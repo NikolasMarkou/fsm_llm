@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Open Knowledge Format (OKF) support, following OKF v0.2 (SPEC.md at commit `ad30107`, 2026-08-21; the spec is pre-1.0 and mutable, upstream issue #24). A bundle is a directory of markdown files with YAML frontmatter; the concept id is the file path minus `.md`.
+  - Core module `fsm_llm.okf` (import it by name; `fsm_llm/__init__.py` does not load it): `load_bundle` (bounded by `OKFLimits`, symlinks skipped, never raises on bundle content), `OKFBundle` (lookup, `list`, lexical `search`, `outgoing`, `backlinks`, link and resource resolution), `OKFConcept`, `OKFIssue`, `TrustTier`, `parse_concept_text`, `check_bundle` (spec section 11), `write_bundle` (atomic per file, unknown frontmatter keys kept, explicit UTC offsets), `bundle_from_memory_entries`, `create_okf_handler` (capped concept summaries into a public context key of a plain FSM), `OKFError`, and the `OKF_*` limits in `constants.py`.
+  - Console script `fsm-llm-okf <validate|list|show|search|export>` (`fsm_llm.okf_cli`). Exit codes: 0 ok, 1 failure, 2 usage error, 130 Ctrl-C.
+  - Agents integration in `fsm_llm.agents`: `create_okf_tools` (four read-only tools `okf_list`, `okf_read` with paging, `okf_search`, `okf_links`), `OKFMemoryBackend` (a read-only memory backend for `AutoMemoryReactAgent`), and the exporters `export_semantic_memory` and `export_agent_result`.
+  - Safety model: bundle text is untrusted and reaches a model only as tool output or capped, control-stripped summaries, never as an instruction, description or persona; nothing a bundle names is executed; the trust tier is a claim of the bundle, never authorization.
+- `security.resolve_within(root, relative)`: the one path-confinement check (resolve first, compare path components).
+- OKF documentation in `docs/api_reference.md`, `README.md`, `AGENTS.md` and the package guides.
+
+### Changed
+
+- `pyyaml>=6.0` is now a declared core dependency (it parses OKF frontmatter; it used to arrive only as a transitive dependency).
+- `harness.tools.Workspace.resolve` now delegates its containment check to `security.resolve_within`. No behaviour change.
+
 ## [0.12.0] - 2026-10-02
 
 Two sets of changes. The entries marked "Step driver" come from plan `07ad3f8c`

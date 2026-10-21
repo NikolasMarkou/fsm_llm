@@ -59,7 +59,7 @@ flowchart TD
 | --- | --- | --- |
 | `reasoning/` | Solves a problem step by step: an orchestrator FSM picks one of 9 reasoning strategies (calculator, deductive, analogical, ...), runs it as a stacked FSM, checks the answer and retries up to 3 times | `ReasoningEngine(model).solve_problem(problem) -> (solution, trace)`, `python -m fsm_llm.reasoning "problem"` |
 | `workflows/` | Async, in-memory workflow engine: named steps over a shared context, 11 step types (Python function, API call, branch, LLM prompt, FSM conversation, agent, timer, wait for event, parallel, retry, ...) and a Python DSL | `WorkflowEngine`, `create_workflow`, `WorkflowBuilder`, `auto_step`, `condition_step`, ... |
-| `agents/` | 18 agent patterns (ReAct, ReWOO, Reflexion, plan and execute, debate, swarm, agent graph, ...), mostly built as generated FSMs; tools, human approval, memory, MCP and HTTP integration, and a meta-builder that designs an FSM, workflow or agent from a chat | `create_agent`, `ConfiguredAgentBuilder`, `ReactAgent`, `ToolRegistry`, `@tool`, `fsm-llm-meta` |
+| `agents/` | 18 agent patterns (ReAct, ReWOO, Reflexion, plan and execute, debate, swarm, agent graph, ...), mostly built as generated FSMs; tools, human approval, memory, MCP and HTTP integration, OKF knowledge-bundle tools, a memory backend and exporters, and a meta-builder that designs an FSM, workflow or agent from a chat | `create_agent`, `ConfiguredAgentBuilder`, `ReactAgent`, `ToolRegistry`, `@tool`, `create_okf_tools`, `fsm-llm-meta` |
 | `monitor/` | FastAPI web dashboard to launch, watch and talk to FSMs, agents and workflows; optional OpenTelemetry export | `fsm-llm-monitor` (http://127.0.0.1:8420), `InstanceManager.attach_api`, `OTELExporter` |
 | `harness/` | Experimental "iterative planner" as a 6-state FSM (explore, plan, execute, reflect, pivot, close) whose gates count files on disk instead of trusting the model | `fsm-llm-harness new "goal"`, `HarnessAgent`, `HarnessAgentBuilder` |
 | `eval/` | Runs the repository examples and scores them 0 to 4, or runs scripted conversations against any FSM over several trials and reports pass rates with confidence intervals | `fsm-llm-eval examples`, `fsm-llm-eval run cases.json`, `run_dataset` |
@@ -84,8 +84,10 @@ flowchart TD
 - `validator.py`, `visualizer.py` - check an FSM file for problems; draw it as ASCII art, or as Mermaid or DOT through the graph data of `build_fsm_graph`.
 - `runner.py`, `__main__.py` - the interactive command-line chat.
 - `utilities.py` - JSON extraction from LLM text, FSM file loading, shared context walkers.
-- `security.py` - the two key checks every context filter uses: internal keys (`has_internal_prefix`) and secret-looking keys (`is_forbidden_context_entry`).
+- `security.py` - the two key checks every context filter uses: internal keys (`has_internal_prefix`) and secret-looking keys (`is_forbidden_context_entry`), and `resolve_within`, the one check that a path stays inside a directory (used by the harness workspace and the OKF loader and writer).
 - `constants.py` - defaults, limits, environment variable names and shared key names; it also re-exports the names from `security.py`.
+- `okf.py` - Open Knowledge Format (OKF) support: read a bundle (a directory of markdown files with YAML frontmatter) with `load_bundle`, look up concepts, follow links and search them through `OKFBundle`, check it with `check_bundle`, write it with `write_bundle`, turn memory entries into a bundle with `bundle_from_memory_entries`, and show capped concept summaries to a plain FSM with `create_okf_handler`. It follows OKF v0.2 (SPEC.md at commit ad30107, pre-1.0 and mutable). Bundle text is untrusted and is never executed. Import it by name: `from fsm_llm.okf import load_bundle`.
+- `okf_cli.py` - the `fsm-llm-okf` command: `validate`, `list`, `show`, `search` and `export` for OKF bundles.
 - `logging.py` - loguru setup (logging is off until you turn it on).
 - `__init__.py`, `__version__.py`, `py.typed` - public exports, version (0.12.0, shared by all subpackages), type-hint marker.
 
@@ -196,12 +198,14 @@ fsm-llm-meta --output my_bot.json        # design an FSM by chatting
 fsm-llm-monitor                          # needs: pip install -e ".[monitor]"
 fsm-llm-eval examples --category basic   # run from the repository root
 fsm-llm-harness new "add a retry to the uploader" --create-only
+fsm-llm-okf validate ./my_bundle         # check an Open Knowledge Format bundle
 ```
 
 ## Things to know
 
 - Any provider litellm supports works. The default model is `ollama_chat/qwen3.5:4b`, or whatever `LLM_MODEL` is set to. API keys come from the usual provider environment variables.
 - To use your own LLM client, pass `llm_interface=` to `API`. Do not pass `model`, `temperature`, `max_tokens` or other LLM settings beside it: `API` refuses them, because the interface owns them.
+- Core installs need loguru, litellm, pydantic, python-dotenv and pyyaml (>=6.0, for OKF frontmatter).
 - Extras: `reasoning`, `workflows`, `agents` and `eval` add no packages; `harness` pulls in `agents`; `monitor` adds fastapi, uvicorn and jinja2; `mcp`, `otel` and `a2a` add optional integrations for agents and the monitor.
 - A state with no transitions is terminal: once reached, `converse` and `advance` raise an error.
 - `required_context_keys` only says what to extract. To block a transition until data exists, add a condition with `logic`.

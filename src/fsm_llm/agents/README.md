@@ -63,6 +63,7 @@ These are the 18 names `create_agent` accepts (`react`, `rewoo`, `reflexion`, `p
 - `tools.py` - `ToolRegistry` and the `@tool` decorator (tool annotations, exact schemas, enforced timeouts). `tool_registries.py` - caching and retrying registries. `semantic_tools.py` - picks relevant tools by embedding similarity.
 - `handlers.py` - runs tools, enforces the iteration limit, and checks human approval. `hitl.py` - human approval before sensitive tools.
 - `memory_tools.py`, `semantic_memory.py`, `memory_persistence.py`, `summarization.py`, `truncation.py` - working-memory tools, long-term embedding memory, saving memory to disk, condensing old observations, shortening long tool output.
+- `okf.py` - Open Knowledge Format (OKF) for agents: `create_okf_tools(bundle)` gives four read-only tools (`okf_list`, `okf_read`, `okf_search`, `okf_links`), `OKFMemoryBackend` is a read-only memory backend for `AutoMemoryReactAgent`, and `export_semantic_memory` and `export_agent_result` write bundles. The format itself lives in core `fsm_llm.okf`.
 - `composition.py` - use ReAct agents as orchestrator workers; an LLM judge for the evaluator-optimizer.
 - `skills.py`, `sop.py` - load tools from folders of Python files; reusable task templates (three built in).
 - `mcp.py` - load tools from an MCP (Model Context Protocol) server. `remote.py` - serve an agent over HTTP, or call a remote one as a tool.
@@ -104,6 +105,19 @@ for chunk in agent.run_stream("What is 4 + 5?"):  # only the model's text
 
 The first argument must name a pattern (matched after `strip().lower()`); anything else, such as `"debat"` or the removed form `create_agent("You are ...", tools)`, raises `ValueError` listing the patterns. Pass standing instructions as `system_prompt=`.
 
+Give an agent a knowledge bundle (a directory of markdown files with YAML frontmatter, the Open Knowledge Format, OKF v0.2, SPEC.md at commit ad30107, pre-1.0 and mutable). The four tools only read it:
+
+```python
+from fsm_llm.agents import create_agent, create_okf_tools
+from fsm_llm.okf import load_bundle
+
+bundle = load_bundle("./my_bundle")          # never raises on bad content; problems are in bundle.issues
+agent = create_agent("react", create_okf_tools(bundle))
+print(agent("What is the maximum payload size of the gateway?").answer)
+```
+
+`okf_read` returns the body in pages of at most 1,500 characters and ends a page with `next offset: N` when more follows; the model passes that number back as `offset`. Every tool reply starts with a fixed line saying the content is untrusted data, and bundle text is never put in a tool description or in the agent's instructions. To recall from a bundle on every run, pass `OKFMemoryBackend(bundle)` as `memory=` to `AutoMemoryReactAgent`; it is read-only, so `auto_remember=True` stores nothing in it (use `export_agent_result` to write a run). The bundle's trust label (`verified[].by`) is a claim the bundle makes, not proof.
+
 Build a new FSM by chatting (say "build it" when ready):
 
 ```bash
@@ -118,6 +132,7 @@ fsm-llm-meta --model ollama_chat/qwen3.5:4b --output my_bot.json
 
 ## Things to know
 
+- OKF bundle text is untrusted. `create_okf_tools` replies are capped under 2,000 characters and control-stripped, `OKFMemoryBackend` returns one-line summaries (never bodies), and the exporters are plain functions, not tools, because a write tool would need human approval.
 - The `agents` extra adds no dependencies. `mcp.py` needs the `mcp` extra; `RemoteAgentTool` needs the `a2a` extra (httpx); `AgentServer` needs fastapi (for example via the `monitor` extra). Install extras from a clone: `pip install -e ".[mcp]"`. `ReasoningReactAgent` uses `fsm_llm.reasoning`, which ships in every install.
 - `AgentConfig` rejects unknown fields (a typo raises). `model` defaults to the `LLM_MODEL` environment variable, read when the config is built, then `ollama_chat/qwen3.5:4b`. `instructions` (at most 2,000 characters; `create_agent(system_prompt=...)` sets it) is added to every non-empty state and per-field instruction (not to `classification_extractions`, the core transition classifier or ReasoningReact's reasoning engine). Together with a large tool catalogue it can overflow core's 5,000-character instruction slot; that raises `AgentError` at `run()` naming the slot, the instructions length and the tool count; `NativeFunctionCallingReactAgent` uses it as its system policy. Swarm and the meta-builder do not use it.
 - Constructor mistakes raise `TypeError` instead of being passed to the LLM provider: `hitl=`, `tools=` or a `HumanInTheLoop` argument (`approval_policy=`, `approval_callback=`, `on_escalation=`, ...) on a pattern that cannot use them, and `model=`, `temperature=` or `max_tokens=` as keyword arguments (put them in `AgentConfig`). Other keyword arguments, such as `seed=`, `timeout=` or `llm_interface=`, still pass through.

@@ -235,6 +235,7 @@ What you get in the core:
 - **Steps without a user message**: `advance()` runs one turn and returns an `AdvanceResult`; `run_until_terminal()` repeats it within a step and time budget (`RunBudgetExceededError`). Agents, the harness and the reasoning engine run on these loops.
 - **Tool calling and structured output**: a state with the optional `completion` field makes one native tool-calling or JSON-schema call. Core runs no tool; your handlers do.
 - **Sessions and memory**: `save_session`/`restore_session` with `FileSessionStore`, and `WorkingMemory` buffers.
+- **Knowledge bundles (OKF)**: `fsm_llm.okf` reads, searches, validates and writes Open Knowledge Format bundles (a directory of markdown files with YAML frontmatter), `create_okf_handler()` puts capped concept summaries into a plain FSM's context, `fsm_llm.agents` adds read-only OKF tools, a read-only memory backend and bundle exporters, and `fsm-llm-okf` runs it from the shell. This follows OKF v0.2 (SPEC.md at commit ad30107, pre-1.0 and mutable). Bundle text is treated as untrusted data. See [docs/api_reference.md](docs/api_reference.md).
 - **Diagrams**: `build_fsm_graph()`, `to_mermaid()`, `to_dot()`, and `fsm-llm-visualize`.
 - **Many providers** through litellm, behind one LLM layer (`src/fsm_llm/llm.py`, the only module that imports litellm) with per-interface call and token counters (`usage()`) and an embedder (`LiteLLMEmbedder`).
 - **Context security**: internal keys (prefixes `_`, `system_`, `internal_`, `__`) and secret-looking entries are kept out of prompts. The compromised litellm 1.82.7 and 1.82.8 are below the required version, and `make audit` scans for malicious `.pth` files.
@@ -317,6 +318,8 @@ asyncio.run(main())
 | `a2a` | httpx (>=0.24.0) |
 | `all`, `dev` | Everything / everything plus the dev tools |
 
+The core install needs loguru, litellm, pydantic, python-dotenv and pyyaml (>=6.0, which parses OKF frontmatter; declared explicitly because it used to arrive only through another package).
+
 From a clone: `pip install -e ".[monitor]"`, `pip install -e ".[all]"`.
 
 ## Examples
@@ -350,6 +353,7 @@ The examples are evaluation baselines: `fsm-llm-eval examples` runs them in para
 | `fsm-llm-monitor` | Web dashboard at http://127.0.0.1:8420 (`--host`, `--port`, `--no-browser`, `--api-key`, `--otel`) |
 | `fsm-llm-meta [--model M] [--output FILE]` | Build FSMs, workflows or agents by chatting |
 | `fsm-llm-harness <new\|resume\|status\|validate\|close>` | Drive or audit an iterative-planner plan directory |
+| `fsm-llm-okf <validate\|list\|show\|search\|export>` | Check, browse, search and export Open Knowledge Format bundles |
 | `fsm-llm-eval examples [--category C] [--fail-under PCT]` | Score every example 0 to 4 |
 | `fsm-llm-eval run <dataset.json\|.jsonl> [--trials N]` | Run scripted conversations and report pass rates |
 | `python -m fsm_llm.reasoning "problem" [--type T]` | Solve a problem with the reasoning engine (no console script) |
