@@ -1269,6 +1269,28 @@ class TestIncompleteBundleSignal:
         )
         assert "2 concept(s)" in reply
 
+    def test_okf_list_keeps_the_note_when_errors_outnumber_the_issue_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        import fsm_llm.okf as okf_module
+
+        monkeypatch.setattr(okf_module, "OKF_MAX_ISSUES", 10)
+        root = tmp_path / "kb"
+        root.mkdir()
+        for n in range(60):
+            (root / f"c{n:03d}.md").write_text(
+                "plain markdown, no frontmatter\n", "utf-8"
+            )
+        bundle = load_bundle(root, limits=OKFLimits(max_files=30))
+        assert "issues-truncated" in [i.code for i in bundle.issues]
+
+        reply = _run(create_okf_tools(bundle), "okf_list")
+
+        assert (
+            "Note: this bundle was loaded incompletely (max-files); "
+            "results may be missing." in reply.splitlines()
+        )
+
     @pytest.mark.parametrize("n", range(0, 330, 33))
     def test_the_note_is_counted_in_the_budget_through_the_real_wrapper(self, n: int):
         stem = "p" * min(n, 150)

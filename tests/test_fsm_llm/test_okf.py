@@ -7,14 +7,19 @@ workspace, the rest cover the tolerant parser, trust tiers and staleness.
 
 from __future__ import annotations
 
+import enum
+import gc
 import json
 import os
 import re
 import subprocess
 import sys
 import time
+import tracemalloc
 import unicodedata
+import uuid
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, ClassVar
 from unittest.mock import MagicMock
@@ -4971,3 +4976,431 @@ class TestWrittenImpliesLoadable:
             write_bundle(OKFBundle([big]), root, overwrite=True)
 
         assert sorted(p.name for p in root.iterdir()) == before
+
+
+# --------------------------------------------------------------
+# Step 3.4 (D-019): the stop issue survives the issue cap, no global cache,
+# a bounded index.md, exported metadata of any numeric/text subclass
+# --------------------------------------------------------------
+
+
+class TestStopIssueSurvivesTheIssueCap:
+    def _plain_files(self, tmp_path: Path, count: int) -> Path:
+        return _write(
+            tmp_path, {f"c{i:03d}.md": "no frontmatter\n" for i in range(count)}
+        )
+
+    @pytest.mark.parametrize(
+        ("limits", "code"),
+        [
+            (OKFLimits(max_files=30), "max-files"),
+            (OKFLimits(max_total_bytes=30 * 15), "max-total-bytes"),
+        ],
+        ids=["max-files", "max-total-bytes"],
+    )
+    def test_more_errors_than_the_cap_never_hide_the_stop(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        limits: OKFLimits,
+        code: str,
+    ) -> None:
+        monkeypatch.setattr(okf_module, "OKF_MAX_ISSUES", 10)
+
+        bundle = load_bundle(self._plain_files(tmp_path, 60), limits=limits)
+
+        assert len(bundle.issues) == 11  # 10 kept, one note: the cap really bit
+        assert _codes(bundle)[-1] == "issues-truncated"
+        assert code in _codes(bundle)
+        assert bundle.incomplete == (code,)
+        assert okf_module.incomplete_note(bundle) != ""
+
+    def test_the_load_deadline_survives_the_cap_too(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        clock = _FakeClock()
+        real = okf_module.parse_concept_text
+
+        def slow(cid: str, text: str) -> Any:
+            clock.now += 1.0
+            return real(cid, text)
+
+        monkeypatch.setattr(okf_module, "time", clock)
+        monkeypatch.setattr(okf_module, "parse_concept_text", slow)
+        monkeypatch.setattr(okf_module, "OKF_MAX_ISSUES", 10)
+
+        bundle = load_bundle(
+            self._plain_files(tmp_path, 60), limits=OKFLimits(max_seconds=25)
+        )
+
+        assert bundle.incomplete == ("load-deadline",)
+
+    def test_capped_keeps_stops_first_then_errors_warnings_info(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(okf_module, "OKF_MAX_ISSUES", 4)
+
+        def make(severity: Any, code: str, n: int = 1) -> list[OKFIssue]:
+            return [
+                OKFIssue(severity=severity, code=code, message=f"m{i}")
+                for i in range(n)
+            ]
+
+        issues = [
+            *make("info", "link-broken", 5),
+            *make("warning", "key-duplicate", 5),
+            *make("error", "type-missing", 5),
+            *make("error", "check-deadline"),
+            *make("error", "load-deadline"),
+        ]
+
+        kept = okf_module._capped(issues)
+
+        assert [i.code for i in kept] == [
+            "check-deadline",
+            "load-deadline",
+            "type-missing",
+            "type-missing",
+            "issues-truncated",
+        ]
+
+    def test_check_bundle_keeps_its_own_check_deadline_under_the_cap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(okf_module, "OKF_MAX_ISSUES", 5)
+        concepts = [OKFConcept(id=f"c{i:02d}", type="") for i in range(40)]
+        bundle = OKFBundle(concepts, max_seconds=100)
+        clock = _FakeClock()
+        real = okf_module._check_timestamps
+
+        def tick(*args: Any, **kwargs: Any) -> Any:
+            clock.now += 1.0
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(okf_module, "time", clock)
+        monkeypatch.setattr(okf_module, "_check_timestamps", tick)
+        monkeypatch.setattr(OKFBundle, "_deadline", lambda self: 20.0)
+
+        codes = [i.code for i in check_bundle(bundle)]
+
+        assert "type-empty" in codes and "issues-truncated" in codes
+        assert "check-deadline" in codes
+
+
+class TestNoModuleGlobalCache:
+    def test_no_function_of_the_module_is_cached(self) -> None:
+        cached = [n for n, v in vars(okf_module).items() if hasattr(v, "cache_info")]
+        assert cached == []
+        assert not hasattr(okf_module._link_candidates, "cache_clear")
+
+    def test_resolving_links_keeps_no_text_alive_after_the_bundle_is_dropped(
+        self,
+    ) -> None:
+        def run() -> None:
+            body = " ".join(f"[](t{i:03d}-{'a' * 1_900}.md)" for i in range(300))
+            bundle = _mem(a=body)
+            assert bundle.outgoing("a") == []
+            check_bundle(bundle)
+            bundle.backlinks("a")
+
+        gc.collect()
+        tracemalloc.start()
+        try:
+            before = tracemalloc.get_traced_memory()[0]
+            run()
+            gc.collect()
+            held = tracemalloc.get_traced_memory()[0] - before
+        finally:
+            tracemalloc.stop()
+
+        assert held < 100_000  # 300 x 1.9 KB targets would be about 600 KB
+
+
+class TestIndexIsBounded:
+    @staticmethod
+    def _many(n: int, text_len: int = 20) -> OKFBundle:
+        return OKFBundle(
+            OKFConcept(
+                id=f"d/c{i:04d}",
+                type="Note" if i % 2 else "Idea",
+                title=f"Title number {i}",
+                description="d" * text_len,
+            )
+            for i in range(n)
+        )
+
+    @staticmethod
+    def _rows(index: str) -> list[str]:
+        return [ln for ln in index.splitlines() if ln.startswith("* [")]
+
+    def test_a_long_bundle_ends_the_index_with_an_and_n_more_line(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(okf_module, "_INDEX_BUDGET", 2_000)
+        bundle = self._many(100)
+
+        write_bundle(bundle, tmp_path / "kb")
+
+        text = (tmp_path / "kb" / "index.md").read_text(encoding="utf-8")
+        rows = self._rows(text)
+        last = text.rstrip("\n").splitlines()[-1]
+        assert 0 < len(rows) < 100
+        assert last == f"* ... and {100 - len(rows)} more concepts"
+        assert "](" not in last
+        assert len(text.encode()) <= 2_000 + len(last) + 2
+        again = load_bundle(tmp_path / "kb")
+        assert again.okf_version == "0.2"
+        assert len(again) == 100
+
+    def test_an_index_exactly_at_the_budget_is_whole_one_byte_less_is_cut(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = self._many(10)
+        whole = okf_module._render_index(bundle)
+        assert "more concepts" not in whole
+
+        monkeypatch.setattr(okf_module, "_INDEX_BUDGET", len(whole.encode()))
+        assert okf_module._render_index(bundle) == whole
+
+        monkeypatch.setattr(okf_module, "_INDEX_BUDGET", len(whole.encode()) - 1)
+        cut = okf_module._render_index(bundle)
+        assert cut != whole and cut.endswith("* ... and 1 more concepts\n")
+        assert len(self._rows(cut)) == 9
+
+    def test_the_cut_keeps_whole_sections_in_order_and_no_empty_heading(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = self._many(10)
+        row = len(self._rows(okf_module._render_index(bundle))[0].encode()) + 1
+        head = len(okf_module._render_index(OKFBundle()).encode())
+        # the Idea heading and its first rows fit, the Note heading does not
+        monkeypatch.setattr(okf_module, "_INDEX_BUDGET", head + 8 + 5 * row)
+
+        text = okf_module._render_index(bundle)
+
+        assert "# Idea" in text and "# Note" not in text
+        assert text.endswith("* ... and 5 more concepts\n")
+
+    def test_a_1300_entry_store_exports_loads_clean_and_validates(
+        self, tmp_path: Path
+    ) -> None:
+        entries = [
+            {"id": f"note-{i}", "text": ("Meeting notes " * 40)[:400] + f" {i}"}
+            for i in range(1_300)
+        ]
+        bundle = bundle_from_memory_entries(entries)
+
+        write_bundle(bundle, tmp_path / "kb")
+
+        assert (tmp_path / "kb" / "index.md").stat().st_size <= OKF_MAX_FILE_BYTES
+        again = load_bundle(tmp_path / "kb")
+        assert again.issues == [] and again.okf_version == "0.2"
+        assert len(again) == 1_300
+        assert [i for i in check_bundle(again) if i.severity != "info"] == []
+
+    def test_a_titles_heavy_bundle_stays_under_the_file_cap(
+        self, tmp_path: Path
+    ) -> None:
+        concepts = [
+            OKFConcept(
+                id=f"d/{i:05d}-" + "x" * 150,
+                type="Note",
+                title="T" * 200,
+                description="d" * OKF_SUMMARY_FIELD_CHARS,
+            )
+            for i in range(1_500)
+        ]
+
+        write_bundle(OKFBundle(concepts), tmp_path / "kb")
+
+        index = tmp_path / "kb" / "index.md"
+        assert index.stat().st_size <= OKF_MAX_FILE_BYTES
+        assert "more concepts" in index.read_text(encoding="utf-8")
+        assert "file-too-large" not in _codes(load_bundle(tmp_path / "kb"))
+
+
+class _Prio(enum.IntEnum):
+    HIGH = 1
+
+
+class _Color(str, enum.Enum):
+    RED = "red"
+
+
+class _MyFloat(float):
+    pass
+
+
+class _MyInt(int):
+    pass
+
+
+class _MyStr(str):
+    pass
+
+
+class TestExportedMetadataTypesNeverRaise:
+    @staticmethod
+    def _entries(odd: Any) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = [
+            {"id": f"e{i}", "text": f"entry {i}", "metadata": {"source": "chat"}}
+            for i in range(100)
+        ]
+        return [*rows, {"id": "odd", "text": "one odd entry", "metadata": odd}]
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (_Prio.HIGH, 1),
+            (_MyInt(7), 7),
+            (_MyFloat(0.5), 0.5),
+            (_Color.RED, "red"),
+            (_MyStr("plain"), "plain"),
+            ((1, _Prio.HIGH), [1, 1]),
+            ([_MyFloat(1.5)], [1.5]),
+            (True, True),
+        ],
+        ids=[
+            "IntEnum",
+            "int-subclass",
+            "float-subclass",
+            "str-Enum",
+            "str-subclass",
+            "tuple-of-IntEnum",
+            "list-of-float-subclass",
+            "bool",
+        ],
+    )
+    def test_a_subclass_is_converted_to_its_base_type_without_a_warning(
+        self, tmp_path: Path, value: Any, expected: Any
+    ) -> None:
+        bundle = bundle_from_memory_entries(self._entries({"v": value}))
+
+        written = write_bundle(bundle, tmp_path / "kb")
+
+        got = bundle.get("memory/odd").extra["metadata"]["v"]
+        assert got == expected and type(got) is type(expected)
+        assert len(list((tmp_path / "kb" / "memory").glob("*.md"))) == 101
+        assert len(written) == 102  # plus index.md
+        assert "metadata-truncated" not in _codes(bundle)
+        assert _load_errors(tmp_path / "kb") == []
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            Decimal("1.5"),
+            uuid.UUID(int=1),
+            datetime(2026, 1, 1),
+            {1, 2},
+            frozenset({1}),
+            b"bytes",
+            Path("/tmp/x"),
+            float("inf"),
+            object(),
+        ],
+        ids=[
+            "Decimal",
+            "UUID",
+            "datetime",
+            "set",
+            "frozenset",
+            "bytes",
+            "Path",
+            "inf",
+            "object",
+        ],
+    )
+    def test_any_other_type_is_dropped_with_one_warning_and_the_export_goes_on(
+        self, tmp_path: Path, value: Any
+    ) -> None:
+        bundle = bundle_from_memory_entries(self._entries({"keep": 1, "v": value}))
+
+        write_bundle(bundle, tmp_path / "kb")
+
+        assert bundle.get("memory/odd").extra["metadata"] == {"keep": 1}
+        cut = [i for i in bundle.issues if i.code == "metadata-truncated"]
+        assert len(cut) == 1 and "values" in cut[0].message
+        assert len(list((tmp_path / "kb" / "memory").glob("*.md"))) == 101
+        assert _load_errors(tmp_path / "kb") == []
+
+    def test_a_subclass_key_and_nested_subclasses_export(self, tmp_path: Path) -> None:
+        meta = {_MyStr("k"): {"p": _Prio.HIGH, "q": [_MyFloat(2.5), _Color.RED]}}
+
+        bundle = bundle_from_memory_entries(self._entries(meta))
+
+        write_bundle(bundle, tmp_path / "kb")
+        assert bundle.get("memory/odd").extra["metadata"] == {
+            "k": {"p": 1, "q": [2.5, "red"]}
+        }
+        assert "metadata-truncated" not in _codes(bundle)
+
+
+class TestDepthIsCheckedBesideASurrogate:
+    def test_a_deep_block_list_next_to_a_lone_surrogate_is_flagged_at_load(
+        self,
+    ) -> None:
+        text = (
+            "---\ntype: X\nnested:\n  " + "- " * 120 + 'leaf\nz: "\\ud800"\n---\nbody\n'
+        )
+
+        concept, issues = parse_concept_text("c", text)
+
+        assert "frontmatter-too-deep" in [i.code for i in issues]
+        assert concept.extra == {}
+
+    def test_the_writer_names_depth_for_the_same_shape(self) -> None:
+        front = {"nested": [[[[]]]], "z": "\ud800"}
+        deep: Any = []
+        for _ in range(120):
+            deep = [deep]
+        front["nested"] = deep
+
+        with pytest.raises(OKFError, match="deep"):
+            okf_module._render_concept(OKFConcept(id="c", type="X", extra=dict(front)))
+
+
+class TestBacklinkDeadlineClearsWhenTheBuildFinishes:
+    def test_a_finished_build_leaves_no_stop_behind(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write(tmp_path, {f"{n}.md": _doc(body="[](/a.md)") for n in "abcdef"})
+        bundle = load_bundle(tmp_path, limits=OKFLimits(max_seconds=10))
+        clock = _FakeClock()
+        real = OKFBundle.outgoing
+        state = {"cost": 4.0}
+
+        def slow(self: OKFBundle, cid: str) -> Any:
+            clock.now += state["cost"]
+            return real(self, cid)
+
+        monkeypatch.setattr(okf_module, "time", clock)
+        monkeypatch.setattr(OKFBundle, "outgoing", slow)
+        bundle.backlinks("a")
+        assert bundle.incomplete == ("check-deadline",)
+
+        state["cost"] = 0.0
+        assert bundle.backlinks("a") == ["b", "c", "d", "e", "f"]
+
+        assert bundle.incomplete == ()
+        assert "check-deadline" not in _codes(bundle)
+        assert okf_module.incomplete_note(bundle) == ""
+
+
+class TestWriterNamesWhatItCannotRender:
+    def test_a_block_scalar_that_loads_clean_is_refused_by_name_and_nothing_is_written(
+        self, tmp_path: Path
+    ) -> None:
+        lines = "  line of prose that's ordinary\n" * 490
+        _write(
+            tmp_path / "in", {"c.md": f"---\ntype: X\ndescription: |\n{lines}---\nb\n"}
+        )
+        bundle = load_bundle(tmp_path / "in")
+        assert bundle.issues == []  # it loads without a single issue
+        assert 15_500 < len(lines) < OKF_MAX_FRONTMATTER_BYTES - 500
+
+        with pytest.raises(
+            OKFError, match=r"nothing written, 1 problem\(s\): concept 'c': frontmatter"
+        ):
+            write_bundle(bundle, tmp_path / "out")
+
+        assert not (tmp_path / "out").exists()

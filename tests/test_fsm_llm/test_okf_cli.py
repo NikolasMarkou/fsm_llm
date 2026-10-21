@@ -23,6 +23,7 @@ import fsm_llm.okf_cli as okf_cli
 from fsm_llm import okf as okf_module
 from fsm_llm.constants import (
     OKF_LIST_MAX_ITEMS,
+    OKF_MAX_FILE_BYTES,
     OKF_MAX_LOAD_SECONDS,
     OKF_READ_PAGE_CHARS,
 )
@@ -1161,3 +1162,37 @@ class TestExportedStoreValidates:
 
         assert code == 0, out + err
         assert "frontmatter-too-large" not in out
+
+
+# --------------------------------------------------------------
+# Step 3.4 (D-019): a big export validates --strict, its index is bounded
+# --------------------------------------------------------------
+
+
+class TestBigExportValidatesStrict:
+    def test_a_1300_entry_store_exports_and_validates_strict_with_exit_0(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        entries = [
+            {
+                "id": f"note-{i}",
+                "text": ("Meeting notes about the quarterly review " * 10)[:400]
+                + f" {i}",
+                "metadata": {"source": "chat"},
+            }
+            for i in range(1_300)
+        ]
+        store = _store(tmp_path / "store.json", entries)
+        out_dir = tmp_path / "kb"
+
+        code, out, err = _run(capsys, "export", store, out_dir)
+
+        assert code == 0, err
+        index = out_dir / "index.md"
+        assert index.stat().st_size <= OKF_MAX_FILE_BYTES
+        assert "more concepts" in index.read_text(encoding="utf-8")
+
+        code, out, err = _run(capsys, "validate", "--strict", out_dir)
+
+        assert code == 0, out + err
+        assert "file-too-large" not in out
