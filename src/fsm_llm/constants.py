@@ -395,6 +395,11 @@ OKF_MAX_FILES = 5_000
 OKF_MAX_FILE_BYTES = 262_144
 OKF_MAX_TOTAL_BYTES = 33_554_432
 OKF_MAX_DEPTH = 16
+# Wall-clock bound for one `load_bundle`, checked between files. Hostile
+# frontmatter costs up to ~27 ms/KB in the pure-Python YAML parser, so a
+# full-size hostile bundle would take ~14 minutes without this bound; a
+# legitimate bundle loads in well under a second per hundred files.
+OKF_MAX_LOAD_SECONDS = 30.0
 # Flow nesting (`[`/`{`) allowed in one frontmatter block.
 OKF_MAX_YAML_DEPTH = 64
 # A frontmatter block above this is not YAML-parsed (pure-Python PyYAML costs

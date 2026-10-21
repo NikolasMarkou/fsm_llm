@@ -26,6 +26,7 @@ import math
 import os
 import re
 import tempfile
+import time
 import unicodedata
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import date, datetime, timedelta, timezone
@@ -47,6 +48,7 @@ from .constants import (
     OKF_MAX_FILES,
     OKF_MAX_FRONTMATTER_BYTES,
     OKF_MAX_ISSUES,
+    OKF_MAX_LOAD_SECONDS,
     OKF_MAX_TOTAL_BYTES,
     OKF_MAX_YAML_DEPTH,
     OKF_SUMMARY_FIELD_CHARS,
@@ -137,7 +139,11 @@ class OKFIssue(BaseModel):
 
 
 class OKFLimits(BaseModel):
-    """Resource bounds for reading a bundle (defaults from ``constants.OKF_*``)."""
+    """Resource bounds for reading a bundle (defaults from ``constants.OKF_*``).
+
+    ``max_seconds`` is a wall-clock budget checked between files; the load
+    stops with a ``load-deadline`` error issue and keeps what it has.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -145,6 +151,7 @@ class OKFLimits(BaseModel):
     max_file_bytes: int = Field(OKF_MAX_FILE_BYTES, gt=0)
     max_total_bytes: int = Field(OKF_MAX_TOTAL_BYTES, gt=0)
     max_depth: int = Field(OKF_MAX_DEPTH, gt=0)
+    max_seconds: float = Field(OKF_MAX_LOAD_SECONDS, gt=0, allow_inf_nan=False)
 
 
 _TS_RE = re.compile(
@@ -377,7 +384,7 @@ def _flow_depth_exceeded(raw: str) -> bool:
 
 
 def _load_yaml(raw: str, note: _Note) -> dict[Any, Any]:
-    # SECURITY: size bound BEFORE any YAML work (pure-Python parse is ~3 ms/KB).
+    # SECURITY: size bound BEFORE any YAML work (pure-Python parse: up to ~27 ms/KB).
     if len(raw.encode("utf-8", "replace")) > OKF_MAX_FRONTMATTER_BYTES:
         note("error", "frontmatter-too-large", "frontmatter block is too large")
         return {}
@@ -568,8 +575,43 @@ _Ids = list[str]
 _Concepts = list[OKFConcept]
 _Hits = list[tuple[OKFConcept, float]]
 
-_RESERVED_FILES = frozenset({"index.md", "log.md"})
 _KNOWN_VERSIONS = frozenset({"0.1", "0.2"})
+_RESERVED_STEMS = frozenset({"index", "log"})
+_ID_MAX_SEGMENT_BYTES = 200
+
+
+def _is_reserved(stem: str) -> bool:
+    """``index`` and ``log`` in any case: spec 8 and 9 files, never concepts."""
+    return stem.casefold() in _RESERVED_STEMS
+
+
+def _id_key(concept_id: str) -> str:
+    """Identity of an id on a case-insensitive, normalising disk (loader, writer)."""
+    return unicodedata.normalize("NFC", concept_id).casefold()
+
+
+def _id_problem(concept_id: object, *, allow_reserved: bool = False) -> str | None:
+    """Why *concept_id* may not become a file path, or ``None`` when it may.
+
+    The ONE id-safety rule of the loader and the writer. ``allow_reserved`` is
+    for the loader, which routes ``index.md`` and ``log.md`` by name first.
+    """
+    if not isinstance(concept_id, str) or not concept_id:
+        return "empty or not a string"
+    if strip_unsafe_text(concept_id) != concept_id:
+        return "holds control or format characters"
+    if concept_id.startswith("/") or "\\" in concept_id:
+        return "absolute or holds a backslash"
+    parts = concept_id.split("/")
+    if any(p in ("", ".", "..") or p.startswith(".") for p in parts):
+        return "has an empty, dot or dot-prefixed segment"
+    if any(len(p.encode("utf-8")) > _ID_MAX_SEGMENT_BYTES for p in parts):
+        return "has a segment that is too long"
+    if not allow_reserved and _is_reserved(parts[-1]):
+        return "is reserved (index and log are never concepts)"
+    return None
+
+
 _SCHEME_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
 _FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
@@ -581,6 +623,7 @@ _LINK_RE = re.compile(
 )
 _MAX_LINKS_PER_BODY = 1_000
 _HAY_FIELDS = ((3, 0), (2, 1), (1, 2))  # (weight, index into the haystack)
+_HAY_WEIGHT = sum(weight for weight, _ in _HAY_FIELDS)  # best score per token
 
 
 def _body_links(body: str) -> Iterator[str]:
@@ -636,7 +679,7 @@ def _link_candidates(target: object, from_id: str) -> _Ids:
             else:
                 stack.append(part)
         else:
-            if stack and stack[-1] not in _RESERVED_FILES and stack[-1] != ".md":
+            if stack and stack[-1] != ".md" and not _is_reserved(stack[-1][:-3]):
                 cid = "/".join(stack)[:-3]
                 if cid not in found:
                     found.append(cid)
@@ -662,9 +705,9 @@ class OKFBundle:
         - ``search(query, limit=5, include_deprecated=False)`` -> ``(concept,
           score)`` best first, score in (0, 1], ties by id; lexical, tokens of
           3+ characters; ``[]`` for a non-string or token-less query.
-        - ``resolve_link(target, from_id)`` / ``resolve_resource(value,
-          from_id)`` -> the id of an EXISTING concept or ``None`` (external,
-          escaping, broken and non-concept targets all give ``None``).
+        - ``resolve_link(target, from_id)`` -> the id of an EXISTING concept
+          or ``None`` (external, escaping, broken and non-concept targets all
+          give ``None``); it also serves path-valued keys such as ``resource``.
         - ``outgoing(id)`` / ``backlinks(id)`` -> ids in order, no self-links;
           outgoing covers body links, ``resource`` and ``sources[].resource``.
         - ``put(concept)`` adds or replaces and invalidates every cache.
@@ -752,7 +795,7 @@ class OKFBundle:
                     if token in hay[i]
                 )
                 if score:
-                    hits.append((concept, score / (6 * len(tokens))))
+                    hits.append((concept, score / (_HAY_WEIGHT * len(tokens))))
         hits.sort(key=lambda hit: (-hit[1], hit[0].id))
         return hits[:limit]
 
@@ -770,10 +813,6 @@ class OKFBundle:
             (c for c in _link_candidates(target, from_id) if c in self._concepts),
             None,
         )
-
-    def resolve_resource(self, value: object, from_id: str) -> str | None:
-        """Same lookup as ``resolve_link``, for path-valued frontmatter keys."""
-        return self.resolve_link(value, from_id)
 
     def outgoing(self, concept_id: str) -> _Ids:
         concept = self._concepts.get(concept_id)
@@ -808,7 +847,10 @@ class OKFBundle:
 
 # code -> (severity, message) for every problem the loader itself reports.
 _LOAD_PROBLEMS: dict[str, tuple[Literal["error", "warning", "info"], str]] = {
-    "id-unsafe": ("warning", "file name holds control characters; skipped"),
+    "id-unsafe": ("warning", "file name is not a safe concept id; skipped"),
+    "id-collision": ("warning", "id repeats an earlier one (case or Unicode form)"),
+    "hardlink-skipped": ("warning", "file has several hard links; skipped"),
+    "parse-failed": ("warning", "file could not be processed; skipped"),
     "path-indirect": ("warning", "path is indirect or outside the root; skipped"),
     "file-too-large": ("warning", "file is over the size limit; skipped"),
     "file-unreadable": ("warning", "file cannot be read; skipped"),
@@ -819,6 +861,7 @@ _LOAD_PROBLEMS: dict[str, tuple[Literal["error", "warning", "info"], str]] = {
     "max-total-bytes": ("error", "bundle byte limit reached; load stopped"),
     "max-files": ("error", "bundle file limit reached; load stopped"),
     "max-depth": ("error", "directory is nested too deeply; skipped"),
+    "load-deadline": ("error", "load time limit reached; load stopped"),
     "log-heading": ("warning", "log.md heading is not an ISO date (spec 9)"),
     "index-frontmatter": ("warning", "index.md has frontmatter (spec 8)"),
 }
@@ -848,18 +891,31 @@ def load_bundle(
     """Load the bundle under *path*. Raises ``OKFError`` only for the root.
 
     A missing or non-directory root is an ``OKFError`` and is never created.
-    Everything else (oversize, non-UTF-8, symlinked, unsafe-named or unreadable
-    files, a spent limit) becomes an ``OKFIssue`` and the rest still loads.
+    Everything else (oversize, non-UTF-8, symlinked, hardlinked, unsafe-named
+    or unreadable files, a spent limit, an unexpected failure on one file)
+    becomes an ``OKFIssue`` and the rest still loads.
 
     Interface contract:
         - Files are visited in sorted order; only exact ``.md`` names count.
-          ``index.md`` and ``log.md`` at any level are reserved, never concepts
-          (the root ``index.md`` supplies ``okf_version`` and ``index_text``).
-          Directories starting with ``.`` (``.git``) are not entered.
+          ``index.md`` and ``log.md`` in any case, at any level, are reserved,
+          never concepts (the root ``index.md`` supplies ``okf_version`` and
+          ``index_text``). Directories and files starting with ``.`` are
+          skipped silently.
+        - An id (the path without ``.md``) must pass the writer's id rule (no
+          control characters, no empty, ``.``, ``..`` or over-long segment),
+          else ``id-unsafe``. Ids that are equal after NFC normalisation and
+          case folding keep the first one visited; the rest are
+          ``id-collision`` (what ``write_bundle`` would refuse anyway).
         - Symlinks (files and directories) are skipped with an issue, never
-          followed; every file also passes ``security.resolve_within``.
-        - Stops with an error issue at ``max_files`` and ``max_total_bytes``;
-          directories deeper than ``max_depth`` are not entered.
+          followed; so are files with more than one hard link
+          (``hardlink-skipped``); every file also passes
+          ``security.resolve_within``.
+        - Stops with an error issue at ``max_files`` and ``max_total_bytes``,
+          and at ``max_seconds`` of wall-clock time (``load-deadline``, checked
+          between entries); the concepts loaded so far are kept. Directories
+          deeper than ``max_depth`` are not entered.
+        - An unexpected exception while processing one file becomes a
+          ``parse-failed`` issue for that file.
         - Residual hole (TOCTOU): a path swapped for a symlink between the
           scan and the open is refused by ``O_NOFOLLOW`` on its last part only.
     """
@@ -872,29 +928,36 @@ def load_bundle(
     if not is_dir:
         raise OKFError(f"bundle root is not a directory: {root}")
 
+    deadline = time.monotonic() + limits.max_seconds
     issues: list[OKFIssue] = []
     concepts: _Concepts = []
-    state: dict[str, Any] = {"total": 0, "version": None, "index": "", "stop": False}
+    claimed: set[str] = set()  # _id_key of every concept loaded
+    total, version, index, stop = 0, None, "", False
 
     def issue(code: str, rel: str) -> None:
         severity, message = _LOAD_PROBLEMS[code]
         issues.append(OKFIssue(severity=severity, code=code, message=message, path=rel))
 
+    def halt(code: str, rel: str) -> None:
+        nonlocal stop
+        issue(code, rel)
+        stop = True
+
     def read(parts: tuple[str, ...], size: int) -> str | None:
         """Checked read of one file; ``None`` after recording why it was skipped."""
-        rel = "/".join(parts)
-        code = "id-unsafe" if strip_unsafe_text(rel) != rel else ""
+        nonlocal total, stop
+        rel, code, data = "/".join(parts), "", b""
         try:
-            if not code and resolve_within(root, rel) != root.joinpath(*parts):
+            if resolve_within(root, rel) != root.joinpath(*parts):
                 code = "path-indirect"
-            elif not code and size > limits.max_file_bytes:
+            elif size > limits.max_file_bytes:
                 code = "file-too-large"
-            elif not code and state["total"] + size > limits.max_total_bytes:
-                code, state["stop"] = "max-total-bytes", True
-            elif not code:
+            elif total + size > limits.max_total_bytes:
+                code, stop = "max-total-bytes", True
+            else:
                 data = _read_bytes(root.joinpath(*parts), limits.max_file_bytes)
                 code = "file-too-large" if len(data) > limits.max_file_bytes else ""
-                state["total"] += len(data)
+                total += len(data)
         except (OSError, RuntimeError, ValueError):
             code = "file-unreadable"
         if not code:
@@ -908,9 +971,10 @@ def load_bundle(
     def reserved(parts: tuple[str, ...], text: str) -> None:
         """Spec 8 and 9: index has no frontmatter (root: only ``okf_version``);
         log headings are ISO dates. Problems are warnings; these never load."""
+        nonlocal version, index
         rel, is_root = "/".join(parts), len(parts) == 1
         raw, body, _ = _split_frontmatter(text)
-        if parts[-1] == "log.md":
+        if parts[-1].casefold() == "log.md":
             headings = re.findall(r"^## (.*)$", body, re.MULTILINE)
             if not all(re.match(r"\d{4}-\d{2}-\d{2}", h) for h in headings):
                 issue("log-heading", rel)
@@ -920,15 +984,68 @@ def load_bundle(
         )
         data = _load_yaml(raw, note) if raw is not None else {}
         if is_root:
-            version = data.get("okf_version")
-            if isinstance(version, (str, int, float)):
-                state["version"] = str(version).strip()
-            state["index"] = body
+            found = data.get("okf_version")
+            if isinstance(found, (str, int, float)):
+                version = str(found).strip()
+            index = body
         if set(data) - ({"okf_version"} if is_root else set()):
             issue("index-frontmatter", rel)
 
+    def add_concept(cid: str, text: str) -> None:
+        concept, found = parse_concept_text(cid, text)
+        concepts.append(concept)
+        claimed.add(_id_key(cid))
+        issues.extend(found)
+
+    def visit_file(entry: os.DirEntry[str], here: tuple[str, ...]) -> None:
+        """One regular ``.md`` file: skip it with an issue, or load it."""
+        rel, cid = "/".join(here), "/".join(here)[:-3]
+        if here[-1].startswith(".") and cid not in (".", ".."):
+            return  # hidden, like a dot-directory (``...md`` is id ``..``: unsafe)
+        info = entry.stat(follow_symlinks=False)
+        is_reserved = _is_reserved(here[-1][:-3])
+        if _id_problem(cid, allow_reserved=True):
+            issue("id-unsafe", rel)
+        elif info.st_nlink > 1:
+            issue("hardlink-skipped", rel)
+        elif not is_reserved and _id_key(cid) in claimed:
+            issue("id-collision", rel)
+        elif not is_reserved and len(concepts) >= limits.max_files:
+            halt("max-files", rel)
+        elif (text := read(here, info.st_size)) is not None:
+            try:
+                if is_reserved:
+                    reserved(here, text)
+                else:
+                    add_concept(cid, text)
+            except Exception as exc:  # defence in depth: one file never aborts a load
+                logger.debug(f"OKF file {rel!r} failed: {exc!r}")
+                issue("parse-failed", rel)
+
+    def visit(
+        entry: os.DirEntry[str], parts: tuple[str, ...], depth: int
+    ) -> tuple[Path, tuple[str, ...], int] | None:
+        """Handle one entry; return a directory to scan later, if it is one."""
+        name, here = entry.name, (*parts, entry.name)
+        if entry.is_symlink():
+            if name.endswith(".md") or entry.is_dir():
+                issue("symlink-skipped", "/".join(here))
+        elif entry.is_dir(follow_symlinks=False):
+            if name.startswith("."):
+                return None
+            if depth < limits.max_depth:
+                return Path(entry.path), here, depth + 1
+            issue("max-depth", "/".join(here))
+        elif (
+            name.endswith(".md")
+            and len(name) > 3
+            and entry.is_file(follow_symlinks=False)
+        ):
+            visit_file(entry, here)
+        return None
+
     stack: list[tuple[Path, tuple[str, ...], int]] = [(root, (), 0)]
-    while stack and not state["stop"]:
+    while stack and not stop:
         directory, parts, depth = stack.pop()
         try:
             with os.scandir(directory) as scan:
@@ -942,47 +1059,25 @@ def load_bundle(
             issue("dir-truncated", "/".join(parts))
         subdirs = []
         for entry in entries:
-            name, here = entry.name, (*parts, entry.name)
+            if time.monotonic() > deadline:
+                halt("load-deadline", "/".join((*parts, entry.name)))
+            if stop:
+                break
             try:
-                if entry.is_symlink():
-                    if name.endswith(".md") or entry.is_dir():
-                        issue("symlink-skipped", "/".join(here))
-                elif entry.is_dir(follow_symlinks=False):
-                    if name.startswith("."):
-                        continue
-                    if depth < limits.max_depth:
-                        subdirs.append((Path(entry.path), here, depth + 1))
-                    else:
-                        issue("max-depth", "/".join(here))
-                elif (
-                    name.endswith(".md")
-                    and len(name) > 3
-                    and entry.is_file(follow_symlinks=False)
-                ):
-                    is_reserved = name in _RESERVED_FILES
-                    if not is_reserved and len(concepts) >= limits.max_files:
-                        issue("max-files", "/".join(here))
-                        state["stop"] = True
-                        break
-                    text = read(here, entry.stat(follow_symlinks=False).st_size)
-                    if state["stop"]:
-                        break
-                    if text is not None and is_reserved:
-                        reserved(here, text)
-                    elif text is not None:
-                        concept, found = parse_concept_text("/".join(here)[:-3], text)
-                        concepts.append(concept)
-                        issues.extend(found)
+                subdir = visit(entry, parts, depth)
             except OSError:
-                issue("file-unreadable", "/".join(here))
+                issue("file-unreadable", "/".join((*parts, entry.name)))
+                continue
+            if subdir is not None:
+                subdirs.append(subdir)
         stack.extend(reversed(subdirs))
 
     return OKFBundle(
         concepts,
         root=root,
         issues=_capped(issues),
-        okf_version=state["version"],
-        index_text=state["index"],
+        okf_version=version,
+        index_text=index,
     )
 
 
@@ -1032,7 +1127,7 @@ def check_bundle(bundle: OKFBundle) -> list[OKFIssue]:
         ) -> None:
             add(severity, code, message, cid)
 
-        if c.id.rsplit("/", 1)[-1] in ("index", "log"):
+        if _is_reserved(c.id.rsplit("/", 1)[-1]):
             note("error", "reserved-id", "index and log are reserved, never concepts")
         if not c.type.strip() and c.id not in typed:
             note("error", "type-empty", "'type' must be a non-empty string")
@@ -1060,7 +1155,6 @@ def check_bundle(bundle: OKFBundle) -> list[OKFIssue]:
 # Writer
 # --------------------------------------------------------------
 
-_ID_MAX_SEGMENT_BYTES = 200
 _INDEX_TYPE_FALLBACK = "Untyped"
 _MAX_CLASHES_SHOWN = 5
 
@@ -1164,24 +1258,6 @@ def _render_index(bundle: OKFBundle) -> str:
     return '---\nokf_version: "0.2"\n---\n' + "\n".join(sections)
 
 
-def _id_problem(concept_id: object) -> str | None:
-    """Why *concept_id* may not become a file path, or ``None`` when it may."""
-    if not isinstance(concept_id, str) or not concept_id:
-        return "empty or not a string"
-    if strip_unsafe_text(concept_id) != concept_id:
-        return "holds control or format characters"
-    if concept_id.startswith("/") or "\\" in concept_id:
-        return "absolute or holds a backslash"
-    parts = concept_id.split("/")
-    if any(p in ("", ".", "..") or p.startswith(".") for p in parts):
-        return "has an empty, dot or dot-prefixed segment"
-    if any(len(p.encode("utf-8")) > _ID_MAX_SEGMENT_BYTES for p in parts):
-        return "has a segment that is too long"
-    if parts[-1].casefold() in ("index", "log"):
-        return "is reserved (index and log are never concepts)"
-    return None
-
-
 def _target_problem(root: Path, rel: str) -> str | None:
     """Why ``root/rel`` may not be written, or ``None``.
 
@@ -1281,10 +1357,10 @@ def write_bundle(
     for concept in bundle:
         cid = concept.id
         reason = _id_problem(cid)
-        if reason is None and cid.casefold() in seen:
+        if reason is None and _id_key(cid) in seen:
             reason = "collides with another id on a case-insensitive disk"
         if reason is None:
-            seen.add(cid.casefold())
+            seen.add(_id_key(cid))
             reason = _target_problem(root, f"{cid}.md")
         if reason is None and not overwrite and os.path.lexists(root / f"{cid}.md"):
             reason = "already exists (pass overwrite=True to replace it)"

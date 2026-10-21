@@ -29,6 +29,7 @@ from fsm_llm.constants import (
     OKF_MAX_FILE_BYTES,
     OKF_MAX_FILES,
     OKF_MAX_FRONTMATTER_BYTES,
+    OKF_MAX_LOAD_SECONDS,
     OKF_MAX_TOTAL_BYTES,
     OKF_SUMMARY_FIELD_CHARS,
     OKF_SUMMARY_MAX_ITEMS,
@@ -1351,7 +1352,7 @@ class TestLinkResolution:
     def test_non_string_targets_resolve_to_nothing(self, bundle: OKFBundle) -> None:
         for bad in (None, 3, ["x.md"], {"a": 1}, b"x.md"):
             assert bundle.resolve_link(bad, "d/e") is None
-            assert bundle.resolve_resource(bad, "d/e") is None
+            assert bundle.resolve_link(bad, "d/e") is None
 
     def test_root_relative_fallback_applies_only_when_file_relative_is_missing(
         self,
@@ -1363,10 +1364,10 @@ class TestLinkResolution:
         assert both.resolve_link("x.md", "d/e") == "d/x"
         assert both.resolve_link("/x.md", "d/e") == "x"  # "/" never goes file-relative
 
-    def test_resolve_resource_uses_the_same_orders(self, bundle: OKFBundle) -> None:
-        assert bundle.resolve_resource("references/none.md", "d/e") is None
-        assert bundle.resolve_resource("tables/orders.md", "d/e") == "tables/orders"
-        assert bundle.resolve_resource("https://x.test/a.md", "d/e") is None
+    def test_resolve_link_takes_path_valued_keys(self, bundle: OKFBundle) -> None:
+        assert bundle.resolve_link("references/none.md", "d/e") is None
+        assert bundle.resolve_link("tables/orders.md", "d/e") == "tables/orders"
+        assert bundle.resolve_link("https://x.test/a.md", "d/e") is None
 
     def test_resolution_never_touches_the_filesystem(
         self, bundle: OKFBundle, monkeypatch: pytest.MonkeyPatch
@@ -1929,8 +1930,8 @@ class TestInteropFixture:
         orders = bundle.get("tables/orders")
 
         assert orders is not None and orders.resource is not None
-        assert bundle.resolve_resource(orders.resource, orders.id) is None
-        assert bundle.resolve_resource("references/attesters/revenue.py", "x") is None
+        assert bundle.resolve_link(orders.resource, orders.id) is None
+        assert bundle.resolve_link("references/attesters/revenue.py", "x") is None
 
     def test_the_index_text_is_kept(self, bundle: OKFBundle) -> None:
         assert "Customer Orders" in bundle.index_text
@@ -3526,3 +3527,359 @@ class TestTimestampNonstandard:
             )
             assert isinstance(concept.is_stale(), bool)
             assert isinstance(concept.flags(), list)
+
+
+class _FakeClock:
+    """Stand-in for the ``time`` module inside ``fsm_llm.okf``.
+
+    Time moves only when ``tick`` is called, so a deadline test never depends
+    on the speed of the machine.
+    """
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+class TestLoadDeadline:
+    """``OKFLimits.max_seconds``: a load is bounded in time, not only in bytes."""
+
+    def _ticking(
+        self, monkeypatch: pytest.MonkeyPatch, cost: float = 1.0
+    ) -> _FakeClock:
+        """Every parsed concept costs *cost* seconds of fake time."""
+        clock = _FakeClock()
+        real = okf_module.parse_concept_text
+
+        def slow(cid: str, text: str) -> Any:
+            clock.now += cost
+            return real(cid, text)
+
+        monkeypatch.setattr(okf_module, "time", clock)
+        monkeypatch.setattr(okf_module, "parse_concept_text", slow)
+        return clock
+
+    def test_the_default_comes_from_the_constant(self) -> None:
+        assert OKFLimits().max_seconds == OKF_MAX_LOAD_SECONDS == 30.0
+
+    @pytest.mark.parametrize("value", [0, -1, float("inf"), float("nan")])
+    def test_the_budget_must_be_positive_and_finite(self, value: float) -> None:
+        with pytest.raises(ValueError):
+            OKFLimits(max_seconds=value)
+
+    def test_a_spent_budget_stops_the_load_and_keeps_what_was_loaded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write(tmp_path, {f"{n}.md": _doc() for n in "abcde"})
+        self._ticking(monkeypatch)
+
+        bundle = load_bundle(tmp_path, limits=OKFLimits(max_seconds=2.5))
+
+        assert [c.id for c in bundle] == ["a", "b", "c"]
+        deadline = [i for i in bundle.issues if i.code == "load-deadline"]
+        assert [(i.severity, i.path) for i in deadline] == [("error", "d.md")]
+        assert "load-deadline" in [i.code for i in check_bundle(bundle)]
+
+    def test_the_budget_also_stops_a_walk_through_directories(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        files = {f"d{n}/f{k}.md": _doc() for n in range(4) for k in range(3)}
+        _write(tmp_path, files)
+        self._ticking(monkeypatch)
+
+        bundle = load_bundle(tmp_path, limits=OKFLimits(max_seconds=4.5))
+
+        assert len(bundle) == 5
+        assert _codes(bundle).count("load-deadline") == 1
+
+    def test_a_load_inside_its_budget_reports_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write(tmp_path, {f"{n}.md": _doc() for n in "abc"})
+        self._ticking(monkeypatch)
+
+        bundle = load_bundle(tmp_path, limits=OKFLimits(max_seconds=100))
+
+        assert len(bundle) == 3
+        assert "load-deadline" not in _codes(bundle)
+
+    def test_hostile_frontmatter_is_cut_off_by_the_real_clock(
+        self, tmp_path: Path
+    ) -> None:
+        unit = "x: " + "[" * 63 + "]" * 63 + "\n"
+        front = "type: X\n" + unit * ((OKF_MAX_FRONTMATTER_BYTES - 20) // len(unit))
+        hostile = f"---\n{front}---\n"
+        _write(tmp_path, {f"c{n:03d}.md": hostile for n in range(60)})
+
+        started = time.monotonic()
+        bundle = load_bundle(tmp_path, limits=OKFLimits(max_seconds=1.0))
+        elapsed = time.monotonic() - started
+
+        assert "load-deadline" in _codes(bundle)
+        assert 0 < len(bundle) < 60
+        assert elapsed < 30
+
+
+class TestPerFileCatchAll:
+    """An unexpected exception on one file never aborts the load."""
+
+    def test_a_concept_that_raises_becomes_parse_failed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write(tmp_path, {"a.md": _doc(), "boom.md": _doc(body="BOOM\n")})
+        real = okf_module.parse_concept_text
+
+        def flaky(cid: str, text: str) -> Any:
+            if "BOOM" in text:
+                raise RuntimeError("secret internal detail")
+            return real(cid, text)
+
+        monkeypatch.setattr(okf_module, "parse_concept_text", flaky)
+
+        bundle = load_bundle(tmp_path)
+
+        assert [c.id for c in bundle] == ["a"]
+        failed = [i for i in bundle.issues if i.code == "parse-failed"]
+        assert [(i.severity, i.path) for i in failed] == [("warning", "boom.md")]
+        assert "secret internal detail" not in failed[0].message
+
+    def test_a_reserved_file_that_raises_becomes_parse_failed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write(tmp_path, {"a.md": _doc(), "log.md": "BOOM\n", "z.md": _doc()})
+        real = okf_module._split_frontmatter
+
+        def flaky(text: str) -> Any:
+            if text.startswith("BOOM"):
+                raise KeyError("x")
+            return real(text)
+
+        monkeypatch.setattr(okf_module, "_split_frontmatter", flaky)
+
+        bundle = load_bundle(tmp_path)
+
+        assert [c.id for c in bundle] == ["a", "z"]
+        assert [i.path for i in bundle.issues if i.code == "parse-failed"] == ["log.md"]
+
+
+class TestHardlinks:
+    """A file with several hard links may be a window on a file outside the root."""
+
+    def _link(self, source: Path, link: Path) -> None:
+        try:
+            os.link(source, link)
+        except OSError:  # pragma: no cover - the file system refuses hard links
+            pytest.skip("file system refuses hard links")
+
+    def test_a_hardlink_to_a_file_outside_the_bundle_is_not_loaded(
+        self, tmp_path: Path
+    ) -> None:
+        outside = tmp_path / "secret.md"
+        outside.write_text(_doc("Secret", body="TOPSECRET\n"), encoding="utf-8")
+        root = _write(tmp_path / "b", {"ok.md": _doc()})
+        self._link(outside, root / "hard.md")
+
+        bundle = load_bundle(root)
+
+        assert [c.id for c in bundle] == ["ok"]
+        assert all("TOPSECRET" not in c.body for c in bundle)
+        skipped = [i for i in bundle.issues if i.code == "hardlink-skipped"]
+        assert [(i.severity, i.path) for i in skipped] == [("warning", "hard.md")]
+
+    def test_a_hardlinked_reserved_file_is_skipped_too(self, tmp_path: Path) -> None:
+        outside = tmp_path / "outside-index.md"
+        outside.write_text('---\nokf_version: "0.1"\n---\nLEAK\n', encoding="utf-8")
+        root = _write(tmp_path / "b", {"ok.md": _doc()})
+        self._link(outside, root / "index.md")
+
+        bundle = load_bundle(root)
+
+        assert bundle.index_text == ""
+        assert bundle.okf_version is None
+        assert "hardlink-skipped" in _codes(bundle)
+
+    def test_a_file_with_one_link_still_loads(self, tmp_path: Path) -> None:
+        root = _write(tmp_path / "b", {"ok.md": _doc()})
+
+        bundle = load_bundle(root)
+
+        assert [c.id for c in bundle] == ["ok"]
+        assert "hardlink-skipped" not in _codes(bundle)
+
+
+class TestReservedAndSafeNames:
+    """One reserved-name rule (casefolded) and one id-safety rule for load and write."""
+
+    @pytest.mark.parametrize("name", ["Index.md", "LOG.md", "iNdEx.md", "sub/Log.md"])
+    def test_reserved_names_are_matched_in_any_case(
+        self, tmp_path: Path, name: str
+    ) -> None:
+        root = _write(tmp_path, {name: _doc(), "a.md": _doc()})
+
+        bundle = load_bundle(root)
+
+        assert [c.id for c in bundle] == ["a"]
+
+    def test_a_root_index_in_any_case_supplies_the_version_and_text(
+        self, tmp_path: Path
+    ) -> None:
+        root = _write(tmp_path, {"INDEX.md": '---\nokf_version: "0.2"\n---\nhello\n'})
+
+        bundle = load_bundle(root)
+
+        assert (bundle.okf_version, bundle.index_text.strip()) == ("0.2", "hello")
+
+    def test_check_bundle_flags_a_reserved_id_in_any_case(self) -> None:
+        bundle = OKFBundle([OKFConcept(id="sub/Index", type="X")])
+
+        assert [(i.code, i.id) for i in check_bundle(bundle)] == [
+            ("reserved-id", "sub/Index")
+        ]
+
+    def test_a_link_to_a_reserved_name_in_any_case_resolves_to_nothing(self) -> None:
+        bundle = OKFBundle([OKFConcept(id="a", type="X", body="[i](Index.md)")])
+
+        assert bundle.outgoing("a") == []
+
+    def test_a_loaded_bundle_with_reserved_names_round_trips(
+        self, tmp_path: Path
+    ) -> None:
+        root = _write(
+            tmp_path / "src",
+            {
+                "Index.md": '---\nokf_version: "0.2"\n---\n# Home\n',
+                "sub/LOG.md": "## 2026-01-01\nchange\n",
+                "a.md": _doc(),
+                "sub/b.md": _doc("Table"),
+            },
+        )
+
+        first = load_bundle(root)
+        write_bundle(first, tmp_path / "out")
+        second = load_bundle(tmp_path / "out")
+
+        assert [c.id for c in second] == ["a", "sub/b"] == [c.id for c in first]
+        assert "id-unsafe" not in _codes(second)
+
+    def test_a_hidden_file_is_skipped_silently_like_a_hidden_directory(
+        self, tmp_path: Path
+    ) -> None:
+        root = _write(
+            tmp_path, {".hidden.md": _doc(), ".git/g.md": _doc(), "a.md": _doc()}
+        )
+
+        bundle = load_bundle(root)
+
+        assert [c.id for c in bundle] == ["a"]
+        assert bundle.issues == []
+
+    @pytest.mark.parametrize("name", ["...md", "..md"])
+    def test_a_name_that_makes_a_dot_id_is_unsafe(
+        self, tmp_path: Path, name: str
+    ) -> None:
+        root = _write(tmp_path, {name: _doc(), "a.md": _doc()})
+
+        bundle = load_bundle(root)
+
+        assert [c.id for c in bundle] == ["a"]
+        assert [(i.code, i.path) for i in bundle.issues] == [("id-unsafe", name)]
+
+    def test_a_too_long_segment_is_unsafe_like_the_writer_says(
+        self, tmp_path: Path
+    ) -> None:
+        root = _write(tmp_path, {"x" * 250 + ".md": _doc(), "a.md": _doc()})
+
+        bundle = load_bundle(root)
+
+        assert [c.id for c in bundle] == ["a"]
+        assert _codes(bundle) == ["id-unsafe"]
+
+    def test_the_loader_and_the_writer_share_one_id_rule(self, tmp_path: Path) -> None:
+        okf_module_rule = okf_module._id_problem
+        for cid in ("..", ".", "a/../b", "x" * 250, "a\x1bb", ".h"):
+            assert okf_module_rule(cid, allow_reserved=True) is not None
+        assert okf_module_rule("Index", allow_reserved=True) is None
+        assert okf_module_rule("Index") is not None
+        assert okf_module_rule("fine/name") is None
+
+
+class TestIdCollisions:
+    """Ids equal after NFC and case folding: the first one visited wins."""
+
+    def _write_pair(self, root: Path, first: str, second: str) -> None:
+        root.mkdir()
+        for name in (first, second):
+            (root / f"{name}.md").write_text(_doc(body=name + "\n"), encoding="utf-8")
+        if len(list(root.iterdir())) < 2:  # pragma: no cover - folding file system
+            pytest.skip("file system folds these names")
+
+    def test_nfc_and_nfd_lookalikes_keep_the_first(self, tmp_path: Path) -> None:
+        nfd, nfc = "café", "café"
+        self._write_pair(tmp_path / "b", nfd, nfc)
+
+        bundle = load_bundle(tmp_path / "b")
+
+        assert [c.id for c in bundle] == [nfd]
+        collided = [i for i in bundle.issues if i.code == "id-collision"]
+        assert [(i.severity, i.path) for i in collided] == [("warning", f"{nfc}.md")]
+
+    def test_ids_that_differ_only_in_case_keep_the_first(self, tmp_path: Path) -> None:
+        self._write_pair(tmp_path / "b", "Alpha", "alpha")
+
+        bundle = load_bundle(tmp_path / "b")
+
+        assert [c.id for c in bundle] == ["Alpha"]
+        assert _codes(bundle) == ["id-collision"]
+
+    def test_a_collision_across_directories_is_found_too(self, tmp_path: Path) -> None:
+        root = tmp_path / "b"
+        try:
+            _write(root, {"Dir/x.md": _doc(), "dir/x.md": _doc()})
+        except OSError:  # pragma: no cover
+            pytest.skip("file system refuses the names")
+        if len(list(root.iterdir())) < 2:  # pragma: no cover
+            pytest.skip("file system folds these names")
+
+        bundle = load_bundle(root)
+
+        assert [c.id for c in bundle] == ["Dir/x"]
+        assert _codes(bundle) == ["id-collision"]
+
+    def test_the_writer_uses_the_same_key(self, tmp_path: Path) -> None:
+        bundle = OKFBundle(
+            [OKFConcept(id="café", type="X"), OKFConcept(id="café", type="X")]
+        )
+
+        with pytest.raises(OKFError, match="collides"):
+            write_bundle(bundle, tmp_path / "out")
+
+        assert not (tmp_path / "out").exists()
+
+
+class TestLoaderTrims:
+    """Behaviour-neutral clean-ups of review note 13."""
+
+    def test_resolve_resource_was_only_an_alias_and_is_gone(self) -> None:
+        assert not hasattr(OKFBundle, "resolve_resource")
+
+    def test_the_search_scale_is_derived_from_the_field_weights(self) -> None:
+        assert okf_module._HAY_WEIGHT == 6
+        bundle = OKFBundle(
+            [
+                OKFConcept(
+                    id="x",
+                    type="T",
+                    title="orders",
+                    description="orders",
+                    body="orders",
+                ),
+                OKFConcept(id="y", type="T", body="orders"),
+            ]
+        )
+
+        hits = dict((c.id, score) for c, score in bundle.search("orders"))
+
+        assert hits["y"] == pytest.approx(1 / 6)
+        assert hits["x"] == pytest.approx(1.0)
