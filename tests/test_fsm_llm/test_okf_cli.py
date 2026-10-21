@@ -828,7 +828,9 @@ class TestExportOfDeepMetadata:
     def test_metadata_json_itself_cannot_parse_exits_one_without_a_traceback(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        store = _deep_store(tmp_path / "store.json", 5_000)
+        # deep enough that json.loads raises RecursionError on 3.10, 3.11 and
+        # 3.12; the C scanner's limit differs per interpreter (3.12 parses 5,000)
+        store = _deep_store(tmp_path / "store.json", 100_000)
 
         code, out, err = _run(capsys, "export", store, tmp_path / "kb")
 
