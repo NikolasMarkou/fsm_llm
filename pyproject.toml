@@ -103,6 +103,7 @@ fsm-llm-monitor = "fsm_llm.monitor.__main__:main_cli"
 fsm-llm-meta = "fsm_llm.agents.meta_cli:main_cli"
 fsm-llm-harness = "fsm_llm.harness.__main__:run"
 fsm-llm-eval = "fsm_llm.eval.__main__:run"
+fsm-llm-okf = "fsm_llm.okf_cli:main_cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
