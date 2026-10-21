@@ -131,27 +131,6 @@ class TestValidate:
 
         assert _ESC not in out + err
 
-    def test_a_flood_of_issues_is_cut_with_one_more_line(
-        self,
-        clean_bundle: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        from fsm_llm.okf import OKFIssue
-
-        flood = [
-            OKFIssue(severity="warning", code="w", message=f"m{i}")
-            for i in range(okf_cli.OKF_MAX_ISSUES + 7)
-        ]
-        monkeypatch.setattr(okf_cli, "check_bundle", lambda bundle: flood)
-
-        code, out, _ = _run(capsys, "validate", clean_bundle)
-
-        lines = out.splitlines()
-        assert len(lines) == okf_cli.OKF_MAX_ISSUES + 1
-        assert lines[-1] == "... and 7 more"
-        assert code == 0
-
     def test_a_missing_root_is_exit_1_with_one_stderr_line_no_traceback(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -335,7 +314,7 @@ class TestShow:
             "id: a",
             "type: Note",
             "title: Alpha",
-            "trust: human-reviewed",
+            "trust (claimed by bundle): human-reviewed",
             "flags: draft",
         ]
         assert "hello body" in out
@@ -773,3 +752,38 @@ class TestWiring:
             source,
         )
         assert not re.search(r"(?m)^\s*(from|import)\s+litellm", source)
+
+
+class TestSharedHelpersAndIssueCap:
+    """Step 7.1: the CLI uses the core helpers and no longer re-caps issues."""
+
+    def test_the_cli_has_no_private_copy_of_the_shared_helpers(self) -> None:
+        for name in ("_cell", "_close_ids"):
+            assert not hasattr(okf_cli, name)
+
+    def test_the_issues_truncated_line_is_printed_not_hidden(
+        self,
+        clean_bundle: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from fsm_llm.constants import OKF_MAX_ISSUES
+        from fsm_llm.okf import OKFIssue
+
+        issues = [
+            OKFIssue(severity="warning", code="w", message=f"m{i}")
+            for i in range(OKF_MAX_ISSUES)
+        ] + [OKFIssue(severity="info", code="issues-truncated", message="1 more")]
+        monkeypatch.setattr(okf_cli, "check_bundle", lambda bundle: issues)
+
+        code, out, _ = _run(capsys, "validate", clean_bundle)
+
+        assert code == 0
+        assert "issues-truncated" in out and "... and" not in out
+        assert len(out.splitlines()) == OKF_MAX_ISSUES + 1
+
+    def test_show_close_matches_use_the_shared_helper(
+        self, clean_bundle: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, _, err = _run(capsys, "show", clean_bundle, "orderz")
+        assert code == 1 and "did you mean:" in err

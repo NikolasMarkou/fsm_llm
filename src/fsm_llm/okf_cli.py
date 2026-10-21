@@ -25,7 +25,6 @@ Imports core only (never a subpackage, never litellm).
 from __future__ import annotations
 
 import argparse
-import difflib
 import json
 import os
 import sys
@@ -38,17 +37,16 @@ from .constants import (
     CLI_EXIT_INTERRUPTED,
     CLI_EXIT_OK,
     OKF_LIST_MAX_ITEMS,
-    OKF_MAX_ISSUES,
     OKF_READ_PAGE_CHARS,
-    OKF_SUMMARY_FIELD_CHARS,
 )
 from .definitions import OKFError
 from .okf import (
-    OKFBundle,
+    body_page,
     bundle_from_memory_entries,
+    capped_line,
     check_bundle,
+    close_ids,
     load_bundle,
-    strip_unsafe_text,
     write_bundle,
 )
 
@@ -56,19 +54,13 @@ __all__ = ["main", "main_cli"]
 
 _PROG = "fsm-llm-okf"
 _MAX_STORE_BYTES = 64 * 1024 * 1024
-_MAX_CLOSE_MATCHES = 5
 _MAX_ID_ARG_CHARS = 500
 _HEADER_FIELD_CHARS = 500
 _SEVERITIES = ("error", "warning", "info")
 
 
-def _cell(text: object, cap: int = OKF_SUMMARY_FIELD_CHARS) -> str:
-    """Single-line, control-stripped, capped text for one output field."""
-    return strip_unsafe_text(text if isinstance(text, str) else str(text))[:cap]
-
-
 def _err(message: str) -> None:
-    print(f"{_PROG}: {_cell(message, 1000)}", file=sys.stderr)
+    print(f"{_PROG}: {capped_line(message, 1000)}", file=sys.stderr)
 
 
 def _more(count: int, hint: str = "") -> None:
@@ -83,11 +75,9 @@ def _more(count: int, hint: str = "") -> None:
 def _cmd_validate(args: argparse.Namespace) -> int:
     bundle = load_bundle(args.path)
     issues = check_bundle(bundle)
-    for issue in issues[:OKF_MAX_ISSUES]:
+    for issue in issues:  # check_bundle caps the list and says so
         where = issue.id or issue.path or "-"
         print(f"{issue.severity} {issue.code} {where} {issue.message}")
-    if len(issues) > OKF_MAX_ISSUES:
-        _more(len(issues) - OKF_MAX_ISSUES)
     count = {s: sum(1 for i in issues if i.severity == s) for s in _SEVERITIES}
     print(
         f"{len(bundle)} concepts, {count['error']} errors, "
@@ -106,9 +96,9 @@ def _cmd_list(args: argparse.Namespace) -> int:
         print(
             "\t".join(
                 (
-                    _cell(concept.id),
-                    _cell(concept.type),
-                    _cell(concept.display_title),
+                    capped_line(concept.id),
+                    capped_line(concept.type),
+                    capped_line(concept.display_title),
                     " ".join(concept.flags()),
                 )
             ).rstrip()
@@ -118,36 +108,28 @@ def _cmd_list(args: argparse.Namespace) -> int:
     return CLI_EXIT_OK
 
 
-def _close_ids(bundle: OKFBundle, wanted: str) -> list[str]:
-    ids = [c.id for c in bundle]
-    return difflib.get_close_matches(wanted, ids, n=_MAX_CLOSE_MATCHES)
-
-
 def _cmd_show(args: argparse.Namespace) -> int:
     bundle = load_bundle(args.path)
     wanted = args.id[:_MAX_ID_ARG_CHARS]
     concept = bundle.get(wanted)
     if concept is None:
-        _err(f"no concept with id {_cell(wanted)!r}")
-        close = _close_ids(bundle, wanted)
-        if close:
+        _err(f"no concept with id {capped_line(wanted)!r}")
+        if close := close_ids(bundle, wanted, include_deprecated=True):
             print(
-                "did you mean: " + ", ".join(_cell(i) for i in close), file=sys.stderr
+                "did you mean: " + ", ".join(capped_line(i) for i in close),
+                file=sys.stderr,
             )
         return CLI_EXIT_FAILURE
-    print(f"id: {_cell(concept.id, _HEADER_FIELD_CHARS)}")
-    print(f"type: {_cell(concept.type, _HEADER_FIELD_CHARS)}")
-    print(f"title: {_cell(concept.display_title, _HEADER_FIELD_CHARS)}")
-    print(f"trust: {concept.trust.value}")
+    print(f"id: {capped_line(concept.id, _HEADER_FIELD_CHARS)}")
+    print(f"type: {capped_line(concept.type, _HEADER_FIELD_CHARS)}")
+    print(f"title: {capped_line(concept.display_title, _HEADER_FIELD_CHARS)}")
+    print(f"trust (claimed by bundle): {concept.trust.value}")
     print(f"flags: {' '.join(concept.flags()) or '-'}")
     print()
-    # Page over the stripped body so the pages add up to exactly what is shown.
-    body = strip_unsafe_text(concept.body, multiline=True)
-    start = min(max(args.offset, 0), len(body))
-    end = start + OKF_READ_PAGE_CHARS
-    print(body[start:end])
-    if end < len(body):
-        print(f"next offset: {end}")
+    page, following, _ = body_page(concept, args.offset, OKF_READ_PAGE_CHARS)
+    print(page)
+    if following is not None:
+        print(f"next offset: {following}")
     return CLI_EXIT_OK
 
 
@@ -159,9 +141,9 @@ def _cmd_search(args: argparse.Namespace) -> int:
             "\t".join(
                 (
                     f"{score:.2f}",
-                    _cell(concept.id),
-                    _cell(concept.type),
-                    _cell(concept.display_title),
+                    capped_line(concept.id),
+                    capped_line(concept.type),
+                    capped_line(concept.display_title),
                 )
             )
         )
@@ -201,7 +183,8 @@ def _cmd_export(args: argparse.Namespace) -> int:
         return CLI_EXIT_FAILURE
     written = write_bundle(bundle, args.out_dir, overwrite=args.overwrite)
     print(
-        f"wrote {len(written)} files under {_cell(Path(args.out_dir).resolve(), 1000)}"
+        f"wrote {len(written)} files under "
+        f"{capped_line(str(Path(args.out_dir).resolve()), 1000)}"
     )
     return CLI_EXIT_OK
 

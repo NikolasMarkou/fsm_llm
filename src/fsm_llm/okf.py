@@ -21,6 +21,7 @@ Entry points: ``parse_concept_text(concept_id, text) -> (OKFConcept, issues)``,
 
 from __future__ import annotations
 
+import difflib
 import math
 import os
 import re
@@ -394,14 +395,9 @@ def _load_yaml(raw: str, note: _Note) -> dict[Any, Any]:
     except RecursionError:  # first: a RuntimeError, so it must not reach the catch-all
         note("error", "frontmatter-too-deep", "frontmatter is nested too deeply")
         return {}
-    except (yaml.YAMLError, ValueError, TypeError, OverflowError) as exc:
+    except Exception as exc:  # PyYAML constructors raise anything (``!!timestamp x``)
         problem = getattr(exc, "problem", None) or exc
         note("error", "frontmatter-invalid", f"{type(exc).__name__}: {problem}"[:160])
-        return {}
-    except Exception as exc:  # PyYAML constructors raise anything
-        # A malformed built-in tag (``!!timestamp x``) escapes as AttributeError etc.
-        logger.debug(f"OKF frontmatter rejected: {type(exc).__name__}: {exc}")
-        note("error", "frontmatter-invalid", f"{type(exc).__name__}: {exc}"[:160])
         return {}
     for key in duplicates:
         note("warning", "key-duplicate", f"duplicate key {key!r}; the last value wins")
@@ -474,6 +470,20 @@ def _check_timestamp(label: str, value: Any, note: _Note) -> None:
         )
 
 
+def _check_timestamps(
+    stale_after: Any, generated: Any, verified: Any, note: _Note
+) -> None:
+    """Check ``stale_after``, ``generated.at`` and every ``verified[].at``."""
+    stamps = [
+        ("stale_after", stale_after),
+        ("generated.at", (generated or {}).get("at")),
+    ]
+    stamps += [("verified.at", entry.get("at")) for entry in verified]
+    for label, value in stamps:
+        if value is not None:
+            _check_timestamp(label, value, note)
+
+
 def parse_concept_text(concept_id: str, text: str) -> tuple[OKFConcept, list[OKFIssue]]:
     """Parse one concept document. Never raises on content.
 
@@ -537,14 +547,8 @@ def _build_concept(concept_id: str, text: str, note: _Note) -> OKFConcept:
     verified = _mapping_list(data, "verified", note)
     stale_after = _text(data, "stale_after", note)
 
-    for label, value in (
-        ("stale_after", stale_after),
-        ("generated.at", (generated or {}).get("at")),
-        *(("verified.at", entry.get("at")) for entry in verified),
-    ):
-        if value is not None:
-            _check_timestamp(label, value, note)
-    concept = OKFConcept(
+    _check_timestamps(stale_after, generated, verified, note)
+    return OKFConcept(
         id=concept_id,
         type=(type_text or "").strip(),
         title=_text(data, "title", note),
@@ -559,7 +563,6 @@ def _build_concept(concept_id: str, text: str, note: _Note) -> OKFConcept:
         extra={k: v for k, v in data.items() if k not in _KNOWN_KEYS},
         body=body,
     )
-    return concept
 
 
 # --------------------------------------------------------------
@@ -1104,41 +1107,21 @@ def check_bundle(bundle: OKFBundle) -> list[OKFIssue]:
 
     if bundle.okf_version not in (None, *_KNOWN_VERSIONS):
         add(
-            "info",
-            "okf-version-unknown",
-            f"okf_version {bundle.okf_version!r} is unknown",
+            "info", "okf-version-unknown", f"okf_version {bundle.okf_version!r} unknown"
         )
     for c in bundle:
-
-        def note(
-            severity: Literal["error", "warning", "info"],
-            code: str,
-            message: str,
-            cid: str = c.id,
-        ) -> None:
-            add(severity, code, message, cid)
+        note = partial(add, cid=c.id)
 
         if _is_reserved(c.id.rsplit("/", 1)[-1]):
             note("error", "reserved-id", "index and log are reserved, never concepts")
         if not c.type.strip() and c.id not in typed:
             note("error", "type-empty", "'type' must be a non-empty string")
-        stamps = [
-            ("stale_after", c.stale_after),
-            ("generated.at", (c.generated or {}).get("at")),
-        ]
-        stamps += [("verified.at", v.get("at")) for v in c.verified]
-        for label, value in stamps:
-            if value is not None:
-                _check_timestamp(label, value, note)
+        _check_timestamps(c.stale_after, c.generated, c.verified, note)
         for target in _body_links(c.body):
             if (cands := _link_candidates(target, c.id)) and not any(
                 x in bundle for x in cands
             ):
-                note(
-                    "info",
-                    "link-broken",
-                    f"link target {target!r} is not in the bundle",
-                )
+                note("info", "link-broken", f"link target {target!r} not in the bundle")
     return _capped(out)
 
 
@@ -1153,11 +1136,7 @@ _SURROGATE_RE = re.compile("[\ud800-\udfff]")
 
 
 class _OKFDumper(yaml.SafeDumper):
-    """``SafeDumper`` that never emits anchors or aliases.
-
-    The loader refuses aliases, so a shared value is written out twice, not as
-    ``&id001`` / ``*id001``.
-    """
+    """``SafeDumper`` without anchors or aliases (the loader refuses them)."""
 
     def ignore_aliases(self, data: Any) -> bool:
         return True
@@ -1353,8 +1332,7 @@ def write_bundle(
         - Atomic PER FILE (temp file, fsync, rename). The whole bundle is not
           atomic: an I/O failure midway leaves the files already written. A
           parent directory swapped for a symlink between validation and the
-          write still wins; whole-bundle atomicity is not claimed (per-file
-          only).
+          write still wins.
     """
     try:
         root = Path(path).resolve()
@@ -1383,11 +1361,9 @@ def write_bundle(
             plan.append((cid, root / f"{cid}.md", _render_concept(concept)))
         except OKFError as exc:
             problems.append(str(exc))
-    if write_index:
-        index = root / "index.md"
-        if os.path.lexists(index) and not overwrite:
-            pass  # a user-owned index.md is not ours to replace
-        elif (reason := _target_problem(root, "index.md")) is not None:
+    index = root / "index.md"
+    if write_index and (overwrite or not os.path.lexists(index)):  # else user-owned
+        if (reason := _target_problem(root, "index.md")) is not None:
             problems.append(f"'index.md' {reason}")
         else:
             plan.append(("index", index, _render_index(bundle).encode()))
@@ -1427,8 +1403,6 @@ _MAX_META_ITEMS = 100
 _MAX_META_DEPTH = 4
 _MAX_META_TEXT = 2_000
 _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
-
-
 _unlone = partial(_SURROGATE_RE.sub, "\ufffd")  # lone surrogate -> U+FFFD
 
 
@@ -1460,9 +1434,33 @@ def _native(value: Any, depth: int = 0) -> Any:
     return _DROP
 
 
-def _line(value: object, cap: int = OKF_SUMMARY_FIELD_CHARS) -> str:
+def capped_line(value: object, cap: int = OKF_SUMMARY_FIELD_CHARS) -> str:
     """Control-stripped, trimmed, capped one-line text; ``""`` for a non-string."""
     return strip_unsafe_text(value).strip()[:cap] if isinstance(value, str) else ""
+
+
+def body_page(
+    concept: OKFConcept, offset: Any, size: int
+) -> tuple[str, int | None, int]:
+    """``(page, next offset or None, length)`` of a concept's stripped body.
+
+    ``offset`` is clamped into the body (a non-int is 0); pages add up to it.
+    """
+    body = strip_unsafe_text(concept.body, multiline=True)
+    try:
+        start = min(max(int(offset), 0), len(body))
+    except (TypeError, ValueError, OverflowError):
+        start = 0
+    end = min(start + size, len(body))
+    return body[start:end], (end if end < len(body) else None), len(body)
+
+
+def close_ids(
+    bundle: OKFBundle, wanted: str, *, include_deprecated: bool = False, n: int = 5
+) -> list[str]:
+    """Up to *n* ids of *bundle* close to *wanted* (the not-found hint)."""
+    ids = [c.id for c in bundle.list(include_deprecated=include_deprecated)]
+    return difflib.get_close_matches(wanted[:200], ids, n=n)
 
 
 def _slug(raw: object) -> str:
@@ -1507,9 +1505,9 @@ def bundle_from_memory_entries(
     issues: list[OKFIssue] = []
     concepts: list[OKFConcept] = []
     used: set[str] = set()
-    stamp = _iso(now) if isinstance(now, datetime) else _line(now, 100)
+    stamp = _iso(now) if isinstance(now, datetime) else capped_line(now, 100)
     generated = {
-        "by": _line(generated_by, 200) or f"fsm-llm/{__version__}",
+        "by": capped_line(generated_by, 200) or f"fsm-llm/{__version__}",
         "at": stamp or _iso(datetime.now(timezone.utc)),
     }
 
@@ -1544,9 +1542,10 @@ def bundle_from_memory_entries(
         concepts.append(
             OKFConcept(
                 id=f"memory/{slug}",
-                type=_line(type_, 100) or "Memory",
-                title=_line(title if isinstance(title, str) else first_line) or None,
-                tags=[t for x in tags if (t := _line(x, 100))]
+                type=capped_line(type_, 100) or "Memory",
+                title=capped_line(title if isinstance(title, str) else first_line)
+                or None,
+                tags=[t for x in tags if (t := capped_line(x, 100))]
                 if isinstance(tags, list)
                 else [],
                 generated=dict(generated),
@@ -1577,7 +1576,7 @@ def create_okf_handler(
 
     Interface contract:
         - Writes ``context_key`` = a list of at most ``max_items`` dicts
-          ``{id, type, title, description, trust, flags}`` (JSON-native; every
+          ``{id, type, title, description, trust_claimed, flags}`` (JSON-native; every
           string control-stripped and cut at ``OKF_SUMMARY_FIELD_CHARS``;
           ``flags`` a sorted list from stale, draft, deprecated). NEVER a body.
         - Concepts: with ``query_key`` set and a non-blank ``str`` there (cut
@@ -1636,11 +1635,11 @@ def create_okf_handler(
         return {
             context_key: [
                 {
-                    "id": _line(c.id),
-                    "type": _line(c.type),
-                    "title": _line(c.display_title),
-                    "description": _line(c.description),
-                    "trust": c.trust.value,
+                    "id": capped_line(c.id),
+                    "type": capped_line(c.type),
+                    "title": capped_line(c.display_title),
+                    "description": capped_line(c.description),
+                    "trust_claimed": c.trust.value,
                     "flags": sorted(c.flags(now)),
                 }
                 for c in found

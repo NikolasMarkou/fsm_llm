@@ -2891,11 +2891,11 @@ class TestCreateOkfHandler:
             "type": "Dataset",
             "title": "One",
             "description": "First",
-            "trust": "human-reviewed",
+            "trust_claimed": "human-reviewed",
             "flags": [],
         }
         assert items[1]["title"] == "b"  # falls back to the last id segment
-        assert items[1]["trust"] == "unverified"
+        assert items[1]["trust_claimed"] == "unverified"
         assert "BODY-SECRET" not in json.dumps(seen[0])
 
     def test_value_is_json_native_and_flat(self) -> None:
@@ -4081,3 +4081,40 @@ class TestMemoryExportSurvivesLoneSurrogates:
         assert (tmp_path / "kb" / "memory" / "a.md").is_file()
         assert (tmp_path / "kb" / "memory" / "b.md").is_file()
         assert "text-sanitized" in captured.err
+
+
+class TestSharedCoreHelpers:
+    """Step 7.1: one capped-line helper, one paging helper, one close-id helper."""
+
+    def test_capped_line_strips_trims_caps_and_ignores_non_strings(self) -> None:
+        capped = okf_module.capped_line
+        assert capped("  ab  ") == "ab"
+        assert "\n" not in capped("x\ny") and "\x1b" not in capped("\x1b[2Jz")
+        assert capped("x" * 500, 10) == "x" * 10
+        assert len(capped("x" * 500)) == OKF_SUMMARY_FIELD_CHARS
+        assert capped(None) == "" and capped(5) == ""
+        assert not hasattr(okf_module, "_line")
+
+    def test_body_page_pages_add_up_and_clamp_the_offset(self) -> None:
+        concept = OKFConcept(id="a", type="Note", body="0123456789\x1b[1m" * 3)
+        text = strip_unsafe_text(concept.body, multiline=True)
+        page, nxt, total = okf_module.body_page(concept, 0, 12)
+        assert (page, nxt, total) == (text[:12], 12, len(text))
+        page, nxt, _ = okf_module.body_page(concept, 24, 12)
+        assert page == text[24:] and nxt is None
+        for bad in (-5, None, "x", float("nan"), [1], 10**30):
+            page, nxt, _ = okf_module.body_page(concept, bad, 12)
+            assert page in ("", text[:12])
+        assert okf_module.body_page(concept, 10**30, 12) == ("", None, len(text))
+        assert okf_module.body_page(OKFConcept(id="b", type="N"), 0, 5) == ("", None, 0)
+
+    def test_close_ids_names_at_most_five_near_ids(self) -> None:
+        bundle = OKFBundle(
+            [OKFConcept(id=f"docs/note-{i}", type="Note") for i in range(9)]
+            + [OKFConcept(id="x", type="Note", status="deprecated")]
+        )
+        close = okf_module.close_ids(bundle, "docs/note-")
+        assert 1 <= len(close) <= 5 and all(c.startswith("docs/") for c in close)
+        assert okf_module.close_ids(bundle, "zzzzzz") == []
+        assert "x" in okf_module.close_ids(bundle, "x", include_deprecated=True)
+        assert "x" not in okf_module.close_ids(bundle, "x")
