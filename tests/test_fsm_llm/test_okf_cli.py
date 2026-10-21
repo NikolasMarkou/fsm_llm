@@ -916,3 +916,59 @@ class TestMaxSeconds:
         code, out, _ = _run(capsys, "validate", root, "--max-seconds", "100")
 
         assert code == 0 and "load-deadline" not in out
+
+
+# --------------------------------------------------------------
+# Step 3.3 (D-018): the check phase honours --max-seconds, cuts warn on export
+# --------------------------------------------------------------
+
+
+class TestCheckPhaseAndExportWarnings:
+    def test_validate_stops_checking_at_the_deadline_and_exits_1(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        body = "[](/gone.md)\n"
+        root = _write(tmp_path / "kb", {f"{n}.md": _doc(body=body) for n in "abcdef"})
+        clock = _FakeClock()
+        real = okf_module._link_candidates
+
+        def slow(*args: Any) -> Any:
+            clock.now += 3.0  # the load costs no fake time, every link check 3 s
+            return real(*args)
+
+        monkeypatch.setattr(okf_module, "time", clock)
+        monkeypatch.setattr(okf_module, "_link_candidates", slow)
+
+        code, out, err = _run(capsys, "validate", root, "--max-seconds", "5")
+
+        assert code == 1
+        assert any(x.startswith("error check-deadline ") for x in out.splitlines())
+        assert "6 concepts, 1 errors" in err
+
+        code, out, _ = _run(capsys, "validate", root, "--max-seconds", "100")
+
+        assert code == 0 and "check-deadline" not in out
+
+    def test_export_of_a_real_cut_prints_the_warning_to_stderr(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        store = _store(
+            tmp_path / "store.json",
+            [
+                {
+                    "id": "a",
+                    "text": "hi",
+                    "metadata": {"a": {"b": {"c": {"d": {"e": "leaf"}}}}},
+                },
+                {"id": "b", "text": "ok", "metadata": {"a": {"b": 1}}},
+            ],
+        )
+
+        code, out, err = _run(capsys, "export", store, tmp_path / "kb")
+
+        assert code == 0, err
+        assert err.count("metadata-truncated") == 1 and "depth" in err
+        assert "wrote 3 files" in out

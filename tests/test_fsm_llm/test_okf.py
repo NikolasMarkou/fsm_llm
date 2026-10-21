@@ -4266,7 +4266,11 @@ class TestExportOfHostileMetadataNeverRaises:
         (concept,) = list(bundle)
         assert len(concept.id) <= len("memory/") + 80
         assert "\ud800" not in (concept.title or "") + concept.body
-        assert [i.code for i in bundle.issues] == ["text-sanitized"]
+        # the 40,000-character title is a real cut now (D-018)
+        assert sorted(i.code for i in bundle.issues) == [
+            "metadata-truncated",
+            "text-sanitized",
+        ]
         write_bundle(bundle, tmp_path / "out")
 
     def test_a_wide_structure_is_fast_and_cut(self) -> None:
@@ -4328,3 +4332,353 @@ class TestWriteRefusesHostileFrontmatterValues:
         write_bundle(OKFBundle([concept]), tmp_path / "out")
 
         assert load_bundle(tmp_path / "out").get("ok").extra == {"k": value}
+
+
+# --------------------------------------------------------------
+# Step 3.3: the check phase is bounded, link resolution is cheap, every
+# metadata cut warns, loaded implies writable (D-018)
+# --------------------------------------------------------------
+
+
+def _link_flood(count: int, links: int = 1_000) -> OKFBundle:
+    """*count* concepts, each repeating one broken link *links* times."""
+    return _mem(**{f"d{i % 5}__c{i}": "[](a.md)" * links for i in range(count)})
+
+
+class TestCheckBundleIsCheapOnLinkFloods:
+    def test_a_repeated_broken_link_builds_no_throwaway_issue_objects(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = _link_flood(40)
+        built: list[int] = []
+
+        class Counting(OKFIssue):
+            def __init__(self, **data: Any) -> None:
+                built.append(1)
+                super().__init__(**data)
+
+        monkeypatch.setattr(okf_module, "OKFIssue", Counting)
+
+        issues = check_bundle(bundle)
+
+        assert [i.code for i in issues].count("link-broken") == 40
+        assert len(built) <= 200  # one per concept, not one per repeated link
+
+    def test_a_repeated_link_is_resolved_once_per_body(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = _link_flood(10)
+        calls: list[int] = []
+        real = okf_module._link_candidates
+
+        def counting(target: object, from_id: str) -> Any:
+            calls.append(1)
+            return real(target, from_id)
+
+        monkeypatch.setattr(okf_module, "_link_candidates", counting)
+
+        check_bundle(bundle)
+        for cid in [c.id for c in bundle]:
+            bundle.outgoing(cid)
+
+        assert len(calls) <= 40  # not 10 bodies x 1,000 links x 2 passes
+
+    def test_distinct_broken_links_are_capped_per_concept_with_one_note(self) -> None:
+        body = " ".join(f"[](gone{i}.md)" for i in range(200))
+        bundle = _mem(a=body, b="[](nope.md)")
+
+        issues = check_bundle(bundle)
+
+        broken = [i for i in issues if i.code == "link-broken"]
+        assert len([i for i in broken if i.id == "a"]) == 20
+        assert len([i for i in broken if i.id == "b"]) == 1  # the cap is per concept
+        notes = [i for i in issues if i.code == "issues-truncated"]
+        assert len(notes) == 1 and notes[0].severity == "info"
+
+    def test_link_issues_are_capped_in_total_at_a_small_multiple(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(okf_module, "OKF_MAX_ISSUES", 30)
+        body = " ".join(f"[](gone{i}.md)" for i in range(20))
+        bundle = _mem(**{f"c{i:03d}": body for i in range(100)})
+
+        issues = check_bundle(bundle)
+
+        assert len([i for i in issues if i.code == "link-broken"]) <= 30
+        assert len(issues) <= 32  # the result cap is unchanged, plus its note
+        assert "issues-truncated" in [i.code for i in issues]
+
+    def test_the_link_flood_finishes_fast_at_scale(self) -> None:
+        bundle = _link_flood(400)
+        started = time.perf_counter()
+
+        issues = check_bundle(bundle)
+        bundle.backlinks("d0/c0")
+
+        # smoke bound, see decisions.md D-017 item 6: HEAD took about 9 s here
+        assert time.perf_counter() - started < 5.0
+        assert len(issues) <= 401
+
+
+class TestCheckPhaseDeadline:
+    """``max_seconds`` of the load also bounds ``check_bundle`` and backlinks."""
+
+    def _slow(self, monkeypatch: pytest.MonkeyPatch, cost: float) -> _FakeClock:
+        clock = _FakeClock()
+        real = okf_module._check_timestamps
+
+        def tick(*args: Any, **kwargs: Any) -> Any:
+            clock.now += cost
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(okf_module, "time", clock)
+        monkeypatch.setattr(okf_module, "_check_timestamps", tick)
+        return clock
+
+    def test_the_loaded_limit_travels_with_the_bundle(self, tmp_path: Path) -> None:
+        _write(tmp_path, {"a.md": _doc()})
+
+        assert load_bundle(tmp_path).max_seconds == OKF_MAX_LOAD_SECONDS
+        loaded = load_bundle(tmp_path, limits=OKFLimits(max_seconds=7.5))
+        assert loaded.max_seconds == 7.5
+        assert OKFBundle().max_seconds is None
+
+    def test_a_spent_budget_gives_a_check_deadline_error_and_what_was_checked(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write(tmp_path, {f"{n}.md": _doc(body="[](/gone.md)") for n in "abcdef"})
+        bundle = load_bundle(tmp_path, limits=OKFLimits(max_seconds=10))
+        self._slow(monkeypatch, 4.0)
+
+        issues = check_bundle(bundle)
+
+        deadline = [i for i in issues if i.code == "check-deadline"]
+        assert [i.severity for i in deadline] == ["error"]
+        assert "max_seconds" in deadline[0].message
+        assert 0 < len([i for i in issues if i.code == "link-broken"]) < 6
+
+    def test_an_in_memory_bundle_is_unbounded_as_before(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = OKFBundle(OKFConcept(id=f"c{i}", type="") for i in range(6))
+        self._slow(monkeypatch, 1_000.0)
+
+        issues = check_bundle(bundle)
+
+        assert "check-deadline" not in [i.code for i in issues]
+        assert [i.code for i in issues].count("type-empty") == 6
+
+    def test_a_fast_check_inside_the_budget_has_no_deadline_issue(
+        self, tmp_path: Path
+    ) -> None:
+        _write(tmp_path, {f"{n}.md": _doc() for n in "abc"})
+
+        issues = check_bundle(load_bundle(tmp_path))
+
+        assert "check-deadline" not in [i.code for i in issues]
+
+    def test_the_lazy_backlink_build_stops_at_the_deadline_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write(tmp_path, {f"{n}.md": _doc(body="[](/a.md)") for n in "abcdef"})
+        bundle = load_bundle(tmp_path, limits=OKFLimits(max_seconds=10))
+        clock = _FakeClock()
+        real = OKFBundle.outgoing
+
+        def slow(self: OKFBundle, cid: str) -> Any:
+            clock.now += 4.0
+            return real(self, cid)
+
+        monkeypatch.setattr(okf_module, "time", clock)
+        monkeypatch.setattr(OKFBundle, "outgoing", slow)
+
+        first = bundle.backlinks("a")
+
+        assert isinstance(first, list)
+        assert [i.code for i in bundle.issues].count("check-deadline") == 1
+        assert bundle._back is None  # a partial graph is never cached as complete
+        bundle.backlinks("a")  # resumes on a fresh clock; still one issue
+        assert [i.code for i in bundle.issues].count("check-deadline") == 1
+
+    def test_a_finished_backlink_build_is_cached_and_has_no_issue(
+        self, tmp_path: Path
+    ) -> None:
+        _write(tmp_path, {"a.md": _doc(), "b.md": _doc(body="[](/a.md)")})
+        bundle = load_bundle(tmp_path)
+
+        assert bundle.backlinks("a") == ["b"]
+        assert bundle._back is not None
+        assert "check-deadline" not in [i.code for i in bundle.issues]
+
+
+def _truncation(meta: Any, *, extra: dict[str, Any] | None = None) -> list[OKFIssue]:
+    bundle = bundle_from_memory_entries(
+        [{"id": "a", "text": "hello", "metadata": meta, **(extra or {})}]
+    )
+    return bundle.issues
+
+
+class TestMetadataTruncatedFiresOnEveryRealCut:
+    @pytest.mark.parametrize(
+        ("kind", "meta"),
+        [
+            ("depth", {"a": {"b": {"c": {"d": {"e": "leaf"}}}}}),
+            ("depth", {"deep": _nested(63)}),
+            ("items", {"refs": list(range(150))}),
+            ("items", {f"k{i}": i for i in range(120)}),
+            ("text", {"note": "n" * 3_000}),
+            ("text", {"k" * 3_000: 1}),
+            ("values", {"when": datetime(2026, 1, 1)}),
+            ("values", {"nan": float("nan")}),
+            ("values", {"items": [1, {2, 3}]}),
+            ("values", {1: "non-str key"}),
+        ],
+        ids=lambda v: v if isinstance(v, str) else "",
+    )
+    def test_each_cut_kind_warns_once_and_names_what_was_cut(
+        self, kind: str, meta: Any
+    ) -> None:
+        issues = _truncation(meta)
+
+        assert [i.code for i in issues] == ["metadata-truncated"]
+        assert issues[0].severity == "warning"
+        assert kind in issues[0].message and "memory entry 0" in issues[0].message
+
+    def test_several_cuts_in_one_entry_give_one_warning_naming_all(self) -> None:
+        meta = {"deep": _nested(10), "long": "x" * 5_000, "n": list(range(500))}
+
+        issues = _truncation(meta)
+
+        assert [i.code for i in issues] == ["metadata-truncated"]
+        for kind in ("depth", "items", "text"):
+            assert kind in issues[0].message
+
+    def test_moderate_metadata_exports_whole_with_no_warning(self) -> None:
+        meta = {
+            "source": "wiki",
+            "scores": {"a": {"b": 1.5}},
+            "tags": ["x", "y"],
+            **{f"k{i}": f"short {i}" for i in range(10)},
+        }
+        bundle = bundle_from_memory_entries(
+            [{"id": "a", "text": "hello", "metadata": meta}]
+        )
+
+        assert bundle.issues == []
+        assert bundle.get("memory/a").extra["metadata"] == {
+            k: v for k, v in meta.items() if k != "tags"
+        }
+
+    def test_secret_and_internal_keys_are_dropped_without_a_cut_warning(self) -> None:
+        meta = {"api_key": "sk-secret-value-123456", "_private": 1, "kept": "yes"}
+
+        assert _truncation(meta) == []
+
+    def test_the_data_that_fits_is_kept(self) -> None:
+        bundle = bundle_from_memory_entries(
+            [{"id": "a", "text": "hi", "metadata": {"refs": list(range(150))}}]
+        )
+
+        assert bundle.get("memory/a").extra["metadata"]["refs"] == list(range(100))
+
+    def test_metadata_that_is_not_a_mapping_is_ignored_without_a_warning(self) -> None:
+        assert _truncation(["a", _LONE]) == []
+
+    def test_a_surrogate_in_kept_metadata_is_still_reported_as_sanitized(self) -> None:
+        issues = _truncation({"note": _LONE})
+
+        assert [i.code for i in issues] == ["text-sanitized"]
+
+    def test_a_surrogate_in_deep_cut_off_metadata_is_not_reported(self) -> None:
+        issues = _truncation({"a": {"b": {"c": {"d": {"e": _LONE}}}}})
+
+        assert [i.code for i in issues] == ["metadata-truncated"]
+
+    def test_the_cut_export_still_writes_and_loads(self, tmp_path: Path) -> None:
+        bundle = bundle_from_memory_entries(
+            [
+                {
+                    "id": "a",
+                    "text": "hi",
+                    "metadata": {"a": {"b": {"c": {"d": {"e": 1}}}}},
+                }
+            ]
+        )
+
+        write_bundle(bundle, tmp_path / "out")
+
+        assert len(load_bundle(tmp_path / "out")) == 1
+
+
+def _block_nested(depth: int) -> str:
+    return "---\ntype: X\nnested:\n  " + "- " * depth + "leaf\n---\nbody text\n"
+
+
+class TestLoadedImpliesWritable:
+    @pytest.mark.parametrize("depth", [100, 250])
+    def test_block_style_nesting_past_the_writer_cap_is_flagged_at_load(
+        self, depth: int
+    ) -> None:
+        concept, issues = parse_concept_text("c", _block_nested(depth))
+
+        errors = {i.code for i in issues if i.severity == "error"}
+        assert errors == {"frontmatter-too-deep", "type-missing"}
+        assert concept.body == "body text\n"  # kept, like the flow-depth case
+        assert concept.type == "" and concept.extra == {}
+
+    def test_a_just_too_deep_block_value_is_flagged_just_inside_is_not(self) -> None:
+        from fsm_llm.constants import OKF_MAX_YAML_DEPTH
+
+        inside = _block_nested(OKF_MAX_YAML_DEPTH - 3)
+        outside = _block_nested(OKF_MAX_YAML_DEPTH + 1)
+
+        assert parse_concept_text("c", inside)[1] == []
+        assert "frontmatter-too-deep" in [
+            i.code for i in parse_concept_text("c", outside)[1]
+        ]
+
+    def test_sixty_levels_load_clean_and_round_trip_through_write_bundle(
+        self, tmp_path: Path
+    ) -> None:
+        _write(tmp_path / "in", {"c.md": _block_nested(60)})
+        bundle = load_bundle(tmp_path / "in")
+        assert bundle.issues == []
+
+        write_bundle(bundle, tmp_path / "out")
+
+        again = load_bundle(tmp_path / "out")
+        assert again.issues == []
+        assert again.get("c").extra == bundle.get("c").extra
+
+    @pytest.mark.parametrize("depth", [70, 100, 250])
+    def test_a_concept_that_loads_with_no_issue_is_always_writable(
+        self, tmp_path: Path, depth: int
+    ) -> None:
+        _write(tmp_path / "in", {"c.md": _block_nested(depth)})
+        bundle = load_bundle(tmp_path / "in")
+
+        if bundle.issues:  # flagged at load: the writer may refuse it, SC6 holds
+            assert "frontmatter-too-deep" in _codes(bundle)
+        else:
+            write_bundle(bundle, tmp_path / "out")
+
+    def test_the_index_frontmatter_is_checked_the_same_way(
+        self, tmp_path: Path
+    ) -> None:
+        _write(tmp_path, {"index.md": _block_nested(100), "a.md": _doc()})
+
+        bundle = load_bundle(tmp_path)
+
+        assert "frontmatter-too-deep" in _codes(bundle)
+        assert [c.id for c in bundle] == ["a"]
+
+
+class TestStripFastPath:
+    def test_printable_ascii_is_returned_as_is_and_the_rest_still_stripped(
+        self,
+    ) -> None:
+        plain = "A path/to-doc_1.md (v2)~"
+        assert strip_unsafe_text(plain) is plain
+        assert strip_unsafe_text("a\x1b[31mb\x00c\td\ne") == "abc d e"
+        assert strip_unsafe_text("a\nb", multiline=True) == "a\nb"
+        assert strip_unsafe_text("café ‮gnp") == "café gnp"
