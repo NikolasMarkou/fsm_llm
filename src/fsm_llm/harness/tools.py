@@ -52,6 +52,7 @@ from types import MappingProxyType
 from fsm_llm.agents.definitions import ToolResult
 from fsm_llm.agents.tools import ToolRegistry, tool
 from fsm_llm.logging import logger
+from fsm_llm.security import resolve_within
 
 from ._atomic import atomic_write_text
 from .constants import ArtifactNames, ContextKeys, Defaults
@@ -541,8 +542,7 @@ class Workspace:
             #      means the plan directory and nothing in this class can
             #      address it, so refusing is the only honest answer.
             # See decisions.md D-006.
-            absolute = Path(candidate).resolve()
-            if absolute != self._root and self._root not in absolute.parents:
+            if resolve_within(self._root, candidate) is None:
                 repaired = _strip_root_sentinel(
                     candidate, (self._root.name, *_WORKSPACE_SENTINELS)
                 )
@@ -550,8 +550,10 @@ class Workspace:
                     raise HarnessConfinementError(relative_path, str(self._root))
                 candidate = repaired
 
-        resolved = (self._root / candidate).resolve()
-        if resolved != self._root and self._root not in resolved.parents:
+        # The resolve-then-compare-components step now lives in
+        # `fsm_llm.security.resolve_within`; the D-032 reasoning above binds it.
+        resolved = resolve_within(self._root, candidate)
+        if resolved is None:
             raise HarnessConfinementError(relative_path, str(self._root))
         return resolved
 

@@ -14,8 +14,10 @@ caller references) from here, so existing imports keep working.
 from __future__ import annotations
 
 import math
+import os
 import re
 from collections.abc import Iterable
+from pathlib import Path
 from urllib.parse import unquote
 
 # --------------------------------------------------------------
@@ -59,6 +61,51 @@ def has_internal_prefix(key: str, prefixes: Iterable[str] | None = None) -> bool
     # exact `str`, so bound `.startswith` is safe. Do NOT re-bind either call.
     lowered = str.lower(key)
     return any(lowered.startswith(str.lower(prefix)) for prefix in prefixes)
+
+
+# --------------------------------------------------------------
+# Path Confinement
+# --------------------------------------------------------------
+
+
+def resolve_within(root: Path, relative: str | os.PathLike[str]) -> Path | None:
+    """Resolve *relative* under *root* and return it only if it stays inside.
+
+    This is the one path-confinement comparison; the harness workspace and the
+    OKF bundle loader and writer both call it. Never re-inline it.
+
+    Interface contract:
+        - ``root``: a directory path that is ALREADY resolved (absolute, no
+          symlinks). An unresolved root fails closed: the resolved candidate
+          can then never equal it or have it as a parent, so ``None`` comes
+          back for every input.
+        - ``relative``: a ``str`` or path-like, joined under ``root``. An
+          absolute value replaces ``root`` in the join and is therefore
+          refused unless it already lands inside ``root``.
+        - Returns the fully resolved absolute path when it equals ``root`` or
+          lies below it, else ``None``. The target need not exist.
+        - Performs no read, write, create or delete of the target.
+        - Failure mode: ``Path.resolve()`` errors propagate unchanged
+          (``ValueError`` for an embedded NUL byte, ``RuntimeError`` or
+          ``OSError`` for a symlink loop). The caller decides how to refuse.
+
+    The order is load-bearing: RESOLVE FIRST, COMPARE SECOND, and compare path
+    COMPONENTS. A lexical check before resolving (``startswith``, a ``..``
+    scan, ``os.path.normpath``) passes a symlink created inside the root that
+    points outside it, and ``/tmp/ws-evil`` is a string-prefix of ``/tmp/ws``.
+    Only ``Path.resolve()`` collapses links, and only ``resolved == root or
+    root in resolved.parents`` is correct for siblings. This is the reasoning
+    recorded as D-032 of plan 191b2eb2 in the harness.
+
+    Residual hole (TOCTOU): a symlink swapped in between this call and the
+    caller's open still wins. Closing that needs ``openat2`` / ``O_NOFOLLOW``;
+    this guard stops path arguments chosen by a model or found in a bundle, not
+    a hostile local process.
+    """
+    resolved = (root / relative).resolve()
+    if resolved == root or root in resolved.parents:
+        return resolved
+    return None
 
 
 # --------------------------------------------------------------
