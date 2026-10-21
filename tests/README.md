@@ -1,6 +1,6 @@
 # tests
 
-The whole pytest test tree of the FSM-LLM repository, at `tests/`. It holds 10,528 collected tests: ten suite folders, one per part of the `fsm_llm` package, plus four test files at this level and the shared `conftest.py`.
+The whole pytest test tree of the FSM-LLM repository, at `tests/`. It holds 10,710 collected tests: ten suite folders, one per part of the `fsm_llm` package, plus four test files at this level and the shared `conftest.py`.
 
 ## What it is for
 
@@ -41,8 +41,8 @@ flowchart TD
 
 | Folder | Tests | What it checks |
 | --- | --- | --- |
-| `test_fsm_llm/` | 3,952 | Core framework: `API`, `FSMManager`, the 2-pass `MessagePipeline`, transition rules, JsonLogic, prompts, the LiteLLM wrapper, handlers, working memory, validator, visualizer, logging, and the secret filter measured against labelled corpora in `fixtures/`, the message-free `advance` and `run_until_terminal` loops, the `complete` LLM primitive and the core builders |
-| `test_fsm_llm_agents/` | 2,431 | Every agent pattern (ReAct, Reflexion, Plan-Execute, Debate and others), tools, human approval (HITL) security, memory, MCP, remote serving, the agents CLI, the agents run loops and `ConfiguredAgentBuilder` |
+| `test_fsm_llm/` | 4,120 | Core framework: `API`, `FSMManager`, the 2-pass `MessagePipeline`, transition rules, JsonLogic, prompts, the LiteLLM wrapper, handlers, working memory, validator, visualizer, logging, and the secret filter measured against labelled corpora in `fixtures/`, the message-free `advance` and `run_until_terminal` loops, the `complete` LLM primitive and the core builders |
+| `test_fsm_llm_agents/` | 2,445 | Every agent pattern (ReAct, Reflexion, Plan-Execute, Debate and others), tools, human approval (HITL) security, memory, MCP, remote serving, the agents CLI, the agents run loops and `ConfiguredAgentBuilder` |
 | `test_fsm_llm_meta/` | 437 | The meta-builder in `fsm_llm.agents`: FSM, workflow and agent artifact builders, builder tools (golden reply text, concurrency isolation), prompts, `MetaBuilderAgent` |
 | `test_fsm_llm_reasoning/` | 191 | Reasoning engine constants, models, exceptions, handlers, strategy fallback, CLI logging and JSON output, and whole scripted solves on the core step loop |
 | `test_fsm_llm_workflows/` | 269 | Async workflow engine: step types, DSL and `WorkflowBuilder`, engine lifecycle, timeouts, audit fixes |
@@ -86,7 +86,7 @@ FSM_LLM_HARNESS_LIVE=1 .venv/bin/python -m pytest tests/test_fsm_llm_harness/tes
 ## Things to know
 
 - Always run from the repository root. Many files import `tests.conftest` or each other as `tests.<folder>.<file>`.
-- Markers: `slow` (135 tests), `integration` and `real_llm` (113 each, the same tests), `examples` (67). `-m "not slow"` runs 10,393 tests. The 135 slow tests are the live files (`test_integration_ollama.py` 12, `test_live_classification_memory.py` 7, `test_live_ollama.py` 94, marked as whole modules, so most of the harness file is offline code that `-m "not slow"` also drops), `test_handler_timeout.py` 7, `test_step_timeouts.py` 8 and the 7 count-pinning tests in `test_packaging.py`.
+- Markers: `slow` (135 tests), `integration` and `real_llm` (113 each, the same tests), `examples` (67). `-m "not slow"` runs 10,575 tests. The 135 slow tests are the live files (`test_integration_ollama.py` 12, `test_live_classification_memory.py` 7, `test_live_ollama.py` 94, marked as whole modules, so most of the harness file is offline code that `-m "not slow"` also drops), `test_handler_timeout.py` 7, `test_step_timeouts.py` 8 and the 7 count-pinning tests in `test_packaging.py`.
 - `pyproject.toml` sets `asyncio_mode = "auto"`, so async tests need no decorator, and `addopts = "-v --tb=short"`.
 - Library logging is off by default. Tests that check a log line enable `fsm_llm` logging with a temporary loguru sink; pytest's `caplog` cannot see loguru output.
 - Some tests skip when an optional package is missing: `mcp` (all of `test_mcp_stdio.py`), `fastapi` and `httpx` in the agents suite, the OpenTelemetry SDK, or a subpackage that fails to import. The monitor suite imports `fastapi.testclient` at module level, so without the monitor extra it errors at collection instead of skipping.
