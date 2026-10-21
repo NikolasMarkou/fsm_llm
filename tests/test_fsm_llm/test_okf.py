@@ -3562,7 +3562,7 @@ class TestLoadDeadline:
         return clock
 
     def test_the_default_comes_from_the_constant(self) -> None:
-        assert OKFLimits().max_seconds == OKF_MAX_LOAD_SECONDS == 30.0
+        assert OKFLimits().max_seconds == OKF_MAX_LOAD_SECONDS == 120.0
 
     @pytest.mark.parametrize("value", [0, -1, float("inf"), float("nan")])
     def test_the_budget_must_be_positive_and_finite(self, value: float) -> None:
@@ -3580,6 +3580,7 @@ class TestLoadDeadline:
         assert [c.id for c in bundle] == ["a", "b", "c"]
         deadline = [i for i in bundle.issues if i.code == "load-deadline"]
         assert [(i.severity, i.path) for i in deadline] == [("error", "d.md")]
+        assert "max_seconds" in deadline[0].message  # names the knob (D-017)
         assert "load-deadline" in [i.code for i in check_bundle(bundle)]
 
     def test_the_budget_also_stops_a_walk_through_directories(
@@ -3665,48 +3666,29 @@ class TestPerFileCatchAll:
 
 
 class TestHardlinks:
-    """A file with several hard links may be a window on a file outside the root."""
+    """D-017: hardlinks are NOT detected, a linked file loads like any other."""
 
-    def _link(self, source: Path, link: Path) -> None:
-        try:
-            os.link(source, link)
-        except OSError:  # pragma: no cover - the file system refuses hard links
-            pytest.skip("file system refuses hard links")
-
-    def test_a_hardlink_to_a_file_outside_the_bundle_is_not_loaded(
+    def test_a_file_with_several_hard_links_is_loaded_as_normal(
         self, tmp_path: Path
     ) -> None:
-        outside = tmp_path / "secret.md"
-        outside.write_text(_doc("Secret", body="TOPSECRET\n"), encoding="utf-8")
-        root = _write(tmp_path / "b", {"ok.md": _doc()})
-        self._link(outside, root / "hard.md")
+        # A hardlink cannot be told from a legitimate file: ``cp -al``, uv and
+        # git worktrees create them, and linking a foreign file needs access the
+        # OS already controls (``fs.protected_hardlinks``). The old skip emptied
+        # honest bundles.
+        source = _write(tmp_path / "src", {"a.md": _doc("A"), "b.md": _doc("B")})
+        root = tmp_path / "linked"
+        root.mkdir()
+        try:
+            for name in ("a.md", "b.md"):
+                os.link(source / name, root / name)
+        except OSError:  # pragma: no cover - the file system refuses hard links
+            pytest.skip("file system refuses hard links")
+        assert (root / "a.md").stat().st_nlink > 1
 
         bundle = load_bundle(root)
 
-        assert [c.id for c in bundle] == ["ok"]
-        assert all("TOPSECRET" not in c.body for c in bundle)
-        skipped = [i for i in bundle.issues if i.code == "hardlink-skipped"]
-        assert [(i.severity, i.path) for i in skipped] == [("warning", "hard.md")]
-
-    def test_a_hardlinked_reserved_file_is_skipped_too(self, tmp_path: Path) -> None:
-        outside = tmp_path / "outside-index.md"
-        outside.write_text('---\nokf_version: "0.1"\n---\nLEAK\n', encoding="utf-8")
-        root = _write(tmp_path / "b", {"ok.md": _doc()})
-        self._link(outside, root / "index.md")
-
-        bundle = load_bundle(root)
-
-        assert bundle.index_text == ""
-        assert bundle.okf_version is None
-        assert "hardlink-skipped" in _codes(bundle)
-
-    def test_a_file_with_one_link_still_loads(self, tmp_path: Path) -> None:
-        root = _write(tmp_path / "b", {"ok.md": _doc()})
-
-        bundle = load_bundle(root)
-
-        assert [c.id for c in bundle] == ["ok"]
-        assert "hardlink-skipped" not in _codes(bundle)
+        assert [c.id for c in bundle] == ["a", "b"]
+        assert bundle.issues == []
 
 
 class TestReservedAndSafeNames:
@@ -3806,7 +3788,7 @@ class TestReservedAndSafeNames:
 
 
 class TestIdCollisions:
-    """Ids equal after NFC and case folding: the first one visited wins."""
+    """Ids with one lookalike key all load; the loader only warns (D-017)."""
 
     def _write_pair(self, root: Path, first: str, second: str) -> None:
         root.mkdir()
@@ -3815,23 +3797,50 @@ class TestIdCollisions:
         if len(list(root.iterdir())) < 2:  # pragma: no cover - folding file system
             pytest.skip("file system folds these names")
 
-    def test_nfc_and_nfd_lookalikes_keep_the_first(self, tmp_path: Path) -> None:
-        nfd, nfc = "café", "café"
+    def _both_load_with_one_warning(self, root: Path, ids: list[str]) -> OKFIssue:
+        bundle = load_bundle(root)
+
+        assert sorted(c.id for c in bundle) == sorted(ids)
+        (warning,) = bundle.issues
+        assert (warning.code, warning.severity) == ("id-collision", "warning")
+        first = min(ids)  # the file visited first (sorted by name)
+        assert repr(first) in warning.message
+        assert warning.path in {f"{i}.md" for i in ids}
+        return warning
+
+    def test_nfc_and_nfd_lookalikes_both_load(self, tmp_path: Path) -> None:
+        nfd, nfc = "cafe\u0301", "caf\u00e9"
         self._write_pair(tmp_path / "b", nfd, nfc)
 
-        bundle = load_bundle(tmp_path / "b")
+        self._both_load_with_one_warning(tmp_path / "b", [nfd, nfc])
 
-        assert [c.id for c in bundle] == [nfd]
-        collided = [i for i in bundle.issues if i.code == "id-collision"]
-        assert [(i.severity, i.path) for i in collided] == [("warning", f"{nfc}.md")]
+    def test_ids_that_differ_only_in_case_both_load(self, tmp_path: Path) -> None:
+        self._write_pair(tmp_path / "b", "Ok", "ok")
 
-    def test_ids_that_differ_only_in_case_keep_the_first(self, tmp_path: Path) -> None:
-        self._write_pair(tmp_path / "b", "Alpha", "alpha")
+        self._both_load_with_one_warning(tmp_path / "b", ["Ok", "ok"])
 
-        bundle = load_bundle(tmp_path / "b")
+    def test_sharp_s_and_ss_both_load(self, tmp_path: Path) -> None:
+        self._write_pair(tmp_path / "b", "Straße", "strasse")
 
-        assert [c.id for c in bundle] == ["Alpha"]
-        assert _codes(bundle) == ["id-collision"]
+        self._both_load_with_one_warning(tmp_path / "b", ["Straße", "strasse"])
+
+    @pytest.mark.parametrize(
+        ("real", "lookalike"),
+        [
+            ("abc", "a\u200dbc"),  # zero width joiner
+            (
+                "\u0645\u06cc\u200c\u062e\u0648",
+                "\u0645\u06cc\u062e\u0648",
+            ),  # Persian ZWNJ
+            ("coop", "co\u00adop"),  # soft hyphen
+        ],
+    )
+    def test_joiner_and_soft_hyphen_lookalikes_both_load(
+        self, tmp_path: Path, real: str, lookalike: str
+    ) -> None:
+        self._write_pair(tmp_path / "b", real, lookalike)
+
+        self._both_load_with_one_warning(tmp_path / "b", [real, lookalike])
 
     def test_a_collision_across_directories_is_found_too(self, tmp_path: Path) -> None:
         root = tmp_path / "b"
@@ -3844,8 +3853,41 @@ class TestIdCollisions:
 
         bundle = load_bundle(root)
 
-        assert [c.id for c in bundle] == ["Dir/x"]
+        assert [c.id for c in bundle] == ["Dir/x", "dir/x"]
         assert _codes(bundle) == ["id-collision"]
+
+    def test_three_lookalikes_give_two_warnings_all_naming_the_first(
+        self, tmp_path: Path
+    ) -> None:
+        root = _write(tmp_path / "b", {f"{n}.md": _doc() for n in ("OK", "Ok", "ok")})
+
+        bundle = load_bundle(root)
+
+        assert len(bundle) == 3
+        warnings = [i for i in bundle.issues if i.code == "id-collision"]
+        assert [w.path for w in warnings] == ["Ok.md", "ok.md"]
+        assert all("'OK'" in w.message for w in warnings)
+
+    def test_a_loaded_colliding_bundle_is_refused_by_the_writer(
+        self, tmp_path: Path
+    ) -> None:
+        # Round trip is not claimed for non-portable bundles.
+        self._write_pair(tmp_path / "b", "Ok", "ok")
+        bundle = load_bundle(tmp_path / "b")
+
+        with pytest.raises(OKFError, match="collides"):
+            write_bundle(bundle, tmp_path / "out")
+
+        assert not (tmp_path / "out").exists()
+
+    @pytest.mark.parametrize("pair", [("Ok", "ok"), ("abc", "a\u200dbc")])
+    def test_the_writer_still_refuses_what_the_loader_only_warns_about(
+        self, tmp_path: Path, pair: tuple[str, str]
+    ) -> None:
+        bundle = OKFBundle([OKFConcept(id=i, type="X") for i in pair])
+
+        with pytest.raises(OKFError, match="collides"):
+            write_bundle(bundle, tmp_path / "out")
 
     def test_the_writer_uses_the_same_key(self, tmp_path: Path) -> None:
         bundle = OKFBundle(

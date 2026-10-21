@@ -11,12 +11,10 @@ Spec status: OKF v0.2 at commit ad30107 of GoogleCloudPlatform/open-knowledge-fo
 pre-1.0 and mutable. The trust tier is a CLAIM the bundle makes about itself
 (a free ``verified[].by`` string), advisory only, never authorization.
 
-Entry points: ``parse_concept_text(concept_id, text) -> (OKFConcept, issues)``,
-``load_bundle(path)`` (bounded, confined, never follows symlinks), ``OKFBundle``
-(lookup, lexical search, link graph), ``check_bundle(bundle)`` (spec section 11),
-``write_bundle(bundle, path)`` (atomic per file, confined),
-``bundle_from_memory_entries(entries)`` and ``create_okf_handler(bundle)``
-(capped concept summaries into a public context key of a plain FSM).
+Entry points: ``parse_concept_text``, ``load_bundle`` (bounded, confined, never
+follows symlinks), ``OKFBundle`` (lookup, search, link graph), ``check_bundle``
+(spec section 11), ``write_bundle`` (atomic per file), ``bundle_from_memory_entries``
+and ``create_okf_handler`` (capped summaries into a public context key).
 """
 
 from __future__ import annotations
@@ -313,8 +311,9 @@ class _OKFLoader(yaml.SafeLoader):
     """``SafeLoader`` without timestamp auto-resolution, aliases and anchors.
 
     SECURITY: the resolver table is a COPY (see the anchor below). Timestamps
-    stay strings (OKF code parses them). Aliases and anchors are refused in ``compose_node``, before any expansion,
-    so an alias bomb cannot grow. Duplicate keys are recorded; the last wins.
+    stay strings (OKF code parses them). Aliases and anchors are refused in
+    ``compose_node``, before any expansion, so an alias bomb cannot grow.
+    Duplicate keys are recorded; the last wins.
     """
 
     # DECISION plan-2026-10-21T140931-095ea5f8/D-014
@@ -584,8 +583,9 @@ def _is_reserved(stem: str) -> bool:
 
 
 def _id_key(concept_id: str) -> str:
-    """Identity of an id on a case-insensitive, normalising disk (loader, writer)."""
-    return unicodedata.normalize("NFC", concept_id).casefold()
+    """Lookalike key of an id: NFC + casefold, joiners and soft hyphen removed."""
+    plain = "".join(ch for ch in concept_id if ch not in _JOINERS)
+    return unicodedata.normalize("NFC", plain).casefold()
 
 
 def _id_problem(concept_id: object, *, allow_reserved: bool = False) -> str | None:
@@ -845,8 +845,7 @@ class OKFBundle:
 # code -> (severity, message) for every problem the loader itself reports.
 _LOAD_PROBLEMS: dict[str, tuple[Literal["error", "warning", "info"], str]] = {
     "id-unsafe": ("warning", "file name is not a safe concept id; skipped"),
-    "id-collision": ("warning", "id repeats an earlier one (case or Unicode form)"),
-    "hardlink-skipped": ("warning", "file has several hard links; skipped"),
+    "id-collision": ("warning", "id looks like an earlier one; both loaded"),
     "parse-failed": ("warning", "file could not be processed; skipped"),
     "path-indirect": ("warning", "path is indirect or outside the root; skipped"),
     "file-too-large": ("warning", "file is over the size limit; skipped"),
@@ -858,7 +857,7 @@ _LOAD_PROBLEMS: dict[str, tuple[Literal["error", "warning", "info"], str]] = {
     "max-total-bytes": ("error", "bundle byte limit reached; load stopped"),
     "max-files": ("error", "bundle file limit reached; load stopped"),
     "max-depth": ("error", "directory is nested too deeply; skipped"),
-    "load-deadline": ("error", "load time limit reached; load stopped"),
+    "load-deadline": ("error", "load time limit (max_seconds) reached; load stopped"),
     "log-heading": ("warning", "log.md heading is not an ISO date (spec 9)"),
     "index-frontmatter": ("warning", "index.md has frontmatter (spec 8)"),
 }
@@ -888,31 +887,29 @@ def load_bundle(
     """Load the bundle under *path*. Raises ``OKFError`` only for the root.
 
     A missing or non-directory root is an ``OKFError`` and is never created.
-    Everything else (oversize, non-UTF-8, symlinked, hardlinked, unsafe-named
-    or unreadable files, a spent limit, an unexpected failure on one file, which
-    is ``parse-failed``) becomes an ``OKFIssue`` and the rest still loads.
+    Everything else (oversize, non-UTF-8, symlinked, unsafe-named or unreadable
+    files, a spent limit, an unexpected failure on one file) becomes an
+    ``OKFIssue`` and the rest still loads.
 
     Interface contract:
         - Files are visited in sorted order; only exact ``.md`` names count.
           ``index.md`` and ``log.md`` in any case, at any level, are reserved,
           never concepts (the root ``index.md`` supplies ``okf_version`` and
-          ``index_text``). Directories and files starting with ``.`` are
-          skipped silently.
-        - An id (the path without ``.md``) must pass the writer's id rule (no
-          control characters, no empty, ``.``, ``..`` or over-long segment),
-          else ``id-unsafe``. Ids that are equal after NFC normalisation and
-          case folding keep the first one visited; the rest are
-          ``id-collision`` (what ``write_bundle`` would refuse anyway).
-        - Symlinks (files and directories) are skipped with an issue, never
-          followed; so are files with more than one hard link
-          (``hardlink-skipped``); every file also passes
-          ``security.resolve_within``.
-        - Stops with an error issue at ``max_files`` and ``max_total_bytes``,
-          and at ``max_seconds`` of wall-clock time (``load-deadline``, checked
-          between entries); the concepts loaded so far are kept. Directories
-          deeper than ``max_depth`` are not entered.
-        - Residual hole (TOCTOU): a path swapped for a symlink between the
-          scan and the open is refused by ``O_NOFOLLOW`` on its last part only.
+          ``index_text``). Entries starting with ``.`` are skipped silently.
+        - An id (the path without ``.md``) must pass the writer's id rule, else
+          ``id-unsafe``. Every distinct id loads; ids that collide after NFC,
+          case folding and removal of soft hyphen and joiners get an
+          ``id-collision`` warning naming the first one (``write_bundle`` refuses
+          such a bundle, so load-then-write is not a round trip for it).
+        - Symlinks are skipped with an issue, never followed; every file also
+          passes ``security.resolve_within``.
+        - Stops with an error issue at ``max_files``, ``max_total_bytes`` and
+          ``max_seconds`` of wall-clock time (``load-deadline``, checked between
+          entries); what was loaded is kept. Directories deeper than
+          ``max_depth`` are not entered.
+        - Residual holes: TOCTOU (a path swapped for a symlink after the scan
+          is refused by ``O_NOFOLLOW`` on its last part only); hardlinks are
+          not detected (see D-017).
     """
     limits = limits or OKFLimits()
     try:
@@ -926,11 +923,12 @@ def load_bundle(
     deadline = time.monotonic() + limits.max_seconds
     issues: list[OKFIssue] = []
     concepts: _Concepts = []
-    claimed: set[str] = set()  # _id_key of every concept loaded
+    first_id: dict[str, str] = {}  # _id_key -> first id loaded with it
     total, version, index, stop = 0, None, "", False
 
-    def issue(code: str, rel: str) -> None:
+    def issue(code: str, rel: str, note: str = "") -> None:
         severity, message = _LOAD_PROBLEMS[code]
+        message = f"{message}: {note}" if note else message
         issues.append(OKFIssue(severity=severity, code=code, message=message, path=rel))
 
     def halt(code: str, rel: str) -> None:
@@ -989,25 +987,25 @@ def load_bundle(
     def add_concept(cid: str, text: str) -> None:
         concept, found = parse_concept_text(cid, text)
         concepts.append(concept)
-        claimed.add(_id_key(cid))
+        if (first := first_id.setdefault(_id_key(cid), cid)) != cid:
+            issue("id-collision", f"{cid}.md", f"same as {first[:80]!r}")
         issues.extend(found)
 
+    # DECISION plan-2026-10-21T140931-095ea5f8/D-017
+    # Do NOT skip files with `st_nlink > 1`: a hardlink looks like any file,
+    # `cp -al` and uv create them, and the skip emptied honest bundles.
     def visit_file(entry: os.DirEntry[str], here: tuple[str, ...]) -> None:
         """One regular ``.md`` file: skip it with an issue, or load it."""
         rel, cid = "/".join(here), "/".join(here)[:-3]
         if here[-1].startswith(".") and cid not in (".", ".."):
             return  # hidden, like a dot-directory (``...md`` is id ``..``: unsafe)
-        info = entry.stat(follow_symlinks=False)
+        size = entry.stat(follow_symlinks=False).st_size
         is_reserved = _is_reserved(here[-1][:-3])
         if _id_problem(cid, allow_reserved=True):
             issue("id-unsafe", rel)
-        elif info.st_nlink > 1:
-            issue("hardlink-skipped", rel)
-        elif not is_reserved and _id_key(cid) in claimed:
-            issue("id-collision", rel)
         elif not is_reserved and len(concepts) >= limits.max_files:
             halt("max-files", rel)
-        elif (text := read(here, info.st_size)) is not None:
+        elif (text := read(here, size)) is not None:
             try:
                 if is_reserved:
                     reserved(here, text)
@@ -1315,24 +1313,21 @@ def write_bundle(
           loaded bundle is byte-identical. ``datetime`` values get an explicit
           UTC offset (naive taken as UTC); strings read from disk are verbatim.
         - Every id and target is validated and every file rendered AND encoded
-          to UTF-8 BEFORE the first byte is written, so a bad id, a clash, a
-          lone surrogate, an over-long path or a file and a directory sharing
-          a path (ids ``q`` and ``q.md/z``) leave the directory untouched
-          (``OKFError`` naming them, capped). An id that is empty, absolute,
-          has an empty or dot-prefixed segment, control characters, or ends in
-          ``index`` / ``log`` is refused, as is a case-insensitive duplicate.
+          BEFORE the first byte is written, so a bad id (empty, absolute, a
+          dot-prefixed segment, control characters, ``index``/``log``), a
+          lookalike id (``_id_key``), a lone surrogate, an over-long path or a
+          file and a directory sharing a path (ids ``q`` and ``q.md/z``) leave
+          the directory untouched (``OKFError`` naming them, capped).
         - Each target passes ``security.resolve_within``; a symlinked target or
           directory component is refused even with ``overwrite=True``. An
-          existing file is replaced only with ``overwrite=True`` (else every
-          clash is listed in the ``OKFError``). A root that is a file is refused.
+          existing file is replaced only with ``overwrite=True``. A root that is
+          a file is refused.
         - ``write_index`` adds a root ``index.md`` (``okf_version: "0.2"``, a
-          ``* [Title](/id.md) - description`` bullet per concept under a
-          ``# <type>`` heading). An existing ``index.md`` is kept unless
-          ``overwrite=True``.
-        - Atomic PER FILE (temp file, fsync, rename). The whole bundle is not
-          atomic: an I/O failure midway leaves the files already written. A
-          parent directory swapped for a symlink between validation and the
-          write still wins.
+          bullet per concept under a ``# <type>`` heading); an existing one is
+          kept unless ``overwrite=True``.
+        - Atomic PER FILE (temp file, fsync, rename), not for the whole bundle:
+          an I/O failure midway leaves the files already written. A parent
+          directory swapped for a symlink after validation still wins.
     """
     try:
         root = Path(path).resolve()
@@ -1480,27 +1475,26 @@ def bundle_from_memory_entries(
 
     Interface contract:
         - ``entries``: mappings shaped like ``SemanticMemoryStore`` entries,
-          ``{id, text, metadata, embedding}``. Only ``id``, ``text`` and
-          ``metadata`` are read; embeddings are NEVER exported. A non-mapping
-          entry, a missing or non-string ``text`` or a blank one is skipped
-          with a warning ``OKFIssue`` on ``bundle.issues``; nothing raises.
+          ``{id, text, metadata, embedding}``; only ``id``, ``text`` and
+          ``metadata`` are read, embeddings are NEVER exported. A non-mapping
+          entry or a missing, blank or non-string ``text`` is skipped with a
+          warning ``OKFIssue`` on ``bundle.issues``; nothing raises.
         - Concept id ``memory/<slug of the entry id>`` (characters outside
           ``A-Za-z0-9._-`` become ``-``, at most 80); a repeated slug gets
-          ``-2``, ``-3``. A hostile id can therefore not shape the path.
-        - ``type`` is metadata ``type`` (a non-blank string) else ``Memory``;
-          ``title`` is metadata ``title`` else the first non-blank line, capped
-          at ``OKF_SUMMARY_FIELD_CHARS``; ``tags`` are the string items of a
+          ``-2``, ``-3``, so a hostile id cannot shape the path.
+        - ``type`` is metadata ``type`` else ``Memory``; ``title`` is metadata
+          ``title`` else the first non-blank line, capped at
+          ``OKF_SUMMARY_FIELD_CHARS``; ``tags`` are the string items of a
           metadata ``tags`` list. The body is the text (cut at
-          ``OKF_EXPORT_TEXT_MAX_CHARS`` with a warning issue). A lone surrogate
-          in the text or any metadata string or key becomes U+FFFD, with a
-          ``text-sanitized`` warning issue (never an error).
-        - Every other metadata entry whose value is JSON-native goes under
-          ``extra["metadata"]``. Entries are dropped when
-          ``is_forbidden_context_entry(key, value)`` is true or the key is
-          internal-prefixed, at any depth; non-JSON values are dropped.
+          ``OKF_EXPORT_TEXT_MAX_CHARS`` with a warning). A lone surrogate in the
+          text or any metadata string or key becomes U+FFFD, with a
+          ``text-sanitized`` warning.
+        - Other JSON-native metadata goes under ``extra["metadata"]``; entries
+          failing ``is_forbidden_context_entry`` or internal-prefixed are
+          dropped at any depth, as are non-JSON values.
         - ``generated`` is ``{by: generated_by or "fsm-llm/<version>", at: now
           or the current time}`` with an explicit UTC offset. There is no
-          ``verified``, so every export is ``unverified`` by construction.
+          ``verified``, so every export is ``unverified``.
     """
     issues: list[OKFIssue] = []
     concepts: list[OKFConcept] = []
@@ -1576,23 +1570,21 @@ def create_okf_handler(
 
     Interface contract:
         - Writes ``context_key`` = a list of at most ``max_items`` dicts
-          ``{id, type, title, description, trust_claimed, flags}`` (JSON-native; every
-          string control-stripped and cut at ``OKF_SUMMARY_FIELD_CHARS``;
-          ``flags`` a sorted list from stale, draft, deprecated). NEVER a body.
+          ``{id, type, title, description, trust_claimed, flags}`` (JSON-native;
+          strings control-stripped and cut at ``OKF_SUMMARY_FIELD_CHARS``;
+          ``flags`` sorted from stale, draft, deprecated). NEVER a body.
         - Concepts: with ``query_key`` set and a non-blank ``str`` there (cut
           to 1,000 chars, control-stripped), the best ``bundle.search`` hits;
-          any other value (missing, None, number, list, dict, blank) means the
-          first ``max_items`` by id. Deprecated concepts only with
-          ``include_deprecated``. ``states`` empty means every state.
+          any other value means the first ``max_items`` by id. Deprecated
+          concepts only with ``include_deprecated``. No ``states`` means all.
         - Not critical: a failure is logged, the turn goes on.
         - Raises ``OKFError`` at build time for: a ``context_key`` that is not a
           non-blank ``str``, is internal-prefixed, secret-looking (judged for a
-          string AND for the list value written, so ``user_token`` is refused)
-          or in ``RESERVED_CONTEXT_KEYS`` (the prompt filter or the pipeline would
-          drop it); ``max_items`` not an ``int`` in ``1..OKF_SUMMARY_MAX_ITEMS``
-          (refused, never clamped); a ``states`` that is a ``str`` or holds a
-          non-``str``; a ``timing`` that is not a ``HandlerTiming``; a
-          ``query_key`` that is neither ``None`` nor a non-blank ``str``.
+          string AND for the list written) or in ``RESERVED_CONTEXT_KEYS``;
+          ``max_items`` not an ``int`` in ``1..OKF_SUMMARY_MAX_ITEMS`` (never
+          clamped); ``states`` a ``str`` or holding a non-``str``; a ``timing``
+          that is not a ``HandlerTiming``; a ``query_key`` that is neither
+          ``None`` nor a non-blank ``str``.
         - The default ``PRE_PROCESSING`` timing runs on every turn, a BLOCKED
           one included (``PRE_TRANSITION`` handlers do not).
     """
