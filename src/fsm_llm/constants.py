@@ -385,3 +385,23 @@ LOG_DEFAULT_CONVERSATION_ID = "GENERAL"
 # One HandlerSystem serves every conversation of an `API`, so the cap is
 # shared API-wide, not per conversation.
 MAX_TIMED_HANDLER_STRAGGLERS = 4
+
+# --------------------------------------------------------------
+# Open Knowledge Format (fsm_llm.okf) limits
+# --------------------------------------------------------------
+
+# Resource bounds for reading an untrusted bundle (`OKFLimits` defaults).
+OKF_MAX_FILES = 5_000
+OKF_MAX_FILE_BYTES = 262_144
+OKF_MAX_TOTAL_BYTES = 33_554_432
+OKF_MAX_DEPTH = 16
+# Flow nesting (`[`/`{`) allowed in one frontmatter block.
+OKF_MAX_YAML_DEPTH = 64
+
+# Caps for text that reaches a model. A summary is a list of capped one-line
+# records (never a body); a read page plus its header stays under the
+# 2,000-character tool-observation cap.
+OKF_SUMMARY_MAX_ITEMS = 20
+OKF_SUMMARY_FIELD_CHARS = 200
+OKF_READ_PAGE_CHARS = 1_500
+OKF_LIST_MAX_ITEMS = 25

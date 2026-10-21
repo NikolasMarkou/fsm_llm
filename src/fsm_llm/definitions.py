@@ -2250,6 +2250,15 @@ class BuildError(FSMError, ValueError):
         self.errors = list(errors) if errors is not None else [message]
 
 
+class OKFError(FSMError):
+    """An Open Knowledge Format operation was refused (``fsm_llm.okf``).
+
+    Raised for a missing or unreadable bundle root and for a write that would
+    leave the target directory or replace a file unasked. Bundle content never
+    raises it: a malformed concept becomes an ``OKFIssue`` instead.
+    """
+
+
 class FSMDefinitionNotFoundError(FSMError, ValueError):
     """No FSM definition is resolvable for a non-path id.
 

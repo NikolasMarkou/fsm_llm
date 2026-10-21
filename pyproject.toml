@@ -38,6 +38,10 @@ dependencies = [
     # importlib.metadata.requires('litellm') on 1.82.6), so without this line `num_retries` is
     # accepted through **kwargs but silently non-functional. See decisions.md D-002.
     "tenacity>=8.0",
+    # fsm_llm.okf parses YAML frontmatter with a SafeLoader subclass. PyYAML was
+    # only installed transitively (litellm -> tokenizers -> huggingface-hub), so
+    # it is declared here like tenacity.
+    "pyyaml>=6.0",
 ]
 
 requires-python = ">=3.10"
