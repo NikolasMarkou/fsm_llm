@@ -240,6 +240,18 @@ class OKFConcept(BaseModel):
     def is_draft(self) -> bool:
         return (self.status or "").strip().lower() == "draft"
 
+    def flags(self, now: datetime | None = None) -> list[str]:
+        """Advisory flags in a fixed order: ``stale``, ``draft``, ``deprecated``."""
+        return [
+            name
+            for name, on in (
+                ("stale", self.is_stale(now)),
+                ("draft", self.is_draft),
+                ("deprecated", self.is_deprecated),
+            )
+            if on
+        ]
+
     @property
     def display_title(self) -> str:
         """Control-stripped title, else the last id segment."""
@@ -1468,15 +1480,7 @@ def create_okf_handler(
                     "title": _line(c.display_title),
                     "description": _line(c.description),
                     "trust": c.trust.value,
-                    "flags": sorted(
-                        flag
-                        for flag, on in (
-                            ("stale", c.is_stale(now)),
-                            ("draft", c.is_draft),
-                            ("deprecated", c.is_deprecated),
-                        )
-                        if on
-                    ),
+                    "flags": sorted(c.flags(now)),
                 }
                 for c in found
             ]

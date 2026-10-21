@@ -45,7 +45,6 @@ from .constants import (
 from .definitions import OKFError
 from .okf import (
     OKFBundle,
-    OKFConcept,
     bundle_from_memory_entries,
     check_bundle,
     load_bundle,
@@ -70,17 +69,6 @@ def _cell(text: object, cap: int = OKF_SUMMARY_FIELD_CHARS) -> str:
 
 def _err(message: str) -> None:
     print(f"{_PROG}: {_cell(message, 1000)}", file=sys.stderr)
-
-
-def _flags(concept: OKFConcept) -> list[str]:
-    flags = []
-    if concept.is_stale():
-        flags.append("stale")
-    if concept.is_draft:
-        flags.append("draft")
-    if concept.is_deprecated:
-        flags.append("deprecated")
-    return flags
 
 
 def _more(count: int, hint: str = "") -> None:
@@ -121,7 +109,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
                     _cell(concept.id),
                     _cell(concept.type),
                     _cell(concept.display_title),
-                    " ".join(_flags(concept)),
+                    " ".join(concept.flags()),
                 )
             ).rstrip()
         )
@@ -151,7 +139,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
     print(f"type: {_cell(concept.type, _HEADER_FIELD_CHARS)}")
     print(f"title: {_cell(concept.display_title, _HEADER_FIELD_CHARS)}")
     print(f"trust: {concept.trust.value}")
-    print(f"flags: {' '.join(_flags(concept)) or '-'}")
+    print(f"flags: {' '.join(concept.flags()) or '-'}")
     print()
     # Page over the stripped body so the pages add up to exactly what is shown.
     body = strip_unsafe_text(concept.body, multiline=True)
