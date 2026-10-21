@@ -60,7 +60,7 @@ flowchart LR
 | `fsm_llm/llm.py`, `ollama.py` | `LLMInterface`, `LiteLLMInterface`; Ollama tweaks | |
 | `fsm_llm/prompts.py`, `context.py`, `memory.py`, `session.py` | Prompt builders; context cleaning and `ContextCompactor`; `WorkingMemory`; `FileSessionStore` | |
 | `fsm_llm/security.py`, `constants.py` | `has_internal_prefix`, `is_forbidden_context_entry`, `resolve_within` (the shared path-confinement helper); defaults and limits (`OKF_*` included) | `constants` re-exports `security` names |
-| `fsm_llm/okf.py`, `okf_cli.py` | Open Knowledge Format (OKF v0.2, SPEC at commit ad30107, pre-1.0 and mutable): bounded bundle loader, tolerant parser, link graph, lexical search, `check_bundle`, atomic `write_bundle`, `create_okf_handler`; `fsm-llm-okf` | `load_bundle`, `OKFBundle`, `fsm-llm-okf`; imports no subpackage |
+| `fsm_llm/okf.py`, `okf_cli.py` | Open Knowledge Format (OKF v0.2, SPEC at commit ad30107, pre-1.0 and mutable): bounded bundle loader, tolerant parser, link graph, lexical search, `check_bundle`, `write_bundle` (atomic per file, refuses what it cannot render within the caps), `create_okf_handler`; `fsm-llm-okf` | `load_bundle`, `OKFBundle`, `fsm-llm-okf`; imports no subpackage |
 | `fsm_llm/utilities.py` | JSON extraction, FSM loading, `filter_context_tree`, `redacting_json_default` | |
 | `fsm_llm/validator.py`, `visualizer.py`, `runner.py`, `__main__.py` | CLIs | |
 | `fsm_llm/logging.py` | loguru setup; `logger.disable("fsm_llm")` at import | |
