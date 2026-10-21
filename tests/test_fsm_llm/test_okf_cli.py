@@ -18,8 +18,10 @@ else:  # pragma: no cover - Python 3.10
     import tomli as tomllib
 
 import fsm_llm.okf_cli as okf_cli
+from fsm_llm import okf as okf_module
 from fsm_llm.constants import (
     OKF_LIST_MAX_ITEMS,
+    OKF_MAX_LOAD_SECONDS,
     OKF_READ_PAGE_CHARS,
 )
 from fsm_llm.okf import (
@@ -29,6 +31,7 @@ from fsm_llm.okf import (
     write_bundle,
 )
 from fsm_llm.okf_cli import main
+from tests.test_fsm_llm.test_okf import _FakeClock
 
 _REPO = Path(__file__).resolve().parents[2]
 _ESC = "\x1b"
@@ -831,3 +834,83 @@ class TestExportOfDeepMetadata:
 
         assert code == 1 and out == ""
         assert err.startswith("fsm-llm-okf:") and "Traceback" not in err
+
+
+# --------------------------------------------------------------
+# Step 7.2 (D-017): --max-seconds on the loading subcommands
+# --------------------------------------------------------------
+
+_LOADING = {
+    "validate": ["validate", "KB"],
+    "list": ["list", "KB"],
+    "show": ["show", "KB", "orders"],
+    "search": ["search", "KB", "orders"],
+}
+
+
+class TestMaxSeconds:
+    @pytest.mark.parametrize("command", sorted(_LOADING))
+    def test_the_flag_reaches_load_bundle_as_okf_limits(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        clean_bundle: Path,
+        command: str,
+    ) -> None:
+        seen: list[Any] = []
+        real = okf_cli.load_bundle
+
+        def spy(path: Any, *, limits: Any = None) -> Any:
+            seen.append(limits)
+            return real(path, limits=limits)
+
+        monkeypatch.setattr(okf_cli, "load_bundle", spy)
+        argv = [str(clean_bundle) if a == "KB" else a for a in _LOADING[command]]
+
+        _run(capsys, *argv)
+        _run(capsys, *argv, "--max-seconds", "7.5")
+
+        assert [limit.max_seconds for limit in seen] == [OKF_MAX_LOAD_SECONDS, 7.5]
+
+    @pytest.mark.parametrize("command", sorted(_LOADING))
+    @pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "-inf", "1e999", "abc"])
+    def test_a_bad_value_is_a_usage_error(self, command: str, value: str) -> None:
+        with pytest.raises(SystemExit) as info:
+            main([*_LOADING[command], "--max-seconds", value])
+
+        assert info.value.code == 2
+
+    def test_export_has_no_such_flag(self) -> None:
+        with pytest.raises(SystemExit) as info:
+            main(["export", "m.json", "out", "--max-seconds", "5"])
+
+        assert info.value.code == 2
+
+    def test_a_spent_budget_gives_a_load_deadline_error_and_exit_1(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        root = _write(tmp_path / "kb", {f"{n}.md": _doc() for n in "abcde"})
+        clock = _FakeClock()
+        real = okf_module.parse_concept_text
+
+        def slow(cid: str, text: str) -> Any:
+            clock.now += 1.0  # every parsed concept costs one fake second
+            return real(cid, text)
+
+        monkeypatch.setattr(okf_module, "time", clock)
+        monkeypatch.setattr(okf_module, "parse_concept_text", slow)
+
+        code, out, err = _run(capsys, "validate", root, "--max-seconds", "2.5")
+
+        assert code == 1
+        line = next(x for x in out.splitlines() if " load-deadline " in x)
+        assert line.startswith("error load-deadline d.md ")
+        assert "--max-seconds" in line  # the validate output names the flag
+        assert "3 concepts, 1 errors" in err
+
+        code, out, _ = _run(capsys, "validate", root, "--max-seconds", "100")
+
+        assert code == 0 and "load-deadline" not in out

@@ -158,7 +158,14 @@ OKF_TOOL_PARAMETERS: dict[str, dict[str, Any]] = {
 # (handlers.py). Do NOT size a reply from a flat number (1,900 cut `okf_read`
 # pages mid-text and kept the `next offset` line): size it from `_budget`,
 # which counts the echoed arguments. See decisions.md D-016.
+# DECISION plan-2026-10-21T140931-095ea5f8/D-017
+# `<input>` is the model's WHOLE tool input (AgentHandlers echoes it before the
+# tool drops keys its schema does not name), so a model-added key such as
+# `reason` costs room the tool cannot see: `_ECHO_MARGIN` reserves it. Do NOT
+# drop the margin (an 80-character `reason` cut ten pages of one concept) and
+# do NOT change the shared executor to cap the echo. See decisions.md D-017.
 _WRAPPER_MARGIN = 24  # a step number past 3 digits, a redacted input
+_ECHO_MARGIN = 300  # model-added keys: a `reason` or `thought` of a sentence
 _MIN_BUDGET = 1_000  # when the echoed input alone nearly fills the cap
 _FOOTER_RESERVE = 40
 _ID_CHARS = 200
@@ -211,13 +218,19 @@ def _fit(lines: Sequence[str], budget: int) -> tuple[list[str], int]:
 def _budget(tool: str, **params: Any) -> int:
     """Characters a *tool* reply may use so its observation entry is not cut.
 
-    The entry is ``[Step n] Tool: <tool> | Input: <params> | Result: <reply>``
-    with ``params`` (the call's own arguments, echoed after redaction) shown
-    as a dict. Floor ``_MIN_BUDGET``: an echoed input that large is cut by the
-    loop whatever the reply does.
+    The entry is ``[Step n] Tool: <tool> | Input: <input> | Result: <reply>``.
+    ``params`` (the arguments this tool received) stand in for ``<input>``, and
+    ``_ECHO_MARGIN`` characters are kept for keys the model added that the tool
+    never sees. Floor ``_MIN_BUDGET``.
+
+    Residual: a model that echoes more than the margin in unknown keys (or a
+    total input of about 600+ characters, where the floor applies) still gets
+    its entry cut by the loop. The cut is visible (``...[truncated N chars]...``
+    in the middle) and ``next offset`` is the end of the page this tool
+    produced, never past it, so a page is re-read, not lost silently.
     """
     wrapper = len(f"[Step 999] Tool: {tool} | Input: {params} | Result: ")
-    room = Defaults.MAX_OBSERVATION_LENGTH - wrapper - _WRAPPER_MARGIN
+    room = Defaults.MAX_OBSERVATION_LENGTH - wrapper - _WRAPPER_MARGIN - _ECHO_MARGIN
     return max(room, _MIN_BUDGET)
 
 
@@ -228,7 +241,8 @@ def _finish(text: str, budget: int) -> str:
 
 def _concept_line(concept: OKFConcept) -> str:
     line = (
-        f"{capped_line(concept.id, _LINE_ID_CHARS)} | {capped_line(concept.type, _LINE_TYPE_CHARS)}"
+        f"{capped_line(concept.id, _LINE_ID_CHARS)}"
+        f" | {capped_line(concept.type, _LINE_TYPE_CHARS)}"
         f" | {capped_line(concept.display_title, _LINE_TITLE_CHARS)}"
     )
     flags = " ".join(f.upper() for f in concept.flags())
@@ -273,10 +287,12 @@ def create_okf_tools(
         - Every reply starts with ``OKF_UNTRUSTED_LABEL``, passes
           ``strip_unsafe_text`` and is sized so that the agent loop's whole
           observation entry (``[Step n] Tool: .. | Input: .. | Result: ..``,
-          the call's echoed arguments included) stays within
-          ``Defaults.MAX_OBSERVATION_LENGTH`` and is never cut (see
-          ``_budget``). ``okf_read`` gives a header (id, type, title, trust as
-          claimed by the bundle, flags in capitals) then a body page of at most
+          the call's echoed arguments and a margin for extra keys the model
+          adds included) stays within ``Defaults.MAX_OBSERVATION_LENGTH`` and
+          is not cut unless the echoed input is far larger than that margin
+          (then the loop's cut is visible; see ``_budget``). ``okf_read``
+          gives a header (id, type, title, trust as claimed by the bundle,
+          flags in capitals) then a body page of at most
           ``OKF_READ_PAGE_CHARS`` (shorter when the header or the echoed input
           is long) and a ``next offset: N`` line when more follows; the pages
           of one concept add up to its control-stripped body. List and search
@@ -413,11 +429,12 @@ class OKFMemoryBackend:
           with ``OKF_SUMMARY_LABEL`` (id, title, description, trust as claimed
           by the bundle, flags) passed through ``sanitize_text_for_prompt``
           because ``augment_task_with_memories`` concatenates it into the task
-          string; a body is never returned. Both routes (lexical, store) label. ``score`` is in 0..1; for the
-          lexical path it is the bundle's coverage score (on the query without
-          common stop words) times 2, capped at 1, so the default
-          ``recall_min_score`` of 0.25 keeps a concept matching about an eighth
-          of the query and drops unrelated ones.
+          string; a body is never returned. Both routes (lexical, store)
+          label. ``score`` is in 0..1; for the lexical path it is the bundle's
+          coverage score (on the query without common stop words) times 2,
+          capped at 1, so the default ``recall_min_score`` of 0.25 keeps a
+          concept matching about an eighth of the query and drops unrelated
+          ones.
         - ``add(text, *args, **kwargs)`` is a documented NO-OP returning
           ``None``: the bundle is read-only, so ``auto_remember=True`` persists
           nothing here (use ``export_agent_result`` to write a run). It never

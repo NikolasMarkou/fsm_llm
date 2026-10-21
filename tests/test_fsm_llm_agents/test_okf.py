@@ -1012,6 +1012,87 @@ class TestObservationWrapper:
         assert out.startswith(OKF_UNTRUSTED_LABEL)
 
 
+# --------------------------------------------------------------
+# Step 7.2 (D-017): the loop echoes the model's WHOLE input, not just the keys
+# the tool names, so `_budget` keeps a fixed margin for extra keys
+# --------------------------------------------------------------
+
+_REASON = "I need to read the next page of this concept to answer the question "
+_ECHO_CASES = {
+    "reason-80": lambda c, o: {"id": c, "offset": o, "reason": _REASON[:80]},
+    "reason-250": lambda c, o: {"id": c, "offset": o, "reason": "r" * 250},
+    "id-echoed": lambda c, o: {"offset": o, "id": c, "query": c, "concept": c},
+    "reason-x3": lambda c, o: {"id": c, "offset": o, "reason": _REASON * 3},
+}
+
+
+def _long_registry(cid: str) -> ToolRegistry:
+    concept = _concept(cid, type="Reference Document", title="T" * 150, body=_LONG_BODY)
+    return create_okf_tools(_bundle(concept))
+
+
+def _walk_okf_read(cid: str, make_input: Any) -> tuple[list[str], list[str]]:
+    """Pages and stored entries of one concept read through the real handler."""
+    registry = _long_registry(cid)
+    pages, entries, offset = [], [], 0
+    for _ in range(100):
+        ctx = {
+            ContextKeys.TOOL_NAME: "okf_read",
+            ContextKeys.TOOL_INPUT: make_input(cid, offset),
+            ContextKeys.OBSERVATIONS: [],
+            ContextKeys.AGENT_TRACE: [],
+        }
+        (entry,) = AgentHandlers(registry).execute_tool(ctx)[ContextKeys.OBSERVATIONS]
+        entries.append(entry)
+        page = _reply_of(entry).partition("\n\n")[2]
+        footer = re.search(r"\nnext offset: (\d+)\Z", page)
+        pages.append(page[: footer.start()] if footer else page)
+        if not footer:
+            return pages, entries
+        offset = int(footer.group(1))
+    pytest.fail("paging did not end")
+
+
+class TestEchoMargin:
+    @pytest.mark.parametrize("case", sorted(_ECHO_CASES))
+    @pytest.mark.parametrize("cid", ["d/" + "n" * 78, "a/b12"], ids=["id80", "id5"])
+    def test_a_typical_extra_key_never_cuts_a_page(self, cid: str, case: str):
+        pages, entries = _walk_okf_read(cid, _ECHO_CASES[case])
+        assert len(pages) > 2
+        assert not any("...[truncated" in e for e in entries)
+        assert "".join(pages) == strip_unsafe_text(_LONG_BODY, multiline=True)
+
+    def test_an_extra_value_beyond_the_margin_is_cut_visibly_not_silently(self):
+        cid = "d/" + "n" * 78
+
+        def make_input(c: str, o: int) -> dict[str, Any]:
+            return {"id": c, "offset": o, "reason": "r" * 1_000}
+
+        _pages, entries = _walk_okf_read(cid, make_input)
+        cut = [e for e in entries if "...[truncated" in e]
+        assert cut, "an echo past the margin must show the loop's marker"
+        registry = _long_registry(cid)
+        offset = 0
+        for entry in entries:
+            assert len(entry) <= Defaults.MAX_OBSERVATION_LENGTH
+            reply = _run(registry, "okf_read", id=cid, offset=offset)
+            footer = re.search(r"\nnext offset: (\d+)\Z", reply)
+            tail = re.search(r"\nnext offset: (\d+)\Z", entry)
+            # The tail the loop keeps carries the tool's own offset: the end of
+            # the page the tool produced, never past it.
+            assert (footer and footer.group(1)) == (tail and tail.group(1))
+            if footer:
+                assert int(footer.group(1)) > offset
+                offset = int(footer.group(1))
+
+    def test_the_floor_still_gives_a_progressing_page_for_a_huge_id(self):
+        cid = "d/" + "n" * 1_200
+        reply = _run(_long_registry(cid), "okf_read", id=cid, offset=0)
+        assert 400 < len(reply) <= 1_000
+        footer = re.search(r"\nnext offset: (\d+)\Z", reply)
+        assert footer and int(footer.group(1)) > 0
+
+
 class TestBackendLabelAndClaimedTrust:
     def test_every_backend_text_starts_with_the_fixed_label(self):
         backend = OKFMemoryBackend(_zephyr_bundle())

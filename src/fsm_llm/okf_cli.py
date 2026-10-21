@@ -3,11 +3,14 @@ Command-line tool for Open Knowledge Format bundles (``fsm-llm-okf``).
 
 Usage::
 
-    fsm-llm-okf validate BUNDLE [--strict]
-    fsm-llm-okf list BUNDLE [--type T] [--include-deprecated]
-    fsm-llm-okf show BUNDLE ID [--offset N]
-    fsm-llm-okf search BUNDLE QUERY [--limit N]
+    fsm-llm-okf validate BUNDLE [--strict] [--max-seconds S]
+    fsm-llm-okf list BUNDLE [--type T] [--include-deprecated] [--max-seconds S]
+    fsm-llm-okf show BUNDLE ID [--offset N] [--max-seconds S]
+    fsm-llm-okf search BUNDLE QUERY [--limit N] [--max-seconds S]
     fsm-llm-okf export MEMORY_JSON OUT_DIR [--overwrite]
+
+``--max-seconds`` is the load's wall-clock budget (default 120); a spent budget
+is a ``load-deadline`` error issue, so ``validate`` exits 1.
 
 The primary report goes to stdout, diagnostics and summaries to stderr. This
 tool prints directly and does not depend on library logging (off by default).
@@ -26,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from collections.abc import Callable, Sequence
@@ -37,10 +41,13 @@ from .constants import (
     CLI_EXIT_INTERRUPTED,
     CLI_EXIT_OK,
     OKF_LIST_MAX_ITEMS,
+    OKF_MAX_LOAD_SECONDS,
     OKF_READ_PAGE_CHARS,
 )
 from .definitions import OKFError
 from .okf import (
+    OKFBundle,
+    OKFLimits,
     body_page,
     bundle_from_memory_entries,
     capped_line,
@@ -63,8 +70,20 @@ def _err(message: str) -> None:
     print(f"{_PROG}: {capped_line(message, 1000)}", file=sys.stderr)
 
 
-def _more(count: int, hint: str = "") -> None:
-    print(f"... and {count} more{hint}")
+def _positive_seconds(text: str) -> float:
+    """argparse ``type`` of ``--max-seconds``: a finite number above zero."""
+    try:
+        seconds = float(text)
+    except ValueError:
+        seconds = math.nan
+    if not 0 < seconds < math.inf:
+        raise argparse.ArgumentTypeError("must be a finite number above 0")
+    return seconds
+
+
+def _load(args: argparse.Namespace) -> OKFBundle:
+    """Load ``args.path`` within the ``--max-seconds`` budget."""
+    return load_bundle(args.path, limits=OKFLimits(max_seconds=args.max_seconds))
 
 
 # --------------------------------------------------------------
@@ -73,11 +92,12 @@ def _more(count: int, hint: str = "") -> None:
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
-    bundle = load_bundle(args.path)
+    bundle = _load(args)
     issues = check_bundle(bundle)
     for issue in issues:  # check_bundle caps the list and says so
         where = issue.id or issue.path or "-"
-        print(f"{issue.severity} {issue.code} {where} {issue.message}")
+        hint = " (raise with --max-seconds)" if issue.code == "load-deadline" else ""
+        print(f"{issue.severity} {issue.code} {where} {issue.message}{hint}")
     count = {s: sum(1 for i in issues if i.severity == s) for s in _SEVERITIES}
     print(
         f"{len(bundle)} concepts, {count['error']} errors, "
@@ -90,7 +110,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
-    bundle = load_bundle(args.path)
+    bundle = _load(args)
     concepts = bundle.list(type=args.type, include_deprecated=args.include_deprecated)
     for concept in concepts[:OKF_LIST_MAX_ITEMS]:
         print(
@@ -104,12 +124,12 @@ def _cmd_list(args: argparse.Namespace) -> int:
             ).rstrip()
         )
     if len(concepts) > OKF_LIST_MAX_ITEMS:
-        _more(len(concepts) - OKF_LIST_MAX_ITEMS, " (narrow with --type)")
+        print(f"... and {len(concepts) - OKF_LIST_MAX_ITEMS} more (narrow with --type)")
     return CLI_EXIT_OK
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
-    bundle = load_bundle(args.path)
+    bundle = _load(args)
     wanted = args.id[:_MAX_ID_ARG_CHARS]
     concept = bundle.get(wanted)
     if concept is None:
@@ -134,7 +154,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
 
 
 def _cmd_search(args: argparse.Namespace) -> int:
-    bundle = load_bundle(args.path)
+    bundle = _load(args)
     limit = min(max(args.limit, 1), OKF_LIST_MAX_ITEMS)
     for concept, score in bundle.search(args.query, limit=limit):
         print(
@@ -200,21 +220,34 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
+    loads = argparse.ArgumentParser(add_help=False)  # shared by the loading commands
+    loads.add_argument("path", help="bundle root directory")
+    loads.add_argument(
+        "--max-seconds",
+        type=_positive_seconds,
+        default=OKF_MAX_LOAD_SECONDS,
+        metavar="SECONDS",
+        help="wall-clock budget of the load (default %(default)s)",
+    )
+
     def add(
-        name: str, func: Callable[[argparse.Namespace], int], help_text: str
+        name: str,
+        func: Callable[[argparse.Namespace], int],
+        help_text: str,
+        parents: Sequence[argparse.ArgumentParser] = (loads,),
     ) -> argparse.ArgumentParser:
-        command = sub.add_parser(name, help=help_text, description=help_text)
+        command = sub.add_parser(
+            name, help=help_text, description=help_text, parents=parents
+        )
         command.set_defaults(func=func)
         return command
 
     validate = add("validate", _cmd_validate, "check a bundle (spec section 11)")
-    validate.add_argument("path", help="bundle root directory")
     validate.add_argument(
         "--strict", action="store_true", help="exit 1 on warnings as well as errors"
     )
 
     list_ = add("list", _cmd_list, "list the concepts of a bundle")
-    list_.add_argument("path", help="bundle root directory")
     list_.add_argument("--type", help="only concepts of this type")
     list_.add_argument(
         "--include-deprecated",
@@ -223,21 +256,22 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     show = add("show", _cmd_show, "print one concept: header, then a page of its body")
-    show.add_argument("path", help="bundle root directory")
     show.add_argument("id", help="concept id (the file path without .md)")
     show.add_argument(
         "--offset", type=int, default=0, help="body character offset (default 0)"
     )
 
     search = add("search", _cmd_search, "lexical search over titles, tags and bodies")
-    search.add_argument("path", help="bundle root directory")
     search.add_argument("query", help="search words")
     search.add_argument(
         "--limit", type=int, default=5, help=f"hits to show, 1..{OKF_LIST_MAX_ITEMS}"
     )
 
     export = add(
-        "export", _cmd_export, "write a SemanticMemoryStore JSON file as a bundle"
+        "export",
+        _cmd_export,
+        "write a SemanticMemoryStore JSON file as a bundle",
+        parents=(),
     )
     export.add_argument("memory_json", help="SemanticMemoryStore JSON file")
     export.add_argument(
