@@ -397,6 +397,13 @@ OKF_MAX_TOTAL_BYTES = 33_554_432
 OKF_MAX_DEPTH = 16
 # Flow nesting (`[`/`{`) allowed in one frontmatter block.
 OKF_MAX_YAML_DEPTH = 64
+# A frontmatter block above this is not YAML-parsed (pure-Python PyYAML costs
+# about 0.7 s for 262 KB, so 128 such files would cost minutes).
+OKF_MAX_FRONTMATTER_BYTES = 16_384
+# Issues kept per bundle (errors first, then warnings, then info) and the
+# characters kept of the root `index.md` body.
+OKF_MAX_ISSUES = 5_000
+OKF_INDEX_MAX_CHARS = 4_000
 
 # Caps for text that reaches a model. A summary is a list of capped one-line
 # records (never a body); a read page plus its header stays under the

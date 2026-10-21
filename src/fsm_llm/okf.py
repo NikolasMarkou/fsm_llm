@@ -11,28 +11,40 @@ Spec status: OKF v0.2 at commit ad30107 of GoogleCloudPlatform/open-knowledge-fo
 pre-1.0 and mutable. The trust tier is a CLAIM the bundle makes about itself
 (a free ``verified[].by`` string), advisory only, never authorization.
 
-Entry point: ``parse_concept_text(concept_id, text) -> (OKFConcept, issues)``.
+Entry points: ``parse_concept_text(concept_id, text) -> (OKFConcept, issues)``,
+``load_bundle(path) -> OKFBundle`` (bounded, confined, never follows symlinks),
+``OKFBundle`` (lookup, lexical search, link graph) and ``check_bundle(bundle)``
+(spec section 11 conformance as a list of issues).
 """
 
 from __future__ import annotations
 
+import os
 import re
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
+from itertools import islice
+from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
+from urllib.parse import unquote
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .constants import (
+    OKF_INDEX_MAX_CHARS,
     OKF_MAX_DEPTH,
     OKF_MAX_FILE_BYTES,
     OKF_MAX_FILES,
+    OKF_MAX_FRONTMATTER_BYTES,
+    OKF_MAX_ISSUES,
     OKF_MAX_TOTAL_BYTES,
     OKF_MAX_YAML_DEPTH,
 )
+from .definitions import OKFError
+from .security import resolve_within
 
 # --------------------------------------------------------------
 # Untrusted-text helper (shared by every output path)
@@ -232,6 +244,7 @@ _KNOWN_KEYS = frozenset(
 )
 _STATUSES = ("draft", "stable", "deprecated")
 _CLOSING_RE = re.compile(r"^---[ \t]*$", re.MULTILINE)
+_MAX_FILE_WARNINGS = 25
 
 
 class _OKFLoader(yaml.SafeLoader):
@@ -304,6 +317,10 @@ def _flow_depth_exceeded(raw: str) -> bool:
 
 
 def _load_yaml(raw: str, note: _Note) -> dict[Any, Any]:
+    # SECURITY: size bound BEFORE any YAML work (pure-Python parse is ~3 ms/KB).
+    if len(raw.encode("utf-8", "replace")) > OKF_MAX_FRONTMATTER_BYTES:
+        note("error", "frontmatter-too-large", "frontmatter block is too large")
+        return {}
     duplicates: list[str] = []
     try:
         loader = _OKFLoader(raw)
@@ -388,10 +405,20 @@ def parse_concept_text(concept_id: str, text: str) -> tuple[OKFConcept, list[OKF
     with ``parse_okf_datetime``.
     """
     issues: list[OKFIssue] = []
+    warnings = 0
 
     def note(
         severity: Literal["error", "warning", "info"], code: str, msg: str
     ) -> None:
+        nonlocal warnings
+        if severity == "warning":  # bound the work a hostile document can cause
+            warnings += 1
+            if warnings > _MAX_FILE_WARNINGS:
+                if warnings == _MAX_FILE_WARNINGS + 1:
+                    severity, code = "info", "issues-truncated"
+                    msg = "further warnings for this concept are not shown"
+                else:
+                    return
         issues.append(
             OKFIssue(severity=severity, code=code, message=msg, id=concept_id)
         )
@@ -444,3 +471,499 @@ def parse_concept_text(concept_id: str, text: str) -> tuple[OKFConcept, list[OKF
         body=body,
     )
     return concept, issues
+
+
+# --------------------------------------------------------------
+# Links (lexical, in id space)
+# --------------------------------------------------------------
+
+_Ids = list[str]
+_Concepts = list[OKFConcept]
+_Hits = list[tuple[OKFConcept, float]]
+
+_RESERVED_FILES = frozenset({"index.md", "log.md"})
+_KNOWN_VERSIONS = frozenset({"0.1", "0.2"})
+_SCHEME_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+_INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+# Every sub-pattern excludes the characters that open the next match, so a
+# hostile body (a long run of ``[](``) is scanned in linear time.
+_LINK_RE = re.compile(
+    r"\[[^\]\[\n]{0,300}\]\(\s*(?:<([^<>\n]{1,2048})>|([^)\s\[(<]{1,2048}))"
+    r"(?:\s+(?:\"[^\"\n]*\"|'[^'\n]*'))?\s*\)"
+)
+_MAX_LINKS_PER_BODY = 1_000
+_HAY_FIELDS = ((3, 0), (2, 1), (1, 2))  # (weight, index into the haystack)
+
+
+def _body_links(body: str) -> Iterator[str]:
+    """Raw link targets of the prose of *body* (fenced and inline code ignored)."""
+    prose: list[str] = []
+    fence: str | None = None
+    for line in body.split("\n"):
+        if fence is None:
+            if match := _FENCE_RE.match(line):
+                fence = match.group(1)
+            else:
+                prose.append(_INLINE_CODE_RE.sub("", line))
+        else:
+            bare = line.strip()
+            if bare and set(bare) == {fence[0]} and len(bare) >= len(fence):
+                fence = None
+    for found in islice(_LINK_RE.finditer("\n".join(prose)), _MAX_LINKS_PER_BODY):
+        yield found.group(1) or found.group(2)
+
+
+def _link_candidates(target: object, from_id: str) -> _Ids:
+    """Concept ids a link or path-valued key may name, best first (D-003).
+
+    A ``/``-prefixed target is bundle-root relative. A relative target is tried
+    file-relative first (spec 6.2), then bundle-root relative (spec 6.3 and the
+    reference bundles, issue #29). The fragment and query are dropped, the rest
+    is percent-decoded once, external schemes and non-``.md`` targets give
+    nothing, and a target that climbs above the root is not a candidate.
+
+    SECURITY: this is lexical on purpose. It works in id space and never
+    touches the filesystem, so nothing here can read outside the bundle;
+    D-032's "no normpath" governs the loader's file access, not this.
+    """
+    if not isinstance(target, str) or len(target) > 4096:
+        return []
+    path = re.split(r"[#?]", target.strip(), maxsplit=1)[0]
+    if not path or path.startswith("//") or _SCHEME_RE.match(path):
+        return []
+    path = unquote(path)
+    if "\\" in path or strip_unsafe_text(path) != path or not path.endswith(".md"):
+        return []
+    here = tuple(from_id.split("/")[:-1])
+    found: _Ids = []
+    for base in ((),) if path.startswith("/") else (here, ()):
+        stack = list(base)
+        for part in path.split("/"):
+            if part in ("", "."):
+                continue
+            if part == "..":
+                if not stack:
+                    break  # climbs above the bundle root
+                stack.pop()
+            else:
+                stack.append(part)
+        else:
+            if stack and stack[-1] not in _RESERVED_FILES and stack[-1] != ".md":
+                cid = "/".join(stack)[:-3]
+                if cid not in found:
+                    found.append(cid)
+    return found
+
+
+# --------------------------------------------------------------
+# Bundle
+# --------------------------------------------------------------
+
+
+class OKFBundle:
+    """Concepts by id, plus the link graph and lexical search over them.
+
+    Interface contract:
+        - Build with ``OKFBundle(concepts, root=, issues=, okf_version=,
+          index_text=)`` or ``load_bundle``; ``root`` is ``None`` for an
+          in-memory bundle. ``index_text`` is control-stripped and capped.
+        - ``get(id)`` -> concept or ``None``; ``len``, ``in`` and iteration
+          (concepts in id order) work as for a mapping of ids.
+        - ``list(type=, prefix=, include_deprecated=False)`` -> concepts in id
+          order (``type`` compared case-insensitively).
+        - ``search(query, limit=5, include_deprecated=False)`` -> ``(concept,
+          score)`` best first, score in (0, 1], ties by id; lexical, tokens of
+          3+ characters; ``[]`` for a non-string or token-less query.
+        - ``resolve_link(target, from_id)`` / ``resolve_resource(value,
+          from_id)`` -> the id of an EXISTING concept or ``None`` (external,
+          escaping, broken and non-concept targets all give ``None``).
+        - ``outgoing(id)`` / ``backlinks(id)`` -> ids in order, no self-links;
+          outgoing covers body links, ``resource`` and ``sources[].resource``.
+        - ``put(concept)`` adds or replaces and invalidates every cache.
+        Nothing here raises on bundle content or touches the filesystem.
+    """
+
+    def __init__(
+        self,
+        concepts: Iterable[OKFConcept] = (),
+        *,
+        root: Path | None = None,
+        issues: Iterable[OKFIssue] = (),
+        okf_version: str | None = None,
+        index_text: str = "",
+    ) -> None:
+        self.root = root
+        self.issues: list[OKFIssue] = list(issues)
+        self.okf_version = okf_version
+        self.index_text = strip_unsafe_text(index_text, multiline=True)[
+            :OKF_INDEX_MAX_CHARS
+        ]
+        self._concepts: dict[str, OKFConcept] = {}
+        self._reset()
+        for concept in concepts:
+            self.put(concept)
+
+    def _reset(self) -> None:
+        self._ids: _Ids | None = None
+        self._out: dict[str, _Ids] = {}
+        self._back: dict[str, _Ids] | None = None
+        self._hay: dict[str, tuple[str, str, str]] = {}
+
+    def put(self, concept: OKFConcept) -> None:
+        self._concepts[concept.id] = concept
+        self._reset()
+
+    def __len__(self) -> int:
+        return len(self._concepts)
+
+    def __contains__(self, concept_id: object) -> bool:
+        return concept_id in self._concepts
+
+    def _sorted_ids(self) -> _Ids:
+        if self._ids is None:
+            self._ids = sorted(self._concepts)
+        return self._ids
+
+    def __iter__(self) -> Iterator[OKFConcept]:
+        return (self._concepts[cid] for cid in self._sorted_ids())
+
+    def get(self, concept_id: str) -> OKFConcept | None:
+        return self._concepts.get(concept_id)
+
+    def list(
+        self,
+        type: str | None = None,
+        prefix: str | None = None,
+        include_deprecated: bool = False,
+    ) -> _Concepts:
+        wanted = type.strip().casefold() if type else None
+        return [
+            c
+            for c in self
+            if (include_deprecated or not c.is_deprecated)
+            and (wanted is None or c.type.casefold() == wanted)
+            and (not prefix or c.id.startswith(prefix))
+        ]
+
+    def search(
+        self, query: str, limit: int = 5, include_deprecated: bool = False
+    ) -> _Hits:
+        if not isinstance(query, str) or limit < 1:
+            return []
+        tokens = list(dict.fromkeys(re.findall(r"\w{3,}", query[:1000].casefold())))[
+            :20
+        ]
+        hits: _Hits = []
+        for concept in self:
+            if tokens and (include_deprecated or not concept.is_deprecated):
+                hay = self._haystack(concept)
+                score = sum(
+                    weight
+                    for token in tokens
+                    for weight, i in _HAY_FIELDS
+                    if token in hay[i]
+                )
+                if score:
+                    hits.append((concept, score / (6 * len(tokens))))
+        hits.sort(key=lambda hit: (-hit[1], hit[0].id))
+        return hits[:limit]
+
+    def _haystack(self, c: OKFConcept) -> tuple[str, str, str]:
+        if c.id not in self._hay:
+            self._hay[c.id] = (
+                f"{c.title or ''}\n{' '.join(c.tags)}".casefold(),
+                f"{c.description or ''}\n{c.id}".casefold(),
+                c.body.casefold(),
+            )
+        return self._hay[c.id]
+
+    def resolve_link(self, target: object, from_id: str) -> str | None:
+        return next(
+            (c for c in _link_candidates(target, from_id) if c in self._concepts),
+            None,
+        )
+
+    def resolve_resource(self, value: object, from_id: str) -> str | None:
+        """Same lookup as ``resolve_link``, for path-valued frontmatter keys."""
+        return self.resolve_link(value, from_id)
+
+    def outgoing(self, concept_id: str) -> _Ids:
+        concept = self._concepts.get(concept_id)
+        if concept is None:
+            return []
+        if concept_id not in self._out:
+            refs = [
+                *_body_links(concept.body),
+                concept.resource,
+                *(s.get("resource") for s in concept.sources),
+            ]
+            found = dict.fromkeys(
+                t for r in refs if (t := self.resolve_link(r, concept_id))
+            )
+            found.pop(concept_id, None)
+            self._out[concept_id] = list(found)
+        return list(self._out[concept_id])
+
+    def backlinks(self, concept_id: str) -> _Ids:
+        if self._back is None:
+            back: dict[str, _Ids] = {}
+            for cid in self._sorted_ids():
+                for target in self.outgoing(cid):
+                    back.setdefault(target, []).append(cid)
+            self._back = back
+        return list(self._back.get(concept_id, []))
+
+
+# --------------------------------------------------------------
+# Loader
+# --------------------------------------------------------------
+
+# code -> (severity, message) for every problem the loader itself reports.
+_LOAD_PROBLEMS: dict[str, tuple[Literal["error", "warning", "info"], str]] = {
+    "id-unsafe": ("warning", "file name holds control characters; skipped"),
+    "path-indirect": ("warning", "path is indirect or outside the root; skipped"),
+    "file-too-large": ("warning", "file is over the size limit; skipped"),
+    "file-unreadable": ("warning", "file cannot be read; skipped"),
+    "dir-unreadable": ("warning", "directory cannot be listed; skipped"),
+    "dir-truncated": ("warning", "directory has too many entries; rest ignored"),
+    "symlink-skipped": ("warning", "symlinks are not followed; skipped"),
+    "not-utf8": ("error", "file is not valid UTF-8; skipped"),
+    "max-total-bytes": ("error", "bundle byte limit reached; load stopped"),
+    "max-files": ("error", "bundle file limit reached; load stopped"),
+    "max-depth": ("error", "directory is nested too deeply; skipped"),
+    "log-heading": ("warning", "log.md heading is not an ISO date (spec 9)"),
+    "index-frontmatter": ("warning", "index.md has frontmatter (spec 8)"),
+}
+
+
+def _capped(issues: list[OKFIssue]) -> list[OKFIssue]:
+    """At most ``OKF_MAX_ISSUES`` issues; errors are kept before warnings, info."""
+    if len(issues) <= OKF_MAX_ISSUES:
+        return issues
+    rank = ("error", "warning", "info")
+    kept = sorted(issues, key=lambda i: rank.index(i.severity))[:OKF_MAX_ISSUES]
+    extra = f"{len(issues) - OKF_MAX_ISSUES} more issues are not shown"
+    kept.append(OKFIssue(severity="info", code="issues-truncated", message=extra))
+    return kept
+
+
+def _read_bytes(path: Path, limit: int) -> bytes:
+    """Read at most ``limit + 1`` bytes; never follows a final symlink."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    with os.fdopen(os.open(path, flags), "rb") as handle:
+        return handle.read(limit + 1)
+
+
+def load_bundle(
+    path: str | os.PathLike[str], *, limits: OKFLimits | None = None
+) -> OKFBundle:
+    """Load the bundle under *path*. Raises ``OKFError`` only for the root.
+
+    A missing or non-directory root is an ``OKFError`` and is never created.
+    Everything else (oversize, non-UTF-8, symlinked, unsafe-named or unreadable
+    files, a spent limit) becomes an ``OKFIssue`` and the rest still loads.
+
+    Interface contract:
+        - Files are visited in sorted order; only exact ``.md`` names count.
+          ``index.md`` and ``log.md`` at any level are reserved, never concepts
+          (the root ``index.md`` supplies ``okf_version`` and ``index_text``).
+          Directories starting with ``.`` (``.git``) are not entered.
+        - Symlinks (files and directories) are skipped with an issue, never
+          followed; every file also passes ``security.resolve_within``.
+        - Stops with an error issue at ``max_files`` and ``max_total_bytes``;
+          directories deeper than ``max_depth`` are not entered.
+        - Residual hole (TOCTOU): a path swapped for a symlink between the
+          scan and the open is refused by ``O_NOFOLLOW`` on its last part only.
+    """
+    limits = limits or OKFLimits()
+    try:
+        root = Path(path).resolve()
+        is_dir = root.is_dir()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise OKFError(f"cannot open bundle root: {type(exc).__name__}") from exc
+    if not is_dir:
+        raise OKFError(f"bundle root is not a directory: {root}")
+
+    issues: list[OKFIssue] = []
+    concepts: _Concepts = []
+    state: dict[str, Any] = {"total": 0, "version": None, "index": "", "stop": False}
+
+    def issue(code: str, rel: str) -> None:
+        severity, message = _LOAD_PROBLEMS[code]
+        issues.append(OKFIssue(severity=severity, code=code, message=message, path=rel))
+
+    def read(parts: tuple[str, ...], size: int) -> str | None:
+        """Checked read of one file; ``None`` after recording why it was skipped."""
+        rel = "/".join(parts)
+        code = "id-unsafe" if strip_unsafe_text(rel) != rel else ""
+        try:
+            if not code and resolve_within(root, rel) != root.joinpath(*parts):
+                code = "path-indirect"
+            elif not code and size > limits.max_file_bytes:
+                code = "file-too-large"
+            elif not code and state["total"] + size > limits.max_total_bytes:
+                code, state["stop"] = "max-total-bytes", True
+            elif not code:
+                data = _read_bytes(root.joinpath(*parts), limits.max_file_bytes)
+                code = "file-too-large" if len(data) > limits.max_file_bytes else ""
+                state["total"] += len(data)
+        except (OSError, RuntimeError, ValueError):
+            code = "file-unreadable"
+        if not code:
+            try:
+                return data.decode("utf-8")
+            except UnicodeDecodeError:
+                code = "not-utf8"
+        issue(code, rel)
+        return None
+
+    def reserved(parts: tuple[str, ...], text: str) -> None:
+        """Spec 8 and 9: index has no frontmatter (root: only ``okf_version``);
+        log headings are ISO dates. Problems are warnings; these never load."""
+        rel, is_root = "/".join(parts), len(parts) == 1
+        raw, body, _ = _split_frontmatter(text)
+        if parts[-1] == "log.md":
+            headings = re.findall(r"^## (.*)$", body, re.MULTILINE)
+            if not all(re.match(r"\d{4}-\d{2}-\d{2}", h) for h in headings):
+                issue("log-heading", rel)
+            return
+        note: _Note = lambda s, c, m: issues.append(  # noqa: E731
+            OKFIssue(severity=s, code=c, message=m, path=rel)
+        )
+        data = _load_yaml(raw, note) if raw is not None else {}
+        if is_root:
+            version = data.get("okf_version")
+            if isinstance(version, (str, int, float)):
+                state["version"] = str(version).strip()
+            state["index"] = body
+        if set(data) - ({"okf_version"} if is_root else set()):
+            issue("index-frontmatter", rel)
+
+    stack: list[tuple[Path, tuple[str, ...], int]] = [(root, (), 0)]
+    while stack and not state["stop"]:
+        directory, parts, depth = stack.pop()
+        try:
+            with os.scandir(directory) as scan:
+                entries = sorted(
+                    islice(scan, limits.max_files * 2), key=lambda e: e.name
+                )
+        except OSError:
+            issue("dir-unreadable", "/".join(parts))
+            continue
+        if len(entries) >= limits.max_files * 2:
+            issue("dir-truncated", "/".join(parts))
+        subdirs = []
+        for entry in entries:
+            name, here = entry.name, (*parts, entry.name)
+            try:
+                if entry.is_symlink():
+                    if name.endswith(".md") or entry.is_dir():
+                        issue("symlink-skipped", "/".join(here))
+                elif entry.is_dir(follow_symlinks=False):
+                    if name.startswith("."):
+                        continue
+                    if depth < limits.max_depth:
+                        subdirs.append((Path(entry.path), here, depth + 1))
+                    else:
+                        issue("max-depth", "/".join(here))
+                elif (
+                    name.endswith(".md")
+                    and len(name) > 3
+                    and entry.is_file(follow_symlinks=False)
+                ):
+                    is_reserved = name in _RESERVED_FILES
+                    if not is_reserved and len(concepts) >= limits.max_files:
+                        issue("max-files", "/".join(here))
+                        state["stop"] = True
+                        break
+                    text = read(here, entry.stat(follow_symlinks=False).st_size)
+                    if state["stop"]:
+                        break
+                    if text is not None and is_reserved:
+                        reserved(here, text)
+                    elif text is not None:
+                        concept, found = parse_concept_text("/".join(here)[:-3], text)
+                        concepts.append(concept)
+                        issues.extend(found)
+            except OSError:
+                issue("file-unreadable", "/".join(here))
+        stack.extend(reversed(subdirs))
+
+    return OKFBundle(
+        concepts,
+        root=root,
+        issues=_capped(issues),
+        okf_version=state["version"],
+        index_text=state["index"],
+    )
+
+
+# --------------------------------------------------------------
+# Conformance (spec section 11)
+# --------------------------------------------------------------
+
+
+def check_bundle(bundle: OKFBundle) -> list[OKFIssue]:
+    """Spec section 11 conformance as a list of issues. Never raises.
+
+    The load-time issues (parse problems, skipped files, reserved-file checks)
+    plus model-level checks that also cover concepts added with ``put``: a
+    non-empty ``type``, no reserved concept id, timestamp forms without an
+    explicit UTC offset (warnings), broken internal links (info: consumers must
+    tolerate them) and an unknown ``okf_version`` (info). Duplicates are
+    dropped; the result is capped like ``load_bundle``'s.
+    """
+    out = list(bundle.issues)
+    seen = {(i.code, i.path, i.id, i.message) for i in out}
+    typed = {i.id for i in out if i.code in ("type-missing", "type-empty")}
+
+    def add(
+        severity: Literal["error", "warning", "info"],
+        code: str,
+        message: str,
+        cid: str | None = None,
+    ) -> None:
+        issue = OKFIssue(severity=severity, code=code, message=message, id=cid)
+        if (key := (code, None, issue.id, issue.message)) not in seen:
+            seen.add(key)
+            out.append(issue)
+
+    if bundle.okf_version not in (None, *_KNOWN_VERSIONS):
+        add(
+            "info",
+            "okf-version-unknown",
+            f"okf_version {bundle.okf_version!r} is unknown",
+        )
+    for c in bundle:
+
+        def note(
+            severity: Literal["error", "warning", "info"],
+            code: str,
+            message: str,
+            cid: str = c.id,
+        ) -> None:
+            add(severity, code, message, cid)
+
+        if c.id.rsplit("/", 1)[-1] in ("index", "log"):
+            note("error", "reserved-id", "index and log are reserved, never concepts")
+        if not c.type.strip() and c.id not in typed:
+            note("error", "type-empty", "'type' must be a non-empty string")
+        stamps = [
+            ("stale_after", c.stale_after),
+            ("generated.at", (c.generated or {}).get("at")),
+        ]
+        stamps += [("verified.at", v.get("at")) for v in c.verified]
+        for label, value in stamps:
+            if value is not None:
+                _check_timestamp(label, value, note)
+        for target in _body_links(c.body):
+            if (cands := _link_candidates(target, c.id)) and not any(
+                x in bundle for x in cands
+            ):
+                note(
+                    "info",
+                    "link-broken",
+                    f"link target {target!r} is not in the bundle",
+                )
+    return _capped(out)
