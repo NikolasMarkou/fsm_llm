@@ -363,7 +363,7 @@ def _pinned_counts(rel: str, pattern: str) -> list[int]:
 # costs seconds; nine would cost minutes). Do NOT "fix" a failure by loosening
 # a regex to match nothing, by asserting `>=`, or by skipping when parsing
 # fails: unparseable output FAILS loudly below. CHANGELOG.md is deliberately
-# NOT pinned (frozen release history), and CLAUDE.md's "N passed / N skipped /
+# NOT pinned (frozen release history), and AGENTS.md's "N passed / N skipped /
 # N xfailed" line is a RUN result at a named commit, not a collection count --
 # both exclusions are scope, not oversights. See decisions.md D-015.
 @pytest.fixture(scope="module")
@@ -444,8 +444,8 @@ class TestDocumentedTestCountsMatchCollection:
     """Every hand-maintained test-count literal equals `pytest --collect-only`.
 
     Same defect class as the package-wiring tests above: hand-maintained
-    parallel copies of a filesystem-derivable fact. CLAUDE.md, README.md and
-    src/fsm_llm/harness/CLAUDE.md each spell test counts as prose literals
+    parallel copies of a filesystem-derivable fact. AGENTS.md, README.md and
+    src/fsm_llm/harness/AGENTS.md each spell test counts as prose literals
     ("5,107 tests", a 9-suite breakdown table, "1,751 tests"); every new test
     silently strands them, and nothing errors. In the predecessor plans the
     literals drifted for days at a time (3,305/2,382 stated vs 5,107 measured)
@@ -453,7 +453,7 @@ class TestDocumentedTestCountsMatchCollection:
     per run (one subprocess, marked slow) and pins every literal to it.
 
     Excluded on purpose: CHANGELOG.md (frozen history -- its counts describe
-    the state AT each release, and must never be retro-edited) and CLAUDE.md's
+    the state AT each release, and must never be retro-edited) and AGENTS.md's
     "N passed / N skipped / N xfailed" sentence (a run result at a pinned
     commit, not a collection count; re-verified by release-gate runs instead).
     """
@@ -461,8 +461,8 @@ class TestDocumentedTestCountsMatchCollection:
     @pytest.mark.parametrize(
         "rel,pattern",
         [
-            ("CLAUDE.md", rf"pytest -v \({_COUNT} tests\)"),
-            ("CLAUDE.md", rf"Run all tests \({_COUNT} collected\)"),
+            ("AGENTS.md", rf"pytest -v \({_COUNT} tests\)"),
+            ("AGENTS.md", rf"Run all tests \({_COUNT} collected\)"),
             ("README.md", rf"Run full test suite \({_COUNT} tests\)"),
         ],
     )
@@ -475,7 +475,7 @@ class TestDocumentedTestCountsMatchCollection:
             )
 
     def test_per_suite_table(self, measured):
-        # CLAUDE.md's Testing block: `pytest tests/<suite>/  # ... (N tests)`.
+        # AGENTS.md's Testing block: `pytest tests/<suite>/  # ... (N tests)`.
         # Dict equality both ways: a NEW suite directory must be added to the
         # table, and a deleted one must leave it.
         _, per_suite, _ = measured
@@ -483,13 +483,13 @@ class TestDocumentedTestCountsMatchCollection:
             suite: _num(count)
             for suite, count in re.findall(
                 rf"^pytest tests/(test_[a-z_]+)/\s+#[^(\n]*\({_COUNT} tests\)",
-                _read("CLAUDE.md"),
+                _read("AGENTS.md"),
                 re.MULTILINE,
             )
         }
-        assert documented, "per-suite table regex matched nothing in CLAUDE.md"
+        assert documented, "per-suite table regex matched nothing in AGENTS.md"
         assert documented == per_suite, (
-            f"CLAUDE.md per-suite table out of sync: doc-only "
+            f"AGENTS.md per-suite table out of sync: doc-only "
             f"{ {k: v for k, v in documented.items() if k not in per_suite} }, "
             f"missing {sorted(set(per_suite) - set(documented))}, "
             f"wrong {[k for k in documented if per_suite.get(k) != documented[k]]} "
@@ -501,9 +501,9 @@ class TestDocumentedTestCountsMatchCollection:
         total, per_suite, _ = measured
         line = re.search(
             rf"The (\d+) suites above sum to {_COUNT}\. The remaining {_COUNT} ",
-            _read("CLAUDE.md"),
+            _read("AGENTS.md"),
         )
-        assert line is not None, "sum/remainder sentence not found in CLAUDE.md"
+        assert line is not None, "sum/remainder sentence not found in AGENTS.md"
         assert int(line.group(1)) == len(per_suite)
         assert _num(line.group(2)) == sum(per_suite.values())
         assert _num(line.group(3)) == total - sum(per_suite.values())
@@ -512,25 +512,25 @@ class TestDocumentedTestCountsMatchCollection:
         # Every root-level test file must be listed as `tests/<name> (N)` with
         # the measured N -- and nothing extra may be listed. Derived from the
         # collection, so a brand-new root-level test file fails this until
-        # CLAUDE.md names it.
+        # AGENTS.md names it.
         _, _, per_root_file = measured
         documented = {
             name: _num(count)
             for name, count in re.findall(
-                rf"tests/(test_[a-z_]+\.py) \({_COUNT}\)", _read("CLAUDE.md")
+                rf"tests/(test_[a-z_]+\.py) \({_COUNT}\)", _read("AGENTS.md")
             )
         }
         assert documented == per_root_file, (
-            f"CLAUDE.md root-file breakdown {documented} != measured {per_root_file}"
+            f"AGENTS.md root-file breakdown {documented} != measured {per_root_file}"
         )
 
     def test_harness_package_doc_literals(self, measured):
-        # src/fsm_llm/harness/CLAUDE.md spells its own suite's count twice
+        # src/fsm_llm/harness/AGENTS.md spells its own suite's count twice
         # ("1,751 tests, 10 test files" and the status paragraph). EVERY
         # "N tests" token in that file must equal the measured harness count,
         # and "N test files" must equal the on-disk test_*.py file count.
         _, per_suite, _ = measured
-        rel = "src/fsm_llm/harness/CLAUDE.md"
+        rel = "src/fsm_llm/harness/AGENTS.md"
         harness = per_suite["test_fsm_llm_harness"]
         for documented in _pinned_counts(rel, rf"{_COUNT} tests"):
             assert documented == harness, (

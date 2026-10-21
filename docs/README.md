@@ -1,6 +1,6 @@
 # docs
 
-The `docs/` folder at the root of the FSM-LLM repository holds the long-form user guides for the framework. FSM-LLM is a Python library that runs conversations as JSON-defined finite state machines (FSMs), with an LLM doing data extraction and response writing. It contains Markdown files only, no code: nine content files plus this index and a maintainer-notes file (`CLAUDE.md`, for coding agents).
+The `docs/` folder at the root of the FSM-LLM repository holds the long-form user guides for the framework. FSM-LLM is a Python library that runs conversations as JSON-defined finite state machines (FSMs), with an LLM doing data extraction and response writing. It contains Markdown files only, no code: nine content files plus this index and a maintainer-notes file (`AGENTS.md`, for coding agents).
 
 ## What it is for
 
@@ -28,7 +28,7 @@ flowchart LR
 - `architecture.md` explains how a message moves through the system.
 - `api_reference.md` is the lookup table for classes, methods, CLIs and exceptions.
 
-Some tests read these files. `tests/test_fsm_llm/test_docs_snippets.py` finds every fenced `json` or `python` block that contains `"initial_state"` in `quickstart.md`, `api_reference.md`, `architecture.md`, `fsm_design.md` and `handlers.md` (and in the root `README.md`, root `CLAUDE.md` and `src/fsm_llm/README.md`), and loads it through `FSMDefinition`. A broken full FSM example fails the test suite. `tests/test_fsm_llm_regression/test_regression_cli_and_exports.py` checks that `quickstart.md` does not mention `examples/basic/quiz`, `examples/intermediate/customer_service` or `python main.py`.
+Some tests read these files. `tests/test_fsm_llm/test_docs_snippets.py` finds every fenced `json` or `python` block that contains `"initial_state"` in `quickstart.md`, `api_reference.md`, `architecture.md`, `fsm_design.md` and `handlers.md` (and in the root `README.md`, root `AGENTS.md` and `src/fsm_llm/README.md`), and loads it through `FSMDefinition`. A broken full FSM example fails the test suite. `tests/test_fsm_llm_regression/test_regression_cli_and_exports.py` checks that `quickstart.md` does not mention `examples/basic/quiz`, `examples/intermediate/customer_service` or `python main.py`.
 
 ## Files
 
@@ -41,7 +41,7 @@ Some tests read these files. `tests/test_fsm_llm/test_docs_snippets.py` finds ev
 - `strands_features_phase_1.md` - historical: delivery note for schema-enforced output, the hidden `metadata` memory buffer, response streaming and session persistence (commit `a7e3d88`).
 - `strands_features_phase_2.md` - historical: plan for the other 8 features (OTEL, swarm, agent graph, MCP, semantic tool retrieval, dependency-based workflow parallelism, SOPs, A2A).
 - `agents_roadmap.md` - design record, not a guide: the `fsm_llm.agents` audit (verdict per audit id, commits, known open items, deferred Track B) and recorded baselines (G3 examples run, agent bench blocks B0 to B2). Current agents contracts live in `src/fsm_llm/agents/README.md` and the Agents section of `api_reference.md`. Source code and `scripts/agents_bench.py` point to it by name.
-- `CLAUDE.md` - maintainer notes for coding agents; not part of the user guides.
+- `AGENTS.md` - maintainer notes for coding agents; not part of the user guides.
 
 ## How to use it
 

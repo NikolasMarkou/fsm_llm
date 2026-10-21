@@ -147,5 +147,5 @@ Payloads and records pinned elsewhere in the suite:
 - Run: `.venv/bin/python -m pytest tests/test_fsm_llm_monitor/`.
 - Put tests for a source module in the matching `test_<module>.py`; audit regressions go in a dated file, one class per finding.
 - Use the local `_minimal_fsm_dict()` helpers (defined in `test_app.py`) for FSM payloads.
-- After adding or removing tests, re-measure with `.venv/bin/python -m pytest tests/test_fsm_llm_monitor --collect-only -q | tail -1` and update the monitor per-suite count in the repo-root `CLAUDE.md` Testing block and the totals there and in `README.md`; `tests/test_packaging.py` checks them against `--collect-only`.
+- After adding or removing tests, re-measure with `.venv/bin/python -m pytest tests/test_fsm_llm_monitor --collect-only -q | tail -1` and update the monitor per-suite count in the repo-root `AGENTS.md` Testing block and the totals there and in `README.md`; `tests/test_packaging.py` checks them against `--collect-only`.
 - Do not change files under `examples/`; preset tests read them.

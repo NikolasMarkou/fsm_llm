@@ -147,4 +147,4 @@ Test-writing constraints:
 - New agent pattern: add creation, FSM-shape (`FSMDefinition(**fsm)` must validate), constants, handler unit tests, and a loop test with a fake LLM that proves no state BLOCKs.
 - New HITL-capable agent: add it to `_agent_classes()` in `test_hitl_security.py` and to the parametrized cases in `test_think_fallback.py`.
 - Read the `DECISION plan-.../D-NNN` notes in docstrings before changing an assertion; many pin a measured failure.
-- After adding or removing tests, re-measure with `pytest --collect-only -q | tail -1` and update the hand-written count literals in the repo-root `CLAUDE.md` and `README.md`; `tests/test_packaging.py` compares them to a fresh collection. The count in this file's Scope section is not pinned; update it too.
+- After adding or removing tests, re-measure with `pytest --collect-only -q | tail -1` and update the hand-written count literals in the repo-root `AGENTS.md` and `README.md`; `tests/test_packaging.py` compares them to a fresh collection. The count in this file's Scope section is not pinned; update it too.

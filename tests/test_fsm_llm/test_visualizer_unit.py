@@ -1412,14 +1412,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _claude_md_example_fsm() -> dict:
-    """The FSM definition example of the root ``CLAUDE.md``, read from the file."""
-    text = (_REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    """The FSM definition example of the root ``AGENTS.md``, read from the file."""
+    text = (_REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
     blocks = [
         block
         for block in re.findall(r"```json\n(.*?)```", text, re.DOTALL)
         if '"initial_state"' in block
     ]
-    assert len(blocks) == 1, "root CLAUDE.md must hold exactly one FSM example"
+    assert len(blocks) == 1, "root AGENTS.md must hold exactly one FSM example"
     return json.loads(blocks[0])
 
 

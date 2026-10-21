@@ -40,4 +40,4 @@ Run from the repository root with the project virtualenv:
 - Git tests compare against `git rev-parse HEAD`, so the checkout must be a git repository.
 - Do not regenerate the golden table in `test_scoring.py` from the current code. It exists to keep new scores comparable with old runs.
 - `test_examples.py` starts real subprocesses and one of them waits for a 1 second timeout.
-- The repository root `CLAUDE.md` states this suite's test count (261). `tests/test_packaging.py` checks that number against `pytest --collect-only`, so update it when adding or removing tests.
+- The repository root `AGENTS.md` states this suite's test count (261). `tests/test_packaging.py` checks that number against `pytest --collect-only`, so update it when adding or removing tests.

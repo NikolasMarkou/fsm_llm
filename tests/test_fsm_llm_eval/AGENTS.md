@@ -104,5 +104,5 @@ Run dir name: `YYYY-MM-DD_HH-MM_<short hash or "unknown">_<model_slug>`, collisi
 - Name tests after the defect they guard; many docstrings start `Defect guarded:` with a review id (W1, W2, W6, NOTE 10, NOTE 15).
 - Keep every case test able to both pass and fail (use `_passing()` and `_failing()`), so a checker that checks nothing is caught.
 - A new helper mirrored in `scripts/harness_bench.py` needs a parity test in `test_bench_parity.py`.
-- After adding or removing tests, re-measure with `.venv/bin/python -m pytest tests/test_fsm_llm_eval --collect-only -q | tail -1` and update the `pytest tests/test_fsm_llm_eval/ ... (261 tests)` line and totals in the root `CLAUDE.md`; `tests/test_packaging.py` checks those literals against collection.
+- After adding or removing tests, re-measure with `.venv/bin/python -m pytest tests/test_fsm_llm_eval --collect-only -q | tail -1` and update the `pytest tests/test_fsm_llm_eval/ ... (261 tests)` line and totals in the root `AGENTS.md`; `tests/test_packaging.py` checks those literals against collection.
 - Run: `.venv/bin/python -m pytest tests/test_fsm_llm_eval/`.

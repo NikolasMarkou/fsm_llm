@@ -17,7 +17,7 @@ flowchart TD
     conf --> io[test_integration_ollama.py]
     conf -. ollama_available .-> hl[test_fsm_llm_harness/test_live_ollama.py]
     pkg[test_packaging.py] -->|subprocess pytest --collect-only| S
-    pkg --> files[pyproject.toml, Makefile, tox.ini,<br/>.github/workflows/python-package.yml, MANIFEST.in,<br/>CLAUDE.md, README.md, src/fsm_llm/harness/CLAUDE.md]
+    pkg --> files[pyproject.toml, Makefile, tox.ini,<br/>.github/workflows/python-package.yml, MANIFEST.in,<br/>AGENTS.md, README.md, src/fsm_llm/harness/AGENTS.md]
     thb[test_harness_bench.py] -->|sys.path += scripts/| hb[scripts/harness_bench.py]
     hb -. lazy import .-> hl
 ```
@@ -53,7 +53,7 @@ Suite folders (test counts from full collection) and root files at this level.
 - `TestMonitorPackageData`: `"fsm_llm.monitor"` package-data globs cover every file under `static/` and `templates/`.
 - `TestPackageBackedExtrasAreInstalled`: each subpackage name is an extra, requested by `pyproject` `all`, `make install-dev`, tox `extras = dev,...` and the CI install line.
 - `TestModuleDocstringsAreReal`: no module under `src/` puts its docstring after `from __future__ import annotations`; at least 50 modules scanned.
-- `TestDocumentedTestCountsMatchCollection` (`slow`): one `pytest --collect-only -q -o addopts= -p no:cacheprovider tests/` subprocess (env drops `PYTEST_ADDOPTS`, `FSM_LLM_HARNESS_LIVE`, `SKIP_SLOW_TESTS`, `TEST_REAL_LLM`), then pins: root `CLAUDE.md` `pytest -v (N tests)` and `Run all tests (N collected)`; root `README.md` `Run full test suite (N tests)`; the root `CLAUDE.md` per-suite lines `pytest tests/<suite>/  # ... (N tests)` (dict equality both ways); the sentence `The N suites above sum to S. The remaining R ...`; the `tests/<file>.py (N)` root-file list; every `N tests` and `N test files` token in `src/fsm_llm/harness/CLAUDE.md`. `CHANGELOG.md` is deliberately not pinned (D-015).
+- `TestDocumentedTestCountsMatchCollection` (`slow`): one `pytest --collect-only -q -o addopts= -p no:cacheprovider tests/` subprocess (env drops `PYTEST_ADDOPTS`, `FSM_LLM_HARNESS_LIVE`, `SKIP_SLOW_TESTS`, `TEST_REAL_LLM`), then pins: root `AGENTS.md` `pytest -v (N tests)` and `Run all tests (N collected)`; root `README.md` `Run full test suite (N tests)`; the root `AGENTS.md` per-suite lines `pytest tests/<suite>/  # ... (N tests)` (dict equality both ways); the sentence `The N suites above sum to S. The remaining R ...`; the `tests/<file>.py (N)` root-file list; every `N tests` and `N test files` token in `src/fsm_llm/harness/AGENTS.md`. `CHANGELOG.md` is deliberately not pinned (D-015).
 
 `test_harness_bench.py` loads `scripts/harness_bench.py` as `hb` and checks: import opens no socket even with `FSM_LLM_HARNESS_LIVE=1`; top-level imports are stdlib only; `wilson_ci` reference values and edge cases; `fisher_exact_two_sided` reference values and symmetry; `write_summary` refuses without a 6-field manifest (`MANIFEST_FIELDS`); `append_row`/`read_rows` round-trip; `report` recounts raw rows, flags tampered summaries (`MISMATCH`), refuses cross-digest comparisons (`REFUSING`); `run_block` refuses a block whose rows file exists (`run ONCE`) or an unknown arm; `main` maps `BenchDataError` to exit 1.
 
@@ -91,7 +91,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 - Never use `caplog` for library logs; `fsm_llm` logs through loguru and is disabled at import. Enable with `logger.enable("fsm_llm")`, add a sink, then remove it and disable again (harness suite: `captured_logs` fixture).
 - Tests that change process globals (cwd, env vars, `server.py` API key, `sys.modules`, logging) restore them.
 - Audit and `DECISION plan-.../D-NNN` pins record deliberate fixes. Treat a failure as a regression in `src/` unless the cited decision was reversed; do not weaken, delete or regenerate them (secret-filter corpora, eval scoring golden table, harness anti-vacuity controls).
-- Every documented test count in root `CLAUDE.md`, root `README.md` and `src/fsm_llm/harness/CLAUDE.md` must equal the measured collection.
+- Every documented test count in root `AGENTS.md`, root `README.md` and `src/fsm_llm/harness/AGENTS.md` must equal the measured collection.
 
 ## Dependencies
 
@@ -113,7 +113,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 - Conventions: files `test_<module>.py` / `test_<module>_elaborate.py`, classes `Test<Feature>`, helpers prefixed `_`; regressions named after the bug or audit id with a docstring stating the fixed behaviour.
 - Use `MockLLM2Interface` or `configure_mock_extract_field` instead of a real model; patch `fsm_llm.llm.completion` (core's one send binding; nothing else calls litellm) for seam tests, or inject a scripted `LLMInterface` with `llm_interface=` (implement `complete` when the FSM classifies or has a completion state).
 - Mark anything sleeping about a second or more, or needing a model, `slow`; live tests also get `integration` and `real_llm`.
-- A new suite folder or root test file must be added to the root `CLAUDE.md` Testing block (per-suite line or root-file list) or `test_per_suite_table` / `test_root_file_breakdown` fail.
+- A new suite folder or root test file must be added to the root `AGENTS.md` Testing block (per-suite line or root-file list) or `test_per_suite_table` / `test_root_file_breakdown` fail.
 - A new subpackage under `src/fsm_llm/` must be added to `_EXPECTED_SUBPACKAGES` in `test_packaging.py`, given an extra, and requested by every install list.
 - Commands:
 

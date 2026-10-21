@@ -5,7 +5,7 @@ Status: design record for the `fsm_llm.agents` audit, 2026-09-29.
 - Code range: `c632893..HEAD` (plan `plan-2026-09-29T103145-06a5ec0a`, 27 steps plus eight completion fixes: 15.1, 20.1, 13.1, 3.1, 21.1, 21.2, 24.1, 20.2).
 - Version: released in `0.12.0`, on top of `0.11.0`. See `CHANGELOG.md` `## [0.12.0]`.
 - Scope: Track A of the audit (test infrastructure E3/E4, Phase 0 hotfixes, Phase 1 pattern correctness). Track B (Phases 2-6), the live agent bench (E1/E2), E5 and the D5 deprecations are deferred.
-- Current contracts: `src/fsm_llm/agents/README.md` (user guide), `src/fsm_llm/agents/CLAUDE.md` (maintainer contracts), `docs/api_reference.md` (Agents section).
+- Current contracts: `src/fsm_llm/agents/README.md` (user guide), `src/fsm_llm/agents/AGENTS.md` (maintainer contracts), `docs/api_reference.md` (Agents section).
 
 The audit was written against `4a5af49` without running tests. Every claim was re-checked at `c632893` before any fix. Verdicts: TRUE (holds as stated), PARTIAL (part holds), GHOST (does not hold or was already fixed), NOT VERIFIED (outside Track A, not traced).
 
@@ -123,7 +123,7 @@ Patterns:
 | PAT-01 | TRUE ("pre-tool guess" GHOST, fixed by D-024 of plan 21cd7f8e) | Fixed, step 18 |
 | PAT-02 | PARTIAL | Fixed, step 18 |
 | PAT-03 | TRUE | Fixed, step 19 |
-| PAT-04 | TRUE (and `agents/CLAUDE.md` wrongly said the errors propagate) | Fixed, step 12 |
+| PAT-04 | TRUE (and `agents/AGENTS.md` wrongly said the errors propagate) | Fixed, step 12 |
 | PAT-05 | TRUE | Fixed, step 19 |
 | PAT-06 | TRUE | Fixed, step 20 |
 | PAT-07 | TRUE | Fixed, steps 3 (edge strip) and 22 (Kahn order) |

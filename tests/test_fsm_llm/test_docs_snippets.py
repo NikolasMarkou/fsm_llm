@@ -1,7 +1,7 @@
 """Every full FSM snippet in the first-touch docs must load.
 
 The docs audit (GD-01, plan-2026-09-19T175721-21cd7f8e D-037) found that every
-copy-paste FSM in the README, quickstart and CLAUDE.md was rejected by the
+copy-paste FSM in the README, quickstart and AGENTS.md was rejected by the
 loader (missing required ``description``, mis-nested classification schema).
 This test extracts each fenced block that names ``"initial_state"`` and loads
 it through ``FSMDefinition``, so a docs edit that breaks a first-touch snippet
@@ -26,7 +26,7 @@ _FULL_FSM_DOCS = [
     "README.md",
     "docs/quickstart.md",
     "src/fsm_llm/README.md",
-    "CLAUDE.md",
+    "AGENTS.md",
 ]
 # Reference docs scanned too (plan-2026-09-19T175721-21cd7f8e D-052 (5)). At the
 # time of writing none carries a block naming "initial_state" (docs/fsm_design.md

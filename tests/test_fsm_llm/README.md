@@ -67,7 +67,7 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_validator_unit.py`, `test_visualizer_unit.py` - `FSMValidator` and the ASCII visualizer, including their CLIs.
 - `test_runner_unit.py`, `test_utilities_unit.py` - the interactive runner's redaction and JSON helpers, FSM file loading.
 - `test_logging_unit.py`, `test_logging_structured.py` - logging helpers, `setup_logging()` and JSON output.
-- `test_docs_snippets.py` - every fenced `json` or `python` block that contains `"initial_state"` in `README.md`, `CLAUDE.md`, `docs/quickstart.md`, `src/fsm_llm/README.md`, `docs/api_reference.md`, `docs/architecture.md`, `docs/fsm_design.md` and `docs/handlers.md` must load through `FSMDefinition`.
+- `test_docs_snippets.py` - every fenced `json` or `python` block that contains `"initial_state"` in `README.md`, `AGENTS.md`, `docs/quickstart.md`, `src/fsm_llm/README.md`, `docs/api_reference.md`, `docs/architecture.md`, `docs/fsm_design.md` and `docs/handlers.md` must load through `FSMDefinition`.
 - `test_live_classification_memory.py` - 7 real-model tests on Ollama `qwen3.5:9b-q8_0`, marked `integration`, `real_llm` and `slow`, skipped without the model.
 
 ## How to use it

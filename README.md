@@ -388,9 +388,9 @@ Rules to know before you open a pull request:
 - Do not edit `examples/` unless asked: they are evaluation baselines.
 - litellm is imported only in `src/fsm_llm/llm.py`. Do not add a second request builder or provider call elsewhere.
 - Internal-key and secret-key checks go through `fsm_llm.constants.has_internal_prefix` and `is_forbidden_context_entry`. Do not re-inline them.
-- Anything new that is configured with many settings gets a step-by-step builder that follows the convention in [src/fsm_llm/CLAUDE.md](src/fsm_llm/CLAUDE.md): setters only record, `build()` is the only validator.
+- Anything new that is configured with many settings gets a step-by-step builder that follows the convention in [src/fsm_llm/AGENTS.md](src/fsm_llm/AGENTS.md): setters only record, `build()` is the only validator.
 - Read `# DECISION plan-<id>/D-NNN` comments before editing nearby code: they say what not to do and why.
-- Test counts in this file and in `CLAUDE.md` are pinned by `tests/test_packaging.py`. After adding tests, re-measure with `pytest --collect-only -q | tail -1` and update them. Every FSM JSON block in this file is loaded by `tests/test_fsm_llm/test_docs_snippets.py`, so keep it valid.
+- Test counts in this file and in `AGENTS.md` are pinned by `tests/test_packaging.py`. After adding tests, re-measure with `pytest --collect-only -q | tail -1` and update them. Every FSM JSON block in this file is loaded by `tests/test_fsm_llm/test_docs_snippets.py`, so keep it valid.
 - Commit messages follow `<type>(<scope>): <summary>`. Plan-step commits start with `[plan-YYYY-MM-DD-<8 hex>/iter-N/step-M]`.
 
 Good places to help, all taken from recorded open items:
