@@ -52,6 +52,8 @@ from fsm_llm.logging import logger
 from fsm_llm.okf import (
     OKFBundle,
     OKFConcept,
+    OKFIssue,
+    OKFLimits,
     check_bundle,
     load_bundle,
     parse_okf_datetime,
@@ -1178,3 +1180,133 @@ class TestExportSemanticMemoryHostileMetadata:
 
         names = sorted(p.relative_to(tmp_path / "kb").as_posix() for p in written)
         assert names == ["index.md", "memory/a.md", "memory/b.md", "memory/c.md"]
+
+
+# --------------------------------------------------------------
+# Step 7.3 (D-018): the model is told when the bundle is incomplete
+# --------------------------------------------------------------
+
+_INCOMPLETE = (
+    "Note: this bundle was loaded incompletely (load-deadline); results may be missing."
+)
+
+
+def _stopped(*concepts: OKFConcept, code: str = "load-deadline") -> OKFBundle:
+    """A bundle whose load was stopped (the issue text must never reach a model)."""
+    issue = OKFIssue(
+        severity="error",
+        code=code,
+        message="SECRET-MESSAGE load stopped",
+        path="SECRET-PATH/x.md",
+    )
+    return OKFBundle(concepts, issues=[issue])
+
+
+def _stopped_calls(
+    stem: str, n: int
+) -> tuple[OKFBundle, list[tuple[str, dict[str, Any]]]]:
+    concepts = [
+        _concept(
+            f"{stem}/n{i:03d}",
+            type="T" * 80,
+            title="Needle " + "w" * 150,
+            body=f"see [x](/{stem}/n{(i + 1) % 40:03d}.md)",
+        )
+        for i in range(40)
+    ]
+    calls: list[tuple[str, dict[str, Any]]] = [
+        ("okf_list", {"prefix": stem, "type": "T" * 80}),
+        ("okf_list", {"prefix": stem, "offset": 25}),
+        ("okf_search", {"query": "needle " + "w" * n, "limit": 10}),
+        ("okf_links", {"id": concepts[0].id}),
+        ("okf_read", {"id": concepts[0].id}),
+        ("okf_read", {"id": "z" * n}),
+    ]
+    return _stopped(*concepts), calls
+
+
+class TestIncompleteBundleSignal:
+    def test_list_search_read_and_links_carry_the_note_right_after_the_label(self):
+        registry = create_okf_tools(_stopped(_concept("d/a", title="Alpha", body="x")))
+
+        for name, params in (
+            ("okf_list", {}),
+            ("okf_search", {"query": "alpha"}),
+            ("okf_read", {"id": "d/a"}),
+            ("okf_read", {"id": "d/missing"}),
+            ("okf_links", {"id": "d/a"}),
+        ):
+            lines = _run(registry, name, **params).splitlines()
+            assert lines[:2] == [OKF_UNTRUSTED_LABEL, _INCOMPLETE], name
+
+    def test_the_note_uses_the_code_only_never_issue_text_or_paths(self):
+        registry = create_okf_tools(_stopped(_concept("d/a", title="Alpha", body="x")))
+
+        for name in _TOOLS:
+            params = {"id": "d/a"} if name in ("okf_read", "okf_links") else {}
+            reply = _run(registry, name, **params)
+            assert "SECRET" not in reply
+
+    def test_a_complete_bundle_gets_no_note(self):
+        registry = create_okf_tools(_bundle(_concept("d/a", title="Alpha", body="x")))
+
+        for name in _TOOLS:
+            params = {"id": "d/a"} if name in ("okf_read", "okf_links") else {}
+            assert "incompletely" not in _run(registry, name, **params)
+
+    def test_a_real_limit_stop_shows_in_okf_list(self, tmp_path: Path):
+        root = tmp_path / "kb"
+        root.mkdir()
+        for n in "abcde":
+            (root / f"{n}.md").write_text("---\ntype: Note\n---\nbody\n", "utf-8")
+        bundle = load_bundle(root, limits=OKFLimits(max_files=2))
+
+        reply = _run(create_okf_tools(bundle), "okf_list")
+
+        assert (
+            "Note: this bundle was loaded incompletely (max-files); "
+            "results may be missing." in reply.splitlines()
+        )
+        assert "2 concept(s)" in reply
+
+    @pytest.mark.parametrize("n", range(0, 330, 33))
+    def test_the_note_is_counted_in_the_budget_through_the_real_wrapper(self, n: int):
+        stem = "p" * min(n, 150)
+        bundle, calls = _stopped_calls(stem, n)
+        registry = create_okf_tools(bundle)
+
+        for name, params in calls:
+            entry = _observe(registry, name, **params)
+            assert "...[truncated" not in entry, (n, name)
+            assert len(entry) <= Defaults.MAX_OBSERVATION_LENGTH, (n, name)
+            assert _INCOMPLETE in _reply_of(entry), (n, name)
+
+    def test_building_the_tools_warns_once_for_an_incomplete_bundle_only(self):
+        warnings: list[str] = []
+        logger.enable("fsm_llm")
+        sink = logger.add(warnings.append, level="WARNING", format="{message}")
+        try:
+            create_okf_tools(_bundle(_concept("d/a")))
+            assert not any("incompletely" in w for w in warnings)
+            create_okf_tools(_stopped(_concept("d/a")))
+        finally:
+            logger.remove(sink)
+            logger.disable("fsm_llm")
+
+        hits = [w for w in warnings if "incompletely" in w]
+        assert len(hits) == 1 and "load-deadline" in hits[0]
+        assert "SECRET" not in hits[0]
+
+    def test_the_backend_exposes_the_stop_but_adds_nothing_to_its_lines(self):
+        complete = OKFMemoryBackend(_zephyr_bundle())
+        assert complete.incomplete == ()
+
+        partial_bundle = _zephyr_bundle()
+        partial_bundle.issues.append(
+            OKFIssue(severity="error", code="max-files", message="m")
+        )
+        partial = OKFMemoryBackend(partial_bundle)
+        assert partial.incomplete == ("max-files",)
+        same = OKFMemoryBackend(_zephyr_bundle()).search("Zephyr gateway payload")
+        assert partial.search("Zephyr gateway payload") == same
+        assert all("incompletely" not in text for text, _, _ in same)

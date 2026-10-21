@@ -52,6 +52,7 @@ from fsm_llm.okf import (
     bundle_from_memory_entries,
     capped_line,
     close_ids,
+    incomplete_note,
     strip_unsafe_text,
     write_bundle,
 )
@@ -239,6 +240,12 @@ def _finish(text: str, budget: int) -> str:
     return strip_unsafe_text(text, multiline=True)[:budget]
 
 
+def _warn_incomplete(bundle: OKFBundle, user: str) -> None:
+    """Log once that *bundle* was loaded incompletely (codes only, no issue text)."""
+    if note := incomplete_note(bundle):
+        logger.warning(f"{user}: {note}")
+
+
 def _concept_line(concept: OKFConcept) -> str:
     line = (
         f"{capped_line(concept.id, _LINE_ID_CHARS)}"
@@ -284,7 +291,10 @@ def create_okf_tools(
         - Descriptions and parameter descriptions are the module constants
           ``OKF_TOOL_DESCRIPTIONS`` and ``OKF_TOOL_PARAMETERS``; nothing taken
           from the bundle ever reaches them.
-        - Every reply starts with ``OKF_UNTRUSTED_LABEL``, passes
+        - Every reply starts with ``OKF_UNTRUSTED_LABEL``, then (when the
+          bundle was loaded incompletely, ``bundle.incomplete``) the fixed
+          ``okf.incomplete_note`` line: issue CODES only, never issue text. A
+          warning is logged once at construction. The reply passes
           ``strip_unsafe_text`` and is sized so that the agent loop's whole
           observation entry (``[Step n] Tool: .. | Input: .. | Result: ..``,
           the call's echoed arguments and a margin for extra keys the model
@@ -308,11 +318,21 @@ def create_okf_tools(
           at once.
     """
     tools = registry if registry is not None else ToolRegistry()
+    _warn_incomplete(bundle, "create_okf_tools")
+
+    # DECISION plan-2026-10-21T140931-095ea5f8/D-018
+    # A stopped load must not look complete to the model, and the note holds
+    # issue CODES only (fixed text): messages and paths can carry bundle text.
+    # Do NOT add them, and do NOT drop the note to save reply budget.
+    def label() -> str:
+        """The untrusted label, plus the fixed incomplete-bundle note if any."""
+        note = incomplete_note(bundle)
+        return f"{OKF_UNTRUSTED_LABEL}\n{note}" if note else OKF_UNTRUSTED_LABEL
 
     def not_found(wanted: str, budget: int) -> str:
         close = close_ids(bundle, wanted, include_deprecated=include_deprecated)
         lines = [
-            OKF_UNTRUSTED_LABEL,
+            label(),
             f"No concept with id {capped_line(wanted, 80)!r}.",
         ]
         if close:
@@ -330,7 +350,7 @@ def create_okf_tools(
         )
         start = _int(offset, 0, 0, len(concepts))
         page = concepts[start : start + OKF_LIST_MAX_ITEMS]
-        head = f"{OKF_UNTRUSTED_LABEL}\n{len(concepts)} concept(s), from {start}:"
+        head = f"{label()}\n{len(concepts)} concept(s), from {start}:"
         lines, _ = _fit(
             [_concept_line(c) for c in page], budget - len(head) - _FOOTER_RESERVE
         )
@@ -348,7 +368,7 @@ def create_okf_tools(
         flags = " ".join(f.upper() for f in concept.flags())
         head = "\n".join(
             (
-                OKF_UNTRUSTED_LABEL,
+                label(),
                 f"id: {capped_line(concept.id, _ID_CHARS)}",
                 f"type: {capped_line(concept.type, _TYPE_CHARS)}",
                 f"title: {capped_line(concept.display_title, _TITLE_CHARS)}",
@@ -372,13 +392,14 @@ def create_okf_tools(
             _int(limit, 5, 1, _MAX_SEARCH_LIMIT),
             include_deprecated,
         )
+        top = label()
         if not hits:
-            return _finish(f"{OKF_UNTRUSTED_LABEL}\nNo matching concepts.", budget)
+            return _finish(f"{top}\nNo matching concepts.", budget)
         lines, _ = _fit(
             [f"{score:.2f} | {_concept_line(c)}" for c, score in hits],
-            budget - len(OKF_UNTRUSTED_LABEL) - _FOOTER_RESERVE,
+            budget - len(top) - _FOOTER_RESERVE,
         )
-        return _finish("\n".join([OKF_UNTRUSTED_LABEL, *lines]), budget)
+        return _finish("\n".join([top, *lines]), budget)
 
     def okf_links(id: Any = "") -> str:
         budget = _budget("okf_links", id=id)
@@ -395,10 +416,11 @@ def create_okf_tools(
                 target = bundle.get(other)
                 flags = " ".join(f.upper() for f in target.flags()) if target else ""
                 lines.append(f"  {capped_line(other, _LINE_ID_CHARS)} {flags}".rstrip())
-        shown, hidden = _fit(lines, budget - len(OKF_UNTRUSTED_LABEL) - _FOOTER_RESERVE)
+        top = label()
+        shown, hidden = _fit(lines, budget - len(top) - _FOOTER_RESERVE)
         if hidden:
             shown.append(f"... {hidden} more line(s) not shown")
-        return _finish("\n".join([OKF_UNTRUSTED_LABEL, *shown]), budget)
+        return _finish("\n".join([top, *shown]), budget)
 
     annotations = ToolAnnotations(
         read_only=True, destructive=False, idempotent=True, open_world=False
@@ -448,7 +470,9 @@ class OKFMemoryBackend:
           hit's ``metadata["id"]`` (hits for ids not in the bundle, and for
           deprecated ones, are dropped), never taken from the store. An empty
           store, or a store that raises, falls back to the lexical path.
-        - ``include_deprecated`` as in ``create_okf_tools``.
+        - ``include_deprecated`` as in ``create_okf_tools``. A bundle loaded
+          incompletely is logged once at construction and shown by
+          ``incomplete``; the lines themselves stay as above.
         - Recalled lines land in the TASK under the header of
           ``augment_task_with_memories`` (default ``[Relevant things you
           remember]``, which reads as trusted; ``AutoMemoryReactAgent`` has no
@@ -466,6 +490,12 @@ class OKFMemoryBackend:
         self._bundle = bundle
         self._store = store
         self._include_deprecated = include_deprecated
+        _warn_incomplete(bundle, "OKFMemoryBackend")
+
+    @property
+    def incomplete(self) -> tuple[str, ...]:
+        """Stop codes of the bundle (``okf.INCOMPLETE_CODES``); ``()`` when whole."""
+        return self._bundle.incomplete
 
     def add(self, text: str, *args: Any, **kwargs: Any) -> None:
         """Documented no-op: the bundle is read-only."""

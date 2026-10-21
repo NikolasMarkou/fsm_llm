@@ -419,6 +419,11 @@ OKF_SUMMARY_MAX_ITEMS = 20
 OKF_SUMMARY_FIELD_CHARS = 200
 OKF_READ_PAGE_CHARS = 1_500
 OKF_LIST_MAX_ITEMS = 25
+# The one line shown to a model or CLI reader when a load was stopped (a spent
+# limit or deadline). `{codes}` takes issue CODES only, never messages or paths.
+OKF_INCOMPLETE_NOTE = (
+    "Note: this bundle was loaded incompletely ({codes}); results may be missing."
+)
 # Characters of one memory entry exported as a concept body: at most 200 KB of
 # UTF-8, so the written file still loads under `OKF_MAX_FILE_BYTES`.
 OKF_EXPORT_TEXT_MAX_CHARS = 50_000

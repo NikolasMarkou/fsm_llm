@@ -4682,3 +4682,166 @@ class TestStripFastPath:
         assert strip_unsafe_text("a\x1b[31mb\x00c\td\ne") == "abc d e"
         assert strip_unsafe_text("a\nb", multiline=True) == "a\nb"
         assert strip_unsafe_text("café ‮gnp") == "café gnp"
+
+
+# --------------------------------------------------------------
+# Step 7.3 (D-018): an incomplete bundle says so; exported metadata is writable
+# --------------------------------------------------------------
+
+
+class TestIncompleteBundle:
+    def _five(self, tmp_path: Path) -> Path:
+        return _write(tmp_path, {f"{n}.md": _doc() for n in "abcde"})
+
+    def test_a_complete_bundle_has_no_stop_and_no_note(self, tmp_path: Path) -> None:
+        bundle = load_bundle(self._five(tmp_path))
+
+        assert bundle.incomplete == ()
+        assert okf_module.incomplete_note(bundle) == ""
+
+    @pytest.mark.parametrize(
+        ("limits", "code"),
+        [
+            (OKFLimits(max_files=2), "max-files"),
+            (OKFLimits(max_total_bytes=60), "max-total-bytes"),
+        ],
+        ids=["max-files", "max-total-bytes"],
+    )
+    def test_a_spent_limit_is_a_stop(
+        self, tmp_path: Path, limits: OKFLimits, code: str
+    ) -> None:
+        bundle = load_bundle(self._five(tmp_path), limits=limits)
+
+        assert bundle.incomplete == (code,)
+        assert okf_module.incomplete_note(bundle) == (
+            f"Note: this bundle was loaded incompletely ({code}); "
+            "results may be missing."
+        )
+
+    def test_a_spent_load_deadline_is_a_stop(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        clock = _FakeClock()
+        real = okf_module.parse_concept_text
+
+        def slow(cid: str, text: str) -> Any:
+            clock.now += 1.0
+            return real(cid, text)
+
+        monkeypatch.setattr(okf_module, "time", clock)
+        monkeypatch.setattr(okf_module, "parse_concept_text", slow)
+
+        bundle = load_bundle(self._five(tmp_path), limits=OKFLimits(max_seconds=2.5))
+
+        assert bundle.incomplete == ("load-deadline",)
+
+    def test_a_spent_backlink_deadline_is_a_stop_once_it_fires(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write(tmp_path, {f"{n}.md": _doc(body="[](/a.md)") for n in "abcdef"})
+        bundle = load_bundle(tmp_path, limits=OKFLimits(max_seconds=10))
+        clock = _FakeClock()
+        real = OKFBundle.outgoing
+
+        def slow(self: OKFBundle, cid: str) -> Any:
+            clock.now += 4.0
+            return real(self, cid)
+
+        monkeypatch.setattr(okf_module, "time", clock)
+        monkeypatch.setattr(OKFBundle, "outgoing", slow)
+        assert bundle.incomplete == ()
+
+        bundle.backlinks("a")
+
+        assert bundle.incomplete == ("check-deadline",)
+
+    def test_only_stops_count_not_skipped_files_or_other_errors(self) -> None:
+        issues = [
+            OKFIssue(severity="error", code="not-utf8", message="m", path="a.md"),
+            OKFIssue(severity="error", code="max-depth", message="m", path="d"),
+            OKFIssue(severity="warning", code="parse-failed", message="m"),
+        ]
+
+        assert OKFBundle(issues=issues).incomplete == ()
+
+    def test_every_code_is_a_real_error_issue_code_of_the_loader(self) -> None:
+        for code in okf_module.INCOMPLETE_CODES:
+            assert code == "check-deadline" or okf_module._LOAD_PROBLEMS[code][0] == (
+                "error"
+            )
+
+    def test_the_note_names_codes_only_never_messages_or_paths(self) -> None:
+        issue = OKFIssue(
+            severity="error",
+            code="max-files",
+            message="secret message text",
+            path="secret/path.md",
+            id="secret/id",
+        )
+        bundle = OKFBundle(
+            issues=[issue, issue.model_copy(update={"code": "load-deadline"})]
+        )
+
+        note = okf_module.incomplete_note(bundle)
+
+        assert note == (
+            "Note: this bundle was loaded incompletely (max-files, load-deadline); "
+            "results may be missing."
+        )
+        assert "secret" not in note
+
+
+def _wide(n: int, items: int) -> dict[str, Any]:
+    return {f"k{i}": list(range(items)) for i in range(n)}
+
+
+def _hostile_meta() -> dict[str, Any]:
+    """100 x 100 x 100: passes every per-level cap, about a million nodes."""
+    return {
+        f"a{i}": {f"b{j}": list(range(100)) for j in range(100)} for i in range(100)
+    }
+
+
+class TestExportedMetadataIsAlwaysWritable:
+    def test_a_hostile_100_by_100_by_100_entry_exports_with_a_warning(
+        self, tmp_path: Path
+    ) -> None:
+        meta = _hostile_meta()
+        bundle = bundle_from_memory_entries(
+            [
+                {"id": "ok", "text": "fine", "metadata": {"source": "wiki"}},
+                {"id": "hostile", "text": "big", "metadata": meta},
+            ]
+        )
+
+        written = write_bundle(bundle, tmp_path / "kb")  # must not raise OKFError
+
+        assert len(written) == 3  # both entries and the index
+        cut = [i for i in bundle.issues if i.code == "metadata-truncated"]
+        assert len(cut) == 1 and "size" in cut[0].message
+        assert "memory entry 1" in cut[0].message
+
+    def test_what_survives_stays_inside_the_writer_node_cap(self) -> None:
+        meta = _hostile_meta()
+
+        (concept,) = bundle_from_memory_entries(
+            [{"id": "h", "text": "big", "metadata": meta}]
+        )
+
+        assert okf_module._lone_surrogate(concept.extra) is False  # no OKFError
+        assert concept.extra["metadata"]  # a cut, not a wipe
+
+    def test_a_normal_entry_is_unchanged_and_silent(self, tmp_path: Path) -> None:
+        meta = {"scores": _wide(30, 30), "source": "wiki", "tags": ["x", "y"]}
+
+        bundle = bundle_from_memory_entries(
+            [{"id": "a", "text": "hi", "metadata": meta}]
+        )
+
+        assert bundle.issues == []
+        (concept,) = bundle
+        assert concept.extra["metadata"] == {
+            "scores": _wide(30, 30),
+            "source": "wiki",
+        }
+        write_bundle(bundle, tmp_path / "kb")

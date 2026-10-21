@@ -10,10 +10,6 @@ can be written back unchanged.
 Spec status: OKF v0.2 at commit ad30107 of GoogleCloudPlatform/open-knowledge-format,
 pre-1.0 and mutable. The trust tier is a CLAIM the bundle makes about itself
 (a free ``verified[].by`` string), advisory only, never authorization.
-
-Entry points: ``parse_concept_text``, ``load_bundle``, ``OKFBundle``,
-``check_bundle``, ``write_bundle``, ``bundle_from_memory_entries`` and
-``create_okf_handler``.
 """
 
 from __future__ import annotations
@@ -41,6 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .__version__ import __version__
 from .constants import (
     OKF_EXPORT_TEXT_MAX_CHARS,
+    OKF_INCOMPLETE_NOTE,
     OKF_INDEX_MAX_CHARS,
     OKF_MAX_DEPTH,
     OKF_MAX_FILE_BYTES,
@@ -76,12 +73,10 @@ _VISIBLE_CATEGORIES = "LMNPS"
 def strip_unsafe_text(text: str, *, multiline: bool = False) -> str:
     """Remove what could drive a terminal or hide text from a reader.
 
-    Drops ANSI escape sequences, control characters (Cc) and format characters
-    (Cf: zero-width and bidi marks, BOM). Exception: ZWNJ, ZWJ and soft hyphen
-    stay when a letter, mark, number, punctuation or symbol sits on both sides
-    (so ``می‌خواهم`` and emoji sequences survive); at an edge, beside a space
-    or a dropped character they go. Each line break or tab becomes one space,
-    unless ``multiline`` keeps ``\\n`` and ``\\t``. Never raises.
+    Drops ANSI escapes, control (Cc) and format characters (Cf: zero-width and
+    bidi marks, BOM), except ZWNJ, ZWJ and soft hyphen between two visible
+    characters (so ``می‌خواهم`` and emoji sequences survive). Each line break or
+    tab becomes one space, unless ``multiline`` keeps ``\\n`` and ``\\t``.
     """
     if text.isascii() and text.isprintable():
         return text  # nothing to strip: the common case, fast
@@ -104,8 +99,6 @@ def strip_unsafe_text(text: str, *, multiline: bool = False) -> str:
 
 
 # --- Models ---
-
-
 class TrustTier(str, Enum):
     """Advisory trust label derived from ``verified[].by`` (a claim, not auth)."""
 
@@ -172,9 +165,8 @@ def parse_okf_datetime(value: object) -> tuple[datetime | None, str | None]:
     """Parse an OKF timestamp; return ``(aware datetime | None, warning code)``.
 
     Accepts ``Z``, ``+HH``, ``+HH:MM``, ``+HHMM`` and any fraction length. The
-    code is ``None`` for the conformant form (explicit UTC offset),
-    ``"date-only"`` (midnight UTC), ``"naive"`` (read as UTC) or ``"invalid"``
-    (datetime is ``None``).
+    code is ``None`` (explicit UTC offset), ``"date-only"`` (midnight UTC),
+    ``"naive"`` (read as UTC) or ``"invalid"`` (datetime is ``None``).
     """
     if isinstance(value, datetime):
         if value.tzinfo is None:
@@ -213,8 +205,7 @@ class OKFConcept(BaseModel):
     """One concept document. ``id`` is the file path minus ``.md``.
 
     Values are kept as read (timestamps stay strings, unknown keys stay in
-    ``extra``) so a write-back is faithful. ``type`` is ``""`` when the document
-    gave none (an error issue, not a rejection).
+    ``extra``); ``type`` is ``""`` when the document gave none (an error issue).
     """
 
     id: str
@@ -467,9 +458,8 @@ def _check_timestamps(
 def parse_concept_text(concept_id: str, text: str) -> tuple[OKFConcept, list[OKFIssue]]:
     """Parse one concept document. Never raises on content.
 
-    Returns the concept (``type == ""`` when the document gave none) and the
-    issues found. Without usable frontmatter the text is the body; timestamps
-    stay as written. An unexpected failure becomes an error issue.
+    Returns the concept and the issues found. Without usable frontmatter the
+    text is the body. An unexpected failure becomes an error issue.
     """
     issues: list[OKFIssue] = []
     warnings = 0
@@ -622,9 +612,8 @@ def _link_candidates(target: object, from_id: str) -> _Ids:
     """Concept ids a link or path-valued key may name, best first (D-003).
 
     ``/``-prefixed is bundle-root relative; else file-relative (spec 6.2), then
-    root relative (spec 6.3). Fragment and query are dropped, the rest
-    percent-decoded once; external, non-``.md`` and above-root targets give
-    nothing. SECURITY: lexical, in id space; never touches the filesystem.
+    root relative (spec 6.3). Fragment and query dropped, the rest percent-decoded
+    once; external, non-``.md`` and above-root targets give nothing. Lexical only.
     """
     if not isinstance(target, str) or len(target) > 4096:
         return []
@@ -662,7 +651,6 @@ def _resolve_path(target: str, directory: str) -> tuple[str, ...]:
 
 # --- Bundle ---
 
-
 _CHECK_DEADLINE = OKFIssue(  # frozen, so one instance serves every bundle
     severity="error",
     code="check-deadline",
@@ -693,6 +681,7 @@ class OKFBundle:
           outgoing covers body links, ``resource`` and ``sources[].resource``.
           A ``backlinks`` build past ``max_seconds`` adds one ``check-deadline``
           issue and answers from the part built.
+        - ``incomplete`` -> the ``INCOMPLETE_CODES`` in ``issues`` (a load stop).
         - ``put(concept)`` adds or replaces and invalidates every cache.
         Nothing here raises on bundle content or touches the filesystem.
     """
@@ -718,6 +707,11 @@ class OKFBundle:
         self._reset()
         for concept in concepts:
             self.put(concept)
+
+    @property
+    def incomplete(self) -> tuple[str, ...]:
+        seen = {i.code for i in self.issues}
+        return tuple(c for c in INCOMPLETE_CODES if c in seen)
 
     def _deadline(self) -> float:
         return time.monotonic() + (self.max_seconds or math.inf)
@@ -857,6 +851,15 @@ _LOAD_PROBLEMS: dict[str, tuple[Literal["error", "warning", "info"], str]] = {
 }
 
 
+INCOMPLETE_CODES = ("max-total-bytes", "max-files", "load-deadline", "check-deadline")
+
+
+def incomplete_note(bundle: OKFBundle) -> str:
+    """The fixed note for a partial bundle (codes only, no issue text); else ``""``."""
+    codes = bundle.incomplete
+    return OKF_INCOMPLETE_NOTE.format(codes=", ".join(codes)) if codes else ""
+
+
 def _capped(issues: list[OKFIssue]) -> list[OKFIssue]:
     """At most ``OKF_MAX_ISSUES`` issues; errors are kept before warnings, info."""
     if len(issues) <= OKF_MAX_ISSUES:
@@ -878,11 +881,9 @@ def _read_bytes(path: Path, limit: int) -> bytes:
 def load_bundle(
     path: str | os.PathLike[str], *, limits: OKFLimits | None = None
 ) -> OKFBundle:
-    """Load the bundle under *path*. Raises ``OKFError`` only for the root.
-
-    A missing or non-directory root is an ``OKFError``, never created. Anything
-    else (oversize, non-UTF-8, symlinked, unsafe-named or unreadable files, a
-    spent limit, a failure on one file) becomes an ``OKFIssue``; the rest loads.
+    """Load the bundle under *path*. ``OKFError`` only for a missing root; every
+    other problem (oversize, non-UTF-8, symlinked, unsafe-named or unreadable
+    files, a spent limit) becomes an ``OKFIssue`` and the rest loads.
 
     Interface contract:
         - Files are visited in sorted order; only exact ``.md`` names count.
@@ -1066,19 +1067,16 @@ def load_bundle(
 
 
 # --- Conformance (spec section 11) ---
-
-
 def check_bundle(bundle: OKFBundle) -> list[OKFIssue]:
     """Spec section 11 conformance as a list of issues. Never raises.
 
     The load-time issues plus model-level checks that also cover concepts
     added with ``put``: a non-empty ``type``, no reserved concept id, timestamp
     forms without an explicit UTC offset (warnings), broken internal links
-    (info: consumers must tolerate them) and an unknown ``okf_version`` (info).
-    Duplicates are dropped; the result is capped like ``load_bundle``'s. At most
-    ``_MAX_LINK_ISSUES`` broken links per concept (twice ``OKF_MAX_ISSUES`` in
-    all) are reported, then one ``issues-truncated`` note. A bundle loaded with
-    ``max_seconds`` is checked for that long at most, then ``check-deadline``.
+    (info) and an unknown ``okf_version`` (info). Duplicates are dropped; the
+    result is capped like ``load_bundle``'s, at most ``_MAX_LINK_ISSUES`` broken
+    links per concept (twice ``OKF_MAX_ISSUES`` in all), then one
+    ``issues-truncated``. Checked for ``max_seconds`` at most, then ``check-deadline``.
     """
     out = list(bundle.issues)
     seen = {(i.code, i.path, i.id, i.message) for i in out}
@@ -1281,11 +1279,8 @@ def _target_problem(root: Path, rel: str) -> str | None:
 # `agents/semantic_memory.py` anchor and the layering rule forbid both), and do
 # NOT widen the cleanup to `except BaseException`.
 def _atomic_write(path: Path, data: bytes) -> None:
-    """Write *data* (encoded while validating) to *path* via a temp file, rename.
-
-    Mirrors ``session.FileSessionStore.save``; the temp file is removed on ANY
-    failure.
-    """
+    """Write *data* to *path* via a temp file and rename (as
+    ``session.FileSessionStore.save``); the temp file is removed on ANY failure."""
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".okf-tmp")
     try:
         with os.fdopen(fd, "wb") as handle:
@@ -1324,11 +1319,9 @@ def write_bundle(
           directory component is refused even with ``overwrite=True``. An
           existing file is replaced only with ``overwrite=True``.
         - ``write_index`` adds a root ``index.md`` (``okf_version: "0.2"``, a
-          bullet per concept under a ``# <type>`` heading); an existing one is
-          kept unless ``overwrite=True``.
+          bullet per concept per ``# <type>``); kept if it exists, unless ``overwrite``.
         - Atomic PER FILE (temp file, fsync, rename), not per bundle: an I/O
-          failure midway leaves the files already written. A parent directory
-          swapped for a symlink after validation still wins.
+          failure midway leaves the files already written.
     """
     try:
         root = Path(path).resolve()
@@ -1399,11 +1392,20 @@ _MAX_META_TEXT = 2_000
 _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
-def _native(value: Any, cuts: set[str], depth: int = 0) -> Any:
+def _native(
+    value: Any, cuts: set[str], depth: int = 0, left: list[int] | None = None
+) -> Any:
     """JSON-native copy of *value* or ``_DROP``; secret-looking and internal
-    keys at any depth are removed (``security`` decides). Each real cut adds
-    "depth", "items", "text" or "values" (non-JSON value, non-string key) to
-    *cuts*; a replaced lone surrogate adds "surrogates"."""
+    keys are removed. Each real cut adds "depth", "items", "size" (node budget),
+    "text" or "values" to *cuts*; a replaced lone surrogate adds "surrogates"."""
+    # DECISION plan-2026-10-21T140931-095ea5f8/D-018
+    # A quarter of the writer's node cap (it counts a mapping item twice), so one
+    # hostile entry never fails a whole export. Do NOT raise it or drop it.
+    left = [OKF_MAX_FRONTMATTER_BYTES // 4] if left is None else left
+    left[0] -= 1
+    if left[0] < 0:
+        cuts.add("size")
+        return _DROP
     if value is None or isinstance(value, (bool, int)):
         return value
     if isinstance(value, float):
@@ -1431,12 +1433,14 @@ def _native(value: Any, cuts: set[str], depth: int = 0) -> Any:
                 elif (
                     not has_internal_prefix(key)
                     and not is_forbidden_context_entry(key, item)
-                    and (clean := _native(item, cuts, depth + 1)) is not _DROP
+                    and (clean := _native(item, cuts, depth + 1, left)) is not _DROP
                 ):
                     out[_native(key, cuts)] = clean
             return out
-        items = (_native(v, cuts, depth + 1) for v in islice(value, _MAX_META_ITEMS))
-        return [v for v in items if v is not _DROP]
+        kids = (
+            _native(v, cuts, depth + 1, left) for v in islice(value, _MAX_META_ITEMS)
+        )
+        return [v for v in kids if v is not _DROP]
     cuts.add("values")
     return _DROP
 
@@ -1484,11 +1488,10 @@ def bundle_from_memory_entries(
     """Turn memory entries (plain mappings) into an in-memory ``OKFBundle``.
 
     Interface contract:
-        - ``entries``: mappings shaped like ``SemanticMemoryStore`` entries,
-          ``{id, text, metadata, embedding}``; only ``id``, ``text`` and
-          ``metadata`` are read, embeddings are NEVER exported. A non-mapping
-          entry or a missing, blank or non-string ``text`` is skipped with a
-          warning ``OKFIssue`` on ``bundle.issues``; nothing raises.
+        - ``entries``: mappings shaped like ``SemanticMemoryStore`` entries;
+          only ``id``, ``text`` and ``metadata`` are read, embeddings NEVER. A
+          non-mapping entry or a missing, blank or non-string ``text`` is
+          skipped with a warning ``OKFIssue`` on ``bundle.issues``; nothing raises.
         - Concept id ``memory/<slug of the entry id>`` (characters outside
           ``A-Za-z0-9._-`` become ``-``, at most 80); a repeated slug gets
           ``-2``, ``-3``, so a hostile id cannot shape the path.
@@ -1499,12 +1502,11 @@ def bundle_from_memory_entries(
           ``OKF_EXPORT_TEXT_MAX_CHARS`` with a warning). A lone surrogate in the
           text, id or kept metadata becomes U+FFFD (``text-sanitized``).
         - The other metadata goes under ``extra["metadata"]`` as JSON-native
-          data cut at depth 4, 100 items per list or mapping and 2,000
-          characters per string; non-JSON values and non-string keys are
-          dropped. ONE ``metadata-truncated`` warning per entry names what was
-          cut (depth, items, text, values). Entries failing
-          ``is_forbidden_context_entry`` or internal-prefixed are dropped at any
-          depth without a warning.
+          data cut at depth 4, 100 items per level, 2,000 characters per string
+          and 4,096 nodes in all (so it is always writable); non-JSON values
+          and non-string keys are dropped. ONE ``metadata-truncated`` warning
+          per entry names the cuts (depth, items, size, text, values). Secret
+          or internal-prefixed keys are dropped at any depth, silently.
         - ``generated`` is ``{by: generated_by or "fsm-llm/<version>", at: now
           or the current time}`` with an explicit UTC offset. There is no
           ``verified``, so every export is ``unverified``.
@@ -1567,8 +1569,6 @@ def bundle_from_memory_entries(
 
 
 # --- Plain-FSM handler ---
-
-
 def create_okf_handler(
     bundle: OKFBundle,
     *,

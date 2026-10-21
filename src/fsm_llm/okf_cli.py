@@ -33,6 +33,7 @@ import math
 import os
 import sys
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +54,7 @@ from .okf import (
     capped_line,
     check_bundle,
     close_ids,
+    incomplete_note,
     load_bundle,
     write_bundle,
 )
@@ -64,6 +66,15 @@ _MAX_STORE_BYTES = 64 * 1024 * 1024
 _MAX_ID_ARG_CHARS = 500
 _HEADER_FIELD_CHARS = 500
 _SEVERITIES = ("error", "warning", "info")
+
+
+def _escape_unencodable_output() -> None:
+    """Make stdout and stderr write text they cannot encode as ``\\uXXXX``, not
+    raise. Process-level and never undone; a stream without ``reconfigure`` is
+    left alone."""
+    for stream in (sys.stdout, sys.stderr):
+        with suppress(AttributeError, ValueError):  # io.UnsupportedOperation too
+            stream.reconfigure(errors="backslashreplace")  # type: ignore[union-attr]
 
 
 def _err(message: str) -> None:
@@ -82,8 +93,12 @@ def _positive_seconds(text: str) -> float:
 
 
 def _load(args: argparse.Namespace) -> OKFBundle:
-    """Load ``args.path`` within the ``--max-seconds`` budget."""
-    return load_bundle(args.path, limits=OKFLimits(max_seconds=args.max_seconds))
+    """Load ``args.path`` within the ``--max-seconds`` budget. A stopped load is
+    flagged on stderr (``validate`` reports the issue itself)."""
+    bundle = load_bundle(args.path, limits=OKFLimits(max_seconds=args.max_seconds))
+    if args.command != "validate" and (note := incomplete_note(bundle)):
+        print(note, file=sys.stderr)
+    return bundle
 
 
 # --------------------------------------------------------------
@@ -292,7 +307,14 @@ def main(argv: Sequence[str] | None = None) -> int:
           ``SystemExit`` from argparse, as for every other console script.
         - Never raises for bundle, file or I/O problems: an ``OKFError`` or
           ``OSError`` becomes one stderr line and exit 1.
+        - Text the terminal cannot encode (a CJK title on an ASCII or cp1252
+          console) is written as ``\\uXXXX`` escapes, never a traceback; the
+          standard streams are reconfigured for the rest of the process.
+        - A bundle whose load was stopped (a spent time or size limit) prints
+          one fixed note on stderr from ``list``, ``show`` and ``search``, and
+          still exits 0; ``validate`` reports the error issue instead.
     """
+    _escape_unencodable_output()
     args = _build_parser().parse_args(argv)
     try:
         return int(args.func(args))

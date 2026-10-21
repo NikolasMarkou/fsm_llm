@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib
+import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -972,3 +974,155 @@ class TestCheckPhaseAndExportWarnings:
         assert code == 0, err
         assert err.count("metadata-truncated") == 1 and "depth" in err
         assert "wrote 3 files" in out
+
+
+# --------------------------------------------------------------
+# Step 7.3 (D-018): an incomplete bundle is flagged; output encoding never fails
+# --------------------------------------------------------------
+
+_NOTE = (
+    "Note: this bundle was loaded incompletely (load-deadline); results may be missing."
+)
+
+
+class TestIncompleteBundleNote:
+    @pytest.fixture
+    def cut_bundle(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """Five concepts of which a 2.5 s budget loads three (1 s of fake time each)."""
+        root = _write(
+            tmp_path / "kb", {f"{n}.md": _doc(body="text\n") for n in "abcde"}
+        )
+        clock = _FakeClock()
+        real = okf_module.parse_concept_text
+
+        def slow(cid: str, text: str) -> Any:
+            clock.now += 1.0
+            return real(cid, text)
+
+        monkeypatch.setattr(okf_module, "time", clock)
+        monkeypatch.setattr(okf_module, "parse_concept_text", slow)
+        return root
+
+    @pytest.mark.parametrize(
+        "argv",
+        [("list",), ("show", "a"), ("search", "text")],
+        ids=["list", "show", "search"],
+    )
+    def test_reading_commands_print_the_note_to_stderr_and_exit_0(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        cut_bundle: Path,
+        argv: tuple[str, ...],
+    ) -> None:
+        code, out, err = _run(
+            capsys, argv[0], cut_bundle, *argv[1:], "--max-seconds", "2.5"
+        )
+
+        assert code == 0
+        assert _NOTE in err.splitlines()
+        assert "incompletely" not in out  # the report stays clean for pipes
+
+    def test_validate_reports_the_issue_itself_and_adds_no_note(
+        self, capsys: pytest.CaptureFixture[str], cut_bundle: Path
+    ) -> None:
+        code, out, err = _run(capsys, "validate", cut_bundle, "--max-seconds", "2.5")
+
+        assert code == 1
+        assert "error load-deadline" in out
+        assert "incompletely" not in out + err
+
+    @pytest.mark.parametrize("cmd", ["list", "search"])
+    def test_a_complete_bundle_prints_no_note(
+        self, capsys: pytest.CaptureFixture[str], clean_bundle: Path, cmd: str
+    ) -> None:
+        extra = ["orders"] if cmd == "search" else []
+        code, _out, err = _run(capsys, cmd, clean_bundle, *extra)
+
+        assert code == 0 and "incompletely" not in err
+
+
+_CJK_TITLE = "网关 café \U0001f600"
+
+
+@pytest.fixture
+def cjk_bundle(tmp_path: Path) -> Path:
+    return _write(
+        tmp_path / "kb",
+        {
+            "gw.md": _doc(
+                "Guide", f"{_CJK_TITLE} text\n[x](/缺失.md)\n", title=_CJK_TITLE
+            ),
+        },
+    )
+
+
+class TestOutputEncodingNeverFails:
+    @pytest.mark.parametrize("encoding", ["ascii", "cp1252"])
+    @pytest.mark.parametrize(
+        "argv",
+        [("list",), ("show", "gw"), ("search", "text"), ("validate",)],
+        ids=lambda a: a[0],
+    )
+    def test_the_console_script_never_raises_for_unencodable_text(
+        self, cjk_bundle: Path, encoding: str, argv: tuple[str, ...]
+    ) -> None:
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONUTF8"}
+        env["PYTHONIOENCODING"] = encoding
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "fsm_llm.okf_cli",
+                argv[0],
+                str(cjk_bundle),
+                *argv[1:],
+            ],
+            capture_output=True,
+            timeout=120,
+            cwd=_REPO,
+            env=env,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert b"Traceback" not in result.stderr
+        shown = result.stdout + result.stderr
+        if argv[0] != "validate":
+            assert b"\\u7f51\\u5173" in shown  # escaped, not lost
+
+    def test_main_called_directly_survives_a_strict_ascii_stream(
+        self, cjk_bundle: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        premise = io.TextIOWrapper(io.BytesIO(), encoding="ascii", errors="strict")
+        with pytest.raises(UnicodeEncodeError):  # a strict ascii stream really fails
+            premise.write("\u7f51")
+        raw_out, raw_err = io.BytesIO(), io.BytesIO()
+        out = io.TextIOWrapper(raw_out, encoding="ascii", errors="strict")
+        err = io.TextIOWrapper(raw_err, encoding="ascii", errors="strict")
+        monkeypatch.setattr(sys, "stdout", out)
+        monkeypatch.setattr(sys, "stderr", err)
+
+        code = main(["list", str(cjk_bundle)])
+        out.flush()
+
+        assert code == 0
+        assert b"\\u7f51\\u5173" in raw_out.getvalue()
+
+    def test_a_stream_that_cannot_be_reconfigured_is_left_alone(
+        self, clean_bundle: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class Stubborn(io.StringIO):
+            def reconfigure(self, **_kw: Any) -> None:
+                raise io.UnsupportedOperation("reconfigure")
+
+        class Plain:  # no reconfigure at all
+            def write(self, text: str) -> int:
+                return len(text)
+
+            def flush(self) -> None:
+                return None
+
+        for stream in (Stubborn(), Plain()):
+            monkeypatch.setattr(sys, "stdout", stream)
+            monkeypatch.setattr(sys, "stderr", Stubborn())
+
+            assert main(["list", str(clean_bundle)]) == 0
