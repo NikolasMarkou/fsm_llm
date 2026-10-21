@@ -186,9 +186,8 @@ def parse_okf_datetime(value: object) -> tuple[datetime | None, str | None]:
             return value.replace(tzinfo=timezone.utc), "naive"
         return value, None
     if isinstance(value, date):
-        return datetime(value.year, value.month, value.day, tzinfo=timezone.utc), (
-            "date-only"
-        )
+        midnight = datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+        return midnight, "date-only"
     match = _TS_RE.fullmatch(value.strip()) if isinstance(value, str) else None
     if match is None:
         return None, "invalid"
@@ -203,15 +202,9 @@ def parse_okf_datetime(value: object) -> tuple[datetime | None, str | None]:
                 digits = zone[1:].replace(":", "")
                 delta = timedelta(hours=int(digits[:2]), minutes=int(digits[2:] or 0))
                 tz = timezone(-delta if zone[0] == "-" else delta)
-        parsed = datetime(
-            int(year),
-            int(month),
-            int(day),
-            int(hour or 0),
-            int(minute or 0),
-            int(second or 0),
-            micro,
-        )
+        nums = (year, month, day, hour or 0, minute or 0, second or 0)
+        y, mo, d, h, mi, sec = map(int, nums)
+        parsed = datetime(y, mo, d, h, mi, sec, micro)
     except ValueError:
         return None, "invalid"
     if hour is None:
@@ -364,10 +357,8 @@ def _split_frontmatter(text: str) -> tuple[str | None, str, str | None]:
 
 
 def _flow_depth_exceeded(raw: str) -> bool:
-    """PyYAML's scanner is quadratic on deeply nested ``[``/``{``: bound it first.
-
-    Brackets in quoted scalars count too (a false positive costs one concept).
-    """
+    """PyYAML's scanner is quadratic on nested ``[``/``{``: bound it first (quoted
+    brackets count too; a false positive costs one concept)."""
     depth = 0
     for ch in raw:
         if ch in "[{":
@@ -645,14 +636,12 @@ def _body_links(body: str) -> Iterator[str]:
 def _link_candidates(target: object, from_id: str) -> _Ids:
     """Concept ids a link or path-valued key may name, best first (D-003).
 
-    A ``/``-prefixed target is bundle-root relative. A relative target is tried
-    file-relative first (spec 6.2), then bundle-root relative (spec 6.3 and the
-    reference bundles, issue #29). The fragment and query are dropped, the rest
-    is percent-decoded once, external schemes and non-``.md`` targets give
-    nothing, and a target that climbs above the root is not a candidate.
+    A ``/``-prefixed target is bundle-root relative; a relative one is tried
+    file-relative (spec 6.2), then root relative (spec 6.3, issue #29). The
+    fragment and query are dropped, the rest percent-decoded once; external
+    schemes, non-``.md`` and above-root targets give nothing.
 
-    SECURITY: lexical on purpose. It works in id space and never touches the
-    filesystem, so nothing here can read outside the bundle.
+    SECURITY: lexical, in id space; it never touches the filesystem.
     """
     if not isinstance(target, str) or len(target) > 4096:
         return []
@@ -1142,9 +1131,7 @@ class _OKFDumper(yaml.SafeDumper):
 
 def _iso(value: datetime) -> str:
     """ISO 8601 with an explicit UTC offset; a naive value is taken as UTC."""
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.isoformat()
+    return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).isoformat()
 
 
 def _plain(value: Any) -> Any:
@@ -1162,14 +1149,22 @@ def _plain(value: Any) -> Any:
 
 
 def _lone_surrogate(value: Any) -> bool:
-    """True when a string, key or item anywhere in *value* is a lone surrogate."""
-    if isinstance(value, str):
-        return bool(_SURROGATE_RE.search(value))
-    if isinstance(value, Mapping):
-        value = [*value, *value.values()]
-    return isinstance(value, (list, tuple, set, frozenset)) and any(
-        map(_lone_surrogate, value)
-    )
+    """True when a string, key or item in *value* is a lone surrogate. Iterative;
+    ``OKFError`` past ``OKF_MAX_YAML_DEPTH`` (a cycle ends there) or
+    ``OKF_MAX_FRONTMATTER_BYTES`` nodes (each costs a byte of frontmatter)."""
+    stack, nodes = [(value, 0)], 0
+    while stack:
+        item, depth = stack.pop()
+        if isinstance(item, str):
+            if _SURROGATE_RE.search(item):
+                return True
+        elif isinstance(item, (Mapping, list, tuple, set, frozenset)):
+            kids = [*item, *item.values()] if isinstance(item, Mapping) else item
+            nodes += len(kids)
+            if depth >= OKF_MAX_YAML_DEPTH or nodes > OKF_MAX_FRONTMATTER_BYTES:
+                raise OKFError("too deep, too large or cyclic")
+            stack.extend((kid, depth + 1) for kid in kids)
+    return False
 
 
 def _render_concept(concept: OKFConcept) -> bytes:
@@ -1204,6 +1199,7 @@ def _render_concept(concept: OKFConcept) -> bytes:
         front["stale_after"] = concept.stale_after
     front.update(extra)
     try:
+        lone = _lone_surrogate(front)  # before anything recurses over it
         plain = _plain(front)
         dumped = yaml.dump(
             plain,
@@ -1212,15 +1208,13 @@ def _render_concept(concept: OKFConcept) -> bytes:
             allow_unicode=True,
             default_flow_style=False,
         )
-    except (yaml.YAMLError, RecursionError) as exc:
+    except (yaml.YAMLError, RecursionError, OKFError) as exc:
+        why = exc if isinstance(exc, OKFError) else type(exc).__name__
         raise OKFError(
-            f"concept {concept.id!r}: frontmatter cannot be written "
-            f"({type(exc).__name__})"
+            f"concept {concept.id!r}: frontmatter cannot be written ({why})"
         ) from exc
-    body = concept.body
-    if body and not body.endswith("\n"):
-        body += "\n"
-    if _lone_surrogate(plain) or _SURROGATE_RE.search(body):  # YAML would escape it
+    body = concept.body + ("\n" if concept.body and concept.body[-1] != "\n" else "")
+    if lone or _SURROGATE_RE.search(body):  # YAML would escape it
         raise OKFError(f"concept {concept.id!r}: holds a lone surrogate (not UTF-8)")
     return f"---\n{dumped}---\n{body}".encode()
 
@@ -1236,19 +1230,18 @@ def _render_index(bundle: OKFBundle) -> str:
         groups.setdefault(heading, []).append(
             f"{line} - {desc[:OKF_SUMMARY_FIELD_CHARS]}" if desc else line
         )
-    sections = [
-        f"# {name}\n\n" + "\n".join(groups[name]) + "\n" for name in sorted(groups)
-    ]
-    return '---\nokf_version: "0.2"\n---\n' + "\n".join(sections)
+    head = '---\nokf_version: "0.2"\n---\n'
+    return head + "\n".join(
+        f"# {n}\n\n" + "\n".join(groups[n]) + "\n" for n in sorted(groups)
+    )
 
 
 def _target_problem(root: Path, rel: str) -> str | None:
     """Why ``root/rel`` may not be written, or ``None``.
 
-    SECURITY: ``security.resolve_within`` is the only confinement check. On top
-    of "stays inside" the resolved path must EQUAL the lexical one, so a
-    symlinked directory component or target (even one pointing inside the
-    root) is refused, and no ancestor may be a regular file.
+    SECURITY: ``security.resolve_within`` is the only confinement check; the
+    resolved path must also EQUAL the lexical one, so any symlinked component
+    or target is refused, and no ancestor may be a regular file.
     """
     lexical = root.joinpath(*rel.split("/"))
     try:
@@ -1281,8 +1274,8 @@ def _target_problem(root: Path, rel: str) -> str | None:
 def _atomic_write(path: Path, data: bytes) -> None:
     """Write *data* (encoded while validating) to *path* via a temp file, rename.
 
-    Mirrors ``session.FileSessionStore.save``. The suffix is not ``.md``, so a
-    crash never leaves a loadable file; a ``finally`` removes it on ANY failure.
+    Mirrors ``session.FileSessionStore.save``. The suffix is not ``.md`` and a
+    ``finally`` removes the temp file on ANY failure.
     """
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".okf-tmp")
     try:
@@ -1315,13 +1308,14 @@ def write_bundle(
         - Every id and target is validated and every file rendered AND encoded
           BEFORE the first byte is written, so a bad id (empty, absolute, a
           dot-prefixed segment, control characters, ``index``/``log``), a
-          lookalike id (``_id_key``), a lone surrogate, an over-long path or a
-          file and a directory sharing a path (ids ``q`` and ``q.md/z``) leave
-          the directory untouched (``OKFError`` naming them, capped).
+          lookalike id (``_id_key``), a lone surrogate, a frontmatter value too
+          deep, large or cyclic (``OKF_MAX_YAML_DEPTH``,
+          ``OKF_MAX_FRONTMATTER_BYTES`` nodes), an over-long path or a file and
+          a directory sharing a path leave the directory untouched (``OKFError``
+          naming them, capped).
         - Each target passes ``security.resolve_within``; a symlinked target or
           directory component is refused even with ``overwrite=True``. An
-          existing file is replaced only with ``overwrite=True``. A root that is
-          a file is refused.
+          existing file is replaced only with ``overwrite=True``.
         - ``write_index`` adds a root ``index.md`` (``okf_version: "0.2"``, a
           bullet per concept under a ``# <type>`` heading); an existing one is
           kept unless ``overwrite=True``.
@@ -1459,9 +1453,7 @@ def close_ids(
 
 
 def _slug(raw: object) -> str:
-    slug = _SLUG_RE.sub("-", str(raw)[:200]).strip("-.")[:80].strip("-.")
-    if not slug:
-        return "entry"
+    slug = _SLUG_RE.sub("-", str(raw)[:200]).strip("-.")[:80].strip("-.") or "entry"
     return f"entry-{slug}" if slug.casefold() in ("index", "log") else slug
 
 
@@ -1488,7 +1480,9 @@ def bundle_from_memory_entries(
           metadata ``tags`` list. The body is the text (cut at
           ``OKF_EXPORT_TEXT_MAX_CHARS`` with a warning). A lone surrogate in the
           text or any metadata string or key becomes U+FFFD, with a
-          ``text-sanitized`` warning.
+          ``text-sanitized`` warning. Metadata too deep or large to scan (over
+          ``OKF_MAX_YAML_DEPTH`` or ``OKF_MAX_FRONTMATTER_BYTES`` nodes, or
+          cyclic) is cut by the sanitiser with a ``metadata-truncated`` warning.
         - Other JSON-native metadata goes under ``extra["metadata"]``; entries
           failing ``is_forbidden_context_entry`` or internal-prefixed are
           dropped at any depth, as are non-JSON values.
@@ -1520,14 +1514,20 @@ def bundle_from_memory_entries(
         if len(text) > OKF_EXPORT_TEXT_MAX_CHARS:
             text = text[:OKF_EXPORT_TEXT_MAX_CHARS]
             skip(index, "text was cut", "text-truncated")
-        if _lone_surrogate(entry):
-            text = _unlone(text)
-            skip(index, "lone surrogates replaced with U+FFFD", "text-sanitized")
         raw_meta = entry.get("metadata")
         meta = _native(dict(raw_meta)) if isinstance(raw_meta, Mapping) else {}
+        ident = i if isinstance(i := entry.get("id", ""), (str, int, float)) else ""
+        try:  # the sanitised `meta` above is capped; this scan is too
+            dirty = _lone_surrogate((text, ident, raw_meta))
+        except OKFError:
+            skip(index, "metadata cut, too deep or large", "metadata-truncated")
+            dirty = _lone_surrogate((text, ident))
+        if dirty:
+            text = _unlone(text)
+            skip(index, "lone surrogates replaced with U+FFFD", "text-sanitized")
         type_, title, tags = (meta.pop(k, None) for k in ("type", "title", "tags"))
         first_line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
-        base = _slug(entry.get("id", ""))
+        base = _slug(ident)
         slug, n = base, 1
         while slug.casefold() in used:
             n += 1

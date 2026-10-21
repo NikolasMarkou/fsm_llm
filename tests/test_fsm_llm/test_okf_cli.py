@@ -787,3 +787,47 @@ class TestSharedHelpersAndIssueCap:
     ) -> None:
         code, _, err = _run(capsys, "show", clean_bundle, "orderz")
         assert code == 1 and "did you mean:" in err
+
+
+# --------------------------------------------------------------
+# Step 4.2: export of hostile metadata exits cleanly (D-017 item 1)
+# --------------------------------------------------------------
+
+
+def _deep_store(path: Path, depth: int) -> Path:
+    # built by string repetition: json.dumps on a deep structure recurses itself
+    path.write_text(
+        '{"entries":[{"id":"a","text":"hi","metadata":{"m":'
+        + "[" * depth
+        + "]" * depth
+        + '}},{"id":"b","text":"second"}]}',
+        encoding="utf-8",
+    )
+    return path
+
+
+class TestExportOfDeepMetadata:
+    @pytest.mark.parametrize("depth", [500, 800])
+    def test_metadata_json_can_parse_is_cut_and_both_entries_are_written(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], depth: int
+    ) -> None:
+        store = _deep_store(tmp_path / "store.json", depth)
+
+        code, out, err = _run(capsys, "export", store, tmp_path / "kb")
+
+        assert code == 0, err
+        assert "wrote 3 files" in out
+        assert sorted(c.id for c in load_bundle(tmp_path / "kb")) == [
+            "memory/a",
+            "memory/b",
+        ]
+
+    def test_metadata_json_itself_cannot_parse_exits_one_without_a_traceback(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        store = _deep_store(tmp_path / "store.json", 5_000)
+
+        code, out, err = _run(capsys, "export", store, tmp_path / "kb")
+
+        assert code == 1 and out == ""
+        assert err.startswith("fsm-llm-okf:") and "Traceback" not in err

@@ -329,6 +329,7 @@ class TestYamlSafety:
         started = time.perf_counter()
         concept, codes = _parse(text)
 
+        # smoke bound, deliberately loose: decisions.md D-017 item 6
         assert time.perf_counter() - started < 5.0
         assert codes[0] == "frontmatter-invalid"
         assert concept.extra == {}
@@ -344,6 +345,7 @@ class TestYamlSafety:
         started = time.perf_counter()
         concept, codes = _parse(text)
 
+        # smoke bound, deliberately loose: decisions.md D-017 item 6
         assert time.perf_counter() - started < 5.0
         assert codes[0] == "frontmatter-too-deep"
         assert concept.body == "body\n"
@@ -352,6 +354,7 @@ class TestYamlSafety:
         started = time.perf_counter()
         _, codes = _parse("type: T\nk: " + "{a: [" * 2500 + "\n")
 
+        # smoke bound, deliberately loose: decisions.md D-017 item 6
         assert time.perf_counter() - started < 5.0
         assert codes[0] == "frontmatter-too-deep"
 
@@ -361,6 +364,7 @@ class TestYamlSafety:
         started = time.perf_counter()
         _, codes = _parse("type: T\n" + lines + " " * 700 + "v: 1\n")
 
+        # smoke bound, deliberately loose: decisions.md D-017 item 6
         assert time.perf_counter() - started < 5.0
         # Block nesting deep enough to recurse is far above the frontmatter size
         # bound, so that bound is what stops it.
@@ -834,6 +838,7 @@ class TestFrontmatterSizeBound:
         started = time.perf_counter()
         concept, issues = parse_concept_text("a", f"---\ntype: T\n{raw}---\nbody\n")
 
+        # smoke bound, deliberately loose: decisions.md D-017 item 6
         assert time.perf_counter() - started < 5.0
         assert concept.type == ""
         assert concept.body == "body\n"
@@ -1075,6 +1080,7 @@ class TestLoader:
         started = time.perf_counter()
         bundle = load_bundle(tmp_path)
 
+        # smoke bound, deliberately loose: decisions.md D-017 item 6
         assert time.perf_counter() - started < 5.0
         assert len(bundle) == 500
         assert bundle.issues == []
@@ -1235,6 +1241,7 @@ class TestSymlink:
         started = time.perf_counter()
         bundle = load_bundle(tmp_path)
 
+        # smoke bound, deliberately loose: decisions.md D-017 item 6
         assert time.perf_counter() - started < 5.0
         assert [c.id for c in bundle] == ["d/a"]
         assert _codes(bundle).count("symlink-skipped") == 2
@@ -1486,6 +1493,7 @@ class TestOutgoingAndBacklinks:
         for body in bodies:
             _mem(a=body).outgoing("a")
 
+        # smoke bound, deliberately loose: decisions.md D-017 item 6
         assert time.perf_counter() - started < 5.0
 
     def test_the_number_of_links_read_from_one_body_is_capped(self) -> None:
@@ -1610,6 +1618,7 @@ class TestListAndSearch:
         started = time.perf_counter()
         bundle.search("orders " * 100_000)
 
+        # smoke bound, deliberately loose: decisions.md D-017 item 6
         assert time.perf_counter() - started < 5.0
 
     def test_put_refreshes_the_search_index(self, bundle: OKFBundle) -> None:
@@ -3103,6 +3112,7 @@ class TestCreateOkfHandlerQuery:
         handler = create_okf_handler(self._bundle(), query_key="q")
         started = time.monotonic()
         ids = self._ids(handler, {"q": "pricing " + "x" * 5_000_000})
+        # smoke bound, deliberately loose: decisions.md D-017 item 6
         assert time.monotonic() - started < 5
         assert ids[0] in ("a", "c")
 
@@ -4160,3 +4170,161 @@ class TestSharedCoreHelpers:
         assert okf_module.close_ids(bundle, "zzzzzz") == []
         assert "x" in okf_module.close_ids(bundle, "x", include_deprecated=True)
         assert "x" not in okf_module.close_ids(bundle, "x")
+
+
+# --------------------------------------------------------------
+# Step 4.2: the lone-surrogate scan is iterative and capped (D-017 item 1)
+# --------------------------------------------------------------
+
+
+def _nested(depth: int) -> list[Any]:
+    root: list[Any] = []
+    node = root
+    for _ in range(depth):
+        child: list[Any] = []
+        node.append(child)
+        node = child
+    return root
+
+
+def _cyclic_map() -> dict[str, Any]:
+    cyc: dict[str, Any] = {"a": 1}
+    cyc["self"] = cyc
+    return cyc
+
+
+def _cyclic_list() -> list[Any]:
+    cyc: list[Any] = ["x"]
+    cyc.append(cyc)
+    return cyc
+
+
+class TestExportOfHostileMetadataNeverRaises:
+    @pytest.mark.parametrize(
+        "meta",
+        [
+            {"deep": _nested(5_000)},
+            {"cyc": _cyclic_map()},
+            {"cyc": _cyclic_list()},
+            _cyclic_map(),
+        ],
+        ids=["deep-5000", "cyclic-mapping", "cyclic-list", "cyclic-top-level"],
+    )
+    def test_the_entry_is_kept_and_the_offending_metadata_cut_with_a_warning(
+        self, meta: dict[str, Any]
+    ) -> None:
+        bundle = bundle_from_memory_entries(
+            [
+                {"id": "a", "text": "hello", "metadata": meta},
+                {"id": "b", "text": "second", "metadata": {"title": "Second"}},
+            ]
+        )
+
+        assert [c.id for c in bundle] == ["memory/a", "memory/b"]
+        assert bundle.get("memory/a").body == "hello"
+        assert [i.code for i in bundle.issues] == ["metadata-truncated"]
+        assert bundle.issues[0].severity == "warning"
+        assert bundle.get("memory/b").title == "Second"
+
+    def test_the_hostile_bundle_still_writes_and_loads(self, tmp_path: Path) -> None:
+        bundle = bundle_from_memory_entries(
+            [{"id": "a", "text": "hello", "metadata": {"deep": _nested(5_000)}}]
+        )
+
+        write_bundle(bundle, tmp_path / "out")
+
+        assert len(load_bundle(tmp_path / "out")) == 1
+
+    def test_a_lone_surrogate_in_the_text_is_still_reported_next_to_it(self) -> None:
+        bundle = bundle_from_memory_entries(
+            [{"id": "a", "text": _LONE, "metadata": {"deep": _nested(5_000)}}]
+        )
+
+        assert sorted(i.code for i in bundle.issues) == [
+            "metadata-truncated",
+            "text-sanitized",
+        ]
+
+    @pytest.mark.parametrize("size", [100, 5_000])
+    def test_a_deep_or_cyclic_id_does_not_raise(self, size: int) -> None:
+        for ident in (_nested(size), _cyclic_list(), _cyclic_map()):
+            bundle = bundle_from_memory_entries([{"id": ident, "text": "hi"}])
+
+            assert [c.id for c in bundle] == ["memory/entry"]
+
+    def test_a_very_long_id_and_title_with_surrogates_is_cut_and_warned(
+        self, tmp_path: Path
+    ) -> None:
+        long = "\ud800" * 40_000
+        started = time.perf_counter()
+        bundle = bundle_from_memory_entries(
+            [{"id": long, "text": "hi " + long, "metadata": {"title": long}}]
+        )
+        # wall-clock bound loosened on purpose, see decisions.md D-017 item 6
+        assert time.perf_counter() - started < 5.0
+
+        (concept,) = list(bundle)
+        assert len(concept.id) <= len("memory/") + 80
+        assert "\ud800" not in (concept.title or "") + concept.body
+        assert [i.code for i in bundle.issues] == ["text-sanitized"]
+        write_bundle(bundle, tmp_path / "out")
+
+    def test_a_wide_structure_is_fast_and_cut(self) -> None:
+        wide = {"items": list(range(200_000)), **{f"k{i}": i for i in range(50_000)}}
+        started = time.perf_counter()
+        bundle = bundle_from_memory_entries(
+            [{"id": "a", "text": "hi", "metadata": wide}]
+        )
+        # wall-clock bound loosened on purpose, see decisions.md D-017 item 6
+        assert time.perf_counter() - started < 5.0
+
+        assert len(bundle) == 1
+        assert len(bundle.get("memory/a").extra["metadata"]["items"]) <= 100
+
+
+class TestWriteRefusesHostileFrontmatterValues:
+    @pytest.mark.parametrize("field", ["extra", "sources", "generated"])
+    @pytest.mark.parametrize("shape", ["deep", "cyclic-mapping", "cyclic-list", "wide"])
+    def test_the_whole_write_is_refused_naming_the_concept(
+        self, tmp_path: Path, field: str, shape: str
+    ) -> None:
+        value: Any = {
+            "deep": _nested(5_000),
+            "cyclic-mapping": _cyclic_map(),
+            "cyclic-list": _cyclic_list(),
+            "wide": list(range(200_000)),
+        }[shape]
+        hostile = {
+            "extra": {"extra": {"k": value}},
+            "sources": {"sources": [{"k": value}]},
+            "generated": {"generated": {"by": value}},
+        }[field]
+        bundle = OKFBundle(
+            [
+                OKFConcept(id="good", type="Note", body="ok"),
+                OKFConcept(id="evil", type="Note", **hostile),
+            ]
+        )
+        out = tmp_path / "out"
+        started = time.perf_counter()
+
+        with pytest.raises(OKFError, match="evil"):
+            write_bundle(bundle, out)
+        # wall-clock bound loosened on purpose, see decisions.md D-017 item 6
+        assert time.perf_counter() - started < 5.0
+
+        assert not out.exists() or list(out.rglob("*")) == []
+
+    def test_a_value_just_inside_the_caps_still_round_trips(
+        self, tmp_path: Path
+    ) -> None:
+        from fsm_llm.constants import OKF_MAX_YAML_DEPTH
+
+        value: Any = "leaf"
+        for _ in range(OKF_MAX_YAML_DEPTH - 2):
+            value = [value]
+        concept = OKFConcept(id="ok", type="Note", extra={"k": value})
+
+        write_bundle(OKFBundle([concept]), tmp_path / "out")
+
+        assert load_bundle(tmp_path / "out").get("ok").extra == {"k": value}

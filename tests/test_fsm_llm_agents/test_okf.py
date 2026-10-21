@@ -1071,3 +1071,29 @@ class TestBackendLabelAndClaimedTrust:
         assert "\ntrust: " not in out
         (text, _, _), *_ = OKFMemoryBackend(_bundle(concept)).search("alpha")
         assert "trust (claimed by bundle): human-reviewed" in text
+
+
+# --------------------------------------------------------------
+# Step 4.2: export_semantic_memory survives hostile metadata (D-017 item 1)
+# --------------------------------------------------------------
+
+
+class TestExportSemanticMemoryHostileMetadata:
+    def test_deep_and_cyclic_metadata_do_not_fail_the_export(self, tmp_path: Path):
+        deep: list[Any] = []
+        node = deep
+        for _ in range(5_000):
+            child: list[Any] = []
+            node.append(child)
+            node = child
+        cyc: dict[str, Any] = {"a": 1}
+        cyc["self"] = cyc
+        store = SemanticMemoryStore(embed_fn=_embed)
+        store.add("first ok", entry_id="a")
+        store.add("deep one", metadata={"deep": deep}, entry_id="b")
+        store.add("cyclic one", metadata=cyc, entry_id="c")
+
+        written = export_semantic_memory(store, tmp_path / "kb")
+
+        names = sorted(p.relative_to(tmp_path / "kb").as_posix() for p in written)
+        assert names == ["index.md", "memory/a.md", "memory/b.md", "memory/c.md"]
