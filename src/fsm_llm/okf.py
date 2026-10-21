@@ -16,7 +16,8 @@ Entry points: ``parse_concept_text(concept_id, text) -> (OKFConcept, issues)``,
 ``OKFBundle`` (lookup, lexical search, link graph), ``check_bundle(bundle)``
 (spec section 11 conformance as a list of issues), ``write_bundle(bundle,
 path)`` (atomic per file, confined) and ``bundle_from_memory_entries(entries)``
-(plain memory-entry mappings to a bundle).
+(plain memory-entry mappings to a bundle), ``create_okf_handler(bundle)`` (capped
+concept summaries into a public context key of a plain FSM).
 """
 
 from __future__ import annotations
@@ -49,8 +50,11 @@ from .constants import (
     OKF_MAX_TOTAL_BYTES,
     OKF_MAX_YAML_DEPTH,
     OKF_SUMMARY_FIELD_CHARS,
+    OKF_SUMMARY_MAX_ITEMS,
+    RESERVED_CONTEXT_KEYS,
 )
 from .definitions import OKFError
+from .handlers import BaseHandler, HandlerTiming, create_handler
 from .security import (
     has_internal_prefix,
     is_forbidden_context_entry,
@@ -1378,3 +1382,104 @@ def bundle_from_memory_entries(
             )
         )
     return OKFBundle(concepts, issues=issues)
+
+
+# --------------------------------------------------------------
+# Plain-FSM handler
+# --------------------------------------------------------------
+
+
+def create_okf_handler(
+    bundle: OKFBundle,
+    *,
+    context_key: str = "okf_concepts",
+    timing: HandlerTiming = HandlerTiming.PRE_PROCESSING,
+    states: Iterable[str] = (),
+    query_key: str | None = None,
+    max_items: int = OKF_SUMMARY_MAX_ITEMS,
+    include_deprecated: bool = False,
+    name: str = "OKFContext",
+) -> BaseHandler:
+    """Build a handler that writes capped concept summaries into the context.
+
+    Interface contract:
+        - Writes ``context_key`` = a list of at most ``max_items`` dicts
+          ``{id, type, title, description, trust, flags}`` (JSON-native; every
+          string control-stripped and cut at ``OKF_SUMMARY_FIELD_CHARS``;
+          ``flags`` a sorted list from stale, draft, deprecated). NEVER a body.
+        - Concepts: with ``query_key`` set and a non-blank ``str`` there (cut
+          to 1,000 chars, control-stripped), the best ``bundle.search`` hits;
+          any other value (missing, None, number, list, dict, blank) means the
+          first ``max_items`` by id. Deprecated concepts only with
+          ``include_deprecated``. ``states`` empty means every state.
+        - Not critical: a failure is logged, the turn goes on.
+        - Raises ``OKFError`` at build time for: a ``context_key`` that is not a
+          non-blank ``str``, is internal-prefixed, secret-looking (judged for a
+          string AND for the list value written, so ``user_token`` is refused)
+          or in ``RESERVED_CONTEXT_KEYS`` (the prompt filter or the pipeline would
+          drop it); ``max_items`` not an ``int`` in ``1..OKF_SUMMARY_MAX_ITEMS``
+          (refused, never clamped); a ``states`` that is a ``str`` or holds a
+          non-``str``; a ``timing`` that is not a ``HandlerTiming``; a
+          ``query_key`` that is neither ``None`` nor a non-blank ``str``.
+        - The default ``PRE_PROCESSING`` timing runs on every turn, a BLOCKED
+          one included (``PRE_TRANSITION`` handlers do not).
+    """
+    if not isinstance(context_key, str) or not context_key.strip():
+        raise OKFError(f"context_key must be a non-blank str, got {context_key!r}")
+    if (
+        has_internal_prefix(context_key)
+        or is_forbidden_context_entry(context_key, "x")
+        or is_forbidden_context_entry(context_key, [])
+        or context_key in RESERVED_CONTEXT_KEYS
+    ):
+        raise OKFError(
+            f"context_key {context_key!r} is hidden from prompts or reserved; "
+            "use a plain public name"
+        )
+    if not isinstance(max_items, int) or isinstance(max_items, bool):
+        raise OKFError(f"max_items must be an int, got {max_items!r}")
+    if not 1 <= max_items <= OKF_SUMMARY_MAX_ITEMS:
+        raise OKFError(f"max_items must be 1..{OKF_SUMMARY_MAX_ITEMS}, got {max_items}")
+    if not isinstance(timing, HandlerTiming):
+        raise OKFError(f"timing must be a HandlerTiming, got {timing!r}")
+    if isinstance(states, (str, bytes)) or not isinstance(states, Iterable):
+        raise OKFError(f"states must be an iterable of str, got {states!r}")
+    state_names = tuple(states)
+    if not all(isinstance(s, str) for s in state_names):
+        raise OKFError(f"states must hold str names, got {state_names!r}")
+    if query_key is not None and (not isinstance(query_key, str) or not query_key):
+        raise OKFError(f"query_key must be None or a non-blank str, got {query_key!r}")
+
+    def summarize(ctx: dict[str, Any]) -> dict[str, Any]:
+        query = ctx.get(query_key) if query_key is not None else None
+        query = (
+            strip_unsafe_text(query[:1000]).strip() if isinstance(query, str) else ""
+        )
+        if query:
+            found = [c for c, _ in bundle.search(query, max_items, include_deprecated)]
+        else:
+            found = bundle.list(include_deprecated=include_deprecated)[:max_items]
+        now = datetime.now(timezone.utc)
+        return {
+            context_key: [
+                {
+                    "id": _line(c.id),
+                    "type": _line(c.type),
+                    "title": _line(c.display_title),
+                    "description": _line(c.description),
+                    "trust": c.trust.value,
+                    "flags": sorted(
+                        flag
+                        for flag, on in (
+                            ("stale", c.is_stale(now)),
+                            ("draft", c.is_draft),
+                            ("deprecated", c.is_deprecated),
+                        )
+                        if on
+                    ),
+                }
+                for c in found
+            ]
+        }
+
+    return create_handler(name).at(timing).on_state(*state_names).do(summarize)
