@@ -55,6 +55,7 @@ from .constants import (
 )
 from .definitions import OKFError
 from .handlers import BaseHandler, HandlerTiming, create_handler
+from .logging import logger
 from .security import (
     has_internal_prefix,
     is_forbidden_context_entry,
@@ -67,21 +68,35 @@ from .security import (
 
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?")
 _LINE_BREAKS = "\n\r\t\u2028\u2029\x0b\x0c\x85"
+# Cf characters that spell words (Persian and Indic ZWNJ, emoji ZWJ sequences,
+# hyphenation hints). Kept only between two visible characters.
+_JOINERS = "\u200c\u200d\u00ad"
+_VISIBLE_CATEGORIES = "LMNPS"
 
 
 def strip_unsafe_text(text: str, *, multiline: bool = False) -> str:
     """Remove what could drive a terminal or hide text from a reader.
 
-    Drops ANSI escape sequences, control characters (Cc), and format characters
-    (Cf: zero-width and bidi marks, BOM). Each line break or tab becomes one
-    space, unless ``multiline`` keeps ``\\n`` and ``\\t``. Never raises.
+    Drops ANSI escape sequences, control characters (Cc) and format characters
+    (Cf: zero-width and bidi marks, BOM). Exception: ZWNJ, ZWJ and soft hyphen
+    stay when a letter, mark, number, punctuation or symbol sits on both sides
+    (so ``می‌خواهم`` and emoji sequences survive); at an edge, beside a space
+    or a dropped character they go. Each line break or tab becomes one space,
+    unless ``multiline`` keeps ``\\n`` and ``\\t``. Never raises.
     """
+    clean = _ANSI_RE.sub("", text)
     out: list[str] = []
-    for ch in _ANSI_RE.sub("", text):
+    for i, ch in enumerate(clean):
         if multiline and ch in "\n\t":
             out.append(ch)
         elif ch in _LINE_BREAKS:
             out.append(" ")
+        elif ch in _JOINERS:
+            if 0 < i < len(clean) - 1 and all(
+                unicodedata.category(n)[0] in _VISIBLE_CATEGORIES
+                for n in (clean[i - 1], clean[i + 1])
+            ):
+                out.append(ch)
         elif unicodedata.category(ch) not in ("Cc", "Cf", "Cs"):
             out.append(ch)
     return "".join(out)
@@ -139,6 +154,19 @@ _TS_RE = re.compile(
 )
 
 
+# The strict RFC 3339 / ISO 8601 profile: ``T`` or a space between date and
+# time, ``.`` fraction, ``Z`` or ``+HH:MM`` offset, nothing lowercase, no space
+# before the offset. A stamp the parser accepts outside it gets a warning.
+_STRICT_TS_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}"
+    r"(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?)?"
+)
+
+
+# DECISION plan-2026-10-21T140931-095ea5f8/D-014
+# Do NOT replace this parser with `datetime.fromisoformat`: on Python 3.10 it
+# rejects a `Z` suffix and fractions that are not 3 or 6 digits, and OKF
+# stamps use both. See decisions.md D-014.
 def parse_okf_datetime(value: object) -> tuple[datetime | None, str | None]:
     """Parse an OKF timestamp; return ``(aware datetime | None, warning code)``.
 
@@ -284,6 +312,11 @@ class _OKFLoader(yaml.SafeLoader):
     so an alias bomb cannot grow. Duplicate keys are recorded; the last wins.
     """
 
+    # DECISION plan-2026-10-21T140931-095ea5f8/D-014
+    # The timestamp resolver is left out of a COPY of the table. Do NOT call
+    # `.remove()` or `del` on `yaml.SafeLoader.yaml_implicit_resolvers`: that
+    # table is shared, so it would change `yaml.safe_load` for the whole
+    # process. See decisions.md D-014.
     yaml_implicit_resolvers: ClassVar[dict[Any, Any]] = {
         first: [(tag, rx) for tag, rx in rules if tag != _TIMESTAMP_TAG]
         for first, rules in yaml.SafeLoader.yaml_implicit_resolvers.items()
@@ -355,12 +388,18 @@ def _load_yaml(raw: str, note: _Note) -> dict[Any, Any]:
             raise RecursionError
         data = cast("object", loader.get_single_data())
         duplicates = loader.duplicate_keys
+    except RecursionError:  # first: a RuntimeError, so it must not reach the catch-all
+        note("error", "frontmatter-too-deep", "frontmatter is nested too deeply")
+        return {}
     except (yaml.YAMLError, ValueError, TypeError, OverflowError) as exc:
         problem = getattr(exc, "problem", None) or exc
         note("error", "frontmatter-invalid", f"{type(exc).__name__}: {problem}"[:160])
         return {}
-    except RecursionError:
-        note("error", "frontmatter-too-deep", "frontmatter is nested too deeply")
+    except Exception as exc:  # PyYAML constructors raise anything
+        # A malformed built-in tag (``!!timestamp x``, an empty ``!!int``) escapes
+        # as AttributeError, KeyError or IndexError. The issue names the class.
+        logger.debug(f"OKF frontmatter rejected: {type(exc).__name__}: {exc}")
+        note("error", "frontmatter-invalid", f"{type(exc).__name__}: {exc}"[:160])
         return {}
     for key in duplicates:
         note("warning", "key-duplicate", f"duplicate key {key!r}; the last value wins")
@@ -421,6 +460,16 @@ def _check_timestamp(label: str, value: Any, note: _Note) -> None:
         note("warning", "timestamp-invalid", f"{label} is not a timestamp: {value!r}")
     elif code:
         note("warning", f"timestamp-{code}", f"{label} lacks an explicit UTC offset")
+    if (
+        code != "invalid"
+        and isinstance(value, str)
+        and not _STRICT_TS_RE.fullmatch(value.strip())
+    ):
+        note(
+            "warning",
+            "timestamp-nonstandard",
+            f"{label} is not strict RFC 3339 (read leniently): {value!r}",
+        )
 
 
 def parse_concept_text(concept_id: str, text: str) -> tuple[OKFConcept, list[OKFIssue]]:
@@ -429,7 +478,8 @@ def parse_concept_text(concept_id: str, text: str) -> tuple[OKFConcept, list[OKF
     Returns the concept (``type == ""`` when the document gave none) and the
     issues found. A document without usable frontmatter keeps its text as the
     body. Dates are not converted: timestamps stay as written and are checked
-    with ``parse_okf_datetime``.
+    with ``parse_okf_datetime``. An unexpected failure in any step becomes an
+    error issue and the text is kept as the body.
     """
     issues: list[OKFIssue] = []
     warnings = 0
@@ -450,6 +500,16 @@ def parse_concept_text(concept_id: str, text: str) -> tuple[OKFConcept, list[OKF
             OKFIssue(severity=severity, code=code, message=msg, id=concept_id)
         )
 
+    try:
+        concept = _build_concept(concept_id, text, note)
+    except Exception as exc:  # the parser is total on content
+        logger.debug(f"OKF concept {concept_id!r} unreadable: {exc!r}")
+        note("error", "frontmatter-invalid", f"{type(exc).__name__}: {exc}"[:160])
+        concept = OKFConcept(id=concept_id, body=text)
+    return concept, issues
+
+
+def _build_concept(concept_id: str, text: str, note: _Note) -> OKFConcept:
     raw, body, problem = _split_frontmatter(text)
     if problem:
         note("error", problem, f"no complete frontmatter block ({problem})")
@@ -497,7 +557,7 @@ def parse_concept_text(concept_id: str, text: str) -> tuple[OKFConcept, list[OKF
         extra={k: v for k, v in data.items() if k not in _KNOWN_KEYS},
         body=body,
     )
-    return concept, issues
+    return concept
 
 
 # --------------------------------------------------------------
