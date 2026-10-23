@@ -235,7 +235,7 @@ What you get in the core:
 - **Steps without a user message**: `advance()` runs one turn and returns an `AdvanceResult`; `run_until_terminal()` repeats it within a step and time budget (`RunBudgetExceededError`). Agents, the harness and the reasoning engine run on these loops.
 - **Tool calling and structured output**: a state with the optional `completion` field makes one native tool-calling or JSON-schema call. Core runs no tool; your handlers do.
 - **Sessions and memory**: `save_session`/`restore_session` with `FileSessionStore`, and `WorkingMemory` buffers.
-- **Knowledge bundles (OKF)**: `fsm_llm.okf` reads, searches, validates and writes Open Knowledge Format bundles (a directory of markdown files with YAML frontmatter), `create_okf_handler()` puts capped concept summaries into a plain FSM's context, `fsm_llm.agents` adds read-only OKF tools, a read-only memory backend and bundle exporters, and `fsm-llm-okf` runs it from the shell. This follows OKF v0.2 (SPEC.md at commit ad30107, pre-1.0 and mutable). Bundle text is treated as untrusted data. See [docs/api_reference.md](docs/api_reference.md).
+- **Knowledge bundles (OKF)**: `fsm_llm.okf` reads, searches, validates and writes Open Knowledge Format bundles (a directory of markdown files with YAML frontmatter), `fsm_llm.okf_bridge.create_okf_handler()` puts capped concept summaries into a plain FSM's context, `fsm_llm.agents` adds read-only OKF tools, a read-only memory backend and bundle exporters, and `fsm-llm-okf` runs it from the shell. This follows OKF v0.2 (SPEC.md at commit ad30107, pre-1.0 and mutable). Bundle text is treated as untrusted data. See [docs/api_reference.md](docs/api_reference.md).
 - **Agent Skills**: `fsm_llm.agent_skills` reads folders with a `SKILL.md` (YAML frontmatter plus markdown, following the open standard at agentskills.io as read on 2026-10-23, unversioned and mutable) from the paths you name, `fsm_llm.agents.create_skill_tools` gives an agent three read-only tools (`skill_list`, `skill_load`, `skill_read`), and `fsm-llm-skills` validates, lists and shows them from the shell. Skill text is untrusted data, nothing in a skill folder is ever executed (scripts are readable as text only) and `allowed-tools` is reported, not enforced. See [docs/api_reference.md](docs/api_reference.md).
 - **Diagrams**: `build_fsm_graph()`, `to_mermaid()`, `to_dot()`, and `fsm-llm-visualize`.
 - **Many providers** through litellm, behind one LLM layer (`src/fsm_llm/llm.py`, the only module that imports litellm) with per-interface call and token counters (`usage()`) and an embedder (`LiteLLMEmbedder`).
@@ -377,11 +377,12 @@ Contributions are welcome, from a typo fix to a new agent pattern. Full rules ar
 
 ```bash
 make install-dev    # editable install with every extra, plus pre-commit hooks
-make test           # Run full test suite (11,582 tests)
+make test           # Run full test suite (11,700 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy on src/fsm_llm/
 make audit          # scan site-packages for malicious .pth files
+make counts         # fail when a test count written in a .md file differs from a collection
 make build          # wheel and sdist
 ```
 
@@ -416,7 +417,7 @@ Good places to help, all taken from recorded open items:
 Things to know:
 
 - The `fsm-llm` command needs `LLM_MODEL`. The Python `API` falls back to `LLM_MODEL`, then to `ollama_chat/qwen3.5:4b`.
-- The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`.
+- The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`; both also replace loguru's default handler, so a library record prints once.
 - One conversation handles one message at a time: a second `converse` on a conversation that is mid-turn raises `FSMError`.
 - Upgrading a clone from before the 2026-09-29 restructure: delete the old `src/fsm_llm_<sub>/` folders by hand (`make clean` does not remove them), then `pip install -e .`. A leftover folder breaks imports.
 - `constraints.txt` pins litellm and the dev tools to exact versions so CI and local runs match.

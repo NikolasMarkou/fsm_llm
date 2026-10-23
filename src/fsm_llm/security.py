@@ -71,9 +71,9 @@ def has_internal_prefix(key: str, prefixes: Iterable[str] | None = None) -> bool
 def resolve_within(root: Path, relative: str | os.PathLike[str]) -> Path | None:
     """Resolve *relative* under *root* and return it only if it stays inside.
 
-    This is the shared comparison used by the harness workspace and the OKF
-    bundle loader and writer; other sites keep their own checks. Never
-    re-inline it in those three.
+    This is the shared comparison used by the harness workspace, the OKF
+    bundle loader and writer and the Agent Skills reads; other sites keep
+    their own checks. Never re-inline it in any of them.
 
     Interface contract:
         - ``root``: a directory path that is ALREADY resolved (absolute, no

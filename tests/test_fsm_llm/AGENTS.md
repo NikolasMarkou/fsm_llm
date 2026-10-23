@@ -1,7 +1,7 @@
 # test_fsm_llm
 
 Path: `tests/test_fsm_llm`
-Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass MessagePipeline, transitions, prompts, LLM wrapper, handlers, memory, validator, visualizer, logging), 60 test files, 4,915 collected tests.
+Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass MessagePipeline, transitions, prompts, LLM wrapper, handlers, memory, validator, visualizer, logging), 61 test files, 4,976 collected tests.
 
 ## Scope
 
@@ -91,11 +91,12 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_validator_unit.py` | `FSMValidator`, agrees with the loader, `fsm-llm-validate` output | |
 | `test_visualizer_unit.py` | ASCII visualizer, box alignment, truncation, CLI output | |
 | `test_runner_unit.py`, `test_utilities_unit.py` | runner redaction, `extract_json_from_text`, FSM loading | |
-| `test_logging_unit.py`, `test_logging_structured.py` | logging helpers, `setup_logging`, JSON formatter | |
-| `test_okf.py`, `test_okf_cli.py` | Open Knowledge Format loader, writer, handler and `fsm-llm-okf` | imports `fsm_llm.okf`; the shared helper `resolve_within` is tested in `test_okf.py` |
+| `test_logging_unit.py`, `test_logging_structured.py` | logging helpers, `setup_logging`, JSON formatter, `replace_default_handler` | `TestDefaultHandlerIsReplacedNotDoubled` runs child processes (`sys.path` from `fsm_llm.__file__`, no `-I`) |
+| `test_okf.py`, `test_okf_cli.py` | Open Knowledge Format loader, writer, `capped_note`, `okf_bridge` (memory export, handler) and `fsm-llm-okf` | imports `fsm_llm.okf` and `fsm_llm.okf_bridge`; the shared helper `resolve_within` is tested in `test_okf.py`; `TestBridgeLayering` pins the bridge's imports |
 | `test_frontmatter.py` | `fsm_llm.frontmatter`: split, bounded `load_yaml`, `read_bytes`, `lone_surrogate`, layering | the one YAML loader; `TestOkfKeepsItsWiring` pins what `okf.py` keeps to it |
 | `test_agent_skills.py` | `fsm_llm.agent_skills` parser, loader, catalog, render, confinement | pure ASCII file (controls built with `chr`); `TestLayering` runs `python -I` subprocesses |
-| `test_agent_skills_cli.py` | `fsm-llm-skills` commands, exit codes, output hygiene | `TestWiring` pins the console script |
+| `test_agent_skills_cli.py` | `fsm-llm-skills` commands (`show --file DIR` lists a directory), exit codes, output hygiene | `TestWiring` pins the console script |
+| `test_cli_support.py` | `fsm_llm.cli_support`: exit mapping, BrokenPipe parking, output escape, `positive_seconds`; both CLIs use it | structure pins: neither CLI re-inlines the skeleton or imports a private name from the other |
 | `test_docs_snippets.py` | loads doc FSM snippets through `FSMDefinition` | see Invariants |
 | `test_live_classification_memory.py` | live classifier and memory agent on `ollama_chat/qwen3.5:9b-q8_0` | markers `integration`, `real_llm`, `slow` |
 
@@ -174,7 +175,7 @@ Seam files fake the backend with `patch("fsm_llm.llm.completion", ...)` returnin
 - New regression for a public-path bug: add a seam test that drives `API.converse` or patched `fsm_llm.llm.completion`, not only a helper-level test.
 - Reuse helpers from earlier seam files by import rather than copying, and keep their names stable.
 - Do not relabel, delete or regenerate corpus rows to improve a rate; do not add filter words to catch one corpus entry. Add names from real vocabulary without reading `constants.py` first.
-- After adding or removing tests, re-measure with the first command below. The suite count (4,915) is pinned by `tests/test_packaging.py::test_per_suite_table` (marked slow), which compares a measured `--collect-only` count per suite against a documented literal of the form `pytest tests/test_fsm_llm/  # ... (N tests)`; run that test after changing the count. The counts stated in this file (60 test files, 4,915 tests, 14 slow) are not pinned by any test and must be updated by hand.
+- After adding or removing tests, re-measure with the first command below. The suite count (4,976) is pinned by `tests/test_packaging.py::test_per_suite_table` (marked slow), which compares a measured `--collect-only` count per suite against a documented literal of the form `pytest tests/test_fsm_llm/  # ... (N tests)`; run that test after changing the count. The counts stated in this file (61 test files, 4,976 tests, 14 slow) are not pinned by any test and must be updated by hand.
 
 ```bash
 .venv/bin/python -m pytest tests/test_fsm_llm/ --collect-only -q | tail -1

@@ -8,7 +8,7 @@ Purpose: Pytest suite for the FSM-LLM agents package (`src/fsm_llm/agents`, impo
 - In: 70 `test_*.py` files, `mcp_fixture_server.py` (a real stdio MCP server, not a test), empty `__init__.py`, and `conftest.py`, whose autouse fixture calls `tests.conftest.block_network`: every IPv4/IPv6 connect (loopback included) raises `ConnectionRefusedError` unless the test is marked `real_llm` or `integration`. Global fixtures and `PromptGroundedLLM` come from `tests/conftest.py` (adds `src` to `sys.path`); most older files build their own mocks.
 - Also in (historical placement, not agents code): `test_review_fixes.py` covers core `API.converse_stream` auto-save, `FileSessionStore._path` validation, `FSMManager.seed_restored_conversation`, and `fsm_llm.monitor.otel.OTELExporter` thread safety; `test_strands_phase2.py` covers `fsm_llm.workflows.dependency_resolver.DependencyResolver` and `OTELExporter`.
 - Out: live-LLM agent tests (none here; no test calls a real provider, and the network block enforces it), meta-builder internals beyond the CLI.
-- Current size: 2,522 collected (all pass; `test_mcp_stdio.py` skips as a whole module with the project `.venv`, which lacks `mcp`). Re-measure with `pytest tests/test_fsm_llm_agents --collect-only -q | tail -1`.
+- Current size: 2,540 collected (all pass; `test_mcp_stdio.py` skips as a whole module with the project `.venv`, which lacks `mcp`). Re-measure with `pytest tests/test_fsm_llm_agents --collect-only -q | tail -1`.
 
 ## Architecture
 
@@ -83,7 +83,8 @@ Observation hooks used by loop tests:
 | `test_mcp_stdio.py` + `mcp_fixture_server.py` | Real stdio MCP round trip | `importorskip("mcp")`; fixture writes its PID to `argv[1]`; tools `add`, `slow` (120 s), `fail`; `--hang` sleeps before serving |
 | `test_remote.py` | `AgentServer` / `RemoteAgentTool` | `importorskip` fastapi and httpx; `/invoke` and `/stream` auth (401) before size (413); default limit 100,000 chars |
 | `test_cli_entrypoints.py` | `meta_cli.main_cli`, `fsm_llm.agents.__main__.main` | Fake `MetaBuilderAgent`; exit codes 0, 1, 2 |
-| `test_review_fixes.py`, `test_strands_phase2.py` | Grab-bag regression files | Include non-agents code (see Scope) |
+| `test_python_tools.py` | `PythonToolLoader`: `load_directory` report (`PythonToolLoadReport`), `from_directory` list and one `UserWarning` per failed file, dedupe, removed names | Loads files written to `tmp_path`; a clean directory warns nothing |
+| `test_review_fixes.py`, `test_strands_phase2.py` | Grab-bag regression files | Include non-agents code (see Scope); `test_strands_phase2.py` also pins that `SOPRegistry.register_directory` warns once per failed file and registers the rest |
 
 ## Public interface
 

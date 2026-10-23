@@ -7,7 +7,7 @@ Purpose: Python framework (v0.12.0, Apache-2.0, Python 3.10-3.12) for stateful c
 
 One distribution (`fsm-llm`, `pyproject.toml`, setuptools, src layout). Always use the project virtualenv: `.venv/bin/python`, or activate `.venv` first.
 
-- In: `src/fsm_llm/` (all source), `tests/`, `examples/` (100 runnable examples), `docs/` (guides), `scripts/` (supply-chain audit, harness bench), `evaluation/` (datasets and eval runs), `.github/workflows/`, `images/`, root build and policy files.
+- In: `src/fsm_llm/` (all source), `tests/`, `examples/` (100 runnable examples), `docs/` (guides), `scripts/` (supply-chain audit, benches, doc-count check), `evaluation/` (datasets and eval runs), `.github/workflows/`, `images/`, root build and policy files.
 - Out: `build/`, `dist/`, `logs/`, `src/fsm_llm.egg-info/` (generated, removed by `make clean`). `plans/` is gitignored except `plans/ANCHORS.md` (append-only anchor manifest; never edit its lines).
 
 ## Architecture
@@ -43,15 +43,17 @@ One LLM layer (`src/fsm_llm/llm.py`, the only module that imports litellm): `LLM
 | `src/fsm_llm/definitions.py`, `transition_evaluator.py`, `expressions.py` | Pydantic FSM models, core exceptions, JsonLogic evaluation | No LLM in transitions |
 | `src/fsm_llm/llm.py`, `classification.py` | `LLMInterface`, `LiteLLMInterface` (`complete`, `usage`), `LiteLLMEmbedder`, `tool_exchange`; `Classifier` | Only litellm import; the classifier uses the conversation's interface |
 | `src/fsm_llm/security.py`, `constants.py` | `has_internal_prefix`, `is_forbidden_context_entry`, `resolve_within`, defaults, `OKF_*` limits | Single source for key filtering; shared path-confinement helper |
-| `src/fsm_llm/okf.py`, `okf_cli.py` | Open Knowledge Format (OKF v0.2, SPEC at commit ad30107, pre-1.0 and mutable): `load_bundle`, `OKFBundle`, `check_bundle`, `write_bundle`, `bundle_from_memory_entries`, `create_okf_handler`; `fsm-llm-okf` | Core modules, import no subpackage; not imported by `fsm_llm/__init__.py` |
+| `src/fsm_llm/okf.py`, `okf_cli.py` | Open Knowledge Format (OKF v0.2, SPEC at commit ad30107, pre-1.0 and mutable): `load_bundle`, `OKFBundle`, `check_bundle`, `write_bundle`; public helpers `iso_utc`, `has_lone_surrogate`, `writes_within_caps`, `capped_note`; `fsm-llm-okf` | Core modules, import no subpackage; not imported by `fsm_llm/__init__.py` |
+| `src/fsm_llm/okf_bridge.py` | Memory entries and plain FSMs to OKF: `bundle_from_memory_entries`, `create_okf_handler` | Split out of `okf.py` (about 1,320 lines now); imports only public names of `okf`; no re-export |
+| `src/fsm_llm/cli_support.py` | The CLI skeleton `okf_cli` and `agent_skills_cli` share: `run_cli`, `exit_main`, `report_error`, `escape_unencodable_output`, `positive_seconds` | Stdlib, `constants`, `okf.capped_line` only; neither CLI imports a private name from the other |
 | `src/fsm_llm/frontmatter.py` | The one YAML frontmatter seam: `split_frontmatter`, `load_yaml` (one `yaml.SafeLoader` subclass, no aliases or anchors, size and depth limits are parameters), `read_bytes` (no-follow), `lone_surrogate` | Shared by OKF and Agent Skills; stdlib and `yaml` only; extracted from `okf.py` |
-| `src/fsm_llm/agent_skills.py`, `agent_skills_cli.py` | Agent Skills (SKILL.md folders, agentskills.io spec read 2026-10-23, unversioned and mutable), read-only: `load_skills`, `SkillCatalog` (`render_catalog`, `read_body`, `read_resource`), `AgentSkill`, `SkillIssue`, `SkillLimits`, `parse_skill_text`; `fsm-llm-skills validate\|list\|show` | Core modules, import no subpackage; not imported by `fsm_llm/__init__.py`; nothing in a skill is executed |
+| `src/fsm_llm/agent_skills.py`, `agent_skills_cli.py` | Agent Skills (SKILL.md folders, agentskills.io spec read 2026-10-23, unversioned and mutable), read-only: `load_skills`, `SkillCatalog` (`render_catalog`, `read_body`, `read_resource`, `files_under`), `AgentSkill`, `SkillIssue`, `SkillLimits`, `parse_skill_text`; `fsm-llm-skills validate\|list\|show` (`show --file` also lists a directory) | Core modules, import no subpackage; not imported by `fsm_llm/__init__.py`; nothing in a skill is executed |
 | `src/fsm_llm/reasoning/` | 9 strategies as stacked FSMs pushed and popped inside one message-free core run, validation with up to 3 retries | `ReasoningEngine.solve_problem(problem) -> (solution, trace_info)` |
 | `src/fsm_llm/workflows/` | Async in-memory engine, 11 step types, DSL | `WorkflowEngine`, `create_workflow`, `auto_step`, `condition_step` |
 | `src/fsm_llm/agents/` | 18 agent patterns (native_fc and the meta-builder are FSMs on core too), tools with annotations and enforced timeouts, HITL, memory, swarm/graph, MCP, A2A, SOPs | `create_agent`, `ReactAgent`, `ToolRegistry`, `@tool`, `MetaBuilderAgent` |
 | `src/fsm_llm/agents/okf.py` | Agents side of OKF: `create_okf_tools` (4 read-only tools), `OKFMemoryBackend` (read-only), `export_semantic_memory`, `export_agent_result` | Imports core only |
 | `src/fsm_llm/agents/agent_skills.py` | Agents side of Agent Skills: `create_skill_tools` (`skill_list`, `skill_load`, `skill_read`, all read-only) | Imports core and sibling agents modules; reuses private reply helpers of `agents/okf.py` (debt, see api_reference.md) |
-| `src/fsm_llm/agents/python_tools.py` | `PythonToolLoader`, `PythonToolDefinition`, `ToolRegistry.register_python_tool`: tools from folders of Python files (`PYTHON_TOOLS` list or `@tool`) | Executes the files it loads, trusted sources only; not Agent Skills |
+| `src/fsm_llm/agents/python_tools.py` | `PythonToolLoader` (`from_directory`, `load_directory` -> `PythonToolLoadReport`), `PythonToolDefinition`, `ToolRegistry.register_python_tool`: tools from folders of Python files (`PYTHON_TOOLS` list or `@tool`) | Executes the files it loads, trusted sources only; not Agent Skills; a file that fails to load is reported in the report and warned once (`UserWarning`) by `from_directory` |
 | `src/fsm_llm/monitor/` | FastAPI dashboard (REST, WebSocket, vanilla-JS SPA), OTEL exporter | `configure`, `InstanceManager`, `OTELExporter` |
 | `src/fsm_llm/harness/` | Experimental iterative planner: 6-state FSM, gates counted from disk, 2-attempt leash | `HarnessAgent`, `pre_step_gate`, `audit` |
 | `src/fsm_llm/eval/` | Examples scorer (0-4) and conversation cases (N trials, Wilson CIs) | `EvalConfig`, `run_examples`, `load_cases`, `run_cases`, `run_dataset`, `wilson_ci` |
@@ -59,6 +61,8 @@ One LLM layer (`src/fsm_llm/llm.py`, the only module that imports litellm): `LLM
 | `tests/test_packaging.py` | Pins package wiring and every test count in this file and `README.md` | See Working here |
 | `scripts/audit_pth.py` | Flags known malicious and code-bearing `.pth` files in site-packages; exit 1 on issues | `make audit`, CI |
 | `scripts/harness_bench.py`, `agents_bench.py` | Pre-registered harness and agent benches: `register`, `run`, `report` (`harness_bench` also `probe-seed`) | Rows in tracked `scripts/bench_data/` |
+| `scripts/skills_bench.py` | Pre-registered Agent Skills read-hint ablation (bench id `skills-disclosure`, blocks B0 and B1): `register`, `run`, `report` | Registered, NOT RUN (live runs declined); the read hint is a recorded default, not a measurement |
+| `scripts/doc_counts.py` | Compares every count token in the tracked `.md` files with one `pytest --collect-only`; exit 1 on drift or on a token no rule names | `make counts`; skips when `mcp` is importable |
 | `evaluation/datasets/` | `simple_greeting_cases.json`, `name_capture_fsm.json` | Samples for `fsm-llm-eval run` |
 | `examples/<category>/<name>/` | `run.py` plus FSM JSON; 8 categories | Evaluation baselines |
 | `pyproject.toml`, `Makefile`, `tox.ini`, `constraints.txt`, `MANIFEST.in`, `.pre-commit-config.yaml` | Build, tasks, envs, exact pins, sdist, hooks | All checked by `test_packaging.py` |
@@ -66,7 +70,7 @@ One LLM layer (`src/fsm_llm/llm.py`, the only module that imports litellm): `LLM
 
 ## Public interface
 
-Core: `API` (`from_file`, `from_definition`, `start_conversation`, `converse`, `converse_stream`, `advance`, `advance_stream`, `run_until_terminal`, `run_until_terminal_stream`, `get_data`, `push_fsm`/`pop_fsm`, `save_session`/`restore_session`), `AdvanceResult`, `FSMManager`, `MessagePipeline`, `HandlerTiming` (8 points), `create_handler`, `clear_keys_on_entry`, `typed_field_extraction`, `Classifier` (`llm=` takes an interface), `LiteLLMInterface` (`complete`, `usage`, `reset_usage`), `CompletionRequest`, `CompletionResponse`, `ModelToolCall`, `LLMUsage`, `LiteLLMEmbedder`, `tool_exchange`, `CompletionStateConfig`, `WorkingMemory`, `FileSessionStore`, graph export `build_fsm_graph`, `to_mermaid`, `to_dot`. OKF is imported by module name: core `fsm_llm.okf` (`load_bundle`, `write_bundle`, `check_bundle`, `create_okf_handler`) and, for agents, `fsm_llm.agents` (`create_okf_tools`, `OKFMemoryBackend`, `export_semantic_memory`, `export_agent_result`). Agent Skills likewise: core `fsm_llm.agent_skills` (`load_skills`, `SkillCatalog`, `SkillLimits`) and, for agents, `fsm_llm.agents.create_skill_tools`.
+Core: `API` (`from_file`, `from_definition`, `start_conversation`, `converse`, `converse_stream`, `advance`, `advance_stream`, `run_until_terminal`, `run_until_terminal_stream`, `get_data`, `push_fsm`/`pop_fsm`, `save_session`/`restore_session`), `AdvanceResult`, `FSMManager`, `MessagePipeline`, `HandlerTiming` (8 points), `create_handler`, `clear_keys_on_entry`, `typed_field_extraction`, `Classifier` (`llm=` takes an interface), `LiteLLMInterface` (`complete`, `usage`, `reset_usage`), `CompletionRequest`, `CompletionResponse`, `ModelToolCall`, `LLMUsage`, `LiteLLMEmbedder`, `tool_exchange`, `CompletionStateConfig`, `WorkingMemory`, `FileSessionStore`, graph export `build_fsm_graph`, `to_mermaid`, `to_dot`. OKF is imported by module name: core `fsm_llm.okf` (`load_bundle`, `write_bundle`, `check_bundle`), `fsm_llm.okf_bridge` (`bundle_from_memory_entries`, `create_okf_handler`) and, for agents, `fsm_llm.agents` (`create_okf_tools`, `OKFMemoryBackend`, `export_semantic_memory`, `export_agent_result`). Agent Skills likewise: core `fsm_llm.agent_skills` (`load_skills`, `SkillCatalog`, `SkillLimits`; `SkillCatalog.files_under` is the one directory-listing rule) and, for agents, `fsm_llm.agents.create_skill_tools`.
 
 Model resolution: `model=` argument, then env `LLM_MODEL`, then `DEFAULT_LLM_MODEL` (`ollama_chat/qwen3.5:4b`). `.env.example` lists `OPENAI_API_KEY`, `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`.
 
@@ -135,7 +139,7 @@ FSM definition (JSON, v4.1):
 - Internal context keys (prefixes `_`, `system_`, `internal_`, `__`) are matched only through `fsm_llm.constants.has_internal_prefix` (case-insensitive). Never re-inline `startswith("_")`.
 - Secret-looking context entries are decided only by `constants.is_forbidden_context_entry(key, value)` (name patterns, whole-segment credential names, policy-suffix exceptions, value-shape layers for `*_key`/`*_token`). Matching entries are kept out of prompts. Never re-inline a check.
 - Context filters share `MAX_CONTEXT_FILTER_DEPTH = 16` (fail closed) and drop cycles. Only the prompt filter truncates (`MAX_CONTEXT_FILTER_NODES = 100_000`); `utilities.filter_context_tree` never truncates and raises `ContextFilterWorkError` on a pathological cycle.
-- Library logging is off until `setup_logging()` / `enable_debug_logging()`: one `logger.disable("fsm_llm")` at import covers every subpackage; never add a per-subpackage disable.
+- Library logging is off until `setup_logging()` / `enable_debug_logging()`: one `logger.disable("fsm_llm")` at import covers every subpackage; never add a per-subpackage disable. Both also replace loguru's default handler (id 0) with an equivalent sink that skips `fsm_llm` records (`logging.replace_default_handler`), so a library record prints once; a host record still prints twice (carried, a decision for the user).
 - One turn per conversation at a time: a concurrent or re-entrant `converse` raises `FSMError`.
 - One LLM layer: litellm is imported only in `src/fsm_llm/llm.py` (`grep -rnE "litellm\.(a?completion|a?embedding)|import litellm|from litellm" src/fsm_llm` hits only it). Never add a second request builder, send path or provider call outside an `LLMInterface`/`LiteLLMEmbedder`.
 - The classifier (AMBIGUOUS ties, `classification_extractions`) calls the conversation's own `llm_interface`; only an entry naming a different `model` gets a private interface, with no inherited credentials. `API(llm_interface=...)` refuses every other LLM setting beside it (`ValueError`).
@@ -146,7 +150,7 @@ FSM definition (JSON, v4.1):
 - Agents HITL is a security boundary in `ReactAgent`, `ReflexionAgent`, `ReasoningReactAgent` when an approval policy is set, or a callback with `requires_approval=True` tools (the flag is then the policy): a gated tool runs only with the driver-only grant `_approval_granted` (`ContextKeys.DRIVER_APPROVAL`) bound to that exact call. Caller `initial_context` can never set that grant, run-output keys (`RUN_OUTPUT_KEYS`) or the pattern's own outputs (`_run_output_keys`). A `requires_approval` tool with no callback and no policy raises `AgentError`; ParallelReact, REWOO, native_fc, PlanExecute have no HITL and refuse registries holding one.
 - Agents `AgentResult.success` means the run reached its goal; forced stops ship their answer with `success=False` and a `stop_reason`. A run closed from outside ends `ReactAgent.run_stream` without an error, and nothing flags a truncated meta-builder artifact; both are deferred work.
 - Do NOT modify `examples/` unless explicitly asked: baselines for `fsm-llm-eval examples`, loaded by `tests/test_examples/`.
-- `scripts/bench_data/` is tracked on purpose. Blocks are pre-registered, run once at fixed n, never edited or re-run.
+- `scripts/bench_data/` is tracked on purpose. Blocks are pre-registered, run once at fixed n, never edited or re-run. `skills-disclosure` B0 and B1 are registered but not run; its manifests pin the sha256 of `agent_skills.py`, `agents/agent_skills.py` and `constants.py`, so a run refuses after any edit to them.
 - Harness status: committed block `scripts/bench_data/l6-e2e/B8/GRADING.md` (`ollama_chat/qwen3.5:4b`, n=3) has 2/3 floor rows; the 3/3 bar is NOT MET. `verification.md` stays empty after PLAN. Not production-ready.
 
 ## Dependencies
@@ -166,7 +170,7 @@ FSM definition (JSON, v4.1):
 ## Working here
 
 ```bash
-make test           # pytest -v (11,582 tests)
+make test           # pytest -v (11,700 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy src/fsm_llm/ --ignore-missing-imports
@@ -175,23 +179,25 @@ make clean          # remove build artifacts, caches, logs/
 make coverage       # pytest with --cov=fsm_llm
 make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,harness,eval]" + pre-commit install
 make audit          # python scripts/audit_pth.py
+make counts         # python scripts/doc_counts.py (fails when a documented test count drifts)
 ```
 
 ```bash
-pytest                                 # Run all tests (11,582 collected)
-pytest tests/test_fsm_llm/            # Core package tests (4,915 tests)
+pytest                                 # Run all tests (11,700 collected)
+pytest tests/test_fsm_llm/            # Core package tests (4,976 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (191 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (269 tests)
-pytest tests/test_fsm_llm_agents/     # Agents tests (2,522 tests)
+pytest tests/test_fsm_llm_agents/     # Agents tests (2,540 tests)
 pytest tests/test_fsm_llm_monitor/    # Monitor tests (391 tests)
 pytest tests/test_fsm_llm_meta/       # Meta-builder tests (437 tests)
 pytest tests/test_fsm_llm_harness/    # Harness tests (2,028 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (264 tests)
 pytest tests/test_examples/           # Example validation tests (67 tests)
 pytest tests/test_fsm_llm_eval/       # Eval tests (261 tests)
-# The 10 suites above sum to 11,345. The remaining 237 are four root-level files:
-#   tests/test_integration_ollama.py (12), tests/test_packaging.py (34),
-#   tests/test_harness_bench.py (59) and tests/test_agents_bench.py (132)
+# The 10 suites above sum to 11,424. The remaining 276 are five root-level files:
+#   tests/test_integration_ollama.py (12), tests/test_packaging.py (36),
+#   tests/test_harness_bench.py (59), tests/test_agents_bench.py (132)
+#   and tests/test_skills_bench.py (37)
 pytest -m "not slow"                  # Skip slow tests
 ```
 

@@ -87,10 +87,10 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_self_consistency_parallel.py` - parallel sampling matches serial.
 - `test_semantic_memory.py` - `SemanticMemoryStore` and its `remember`/`recall` tools.
 - `test_semantic_memory_robustness.py` - thread safety, embedding model mismatch warning, `max_entries`, atomic save.
-- `test_python_tools.py` - `PythonToolLoader.from_directory` dedupe.
+- `test_python_tools.py` - `PythonToolLoader`: the `load_directory` report (`PythonToolLoadReport` with `tools` and `errors`), `from_directory` returning the list and warning once per failed file, dedupe, removed names.
 - `test_okf.py` - the OKF tools, memory backend and exporters in `fsm_llm.agents`.
 - `test_agent_skills.py` - `create_skill_tools`: the three read-only tools, reply budget against the 2,000-character observation cap, injection containment, parameter clamping, end-to-end runs (scripted `native_fc` and `ReactAgent`) and the no-execution pin.
-- `test_strands_phase2.py` - MCP provider and timeouts, swarm, agent graph, OTEL, `DependencyResolver`, SOPs, semantic tools, A2A, exports.
+- `test_strands_phase2.py` - MCP provider and timeouts, swarm, agent graph, OTEL, `DependencyResolver`, SOPs (including the warning `register_directory` gives per failed file), semantic tools, A2A, exports.
 - `test_structured_output.py` - `output_schema` parsing into `structured_output`.
 - `test_summarization.py` - `make_observation_summarizer` and its handler wiring.
 - `test_think_fallback.py` - `think` never BLOCKs; unknown tool names are not evidence.
@@ -111,7 +111,7 @@ From the repo root, with the project virtualenv:
 .venv/bin/python -m pytest tests/test_fsm_llm_agents/ --collect-only -q | tail -1
 ```
 
-The whole suite needs no network or API key; the `conftest.py` network block makes sure of it. A default run (about 20 seconds) collects 2,522 tests. If a new test must open a real connection, mark it `real_llm` or `integration`; otherwise it fails with `ConnectionRefusedError`.
+The whole suite needs no network or API key; the `conftest.py` network block makes sure of it. A default run (about 20 seconds) collects 2,540 tests. If a new test must open a real connection, mark it `real_llm` or `integration`; otherwise it fails with `ConnectionRefusedError`.
 
 ## Things to know
 

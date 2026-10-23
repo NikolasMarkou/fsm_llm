@@ -1,6 +1,6 @@
 # test_fsm_llm
 
-The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 60 test files (4,915 collected tests) plus a `fixtures/` package of labelled secret-filter data.
+The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 61 test files (4,976 collected tests) plus a `fixtures/` package of labelled secret-filter data.
 
 ## What it is for
 
@@ -66,11 +66,12 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_review_round1_core.py`, `test_review_round2_core.py`, `test_review_fixes_core.py`, `test_review_fixes_core_round2.py` - findings of two review rounds of the step-driver and LLM-layer plans; each class pins one accepted finding.
 - `test_validator_unit.py`, `test_visualizer_unit.py` - `FSMValidator` and the ASCII visualizer, including their CLIs.
 - `test_runner_unit.py`, `test_utilities_unit.py` - the interactive runner's redaction and JSON helpers, FSM file loading.
-- `test_logging_unit.py`, `test_logging_structured.py` - logging helpers, `setup_logging()` and JSON output.
-- `test_okf.py`, `test_okf_cli.py` - Open Knowledge Format: the shared path-confinement helper, parser, loader, link graph, search, writer, memory export, handler, and the `fsm-llm-okf` command.
+- `test_logging_unit.py`, `test_logging_structured.py` - logging helpers, `setup_logging()` and JSON output; child-process tests that `setup_logging()` and `enable_debug_logging()` replace loguru's default handler (a library record prints once, the host's default output stays, `LOGURU_*` settings apply).
+- `test_okf.py`, `test_okf_cli.py` - Open Knowledge Format: the shared path-confinement helper, parser, loader, link graph, search, writer, `capped_note`, the memory export and handler of `okf_bridge.py` (`TestBridgeLayering`: the bridge imports only public names of `okf`), and the `fsm-llm-okf` command.
 - `test_frontmatter.py` - `fsm_llm.frontmatter`, the one YAML frontmatter seam shared by OKF and Agent Skills: split, bounded load with limits as parameters, no-follow read, surrogate walk, layering, and the wiring `okf.py` keeps to it.
 - `test_agent_skills.py` - `fsm_llm.agent_skills`: the parser as a total function over every frontmatter value shape, the bounded loader, symlink and path confinement, the catalog that keeps no body, `render_catalog`, limits, real-world layouts and injection staying in labelled or stripped fields.
-- `test_agent_skills_cli.py` - `fsm-llm-skills`: `validate` (including `--strict`), `list`, `show`, exit codes, output hygiene and wiring.
+- `test_agent_skills_cli.py` - `fsm-llm-skills`: `validate` (including `--strict`; a symlinked `SKILL.md` exits 1), `list`, `show` (`--file DIR` lists a directory), exit codes, output hygiene and wiring.
+- `test_cli_support.py` - `fsm_llm.cli_support`, the skeleton `fsm-llm-okf` and `fsm-llm-skills` share: exit-code mapping, BrokenPipe parking, the unencodable-output escape, the `--max-seconds` type, and pins that neither CLI re-inlines them or imports a private name from the other.
 - `test_docs_snippets.py` - every fenced `json` or `python` block that contains `"initial_state"` in `README.md`, `AGENTS.md`, `docs/quickstart.md`, `src/fsm_llm/README.md`, `docs/api_reference.md`, `docs/architecture.md`, `docs/fsm_design.md` and `docs/handlers.md` must load through `FSMDefinition`.
 - `test_live_classification_memory.py` - 7 real-model tests on Ollama `qwen3.5:9b-q8_0`, marked `integration`, `real_llm` and `slow`, skipped without the model.
 
