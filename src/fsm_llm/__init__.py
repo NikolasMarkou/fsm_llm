@@ -489,11 +489,13 @@ def enable_debug_logging():
         logger,
         prepare_log_record,
         register_stream_handler,
+        replace_default_handler,
         reset_handlers,
     )
 
     # Re-enable the library loggers
     enable_library_logging()
+    replace_default_handler()
 
     # Only remove library-registered handlers (not user's handlers), and let
     # setup_file_logging be called again.

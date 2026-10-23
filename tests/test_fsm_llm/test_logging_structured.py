@@ -5,6 +5,10 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 from loguru import logger
@@ -265,6 +269,13 @@ class TestEnableDebugLoggingHandlerDedup:
         produce exactly one printed line, not two."""
         from fsm_llm import enable_debug_logging
 
+        # Drop loguru's default stderr handler first (as test_core_hardening_seam
+        # does): the call below replaces it with a sink bound to capsys's stream,
+        # which would count this host record once more. The assertion is unchanged.
+        try:
+            logger.remove(0)
+        except ValueError:
+            pass
         enable_debug_logging()
         setup_logging(sink=LOG_SINK_STDERR, format=LOG_FORMAT_HUMAN)
 
@@ -352,3 +363,118 @@ class TestJsonFormatter:
         entry = json.loads(buf.getvalue().strip())
         assert entry["workflow_id"] == "wf-42"
         assert entry["step_name"] == "process"
+
+
+# ``setup_logging()`` and ``enable_debug_logging()`` own the process's output
+# for the library's records: loguru's default stderr handler (id 0) would print
+# every ``fsm_llm`` record a second time. The helper replaces it with an
+# equivalent sink that skips library records, so the host's own records keep
+# printing. Capturing needs a child process: loguru binds the stream at
+# ``logger.add()`` time, and the child must see the tree under test, so its
+# ``sys.path`` comes from ``fsm_llm.__file__`` (``python -I`` would import the
+# editable install, not a copy of the tree).
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+_CHILD = """
+import sys
+sys.path.insert(0, {root!r})
+import fsm_llm
+from loguru import logger
+{body}
+def named(name):
+    def patch(record):
+        record["name"] = name
+    return logger.patch(patch)
+named("fsm_llm.x").warning("LIBREC")
+named("fsm_llm_contrib.y").warning("LOOKREC")
+named("__main__").warning("HOSTREC")
+named("__main__").info("QUIETREC")
+"""
+
+
+def _child(body: str, **env: str) -> list[str]:
+    """Run ``body`` in a fresh interpreter; return its stderr lines, no ANSI."""
+    root = str(Path(sys.modules["fsm_llm"].__file__).parent.parent)
+    clean = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("LOGURU_", "FSM_LLM_LOG"))
+    }
+    result = subprocess.run(
+        [sys.executable, "-c", _CHILD.format(root=root, body=body)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+        env={**clean, **env},
+    )
+    return _ANSI.sub("", result.stderr).splitlines()
+
+
+def _count(lines: list[str], marker: str, separator: str) -> int:
+    return sum(line.endswith(f" {separator} {marker}") for line in lines)
+
+
+class TestDefaultHandlerIsReplacedNotDoubled:
+    """I-127: a library record printed twice after ``setup_logging()``: once by
+    loguru's default handler (format ``... - msg``), once by the library's own
+    (``... | msg``). The library's own handler prints host records too (it has
+    no name filter); that is unchanged and not pinned here."""
+
+    @pytest.mark.parametrize(
+        "body", ["fsm_llm.setup_logging()", "fsm_llm.enable_debug_logging()"]
+    )
+    def test_a_library_record_prints_once_and_the_host_default_output_is_kept(
+        self, body
+    ):
+        lines = _child(body)
+
+        assert _count(lines, "LIBREC", "|") == 1
+        assert _count(lines, "LIBREC", "-") == 0
+        assert _count(lines, "HOSTREC", "-") == 1
+        # A lookalike package name is the host's, not ours.
+        assert _count(lines, "LOOKREC", "-") == 1
+
+    def test_the_other_sinks_replace_it_too(self):
+        lines = _child('fsm_llm.setup_logging(sink="stdout", format="json")')
+
+        assert _count(lines, "LIBREC", "-") == 0
+        assert _count(lines, "HOSTREC", "-") == 1
+
+    def test_a_second_call_is_a_no_op(self):
+        lines = _child(
+            "fsm_llm.setup_logging()\n"
+            "from fsm_llm.logging import replace_default_handler\n"
+            "replace_default_handler()\nreplace_default_handler()"
+        )
+
+        assert _count(lines, "HOSTREC", "-") == 1
+
+    def test_a_missing_default_handler_changes_nothing(self):
+        """A host that already removed id 0 gets no sink added and no error."""
+        lines = _child(
+            "logger.remove()\n"
+            "from fsm_llm.logging import replace_default_handler\n"
+            "replace_default_handler()"
+        )
+
+        assert lines == []
+
+    def test_the_hosts_own_first_sink_is_not_taken_for_the_default(self):
+        """With ``LOGURU_AUTOINIT=false`` the host's first sink is id 0."""
+        lines = _child(
+            'logger.add(sys.stderr, format="HOST>{message}")\nfsm_llm.setup_logging()',
+            LOGURU_AUTOINIT="false",
+        )
+
+        assert "HOST>HOSTREC" in lines
+
+    def test_loguru_level_and_format_are_honoured(self):
+        lines = _child(
+            "fsm_llm.setup_logging()",
+            LOGURU_LEVEL="WARNING",
+            LOGURU_FORMAT="HOST>{message}",
+        )
+
+        assert lines.count("HOST>HOSTREC") == 1
+        assert "HOST>QUIETREC" not in lines
+        assert "HOST>LIBREC" not in lines

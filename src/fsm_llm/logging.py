@@ -126,6 +126,34 @@ def setup_cli_logging(default_level: str) -> int:
     return setup_logging(level=level)
 
 
+_LOGURU_OFF = ("0", "false", "no", "n", "nok", "off")  # loguru's false spellings
+
+
+def _is_library_record(record) -> bool:
+    return (record["name"] or "").split(".")[0] in LIBRARY_LOGGER_NAMES
+
+
+def replace_default_handler() -> None:
+    """Swap loguru's default stderr handler (id 0) for one without library records.
+
+    Id 0 would print each ``fsm_llm`` record a second time. The replacement is
+    ``logger.add(sys.stderr)`` (loguru's own defaults, so ``LOGURU_*`` apply)
+    plus a filter that drops library records. A no-op when id 0 is gone or
+    ``LOGURU_AUTOINIT`` is off (id 0 is then the host's own sink).
+    """
+    # DECISION plan-2026-10-23T113904-93d78536/D-011
+    # Do NOT replace handler 0 without an equivalent sink that keeps the
+    # host's own output, and do NOT just remove it (that silences the host).
+    # Do NOT copy loguru's default format: add() without format= is the default.
+    if os.environ.get("LOGURU_AUTOINIT", "true").lower() in _LOGURU_OFF:
+        return
+    try:
+        logger.remove(0)
+    except ValueError:
+        return
+    logger.add(sys.stderr, filter=lambda r: not _is_library_record(r))
+
+
 # --------------------------------------------------------------
 
 _file_handler_initialized = False
@@ -261,6 +289,7 @@ def setup_logging(
 
     # Enable library logging
     enable_library_logging()
+    replace_default_handler()
 
     # Determine sink and format
     if sink == LOG_SINK_FILE:
