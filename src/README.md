@@ -97,11 +97,12 @@ fsm-llm-meta                          # design an FSM, workflow or agent by chat
 fsm-llm-harness new "goal"            # experimental iterative planner
 fsm-llm-eval examples                 # score every example 0 to 4 (slow, calls the model)
 fsm-llm-okf validate ./bundle         # check an Open Knowledge Format bundle (also list, show, search, export)
+fsm-llm-skills validate ./skills      # check Agent Skills folders (also list, show)
 ```
 
 ## Things to know
 
-- Core dependencies: loguru, litellm (>=1.83.0,<2.0), pydantic (>=2.0), python-dotenv, pyyaml (>=6.0, parses Open Knowledge Format frontmatter), tenacity. Tenacity is not imported by the code but litellm's retry path needs it.
+- Core dependencies: loguru, litellm (>=1.83.0,<2.0), pydantic (>=2.0), python-dotenv, pyyaml (>=6.0, parses Open Knowledge Format and Agent Skills frontmatter), tenacity. Tenacity is not imported by the code but litellm's retry path needs it.
 - Extras: `reasoning`, `workflows`, `agents` and `eval` add nothing; `harness` pulls in `agents`; `monitor` adds fastapi, uvicorn and jinja2; `mcp`, `otel` and `a2a` add optional integrations.
 - The default model is `ollama_chat/qwen3.5:4b`, or whatever `LLM_MODEL` is set to.
 - The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`.

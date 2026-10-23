@@ -64,8 +64,9 @@ These are the 18 names `create_agent` accepts (`react`, `rewoo`, `reflexion`, `p
 - `handlers.py` - runs tools, enforces the iteration limit, and checks human approval. `hitl.py` - human approval before sensitive tools.
 - `memory_tools.py`, `semantic_memory.py`, `memory_persistence.py`, `summarization.py`, `truncation.py` - working-memory tools, long-term embedding memory, saving memory to disk, condensing old observations, shortening long tool output.
 - `okf.py` - Open Knowledge Format (OKF) for agents: `create_okf_tools(bundle)` gives four read-only tools (`okf_list`, `okf_read`, `okf_search`, `okf_links`), `OKFMemoryBackend` is a read-only memory backend for `AutoMemoryReactAgent`, and `export_semantic_memory` and `export_agent_result` write bundles. The format itself lives in core `fsm_llm.okf`.
+- `agent_skills.py` - Agent Skills for agents: `create_skill_tools(catalog)` gives three read-only tools (`skill_list`, `skill_load`, `skill_read`) over skills loaded by `fsm_llm.agent_skills`. Skill text is untrusted tool output under a fixed label; nothing in a skill is run.
 - `composition.py` - use ReAct agents as orchestrator workers; an LLM judge for the evaluator-optimizer.
-- `python_tools.py`, `sop.py` - load tools from folders of Python files; reusable task templates (three built in).
+- `python_tools.py`, `sop.py` - load tools from folders of Python files (`PythonToolLoader`; it runs those files, so trusted sources only; this is not Agent Skills); reusable task templates (three built in).
 - `mcp.py` - load tools from an MCP (Model Context Protocol) server. `remote.py` - serve an agent over HTTP, or call a remote one as a tool.
 - `meta_builder.py`, `meta_builders.py`, `meta_tools.py`, `meta_prompts.py`, `meta_output.py`, `meta_cli.py` - the meta-builder, its artifact builders (`FSMArtifactBuilder`, `WorkflowArtifactBuilder`, `AgentArtifactBuilder`: calls chain, `take_warnings()` returns and clears the warnings, `build()` validates) and its `fsm-llm-meta` command.
 - `builders.py` - `ConfiguredAgentBuilder`.
@@ -118,6 +119,19 @@ print(agent("What is the maximum payload size of the gateway?").answer)
 
 `okf_read` returns the body in pages of at most 1,500 characters and ends a page with `next offset: N` when more follows; the model passes that number back as `offset`. Pages are sized to fit the agent loop's 2,000-character observation entry: the cap minus the wrapper built from the call's arguments minus a 24-character step allowance minus a 300-character margin for keys the model adds to its input (floor 1,000). The loop may still cut an entry when the echoed input is long (extra keys, escape-heavy ids), visible as the loop's `...[truncated` marker; `next offset` never points past what the page contains. Every tool reply starts with a fixed line saying the content is untrusted data, followed by one more fixed note when the bundle was loaded incompletely (a spent time or size limit; `OKFMemoryBackend.incomplete` shows the codes, but its recalled lines carry no note), and bundle text is never put in a tool description or in the agent's instructions. To recall from a bundle on every run, pass `OKFMemoryBackend(bundle)` as `memory=` to `AutoMemoryReactAgent`; it is read-only, so `auto_remember=True` stores nothing in it (use `export_agent_result` to write a run). Each recalled line starts with `OKF_SUMMARY_LABEL` and is concatenated into the task string; `AutoMemoryReactAgent` has no header setting, so that label is the protection (a caller of `augment_task_with_memories` should pass an untrusted `header`). The bundle's trust label (`verified[].by`) is shown as `trust (claimed by bundle)`: a claim, not proof.
 
+Give an agent Agent Skills (folders with a `SKILL.md`, the open standard at agentskills.io as read on 2026-10-23, unversioned and mutable). You name the folders; nothing is scanned for you:
+
+```python
+from fsm_llm.agent_skills import load_skills
+from fsm_llm.agents import create_agent, create_skill_tools
+
+catalog = load_skills("./skills")            # never raises on bad content; problems are in catalog.issues
+agent = create_agent("react", create_skill_tools(catalog))
+print(agent(catalog.render_catalog() + "\n\nFill in the form.").answer)
+```
+
+`skill_list` shows the skills, `skill_load` the instructions of one a page at a time, and `skill_read` a bundled text file (or the list of files in a directory). The catalog is not put in the system prompt for you: hand the model `catalog.render_catalog()` in the task, as above, or it has to call `skill_list` first, which a small model may not do. Scripts in a skill are only readable as text, never run.
+
 Build a new FSM by chatting (say "build it" when ready):
 
 ```bash
@@ -132,6 +146,7 @@ fsm-llm-meta --model ollama_chat/qwen3.5:4b --output my_bot.json
 
 ## Things to know
 
+- Agent Skills text is untrusted. `create_skill_tools` replies start with the fixed label `SKILL_UNTRUSTED_LABEL`, are capped to fit the 2,000-character observation entry and are control-stripped; skill text is never a tool description or an instruction, nothing in a skill folder is executed, and `allowed-tools` is shown as a claim, not enforced. Long bodies take many calls (the 50 KB `iterative-planner` skill takes 37 `skill_load` pages).
 - OKF bundle text is untrusted. `create_okf_tools` replies fit the agent loop's 2,000-character observation entry and are control-stripped, `OKFMemoryBackend` returns one-line summaries (never bodies) that start with `OKF_SUMMARY_LABEL` and enter the task string, and the exporters are plain functions, not tools, because a write tool would need human approval.
 - The `agents` extra adds no dependencies. `mcp.py` needs the `mcp` extra; `RemoteAgentTool` needs the `a2a` extra (httpx); `AgentServer` needs fastapi (for example via the `monitor` extra). Install extras from a clone: `pip install -e ".[mcp]"`. `ReasoningReactAgent` uses `fsm_llm.reasoning`, which ships in every install.
 - `AgentConfig` rejects unknown fields (a typo raises). `model` defaults to the `LLM_MODEL` environment variable, read when the config is built, then `ollama_chat/qwen3.5:4b`. `instructions` (at most 2,000 characters; `create_agent(system_prompt=...)` sets it) is added to every non-empty state and per-field instruction (not to `classification_extractions`, the core transition classifier or ReasoningReact's reasoning engine). Together with a large tool catalogue it can overflow core's 5,000-character instruction slot; that raises `AgentError` at `run()` naming the slot, the instructions length and the tool count; `NativeFunctionCallingReactAgent` uses it as its system policy. Swarm and the meta-builder do not use it.

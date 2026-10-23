@@ -88,6 +88,8 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_semantic_memory.py` - `SemanticMemoryStore` and its `remember`/`recall` tools.
 - `test_semantic_memory_robustness.py` - thread safety, embedding model mismatch warning, `max_entries`, atomic save.
 - `test_python_tools.py` - `PythonToolLoader.from_directory` dedupe.
+- `test_okf.py` - the OKF tools, memory backend and exporters in `fsm_llm.agents`.
+- `test_agent_skills.py` - `create_skill_tools`: the three read-only tools, reply budget against the 2,000-character observation cap, injection containment, parameter clamping, end-to-end runs (scripted `native_fc` and `ReactAgent`) and the no-execution pin.
 - `test_strands_phase2.py` - MCP provider and timeouts, swarm, agent graph, OTEL, `DependencyResolver`, SOPs, semantic tools, A2A, exports.
 - `test_structured_output.py` - `output_schema` parsing into `structured_output`.
 - `test_summarization.py` - `make_observation_summarizer` and its handler wiring.

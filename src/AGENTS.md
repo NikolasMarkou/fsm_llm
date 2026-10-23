@@ -61,12 +61,14 @@ flowchart LR
 | `fsm_llm/prompts.py`, `context.py`, `memory.py`, `session.py` | Prompt builders; context cleaning and `ContextCompactor`; `WorkingMemory`; `FileSessionStore` | |
 | `fsm_llm/security.py`, `constants.py` | `has_internal_prefix`, `is_forbidden_context_entry`, `resolve_within` (the shared path-confinement helper); defaults and limits (`OKF_*` included) | `constants` re-exports `security` names |
 | `fsm_llm/okf.py`, `okf_cli.py` | Open Knowledge Format (OKF v0.2, SPEC at commit ad30107, pre-1.0 and mutable): bounded bundle loader, tolerant parser, link graph, lexical search, `check_bundle`, `write_bundle` (atomic per file, refuses what it cannot render within the caps), `create_okf_handler`; `fsm-llm-okf` | `load_bundle`, `OKFBundle`, `fsm-llm-okf`; imports no subpackage |
+| `fsm_llm/frontmatter.py` | The one YAML frontmatter seam (`split_frontmatter`, `load_yaml`, `read_bytes`, `lone_surrogate`), shared by OKF and Agent Skills | Stdlib and `yaml` only; limits are parameters |
+| `fsm_llm/agent_skills.py`, `agent_skills_cli.py` | Agent Skills (SKILL.md folders; agentskills.io spec read 2026-10-23, unversioned and mutable), read-only: tolerant parser, bounded loader, progressive-disclosure `SkillCatalog` (no body kept), `render_catalog`; `fsm-llm-skills validate\|list\|show` | `load_skills`, `SkillCatalog`, `fsm-llm-skills`; imports no subpackage; nothing in a skill is executed |
 | `fsm_llm/utilities.py` | JSON extraction, FSM loading, `filter_context_tree`, `redacting_json_default` | |
 | `fsm_llm/validator.py`, `visualizer.py`, `runner.py`, `__main__.py` | CLIs | |
 | `fsm_llm/logging.py` | loguru setup; `logger.disable("fsm_llm")` at import | |
 | `fsm_llm/reasoning/` | 9 strategy FSMs under an orchestrator, validation with up to 3 retries | `ReasoningEngine.solve_problem` |
 | `fsm_llm/workflows/` | Async in-memory engine, 11 step types, DSL, no persistence | `WorkflowEngine`, `create_workflow` |
-| `fsm_llm/agents/` | 18 agent patterns as generated FSMs, tools, HITL, memory, MCP, A2A, meta-builder, OKF read tools, memory backend and exporters (`agents/okf.py`) | `create_agent`, `ReactAgent`, `@tool`, `create_okf_tools` |
+| `fsm_llm/agents/` | 18 agent patterns as generated FSMs, tools, HITL, memory, MCP, A2A, meta-builder, OKF read tools, memory backend and exporters (`agents/okf.py`), Agent Skills read tools (`agents/agent_skills.py`) | `create_agent`, `ReactAgent`, `@tool`, `create_okf_tools`, `create_skill_tools` |
 | `fsm_llm/monitor/` | FastAPI dashboard (REST, WebSocket, vanilla-JS SPA), OTEL exporter | `fsm-llm-monitor` |
 | `fsm_llm/harness/` | Experimental iterative planner: 6-state, 9-transition FSM with disk-counted gates, 2-attempt leash | `fsm-llm-harness`, `HarnessAgent` |
 | `fsm_llm/eval/` | Examples evaluator (score 0-4) and conversation-case runner with Wilson CI | `fsm-llm-eval` |
@@ -87,6 +89,7 @@ flowchart LR
 | `fsm-llm-harness` | `fsm_llm.harness.__main__:run` |
 | `fsm-llm-eval` | `fsm_llm.eval.__main__:run` |
 | `fsm-llm-okf` | `fsm_llm.okf_cli:main_cli` |
+| `fsm-llm-skills` | `fsm_llm.agent_skills_cli:main_cli` |
 
 - Reasoning CLI has no console script: `python -m fsm_llm.reasoning "problem"`.
 - CLIs write reports to stdout, diagnostics to stderr. Shared codes in `fsm_llm/constants.py`: `CLI_EXIT_OK = 0`, `CLI_EXIT_FAILURE = 1`, `CLI_EXIT_INTERRUPTED = 130` (Ctrl-C). `fsm-llm-okf` follows the same codes and keeps argparse's exit 2 for a usage error, as do the other CLIs. Two CLIs also use exit 2 for a result, and both override argparse so usage errors exit 1 instead of 2:
@@ -111,7 +114,7 @@ flowchart LR
 
 ## Dependencies
 
-- Core (pyproject): loguru>=0.7.3, litellm>=1.83.0,<2.0, pydantic>=2.0, python-dotenv>=1.0.0, pyyaml>=6.0 (parses OKF YAML frontmatter; declared explicitly because it was only a transitive dependency), tenacity>=8.0 (required by litellm's sync retry path; nothing in `src/` imports it; do not remove).
+- Core (pyproject): loguru>=0.7.3, litellm>=1.83.0,<2.0, pydantic>=2.0, python-dotenv>=1.0.0, pyyaml>=6.0 (parses OKF and Agent Skills YAML frontmatter, in `frontmatter.py` only; declared explicitly because it was only a transitive dependency), tenacity>=8.0 (required by litellm's sync retry path; nothing in `src/` imports it; do not remove).
 - Extras: `workflows`, `reasoning`, `agents`, `eval` empty; `harness = ["fsm-llm[agents]"]`; `monitor` = fastapi, uvicorn, jinja2; `mcp` = mcp>=1.0.0; `otel` = opentelemetry-api/sdk>=1.20.0; `a2a` = httpx>=0.24.0; plus `all` and `dev`.
 - Subpackages consume from core: `API` and its stacking/handler methods, `HandlerTiming`, `BaseHandler`, `LLMInterface`, `FSMDefinition`, `FSMError`, `has_internal_prefix`, `is_forbidden_context_entry`, `redacting_json_default`, `filter_context_tree`, `DEFAULT_LLM_MODEL`. Changing these affects subpackages.
 

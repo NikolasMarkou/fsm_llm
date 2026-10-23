@@ -92,6 +92,10 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_visualizer_unit.py` | ASCII visualizer, box alignment, truncation, CLI output | |
 | `test_runner_unit.py`, `test_utilities_unit.py` | runner redaction, `extract_json_from_text`, FSM loading | |
 | `test_logging_unit.py`, `test_logging_structured.py` | logging helpers, `setup_logging`, JSON formatter | |
+| `test_okf.py`, `test_okf_cli.py` | Open Knowledge Format loader, writer, handler and `fsm-llm-okf` | imports `fsm_llm.okf`; the shared helper `resolve_within` is tested in `test_okf.py` |
+| `test_frontmatter.py` | `fsm_llm.frontmatter`: split, bounded `load_yaml`, `read_bytes`, `lone_surrogate`, layering | the one YAML loader; `TestOkfKeepsItsWiring` pins what `okf.py` keeps to it |
+| `test_agent_skills.py` | `fsm_llm.agent_skills` parser, loader, catalog, render, confinement | pure ASCII file (controls built with `chr`); `TestLayering` runs `python -I` subprocesses |
+| `test_agent_skills_cli.py` | `fsm-llm-skills` commands, exit codes, output hygiene | `TestWiring` pins the console script |
 | `test_docs_snippets.py` | loads doc FSM snippets through `FSMDefinition` | see Invariants |
 | `test_live_classification_memory.py` | live classifier and memory agent on `ollama_chat/qwen3.5:9b-q8_0` | markers `integration`, `real_llm`, `slow` |
 

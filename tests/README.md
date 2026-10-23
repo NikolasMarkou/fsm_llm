@@ -41,8 +41,8 @@ flowchart TD
 
 | Folder | Tests | What it checks |
 | --- | --- | --- |
-| `test_fsm_llm/` | 4,298 | Core framework: `API`, `FSMManager`, the 2-pass `MessagePipeline`, transition rules, JsonLogic, prompts, the LiteLLM wrapper, handlers, working memory, validator, visualizer, logging, and the secret filter measured against labelled corpora in `fixtures/`, the message-free `advance` and `run_until_terminal` loops, the `complete` LLM primitive and the core builders |
-| `test_fsm_llm_agents/` | 2,473 | Every agent pattern (ReAct, Reflexion, Plan-Execute, Debate and others), tools, human approval (HITL) security, memory, MCP, remote serving, the agents CLI, the agents run loops and `ConfiguredAgentBuilder` |
+| `test_fsm_llm/` | 4,298 | Core framework: `API`, `FSMManager`, the 2-pass `MessagePipeline`, transition rules, JsonLogic, prompts, the LiteLLM wrapper, handlers, working memory, validator, visualizer, logging, and the secret filter measured against labelled corpora in `fixtures/`, the message-free `advance` and `run_until_terminal` loops, the `complete` LLM primitive, the core builders, OKF, the shared `frontmatter` seam and Agent Skills with `fsm-llm-skills` |
+| `test_fsm_llm_agents/` | 2,473 | Every agent pattern (ReAct, Reflexion, Plan-Execute, Debate and others), tools, human approval (HITL) security, memory, MCP, remote serving, the agents CLI, the agents run loops, `ConfiguredAgentBuilder` and the OKF and Agent Skills tools |
 | `test_fsm_llm_meta/` | 437 | The meta-builder in `fsm_llm.agents`: FSM, workflow and agent artifact builders, builder tools (golden reply text, concurrency isolation), prompts, `MetaBuilderAgent` |
 | `test_fsm_llm_reasoning/` | 191 | Reasoning engine constants, models, exceptions, handlers, strategy fallback, CLI logging and JSON output, and whole scripted solves on the core step loop |
 | `test_fsm_llm_workflows/` | 269 | Async workflow engine: step types, DSL and `WorkflowBuilder`, engine lifecycle, timeouts, audit fixes |
