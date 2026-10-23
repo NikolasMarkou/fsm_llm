@@ -580,7 +580,7 @@ def doc_measured() -> dict:
 class TestEveryDocumentedCountMatchesCollection:
     """Every count token of the shapes `scripts/doc_counts.py` names equals the collection.
 
-    The class above pins 16 literals of three files. This one runs the sweep of
+    The class above pins the count literals of two files (AGENTS.md and README.md). This one runs the sweep of
     `scripts/doc_counts.py` (`make counts`) over the tracked .md files: `N tests`
     style tokens, marker, `slow`, live and file counts, the per-file rows. A
     token of one of those shapes that no rule names fails too. A number in prose
