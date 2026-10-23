@@ -1,9 +1,10 @@
 # Pre-registration, skills-disclosure B0 (decision block)
 
 Written and committed BEFORE row 1, together with the manifests
-`manifest_hint_on.json` and `manifest_hint_off.json`. Nothing in this file or in
-`scripts/skills_bench.py` between its BEGIN FIXTURE and END FIXTURE markers may
-change after this commit; a new question needs a new block with a new manifest.
+`manifest_hint_on.json` and `manifest_hint_off.json`. After that commit nothing in
+this file or in `scripts/skills_bench.py` between its BEGIN FIXTURE and END FIXTURE
+markers may change, except the dated amendments listed below (A1, A2, A3), each made
+before any row existed; a new question needs a new block with a new manifest.
 
 Question: does `qwen3.5:4b` ReAct complete the two-step disclosure (skill_load of
 the right skill, then skill_read of the right file) more often with the read hint
@@ -85,6 +86,25 @@ Cases: 0 v 0, 1 v 1, 2 v 1, 1 v 2, 4 v 4, 4 v 3 -> inconclusive, KEEP; 0 v 4 (a 
 4 but p = 0.087) -> inconclusive, KEEP; 5 v 5, 5 v 4, 10 v 10, 9 v 10 -> no effect
 shown, REMOVE; 10 v 4 (p = 0.011) -> effect shown, KEEP; 4 v 10 -> harmful, REMOVE.
 `decide_b0` implements this order and `report` prints the applied branch.
+
+## Amendment A3, 2026-10-23 (decision D-036 of plan 93d78536): what is pinned
+
+Made after A2 and BEFORE row 1: no row of B0 or B1 exists. A3 changes no rule, no
+manifest and no fixture; it only states what the pre-registration does and does not
+pin, because the header above and the run-time check claimed more than they hold
+(reviewer pass 1, warnings 1 and 3 of findings/review-iter-1.md).
+
+Pinned and not pinned:
+- The run-time drift check (`PINNED_AT_RUN`) hashes `src/fsm_llm/agent_skills.py`,
+  `src/fsm_llm/agents/agent_skills.py` and `src/fsm_llm/constants.py` only.
+- NOT hashed: the ReAct agent, native_fc, `okf.text_page`, `llm.py` and the rest of
+  the tree. A change there between registration and a run alters the measured system
+  without being detected, so a later run must record the git commit it ran at in
+  GRADING.md.
+- The primary unit (first-trial G1 of the 10 read-needed questions, controls and
+  trial 2 apart) and the decision rule inputs are pinned by
+  `tests/test_skills_bench.py` (`metrics()` and `decide_b0` through `report`), not
+  by a hash.
 
 ## Operational definitions (they only make the text above computable)
 

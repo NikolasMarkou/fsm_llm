@@ -1,7 +1,9 @@
 # Pre-registration, skills-disclosure B1 (informational block)
 
 Written and committed BEFORE row 1, together with the manifests of the arms
-`native_4b`, `native_4b_hint_off`, `react_9b` and `native_9b`.
+`native_4b`, `native_4b_hint_off`, `react_9b` and `native_9b`. After that commit
+this file and the fixture may change only by dated amendments, each made before any
+row existed; the only one that touches B1 is A3 of PRE_REGISTRATION_B0.md.
 
 Question (I-133): does the two-step disclosure also complete on other models and
 agent patterns? Arms: `native_4b` (native_fc on
@@ -30,6 +32,14 @@ hint on/off view where the model does reach `skill_read`. It is labelled
 "informational, no gate", it feeds no rule and it does not change the B0 decision.
 Rows whose hint state contradicts the arm are reported, never dropped.
 A block that did not finish is reported with its reason.
+
+## Pinned and not pinned (amendment A3 of PRE_REGISTRATION_B0.md, 2026-10-23, before any row)
+
+The run-time drift check hashes `src/fsm_llm/agent_skills.py`,
+`src/fsm_llm/agents/agent_skills.py` and `src/fsm_llm/constants.py` only. The ReAct
+agent, native_fc, `okf.text_page` and `llm.py` are not hashed, so a later run must
+record the git commit it ran at in GRADING.md. The primary unit and the report
+inputs are pinned by `tests/test_skills_bench.py`, not by a hash.
 
 ## Operational definitions
 

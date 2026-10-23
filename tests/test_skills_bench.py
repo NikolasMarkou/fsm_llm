@@ -257,6 +257,23 @@ class TestBlocks:
         got = (f"{verdict.split(' (')[0]} {action}", "fewer than half" in verdict)
         assert got == (("inconclusive KEEP", True) if want == "floor" else (want, False))  # fmt: skip
 
+    def test_the_decision_reads_first_trial_g1_of_the_read_needed_questions(
+        self, bench, capsys
+    ):
+        """Guards (W3): metrics() scoring trial 2, a control in the unit, or G2/G4 deciding."""
+        (bench / "B0").mkdir(parents=True)
+        for arm, first, later in (("hint_on", True, False), ("hint_off", False, True)):
+            for q, trial in ((q, t) for q in sb.QUESTIONS for t in (1, 2)):
+                g = first if trial == 1 else later  # controls get the opposite
+                row = dict(task_id=q.id, trial=trial, control=q.control, shape="x")
+                row |= dict(
+                    g1=g != q.control, g2=later, g3=later, g4=later, hint_valid=1
+                )
+                sb.hb.append_row(bench / "B0" / f"rows_{arm}.jsonl", row)
+            sb.write_summary(bench / "B0", arm, "complete", "t", {})
+        assert sb.report(BID) == 0
+        assert "effect shown (diff 10, p=0.0000) -> KEEP" in capsys.readouterr().out
+
     def test_b1_pairs_native_4b_with_its_hint_off_arm_and_prints_a_fisher_p(
         self, bench, scripted, capsys
     ):
