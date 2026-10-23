@@ -1,8 +1,8 @@
 """Tests for the Open Knowledge Format (OKF) support.
 
 This file grows with the OKF plan; the first class guards the one
-path-confinement helper that the OKF loader and writer share with the harness
-workspace, the rest cover the tolerant parser, trust tiers and staleness.
+path-confinement helper that the OKF loader and writer share with the Agent
+Skills reads, the rest cover the tolerant parser, trust tiers and staleness.
 """
 
 from __future__ import annotations
