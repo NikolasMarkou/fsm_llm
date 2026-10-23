@@ -154,18 +154,20 @@ def _first_page(skill: AgentSkill, spare: int) -> list[str]:
     return out + _fit(_claims(skill), spare)[0]
 
 
-def _tail(text: str, following: int | None) -> str:
-    """Control-stripped *text*, then the ``next offset`` line when more follows.
-    The footer is appended after the strip, never cut: callers size *text* to leave
-    it room (a page is at least one character, so a reply always moves on)."""
-    out = strip_unsafe_text(text, multiline=True)
+def _tail(head: str, page: str, following: int | None) -> str:
+    """Control-stripped *head*, then *page* as is, then the ``next offset`` line
+    when more follows. A page is a slice of text the catalog already stripped, so
+    it is not stripped again (that would drop a joiner at its edge); the footer is
+    never cut: callers size *page* to leave it room (a page is at least one
+    character, so a reply always moves on)."""
+    out = strip_unsafe_text(head, multiline=True) + page
     return out if following is None else f"{out}\nnext offset: {following}"
 
 
 def _reply(head: str, page: str, following: int | None, total: int, kind: str) -> str:
     """*head*, a page of text (or the end marker) and the footer, via ``_tail``."""
     return _tail(
-        head + (page or (f"(end of {kind})" if total else f"(empty {kind})")), following
+        head, page or (f"(end of {kind})" if total else f"(empty {kind})"), following
     )
 
 
@@ -219,7 +221,9 @@ def create_skill_tools(
         lines, _ = _fit(entries, budget - len(head) - _FOOTER_RESERVE)
         lines = lines or entries[:1]  # a page always moves on
         more = start + len(lines) < len(skills)
-        return _tail("\n".join([head, *lines]), start + len(lines) if more else None)
+        return _tail(
+            "\n".join([head, *lines]), "", start + len(lines) if more else None
+        )
 
     def skill_load(name: Any = "", offset: Any = 0) -> str:
         budget = _budget("skill_load", name=name, offset=offset)

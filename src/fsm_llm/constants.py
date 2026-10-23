@@ -419,9 +419,6 @@ OKF_SUMMARY_MAX_ITEMS = 20
 OKF_SUMMARY_FIELD_CHARS = 200
 OKF_READ_PAGE_CHARS = 1_500
 OKF_LIST_MAX_ITEMS = 25
-# Last line of `render_catalog()` after the closing tag, so the caller's own text
-# that follows is not read as part of the untrusted block.
-SKILL_CATALOG_END = "[end of untrusted skill catalog]"
 # The one line shown to a model or CLI reader when a load was stopped (a spent
 # limit or deadline). `{codes}` takes issue CODES only, never messages or paths.
 OKF_INCOMPLETE_NOTE = (
@@ -482,16 +479,24 @@ SKILL_UNTRUSTED_LABEL = (
 # Last line of `render_catalog()` after the closing tag, so the caller's own text
 # that follows is not read as part of the untrusted block.
 SKILL_CATALOG_END = "[end of untrusted skill catalog]"
+# DECISION plan-2026-10-23T043147-4c2042f3/D-041
+# Every fixed line of the catalog block (the label, the end line, the notes below,
+# the tags) is made of `[` `]` `<` `>` text, so skill text in `render_catalog()`
+# goes through this table. Do NOT go back to escaping `<` as `&lt;` and keeping
+# `[`: the agent sanitizer prints the real tags that way, so a forged closing tag
+# or end line in a description would look the same in the prompt. See D-041.
+SKILL_DEFANG = str.maketrans("[]<>", "()\u2039\u203a")
 # The one line shown to a model or CLI reader when a load was stopped (a spent
 # limit or deadline). `{codes}` takes issue CODES only, never messages or paths.
 SKILL_INCOMPLETE_NOTE = (
-    "Note: these skills were loaded incompletely ({codes}); results may be missing."
+    "[note: these skills were loaded incompletely ({codes}); results may be missing]"
 )
 # Shown beside `skill_list` and `render_catalog()` when skill folders were skipped
 # for an error (invalid frontmatter and the like). `{count}` is a number only.
+# It tells the model nothing to run: only the user has a shell.
 SKILL_SKIPPED_NOTE = (
-    "Note: {count} skill folder(s) were skipped (invalid or unreadable SKILL.md); "
-    "run `fsm-llm-skills validate` to see why."
+    "[note: {count} skill folder(s) were skipped (invalid or unreadable SKILL.md); "
+    "the user can check them with fsm-llm-skills validate]"
 )
 # One line on the first `skill_load` page of a skill that bundles files: it names
 # the call that reads a listed file. Fixed text, never skill content.

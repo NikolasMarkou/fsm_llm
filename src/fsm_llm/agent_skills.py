@@ -38,6 +38,7 @@ from .constants import (
     SKILL_CATALOG_END,
     SKILL_CATALOG_MAX_ITEMS,
     SKILL_COMPATIBILITY_MAX_CHARS,
+    SKILL_DEFANG,
     SKILL_DESCRIPTION_MAX_CHARS,
     SKILL_ECHO_CHARS,
     SKILL_INCOMPLETE_NOTE,
@@ -241,10 +242,8 @@ def parse_skill_text(
             f"description has {len(description)} characters; "
             f"the standard allows {SKILL_DESCRIPTION_MAX_CHARS}",
         )
-    compatibility = _text(
-        data, "compatibility", "compatibility-invalid", note, filled=True
-    )
-    if len(compatibility) > SKILL_COMPATIBILITY_MAX_CHARS:
+    compat = _text(data, "compatibility", "compatibility-invalid", note, filled=True)
+    if len(compat) > SKILL_COMPATIBILITY_MAX_CHARS:
         note("warning", "compatibility-long", "compatibility is over the limit")
 
     given = data.get("metadata")
@@ -279,7 +278,7 @@ def parse_skill_text(
         directory=directory,
         skill_md=skill_md,
         license=_text(data, "license", "license-invalid", note, filled=True) or None,
-        compatibility=compatibility or None,
+        compatibility=compat or None,
         metadata=metadata,
         allowed_tools=allowed,
         extra_keys=extras,
@@ -408,7 +407,7 @@ def _list_resources(
     """Sorted relative paths of the regular files a skill bundles (never raises);
     a bound or *deadline* ends the walk with ``resources-truncated``."""
     found: list[str] = []
-    links, first_link, unsafe, unreadable, visited, cut = 0, "", 0, 0, 0, False
+    links, first_link, unsafe, unreadable, bad, visited, cut = 0, "", 0, 0, "", 0, False
     budget = limits.max_resources_per_skill * SKILL_SCAN_FACTOR
     stack: list[tuple[Path, tuple[str, ...], int]] = [(skill_dir, (), 0)]
     while stack and not cut:
@@ -417,7 +416,7 @@ def _list_resources(
             with os.scandir(directory) as scan:
                 entries = sorted(islice(scan, budget + 1), key=lambda e: e.name)
         except OSError:
-            unreadable += 1
+            unreadable, bad = unreadable + 1, bad or "/".join((folder, *parts))
             continue
         subdirs = []
         for entry in entries:
@@ -452,7 +451,7 @@ def _list_resources(
     if unsafe:
         _note(issues, "resource-name-unsafe", folder, f"{unsafe} not listed")
     if unreadable:
-        _note(issues, "dir-unreadable", folder, f"{unreadable} directories")
+        _note(issues, "dir-unreadable", bad, f"{unreadable} directories")
     if cut:
         _note(issues, "resources-truncated", folder)
     return tuple(sorted(found))
@@ -622,17 +621,18 @@ class SkillCatalog:
         max_items: int = SKILL_CATALOG_MAX_ITEMS,
         description_chars: int = SKILL_CATALOG_DESCRIPTION_CHARS,
     ) -> str:
-        """The label, then ``<available_skills>`` with one escaped ``<skill>`` per
-        skill (name, capped description; no path), a fixed end line, the incomplete
-        and skipped notes. Escaped by ``html.escape(quote=False)`` (tags, ``&``)."""
+        """The label, then ``<available_skills>`` with one ``<skill>`` per skill
+        (name, capped description; no path), a fixed end line, the incomplete and
+        skipped notes. Skill text has ``[ ] < >`` swapped (D-041) and ``&`` escaped,
+        so it cannot spell a fixed line; each occurs once."""
         if not self._skills:
             return ""
         shown = list(self._skills.values())[: max(max_items, 0)]
         lines = [SKILL_UNTRUSTED_LABEL, "<available_skills>"]
         for skill in shown:
-            name = html.escape(skill.name, quote=False)
+            name = html.escape(skill.name.translate(SKILL_DEFANG), quote=False)
             text = capped_line(skill.description, description_chars)
-            text = html.escape(text, quote=False)
+            text = html.escape(text.translate(SKILL_DEFANG), quote=False)
             lines.append(
                 f"<skill><name>{name}</name><description>{text}</description></skill>"
             )

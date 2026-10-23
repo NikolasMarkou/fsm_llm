@@ -45,6 +45,7 @@ _TOOLS = ("skill_list", "skill_load", "skill_read")
 _MARKERS = ("namepwn-1", "DESCPWN-2", "BODYPWN-3", "FILEPWN-4", "TEXTPWN-5")
 _M_NAME, _M_DESC, _M_BODY, _M_FILE, _M_TEXT = _MARKERS
 _ESC, _BIDI, _NUL = chr(0x1B), chr(0x202E), chr(0)
+_ZWJ_RUN = (chr(0x1F600) + chr(0x200D)) * 1600  # joiners fall on page edges
 _FILES = {"a/" + "f" * 90: "z" * 5000}
 _LONG = "\n".join(f"line {i:04d} " + "x" * 60 for i in range(120))
 
@@ -242,6 +243,7 @@ class TestReplyBudget:
     ):
         monkeypatch.setattr(Defaults, "MAX_OBSERVATION_LENGTH", cap)
         text = _LONG + f"\n{_ESC}[0m tail" + "\n\n" + "y" * 40
+        text += "\n" + _ZWJ_RUN + "x" + _ZWJ_RUN + chr(0x1F600)  # both parities
         _make(tmp_path, "big", "Big.", text + "\n", {"references/r.md": text})
         registry = _registry(tmp_path)
         raw = (tmp_path / "big/SKILL.md").read_text()
