@@ -19,24 +19,23 @@ Imports core only (never a subpackage).
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from collections import Counter
 from collections.abc import Callable, Sequence
 from typing import TextIO
 
 from .agent_skills import SkillCatalog, SkillLimits, incomplete_note, load_skills
+from .cli_support import exit_main, positive_seconds, report_error, run_cli
 from .constants import (
     CLI_EXIT_FAILURE,
-    CLI_EXIT_INTERRUPTED,
     CLI_EXIT_OK,
     SKILL_CATALOG_DESCRIPTION_CHARS,
     SKILL_LIST_MAX_ITEMS,
     SKILL_MAX_LOAD_SECONDS,
+    SKILL_READ_PAGE_CHARS,
 )
 from .definitions import SkillError
-from .okf import capped_line, strip_unsafe_text
-from .okf_cli import _escape_unencodable_output, _positive_seconds
+from .okf import capped_line, strip_unsafe_text, text_page
 
 __all__ = ["main", "main_cli"]
 
@@ -49,7 +48,7 @@ def _say(text: str, stream: TextIO | None = None, *, multiline: bool = False) ->
 
 
 def _err(message: str) -> None:
-    _say(f"{_PROG}: {capped_line(message, 1000)}", sys.stderr)
+    report_error(_PROG, message)
 
 
 def _load(args: argparse.Namespace) -> SkillCatalog:
@@ -95,6 +94,11 @@ def _cmd_show(args: argparse.Namespace) -> int:
         page, following, _ = catalog.read_body(skill.name, args.offset)
         listed = ", ".join(skill.resources[:SKILL_LIST_MAX_ITEMS])
         what = f"files ({len(skill.resources)}): {listed}"
+    elif files := catalog.files_under(skill.name, args.file):
+        page, following, _ = text_page(
+            "\n".join(files), args.offset, SKILL_READ_PAGE_CHARS
+        )
+        what = f"files under {capped_line(args.file, 300)!r} ({len(files)})"
     else:
         page, following, _ = catalog.read_resource(skill.name, args.file, args.offset)
         what = f"file: {capped_line(args.file, 300)}"
@@ -119,7 +123,7 @@ def _build_parser() -> argparse.ArgumentParser:
         command.add_argument("paths", nargs="+", metavar="PATH")
         command.add_argument(
             "--max-seconds",
-            type=_positive_seconds,
+            type=positive_seconds,
             default=SKILL_MAX_LOAD_SECONDS,
             help="wall-clock budget of the load (default %(default)s)",
         )
@@ -140,30 +144,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     a ``SkillError`` or ``OSError`` is one stderr line and exit 1, never a
     traceback; unencodable text is written as ``\\uXXXX`` escapes (the standard
     streams are reconfigured for the rest of the process, as in ``fsm-llm-okf``)."""
-    _escape_unencodable_output()
-    args = _build_parser().parse_args(argv)
-    try:
-        return int(args.func(args))
-    except KeyboardInterrupt:
-        _err("interrupted")
-        return CLI_EXIT_INTERRUPTED
-    except BrokenPipeError:
-        raise  # handled by main_cli, which owns stdout
-    except (SkillError, OSError) as exc:
-        _err(f"error: {exc}")
-        return CLI_EXIT_FAILURE
+    return run_cli(_build_parser(), argv, prog=_PROG, errors=(SkillError,))
 
 
 def main_cli() -> None:
     """Console-script entry point for ``fsm-llm-skills``."""
-    try:
-        code = main()
-        sys.stdout.flush()
-    except BrokenPipeError:
-        # Piped into `head`: park stdout so the exit flush prints no second error.
-        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
-        code = CLI_EXIT_FAILURE
-    sys.exit(code)
+    exit_main(main)
 
 
 if __name__ == "__main__":  # pragma: no cover - process entry point

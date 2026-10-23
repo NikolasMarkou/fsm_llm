@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `okf.capped_issues(issues, cap, stops, kind)` and `okf.text_page(text, offset, size)` are now public helpers shared by OKF and Agent Skills (the issue cap and the paging); `okf.body_page` calls `text_page`.
   - Measured on seven real skills of a local `~/.claude/skills`: all load with 0 errors (three `key-unknown` warnings for the `version`, `released` and `commit` extras). The largest, `iterative-planner` (a 50 KB body), takes 37 `skill_load` pages, a consequence of the 2,000-character observation cap.
 - Agent Skills documentation in `docs/api_reference.md`, `README.md`, `AGENTS.md` and the package guides.
+- `fsm-llm-skills show NAME PATH --file DIR` lists the bundled files under a directory (with or without a trailing `/`; `--file ""` lists every file) with the header and `--offset` paging of the agents tool `skill_read`, instead of refusing it. The prefix rule is now `SkillCatalog.files_under(name, path)` in core (`()` for a file, an unknown directory or skill, or a non-string; never raises), and `skill_read` calls it.
+- `fsm-llm-okf` and `fsm-llm-skills` share one implementation of the exit-code mapping, the BrokenPipe parking, the unencodable-output escape and the `--max-seconds` type in the new core module `fsm_llm.cli_support` (import it by name; `fsm_llm/__init__.py` does not load it). `fsm-llm-skills` no longer imports private helpers from `okf_cli.py`. No behaviour change.
 
 ### Changed
 

@@ -127,15 +127,6 @@ def _claims(skill: AgentSkill) -> list[str]:
     ]
 
 
-def _under(skill: AgentSkill, path: Any) -> list[str]:
-    """The bundled files under directory *path* (``""`` is the root); ``[]`` for a
-    file, a non-string or an unknown directory (the read then refuses it)."""
-    if not isinstance(path, str):
-        return []
-    prefix = path.strip("/") + "/" if path.strip("/") else ""
-    return [r for r in skill.resources if r.startswith(prefix)]
-
-
 def _first_page(skill: AgentSkill, spare: int) -> list[str]:
     """Header lines of the first ``skill_load`` page that fit in *spare* characters:
     the description, then the files (count, names that fit, the fixed read hint),
@@ -256,7 +247,7 @@ def create_skill_tools(
         skill = catalog.get(name)
         if skill is None:
             return not_found(name, budget)
-        files = _under(skill, path)
+        files = catalog.files_under(skill.name, path)
         top = [_label(catalog), f"skill: {capped_line(skill.name, 64)}"]
         if not files and isinstance(path, str) and not path.strip("/"):
             return _finish("\n".join([*top, "(no files)"]), budget)

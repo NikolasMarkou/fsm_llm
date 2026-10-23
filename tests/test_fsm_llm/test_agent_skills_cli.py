@@ -250,15 +250,63 @@ class TestListShow:
         assert "file: references/guide.md" in out and "Guide text." in out
         assert "Body line." not in out
 
+    @pytest.mark.parametrize("target", ["references", "references/"])
+    def test_a_directory_is_listed_like_the_skill_read_tool(
+        self, clean: Path, capsys: pytest.CaptureFixture[str], target: str
+    ) -> None:
+        code, out, err = _run(capsys, "show", "alpha", clean, "--file", target)
+
+        assert (code, err) == (0, "")
+        head, _, listing = out.partition("\n\n")
+        assert f"files under {target!r} (1)" in head and "file:" not in head
+        assert listing.strip() == "references/guide.md"
+        assert "Guide text." not in out and "next offset" not in out
+
+    def test_the_empty_path_lists_every_file_of_a_skill(
+        self, clean: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, out, _ = _run(capsys, "show", "alpha", clean, "--file", "")
+
+        assert code == 0 and "files under '' (2)" in out
+        assert out.rstrip().endswith("references/guide.md\nx.txt")
+
+    def test_an_empty_path_on_a_skill_without_files_stays_refused(
+        self, clean: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, out, err = _run(capsys, "show", "beta", clean, "--file", "")
+
+        assert (code, out) == (1, "")
+        assert err.strip().startswith("fsm-llm-skills: error: ")
+        assert len(err.splitlines()) == 1
+
+    def test_a_long_listing_pages_with_offset(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        names = [f"refs/file-{n:04d}-{'x' * 30}.md" for n in range(120)]
+        _skill(tmp_path, "many", files={name: "." for name in names})
+        seen, offset = [], 0
+        for _ in range(20):  # bounded: a broken --offset must fail, not hang
+            args = ["show", "many", tmp_path, "--file", "refs", "--offset", str(offset)]
+            _, out, _ = _run(capsys, *args)
+            head, _, rest = out.partition("\n\n")
+            assert "files under 'refs' (120)" in head
+            body, sep, tail = rest.rpartition("next offset: ")
+            seen.append(body.rstrip("\n") if sep else rest.rstrip("\n"))
+            if not sep:
+                break
+            offset = int(tail)
+        else:
+            pytest.fail("the last page was never reached")
+        assert len(seen) > 1 and len(seen[0]) <= SKILL_READ_PAGE_CHARS
+        assert "".join(seen).replace("\n", "") == "".join(names)
+
     @pytest.mark.parametrize(
         "target",
         [
             "../beta/SKILL.md",
             "/etc/passwd",
             ".env",
-            "references",
-            "references/",
-            "",
+            "nope/",
             "a\\b",
             "link.txt",
         ],

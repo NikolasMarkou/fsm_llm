@@ -615,6 +615,16 @@ class SkillCatalog:
         """Up to *n* skill names close to *name* (the not-found hint)."""
         return get_close_matches(str(name)[:SKILL_ECHO_CHARS], self._skills, n=n)
 
+    # DECISION plan-2026-10-23T113904-93d78536/D-003: the one prefix rule for "files
+    # under a directory"; do NOT re-inline it in a consumer (CLI, skill_read).
+    def files_under(self, name: object, path: object) -> tuple[str, ...]:
+        """Files under directory *path* (``""`` is all); ``()`` for none. Never raises."""
+        skill = self.get(name)
+        if skill is None or not isinstance(path, str):
+            return ()
+        prefix = path.strip("/") + "/" if path.strip("/") else ""
+        return tuple(r for r in skill.resources if r.startswith(prefix))
+
     def render_catalog(
         self,
         *,

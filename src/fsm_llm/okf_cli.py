@@ -29,17 +29,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
-import os
 import sys
 from collections.abc import Callable, Sequence
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from .cli_support import exit_main, positive_seconds, report_error, run_cli
 from .constants import (
     CLI_EXIT_FAILURE,
-    CLI_EXIT_INTERRUPTED,
     CLI_EXIT_OK,
     OKF_LIST_MAX_ITEMS,
     OKF_MAX_LOAD_SECONDS,
@@ -68,28 +65,8 @@ _HEADER_FIELD_CHARS = 500
 _SEVERITIES = ("error", "warning", "info")
 
 
-def _escape_unencodable_output() -> None:
-    """Make stdout and stderr write text they cannot encode as ``\\uXXXX``, not
-    raise. Process-level and never undone; a stream without ``reconfigure`` is
-    left alone."""
-    for stream in (sys.stdout, sys.stderr):
-        with suppress(AttributeError, ValueError):  # io.UnsupportedOperation too
-            stream.reconfigure(errors="backslashreplace")  # type: ignore[union-attr]
-
-
 def _err(message: str) -> None:
-    print(f"{_PROG}: {capped_line(message, 1000)}", file=sys.stderr)
-
-
-def _positive_seconds(text: str) -> float:
-    """argparse ``type`` of ``--max-seconds``: a finite number above zero."""
-    try:
-        seconds = float(text)
-    except ValueError:
-        seconds = math.nan
-    if not 0 < seconds < math.inf:
-        raise argparse.ArgumentTypeError("must be a finite number above 0")
-    return seconds
+    report_error(_PROG, message)
 
 
 def _load(args: argparse.Namespace) -> OKFBundle:
@@ -239,7 +216,7 @@ def _build_parser() -> argparse.ArgumentParser:
     loads.add_argument("path", help="bundle root directory")
     loads.add_argument(
         "--max-seconds",
-        type=_positive_seconds,
+        type=positive_seconds,
         default=OKF_MAX_LOAD_SECONDS,
         metavar="SECONDS",
         help="wall-clock budget of the load (default %(default)s)",
@@ -314,31 +291,12 @@ def main(argv: Sequence[str] | None = None) -> int:
           one fixed note on stderr from ``list``, ``show`` and ``search``, and
           still exits 0; ``validate`` reports the error issue instead.
     """
-    _escape_unencodable_output()
-    args = _build_parser().parse_args(argv)
-    try:
-        return int(args.func(args))
-    except KeyboardInterrupt:
-        _err("interrupted")
-        return CLI_EXIT_INTERRUPTED
-    except BrokenPipeError:
-        raise  # handled by main_cli, which owns stdout
-    except (OKFError, OSError) as exc:
-        _err(f"error: {exc}")
-        return CLI_EXIT_FAILURE
+    return run_cli(_build_parser(), argv, prog=_PROG, errors=(OKFError,))
 
 
 def main_cli() -> None:
     """Console-script entry point for ``fsm-llm-okf``."""
-    try:
-        code = main()
-        sys.stdout.flush()
-    except BrokenPipeError:
-        # Output piped into `head`: park stdout so the interpreter's exit flush
-        # does not print a second error.
-        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
-        code = CLI_EXIT_FAILURE
-    sys.exit(code)
+    exit_main(main)
 
 
 if __name__ == "__main__":  # pragma: no cover - process entry point

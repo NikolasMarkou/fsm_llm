@@ -614,7 +614,8 @@ class TestLayering:
     def test_importing_fsm_llm_loads_none_of_the_skills_or_okf_modules(self) -> None:
         _isolated(
             "import sys, fsm_llm\n"
-            "mods = ('frontmatter', 'okf', 'okf_cli', 'agent_skills', 'agent_skills_cli')\n"
+            "mods = ('frontmatter', 'okf', 'okf_cli', 'agent_skills', "
+            "'agent_skills_cli', 'cli_support')\n"
             "bad = [m for m in mods if f'fsm_llm.{m}' in sys.modules]\n"
             "assert not bad, bad\n"
         )
@@ -1222,6 +1223,50 @@ class TestCatalogApi:
         assert catalog.names == ("demo",) and len(catalog) == 1
         with pytest.raises(SkillError):  # no directory: nothing to read
             catalog.read_body("demo")
+
+    def _with_files(self, tmp_path: Path) -> SkillCatalog:
+        files = {"references/guide.md": "g", "references/deep/a.md": "a", "x.txt": "x"}
+        _mk(tmp_path, "alpha", files=files)
+        _mk(tmp_path, "bare")
+        return load_skills(tmp_path)
+
+    def test_files_under_lists_a_directory_with_or_without_a_slash(
+        self, tmp_path: Path
+    ) -> None:
+        catalog = self._with_files(tmp_path)
+        both = ("references/deep/a.md", "references/guide.md")
+        assert catalog.files_under("alpha", "references") == both
+        assert catalog.files_under("alpha", "references/") == both
+        assert catalog.files_under("alpha", "/references//") == both
+        assert catalog.files_under("alpha", "references/deep") == (both[0],)
+
+    def test_files_under_the_root_is_every_file(self, tmp_path: Path) -> None:
+        catalog = self._with_files(tmp_path)
+        every = catalog.get("alpha").resources  # type: ignore[union-attr]
+        assert catalog.files_under("alpha", "") == every and len(every) == 3
+        assert catalog.files_under("alpha", "/") == every
+        assert catalog.files_under("bare", "") == ()
+
+    @pytest.mark.parametrize(
+        ("name", "path"),
+        [
+            ("alpha", "x.txt"),  # a file, not a directory
+            ("alpha", "refer"),  # a prefix of a name is not a directory
+            ("alpha", "nope"),
+            ("alpha", "nope/"),
+            ("alpha", None),
+            ("alpha", 5),
+            ("alpha", b"references"),
+            ("alpha", ["references"]),
+            ("missing", "references"),
+            (None, "references"),
+            (5, ""),
+        ],
+    )
+    def test_files_under_is_an_empty_tuple_never_an_error(
+        self, tmp_path: Path, name: Any, path: Any
+    ) -> None:
+        assert self._with_files(tmp_path).files_under(name, path) == ()
 
 
 # --- Confinement ---
