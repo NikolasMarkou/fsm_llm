@@ -20,13 +20,21 @@ from fsm_llm.agents.definitions import ToolAnnotations, ToolCall
 from fsm_llm.agents.fsm_definitions import build_native_fc_fsm, build_react_fsm
 from fsm_llm.agents.handlers import AgentHandlers
 from fsm_llm.agents.okf import _budget
+from fsm_llm.agents.react import ReactAgent
 from fsm_llm.constants import (
     SKILL_INCOMPLETE_NOTE,
     SKILL_LIST_MAX_ITEMS,
     SKILL_READ_PAGE_CHARS,
     SKILL_UNTRUSTED_LABEL,
 )
+from fsm_llm.definitions import (
+    FieldExtractionRequest,
+    FieldExtractionResponse,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+)
 from fsm_llm.frontmatter import split_frontmatter
+from fsm_llm.llm import LLMInterface
 from fsm_llm.okf import strip_unsafe_text
 from tests.test_fsm_llm.test_completion_state import _calls, _final, _ScriptedLLM
 
@@ -422,7 +430,63 @@ class TestEndToEnd:
         assert "6218 KB" in messages[2]["content"]
 
 
-# No ReactAgent run: test_react.py has no scripted interface (I-047).
+class _ReactScript(LLMInterface):
+    """Answers the ReAct think extractions from a script: one ``(tool, input)``
+    per think turn (``None`` ends the run); the conclude turn is canned."""
+
+    def __init__(self, steps: list[tuple[str | None, dict[str, Any]]]) -> None:
+        self.model, self.steps, self.turn = "mock-model", steps, -1
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        self.turn += request.field_name == "tool_name"
+        tool, params = self.steps[min(self.turn, len(self.steps) - 1)]
+        value = {
+            "tool_name": tool,
+            "tool_input": params,
+            "should_terminate": tool is None,
+        }.get(request.field_name)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=1.0,
+            reasoning="script",
+            is_valid=value is not None,
+        )
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="The limit is 6218 KB.", message_type="response", reasoning="x"
+        )
+
+
+class TestReactEndToEnd:
+    def test_a_scripted_react_run_lists_loads_and_reads(self, hostile: Path):
+        read = {"name": "gateway-ops", "path": "references/limits.md"}
+        script = _ReactScript(
+            [
+                ("skill_list", {}),
+                ("skill_load", {"name": "gateway-ops"}),
+                ("skill_read", read),
+                (None, {}),
+            ]
+        )
+        agent = ReactAgent(
+            tools=_registry(hostile),
+            config=AgentConfig(max_iterations=8, model="mock/model"),
+            llm_interface=script,
+        )
+        result = agent.run("What is the Zephyr gateway payload limit?")
+        assert result.success is True and result.answer == "The limit is 6218 KB."
+        assert [c.tool_name for c in result.trace.tool_calls] == list(_TOOLS)
+        observed = result.final_context["observations"]
+        assert len(observed) == 3
+        for entry in observed:  # the loop did not cut a reply
+            assert SKILL_UNTRUSTED_LABEL in entry and "...[truncated" not in entry
+            assert len(entry) <= Defaults.MAX_OBSERVATION_LENGTH
+        assert "6218 KB" in observed[2]
+
 
 _BAD_IMPORTS = "subprocess runpy importlib shlex ctypes multiprocessing pty".split()
 _BAD_CALLS = ("exec", "eval", "compile", "__import__")
@@ -434,7 +498,15 @@ def _violations(source: str) -> list[str]:
     calls and ``os.system``/``popen``/``exec*``/``spawn*`` (a method named
     ``compile`` on another object, such as ``re.compile``, is fine)."""
     found: list[str] = []
-    for node in ast.walk(ast.parse(source)):
+    tree = ast.parse(source)
+    os_names = {"os"} | {  # ``import os as o`` makes ``o.system`` the same call
+        a.asname
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Import)
+        for a in n.names
+        if a.name == "os" and a.asname
+    }
+    for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             mods = (
                 [a.name for a in node.names]
@@ -448,7 +520,7 @@ def _violations(source: str) -> list[str]:
             fn = node.func
             if isinstance(fn, ast.Name) and fn.id in _BAD_CALLS:
                 found.append(fn.id)
-            elif isinstance(fn, ast.Attribute) and ast.unparse(fn.value) == "os":
+            elif isinstance(fn, ast.Attribute) and ast.unparse(fn.value) in os_names:
                 found += [fn.attr] if _BAD_OS.fullmatch(fn.attr) else []
     return found
 
@@ -468,6 +540,20 @@ os.execv('x', [])
 os.spawnl(0, 'x')""".splitlines():
             assert _violations(source), source
         assert not _violations("import os, re\nre.compile('x')\nos.path.join('a')")
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "import os as o\no.system('x')",
+            "import os as o\nimport os as p\np.popen('x')",
+            "from os import system as s\ns('x')",
+            "import subprocess as sp\nsp.run(['x'])",
+            "from importlib import import_module\nimport_module('x')",
+        ],
+    )
+    def test_the_pin_resolves_import_aliases(self, source: str):
+        assert _violations(source)
+        assert not _violations("import os as o\no.path.join('a')")
 
     @pytest.mark.parametrize(
         "module",

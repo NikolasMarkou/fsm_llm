@@ -53,9 +53,10 @@ def _err(message: str) -> None:
 
 
 def _load(args: argparse.Namespace) -> SkillCatalog:
-    # A stopped load is flagged on stderr (validate reports the issue itself).
+    # A stopped or empty load is flagged on stderr (validate reports the issues).
     catalog = load_skills(args.paths, limits=SkillLimits(max_seconds=args.max_seconds))
-    if args.command != "validate" and (note := incomplete_note(catalog)):
+    note = incomplete_note(catalog) or ("" if catalog else "no skills found")
+    if args.command != "validate" and note:
         _say(note, sys.stderr)
     return catalog
 
@@ -138,8 +139,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     Interface contract: a usage error or ``--help`` raises ``SystemExit`` (argparse);
     a ``SkillError`` or ``OSError`` is one stderr line and exit 1, never a
     traceback; unencodable text is written as ``\\uXXXX`` escapes (the standard
-    streams are reconfigured for the rest of the process, as in ``fsm-llm-okf``).
-    """
+    streams are reconfigured for the rest of the process, as in ``fsm-llm-okf``)."""
     _escape_unencodable_output()
     args = _build_parser().parse_args(argv)
     try:

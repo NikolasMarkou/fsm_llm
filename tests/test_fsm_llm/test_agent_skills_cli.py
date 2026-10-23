@@ -193,6 +193,17 @@ class TestListShow:
         assert rows[1][0] == "wordy" and rows[1][2] == "0 files"
         assert len(rows[1][1]) == SKILL_CATALOG_DESCRIPTION_CHARS
 
+    def test_list_with_no_skills_says_so_on_stderr_and_exits_0(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, out, err = _run(capsys, "list", tmp_path)
+
+        assert (code, out) == (0, "")
+        assert err == "no skills found\n"
+        _skill(tmp_path, "bad", extra="")  # a skill that is skipped (name differs)
+        (tmp_path / "bad" / "SKILL.md").write_text("---\nname: BAD\n---\n")
+        assert _run(capsys, "list", tmp_path) == (0, "", "no skills found\n")
+
     def test_show_prints_a_header_the_file_list_and_the_body(
         self, clean: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -432,7 +443,10 @@ class TestExitCodes:
         monkeypatch.setattr(skills_cli, command, boom)
         extra = ["name", "."] if command == "_cmd_show" else ["."]
 
-        code, out, err = _run(capsys, command[5:], *extra)
+        try:
+            code, out, err = _run(capsys, command[5:], *extra)
+        except KeyboardInterrupt:  # a leaked interrupt must fail this test only
+            pytest.fail("main() let a KeyboardInterrupt escape")
 
         assert (code, out) == (130, "")
         assert "interrupted" in err
