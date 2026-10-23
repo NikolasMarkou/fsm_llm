@@ -2,15 +2,14 @@
 Agent Skills: folders with a ``SKILL.md`` (YAML frontmatter plus markdown body).
 
 The format layer, read-only: a tolerant parser, bounded loading and a
-progressive-disclosure catalog. Skill text is untrusted third-party prose:
-content never raises (a defect becomes a ``SkillIssue``), nothing a skill folder
-holds is executed or imported, ``allowed-tools`` is a claim that is reported and
-never enforced, and the body is never retained (re-read from disk on demand).
+progressive-disclosure catalog. Skill text is untrusted prose: content never raises
+(a defect becomes a ``SkillIssue``), nothing in a skill folder is executed or
+imported, ``allowed-tools`` is reported, never enforced, the body is never kept.
 
 Spec status: the open standard at agentskills.io, read on 2026-10-23, unversioned
-and mutable. Names are ASCII (``[a-z0-9]`` and single hyphens), as Anthropic's
-docs and API say; the standard's prose allows unicode letters, so a unicode name
-is skipped here with ``name-invalid``, never loaded under a lookalike.
+and mutable. Names are ASCII (``[a-z0-9]`` and single hyphens), as Anthropic's docs
+say; the standard's prose allows unicode letters, so a unicode name is skipped
+(``name-invalid``), never loaded under a lookalike.
 """
 
 from __future__ import annotations
@@ -37,20 +36,26 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .constants import (
     SKILL_BODY_MAX_LINES,
     SKILL_CATALOG_DESCRIPTION_CHARS,
+    SKILL_CATALOG_END,
     SKILL_CATALOG_MAX_ITEMS,
     SKILL_COMPATIBILITY_MAX_CHARS,
     SKILL_DESCRIPTION_MAX_CHARS,
+    SKILL_ECHO_CHARS,
     SKILL_INCOMPLETE_NOTE,
     SKILL_MAX_DEPTH,
     SKILL_MAX_FILE_BYTES,
     SKILL_MAX_FRONTMATTER_BYTES,
     SKILL_MAX_ISSUES,
+    SKILL_MAX_ISSUES_PER_SKILL,
     SKILL_MAX_LOAD_SECONDS,
     SKILL_MAX_RESOURCES,
     SKILL_MAX_SKILLS,
     SKILL_MAX_YAML_DEPTH,
+    SKILL_NAME_ECHO_CHARS,
     SKILL_NAME_MAX_CHARS,
     SKILL_READ_PAGE_CHARS,
+    SKILL_SCAN_FACTOR,
+    SKILL_TEXT_MAX_CHARS,
     SKILL_UNTRUSTED_LABEL,
 )
 from .definitions import SkillError
@@ -72,6 +77,7 @@ __all__ = [
 _KNOWN_KEYS = frozenset(
     {"name", "description", "license", "compatibility", "metadata", "allowed-tools"}
 )
+_Severity = Literal["error", "warning", "info"]
 _NAME_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 # Anthropic's API refuses these inside a name; kept as a portability warning.
 _RESERVED_WORDS = ("anthropic", "claude")
@@ -81,12 +87,11 @@ _TOOL_RE = re.compile(r"[^\s,(]+(?:\([^)]*\))?")
 
 
 class SkillIssue(BaseModel):
-    """One problem found while reading a skill; ``message`` and ``path`` are
-    untrusted, so control-stripped and capped here."""
+    """One problem found in a skill; untrusted ``message`` and ``path`` are stripped."""
 
     model_config = ConfigDict(frozen=True)
 
-    severity: Literal["error", "warning", "info"]
+    severity: _Severity
     code: str
     message: str
     path: str | None = None
@@ -94,7 +99,7 @@ class SkillIssue(BaseModel):
     @field_validator("message", "path")
     @classmethod
     def _clean(cls, value: str | None) -> str | None:
-        return None if value is None else strip_unsafe_text(value)[:300]
+        return value and strip_unsafe_text(value)[:SKILL_TEXT_MAX_CHARS]
 
 
 def _clean(value: Any) -> Any:
@@ -172,13 +177,21 @@ def parse_skill_text(
     content). ``None`` comes with an ``error`` issue: bad frontmatter, a missing
     or non-string description, or a name that is not ``[a-z0-9]`` words joined by
     single hyphens in 1 to 64 characters (defaulting to *folder_name*). All else
-    loads with a warning; ``body-long`` is info. The body is counted, discarded."""
+    loads with a warning (at most ``SKILL_MAX_ISSUES_PER_SKILL``, then one
+    ``issues-truncated`` info); the body is counted, discarded."""
     issues: list[SkillIssue] = []
     where = f"{folder_name}/{skill_md}"
+    warned = 0
 
-    def note(
-        severity: Literal["error", "warning", "info"], code: str, msg: str
-    ) -> None:
+    def note(severity: _Severity, code: str, msg: str) -> None:
+        nonlocal warned
+        if severity == "warning":  # bound what hostile frontmatter can build
+            warned += 1
+            if warned > SKILL_MAX_ISSUES_PER_SKILL:
+                if warned > SKILL_MAX_ISSUES_PER_SKILL + 1:
+                    return
+                severity, code = "info", "issues-truncated"
+                msg = "further warnings for this skill are not shown"
         issues.append(SkillIssue(severity=severity, code=code, message=msg, path=where))
 
     raw, body, problem = split_frontmatter(text)
@@ -195,14 +208,10 @@ def parse_skill_text(
     if not given_name:
         note("warning", "name-missing", "no usable 'name'; using the folder name")
     name = given_name or strip_unsafe_text(folder_name).strip()
-    raw_description = data.get("description")
-    description = (
-        strip_unsafe_text(raw_description).strip()
-        if isinstance(raw_description, str)
-        else ""
-    )
+    raw = data.get("description")
+    description = strip_unsafe_text(raw).strip() if isinstance(raw, str) else ""
     if not description:
-        missing = raw_description is None or isinstance(raw_description, str)
+        missing = raw is None or isinstance(raw, str)
         note(
             "error",
             "description-missing" if missing else "description-invalid",
@@ -212,8 +221,8 @@ def parse_skill_text(
         note(
             "error",
             "name-invalid",
-            f"name {name[:80]!r} must be lowercase letters and digits joined by "
-            f"single hyphens, at most {SKILL_NAME_MAX_CHARS} characters",
+            f"name {name[:SKILL_NAME_ECHO_CHARS]!r} must be lowercase letters and "
+            f"digits joined by single hyphens, at most {SKILL_NAME_MAX_CHARS} characters",
         )
     if any(issue.severity == "error" for issue in issues):
         return None, issues
@@ -235,9 +244,7 @@ def parse_skill_text(
         data, "compatibility", "compatibility-invalid", note, filled=True
     )
     if len(compatibility) > SKILL_COMPATIBILITY_MAX_CHARS:
-        note(
-            "warning", "compatibility-long", "compatibility is over the allowed length"
-        )
+        note("warning", "compatibility-long", "compatibility is over the limit")
 
     given_metadata = data.get("metadata")
     metadata = (
@@ -267,9 +274,7 @@ def parse_skill_text(
         if key not in _KNOWN_KEYS
     )
     if extras:
-        note(
-            "warning", "key-unknown", f"keys outside the standard: {', '.join(extras)}"
-        )
+        note("warning", "key-unknown", f"unknown keys: {', '.join(extras)}")
 
     line_count = body.count("\n") + (1 if body and not body.endswith("\n") else 0)
     if line_count > SKILL_BODY_MAX_LINES:
@@ -345,15 +350,15 @@ class SkillLimits(BaseModel):
 # DECISION plan-2026-10-23T043147-4c2042f3/D-024
 # Do NOT widen this allowlist to dot entries, and do NOT relax a segment rule
 # here: `.env`, `.git` and `.ssh` live in dot names, and a hostile skill author
-# chooses every name. Listing and reading share this one predicate, so a file
-# that cannot be read is never listed. See decisions.md D-024.
+# chooses every name. Listing and reading share this one path predicate (size,
+# symlink and content checks are separate, at read time). See decisions.md D-024.
 def _path_parts(path: object) -> tuple[str, ...] | None:
     """The segments of a safe relative path (1 to 300 characters, unchanged by
     ``strip_unsafe_text``, no backslash, no empty, ``.``, ``..`` or dot segment),
     else ``None``. Never raises."""
-    if not isinstance(path, str) or not path or len(path) > 300 or "\\" in path:
+    if not isinstance(path, str) or not 0 < len(path) <= SKILL_TEXT_MAX_CHARS:
         return None
-    if strip_unsafe_text(path) != path:
+    if "\\" in path or strip_unsafe_text(path) != path:
         return None
     parts = tuple(path.split("/"))
     return None if any(not p or p.startswith(".") for p in parts) else parts
@@ -399,9 +404,7 @@ def _read_file(directory: Path, parts: tuple[str, ...], limit: int) -> bytes:
 
 def _note(issues: list[SkillIssue], code: str, path: str, extra: str = "") -> None:
     message = f"{_MESSAGES[code]}: {extra}" if extra else _MESSAGES[code]
-    severity: Literal["error", "warning"] = (
-        "error" if code in _ERROR_CODES else "warning"
-    )
+    severity: _Severity = "error" if code in _ERROR_CODES else "warning"
     issues.append(SkillIssue(severity=severity, code=code, message=message, path=path))
 
 
@@ -415,8 +418,8 @@ def _list_resources(
     """Sorted relative paths of the regular files a skill bundles (never raises);
     a bound or *deadline* ends the walk with ``resources-truncated``."""
     found: list[str] = []
-    links, first_link, unsafe, visited, cut = 0, "", 0, 0, False
-    budget = limits.max_resources_per_skill * 4
+    links, first_link, unsafe, unreadable, visited, cut = 0, "", 0, 0, 0, False
+    budget = limits.max_resources_per_skill * SKILL_SCAN_FACTOR
     stack: list[tuple[Path, tuple[str, ...], int]] = [(skill_dir, (), 0)]
     while stack and not cut:
         directory, parts, depth = stack.pop()
@@ -424,7 +427,7 @@ def _list_resources(
             with os.scandir(directory) as scan:
                 entries = sorted(islice(scan, budget + 1), key=lambda e: e.name)
         except OSError:
-            _note(issues, "dir-unreadable", f"{folder}/{'/'.join(parts)}")
+            unreadable += 1
             continue
         subdirs = []
         for entry in entries:
@@ -458,6 +461,8 @@ def _list_resources(
         _note(issues, "symlink-skipped", f"{folder}/{first_link}", f"{links} skipped")
     if unsafe:
         _note(issues, "resource-name-unsafe", folder, f"{unsafe} not listed")
+    if unreadable:
+        _note(issues, "dir-unreadable", folder, f"{unreadable} directories")
     if cut:
         _note(issues, "resources-truncated", folder)
     return tuple(sorted(found))
@@ -489,7 +494,7 @@ def _candidates(
     its sorted, non-dot child directories that do (a symlinked one is followed)."""
     if os.path.lexists(root / _SKILL_MD):
         return [(root.name, root)]
-    cap = limits.max_skills * 4
+    cap = limits.max_skills * SKILL_SCAN_FACTOR
     try:
         with os.scandir(root) as scan:
             entries = sorted(islice(scan, cap + 1), key=lambda e: e.name)
@@ -567,7 +572,7 @@ def load_skills(
         listed = _list_resources(skill_dir, folder, limits, deadline, issues)
         skills[skill.name] = skill.model_copy(update={"resources": listed})
     if not skills:
-        _note(issues, "no-skills", ", ".join(r.name for r in roots)[:200])
+        _note(issues, "no-skills", ", ".join(r.name for r in roots)[:SKILL_ECHO_CHARS])
     issues = capped_issues(issues, SKILL_MAX_ISSUES, INCOMPLETE_CODES, SkillIssue)
     return SkillCatalog(
         skills.values(), issues=issues, max_file_bytes=limits.max_file_bytes
@@ -619,7 +624,7 @@ class SkillCatalog:
 
     def closest(self, name: object, n: int = 5) -> list[str]:
         """Up to *n* skill names close to *name* (the not-found hint)."""
-        return get_close_matches(str(name)[:200], self._skills, n=n)
+        return get_close_matches(str(name)[:SKILL_ECHO_CHARS], self._skills, n=n)
 
     def render_catalog(
         self,
@@ -628,20 +633,22 @@ class SkillCatalog:
         description_chars: int = SKILL_CATALOG_DESCRIPTION_CHARS,
     ) -> str:
         """The label, then ``<available_skills>`` with one escaped ``<skill>`` per
-        skill (name, capped description; no path), and the incomplete note."""
+        skill (name, capped description; no path), a fixed end line, the incomplete
+        note. Escaped by ``html.escape(quote=False)``: tags and ``&`` only."""
         if not self._skills:
             return ""
         shown = list(self._skills.values())[: max(max_items, 0)]
         lines = [SKILL_UNTRUSTED_LABEL, "<available_skills>"]
         for skill in shown:
-            name = html.escape(skill.name)
-            text = html.escape(capped_line(skill.description, description_chars))
+            name = html.escape(skill.name, quote=False)
+            text = capped_line(skill.description, description_chars)
+            text = html.escape(text, quote=False)
             lines.append(
                 f"<skill><name>{name}</name><description>{text}</description></skill>"
             )
         if len(shown) < len(self._skills):
             lines.append(f"({len(self._skills) - len(shown)} more, use skill_list)")
-        lines.append("</available_skills>")
+        lines += ["</available_skills>", SKILL_CATALOG_END]
         if note := incomplete_note(self):
             lines.append(note)
         return "\n".join(lines)

@@ -20,7 +20,7 @@ import re
 import tempfile
 import time
 import unicodedata
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Container, Iterable, Iterator, Mapping
 from contextlib import suppress
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
@@ -744,16 +744,16 @@ def incomplete_note(bundle: OKFBundle) -> str:
     return OKF_INCOMPLETE_NOTE.format(codes=", ".join(codes)) if codes else ""
 
 
-def capped_issues(issues: list[Any], cap: int, stops: Any, kind: Any) -> list[Any]:
+def capped_issues(
+    issues: list[Any], cap: int, stops: Container[str], kind: Callable[..., Any]
+) -> list[Any]:
     """At most *cap* issues (*stops* codes first), then one ``issues-truncated``."""
     if len(issues) <= cap:
         return issues
     rank = ("error", "warning", "info")
     order = sorted(issues, key=lambda i: (i.code not in stops, rank.index(i.severity)))
-    kept = order[:cap]
     extra = f"{len(issues) - cap} more issues are not shown"
-    kept.append(kind(severity="info", code="issues-truncated", message=extra))
-    return kept
+    return [*order[:cap], kind(severity="info", code="issues-truncated", message=extra)]
 
 
 def _capped(issues: list[OKFIssue]) -> list[OKFIssue]:
