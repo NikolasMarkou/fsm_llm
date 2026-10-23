@@ -220,6 +220,22 @@ class TestWireDisclosure:
     """Review pass 10 warning 3 (D-037 item 18.5, D-040): an L4 manifest
     discloses what its first request carried at core's send binding."""
 
+    @pytest.fixture
+    def no_send(self, monkeypatch):
+        import fsm_llm.llm
+
+        def no_send(**kw):
+            raise AssertionError("the disclosure probe sent a provider request")
+
+        monkeypatch.setattr(fsm_llm.llm, "completion", no_send)
+
+    def test_the_binding_is_restored_when_the_block_raises(self, no_send):
+        import fsm_llm.llm
+
+        with pytest.raises(RuntimeError), bc.captured_wire():
+            raise RuntimeError("boom")
+        assert fsm_llm.llm.completion.__name__ == "no_send"
+
     def test_the_digest_masks_the_date_and_the_task(self):
         def params(day: str, task: str) -> dict:
             return {

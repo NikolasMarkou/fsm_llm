@@ -1,7 +1,7 @@
 # tests
 
 Path: `tests`
-Purpose: The full pytest tree of FSM-LLM (9,646 collected tests): nine suite folders for the `fsm_llm` package and its five subpackages, five repo-wide root test files, and the shared `conftest.py`.
+Purpose: The full pytest tree of FSM-LLM (9,647 collected tests): nine suite folders for the `fsm_llm` package and its five subpackages, five repo-wide root test files, and the shared `conftest.py`.
 
 ## Scope
 
@@ -31,7 +31,7 @@ Suite folders (test counts from full collection) and root files at this level.
 | --- | --- | --- |
 | `conftest.py` | Shared fixtures, fakes and marker registration (see Public interface) | 0 tests |
 | `test_packaging.py` | Repo-wide wiring and doc-count pins | 45 tests; classes listed below |
-| `test_bench_common.py` | Offline checks of `scripts/bench_common.py`, the stdlib helpers shared by the agents and skills benches | 18 tests |
+| `test_bench_common.py` | Offline checks of `scripts/bench_common.py`, the stdlib helpers shared by the agents and skills benches | 19 tests |
 | `test_agents_bench.py` | Offline checks of `scripts/agents_bench.py` | 132 tests |
 | `test_skills_bench.py` | Offline checks of `scripts/skills_bench.py` (Agent Skills read-hint ablation: fixture, grader, hint ablation, one trial, blocks, hygiene); scripted agents drive the REAL skill tools | 38 tests; never calls a model |
 | `test_integration_ollama.py` | Live end-to-end on `ollama_chat/qwen3.5:9b-q8_0`, plus 4 model-free workflow checks | 12 tests |
@@ -86,7 +86,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 
 - Env knobs: `FSM_LLM_REAL_SKILLS` (arms the Agent Skills home-directory test in `test_agent_skills.py`), `FSM_LLM_MONITOR_API_KEY` (cleared for monitor tests). No test reads `SKIP_SLOW_TESTS`, `TEST_REAL_LLM` or `TEST_LLM_MODEL`; `test_packaging.py` drops the first two from its collection child env.
 - pytest config in `pyproject.toml`: `testpaths = ["tests"]`, `addopts = "-v --tb=short"`, `asyncio_mode = "auto"`, `asyncio_default_fixture_loop_scope = "function"`.
-- Marker counts (full collection): `slow` 41, `integration` 20, `real_llm` 19, `examples` 67; `-m "not slow"` collects 9,605.
+- Marker counts (full collection): `slow` 41, `integration` 20, `real_llm` 19, `examples` 67; `-m "not slow"` collects 9,606.
 
 ## Invariants and constraints
 
