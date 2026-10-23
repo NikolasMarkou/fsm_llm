@@ -1015,7 +1015,7 @@ class _OKFDumper(yaml.SafeDumper):
         return True
 
 
-def _iso(value: datetime) -> str:
+def iso_utc(value: datetime) -> str:
     """ISO 8601 with an explicit UTC offset; a naive value is taken as UTC."""
     return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).isoformat()
 
@@ -1023,9 +1023,9 @@ def _iso(value: datetime) -> str:
 def _plain(value: Any) -> Any:
     """Copy *value* for dumping; datetimes and dates become offset-bearing text."""
     if isinstance(value, datetime):
-        return _iso(value)
+        return iso_utc(value)
     if isinstance(value, date):
-        return _iso(datetime(value.year, value.month, value.day))
+        return iso_utc(datetime(value.year, value.month, value.day))
     if isinstance(value, dict):
         return {k: _plain(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
@@ -1033,7 +1033,7 @@ def _plain(value: Any) -> Any:
     return value
 
 
-def _lone_surrogate(value: Any) -> bool:
+def has_lone_surrogate(value: Any) -> bool:
     """True when a string, key or item in *value* is a lone surrogate; ``OKFError``
     past ``OKF_MAX_YAML_DEPTH`` (a cycle ends there) or ``OKF_MAX_FRONTMATTER_BYTES``
     nodes, surrogate or not."""
@@ -1079,7 +1079,7 @@ def _render_concept(concept: OKFConcept) -> bytes:
         front["stale_after"] = concept.stale_after
     front.update(extra)
     try:
-        lone = _lone_surrogate(front)  # before anything recurses over it
+        lone = has_lone_surrogate(front)  # before anything recurses over it
         plain = _plain(front)
         dumped = yaml.dump(
             plain,
@@ -1375,7 +1375,7 @@ def _slug(raw: object) -> str:
     return f"entry-{slug}" if slug.casefold() in ("index", "log") else slug
 
 
-def _loads_back(concept: OKFConcept) -> bool:
+def writes_within_caps(concept: OKFConcept) -> bool:
     """False when the writer would refuse *concept* for frontmatter size."""
     try:
         _render_concept(concept)
@@ -1423,10 +1423,10 @@ def bundle_from_memory_entries(
     issues: list[OKFIssue] = []
     concepts: list[OKFConcept] = []
     used: set[str] = set()
-    stamp = _iso(now) if isinstance(now, datetime) else capped_line(now, 100)
+    stamp = iso_utc(now) if isinstance(now, datetime) else capped_line(now, 100)
     generated = {
         "by": capped_line(generated_by, 200) or f"fsm-llm/{__version__}",
-        "at": stamp or _iso(datetime.now(timezone.utc)),
+        "at": stamp or iso_utc(datetime.now(timezone.utc)),
     }
 
     def skip(index: int, why: str, code: str = "entry-skipped") -> None:
@@ -1447,7 +1447,7 @@ def bundle_from_memory_entries(
         raw_meta, notes = entry.get("metadata"), set[str]()
         meta = _native(dict(raw_meta), notes) if isinstance(raw_meta, Mapping) else {}
         ident = i if isinstance(i := entry.get("id", ""), (str, int, float)) else ""
-        if "surrogates" in notes or _lone_surrogate((text, ident)):
+        if "surrogates" in notes or has_lone_surrogate((text, ident)):
             text = _SURROGATE_RE.sub("\ufffd", text)
             skip(index, "lone surrogates replaced with U+FFFD", "text-sanitized")
         type_, title, tags = (meta.pop(k, None) for k in ("type", "title", "tags"))
@@ -1469,10 +1469,10 @@ def bundle_from_memory_entries(
             extra={"metadata": meta} if meta else {},
             body=text,
         )
-        if not _loads_back(concept):  # drop metadata, then tags (D-018)
+        if not writes_within_caps(concept):  # drop metadata, then tags (D-018)
             notes.add("size")
             concept.extra.clear()
-            if not _loads_back(concept):
+            if not writes_within_caps(concept):
                 concept.tags = []
         concepts.append(concept)
         if cut := sorted(notes - {"surrogates"}):

@@ -4833,7 +4833,7 @@ class TestExportedMetadataIsAlwaysWritable:
             [{"id": "h", "text": "big", "metadata": meta}]
         )
 
-        assert okf_module._lone_surrogate(concept.extra) is False  # no OKFError
+        assert okf_module.has_lone_surrogate(concept.extra) is False  # no OKFError
         assert concept.extra == {}  # over the frontmatter byte cap: dropped (4.4)
 
     def test_a_normal_entry_is_unchanged_and_silent(self, tmp_path: Path) -> None:

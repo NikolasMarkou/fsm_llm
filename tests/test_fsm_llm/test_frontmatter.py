@@ -559,12 +559,12 @@ class TestOkfKeepsItsWiring:
         }
 
     def test_the_okf_adapter_restores_the_okferror_type(self) -> None:
-        assert okf_module._lone_surrogate({"a": ["\ud800"]}) is True
-        assert okf_module._lone_surrogate({"a": ["ok"]}) is False
+        assert okf_module.has_lone_surrogate({"a": ["\ud800"]}) is True
+        assert okf_module.has_lone_surrogate({"a": ["ok"]}) is False
         loop: list[Any] = []
         loop.append(loop)
         with pytest.raises(OKFError, match="too deep"):
-            okf_module._lone_surrogate(loop)
+            okf_module.has_lone_surrogate(loop)
 
     def test_okf_has_no_loader_class_of_its_own(self) -> None:
         assert not hasattr(okf_module, "_OKFLoader")
