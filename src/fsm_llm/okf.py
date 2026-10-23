@@ -265,8 +265,7 @@ _STATUSES = ("draft", "stable", "deprecated")
 _MAX_FILE_WARNINGS = 25
 
 
-# The one frontmatter seam is ``frontmatter.py``. The private names below stay
-# module globals of this file (tests patch them); OKF passes its own limits.
+# The one frontmatter seam is ``frontmatter.py``; these names stay module globals (tests patch them).
 _Note = _fm.Note
 _SURROGATE_RE = _fm.SURROGATE_RE
 _split_frontmatter = _fm.split_frontmatter
@@ -747,7 +746,8 @@ def incomplete_note(bundle: OKFBundle) -> str:
 def capped_issues(
     issues: list[Any], cap: int, stops: Container[str], kind: Callable[..., Any]
 ) -> list[Any]:
-    """At most *cap* issues (*stops* codes first), then one ``issues-truncated``."""
+    """At most *cap* issues, *stops* codes first then error, warning, info; the rest
+    become one ``kind`` info ``issues-truncated``. An unknown severity: ``ValueError``."""
     if len(issues) <= cap:
         return issues
     rank = ("error", "warning", "info")
