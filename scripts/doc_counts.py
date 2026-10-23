@@ -188,7 +188,7 @@ class _Doc:
             n = m["suites"][s] - m["slow_suites"][s] if s else m["markers"]["not slow"]
             return n, "not slow collection here"
         if kind == "suite_sum":
-            return m["total"] - m["suites"][None], "the ten suites summed"
+            return m["total"] - m["suites"][None], "the nine suites summed"
         if kind == "test_files":
             return m["test_files"][s], f"test files in {s}"
         if kind in ("slow_here", "live"):  # the file's, else the suite's, else all

@@ -28,8 +28,8 @@ flowchart TD
     cs --> rec
     cs --> st[stats: pass_rate]
     cs --> api[fsm_llm.API]
-    hb[scripts/bench_common.py] -. parity-tested copies .-> st
-    hb -. parity-tested copies .-> rec
+    bc[scripts/bench_common.py] -. parity-tested copies .-> st
+    bc -. parity-tested copies .-> rec
 ```
 
 Examples run: `discover_examples(config)` -> `create_output_dir` (`open_run_dir`, git hash of the examples tree's parent) -> `run_interruptible` over `config.workers` threads, each driving one subprocess (`run_example`, scored once with `classify_result`) -> log written as each finishes (`write_example_log`) -> results sorted by name -> `write_scorecard` (`scorecard.md` + `results.json`).

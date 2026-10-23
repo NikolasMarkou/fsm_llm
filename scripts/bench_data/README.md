@@ -12,6 +12,11 @@ manifest comparison, wire capture) now live in `scripts/bench_common.py`, used
 by `scripts/agents_bench.py` and `scripts/skills_bench.py`. The two live
 benches that still have code are `agents-react` and `skills-disclosure`.
 
+Name mapping: the frozen `skills-disclosure/PRE_REGISTRATION_B0.md` names
+`harness_bench.fisher_exact_two_sided`; that function now lives in
+`scripts/bench_common.py` as `bench_common.fisher_exact_two_sided`. The
+pre-registration file itself stays frozen.
+
 Raw, append-only evidence produced by the removed `scripts/harness_bench.py`
 and the removed live harness tests, and by `scripts/agents_bench.py` and
 `scripts/skills_bench.py`. Every block here ran against a local Ollama model,
