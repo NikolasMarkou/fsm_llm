@@ -20,19 +20,20 @@ import re
 import tempfile
 import time
 import unicodedata
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import suppress
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from functools import partial
 from itertools import islice
 from pathlib import Path
-from typing import Any, ClassVar, Literal, cast
+from typing import Any, Literal
 from urllib.parse import quote, unquote
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from . import frontmatter as _fm
 from .__version__ import __version__
 from .constants import (
     OKF_EXPORT_TEXT_MAX_CHARS,
@@ -256,107 +257,23 @@ class OKFConcept(BaseModel):
 
 
 # --- Tolerant parser ---
-_Note = Callable[[Literal["error", "warning", "info"], str, str], None]
-_TIMESTAMP_TAG = "tag:yaml.org,2002:timestamp"
 _KNOWN_KEYS = frozenset(
     {"type", "title", "description", "resource", "tags", "sources"}
     | {"generated", "verified", "status", "stale_after"}
 )
 _STATUSES = ("draft", "stable", "deprecated")
-_CLOSING_RE = re.compile(r"^---[ \t]*$", re.MULTILINE)
 _MAX_FILE_WARNINGS = 25
 
 
-class _OKFLoader(yaml.SafeLoader):
-    """``SafeLoader`` without timestamps, aliases and anchors (refused in
-    ``compose_node``, before any expansion); duplicate keys are recorded, the
-    last wins. SECURITY: the resolver table is a COPY (below)."""
-
-    # DECISION plan-2026-10-21T140931-095ea5f8/D-014
-    # The timestamp resolver is left out of a COPY of the table. Do NOT call
-    # `.remove()` or `del` on `yaml.SafeLoader.yaml_implicit_resolvers`: that
-    # table is shared, so it would change `yaml.safe_load` for the whole
-    # process. See decisions.md D-014.
-    yaml_implicit_resolvers: ClassVar[dict[Any, Any]] = {
-        first: [(tag, rx) for tag, rx in rules if tag != _TIMESTAMP_TAG]
-        for first, rules in yaml.SafeLoader.yaml_implicit_resolvers.items()
-    }
-
-    def __init__(self, stream: str) -> None:
-        super().__init__(stream)
-        self.duplicate_keys: list[str] = []
-
-    def compose_node(self, parent: Any, index: Any) -> Any:
-        event = self.peek_event()
-        if getattr(event, "anchor", None):  # AliasEvent and anchored nodes
-            raise yaml.YAMLError("YAML aliases and anchors are not allowed")
-        return super().compose_node(parent, index)
-
-    def construct_mapping(self, node: Any, deep: bool = False) -> Any:
-        seen: set[str] = set()
-        for key_node, _ in node.value:
-            if isinstance(key_node, yaml.ScalarNode):
-                if key_node.value in seen:
-                    self.duplicate_keys.append(key_node.value)
-                seen.add(key_node.value)
-        return super().construct_mapping(node, deep)
-
-
-def _split_frontmatter(text: str) -> tuple[str | None, str, str | None]:
-    """``(yaml text | None, body, problem code | None)``; BOM removed, line ends
-    normalised to ``\\n``. Without a complete ``---`` block all text is body."""
-    text = text.removeprefix("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
-    first, _, rest = text.partition("\n")
-    if first.rstrip() != "---":
-        return None, text, "frontmatter-missing"
-    closing = _CLOSING_RE.search(rest)
-    if closing is None:
-        return None, text, "frontmatter-unterminated"
-    return rest[: closing.start()], rest[closing.end() :].removeprefix("\n"), None
-
-
-def _flow_depth_exceeded(raw: str) -> bool:
-    """Bound nested ``[``/``{`` first (PyYAML's scanner is quadratic on them)."""
-    depth = 0
-    for ch in raw:
-        if ch in "[{":
-            depth += 1
-            if depth > OKF_MAX_YAML_DEPTH:
-                return True
-        elif ch in "]}" and depth:
-            depth -= 1
-    return False
-
-
-def _load_yaml(raw: str, note: _Note) -> dict[Any, Any]:
-    # SECURITY: size bound BEFORE any YAML work (pure-Python parse: up to ~27 ms/KB).
-    if len(raw.encode("utf-8", "replace")) > OKF_MAX_FRONTMATTER_BYTES:
-        note("error", "frontmatter-too-large", "frontmatter block is too large")
-        return {}
-    duplicates: list[str] = []
-    try:
-        loader = _OKFLoader(raw)
-        if _flow_depth_exceeded(raw):
-            raise RecursionError
-        data = cast("object", loader.get_single_data())
-        duplicates = loader.duplicate_keys
-        _lone_surrogate(data)  # depth the writer would refuse
-    except (RecursionError, OKFError):  # first: a RuntimeError, not the catch-all's
-        note("error", "frontmatter-too-deep", "frontmatter is nested too deeply")
-        return {}
-    except Exception as exc:  # PyYAML constructors raise anything (``!!timestamp x``)
-        problem = getattr(exc, "problem", None) or exc
-        note("error", "frontmatter-invalid", f"{type(exc).__name__}: {problem}"[:160])
-        return {}
-    for key in duplicates:
-        note("warning", "key-duplicate", f"duplicate key {key!r}; the last value wins")
-    if data is None:
-        note("warning", "frontmatter-empty", "frontmatter block is empty")
-        return {}
-    if not isinstance(data, dict):
-        note("error", "frontmatter-not-mapping", "frontmatter is not a mapping")
-        return {}
-    return data
+# The one frontmatter seam is ``frontmatter.py``. The private names below stay
+# module globals of this file (tests patch them); OKF passes its own limits.
+_Note = _fm.Note
+_SURROGATE_RE = _fm.SURROGATE_RE
+_split_frontmatter = _fm.split_frontmatter
+_read_bytes = _fm.read_bytes
+_load_yaml = partial(
+    _fm.load_yaml, max_bytes=OKF_MAX_FRONTMATTER_BYTES, max_depth=OKF_MAX_YAML_DEPTH
+)
 
 
 def _text(data: dict[str, Any], key: str, note: _Note) -> str | None:
@@ -841,13 +758,6 @@ def _capped(issues: list[OKFIssue]) -> list[OKFIssue]:
     return kept
 
 
-def _read_bytes(path: Path, limit: int) -> bytes:
-    """Read at most ``limit + 1`` bytes; never follows a final symlink."""
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-    with os.fdopen(os.open(path, flags), "rb") as handle:
-        return handle.read(limit + 1)
-
-
 def load_bundle(
     path: str | os.PathLike[str], *, limits: OKFLimits | None = None
 ) -> OKFBundle:
@@ -1094,7 +1004,6 @@ def check_bundle(bundle: OKFBundle) -> list[OKFIssue]:
 _INDEX_BUDGET = OKF_MAX_FILE_BYTES * 3 // 4  # room for the last line, so it loads back
 _MAX_CLASHES_SHOWN = 5
 _MAX_PATH_BYTES = 4_000  # Linux PATH_MAX is 4,096; room left for the temp sibling
-_SURROGATE_RE = re.compile("[\ud800-\udfff]")
 
 
 class _OKFDumper(yaml.SafeDumper):
@@ -1123,21 +1032,15 @@ def _plain(value: Any) -> Any:
 
 
 def _lone_surrogate(value: Any) -> bool:
-    """True when a string, key or item in *value* is a lone surrogate. Iterative
-    and walked to the end: ``OKFError`` past ``OKF_MAX_YAML_DEPTH`` (a cycle
-    ends there) or ``OKF_MAX_FRONTMATTER_BYTES`` nodes, surrogate or not."""
-    stack, nodes, found = [(value, 0)], 0, False
-    while stack:
-        item, depth = stack.pop()
-        if isinstance(item, str):
-            found = found or bool(_SURROGATE_RE.search(item))
-        elif isinstance(item, (Mapping, list, tuple, set, frozenset)):
-            kids = [*item, *item.values()] if isinstance(item, Mapping) else item
-            nodes += len(kids)
-            if depth >= OKF_MAX_YAML_DEPTH or nodes > OKF_MAX_FRONTMATTER_BYTES:
-                raise OKFError("too deep, too large or cyclic")
-            stack.extend((kid, depth + 1) for kid in kids)
-    return found
+    """True when a string, key or item in *value* is a lone surrogate; ``OKFError``
+    past ``OKF_MAX_YAML_DEPTH`` (a cycle ends there) or ``OKF_MAX_FRONTMATTER_BYTES``
+    nodes, surrogate or not."""
+    try:
+        return _fm.lone_surrogate(
+            value, max_depth=OKF_MAX_YAML_DEPTH, max_nodes=OKF_MAX_FRONTMATTER_BYTES
+        )
+    except RecursionError as exc:
+        raise OKFError(str(exc)) from exc
 
 
 class _FrontmatterTooLarge(OKFError):
