@@ -35,6 +35,7 @@ benches that support it, direct reads of `rows.jsonl` for L6 and L8).
 | `l8-explore-loop` | The EXPLORE redispatch loop, per tool call. n=10 runs | B0, B1 | Runs reaching PLAN: B0 0/10, B1 9/10 |
 | `agents-react` | 38 deterministic tool-loop tasks x 3 trials | B0, B1, B2 | First-trial pass@1: `legacy` 28/38, `native_fc` 37/38 (B0); `fsm_advance` 32/38 (B1); `fsm_toolcall` 37/38 (B2) |
 | `seed-probe` | Does Ollama honour `seed`? | one record | Same seed is identical at temperature 0.7, a different seed diverges (temperature 0 hides any seed effect) |
+| `skills-disclosure` | Do small models complete the two-step Agent Skills disclosure (`skill_load`, then `skill_read`) on 16 skills and 12 questions, and does the read hint matter? | B0 (48 rows), B1 (96 rows): REGISTERED, NOT RUN | No rows. The manifests and `PRE_REGISTRATION_B0.md` (with amendments A1, A2) and `PRE_REGISTRATION_B1.md` are committed; the live runs were declined at step 6 of plan 93d78536, so the hint decision is a recorded default (keep), not a measurement. `run` refuses to start if `agent_skills.py`, `agents/agent_skills.py` or `constants.py` changed since registration |
 
 Honest status of the harness: it is experimental and not production-ready. The
 committed end-to-end block `l6-e2e/B8` (see `l6-e2e/B8/GRADING.md`,
