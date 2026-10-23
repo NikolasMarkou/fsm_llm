@@ -30,6 +30,7 @@ from __future__ import annotations
 from .__version__ import __version__
 from .adapt import ADaPTAgent
 from .agent_graph import AgentGraph, AgentGraphBuilder
+from .agent_skills import create_skill_tools
 from .auto_memory import (
     AutoMemoryReactAgent,
     augment_task_with_memories,
@@ -324,6 +325,8 @@ __all__ = [
     "create_okf_tools",
     "export_agent_result",
     "export_semantic_memory",
+    # Agent Skills folders
+    "create_skill_tools",
     "SkillDefinition",
     "SkillLoader",
     # Meta-builder
