@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ToolRegistry.register_skill(skill)` -> `ToolRegistry.register_python_tool(tool)`
   - the parameter `skills` of `PythonToolLoader.to_tool_registry` and `PythonToolLoader.by_category` -> `python_tools` (a call that passes it by keyword breaks)
   - the `SKILLS = [...]` list convention in a `.py` file that `from_directory` loads -> `PYTHON_TOOLS = [...]`
-  - **A user script that defines `SKILLS = [...]` stops being collected without an error: its tools are silently not loaded unless they are also `@tool`-decorated. Rename the list to `PYTHON_TOOLS`.**
+  - **Any tool file that still uses an old name (a `SKILLS = [...]` list, a `SkillDefinition` or `SkillLoader` import) loads no tools and raises nothing, silently: `PythonToolLoader.from_directory` catches every error while it loads a file and only logs a warning, and library logging is off by default. A `SKILLS` list in a file that already imports the new names is skipped without even a warning (its `@tool`-decorated tools still load); a file that imports an old name is skipped whole. To see the "Failed to load Python tools from <file>" warning call `fsm_llm.enable_debug_logging()` (or `fsm_llm.setup_logging()`). Rename the list to `PYTHON_TOOLS` and the imports to the new names.**
   - Log and warning texts follow the new noun ("Python tool directory not found", "Loaded N Python tools from ..."). The example `examples/agents/skill_loader/` is updated to the new names (token-level edits only, same directory and file names).
 
 ## [0.12.0] - 2026-10-02

@@ -145,3 +145,21 @@ class TestPythonToolLoaderToolAliasDedupe:
         assert len(warnings) == 1
         assert "lookup" in warnings[0]
         assert "b_second" in warnings[0]
+
+
+class TestPythonToolLoaderRemovedNames:
+    """D-039: a tool file that still imports a removed name loads nothing and
+    raises nothing; the only trace is a warning, off until logging is enabled."""
+
+    def test_a_file_importing_a_removed_name_is_skipped_quietly(
+        self, tmp_path: Path, capsys
+    ):
+        removed = "Skill" + "Definition"
+        (tmp_path / "old.py").write_text(f"from fsm_llm.agents import {removed}\n")
+
+        assert PythonToolLoader.from_directory(tmp_path) == []
+        assert capsys.readouterr() == ("", "")
+        _, warnings = _capture_warnings(
+            lambda: PythonToolLoader.from_directory(tmp_path)
+        )
+        assert len(warnings) == 1 and removed in warnings[0]

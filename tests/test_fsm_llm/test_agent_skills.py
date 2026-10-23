@@ -664,9 +664,11 @@ class TestTextPage:
             offset = nxt
         assert out == text
 
-    @pytest.mark.parametrize("bad", [None, "x", [], 1.5e400, True * -1, -5])
-    def test_a_bad_or_negative_offset_is_the_start(self, bad: Any) -> None:
+    @pytest.mark.parametrize("bad", [None, "x", -3, [], 1.5e400, True * -1, -5])
+    def test_a_bad_or_negative_offset_is_the_start(self, tmp_path: Path, bad: Any):
         assert text_page("abcdef", bad, 3) == ("abc", 3, 6)
+        _mk(tmp_path, "p", body="abcdef\n")
+        assert load_skills(tmp_path).read_body("p", bad, size=3)[0] == "abc"
 
     def test_an_offset_past_the_end_gives_an_empty_final_page(self) -> None:
         assert text_page("abc", 10**30, 2) == ("", None, 3)
@@ -1138,20 +1140,14 @@ class TestCatalogDisclosure:
         assert out == expected and pages > 1
         assert _ESC not in out and _BIDI not in out
 
-    def test_the_default_page_size_is_the_constant(self, tmp_path: Path) -> None:
+    def test_the_default_page_is_the_constant_and_a_size_below_one_advances(
+        self, tmp_path: Path
+    ) -> None:
         _mk(tmp_path, "p", body="x" * 5_000)
-        page, nxt, length = load_skills(tmp_path).read_body("p")
+        catalog = load_skills(tmp_path)
+        page, nxt, length = catalog.read_body("p")
         assert (len(page), nxt, length) == (1_500, 1_500, 5_000)
-
-    @pytest.mark.parametrize("bad", [None, "x", -3, [], 1.5e400, True * -1])
-    def test_a_bad_offset_reads_from_the_start(self, tmp_path: Path, bad: Any) -> None:
-        _mk(tmp_path, "p", body="abcdef\n")
-        assert load_skills(tmp_path).read_body("p", bad, size=3)[0] == "abc"
-
-    def test_a_size_below_one_still_makes_progress(self, tmp_path: Path) -> None:
-        _mk(tmp_path, "p", body="abcdef\n")
-        page, nxt, _ = load_skills(tmp_path).read_body("p", 0, size=0)
-        assert page == "a" and nxt == 1
+        assert catalog.read_body("p", 0, size=0)[:2] == ("x", 1)
 
     def test_the_body_is_re_read_from_disk_not_cached(self, tmp_path: Path) -> None:
         folder = _mk(tmp_path, "p", body="first\n")
@@ -1530,12 +1526,8 @@ class TestLimits:
         assert [(i.severity, i.path) for i in stop] == [("error", "d")]
         assert "max_skills" in stop[0].message  # names the knob
         assert catalog.incomplete == ("max-skills",)
-
-    def test_exactly_max_skills_skills_is_complete(self, tmp_path: Path) -> None:
-        for name in "abc":
-            _mk(tmp_path, name)
-        catalog = load_skills(tmp_path, limits=SkillLimits(max_skills=3))
-        assert len(catalog) == 3 and catalog.incomplete == ()
+        exact = load_skills(tmp_path, limits=SkillLimits(max_skills=5))
+        assert len(exact) == 5 and exact.incomplete == ()  # exactly the cap
 
     def test_a_skipped_or_duplicate_skill_does_not_use_up_max_skills(
         self, tmp_path: Path
@@ -1586,11 +1578,8 @@ class TestLimits:
         assert catalog.incomplete == ("resources-truncated",)
         # a file past the cut is still readable: confinement, not the list, decides
         assert catalog.read_resource("r", "f07.txt")[0] == "x"
-
-    def test_exactly_the_cap_is_not_truncated(self, tmp_path: Path) -> None:
-        _mk(tmp_path, "r", files={f"f{i}.txt": "x" for i in range(5)})
-        catalog = load_skills(tmp_path, limits=SkillLimits(max_resources_per_skill=5))
-        assert catalog.issues == [] and catalog.incomplete == ()
+        exact = load_skills(tmp_path, limits=SkillLimits(max_resources_per_skill=8))
+        assert exact.issues == [] and exact.incomplete == ()  # exactly the cap
 
     def test_a_directory_tree_deeper_than_the_depth_bound_is_cut(
         self, tmp_path: Path
@@ -1886,10 +1875,8 @@ class TestRender:
         assert "s2" not in out
         zero = load_skills(tmp_path).render_catalog(max_items=0)
         assert zero.count("<skill>") == 0 and "(5 more, use skill_list)" in zero
-
-    def test_the_default_shows_at_most_50_entries(self, tmp_path: Path) -> None:
-        for i in range(53):
-            _mk(tmp_path, f"s{i:02d}")
+        for i in range(5, 53):  # the default shows at most 50 entries
+            _mk(tmp_path, f"s{i}")
         out = load_skills(tmp_path).render_catalog()
         assert out.count("<skill>") == 50 and "(3 more, use skill_list)" in out
 

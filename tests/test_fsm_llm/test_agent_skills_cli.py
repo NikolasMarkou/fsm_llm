@@ -381,18 +381,12 @@ class TestExitCodes:
             ["show", "only-a-name"],
             ["list", ".", "--nope"],
             ["show", "n", ".", "--offset", "x"],
+            *(["list", ".", "--max-seconds", s] for s in "0 -1 nan inf abc".split()),
         ],
     )
     def test_usage_errors_exit_2(self, argv: list[str]) -> None:
         with pytest.raises(SystemExit) as info:
             main(argv)
-
-        assert info.value.code == 2
-
-    @pytest.mark.parametrize("seconds", ["0", "-1", "nan", "inf", "abc"])
-    def test_a_bad_max_seconds_exits_2(self, seconds: str) -> None:
-        with pytest.raises(SystemExit) as info:
-            main(["list", ".", "--max-seconds", seconds])
 
         assert info.value.code == 2
 
