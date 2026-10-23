@@ -2259,6 +2259,16 @@ class OKFError(FSMError):
     """
 
 
+class SkillError(FSMError):
+    """An Agent Skills operation was refused (``fsm_llm.agent_skills``).
+
+    Raised for caller misuse: a missing or non-directory skills root, no path
+    given, an unknown skill name, or a body or resource read that is refused
+    (a path that leaves the skill folder, a binary or oversize file). Skill
+    content never raises it: a malformed skill becomes a ``SkillIssue`` instead.
+    """
+
+
 class FSMDefinitionNotFoundError(FSMError, ValueError):
     """No FSM definition is resolvable for a non-path id.
 
