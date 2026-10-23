@@ -376,58 +376,6 @@ class TestRunRefusesResample:
             hb.run_block("x", "B0", "nativ", 40)
 
 
-class TestMachineryImport:
-    """D-001: the scripts->tests import direction actually works offline."""
-
-    def test_fixture_hash_is_deterministic_and_hex(self, monkeypatch):
-        """Defect guarded: the D-001 import direction breaking silently (a
-        renamed test helper) or the fixture hash wobbling between calls,
-        which would un-pin every manifest."""
-        monkeypatch.delenv("FSM_LLM_HARNESS_LIVE", raising=False)
-        live = hb._live()
-        h1 = hb._fixture_hash(live)
-        assert h1 == hb._fixture_hash(live)
-        assert len(h1) == 64 and int(h1, 16) >= 0
-
-    def test_prompt_hash_is_deterministic_and_hex(self, monkeypatch):
-        """Defect guarded: placeholder paths leaking per-run tmpdirs into the
-        prompt hash, making every block 'differ' in prompt bytes."""
-        monkeypatch.delenv("FSM_LLM_HARNESS_LIVE", raising=False)
-        live = hb._live()
-        h1 = hb._prompt_hash(live)
-        assert h1 == hb._prompt_hash(live)
-        assert len(h1) == 64 and int(h1, 16) >= 0
-
-    def test_tool_surface_names_a_write_tool_and_the_arm_flag(self, monkeypatch):
-        """Defect guarded: a manifest that cannot show the dispatch even HELD
-        a write tool -- the exact ambiguity manifests exist to remove."""
-        monkeypatch.delenv("FSM_LLM_HARNESS_LIVE", raising=False)
-        live = hb._live()
-        surface = hb._tool_surface(live, native=True)
-        assert surface["native_function_calling"] is True
-        assert "write_file" in surface["declared_tools"]
-        assert surface["retry_attempts"] == 1
-        assert surface["timeout_seconds"] == 600
-
-    def test_build_manifest_carries_all_six_fields(self, monkeypatch):
-        """Defect guarded: a manifest builder that drifts from the 6-field
-        contract its own summary writer enforces."""
-        monkeypatch.delenv("FSM_LLM_HARNESS_LIVE", raising=False)
-        monkeypatch.setattr(
-            hb,
-            "_model_digest",
-            lambda tag=hb.MODEL_TAG: {"tag": tag, "digest": "stubbed"},
-        )
-        live = hb._live()
-        manifest = hb.build_manifest(
-            live, bench_id="x", block="B0", arm_name="react", n=40, seed=None
-        )
-        assert all(field in manifest for field in hb.MANIFEST_FIELDS)
-        assert manifest["arm"] == {"native": False, "display": "react"}
-        for field in hb.DISCLOSURE_FIELDS:
-            assert manifest[field] is not None, field
-
-
 class TestCLI:
     """The argparse surface the five pre-declared live events will drive."""
 
@@ -558,97 +506,9 @@ class TestProbeSeedOnCore:
         assert offenders == []
 
 
-class TestLiveSpyForwardsGated:
-    """D-034: the live harness spy that the L4 bench rows run through."""
-
-    def test_spy_forwards_keyword_arguments_to_the_real_execute(self, monkeypatch):
-        """Defect guarded: `_spy_on_tools` replacing `ToolRegistry.execute`
-        with `spied(self, tool_call)`, so every ReAct tool call (which passes
-        `gated`) raised TypeError and the L4 react arm measured a broken spy
-        with zero tool calls (07900ff live probe, D-033/D-034)."""
-        from fsm_llm.agents.definitions import ToolCall
-        from fsm_llm.agents.tools import ToolRegistry, refuse_execute_without_gated
-
-        monkeypatch.delenv("FSM_LLM_HARNESS_LIVE", raising=False)
-        live = hb._live()
-        seen: list[dict] = []
-        real = ToolRegistry.execute
-
-        def recording(self, tool_call, **kwargs):
-            seen.append(kwargs)
-            return real(self, tool_call, **kwargs)
-
-        monkeypatch.setattr(ToolRegistry, "execute", recording)
-
-        def shout(text: str) -> str:
-            """Upper-case the text."""
-            return text.upper()
-
-        registry = ToolRegistry()
-        registry.register_function(shout, name="shout")
-        sink: list[dict] = []
-        original = live._spy_on_tools(sink)
-        try:
-            refuse_execute_without_gated(registry)
-            result = registry.execute(
-                ToolCall(tool_name="shout", parameters={"text": "hi"}), gated=True
-            )
-        finally:
-            ToolRegistry.execute = original
-        assert original is recording
-        assert seen == [{"gated": True}]
-        assert result.success
-        assert sink == [
-            {"tool": "shout", "ok": True, "params": {"text": "hi"}, "error": None}
-        ]
-
-
 class TestWireDisclosure:
     """Review pass 10 warning 3 (D-037 item 18.5, D-040): an L4 manifest
     discloses what its first request carried at core's send binding."""
-
-    @pytest.fixture
-    def live(self, monkeypatch):
-        import fsm_llm.llm
-
-        def no_send(**kw):
-            raise AssertionError("the disclosure probe sent a provider request")
-
-        monkeypatch.delenv("FSM_LLM_HARNESS_LIVE", raising=False)
-        monkeypatch.setattr(fsm_llm.llm, "completion", no_send)
-        return hb._live()
-
-    @pytest.mark.parametrize("native", [True, False])
-    def test_the_first_request_is_read_at_the_wire(self, live, native):
-        """Defect guarded: a harness B2 vs B1 pair that cannot show the
-        per-request timeout, the tool bytes or core's Ollama preparation."""
-        import fsm_llm.llm
-
-        disclosure = hb.request_disclosure(live, native=native, seed=None)
-        settings = disclosure["llm_request"]
-        assert settings["timeout"] == 120.0
-        assert settings["reasoning_effort"] == "none"
-        assert settings["model"] == hb.MODEL
-        first = disclosure["first_request"]
-        assert (first["tools_sha256"] is not None) is native
-        assert first["n_requests"] >= 1
-        assert fsm_llm.llm.completion.__name__ == "no_send"  # restored
-        assert disclosure == hb.request_disclosure(live, native=native, seed=None)
-
-    def test_a_seed_is_recorded_with_its_value(self, live):
-        """Defect guarded: a seeded native block indistinguishable from an
-        unseeded one."""
-        seeded = hb.request_disclosure(live, native=True, seed=7)
-        assert seeded["llm_request"]["seed"] == 7
-        unseeded = hb.request_disclosure(live, native=True, seed=None)
-        assert "seed" not in unseeded["llm_request"]
-
-    def test_the_binding_is_restored_when_the_block_raises(self, live):
-        import fsm_llm.llm
-
-        with pytest.raises(RuntimeError), hb.captured_wire():
-            raise RuntimeError("boom")
-        assert fsm_llm.llm.completion.__name__ == "no_send"
 
     def test_the_digest_masks_the_date_and_the_task(self):
         def params(day: str, task: str) -> dict:
@@ -754,97 +614,11 @@ class TestRegisterNativeFsm:
     is registered (manifest only, committed before row 1) and ``run`` keeps
     that manifest and refuses it on drift instead of overwriting it."""
 
-    @pytest.fixture
-    def offline(self, tmp_path: Path, monkeypatch):
-        import fsm_llm.llm
-
-        def no_send(**kw):
-            raise AssertionError("the registration sent a provider request")
-
-        monkeypatch.delenv("FSM_LLM_HARNESS_LIVE", raising=False)
-        monkeypatch.setattr(fsm_llm.llm, "completion", no_send)
-        monkeypatch.setattr(hb, "BENCH_DATA", tmp_path)
-        monkeypatch.setattr(
-            hb, "_model_digest", lambda tag=hb.MODEL_TAG: dict(_DIGEST_STUB)
-        )
-        monkeypatch.setattr(hb, "_git_commit", lambda: "cafebabe")
-        monkeypatch.setattr(hb, "_git_dirty", lambda: False)
-        return tmp_path / "l4-execute-write" / "B2"
-
     def test_native_fsm_is_the_native_flag_under_a_new_label(self):
         """Defect guarded: B2 rows of changed code written under B1's
         ``native`` label, or a ``native_fsm`` arm that runs the ReAct arm."""
         assert hb.ARMS["native_fsm"] is True
         assert hb.ARMS["native"] is True and hb.ARMS["react"] is False
-
-    def test_register_writes_the_manifest_only_and_once(self, offline):
-        """Defect guarded: a block whose manifest cannot be committed before
-        its first row, or that can be registered twice."""
-        path = hb.register_block(
-            "l4-execute-write", "B2", "native_fsm", 40, 20260722000
-        )
-        assert path == offline / "manifest_native_fsm.json"
-        assert sorted(p.name for p in offline.iterdir()) == [path.name]
-        manifest = json.loads(path.read_text(encoding="utf-8"))
-        assert all(field in manifest for field in hb.MANIFEST_FIELDS)
-        assert manifest["arm"] == {"native": True, "display": "native_fsm"}
-        assert manifest["tool_surface"]["native_function_calling"] is True
-        assert manifest["n_preregistered"] == 40
-        assert manifest["seed"]["base"] == 20260722000
-        assert manifest["llm_request"]["seed"] == 20260722000
-        assert manifest["llm_request"]["timeout"] == 120.0
-        assert manifest["first_request"]["tools_sha256"] is not None
-        with pytest.raises(hb.BenchDataError, match="registered ONCE"):
-            hb.register_block("l4-execute-write", "B2", "native_fsm", 40, 20260722000)
-        with pytest.raises(hb.BenchDataError, match="unknown arm"):
-            hb.register_block("l4-execute-write", "B2", "native_fs", 40)
-
-    def test_run_keeps_the_registered_manifest(self, offline, monkeypatch):
-        """Defect guarded: ``run`` rewriting the committed manifest (new
-        ``created_at``/``git_commit``), so the pre-registration is gone."""
-        path = hb.register_block("l4-execute-write", "B2", "native_fsm", 2, 7)
-        before = path.read_text(encoding="utf-8")
-        monkeypatch.setattr(hb, "_git_commit", lambda: "f00d")
-        seen = []
-
-        def fake_run_one(live, tmp, run, *, native, seed):
-            seen.append((run, native, seed))
-            row = _synthetic_rows([(True, True, True, True)])[0]
-            return {**row, "run": run, "seed": seed}, []
-
-        monkeypatch.setattr(hb, "_run_one", fake_run_one)
-        summary = hb.run_block("l4-execute-write", "B2", "native_fsm", 2, 7)
-        assert path.read_text(encoding="utf-8") == before
-        assert seen == [(1, True, 7), (2, True, 8)]
-        assert summary["n"] == 2 and summary["status"] == "complete"
-        assert summary["run"] == {"git_commit": "f00d", "git_dirty": False}
-
-    @pytest.mark.parametrize(
-        ("n", "seed", "field"), [(39, 7, "n_preregistered"), (2, 8, "seed")]
-    )
-    def test_run_refuses_a_registered_block_that_drifted(
-        self, offline, monkeypatch, n, seed, field
-    ):
-        """Defect guarded: a block registered at one n or seed and run at
-        another, with the committed manifest still claiming the first."""
-        hb.register_block("l4-execute-write", "B2", "native_fsm", 2, 7)
-        monkeypatch.setattr(
-            hb, "_run_one", lambda *a, **k: pytest.fail("a dispatch ran")
-        )
-        with pytest.raises(hb.BenchDataError, match=field):
-            hb.run_block("l4-execute-write", "B2", "native_fsm", n, seed)
-        assert not (offline / "rows_native_fsm.jsonl").exists()
-
-    def test_run_refuses_when_the_first_request_changed(self, offline, monkeypatch):
-        """Defect guarded: the native request bytes (tools, timeout) changing
-        between registration and run unnoticed."""
-        hb.register_block("l4-execute-write", "B2", "native_fsm", 2, 7)
-        original = hb.wire_settings
-        monkeypatch.setattr(
-            hb, "wire_settings", lambda params: {**original(params), "timeout": 30.0}
-        )
-        with pytest.raises(hb.BenchDataError, match="llm_request"):
-            hb.run_block("l4-execute-write", "B2", "native_fsm", 2, 7)
 
     def test_pinned_drift_ignores_key_order_but_not_types(self):
         """Defect guarded (review pass 12 note 3): a manifest read back from
@@ -862,13 +636,6 @@ class TestRegisterNativeFsm:
         assert hb.pinned_drift(stored, typed, ("llm_request",)) == ["llm_request"]
         moved = {**current, "model_digest": {"digest": "e"}}
         assert hb.pinned_drift(recorded, moved, ()) == ["model_digest"]
-
-    def test_the_cli_registers(self, offline, capsys):
-        argv = ["register", "--bench-id", "l4-execute-write", "--block", "B2"]
-        rc = hb.main([*argv, "--arm", "native_fsm", "--n", "40", "--seed", "1"])
-        assert rc == 0
-        assert "registered" in capsys.readouterr().out
-        assert (offline / "manifest_native_fsm.json").is_file()
 
 
 _DIGEST_STUB = {"tag": "qwen3.5:4b", "digest": "2a654d98e6fb"}

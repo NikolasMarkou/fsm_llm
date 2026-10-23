@@ -294,11 +294,6 @@ class TestExtractJsonFenceSpanSkip:
         text = 'x {"intent":"buy","confidence":0.9} y\n```\n[{"message":"m"}]\n```'
         assert extract_json_from_text(text) == {"intent": "buy", "confidence": 0.9}
 
-    def test_harness_payload_contract_for_a_fenced_array(self):
-        from fsm_llm.harness.hardening import parse_json_payload
-
-        assert parse_json_payload('```json\n[{"a":1}]\n```') is None
-
     def test_a_hundred_thousand_open_brackets_do_not_raise(self):
         assert extract_json_from_text("[" * 100000) is None
 

@@ -8,7 +8,7 @@ in coverage, or stops shipping in the sdist. Nothing errors.
 This file is that missing check. The package list is derived from the
 filesystem (`src/*/__init__.py`), never hardcoded, so it cannot go stale. Since
 plan-2026-09-29T044048-3a032517 the layout is ONE top-level package, `fsm_llm`,
-with six subpackages (`src/fsm_llm/*/__init__.py`); both sets are derived and
+with five subpackages (`src/fsm_llm/*/__init__.py`); both sets are derived and
 pinned exactly, so a stray second top-level package fails here.
 """
 
@@ -50,10 +50,10 @@ SRC_PACKAGES: frozenset[str] = _packages_under(_REPO_ROOT / "src")
 #: Every subpackage of `fsm_llm`, derived from disk.
 SUBPACKAGES: frozenset[str] = _packages_under(_REPO_ROOT / "src" / "fsm_llm")
 
-#: The five former sibling packages that now live under `fsm_llm`, plus `eval`
+#: The four former sibling packages that now live under `fsm_llm`, plus `eval`
 #: (added in plan-2026-09-29T061903-581c2634).
 _EXPECTED_SUBPACKAGES = frozenset(
-    {"agents", "reasoning", "workflows", "monitor", "harness", "eval"}
+    {"agents", "reasoning", "workflows", "monitor", "eval"}
 )
 
 #: Matches a package name wherever one is spelled out in a build file.
@@ -153,7 +153,7 @@ class TestEveryPackageIsWired:
         # undo the single-package layout.
         assert SRC_PACKAGES == {"fsm_llm"}, SRC_PACKAGES
 
-    def test_subpackage_list_is_exactly_the_six(self):
+    def test_subpackage_list_is_exactly_the_five(self):
         assert SUBPACKAGES == _EXPECTED_SUBPACKAGES, SUBPACKAGES
 
     @pytest.mark.parametrize("slot_id", sorted(_SLOTS))
@@ -417,8 +417,7 @@ def measured() -> tuple[int, dict[str, int], dict[str, int]]:
 
     The child env drops every variable that changes what gets collected or
     probed at collection time: PYTEST_ADDOPTS (an outer `-m "not slow"`
-    would deselect in the child and skew the count), FSM_LLM_HARNESS_LIVE
-    (armed, the live suite's skipif probes a socket at collection), and the
+    would deselect in the child and skew the count) and the
     SKIP_SLOW_TESTS/TEST_REAL_LLM knobs. Docs document the FULL collection.
     `-o addopts=` neutralizes pyproject's `addopts = "-v --tb=short"` for
     the same reason: its `-v` cancels `-q` and flips the output to the
@@ -430,7 +429,6 @@ def measured() -> tuple[int, dict[str, int], dict[str, int]]:
         if k
         not in (
             "PYTEST_ADDOPTS",
-            "FSM_LLM_HARNESS_LIVE",
             "SKIP_SLOW_TESTS",
             "TEST_REAL_LLM",
         )
@@ -489,9 +487,9 @@ class TestDocumentedTestCountsMatchCollection:
     """Every hand-maintained test-count literal equals `pytest --collect-only`.
 
     Same defect class as the package-wiring tests above: hand-maintained
-    parallel copies of a filesystem-derivable fact. AGENTS.md, README.md and
-    src/fsm_llm/harness/AGENTS.md each spell test counts as prose literals
-    ("5,107 tests", a 9-suite breakdown table, "1,751 tests"); every new test
+    parallel copies of a filesystem-derivable fact. AGENTS.md and README.md
+    each spell test counts as prose literals
+    ("5,107 tests", a 9-suite breakdown table); every new test
     silently strands them, and nothing errors. In the predecessor plans the
     literals drifted for days at a time (3,305/2,382 stated vs 5,107 measured)
     before a manual `--collect-only` audit caught it. This class measures once
@@ -568,26 +566,6 @@ class TestDocumentedTestCountsMatchCollection:
         assert documented == per_root_file, (
             f"AGENTS.md root-file breakdown {documented} != measured {per_root_file}"
         )
-
-    def test_harness_package_doc_literals(self, measured):
-        # src/fsm_llm/harness/AGENTS.md spells its own suite's count twice
-        # ("1,751 tests, 10 test files" and the status paragraph). EVERY
-        # "N tests" token in that file must equal the measured harness count,
-        # and "N test files" must equal the on-disk test_*.py file count.
-        _, per_suite, _ = measured
-        rel = "src/fsm_llm/harness/AGENTS.md"
-        harness = per_suite["test_fsm_llm_harness"]
-        for documented in _pinned_counts(rel, rf"{_COUNT} tests"):
-            assert documented == harness, (
-                f"{rel} says {documented} tests; measured {harness}"
-            )
-        n_files = len(
-            list((_REPO_ROOT / "tests" / "test_fsm_llm_harness").glob("test_*.py"))
-        )
-        for documented in _pinned_counts(rel, rf"{_COUNT} test files"):
-            assert documented == n_files, (
-                f"{rel} says {documented} test files; on disk: {n_files}"
-            )
 
 
 @pytest.fixture(scope="module")

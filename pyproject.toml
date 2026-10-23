@@ -62,10 +62,6 @@ otel = [
     "opentelemetry-sdk>=1.20.0",
 ]
 a2a = ["httpx>=0.24.0"]
-# The harness ships no third-party deps of its own; it is listed as an extra so it
-# appears in the `all` set and in the dev/CI install lists. It imports
-# `fsm_llm.agents`, which is why that extra is named here rather than `[]`.
-harness = ["fsm-llm[agents]"]
 # Evaluation tooling (fsm_llm.eval) is stdlib plus core deps only; listed as an
 # extra so it appears in the `all` set and in the dev/CI install lists.
 eval = []
@@ -83,7 +79,6 @@ all = [
     "fsm-llm[reasoning]",
     "fsm-llm[agents]",
     "fsm-llm[monitor]",
-    "fsm-llm[harness]",
     "fsm-llm[eval]",
     "fsm-llm[mcp]",
     "fsm-llm[otel]",
@@ -101,7 +96,6 @@ fsm-llm-visualize = "fsm_llm.visualizer:main_cli"
 fsm-llm-validate = "fsm_llm.validator:main_cli"
 fsm-llm-monitor = "fsm_llm.monitor.__main__:main_cli"
 fsm-llm-meta = "fsm_llm.agents.meta_cli:main_cli"
-fsm-llm-harness = "fsm_llm.harness.__main__:run"
 fsm-llm-eval = "fsm_llm.eval.__main__:run"
 fsm-llm-okf = "fsm_llm.okf_cli:main_cli"
 fsm-llm-skills = "fsm_llm.agent_skills_cli:main_cli"

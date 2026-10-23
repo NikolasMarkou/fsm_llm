@@ -948,12 +948,6 @@ class TestExtractJsonFencedNonDictAndDepth:
         deep = "```json\n" + "[" * 100000 + "\n```"
         assert extract_json_from_text(deep) is None
 
-    def test_harness_parse_json_payload_fenced_array_is_none(self):
-        from fsm_llm.harness.hardening import parse_json_payload
-
-        assert parse_json_payload('```json\n[{"a":1}]\n```') is None
-        assert parse_json_payload('```json\n{"a":1}\n```') == {"a": 1}
-
 
 # ══════════════════════════════════════════════════════════════
 # Step 7 / LS-01 + LS-06: sanitizer bypass and camelCase secret keys

@@ -29,7 +29,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT_ENV = "DOC_COUNTS_OUT"
 MARKERS = ("slow", "integration", "real_llm", "examples")
-SCRUB = ("PYTEST_ADDOPTS", "FSM_LLM_HARNESS_LIVE", "SKIP_SLOW_TESTS", "TEST_REAL_LLM")
+SCRUB = ("PYTEST_ADDOPTS", "SKIP_SLOW_TESTS", "TEST_REAL_LLM")
 MCP_INSTALLED = importlib.util.find_spec("mcp") is not None
 MCP_SKIP = "skipped: `mcp` is importable; the documented counts are the no-mcp counts"
 HISTORICAL = {

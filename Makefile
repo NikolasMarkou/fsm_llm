@@ -37,7 +37,7 @@ clean: ## Remove build artifacts and caches
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 
 install-dev: ## Install package in development mode with all extras
-	pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,harness,eval]"
+	pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval]"
 	pre-commit install
 
 audit: ## Audit site-packages for suspicious .pth files
