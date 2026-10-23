@@ -14,6 +14,7 @@ import pytest
 from fsm_llm.agent_skills import SkillLimits, load_skills
 from fsm_llm.agents import AgentConfig, ToolRegistry, create_agent, create_skill_tools
 from fsm_llm.agents import __all__ as agents_all
+from fsm_llm.agents import okf as agents_okf
 from fsm_llm.agents.agent_skills import SKILL_TOOL_DESCRIPTIONS, SKILL_TOOL_PARAMETERS
 from fsm_llm.agents.constants import ContextKeys, Defaults
 from fsm_llm.agents.definitions import ToolAnnotations, ToolCall
@@ -289,11 +290,15 @@ class TestReplyBudget:
     def test_skill_read_lists_a_directory_but_reads_a_file_and_refuses_the_rest(
         self, tmp_path: Path
     ):
-        _make(tmp_path, "s", files={"d/a.txt": "A\n", "d/e/b.txt": "B\n"})
+        _make(tmp_path, "s", files={"d/a.txt": "A\n", "d/e/b.txt": "B\n", "0/z": "Z"})
         (tmp_path / "s" / "empty").mkdir()
         registry = _registry(tmp_path)
-        assert _run(registry, "skill_read", name="s", path="d").endswith(
+        listed = _run(registry, "skill_read", name="s", path="d")
+        assert "\nfiles under 'd' (2)\n\n" in listed and listed.endswith(
             "d/a.txt\nd/e/b.txt"
+        )
+        assert _run(registry, "skill_read", name="s", path=0).endswith(  # not "0/"
+            "resource path is not allowed"
         )
         assert _run(registry, "skill_read", name="s", path="d/e/").endswith("d/e/b.txt")
         assert _run(registry, "skill_read", name="s", path="d/a.txt").endswith("\nA\n")
@@ -306,6 +311,19 @@ class TestReplyBudget:
         _make(tmp_path, "bare")  # no files: the empty path lists nothing and is refused
         bare = _run(_registry(tmp_path), "skill_read", name="bare", path="")
         assert bare.endswith("resource path is not allowed")
+
+    def test_a_listing_page_advances_even_when_the_header_eats_the_budget(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        _make(tmp_path, "s", files={"d/aaaa.txt": "x", "d/bbbb.txt": "x"})
+        registry = _registry(tmp_path)
+        label = SKILL_UNTRUSTED_LABEL
+        head = "\n".join([label, "skill: s", "files under 'd' (2)", "", ""])
+        monkeypatch.setattr(Defaults, "MAX_OBSERVATION_LENGTH", 0)
+        monkeypatch.setattr(agents_okf, "_MIN_BUDGET", len(head) + 10)
+        # One character of the listing, never a negative-size slice of it.
+        reply = _run(registry, "skill_read", name="s", path="d")
+        assert reply == head + "d\nnext off"
 
 
 class TestInjection:
