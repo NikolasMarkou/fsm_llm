@@ -767,7 +767,8 @@ print(bundle.outgoing("api/gateway"), bundle.backlinks("api/gateway"))
 ### Writing a bundle
 
 ```python
-from fsm_llm.okf import bundle_from_memory_entries, write_bundle
+from fsm_llm.okf import write_bundle
+from fsm_llm.okf_bridge import bundle_from_memory_entries
 
 bundle = bundle_from_memory_entries(
     [{"id": "m1", "text": "The gateway accepts 7341 KB.", "metadata": {"type": "Fact"}}]
@@ -784,7 +785,8 @@ written = write_bundle(bundle, "./out_bundle", overwrite=False)   # list of Path
 
 ```python
 from fsm_llm import API
-from fsm_llm.okf import create_okf_handler, load_bundle
+from fsm_llm.okf import load_bundle
+from fsm_llm.okf_bridge import create_okf_handler
 
 api = API.from_file("bot.json", model="ollama_chat/qwen3.5:4b")
 api.register_handler(create_okf_handler(load_bundle("./my_bundle"), query_key="topic"))

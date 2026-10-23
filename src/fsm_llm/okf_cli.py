@@ -47,7 +47,6 @@ from .okf import (
     OKFBundle,
     OKFLimits,
     body_page,
-    bundle_from_memory_entries,
     capped_line,
     check_bundle,
     close_ids,
@@ -55,6 +54,7 @@ from .okf import (
     load_bundle,
     write_bundle,
 )
+from .okf_bridge import bundle_from_memory_entries
 
 __all__ = ["main", "main_cli"]
 

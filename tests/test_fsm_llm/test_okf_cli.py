@@ -28,11 +28,11 @@ from fsm_llm.constants import (
     OKF_READ_PAGE_CHARS,
 )
 from fsm_llm.okf import (
-    bundle_from_memory_entries,
     load_bundle,
     strip_unsafe_text,
     write_bundle,
 )
+from fsm_llm.okf_bridge import bundle_from_memory_entries
 from fsm_llm.okf_cli import main
 from tests.test_fsm_llm.test_okf import _FakeClock
 

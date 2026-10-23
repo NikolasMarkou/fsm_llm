@@ -49,13 +49,13 @@ from fsm_llm.okf import (
     OKFBundle,
     OKFConcept,
     body_page,
-    bundle_from_memory_entries,
     capped_line,
     close_ids,
     incomplete_note,
     strip_unsafe_text,
     write_bundle,
 )
+from fsm_llm.okf_bridge import bundle_from_memory_entries
 from fsm_llm.prompts import sanitize_text_for_prompt
 from fsm_llm.utilities import redacting_json_default
 
@@ -581,7 +581,7 @@ def export_semantic_memory(
 
     Interface contract:
         - Each entry becomes one concept under ``memory/`` through core
-          ``okf.bundle_from_memory_entries`` and ``okf.write_bundle`` (the
+          ``okf_bridge.bundle_from_memory_entries`` and ``okf.write_bundle`` (the
           same two calls as ``fsm-llm-okf export``, so both routes write the
           same files; only ``generated.at`` differs). Only ``id``, ``text`` and
           ``metadata`` are read, embeddings are never exported, secret-looking

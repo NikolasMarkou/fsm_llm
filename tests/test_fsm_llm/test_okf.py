@@ -7,6 +7,7 @@ workspace, the rest cover the tolerant parser, trust tiers and staleness.
 
 from __future__ import annotations
 
+import ast
 import enum
 import gc
 import json
@@ -27,7 +28,9 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
+import fsm_llm
 import fsm_llm.okf as okf_module
+import fsm_llm.okf_bridge as okf_bridge
 from fsm_llm.api import API
 from fsm_llm.constants import (
     OKF_MAX_DEPTH,
@@ -47,15 +50,14 @@ from fsm_llm.okf import (
     OKFIssue,
     OKFLimits,
     TrustTier,
-    bundle_from_memory_entries,
     check_bundle,
-    create_okf_handler,
     load_bundle,
     parse_concept_text,
     parse_okf_datetime,
     strip_unsafe_text,
     write_bundle,
 )
+from fsm_llm.okf_bridge import bundle_from_memory_entries, create_okf_handler
 from fsm_llm.okf_cli import main as okf_cli_main
 from fsm_llm.prompts import ResponseGenerationPromptBuilder
 from fsm_llm.security import resolve_within
@@ -1976,6 +1978,76 @@ class TestLayering:
 
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "ok"
+
+
+_SRC_ROOT = Path(__file__).parents[2] / "src" / "fsm_llm"
+_MOVED = frozenset({"bundle_from_memory_entries", "create_okf_handler"})
+
+
+def _imported_from_okf(tree: ast.AST) -> list[tuple[str, int]]:
+    """``(name, line)`` of every ``from fsm_llm.okf import`` / ``from .okf import``."""
+    found: list[tuple[str, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (
+            (node.level == 0 and node.module == "fsm_llm.okf")
+            or (node.level > 0 and node.module == "okf")
+        ):
+            found += [(alias.name, node.lineno) for alias in node.names]
+    return found
+
+
+class TestBridgeLayering:
+    """``okf_bridge`` sits on top of ``okf`` and obeys the same core-module rules."""
+
+    def test_the_bridge_does_not_import_litellm(self) -> None:
+        assert "litellm" not in (_SRC_ROOT / "okf_bridge.py").read_text()
+
+    def test_the_bridge_loads_no_subpackage_and_is_loaded_by_nothing_eager(
+        self, tmp_path: Path
+    ) -> None:
+        src = str(Path(fsm_llm.__file__).parent.parent)
+        probe = (
+            f"import sys; sys.path.insert(0, {src!r})\n"
+            "import fsm_llm\n"
+            "assert 'fsm_llm.okf_bridge' not in sys.modules, 'core imports it'\n"
+            "import fsm_llm.okf\n"
+            "assert 'fsm_llm.okf_bridge' not in sys.modules, 'okf imports its bridge'\n"
+            "import fsm_llm.okf_bridge\n"
+            "subs = ('agents', 'harness', 'reasoning', 'workflows', 'monitor', 'eval')\n"
+            "bad = [m for m in sys.modules if m.split('.')[:2] in "
+            "[['fsm_llm', s] for s in subs]]\n"
+            "assert not bad, bad\n"
+            "print('ok')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=tmp_path,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "ok"
+
+    def test_the_public_surface_is_exactly_the_two_moved_functions(self) -> None:
+        assert set(okf_bridge.__all__) == _MOVED
+        assert not _MOVED & set(dir(okf_module)), "okf must not re-export them"
+
+    def test_no_module_under_src_imports_a_moved_name_from_okf(self) -> None:
+        stale = {
+            f"{path.relative_to(_SRC_ROOT)}:{line}"
+            for path in _SRC_ROOT.rglob("*.py")
+            for name, line in _imported_from_okf(ast.parse(path.read_text()))
+            if name in _MOVED
+        }
+
+        assert stale == set()
+
+    def test_no_private_name_crosses_the_bridge_boundary(self) -> None:
+        tree = ast.parse((_SRC_ROOT / "okf_bridge.py").read_text())
+
+        assert [n for n, _ in _imported_from_okf(tree) if n.startswith("_")] == []
 
 
 # --------------------------------------------------------------
