@@ -25,7 +25,9 @@ from fsm_llm.agents.react import ReactAgent
 from fsm_llm.constants import (
     SKILL_INCOMPLETE_NOTE,
     SKILL_LIST_MAX_ITEMS,
+    SKILL_READ_HINT,
     SKILL_READ_PAGE_CHARS,
+    SKILL_SKIPPED_NOTE,
     SKILL_UNTRUSTED_LABEL,
 )
 from fsm_llm.definitions import (
@@ -213,18 +215,25 @@ class TestReplyBudget:
         assert len(reply) <= _budget("skill_load", **floor)
         assert "c" * 300 not in reply  # the description is cut in the header
 
-    def _walk(self, registry: ToolRegistry, tool: str, **params: Any) -> list[str]:
-        pages, offset = [], 0
-        for _ in range(100):
-            reply = _run(registry, tool, **params, offset=offset)
+    def _walk(
+        self, registry: ToolRegistry, tool: str, start: int = 0, pad: int = 0, **params
+    ) -> list[str]:
+        """Pages from offset *start* to the end (*pad* zeros echo a long offset).
+        Every reply is within its budget, ends in a ``next offset: N`` that moves
+        on and is accurate; the caller compares the pages to the whole text."""
+        pages, offset = [], start
+        for _ in range(300):
+            shown = str(offset).zfill(pad) if pad else offset
+            reply = _run(registry, tool, **params, offset=shown)
+            assert len(reply) <= _budget(tool, **params, offset=shown), (tool, offset)
             page = reply.split("\n\n", 1)[1]
             footer = re.search(r"\nnext offset: (\d+)\Z", page)
             pages.append(page[: footer.start()] if footer else page)
             assert len(pages[-1]) <= SKILL_READ_PAGE_CHARS
             if not footer:
                 return pages
+            assert int(footer.group(1)) == offset + len(pages[-1]) > offset
             offset = int(footer.group(1))
-            assert offset == sum(len(p) for p in pages)  # the footer is accurate
         pytest.fail("paging did not end")
 
     @pytest.mark.parametrize("cap", [2000, 10_000])
@@ -245,13 +254,16 @@ class TestReplyBudget:
             pages = self._walk(registry, **params)
             assert len(pages) > 3 and "".join(pages) == expected
 
-    def test_list_pages_visit_every_skill_once_in_order(self, tmp_path: Path):
+    @pytest.mark.parametrize("pad", [0, 3000])
+    def test_list_pages_visit_every_skill_once_in_order(self, tmp_path, pad: int):
         for i in range(60):  # short lines first (the item cap binds), then long
             _make(tmp_path, f"skill-{i:02d}", "d" * (5 if i < 30 else 300))
         registry = _registry(tmp_path)
         seen, offset = [], 0
         for _ in range(100):
-            reply = _run(registry, "skill_list", offset=offset)
+            shown = str(offset).zfill(pad) if pad else offset
+            reply = _run(registry, "skill_list", offset=shown)
+            assert len(reply) <= _budget("skill_list", offset=shown)
             found = re.findall(r"^(skill-\d\d) \|.*$", reply, re.M)
             assert len(found) <= SKILL_LIST_MAX_ITEMS and len(reply) < 1700
             assert max(map(len, reply.split("\n")[1:])) < 160  # descriptions are cut
@@ -259,6 +271,7 @@ class TestReplyBudget:
             footer = re.search(r"\nnext offset: (\d+)\Z", reply)
             if not footer:
                 break
+            assert int(footer.group(1)) > offset
             offset = int(footer.group(1))
         assert seen == [f"skill-{i:02d}" for i in range(60)]
 
@@ -271,6 +284,7 @@ class TestReplyBudget:
         assert listed == sorted(listed, reverse=True) and not all(listed)
         hidden = f'  ... {listed.count(False)} more: skill_read with path "" lists all'
         assert "files (80):" in first and hidden in first
+        assert first.split("\n\n")[0].endswith(SKILL_READ_HINT)
         # The advertised call really lists every file, in order, in pages.
         for path in ("", "d", "d/", "/d"):
             pages = self._walk(registry, "skill_read", name="many", path=path)
@@ -308,22 +322,71 @@ class TestReplyBudget:
             ("../s", "resource path is not allowed"),
         ):
             assert _run(registry, "skill_read", name="s", path=path).endswith(why)
-        _make(tmp_path, "bare")  # no files: the empty path lists nothing and is refused
+        _make(tmp_path, "bare")  # no files: the empty path says so
         bare = _run(_registry(tmp_path), "skill_read", name="bare", path="")
-        assert bare.endswith("resource path is not allowed")
+        assert bare.startswith(SKILL_UNTRUSTED_LABEL) and bare.endswith("\n(no files)")
+        assert SKILL_READ_HINT not in _run(
+            _registry(tmp_path), "skill_load", name="bare"
+        )
 
     def test_a_listing_page_advances_even_when_the_header_eats_the_budget(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         _make(tmp_path, "s", files={"d/aaaa.txt": "x", "d/bbbb.txt": "x"})
+        _make(tmp_path, "t")
         registry = _registry(tmp_path)
         label = SKILL_UNTRUSTED_LABEL
         head = "\n".join([label, "skill: s", "files under 'd' (2)", "", ""])
         monkeypatch.setattr(Defaults, "MAX_OBSERVATION_LENGTH", 0)
         monkeypatch.setattr(agents_okf, "_MIN_BUDGET", len(head) + 10)
-        # One character of the listing, never a negative-size slice of it.
+        # One character of the listing and the whole footer, never a negative slice.
         reply = _run(registry, "skill_read", name="s", path="d")
-        assert reply == head + "d\nnext off"
+        assert reply == head + "d\nnext offset: 1"
+        # skill_list: no line fits, one is shown anyway so the next offset moves on.
+        assert _run(registry, "skill_list").endswith(
+            "\ns | A skill. | 2 file(s)\nnext offset: 1"
+        )
+
+    def test_the_footer_survives_a_header_that_fills_the_budget(self, tmp_path):
+        huge = "".join(
+            f"{k}: {'v' * 3000}\n"
+            for k in ("license", "compatibility", "allowed-tools")
+        )
+        big, files = "k" * 64, {f"f/{i:02d}-" + "x" * 40: _LONG for i in range(30)}
+        for i in range(30):
+            _make(tmp_path, f"s{i:02d}-" + "n" * 55, "d" * 10_000)
+        _make(tmp_path, big, "c" * 2000, _LONG, files, extra=huge)
+        _make(tmp_path, "zz")  # past max_skills: the catalog is incomplete
+        registry = _registry(tmp_path, max_skills=31)
+        body = split_frontmatter((tmp_path / big / "SKILL.md").read_text())[1]
+        for pad in (0, 3000):  # 3,000 zeros echoed: only the floor budget is left
+            pages = self._walk(registry, "skill_load", pad=pad, name=big)
+            assert "".join(pages) == body and len(pages) > 3
+            assert len(pages[0]) >= 150  # the claims and files give way to the text
+            for path, text in (("f/00-" + "x" * 40, _LONG), ("", "\n".join(files))):
+                pages = self._walk(registry, "skill_read", pad=pad, name=big, path=path)
+                assert "".join(pages) == text
+        first = _run(registry, "skill_load", name=big)  # claims give way, hint stays
+        head = first.split("\n\n")[0]
+        assert "files (30):" in head and SKILL_READ_HINT in head
+        assert head.count("claimed by the skill") < 3  # the claims shrank, not the page
+
+    def test_a_larger_catalog_limit_is_reachable_by_offset(self, tmp_path: Path):
+        body = "".join(f"line {i:06d}\n" for i in range(30_000))  # 360,000 characters
+        _make(tmp_path, "big", "Big.", body, {"notes.md": body})
+        registry = _registry(tmp_path, max_file_bytes=1_000_000)
+        for tool, extra in (("skill_load", {}), ("skill_read", {"path": "notes.md"})):
+            pages = self._walk(registry, tool, start=300_000, name="big", **extra)
+            assert "".join(pages) == body[300_000:] and len(pages) > 30
+
+    def test_skill_list_says_how_many_skill_folders_were_skipped(self, gateway):
+        assert "skipped" not in _run(_registry(gateway), "skill_list")
+        for name in ("bad", "worse"):  # a colon in an unquoted description
+            _make(gateway, name, extra="")
+            (gateway / name / "SKILL.md").write_text("---\ndescription: A: b\n---\n")
+        lines = _run(_registry(gateway), "skill_list").split("\n")
+        assert lines[:2] == [SKILL_UNTRUSTED_LABEL, SKILL_SKIPPED_NOTE.format(count=2)]
+        assert lines[2] == "2 skill(s), from 0:"
 
 
 class TestInjection:

@@ -33,6 +33,7 @@ from fsm_llm.agent_skills import (
     incomplete_note,
     load_skills,
     parse_skill_text,
+    skipped_note,
 )
 from fsm_llm.constants import (
     SKILL_CATALOG_END,
@@ -43,6 +44,7 @@ from fsm_llm.constants import (
     SKILL_MAX_LOAD_SECONDS,
     SKILL_MAX_RESOURCES,
     SKILL_MAX_SKILLS,
+    SKILL_SKIPPED_NOTE,
     SKILL_UNTRUSTED_LABEL,
 )
 from fsm_llm.definitions import FSMError, SkillError
@@ -1810,6 +1812,29 @@ class TestRender:
         assert out.count(SKILL_CATALOG_END) == 1 and out.startswith(
             SKILL_UNTRUSTED_LABEL
         )
+
+    def test_skipped_folders_are_counted_in_a_fixed_note_with_no_skill_text(
+        self, tmp_path: Path
+    ) -> None:
+        _mk(tmp_path, "good")
+        _mk(tmp_path, "bad-yaml", front="name: bad-yaml\ndescription: Do: this\n")
+        _mk(tmp_path, "two-errors", front="name: Two_Errors\ndescription: 7\n")
+        assert skipped_note(load_skills(tmp_path)) == SKILL_SKIPPED_NOTE.format(count=2)
+        out = load_skills(tmp_path).render_catalog().split("\n")
+        assert out[-2:] == [SKILL_CATALOG_END, SKILL_SKIPPED_NOTE.format(count=2)]
+        assert "Do: this" not in "\n".join(out) and "Two_Errors" not in "\n".join(out)
+
+    def test_no_skipped_note_for_a_complete_catalog_or_a_spent_bound(
+        self, tmp_path: Path
+    ) -> None:
+        for name in "ab":
+            _mk(tmp_path, name)
+        for limits in (SkillLimits(), SkillLimits(max_skills=1)):  # a stop code
+            catalog = load_skills(tmp_path, limits=limits)
+            assert (
+                skipped_note(catalog) == ""
+                and "skipped" not in catalog.render_catalog()
+            )
 
     def test_the_label_is_the_first_line_and_the_structure_is_fixed(
         self, tmp_path: Path

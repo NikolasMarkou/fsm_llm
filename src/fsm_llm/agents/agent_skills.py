@@ -15,18 +15,24 @@ wants the catalog in the task string uses ``SkillCatalog.render_catalog()``.
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
-from fsm_llm.agent_skills import AgentSkill, SkillCatalog, incomplete_note
+from fsm_llm.agent_skills import (
+    AgentSkill,
+    SkillCatalog,
+    incomplete_note,
+    skipped_note,
+)
 from fsm_llm.constants import (
     SKILL_CATALOG_DESCRIPTION_CHARS,
     SKILL_LIST_MAX_ITEMS,
-    SKILL_MAX_FILE_BYTES,
+    SKILL_READ_HINT,
     SKILL_READ_PAGE_CHARS,
     SKILL_UNTRUSTED_LABEL,
 )
 from fsm_llm.definitions import SkillError
-from fsm_llm.okf import capped_line, text_page
+from fsm_llm.okf import capped_line, strip_unsafe_text, text_page
 
 from .definitions import ToolAnnotations
 from .okf import _budget, _finish, _fit, _int
@@ -83,7 +89,9 @@ SKILL_TOOL_PARAMETERS: dict[str, dict[str, Any]] = {
 }
 
 _FOOTER_RESERVE = 40  # room for the "next offset: N" line (own value, see D-031)
+_MIN_PAGE = 200  # text a page keeps before the claims and files give way
 _FILES_CHARS = 400  # first-page file list of skill_load
+_MORE_LINE = 60  # the "... N more" line closing a cut file list
 _LINE_DESC_CHARS = 120  # skill_list: one description per line
 _CLAIM_CHARS = 120
 
@@ -128,14 +136,37 @@ def _under(skill: AgentSkill, path: Any) -> list[str]:
     return [r for r in skill.resources if r.startswith(prefix)]
 
 
-def _paged(
-    head: str, page: str, following: int | None, total: int, kind: str, budget: int
-) -> str:
-    """*head*, a page of text, and the ``next offset`` line; never over *budget*."""
-    out = head + (page or (f"(end of {kind})" if total else f"(empty {kind})"))
-    if following is not None:
-        out += f"\nnext offset: {following}"
-    return _finish(out, budget)
+def _first_page(skill: AgentSkill, spare: int) -> list[str]:
+    """Header lines of the first ``skill_load`` page that fit in *spare* characters:
+    the description, then the files (count, names that fit, the fixed read hint),
+    then the claims. Nothing is cut mid-line; what does not fit is left out."""
+    desc = capped_line(skill.description, SKILL_CATALOG_DESCRIPTION_CHARS)
+    out, _ = _fit([f"description: {desc}"], spare)
+    spare -= sum(len(line) + 1 for line in out)
+    count = f"files ({len(skill.resources)}):"
+    names = min(_FILES_CHARS, spare - len(count) - len(SKILL_READ_HINT) - _MORE_LINE)
+    if skill.resources and names > 0:
+        shown, hidden = _fit([f"  {r}" for r in skill.resources], names)
+        more = [f'  ... {hidden} more: skill_read with path "" lists all']
+        files = [count, *shown, *(more if hidden else []), SKILL_READ_HINT]
+        out += files
+        spare -= sum(len(line) + 1 for line in files)
+    return out + _fit(_claims(skill), spare)[0]
+
+
+def _tail(text: str, following: int | None) -> str:
+    """Control-stripped *text*, then the ``next offset`` line when more follows.
+    The footer is appended after the strip, never cut: callers size *text* to leave
+    it room (a page is at least one character, so a reply always moves on)."""
+    out = strip_unsafe_text(text, multiline=True)
+    return out if following is None else f"{out}\nnext offset: {following}"
+
+
+def _reply(head: str, page: str, following: int | None, total: int, kind: str) -> str:
+    """*head*, a page of text (or the end marker) and the footer, via ``_tail``."""
+    return _tail(
+        head + (page or (f"(end of {kind})" if total else f"(empty {kind})")), following
+    )
 
 
 def create_skill_tools(
@@ -175,45 +206,46 @@ def create_skill_tools(
         budget = _budget("skill_list", offset=offset)
         skills = list(catalog)
         start = _start(offset, len(skills))
-        head = f"{_label(catalog)}\n{len(skills)} skill(s), from {start}:"
-        lines, _ = _fit(
-            [
-                f"{capped_line(s.name, 64)} | "
-                f"{capped_line(s.description, _LINE_DESC_CHARS)} | "
-                f"{len(s.resources)} file(s)"
-                for s in skills[start : start + SKILL_LIST_MAX_ITEMS]
-            ],
-            budget - len(head) - _FOOTER_RESERVE,
+        notes = [_label(catalog), skipped_note(catalog)]
+        head = "\n".join(
+            [*filter(None, notes), f"{len(skills)} skill(s), from {start}:"]
         )
-        out = [head, *lines]
-        if start + len(lines) < len(skills):
-            out.append(f"next offset: {start + len(lines)}")
-        return _finish("\n".join(out), budget)
+        entries = [
+            f"{capped_line(s.name, 64)} | "
+            f"{capped_line(s.description, _LINE_DESC_CHARS)} | "
+            f"{len(s.resources)} file(s)"
+            for s in skills[start : start + SKILL_LIST_MAX_ITEMS]
+        ]
+        lines, _ = _fit(entries, budget - len(head) - _FOOTER_RESERVE)
+        lines = lines or entries[:1]  # a page always moves on
+        more = start + len(lines) < len(skills)
+        return _tail("\n".join([head, *lines]), start + len(lines) if more else None)
 
     def skill_load(name: Any = "", offset: Any = 0) -> str:
         budget = _budget("skill_load", name=name, offset=offset)
         skill = catalog.get(name)
         if skill is None:
             return not_found(name, budget)
-        start = _start(offset, SKILL_MAX_FILE_BYTES)
-        lines = [_label(catalog), f"name: {capped_line(skill.name, 64)}"]
-        if start:  # later pages repeat only the name: more room for the text
-            lines[-1] += f" (from character {start})"
-        else:
-            desc = capped_line(skill.description, SKILL_CATALOG_DESCRIPTION_CHARS)
-            lines += [f"description: {desc}", *_claims(skill)]
-        if start == 0 and skill.resources:
-            files, hidden = _fit([f"  {r}" for r in skill.resources], _FILES_CHARS)
-            lines += [f"files ({len(skill.resources)}):", *files]
-            if hidden:
-                lines.append(f'  ... {hidden} more: skill_read with path "" lists all')
-        head = "\n".join([*lines, "", ""])
-        room = min(SKILL_READ_PAGE_CHARS, budget - len(head) - _FOOTER_RESERVE)
-        try:
-            page, following, total = catalog.read_body(skill.name, start, size=room)
+        try:  # the catalog clamps the offset to the text, whatever its size limit
+            page, following, total = catalog.read_body(
+                skill.name, _start(offset, sys.maxsize), size=SKILL_READ_PAGE_CHARS
+            )
         except SkillError as refused:
             return failed(str(refused), budget)
-        return _paged(head, page, following, total, "body", budget)
+        begin = (total if following is None else following) - len(page)
+        shown = f"name: {capped_line(skill.name, 64)}"
+        lines = [
+            _label(catalog),
+            shown + (f" (from character {begin})" if begin else ""),
+        ]
+        if not begin:  # later pages repeat only the name: more room for the text
+            spare = budget - _FOOTER_RESERVE - _MIN_PAGE - len("\n".join(lines)) - 2
+            lines += _first_page(skill, spare)
+        head = "\n".join([*lines, "", ""])
+        room = max(min(SKILL_READ_PAGE_CHARS, budget - _FOOTER_RESERVE - len(head)), 1)
+        if len(page) > room:
+            page, following = page[:room], begin + room
+        return _reply(head, page, following, total, "body")
 
     def skill_read(name: Any = "", path: Any = "", offset: Any = 0) -> str:
         budget = _budget("skill_read", name=name, path=path, offset=offset)
@@ -221,28 +253,27 @@ def create_skill_tools(
         if skill is None:
             return not_found(name, budget)
         files = _under(skill, path)
+        top = [_label(catalog), f"skill: {capped_line(skill.name, 64)}"]
+        if not files and isinstance(path, str) and not path.strip("/"):
+            return _finish("\n".join([*top, "(no files)"]), budget)
         what = (
             f"files under {capped_line(path, 300)!r} ({len(files)})"
             if files
             else (f"file: {capped_line(path, 300)}")
         )
-        head = "\n".join(
-            [_label(catalog), f"skill: {capped_line(skill.name, 64)}", what, "", ""]
-        )
-        room = min(SKILL_READ_PAGE_CHARS, budget - len(head) - _FOOTER_RESERVE)
-        start = _start(offset, SKILL_MAX_FILE_BYTES)
+        head = "\n".join([*top, what, "", ""])
+        room = max(min(SKILL_READ_PAGE_CHARS, budget - len(head) - _FOOTER_RESERVE), 1)
+        start = _start(offset, sys.maxsize)
         try:
             if files:
-                page, following, total = text_page(
-                    "\n".join(files), start, max(room, 1)
-                )
+                page, following, total = text_page("\n".join(files), start, room)
             else:
                 page, following, total = catalog.read_resource(
                     skill.name, path, start, size=room
                 )
         except SkillError as refused:
             return failed(str(refused), budget)
-        return _paged(head, page, following, total, "file", budget)
+        return _reply(head, page, following, total, "file")
 
     annotations = ToolAnnotations(
         read_only=True, destructive=False, idempotent=True, open_world=False

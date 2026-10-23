@@ -487,3 +487,15 @@ SKILL_CATALOG_END = "[end of untrusted skill catalog]"
 SKILL_INCOMPLETE_NOTE = (
     "Note: these skills were loaded incompletely ({codes}); results may be missing."
 )
+# Shown beside `skill_list` and `render_catalog()` when skill folders were skipped
+# for an error (invalid frontmatter and the like). `{count}` is a number only.
+SKILL_SKIPPED_NOTE = (
+    "Note: {count} skill folder(s) were skipped (invalid or unreadable SKILL.md); "
+    "run `fsm-llm-skills validate` to see why."
+)
+# One line on the first `skill_load` page of a skill that bundles files: it names
+# the call that reads a listed file. Fixed text, never skill content.
+SKILL_READ_HINT = (
+    "To read a bundled file call skill_read with the skill name and the path "
+    "shown above."
+)

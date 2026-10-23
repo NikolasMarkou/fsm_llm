@@ -8,8 +8,7 @@ imported, ``allowed-tools`` is reported, never enforced, the body is never kept.
 
 Spec status: the open standard at agentskills.io, read on 2026-10-23, unversioned
 and mutable. Names are ASCII (``[a-z0-9]`` and single hyphens), as Anthropic's docs
-say; the standard's prose allows unicode letters, so a unicode name is skipped
-(``name-invalid``), never loaded under a lookalike.
+say; a unicode name is skipped (``name-invalid``), never loaded as a lookalike.
 """
 
 from __future__ import annotations
@@ -55,6 +54,7 @@ from .constants import (
     SKILL_NAME_MAX_CHARS,
     SKILL_READ_PAGE_CHARS,
     SKILL_SCAN_FACTOR,
+    SKILL_SKIPPED_NOTE,
     SKILL_TEXT_MAX_CHARS,
     SKILL_UNTRUSTED_LABEL,
 )
@@ -71,6 +71,7 @@ __all__ = [
     "incomplete_note",
     "load_skills",
     "parse_skill_text",
+    "skipped_note",
 ]
 
 # The six keys of the open standard; any other key is reported, never an error.
@@ -246,18 +247,11 @@ def parse_skill_text(
     if len(compatibility) > SKILL_COMPATIBILITY_MAX_CHARS:
         note("warning", "compatibility-long", "compatibility is over the limit")
 
-    given_metadata = data.get("metadata")
-    metadata = (
-        {
-            k: v
-            for k, v in given_metadata.items()
-            if isinstance(k, str) and isinstance(v, str)
-        }
-        if isinstance(given_metadata, dict)
-        else {}
-    )
-    if given_metadata is not None and (
-        not isinstance(given_metadata, dict) or len(metadata) != len(given_metadata)
+    given = data.get("metadata")
+    items = list(given.items()) if isinstance(given, dict) else []
+    metadata = {k: v for k, v in items if isinstance(k, str) and isinstance(v, str)}
+    if given is not None and (
+        not isinstance(given, dict) or len(metadata) != len(items)
     ):
         note("warning", "metadata-invalid", "'metadata' must map strings to strings")
     tools = data.get("allowed-tools")
@@ -298,14 +292,10 @@ def parse_skill_text(
 # --- Loading ---
 _SKILL_MD = "SKILL.md"
 _SKIPPED_NAMES = ("node_modules", "__pycache__")
-INCOMPLETE_CODES = (
-    "max-skills",
-    "load-deadline",
-    "dir-truncated",
-    "resources-truncated",
+INCOMPLETE_CODES = tuple(
+    "max-skills load-deadline dir-truncated resources-truncated".split()
 )
-# code -> fixed text of a loader issue or of a refused read (``SkillError``,
-# the code in ``details``): never skill text, never a path.
+# code -> fixed text of a loader issue or a refused read: no skill text, no path
 _MESSAGES = {
     "symlink-skipped": "symlinks inside a skill are not followed; skipped",
     "not-utf8": "SKILL.md is not valid UTF-8; decoded with replacement",
@@ -634,7 +624,7 @@ class SkillCatalog:
     ) -> str:
         """The label, then ``<available_skills>`` with one escaped ``<skill>`` per
         skill (name, capped description; no path), a fixed end line, the incomplete
-        note. Escaped by ``html.escape(quote=False)``: tags and ``&`` only."""
+        and skipped notes. Escaped by ``html.escape(quote=False)`` (tags, ``&``)."""
         if not self._skills:
             return ""
         shown = list(self._skills.values())[: max(max_items, 0)]
@@ -649,8 +639,7 @@ class SkillCatalog:
         if len(shown) < len(self._skills):
             lines.append(f"({len(self._skills) - len(shown)} more, use skill_list)")
         lines += ["</available_skills>", SKILL_CATALOG_END]
-        if note := incomplete_note(self):
-            lines.append(note)
+        lines += [n for n in (incomplete_note(self), skipped_note(self)) if n]
         return "\n".join(lines)
 
     def read_body(
@@ -698,3 +687,14 @@ def incomplete_note(catalog: SkillCatalog) -> str:
     """The fixed note for a partial catalog (codes only, no issue text); else ``""``."""
     codes = catalog.incomplete
     return SKILL_INCOMPLETE_NOTE.format(codes=", ".join(codes)) if codes else ""
+
+
+def skipped_note(catalog: SkillCatalog) -> str:
+    """The fixed note counting skill folders skipped for an error (a number, no
+    skill text); else ``""``. Stop codes are not skills; a lower bound at the cap."""
+    skipped = {
+        i.path
+        for i in catalog.issues
+        if i.severity == "error" and i.code not in INCOMPLETE_CODES
+    }
+    return SKILL_SKIPPED_NOTE.format(count=len(skipped)) if skipped else ""
