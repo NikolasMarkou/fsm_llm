@@ -600,14 +600,51 @@ def doc_measured() -> dict:
 
 @pytest.mark.slow
 class TestEveryDocumentedCountMatchesCollection:
-    """Every count token in a tracked .md file equals the collection.
+    """Every count token of the shapes `scripts/doc_counts.py` names equals the collection.
 
     The class above pins 16 literals of three files. This one runs the sweep of
-    `scripts/doc_counts.py` (`make counts`) over all of them: the suite and
-    folder docs, the marker counts, the per-file rows. A token no rule names
-    fails too. Dated records (CHANGELOG.md, plans/) are skipped by that script.
+    `scripts/doc_counts.py` (`make counts`) over the tracked .md files: `N tests`
+    style tokens, marker, `slow`, live and file counts, the per-file rows. A
+    token of one of those shapes that no rule names fails too. A number in prose
+    without such a shape (N-007) is not read. Dated records (CHANGELOG.md,
+    plans/) are skipped by that script.
     """
 
     def test_no_documented_count_drifts(self, doc_measured):
         problems = doc_counts.scan(doc_measured)
         assert problems == [], "\n".join(problems)
+
+
+@pytest.mark.parametrize(
+    ("line", "bad"),
+    [
+        ("| `test_a.py` | 21 (8 `slow`) |", 0),
+        ("| `test_a.py` | 21 (9 `slow`) |", 1),
+        ("| `test_a.py` | 22 (8 `slow`) |", 1),
+        ("- `test_a.py` - 21 offline tests", 0),
+        ("- `test_a.py` - 22 offline tests", 1),
+        ("Of them, 3 live Ollama tests and 3 gated by `requires_live`.", 0),
+        ("Of them, 4 live Ollama tests.", 1),
+        ('`-m "not slow"` skips the 8 `slow` and the 8 marked `slow` tests.', 0),
+        ('`-m "not slow"` skips the 9 marked `slow` tests.', 1),
+        ("The suite holds 269 tests in 7 files.", 0),
+        ("The suite holds 269 tests in 8 files.", 1),
+    ],
+)
+def test_doc_counts_reads_the_slow_live_and_file_shapes(line, bad):
+    """Guards: a slow, live or file count in a doc that no rule of doc_counts read."""
+    m = {k: collections.Counter() for k in ("files", "slow_files", "live_files")}
+    m |= {k: collections.Counter() for k in ("classes", "markers", "test_files")}
+    m |= {k: collections.Counter() for k in ("suites", "slow_suites", "live_suites")}
+    path = "tests/test_s/test_a.py"
+    m["by_base"] = {"test_a.py": [path]}
+    m["files"][path], m["slow_files"][path], m["live_files"][path] = 21, 8, 3
+    m["suites"]["test_s"], m["slow_suites"]["test_s"], m["live_suites"]["test_s"] = (
+        269,
+        8,
+        3,
+    )
+    m["test_files"]["test_s"] = 7
+    doc = doc_counts._Doc(m, "tests/test_s/AGENTS.md")
+    doc.line(1, line)
+    assert len(doc.bad) == bad, doc.bad

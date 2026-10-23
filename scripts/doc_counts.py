@@ -41,11 +41,11 @@ HISTORICAL = {
 }
 NUM = r"(?:\d{1,3}(?:,\d{3})+|\d+)"
 TOK = re.compile(
-    rf"(?P<n>{NUM})\s+(?P<kind>collected tests|collected|tests|test files"
+    rf"(?P<n>{NUM})\s+(?:offline )?(?P<kind>collected tests|collected|tests|test files"
     rf"|`?test_\*\.py`? files|test modules)\b"
     rf"|(?:collected|collects) (?P<n2>{NUM})\b|suite count \((?P<n3>{NUM})\)"
 )
-CELL = re.compile(r"\|\s*(\d{1,3}(?:,\d{3})*)\s*(?=\|)")
+CELL = re.compile(r"\|\s*(\d{1,3}(?:,\d{3})*)(?: \([^|)]*\))?\s*(?=\|)")
 RUN = re.compile(r"pytest (?:\S+ )*?tests/(test_[a-z_]+)")
 LEAD_FILE = re.compile(r"^\s*[|-]\s*`((?:test_[a-z0-9_]+|conftest)\.py)`")
 LEAD_SUITE = re.compile(r"^\s*\|\s*`(test_[a-z_]+)/`")
@@ -59,7 +59,9 @@ PHRASES = (
     ("marker", rf"`(?P<k>{'|'.join(MARKERS)})` \(?(?P<n>{NUM})(?! s)\b"),
     ("not_slow", rf"-m \"not slow\"`? (?:collects|runs) (?P<n>{NUM})"),
     ("suite_sum", rf"sum to (?P<n>{NUM})"),
-    ("slow_here", rf"(?P<n>{NUM}) (?:tests are marked `slow`|slow\b)"),
+    ("slow_here", rf"(?P<n>{NUM}) (?:tests are )?(?:marked `slow`|`?slow\b)"),
+    ("test_files", rf"tests,? (?:in )?(?P<n>{NUM}) files"),
+    ("live", rf"\b(?P<n>{NUM}) (?:live|gated)\b"),
     ("slow_here", rf"deselects (?P<n>{NUM}) tests"),
     ("slow_here", rf"as a whole \((?P<n>{NUM}) tests\)"),
     ("slow_lead", rf"(?P<n>{NUM}) of them `slow`"),
@@ -68,11 +70,15 @@ PHRASES = (
 
 
 def pytest_collection_finish(session):
-    """Child side (`-p doc_counts`): write each item's node id and markers."""
-    rows = [
-        [i.nodeid, sorted({m.name for m in i.iter_markers()} & set(MARKERS))]
-        for i in session.items
-    ]
+    """Child side (`-p doc_counts`): write each item's node id and markers.
+
+    `live` is not a marker: it tags a `real_llm` test that also has a `skipif`
+    (the gated Ollama tests, off by default)."""
+    rows = []
+    for i in session.items:
+        names = {m.name for m in i.iter_markers()}
+        live = {"live"} if {"real_llm", "skipif"} <= names else set()
+        rows.append([i.nodeid, sorted(names & set(MARKERS) | live)])
     Path(os.environ[OUT_ENV]).write_text(json.dumps(rows))
 
 
@@ -88,9 +94,9 @@ def _num(text: str) -> int:
 def measure() -> dict:
     """One child collection of `tests/`; returns the measured numbers.
 
-    Keys: total; files, slow_files (Counter path -> tests; test files with none
-    included); classes (Counter (suite, class) -> tests); markers (Counter, plus
-    "not slow"); suites, slow_suites (key None = root files); test_files (suite
+    Keys: total; files, slow_files, live_files (Counter path -> tests; test files
+    with none included); classes (Counter (suite, class) -> tests); markers (Counter,
+    plus "not slow"); suites, slow_suites, live_suites (key None = root files); test_files (suite
     -> number of test_*.py); by_base (file name -> repo paths). A failed child
     raises RuntimeError with the output tails.
     """
@@ -111,11 +117,13 @@ def measure() -> dict:
                 f"collection failed: {run.stdout[-1500:]}{run.stderr[-1500:]}"
             )
         rows = json.loads(out.read_text())
-    files, slow_files, classes, markers = Counter(), Counter(), Counter(), Counter()
+    files, slow_files, live_files = Counter(), Counter(), Counter()
+    classes, markers = Counter(), Counter()
     for nodeid, marks in rows:
         parts = nodeid.split("[", 1)[0].split("::")
         files[parts[0]] += 1
         slow_files[parts[0]] += "slow" in marks
+        live_files[parts[0]] += "live" in marks
         if len(parts) > 2:
             classes[(_suite(parts[0]), parts[1])] += 1
         markers.update(marks)
@@ -128,14 +136,19 @@ def measure() -> dict:
             by_base.setdefault(p.name, []).append(rel)
             files.setdefault(rel, 0)
             test_files[_suite(rel)] += p.name.startswith("test_")
-    suites, slow_suites = Counter(), Counter()
-    for counter, into in ((files, suites), (slow_files, slow_suites)):
+    suites, slow_suites, live_suites = Counter(), Counter(), Counter()
+    for counter, into in (
+        (files, suites),
+        (slow_files, slow_suites),
+        (live_files, live_suites),
+    ):
         for path, n in counter.items():
             into[_suite(path)] += n
     return {
         "total": len(rows), "files": files, "slow_files": slow_files,
         "classes": classes, "markers": markers, "suites": suites,
-        "slow_suites": slow_suites, "by_base": by_base, "test_files": test_files,
+        "slow_suites": slow_suites, "live_files": live_files,
+        "live_suites": live_suites, "by_base": by_base, "test_files": test_files,
     }  # fmt: skip
 
 
@@ -167,9 +180,8 @@ class _Doc:
                 f"measured {want[0]} ({want[1]})"
             )
 
-    def phrase(self, kind: str, x: re.Match, slowish: bool, lead: str | None):
-        m, s = self.m, self.suite
-        slow = m["slow_suites"][s] if s else m["markers"]["slow"]
+    def phrase(self, kind: str, x: re.Match, slowish: bool, lead, lead_suite):
+        m, s = self.m, (lead_suite[1] if lead_suite else self.suite)
         if kind == "marker":
             return m["markers"][x["k"]], f"marker {x['k']}"
         if kind == "not_slow":
@@ -177,8 +189,14 @@ class _Doc:
             return n, "not slow collection here"
         if kind == "suite_sum":
             return m["total"] - m["suites"][None], "the ten suites summed"
-        if kind == "slow_here":
-            return slow, "slow tests here"
+        if kind == "test_files":
+            return m["test_files"][s], f"test files in {s}"
+        if kind in ("slow_here", "live"):  # the file's, else the suite's, else all
+            c = "slow" if kind == "slow_here" else "live"
+            if lead:
+                return m[f"{c}_files"][lead], f"{c} tests in {lead}"
+            by_suite = m[f"{c}_suites"]
+            return by_suite[s] if s else sum(by_suite.values()), f"{c} tests in {s}"
         f = lead if kind == "slow_lead" else self.file_in(x["f"])
         return (m["slow_files"][f], f"slow tests in {f}") if f and slowish else None
 
@@ -214,7 +232,7 @@ class _Doc:
         slowish, owned = bool(re.search("slow|deselect", line)), []
         for kind, pat in PHRASES:
             for x in re.finditer(pat, line):
-                if want := self.phrase(kind, x, slowish, lead):
+                if want := self.phrase(kind, x, slowish, lead, lead_suite):
                     self.put(ln, x[0], _num(x["n"]), want)
                     owned.append(x.span())
         for cm in CELL.finditer(line) if (lead or lead_suite) else ():
