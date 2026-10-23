@@ -7,7 +7,7 @@ Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass 
 
 In: tests of the core modules in `src/fsm_llm/` (`api.py`, `fsm.py`, `pipeline.py`, `transition_evaluator.py`, `expressions.py`, `classification.py`, `context.py`, `prompts.py`, `llm.py`, `ollama.py`, `handlers.py`, `memory.py`, `session.py`, `validator.py`, `visualizer.py`, `runner.py`, `utilities.py`, `logging.py`, `constants.py`), plus `fixtures/` (labelled secret-filter corpora).
 
-Out: the subpackages `fsm_llm.agents`, `.reasoning`, `.workflows`, `.monitor`, `.harness`, `.eval` have their own suites under `tests/test_fsm_llm_<name>/`. A few tests here still import from them (see Dependencies).
+Out: the subpackages `fsm_llm.agents`, `.reasoning`, `.workflows`, `.monitor`, `.eval` have their own suites under `tests/test_fsm_llm_<name>/`. A few tests here still import from them (see Dependencies).
 
 Core flow under test, for reference:
 
@@ -159,7 +159,7 @@ Seam files fake the backend with `patch("fsm_llm.llm.completion", ...)` returnin
 ## Dependencies
 
 - Core modules of `fsm_llm` listed in Scope.
-- Cross-subpackage imports: `fsm_llm.agents` (`test_live_classification_memory.py`, `test_strands_features.py`, `test_audit_iter4_seam.py` via `fsm_llm.agents.fsm_definitions` and `fsm_llm.agents.tools.ToolRegistry`), `fsm_llm.harness.hardening` (`test_audit_iter2_seam.py`, `test_utilities_unit.py`), `fsm_llm.workflows.exceptions` and `.models` (`test_logging_unit.py`), `fsm_llm.workflows` itself (`test_audit_2026_09_21.py`, which also simulates its import failing).
+- Cross-subpackage imports: `fsm_llm.agents` (`test_live_classification_memory.py`, `test_strands_features.py`, `test_audit_iter4_seam.py` via `fsm_llm.agents.fsm_definitions` and `fsm_llm.agents.tools.ToolRegistry`), `fsm_llm.workflows.exceptions` and `.models` (`test_logging_unit.py`), `fsm_llm.workflows` itself (`test_audit_2026_09_21.py`, which also simulates its import failing).
 - External: pytest, `unittest.mock`; the live file also uses litellm callbacks and a local Ollama.
 
 ## Failure modes

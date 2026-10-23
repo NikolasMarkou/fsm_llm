@@ -1,10 +1,22 @@
 # bench_data: committed bench artifacts
 
-Raw, append-only evidence produced by `scripts/harness_bench.py`,
-`scripts/agents_bench.py` and the live tests in
-`tests/test_fsm_llm_harness/test_live_ollama.py`. Every block here ran against
-a local Ollama model, `ollama_chat/qwen3.5:4b` (the digest each block actually
-served is pinned in its manifest).
+The harness code is removed: the `scripts/harness_bench.py` CLI, the
+`fsm_llm.harness` package and `tests/test_fsm_llm_harness` no longer exist. The
+blocks they produced (`l4-execute-write`, `l6-e2e`, `l7-explore-coldstart`,
+`l8-explore-loop` and `seed-probe`) are kept here as frozen historical records.
+There is no runnable code for them and they are never edited. Their pre-registration
+and grading files stay beside the rows.
+
+The stdlib helpers that the remaining benches share (statistics, jsonl rows,
+manifest comparison, wire capture) now live in `scripts/bench_common.py`, used
+by `scripts/agents_bench.py` and `scripts/skills_bench.py`. The two live
+benches that still have code are `agents-react` and `skills-disclosure`.
+
+Raw, append-only evidence produced by the removed `scripts/harness_bench.py`
+and the removed live harness tests, and by `scripts/agents_bench.py` and
+`scripts/skills_bench.py`. Every block here ran against a local Ollama model,
+`ollama_chat/qwen3.5:4b` (the digest each block actually served is pinned in
+its manifest), except `skills-disclosure`, which has no rows.
 
 This directory is GIT-TRACKED on purpose: an earlier plan's bench scripts and
 jsonl traces lived in gitignored scratch directories and are gone, so none of
@@ -24,29 +36,26 @@ Rules for anyone touching this folder:
 
 ## Status at a glance
 
-All numbers below are recounted from the committed rows (`report` for the
-benches that support it, direct reads of `rows.jsonl` for L6 and L8).
+The harness rows below were recounted from the committed rows before the
+harness code was removed (`report` for `l4` and `l7`, direct reads of
+`rows.jsonl` for L6 and L8). They are records now: nothing in the repository
+recounts them. `agents-react` is recounted by `scripts/agents_bench.py report`.
 
-| Bench id | What it measures | Blocks | Result |
+| Bench id | What it measured | Blocks | Result |
 |---|---|---|---|
-| `l4-execute-write` | Does one harness EXECUTE dispatch write the assigned file? n=40 per arm | B0, B1, B2 | `native` B0 14/40 `success`, B1 40/40; `react` 0/40 in B0 and B1; `native_fsm` B2 40/40 |
-| `l6-e2e` | Full harness run on one goal, graded on a rubric. n=3 per block | B0 to B8 | Floor met by 0/3 rows in B0 to B7; B8 is 2/3 (3/3 bar NOT MET); no run in any block reached CLOSE (`success` is false in all 27 rows) |
-| `l7-explore-coldstart` | EXPLORE cold start, bare vs seeded plan directory. n=12 per arm | B0 | `write_tool_issued` bare 5/12, seeded 7/12 (Wilson CIs overlap widely) |
-| `l8-explore-loop` | The EXPLORE redispatch loop, per tool call. n=10 runs | B0, B1 | Runs reaching PLAN: B0 0/10, B1 9/10 |
+| `l4-execute-write` (frozen record) | Did one harness EXECUTE dispatch write the assigned file? n=40 per arm | B0, B1, B2 | `native` B0 14/40 `success`, B1 40/40; `react` 0/40 in B0 and B1; `native_fsm` B2 40/40 |
+| `l6-e2e` (frozen record) | Full harness run on one goal, graded on a rubric. n=3 per block | B0 to B8 | Floor met by 0/3 rows in B0 to B7; B8 is 2/3 (3/3 bar NOT MET); no run in any block reached CLOSE (`success` is false in all 27 rows) |
+| `l7-explore-coldstart` (frozen record) | EXPLORE cold start, bare vs seeded plan directory. n=12 per arm | B0 | `write_tool_issued` bare 5/12, seeded 7/12 (Wilson CIs overlap widely) |
+| `l8-explore-loop` (frozen record) | The EXPLORE redispatch loop, per tool call. n=10 runs | B0, B1 | Runs reaching PLAN: B0 0/10, B1 9/10 |
 | `agents-react` | 38 deterministic tool-loop tasks x 3 trials | B0, B1, B2 | First-trial pass@1: `legacy` 28/38, `native_fc` 37/38 (B0); `fsm_advance` 32/38 (B1); `fsm_toolcall` 37/38 (B2) |
-| `seed-probe` | Does Ollama honour `seed`? | one record | Same seed is identical at temperature 0.7, a different seed diverges (temperature 0 hides any seed effect) |
+| `seed-probe` (frozen record) | Does Ollama honour `seed`? | one record | Same seed is identical at temperature 0.7, a different seed diverges (temperature 0 hides any seed effect) |
 | `skills-disclosure` | Do small models complete the two-step Agent Skills disclosure (`skill_load`, then `skill_read`) on 16 skills and 12 questions, and does the read hint matter? | B0 (48 rows), B1 (96 rows): REGISTERED, NOT RUN | No rows. The manifests and `PRE_REGISTRATION_B0.md` (with amendments A1, A2) and `PRE_REGISTRATION_B1.md` are committed; the live runs were declined at step 6 of plan 93d78536, so the hint decision is a recorded default (keep), not a measurement. `run` refuses to start if `agent_skills.py`, `agents/agent_skills.py` or `constants.py` changed since registration |
 
-Honest status of the harness: it is experimental and not production-ready. The
-committed end-to-end block `l6-e2e/B8` (see `l6-e2e/B8/GRADING.md`,
-`ollama_chat/qwen3.5:4b`, n=3) has 2/3 floor rows (floor row: reached EXECUTE
-or later, `verified_write`, `honest_halt`). The frozen 3/3 bar is NOT MET. Row
-2 halted at `plan-cap` before EXECUTE. Rows 1 and 3 wrote the file and halted
-honestly at `close-cap` (row 1: the CLOSE approval was denied four times
-because `verification.md` stayed empty) and `reflect-cap` (row 3: four REFLECT
-dispatches did not produce a parseable verdict). The 4B-model results say
-nothing about larger models, and these are small-n, single-configuration
-measurements.
+History of the removed harness: the last graded end-to-end block was
+`l6-e2e/B8` (see `l6-e2e/B8/GRADING.md`, `ollama_chat/qwen3.5:4b`, n=3). It had
+2/3 floor rows and the frozen 3/3 bar was NOT MET. These are small-n,
+single-configuration measurements on a 4B model and say nothing about larger
+models.
 
 Agents numbers are a different bench: pass@1 on synthetic ground-truth tasks
 with pure in-file tools. They are not an end-to-end quality claim.
@@ -54,81 +63,74 @@ with pure in-file tools. They are not an end-to-end quality claim.
 ## Commands
 
 Always the venv. `report` and `list-tasks` read only committed files (no model,
-no network); `register` writes a manifest only; `run` and `probe-seed` are LIVE
-(need Ollama) and `run` refuses a block that already has rows.
+no network); `register` writes a manifest only; `run` is LIVE (needs Ollama)
+and refuses a block that already has rows. Only the two benches that still
+have code have commands:
 
 ```
-.venv/bin/python scripts/harness_bench.py report <bench-id> [--blocks B1 B2] [--pair B2/native_fsm:B1/native]
-.venv/bin/python scripts/harness_bench.py register --bench-id <id> --block <B> --arm {native,native_fsm,react} --n N --seed S
-.venv/bin/python scripts/harness_bench.py run      --bench-id <id> --block <B> --arm {native,native_fsm,react} --n N --seed S
-.venv/bin/python scripts/harness_bench.py probe-seed
 .venv/bin/python scripts/agents_bench.py list-tasks [--verify]
 .venv/bin/python scripts/agents_bench.py register|run|report ...
+.venv/bin/python scripts/skills_bench.py register|run|report skills-disclosure B0
 ```
 
-`harness_bench.py` `register` and `run` only build `l4-execute-write` blocks
-(arms `native`, `native_fsm`, `react`). `report` also recounts
-`l7-explore-coldstart` (per-arm files) but prints nothing for `l6-e2e`,
-`l8-explore-loop` or `seed-probe`, whose rows are flat `rows.jsonl` or a single
-`probe.json`. The L6, L7 and L8 blocks were produced by live pytest nodes in
-`test_live_ollama.py` (they need `FSM_LLM_HARNESS_LIVE=1` and Ollama), for
-example the L6 node:
-
-```
-FSM_LLM_HARNESS_LIVE=1 .venv/bin/python -m pytest \
-  "tests/test_fsm_llm_harness/test_live_ollama.py::TestL6EndToEndRealWorkers::test_three_full_runs_grade_at_or_above_the_floor" -q -s
-```
-
-Do not run these against an existing block (the L6 test refuses when
-`rows.jsonl` exists). A new block needs a new pre-registration first, and the
-block constant (`L6_BLOCK`, `L7_BLOCK`, `L8_BLOCK`) in the test module names the
-block it writes.
+Do not run these against an existing block. A new block needs a new
+pre-registration first. There is no command for the frozen records: the
+`report`, `register`, `run` and `probe-seed` commands of `harness_bench.py` and
+the live pytest nodes that wrote the L6, L7 and L8 blocks were removed with the
+harness. Their rows are plain JSON and JSONL files that can be read directly.
 
 ## Layout
 
 ```
 bench_data/
-├── <bench-id>/               # e.g. l4-execute-write
-│   └── <block>/              # B0, B1, ... one pre-registered block each
+├── l4-execute-write/         # frozen record
+│   └── <block>/              # B0, B1, B2 (one pre-registered block each)
 │       ├── manifest_<arm>.json   # written BEFORE the first dispatch
 │       ├── rows_<arm>.jsonl      # one raw row per dispatch, append-only
 │       └── summary_<arm>.json    # k/n + Wilson CI, recounted from rows
-├── l6-e2e/                   # per-run e2e rubric vectors, graded not binary
-│   ├── <block>/              # B0 .. B8, n=3 each; manifest.json + rows.jsonl
-│   │                         #   (no arm suffix, no summary file: L6 is always
+├── l6-e2e/                   # frozen record: per-run e2e rubric vectors,
+│   ├── <block>/              #   graded not binary
+│   │                         # B0 .. B8, n=3 each; manifest.json + rows.jsonl
+│   │                         #   (no arm suffix, no summary file: L6 was always
 │   │                         #   native and test-embedded). B4 to B8 also keep
 │   │                         #   artifacts/run-N/ (observations, plan.md,
 │   │                         #   state.md); B7 and B8 have a GRADING.md
 │   ├── PRE_REGISTRATION_B2.md .. _B8.md   # decision rule, written before rows
 │   └── probe-*/              # NON-pre-registered scratch probes with a
 │                             #   RESULT.md or VERDICT.md, not benches
-├── l7-explore-coldstart/     # EXPLORE cold-start A/B, one dispatch per row
-│   └── <block>/              # B0: manifest_<arm>.json + rows_<arm>.jsonl
+├── l7-explore-coldstart/     # frozen record: EXPLORE cold-start A/B, one
+│   └── <block>/              #   dispatch per row
+│                             # B0: manifest_<arm>.json + rows_<arm>.jsonl
 │                             #   + summary_<arm>.json, arm in {bare, seeded}
-├── l8-explore-loop/          # EXPLORE redispatch-loop characterization
-│   ├── <block>/              # B0, B1, n=10 runs each; manifest.json,
+├── l8-explore-loop/          # frozen record: EXPLORE redispatch-loop
+│   ├── <block>/              #   characterization
+│   │                         # B0, B1, n=10 runs each; manifest.json,
 │   │                         #   rows.jsonl, summary.json (no arm suffix)
 │   └── PRE_REGISTRATION.md, PRE_REGISTRATION_B1.md
 ├── agents-react/             # agents_bench.py: ground-truth tool-loop tasks,
 │   └── <block>/              #   one row per (task, trial); manifest_<arm>.json
 │                             #   + rows_<arm>.jsonl + summary_<arm>.json
-└── seed-probe/               # probe-seed record (probe.json)
+├── skills-disclosure/        # skills_bench.py: registered, not run
+│   ├── <block>/              #   manifests only (B0, B1)
+│   └── PRE_REGISTRATION_B0.md, PRE_REGISTRATION_B1.md
+└── seed-probe/               # frozen record: probe-seed result (probe.json)
 ```
 
 Arms carry TWO different meanings depending on the bench, and they must not be
 read as the same axis:
 
-- `l4-execute-write`: `native` (`native_function_calling=True`, the shipped
-  default) vs `react` (the opt-in control) -- these are AGENT shapes.
+- `l4-execute-write` (frozen): `native` (`native_function_calling=True`, the
+  shipped default) vs `react` (the opt-in control) -- these are AGENT shapes.
   `native_fsm` (B2, plan 944e2692 D-049) is the same `native=True` dispatch
   on the code where native_fc runs as an FSM on core's completion state
   instead of its private loop; a new label because the code changed, paired
   with `B1/native`.
-- `l7-explore-coldstart`: `bare` (a plain `mkdir` plan directory, L6's own
-  population) vs `seeded` (the same `mkdir` plus the product's
-  `PlanDirectory.seed_protocol_skeleton()`) -- these are PLAN-DIRECTORY shapes,
-  and BOTH run `native_function_calling=True`. The independent variable is the
-  on-disk population, not the agent.
+- `l7-explore-coldstart` (frozen): `bare` (a plain `mkdir` plan directory,
+  L6's own population) vs `seeded` (the same `mkdir` plus the product's
+  `PlanDirectory.seed_protocol_skeleton()`) -- these are PLAN-DIRECTORY
+  shapes, and BOTH ran `native_function_calling=True`. The independent
+  variable was the on-disk population, not the agent. `PlanDirectory` was part
+  of the removed harness.
 - `agents-react`: agent engines on the same task set. A later block uses a
   new arm label for changed code, never an old one; `report` reads arm labels
   from the `rows_<arm>.jsonl` file names, so rows of an arm retired from
@@ -160,45 +162,33 @@ read as the same axis:
 
 ## The 6 manifest fields (all REQUIRED)
 
+The `l4-execute-write` and `agents-react` manifests carry these six fields. A
+summary without its manifest is NOT evidence.
+
 | Field | Pins |
 |---|---|
-| `prompt_bytes_sha256` | rendered EXECUTE system+task prompts (fixed placeholder paths) |
-| `tool_surface` | worker-factory kwargs + the exact tool names the dispatch holds |
-| `fixture_hash` | sha256 of EXECUTE_PLAN_MD + EXECUTE_STATE_MD + SEED_FILES |
+| `prompt_bytes_sha256` | rendered prompts (for `l4`: the EXECUTE system+task prompts with fixed placeholder paths) |
+| `tool_surface` | the tool names and settings the run held (for `l4`: worker-factory kwargs + the exact tool names the dispatch held) |
+| `fixture_hash` | sha256 of the fixture (for `l4`: EXECUTE_PLAN_MD + EXECUTE_STATE_MD + SEED_FILES; for `agents-react`: `tasks_sha256`) |
 | `model_digest` | the digest Ollama actually served at block start (queried, never assumed) |
-| `arm` | `native` boolean + display label |
+| `arm` | the arm label (for `l4`: `native` boolean + display label) |
 | `git_commit` | the source commit the block ran against |
 
-Blocks run after B1 also carry the request disclosures `llm_request` (the
+The `l4` blocks after B1 also carry the request disclosures `llm_request` (the
 first request's kwargs with values, secrets redacted) and `first_request`
 (digests of its system text, other messages, tools and settings, plus
 `n_requests` and `run_error`), read at core's send binding by one EXECUTE
-dispatch whose first request is refused (`request_disclosure`; same rules as
-the agents-react disclosures below). Recorded B0/B1 manifests predate them.
-Their summaries carry `run: {git_commit, git_dirty}` read at run start.
+dispatch whose first request was refused. The recorded B0/B1 manifests predate
+them. Their summaries carry `run: {git_commit, git_dirty}` read at run start.
+The l4 B2 manifest was registered (written alone) before dispatch 1.
 
-`register` (l4 B2 onwards) writes the manifest alone, so it is committed before
-dispatch 1; `run` then keeps it and refuses on drift in `n_preregistered`,
-`seed`, `model`, `prompt_bytes_sha256`, `tool_surface`, `fixture_hash`,
-`arm`, `llm_request`, `first_request` or the served model digest (values
-compared as JSON text). B0/B1 manifests were written by `run` itself.
+For `l4`, only the FIRST request of the dispatch was disclosed: the capture
+stub refused it, so request 2 (the tool-result turns, the assistant
+`tool_calls` echo, a forced or repair turn) was never built. A change in the
+follow-up turns moves no manifest field and is disclosed only by `git_commit`
+and the summary's `run.git_commit` (review pass 12 W1 of plan 944e2692).
 
-```
-.venv/bin/python scripts/harness_bench.py register --bench-id l4-execute-write \
-    --block B2 --arm native_fsm --n 40 --seed 20260722000
-```
-
-Only the FIRST request of the dispatch is disclosed: the capture stub
-refuses it, so request 2 (the tool-result turns, the assistant `tool_calls`
-echo, a forced or repair turn) is never built. A change in the follow-up
-turns moves no manifest field and is disclosed only by `git_commit` and the
-summary's `run.git_commit` (review pass 12 W1 of plan 944e2692).
-
-A summary without its manifest is NOT evidence; the writer refuses to emit
-one. `report` refuses to Fisher-compare two blocks whose manifests pin
-different model digests.
-
-## Row schema (rows_<arm>.jsonl)
+## Row schema of the frozen `l4` rows (rows_<arm>.jsonl)
 
 `bench_id`, `block`, `arm` (display), `native` (bool), `run`, `ts`,
 `elapsed_s`, `tool_calls`, `write_tool_issued`, `bytes_on_disk`,
@@ -206,24 +196,9 @@ different model digests.
 only), `success`, `tool_trace` (`[{tool, ok}]`), `seed` (int or null) and
 `seed_effective`.
 
-Recompute everything from the raw rows:
-
-```
-.venv/bin/python scripts/harness_bench.py report <bench-id>
-.venv/bin/python scripts/harness_bench.py report l4-execute-write \
-    --blocks B1 B2 --pair B2/native_fsm:B1/native
-```
-
-Two blocks compare each arm label present in both. `--pair
-BLOCK/ARM:BLOCK/ARM` compares two arms whose labels differ (a B2
-`native_fsm` against a B1 `native`): it prints every differing manifest field
-first (values compared as JSON text, a field one side lacks as "not
-recorded"), then Fisher two-sided per metric both blocks carry, only when the
-two manifests pin the same model digest.
-
-A B2-vs-B1 pair (`B2/native_fsm:B1/native`) must disclose, beyond the
-printed lines (B1's manifest lacks `llm_request` and `first_request`, so the
-pair prints them as an opaque "not recorded"):
+The recorded B2-vs-B1 pair (`B2/native_fsm:B1/native`) was read with these
+differences in view (B1's manifest lacks `llm_request` and `first_request`, so
+the pair printed them as an opaque "not recorded"):
 
 - per-request timeout: B1 sent none; every B2 request carries
   `timeout: 120.0` (core's `LiteLLMInterface` default);
@@ -239,8 +214,8 @@ pair prints them as an opaque "not recorded"):
   the FSM on core's completion state. Core's request building for native
   turns reproduces e1f63a9's bytes in every key except `timeout` and
   `max_retries` (the golden test of plan 944e2692 step 1), not 2a89226's;
-- only the first request is digested (above): follow-up turns are disclosed
-  by the commit hash alone;
+- only the first request is digested: follow-up turns are disclosed by the
+  commit hash alone;
 - the tool trace: the row's `tool_trace` comes from the live test's tool
   spy, which since plan 944e2692 D-034 forwards `gated` (native never
   passes it; the react arm did not run its tools under the old spy);
@@ -248,6 +223,10 @@ pair prints them as an opaque "not recorded"):
 - harness rows have no LLM call meter (only `tool_calls` from the spy), so
   there is no meter difference to read; the agents-react pair below has one;
 - the git commit and date (the model digest must still match).
+
+The other frozen blocks keep their own row shapes in their manifests, rows and
+`PRE_REGISTRATION*.md` / `GRADING.md` files. Read those rather than this
+summary.
 
 ## agents-react (scripts/agents_bench.py)
 
@@ -272,7 +251,7 @@ and are never edited, so `report` prints them as "not recorded"). They are
 computed offline at `register`/`run` by running the arm for every task on the
 trial interface with core's one send binding (`fsm_llm.llm.completion`)
 replaced by a stub that records the FINAL request and refuses it
-(`harness_bench.captured_wire`; no provider call). So everything core adds
+(`bench_common.captured_wire`; no provider call). So everything core adds
 on the way out counts: Ollama preparation (`reasoning_effort`, `/nothink` on
 the last user turn, a schema echo), the temperature rules, `max_tokens`,
 timeout, retries and any extra provider kwarg (D-040 of plan 944e2692):

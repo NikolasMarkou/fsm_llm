@@ -92,6 +92,6 @@ From the repository root, with the project virtualenv:
 - The live file needs Ollama running with `qwen3.5:9b-q8_0` pulled. Without it the tests are skipped, not failed.
 - One test in `test_context_unit.py` is `xfail(strict=True)` on purpose: the secret filter misses its target rate. If it starts passing, the test fails, so the change gets looked at.
 - Do not edit the `fixtures/` corpora to make a failure rate look better. Tests pin exact counts and banner text in those files.
-- A few tests import from `fsm_llm.agents`, `fsm_llm.harness.hardening` and `fsm_llm.workflows`, so those subpackages must be importable.
+- A few tests import from `fsm_llm.agents` and `fsm_llm.workflows`, so those subpackages must be importable.
 - Editing an FSM example in the listed docs can break `test_docs_snippets.py`.
 - Logging is off by default, so tests that check a log line enable `fsm_llm` logging with a temporary loguru sink (`caplog` cannot see loguru output).

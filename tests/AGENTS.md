@@ -1,12 +1,12 @@
 # tests
 
 Path: `tests`
-Purpose: The full pytest tree of FSM-LLM (11,719 collected tests): ten suite folders for the `fsm_llm` package and its six subpackages, five repo-wide root test files, and the shared `conftest.py`.
+Purpose: The full pytest tree of FSM-LLM (11,719 collected tests): nine suite folders for the `fsm_llm` package and its five subpackages, five repo-wide root test files, and the shared `conftest.py`.
 
 ## Scope
 
-- In: `conftest.py`, `__init__.py` (empty), `test_packaging.py`, `test_harness_bench.py`, `test_agents_bench.py`, `test_skills_bench.py`, `test_integration_ollama.py`, `fixtures/test_fsm_definitions/minimal_fsm.json`, `test_examples/`, and the nine `test_fsm_llm*` suite folders.
-- Package under test: one top-level package `fsm_llm` (`src/fsm_llm/`) with subpackages `agents`, `reasoning`, `workflows`, `monitor`, `harness`, `eval`. The old top-level names (`fsm_llm_agents`, ...) no longer exist (no test checks for a leftover directory any more).
+- In: `conftest.py`, `__init__.py` (empty), `test_packaging.py`, `test_bench_common.py`, `test_agents_bench.py`, `test_skills_bench.py`, `test_integration_ollama.py`, `fixtures/test_fsm_definitions/minimal_fsm.json`, `test_examples/`, and the eight `test_fsm_llm*` suite folders.
+- Package under test: one top-level package `fsm_llm` (`src/fsm_llm/`) with subpackages `agents`, `reasoning`, `workflows`, `monitor`, `eval`. The old top-level names (`fsm_llm_agents`, ...) no longer exist (no test checks for a leftover directory any more).
 - Out: the bench data under `scripts/bench_data/`, the examples themselves (`examples/`, evaluation baselines, never edit unless asked).
 
 ## Architecture
@@ -15,15 +15,13 @@ Purpose: The full pytest tree of FSM-LLM (11,719 collected tests): ten suite fol
 flowchart TD
     conf[conftest.py] --> S[suite folders]
     conf --> io[test_integration_ollama.py]
-    conf -. ollama_available .-> hl[test_fsm_llm_harness/test_live_ollama.py]
     pkg[test_packaging.py] -->|subprocess pytest --collect-only| S
-    pkg --> files[pyproject.toml, Makefile, tox.ini,<br/>.github/workflows/python-package.yml, MANIFEST.in,<br/>AGENTS.md, README.md, src/fsm_llm/harness/AGENTS.md]
-    thb[test_harness_bench.py] -->|sys.path += scripts/| hb[scripts/harness_bench.py]
+    pkg --> files[pyproject.toml, Makefile, tox.ini,<br/>.github/workflows/python-package.yml, MANIFEST.in,<br/>AGENTS.md, README.md]
+    tbc[test_bench_common.py] -->|sys.path += scripts/| bc[scripts/bench_common.py]
     tsb[test_skills_bench.py] -->|sys.path += scripts/| sb[scripts/skills_bench.py]
-    hb -. lazy import .-> hl
 ```
 
-Test styles used across suites: unit (call one module), seam (drive a public entry point such as `API.converse` with `fsm_llm.llm.completion` patched), loop (run an agent or harness end to end with a scripted fake LLM), structure (build an FSM dict and check states, edges, priorities, JsonLogic gates), source-text checks (`inspect.getsource`, `ast`, file reads), and audit regressions (one class per finding id, each run failing before its fix).
+Test styles used across suites: unit (call one module), seam (drive a public entry point such as `API.converse` with `fsm_llm.llm.completion` patched), loop (run an agent end to end with a scripted fake LLM), structure (build an FSM dict and check states, edges, priorities, JsonLogic gates), source-text checks (`inspect.getsource`, `ast`, file reads), and audit regressions (one class per finding id, each run failing before its fix).
 
 ## Key files
 
@@ -33,7 +31,7 @@ Suite folders (test counts from full collection) and root files at this level.
 | --- | --- | --- |
 | `conftest.py` | Shared fixtures, fakes and marker registration (see Public interface) | 0 tests |
 | `test_packaging.py` | Repo-wide wiring and doc-count pins | 47 tests; classes listed below |
-| `test_harness_bench.py` | Offline checks of `scripts/harness_bench.py` | 59 tests |
+| `test_bench_common.py` | Offline checks of `scripts/bench_common.py`, the stdlib helpers shared by the agents and skills benches | 18 tests |
 | `test_agents_bench.py` | Offline checks of `scripts/agents_bench.py` | 132 tests |
 | `test_skills_bench.py` | Offline checks of `scripts/skills_bench.py` (Agent Skills read-hint ablation: fixture, grader, hint ablation, one trial, blocks, hygiene); scripted agents drive the REAL skill tools | 38 tests; never calls a model |
 | `test_integration_ollama.py` | Live end-to-end on `ollama_chat/qwen3.5:9b-q8_0`, plus 4 model-free workflow checks | 12 tests |
@@ -44,25 +42,24 @@ Suite folders (test counts from full collection) and root files at this level.
 | `test_fsm_llm_reasoning/` | `fsm_llm.reasoning` constants, models, exceptions, handlers, ANALYTICAL-only fallback, whole solves through core with a scripted `LLMInterface` (`test_engine_scripted.py`), CLI `--verbose` and JSON output | 191 tests. Engine built with `object.__new__` or on a scripted interface; source-string pins (no `converse(`, no "Continue reasoning") |
 | `test_fsm_llm_workflows/` | `fsm_llm.workflows` steps, DSL, `WorkflowEngine`, timeouts, audit fixes | 269 tests. Real short sleeps; 8 `slow` |
 | `test_fsm_llm_monitor/` | `fsm_llm.monitor` server via `TestClient`, security, `InstanceManager`, `EventCollector`, `OTELExporter` | 391 tests. Local autouse fixture deletes `FSM_LLM_MONITOR_API_KEY`; audit file skips whole when workflows missing |
-| `test_fsm_llm_harness/` | `fsm_llm.harness`: artifacts, hardening, 6-state FSM gates, `HarnessAgent`, plan validator, roles and tools, storage, CLI | 2,028 tests. Local `conftest.py` (`make_harness`, `RecordingWorker`, `ApprovalRecorder`, `captured_logs`); 17 live tests gated on `FSM_LLM_HARNESS_LIVE=1` then Ollama |
-| `test_fsm_llm_eval/` | `fsm_llm.eval` and `fsm-llm-eval`: config, records, stats, scoring golden table, examples mode, cases mode, exit codes; parity with `scripts/harness_bench.py` | 261 tests. Reads `evaluation/` files and needs a git checkout |
+| `test_fsm_llm_eval/` | `fsm_llm.eval` and `fsm-llm-eval`: config, records, stats, scoring golden table, examples mode, cases mode, exit codes; parity with `scripts/bench_common.py` | 261 tests. Reads `evaluation/` files and needs a git checkout |
 | `test_fsm_llm_regression/` | One class per fixed bug id across core, reasoning, workflows, CLI, packaging text | 264 tests. Many private-method and source-text pins |
 | `test_examples/` | Every `examples/**/*.json` loads as JSON with `name`/`initial_state`/`states`, parses as `FSMDefinition`, passes `FSMValidator.validate()`; at least 5 files exist | 67 tests. Marker `examples`; 14 JSON files today |
 
 `test_packaging.py` classes:
 
-- `TestEveryPackageIsWired`: `src/*/__init__.py` must be exactly `{"fsm_llm"}`; `src/fsm_llm/*/__init__.py` exactly the six subpackages; each of 8 slots names `fsm_llm` (`pyproject:package-data`, `pyproject:ruff-isort-known-first-party`, `makefile:type-check`, `makefile:coverage`, `tox:testenv-coverage`, `tox:testenv-type`, `ci:mypy`, `manifest.in:recursive-include`); `src/fsm_llm/py.typed` exists; `[tool.setuptools.packages.find]` has no `include`/`exclude`.
+- `TestEveryPackageIsWired`: `src/*/__init__.py` must be exactly `{"fsm_llm"}`; `src/fsm_llm/*/__init__.py` exactly the five subpackages; each of 8 slots names `fsm_llm` (`pyproject:package-data`, `pyproject:ruff-isort-known-first-party`, `makefile:type-check`, `makefile:coverage`, `tox:testenv-coverage`, `tox:testenv-type`, `ci:mypy`, `manifest.in:recursive-include`); `src/fsm_llm/py.typed` exists; `[tool.setuptools.packages.find]` has no `include`/`exclude`.
 - `TestSubpackagesImport`: `fsm_llm.<sub>` importable (monitor needs `fastapi`).
 - `TestMonitorPackageData`: `"fsm_llm.monitor"` package-data globs cover every file under `static/` and `templates/`.
 - `TestPackageBackedExtrasAreInstalled`: each subpackage name is an extra, requested by `pyproject` `all`, `make install-dev`, tox `extras = dev,...` and the CI install line.
 - `TestModuleDocstringsAreReal`: no module under `src/` puts its docstring after `from __future__ import annotations`; at least 50 modules scanned.
-- `TestDocumentedTestCountsMatchCollection` (`slow`): one `pytest --collect-only -q -o addopts= -p no:cacheprovider tests/` subprocess (env drops `PYTEST_ADDOPTS`, `FSM_LLM_HARNESS_LIVE`, `SKIP_SLOW_TESTS`, `TEST_REAL_LLM`), then pins: root `AGENTS.md` `pytest -v (N tests)` and `Run all tests (N collected)`; root `README.md` `Run full test suite (N tests)`; the root `AGENTS.md` per-suite lines `pytest tests/<suite>/  # ... (N tests)` (dict equality both ways); the sentence `The N suites above sum to S. The remaining R ...`; the `tests/<file>.py (N)` root-file list; every `N tests` and `N test files` token in `src/fsm_llm/harness/AGENTS.md`. `CHANGELOG.md` is deliberately not pinned (D-015).
+- `TestDocumentedTestCountsMatchCollection` (`slow`): one `pytest --collect-only -q -o addopts= -p no:cacheprovider tests/` subprocess (env drops `PYTEST_ADDOPTS`, `SKIP_SLOW_TESTS`, `TEST_REAL_LLM`), then pins: root `AGENTS.md` `pytest -v (N tests)` and `Run all tests (N collected)`; root `README.md` `Run full test suite (N tests)`; the root `AGENTS.md` per-suite lines `pytest tests/<suite>/  # ... (N tests)` (dict equality both ways); the sentence `The N suites above sum to S. The remaining R ...`; the `tests/<file>.py (N)` root-file list. `CHANGELOG.md` is deliberately not pinned (D-015).
 - `TestNoTopLevelNameIsBoundTwice` (1 test): over every `src/fsm_llm/**/*.py`, no top-level assignment, annotated assignment, def or class binds a name twice (`if`/`try` branches and `@overload` stubs are exempt); it replaced the constants-only test of `test_agent_skills.py`.
 - `TestNoPypiInstallHint` (1 test): no `pip install fsm-llm` hint in `src/` (that name on PyPI is another project).
 - `TestEveryDocumentedCountMatchesCollection` (`slow`, 1 test): `scripts/doc_counts.py` (`make counts`) makes one more `--collect-only` child with a plugin that reads markers, then compares the count tokens of the shapes it knows in the tracked `.md` files (suite and folder docs, marker, `slow`, live and file counts, per-file rows) with it; a token of such a shape that no rule names fails too, a number in prose with no token shape (`1 test`, `2,011 passed`) is not read, and it skips when `mcp` is importable (the documented counts are the no-`mcp` counts).
 - `test_doc_counts_reads_the_slow_live_and_file_shapes` (11 parametrized cases, not `slow`): a fake measurement and one line each, offline, pinning that `scripts/doc_counts.py` reads the `N slow` / `(N slow)` cell, `N marked slow`, `N live` / `N gated`, `N offline tests` and `tests in N files` shapes.
 
-`test_harness_bench.py` loads `scripts/harness_bench.py` as `hb` and checks: import opens no socket even with `FSM_LLM_HARNESS_LIVE=1`; top-level imports are stdlib only; `wilson_ci` reference values and edge cases; `fisher_exact_two_sided` reference values and symmetry; `write_summary` refuses without a 6-field manifest (`MANIFEST_FIELDS`); `append_row`/`read_rows` round-trip; `report` recounts raw rows, flags tampered summaries (`MISMATCH`), refuses cross-digest comparisons (`REFUSING`); `run_block` refuses a block whose rows file exists (`run ONCE`) or an unknown arm; `main` maps `BenchDataError` to exit 1.
+`test_bench_common.py` loads `scripts/bench_common.py` as `bc` and checks: import opens no socket (a subprocess with sockets disabled); top-level imports are stdlib only; no direct `litellm` reference anywhere in the module; `wilson_ci` reference values and edge cases; `fisher_exact_two_sided` reference values and symmetry; the `MANIFEST_FIELDS` constant names six fields; `append_row`/`read_rows` round-trip and a missing rows file reads as empty; `wire_digest` masks the date and the task; `manifest_differences` distinguishes types; `pinned_drift` ignores key order but not types.
 
 `test_integration_ollama.py`: module `pytestmark` is `integration`, `real_llm`, `slow`; classes needing Ollama carry `requires_ollama` (`ollama_available("qwen3.5:9b-q8_0")`) and retry up to 3 times. It uses `examples/basic/simple_greeting/fsm.json`. `TestWorkflowUTCConsistency` and `TestParallelStepIsolation` need no model but are still `slow`.
 
@@ -87,22 +84,22 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 
 ## Data shapes
 
-- Env knobs: `FSM_LLM_HARNESS_LIVE` (arms harness live tests), `FSM_LLM_REAL_SKILLS` (arms the Agent Skills home-directory test in `test_agent_skills.py`), `FSM_LLM_MONITOR_API_KEY` (cleared for monitor tests). No test reads `SKIP_SLOW_TESTS`, `TEST_REAL_LLM` or `TEST_LLM_MODEL`; `test_packaging.py` drops the first two from its collection child env.
+- Env knobs: `FSM_LLM_REAL_SKILLS` (arms the Agent Skills home-directory test in `test_agent_skills.py`), `FSM_LLM_MONITOR_API_KEY` (cleared for monitor tests). No test reads `SKIP_SLOW_TESTS`, `TEST_REAL_LLM` or `TEST_LLM_MODEL`; `test_packaging.py` drops the first two from its collection child env.
 - pytest config in `pyproject.toml`: `testpaths = ["tests"]`, `addopts = "-v --tb=short"`, `asyncio_mode = "auto"`, `asyncio_default_fixture_loop_scope = "function"`.
 - Marker counts (full collection): `slow` 136, `integration` 114, `real_llm` 113, `examples` 67; `-m "not slow"` collects 11,583.
 
 ## Invariants and constraints
 
-- Run from the repo root: `tests` is a package and files import `tests.conftest`, `tests.test_fsm_llm.<file>`, `tests.test_fsm_llm_harness...`.
-- Default runs make no network call and no real LLM call; the agents and meta suites enforce it with `block_network`. Live tests self-skip: core `test_live_classification_memory.py` and `test_integration_ollama.py` on Ollama availability; harness live tests check `FSM_LLM_HARNESS_LIVE` first so a default run never opens a socket.
-- Never use `caplog` for library logs; `fsm_llm` logs through loguru and is disabled at import. Enable with `logger.enable("fsm_llm")`, add a sink, then remove it and disable again (harness suite: `captured_logs` fixture).
+- Run from the repo root: `tests` is a package and files import `tests.conftest` and `tests.test_fsm_llm.<file>`.
+- Default runs make no network call and no real LLM call; the agents and meta suites enforce it with `block_network`. Live tests self-skip: core `test_live_classification_memory.py` and `test_integration_ollama.py` on Ollama availability, so a default run without a model skips them.
+- Never use `caplog` for library logs; `fsm_llm` logs through loguru and is disabled at import. Enable with `logger.enable("fsm_llm")`, add a sink, then remove it and disable again.
 - Tests that change process globals (cwd, env vars, `server.py` API key, `sys.modules`, logging) restore them.
-- Audit and `DECISION plan-.../D-NNN` pins record deliberate fixes. Treat a failure as a regression in `src/` unless the cited decision was reversed; do not weaken, delete or regenerate them (secret-filter corpora, eval scoring golden table, harness anti-vacuity controls).
-- Every documented test count in root `AGENTS.md`, root `README.md` and `src/fsm_llm/harness/AGENTS.md` must equal the measured collection.
+- Audit and `DECISION plan-.../D-NNN` pins record deliberate fixes. Treat a failure as a regression in `src/` unless the cited decision was reversed; do not weaken, delete or regenerate them (secret-filter corpora, eval scoring golden table).
+- Every documented test count in root `AGENTS.md` and root `README.md` must equal the measured collection.
 
 ## Dependencies
 
-- Internal: every module of `src/fsm_llm/`; `scripts/harness_bench.py`; repo files `pyproject.toml`, `Makefile`, `tox.ini`, `MANIFEST.in`, `.github/workflows/python-package.yml`, root docs, `docs/*.md`, `examples/`, `evaluation/`, `scripts/bench_data/`.
+- Internal: every module of `src/fsm_llm/`; `scripts/bench_common.py`; repo files `pyproject.toml`, `Makefile`, `tox.ini`, `MANIFEST.in`, `.github/workflows/python-package.yml`, root docs, `docs/*.md`, `examples/`, `evaluation/`, `scripts/bench_data/`.
 - External: pytest, pytest-asyncio, `unittest.mock`, loguru, pydantic, litellm (patched, never called in offline tests). Optional: httpx (Ollama probe, remote tests), fastapi, mcp, opentelemetry, a local Ollama.
 
 ## Failure modes
@@ -110,8 +107,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 - `ModuleNotFoundError: tests...`: pytest run from outside the repo root.
 - `test_packaging.py` count failures: a test was added or removed without updating the pinned doc literals.
 - Version failures after a release: `"0.12.0"` literals in `test_fsm_llm_monitor/test_app.py` and `test_fsm_llm_regression/test_regression_review.py`.
-- Armed live harness blocks `pytest.fail` when their rows file already exists; running them also writes into tracked `scripts/bench_data/`.
-- Timing-sensitive workflow and harness tests can flake on a loaded machine; live Ollama tests time out under GPU load.
+- Timing-sensitive workflow tests can flake on a loaded machine; live Ollama tests time out under GPU load.
 - An OpenTelemetry "I/O operation on closed file" traceback after an agents run is shutdown noise, not a failure.
 
 ## Working here
