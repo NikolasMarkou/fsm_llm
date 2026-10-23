@@ -9,6 +9,7 @@ output schemas, and agent patterns.
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 from typing import Any, cast
 
@@ -173,7 +174,8 @@ class SOPRegistry:
             directory: Path to directory containing SOP files.
 
         Returns:
-            Number of SOPs registered.
+            Number of SOPs registered. Each file that fails to load is skipped
+            with one ``UserWarning`` attributed to the caller.
         """
         directory = Path(directory)
         if not directory.is_dir():
@@ -187,6 +189,9 @@ class SOPRegistry:
                     count += 1
                 except Exception as e:
                     logger.warning(f"Failed to load SOP from {path}: {e}")
+                    warnings.warn(
+                        f"SOP not loaded from {path}: {e}", UserWarning, stacklevel=2
+                    )
         return count
 
     def get(self, name: str) -> SOPDefinition:

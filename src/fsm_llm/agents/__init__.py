@@ -115,7 +115,11 @@ from .orchestrator import OrchestratorAgent
 from .parallel_react import ParallelReactAgent, build_parallel_react_fsm
 from .plan_execute import PlanExecuteAgent
 from .prompt_chain import PromptChainAgent
-from .python_tools import PythonToolDefinition, PythonToolLoader
+from .python_tools import (
+    PythonToolDefinition,
+    PythonToolLoader,
+    PythonToolLoadReport,
+)
 from .react import ReactAgent
 from .reasoning_react import ReasoningReactAgent
 from .reflexion import ReflexionAgent
@@ -310,6 +314,7 @@ __all__ = [
     "tool",
     "PythonToolDefinition",
     "PythonToolLoader",
+    "PythonToolLoadReport",
     "create_agent",
     "create_memory_tools",
     "MemorySessionStore",

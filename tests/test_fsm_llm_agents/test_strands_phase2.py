@@ -874,6 +874,43 @@ class TestSOPRegistry:
         registry.register_from_file(sop_file)
         assert registry.has("json-sop")
 
+    def test_register_directory_warns_once_per_failed_file_and_registers_the_rest(
+        self, tmp_path
+    ):
+        """I-126: a broken SOP file is a warning to the caller, not only a log
+        line; the good files still register and the return value is the count."""
+        from fsm_llm.agents.sop import SOPRegistry
+
+        for name in ("alpha", "gamma"):
+            (tmp_path / f"{name}.json").write_text(
+                json.dumps({"name": name, "agent_pattern": "react"})
+            )
+        (tmp_path / "beta.json").write_text("{not json")
+        (tmp_path / "delta.yaml").write_text("description: no name here\n")
+        (tmp_path / "notes.txt").write_text("ignored, not an SOP file\n")
+
+        registry = SOPRegistry()
+        with pytest.warns(UserWarning) as caught:
+            count = registry.register_directory(tmp_path)
+
+        assert count == 2
+        assert sorted(registry.list_names()) == ["alpha", "gamma"]
+        assert len(caught) == 2
+        assert {w.filename for w in caught} == {__file__}
+        text = "\n".join(str(w.message) for w in caught)
+        assert "beta.json" in text and "delta.yaml" in text
+
+    def test_register_directory_of_good_files_warns_nothing(self, tmp_path):
+        import warnings
+
+        from fsm_llm.agents.sop import SOPRegistry
+
+        (tmp_path / "alpha.json").write_text(json.dumps({"name": "alpha"}))
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert SOPRegistry().register_directory(tmp_path) == 1
+
     def test_load_builtin_sops(self):
         """load_builtin_sops returns registry with 3 SOPs."""
         from fsm_llm.agents.sop import load_builtin_sops

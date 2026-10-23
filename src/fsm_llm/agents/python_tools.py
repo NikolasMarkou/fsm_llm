@@ -11,6 +11,7 @@ import hashlib
 import importlib
 import importlib.util
 import sys
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -67,6 +68,16 @@ class PythonToolDefinition:
         )
 
 
+@dataclass(frozen=True)
+class PythonToolLoadReport:
+    """The tools ``load_directory`` found and one ``(file, message)`` pair per
+    file or directory it could not load (message: ``ExcType: text`` or a fixed
+    phrase)."""
+
+    tools: tuple[PythonToolDefinition, ...] = ()
+    errors: tuple[tuple[str, str], ...] = ()
+
+
 class PythonToolLoader:
     """Load Python tools from various sources and convert to tool registries.
 
@@ -78,32 +89,30 @@ class PythonToolLoader:
     """
 
     @staticmethod
-    def from_directory(
+    def load_directory(
         path: str | Path,
         pattern: str = "*.py",
         category: str | None = None,
-    ) -> list[PythonToolDefinition]:
-        """Load Python tools from Python files in a directory.
+    ) -> PythonToolLoadReport:
+        """Load Python tools from a directory, reporting each file it cannot.
 
-        Each Python file should define a ``PYTHON_TOOLS`` list of
-        ``PythonToolDefinition`` objects, or functions decorated with
-        ``@tool`` that have a ``_tool_definition`` attribute.
+        Each file defines a ``PYTHON_TOOLS`` list of ``PythonToolDefinition``
+        objects or ``@tool`` functions. Files starting with ``_`` and non-``.py``
+        files are ignored, not errors; ``SystemExit`` and ``KeyboardInterrupt``
+        from a file propagate. Never raises for a bad file.
 
         Args:
             path: Directory path containing Python tool files.
             pattern: Glob pattern for Python tool files (default: ``*.py``).
             category: Override category for all loaded Python tools.
-                If None, uses each tool's own category.
-
-        Returns:
-            List of discovered PythonToolDefinition objects.
         """
         tool_dir = Path(path)
         if not tool_dir.is_dir():
             logger.warning(f"Python tool directory not found: {path}")
-            return []
+            return PythonToolLoadReport(errors=((str(path), "directory not found"),))
 
         tools: list[PythonToolDefinition] = []
+        errors: list[tuple[str, str]] = []
         for file_path in sorted(tool_dir.glob(pattern)):
             if file_path.name.startswith("_"):
                 continue
@@ -112,9 +121,31 @@ class PythonToolLoader:
                 tools.extend(loaded)
             except Exception as e:
                 logger.warning(f"Failed to load Python tools from {file_path}: {e!s}")
+                errors.append((str(file_path), f"{type(e).__name__}: {e}"))
 
         logger.info(f"Loaded {len(tools)} Python tools from {path}")
-        return tools
+        return PythonToolLoadReport(tuple(tools), tuple(errors))
+
+    @staticmethod
+    def from_directory(
+        path: str | Path,
+        pattern: str = "*.py",
+        category: str | None = None,
+    ) -> list[PythonToolDefinition]:
+        """``load_directory(...).tools`` as a list, with one warning per error.
+
+        Each failed file is also reported with ``warnings.warn`` (a
+        ``UserWarning`` attributed to the caller, so ``disable_warnings()``
+        cannot hide it). Arguments as for ``load_directory``.
+        """
+        report = PythonToolLoader.load_directory(path, pattern, category)
+        for file, message in report.errors:
+            warnings.warn(
+                f"Python tools not loaded from {file}: {message}",
+                UserWarning,
+                stacklevel=2,
+            )
+        return list(report.tools)
 
     @staticmethod
     def from_functions(
@@ -197,6 +228,8 @@ class PythonToolLoader:
     ) -> list[PythonToolDefinition]:
         """Load Python tools from a single Python file.
 
+        Raises for a file it cannot load (``load_directory`` records it).
+
         .. warning::
 
            This method executes arbitrary Python code from *file_path* via
@@ -205,12 +238,8 @@ class PythonToolLoader:
         if file_path.suffix != ".py":
             logger.warning(f"Skipping non-Python tool file: {file_path}")
             return []
-        try:
-            if file_path.stat().st_size > 1_000_000:
-                logger.warning(f"Skipping oversized tool file (>1 MB): {file_path}")
-                return []
-        except OSError:
-            return []
+        if file_path.stat().st_size > 1_000_000:
+            raise ValueError("file is larger than 1 MB")
 
         path_hash = hashlib.sha1(str(file_path.resolve()).encode("utf-8")).hexdigest()[
             :12
@@ -218,7 +247,7 @@ class PythonToolLoader:
         module_name = f"_fsm_python_tool_{path_hash}_{file_path.stem}"
         spec = importlib.util.spec_from_file_location(module_name, file_path)
         if spec is None or spec.loader is None:
-            return []
+            raise ImportError("cannot build a module spec for the file")
 
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
