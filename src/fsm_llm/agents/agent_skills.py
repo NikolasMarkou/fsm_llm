@@ -122,7 +122,7 @@ def _claims(skill: AgentSkill) -> list[str]:
 def _under(skill: AgentSkill, path: Any) -> list[str]:
     """The bundled files under directory *path* (``""`` is the root); ``[]`` for a
     file, a non-string or an unknown directory (the read then refuses it)."""
-    if not isinstance(path, str) or path in skill.resources:
+    if not isinstance(path, str):
         return []
     prefix = path.strip("/") + "/" if path.strip("/") else ""
     return [r for r in skill.resources if r.startswith(prefix)]
