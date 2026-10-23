@@ -203,7 +203,7 @@ What you get from this style:
 - Settings that pass straight through to the model library are accepted without a whitelist, and a name that clashes with a typed setter is refused with a message that names the setter to use.
 - It is an alternative, not a replacement: the plain constructors and `from_file` still work everywhere.
 
-The same shape builds conversations, agents of any pattern, workflows, agent graphs, handlers and the planning harness. The workflow example below uses it too. The rules are in [docs/api_reference.md](docs/api_reference.md).
+The same shape builds conversations, agents of any pattern, workflows, agent graphs and handlers. The workflow example below uses it too. The rules are in [docs/api_reference.md](docs/api_reference.md).
 
 ## How it works
 
@@ -232,7 +232,7 @@ What you get in the core:
 - **Intent classification**: `classification_extractions` on a state, plus `Classifier`, `HierarchicalClassifier` and `IntentRouter`.
 - **FSM stacking**: hand a conversation to a sub-FSM and come back with its results.
 - **Streaming**: `converse_stream()` yields reply tokens as they arrive.
-- **Steps without a user message**: `advance()` runs one turn and returns an `AdvanceResult`; `run_until_terminal()` repeats it within a step and time budget (`RunBudgetExceededError`). Agents, the harness and the reasoning engine run on these loops.
+- **Steps without a user message**: `advance()` runs one turn and returns an `AdvanceResult`; `run_until_terminal()` repeats it within a step and time budget (`RunBudgetExceededError`). Agents and the reasoning engine run on these loops.
 - **Tool calling and structured output**: a state with the optional `completion` field makes one native tool-calling or JSON-schema call. Core runs no tool; your handlers do.
 - **Sessions and memory**: `save_session`/`restore_session` with `FileSessionStore`, and `WorkingMemory` buffers.
 - **Knowledge bundles (OKF)**: `fsm_llm.okf` reads, searches, validates and writes Open Knowledge Format bundles (a directory of markdown files with YAML frontmatter), `fsm_llm.okf_bridge.create_okf_handler()` puts capped concept summaries into a plain FSM's context, `fsm_llm.agents` adds read-only OKF tools, a read-only memory backend and bundle exporters, and `fsm-llm-okf` runs it from the shell. This follows OKF v0.2 (SPEC.md at commit ad30107, pre-1.0 and mutable). Bundle text is treated as untrusted data. See [docs/api_reference.md](docs/api_reference.md).
@@ -253,7 +253,6 @@ Design guides: [docs/fsm_design.md](docs/fsm_design.md) for states and transitio
 | [`fsm_llm.workflows`](src/fsm_llm/workflows/README.md) | Async in-memory workflow engine, 11 step types, a Python DSL | Runs without an LLM unless you add LLM steps |
 | [`fsm_llm.agents`](src/fsm_llm/agents/README.md) | 18 agent patterns (ReAct, ReWOO, Reflexion, plan-and-execute, debate, orchestrator, swarm, graph, native tool calling, ...), tools, human approval, memory, MCP, A2A, and a meta-builder that designs FSMs, workflows and agents by chat | Documented known limits, see [docs/agents_roadmap.md](docs/agents_roadmap.md) |
 | [`fsm_llm.monitor`](src/fsm_llm/monitor/README.md) | FastAPI dashboard to launch, watch and chat with FSMs, agents and workflows, optional OpenTelemetry export | Needs the `monitor` extra |
-| [`fsm_llm.harness`](src/fsm_llm/harness/README.md) | Iterative planner (explore, plan, execute, reflect, pivot, close) as an FSM whose gates count files on disk | **Experimental, not production-ready** |
 | [`fsm_llm.eval`](src/fsm_llm/eval/README.md) | Scores the examples 0 to 4, or runs scripted conversations N times and reports pass rates with Wilson intervals | Scores are a heuristic that overstates quality; read the logs too |
 
 An agent with one tool (this ran against the same local model and answered 42):
@@ -312,7 +311,6 @@ asyncio.run(main())
 | Extra | Adds |
 |-------|------|
 | `reasoning`, `agents`, `workflows`, `eval` | No third-party packages (the code ships in every install) |
-| `harness` | Pulls `fsm-llm[agents]` |
 | `monitor` | fastapi, uvicorn, jinja2 |
 | `mcp` | mcp (>=1.0.0) |
 | `otel` | opentelemetry-api, opentelemetry-sdk (>=1.20.0) |
@@ -353,7 +351,6 @@ The examples are evaluation baselines: `fsm-llm-eval examples` runs them in para
 | `fsm-llm-validate --fsm <path.json>` | Check an FSM definition for problems |
 | `fsm-llm-monitor` | Web dashboard at http://127.0.0.1:8420 (`--host`, `--port`, `--no-browser`, `--api-key`, `--otel`) |
 | `fsm-llm-meta [--model M] [--output FILE]` | Build FSMs, workflows or agents by chatting |
-| `fsm-llm-harness <new\|resume\|status\|validate\|close>` | Drive or audit an iterative-planner plan directory |
 | `fsm-llm-okf <validate\|list\|show\|search\|export>` | Check, browse, search and export Open Knowledge Format bundles |
 | `fsm-llm-skills <validate\|list\|show> PATH...` | Check (`--strict` for API portability), list and read Agent Skills folders |
 | `fsm-llm-eval examples [--category C] [--fail-under PCT]` | Score every example 0 to 4 |
@@ -386,7 +383,7 @@ make counts         # fail when a test count written in a .md file differs from 
 make build          # wheel and sdist
 ```
 
-The default test run needs no network and no model. `pytest -m "not slow"` skips the slow tests. Live tests skip without a local Ollama; the harness live tests also need `FSM_LLM_HARNESS_LIVE=1`. CI runs Python 3.10, 3.11 and 3.12: `.pth` audit, ruff lint and format check, mypy, and pytest without the `slow`, `real_llm` and `integration` markers.
+The default test run needs no network and no model. `pytest -m "not slow"` skips the slow tests. Live tests skip without a local Ollama. CI runs Python 3.10, 3.11 and 3.12: `.pth` audit, ruff lint and format check, mypy, and pytest without the `slow`, `real_llm` and `integration` markers.
 
 Rules to know before you open a pull request:
 
@@ -405,13 +402,11 @@ Good places to help, all taken from recorded open items:
 - **Agents** ([docs/agents_roadmap.md](docs/agents_roadmap.md), Known open items and Track B): `AgentGraph` has no failure routing, so a fallback branch cannot be built; Orchestrator subtasks dropped over `max_workers` do not affect `success`; a long generated artifact can be cut off by the per-field `max_tokens` budget and ship truncated; Swarm never hands off by itself; real human-in-the-loop for REWOO, PlanExecute, ParallelReact and native_fc; MCP v2 and A2A v1.0.
 - **Core** (`CHANGELOG.md`, Unreleased, Known open): validating an `FSMDefinition` for the first time from several threads at once can race; the message-free `classification_extractions` path has offline coverage only; nothing was checked live on a non-Ollama provider.
 - **Reasoning** (`CHANGELOG.md`, Known open): cheaper typed per-key reasoning fields were tried and reverted after losing answers on a pre-registered probe, so a new attempt needs its own probe; a `final_context` passed back as `initial_context` still carries the previous problem's analysis.
-- **Harness** ([src/fsm_llm/harness/README.md](src/fsm_llm/harness/README.md)): the 3 of 3 bench bar is not met; in block B8 one run halted at `close-cap` (the approval was denied because `verification.md` stayed empty), one at `reflect-cap`, one at `plan-cap`.
 - **Measurement**: every live number here comes from one small local model. Runs on other models and providers are welcome, as new pre-registered blocks (see `scripts/bench_data/README.md`).
 
 ## Status
 
 - Version 0.12.0. Most tests are offline and use a fake model, so they check logic and wiring, not model quality.
-- **The harness is experimental and not production-ready.** In the committed end-to-end block `scripts/bench_data/l6-e2e/B8` (`ollama_chat/qwen3.5:4b`, n=3), 2 of 3 runs met the floor (reached EXECUTE, wrote a verified file, halted with a named reason); the third stopped in PLAN. No run in any block closed a plan, and the 3 of 3 bar is not met. See [scripts/bench_data/README.md](scripts/bench_data/README.md).
 - Evaluation scores are a heuristic and overstate quality. The recorded runs in [EVALUATE.md](EVALUATE.md) used a 4B local model, and scores on other models differ.
 
 Things to know:

@@ -7,7 +7,7 @@ Work inside the project virtualenv. Every command below assumes `.venv/bin` is o
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,harness,eval]" + pre-commit install
+make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval]" + pre-commit install
 ```
 
 Upgrading a clone from before the 2026-09-29 restructure (extensions moved under `fsm_llm/`): delete the old `src/fsm_llm_<sub>/` directories by hand (`make clean` no longer removes them), then reinstall with `pip install -e .`. A leftover directory imports as a namespace package.
@@ -25,10 +25,10 @@ pytest tests/test_fsm_llm/            # one suite (core)
 pytest -m "not slow"                  # skip the slow tests
 ```
 
-- The default suite mocks the LLM. Live tests need a reachable Ollama and skip without one; the harness live tests also need `FSM_LLM_HARNESS_LIVE=1`.
+- The default suite mocks the LLM. Live tests need a reachable Ollama and skip without one.
 - Pre-commit runs ruff (lint with `--fix`, and format) and the file hygiene hooks on commit, and a quick pytest run on push.
 - A behaviour change needs a test that fails on the code before the change. Run it against the parent commit to confirm.
-- Test counts are written out as literals in `AGENTS.md`, `README.md` and `src/fsm_llm/harness/AGENTS.md`, and `tests/test_packaging.py` checks them against a fresh collection. When you add or remove tests, re-measure with `pytest --collect-only -q | tail -1` (and per suite) and update every literal. Never guess or adjust a count by hand.
+- Test counts are written out as literals in `AGENTS.md` and `README.md`, and `tests/test_packaging.py` checks them against a fresh collection. When you add or remove tests, re-measure with `pytest --collect-only -q | tail -1` (and per suite) and update every literal. Never guess or adjust a count by hand.
 - `tests/test_fsm_llm/test_docs_snippets.py` loads every fenced block that names `"initial_state"` in the first-touch docs. A full FSM snippet in the docs must be a valid FSM.
 
 ## Examples are frozen
