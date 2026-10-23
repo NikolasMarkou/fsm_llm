@@ -47,18 +47,15 @@ _library_handler_ids: list[int] = []
 # --------------------------------------------------------------
 
 
-# Do NOT add handlers on import — libraries should not configure logging.
-# Users who want console logging can call enable_debug_logging() or add
-# their own loguru handler.  We only disable the default loguru handler
-# so that unconfigured usage does not spam stderr.
+# Do NOT add handlers on import: libraries must not configure logging. Users
+# call enable_debug_logging() or add their own loguru handler.
 logger.disable("fsm_llm")
 
-#: Top-level packages of this distribution whose log output is library output.
-#: loguru's `disable("fsm_llm")` matches `fsm_llm` and all its submodules,
-#: which include the subpackages fsm_llm.agents, fsm_llm.reasoning,
-#: fsm_llm.workflows, fsm_llm.monitor and fsm_llm.harness, so the one disable
-#: above silences all of them and `setup_logging()` /
-#: `enable_debug_logging()` re-enable every name listed here.
+#: Top-level packages whose log output is library output. loguru's
+#: `disable("fsm_llm")` matches `fsm_llm` and every submodule and subpackage
+#: (agents, reasoning, workflows, monitor, harness), so the one disable above
+#: silences all of them; `setup_logging()` / `enable_debug_logging()` re-enable
+#: every name listed here.
 # DECISION plan-2026-09-29T044048-3a032517/D-004
 # One name only. Do NOT add a subpackage here and do NOT call
 # logger.disable("fsm_llm.<sub>") in a subpackage: loguru keeps the more
@@ -133,25 +130,39 @@ def _is_library_record(record) -> bool:
     return (record["name"] or "").split(".")[0] in LIBRARY_LOGGER_NAMES
 
 
-def replace_default_handler() -> None:
-    """Swap loguru's default stderr handler (id 0) for one without library records.
+class _LiveStderr:
+    on = False  # True while the host sink below is registered (see stop)
 
-    Id 0 would print each ``fsm_llm`` record a second time. The replacement is
-    ``logger.add(sys.stderr)`` (loguru's own defaults, so ``LOGURU_*`` apply)
-    plus a filter that drops library records. A no-op when id 0 is gone or
-    ``LOGURU_AUTOINIT`` is off (id 0 is then the host's own sink).
+    def __getattr__(self, name):
+        return getattr(sys.stderr, name)
+
+    def stop(self):  # called by loguru when the handler is removed
+        _LiveStderr.on = False
+
+
+def library_only(rec):
+    """Library records, and host records while no host sink is registered."""
+    return (_is_library_record(rec) or not _LiveStderr.on) and prepare_log_record(rec)
+
+
+def replace_default_handler() -> None:
+    """Replace loguru's default stderr sink (id 0) by one that skips library records.
+
+    A no-op when id 0 is gone or ``LOGURU_AUTOINIT`` is off (it is the host's own).
     """
     # DECISION plan-2026-10-23T113904-93d78536/D-011
-    # Do NOT replace handler 0 without an equivalent sink that keeps the
-    # host's own output, and do NOT just remove it (that silences the host).
-    # Do NOT copy loguru's default format: add() without format= is the default.
+    # Do NOT replace id 0 without an equivalent sink (removing it silences the
+    # host) and do NOT copy loguru's default format (add() without format= is it).
+    # Do NOT hand it sys.stderr itself (D-036): it stays bound to a capture
+    # stream. The proxy resolves sys.stderr at write time.
     if os.environ.get("LOGURU_AUTOINIT", "true").lower() in _LOGURU_OFF:
         return
     try:
         logger.remove(0)
     except ValueError:
         return
-    logger.add(sys.stderr, filter=lambda r: not _is_library_record(r))
+    _LiveStderr.on = True
+    logger.add(_LiveStderr(), filter=lambda r: not _is_library_record(r))
 
 
 # --------------------------------------------------------------
@@ -214,12 +225,7 @@ def _record_to_json(record) -> str:
 
 
 def _make_json_sink(target):
-    """Create a JSON sink function that writes JSONL to a stream.
-
-    In loguru, custom formatting requires a sink function (callable)
-    rather than the ``format`` parameter (which is a template string).
-    The sink receives a ``Message`` object with a ``.record`` attribute.
-    """
+    """Create a callable sink that writes JSONL to a stream."""
 
     def sink(message):
         line = _record_to_json(message.record)
@@ -287,11 +293,7 @@ def setup_logging(
     # Resolve format from env var or default
     resolved_format = format or os.environ.get(ENV_LOG_FORMAT, LOG_FORMAT_HUMAN)
 
-    # Enable library logging
     enable_library_logging()
-    replace_default_handler()
-
-    # Determine sink and format
     if sink == LOG_SINK_FILE:
         global _file_handler_initialized
         if _file_handler_initialized:
@@ -364,12 +366,13 @@ def setup_logging(
                 output,
                 format=fmt,
                 level=resolved_level,
-                filter=prepare_log_record,
+                filter=prepare_log_record if sink == LOG_SINK_STDOUT else library_only,
                 colorize=True,
             )
 
         _stream_handler_ids[stream_key] = handler_id
 
+    replace_default_handler()  # after the sink is added: a raising call keeps id 0
     _library_handler_ids.append(handler_id)
     return handler_id
 

@@ -269,13 +269,6 @@ class TestEnableDebugLoggingHandlerDedup:
         produce exactly one printed line, not two."""
         from fsm_llm import enable_debug_logging
 
-        # Drop loguru's default stderr handler first (as test_core_hardening_seam
-        # does): the call below replaces it with a sink bound to capsys's stream,
-        # which would count this host record once more. The assertion is unchanged.
-        try:
-            logger.remove(0)
-        except ValueError:
-            pass
         enable_debug_logging()
         setup_logging(sink=LOG_SINK_STDERR, format=LOG_FORMAT_HUMAN)
 
@@ -368,11 +361,11 @@ class TestJsonFormatter:
 # ``setup_logging()`` and ``enable_debug_logging()`` own the process's output
 # for the library's records: loguru's default stderr handler (id 0) would print
 # every ``fsm_llm`` record a second time. The helper replaces it with an
-# equivalent sink that skips library records, so the host's own records keep
-# printing. Capturing needs a child process: loguru binds the stream at
-# ``logger.add()`` time, and the child must see the tree under test, so its
-# ``sys.path`` comes from ``fsm_llm.__file__`` (``python -I`` would import the
-# editable install, not a copy of the tree).
+# equivalent sink that skips library records and resolves ``sys.stderr`` at
+# write time, so the host's own records keep printing exactly once. Capturing
+# needs a child process (process-global handlers), and the child must see the
+# tree under test, so its ``sys.path`` comes from ``fsm_llm.__file__``
+# (``python -I`` would import the editable install, not a copy of the tree).
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _CHILD = """
 import sys
@@ -417,22 +410,70 @@ def _count(lines: list[str], marker: str, separator: str) -> int:
 class TestDefaultHandlerIsReplacedNotDoubled:
     """I-127: a library record printed twice after ``setup_logging()``: once by
     loguru's default handler (format ``... - msg``), once by the library's own
-    (``... | msg``). The library's own handler prints host records too (it has
-    no name filter); that is unchanged and not pinned here."""
+    (``... | msg``). I-149: the library's own stderr handler printed host
+    records too, so a host record also printed twice; it now passes library
+    records only (JSON and file sinks keep host records)."""
 
     @pytest.mark.parametrize(
         "body", ["fsm_llm.setup_logging()", "fsm_llm.enable_debug_logging()"]
     )
-    def test_a_library_record_prints_once_and_the_host_default_output_is_kept(
-        self, body
-    ):
+    def test_each_record_prints_once_and_the_host_default_output_is_kept(self, body):
         lines = _child(body)
 
         assert _count(lines, "LIBREC", "|") == 1
         assert _count(lines, "LIBREC", "-") == 0
+        # The host record: by its own default sink only, never by the library's.
         assert _count(lines, "HOSTREC", "-") == 1
+        assert _count(lines, "HOSTREC", "|") == 0
         # A lookalike package name is the host's, not ours.
         assert _count(lines, "LOOKREC", "-") == 1
+        assert _count(lines, "LOOKREC", "|") == 0
+
+    def test_a_json_sink_keeps_host_records(self):
+        lines = _child('fsm_llm.setup_logging(sink="stderr", format="json")')
+
+        assert _count(lines, "HOSTREC", "-") == 1
+        assert sum('"message": "HOSTREC"' in line for line in lines) == 1
+        assert sum('"message": "LIBREC"' in line for line in lines) == 1
+
+    def test_the_file_sink_keeps_host_records_and_library_records_leave_stderr(
+        self, tmp_path
+    ):
+        """After ``sink="file"`` a library record goes to the file only."""
+        lines = _child(f"fsm_llm.setup_logging(sink='file', log_dir={str(tmp_path)!r})")
+
+        (log_file,) = tmp_path.glob("fsm-llm_*.log")
+        text = log_file.read_text()
+        assert "LIBREC" in text
+        assert "HOSTREC" in text
+        assert _count(lines, "LIBREC", "-") == 0
+        assert _count(lines, "LIBREC", "|") == 0
+        assert _count(lines, "HOSTREC", "-") == 1
+
+    def test_host_records_are_not_lost_when_the_host_sink_is_gone(self):
+        """A host that dropped every sink gets them from the library's handler."""
+        lines = _child("logger.remove()\nfsm_llm.setup_logging()")
+
+        assert _count(lines, "HOSTREC", "|") == 1
+        assert _count(lines, "HOSTREC", "-") == 0
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            'setup_logging(level="NOPE")',
+            "setup_logging(sink='file', log_dir=sys.executable)",
+        ],
+    )
+    def test_a_call_that_raises_leaves_the_default_handler_alone(self, call):
+        lines = _child(
+            "from fsm_llm.logging import setup_logging\n"
+            f"try:\n    {call}\nexcept Exception:\n    pass\n"
+            "try:\n    logger.remove(0)\n    print('ID0-THERE', file=sys.stderr)\n"
+            "except ValueError:\n    print('ID0-GONE', file=sys.stderr)"
+        )
+
+        assert "ID0-THERE" in lines
+        assert "ID0-GONE" not in lines
 
     def test_the_other_sinks_replace_it_too(self):
         lines = _child('fsm_llm.setup_logging(sink="stdout", format="json")')
@@ -478,3 +519,39 @@ class TestDefaultHandlerIsReplacedNotDoubled:
         assert lines.count("HOST>HOSTREC") == 1
         assert "HOST>QUIETREC" not in lines
         assert "HOST>LIBREC" not in lines
+
+
+class TestHostOutputFollowsSysStderr:
+    """W4: the replacement default sink looks ``sys.stderr`` up at write time.
+    Bound at setup time it would keep a capture stream for good (and fail once
+    that stream is closed), where loguru's own id 0 wrote to the real one."""
+
+    def test_a_closed_stream_at_setup_does_not_break_host_output(self):
+        lines = _child(
+            "import io\n"
+            "sys.stderr = io.StringIO()\n"
+            'fsm_llm.setup_logging(sink="stdout", format="json")\n'
+            "sys.stderr.close()\n"
+            "sys.stderr = sys.__stderr__"
+        )
+
+        assert not any("Logging error" in line for line in lines)
+        assert _count(lines, "HOSTREC", "-") == 1
+        assert _count(lines, "LIBREC", "-") == 0
+
+    def test_redirect_stderr_is_followed_for_its_duration_only(self):
+        lines = _child(
+            "import contextlib, io\n"
+            "buf = io.StringIO()\n"
+            "with contextlib.redirect_stderr(buf):\n"
+            '    fsm_llm.setup_logging(sink="stdout", format="json")\n'
+            '    logger.warning("INBUF")\n'
+            'logger.warning("AFTER")\n'
+            "sys.stderr.write(''.join('BUF:' + x + '\\n' "
+            "for x in buf.getvalue().splitlines()))"
+        )
+
+        assert _count([x[4:] for x in lines if x.startswith("BUF:")], "INBUF", "-") == 1
+        assert _count(lines, "AFTER", "-") == 1
+        assert not any(x.startswith("BUF:") and x.endswith("AFTER") for x in lines)
+        assert not any("Logging error" in line for line in lines)

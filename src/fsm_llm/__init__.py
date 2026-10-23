@@ -486,8 +486,8 @@ def enable_debug_logging():
     from .constants import LOG_FORMAT_HUMAN, LOG_SINK_STDERR
     from .logging import (
         enable_library_logging,
+        library_only,
         logger,
-        prepare_log_record,
         register_stream_handler,
         replace_default_handler,
         reset_handlers,
@@ -505,7 +505,7 @@ def enable_debug_logging():
         sys.stderr,
         level="DEBUG",
         format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | <cyan>{name}:{function}:{line}</cyan> | {message}",
-        filter=prepare_log_record,
+        filter=library_only,
     )
 
     # DECISION plan-2026-09-20T114608-a8e47b88/D-013
