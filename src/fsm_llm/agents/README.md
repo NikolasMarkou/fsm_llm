@@ -65,7 +65,7 @@ These are the 18 names `create_agent` accepts (`react`, `rewoo`, `reflexion`, `p
 - `memory_tools.py`, `semantic_memory.py`, `memory_persistence.py`, `summarization.py`, `truncation.py` - working-memory tools, long-term embedding memory, saving memory to disk, condensing old observations, shortening long tool output.
 - `okf.py` - Open Knowledge Format (OKF) for agents: `create_okf_tools(bundle)` gives four read-only tools (`okf_list`, `okf_read`, `okf_search`, `okf_links`), `OKFMemoryBackend` is a read-only memory backend for `AutoMemoryReactAgent`, and `export_semantic_memory` and `export_agent_result` write bundles. The format itself lives in core `fsm_llm.okf`.
 - `composition.py` - use ReAct agents as orchestrator workers; an LLM judge for the evaluator-optimizer.
-- `skills.py`, `sop.py` - load tools from folders of Python files; reusable task templates (three built in).
+- `python_tools.py`, `sop.py` - load tools from folders of Python files; reusable task templates (three built in).
 - `mcp.py` - load tools from an MCP (Model Context Protocol) server. `remote.py` - serve an agent over HTTP, or call a remote one as a tool.
 - `meta_builder.py`, `meta_builders.py`, `meta_tools.py`, `meta_prompts.py`, `meta_output.py`, `meta_cli.py` - the meta-builder, its artifact builders (`FSMArtifactBuilder`, `WorkflowArtifactBuilder`, `AgentArtifactBuilder`: calls chain, `take_warnings()` returns and clears the warnings, `build()` validates) and its `fsm-llm-meta` command.
 - `builders.py` - `ConfiguredAgentBuilder`.

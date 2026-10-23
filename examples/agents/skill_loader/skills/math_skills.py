@@ -1,4 +1,4 @@
-"""Math skills loaded from directory by SkillLoader."""
+"""Math skills loaded from directory by PythonToolLoader."""
 
 from fsm_llm.agents import tool
 

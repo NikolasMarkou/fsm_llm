@@ -1,7 +1,7 @@
 """
-Skill loading system for FSM-LLM agents.
+Python tool loading for FSM-LLM agents.
 
-Enables loading external skill definitions as agent tools from
+Enables loading external Python tool definitions as agent tools from
 Python files, directories, or programmatic definitions.
 """
 
@@ -21,17 +21,22 @@ from fsm_llm.logging import logger
 from .definitions import ToolDefinition
 from .tools import ToolRegistry
 
+# DECISION plan-2026-10-23T043147-4c2042f3/D-032: "skill" now means only Agent
+# Skills (SKILL.md, never executed); this loader EXECUTES files, so it was
+# renamed. Do NOT re-add the old Skill-prefixed names, the skill-named registry
+# method or the all-caps list name as aliases, re-exports or shims (no legacy).
+
 
 @dataclass
-class SkillDefinition:
-    """A structured skill that can be loaded as an agent tool.
+class PythonToolDefinition:
+    """A structured Python tool that can be loaded as an agent tool.
 
-    Skills are a higher-level abstraction over tools, supporting
+    Python tools are a higher-level abstraction over tools, supporting
     categorization, trigger patterns, and directory-based discovery.
 
     Example::
 
-        skill = SkillDefinition(
+        tool = PythonToolDefinition(
             name="web_search",
             description="Search the web for information",
             category="research",
@@ -52,7 +57,7 @@ class SkillDefinition:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_tool_definition(self) -> ToolDefinition:
-        """Convert this skill to a ``ToolDefinition`` for registration."""
+        """Convert this Python tool to a ``ToolDefinition`` for registration."""
         return ToolDefinition(
             name=self.name,
             description=self.description,
@@ -62,13 +67,13 @@ class SkillDefinition:
         )
 
 
-class SkillLoader:
-    """Load skills from various sources and convert to tool registries.
+class PythonToolLoader:
+    """Load Python tools from various sources and convert to tool registries.
 
     Example::
 
-        skills = SkillLoader.from_directory("./skills/")
-        registry = SkillLoader.to_tool_registry(skills)
+        tools = PythonToolLoader.from_directory("./tools/")
+        registry = PythonToolLoader.to_tool_registry(tools)
         agent = ReactAgent(tools=registry)
     """
 
@@ -77,58 +82,58 @@ class SkillLoader:
         path: str | Path,
         pattern: str = "*.py",
         category: str | None = None,
-    ) -> list[SkillDefinition]:
-        """Load skills from Python files in a directory.
+    ) -> list[PythonToolDefinition]:
+        """Load Python tools from Python files in a directory.
 
-        Each Python file should define a ``SKILLS`` list of
-        ``SkillDefinition`` objects, or functions decorated with
+        Each Python file should define a ``PYTHON_TOOLS`` list of
+        ``PythonToolDefinition`` objects, or functions decorated with
         ``@tool`` that have a ``_tool_definition`` attribute.
 
         Args:
-            path: Directory path containing skill files.
-            pattern: Glob pattern for skill files (default: ``*.py``).
-            category: Override category for all loaded skills.
-                If None, uses each skill's own category.
+            path: Directory path containing Python tool files.
+            pattern: Glob pattern for Python tool files (default: ``*.py``).
+            category: Override category for all loaded Python tools.
+                If None, uses each tool's own category.
 
         Returns:
-            List of discovered SkillDefinition objects.
+            List of discovered PythonToolDefinition objects.
         """
-        skill_dir = Path(path)
-        if not skill_dir.is_dir():
-            logger.warning(f"Skill directory not found: {path}")
+        tool_dir = Path(path)
+        if not tool_dir.is_dir():
+            logger.warning(f"Python tool directory not found: {path}")
             return []
 
-        skills: list[SkillDefinition] = []
-        for file_path in sorted(skill_dir.glob(pattern)):
+        tools: list[PythonToolDefinition] = []
+        for file_path in sorted(tool_dir.glob(pattern)):
             if file_path.name.startswith("_"):
                 continue
             try:
-                loaded = SkillLoader._load_from_file(file_path, category)
-                skills.extend(loaded)
+                loaded = PythonToolLoader._load_from_file(file_path, category)
+                tools.extend(loaded)
             except Exception as e:
-                logger.warning(f"Failed to load skills from {file_path}: {e!s}")
+                logger.warning(f"Failed to load Python tools from {file_path}: {e!s}")
 
-        logger.info(f"Loaded {len(skills)} skills from {path}")
-        return skills
+        logger.info(f"Loaded {len(tools)} Python tools from {path}")
+        return tools
 
     @staticmethod
     def from_functions(
         *functions: Callable[..., Any],
         category: str = "general",
-    ) -> list[SkillDefinition]:
-        """Create skills from ``@tool``-decorated functions.
+    ) -> list[PythonToolDefinition]:
+        """Create Python tools from ``@tool``-decorated functions.
 
         Each function must have a ``_tool_definition`` attribute
         (set by the ``@tool`` decorator).
 
         Args:
             functions: Decorated functions to convert.
-            category: Category to assign to all skills.
+            category: Category to assign to all Python tools.
 
         Returns:
-            List of SkillDefinition objects.
+            List of PythonToolDefinition objects.
         """
-        skills = []
+        tools = []
         for fn in functions:
             tool_def = getattr(fn, "_tool_definition", None)
             if tool_def is None:
@@ -136,8 +141,8 @@ class SkillLoader:
                     f"Function {fn.__name__} has no _tool_definition; skipping"
                 )
                 continue
-            skills.append(
-                SkillDefinition(
+            tools.append(
+                PythonToolDefinition(
                     name=tool_def.name,
                     description=tool_def.description,
                     execute=tool_def.execute_fn,
@@ -146,63 +151,63 @@ class SkillLoader:
                     category=category,
                 )
             )
-        return skills
+        return tools
 
     @staticmethod
     def to_tool_registry(
-        skills: list[SkillDefinition],
+        python_tools: list[PythonToolDefinition],
         registry: ToolRegistry | None = None,
     ) -> ToolRegistry:
-        """Convert skills to a ``ToolRegistry``.
+        """Convert Python tools to a ``ToolRegistry``.
 
         Args:
-            skills: Skills to register.
+            python_tools: Python tools to register.
             registry: Existing registry to add to.
                 If None, creates a new one.
 
         Returns:
-            ToolRegistry with all skills registered.
+            ToolRegistry with all Python tools registered.
         """
         reg = registry or ToolRegistry()
-        for skill in skills:
-            reg.register(skill.to_tool_definition())
+        for tool in python_tools:
+            reg.register(tool.to_tool_definition())
         return reg
 
     @staticmethod
     def by_category(
-        skills: list[SkillDefinition],
-    ) -> dict[str, list[SkillDefinition]]:
-        """Group skills by category.
+        python_tools: list[PythonToolDefinition],
+    ) -> dict[str, list[PythonToolDefinition]]:
+        """Group Python tools by category.
 
         Useful for building hierarchical classification schemas
         where categories map to domains.
 
         Returns:
-            Dict mapping category names to skill lists.
+            Dict mapping category names to Python tool lists.
         """
-        groups: dict[str, list[SkillDefinition]] = {}
-        for skill in skills:
-            groups.setdefault(skill.category, []).append(skill)
+        groups: dict[str, list[PythonToolDefinition]] = {}
+        for tool in python_tools:
+            groups.setdefault(tool.category, []).append(tool)
         return groups
 
     @staticmethod
     def _load_from_file(
         file_path: Path,
         category_override: str | None = None,
-    ) -> list[SkillDefinition]:
-        """Load skills from a single Python file.
+    ) -> list[PythonToolDefinition]:
+        """Load Python tools from a single Python file.
 
         .. warning::
 
            This method executes arbitrary Python code from *file_path* via
-           ``importlib``.  Only load skill files from **trusted sources**.
+           ``importlib``.  Only load Python tool files from **trusted sources**.
         """
         if file_path.suffix != ".py":
-            logger.warning(f"Skipping non-Python skill file: {file_path}")
+            logger.warning(f"Skipping non-Python tool file: {file_path}")
             return []
         try:
             if file_path.stat().st_size > 1_000_000:
-                logger.warning(f"Skipping oversized skill file (>1 MB): {file_path}")
+                logger.warning(f"Skipping oversized tool file (>1 MB): {file_path}")
                 return []
         except OSError:
             return []
@@ -210,7 +215,7 @@ class SkillLoader:
         path_hash = hashlib.sha1(str(file_path.resolve()).encode("utf-8")).hexdigest()[
             :12
         ]
-        module_name = f"_fsm_skill_{path_hash}_{file_path.stem}"
+        module_name = f"_fsm_python_tool_{path_hash}_{file_path.stem}"
         spec = importlib.util.spec_from_file_location(module_name, file_path)
         if spec is None or spec.loader is None:
             return []
@@ -223,21 +228,21 @@ class SkillLoader:
             sys.modules.pop(module_name, None)
             raise
 
-        skills: list[SkillDefinition] = []
+        tools: list[PythonToolDefinition] = []
 
-        # Check for explicit SKILLS list
-        if hasattr(module, "SKILLS"):
-            for skill in module.SKILLS:
-                if isinstance(skill, SkillDefinition):
+        # Check for explicit PYTHON_TOOLS list
+        if hasattr(module, "PYTHON_TOOLS"):
+            for tool in module.PYTHON_TOOLS:
+                if isinstance(tool, PythonToolDefinition):
                     if category_override:
-                        skill.category = category_override
-                    skills.append(skill)
-        # Names already provided via SKILLS win; the @tool scan skips them so
+                        tool.category = category_override
+                    tools.append(tool)
+        # Names already provided via PYTHON_TOOLS win; the @tool scan skips them so
         # one function listed in both places is not loaded twice (PT-07).
-        explicit_names = {skill.name for skill in skills}
+        explicit_names = {tool.name for tool in tools}
         # DECISION plan-2026-09-24T091842-c1d5bfbc/D-012: dedupe the @tool scan
         # on the tool name against the @tool skills already loaded too, not
-        # only against SKILLS: dir() lists one function once per attribute
+        # only against PYTHON_TOOLS: dir() lists one function once per attribute
         # name, so an alias loaded it twice. The first attribute in dir()
         # (alphabetical) order wins; a DIFFERENT function claiming the same
         # name is skipped with a warning (an alias of the same function is
@@ -257,14 +262,14 @@ class SkillLoader:
                     first_attr, first_fn = tool_attrs[tool_def.name]
                     if tool_def.execute_fn is not first_fn:
                         logger.warning(
-                            f"Skill file {file_path.name}: '{attr_name}' "
+                            f"Python tool file {file_path.name}: '{attr_name}' "
                             f"declares tool '{tool_def.name}', already loaded "
                             f"from '{first_attr}'; skipping '{attr_name}'"
                         )
                     continue
                 tool_attrs[tool_def.name] = (attr_name, tool_def.execute_fn)
-                skills.append(
-                    SkillDefinition(
+                tools.append(
+                    PythonToolDefinition(
                         name=tool_def.name,
                         description=tool_def.description,
                         execute=tool_def.execute_fn,
@@ -277,4 +282,4 @@ class SkillLoader:
         # Clean up
         sys.modules.pop(module_name, None)
 
-        return skills
+        return tools

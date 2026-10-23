@@ -656,7 +656,7 @@ class TestToolRegistryConcurrency:
 
                 return R()
 
-        class _Skill:
+        class _PythonTool:
             def to_tool_definition(self):
                 return _make_tool(99)
 
@@ -664,7 +664,7 @@ class TestToolRegistryConcurrency:
             lambda: registry.register(_make_tool(1)),
             lambda: registry.register_function(_noop, name="fn", description="d"),
             lambda: registry.register_agent(_Agent(), name="ag", description="d"),
-            lambda: registry.register_skill(_Skill()),
+            lambda: registry.register_python_tool(_PythonTool()),
             lambda: registry.get("tool_0"),
             registry.list_tools,
             lambda: registry.tool_names,

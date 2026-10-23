@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `pyyaml>=6.0` is now a declared core dependency (it parses OKF frontmatter; it used to arrive only as a transitive dependency).
 - `harness.tools.Workspace.resolve` now delegates its containment check to `security.resolve_within`. No behaviour change.
+- **BREAKING:** the Python-tool API in `fsm_llm.agents` is renamed, with no alias, no shim and no deprecation period, because the old names collide with Agent Skills (SKILL.md folders, which are read and never executed, while this loader executes the files it loads). Behaviour is unchanged. Old -> new:
+  - module `fsm_llm.agents.skills` -> `fsm_llm.agents.python_tools`
+  - `SkillDefinition` -> `PythonToolDefinition`
+  - `SkillLoader` -> `PythonToolLoader`
+  - `ToolRegistry.register_skill(skill)` -> `ToolRegistry.register_python_tool(tool)`
+  - the parameter `skills` of `PythonToolLoader.to_tool_registry` and `PythonToolLoader.by_category` -> `python_tools` (a call that passes it by keyword breaks)
+  - the `SKILLS = [...]` list convention in a `.py` file that `from_directory` loads -> `PYTHON_TOOLS = [...]`
+  - **A user script that defines `SKILLS = [...]` stops being collected without an error: its tools are silently not loaded unless they are also `@tool`-decorated. Rename the list to `PYTHON_TOOLS`.**
+  - Log and warning texts follow the new noun ("Python tool directory not found", "Loaded N Python tools from ..."). The example `examples/agents/skill_loader/` is updated to the new names (token-level edits only, same directory and file names).
 
 ## [0.12.0] - 2026-10-02
 

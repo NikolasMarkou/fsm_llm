@@ -115,6 +115,7 @@ from .orchestrator import OrchestratorAgent
 from .parallel_react import ParallelReactAgent, build_parallel_react_fsm
 from .plan_execute import PlanExecuteAgent
 from .prompt_chain import PromptChainAgent
+from .python_tools import PythonToolDefinition, PythonToolLoader
 from .react import ReactAgent
 from .reasoning_react import ReasoningReactAgent
 from .reflexion import ReflexionAgent
@@ -127,7 +128,6 @@ from .semantic_memory import (
     create_semantic_memory_tools,
 )
 from .semantic_tools import SemanticToolRegistry
-from .skills import SkillDefinition, SkillLoader
 from .sop import SOPDefinition, SOPRegistry, load_builtin_sops
 from .summarization import make_observation_summarizer
 from .swarm import SwarmAgent
@@ -306,8 +306,10 @@ __all__ = [
     "AgentServer",
     "RemoteAgentTool",
     "ReasoningReactAgent",
-    # Decorator + factory + skill loading
+    # Decorator + factory + Python tool loading
     "tool",
+    "PythonToolDefinition",
+    "PythonToolLoader",
     "create_agent",
     "create_memory_tools",
     "MemorySessionStore",
@@ -327,8 +329,6 @@ __all__ = [
     "export_semantic_memory",
     # Agent Skills folders
     "create_skill_tools",
-    "SkillDefinition",
-    "SkillLoader",
     # Meta-builder
     "ArtifactBuilder",
     "FSMArtifactBuilder",

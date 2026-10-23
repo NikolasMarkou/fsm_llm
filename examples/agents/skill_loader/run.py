@@ -1,9 +1,9 @@
 """
-SkillLoader Example -- Directory-Based Skill Discovery
+PythonToolLoader Example -- Directory-Based Skill Discovery
 ======================================================
 
 Demonstrates loading tools from a skills directory using
-SkillLoader.from_directory(), grouping by category, and
+PythonToolLoader.from_directory(), grouping by category, and
 building a ToolRegistry automatically.
 
 Run:
@@ -14,7 +14,7 @@ Run:
 import os
 
 from fsm_llm.agents import AgentConfig, ReactAgent
-from fsm_llm.agents.skills import SkillLoader
+from fsm_llm.agents.python_tools import PythonToolLoader
 
 
 def main():
@@ -30,23 +30,23 @@ def main():
     skills_dir = os.path.join(current_dir, "skills")
 
     print("=" * 60)
-    print("SkillLoader -- Directory-Based Tool Discovery")
+    print("PythonToolLoader -- Directory-Based Tool Discovery")
     print("=" * 60)
     print(f"Model: {model}")
     print(f"Skills directory: {skills_dir}\n")
 
     # Load all skills
-    skills = SkillLoader.from_directory(skills_dir)
+    skills = PythonToolLoader.from_directory(skills_dir)
     print(f"Loaded {len(skills)} skills:")
     for skill in skills:
         print(f"  - {skill.name} [{skill.category}]: {skill.description}")
 
     # Group by category
-    by_category = SkillLoader.by_category(skills)
+    by_category = PythonToolLoader.by_category(skills)
     print(f"\nCategories: {list(by_category.keys())}")
 
     # Convert to ToolRegistry
-    registry = SkillLoader.to_tool_registry(skills)
+    registry = PythonToolLoader.to_tool_registry(skills)
     print(f"Registry tools: {', '.join(registry.tool_names)}\n")
 
     # Create agent with loaded tools

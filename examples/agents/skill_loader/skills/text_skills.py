@@ -1,4 +1,4 @@
-"""Text processing skills loaded from directory by SkillLoader."""
+"""Text processing skills loaded from directory by PythonToolLoader."""
 
 from fsm_llm.agents import tool
 

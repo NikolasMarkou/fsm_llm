@@ -87,7 +87,7 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_self_consistency_parallel.py` - parallel sampling matches serial.
 - `test_semantic_memory.py` - `SemanticMemoryStore` and its `remember`/`recall` tools.
 - `test_semantic_memory_robustness.py` - thread safety, embedding model mismatch warning, `max_entries`, atomic save.
-- `test_skills.py` - `SkillLoader.from_directory` dedupe.
+- `test_python_tools.py` - `PythonToolLoader.from_directory` dedupe.
 - `test_strands_phase2.py` - MCP provider and timeouts, swarm, agent graph, OTEL, `DependencyResolver`, SOPs, semantic tools, A2A, exports.
 - `test_structured_output.py` - `output_schema` parsing into `structured_output`.
 - `test_summarization.py` - `make_observation_summarizer` and its handler wiring.

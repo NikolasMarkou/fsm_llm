@@ -1,15 +1,15 @@
-"""Tests for fsm_llm.agents.skills.SkillLoader file discovery."""
+"""Tests for fsm_llm.agents.python_tools.PythonToolLoader file discovery."""
 
 from __future__ import annotations
 
 import textwrap
 from pathlib import Path
 
-from fsm_llm.agents.skills import SkillLoader
+from fsm_llm.agents.python_tools import PythonToolLoader
 
 _MODULE_BOTH_SOURCES = textwrap.dedent(
     """
-    from fsm_llm.agents.skills import SkillDefinition
+    from fsm_llm.agents.python_tools import PythonToolDefinition
     from fsm_llm.agents.tools import tool
 
 
@@ -19,8 +19,8 @@ _MODULE_BOTH_SOURCES = textwrap.dedent(
         return query
 
 
-    SKILLS = [
-        SkillDefinition(
+    PYTHON_TOOLS = [
+        PythonToolDefinition(
             name="lookup",
             description="Look something up (explicit)",
             execute=lookup,
@@ -30,19 +30,19 @@ _MODULE_BOTH_SOURCES = textwrap.dedent(
 )
 
 
-class TestSkillLoaderDedupe:
-    """PT-07: a skill in SKILLS and also @tool-decorated is loaded once."""
+class TestPythonToolLoaderDedupe:
+    """PT-07: a tool in PYTHON_TOOLS and also @tool-decorated is loaded once."""
 
-    def test_skills_list_and_decorator_yield_one_skill(self, tmp_path: Path):
-        path = tmp_path / "dup_skill.py"
+    def test_python_tools_list_and_decorator_yield_one_tool(self, tmp_path: Path):
+        path = tmp_path / "dup_tool.py"
         path.write_text(_MODULE_BOTH_SOURCES)
 
-        skills = SkillLoader.from_directory(tmp_path)
+        tools = PythonToolLoader.from_directory(tmp_path)
 
-        names = [s.name for s in skills]
+        names = [t.name for t in tools]
         assert names == ["lookup"]
-        # The explicit SKILLS entry wins over the decorator scan.
-        assert skills[0].description == "Look something up (explicit)"
+        # The explicit PYTHON_TOOLS entry wins over the decorator scan.
+        assert tools[0].description == "Look something up (explicit)"
 
     def test_decorator_only_module_still_loads(self, tmp_path: Path):
         path = tmp_path / "deco_only.py"
@@ -60,9 +60,9 @@ class TestSkillLoaderDedupe:
             )
         )
 
-        skills = SkillLoader.from_directory(tmp_path)
+        tools = PythonToolLoader.from_directory(tmp_path)
 
-        assert [s.name for s in skills] == ["ping"]
+        assert [t.name for t in tools] == ["ping"]
 
 
 _MODULE_ALIASED_TOOL = textwrap.dedent(
@@ -114,19 +114,19 @@ def _capture_warnings(fn):
     return result, captured
 
 
-class TestSkillLoaderToolAliasDedupe:
+class TestPythonToolLoaderToolAliasDedupe:
     """DECISION plan-2026-09-24T091842-c1d5bfbc/D-012: the @tool scan dedupes on
-    the tool name against SKILLS and against @tool skills it already loaded."""
+    the tool name against PYTHON_TOOLS and against @tool tools it already loaded."""
 
     def test_one_tool_under_three_names_loads_once(self, tmp_path: Path):
         (tmp_path / "aliased.py").write_text(_MODULE_ALIASED_TOOL)
 
-        skills, warnings = _capture_warnings(
-            lambda: SkillLoader.from_directory(tmp_path)
+        tools, warnings = _capture_warnings(
+            lambda: PythonToolLoader.from_directory(tmp_path)
         )
 
-        assert [s.name for s in skills] == ["fast_add"]
-        assert skills[0].execute(a=2, b=3) == 5
+        assert [t.name for t in tools] == ["fast_add"]
+        assert tools[0].execute(a=2, b=3) == 5
         # The same function under another name is not a conflict: no warning.
         assert warnings == []
 
@@ -135,13 +135,13 @@ class TestSkillLoaderToolAliasDedupe:
     ):
         (tmp_path / "collision.py").write_text(_MODULE_NAME_COLLISION)
 
-        skills, warnings = _capture_warnings(
-            lambda: SkillLoader.from_directory(tmp_path)
+        tools, warnings = _capture_warnings(
+            lambda: PythonToolLoader.from_directory(tmp_path)
         )
 
-        assert [s.name for s in skills] == ["lookup"]
+        assert [t.name for t in tools] == ["lookup"]
         # dir() order is alphabetical, so the first attribute wins.
-        assert skills[0].execute(query="q") == "first"
+        assert tools[0].execute(query="q") == "first"
         assert len(warnings) == 1
         assert "lookup" in warnings[0]
         assert "b_second" in warnings[0]

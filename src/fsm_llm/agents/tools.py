@@ -769,13 +769,13 @@ class ToolRegistry:
             "confidence_threshold": 0.4,
         }
 
-    def register_skill(self, skill: Any) -> ToolRegistry:
-        """Register a ``SkillDefinition`` as a tool.
+    def register_python_tool(self, tool: Any) -> ToolRegistry:
+        """Register a ``PythonToolDefinition`` as a tool.
 
-        Convenience method that calls ``skill.to_tool_definition()`` and
+        Convenience method that calls ``tool.to_tool_definition()`` and
         registers the result.  Returns *self* for chaining.
         """
-        return self.register(skill.to_tool_definition())
+        return self.register(tool.to_tool_definition())
 
 
 def _infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
