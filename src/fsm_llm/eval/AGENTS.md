@@ -12,7 +12,7 @@ Two evaluation kinds behind one CLI, sharing config, records, stats and the run-
 
 The `eval` extra in `pyproject.toml` is `[]` (nothing beyond core deps). Version comes from `fsm_llm.__version__`.
 
-Not here: LLM-as-judge scoring, repeats/median for example runs, a stats subcommand, harness bench glue (manifest gate, probes, `write_summary`, `report` stay in `scripts/harness_bench.py`, which keeps stdlib copies of the generic helpers so it stays offline; DECISION D-008 of plan 581c2634).
+Not here: LLM-as-judge scoring, repeats/median for example runs, a stats subcommand, bench glue (the manifest gate, drift checks and wire capture stay in `scripts/bench_common.py`, which holds the shared stdlib helpers so the bench scripts stay offline; DECISION D-008 of plan 581c2634).
 
 ## Architecture
 
@@ -28,7 +28,7 @@ flowchart TD
     cs --> rec
     cs --> st[stats: pass_rate]
     cs --> api[fsm_llm.API]
-    hb[scripts/harness_bench.py] -. parity-tested copies .-> st
+    hb[scripts/bench_common.py] -. parity-tested copies .-> st
     hb -. parity-tested copies .-> rec
 ```
 
@@ -99,7 +99,7 @@ Python:
 - `setup_cli_logging` only in `run()`, never in `main_cli()` (tests call `main_cli` in-process).
 - An empty `expect` is rejected even when Python `checks` are passed (D-004).
 - Case trials stay on threads in one process; do not move them to a subprocess per trial (D-004).
-- `scripts/harness_bench.py` must stay stdlib-only and offline and never import `fsm_llm.eval` (importing `fsm_llm` pulls litellm, which opens a socket; D-008). Its seven copies (`wilson_ci`, `fisher_exact_two_sided`, `_utc_now`, `_git_commit`, `_write_json`, `append_row`, `read_rows`) must match this package; `tests/test_fsm_llm_eval/test_bench_parity.py` enforces it, so change both together.
+- `scripts/bench_common.py` must stay stdlib-only and offline at import time and never import `fsm_llm.eval` (importing `fsm_llm` pulls litellm, which opens a socket; D-008). Its seven copies (`wilson_ci`, `fisher_exact_two_sided`, `_utc_now`, `_git_commit`, `_write_json`, `append_row`, `read_rows`) must match this package; `tests/test_fsm_llm_eval/test_bench_parity.py` enforces it, so change both together.
 - `fsm_llm/__init__.py` never imports this subpackage.
 - One case trial = one fresh `API`, closed in `finally`; trial exceptions are data (`error` set), never a crashed run.
 - `on_done` callbacks in `run_interruptible` run on the calling thread, so `results`/`trials` lists need no lock.

@@ -10,7 +10,7 @@ The project uses the "src layout": the package lives under `src/` rather than at
 
 ## What is here
 
-- `fsm_llm/` - the whole framework. Its top-level modules are the core engine; six subpackages build on it.
+- `fsm_llm/` - the whole framework. Its top-level modules are the core engine; five subpackages build on it.
 - `fsm_llm.egg-info/` - metadata written by `pip install -e .`. It is generated, ignored by git (`*.egg-info/` in `.gitignore`) and removed by `make clean`. Do not edit it.
 
 ## How it works
@@ -50,8 +50,6 @@ flowchart TD
     monitor[fsm_llm.monitor] --> core
     monitor -. launches .-> agents
     monitor -. demo workflows .-> workflows
-    harness[fsm_llm.harness] --> agents
-    harness --> core
     eval[fsm_llm.eval] --> core
 ```
 
@@ -63,7 +61,6 @@ flowchart TD
 | `fsm_llm.workflows` | Async in-memory workflow engine with 11 step types and a Python DSL | `WorkflowEngine`, `create_workflow`, `auto_step` |
 | `fsm_llm.agents` | 18 agent patterns (ReAct, Reflexion, plan and execute, swarm, ...), tools, human approval, memory, and a meta-builder | `create_agent`, `ReactAgent`, `ToolRegistry`, `@tool`, `fsm-llm-meta` |
 | `fsm_llm.monitor` | FastAPI web dashboard to launch and watch FSMs, agents and workflows; optional OpenTelemetry export | `fsm-llm-monitor` (http://127.0.0.1:8420) |
-| `fsm_llm.harness` | Experimental iterative planner as a 6-state FSM whose gates count files on disk | `fsm-llm-harness new "goal"`, `HarnessAgent` |
 | `fsm_llm.eval` | Scores the repository examples 0 to 4, or runs scripted conversations over several trials with confidence intervals | `fsm-llm-eval examples`, `fsm-llm-eval run cases.json` |
 
 ## How to use it
@@ -94,7 +91,6 @@ fsm-llm-validate --fsm $fsm           # check an FSM file
 fsm-llm-visualize --fsm $fsm          # draw it as ASCII (--format mermaid or dot)
 fsm-llm-monitor                       # web dashboard, needs the monitor extra
 fsm-llm-meta                          # design an FSM, workflow or agent by chatting
-fsm-llm-harness new "goal"            # experimental iterative planner
 fsm-llm-eval examples                 # score every example 0 to 4 (slow, calls the model)
 fsm-llm-okf validate ./bundle         # check an Open Knowledge Format bundle (also list, show, search, export)
 fsm-llm-skills validate ./skills      # check Agent Skills folders (also list, show)
@@ -103,7 +99,7 @@ fsm-llm-skills validate ./skills      # check Agent Skills folders (also list, s
 ## Things to know
 
 - Core dependencies: loguru, litellm (>=1.83.0,<2.0), pydantic (>=2.0), python-dotenv, pyyaml (>=6.0, parses Open Knowledge Format and Agent Skills frontmatter), tenacity. Tenacity is not imported by the code but litellm's retry path needs it.
-- Extras: `reasoning`, `workflows`, `agents` and `eval` add nothing; `harness` pulls in `agents`; `monitor` adds fastapi, uvicorn and jinja2; `mcp`, `otel` and `a2a` add optional integrations.
+- Extras: `reasoning`, `workflows`, `agents` and `eval` add nothing; `monitor` adds fastapi, uvicorn and jinja2; `mcp`, `otel` and `a2a` add optional integrations.
 - The default model is `ollama_chat/qwen3.5:4b`, or whatever `LLM_MODEL` is set to.
 - The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`.
-- `src/fsm_llm_agents`, `src/fsm_llm_reasoning`, `src/fsm_llm_workflows`, `src/fsm_llm_monitor` and `src/fsm_llm_harness` are leftovers from the layout before 2026-09-29 with separate top-level packages. They are not part of the current source and `make clean` does not remove them: delete them by hand in an old clone.
+- `src/fsm_llm_agents`, `src/fsm_llm_reasoning`, `src/fsm_llm_workflows` and `src/fsm_llm_monitor` are leftovers from the layout before 2026-09-29 with separate top-level packages. They are not part of the current source and `make clean` does not remove them: delete them by hand in an old clone.

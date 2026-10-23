@@ -5,7 +5,7 @@ Purpose: Long-form Markdown guides for FSM-LLM v0.12.0 (quickstart, FSM design, 
 
 ## Scope
 
-- In scope: 8 Markdown files at `docs/` with no subdirectories. FSM-LLM is one distribution (`fsm-llm`). The code lives in `src/fsm_llm/`, and the extensions are subpackages: `fsm_llm.reasoning`, `fsm_llm.workflows`, `fsm_llm.agents`, `fsm_llm.monitor`, `fsm_llm.harness`, `fsm_llm.eval`.
+- In scope: 8 Markdown files at `docs/` with no subdirectories. FSM-LLM is one distribution (`fsm-llm`). The code lives in `src/fsm_llm/`, and the extensions are subpackages: `fsm_llm.reasoning`, `fsm_llm.workflows`, `fsm_llm.agents`, `fsm_llm.monitor`, `fsm_llm.eval`.
 - Out of scope: runnable code, per-package READMEs, `CHANGELOG.md`, `EVALUATE.md`, planning artifacts under `plans/`. By user preference, monitor docs belong in `api_reference.md`. Do not create a separate `docs/monitor.md`.
 
 ## Architecture
@@ -26,8 +26,8 @@ Links between the docs: `fsm_design.md` ends with `**Next:** [Handler Developmen
 | `quickstart.md` | First-run tutorial | Env var table (`LLM_MODEL`, `LLM_TEMPERATURE` default `0.5`, `LLM_MAX_TOKENS` default `1000`, `FSM_PATH`). Full FSM `friendly_greeter` in a Python block. Handler example at `CONTEXT_UPDATE`. `converse_stream`, `FileSessionStore`. Example commands point at `examples/basic/form_filling`, `examples/basic/story_time`, `examples/intermediate/book_recommendation` |
 | `fsm_design.md` | Design guide | Only state-level JSON fragments, no full FSM. Covers the priority rule, `evaluation_priority` (default 100, range 0-1000), `llm_description` (max 300 chars), `context_scope.read_keys`/`write_keys`, `handler_only_keys`, correction provenance with `<rejected_corrections>`, stacking merge strategies, WorkingMemory reach |
 | `handlers.md` | Handler guide | 8 timings, `HandlerBuilder` table including `.critical()`, `error_mode`, `HandlerSystem.handlers_at` fast path, ERROR-handler rules (return dict not merged, re-entry raises `FSMError`) |
-| `architecture.md` | System design | Layer diagram, component list, message, message-free step, start and stream flows, `FSMContext` fields, special `_` keys, stacked-FSM merge, extension table, a long harness section (gates read from disk, driver vs worker, safety bounds table), extension points |
-| `api_reference.md` | Reference | `API(...)` signature, steps without a user message (`advance`, `run_until_terminal`), session, query, stacking methods, visualization, `LLMInterface`, `WorkingMemory`, `TransitionEvaluatorConfig`, classification, reasoning, agents, workflows, harness, eval (CLI flags, exit codes, `EvalConfig` table, dataset schema, output layout), monitor, Open Knowledge Format (core API, `fsm-llm-okf`, agents API, safety model), Agent Skills (core API, `fsm-llm-skills`, agents tools, safety model, known limits), exception tree, constants |
+| `architecture.md` | System design | Layer diagram, component list, message, message-free step, start and stream flows, `FSMContext` fields, special `_` keys, stacked-FSM merge, extension table, extension points |
+| `api_reference.md` | Reference | `API(...)` signature, steps without a user message (`advance`, `run_until_terminal`), session, query, stacking methods, visualization, `LLMInterface`, `WorkingMemory`, `TransitionEvaluatorConfig`, classification, reasoning, agents, workflows, eval (CLI flags, exit codes, `EvalConfig` table, dataset schema, output layout), monitor, Open Knowledge Format (core API, `fsm-llm-okf`, agents API, safety model), Agent Skills (core API, `fsm-llm-skills`, agents tools, safety model, known limits), exception tree, constants |
 | `strands_features.md` | Historical | 12 features to adapt, plus "Features NOT Recommended" |
 | `strands_features_phase_1.md` | Historical | 4 delivered features, commit `a7e3d88`, test counts from that time |
 | `strands_features_phase_2.md` | Historical | 8 features with estimated LOC and "Not yet implemented" notes from that time |
@@ -50,8 +50,7 @@ Facts the guides state that must stay in step with the code:
 - `DEFAULT_LLM_MODEL = "ollama_chat/qwen3.5:4b"`, `DEFAULT_MAX_STACK_DEPTH = 10`.
 - `TransitionEvaluatorConfig` fields: `strict_condition_matching`, `detailed_logging` (the three no-op confidence fields were removed).
 - Core step driver: `API.advance`, `advance_stream`, `run_until_terminal(conv_id, *, max_steps, max_seconds=None, before_step=None)`, `run_until_terminal_stream`, `AdvanceResult`, `RunBudgetExceededError`; a silent state makes no call, returns `""` and adds nothing to history. Graph export: `build_fsm_graph`, `to_mermaid`, `to_dot`, `fsm-llm-visualize --format`.
-- `fsm_llm.harness.CHECKS` has 30 entries.
-- Console scripts (`pyproject.toml`): `fsm-llm`, `fsm-llm-visualize`, `fsm-llm-validate`, `fsm-llm-monitor`, `fsm-llm-meta`, `fsm-llm-harness`, `fsm-llm-eval`, `fsm-llm-okf`, `fsm-llm-skills`.
+- Console scripts (`pyproject.toml`): `fsm-llm`, `fsm-llm-visualize`, `fsm-llm-validate`, `fsm-llm-monitor`, `fsm-llm-meta`, `fsm-llm-eval`, `fsm-llm-okf`, `fsm-llm-skills`.
 
 ## Invariants and constraints
 
@@ -63,7 +62,7 @@ Facts the guides state that must stay in step with the code:
 
 ## Dependencies
 
-No runtime dependencies. The snippets import from `fsm_llm` and from `fsm_llm.agents`, `fsm_llm.reasoning`, `fsm_llm.workflows`, `fsm_llm.harness`, `fsm_llm.eval`, `fsm_llm.monitor`. The monitor snippet also uses `uvicorn`.
+No runtime dependencies. The snippets import from `fsm_llm` and from `fsm_llm.agents`, `fsm_llm.reasoning`, `fsm_llm.workflows`, `fsm_llm.eval`, `fsm_llm.monitor`. The monitor snippet also uses `uvicorn`.
 
 ## Failure modes
 
@@ -71,7 +70,7 @@ No known mismatches between these docs and the code. When one is found, list it 
 
 ## Working here
 
-- Before stating a count, signature or default, check it against `src/fsm_llm/` (for example `.venv/bin/python -c "import fsm_llm.harness as h; print(len(h.__all__))"`).
+- Before stating a count, signature or default, check it against `src/fsm_llm/` (for example `.venv/bin/python -c "import fsm_llm.eval as e; print(len(e.__all__))"`).
 - After any edit, run:
   `.venv/bin/python -m pytest tests/test_fsm_llm/test_docs_snippets.py tests/test_fsm_llm_regression/test_regression_cli_and_exports.py`
 - A new full FSM example must include `description` on the FSM and on every state, `id` and `purpose` on every state, and a reachable terminal state.

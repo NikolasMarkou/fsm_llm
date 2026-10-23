@@ -80,7 +80,7 @@ for chunk in api.run_until_terminal_stream(conv_id, max_steps=20):
 
 `advance` runs the same turn as `converse` (one turn at a time, rollback on failure, every handler timing, extraction, transition evaluation, Pass 2 from the post-transition state, session auto-save) with no user message: nothing is added to the history for a user, and the extraction, classification and reply prompts use their no-message wording. The bulk extraction prompt is built from the state's scoped, security-filtered context and fills only unset keys. The LLM layer sends the fixed `NEUTRAL_USER_TURN` as the provider user turn; an empty `converse("")` message is a different fact and goes out as `EMPTY_USER_MESSAGE_TURN` (`"(empty message)"`). `advance` on a terminal state raises `FSMError`.
 
-`run_until_terminal` checks, before each step: has the conversation (top of the FSM stack) ended, is the `max_seconds` budget spent, is the `max_steps` budget spent, then calls `before_step(n)` and runs one `advance`. Budgets are checked only between steps. A spent budget raises `RunBudgetExceededError` (`budget` `"steps"` or `"seconds"`, `limit`, `steps_done`); the steps already run are kept, read them from `get_conversation_history` and `get_current_state`. A conversation closed during the run (from `before_step` or another thread) ends the run normally. When the top of the stack is an ended pushed FSM (stack depth above 1), `before_step(n)` is called once first: that call is not a step and is not budget-gated, `n` is the next step's number (the step itself calls it again with the same `n`; tell the two apart with `has_conversation_ended`), and if the hook pops the frame the run continues on the parent, otherwise it returns. `seconds_exempt_states` lets a round whose current state id is in the set run after `max_seconds` is spent (the steps budget still applies); ids are checked against the running definition (`ValueError`). `max_steps` must be an int of at least 1 and `max_seconds` `None` or a positive number (`ValueError` otherwise). The agents, the harness and workflow `AgentStep`s run on these loops.
+`run_until_terminal` checks, before each step: has the conversation (top of the FSM stack) ended, is the `max_seconds` budget spent, is the `max_steps` budget spent, then calls `before_step(n)` and runs one `advance`. Budgets are checked only between steps. A spent budget raises `RunBudgetExceededError` (`budget` `"steps"` or `"seconds"`, `limit`, `steps_done`); the steps already run are kept, read them from `get_conversation_history` and `get_current_state`. A conversation closed during the run (from `before_step` or another thread) ends the run normally. When the top of the stack is an ended pushed FSM (stack depth above 1), `before_step(n)` is called once first: that call is not a step and is not budget-gated, `n` is the next step's number (the step itself calls it again with the same `n`; tell the two apart with `has_conversation_ended`), and if the hook pops the frame the run continues on the parent, otherwise it returns. `seconds_exempt_states` lets a round whose current state id is in the set run after `max_seconds` is spent (the steps budget still applies); ids are checked against the running definition (`ValueError`). `max_steps` must be an int of at least 1 and `max_seconds` `None` or a positive number (`ValueError` otherwise). The agents, the reasoning engine and workflow `AgentStep`s run on these loops.
 
 ### Session Persistence
 
@@ -161,7 +161,7 @@ Fluent API returned by `api.create_handler()`:
 
 ## Builders and `BuildError`
 
-One convention for every builder (`APIBuilder`, `FSMManagerBuilder`, `HandlerBuilder`, `AgentGraphBuilder`, `ConfiguredAgentBuilder`, `HarnessAgentBuilder`, `workflows.WorkflowBuilder`, the meta artifact builders): `<Product>Builder`; `set_`, `add_` and `remove_` mutators only record and return the builder; `build()` is the only validator, copies what the builder owns, and raises `BuildError`. `BuildError` is exported from `fsm_llm`; it is an `FSMError` and a `ValueError`, `.errors` lists the problems, and the domain or constructor error that caused it is its `__cause__`. Objects you pass in (an `LLMInterface`, a session store, handlers, agents, registries) stay shared by reference. `HandlerBuilder` keeps its `at`/`on_state`/`do` vocabulary, and the meta artifact builders still refuse a bad call at call time with `BuilderError` (also a `BuildError`) and report warnings with `take_warnings()`. They also keep `update_state`, and their tools serialise calls per builder (direct builder calls are not serialised against tool calls).
+One convention for every builder (`APIBuilder`, `FSMManagerBuilder`, `HandlerBuilder`, `AgentGraphBuilder`, `ConfiguredAgentBuilder`, `workflows.WorkflowBuilder`, the meta artifact builders): `<Product>Builder`; `set_`, `add_` and `remove_` mutators only record and return the builder; `build()` is the only validator, copies what the builder owns, and raises `BuildError`. `BuildError` is exported from `fsm_llm`; it is an `FSMError` and a `ValueError`, `.errors` lists the problems, and the domain or constructor error that caused it is its `__cause__`. Objects you pass in (an `LLMInterface`, a session store, handlers, agents, registries) stay shared by reference. `HandlerBuilder` keeps its `at`/`on_state`/`do` vocabulary, and the meta artifact builders still refuse a bad call at call time with `BuilderError` (also a `BuildError`) and report warnings with `take_warnings()`. They also keep `update_state`, and their tools serialise calls per builder (direct builder calls are not serialised against tool calls).
 
 ```python
 from fsm_llm import APIBuilder, BuildError
@@ -182,7 +182,6 @@ except BuildError as exc:
 - `APIBuilder`: one setter per `API` parameter (`set_definition`, `set_llm_interface`, `set_model`, `set_api_key`, `set_temperature`, `set_max_tokens`, `set_llm_option(name, value)` (`build()` refuses a name that repeats a named `API` parameter and names the typed setter), `add_handler`, `set_handler_error_mode`, `set_transition_config`, `set_session_store`, `set_handler_timeout`, `set_max_history_size`, `set_max_message_length`, `set_max_fsm_cache_size`). Only set values reach `API(...)`, so `API`'s own rules (an `llm_interface` refuses other LLM settings) apply unchanged and come back as `BuildError`. No definition is a `BuildError`.
 - `FSMManagerBuilder`: `set_fsm_loader`, `set_llm_interface`, the three prompt builders, `set_transition_evaluator`, `set_max_history_size`, `set_max_message_length`, `set_handler_system`, `set_handler_error_mode`, `set_max_fsm_cache_size`, `build() -> FSMManager`.
 - `fsm_llm.agents.ConfiguredAgentBuilder`: `set_pattern`, `add_tool` (or `set_tool_registry`, not both), `set_config`, `set_config_option`, typed config setters (`set_model`, `set_temperature`, `set_max_tokens`, `set_max_iterations`, `set_timeout_seconds`), `set_system_prompt` (a `create_agent` argument, not an `AgentConfig` field), `set_hitl`, `set_option(name, value)`; `build()` calls `create_agent` on a shallow copy of the config (callables inside it stay shared). `set_option` passes any other `create_agent` keyword; `build()` refuses a name that repeats a named parameter (`pattern`, `tools`, `config`, `system_prompt`, ...) and names the typed setter to use.
-- `fsm_llm.harness.HarnessAgentBuilder`: one `set_<parameter>` per `HarnessAgent` parameter and `set_api_option(name, value)`; `build() -> HarnessAgent` from a shallow copy of the config (callables inside it stay shared). `build()` refuses a `set_api_option` name that repeats a constructor parameter and names the typed setter to use.
 
 ## HandlerTiming Enum
 
@@ -454,133 +453,6 @@ await engine.shutdown()
 
 Events and loops: `await engine.process_event(WorkflowEvent(event_type="paid", payload={...}))` wakes waiting instances (set `instance_id=` to target one; `wait_event_step(..., correlation_key=...)` matches a payload key against the instance context). Loops must pass through a `timer_step` or `wait_event_step`; purely synchronous cycles are rejected by `register_workflow`. A step failure with no error route FAILS the instance. `engine.add_hook(fn)` observes step and status changes. `WorkflowEngine(*, max_concurrent_workflows=100, max_completed_instances=1000, max_steps_per_run=1000, executor=None)` takes keyword arguments only. A `conversation_step` publishes `last_response`/`final_answer` as the last reply that was actually spoken (silent states say nothing), and adds neither key when nothing was spoken.
 
-## Harness (`fsm_llm.harness`)
-
-The iterative-planner protocol as a 6-state FSM over a plan directory. Requires
-`pip install -e ".[harness]"` from a clone (the `harness` extra pulls `agents`). The public surface is one literal `__all__`; the
-load-bearing names are below.
-
-### HarnessAgent -- the driver
-
-```python
-from fsm_llm.harness import HarnessAgent, Workspace, build_default_worker_factory, ContextKeys
-
-workspace = Workspace("./src")                       # confined source-tree root
-agent = HarnessAgent(
-    worker_factory=build_default_worker_factory(workspace),
-    approval_callback=None,      # None => a callback that DENIES every human gate
-    revert_callback=None,        # None => compute the leash revert, execute nothing
-    findings_threshold=3,        # EXPLORE -> PLAN
-    max_fix_attempts=2,          # the autonomy leash
-    max_leash_grants=2,          # human leash-continues honoured per plan step
-    iteration_hard_cap=6,        # PLAN -> EXECUTE
-    max_explore_redispatches=9,  # extra EXPLORE dispatches per run while blocked
-)
-# Same agent, fluent: HarnessAgentBuilder().set_worker_factory(...).set_max_fix_attempts(2).build()
-result = agent.run(
-    "add a retry to the uploader",
-    initial_context={
-        ContextKeys.PLAN_DIR: "plans/plan-2026-07-22T101500-1a2b3c4d",
-        ContextKeys.WORKSPACE_ROOT: "./src",
-    },
-)
-agent.presentations   # list[Presentation] -- the Presentation Contracts emitted
-agent.reverts         # list[RevertDirective] -- computed, not executed
-agent.audit_issues    # list[Issue] | None -- the CLOSE audit, if CLOSE was reached
-```
-
-Executor dispatches on one plan step are bounded by
-`max_fix_attempts * (1 + max_leash_grants)` for **any** sequence of approvals --
-an approving callback cannot raise it. `worker_factory=None` is a diagnostic mode:
-the FSM turns but no gate opens.
-
-Worker seam: `WorkerFactory = Callable[[RoleRequest], AgentResult]`. `RoleSpec`
-(one per state) carries `tool_scope`, `plan_tool_scope`, `owned_artifacts`,
-`output_schema`, `expected_keys`, `writable_keys`, `max_iterations`;
-`ROLE_SPECS` / `get_role_spec(state)` expose them.
-
-### Plan directory, gate and audit
-
-```python
-from fsm_llm.harness import PlanDirectory, Role, ArtifactNames, StateDoc, pre_step_gate, audit
-
-directory = PlanDirectory.create("plans", role=Role.ORCHESTRATOR)   # mints plan-<ts>-<hex8>
-directory.write_text(ArtifactNames.STATE, StateDoc(state="explore").to_markdown())  # atomic
-run_state = directory.load_run_state()          # RunState(plan_id, doc); .state == "explore"
-
-gate = pre_step_gate(directory.path)            # GateResult(passed, slug, detail, exit_code)
-issues = audit(directory.path, workspace_root=".")     # list[Issue]; [] means clean
-```
-
-`directory.path` is the plan directory; `directory.root` is its **parent** (the
-confinement root `PlanMemory` was given), so pass `path` to anything that expects
-a plan directory. `mint_plan_id()` is exported separately for callers that want
-the id without a directory.
-
-`pre_step_gate` evaluates 4 slugs in `GateSlug.ORDER` (`no-plan`, `wrong-state`,
-`leash-cap`, `iteration-cap`), short-circuits on the first failure, and never
-raises -- an unreadable `state.md` **is** the `no-plan` answer. Every failure is
-HARD and carries `exit_code == 2`. `audit` runs the 30 checks in `CHECKS` and
-reports a check that raises as an ERROR rather than letting it suppress the rest.
-
-CLOSE-phase size policies, all pure and non-writing: `evict_lessons(doc)` and
-`apply_sliding_window(doc)` return `(trimmed_doc, report)`, while
-`check_system_cap(doc)` returns a `CapReport` only -- `SYSTEM.md` is measured and
-REFUSED over its cap, never trimmed, because it carries no eviction order and all
-six of its sections are required. `PlanDirectory.enforce_lessons_cap` /
-`enforce_system_cap` / `apply_sliding_window` are the wrappers that write.
-
-### Confined tools
-
-```python
-from fsm_llm.harness import Workspace, PlanMemory, build_workspace_tools, build_plan_tools, Role
-
-workspace = Workspace("./src")                          # confinement only
-memory = PlanMemory("plans/plan-...", role=Role.EXPLORER)  # confinement + ownership
-registry = build_workspace_tools(workspace, allowed=("read_file", "grep_files"))
-build_plan_tools(memory, allowed=("write_plan_file",), registry=registry)
-```
-
-Tool name groups: `READ_ONLY_TOOLS`, `WRITE_TOOLS`, `SHELL_TOOLS`,
-`PLAN_READ_TOOLS`, `PLAN_WRITE_TOOLS`. `run_command` is off unless
-`Workspace(..., allow_shell=True)`; `COMMAND_ALLOWLIST` is
-`cat grep head ls tail wc` (`git` is deliberately excluded), and
-`VERIFICATION_COMMANDS` (`git make mypy pytest ruff`) is an opt-in set.
-An escape raises `HarnessConfinementError`; an ownership violation raises
-`HarnessOwnershipError`.
-
-### Artifacts and hardening
-
-`ARTIFACT_MODELS` maps each of the 15 artifact names to its pydantic model -- 14
-classes, since `FINDINGS.md` and `DECISIONS.md` share `ConsolidatedDoc`:
-`StateDoc`, `PlanDoc`, `DecisionsDoc`, `FindingsIndexDoc`, `FindingsTopicDoc`,
-`ProgressDoc`, `VerificationDoc`, `ChangelogDoc`, `CheckpointDoc`, `SummaryDoc`,
-`ConsolidatedDoc`, `LessonsDoc`, `SystemAtlasDoc`, `IndexDoc`. Every one carries
-`from_markdown()` / `to_markdown()`. Contract tables: `DECISION_ENTRY_SCHEMAS`,
-`PRESENTATION_CONTRACTS`, `MANDATORY_ADDITIONAL_CHECKS`, `VERDICT_BULLETS`,
-`VERDICT_RECOMMENDATIONS`, `REJECTED_EVIDENCE`.
-
-Small-model reply recovery (`hardening`): `strip_model_noise`,
-`parse_json_payload`, `parse_role_output` -> `RoleOutput`, `coerce_worker_output`,
-`type_matches`, `as_int`, `retry`. All fail CLOSED -- a garbled reply is never
-retried into a pass.
-
-### CLI
-
-```bash
-fsm-llm-harness new "add a retry to the uploader" [--create-only] [--model M] [--workspace .]
-fsm-llm-harness resume   plans/plan-...  [--goal G]
-fsm-llm-harness status   plans/plan-...
-fsm-llm-harness validate plans/plan-...  [--workspace .]
-fsm-llm-harness close    plans/plan-...  [--workspace .] [--apply]
-```
-
-Exit codes: `0` pass, `1` a negative answer (audit ERRORs, a failed run, a usage
-fault), `2` **RESERVED** for a HARD `pre_step_gate` refusal. Because `2` is
-reserved, argparse usage errors exit `1` rather than argparse's conventional `2`.
-Model resolution: `--model` > `$LLM_MODEL` > package default. `close` is DRY-RUN
-without `--apply` and refuses to compress a directory with audit ERRORs.
-
 ## Eval (`fsm_llm.eval`)
 
 Two evaluation kinds behind one CLI, `fsm-llm-eval` (also `python -m fsm_llm.eval`;
@@ -846,7 +718,7 @@ export_agent_result(result, "./my_bundle", task="payload size")     # writes run
 
 1. Bundle text is untrusted. It reaches a model in three ways, all capped and control-stripped: as tool output (under a fixed untrusted label), as public-context summaries (the plain-FSM handler writes `{id, type, title, description, trust_claimed, flags}` records to a public context key), and as one-line `OKFMemoryBackend` summaries that `augment_task_with_memories` concatenates into the task string (each starts with `OKF_SUMMARY_LABEL`). It is never a tool description, `AgentConfig.instructions`, persona or state instruction.
 2. Nothing a bundle names is executed or fetched. `executor` and `attester` resources are never executed; links and `resource` values are only ever looked up as concept ids of the loaded bundle.
-3. Bundle paths are checked with the shared helper `fsm_llm.security.resolve_within(root, relative) -> Path | None`: resolve first, compare path components, never `startswith`. `harness.Workspace.resolve`, the OKF loader, the OKF writer and the Agent Skills reads use it; other confinement sites in the repository keep their own checks. Symlinks are skipped, not followed. Hardlinks are not detected and load like any file (an accepted residual; creating a hardlink to a file you do not own is blocked on Linux by `fs.protected_hardlinks`). The check is not atomic with the later open or write: a directory swapped for a symlink in between still wins for the writer, and the loader's `O_NOFOLLOW` covers the last path component only.
+3. Bundle paths are checked with the shared helper `fsm_llm.security.resolve_within(root, relative) -> Path | None`: resolve first, compare path components, never `startswith`. the OKF loader, the OKF writer and the Agent Skills reads use it; other confinement sites in the repository keep their own checks. Symlinks are skipped, not followed. Hardlinks are not detected and load like any file (an accepted residual; creating a hardlink to a file you do not own is blocked on Linux by `fs.protected_hardlinks`). The check is not atomic with the later open or write: a directory swapped for a symlink in between still wins for the writer, and the loader's `O_NOFOLLOW` covers the last path component only.
 4. Every read is bounded (`OKFLimits` including the `max_seconds` load deadline of 120 s, the separate check and backlink deadline, the frontmatter and issue caps above), and a spent load bound is flagged by the okf tools and the CLI: an incomplete bundle adds the fixed note to every okf tool reply, and the CLI prints it to stderr. The plain-FSM handler records and the `OKFMemoryBackend` summaries carry no note (see Known limits).
 5. The trust tier is a claim of the bundle, never authorization. Every place that shows it to a model or a reader says so (`trust (claimed by bundle): <tier>`, handler key `trust_claimed`).
 
@@ -964,7 +836,6 @@ FSMError
 ├── HandlerSystemError (-> HandlerExecutionError)
 ├── ReasoningEngineError (-> ReasoningExecutionError, ReasoningClassificationError)
 ├── WorkflowError (-> Definition, Step, Instance, Timeout, Validation, State, Event, Resource)
-├── HarnessError (-> HarnessArtifactError, HarnessOwnershipError, HarnessReentrancyError, HarnessConfinementError)
 ├── EvalError (-> EvalConfigError, EvalDatasetError)
 └── AgentError (-> ToolExecution, ToolNotFound, BudgetExhausted, ApprovalDenied, AgentTimeout, Evaluation)
     └── MetaBuilderError (-> Builder, MetaValidation, Output)

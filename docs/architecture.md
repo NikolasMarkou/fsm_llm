@@ -120,7 +120,7 @@ API.run_until_terminal(conversation_id, *, max_steps, max_seconds=None, before_s
   → RunBudgetExceededError when a budget is spent; a conversation closed mid-run ends it normally
 ```
 
-This is how the agents, the harness, the reasoning engine and any program that drives an FSM by itself run a conversation: no synthetic user message is ever sent. The reasoning engine runs one orchestrator run whose `before_step` hook pushes and pops the strategy FSMs. `advance_stream` and `run_until_terminal_stream` are the streaming forms (reply text only).
+This is how the agents, the reasoning engine and any program that drives an FSM by itself run a conversation: no synthetic user message is ever sent. The reasoning engine runs one orchestrator run whose `before_step` hook pushes and pops the strategy FSMs. `advance_stream` and `run_until_terminal_stream` are the streaming forms (reply text only).
 
 ### Completion States (tool calling and structured output)
 
@@ -214,13 +214,11 @@ fsm_llm (core, includes classification)
 ├── fsm_llm.agents     -- Uses API (auto-generates FSMs, drives them with run_until_terminal)
 │                          + handlers for tool execution; native_fc and the meta-builder use completion states
 ├── fsm_llm.monitor    -- Uses API + handlers (observer callbacks at priority 9999)
-├── fsm_llm.harness    -- Uses API (hand-written FSM) + handlers at state entry; dispatches
-│                          fsm_llm.agents workers as protocol roles
 └── fsm_llm.eval       -- Runs example scripts as subprocesses; drives scripted conversations
                            through API (one instance per trial) and checks the outcome
 ```
 
-The six extensions are subpackages of `fsm_llm`. Core never imports them at package
+The five extensions are subpackages of `fsm_llm`. Core never imports them at package
 import time; each one imports core (`from fsm_llm import API`).
 
 | Package | Integration | Key Mechanism |
@@ -230,104 +228,7 @@ import time; each one imports core (`from fsm_llm import API`).
 | Workflows | Async engine + ConversationStep | ConversationStep creates API instance for FSM conversations |
 | Agents | Auto-generated FSMs + handlers, driven by core `run_until_terminal` | `build_react_fsm()` generates FSM; handlers execute tools on state entry; core owns the step and time budgets; no synthetic message is sent. `native_fc` runs on core completion states (native tool calls); the meta-builder is an FSM driven with `converse`/`advance`. Also covers multi-agent graph/swarm orchestration, MCP tools, A2A remote agents, and semantic tool retrieval |
 | Monitor | Observer handlers + loguru sink + core graph data | Registers observer handlers (priority 9999; not POST_TRANSITION), never modifies state; FSM graphs come from `build_fsm_graph` |
-| Harness | Hand-written FSM + state-entry handlers | `build_harness_fsm()` returns a 6-state definition whose gates are JsonLogic conditions; a handler per state entry dispatches one agent worker, and the gate values it writes are derived from the filesystem |
 | Eval | Subprocesses + public API only | `fsm-llm-eval examples` scores example output with a 0-4 heuristic; `fsm-llm-eval run` sends each case's turns through a fresh `API`, reads `get_current_state`/`get_data`/`has_conversation_ended`, and checks declared expectations over N trials. No handlers, no core changes |
-
-## The Harness: a Protocol on Top of the 2-Pass Core (`fsm_llm.harness`)
-
-The harness runs a 6-state planning protocol -- EXPLORE, PLAN, EXECUTE, REFLECT,
-PIVOT, CLOSE -- as an ordinary FSM-LLM conversation. It adds no machinery to the
-core: it is a definition, a set of handlers, and a filesystem layer.
-
-### Where it sits in the 2-pass flow
-
-Each protocol turn is one message-free `advance()` step of core's `run_until_terminal`, so it runs both passes. Two
-deliberate choices reduce that to exactly ONE core LLM call per turn -- Pass 2's
-response generation -- with Pass 1 issuing none at all:
-
-- **No state carries `extraction_instructions`.** Pass 1's additive
-  bulk-extraction call fires on the presence of that string alone, so the harness
-  states omit it entirely. Measured live: 2.000 -> 1.000 core LLM calls per turn.
-- **Every driver-owned context key is seeded before turn 1** -- the nine gate
-  flags plus the counters and rollups, sixteen in all. Core mints a required
-  extraction config for every key a transition condition names in
-  `requires_context_keys`, and skips a field already present in context. Seeding
-  them falsy means the model is never asked to invent a gate value, and it also
-  removes the per-turn extraction call each of those keys would otherwise cost.
-
-The second point is a security property, not an optimisation. Before the seeds
-existed, an LLM emitting `{"plan_approved": true, "close_confirmed": true}` in
-Pass 1 drove a full traverse to CLOSE while every worker dispatch failed and a
-DENYING approval callback was never consulted once.
-
-### Driver and worker: two different actors
-
-```
-HarnessAgent (the DRIVER)              worker (a ROLE)
-├── owns the FSM conversation          ├── an fsm_llm.agents agent
-├── owns all nine gate flags           ├── receives a RoleRequest (context SNAPSHOT)
-├── writes exactly one artifact        ├── holds only the tools its ownership
-│     (state.md), on transitions       │     entry grants it
-└── dispatches one worker per          └── returns an AgentResult; its keys pass
-      state entry                            an exact-type allowlist to reach context
-```
-
-A worker cannot reach the driver: `run`, `api` and `conversation_id` raise
-`HarnessReentrancyError` while a dispatch is in flight, and the re-dispatch and
-leash counters are driver run state rather than context keys -- so no worker can
-refill its own budget from inside its own callback.
-
-### Gates read the disk, not the reply
-
-This is the design commitment the rest follows from.
-
-- `findings_count` is a count of non-empty `findings/*.md` files, read back
-  through the same role-scoped `PlanMemory` the write tools wrote through. A
-  worker-supplied integer is popped from the payload and treated as advisory.
-- A dispatch that HOLDS a write tool must show a write-tool call in its trace
-  whose target now carries BYTES. Tool-name presence alone is not enough: a
-  `write_plan_file` the ownership layer refused appears in the trace and leaves
-  nothing.
-- A failed observation never fabricates a zero. No plan directory, a directory
-  that is not there yet, a path that is a file, or an I/O error all leave the gate
-  value UNCHANGED -- absence of evidence is not evidence of absence.
-
-These mechanisms exist because measurement demanded them, not because they were
-elegant: a 4B model returned "implemented retry-with-backoff in uploader.py"
-5 runs out of 5 having written zero bytes, and a payload claiming
-`findings_count: 3` over an empty `findings/` directory. Three successive attempts
-to fix this with prompt WORDING moved nothing; the mechanical check moved it
-immediately.
-
-### Filesystem as memory
-
-A plan directory holds 15 artifact kinds with strict Markdown grammars
-(`plan.md`'s 11 sections in exact order, `decisions.md`'s
-`## D-NNN | PHASE | YYYY-MM-DD` header, `changelog.md`'s 8 pipe-delimited
-fields). Two roots are confined independently -- `Workspace` over the source tree,
-`PlanMemory` over the plan directory -- through one `resolve()` chokepoint that
-resolves first and compares second. `PlanMemory` adds an ownership check from a
-single `OWNERSHIP` table that also derives each role's tool scope and prompt text,
-so what a role is TOLD it may write and what it CAN write are one fact.
-
-Writes are atomic (`mkstemp` in the target's own directory, then `os.replace`),
-because a torn `state.md` still parses and a truncated Fix-Attempts section reads
-as a leash that reset itself.
-
-### Safety bounds
-
-| Bound | Value | Enforced by |
-|---|---|---|
-| Autonomy leash | 2 fix attempts per plan step | HARD JsonLogic gate + the pre-step gate |
-| Leash grants | 2 human continues per plan step | driver counter; executor dispatches per step are bounded by `attempts x (1 + grants)` for any approval sequence |
-| Iteration cap | 6 | HARD gate on PLAN -> EXECUTE |
-| EXPLORE re-dispatches | 9 extra per run | driver run state, reset only per run |
-| Human gates | 4 (approve plan, confirm close, continue after leash, revert) | `HumanInTheLoop`; the default callback DENIES |
-
-The `leash-cap` revert is COMPUTED and scoped -- never touching the plan
-directory -- and reported, but executed only by an explicitly supplied callback
-that the approval gate has already granted. `git` is deliberately absent from the
-command allowlist, so the driver never shells out to it.
 
 ## Extension Points
 

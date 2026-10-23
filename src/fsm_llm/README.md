@@ -1,6 +1,6 @@
 # fsm_llm
 
-The `fsm_llm` package at `src/fsm_llm` is the whole FSM-LLM framework. Its top level is the core engine: it runs chatbots defined as finite state machines, where a large language model (LLM) reads each user message, pulls out data, and writes the reply. Six subpackages built on that core add reasoning, workflows, agents, a web dashboard, a planning harness, and evaluation tools.
+The `fsm_llm` package at `src/fsm_llm` is the whole FSM-LLM framework. Its top level is the core engine: it runs chatbots defined as finite state machines, where a large language model (LLM) reads each user message, pulls out data, and writes the reply. Five subpackages built on that core add reasoning, workflows, agents, a web dashboard, and evaluation tools.
 
 ## What it is for
 
@@ -29,7 +29,7 @@ flowchart TD
 - **Pass 1** asks the LLM to pull named values (such as `name` or `email`) out of the message and stores them in the conversation's context, a dictionary of everything collected so far.
 - **Transition rules** are written in JsonLogic, a small JSON rule language (for example `{">=": [{"var": "age"}, 18]}`). They are checked in plain Python, not by the LLM. If several transitions pass, the one with the lowest `priority` number wins; the LLM is asked only when two or more tie at that lowest priority.
 - **Pass 2** writes the reply from the state the conversation ends up in, so the bot never answers from a state it has already left. A state with empty `response_instructions` skips Pass 2: it makes no LLM call, replies with the empty string and adds nothing to the history.
-- **Steps without a user message**: `api.advance(conv_id)` runs the same two passes with no user message and returns an `AdvanceResult` (`state_before`, `state_after`, `transition_outcome`, `response`, `ended`). `api.run_until_terminal(conv_id, max_steps=N)` repeats it until a terminal state and raises `RunBudgetExceededError` when `max_steps` or `max_seconds` runs out. The agents and the harness are driven this way.
+- **Steps without a user message**: `api.advance(conv_id)` runs the same two passes with no user message and returns an `AdvanceResult` (`state_before`, `state_after`, `transition_outcome`, `response`, `ended`). `api.run_until_terminal(conv_id, max_steps=N)` repeats it until a terminal state and raises `RunBudgetExceededError` when `max_steps` or `max_seconds` runs out. The agents and the reasoning engine are driven this way.
 - **Handlers** are your own Python functions that run at 8 fixed points in this flow (start, before and after processing, before and after a transition, on context update, at the end, on error).
 - **FSM stacking** lets one conversation temporarily hand control to a second FSM (for example an address form) and come back with its results.
 - **Tool calling and structured output**: a state with the optional `completion` field makes its Pass 1 a single native tool-calling or JSON-schema call over a message list your handlers keep in the context. The reply (`{kind, text, calls}`) is stored under a key the transitions read; your handler runs the tools and appends the results with `tool_exchange`. The core never runs a tool itself. The `native_fc` agent and the meta-builder are built this way.
@@ -46,8 +46,6 @@ flowchart TD
     monitor[fsm_llm.monitor] --> core
     monitor -. launches .-> agents
     monitor -. demo workflows .-> workflows
-    harness[fsm_llm.harness] --> agents
-    harness --> core
     eval[fsm_llm.eval] --> core
 ```
 
@@ -61,7 +59,6 @@ flowchart TD
 | `workflows/` | Async, in-memory workflow engine: named steps over a shared context, 11 step types (Python function, API call, branch, LLM prompt, FSM conversation, agent, timer, wait for event, parallel, retry, ...) and a Python DSL | `WorkflowEngine`, `create_workflow`, `WorkflowBuilder`, `auto_step`, `condition_step`, ... |
 | `agents/` | 18 agent patterns (ReAct, ReWOO, Reflexion, plan and execute, debate, swarm, agent graph, ...), mostly built as generated FSMs; tools, human approval, memory, MCP and HTTP integration, OKF knowledge-bundle tools, a memory backend and exporters, Agent Skills read tools, and a meta-builder that designs an FSM, workflow or agent from a chat | `create_agent`, `ConfiguredAgentBuilder`, `ReactAgent`, `ToolRegistry`, `@tool`, `create_okf_tools`, `create_skill_tools`, `fsm-llm-meta` |
 | `monitor/` | FastAPI web dashboard to launch, watch and talk to FSMs, agents and workflows; optional OpenTelemetry export | `fsm-llm-monitor` (http://127.0.0.1:8420), `InstanceManager.attach_api`, `OTELExporter` |
-| `harness/` | Experimental "iterative planner" as a 6-state FSM (explore, plan, execute, reflect, pivot, close) whose gates count files on disk instead of trusting the model | `fsm-llm-harness new "goal"`, `HarnessAgent`, `HarnessAgentBuilder` |
 | `eval/` | Runs the repository examples and scores them 0 to 4, or runs scripted conversations against any FSM over several trials and reports pass rates with confidence intervals | `fsm-llm-eval examples`, `fsm-llm-eval run cases.json`, `run_dataset` |
 
 ## Files
@@ -84,7 +81,7 @@ flowchart TD
 - `validator.py`, `visualizer.py` - check an FSM file for problems; draw it as ASCII art, or as Mermaid or DOT through the graph data of `build_fsm_graph`.
 - `runner.py`, `__main__.py` - the interactive command-line chat.
 - `utilities.py` - JSON extraction from LLM text, FSM file loading, shared context walkers.
-- `security.py` - the two key checks every context filter uses: internal keys (`has_internal_prefix`) and secret-looking keys (`is_forbidden_context_entry`), and `resolve_within`, the shared check that a path stays inside a directory (used by the harness workspace, the OKF loader and writer and the Agent Skills reads).
+- `security.py` - the two key checks every context filter uses: internal keys (`has_internal_prefix`) and secret-looking keys (`is_forbidden_context_entry`), and `resolve_within`, the shared check that a path stays inside a directory (used by the OKF loader and writer and the Agent Skills reads).
 - `constants.py` - defaults, limits, environment variable names and shared key names; it also re-exports the names from `security.py`.
 - `okf.py` - Open Knowledge Format (OKF) support: read a bundle (a directory of markdown files with YAML frontmatter) with `load_bundle`, look up concepts, follow links and search them through `OKFBundle`, check it with `check_bundle`, write it with `write_bundle` (it refuses what it cannot render within its size caps, so a loaded bundle is not always writable). It follows OKF v0.2 (SPEC.md at commit ad30107, pre-1.0 and mutable). Bundle text is untrusted and is never executed. Import it by name: `from fsm_llm.okf import load_bundle`.
 - `okf_bridge.py` - turn memory entries into a bundle with `bundle_from_memory_entries`, and show capped concept summaries to a plain FSM with `create_okf_handler`. It was split out of `okf.py` and imports only public names from it. Import it by name: `from fsm_llm.okf_bridge import create_okf_handler`.
@@ -193,7 +190,7 @@ except BuildError as err:
     print(err.errors)
 ```
 
-`build()` raises `BuildError` (a `FSMError` and a `ValueError`, with `.errors` listing the problems and the constructor's own error chained as the cause). Dictionaries, lists and definitions you pass in are copied at `build()`; interfaces, stores and handlers stay shared with you. `set_llm_option` refuses a name that is a named `API` parameter (for example `model`) and tells you which setter to use. `FSMManagerBuilder` works the same way and needs `set_llm_interface(...)`. The subpackages follow the same convention: `ConfiguredAgentBuilder` and `AgentGraphBuilder` (agents), `WorkflowBuilder` (workflows), `HarnessAgentBuilder` (harness). The meta-builder's `FSMArtifactBuilder`, `WorkflowArtifactBuilder` and `AgentArtifactBuilder` are the one exception: they refuse a bad call immediately.
+`build()` raises `BuildError` (a `FSMError` and a `ValueError`, with `.errors` listing the problems and the constructor's own error chained as the cause). Dictionaries, lists and definitions you pass in are copied at `build()`; interfaces, stores and handlers stay shared with you. `set_llm_option` refuses a name that is a named `API` parameter (for example `model`) and tells you which setter to use. `FSMManagerBuilder` works the same way and needs `set_llm_interface(...)`. The subpackages follow the same convention: `ConfiguredAgentBuilder` and `AgentGraphBuilder` (agents), `WorkflowBuilder` (workflows). The meta-builder's `FSMArtifactBuilder`, `WorkflowArtifactBuilder` and `AgentArtifactBuilder` are the one exception: they refuse a bad call immediately.
 
 The subpackages have their own commands:
 
@@ -202,7 +199,6 @@ python -m fsm_llm.reasoning "What is 15% of 240?"
 fsm-llm-meta --output my_bot.json        # design an FSM by chatting
 fsm-llm-monitor                          # needs: pip install -e ".[monitor]"
 fsm-llm-eval examples --category basic   # run from the repository root
-fsm-llm-harness new "add a retry to the uploader" --create-only
 fsm-llm-okf validate ./my_bundle         # check an Open Knowledge Format bundle
 fsm-llm-skills validate ./skills         # check Agent Skills folders (also list, show)
 ```
@@ -212,14 +208,14 @@ fsm-llm-skills validate ./skills         # check Agent Skills folders (also list
 - Any provider litellm supports works. The default model is `ollama_chat/qwen3.5:4b`, or whatever `LLM_MODEL` is set to. API keys come from the usual provider environment variables.
 - To use your own LLM client, pass `llm_interface=` to `API`. Do not pass `model`, `temperature`, `max_tokens` or other LLM settings beside it: `API` refuses them, because the interface owns them.
 - Core installs need loguru, litellm, pydantic, python-dotenv and pyyaml (>=6.0, for OKF and Agent Skills frontmatter).
-- Extras: `reasoning`, `workflows`, `agents` and `eval` add no packages; `harness` pulls in `agents`; `monitor` adds fastapi, uvicorn and jinja2; `mcp`, `otel` and `a2a` add optional integrations for agents and the monitor.
+- Extras: `reasoning`, `workflows`, `agents` and `eval` add no packages; `monitor` adds fastapi, uvicorn and jinja2; `mcp`, `otel` and `a2a` add optional integrations for agents and the monitor.
 - A state with no transitions is terminal: once reached, `converse` and `advance` raise an error.
 - `required_context_keys` only says what to extract. To block a transition until data exists, add a condition with `logic`.
 - Context keys starting with `_`, `system_`, `internal_`, or `__` are internal and hidden from `get_data()`. Keys that look like passwords, tokens, or API keys are filtered out of prompts.
 - The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`. This covers the subpackages too.
 - `FileSessionStore` saves state to JSON, so values like `datetime` come back as strings.
 - One conversation can only process one message at a time. A second concurrent call for the same conversation raises an error instead of waiting.
-- Errors from the core, reasoning, workflows, agents, harness and eval all derive from `FSMError`, and so does `BuildError`. The monitor's `MonitorError` does not.
+- Errors from the core, reasoning, workflows, agents and eval all derive from `FSMError`, and so does `BuildError`. The monitor's `MonitorError` does not.
 
 ## Where to go next
 
