@@ -1783,11 +1783,8 @@ class TestRender:
         assert out.split("\n")[-2:] == ["</available_skills>", SKILL_CATALOG_END]
         assert "<script>" not in out and "alert(1)" in out
         assert "&lt;/available_skills&gt;" in out and "&amp;" in out
-
-    def test_quotes_and_apostrophes_are_plain_text(self, tmp_path: Path) -> None:
-        _, out = self._one(tmp_path, "Use when it's \"asked\" about Anne's file.")
-        assert "it's \"asked\" about Anne's file." in out
-        assert "&#x27;" not in out and "&quot;" not in out
+        # quotes and apostrophes are plain text
+        assert "&amp; \"q\" 'a'" in out and "&#x27;" not in out and "&quot;" not in out
 
     def test_a_fixed_end_line_closes_the_block_before_the_incomplete_note(
         self, tmp_path: Path
@@ -1840,6 +1837,7 @@ class TestRender:
         assert lines[3].startswith("<skill><name>two</name>")
         assert lines[-2:] == ["</available_skills>", SKILL_CATALOG_END]
         assert len(lines) == 6
+        assert str(tmp_path) not in out and "location" not in out  # no path
 
     def test_ansi_bidi_and_line_breaks_in_a_description_are_stripped(
         self, tmp_path: Path
@@ -1858,10 +1856,6 @@ class TestRender:
         assert "w" * 250 in out and "w" * 251 not in out
         assert "w" * 20 in catalog.render_catalog(description_chars=20)
         assert "w" * 21 not in catalog.render_catalog(description_chars=20)
-
-    def test_no_absolute_path_is_ever_rendered(self, tmp_path: Path) -> None:
-        _, out = self._one(tmp_path, "d")
-        assert str(tmp_path) not in out and "location" not in out
 
     def test_an_empty_catalog_renders_as_an_empty_string(self, tmp_path: Path) -> None:
         assert load_skills(tmp_path).render_catalog() == ""
@@ -1942,7 +1936,14 @@ class TestRealWorldLayouts:
         with pytest.raises(SkillError):
             catalog.read_resource("open", "../open/a.txt")
 
+    @pytest.mark.integration
+    @pytest.mark.skipif(
+        os.environ.get("FSM_LLM_REAL_SKILLS") != "1",
+        reason="opt-in: set FSM_LLM_REAL_SKILLS=1 to read the real ~/.claude/skills",
+    )
     def test_the_real_home_skills_load_without_an_error_issue(self) -> None:
+        """Opt-in (integration marker and FSM_LLM_REAL_SKILLS=1): it reads the
+        developer's own ~/.claude/skills, which no test run may depend on."""
         home = Path.home() / ".claude" / "skills"
         if not home.is_dir():
             pytest.skip("no ~/.claude/skills on this machine")
