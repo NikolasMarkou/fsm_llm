@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pre-registered live bench for agent tool loops (E1 of docs/agents_roadmap.md).
 
-Same discipline as ``scripts/harness_bench.py``: raw jsonl rows, a manifest
+Same discipline as ``scripts/bench_common.py``: raw jsonl rows, a manifest
 written before row 1, blocks run once at fixed n, and a ``report`` that
 recounts every number from the committed rows.
 
@@ -79,11 +79,11 @@ LIMITS: dict[str, Any] = {
 }
 
 
-def _load_harness_bench() -> Any:
-    """harness_bench, loaded by file path (stdlib only, inert at import).
+def _load_bench_common() -> Any:
+    """bench_common, loaded by file path (stdlib only, inert at import).
 
     One module object per process: a copy already imported as
-    ``harness_bench`` (the tests put scripts/ on sys.path) is reused, so
+    ``bench_common`` (the tests put scripts/ on sys.path) is reused, so
     ``BenchDataError`` is one class, not two.
     """
     # DECISION plan-2026-09-29T184639-65baa765/D-002
@@ -91,31 +91,31 @@ def _load_harness_bench() -> Any:
     # _model_digest or BenchDataError into this file, and do NOT import them
     # from fsm_llm.eval: a third copy would need its own parity test, and
     # fsm_llm pulls litellm, which opens a socket at import (the offline
-    # `report` must not). harness_bench is the one stdlib source; its copies
+    # `report` must not). bench_common is the one stdlib source; its copies
     # are held equal to fsm_llm.eval by test_bench_parity.py. See D-002.
-    cached = sys.modules.get("harness_bench")
+    cached = sys.modules.get("bench_common")
     if cached is not None:
         return cached
-    path = Path(__file__).resolve().parent / "harness_bench.py"
-    spec = importlib.util.spec_from_file_location("harness_bench", path)
+    path = Path(__file__).resolve().parent / "bench_common.py"
+    spec = importlib.util.spec_from_file_location("bench_common", path)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {path}")
     module = importlib.util.module_from_spec(spec)
-    sys.modules["harness_bench"] = module
+    sys.modules["bench_common"] = module
     spec.loader.exec_module(module)
     return module
 
 
-hb = _load_harness_bench()
-BenchDataError = hb.BenchDataError
-wilson_ci = hb.wilson_ci
-fisher_exact_two_sided = hb.fisher_exact_two_sided
-append_row = hb.append_row
-read_rows = hb.read_rows
-sha256_json = hb.sha256_json
-manifest_differences = hb.manifest_differences
+bc = _load_bench_common()
+BenchDataError = bc.BenchDataError
+wilson_ci = bc.wilson_ci
+fisher_exact_two_sided = bc.fisher_exact_two_sided
+append_row = bc.append_row
+read_rows = bc.read_rows
+sha256_json = bc.sha256_json
+manifest_differences = bc.manifest_differences
 
-#: harness_bench's six comparability fields plus the agent-bench extras.
+#: bench_common's six comparability fields plus the agent-bench extras.
 EXTRA_MANIFEST_FIELDS = (
     "tasks_sha256",
     "trials",
@@ -134,7 +134,7 @@ DISCLOSURE_FIELDS = (
     "tool_schemas_sha256",
     "first_request",
 )
-MANIFEST_FIELDS = tuple(hb.MANIFEST_FIELDS) + EXTRA_MANIFEST_FIELDS + DISCLOSURE_FIELDS
+MANIFEST_FIELDS = tuple(bc.MANIFEST_FIELDS) + EXTRA_MANIFEST_FIELDS + DISCLOSURE_FIELDS
 
 
 # --- BEGIN TASKS (hashed: tools, tasks, graders, reference solvers) ----------
@@ -902,13 +902,13 @@ def request_disclosure(arm_name: str, model: str) -> dict[str, Any]:
     Interface contract (callers: ``build_manifest``, so also ``run``'s drift
     check; the tests):
         - Builds the arm for every task on the trial interface
-          (``metered_interface``) and runs it inside ``hb.captured_wire``:
+          (``metered_interface``) and runs it inside ``bc.captured_wire``:
           core's send binding records the final request and refuses it, so
           nothing is sent and the run ends in an error, which is expected and
           recorded by name.
         - Returns ``{"llm_request", "agent_class", "run_cap",
           "tool_schemas_sha256", "first_request"}``: the first task's first
-          request settings with values (``hb.wire_settings``: temperature,
+          request settings with values (``bc.wire_settings``: temperature,
           ``max_tokens``, timeout, ``max_retries``, Ollama's
           ``reasoning_effort``, any extra kwarg such as a ``seed``; secrets
           redacted), ``None`` when no task sent a request; the agent's
@@ -917,7 +917,7 @@ def request_disclosure(arm_name: str, model: str) -> dict[str, Any]:
           "max_seconds"}`` (``None`` for an agent without
           ``_step_ceiling``); per task the ``sha256_json`` of the registry's
           ``get_json_schemas()``; per task the first request's
-          ``hb.wire_digest`` (date line and task text masked, so it is
+          ``bc.wire_digest`` (date line and task text masked, so it is
           stable across days and time zones) plus ``run_error`` (``None``
           when the run sent no request).
         - Raises whatever the arm factory raises (a broken arm fails the
@@ -933,7 +933,7 @@ def request_disclosure(arm_name: str, model: str) -> dict[str, Any]:
         tool_schemas[task.id] = sha256_json(build_registry(selected).get_json_schemas())
         agent = ARMS[arm_name](selected, model, metered_interface(model))
         run_error = None
-        with hb.captured_wire() as captured:
+        with bc.captured_wire() as captured:
             try:
                 agent.run(task.prompt)
             except Exception as exc:  # every request is refused: the run fails
@@ -942,8 +942,8 @@ def request_disclosure(arm_name: str, model: str) -> dict[str, Any]:
             first_request[task.id] = None
             continue
         if llm_request is None:
-            llm_request = hb.wire_settings(captured[0])
-        digest = hb.wire_digest(captured[0], task.prompt)
+            llm_request = bc.wire_settings(captured[0])
+        digest = bc.wire_digest(captured[0], task.prompt)
         first_request[task.id] = {**digest, "run_error": run_error}
     step_ceiling = getattr(agent, "_step_ceiling", None)
     run_cap = None
@@ -1157,14 +1157,14 @@ def build_manifest(
         "order": "trial-major: every task once per trial, tasks in file order",
         "seed": None,
         "model": model,
-        "created_at": hb._utc_now(),
+        "created_at": bc._utc_now(),
         "prompt_bytes_sha256": prompt_sha256(),
         "tool_surface": tool_surface(arm_name),
         "fixture_hash": fixture,
         "tasks_sha256": fixture,
-        "model_digest": hb._model_digest(_model_tag(model)),
+        "model_digest": bc._model_digest(_model_tag(model)),
         "arm": {"name": arm_name, "factory": (ARMS[arm_name].__doc__ or "").strip()},
-        "git_commit": hb._git_commit(),
+        "git_commit": bc._git_commit(),
         "temperature": LIMITS["temperature"],
         "limits": dict(LIMITS),
         "wrapper_version": WRAPPER_VERSION,
@@ -1212,7 +1212,7 @@ def register_block(
     manifest = build_manifest(
         bench_id=bench_id, block=block, arm_name=arm_name, trials=trials, model=model
     )
-    hb._write_json(manifest_path, manifest)
+    bc._write_json(manifest_path, manifest)
     return manifest_path
 
 
@@ -1230,7 +1230,7 @@ def _checked_manifest(
         bench_id=bench_id, block=block, arm_name=arm_name, trials=trials, model=model
     )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    drift = hb.pinned_drift(manifest, current, _PINNED_AT_RUN)
+    drift = bc.pinned_drift(manifest, current, _PINNED_AT_RUN)
     if drift:
         raise BenchDataError(
             f"{manifest_path} was registered with different {drift}; "
@@ -1322,16 +1322,16 @@ def run_block(
             trials=trials,
             model=model,
         )
-        hb._write_json(manifest_path, manifest)
+        bc._write_json(manifest_path, manifest)
     print(f"pre-registered {manifest_path} (digest {manifest['model_digest']})")
-    started, status, ran = hb._utc_now(), "aborted", hb.run_commit()
+    started, status, ran = bc._utc_now(), "aborted", bc.run_commit()
     try:
         total = len(TASKS) * trials
         done = 0
         for trial in range(1, trials + 1):
             for task in TASKS:
                 row = _trial_row(task, trial, arm_name, model)
-                row.update(bench_id=bench_id, block=block, ts=hb._utc_now())
+                row.update(bench_id=bench_id, block=block, ts=bc._utc_now())
                 append_row(rows_path, row)
                 done += 1
                 print(
@@ -1535,14 +1535,14 @@ def write_summary(
         "arm": arm_name,
         "status": status,
         "started_at": started_at,
-        "finished_at": hb._utc_now(),
+        "finished_at": bc._utc_now(),
         "manifest": manifest_path.name,
-        # The code the run executed (``hb.run_commit`` at run start); the
+        # The code the run executed (``bc.run_commit`` at run start); the
         # manifest's git_commit is the registration commit.
         "run": run,
         "metrics": compute_metrics(read_rows(rows_path), int(manifest["trials"])),
     }
-    hb._write_json(summary_path, summary)
+    bc._write_json(summary_path, summary)
     return summary
 
 

@@ -9,7 +9,7 @@ against declared expectations over repeated trials; CLI ``fsm-llm-eval run``,
 Python ``run_dataset``),
 a layered ``EvalConfig``, binomial statistics (Wilson intervals, Fisher exact
 test), append-only result rows, and collision-safe run directories shared with
-the harness live bench.
+the live benches (``scripts/bench_common.py``).
 
 Import it as ``from fsm_llm import eval as fsm_eval`` or import names directly
 (``from fsm_llm.eval import wilson_ci``) to avoid shadowing the builtin.

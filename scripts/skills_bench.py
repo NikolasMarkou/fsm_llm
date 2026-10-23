@@ -17,7 +17,7 @@ The rule is in ``bench_data/skills-disclosure/PRE_REGISTRATION_B*.md``.
 
 Same discipline as ``agents_bench.py`` (manifest before row 1, a block runs
 once, ``report`` recounts raw rows); it reuses that module's helpers through
-``ab``/``hb``: no copy of wilson, fisher, append_row or read_rows. The module
+``ab``/``bc``: no copy of wilson, fisher, append_row or read_rows. The module
 top level is stdlib only; ``fsm_llm`` loads lazily. Raw requests and responses
 of every trial go to ``logs/skills-bench/`` (gitignored).
 """
@@ -39,9 +39,9 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import agents_bench as ab  # loads harness_bench as ab.hb
+import agents_bench as ab  # loads bench_common as ab.bc
 
-hb = ab.hb  # wilson_ci, fisher_exact_two_sided, append_row, read_rows, pinned_drift
+bc = ab.bc  # wilson_ci, fisher_exact_two_sided, append_row, read_rows, pinned_drift
 
 ROOT = Path(__file__).resolve().parent.parent
 BENCH_DATA = ROOT / "scripts" / "bench_data"
@@ -286,7 +286,7 @@ def hint_ablation(hint_on: bool) -> Iterator[None]:
 @contextmanager
 def wire_spy() -> Iterator[list[dict[str, Any]]]:
     """Record every request and response at core's one send binding
-    (``fsm_llm.llm.completion``, the binding ``hb.captured_wire`` replaces)
+    (``fsm_llm.llm.completion``, the binding ``bc.captured_wire`` replaces)
     while still sending. Yields the list; restores the binding on exit."""
     import fsm_llm.llm as core_llm
 
@@ -417,8 +417,8 @@ def build_manifest(bench_id: str, block: str, arm: str) -> dict[str, Any]:
         "arm": {"name": arm, "agent": kind, "hint": hint_on}, "order": "model-major, arms of one model alternate" if block == "B1" else "question-major, arms alternate, first arm flips",
         "n_questions": len(QUESTIONS), "limits": dict(LIMITS), "fixture_hash": fixture_sha256(),
         "src_sha256": {rel: hashlib.sha256((ROOT / rel).read_bytes()).hexdigest() for rel in SRC_PINS},
-        "model_digest": hb._model_digest(model.split("/", 1)[1]),
-        "git_commit": hb._git_commit(), "created_at": hb._utc_now(),
+        "model_digest": bc._model_digest(model.split("/", 1)[1]),
+        "git_commit": bc._git_commit(), "created_at": bc._utc_now(),
     }  # fmt: skip
 
 
@@ -429,7 +429,7 @@ def fixture_catalog(root: Path) -> Any:
     build_skills(root)
     catalog = load_skills(root)
     if problems := check_fixture(catalog):
-        raise hb.BenchDataError("fixture: " + "; ".join(problems))
+        raise bc.BenchDataError("fixture: " + "; ".join(problems))
     return catalog
 
 
@@ -437,12 +437,12 @@ def register_block(bench_id: str, block: str) -> list[Path]:
     """Write every arm's manifest of *block* (nothing else), once."""
     bdir = BENCH_DATA / bench_id / block
     if existing := [p for a in BLOCKS[block] for p in _paths(bdir, a) if p.exists()]:
-        raise hb.BenchDataError(f"{existing[0]} exists -- a block is registered ONCE")
+        raise bc.BenchDataError(f"{existing[0]} exists -- a block is registered ONCE")
     with tempfile.TemporaryDirectory(prefix="skills-bench-") as tmp:
         fixture_catalog(Path(tmp))
     bdir.mkdir(parents=True, exist_ok=True)
     for arm in BLOCKS[block]:
-        hb._write_json(_paths(bdir, arm)[0], build_manifest(bench_id, block, arm))
+        bc._write_json(_paths(bdir, arm)[0], build_manifest(bench_id, block, arm))
     return [_paths(bdir, arm)[0] for arm in BLOCKS[block]]
 
 
@@ -458,7 +458,7 @@ def metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     k = {g: sum(bool(r[g]) for r in need) for g in ("g1", "g2", "g3", "g4")}
     return {
         "n_rows": len(rows), "n_units": len(need), **{f"k_{g}": v for g, v in k.items()},
-        "wilson_g1": [round(x, 4) for x in hb.wilson_ci(k["g1"], len(need))],
+        "wilson_g1": [round(x, 4) for x in bc.wilson_ci(k["g1"], len(need))],
         "k_pass_hat2": sum(not first[q]["control"] and len(rs) >= TRIALS and all(r["g1"] for r in rs) for q, rs in by_q.items()),
         "controls_n": len(ctrl), "controls_k_g1": sum(bool(r["g1"]) for r in ctrl),
         "invalid_cells": sum(not r["hint_valid"] for r in need), "invalid_rows": sum(not r["hint_valid"] for r in rows),
@@ -469,9 +469,9 @@ def metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def write_summary(bdir: Path, arm: str, status: str, started: str, run: dict) -> dict:
     """Summary from the arm's raw rows; ``status`` is complete or aborted: reason."""
     _, rows_path, summary_path = _paths(bdir, arm)
-    summary = {"arm": arm, "status": status, "started_at": started, "finished_at": hb._utc_now(),
-               "run": run, "metrics": metrics(hb.read_rows(rows_path))}  # fmt: skip
-    hb._write_json(summary_path, summary)
+    summary = {"arm": arm, "status": status, "started_at": started, "finished_at": bc._utc_now(),
+               "run": run, "metrics": metrics(bc.read_rows(rows_path))}  # fmt: skip
+    bc._write_json(summary_path, summary)
     return summary
 
 
@@ -482,17 +482,17 @@ def run_block(bench_id: str, block: str) -> dict[str, dict[str, Any]]:
     for arm in arms:
         manifest_path, rows_path, summary_path = _paths(bdir, arm)
         if rows_path.exists() or summary_path.exists():
-            raise hb.BenchDataError(f"{rows_path} exists -- a block is run ONCE")
+            raise bc.BenchDataError(f"{rows_path} exists -- a block is run ONCE")
         if not manifest_path.is_file():
-            raise hb.BenchDataError(f"{manifest_path} missing -- register first")
+            raise bc.BenchDataError(f"{manifest_path} missing -- register first")
         recorded = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if drift := hb.pinned_drift(
+        if drift := bc.pinned_drift(
             recorded, build_manifest(bench_id, block, arm), PINNED_AT_RUN
         ):
-            raise hb.BenchDataError(f"{arm} was registered with different {drift}")
+            raise bc.BenchDataError(f"{arm} was registered with different {drift}")
     started, ran, status, streak, todo = (
-        hb._utc_now(),
-        hb.run_commit(),
+        bc._utc_now(),
+        bc.run_commit(),
         "aborted: not finished",
         0,
         plan(block),
@@ -503,13 +503,13 @@ def run_block(bench_id: str, block: str) -> dict[str, dict[str, Any]]:
             for done, (arm, q, trial) in enumerate(todo, 1):
                 raw = RAW_DIR / bench_id / block / f"{arm}__{q.id}__t{trial}.json"
                 row = run_trial(arm, q, trial, catalog, raw)
-                row.update(bench_id=bench_id, block=block, ts=hb._utc_now())
-                hb.append_row(_paths(bdir, arm)[1], row)
+                row.update(bench_id=bench_id, block=block, ts=bc._utc_now())
+                bc.append_row(_paths(bdir, arm)[1], row)
                 print(f"  {block}/{arm} {done}/{len(todo)} {q.id} t{trial}: {row['shape']} g1={row['g1']} "
                       f"hint_seen={row['hint_seen']} calls={row['llm_calls']} {row['latency_s']}s", flush=True)  # fmt: skip
                 streak = streak + 1 if row["error"] else 0
                 if streak >= OUTAGE_ROWS:
-                    raise hb.BenchDataError(
+                    raise bc.BenchDataError(
                         f"{OUTAGE_ROWS} consecutive errored rows (provider outage?)"
                     )
         status = "complete"
@@ -544,7 +544,7 @@ def decide_b0(
     if on["invalid_cells"] + off["invalid_cells"] > 2:
         return "block invalid (more than 2 invalid cells)", "KEEP"
     diff = on["k_g1"] - off["k_g1"]
-    p = hb.fisher_exact_two_sided(on["k_g1"], PRIMARY_N, off["k_g1"], PRIMARY_N)
+    p = bc.fisher_exact_two_sided(on["k_g1"], PRIMARY_N, off["k_g1"], PRIMARY_N)
     at = f"(diff {diff}, p={p:.4f})"
     if diff >= 4 and p < 0.05:
         return f"effect shown {at}", "KEEP"
@@ -564,12 +564,12 @@ def report(bench_id: str, blocks: list[str] | None = None) -> int:
     apply the B0 rule. 0 ok; 1 on a mismatch."""
     bench_dir, ok = BENCH_DATA / bench_id, True
     if not bench_dir.is_dir():
-        raise hb.BenchDataError(f"no such bench: {bench_dir}")
+        raise bc.BenchDataError(f"no such bench: {bench_dir}")
     for block in blocks or sorted(d.name for d in bench_dir.iterdir() if d.is_dir()):
         recount, complete = {}, True
         for rows_path in sorted((bench_dir / block).glob("rows_*.jsonl")):
             arm = rows_path.stem.split("_", 1)[1]
-            recount[arm] = m = json.loads(json.dumps(metrics(hb.read_rows(rows_path))))
+            recount[arm] = m = json.loads(json.dumps(metrics(bc.read_rows(rows_path))))
             print(f"{bench_id} {block} [{arm}] rows={m['n_rows']}: G1 first trial {m['k_g1']}/{m['n_units']} "
                   f"wilson95={m['wilson_g1']}; G2 {m['k_g2']} G3 {m['k_g3']} G4 {m['k_g4']}; pass^2 "
                   f"{m['k_pass_hat2']}; controls {m['controls_k_g1']}/{m['controls_n']}; shapes {m['shapes']}; "
@@ -595,7 +595,7 @@ def report(bench_id: str, blocks: list[str] | None = None) -> int:
             print(f"B0 rule: {verdict} -> {action} the hint")
         if block == "B1" and {"native_4b", "native_4b_hint_off"} <= recount.keys():
             on, off = recount["native_4b"], recount["native_4b_hint_off"]
-            p = hb.fisher_exact_two_sided(
+            p = bc.fisher_exact_two_sided(
                 on["k_g1"], on["n_units"], off["k_g1"], off["n_units"]
             )
             print(f"B1 native 4b hint on {on['k_g1']}/{on['n_units']} vs off {off['k_g1']}/{off['n_units']}: Fisher p={p:.4f} (informational, no gate)")  # fmt: skip
@@ -626,7 +626,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             return report(args.bench_id, args.blocks)
         return 0
-    except hb.BenchDataError as exc:
+    except bc.BenchDataError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

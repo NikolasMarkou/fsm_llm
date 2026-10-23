@@ -27,7 +27,7 @@ from fsm_llm.agents.agent_skills import create_skill_tools
 from fsm_llm.constants import SKILL_READ_HINT
 
 Q = {q.id: q for q in sb.QUESTIONS}
-BAD = sb.hb.BenchDataError
+BAD = sb.bc.BenchDataError
 BID = "skills-disclosure"
 FIXTURE_SHA = "a62f855bc2b0254edc65a329304c498adec7a763e5b784ec60ab8835bcec6ecc"
 
@@ -87,8 +87,8 @@ def bench(tmp_path, monkeypatch):
     """Bench data and raw dirs in tmp; digest and commit need no daemon or git."""
     monkeypatch.setattr(sb, "BENCH_DATA", tmp_path / "data")
     monkeypatch.setattr(sb, "RAW_DIR", tmp_path / "raw")
-    monkeypatch.setattr(sb.hb, "_model_digest", lambda tag: {"tag": tag, "digest": "d"})
-    monkeypatch.setattr(sb.hb, "_git_commit", lambda: "c" * 40)
+    monkeypatch.setattr(sb.bc, "_model_digest", lambda tag: {"tag": tag, "digest": "d"})
+    monkeypatch.setattr(sb.bc, "_git_commit", lambda: "c" * 40)
     return tmp_path / "data" / BID
 
 
@@ -222,7 +222,7 @@ class TestBlocks:
         sb.register_block(BID, "B0")
         out = sb.run_block(BID, "B0")
         assert {s["status"] for s in out.values()} == {"complete"}
-        assert len(sb.hb.read_rows(bench / "B0" / "rows_hint_on.jsonl")) == 24
+        assert len(sb.bc.read_rows(bench / "B0" / "rows_hint_on.jsonl")) == 24
         assert sb.report(BID) == 0
         assert "no effect shown (diff 0, p=1.0000) -> REMOVE" in capsys.readouterr().out
         path = bench / "B0" / "summary_hint_off.json"
@@ -269,7 +269,7 @@ class TestBlocks:
                 row |= dict(
                     g1=g != q.control, g2=later, g3=later, g4=later, hint_valid=1
                 )
-                sb.hb.append_row(bench / "B0" / f"rows_{arm}.jsonl", row)
+                sb.bc.append_row(bench / "B0" / f"rows_{arm}.jsonl", row)
             sb.write_summary(bench / "B0", arm, "complete", "t", {})
         assert sb.report(BID) == 0
         assert "effect shown (diff 10, p=0.0000) -> KEEP" in capsys.readouterr().out
@@ -286,7 +286,7 @@ class TestBlocks:
         assert on == ("native_fc", sb.M4B, True) and off == (*on[:2], False)
         sb.register_block(BID, "B1")
         sb.run_block(BID, "B1")
-        assert len(sb.hb.read_rows(bench / "B1" / "rows_native_4b_hint_off.jsonl")) == 24  # fmt: skip
+        assert len(sb.bc.read_rows(bench / "B1" / "rows_native_4b_hint_off.jsonl")) == 24  # fmt: skip
         assert sb.report(BID) == 0
         out = capsys.readouterr().out
         assert "Fisher p=1.0000 (informational, no gate)" in out and "B0 rule" not in out  # fmt: skip

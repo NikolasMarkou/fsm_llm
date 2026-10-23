@@ -1,4 +1,4 @@
-"""Parity between ``scripts/harness_bench.py`` and its ``fsm_llm.eval`` twins.
+"""Parity between ``scripts/bench_common.py`` and its ``fsm_llm.eval`` twins.
 
 The bench script keeps stdlib copies of seven helpers so it stays offline
 (D-008 of plan 581c2634: importing ``fsm_llm`` pulls litellm, which opens a
@@ -8,7 +8,6 @@ socket). These tests are what keeps the two copies from drifting.
 from __future__ import annotations
 
 import importlib.util
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -18,7 +17,7 @@ import pytest
 from fsm_llm.eval import records, stats
 
 ROOT = Path(__file__).resolve().parents[2]
-BENCH = ROOT / "scripts" / "harness_bench.py"
+BENCH = ROOT / "scripts" / "bench_common.py"
 
 _FISHER_TABLES = [
     (0, 1, 0, 1),
@@ -35,7 +34,7 @@ _FISHER_TABLES = [
 
 
 def _load_bench():
-    spec = importlib.util.spec_from_file_location("_harness_bench_parity", BENCH)
+    spec = importlib.util.spec_from_file_location("_bench_common_parity", BENCH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -43,22 +42,22 @@ def _load_bench():
 
 
 @pytest.fixture(scope="module")
-def hb():
+def bc():
     return _load_bench()
 
 
 class TestStatsParity:
     @pytest.mark.parametrize("n", [0, 1, 2, 3, 5, 10, 30, 40, 100])
-    def test_wilson_equal_over_every_k(self, hb, n):
+    def test_wilson_equal_over_every_k(self, bc, n):
         """Defect guarded: an edit to one Wilson copy but not the other."""
         for k in range(n + 1):
-            assert hb.wilson_ci(k, n) == stats.wilson_ci(k, n)
-            assert hb.wilson_ci(k, n, 2.576) == stats.wilson_ci(k, n, 2.576)
+            assert bc.wilson_ci(k, n) == stats.wilson_ci(k, n)
+            assert bc.wilson_ci(k, n, 2.576) == stats.wilson_ci(k, n, 2.576)
 
     @pytest.mark.parametrize("table", _FISHER_TABLES)
-    def test_fisher_equal(self, hb, table):
+    def test_fisher_equal(self, bc, table):
         """Defect guarded: an edit to one Fisher copy but not the other."""
-        assert hb.fisher_exact_two_sided(*table) == stats.fisher_exact_two_sided(*table)
+        assert bc.fisher_exact_two_sided(*table) == stats.fisher_exact_two_sided(*table)
 
     @pytest.mark.parametrize(
         ("name", "args"),
@@ -69,40 +68,40 @@ class TestStatsParity:
             ("fisher_exact_two_sided", (3, 2, 1, 1)),
         ],
     )
-    def test_same_rejections(self, hb, name, args):
+    def test_same_rejections(self, bc, name, args):
         """Both copies refuse impossible counts."""
-        for impl in (getattr(hb, name), getattr(stats, name)):
+        for impl in (getattr(bc, name), getattr(stats, name)):
             with pytest.raises(ValueError):
                 impl(*args)
 
 
 class TestRecordsParity:
-    def test_append_read_round_trip_is_interchangeable(self, hb, tmp_path):
+    def test_append_read_round_trip_is_interchangeable(self, bc, tmp_path):
         """Rows written by either copy read back identically through both."""
         rows = [{"run": 1, "ok": True}, {"run": 2, "text": "café", "x": None}]
         a, b = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
         for row in rows:
-            hb.append_row(a, row)
+            bc.append_row(a, row)
             records.append_row(b, row)
         assert a.read_bytes() == b.read_bytes()
-        assert hb.read_rows(a) == records.read_rows(a) == rows
-        assert hb.read_rows(tmp_path / "missing.jsonl") == []
+        assert bc.read_rows(a) == records.read_rows(a) == rows
+        assert bc.read_rows(tmp_path / "missing.jsonl") == []
         assert records.read_rows(tmp_path / "missing.jsonl") == []
 
-    def test_write_json_bytes_identical(self, hb, tmp_path):
+    def test_write_json_bytes_identical(self, bc, tmp_path):
         obj = {"b": [1, 2.5, None], "a": {"z": "café", "y": True}}
         a, b = tmp_path / "a.json", tmp_path / "b.json"
-        hb._write_json(a, obj)
+        bc._write_json(a, obj)
         records.write_json(b, obj)
         assert a.read_bytes() == b.read_bytes()
 
-    def test_utc_now_same_format(self, hb):
-        a, b = hb._utc_now(), records.utc_now()
+    def test_utc_now_same_format(self, bc):
+        a, b = bc._utc_now(), records.utc_now()
         assert len(a) == len(b) == 20 and a.endswith("Z") and b.endswith("Z")
         assert a[:16] <= b[:16]
 
-    def test_git_commit_equal(self, hb):
-        assert hb._git_commit() == records.git_commit(cwd=ROOT)
+    def test_git_commit_equal(self, bc):
+        assert bc._git_commit() == records.git_commit(cwd=ROOT)
 
 
 def test_bench_statistics_work_with_sockets_disabled():
@@ -117,14 +116,13 @@ def test_bench_statistics_work_with_sockets_disabled():
         "socket.create_connection = boom\n"
         "import sys\n"
         f"sys.path.insert(0, {str(BENCH.parent)!r})\n"
-        "import harness_bench as hb\n"
-        "assert hb.wilson_ci(3, 5)\n"
-        "assert hb.fisher_exact_two_sided(1, 5, 4, 5) > 0\n"
+        "import bench_common as bc\n"
+        "assert bc.wilson_ci(3, 5)\n"
+        "assert bc.fisher_exact_two_sided(1, 5, 4, 5) > 0\n"
         "print('OFFLINE-OK', 'fsm_llm' in sys.modules)\n"
     )
     proc = subprocess.run(
         [sys.executable, "-c", code],
-        env={**os.environ, "FSM_LLM_HARNESS_LIVE": "1"},
         capture_output=True,
         text=True,
         timeout=120,

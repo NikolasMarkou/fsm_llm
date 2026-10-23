@@ -2,7 +2,7 @@
 
 Pure-offline and fast: no live gate, no slow marker, no LLM. Each test's
 docstring names the defect it guards against (repo convention). Patterns
-follow ``tests/test_harness_bench.py``; decisions D-002/D-003 of
+follow ``tests/test_bench_common.py``; decisions D-002/D-003 of
 plan-2026-09-29T184639-65baa765.
 """
 
@@ -24,7 +24,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import agents_bench as ab
-import harness_bench as hb
+import bench_common as bc
 
 #: Top-level imports the bench module may hold; everything heavier is lazy.
 _STDLIB_ALLOWED = {
@@ -165,22 +165,22 @@ class TestImportIsInert:
                 names.add((node.module or "").split(".")[0])
         assert names <= _STDLIB_ALLOWED, names - _STDLIB_ALLOWED
 
-    def test_stats_and_io_helpers_are_harness_benchs_not_copies(self):
+    def test_stats_and_io_helpers_are_bench_common_not_copies(self):
         """Defect guarded (D-002): a third hand-kept copy of wilson/fisher/
         jsonl IO drifting from the pair test_bench_parity.py holds equal."""
-        assert ab.wilson_ci is hb.wilson_ci
-        assert ab.fisher_exact_two_sided is hb.fisher_exact_two_sided
-        assert ab.append_row is hb.append_row
-        assert ab.read_rows is hb.read_rows
-        assert ab.BenchDataError is hb.BenchDataError
+        assert ab.wilson_ci is bc.wilson_ci
+        assert ab.fisher_exact_two_sided is bc.fisher_exact_two_sided
+        assert ab.append_row is bc.append_row
+        assert ab.read_rows is bc.read_rows
+        assert ab.BenchDataError is bc.BenchDataError
         source = Path(ab.__file__).read_text(encoding="utf-8")
         assert "def wilson_ci" not in source
         assert "def fisher_exact_two_sided" not in source
 
-    def test_manifest_fields_extend_harness_six(self):
+    def test_manifest_fields_extend_the_common_six(self):
         """Defect guarded: an agent manifest missing one of the six fields
         that make two blocks comparable, or the agent-bench extras."""
-        assert ab.MANIFEST_FIELDS[:6] == hb.MANIFEST_FIELDS
+        assert ab.MANIFEST_FIELDS[:6] == bc.MANIFEST_FIELDS
         for field in ("tasks_sha256", "trials", "temperature", "limits"):
             assert field in ab.MANIFEST_FIELDS
         assert "wrapper_version" in ab.MANIFEST_FIELDS
@@ -345,7 +345,7 @@ class TestMetricsMath:
         assert m["k_correct_rows"] == 5
         assert m["k_pass_hat_k"] == 1  # only t1 is correct on all 3
         assert m["wilson_pass1_first_trial"] == [
-            round(v, 4) for v in hb.wilson_ci(1, 2)
+            round(v, 4) for v in bc.wilson_ci(1, 2)
         ]
 
     def test_pass_hat_k_needs_all_trials_present(self):
@@ -411,7 +411,7 @@ class TestManifestGate:
         """Defect guarded: the builder drifting from the field list its own
         summary writer enforces."""
         monkeypatch.setattr(
-            hb, "_model_digest", lambda tag: {"tag": tag, "digest": "x"}
+            bc, "_model_digest", lambda tag: {"tag": tag, "digest": "x"}
         )
         two = tuple(t for t in ab.TASKS if t.id in ("st-capital", "er-flaky"))
         monkeypatch.setattr(ab, "TASKS", two)
@@ -442,7 +442,7 @@ class TestManifestDisclosure:
             raise AssertionError("the disclosure probe sent a provider request")
 
         monkeypatch.setattr(fsm_llm.llm, "completion", no_send)
-        monkeypatch.setattr(hb, "_model_digest", lambda tag: dict(_DIGEST))
+        monkeypatch.setattr(bc, "_model_digest", lambda tag: dict(_DIGEST))
         two = tuple(t for t in ab.TASKS if t.id in _TWO_IDS)
         monkeypatch.setattr(ab, "TASKS", two)
         return two
@@ -529,7 +529,7 @@ class TestManifestDisclosure:
         """Defect guarded: a block registered at one per-request timeout and
         run at another, with the manifest still claiming the first."""
         monkeypatch.setattr(ab, "BENCH_DATA", tmp_path)
-        monkeypatch.setattr(hb, "_git_commit", lambda: "cafebabe")
+        monkeypatch.setattr(bc, "_git_commit", lambda: "cafebabe")
         ab.register_block("agents-react", "B9", "fsm_advance", trials=1)
         original = ab.metered_interface
 
@@ -699,7 +699,7 @@ class TestReport:
         rc = ab.report("synthetic", ["B0", "B1"], ["B1/runtime_native:legacy"])
         assert rc == 0
         out = capsys.readouterr().out
-        expected = hb.fisher_exact_two_sided(2, 2, 1, 2)
+        expected = bc.fisher_exact_two_sided(2, 2, 1, 2)
         assert f"pass@1 first trial: 2/2 vs 1/2 p={expected:.4f}" in out
 
     def test_pair_across_digests_is_refused(self, tmp_path, monkeypatch, capsys):
@@ -881,9 +881,9 @@ class TestRunEndToEnd:
         import fsm_llm.llm
 
         monkeypatch.setattr(ab, "BENCH_DATA", tmp_path)
-        monkeypatch.setattr(hb, "_model_digest", lambda tag: dict(_DIGEST))
-        monkeypatch.setattr(hb, "_git_commit", lambda: "cafebabe")
-        monkeypatch.setattr(hb, "_git_dirty", lambda: False)
+        monkeypatch.setattr(bc, "_model_digest", lambda tag: dict(_DIGEST))
+        monkeypatch.setattr(bc, "_git_commit", lambda: "cafebabe")
+        monkeypatch.setattr(bc, "_git_dirty", lambda: False)
         monkeypatch.setattr(
             fsm_llm.llm,
             "completion",
@@ -1270,7 +1270,7 @@ class TestFsmToolcallArm:
             raise AssertionError("the disclosure probe sent a provider request")
 
         monkeypatch.setattr(fsm_llm.llm, "completion", no_send)
-        monkeypatch.setattr(hb, "_model_digest", lambda tag: dict(_DIGEST))
+        monkeypatch.setattr(bc, "_model_digest", lambda tag: dict(_DIGEST))
         b0 = json.loads(
             (
                 ab.BENCH_DATA / "agents-react" / "B0" / "manifest_native_fc.json"
@@ -1313,7 +1313,7 @@ class TestFsmToolcallArm:
         sent = []
         for llm_interface in (None, ab.metered_interface(ab.MODEL)):
             agent = ab.ARMS["fsm_toolcall"](selected, ab.MODEL, llm_interface)
-            with hb.captured_wire() as captured:
+            with bc.captured_wire() as captured:
                 with pytest.raises(Exception):
                     agent.run(prompt)
             assert captured, "the run sent no request"
@@ -1392,8 +1392,8 @@ class TestWireDisclosure:
             raise AssertionError("the disclosure probe sent a provider request")
 
         monkeypatch.setattr(fsm_llm.llm, "completion", no_send)
-        monkeypatch.setattr(hb, "_model_digest", lambda tag: dict(_DIGEST))
-        monkeypatch.setattr(hb, "_git_commit", lambda: "cafebabe")
+        monkeypatch.setattr(bc, "_model_digest", lambda tag: dict(_DIGEST))
+        monkeypatch.setattr(bc, "_git_commit", lambda: "cafebabe")
         two = tuple(t for t in ab.TASKS if t.id in _TWO_IDS)
         monkeypatch.setattr(ab, "TASKS", two)
 
@@ -1418,7 +1418,7 @@ class TestWireDisclosure:
         )
         after = ab.request_disclosure("fsm_toolcall", ab.MODEL)
         assert after["llm_request"]["temperature"] == 0
-        assert hb.manifest_differences(before, after)
+        assert bc.manifest_differences(before, after)
         for task_id in _TWO_IDS:
             assert (
                 before["first_request"][task_id]["settings_sha256"]
@@ -1469,7 +1469,7 @@ class TestWireDisclosure:
         assert seven["llm_request"]["seed"] == 7
         assert seven["llm_request"]["api_key"] == "<redacted>"
         assert "sk-live" not in json.dumps(seven)
-        assert "llm_request.seed: 7 vs 8" in hb.manifest_differences(seven, eight)
+        assert "llm_request.seed: 7 vs 8" in bc.manifest_differences(seven, eight)
 
     def test_digests_do_not_move_with_the_date(self, native_two, monkeypatch):
         """Defect guarded: a prompt-mode system prompt carries today's date,
@@ -1514,4 +1514,4 @@ class TestWireDisclosure:
             {"a": 1, "b": {"t": 120}}, {"a": True, "b": {"t": 120.0}}
         )
         assert lines == ["a: 1 vs true", "b.t: 120 vs 120.0"]
-        assert ab.manifest_differences is hb.manifest_differences
+        assert ab.manifest_differences is bc.manifest_differences
