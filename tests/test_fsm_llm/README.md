@@ -1,6 +1,6 @@
 # test_fsm_llm
 
-The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 61 test files (4,976 collected tests) plus a `fixtures/` package of labelled secret-filter data.
+The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 61 test files (4,983 collected tests) plus a `fixtures/` package of labelled secret-filter data.
 
 ## What it is for
 

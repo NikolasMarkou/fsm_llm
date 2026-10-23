@@ -44,7 +44,7 @@ One LLM layer (`src/fsm_llm/llm.py`, the only module that imports litellm): `LLM
 | `src/fsm_llm/llm.py`, `classification.py` | `LLMInterface`, `LiteLLMInterface` (`complete`, `usage`), `LiteLLMEmbedder`, `tool_exchange`; `Classifier` | Only litellm import; the classifier uses the conversation's interface |
 | `src/fsm_llm/security.py`, `constants.py` | `has_internal_prefix`, `is_forbidden_context_entry`, `resolve_within`, defaults, `OKF_*` limits | Single source for key filtering; shared path-confinement helper |
 | `src/fsm_llm/okf.py`, `okf_cli.py` | Open Knowledge Format (OKF v0.2, SPEC at commit ad30107, pre-1.0 and mutable): `load_bundle`, `OKFBundle`, `check_bundle`, `write_bundle`; public helpers `iso_utc`, `has_lone_surrogate`, `writes_within_caps`, `capped_note`; `fsm-llm-okf` | Core modules, import no subpackage; not imported by `fsm_llm/__init__.py` |
-| `src/fsm_llm/okf_bridge.py` | Memory entries and plain FSMs to OKF: `bundle_from_memory_entries`, `create_okf_handler` | Split out of `okf.py` (about 1,320 lines now); imports only public names of `okf`; no re-export |
+| `src/fsm_llm/okf_bridge.py` | Memory entries and plain FSMs to OKF: `bundle_from_memory_entries`, `create_okf_handler` | 289 lines, split out of `okf.py` (which is about 1,320 lines now); imports only public names of `okf`; no re-export |
 | `src/fsm_llm/cli_support.py` | The CLI skeleton `okf_cli` and `agent_skills_cli` share: `run_cli`, `exit_main`, `report_error`, `escape_unencodable_output`, `positive_seconds` | Stdlib, `constants`, `okf.capped_line` only; neither CLI imports a private name from the other |
 | `src/fsm_llm/frontmatter.py` | The one YAML frontmatter seam: `split_frontmatter`, `load_yaml` (one `yaml.SafeLoader` subclass, no aliases or anchors, size and depth limits are parameters), `read_bytes` (no-follow), `lone_surrogate` | Shared by OKF and Agent Skills; stdlib and `yaml` only; extracted from `okf.py` |
 | `src/fsm_llm/agent_skills.py`, `agent_skills_cli.py` | Agent Skills (SKILL.md folders, agentskills.io spec read 2026-10-23, unversioned and mutable), read-only: `load_skills`, `SkillCatalog` (`render_catalog`, `read_body`, `read_resource`, `files_under`), `AgentSkill`, `SkillIssue`, `SkillLimits`, `parse_skill_text`; `fsm-llm-skills validate\|list\|show` (`show --file` also lists a directory) | Core modules, import no subpackage; not imported by `fsm_llm/__init__.py`; nothing in a skill is executed |
@@ -170,7 +170,7 @@ FSM definition (JSON, v4.1):
 ## Working here
 
 ```bash
-make test           # pytest -v (11,700 tests)
+make test           # pytest -v (11,719 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy src/fsm_llm/ --ignore-missing-imports
@@ -183,8 +183,8 @@ make counts         # python scripts/doc_counts.py (fails when a documented test
 ```
 
 ```bash
-pytest                                 # Run all tests (11,700 collected)
-pytest tests/test_fsm_llm/            # Core package tests (4,976 tests)
+pytest                                 # Run all tests (11,719 collected)
+pytest tests/test_fsm_llm/            # Core package tests (4,983 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (191 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (269 tests)
 pytest tests/test_fsm_llm_agents/     # Agents tests (2,540 tests)
@@ -194,10 +194,10 @@ pytest tests/test_fsm_llm_harness/    # Harness tests (2,028 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (264 tests)
 pytest tests/test_examples/           # Example validation tests (67 tests)
 pytest tests/test_fsm_llm_eval/       # Eval tests (261 tests)
-# The 10 suites above sum to 11,424. The remaining 276 are five root-level files:
-#   tests/test_integration_ollama.py (12), tests/test_packaging.py (36),
+# The 10 suites above sum to 11,431. The remaining 288 are five root-level files:
+#   tests/test_integration_ollama.py (12), tests/test_packaging.py (47),
 #   tests/test_harness_bench.py (59), tests/test_agents_bench.py (132)
-#   and tests/test_skills_bench.py (37)
+#   and tests/test_skills_bench.py (38)
 pytest -m "not slow"                  # Skip slow tests
 ```
 

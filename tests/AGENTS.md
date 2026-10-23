@@ -1,7 +1,7 @@
 # tests
 
 Path: `tests`
-Purpose: The full pytest tree of FSM-LLM (11,700 collected tests): ten suite folders for the `fsm_llm` package and its six subpackages, five repo-wide root test files, and the shared `conftest.py`.
+Purpose: The full pytest tree of FSM-LLM (11,719 collected tests): ten suite folders for the `fsm_llm` package and its six subpackages, five repo-wide root test files, and the shared `conftest.py`.
 
 ## Scope
 
@@ -32,13 +32,13 @@ Suite folders (test counts from full collection) and root files at this level.
 | File | Role | Notes |
 | --- | --- | --- |
 | `conftest.py` | Shared fixtures, fakes and marker registration (see Public interface) | 0 tests |
-| `test_packaging.py` | Repo-wide wiring and doc-count pins | 36 tests; classes listed below |
+| `test_packaging.py` | Repo-wide wiring and doc-count pins | 47 tests; classes listed below |
 | `test_harness_bench.py` | Offline checks of `scripts/harness_bench.py` | 59 tests |
 | `test_agents_bench.py` | Offline checks of `scripts/agents_bench.py` | 132 tests |
-| `test_skills_bench.py` | Offline checks of `scripts/skills_bench.py` (Agent Skills read-hint ablation: fixture, grader, hint ablation, one trial, blocks, hygiene); scripted agents drive the REAL skill tools | 37 tests; never calls a model |
+| `test_skills_bench.py` | Offline checks of `scripts/skills_bench.py` (Agent Skills read-hint ablation: fixture, grader, hint ablation, one trial, blocks, hygiene); scripted agents drive the REAL skill tools | 38 tests; never calls a model |
 | `test_integration_ollama.py` | Live end-to-end on `ollama_chat/qwen3.5:9b-q8_0`, plus 4 model-free workflow checks | 12 tests |
 | `fixtures/test_fsm_definitions/minimal_fsm.json` | v3.0 one-state FSM behind the `sample_fsm_definition` fixture | Written by `conftest.py` if missing |
-| `test_fsm_llm/` | Core: `API`, `FSMManager`, `MessagePipeline`, `TransitionEvaluator`, `expressions`, classification (on the conversation interface), context, prompts, `LiteLLMInterface` (`complete`, usage counters), `LiteLLMEmbedder`, the `completion` state, `ollama`, handlers, `WorkingMemory`, session, validator, visualizer, runner, logging, OKF (`okf`, `okf_cli`), the shared `frontmatter` seam, Agent Skills (`agent_skills`) and `fsm-llm-skills` | 4,976 tests. Local `conftest.py` (`minimal_fsm_dict`); `fixtures/` holds labelled secret-filter corpora for `test_context_unit.py`; seam files import `_` helpers from each other; `test_docs_snippets.py` loads FSM JSON from root docs; 14 `slow` |
+| `test_fsm_llm/` | Core: `API`, `FSMManager`, `MessagePipeline`, `TransitionEvaluator`, `expressions`, classification (on the conversation interface), context, prompts, `LiteLLMInterface` (`complete`, usage counters), `LiteLLMEmbedder`, the `completion` state, `ollama`, handlers, `WorkingMemory`, session, validator, visualizer, runner, logging, OKF (`okf`, `okf_cli`), the shared `frontmatter` seam, Agent Skills (`agent_skills`) and `fsm-llm-skills` | 4,983 tests. Local `conftest.py` (`minimal_fsm_dict`); `fixtures/` holds labelled secret-filter corpora for `test_context_unit.py`; seam files import `_` helpers from each other; `test_docs_snippets.py` loads FSM JSON from root docs; 14 `slow` |
 | `test_fsm_llm_agents/` | All agent patterns (`native_fc` as an FSM on core, pinned by a golden request fixture), `ToolRegistry` and ToolSpec, HITL grant security, memory, MCP (real stdio fixture server), `AgentServer`, `fsm-llm-meta` and `python -m fsm_llm.agents` CLIs, the OKF and Agent Skills tools (`test_okf.py`, `test_agent_skills.py`) | 2,540 tests. Local `conftest.py` autouses `block_network`; most files define their own fake `LLMInterface`, pattern loops use `PromptGroundedLLM` (`test_grounded_patterns.py`); skips without `mcp`, `fastapi`/`httpx`, OTEL SDK |
 | `test_fsm_llm_meta/` | Meta-builder in `fsm_llm.agents`: `FSMArtifactBuilder`, `WorkflowArtifactBuilder`, `AgentArtifactBuilder`, `create_*_tools`, `meta_prompts`, the meta FSM and `MetaBuilderAgent` on core | 437 tests. Autouse `block_network`; `ScriptedMetaLLM` (local conftest) answers classifier, build and collect calls from queues; `offline_llm` makes core's send binding raise so fallback paths run without a network call |
 | `test_fsm_llm_reasoning/` | `fsm_llm.reasoning` constants, models, exceptions, handlers, ANALYTICAL-only fallback, whole solves through core with a scripted `LLMInterface` (`test_engine_scripted.py`), CLI `--verbose` and JSON output | 191 tests. Engine built with `object.__new__` or on a scripted interface; source-string pins (no `converse(`, no "Continue reasoning") |
@@ -60,6 +60,7 @@ Suite folders (test counts from full collection) and root files at this level.
 - `TestNoTopLevelNameIsBoundTwice` (1 test): over every `src/fsm_llm/**/*.py`, no top-level assignment, annotated assignment, def or class binds a name twice (`if`/`try` branches and `@overload` stubs are exempt); it replaced the constants-only test of `test_agent_skills.py`.
 - `TestNoPypiInstallHint` (1 test): no `pip install fsm-llm` hint in `src/` (that name on PyPI is another project).
 - `TestEveryDocumentedCountMatchesCollection` (`slow`, 1 test): `scripts/doc_counts.py` (`make counts`) makes one more `--collect-only` child with a plugin that reads markers, then compares the count tokens of the shapes it knows in the tracked `.md` files (suite and folder docs, marker, `slow`, live and file counts, per-file rows) with it; a token of such a shape that no rule names fails too, a number in prose with no token shape (`1 test`, `2,011 passed`) is not read, and it skips when `mcp` is importable (the documented counts are the no-`mcp` counts).
+- `test_doc_counts_reads_the_slow_live_and_file_shapes` (11 parametrized cases, not `slow`): a fake measurement and one line each, offline, pinning that `scripts/doc_counts.py` reads the `N slow` / `(N slow)` cell, `N marked slow`, `N live` / `N gated`, `N offline tests` and `tests in N files` shapes.
 
 `test_harness_bench.py` loads `scripts/harness_bench.py` as `hb` and checks: import opens no socket even with `FSM_LLM_HARNESS_LIVE=1`; top-level imports are stdlib only; `wilson_ci` reference values and edge cases; `fisher_exact_two_sided` reference values and symmetry; `write_summary` refuses without a 6-field manifest (`MANIFEST_FIELDS`); `append_row`/`read_rows` round-trip; `report` recounts raw rows, flags tampered summaries (`MISMATCH`), refuses cross-digest comparisons (`REFUSING`); `run_block` refuses a block whose rows file exists (`run ONCE`) or an unknown arm; `main` maps `BenchDataError` to exit 1.
 
@@ -88,7 +89,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 
 - Env knobs: `FSM_LLM_HARNESS_LIVE` (arms harness live tests), `FSM_LLM_REAL_SKILLS` (arms the Agent Skills home-directory test in `test_agent_skills.py`), `FSM_LLM_MONITOR_API_KEY` (cleared for monitor tests). No test reads `SKIP_SLOW_TESTS`, `TEST_REAL_LLM` or `TEST_LLM_MODEL`; `test_packaging.py` drops the first two from its collection child env.
 - pytest config in `pyproject.toml`: `testpaths = ["tests"]`, `addopts = "-v --tb=short"`, `asyncio_mode = "auto"`, `asyncio_default_fixture_loop_scope = "function"`.
-- Marker counts (full collection): `slow` 136, `integration` 114, `real_llm` 113, `examples` 67; `-m "not slow"` collects 11,564.
+- Marker counts (full collection): `slow` 136, `integration` 114, `real_llm` 113, `examples` 67; `-m "not slow"` collects 11,583.
 
 ## Invariants and constraints
 
