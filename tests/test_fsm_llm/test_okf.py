@@ -884,6 +884,54 @@ class TestFrontmatterSizeBound:
         assert [i.code for i in issues].count("issues-truncated") == 1
 
 
+class TestCappedNote:
+    """``capped_note`` is the one warning cap of ``parse_concept_text`` and
+    ``parse_skill_text``: the first CAP warnings pass, one info follows, then nothing."""
+
+    @staticmethod
+    def _run(cap: int, sends: list[str]) -> list[tuple[str, str, str]]:
+        got: list[tuple[str, str, str]] = []
+        note = okf_module.capped_note(
+            lambda **kw: got.append((kw["severity"], kw["code"], kw["message"])),
+            cap,
+            "thing",
+        )
+        for severity in sends:
+            note(severity, f"c-{severity}", "m")  # type: ignore[arg-type]
+        return got
+
+    def test_warnings_past_the_cap_become_one_info_and_then_stop(self) -> None:
+        got = self._run(2, ["warning"] * 6)
+
+        assert got == [
+            ("warning", "c-warning", "m"),
+            ("warning", "c-warning", "m"),
+            (
+                "info",
+                "issues-truncated",
+                "further warnings for this thing are not shown",
+            ),
+        ]
+
+    def test_errors_and_infos_are_never_counted_or_dropped(self) -> None:
+        got = self._run(1, ["warning", "warning", "error", "info", "warning", "error"])
+
+        assert [sev for sev, _, _ in got] == [
+            "warning",
+            "info",
+            "error",
+            "info",
+            "error",
+        ]
+        assert [c for _, c, _ in got].count("issues-truncated") == 1
+
+    def test_each_note_counts_on_its_own(self) -> None:
+        assert len(self._run(3, ["warning"] * 3)) == 3
+        assert [s for s, _, _ in self._run(3, ["warning"] * 3 + ["warning"])][-1] == (
+            "info"
+        )
+
+
 class TestLoader:
     def test_ids_are_the_path_minus_md_in_sorted_order(self, tmp_path: Path) -> None:
         _write(

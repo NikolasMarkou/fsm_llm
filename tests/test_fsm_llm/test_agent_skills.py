@@ -579,6 +579,10 @@ class TestConstantsAndError:
     def test_the_issue_cap_is_the_one_function_okf_uses(self) -> None:
         assert skills_module.capped_issues is okf_module.capped_issues
 
+    def test_the_per_skill_warning_cap_is_the_one_function_okf_uses(self) -> None:
+        assert skills_module.capped_note is okf_module.capped_note
+        assert "def note(" not in (_SRC / "agent_skills.py").read_text(encoding="utf-8")
+
     def test_the_source_is_pure_ascii_with_the_docstring_first(self) -> None:
         text = (_SRC / "agent_skills.py").read_text(encoding="utf-8")
         assert text.isascii()

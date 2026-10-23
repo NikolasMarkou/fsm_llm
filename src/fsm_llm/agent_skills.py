@@ -61,7 +61,7 @@ from .constants import (
 )
 from .definitions import SkillError
 from .frontmatter import Note, load_yaml, read_bytes, split_frontmatter
-from .okf import capped_issues, capped_line, strip_unsafe_text, text_page
+from .okf import capped_issues, capped_line, capped_note, strip_unsafe_text, text_page
 from .security import resolve_within
 
 __all__ = [
@@ -183,18 +183,11 @@ def parse_skill_text(
     ``issues-truncated`` info); the body is counted, discarded."""
     issues: list[SkillIssue] = []
     where = f"{folder_name}/{skill_md}"
-    warned = 0
-
-    def note(severity: _Severity, code: str, msg: str) -> None:
-        nonlocal warned
-        if severity == "warning":  # bound what hostile frontmatter can build
-            warned += 1
-            if warned > SKILL_MAX_ISSUES_PER_SKILL:
-                if warned > SKILL_MAX_ISSUES_PER_SKILL + 1:
-                    return
-                severity, code = "info", "issues-truncated"
-                msg = "further warnings for this skill are not shown"
-        issues.append(SkillIssue(severity=severity, code=code, message=msg, path=where))
+    note = capped_note(
+        lambda **kw: issues.append(SkillIssue(path=where, **kw)),
+        SKILL_MAX_ISSUES_PER_SKILL,
+        "skill",
+    )
 
     raw, body, problem = split_frontmatter(text)
     if raw is None:

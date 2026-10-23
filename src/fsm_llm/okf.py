@@ -345,23 +345,11 @@ def parse_concept_text(concept_id: str, text: str) -> tuple[OKFConcept, list[OKF
     """Parse one concept document into ``(concept, issues)``; never raises on
     content. Without usable frontmatter the text is the body."""
     issues: list[OKFIssue] = []
-    warnings = 0
-
-    def note(
-        severity: Literal["error", "warning", "info"], code: str, msg: str
-    ) -> None:
-        nonlocal warnings
-        if severity == "warning":  # bound the work a hostile document can cause
-            warnings += 1
-            if warnings > _MAX_FILE_WARNINGS:
-                if warnings == _MAX_FILE_WARNINGS + 1:
-                    severity, code = "info", "issues-truncated"
-                    msg = "further warnings for this concept are not shown"
-                else:
-                    return
-        issues.append(
-            OKFIssue(severity=severity, code=code, message=msg, id=concept_id)
-        )
+    note = capped_note(
+        lambda **kw: issues.append(OKFIssue(id=concept_id, **kw)),
+        _MAX_FILE_WARNINGS,
+        "concept",
+    )
 
     try:
         concept = _build_concept(concept_id, text, note)
@@ -746,6 +734,29 @@ def capped_issues(
     order = sorted(issues, key=lambda i: (i.code not in stops, rank.index(i.severity)))
     extra = f"{len(issues) - cap} more issues are not shown"
     return [*order[:cap], kind(severity="info", code="issues-truncated", message=extra)]
+
+
+def capped_note(emit: Callable[..., None], cap: int, what: str) -> _Note:
+    """A ``note(severity, code, message)`` that calls ``emit(severity=, code=,
+    message=)`` for at most *cap* warnings, then once for an info
+    ``issues-truncated`` ("further warnings for this *what* are not shown"), then
+    never for a warning; errors and infos pass uncounted. State is per call."""
+    warned = 0
+
+    def note(
+        severity: Literal["error", "warning", "info"], code: str, msg: str
+    ) -> None:
+        nonlocal warned
+        if severity == "warning":  # bound the work a hostile document can cause
+            warned += 1
+            if warned > cap + 1:
+                return
+            if warned > cap:
+                severity, code = "info", "issues-truncated"
+                msg = f"further warnings for this {what} are not shown"
+        emit(severity=severity, code=code, message=msg)
+
+    return note
 
 
 def _capped(issues: list[OKFIssue]) -> list[OKFIssue]:
