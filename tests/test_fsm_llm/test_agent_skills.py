@@ -22,6 +22,7 @@ import yaml
 from pydantic import ValidationError
 
 from fsm_llm import agent_skills as skills_module
+from fsm_llm import okf as okf_module
 from fsm_llm.agent_skills import (
     AgentSkill,
     SkillCatalog,
@@ -560,6 +561,9 @@ class TestConstantsAndError:
         assert SKILL_UNTRUSTED_LABEL.startswith("[untrusted skill content")
         assert "\n" not in SKILL_UNTRUSTED_LABEL and "{" not in SKILL_UNTRUSTED_LABEL
         assert SKILL_INCOMPLETE_NOTE.format(codes="max-skills").count("max-skills") == 1
+
+    def test_the_issue_cap_is_the_one_function_okf_uses(self) -> None:
+        assert skills_module.capped_issues is okf_module.capped_issues
 
     def test_the_source_is_pure_ascii_with_the_docstring_first(self) -> None:
         text = (_SRC / "agent_skills.py").read_text(encoding="utf-8")
@@ -1263,8 +1267,8 @@ class TestResourceConfinement:
         with pytest.raises(SkillError) as info:
             catalog.read_resource("guard", path)
         message = str(info.value)
-        assert message in set(skills_module._REFUSALS.values())
-        assert skills_module._REFUSALS[info.value.details["code"]] == message
+        assert message in set(skills_module._MESSAGES.values())
+        assert skills_module._MESSAGES[info.value.details["code"]] == message
         if _is_syntactic(path):
             assert message == "resource path is not allowed"
         for leaked in (_SECRET, _DOTSECRET, str(tmp_path), "etc/passwd"):
@@ -1845,7 +1849,7 @@ class TestInjectionStaysInLabelledOrStrippedFields:
             b"---\n\xff: " + self.PAYLOAD.encode()
         )
         catalog = load_skills(tmp_path, limits=SkillLimits(max_skills=2))
-        loader_codes = set(skills_module._PROBLEMS)
+        loader_codes = set(skills_module._MESSAGES)
         for issue in catalog.issues:
             if issue.code in loader_codes:
                 assert self.PAYLOAD not in issue.message

@@ -55,7 +55,7 @@ from .constants import (
 )
 from .definitions import SkillError
 from .frontmatter import Note, load_yaml, read_bytes, split_frontmatter
-from .okf import capped_line, strip_unsafe_text, text_page
+from .okf import capped_issues, capped_line, strip_unsafe_text, text_page
 from .security import resolve_within
 
 __all__ = [
@@ -117,12 +117,10 @@ def _clean(value: Any) -> Any:
 class AgentSkill(BaseModel):
     """The metadata of one skill: no body, only its length in lines.
 
-    Interface contract: built by ``parse_skill_text`` (``directory`` and
-    ``resources`` are set by the loader). Every string it holds is
-    control-stripped by this model, whoever constructs it. ``extra_keys`` names
-    the frontmatter keys outside the standard; ``allowed_tools``, ``license`` and
-    ``compatibility`` are claims the skill makes, reported and never enforced.
-    """
+    Interface contract: built by ``parse_skill_text`` (the loader sets
+    ``directory`` and ``resources``); every string is control-stripped here,
+    whoever constructs it. ``allowed_tools``, ``license`` and ``compatibility``
+    are claims the skill makes, reported and never enforced."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -170,14 +168,11 @@ def parse_skill_text(
 ) -> tuple[AgentSkill | None, list[SkillIssue]]:
     """Parse the text of one ``SKILL.md`` into ``(skill or None, issues)``.
 
-    Interface contract: pure and total, no filesystem access, never raises on
-    content (any YAML shape, non-string value, huge value, lone surrogate or
-    duplicate key). ``None`` comes with at least one ``error`` issue: no,
-    unterminated, invalid, too large, too deep or non-mapping frontmatter, a
-    missing or non-string description, or a name that is not ``[a-z0-9]`` words
-    joined by single hyphens in 1 to 64 characters (after defaulting to
-    *folder_name*). Everything else loads with a warning; ``body-long`` is info.
-    The body is counted in ``line_count`` and discarded."""
+    Interface contract: pure and total (no filesystem access, never raises on
+    content). ``None`` comes with an ``error`` issue: bad frontmatter, a missing
+    or non-string description, or a name that is not ``[a-z0-9]`` words joined by
+    single hyphens in 1 to 64 characters (defaulting to *folder_name*). All else
+    loads with a warning; ``body-long`` is info. The body is counted, discarded."""
     issues: list[SkillIssue] = []
     where = f"{folder_name}/{skill_md}"
 
@@ -304,21 +299,33 @@ INCOMPLETE_CODES = (
     "dir-truncated",
     "resources-truncated",
 )
-# code -> (severity, fixed message): loader issues never carry skill text.
-_PROBLEMS: dict[str, tuple[Literal["error", "warning", "info"], str]] = {
-    "symlink-skipped": ("warning", "symlinks inside a skill are not followed; skipped"),
-    "not-utf8": ("warning", "SKILL.md is not valid UTF-8; decoded with replacement"),
-    "skill-md-too-large": ("error", "SKILL.md is over the byte bound; skipped"),
-    "skill-md-unreadable": ("error", "SKILL.md cannot be read; skipped"),
-    "name-duplicate": ("warning", "an earlier skill has this name; skipped"),
-    "resource-name-unsafe": ("warning", "files with unsafe names are not listed"),
-    "resources-truncated": ("warning", "resource list cut at a bound"),
-    "dir-unreadable": ("warning", "directory cannot be listed; skipped"),
-    "dir-truncated": ("error", "directory has too many entries; rest ignored"),
-    "max-skills": ("error", "skill limit (max_skills) reached; load stopped"),
-    "load-deadline": ("error", "load time limit (max_seconds) reached; load stopped"),
-    "no-skills": ("warning", "no skills found under the given path"),
+# code -> fixed text of a loader issue or of a refused read (``SkillError``,
+# the code in ``details``): never skill text, never a path.
+_MESSAGES = {
+    "symlink-skipped": "symlinks inside a skill are not followed; skipped",
+    "not-utf8": "SKILL.md is not valid UTF-8; decoded with replacement",
+    "skill-md-too-large": "SKILL.md is over the byte bound; skipped",
+    "skill-md-unreadable": "SKILL.md cannot be read; skipped",
+    "name-duplicate": "an earlier skill has this name; skipped",
+    "resource-name-unsafe": "files with unsafe names are not listed",
+    "resources-truncated": "resource list cut at a bound",
+    "dir-unreadable": "directory cannot be listed; skipped",
+    "dir-truncated": "directory has too many entries; rest ignored",
+    "max-skills": "skill limit (max_skills) reached; load stopped",
+    "load-deadline": "load time limit (max_seconds) reached; load stopped",
+    "no-skills": "no skills found under the given path",
+    "path-refused": "resource path is not allowed",
+    "path-indirect": "resource is behind a symlink; not read",
+    "not-regular": "resource is not a regular file",
+    "file-unreadable": "resource cannot be read",
+    "file-too-large": "resource is over the size bound",
+    "not-text": "resource is binary or not UTF-8 text",
 }
+# the loader issues that are errors; every other one is a warning
+_ERROR_CODES = frozenset(
+    {"skill-md-too-large", "skill-md-unreadable", "dir-truncated"}
+    | {"max-skills", "load-deadline"}
+)
 
 
 class SkillLimits(BaseModel):
@@ -335,29 +342,15 @@ class SkillLimits(BaseModel):
     max_seconds: float = Field(SKILL_MAX_LOAD_SECONDS, gt=0, allow_inf_nan=False)
 
 
-# Fixed refusal texts of a confined read (no skill text, no path); the key is the
-# code carried in ``SkillError.details["code"]``.
-_REFUSALS = {
-    "path-refused": "resource path is not allowed",
-    "path-indirect": "resource is behind a symlink; not read",
-    "not-regular": "resource is not a regular file",
-    "file-unreadable": "resource cannot be read",
-    "file-too-large": "resource is over the size bound",
-    "not-text": "resource is binary or not UTF-8 text",
-}
-
-
 # DECISION plan-2026-10-23T043147-4c2042f3/D-024
 # Do NOT widen this allowlist to dot entries, and do NOT relax a segment rule
 # here: `.env`, `.git` and `.ssh` live in dot names, and a hostile skill author
 # chooses every name. Listing and reading share this one predicate, so a file
 # that cannot be read is never listed. See decisions.md D-024.
 def _path_parts(path: object) -> tuple[str, ...] | None:
-    """The segments of a safe relative resource path, else ``None`` (never raises).
-
-    Interface contract: a ``str`` of 1 to 300 characters that ``strip_unsafe_text``
-    leaves unchanged, no backslash, no empty, ``.``, ``..`` or dot-prefixed segment
-    (so no absolute path either)."""
+    """The segments of a safe relative path (1 to 300 characters, unchanged by
+    ``strip_unsafe_text``, no backslash, no empty, ``.``, ``..`` or dot segment),
+    else ``None``. Never raises."""
     if not isinstance(path, str) or not path or len(path) > 300 or "\\" in path:
         return None
     if strip_unsafe_text(path) != path:
@@ -374,10 +367,8 @@ def _path_parts(path: object) -> tuple[str, ...] | None:
 # the links; skipping them is the defence. Only a skill DIRECTORY directly under
 # a root is followed (the caller named the root). See decisions.md D-023.
 def _confined(directory: Path, parts: tuple[str, ...]) -> Path | None:
-    """``directory`` joined with *parts* when no symlink lies on the way.
-
-    Interface contract: *directory* is already resolved; ``None`` when the resolved
-    target differs from the lexical join or cannot be resolved. Never raises."""
+    """*directory* joined with *parts* (already resolved), ``None`` when a symlink
+    lies on the way or the path cannot be resolved. Never raises."""
     target = directory.joinpath(*parts)
     try:
         return target if resolve_within(directory, "/".join(parts)) == target else None
@@ -386,15 +377,12 @@ def _confined(directory: Path, parts: tuple[str, ...]) -> Path | None:
 
 
 def _refuse(code: str) -> SkillError:
-    return SkillError(_REFUSALS[code], details={"code": code})
+    return SkillError(_MESSAGES[code], details={"code": code})
 
 
 def _read_file(directory: Path, parts: tuple[str, ...], limit: int) -> bytes:
-    """The bytes of one confined, regular, in-bound file under *directory*.
-
-    Interface contract: raises ``SkillError`` (fixed message, code in
-    ``details``) for a symlink on the path, a non-regular file, a file that
-    cannot be read or vanished, or one over *limit* bytes; never blocks."""
+    """The bytes of one confined, regular file of at most *limit* bytes; else a
+    ``SkillError`` (fixed message, code in ``details``). Never blocks."""
     target = _confined(directory, parts)
     if target is None:
         raise _refuse("path-indirect")
@@ -410,8 +398,10 @@ def _read_file(directory: Path, parts: tuple[str, ...], limit: int) -> bytes:
 
 
 def _note(issues: list[SkillIssue], code: str, path: str, extra: str = "") -> None:
-    severity, message = _PROBLEMS[code]
-    message = f"{message}: {extra}" if extra else message
+    message = f"{_MESSAGES[code]}: {extra}" if extra else _MESSAGES[code]
+    severity: Literal["error", "warning"] = (
+        "error" if code in _ERROR_CODES else "warning"
+    )
     issues.append(SkillIssue(severity=severity, code=code, message=message, path=path))
 
 
@@ -422,12 +412,8 @@ def _list_resources(
     deadline: float,
     issues: list[SkillIssue],
 ) -> tuple[str, ...]:
-    """Sorted relative paths of the bundled regular files of one skill (never raises).
-
-    Skips dot entries, ``node_modules``, ``__pycache__``, symlinks (one
-    ``symlink-skipped`` issue) and special files; names ``_path_parts`` refuses are
-    counted in one ``resource-name-unsafe``; depth, file count, a visit budget and
-    *deadline* end the walk with ``resources-truncated``."""
+    """Sorted relative paths of the regular files a skill bundles (never raises);
+    a bound or *deadline* ends the walk with ``resources-truncated``."""
     found: list[str] = []
     links, first_link, unsafe, visited, cut = 0, "", 0, 0, False
     budget = limits.max_resources_per_skill * 4
@@ -478,7 +464,7 @@ def _list_resources(
 
 
 def _open_roots(path_or_paths: Any) -> list[Path]:
-    """The resolved root directories; ``SkillError`` for caller misuse only."""
+    """The resolved roots; ``SkillError`` for caller misuse only."""
     try:
         given = (
             [path_or_paths]
@@ -499,9 +485,8 @@ def _open_roots(path_or_paths: Any) -> list[Path]:
 def _candidates(
     root: Path, limits: SkillLimits, issues: list[SkillIssue]
 ) -> list[tuple[str, Path]]:
-    """``(folder name, resolved dir)`` pairs: the root when it holds a ``SKILL.md``
-    entry, else its sorted, dot-skipped child directories (a symlinked one is
-    followed) that hold one. A directory without it (``synced/``) says nothing."""
+    """``(folder name, resolved dir)``: the root if it holds a ``SKILL.md``, else
+    its sorted, non-dot child directories that do (a symlinked one is followed)."""
     if os.path.lexists(root / _SKILL_MD):
         return [(root.name, root)]
     cap = limits.max_skills * 4
@@ -526,20 +511,6 @@ def _candidates(
     return out
 
 
-def _capped(issues: list[SkillIssue]) -> list[SkillIssue]:
-    """At most ``SKILL_MAX_ISSUES`` issues: the ``INCOMPLETE_CODES`` stops first
-    (the cap never hides one), then errors, warnings, info."""
-    if len(issues) <= SKILL_MAX_ISSUES:
-        return issues
-    rank = ("error", "warning", "info")
-    kept = sorted(
-        issues, key=lambda i: (i.code not in INCOMPLETE_CODES, rank.index(i.severity))
-    )[:SKILL_MAX_ISSUES]
-    extra = f"{len(issues) - SKILL_MAX_ISSUES} more issues are not shown"
-    kept.append(SkillIssue(severity="info", code="issues-truncated", message=extra))
-    return kept
-
-
 def load_skills(
     path_or_paths: str | os.PathLike[str] | Iterable[str | os.PathLike[str]],
     *,
@@ -547,17 +518,13 @@ def load_skills(
 ) -> SkillCatalog:
     """Load the skills under the named directories into a ``SkillCatalog``.
 
-    Interface contract:
-        - ``SkillError`` only for caller misuse (no path, or a root that is missing,
-          not a directory or not a path); every other problem is a ``SkillIssue``.
-        - A root holding a ``SKILL.md`` is one skill, else each sorted child
-          directory holding one is (depth 1). A symlinked skill directory is
-          followed once (deduped by target); symlinks inside a skill are skipped.
-        - The earlier root, then sorted order, wins a duplicate name
-          (``name-duplicate``). A spent bound (``INCOMPLETE_CODES``) survives the
-          issue cap and makes the catalog ``incomplete``; what loaded is kept.
-        - Residual holes: TOCTOU (``O_NOFOLLOW`` guards the last part), hardlinks.
-    """
+    Interface contract: ``SkillError`` only for caller misuse (no path, a root
+    that is missing or not a directory); every other problem is a ``SkillIssue``.
+    A root holding a ``SKILL.md`` is one skill, else each child directory holding
+    one is (depth 1); a symlinked skill directory is followed once, symlinks
+    inside a skill are skipped. The earlier root, then sorted order, wins a
+    duplicate name. A spent bound makes the catalog ``incomplete``. Residual
+    holes: TOCTOU (``O_NOFOLLOW`` guards the last part) and hardlinks."""
     limits = limits or SkillLimits()
     roots = _open_roots(path_or_paths)
     deadline = time.monotonic() + limits.max_seconds
@@ -601,8 +568,9 @@ def load_skills(
         skills[skill.name] = skill.model_copy(update={"resources": listed})
     if not skills:
         _note(issues, "no-skills", ", ".join(r.name for r in roots)[:200])
+    issues = capped_issues(issues, SKILL_MAX_ISSUES, INCOMPLETE_CODES, SkillIssue)
     return SkillCatalog(
-        skills.values(), issues=_capped(issues), max_file_bytes=limits.max_file_bytes
+        skills.values(), issues=issues, max_file_bytes=limits.max_file_bytes
     )
 
 
@@ -610,14 +578,11 @@ def load_skills(
 class SkillCatalog:
     """The loaded skills (metadata only) and what was found while loading them.
 
-    Interface contract:
-        - ``get``, ``in``, ``len``, iteration (load order) and ``names`` never
-          raise; ``issues`` is the capped list, ``incomplete`` the stop codes seen.
-        - ``read_body`` and ``read_resource`` re-read from disk, confined, bounded
-          and paged; an unknown name or any refusal is a ``SkillError`` with a
-          FIXED message (no skill text, no path; the code is in ``details``).
-        - ``render_catalog`` is the labelled, escaped ``<available_skills>`` block
-          for a caller's task string (``""`` for no skills)."""
+    Interface contract: ``get``, ``in``, ``len``, iteration and ``names`` never
+    raise. ``read_body`` and ``read_resource`` re-read from disk, confined,
+    bounded and paged; an unknown name or any refusal is a ``SkillError`` with a
+    FIXED message (the code is in ``details``). ``render_catalog`` is the
+    labelled, escaped block for a caller's task string (``""`` for no skills)."""
 
     def __init__(
         self,
@@ -662,9 +627,8 @@ class SkillCatalog:
         max_items: int = SKILL_CATALOG_MAX_ITEMS,
         description_chars: int = SKILL_CATALOG_DESCRIPTION_CHARS,
     ) -> str:
-        """The untrusted label, then ``<available_skills>`` with one escaped
-        ``<skill>`` per skill (name, capped description; no path), a count of
-        the skills left out, and the incomplete note when a bound was spent."""
+        """The label, then ``<available_skills>`` with one escaped ``<skill>`` per
+        skill (name, capped description; no path), and the incomplete note."""
         if not self._skills:
             return ""
         shown = list(self._skills.values())[: max(max_items, 0)]
@@ -699,11 +663,9 @@ class SkillCatalog:
         *,
         size: int = SKILL_READ_PAGE_CHARS,
     ) -> tuple[str, int | None, int]:
-        """``(page, next offset or None, length)`` of a bundled text file.
-
-        Refused with ``SkillError``: a path ``_path_parts`` rejects, a symlink on
-        the way, a non-regular file, one over ``max_file_bytes``, a vanished or
-        unreadable file, and content that is binary (NUL) or not strict UTF-8."""
+        """``(page, next offset or None, length)`` of a bundled text file; a
+        ``SkillError`` for an unsafe path, a symlink, a non-regular, oversize or
+        unreadable file, and binary (NUL) or non-UTF-8 content."""
         parts = _path_parts(path)
         if parts is None:
             raise _refuse("path-refused")

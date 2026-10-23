@@ -744,18 +744,20 @@ def incomplete_note(bundle: OKFBundle) -> str:
     return OKF_INCOMPLETE_NOTE.format(codes=", ".join(codes)) if codes else ""
 
 
-def _capped(issues: list[OKFIssue]) -> list[OKFIssue]:
-    """At most ``OKF_MAX_ISSUES`` issues: the ``INCOMPLETE_CODES`` stops first
-    (the cap never hides one), then errors, warnings, info."""
-    if len(issues) <= OKF_MAX_ISSUES:
+def capped_issues(issues: list[Any], cap: int, stops: Any, kind: Any) -> list[Any]:
+    """At most *cap* issues (*stops* codes first), then one ``issues-truncated``."""
+    if len(issues) <= cap:
         return issues
     rank = ("error", "warning", "info")
-    kept = sorted(
-        issues, key=lambda i: (i.code not in INCOMPLETE_CODES, rank.index(i.severity))
-    )[:OKF_MAX_ISSUES]
-    extra = f"{len(issues) - OKF_MAX_ISSUES} more issues are not shown"
-    kept.append(OKFIssue(severity="info", code="issues-truncated", message=extra))
+    order = sorted(issues, key=lambda i: (i.code not in stops, rank.index(i.severity)))
+    kept = order[:cap]
+    extra = f"{len(issues) - cap} more issues are not shown"
+    kept.append(kind(severity="info", code="issues-truncated", message=extra))
     return kept
+
+
+def _capped(issues: list[OKFIssue]) -> list[OKFIssue]:
+    return capped_issues(issues, OKF_MAX_ISSUES, INCOMPLETE_CODES, OKFIssue)
 
 
 def load_bundle(
