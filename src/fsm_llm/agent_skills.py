@@ -533,10 +533,9 @@ def load_skills(
         try:
             data = _read_file(skill_dir, (_SKILL_MD,), limits.max_file_bytes)
         except SkillError as refused:
-            code = {
-                "path-indirect": "symlink-skipped",
-                "file-too-large": "skill-md-too-large",
-            }.get(refused.details["code"], "skill-md-unreadable")
+            code = {"file-too-large": "skill-md-too-large"}.get(
+                refused.details["code"], "skill-md-unreadable"
+            )
             _note(issues, code, where)
             continue
         try:
@@ -569,7 +568,7 @@ class SkillCatalog:
     raise. ``read_body`` and ``read_resource`` re-read from disk, confined,
     bounded and paged; an unknown name or any refusal is a ``SkillError`` with a
     FIXED message (the code is in ``details``). ``render_catalog`` is the
-    labelled, escaped block for a caller's task string (``""`` for no skills)."""
+    labelled, escaped block for a caller's task string (``""`` for nothing to say)."""
 
     def __init__(
         self,
@@ -627,8 +626,10 @@ class SkillCatalog:
         """The label, then ``<available_skills>`` with one ``<skill>`` per skill
         (name, capped description; no path), a fixed end line, the incomplete and
         skipped notes. Skill text has ``[ ] < >`` swapped (D-041) and ``&`` escaped,
-        so it cannot spell a fixed line; each occurs once."""
-        if not self._skills:
+        so it cannot spell a fixed line; each occurs once. ``""`` only when there
+        is neither a skill nor a note: no skill still shows the empty block."""
+        notes = [n for n in (incomplete_note(self), skipped_note(self)) if n]
+        if not (self._skills or notes):
             return ""
         shown = list(self._skills.values())[: max(max_items, 0)]
         lines = [SKILL_UNTRUSTED_LABEL, "<available_skills>"]
@@ -640,9 +641,8 @@ class SkillCatalog:
                 f"<skill><name>{name}</name><description>{text}</description></skill>"
             )
         if len(shown) < len(self._skills):
-            lines.append(f"({len(self._skills) - len(shown)} more, use skill_list)")
-        lines += ["</available_skills>", SKILL_CATALOG_END]
-        lines += [n for n in (incomplete_note(self), skipped_note(self)) if n]
+            lines.append(f"[{len(self._skills) - len(shown)} more, use skill_list]")
+        lines += ["</available_skills>", SKILL_CATALOG_END, *notes]
         return "\n".join(lines)
 
     def read_body(

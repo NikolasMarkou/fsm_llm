@@ -313,6 +313,46 @@ class TestModuleDocstringsAreReal:
         )
 
 
+class TestNoTopLevelNameIsBoundTwice:
+    """A doubled top-level name (a copy-paste slip) silently keeps the last one.
+    Ruff F811 sees a redefined def or import, not a doubled constant. `if` and
+    `try` branches are not scanned (a fallback binding is deliberate)."""
+
+    @staticmethod
+    def _bound_names(path: pathlib.Path) -> list[str]:
+        names: list[str] = []
+        for node in ast.parse(path.read_text(encoding="utf-8")).body:
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    names += [
+                        n.id
+                        for n in ast.walk(target)
+                        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)
+                    ]
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                if isinstance(node.target, ast.Name):
+                    names.append(node.target.id)
+            elif isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+            ):
+                overload = any(
+                    "overload" in ast.unparse(d)
+                    for d in getattr(node, "decorator_list", [])
+                )
+                if not overload:
+                    names.append(node.name)
+        return names
+
+    def test_no_src_module_binds_a_top_level_name_twice(self):
+        offenders = {}
+        for path in SRC_MODULES:
+            names = self._bound_names(path)
+            twice = sorted({n for n in names if names.count(n) > 1})
+            if twice:
+                offenders[str(path.relative_to(_REPO_ROOT))] = twice
+        assert not offenders, offenders
+
+
 class TestNoPypiInstallHint:
     """`fsm-llm` on PyPI is a different project: this repo installs from a clone."""
 

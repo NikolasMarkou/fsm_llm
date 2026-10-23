@@ -117,6 +117,16 @@ class TestValidate:
         assert message
         assert "1 errors" in err and "2 skills" in err
 
+    def test_a_symlinked_skill_md_is_an_error_and_exits_1(
+        self, clean: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        (clean / "linked").mkdir()
+        (clean / "linked" / "SKILL.md").symlink_to(clean / "alpha" / "SKILL.md")
+
+        code, out, _ = _run(capsys, "validate", clean)
+
+        assert code == 1 and "error skill-md-unreadable linked/SKILL.md" in out
+
     @pytest.mark.parametrize(
         ("extra", "body", "code", "strict", "expected"),
         [
