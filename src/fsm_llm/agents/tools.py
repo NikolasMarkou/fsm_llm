@@ -288,9 +288,9 @@ def refuse_execute_without_gated(tools: Any) -> None:
     # the run turned into a failed tool. Do NOT pass `gated` only when True to
     # dodge the break: it would hide it until the first approved call. Do NOT
     # move this into agent constructors or check agents that never pass
-    # `gated` (REWOO, ParallelReact, native_fc): the harness builds its
-    # agents outside its dispatch error handling and its live suite spies on
-    # `execute` with the old signature (STOP IF 2 of plan 944e2692).
+    # `gated` (REWOO, ParallelReact, native_fc): an agent built outside any
+    # dispatch error handling, or a registry spy on `execute` with the old
+    # signature, would break (STOP IF 2 of plan 944e2692).
     execute = getattr(tools, "execute", None)
     if execute is None:
         return

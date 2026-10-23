@@ -1173,8 +1173,8 @@ def _target_problem(root: Path, rel: str) -> str | None:
 
 
 # DECISION plan-2026-10-21T140931-095ea5f8/D-014
-# Do NOT swap this private copy for a shared helper or `harness._atomic` (the
-# `agents/semantic_memory.py` anchor and the layering rule forbid both), and do
+# Do NOT swap this private copy for a shared helper (the
+# `agents/semantic_memory.py` anchor and the layering rule forbid it), and do
 # NOT widen the cleanup to `except BaseException`.
 def _atomic_write(path: Path, data: bytes) -> None:
     """Write *data* to *path* via a temp file and rename; removed on ANY failure."""

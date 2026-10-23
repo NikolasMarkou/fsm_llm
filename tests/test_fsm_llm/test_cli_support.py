@@ -90,7 +90,7 @@ class TestBothClisUseTheSharedCode:
             "import fsm_llm\n"
             "assert 'fsm_llm.cli_support' not in sys.modules\n"
             "import fsm_llm.cli_support\n"
-            "subs = ('agents', 'harness', 'reasoning', 'workflows', 'monitor', 'eval')\n"
+            "subs = ('agents', 'reasoning', 'workflows', 'monitor', 'eval')\n"
             "bad = [m for m in sys.modules if m.split('.')[:2] in "
             "[['fsm_llm', s] for s in subs]]\n"
             "assert not bad, bad\n"

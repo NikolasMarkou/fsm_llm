@@ -139,8 +139,8 @@ class TestExactArgumentSchema:
         }
 
     def test_simple_tool_shape_matches_the_coarse_schema(self):
-        # The harness workspace tools are all ``str`` params: the emitted
-        # schema is unchanged for them.
+        # Tools whose params are all ``str``: the emitted schema is unchanged
+        # for them.
         @tool
         def read_file(path: str) -> str:
             """Read."""

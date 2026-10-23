@@ -1,7 +1,7 @@
 """Golden provider requests of ``NativeFunctionCallingReactAgent``.
 
 The native tool-calling path is measured-good (agents-react B0 37/38 at 2.39
-calls, harness L4 B1 40/40), and its request bytes decide that: the system
+calls), and its request bytes decide that: the system
 message placement alone moved a 4B worker from 0/5 to 4/5 writes (D-021 of plan
 bf7ffe24). Plan 944e2692 rebuilds this agent as an FSM run by core (D-009); this
 module pins every model-visible key of every request it sends, captured at
@@ -211,9 +211,9 @@ def _scenario_specs() -> dict[str, dict[str, Any]]:
             "script": lambda: [_calls(_PARIS), _final("It is sunny in Paris.")],
         },
         # Added in step 18.2 (review round 1, D-029), captured at e1f63a9 like
-        # the scenarios above: the harness EXPLORE configuration (forced
-        # tool plus output schema), the iteration limit (alone and with both
-        # post-loop turns), a malformed turn and a provider error.
+        # the scenarios above: a forced tool plus output schema, the
+        # iteration limit (alone and with both post-loop turns), a malformed
+        # turn and a provider error.
         "forced_tool_output_schema": {
             "task": "Check the weather in Paris, record it and report it.",
             "config": {

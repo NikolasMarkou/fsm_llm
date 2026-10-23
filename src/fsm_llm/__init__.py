@@ -340,7 +340,7 @@ __all__ = [
 # --------------------------------------------------------------
 
 # DECISION plan-2026-09-29T044048-3a032517/D-003
-# The subpackages fsm_llm.{agents,reasoning,workflows,monitor,harness} are
+# The subpackages fsm_llm.{agents,reasoning,workflows,monitor,eval} are
 # NOT imported here and NOT listed in __all__. They import core as
 # `from fsm_llm import API`, so an eager import from this module would hit a
 # partially initialised fsm_llm, and monitor would drag in fastapi on

@@ -225,8 +225,8 @@ def strip_caller_context(
     # callback never asked (SEC-01); forged `observation_count`/`should_terminate`/
     # `final_answer` gave success=True with zero tools (LOOP-12). Do NOT
     # blanket-drop internal-prefix keys here for in-process callers: `_sensitive`
-    # reaches the approval policy by design (TestDriverSeesRefusalContext) and the
-    # harness passes its roots this way. Only AgentServer sets `drop_internal`.
+    # reaches the approval policy by design (TestDriverSeesRefusalContext).
+    # Only AgentServer sets `drop_internal`.
     # Do NOT answer a forged remote key with 400 either: clients that echo
     # context would break; the drop is logged instead. See decisions.md D-002.
     kept: dict[str, Any] = {}
@@ -809,8 +809,8 @@ class BaseAgent(ABC):
         # and NO policy, requires_approval=True tools are the default policy:
         # active iff some registered tool is flagged. Do NOT go back to
         # "no policy means no gating" (the flag was a no-op, SEC-03), and do
-        # NOT gate a policy-less run with no flagged tool (the harness runs
-        # callback-only HITL with no flagged tools). See decisions.md D-004.
+        # NOT gate a policy-less run with no flagged tool (callback-only HITL
+        # with no flagged tool must keep running). See decisions.md D-004.
         hitl: HumanInTheLoop | None = getattr(self, "hitl", None)
         if hitl is None:
             return False

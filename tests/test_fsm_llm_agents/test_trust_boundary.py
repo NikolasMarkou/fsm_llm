@@ -201,7 +201,7 @@ class TestForgedRunOutputs:
 
 class TestInitContextKeepsPolicyInputs:
     """D-002: only run-owned keys are dropped in-process; other internal keys
-    (approval-policy inputs, harness roots) still reach the run."""
+    (approval-policy inputs) still reach the run."""
 
     def test_internal_policy_key_passes(self):
         agent = _Harness().react()

@@ -733,7 +733,7 @@ class TestWiring:
             "import sys\n"
             "import fsm_llm.okf_cli\n"
             "bad = [m for m in sys.modules if m.split('.')[:2] in "
-            "(['fsm_llm', 'agents'], ['fsm_llm', 'harness'], ['fsm_llm', 'reasoning'], "
+            "(['fsm_llm', 'agents'], ['fsm_llm', 'reasoning'], "
             "['fsm_llm', 'workflows'], ['fsm_llm', 'monitor'], ['fsm_llm', 'eval'])]\n"
             "assert not bad, bad\n"
             "print('ok')\n"
@@ -753,7 +753,7 @@ class TestWiring:
         source = (_REPO / "src" / "fsm_llm" / "okf_cli.py").read_text(encoding="utf-8")
 
         assert not re.search(
-            r"(?m)^\s*(from|import)\s+(fsm_llm\.|\.)(agents|harness|reasoning|"
+            r"(?m)^\s*(from|import)\s+(fsm_llm\.|\.)(agents|reasoning|"
             r"workflows|monitor|eval)\b",
             source,
         )

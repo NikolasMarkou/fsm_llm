@@ -44,8 +44,8 @@ def refuse_named_options(
 ) -> None:
     """Refuse open-ended option names that are named parameters of ``target``.
 
-    Interface contract (shared by ``APIBuilder``, ``ConfiguredAgentBuilder``
-    and ``HarnessAgentBuilder``): ``target`` is the constructor or factory the
+    Interface contract (shared by ``APIBuilder`` and
+    ``ConfiguredAgentBuilder``): ``target`` is the constructor or factory the
     builder will call; ``options`` are the names recorded through the builder's
     open-ended setter; ``hint`` maps a parameter name to the builder method
     that sets it when that is not ``set_<name>``; ``owner`` is the builder

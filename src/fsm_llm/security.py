@@ -71,8 +71,8 @@ def has_internal_prefix(key: str, prefixes: Iterable[str] | None = None) -> bool
 def resolve_within(root: Path, relative: str | os.PathLike[str]) -> Path | None:
     """Resolve *relative* under *root* and return it only if it stays inside.
 
-    This is the shared comparison used by the harness workspace, the OKF
-    bundle loader and writer and the Agent Skills reads; other sites keep
+    This is the shared comparison used by the OKF bundle loader and writer
+    and the Agent Skills reads; other sites keep
     their own checks. Never re-inline it in any of them.
 
     Interface contract:
@@ -96,7 +96,7 @@ def resolve_within(root: Path, relative: str | os.PathLike[str]) -> Path | None:
     points outside it, and ``/tmp/ws-evil`` is a string-prefix of ``/tmp/ws``.
     Only ``Path.resolve()`` collapses links, and only ``resolved == root or
     root in resolved.parents`` is correct for siblings. This is the reasoning
-    recorded as D-032 of plan 191b2eb2 in the harness.
+    recorded as D-032 of plan 191b2eb2.
 
     Residual hole (TOCTOU): a symlink swapped in between this call and the
     caller's open still wins. Closing that needs ``openat2`` / ``O_NOFOLLOW``;
@@ -1498,7 +1498,7 @@ _TOKEN_VALUE_SCAN_NAME_RE = re.compile(
 #      (`pin_attempts`, `otp_enabled`, `criteria_pass_count`) is metadata,
 #      by the same measured rule `password_*` already uses (D-030);
 #   2. a `bool` value is never credential material (`all_criteria_pass:
-#      True`, the harness REFLECT gate flag). Numbers are NOT exempt: a PIN,
+#      True`, a pass/fail flag). Numbers are NOT exempt: a PIN,
 #      CVV, OTP or card number is routinely stored as an int.
 # A name-only caller (`value=None`) strips. See decisions.md D-012, D-031.
 #

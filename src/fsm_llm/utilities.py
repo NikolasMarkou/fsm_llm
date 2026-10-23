@@ -657,8 +657,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
     # A text that parses cleanly to a non-object returns None immediately; it
     # does NOT fall through to the brace scan. Falling through would recover
     # the first object inside a top-level array (`[{"a":1}]` -> `{"a":1}`), a
-    # "recover more" change that would reach fsm_llm/harness/hardening.py,
-    # whose documented contract is that a top-level array is not a payload.
+    # "recover more" change, though a top-level array is not a payload.
     # Do NOT return the list/scalar either: the `dict | None` annotation was a
     # lie and Classifier._parse_single died on it with AttributeError.
     try:

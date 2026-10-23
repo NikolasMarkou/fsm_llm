@@ -43,7 +43,7 @@ def ollama_available(model_tag: str = OLLAMA_MODEL_TAG) -> bool:
     """Whether Ollama is reachable AND *model_tag* is pulled.
 
     Interface contract (2 call sites -- ``tests/test_integration_ollama.py``
-    and ``tests/test_fsm_llm_harness/test_live_ollama.py``; centralised so the
+    and ``tests/test_fsm_llm/test_live_classification_memory.py``; centralised so the
     two live suites cannot drift into probing different daemons):
         - Parameter: a substring of the tag as ``/api/tags`` reports it.
         - Returns ``True`` only when the daemon answered 200 AND some pulled

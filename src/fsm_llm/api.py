@@ -276,7 +276,7 @@ def _seconds_exempt_set(states: Collection[str]) -> frozenset[str]:
 # ``API.run_until_terminal_stream``: "has it ended", both budgets, the hook,
 # then the caller runs exactly one step (``advance`` / ``advance_stream``) per
 # yielded number. Do NOT write this sequence a second time in either method or
-# in a subpackage (agents, reasoning and the harness pass their limits and
+# in a subpackage (agents and reasoning pass their limits and
 # their hook in). Do NOT move a budget check after the step: a spent budget
 # must never start a step, so the seconds budget and "has it ended" are asked
 # again after ``before_step`` returns (the hook may wait, or end the

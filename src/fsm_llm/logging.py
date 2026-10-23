@@ -53,7 +53,7 @@ logger.disable("fsm_llm")
 
 #: Top-level packages whose log output is library output. loguru's
 #: `disable("fsm_llm")` matches `fsm_llm` and every submodule and subpackage
-#: (agents, reasoning, workflows, monitor, harness), so the one disable above
+#: (agents, reasoning, workflows, monitor, eval), so the one disable above
 #: silences all of them; `setup_logging()` / `enable_debug_logging()` re-enable
 #: every name listed here.
 # DECISION plan-2026-09-29T044048-3a032517/D-004
@@ -88,8 +88,8 @@ def is_library_logging_enabled() -> bool:
 def setup_cli_logging(default_level: str) -> int:
     """Turn on library log output at a command-line process entry point.
 
-    Interface contract (3 call sites: the harness and eval ``run()`` entry
-    wrappers and the reasoning CLI's ``--verbose``):
+    Interface contract (2 call sites: the eval ``run()`` entry wrapper and
+    the reasoning CLI's ``--verbose``):
         - ``default_level``: loguru level name used when ``FSM_LLM_LOG_LEVEL``
           is unset, blank, or not a loguru level; a valid env value wins
           (case-insensitive). An invalid one is reported on stderr, not raised.
@@ -103,7 +103,7 @@ def setup_cli_logging(default_level: str) -> int:
     # DECISION plan-2026-09-29T044048-3a032517/D-016
     # Call this ONLY from a process entry point (console script, `-m` guard,
     # a CLI flag), never from library code or from a function tests call
-    # in-process such as harness `main_cli`: it enables "fsm_llm" globally.
+    # in-process such as eval `main_cli`: it enables "fsm_llm" globally.
     # Handler 0 is removed because, once "fsm_llm" is enabled, it would print
     # every DEBUG record and duplicate each line the new handler prints.
     try:

@@ -351,8 +351,7 @@ class TestGatedKeywordRequired:
         ids=["rewoo", "native_fc"],
     )
     def test_agents_that_never_pass_gated_accept_it(self, build):
-        """They call ``execute(call)``: an older override still runs there
-        (the harness live suite spies on ``execute`` this way)."""
+        """They call ``execute(call)``: an older override still runs there."""
         build(_with_tool(_OldRegistry()))
 
     def test_kwargs_and_the_shipped_registries_are_accepted(self):

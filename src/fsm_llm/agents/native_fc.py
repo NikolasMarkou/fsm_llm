@@ -92,8 +92,8 @@ _FORCE_WRITE_PROMPT = (
 def _shown_call(call: ToolCall) -> ToolCall:
     """The trace copy of an executed call, secret-looking arguments redacted.
 
-    The tool ran with ``call``; the returned trace (read by the monitor and
-    the harness) gets this copy.
+    The tool ran with ``call``; the returned trace (read by the monitor)
+    gets this copy.
     """
     # DECISION plan-2026-10-01T093600-944e2692/D-027 (carries
     # 06a5ec0a/D-016): the trace, `agent_trace` and logs hold this redacted
@@ -171,7 +171,7 @@ class NativeFCHandlers:
     Interface contract (one caller: ``NativeFunctionCallingReactAgent``, which
     builds one per run and never stores it on the agent):
         - ``tools``: every call runs through ``tools.execute`` (Caching and
-          Retrying registries keep working; the harness spies on it).
+          Retrying registries keep working).
         - ``max_tool_turns``: the loop ends ``exhausted`` after this many tool
           turns without a final turn (``AgentConfig.max_iterations``), >= 1.
         - ``force_final_tool``: the tool the run must end by calling, or
@@ -405,8 +405,8 @@ class NativeFCHandlers:
         # DECISION plan-2026-10-01T093600-944e2692/D-027 (carries
         # bb230f18/D-003): the forced write is the MODEL's call (named
         # `tool_choice`, tools only, never `response_format`), made at most
-        # once after the loop, run through `tools.execute` so the harness's
-        # disk-is-truth check sees a real write. Do NOT synthesise the call
+        # once after the loop, run through `tools.execute` like every
+        # other tool call, never around the registry. Do NOT synthesise the call
         # in the driver, do NOT loop, and do NOT let a malformed forced turn
         # touch the answer or success. See decisions.md D-027.
         reply = context.get(_K.FORCED_REPLY)
@@ -592,7 +592,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         # Standing instructions belong in the SYSTEM message, and this seam
         # exists because that placement was MEASURED to be the difference
         # between a 4B model doing the work and only talking about it. Live
-        # `ollama_chat/qwen3.5:4b`, harness EXECUTE role, n=5 per arm, bytes
+        # `ollama_chat/qwen3.5:4b`, an EXECUTE role, n=5 per arm, bytes
         # stat'd on disk: the whole role prompt in the USER turn wrote 0/5;
         # the SAME text, unchanged and complete, with everything standing moved
         # into the system message wrote 4/5. Content ablations in between

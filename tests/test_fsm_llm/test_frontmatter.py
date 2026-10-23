@@ -449,7 +449,7 @@ class TestLayering:
             "(['fsm_llm', 'okf'], ['fsm_llm', 'okf_cli'], ['fsm_llm', 'okf_bridge'], "
             "['fsm_llm', 'cli_support'], "
             "['fsm_llm', 'agents'], "
-            "['fsm_llm', 'harness'], ['fsm_llm', 'reasoning'], "
+            "['fsm_llm', 'reasoning'], "
             "['fsm_llm', 'workflows'], ['fsm_llm', 'monitor'], ['fsm_llm', 'eval'])]\n"
             "assert not bad, bad\n"
             "print('ok')\n"

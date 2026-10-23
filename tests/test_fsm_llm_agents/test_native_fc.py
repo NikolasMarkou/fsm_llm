@@ -137,7 +137,7 @@ class TestSystemPolicy:
     """Standing instructions go in the SYSTEM message, not the user turn.
 
     Measured on `ollama_chat/qwen3.5:4b` (see decisions.md D-021 of plan
-    bf7ffe24): the harness's role prompt delivered entirely in the user turn
+    bf7ffe24): a role prompt delivered entirely in the user turn
     produced ZERO writes in 5/5 dispatches; the same text with its standing
     half moved here produced 4/5. These tests pin the seam: the no-policy path
     is the base prompt and the policy, when set, lands in the system message

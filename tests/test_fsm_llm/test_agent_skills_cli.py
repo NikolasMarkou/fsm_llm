@@ -575,7 +575,7 @@ class TestWiring:
         probe = (
             "import sys\n"
             "import fsm_llm.agent_skills_cli\n"
-            "subs = ('agents', 'harness', 'reasoning', 'workflows', 'monitor', 'eval')\n"
+            "subs = ('agents', 'reasoning', 'workflows', 'monitor', 'eval')\n"
             "bad = [m for m in sys.modules if m.split('.')[:2] in "
             "[['fsm_llm', s] for s in subs]]\n"
             "assert not bad, bad\n"

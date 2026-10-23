@@ -211,7 +211,7 @@ def resolve_agent_model(model: str | None = None) -> str:
     # DECISION plan-2026-09-29T103145-06a5ec0a/D-013
     Do NOT make ``AgentConfig.model`` default to ``None`` and resolve later:
     ``config.model`` is read directly at more than 20 sites (native_fc,
-    SelfConsistency, ReasoningReact, meta builder, log lines, the harness),
+    SelfConsistency, ReasoningReact, meta builder, log lines),
     and every one of them needs a concrete string.
     """
     if model:

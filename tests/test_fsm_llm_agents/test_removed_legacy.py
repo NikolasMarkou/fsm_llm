@@ -211,7 +211,7 @@ class TestMetaBuildersAreArtifactBuilders:
     """Plan 89b03f61 step 2: the meta builders took the *ArtifactBuilder names.
 
     The bare names clashed with ``fsm_llm.workflows.WorkflowBuilder`` (a
-    different class) and ``fsm_llm.harness.AgentBuilder`` (a callable alias).
+    different class).
     """
 
     @pytest.mark.parametrize("name", ["FSMBuilder", "WorkflowBuilder", "AgentBuilder"])

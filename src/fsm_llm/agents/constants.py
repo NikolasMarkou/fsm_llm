@@ -382,7 +382,7 @@ class StopReason:
 
     # Concluded with a real answer: an answer key or an executed tool call.
     ANSWERED = "answered"
-    # Succeeded on executed work: planner evidence, subtasks, a harness role.
+    # Succeeded on executed work: planner evidence, subtasks.
     EVIDENCE = "evidence"
     # The iteration budget forced the stop; the last output still ships.
     MAX_ITERATIONS = "max_iterations"
@@ -446,8 +446,8 @@ REACT_THINK_FRESH_KEYS: tuple[str, ...] = (
 # (tool selection and results, evidence counters, termination, approval state and
 # the driver-only grant). Caller context never supplies them; they are removed
 # only by ``base.strip_caller_context`` (see the anchor there). Do NOT add the
-# whole internal-prefix family here: ``_sensitive``-style policy inputs and the
-# harness roots legitimately arrive through ``initial_context``.
+# whole internal-prefix family here: ``_sensitive``-style policy inputs
+# legitimately arrive through ``initial_context``.
 RUN_OUTPUT_KEYS: frozenset[str] = frozenset(
     {
         ContextKeys.OBSERVATION_COUNT,
