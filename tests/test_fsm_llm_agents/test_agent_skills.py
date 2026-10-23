@@ -198,7 +198,7 @@ class TestReplyBudget:
                 assert len(entry) <= Defaults.MAX_OBSERVATION_LENGTH
                 assert SKILL_UNTRUSTED_LABEL in entry
         # An echoed input of 3,000 characters leaves only the floor budget.
-        floor = {"name": "k" * 64, "offset": "1" * 3000}
+        floor = {"name": "k" * 64, "offset": "0" * 3000}
         reply = _run(registry, "skill_load", **floor)
         assert reply.startswith(SKILL_UNTRUSTED_LABEL)
         assert len(reply) <= _budget("skill_load", **floor)
@@ -253,12 +253,51 @@ class TestReplyBudget:
             offset = int(footer.group(1))
         assert seen == [f"skill-{i:02d}" for i in range(60)]
 
-    def test_the_first_page_lists_files_and_counts_the_rest(self, tmp_path: Path):
-        _make(tmp_path, "many", files={f"d/f-{i:03d}.txt": "x" for i in range(80)})
-        first = _run(_registry(tmp_path), "skill_load", name="many")
-        assert "files (80):" in first and "more file(s) not listed" in first
-        later = _run(_registry(tmp_path), "skill_load", name="many", offset=1)
-        assert "files (" not in later
+    def test_the_first_page_lists_files_and_says_how_to_list_the_rest(self, tmp_path):
+        names = [f"d/f-{i:03d}-" + "n" * 40 for i in range(80)]
+        _make(tmp_path, "many", files={n: "x" for n in names})
+        registry = _registry(tmp_path)
+        first = _run(registry, "skill_load", name="many")
+        listed = [f"  {n}\n" in first for n in names]
+        assert listed == sorted(listed, reverse=True) and not all(listed)
+        hidden = f'  ... {listed.count(False)} more: skill_read with path "" lists all'
+        assert "files (80):" in first and hidden in first
+        # The advertised call really lists every file, in order, in pages.
+        for path in ("", "d", "d/", "/d"):
+            pages = self._walk(registry, "skill_read", name="many", path=path)
+            assert "".join(pages) == "\n".join(names) and len(pages) > 1
+
+    def test_later_pages_repeat_only_the_name(self, tmp_path: Path):
+        claims = "".join(f"{k}: {'v' * 120}\n" for k in ("license", "compatibility"))
+        _make(tmp_path, "big", "d" * 400, _LONG * 3, {"r/a.md": "x"}, extra=claims)
+        registry = _registry(tmp_path)
+        first = _run(registry, "skill_load", name="big").split("\n\n")[0]
+        assert "description: " in first and "license (claimed" in first
+        later = _run(registry, "skill_load", name="big", offset=1400)
+        header, page = later.split("\n\n", 1)
+        assert header.split("\n")[1:] == ["name: big (from character 1400)"]
+        assert len(page) > 1300  # the description and claims no longer eat the page
+
+    def test_skill_read_lists_a_directory_but_reads_a_file_and_refuses_the_rest(
+        self, tmp_path: Path
+    ):
+        _make(tmp_path, "s", files={"d/a.txt": "A\n", "d/e/b.txt": "B\n"})
+        (tmp_path / "s" / "empty").mkdir()
+        registry = _registry(tmp_path)
+        assert _run(registry, "skill_read", name="s", path="d").endswith(
+            "d/a.txt\nd/e/b.txt"
+        )
+        assert _run(registry, "skill_read", name="s", path="d/e/").endswith("d/e/b.txt")
+        assert _run(registry, "skill_read", name="s", path="d/a.txt").endswith("\nA\n")
+        for path, why in (
+            ("d/a", "resource cannot be read"),  # a name part is not a directory
+            ("empty", "resource is not a regular file"),
+            ("../s", "resource path is not allowed"),
+        ):
+            assert _run(registry, "skill_read", name="s", path=path).endswith(why)
+        _make(tmp_path, "bare")  # no files: the empty path lists nothing and is refused
+        bare = _run(_registry(tmp_path), "skill_read", name="bare", path="")
+        assert bare.endswith("resource path is not allowed")
 
 
 class TestInjection:
@@ -338,9 +377,10 @@ class TestClamping:
         assert "No skill named ''." in _run(
             registry, "skill_load", name=["gateway-ops"]
         )
+        (gateway / "gateway-ops" / "empty").mkdir()
         for path, why in (
             (["references/limits.md"], "resource path is not allowed"),
-            ("references", "resource is not a regular file"),
+            ("empty", "resource is not a regular file"),
         ):
             assert _run(registry, "skill_read", **load, path=path).endswith(why)
 

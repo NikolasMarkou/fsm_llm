@@ -26,7 +26,7 @@ from fsm_llm.constants import (
     SKILL_UNTRUSTED_LABEL,
 )
 from fsm_llm.definitions import SkillError
-from fsm_llm.okf import capped_line
+from fsm_llm.okf import capped_line, text_page
 
 from .definitions import ToolAnnotations
 from .okf import _budget, _finish, _fit, _int
@@ -45,7 +45,8 @@ SKILL_TOOL_DESCRIPTIONS: dict[str, str] = {
     ),
     "skill_read": (
         "Read one file bundled with a skill, by skill name and relative path, "
-        "a page at a time. Use the 'next offset' line to read on."
+        "a page at a time; an empty path or a directory lists its files. "
+        "Use the 'next offset' line to read on."
     ),
 }
 
@@ -73,7 +74,7 @@ SKILL_TOOL_PARAMETERS: dict[str, dict[str, Any]] = {
             "name": _NAME,
             "path": {
                 "type": "string",
-                "description": "File path relative to the skill, as listed by skill_load.",
+                "description": "File or directory path relative to the skill ('' lists all).",
             },
             "offset": _OFFSET,
         },
@@ -118,6 +119,15 @@ def _claims(skill: AgentSkill) -> list[str]:
     ]
 
 
+def _under(skill: AgentSkill, path: Any) -> list[str]:
+    """The bundled files under directory *path* (``""`` is the root); ``[]`` for a
+    file, a non-string or an unknown directory (the read then refuses it)."""
+    if not isinstance(path, str) or path in skill.resources:
+        return []
+    prefix = path.strip("/") + "/" if path.strip("/") else ""
+    return [r for r in skill.resources if r.startswith(prefix)]
+
+
 def _paged(
     head: str, page: str, following: int | None, total: int, kind: str, budget: int
 ) -> str:
@@ -134,27 +144,20 @@ def create_skill_tools(
     """Register three read-only tools over *catalog*; return the registry.
 
     Interface contract:
-        - Tools: ``skill_list(offset=0)``, ``skill_load(name, offset=0)``,
-          ``skill_read(name, path, offset=0)``, each annotated ``read_only``,
-          ``idempotent``, not destructive, not open world. Registered into
-          *registry* (a new one when ``None``), which is returned; a name already
-          there is replaced (the registry warns).
-        - Descriptions and parameter descriptions are the module constants
-          ``SKILL_TOOL_DESCRIPTIONS`` and ``SKILL_TOOL_PARAMETERS``.
-        - Every reply starts with ``SKILL_UNTRUSTED_LABEL``, then (catalog loaded
-          incompletely) the fixed ``incomplete_note`` with issue CODES only. It is
-          control-stripped and sized with the OKF ``_budget`` so the agent loop's
-          whole observation entry is not cut. ``skill_load`` shows name,
-          description, the license / compatibility / allowed-tools the skill
-          claims (never enforced), on the first page the files it bundles (as
-          many as fit, then a count of the rest), and a body page; ``skill_read``
-          a file page. Pages hold at most ``SKILL_READ_PAGE_CHARS`` (fewer when
-          the header or the echoed input is long), end with ``next offset: N``
-          while more follows, and add up to the stripped text.
-        - Parameters from a small model are clamped, never raised on: a bool,
-          non-int or negative ``offset`` is 0; a wrong-typed or unknown name gives
-          a short message with at most 5 close names; a refused path gives the
-          fixed ``SkillError`` message.
+        - ``skill_list(offset=0)``, ``skill_load(name, offset=0)``,
+          ``skill_read(name, path, offset=0)``, annotated read-only and
+          idempotent, registered into *registry* (a new one when ``None``; a name
+          already there is replaced). Descriptions and parameter descriptions are
+          the module constants.
+        - Every reply starts with ``SKILL_UNTRUSTED_LABEL``, then the fixed
+          ``incomplete_note`` (codes only) for a partial catalog, is
+          control-stripped and sized with the OKF ``_budget``. ``skill_load``:
+          name, then on the first page the description, the claims (never
+          enforced) and the files; ``skill_read``: a file page, or the file list
+          of a directory (``""`` is all). Pages end with ``next offset: N``
+          while more follows and add up to the stripped text.
+        - Parameters are clamped, never raised on: a bool, non-int or negative
+          offset is 0; a wrong-typed or unknown name gives a short message.
         - Nothing is executed; the tools only read the catalog's folders.
     """
     tools = registry if registry is not None else ToolRegistry()
@@ -193,17 +196,17 @@ def create_skill_tools(
         if skill is None:
             return not_found(name, budget)
         start = _start(offset, SKILL_MAX_FILE_BYTES)
-        lines = [
-            _label(catalog),
-            f"name: {capped_line(skill.name, 64)}",
-            f"description: {capped_line(skill.description, SKILL_CATALOG_DESCRIPTION_CHARS)}",
-            *_claims(skill),
-        ]
+        lines = [_label(catalog), f"name: {capped_line(skill.name, 64)}"]
+        if start:  # later pages repeat only the name: more room for the text
+            lines[-1] += f" (from character {start})"
+        else:
+            desc = capped_line(skill.description, SKILL_CATALOG_DESCRIPTION_CHARS)
+            lines += [f"description: {desc}", *_claims(skill)]
         if start == 0 and skill.resources:
             files, hidden = _fit([f"  {r}" for r in skill.resources], _FILES_CHARS)
             lines += [f"files ({len(skill.resources)}):", *files]
             if hidden:
-                lines.append(f"  ... {hidden} more file(s) not listed")
+                lines.append(f'  ... {hidden} more: skill_read with path "" lists all')
         head = "\n".join([*lines, "", ""])
         room = min(SKILL_READ_PAGE_CHARS, budget - len(head) - _FOOTER_RESERVE)
         try:
@@ -217,21 +220,26 @@ def create_skill_tools(
         skill = catalog.get(name)
         if skill is None:
             return not_found(name, budget)
+        files = _under(skill, path)
+        what = (
+            f"files under {capped_line(path, 300)!r} ({len(files)})"
+            if files
+            else (f"file: {capped_line(path, 300)}")
+        )
         head = "\n".join(
-            [
-                _label(catalog),
-                f"skill: {capped_line(skill.name, 64)}",
-                f"file: {capped_line(path, 300)}",
-                "",
-                "",
-            ]
+            [_label(catalog), f"skill: {capped_line(skill.name, 64)}", what, "", ""]
         )
         room = min(SKILL_READ_PAGE_CHARS, budget - len(head) - _FOOTER_RESERVE)
         start = _start(offset, SKILL_MAX_FILE_BYTES)
         try:
-            page, following, total = catalog.read_resource(
-                skill.name, path, start, size=room
-            )
+            if files:
+                page, following, total = text_page(
+                    "\n".join(files), start, max(room, 1)
+                )
+            else:
+                page, following, total = catalog.read_resource(
+                    skill.name, path, start, size=room
+                )
         except SkillError as refused:
             return failed(str(refused), budget)
         return _paged(head, page, following, total, "file", budget)
