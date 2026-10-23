@@ -246,16 +246,16 @@ class TestBlocks:
 
     @pytest.mark.parametrize(
         ("k_on", "k_off", "want"),
-        [(0, 0, "floor, inconclusive KEEP"), (1, 1, "floor, inconclusive KEEP"), (1, 0, "floor, inconclusive KEEP"),
-         (0, 1, "floor, inconclusive KEEP"), (0, 4, "inconclusive KEEP"), (2, 1, "no effect shown REMOVE"),
-         (10, 10, "no effect shown REMOVE"), (10, 4, "effect shown KEEP"), (9, 3, "effect shown KEEP"), (4, 10, "hint harmful REMOVE"),
-         (10, 6, "inconclusive KEEP"), (6, 10, "inconclusive KEEP"), (4, 7, "inconclusive KEEP"),
-         (9, 9, "no effect shown REMOVE"), (10, 9, "no effect shown REMOVE"), (3, 3, "no effect shown REMOVE")],
+        [(*c, "floor") for c in [(0, 0), (1, 1), (2, 1), (1, 2), (4, 4), (4, 3), (0, 4)]]
+        + [(*c, "no effect shown REMOVE") for c in [(5, 5), (5, 4), (10, 10), (9, 10), (10, 9)]]
+        + [(10, 4, "effect shown KEEP"), (9, 3, "effect shown KEEP"), (4, 10, "hint harmful REMOVE")]
+        + [(*c, "inconclusive KEEP") for c in [(10, 6), (6, 10), (5, 8)]],
     )  # fmt: skip
     def test_the_pre_registered_rule(self, k_on, k_off, want):
-        """Guards: a rule unlike the registered text (10/6: p > .05; floor <= 1 both: D-032)."""
+        """Guards: a null that removes the hint when no arm could reach skill_read (D-034)."""
         verdict, action = sb.decide_b0(_arm(k_on), _arm(k_off), True)
-        assert f"{verdict.split(' (')[0]} {action}" == want
+        got = (f"{verdict.split(' (')[0]} {action}", "fewer than half" in verdict)
+        assert got == (("inconclusive KEEP", True) if want == "floor" else (want, False))  # fmt: skip
 
     def test_b1_pairs_native_4b_with_its_hint_off_arm_and_prints_a_fisher_p(
         self, bench, scripted, capsys

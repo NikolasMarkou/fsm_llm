@@ -60,6 +60,32 @@ trials run to their step budget. B1 (own pre-registration) has 96 rows, about 17
 minutes; D-014 above quotes the earlier "48 plus 72 rows, about 1.5 h", superseded by
 these figures.
 
+## Amendment A2, 2026-10-23 (decision D-034 of plan 93d78536): a reachable null
+
+Made after registration commit 0ac943b and BEFORE row 1: no row of B0 or B1 exists,
+no `run` was started, and the manifests (fixture hash, models and digests, src
+hashes, git commit) are unchanged and are NOT re-registered. A1 above stays as
+written; A2 replaces its floor clause (k <= 1 for both arms) and nothing else.
+Reason: the A1 floor has a cliff. 1 v 1 was a floor KEEP but 2 v 1 read as "no
+effect shown" and would REMOVE the hint, and ReAct on `qwen3.5:4b` reached
+`skill_read` in 0 of 8 smoke trials, so outcomes of 0 to 3 of 10 are the likely ones
+and a 2 v 1 result is plausible. Removing a line on that repeats the defect A1 was
+written to stop, one step higher.
+
+Rule order now: (1) validity checks (incomplete block, more than 2 invalid cells:
+KEEP); (2) effect shown, on minus off >= 4 AND p < 0.05 -> KEEP; (3) harmful, off
+minus on >= 4 AND p < 0.05 -> REMOVE; (4) if max(k_on, k_off) <= 4, the block is
+INCONCLUSIVE and the hint is KEPT, with the scope stated: fewer than half of the
+questions reached `skill_read` in the better arm, so the hint could not be tested;
+(5) otherwise |on minus off| <= 1 -> no effect shown, REMOVE; anything else ->
+inconclusive, KEEP. "No effect shown -> REMOVE" therefore needs max(k_on, k_off) >= 5
+of 10. Branches (2) and (3) are unchanged and cannot fire at a floor anyway.
+
+Cases: 0 v 0, 1 v 1, 2 v 1, 1 v 2, 4 v 4, 4 v 3 -> inconclusive, KEEP; 0 v 4 (a gap of
+4 but p = 0.087) -> inconclusive, KEEP; 5 v 5, 5 v 4, 10 v 10, 9 v 10 -> no effect
+shown, REMOVE; 10 v 4 (p = 0.011) -> effect shown, KEEP; 4 v 10 -> harmful, REMOVE.
+`decide_b0` implements this order and `report` prints the applied branch.
+
 ## Operational definitions (they only make the text above computable)
 
 - Cell: the first-trial row of one of the 10 read-needed questions of one arm

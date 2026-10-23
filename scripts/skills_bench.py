@@ -533,11 +533,11 @@ def decide_b0(
     Interface contract: the rule text is PRE_REGISTRATION_B0.md. An incomplete
     block (aborted, or fewer than 10 units) or one with more than 2 invalid
     primary cells is invalid and the hint stays. diff = on - off in first-trial
-    G1 cells; FLOOR first (D-032): both arms <= 1 of 10 -> inconclusive, KEEP
-    (the run never reached skill_read, so the hint could not act); Fisher
-    two-sided p: diff >= 4 and p < .05 -> effect shown, KEEP;
-    -diff >= 4 and p < .05 -> harmful, REMOVE; |diff| <= 1 -> no effect shown,
-    REMOVE; anything else -> inconclusive, KEEP.
+    G1 cells; Fisher two-sided p: diff >= 4 and p < .05 -> effect shown, KEEP;
+    -diff >= 4 and p < .05 -> harmful, REMOVE; then REACHABLE NULL (D-034):
+    max(k_on, k_off) <= 4 -> inconclusive, KEEP (fewer than half of the questions
+    reached skill_read in the better arm, so the hint could not be tested);
+    else |diff| <= 1 -> no effect shown, REMOVE; anything else -> inconclusive, KEEP.
     """
     if not complete or on["n_units"] != PRIMARY_N or off["n_units"] != PRIMARY_N:
         return "block incomplete", "KEEP"
@@ -546,12 +546,12 @@ def decide_b0(
     diff = on["k_g1"] - off["k_g1"]
     p = hb.fisher_exact_two_sided(on["k_g1"], PRIMARY_N, off["k_g1"], PRIMARY_N)
     at = f"(diff {diff}, p={p:.4f})"
-    if max(on["k_g1"], off["k_g1"]) <= 1:
-        return f"floor, inconclusive {at}; both arms <= 1 of 10, the runs did not reach skill_read, so the hint could not act", "KEEP"  # fmt: skip
     if diff >= 4 and p < 0.05:
         return f"effect shown {at}", "KEEP"
     if -diff >= 4 and p < 0.05:
         return f"hint harmful {at}", "REMOVE"
+    if max(on["k_g1"], off["k_g1"]) <= 4:
+        return f"inconclusive {at}; fewer than half of the questions reached skill_read in the better arm, so the hint could not be tested", "KEEP"  # fmt: skip
     return (
         (f"no effect shown {at}", "REMOVE")
         if abs(diff) <= 1
