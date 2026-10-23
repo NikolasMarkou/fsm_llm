@@ -1341,18 +1341,23 @@ def capped_line(value: object, cap: int = OKF_SUMMARY_FIELD_CHARS) -> str:
     return strip_unsafe_text(value).strip()[:cap] if isinstance(value, str) else ""
 
 
+def text_page(text: str, offset: Any, size: int) -> tuple[str, int | None, int]:
+    """``(page, next offset or None, length)`` of *text*, which the caller has
+    already control-stripped; ``offset`` is clamped into the text (a non-int is
+    0) and pages add up to it. Shared by OKF bodies and Agent Skills files."""
+    try:
+        start = min(max(int(offset), 0), len(text))
+    except (TypeError, ValueError, OverflowError):
+        start = 0
+    end = min(start + size, len(text))
+    return text[start:end], (end if end < len(text) else None), len(text)
+
+
 def body_page(
     concept: OKFConcept, offset: Any, size: int
 ) -> tuple[str, int | None, int]:
-    """``(page, next offset or None, length)`` of a concept's stripped body;
-    ``offset`` is clamped into the body (a non-int is 0); pages add up to it."""
-    body = strip_unsafe_text(concept.body, multiline=True)
-    try:
-        start = min(max(int(offset), 0), len(body))
-    except (TypeError, ValueError, OverflowError):
-        start = 0
-    end = min(start + size, len(body))
-    return body[start:end], (end if end < len(body) else None), len(body)
+    """``text_page`` of a concept's stripped body."""
+    return text_page(strip_unsafe_text(concept.body, multiline=True), offset, size)
 
 
 def close_ids(
