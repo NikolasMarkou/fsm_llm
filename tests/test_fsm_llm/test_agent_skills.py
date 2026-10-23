@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import threading
 import time
 import tracemalloc
@@ -571,6 +573,39 @@ class TestConstantsAndError:
         assert text.index('"""') < text.index("from __future__ import annotations")
         assert text.count("__all__ =") == 1
         assert Path(__file__).read_text(encoding="utf-8").isascii()
+
+
+def _isolated(probe: str) -> None:
+    """Run *probe* in a ``python -I`` child (no user site, no cwd on the path)."""
+    done = subprocess.run(
+        [sys.executable, "-I", "-c", probe],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=_SRC.parents[1],
+    )
+    assert done.returncode == 0, done.stderr
+
+
+class TestLayering:
+    """The core modules import no subpackage; core never imports them back."""
+
+    def test_the_format_module_loads_no_subpackage(self) -> None:
+        _isolated(
+            "import sys, fsm_llm.agent_skills\n"
+            "subs = ('agents', 'harness', 'reasoning', 'workflows', 'monitor', 'eval')\n"
+            "bad = [m for m in sys.modules if m.split('.')[:2] in "
+            "[['fsm_llm', s] for s in subs]]\n"
+            "assert not bad, bad\n"
+        )
+
+    def test_importing_fsm_llm_loads_none_of_the_skills_or_okf_modules(self) -> None:
+        _isolated(
+            "import sys, fsm_llm\n"
+            "mods = ('frontmatter', 'okf', 'okf_cli', 'agent_skills', 'agent_skills_cli')\n"
+            "bad = [m for m in mods if f'fsm_llm.{m}' in sys.modules]\n"
+            "assert not bad, bad\n"
+        )
 
 
 # --- Ledger fixes in the parse half (I-018, I-019) ---
