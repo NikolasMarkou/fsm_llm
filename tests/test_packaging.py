@@ -26,6 +26,11 @@ import sys
 import pytest
 
 _REPO_ROOT = pathlib.Path(__file__).parents[1]
+_SCRIPTS = str(_REPO_ROOT / "scripts")
+if _SCRIPTS not in sys.path:  # scripts/ is not a package
+    sys.path.insert(0, _SCRIPTS)
+
+import doc_counts
 
 
 def _packages_under(root: pathlib.Path) -> frozenset[str]:
@@ -583,3 +588,26 @@ class TestDocumentedTestCountsMatchCollection:
             assert documented == n_files, (
                 f"{rel} says {documented} test files; on disk: {n_files}"
             )
+
+
+@pytest.fixture(scope="module")
+def doc_measured() -> dict:
+    """One more child collection (about 10 s) for `scripts/doc_counts.py`."""
+    if doc_counts.MCP_INSTALLED:
+        pytest.skip(doc_counts.MCP_SKIP)
+    return doc_counts.measure()
+
+
+@pytest.mark.slow
+class TestEveryDocumentedCountMatchesCollection:
+    """Every count token in a tracked .md file equals the collection.
+
+    The class above pins 16 literals of three files. This one runs the sweep of
+    `scripts/doc_counts.py` (`make counts`) over all of them: the suite and
+    folder docs, the marker counts, the per-file rows. A token no rule names
+    fails too. Dated records (CHANGELOG.md, plans/) are skipped by that script.
+    """
+
+    def test_no_documented_count_drifts(self, doc_measured):
+        problems = doc_counts.scan(doc_measured)
+        assert problems == [], "\n".join(problems)

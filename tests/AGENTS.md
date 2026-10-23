@@ -54,6 +54,7 @@ Suite folders (test counts from full collection) and root files at this level.
 - `TestPackageBackedExtrasAreInstalled`: each subpackage name is an extra, requested by `pyproject` `all`, `make install-dev`, tox `extras = dev,...` and the CI install line.
 - `TestModuleDocstringsAreReal`: no module under `src/` puts its docstring after `from __future__ import annotations`; at least 50 modules scanned.
 - `TestDocumentedTestCountsMatchCollection` (`slow`): one `pytest --collect-only -q -o addopts= -p no:cacheprovider tests/` subprocess (env drops `PYTEST_ADDOPTS`, `FSM_LLM_HARNESS_LIVE`, `SKIP_SLOW_TESTS`, `TEST_REAL_LLM`), then pins: root `AGENTS.md` `pytest -v (N tests)` and `Run all tests (N collected)`; root `README.md` `Run full test suite (N tests)`; the root `AGENTS.md` per-suite lines `pytest tests/<suite>/  # ... (N tests)` (dict equality both ways); the sentence `The N suites above sum to S. The remaining R ...`; the `tests/<file>.py (N)` root-file list; every `N tests` and `N test files` token in `src/fsm_llm/harness/AGENTS.md`. `CHANGELOG.md` is deliberately not pinned (D-015).
+- `TestEveryDocumentedCountMatchesCollection` (`slow`, 1 test): `scripts/doc_counts.py` (`make counts`) makes one more `--collect-only` child with a plugin that reads markers, then compares every count token of every tracked `.md` file (suite and folder docs, marker counts, per-file rows) with it; a token no rule names fails too, and it skips when `mcp` is importable (the documented counts are the no-`mcp` counts).
 
 `test_harness_bench.py` loads `scripts/harness_bench.py` as `hb` and checks: import opens no socket even with `FSM_LLM_HARNESS_LIVE=1`; top-level imports are stdlib only; `wilson_ci` reference values and edge cases; `fisher_exact_two_sided` reference values and symmetry; `write_summary` refuses without a 6-field manifest (`MANIFEST_FIELDS`); `append_row`/`read_rows` round-trip; `report` recounts raw rows, flags tampered summaries (`MISMATCH`), refuses cross-digest comparisons (`REFUSING`); `run_block` refuses a block whose rows file exists (`run ONCE`) or an unknown arm; `main` maps `BenchDataError` to exit 1.
 
@@ -80,7 +81,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 
 ## Data shapes
 
-- Env knobs: `FSM_LLM_HARNESS_LIVE` (arms harness live tests), `FSM_LLM_MONITOR_API_KEY` (cleared for monitor tests). No test reads `SKIP_SLOW_TESTS`, `TEST_REAL_LLM` or `TEST_LLM_MODEL`; `test_packaging.py` drops the first two from its collection child env.
+- Env knobs: `FSM_LLM_HARNESS_LIVE` (arms harness live tests), `FSM_LLM_REAL_SKILLS` (arms the Agent Skills home-directory test in `test_agent_skills.py`), `FSM_LLM_MONITOR_API_KEY` (cleared for monitor tests). No test reads `SKIP_SLOW_TESTS`, `TEST_REAL_LLM` or `TEST_LLM_MODEL`; `test_packaging.py` drops the first two from its collection child env.
 - pytest config in `pyproject.toml`: `testpaths = ["tests"]`, `addopts = "-v --tb=short"`, `asyncio_mode = "auto"`, `asyncio_default_fixture_loop_scope = "function"`.
 - Marker counts (full collection): `slow` 135, `integration` 114, `real_llm` 113, `examples` 67; `-m "not slow"` collects 11,447.
 

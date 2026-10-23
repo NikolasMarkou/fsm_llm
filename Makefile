@@ -1,4 +1,4 @@
-.PHONY: help test lint format type-check build clean install-dev coverage audit
+.PHONY: help test lint format type-check build clean install-dev coverage audit counts
 
 # Default target
 help: ## Show this help message
@@ -42,3 +42,6 @@ install-dev: ## Install package in development mode with all extras
 
 audit: ## Audit site-packages for suspicious .pth files
 	python scripts/audit_pth.py
+
+counts: ## Fail when a documented test count differs from a collection
+	python scripts/doc_counts.py
