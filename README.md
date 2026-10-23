@@ -377,7 +377,7 @@ Contributions are welcome, from a typo fix to a new agent pattern. Full rules ar
 
 ```bash
 make install-dev    # editable install with every extra, plus pre-commit hooks
-make test           # Run full test suite (11,579 tests)
+make test           # Run full test suite (11,582 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy on src/fsm_llm/
