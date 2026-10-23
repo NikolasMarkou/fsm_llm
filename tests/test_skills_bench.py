@@ -187,6 +187,8 @@ class TestRunTrial:
 
         assert flags("hint_on") == [True, True, True]
         assert flags("hint_off") == [False, False, True]
+        assert flags("native_4b") == [True, True, True]
+        assert flags("native_4b_hint_off") == [False, False, True]  # native too
         assert json.loads(raw.read_text())["wire"], "raw requests are kept"
         monkeypatch.setattr(sb, "hint_ablation", lambda on: contextlib.nullcontext())
         assert flags("hint_off") == [True, True, False]  # kept, flagged invalid
@@ -200,7 +202,7 @@ class TestBlocks:
         sb.register_block(BID, "B0")
         paths = sb.register_block(BID, "B1")
         assert [p.stem[9:] for p in paths] == list(sb.BLOCKS["B1"])
-        manifest = json.loads(paths[1].read_text())
+        manifest = json.loads(paths[2].read_text())
         assert manifest["model"] == sb.M9B and manifest["fixture_hash"] == FIXTURE_SHA
         assert set(manifest["src_sha256"]) == set(sb.SRC_PINS)
         with pytest.raises(BAD, match="ONCE"):  # registered once
@@ -238,20 +240,39 @@ class TestBlocks:
         summary = json.loads((bench / "B1" / "summary_native_4b.json").read_text())
         assert summary["status"].startswith("aborted")
         metrics = summary["metrics"]
-        assert (metrics["n_rows"], metrics["shapes"]) == (3, {"budget": 3})
+        assert (metrics["n_rows"], metrics["shapes"]) == (2, {"budget": 2})
         assert not (bench / "B1" / "rows_react_9b.jsonl").exists()
         assert sb.plan("B0")[4][0] == "hint_off"  # the first arm flips per question
 
     @pytest.mark.parametrize(
         ("k_on", "k_off", "want"),
-        [(10, 4, "effect shown KEEP"), (9, 3, "effect shown KEEP"), (4, 10, "hint harmful REMOVE"),
+        [(0, 0, "floor, inconclusive KEEP"), (1, 1, "floor, inconclusive KEEP"), (1, 0, "floor, inconclusive KEEP"),
+         (0, 1, "floor, inconclusive KEEP"), (0, 4, "inconclusive KEEP"), (2, 1, "no effect shown REMOVE"),
+         (10, 10, "no effect shown REMOVE"), (10, 4, "effect shown KEEP"), (9, 3, "effect shown KEEP"), (4, 10, "hint harmful REMOVE"),
          (10, 6, "inconclusive KEEP"), (6, 10, "inconclusive KEEP"), (4, 7, "inconclusive KEEP"),
          (9, 9, "no effect shown REMOVE"), (10, 9, "no effect shown REMOVE"), (3, 3, "no effect shown REMOVE")],
     )  # fmt: skip
     def test_the_pre_registered_rule(self, k_on, k_off, want):
-        """Guards: a rule that differs from the registered text (10/6: p > .05)."""
+        """Guards: a rule unlike the registered text (10/6: p > .05; floor <= 1 both: D-032)."""
         verdict, action = sb.decide_b0(_arm(k_on), _arm(k_off), True)
         assert f"{verdict.split(' (')[0]} {action}" == want
+
+    def test_b1_pairs_native_4b_with_its_hint_off_arm_and_prints_a_fisher_p(
+        self, bench, scripted, capsys
+    ):
+        """Guards: a hint-off pair not adjacent, not alternating or gated (D-032)."""
+        order, arms = sb.plan("B1"), [a for a, *_ in sb.plan("B1")]
+        assert len(order) == 96 and len(sb.plan("B0")) == 48
+        assert arms[:8] == ["native_4b", "native_4b_hint_off"] * 2 + ["native_4b_hint_off", "native_4b"] * 2  # fmt: skip
+        assert set(arms[48:72]) == {"react_9b"} and arms[72] == "native_9b"
+        on, off = sb.ARMS["native_4b"], sb.ARMS["native_4b_hint_off"]
+        assert on == ("native_fc", sb.M4B, True) and off == (*on[:2], False)
+        sb.register_block(BID, "B1")
+        sb.run_block(BID, "B1")
+        assert len(sb.hb.read_rows(bench / "B1" / "rows_native_4b_hint_off.jsonl")) == 24  # fmt: skip
+        assert sb.report(BID) == 0
+        out = capsys.readouterr().out
+        assert "Fisher p=1.0000 (informational, no gate)" in out and "B0 rule" not in out  # fmt: skip
 
     def test_an_incomplete_or_invalid_block_keeps_the_hint(self):
         """Guards: removing the hint on a block that proved nothing."""

@@ -6,7 +6,8 @@ right skill, then read the right bundled file, and does the fixed read hint
 (``constants.SKILL_READ_HINT``) on the first ``skill_load`` page matter?
 
 Block B0 (decision): ``qwen3.5:4b`` ReAct, arms ``hint_on`` and ``hint_off``.
-Block B1 (informational): ``native_4b``, ``react_9b``, ``native_9b``, hint on.
+Block B1 (informational): ``native_4b``, ``native_4b_hint_off``, ``react_9b``,
+``native_9b`` (hint on except the one named off).
 12 questions x 2 trials per arm. Grading is offline, no judge (``grade``).
 The rule is in ``bench_data/skills-disclosure/PRE_REGISTRATION_B*.md``.
 
@@ -52,9 +53,9 @@ LIMITS = {"max_iterations": 8, "timeout_seconds": 300.0, "temperature": 0.5, "ma
 ARMS = {
     "hint_on": ("react", M4B, True), "hint_off": ("react", M4B, False),
     "native_4b": ("native_fc", M4B, True), "react_9b": ("react", M9B, True),
-    "native_9b": ("native_fc", M9B, True),
+    "native_9b": ("native_fc", M9B, True), "native_4b_hint_off": ("native_fc", M4B, False),
 }  # fmt: skip
-BLOCKS = {"B0": ("hint_on", "hint_off"), "B1": ("native_4b", "react_9b", "native_9b")}
+BLOCKS = {"B0": ("hint_on", "hint_off"), "B1": ("native_4b", "native_4b_hint_off", "react_9b", "native_9b")}  # fmt: skip
 SRC_PINS = ("src/fsm_llm/agent_skills.py", "src/fsm_llm/agents/agent_skills.py", "src/fsm_llm/constants.py")  # fmt: skip
 PINNED_AT_RUN = ("fixture_hash", "trials", "model", "limits", "src_sha256", "arm")
 PRIMARY_N = 10  # read-needed questions per arm
@@ -392,15 +393,20 @@ def _paths(bdir: Path, arm: str) -> tuple[Path, Path, Path]:
 
 
 def plan(block: str) -> list[tuple[str, Question, int]]:
-    """The fixed run order of a block: (arm, question, trial) triples."""
-    arms, trials = BLOCKS[block], range(1, TRIALS + 1)
-    if block == "B1":
-        return [(a, q, t) for a in arms for q in QUESTIONS for t in trials]
+    """The fixed run order of a block: (arm, question, trial) triples.
+
+    Arms sharing an agent and a model form one group; groups run one after the
+    other (no model reloads); inside a group the arms alternate for each
+    question and trial and the first arm flips from question to question."""
+    groups: dict[tuple[str, str], list[str]] = {}
+    for arm in BLOCKS[block]:
+        groups.setdefault(ARMS[arm][:2], []).append(arm)
     return [
         (a, q, t)
+        for grp in groups.values()
         for i, q in enumerate(QUESTIONS)
-        for t in trials
-        for a in arms[:: 1 - i % 2 * 2]
+        for t in range(1, TRIALS + 1)
+        for a in grp[:: 1 - i % 2 * 2]
     ]
 
 
@@ -408,7 +414,7 @@ def build_manifest(bench_id: str, block: str, arm: str) -> dict[str, Any]:
     kind, model, hint_on = ARMS[arm]
     return {
         "bench_id": bench_id, "block": block, "model": model, "trials": TRIALS,
-        "arm": {"name": arm, "agent": kind, "hint": hint_on}, "order": "model-major" if block == "B1" else "question-major, arms alternate, first arm flips",
+        "arm": {"name": arm, "agent": kind, "hint": hint_on}, "order": "model-major, arms of one model alternate" if block == "B1" else "question-major, arms alternate, first arm flips",
         "n_questions": len(QUESTIONS), "limits": dict(LIMITS), "fixture_hash": fixture_sha256(),
         "src_sha256": {rel: hashlib.sha256((ROOT / rel).read_bytes()).hexdigest() for rel in SRC_PINS},
         "model_digest": hb._model_digest(model.split("/", 1)[1]),
@@ -527,7 +533,9 @@ def decide_b0(
     Interface contract: the rule text is PRE_REGISTRATION_B0.md. An incomplete
     block (aborted, or fewer than 10 units) or one with more than 2 invalid
     primary cells is invalid and the hint stays. diff = on - off in first-trial
-    G1 cells; Fisher two-sided p: diff >= 4 and p < .05 -> effect shown, KEEP;
+    G1 cells; FLOOR first (D-032): both arms <= 1 of 10 -> inconclusive, KEEP
+    (the run never reached skill_read, so the hint could not act); Fisher
+    two-sided p: diff >= 4 and p < .05 -> effect shown, KEEP;
     -diff >= 4 and p < .05 -> harmful, REMOVE; |diff| <= 1 -> no effect shown,
     REMOVE; anything else -> inconclusive, KEEP.
     """
@@ -538,6 +546,8 @@ def decide_b0(
     diff = on["k_g1"] - off["k_g1"]
     p = hb.fisher_exact_two_sided(on["k_g1"], PRIMARY_N, off["k_g1"], PRIMARY_N)
     at = f"(diff {diff}, p={p:.4f})"
+    if max(on["k_g1"], off["k_g1"]) <= 1:
+        return f"floor, inconclusive {at}; both arms <= 1 of 10, the runs did not reach skill_read, so the hint could not act", "KEEP"  # fmt: skip
     if diff >= 4 and p < 0.05:
         return f"effect shown {at}", "KEEP"
     if -diff >= 4 and p < 0.05:
@@ -583,6 +593,12 @@ def report(bench_id: str, blocks: list[str] | None = None) -> int:
                 recount["hint_on"], recount["hint_off"], complete
             )
             print(f"B0 rule: {verdict} -> {action} the hint")
+        if block == "B1" and {"native_4b", "native_4b_hint_off"} <= recount.keys():
+            on, off = recount["native_4b"], recount["native_4b_hint_off"]
+            p = hb.fisher_exact_two_sided(
+                on["k_g1"], on["n_units"], off["k_g1"], off["n_units"]
+            )
+            print(f"B1 native 4b hint on {on['k_g1']}/{on['n_units']} vs off {off['k_g1']}/{off['n_units']}: Fisher p={p:.4f} (informational, no gate)")  # fmt: skip
     return 0 if ok else 1
 
 
