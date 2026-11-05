@@ -32,7 +32,7 @@ from .definitions import (
 )
 from .exceptions import AgentError
 from .fsm_definitions import build_reflexion_fsm
-from .handlers import AgentHandlers, make_fresh_keys_handler
+from .handlers import AgentHandlers, make_fresh_keys_handler, run_evaluation_fn
 from .hitl import HumanInTheLoop
 from .tools import ToolRegistry
 
@@ -237,7 +237,9 @@ class ReflexionAgent(BaseAgent):
         """Create the evaluate-entry handler that runs the external evaluation_fn.
 
         Its verdict replaces the self-evaluation: the keys it writes are set,
-        so evaluate extracts nothing (skip-if-set)."""
+        so evaluate extracts nothing (skip-if-set). A raising or wrong-typed
+        function is a failed evaluation (``run_evaluation_fn``), never a reason
+        to fall back to the model's own verdict."""
         if self.evaluation_fn is None:
             raise AgentError(
                 "evaluation_fn must be set before creating evaluation handler"
@@ -245,7 +247,7 @@ class ReflexionAgent(BaseAgent):
         evaluation_fn = self.evaluation_fn
 
         def handle_evaluation(context: dict[str, Any]) -> dict[str, Any]:
-            eval_result = evaluation_fn(context)
+            eval_result = run_evaluation_fn(evaluation_fn, context)
             return {
                 ContextKeys.EVALUATION_PASSED: eval_result.passed,
                 ContextKeys.EVALUATION_SCORE: eval_result.score,

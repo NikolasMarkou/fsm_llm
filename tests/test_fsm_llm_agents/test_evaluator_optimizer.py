@@ -583,3 +583,44 @@ class TestPreviousOutputStaysOutOfFinalContext:
         assert len(llm.output_prompts) == 2
         assert ContextKeys.PREVIOUS_OUTPUT in llm.output_prompts[1]
         assert "v1" in llm.output_prompts[1]
+
+
+class TestEvaluationFnWrongType:
+    """F-AM-03 (plan 5ed71cf2): an ``evaluation_fn`` that returns a bool,
+    dict or None is a failed evaluation, not a swallowed handler error that
+    let the first draft ship as ``answered``."""
+
+    @pytest.mark.parametrize(
+        "bad_fn",
+        [lambda o, c: False, lambda o, c: True, lambda o, c: {"passed": True}],
+        ids=["false", "true", "dict"],
+    )
+    def test_run_evaluation_returns_a_failed_verdict(self, bad_fn):
+        agent = EvaluatorOptimizerAgent(evaluation_fn=bad_fn)
+        context = {
+            ContextKeys.GENERATED_OUTPUT: "draft",
+            ContextKeys.REFINEMENT_COUNT: 0,
+            ContextKeys.AGENT_TRACE: [],
+            "_max_refinements": 3,
+        }
+        result = agent._run_evaluation(context)
+        assert result[ContextKeys.EVALUATION_PASSED] is False
+        assert "Evaluation error" in result[ContextKeys.REFINEMENT_FEEDBACK]
+
+    def test_bool_returning_function_refines_instead_of_shipping_draft_one(self):
+        seen: list[str] = []
+
+        def _bool_fn(output: str, context: dict) -> bool:
+            seen.append(output)
+            return False
+
+        agent = EvaluatorOptimizerAgent(
+            evaluation_fn=_bool_fn,  # type: ignore[arg-type]
+            max_refinements=2,
+            config=AgentConfig(max_iterations=20),
+            llm_interface=_VersionedLLM(),
+        )
+        agent.run("Write a poem")
+
+        # Pre-fix: ['v1'] (handler error swallowed, fallback shipped draft 1).
+        assert seen == ["v1", "v2", "v3"]

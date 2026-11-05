@@ -20,7 +20,7 @@ from .constants import (
     ReflexionStates,
     StopReason,
 )
-from .definitions import AgentStep, ToolCall
+from .definitions import AgentStep, EvaluationResult, ToolCall
 from .exceptions import AgentTimeoutError, BudgetExhaustedError
 from .hitl import ApprovalPolicy
 from .tools import (
@@ -30,6 +30,54 @@ from .tools import (
     refuse_execute_without_gated,
 )
 from .truncation import smart_truncate
+
+
+def run_evaluation_fn(
+    evaluation_fn: Callable[..., Any], *args: Any
+) -> EvaluationResult:
+    """Run a caller's ``evaluation_fn`` so that it can only fail closed.
+
+    Interface contract (Reflexion ``handle_evaluation``, EvaluatorOptimizer
+    ``_run_evaluation``):
+        - ``evaluation_fn``: the caller's gate, called as ``evaluation_fn(*args)``
+          (Reflexion passes the context, EvaluatorOptimizer the output text
+          and the context).
+        - Returns the function's ``EvaluationResult`` unchanged; an exception,
+          or any other return value (a bool, a dict, ``None``), becomes a
+          FAILED evaluation (``passed=False``, ``score=0.0``, feedback
+          ``"Evaluation error: ..."``) and a WARNING is logged.
+        - Never raises (``Exception`` only; ``BaseException`` still passes).
+    """
+    # DECISION plan-2026-11-05T134105-5ed71cf2/D-012
+    # Do NOT let the exception or a wrong-typed return leave the handler: core
+    # runs it in handler_error_mode="continue", the verdict keys stay unset and
+    # the evaluating state falls back to the model's own verdict (Reflexion)
+    # or to the first draft (EvaluatorOptimizer), so an outage of the caller's
+    # verifier shipped an unverified answer as a success. Do NOT register the
+    # handler `.critical()` instead: that aborts the run rather than letting
+    # the loop refine or reflect. See decisions.md D-012.
+    try:
+        result = evaluation_fn(*args)
+    except Exception as e:
+        logger.warning(f"Evaluation function raised an exception: {e}", exc_info=True)
+        return EvaluationResult(
+            passed=False, score=0.0, feedback=f"Evaluation error: {e}"
+        )
+    if not isinstance(result, EvaluationResult):
+        logger.warning(
+            "Evaluation function returned "
+            f"{type(result).__name__}, not EvaluationResult; counted as failed"
+        )
+        return EvaluationResult(
+            passed=False,
+            score=0.0,
+            feedback=(
+                "Evaluation error: evaluation_fn returned "
+                f"{type(result).__name__}, not EvaluationResult"
+            ),
+        )
+    return result
+
 
 # Errors that end a whole run even when a sub-agent raises them inside a handler.
 RUN_ENDING_ERRORS: tuple[type[Exception], ...] = (

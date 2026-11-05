@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Tests for fsm_llm.agents.reflexion module and Reflexion FSM definition."""
 
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -644,3 +644,75 @@ class TestForcedStopFromEvaluate:
         assert result.trace.total_iterations <= 3 * budget
         if mode in ("memory", "none_noterm"):
             assert ran == [] and result.success is False
+
+
+class _RecordingBehaviourLLM(_ScriptedBehaviourLLM):
+    """A scripted model that records the fields it was asked to extract."""
+
+    def __init__(self, script: dict[str, Any]) -> None:
+        super().__init__(script)
+        self.asked: list[str] = []
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        self.asked.append(request.field_name)
+        return super().extract_field(request)
+
+
+def _raise_boom(context: dict[str, Any]) -> EvaluationResult:
+    raise RuntimeError("verifier down")
+
+
+class TestEvaluationFnFailsClosed:
+    """F-AR-03 (plan 5ed71cf2): an ``evaluation_fn`` that raises, or returns
+    something that is not an ``EvaluationResult``, is a FAILED evaluation, as
+    for EvaluatorOptimizer. Pre-fix core swallowed the handler error and the
+    evaluate state extracted the model's own verdict (``evaluation_passed``
+    True shipped an unverified answer as a success)."""
+
+    _SCRIPT: ClassVar[dict[str, Any]] = {
+        "tool_name": "none",
+        "should_terminate": True,
+        "evaluation_passed": True,
+        "evaluation_score": 0.9,
+        "evaluation_feedback": "model says fine",
+    }
+
+    def _run(self, evaluation_fn: Any, max_iterations: int = 4):
+        llm = _RecordingBehaviourLLM(self._SCRIPT)
+        agent = ReflexionAgent(
+            tools=_make_registry(),
+            evaluation_fn=evaluation_fn,
+            config=AgentConfig(max_iterations=max_iterations, model="mock/m"),
+            llm_interface=llm,
+        )
+        return agent.run("t"), llm
+
+    @pytest.mark.parametrize(
+        "bad_fn",
+        [
+            _raise_boom,
+            lambda ctx: True,
+            lambda ctx: {"passed": True, "score": 1.0},
+            lambda ctx: None,
+        ],
+        ids=["raises", "bool", "dict", "none"],
+    )
+    def test_bad_evaluation_fn_is_a_failed_evaluation(self, bad_fn):
+        result, llm = self._run(bad_fn)
+
+        assert "evaluation_passed" not in llm.asked
+        assert result.final_context[ContextKeys.EVALUATION_PASSED] is False
+        assert result.final_context[ContextKeys.EVALUATION_SCORE] == 0.0
+        assert result.final_context[ContextKeys.EVALUATION_FEEDBACK].startswith(
+            "Evaluation error:"
+        )
+        assert result.success is False
+
+    def test_a_good_evaluation_fn_still_decides(self):
+        result, llm = self._run(
+            lambda ctx: EvaluationResult(passed=True, score=0.7, feedback="ok")
+        )
+
+        assert "evaluation_passed" not in llm.asked
+        assert result.final_context[ContextKeys.EVALUATION_PASSED] is True
+        assert result.final_context[ContextKeys.EVALUATION_FEEDBACK] == "ok"

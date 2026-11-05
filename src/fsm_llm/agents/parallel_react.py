@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, ClassVar
 
 from fsm_llm import API, typed_field_extraction
 from fsm_llm.logging import logger
@@ -208,6 +208,12 @@ def build_parallel_react_fsm(
 
 class ParallelReactAgent(BaseAgent):
     """ReAct agent that dispatches multiple tool calls per step concurrently."""
+
+    # Run outputs caller context may not seed (D-052 of plan 06a5ec0a):
+    # `tool_calls` is the list `act` executes, and a seeded value is a set key
+    # (skip-if-set), so the think extraction would be skipped and the caller's
+    # calls would run with no model choice, also through AgentServer.
+    _run_output_keys: ClassVar[frozenset[str]] = frozenset({TOOL_CALLS_KEY})
 
     def __init__(
         self,

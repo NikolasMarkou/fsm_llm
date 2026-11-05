@@ -26,7 +26,11 @@ from .constants import (
 )
 from .definitions import AgentConfig, AgentResult, EvaluationResult
 from .fsm_definitions import build_evalopt_fsm
-from .handlers import make_iteration_limiter, make_redraft_handlers
+from .handlers import (
+    make_iteration_limiter,
+    make_redraft_handlers,
+    run_evaluation_fn,
+)
 
 
 class EvaluatorOptimizerAgent(BaseAgent):
@@ -173,18 +177,11 @@ class EvaluatorOptimizerAgent(BaseAgent):
         refinement_count = context.get(ContextKeys.REFINEMENT_COUNT, 0)
         max_refinements = context.get("_max_refinements", self.max_refinements)
 
-        # Run the external evaluation
-        try:
-            eval_result = self.evaluation_fn(artifact_text(generated_output), context)
-        except Exception as e:
-            logger.warning(
-                f"Evaluation function raised an exception: {e}", exc_info=True
-            )
-            eval_result = EvaluationResult(
-                passed=False,
-                score=0.0,
-                feedback=f"Evaluation error: {e}",
-            )
+        # Run the external evaluation (a raise or a wrong-typed return is a
+        # failed evaluation, never a swallowed handler error).
+        eval_result = run_evaluation_fn(
+            self.evaluation_fn, artifact_text(generated_output), context
+        )
 
         logger.info(
             LogMessages.EVALUATION.format(
