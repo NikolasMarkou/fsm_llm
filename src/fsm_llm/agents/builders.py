@@ -14,9 +14,9 @@ from fsm_llm.builders import refuse_named_options
 from fsm_llm.definitions import BuildError
 
 from . import create_agent
-from .definitions import AgentConfig, MetaBuilderConfig, ToolDefinition
+from .definitions import AgentConfig, MetaBuilderConfig, ToolDefinition, config_with
 from .exceptions import AgentError
-from .tools import ToolRegistry
+from .tools import ToolRegistry, registry_from
 
 _NAMED_OPTION_HINT = {
     "pattern": "set_pattern",
@@ -134,15 +134,7 @@ class ConfiguredAgentBuilder:
             if self._registry is not None:
                 args["tools"] = self._registry
             elif self._tools:
-                registry = ToolRegistry()
-                for fn in self._tools:
-                    if isinstance(fn, ToolDefinition):
-                        registry.register(fn)
-                    elif hasattr(fn, "_tool_definition"):
-                        registry.register(fn._tool_definition)
-                    else:
-                        registry.register_function(fn)
-                args["tools"] = registry
+                args["tools"] = registry_from(self._tools)
             # DECISION plan-2026-10-02T052921-89b03f61/D-008
             # Options go to create_agent exactly as set. Do NOT filter or
             # rename them here: the BaseAgent denylist (misplaced and
@@ -169,5 +161,4 @@ class ConfiguredAgentBuilder:
             )
         else:
             base = self._config.model_copy() if self._config else AgentConfig()
-        fields = {name: getattr(base, name) for name in type(base).model_fields}
-        return type(base)(**{**fields, **self._config_options})
+        return config_with(base, **self._config_options)

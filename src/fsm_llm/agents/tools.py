@@ -15,7 +15,7 @@ import time
 import types
 import typing
 import warnings
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, get_type_hints
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -126,6 +126,21 @@ def normalize_tool_input(raw: Any) -> dict[str, Any]:
     return {"input": str(raw)}
 
 
+def tool_call_from_context(context: Mapping[str, Any]) -> ToolCall:
+    """The tool call a context holds: ``tool_name``, ``tool_input`` (normalized by
+    :func:`normalize_tool_input`) and ``reasoning``.
+
+    Shared by the approval gate (``hitl.make_hitl_checker``), the approval
+    driver and ``AgentHandlers.approval_refusal``, so all three judge the same
+    call. A missing name is ``""``. Never raises for a missing key.
+    """
+    return ToolCall(
+        tool_name=str(context.get(ContextKeys.TOOL_NAME) or ""),
+        parameters=normalize_tool_input(context.get(ContextKeys.TOOL_INPUT)),
+        reasoning=context.get(ContextKeys.REASONING, ""),
+    )
+
+
 def _is_dict_annotation(ann: Any) -> bool:
     """True for ``dict``, a ``dict[...]`` generic, or a string annotation
     (``from __future__``) spelling one of those. Never raises."""
@@ -159,7 +174,7 @@ def _unwrap_nested_tool_input(
     return merged
 
 
-def _callable_name(fn: Any) -> str:
+def callable_name(fn: Any) -> str:
     """A display name for any callable: ``__name__``, else its type's name.
 
     ``functools.partial`` objects and callable instances have no ``__name__``
@@ -372,7 +387,7 @@ class ToolRegistry:
         there). An inferred schema also gets an ``args_model``; an explicit
         ``parameter_schema`` does not.
         """
-        tool_name = name or _callable_name(fn)
+        tool_name = name or callable_name(fn)
         tool_desc = description or fn.__doc__ or f"Tool: {tool_name}"
 
         args_model: type[BaseModel] | None = None
@@ -595,7 +610,7 @@ class ToolRegistry:
             if tool.timeout_s is None:
                 result = self._invoke_tool_fn(fn, tool_call.parameters, schema_props)
             else:
-                result = _call_with_timeout(
+                result = call_with_timeout(
                     functools.partial(
                         self._invoke_tool_fn, fn, tool_call.parameters, schema_props
                     ),
@@ -623,7 +638,7 @@ class ToolRegistry:
                 success=False,
                 error=str(e),
                 execution_time_ms=elapsed_ms,
-                timed_out=isinstance(e, _ToolTimedOut),
+                timed_out=isinstance(e, ToolTimedOut),
             )
 
     def to_prompt_description(self) -> str:
@@ -792,7 +807,7 @@ def infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
     try:
         hints = get_type_hints(_introspection_target(fn), include_extras=True)
     except Exception as exc:
-        logger.debug(f"Could not resolve type hints for {_callable_name(fn)}: {exc}")
+        logger.debug(f"Could not resolve type hints for {callable_name(fn)}: {exc}")
         return {}
 
     sig = inspect.signature(fn)
@@ -857,8 +872,8 @@ def infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
     return schema
 
 
-class _ToolTimedOut(ToolExecutionError):
-    """``_call_with_timeout`` stopped waiting: the call's outcome is unknown."""
+class ToolTimedOut(ToolExecutionError):
+    """``call_with_timeout`` stopped waiting: the call's outcome is unknown."""
 
 
 # DECISION plan-2026-10-01T093600-944e2692/D-008: `timeout_s` is enforced
@@ -873,24 +888,24 @@ class _ToolTimedOut(ToolExecutionError):
 # never be reported as a plain failure, and a retry-safe one would be re-run),
 # and do NOT report a timeout as a failure: its outcome is unknown
 # (`ToolResult.timed_out`).
-def _call_with_timeout(
-    call: Callable[[], Any], tool_name: str, timeout_s: float
-) -> Any:
+def call_with_timeout(call: Callable[[], Any], tool_name: str, timeout_s: float) -> Any:
     """Run *call* in a daemon worker thread and wait at most *timeout_s* seconds.
 
-    Interface contract (caller: ``ToolRegistry.execute``, for a tool with
-    ``timeout_s``):
+    Interface contract (callers: ``ToolRegistry.execute``, for a tool with
+    ``timeout_s``, and ``HumanInTheLoop.request_approval``):
         - Raises ``ToolExecutionError`` (``TOOL_BAD_TIMEOUT``) without running
           *call* when *timeout_s* is not a finite number in
           ``(0, Defaults.MAX_TOOL_TIMEOUT_S]``.
         - Returns ``call()``'s value, or re-raises its exception, when it ends
           in time. The worker runs in a copy of the caller's context variables.
-        - On expiry raises ``_ToolTimedOut`` (a ``ToolExecutionError``,
+        - On expiry raises ``ToolTimedOut`` (a ``ToolExecutionError``,
           ``TOOL_TIMED_OUT``: outcome unknown). The worker keeps running; its
           late value or exception is discarded with a WARNING naming the tool
           (``TOOL_LATE_RESULT``).
         - Holds no lock while waiting. Nothing it does after the worker starts
           can raise, except the timeout and the tool's own exception.
+        - Also the timed wait of ``HumanInTheLoop.request_approval`` (the
+          callback is the "tool"; a ``ToolTimedOut`` means denied).
     """
     if (
         isinstance(timeout_s, bool)
@@ -904,7 +919,7 @@ def _call_with_timeout(
             ),
             tool_name=tool_name,
         )
-    timed_out_error = _ToolTimedOut(
+    timed_out_error = ToolTimedOut(
         ErrorMessages.TOOL_TIMED_OUT.format(name=tool_name, timeout=timeout_s),
         tool_name=tool_name,
     )
@@ -930,7 +945,11 @@ def _call_with_timeout(
             outcome[entry[0]] = entry[1]
         finished.set()
         if abandoned:
-            logger.warning(late_warning["result" if entry[0] == "value" else "error"])
+            kind = "result" if entry[0] == "value" else "error"
+            detail = (
+                f": {type(entry[1]).__name__}: {entry[1]}" if kind == "error" else ""
+            )
+            logger.warning(late_warning[kind] + detail)
 
     thread = threading.Thread(
         target=contextvars.copy_context().run,
@@ -1172,7 +1191,7 @@ def tool(
     """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-        tool_name = name or _callable_name(fn)
+        tool_name = name or callable_name(fn)
         raw_doc = fn.__doc__ or ""
         tool_desc = (
             description or raw_doc.strip().split("\n")[0] or f"Tool: {tool_name}"
@@ -1203,6 +1222,26 @@ def tool(
         return decorator(fn)
     # Called as @tool(...) with keyword arguments
     return decorator
+
+
+def registry_from(tools: Iterable[Any]) -> ToolRegistry:
+    """A new ``ToolRegistry`` holding *tools*, however each one is given.
+
+    Interface contract (callers: ``create_agent(tools=[...])``,
+    ``ConfiguredAgentBuilder.build``): each item is a ``ToolDefinition``, a
+    ``@tool`` function (its ``_tool_definition``) or a plain function
+    (``register_function``). Raises what ``register`` / ``register_function``
+    raise (a duplicate name, a bad signature, ``TypeError`` for a non-callable).
+    """
+    registry = ToolRegistry()
+    for item in tools:
+        if isinstance(item, ToolDefinition):
+            registry.register(item)
+        elif hasattr(item, "_tool_definition"):
+            registry.register(item._tool_definition)
+        else:
+            registry.register_function(item)
+    return registry
 
 
 def register_agent(

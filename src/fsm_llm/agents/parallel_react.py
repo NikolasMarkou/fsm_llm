@@ -40,13 +40,14 @@ from .constants import (
     Defaults,
     ToolRunStatus,
 )
-from .definitions import AgentConfig, AgentResult, AgentStep, ToolCall
+from .definitions import AgentConfig, AgentResult, ToolCall
 from .exceptions import AgentError
 from .fsm_definitions import conclude_on_evidence_logic, loop_field_context_keys
 from .handlers import (
     ThinkTurnLimiter,
+    call_label,
     forced_stop_skip,
-    next_step_number,
+    record_tool_step,
     with_feedback,
 )
 from .prompts import (
@@ -54,7 +55,6 @@ from .prompts import (
     build_think_terminate_instructions,
 )
 from .tools import ToolRegistry, normalize_tool_input, redact_secret_entries
-from .truncation import smart_truncate
 
 TOOL_CALLS_KEY = "tool_calls"
 
@@ -315,13 +315,6 @@ class ParallelReactAgent(BaseAgent):
         if forced is not None:  # LOOP-05: no tool after the forced stop
             return {**forced, TOOL_CALLS_KEY: None}
         calls = self._normalize_calls(context.get(TOOL_CALLS_KEY))
-        observations = context.get(ContextKeys.OBSERVATIONS, []) or []
-        if not isinstance(observations, list):
-            observations = []
-        trace = context.get(ContextKeys.AGENT_TRACE, []) or []
-        if not isinstance(trace, list):
-            trace = []
-
         if not calls:
             return with_feedback(
                 "No tools were selected.",
@@ -336,30 +329,19 @@ class ParallelReactAgent(BaseAgent):
 
         reasoning = str(context.get(ContextKeys.REASONING) or "")
         any_success = False
+        recorded: dict[str, Any] = {}
         for call, result in results:
             any_success = any_success or result.success
-            observation = result.observation
-            step_num = next_step_number(trace)
-            # plan-2026-09-29T103145-06a5ec0a/D-016: show a redacted copy.
-            shown_input = redact_secret_entries(call.parameters)
-            entry = smart_truncate(
-                f"[Step {step_num}] Tool: {call.tool_name} | "
-                f"Input: {shown_input} | Result: {observation}",
-                Defaults.MAX_OBSERVATION_LENGTH,
-            )
-            observations.append(entry)
-            trace_step = AgentStep(
-                iteration=step_num,
+            recorded = record_tool_step(
+                {**context, **recorded},
+                tool_name=call.tool_name,
+                # plan-2026-09-29T103145-06a5ec0a/D-016: show a redacted copy.
+                shown_input=redact_secret_entries(call.parameters),
+                observation=result.observation,
+                status=result.status,
                 thought=reasoning,
-                action=f"{call.tool_name}({shown_input})",
-                observation=observation,
-            ).model_dump(mode="json")
-            trace_step["tool_input"] = shown_input
-            trace_step[ContextKeys.TOOL_STATUS] = result.status
-            trace.append(trace_step)
-
-        if len(observations) > Defaults.MAX_OBSERVATIONS:
-            observations = observations[-Defaults.MAX_OBSERVATIONS :]
+                action=call_label(call.tool_name, call.parameters),
+            )
 
         logger.info(
             f"Parallel dispatch executed {len(calls)} tool(s), "
@@ -378,9 +360,7 @@ class ParallelReactAgent(BaseAgent):
         return {
             ContextKeys.TOOL_RESULT: f"Executed {len(calls)} tool(s).",
             ContextKeys.TOOL_STATUS: batch_status,
-            ContextKeys.OBSERVATIONS: observations,
-            ContextKeys.OBSERVATION_COUNT: len(observations),
-            ContextKeys.AGENT_TRACE: trace,
+            **recorded,
             TOOL_CALLS_KEY: None,
             ContextKeys.SHOULD_TERMINATE: None,
         }

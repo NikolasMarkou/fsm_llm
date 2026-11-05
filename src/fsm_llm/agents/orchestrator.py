@@ -233,7 +233,9 @@ class OrchestratorAgent(BaseAgent):
                     if holder.capture(e):
                         logger.warning(f"Worker ended the run: {e}")
                         break
-                    logger.warning(f"Worker failed for subtask: {e}", exc_info=True)
+                    logger.opt(exception=True).warning(
+                        "Worker failed for subtask: {}", e
+                    )
                     new_results.append(
                         {
                             "subtask": subtask_str,

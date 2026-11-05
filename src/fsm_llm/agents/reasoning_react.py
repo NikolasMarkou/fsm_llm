@@ -23,19 +23,23 @@ from .constants import (
     ContextKeys,
     LogMessages,
     ReasoningIntegrationKeys,
+    ToolObservationPrefix,
     ToolRunStatus,
 )
 from .definitions import (
     AgentConfig,
     AgentResult,
-    AgentStep,
     ToolCall,
     ToolDefinition,
     ToolResult,
 )
 from .exceptions import AgentError
 from .fsm_definitions import build_react_fsm
-from .handlers import AgentHandlers, forced_stop_skip, next_step_number
+from .handlers import (
+    AgentHandlers,
+    forced_stop_skip,
+    record_tool_step,
+)
 from .hitl import HumanInTheLoop
 from .tools import ToolRegistry, redact_secret_entries, refuse_execute_without_gated
 
@@ -323,6 +327,17 @@ class ReasoningReactAgent(BaseAgent):
 
             logger.info(f"ReasoningReactAgent: invoking reasoning for: {shown}")
 
+            def record(observation: str, status: str) -> dict[str, Any]:
+                return record_tool_step(
+                    context,
+                    tool_name=reason_name,
+                    shown_input=shown,
+                    observation=observation,
+                    status=status,
+                    thought=context.get(ContextKeys.REASONING, ""),
+                    action=f"{reason_name}({shown})",
+                )
+
             try:
                 solution, trace_info = engine.solve_problem(problem)
 
@@ -337,38 +352,13 @@ class ReasoningReactAgent(BaseAgent):
                     f"Structured reasoning result (type={reasoning_type}): {solution}"
                 )
 
-                # Accumulate in observations
-                observations = context.get(ContextKeys.OBSERVATIONS, [])
-                if not isinstance(observations, list):
-                    observations = []
-                trace = context.get(ContextKeys.AGENT_TRACE, [])
-                if not isinstance(trace, list):
-                    trace = []
-                step_num = next_step_number(trace)
-                observation_entry = (
-                    f"[Step {step_num}] Tool: reason | "
-                    f"Input: {shown} | "
-                    f"Result: {observation}"
-                )
-                observations.append(observation_entry)
-
-                # Track in agent trace
-                trace.append(
-                    AgentStep(
-                        iteration=step_num,
-                        thought=context.get(ContextKeys.REASONING, ""),
-                        action=f"reason({shown})",
-                        observation=observation,
-                    ).model_dump(mode="json")
-                )
+                recorded = record(observation, ToolRunStatus.SUCCESS)
 
                 return {
                     ContextKeys.TOOL_RESULT: observation,
                     ContextKeys.TOOL_STATUS: ToolRunStatus.SUCCESS,
                     ContextKeys.TOOL_ERROR: None,
-                    ContextKeys.OBSERVATIONS: observations,
-                    ContextKeys.OBSERVATION_COUNT: len(observations),
-                    ContextKeys.AGENT_TRACE: trace,
+                    **recorded,
                     ContextKeys.TOOL_NAME: None,
                     ContextKeys.TOOL_INPUT: None,
                     ContextKeys.SHOULD_TERMINATE: None,
@@ -379,13 +369,24 @@ class ReasoningReactAgent(BaseAgent):
                 }
 
             except Exception as e:
-                logger.warning(f"Reasoning failed, recording error: {e}", exc_info=True)
+                logger.opt(exception=True).warning(
+                    "Reasoning failed, recording error: {}", e
+                )
+                # The next think turn reads `observations` only (tool_result is
+                # transient), so the failure is recorded as one, like a failed
+                # real tool (F-AB-03).
+                recorded = record(
+                    f"{ToolObservationPrefix.FAILED} Reasoning failed: {e}",
+                    ToolRunStatus.FAILED,
+                )
                 return {
                     ContextKeys.TOOL_RESULT: f"Reasoning failed: {e}",
                     ContextKeys.TOOL_STATUS: ToolRunStatus.FAILED,
                     ContextKeys.TOOL_ERROR: str(e),
+                    **recorded,
                     ContextKeys.TOOL_NAME: None,
                     ContextKeys.TOOL_INPUT: None,
+                    ContextKeys.SHOULD_TERMINATE: None,
                 }
 
         return execute_tool_with_reasoning

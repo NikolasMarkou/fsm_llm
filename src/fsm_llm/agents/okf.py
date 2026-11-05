@@ -59,8 +59,8 @@ from fsm_llm.okf_bridge import bundle_from_memory_entries
 from fsm_llm.prompts import sanitize_text_for_prompt
 from fsm_llm.utilities import redacting_json_default
 
-from .constants import Defaults
-from .definitions import AgentResult, ToolAnnotations
+from .constants import OBSERVATION_ENTRY, Defaults
+from .definitions import READ_ONLY_ANNOTATIONS, AgentResult
 from .semantic_memory import SemanticMemoryStore
 from .tools import ToolRegistry, redact_secret_entries
 
@@ -231,7 +231,9 @@ def _budget(tool: str, **params: Any) -> int:
     produced, so the model can re-read from the offset it was given. Text cut
     from the middle of an over-long entry is not recovered.
     """
-    wrapper = len(f"[Step 999] Tool: {tool} | Input: {params} | Result: ")
+    wrapper = len(
+        OBSERVATION_ENTRY.format(step=999, tool=tool, input=params, result="")
+    )
     room = Defaults.MAX_OBSERVATION_LENGTH - wrapper - _WRAPPER_MARGIN - _ECHO_MARGIN
     return max(room, _MIN_BUDGET)
 
@@ -423,16 +425,13 @@ def create_okf_tools(
             shown.append(f"... {hidden} more line(s) not shown")
         return _finish("\n".join([top, *shown]), budget)
 
-    annotations = ToolAnnotations(
-        read_only=True, destructive=False, idempotent=True, open_world=False
-    )
     for fn in (okf_list, okf_read, okf_search, okf_links):
         tools.register_function(
             fn,
             name=fn.__name__,
             description=OKF_TOOL_DESCRIPTIONS[fn.__name__],
             parameter_schema=OKF_TOOL_PARAMETERS[fn.__name__],
-            annotations=annotations,
+            annotations=READ_ONLY_ANNOTATIONS,
         )
     return tools
 

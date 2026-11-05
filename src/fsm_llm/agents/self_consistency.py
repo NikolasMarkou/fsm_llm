@@ -252,7 +252,9 @@ class SelfConsistencyAgent(BaseAgent):
                 # Per-sample exception handling is intentional: unlike other
                 # agents, SelfConsistency benefits from partial results.
                 # If 3 of 5 samples succeed, the majority vote is still valid.
-                logger.warning(f"Sample {sample_idx + 1} failed: {e!s}", exc_info=True)
+                logger.opt(exception=True).warning(
+                    "Sample {} failed: {}", sample_idx + 1, e
+                )
                 continue
 
         return samples
@@ -295,7 +297,9 @@ class SelfConsistencyAgent(BaseAgent):
                 try:
                     results[idx] = fut.result()
                 except Exception as e:
-                    logger.warning(f"Sample {idx + 1} failed: {e!s}", exc_info=True)
+                    logger.opt(exception=True).warning(
+                        "Sample {} failed: {}", idx + 1, e
+                    )
                     results[idx] = None
 
         # sample-index order → deterministic aggregation

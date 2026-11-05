@@ -7,7 +7,6 @@ mechanisms that integrate with the agent FSM via handlers and context.
 
 from __future__ import annotations
 
-import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -17,7 +16,12 @@ from fsm_llm.logging import logger
 from .constants import ContextKeys, Defaults, LogMessages
 from .definitions import ApprovalRequest, ToolCall
 from .exceptions import ApprovalDeniedError
-from .tools import normalize_tool_input, redact_secret_entries
+from .tools import (
+    ToolTimedOut,
+    call_with_timeout,
+    redact_secret_entries,
+    tool_call_from_context,
+)
 
 # Type aliases
 ApprovalCallback = Callable[[ApprovalRequest], bool]
@@ -61,7 +65,10 @@ class HumanInTheLoop:
         :param on_escalation: Callback when the agent escalates to a human.
         :param confidence_threshold: Escalate if agent confidence falls below this.
         :param approval_timeout: Max seconds to wait for approval. None = no limit.
-            If exceeded, the tool call is treated as denied.
+            If exceeded, the tool call is treated as denied. A value that is not
+            a finite number in ``(0, Defaults.MAX_TOOL_TIMEOUT_S]`` makes
+            ``request_approval`` raise ``ToolExecutionError`` (not a silent
+            denial of every request).
         """
         self._approval_policy = approval_policy
         self._approval_timeout = approval_timeout
@@ -93,7 +100,8 @@ class HumanInTheLoop:
             )
         )
 
-        if self._approval_callback is None:
+        callback = self._approval_callback
+        if callback is None:
             raise ApprovalDeniedError(
                 "No approval callback configured; cannot request approval"
             )
@@ -121,52 +129,24 @@ class HumanInTheLoop:
             ),
         )
 
-        if self._approval_timeout is not None:
-            result_container: list[bool] = []
-            error_container: list[Exception] = []
-            callback = self._approval_callback  # Already validated non-None above
-            timeout = self._approval_timeout
-            # `abandoned` is set under `state_lock` once the join times out; a
-            # callback that raises afterwards logs instead of being lost (CR-05).
-            state_lock = threading.Lock()
-            abandoned: list[bool] = []
-
-            def _run_callback() -> None:
-                try:
-                    result_container.append(callback(request))
-                except Exception as exc:
-                    with state_lock:
-                        if abandoned:
-                            logger.warning(
-                                f"Approval callback raised after the {timeout}s "
-                                f"timeout (already denied): {type(exc).__name__}: {exc}"
-                            )
-                            return
-                        error_container.append(exc)
-
-            thread = threading.Thread(target=_run_callback, daemon=True)
-            thread.start()
-            thread.join(timeout=timeout)
-
-            with state_lock:
-                # A callback that finished before the lock counts as done even
-                # if the thread has not fully exited yet.
-                timed_out = not (result_container or error_container)
-                if timed_out:
-                    abandoned.append(True)
-
-            if timed_out:
+        if self._approval_timeout is None:
+            approved = callback(request)
+        else:
+            # The callback runs as a timed tool does: in a copy of the caller's
+            # context variables, its exception (SystemExit too) raised here, a
+            # late one logged, a bad timeout refused (F-AB-04).
+            try:
+                approved = call_with_timeout(
+                    lambda: callback(request),
+                    "approval_callback",
+                    self._approval_timeout,
+                )
+            except ToolTimedOut:
                 logger.warning(
                     f"Approval timed out after {self._approval_timeout}s, "
                     "treating as denied"
                 )
                 approved = False
-            elif error_container:
-                raise error_container[0]
-            else:
-                approved = result_container[0]
-        else:
-            approved = self._approval_callback(request)
 
         logger.info(
             LogMessages.APPROVAL_RESULT.format(
@@ -218,16 +198,7 @@ def make_hitl_checker(
         if not tool_name or tool_name == ContextKeys.NO_TOOL:
             return {}
 
-        tool_input = normalize_tool_input(context.get(ContextKeys.TOOL_INPUT))
-        reasoning = context.get(ContextKeys.REASONING, "")
-
-        tool_call = ToolCall(
-            tool_name=tool_name,
-            parameters=tool_input,
-            reasoning=reasoning,
-        )
-
-        if decide(tool_call, context):
+        if decide(tool_call_from_context(context), context):
             return {ContextKeys.APPROVAL_REQUIRED: True}
 
         return {ContextKeys.APPROVAL_REQUIRED: False}

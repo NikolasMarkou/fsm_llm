@@ -71,6 +71,12 @@ class ToolAnnotations(BaseModel):
         return self.idempotent is True or self.read_only is True
 
 
+# The hints of a tool that only reads a closed store (memory, OKF, skills).
+READ_ONLY_ANNOTATIONS = ToolAnnotations(
+    read_only=True, destructive=False, idempotent=True, open_world=False
+)
+
+
 class ToolDefinition(BaseModel):
     """Definition of a tool available to an agent.
 
@@ -366,6 +372,18 @@ class AgentConfig(BaseModel):
         if v <= 0:
             raise ValueError("timeout_seconds must be positive")
         return v
+
+
+def config_with(base: AgentConfig, **updates: Any) -> AgentConfig:
+    """A validated copy of *base* (same class) with *updates* applied.
+
+    Interface contract (callers: ``create_agent``'s ``system_prompt=``,
+    ``ConfiguredAgentBuilder``): *updates* are ``base``'s own field names and
+    are validated again, unlike ``model_copy(update=)``; a bad value raises
+    ``ValidationError``. *base* is not modified.
+    """
+    fields = {name: getattr(base, name) for name in type(base).model_fields}
+    return type(base)(**{**fields, **updates})
 
 
 class AgentResult(BaseModel):

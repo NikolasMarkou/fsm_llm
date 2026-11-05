@@ -92,9 +92,9 @@ class TestPlannerExecutionEvidence:
             ],
         }
         assert (
-            BaseAgent._completion_is_real(
+            BaseAgent._run_outcome(
                 ctx, _trace("delegate"), None, [ContextKeys.WORKER_RESULTS]
-            )
+            )[0]
             is False
         )
 
@@ -105,22 +105,20 @@ class TestPlannerExecutionEvidence:
                 {"subtask": "x", "answer": "Paris", "success": True}
             ],
         }
-        assert BaseAgent._completion_is_real(
+        assert BaseAgent._run_outcome(
             ctx, _trace("delegate"), None, [ContextKeys.WORKER_RESULTS]
-        )
+        )[0]
 
     def test_rewoo_empty_evidence_is_not_real(self):
         ctx = {ContextKeys.FINAL_ANSWER: "synthesized prose", ContextKeys.EVIDENCE: {}}
         assert (
-            BaseAgent._completion_is_real(ctx, _trace(), None, [ContextKeys.EVIDENCE])
+            BaseAgent._run_outcome(ctx, _trace(), None, [ContextKeys.EVIDENCE])[0]
             is False
         )
 
     def test_rewoo_nonempty_evidence_is_real(self):
         ctx = {ContextKeys.EVIDENCE: {"E1": "17*23 = 391"}}
-        assert BaseAgent._completion_is_real(
-            ctx, _trace(), None, [ContextKeys.EVIDENCE]
-        )
+        assert BaseAgent._run_outcome(ctx, _trace(), None, [ContextKeys.EVIDENCE])[0]
 
     def test_plan_execute_no_steps_is_not_real(self):
         ctx = {
@@ -128,18 +126,16 @@ class TestPlannerExecutionEvidence:
             ContextKeys.STEP_RESULTS: [],
         }
         assert (
-            BaseAgent._completion_is_real(
-                ctx, _trace(), None, [ContextKeys.STEP_RESULTS]
-            )
+            BaseAgent._run_outcome(ctx, _trace(), None, [ContextKeys.STEP_RESULTS])[0]
             is False
         )
 
     def test_plan_execute_executed_steps_is_real(self):
         # step_results entries have no `success` flag → non-empty list is evidence.
         ctx = {ContextKeys.STEP_RESULTS: ["step 1 done", "step 2 done"]}
-        assert BaseAgent._completion_is_real(
-            ctx, _trace(), None, [ContextKeys.STEP_RESULTS]
-        )
+        assert BaseAgent._run_outcome(ctx, _trace(), None, [ContextKeys.STEP_RESULTS])[
+            0
+        ]
 
     def test_has_execution_evidence_dict_vs_list(self):
         assert BaseAgent._has_execution_evidence({"evidence": {"E1": 1}}, ["evidence"])

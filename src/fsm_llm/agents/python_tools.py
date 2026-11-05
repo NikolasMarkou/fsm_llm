@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from fsm_llm.logging import logger
 
 from .definitions import ToolAnnotations, ToolDefinition
-from .tools import ToolRegistry
+from .tools import ToolRegistry, callable_name
 
 # DECISION plan-2026-10-23T043147-4c2042f3/D-032: "skill" now means only Agent
 # Skills (SKILL.md, never executed); this loader EXECUTES files, so it was
@@ -206,7 +206,7 @@ class PythonToolLoader:
             tool_def = getattr(fn, "_tool_definition", None)
             if tool_def is None:
                 logger.warning(
-                    f"Function {fn.__name__} has no _tool_definition; skipping"
+                    f"Function {callable_name(fn)} has no _tool_definition; skipping"
                 )
                 continue
             tools.append(PythonToolDefinition._from_tool_definition(tool_def, category))

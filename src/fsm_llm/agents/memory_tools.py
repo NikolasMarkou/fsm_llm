@@ -26,8 +26,8 @@ from typing import Annotated
 
 from fsm_llm.memory import BUFFER_CORE, WorkingMemory
 
-from .definitions import ToolDefinition
-from .tools import infer_schema_from_hints, redact_secret_entries
+from .definitions import READ_ONLY_ANNOTATIONS, ToolDefinition
+from .tools import redact_secret_entries, tool
 
 
 def create_memory_tools(
@@ -52,6 +52,7 @@ def create_memory_tools(
     def visible_buffers() -> list[str]:
         return [b for b in memory.list_buffers() if b not in memory.hidden_buffers]
 
+    @tool
     def remember(
         key: Annotated[str, "The key/name to store the value under"],
         value: Annotated[str, "The value to remember"],
@@ -70,6 +71,7 @@ def create_memory_tools(
         memory.set(buffer, key, value)
         return f"Remembered '{key}' in {buffer} buffer."
 
+    @tool(annotations=READ_ONLY_ANNOTATIONS)
     def recall(
         query: Annotated[str, "Search query to find matching memories"],
     ) -> str:
@@ -91,6 +93,7 @@ def create_memory_tools(
             lines.append(f"  [{buffer_name}] {key} = {value_preview}")
         return "\n".join(lines)
 
+    @tool
     def forget(
         key: Annotated[str, "The key/name to remove from memory"],
     ) -> str:
@@ -103,6 +106,7 @@ def create_memory_tools(
                 return f"Forgot '{key}' from {buffer_name} buffer."
         return f"Key '{key}' not found in any memory buffer."
 
+    @tool(annotations=READ_ONLY_ANNOTATIONS)
     def list_memories(
         buffer: Annotated[
             str,
@@ -149,16 +153,4 @@ def create_memory_tools(
                 lines.append(f"    {key} = {preview}")
         return "\n".join(lines)
 
-    # Build ToolDefinition objects with auto-inferred schemas
-    tools = []
-    for fn in (remember, recall, forget, list_memories):
-        schema = infer_schema_from_hints(fn)
-        tool_def = ToolDefinition(
-            name=fn.__name__,
-            description=(fn.__doc__ or "").strip().split("\n")[0],
-            parameter_schema=schema,
-            execute_fn=fn,
-        )
-        tools.append(tool_def)
-
-    return tools
+    return [fn._tool_definition for fn in (remember, recall, forget, list_memories)]

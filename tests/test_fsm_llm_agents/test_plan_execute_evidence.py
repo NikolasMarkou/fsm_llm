@@ -105,9 +105,9 @@ class TestPlanExecuteEvidenceGuard:
         }
         # all entries success=False -> _has_execution_evidence False
         assert (
-            BaseAgent._completion_is_real(
+            BaseAgent._run_outcome(
                 final_ctx, _trace(), None, [ContextKeys.STEP_RESULTS]
-            )
+            )[0]
             is False
         )
 
@@ -121,9 +121,9 @@ class TestPlanExecuteEvidenceGuard:
         final_ctx = {
             ContextKeys.STEP_RESULTS: _check_result(ctx)[ContextKeys.STEP_RESULTS]
         }
-        assert BaseAgent._completion_is_real(
+        assert BaseAgent._run_outcome(
             final_ctx, _trace(), None, [ContextKeys.STEP_RESULTS]
-        )
+        )[0]
 
     def test_none_mode_unchanged(self):
         # Regression: execution_evidence_keys=None keeps the original

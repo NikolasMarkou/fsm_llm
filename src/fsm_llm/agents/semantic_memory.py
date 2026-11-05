@@ -40,9 +40,9 @@ from typing import Annotated, Any
 from fsm_llm.llm import DEFAULT_EMBEDDING_MODEL
 from fsm_llm.logging import logger
 
-from .definitions import ToolDefinition
+from .definitions import READ_ONLY_ANNOTATIONS, ToolDefinition
 from .semantic_tools import EmbedFn, cosine_similarity, embedding_backend
-from .tools import infer_schema_from_hints
+from .tools import tool
 
 
 class MemoryEntry:
@@ -405,6 +405,7 @@ def create_semantic_memory_tools(
         Two ``ToolDefinition`` objects: ``remember``, ``recall``.
     """
 
+    @tool
     def remember(
         content: Annotated[str, "The fact or information to store in long-term memory"],
     ) -> str:
@@ -412,6 +413,7 @@ def create_semantic_memory_tools(
         eid = store.add(content)
         return f"Remembered (id={eid})."
 
+    @tool(annotations=READ_ONLY_ANNOTATIONS)
     def recall(
         query: Annotated[str, "What to search long-term memory for"],
     ) -> str:
@@ -424,14 +426,4 @@ def create_semantic_memory_tools(
             lines.append(f"  ({score:.2f}) {text}")
         return "\n".join(lines)
 
-    tools: list[ToolDefinition] = []
-    for fn in (remember, recall):
-        tools.append(
-            ToolDefinition(
-                name=fn.__name__,
-                description=(fn.__doc__ or "").strip().split("\n")[0],
-                parameter_schema=infer_schema_from_hints(fn),
-                execute_fn=fn,
-            )
-        )
-    return tools
+    return [fn._tool_definition for fn in (remember, recall)]

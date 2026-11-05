@@ -302,8 +302,8 @@ class ADaPTAgent(BaseAgent):
                     )
                     break
                 # Any other subtask failure must not crash the parent.
-                logger.warning(
-                    f"ADaPT subtask failed at depth {depth}: {e}", exc_info=True
+                logger.opt(exception=True).warning(
+                    "ADaPT subtask failed at depth {}: {}", depth, e
                 )
                 results.append(
                     {

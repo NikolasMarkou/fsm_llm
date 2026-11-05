@@ -25,7 +25,7 @@ from fsm_llm.agents import (
     create_agent,
     default_llm_judge,
 )
-from fsm_llm.agents.base import with_instructions
+from fsm_llm.agents.base import _with_instructions
 from fsm_llm.agents.definitions import MetaBuilderConfig
 from fsm_llm.agents.sop import SOPDefinition, SOPRegistry
 from fsm_llm.constants import DEFAULT_LLM_MODEL
@@ -239,11 +239,11 @@ class TestWithInstructions:
     }
 
     def test_none_or_blank_returns_the_same_dict(self):
-        assert with_instructions(self._FSM, None) is self._FSM
-        assert with_instructions(self._FSM, "  ") is self._FSM
+        assert _with_instructions(self._FSM, None) is self._FSM
+        assert _with_instructions(self._FSM, "  ") is self._FSM
 
     def test_fills_only_non_empty_slots_and_copies(self):
-        out = with_instructions(self._FSM, "RULE")
+        out = _with_instructions(self._FSM, "RULE")
         think = out["states"]["think"]
 
         assert think["extraction_instructions"] == ""

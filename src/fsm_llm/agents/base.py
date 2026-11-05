@@ -59,10 +59,10 @@ from .handlers import (
 )
 from .hitl import ApprovalPolicy, HumanInTheLoop, make_hitl_checker
 from .summarization import make_observation_summarizer
-from .tools import normalize_tool_input
+from .tools import tool_call_from_context
 
 
-def with_instructions(
+def _with_instructions(
     fsm_def: dict[str, Any], instructions: str | None
 ) -> dict[str, Any]:
     """Return *fsm_def* with ``AgentConfig.instructions`` in every non-empty
@@ -72,9 +72,8 @@ def with_instructions(
     think path), core's AMBIGUOUS transition classifier, ReasoningReact's
     reasoning-engine call, and any empty slot (see below).
 
-    Interface contract (2 call sites: :meth:`BaseAgent._create_api` and
-    ``SelfConsistencyAgent``, the one pattern that builds its ``API``
-    directly):
+    Interface contract (one call site, :meth:`BaseAgent._create_api`, which
+    every pattern's ``API`` goes through):
         - ``None`` or blank *instructions* return *fsm_def* itself, unchanged.
         - Otherwise returns a copy (the caller's dict and its states are not
           mutated) where each state's non-empty ``response_instructions``
@@ -116,13 +115,13 @@ def with_instructions(
 _INSTRUCTION_SLOTS = frozenset({"extraction_instructions", "response_instructions"})
 
 
-def prompt_overflow_error(
+def _prompt_overflow_error(
     exc: ValueError, instructions: str | None, tools: Any
 ) -> AgentError | None:
     """Translate core's FSM-load length error into an actionable ``AgentError``.
 
-    Interface contract (2 call sites: :meth:`BaseAgent._create_api` and
-    ``SelfConsistencyAgent``, the two places that load an agent FSM):
+    Interface contract (one call site, :meth:`BaseAgent._create_api`, the only
+    place that loads an agent FSM):
         - *exc* is the ``ValueError`` ``API.from_definition`` raised for a
           dict definition; its ``__cause__`` is core's pydantic
           ``ValidationError``.
@@ -931,15 +930,8 @@ class BaseAgent(ABC):
         if current_context.get(ContextKeys.APPROVAL_GRANTED) is True:
             return
 
-        tool_name = current_context.get(ContextKeys.TOOL_NAME) or ""
-        tool_input = normalize_tool_input(current_context.get(ContextKeys.TOOL_INPUT))
-        reasoning = current_context.get(ContextKeys.REASONING, "")
-
-        tool_call = ToolCall(
-            tool_name=tool_name,
-            parameters=tool_input,
-            reasoning=reasoning,
-        )
+        tool_call = tool_call_from_context(current_context)
+        tool_name, tool_input = tool_call.tool_name, tool_call.parameters
 
         # DECISION plan-2026-09-24T091842-c1d5bfbc/D-005: ask only about a
         # registered tool the shared predicate gates. Do NOT ask on a bare
@@ -1158,7 +1150,6 @@ class BaseAgent(ABC):
         final_context: dict[str, Any],
         trace: AgentTrace,
         extra_answer_keys: list[str] | None,
-        execution_evidence_keys: list[str] | None = None,
     ) -> bool:
         """True if the run produced a genuine result.
 
@@ -1167,26 +1158,9 @@ class BaseAgent(ABC):
         call. When BOTH are absent the ``answer``
         can only have come from the prose-fallback in ``_extract_answer``
         (a planner state's Pass-2 text leaking as the result) — that is a
-        degenerate completion, not a success.
-
-        # DECISION plan_2026-05-31_cb91a9d5/D-001 [STALE]: when ``execution_evidence_keys``
-        # is supplied (planner patterns: orchestrator/rewoo/plan_execute), the
-        # answer-key/tool-call test above is NOT sufficient. A planner can reach
-        # a synthesis state that writes an answer (and record a ``delegate``
-        # control action that _build_trace turns into a fake ToolCall) while
-        # having executed ZERO real work — weak 4b decomposition routes straight
-        # to synthesis via the fallback transitions. That filler must report
-        # success=False. So in planner mode we require genuine EXECUTION EVIDENCE
-        # (a successful worker / non-empty tool evidence / executed steps)
-        # instead. This extends D-001 (plan_26c9510a) from "no answer key AND no
-        # tool" to also cover "answer key but no real execution". Opt-in per
-        # call-site → every non-planner pattern (execution_evidence_keys=None)
-        # keeps the original has_answer_key-OR-tools_executed behavior unchanged.
+        degenerate completion, not a success. Planner patterns are judged by
+        execution evidence instead (``_run_outcome``).
         """
-        if execution_evidence_keys:
-            return BaseAgent._has_execution_evidence(
-                final_context, execution_evidence_keys
-            )
         has_answer_key = any(
             artifact_text(final_context.get(k)).strip()
             for k in (extra_answer_keys or [])
@@ -1268,6 +1242,15 @@ class BaseAgent(ABC):
         # caller cannot write it. See decisions.md D-028.
         if final_context.get(ContextKeys.FORCED_STOP_REASON) == StopReason.NO_RESULT:
             return False, StopReason.NO_RESULT
+        # DECISION plan_2026-05-31_cb91a9d5/D-001 [STALE]: when
+        # ``execution_evidence_keys`` is supplied (planner patterns:
+        # orchestrator/rewoo/plan_execute), the answer-key/tool-call test is NOT
+        # sufficient. A planner can reach a synthesis state that writes an answer
+        # (and record a ``delegate`` control action that _build_trace turns into
+        # a fake ToolCall) while having executed ZERO real work, so success
+        # requires genuine EXECUTION EVIDENCE (a successful worker / non-empty
+        # tool evidence / executed steps). Do NOT run ``_completion_is_real``
+        # for a planner: filler must report success=False.
         if execution_evidence_keys:
             if BaseAgent._has_execution_evidence(
                 final_context, execution_evidence_keys
@@ -1357,7 +1340,7 @@ class BaseAgent(ABC):
             kwargs["caching"] = True
         try:
             return API.from_definition(
-                with_instructions(fsm_def, self.config.instructions),
+                _with_instructions(fsm_def, self.config.instructions),
                 **llm_settings_for(
                     kwargs,
                     model=self.config.model,
@@ -1367,7 +1350,7 @@ class BaseAgent(ABC):
                 **kwargs,
             )
         except ValueError as exc:
-            error = prompt_overflow_error(
+            error = _prompt_overflow_error(
                 exc, self.config.instructions, getattr(self, "tools", None)
             )
             if error is None:
@@ -1438,6 +1421,34 @@ class BaseAgent(ABC):
     # Streaming run() implementation
     # ------------------------------------------------------------------
 
+    def _prepare_run_api(
+        self, fsm_def: dict[str, Any], agent_type: str, handlers: Any
+    ) -> API:
+        """The API of one run: built from *fsm_def*, with the pattern's handlers
+        and the lifecycle handlers registered.
+
+        Shared by ``_standard_run`` and ``_standard_run_stream``; *handlers* is
+        the call-local handler-state object of ``_standard_run`` (see there).
+        """
+        api = self._create_api(fsm_def)
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-014
+        # Do NOT collapse this to an unconditional `self._register_handlers(api,
+        # handlers)` — most subclasses' `_register_handlers(self, api)` override
+        # takes only one argument, and only react.py/parallel_react.py's
+        # override accepts (and requires) `handlers`. The abstract base
+        # signature is deliberately left at `(self, api)` (LSP: subclasses
+        # may only WIDEN with optional params, not the base), so this
+        # 2-argument call is only type-correct for the subclasses that
+        # actually declare it — hence the `type: ignore[call-arg]` below,
+        # guarded by the same `handlers is not None` runtime check those
+        # subclasses require. See decisions.md D-014.
+        if handlers is not None:
+            self._register_handlers(api, handlers)  # type: ignore[call-arg]
+        else:
+            self._register_handlers(api)
+        self._register_lifecycle_handlers(api, agent_type)
+        return api
+
     def _standard_run_stream(
         self,
         task: str,
@@ -1462,23 +1473,7 @@ class BaseAgent(ABC):
         ``_register_handlers`` (never round-tripped through ``self``).
         """
         start_time = time.monotonic()
-        api = self._create_api(fsm_def)
-        # DECISION plan-2026-09-12T065608-089d0ec7/D-014
-        # Do NOT collapse this to an unconditional `self._register_handlers(api,
-        # handlers)` — most subclasses' `_register_handlers(self, api)` override
-        # takes only one argument, and only react.py/parallel_react.py's
-        # override accepts (and requires) `handlers`. The abstract base
-        # signature is deliberately left at `(self, api)` (LSP: subclasses
-        # may only WIDEN with optional params, not the base), so this
-        # 2-argument call is only type-correct for the subclasses that
-        # actually declare it — hence the `type: ignore[call-arg]` below,
-        # guarded by the same `handlers is not None` runtime check those
-        # subclasses require. See decisions.md D-014.
-        if handlers is not None:
-            self._register_handlers(api, handlers)  # type: ignore[call-arg]
-        else:
-            self._register_handlers(api)
-        self._register_lifecycle_handlers(api, agent_type)
+        api = self._prepare_run_api(fsm_def, agent_type, handlers)
 
         try:
             conv_id, greeting = api.start_conversation(context)
@@ -1543,23 +1538,7 @@ class BaseAgent(ABC):
         first fix).
         """
         start_time = time.monotonic()
-        api = self._create_api(fsm_def)
-        # DECISION plan-2026-09-12T065608-089d0ec7/D-014
-        # Do NOT collapse this to an unconditional `self._register_handlers(api,
-        # handlers)` — most subclasses' `_register_handlers(self, api)` override
-        # takes only one argument, and only react.py/parallel_react.py's
-        # override accepts (and requires) `handlers`. The abstract base
-        # signature is deliberately left at `(self, api)` (LSP: subclasses
-        # may only WIDEN with optional params, not the base), so this
-        # 2-argument call is only type-correct for the subclasses that
-        # actually declare it — hence the `type: ignore[call-arg]` below,
-        # guarded by the same `handlers is not None` runtime check those
-        # subclasses require. See decisions.md D-014.
-        if handlers is not None:
-            self._register_handlers(api, handlers)  # type: ignore[call-arg]
-        else:
-            self._register_handlers(api)
-        self._register_lifecycle_handlers(api, agent_type)
+        api = self._prepare_run_api(fsm_def, agent_type, handlers)
 
         try:
             responses, final_context, iteration = self._run_conversation_loop(

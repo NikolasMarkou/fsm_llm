@@ -61,6 +61,7 @@ from .definitions import (
     ToolCall,
     ToolDefinition,
     ToolResult,
+    config_with,
 )
 from .evaluator_optimizer import EvaluatorOptimizerAgent
 from .exceptions import (
@@ -136,7 +137,7 @@ from .sop import SOPDefinition, SOPRegistry, load_builtin_sops
 from .summarization import make_observation_summarizer
 from .swarm import SwarmAgent
 from .tool_registries import CachingToolRegistry, RetryingToolRegistry
-from .tools import ToolRegistry, tool
+from .tools import ToolRegistry, registry_from, tool
 from .verified_react import VerifiedReactAgent
 
 # Pattern name -> agent class for create_agent. AgentGraph is intentionally
@@ -181,7 +182,8 @@ def create_agent(
     Args:
         pattern: Agent pattern: "react" (default), "debate", "rewoo", ...
             (see ``_PATTERNS``).
-        tools: List of @tool-decorated functions or a ToolRegistry.
+        tools: A list of ``@tool`` functions, plain functions or
+            ``ToolDefinition`` objects, or a ToolRegistry.
         config: ``AgentConfig`` for the agent; omitted, the pattern's default.
         system_prompt: Standing instructions for the agent, stored as
             ``AgentConfig.instructions`` (FSM patterns put them in their
@@ -237,34 +239,30 @@ def create_agent(
                 "create_agent got both system_prompt= and config.instructions; "
                 "pass the instructions once"
             )
-        base = config if config is not None else AgentConfig()
-        fields = {name: getattr(base, name) for name in type(base).model_fields}
-        config = type(base)(**{**fields, "instructions": system_prompt})
+        config = config_with(
+            config if config is not None else AgentConfig(),
+            instructions=system_prompt,
+        )
     if config is not None:
         kwargs["config"] = config
 
-    # Build ToolRegistry from list of @tool-decorated functions
     registry = None
     if isinstance(tools, ToolRegistry):
         registry = tools
     elif tools is not None:
-        registry = ToolRegistry()
-        for fn in tools:
-            if hasattr(fn, "_tool_definition"):
-                registry.register(fn._tool_definition)
-            else:
-                registry.register_function(fn)
+        registry = registry_from(tools)
 
     # DECISION plan-2026-09-29T103145-06a5ec0a/D-003: route tools by constructor
     # signature. Do NOT inject `tools` into every pattern: a tool-less pattern
     # (debate, self_consistency, ...) forwarded it to litellm (PAT-12).
     if registry is not None and "tools" not in kwargs:
-        if not accepts_tools(cls):
+        if accepts_tools(cls):
+            kwargs["tools"] = registry
+        elif len(registry):  # an empty list is no tools given (F-AP-14)
             raise TypeError(
                 f"Pattern '{pattern}' ({cls.__name__}) does not take tools; "
                 f"remove the tools argument"
             )
-        kwargs["tools"] = registry
 
     return cls(**kwargs)
 

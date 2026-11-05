@@ -573,6 +573,11 @@ class HandlerNames:
     OBSERVATION_SUMMARIZER = "AgentObservationSummarizer"
 
 
+# One tool observation as the loop stores it (``handlers.record_tool_step``).
+# Read back by ``BaseAgent._try_parse_structured_output`` (the text after the last
+# "Result:") and sized by ``okf._budget``, which measures the wrapper with this.
+OBSERVATION_ENTRY = "[Step {step}] Tool: {tool} | Input: {input} | Result: {result}"
+
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
