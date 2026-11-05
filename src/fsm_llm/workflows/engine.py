@@ -60,6 +60,21 @@ LifecycleHook = Callable[[str, WorkflowInstance, dict[str, Any]], Any]
 # --------------------------------------------------------------
 
 
+class _CancelRequest:
+    """A ``cancel_workflow`` call waiting for an instance's lock.
+
+    Interface contract: ``reason`` is the caller's text; ``honored`` is set
+    to ``True`` only by the run loop that cancelled the instance on this
+    request. Never raises; one request per instance at a time.
+    """
+
+    __slots__ = ("honored", "reason")
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        self.honored = False
+
+
 class Timer:
     """Information about a timer scheduled for a workflow instance."""
 
@@ -139,6 +154,10 @@ class WorkflowEngine:
         self.timers: dict[str, Timer] = {}
         self._listener_lock = asyncio.Lock()
         self._instance_locks: dict[str, asyncio.Lock] = {}
+        # Cancels waiting for an instance lock, by instance id. Registered by
+        # `cancel_workflow` BEFORE it awaits the lock, removed in its
+        # `finally` (and with the instance); read once per loop iteration.
+        self._cancel_requests: dict[str, _CancelRequest] = {}
         # Definition each instance was started with (re-registering a
         # workflow id does not change instances already running).
         self._instance_definitions: dict[str, WorkflowDefinition] = {}
@@ -477,6 +496,24 @@ class WorkflowEngine:
         """
         steps_run = 0
         while True:
+            # DECISION plan-2026-11-05T134105-5ed71cf2/D-017
+            # A cancel is honoured HERE, between steps, not by cancelling the
+            # running asyncio task (that would interrupt user code mid-step and
+            # leave resources half-released) and not through a second lock in
+            # an inner method (089d0ec7/D-003: locks only at outermost entry
+            # points). `cancel_workflow` cannot get the instance lock until
+            # this whole chain returns, so it registers a request first; a
+            # step already in flight runs to completion. Do NOT make
+            # `cancel_workflow` take the lock first or call update_status
+            # (CANCELLED) on a terminal instance (089d0ec7/D-015).
+            request = self._cancel_requests.get(instance.instance_id)
+            if request is not None and not instance.is_terminal():
+                instance.context[KEY_CANCELLATION_REASON] = request.reason
+                self._set_status(instance, WorkflowStatus.CANCELLED)
+                request.honored = True
+                await self._cleanup_workflow_resources(instance.instance_id)
+                return
+
             if steps_run >= self.max_steps_per_run:
                 error = WorkflowStateError(
                     current_state=instance.current_step_id,
@@ -1371,10 +1408,15 @@ class WorkflowEngine:
     ) -> bool:
         """Cancel a workflow instance.
 
-        :returns: ``True`` if this call transitioned the instance to
-            ``CANCELLED``. ``False`` if the instance id is unknown, or the
-            instance had already reached a terminal status by the time this
-            call acquired the per-instance lock (see D-015 -- a benign no-op,
+        A cancel of an instance whose chain of steps is running takes effect
+        between steps (the step in flight runs to completion, later steps do
+        not run); the call returns once the run has stopped.
+
+        :returns: ``True`` if this call (or the run loop, on its request)
+            transitioned the instance to ``CANCELLED``. ``False`` if the
+            instance id is unknown, or the instance reached a terminal status
+            some other way (a natural completion, a failure) by the time the
+            run released the per-instance lock (see D-015 -- a benign no-op,
             not an error).
         """
         if instance_id not in self.workflow_instances:
@@ -1382,30 +1424,42 @@ class WorkflowEngine:
 
         instance = self.workflow_instances[instance_id]
 
-        # F4: see advance_workflow's comment -- same per-instance lock,
-        # held across the status mutation and resource cleanup.
-        async with self._get_instance_lock(instance_id):
-            # DECISION plan-2026-09-12T065608-089d0ec7/D-015
-            # Do NOT call update_status(CANCELLED, ...) unconditionally here.
-            # Since F4/D-003, this lock can be won only AFTER a concurrent
-            # in-flight step already finished and committed a terminal status
-            # (e.g. COMPLETED) for this same instance. update_status(CANCELLED)
-            # on an already-terminal instance raises WorkflowStateError, which
-            # would propagate out of this `-> bool` API instead of the plain
-            # False it returns for every other "nothing to cancel" case. See
-            # decisions.md D-015.
-            if instance.is_terminal():
-                logger.debug(
-                    f"Instance {instance_id} already terminal "
-                    f"({instance.status.value}); cancel_workflow is a no-op"
-                )
-                return False
-            instance.context[KEY_CANCELLATION_REASON] = reason
-            self._set_status(instance, WorkflowStatus.CANCELLED)
+        # Registered BEFORE the lock wait: the lock is held by a running chain
+        # until it ends, so the chain loop has to see the request (D-017).
+        request = self._cancel_requests.setdefault(instance_id, _CancelRequest(reason))
+        try:
+            # F4: see advance_workflow's comment -- same per-instance lock,
+            # held across the status mutation and resource cleanup.
+            async with self._get_instance_lock(instance_id):
+                # DECISION plan-2026-09-12T065608-089d0ec7/D-015
+                # Do NOT call update_status(CANCELLED, ...) unconditionally
+                # here. Since F4/D-003, this lock can be won only AFTER a
+                # concurrent in-flight step already finished and committed a
+                # terminal status (e.g. COMPLETED) for this same instance.
+                # update_status(CANCELLED) on an already-terminal instance
+                # raises WorkflowStateError, which would propagate out of this
+                # `-> bool` API instead of the plain False it returns for
+                # every other "nothing to cancel" case. See decisions.md D-015.
+                # A terminal instance returns `request.honored` (D-017): True
+                # when the run loop cancelled it on this request, False for a
+                # natural completion.
+                if instance.is_terminal():
+                    logger.debug(
+                        f"Instance {instance_id} already terminal "
+                        f"({instance.status.value}); cancel_workflow is a no-op"
+                    )
+                    if not request.honored:
+                        return False
+                else:
+                    instance.context[KEY_CANCELLATION_REASON] = reason
+                    self._set_status(instance, WorkflowStatus.CANCELLED)
 
-            # Clean up resources (already released by _set_status; kept so the
-            # listener lock is observed on this path too)
-            await self._cleanup_workflow_resources(instance_id)
+                    # Clean up resources (already released by _set_status; kept
+                    # so the listener lock is observed on this path too)
+                    await self._cleanup_workflow_resources(instance_id)
+        finally:
+            if self._cancel_requests.get(instance_id) is request:
+                del self._cancel_requests[instance_id]
 
         logger.info(f"Workflow instance {instance_id} cancelled: {reason}")
         return True
@@ -1471,6 +1525,7 @@ class WorkflowEngine:
         # F4: drop the per-instance lock too, otherwise _instance_locks grows
         # unbounded across the engine's lifetime.
         self._instance_locks.pop(instance_id, None)
+        self._cancel_requests.pop(instance_id, None)
         self._instance_definitions.pop(instance_id, None)
         self._release_instance_resources(instance_id)
 

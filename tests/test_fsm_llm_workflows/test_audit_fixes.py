@@ -661,3 +661,142 @@ class TestFloatTimeoutSecondsEndToEnd:
 
         assert exc_info.value.timeout_seconds == 0.5
         assert "0.5 seconds" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# F-WE-01: cancel_workflow must take effect on a RUNNING chain
+# ---------------------------------------------------------------------------
+
+
+class TestCancelMidChain:
+    """F-WE-01 (plan 5ed71cf2 step 15, D-017): the entry point holds the
+    instance lock across a whole chain of back-to-back steps, so a cancel
+    used to wait for the end of the run, find COMPLETED and return False.
+    The cancel now registers a request before awaiting the lock; the chain
+    loop honours it between steps. Gates are events, not sleeps, so the
+    ordering does not depend on timing.
+    """
+
+    @staticmethod
+    def _build(chain: list[str], ran: list[str], gates: dict[str, asyncio.Event]):
+        """A chain ``chain[0] -> chain[1] -> ...`` of gated async steps.
+
+        Each step appends its id to ``ran``, signals ``<id>_started`` and
+        waits on its gate (when it has one) before routing on.
+        """
+        from fsm_llm.workflows.definitions import WorkflowDefinition
+        from fsm_llm.workflows.models import WorkflowStepResult
+        from fsm_llm.workflows.steps import WorkflowStep
+
+        class _GatedStep(WorkflowStep):
+            next_state: str = ""
+
+            async def execute(self, context):
+                ran.append(self.step_id)
+                started = gates.get(f"{self.step_id}_started")
+                if started is not None:
+                    started.set()
+                gate = gates.get(self.step_id)
+                if gate is not None:
+                    await gate.wait()
+                return WorkflowStepResult.success_result(
+                    data={}, next_state=self.next_state or None, message=self.step_id
+                )
+
+        steps = {}
+        for i, sid in enumerate(chain):
+            nxt = chain[i + 1] if i + 1 < len(chain) else ""
+            steps[sid] = _GatedStep(step_id=sid, name=sid, next_state=nxt)
+        return WorkflowDefinition(
+            workflow_id="wf-cancel-chain",
+            name="CancelChain",
+            steps=steps,
+            initial_step_id=chain[0],
+        )
+
+    async def test_cancel_between_steps_cancels_and_returns_true(self):
+        from fsm_llm.workflows.constants import KEY_CANCELLATION_REASON
+        from fsm_llm.workflows.models import WorkflowStatus
+
+        ran: list[str] = []
+        gates = {"a": asyncio.Event(), "a_started": asyncio.Event()}
+        engine = WorkflowEngine()
+        engine.register_workflow(self._build(["a", "b", "c"], ran, gates))
+
+        iid = await engine.start_workflow("wf-cancel-chain", wait=False)
+        await asyncio.wait_for(gates["a_started"].wait(), 5)
+        # Step a is in flight; the chain holds the instance lock.
+        cancel = asyncio.ensure_future(engine.cancel_workflow(iid, "stop now"))
+        await asyncio.sleep(0.02)  # let cancel register and block on the lock
+        gates["a"].set()
+
+        assert await asyncio.wait_for(cancel, 5) is True
+        instance = engine.workflow_instances[iid]
+        assert instance.status == WorkflowStatus.CANCELLED
+        assert instance.context[KEY_CANCELLATION_REASON] == "stop now"
+        assert ran == ["a"]  # b and c never ran
+        assert engine._cancel_requests == {}
+        await asyncio.gather(*engine._background_tasks)
+
+    async def test_cancel_racing_a_chain_that_finishes_first_returns_false(self):
+        from fsm_llm.workflows.models import WorkflowStatus
+
+        ran: list[str] = []
+        gates = {"a": asyncio.Event(), "a_started": asyncio.Event()}
+        engine = WorkflowEngine()
+        engine.register_workflow(self._build(["a"], ran, gates))
+
+        iid = await engine.start_workflow("wf-cancel-chain", wait=False)
+        await asyncio.wait_for(gates["a_started"].wait(), 5)
+        cancel = asyncio.ensure_future(engine.cancel_workflow(iid))
+        await asyncio.sleep(0.02)
+        gates["a"].set()  # the only step ends the workflow; no later iteration
+
+        # D-015: a natural completion before the loop saw the request is
+        # not a cancel that took effect.
+        assert await asyncio.wait_for(cancel, 5) is False
+        assert engine.workflow_instances[iid].status == WorkflowStatus.COMPLETED
+        assert engine._cancel_requests == {}
+
+    async def test_cancel_of_completed_instance_returns_false(self):
+        from fsm_llm.workflows.models import WorkflowStatus
+
+        ran: list[str] = []
+        engine = WorkflowEngine()
+        engine.register_workflow(self._build(["a", "b"], ran, {}))
+
+        iid = await engine.start_workflow("wf-cancel-chain", wait=True)
+        assert engine.workflow_instances[iid].status == WorkflowStatus.COMPLETED
+
+        assert await engine.cancel_workflow(iid) is False
+        assert engine.workflow_instances[iid].status == WorkflowStatus.COMPLETED
+        assert engine._cancel_requests == {}
+
+    async def test_cancel_of_unknown_instance_leaves_no_request(self):
+        engine = WorkflowEngine()
+        assert await engine.cancel_workflow("nope") is False
+        assert engine._cancel_requests == {}
+
+    async def test_cancel_of_waiting_instance_still_works(self):
+        from fsm_llm.workflows.constants import KEY_CANCELLATION_REASON
+        from fsm_llm.workflows.definitions import WorkflowDefinition
+        from fsm_llm.workflows.dsl import wait_event_step
+        from fsm_llm.workflows.models import WorkflowStatus
+
+        engine = WorkflowEngine()
+        engine.register_workflow(
+            WorkflowDefinition(
+                workflow_id="wf-cancel-wait",
+                name="CancelWait",
+                steps={"w": wait_event_step("w", "w", "go", "")},
+                initial_step_id="w",
+            )
+        )
+        iid = await engine.start_workflow("wf-cancel-wait")
+        assert engine.workflow_instances[iid].status == WorkflowStatus.WAITING
+
+        assert await engine.cancel_workflow(iid, "bye") is True
+        instance = engine.workflow_instances[iid]
+        assert instance.status == WorkflowStatus.CANCELLED
+        assert instance.context[KEY_CANCELLATION_REASON] == "bye"
+        assert engine._cancel_requests == {}
