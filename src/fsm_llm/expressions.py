@@ -55,7 +55,11 @@ None / missing rule (one rule, applied by ``evaluate_logic``):
       ``None``, so a bare arithmetic condition on an unset operand is falsy
       (the transition does not fire). Any other operator (``cat``) sees it
       as ``None``. Gate arithmetic operands with ``requires_context_keys``
-      when "unset" should mean something specific.
+      when "unset" should mean something specific. An arithmetic operator
+      that cannot compute (a non-numeric operand such as an extracted
+      ``"N/A"``, a wrong arity) is UNDEFINED too, never ``False``
+      (D-007 of plan-2026-11-05T134105-5ed71cf2); a division or modulo by
+      zero still raises.
     * Ordering (``<``, ``<=``, ``>``, ``>=``) returns ``False`` when ANY
       operand is ``None``. ``-`` is unary only when it has exactly one
       operand (``{"-": [5]}`` is ``-5``); ``{"-": [5, null]}`` is undefined.
@@ -630,7 +634,8 @@ def _minus(*args: Any) -> float:
     Arity is decided by operand COUNT, never by a ``None`` default, so a
     second operand that resolved to ``None`` is not mistaken for "omitted"
     (and ``evaluate_logic`` already returns None for it). Any other arity
-    raises ``TypeError``, which ``evaluate_logic`` turns into False.
+    raises ``TypeError``, which ``evaluate_logic`` turns into UNDEFINED
+    (an arithmetic operator that cannot compute never satisfies a comparison).
     """
     if len(args) == 1:
         return -float(args[0])
@@ -1093,4 +1098,12 @@ def _evaluate_logic(
         logger.warning(
             f"Error evaluating operation '{operator}' with args {evaluated_values}: {e}"
         )
+        # DECISION plan-2026-11-05T134105-5ed71cf2/D-007: a failed ARITHMETIC
+        # operator (non-numeric operand such as an extracted "N/A", wrong
+        # arity) is `_UNDEFINED`, the same as the None-operand case above.
+        # Do NOT return False for it: the enclosing comparison reads False as
+        # 0 (`{"<": [{"+": ["abc", 1]}, 5]}` was True), the D-048 hazard
+        # through the error path. Other operators still fail to False.
+        if operator in _UNDEFINED_PROPAGATING_OPERATORS:
+            return _UNDEFINED
         return False

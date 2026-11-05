@@ -648,3 +648,77 @@ class TestShortCircuitEvaluation:
             ]
         }
         assert evaluate_logic(logic, {"mode": "a", "count": 0}) == "OK"
+
+
+class TestFailedArithmeticIsUndefined:
+    """F-DV-02: an arithmetic operator that cannot compute (non-numeric operand,
+    wrong arity) is UNDEFINED, exactly like the None-operand twin, so the
+    enclosing comparison can never read it as 0."""
+
+    def test_non_numeric_plus_never_satisfies_less_than(self):
+        assert evaluate_logic({"<": [{"+": ["abc", 1]}, 5]}) is False
+
+    def test_non_numeric_division_never_equals_zero(self):
+        assert evaluate_logic({"==": [{"/": ["abc", 2]}, 0]}) is False
+
+    def test_non_numeric_var_minus_one_never_differs_from_zero(self):
+        logic = {"!=": [{"-": [{"var": "total"}, 1]}, 0]}
+        assert evaluate_logic(logic, {"total": "N/A"}) is False
+
+    def test_wrong_arity_minus_never_satisfies_less_than(self):
+        assert evaluate_logic({"<": [{"-": [1, 2, 3]}, 5]}) is False
+
+    def test_every_propagating_operator_is_unsatisfiable_on_garbage(self):
+        for op in ("+", "-", "*", "/", "%", "min", "max"):
+            for cmp_op, rhs in (
+                ("<", 5),
+                (">=", -5),
+                ("==", 0),
+                ("!=", 0),
+                ("in", [0, 1]),
+            ):
+                logic = {cmp_op: [{op: ["abc", 2]}, rhs]}
+                assert evaluate_logic(logic) is False, (op, cmp_op)
+
+    def test_wrong_arity_modulo_and_division_are_unsatisfiable(self):
+        assert evaluate_logic({"==": [{"%": [5]}, 0]}) is False
+        assert evaluate_logic({"==": [{"/": [1, 2, 3]}, 0]}) is False
+
+    def test_none_operand_twin_stays_false(self):
+        logic = {"<": [{"-": [{"var": "t"}, 1]}, 5]}
+        assert evaluate_logic(logic, {"t": None}) is False
+
+    def test_bare_failed_arithmetic_is_none_at_the_public_boundary(self):
+        assert evaluate_logic({"+": ["abc", 1]}) is None
+        assert evaluate_logic({"-": [1, 2, 3]}) is None
+
+    def test_failed_arithmetic_is_falsy_in_boolean_context(self):
+        assert evaluate_logic({"!": [{"+": ["abc", 1]}]}) is True
+        assert evaluate_logic({"!!": [{"+": ["abc", 1]}]}) is False
+        assert evaluate_logic({"or": [{"+": ["abc", 1]}, "fallback"]}) == "fallback"
+
+    def test_failed_arithmetic_propagates_through_nesting(self):
+        logic = {"<": [{"*": [{"+": ["abc", 1]}, 2]}, 5]}
+        assert evaluate_logic(logic) is False
+
+    def test_non_propagating_operator_failure_stays_false(self):
+        assert evaluate_logic({"in": [{"var": "x"}, "abc"]}, {"x": [1]}) is False
+        logic = {"in": [{"var": "x"}, {"var": "y"}]}
+        assert evaluate_logic(logic, {"x": [1], "y": {"a": 1}}) is False
+
+    def test_valid_numeric_input_is_unchanged(self):
+        assert evaluate_logic({"+": ["2", 1]}) == 3.0
+        assert evaluate_logic({"<": [{"+": ["2", 1]}, 5]}) is True
+        assert evaluate_logic({"-": [3]}) == -3.0
+        assert evaluate_logic({"max": ["4", 9]}) == 9.0
+        assert evaluate_logic({"cat": ["a", 1]}) == "a1"
+
+    def test_division_by_zero_still_raises(self):
+        import pytest
+
+        from fsm_llm.definitions import TransitionEvaluationError
+
+        with pytest.raises(TransitionEvaluationError):
+            evaluate_logic({"/": [1, 0]})
+        with pytest.raises(TransitionEvaluationError):
+            evaluate_logic({"%": [1, 0]})
