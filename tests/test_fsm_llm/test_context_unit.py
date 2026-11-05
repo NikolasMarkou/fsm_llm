@@ -4727,6 +4727,52 @@ class TestDigitSuffixedCredentialNames:
     def test_honest_digit_suffixed_names_are_kept(self, name, value):
         assert is_forbidden_context_entry(name, value) is False
 
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "token2_value",
+            "token2_hash",
+            "token2_string",
+            "tokens2_value",
+            "tokens2_secret",
+            "token12_values",
+            "key2_file",
+            "keys2_file",
+            "key2_pair",
+            "key3_store",
+            "key1-rsa",
+            "key4.material",
+            "app_key2_file",
+            "my_token2_value",
+            "App_Keys2_File",
+        ],
+    )
+    @pytest.mark.parametrize("value", [None, "abc", 4096, "ORD-1"])
+    def test_a_digit_between_the_trigger_and_a_material_head_is_the_same_name(
+        self, name, value
+    ):
+        # The `trigger + head` arms take the digit run exactly like the
+        # `trigger + boundary` arms: `token2_value` is `token_value`.
+        assert is_forbidden_context_entry(name, value) is True
+
+    @pytest.mark.parametrize(
+        ("name", "value"),
+        [
+            ("key2_value_pair", "x"),
+            ("key2_performance_indicator", "x"),
+            ("token2_count", 12),
+            ("token2_ids", [1, 2]),
+            ("tokens2_used", 12),
+            ("token2_max_length", 4096),
+            ("tokenizer2_config", "x"),
+            ("keyboard2_layout", "qwerty"),
+            ("keyrsa1", "x"),
+            ("order_key2_name", "ORD-1"),
+        ],
+    )
+    def test_ordinary_names_with_a_digit_after_the_trigger_are_kept(self, name, value):
+        assert is_forbidden_context_entry(name, value) is False
+
     def test_layer_two_now_reads_the_value_of_an_ordinary_key_name_with_a_digit(self):
         assert is_forbidden_context_entry("order_key2", _AUDIT_STRIPE) is True
         assert is_forbidden_context_entry("order_key2", "ORD-1") is False

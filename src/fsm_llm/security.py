@@ -369,6 +369,12 @@ _TOKEN_TRIGGER = rf"token{_TRIGGER_PLURAL}"
 # (its head already eats digits; `pins1` would flip). Do NOT also let a digit
 # follow a separator (`key_2`): that stays a layer-2 name on purpose. Do NOT
 # fold `\d*` into `_TRIGGER_PLURAL`.
+# Step 3.1: the two `trigger + head` arms in `FORBIDDEN_CONTEXT_PATTERNS` take the
+# same digit run BEFORE their optional separator (`{_KEY_TRIGGER}\d*[-_.]?heads`),
+# so `token2_value`, `tokens2_hash`, `key2_file` and `keys2_pair` are the names
+# `token_value`, `tokens_hash`, `key_file`, `keys_pair` (review WARNING 2). The
+# digit still stops at the trigger: after the HEAD the boundary stays
+# `_PLAIN_WORD_END`, and the digit-free tail (`token_value2`) is unchanged.
 _PLAIN_WORD_END = r"(?:[\W_]|$)"
 _WORD_END = rf"(?:\d*{_PLAIN_WORD_END})"
 
@@ -607,7 +613,7 @@ FORBIDDEN_CONTEXT_PATTERNS = [
     #      `key_performance_indicator`
     rf"(?:{_KEY_TRIGGER}\d*$)"
     rf"|(?:^|.*[\W_]){_CRYPTO_AT_WORD}{_CRYPTO_GAP}{_KEY_TRIGGER}{_WORD_END}"
-    rf"|(?:^|.*[\W_]){_KEY_TRIGGER}[-_.]?"
+    rf"|(?:^|.*[\W_]){_KEY_TRIGGER}\d*[-_.]?"
     rf"(?:{_KEY_MATERIAL_HEADS})s?{_PLAIN_WORD_END}",
     # DECISION plan-2026-07-20T040150-876e7164/D-015 [STALE] -- the ENUMERATED residual.
     # These name key material but contain no "key" substring, so the pattern
@@ -639,7 +645,7 @@ FORBIDDEN_CONTEXT_PATTERNS = [
     rf"(?:{_TOKEN_TRIGGER}\d*$)"
     rf"|(?:^|.*[\W_])(?:{_BEARER_TOKEN_QUALIFIERS}){_SEP_RUN}"
     rf"{_TOKEN_TRIGGER}{_WORD_END}"
-    rf"|(?:^|.*[\W_]){_TOKEN_TRIGGER}[-_.]?"
+    rf"|(?:^|.*[\W_]){_TOKEN_TRIGGER}\d*[-_.]?"
     rf"(?:{_TOKEN_MATERIAL_HEADS})s?{_PLAIN_WORD_END}",
     r"(?:^|.*[\W_])oauth[-_.]?token(?:s)?(?:[\W_].*|$)",  # OAuth token patterns
 ]
