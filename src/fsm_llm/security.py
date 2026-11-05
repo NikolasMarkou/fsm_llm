@@ -342,8 +342,9 @@ _PASSWORD_POLICY_SUFFIXES = (
 # + `_used` and strip. The second branch asserts there is no consumable `s`,
 # which forecloses that parse while still letting `keystone` decompose as
 # `key` + `stone` (the `s` there is followed by an alphanumeric, so it is part
-# of the next word rather than a plural).
-_TRIGGER_PLURAL = r"(?:s(?![a-z0-9])|(?!s(?![a-z0-9])))"
+# of the next word rather than a plural). A DIGIT after the `s` still makes it
+# a plural (`keys2`, `tokens2`), hence `[a-z]` and not `[a-z0-9]` (D-003).
+_TRIGGER_PLURAL = r"(?:s(?![a-z])|(?!s(?![a-z])))"
 _KEY_TRIGGER = rf"key{_TRIGGER_PLURAL}"
 _TOKEN_TRIGGER = rf"token{_TRIGGER_PLURAL}"
 
@@ -352,7 +353,24 @@ _TOKEN_TRIGGER = rf"token{_TRIGGER_PLURAL}"
 # end of the string, so the trailing `.*` is pure backtracking surface. Dropping
 # it removes an O(n) scan from inside two negative lookaheads that are themselves
 # retried at every separator position.
-_WORD_END = r"(?:[\W_]|$)"
+#
+# DECISION plan-2026-11-05T134105-5ed71cf2/D-003 -- `_WORD_END` is the boundary
+# that follows a TRIGGER WORD (`key`, `token`) and so tolerates a DIGIT RUN:
+# `key1`, `ssh_key2`, `token3_old` and `order_key2` are the same names as `key`,
+# `ssh_key`, `token_old` and `order_key` (audit F-SU-01: `secret1`, `token2`,
+# `private_key2` reached the prompt). `\d*` is a plain greedy run over a class
+# disjoint from `[\W_]`, so it adds no backtracking (the `"ssh_"*n` timing pin
+# still holds). `_PLAIN_WORD_END` keeps the old boundary for the three places a
+# digit must NOT count, each measured by the step-3 differential: after a
+# material HEAD (`keyrsa1` would be a flip with no trigger word before the
+# digit), inside the safe-qualifier lookahead of `_TOKEN_VALUE_SCAN_NAME_RE`
+# (`max_tokens2_billed_tokens` would flip True to False, the quirk
+# `max_tokens_billed_tokens` already has), and in the credential-name rule
+# (its head already eats digits; `pins1` would flip). Do NOT also let a digit
+# follow a separator (`key_2`): that stays a layer-2 name on purpose. Do NOT
+# fold `\d*` into `_TRIGGER_PLURAL`.
+_PLAIN_WORD_END = r"(?:[\W_]|$)"
+_WORD_END = rf"(?:\d*{_PLAIN_WORD_END})"
 
 # DECISION plan-2026-07-20T040150-876e7164/D-019 [STALE]
 # A separator RUN, not a single optional separator. The token suffix arm used
@@ -571,9 +589,10 @@ FORBIDDEN_CONTEXT_PATTERNS = [
     # every `password_<suffix>` whose suffix does not decompose ENTIRELY into
     # policy/status tokens. See the D-026 block above before editing.
     rf"(?:^|.*[\W_])passwords?(?!(?:[-_.]?(?:{_PASSWORD_POLICY_SUFFIXES}))+$)",
-    r"(?:^|.*[\W_])secret(?:s)?(?:[\W_].*|$)",  # Secret-related keys (not "secretary")
+    # Secret-related keys (not "secretary"); a digit run may follow (`secret1`).
+    r"(?:^|.*[\W_])secret(?:s)?\d*(?:[\W_].*|$)",
     r".*(?:api[-_.]?key|key[-_.]?api).*",  # API key patterns (both orderings, with dash/underscore/dot)
-    r"(?:^|.*[\W_])credential(?:s)?(?:[\W_].*|$)",  # Credential-related keys
+    r"(?:^|.*[\W_])credential(?:s)?\d*(?:[\W_].*|$)",  # Credential-related keys
     # DECISION plan-2026-07-20T040150-876e7164/D-015 [STALE] -- cryptographic key
     # material. This is an ENUMERATED CRYPTO DENYLIST and it FAILS OPEN on
     # vocabulary nobody listed; it is NOT a class control and must not be
@@ -586,10 +605,10 @@ FORBIDDEN_CONTEXT_PATTERNS = [
     #   3. key-then-material-head: strips `keyfile`, `key_pair`, `keystore`,
     #      `key_material`; keeps `keyword`, `keyboard_layout`, `key_value_pair`,
     #      `key_performance_indicator`
-    rf"(?:{_KEY_TRIGGER}$)"
+    rf"(?:{_KEY_TRIGGER}\d*$)"
     rf"|(?:^|.*[\W_]){_CRYPTO_AT_WORD}{_CRYPTO_GAP}{_KEY_TRIGGER}{_WORD_END}"
     rf"|(?:^|.*[\W_]){_KEY_TRIGGER}[-_.]?"
-    rf"(?:{_KEY_MATERIAL_HEADS})s?{_WORD_END}",
+    rf"(?:{_KEY_MATERIAL_HEADS})s?{_PLAIN_WORD_END}",
     # DECISION plan-2026-07-20T040150-876e7164/D-015 [STALE] -- the ENUMERATED residual.
     # These name key material but contain no "key" substring, so the pattern
     # above cannot structurally reach them. This entry is a DENYLIST and is
@@ -617,11 +636,11 @@ FORBIDDEN_CONTEXT_PATTERNS = [
     #      `token_max_length`
     # The `oauth[-_.]?token` entry that follows is retained deliberately as an
     # independently-pinned explicit statement, not because it is load-bearing.
-    rf"(?:{_TOKEN_TRIGGER}$)"
+    rf"(?:{_TOKEN_TRIGGER}\d*$)"
     rf"|(?:^|.*[\W_])(?:{_BEARER_TOKEN_QUALIFIERS}){_SEP_RUN}"
     rf"{_TOKEN_TRIGGER}{_WORD_END}"
     rf"|(?:^|.*[\W_]){_TOKEN_TRIGGER}[-_.]?"
-    rf"(?:{_TOKEN_MATERIAL_HEADS})s?{_WORD_END}",
+    rf"(?:{_TOKEN_MATERIAL_HEADS})s?{_PLAIN_WORD_END}",
     r"(?:^|.*[\W_])oauth[-_.]?token(?:s)?(?:[\W_].*|$)",  # OAuth token patterns
 ]
 
@@ -1478,7 +1497,7 @@ _AMBIGUOUS_CREDENTIAL_ABBREVIATIONS = frozenset(
 # stripping unconditionally. `billed_tokens`, `prefill_tokens`, `subword_token`
 # and `truncation_token` are in this set and are now kept.
 _TOKEN_VALUE_SCAN_NAME_RE = re.compile(
-    rf"(?!(?:(?:{_SAFE_TOKEN_QUALIFIERS}){_SEP_RUN})+{_TOKEN_TRIGGER}{_WORD_END})"
+    rf"(?!(?:(?:{_SAFE_TOKEN_QUALIFIERS}){_SEP_RUN})+{_TOKEN_TRIGGER}{_PLAIN_WORD_END})"
     rf"(?:^|.*[\W_])[a-z0-9]+{_SEP_RUN}{_TOKEN_TRIGGER}{_WORD_END}",
     re.IGNORECASE,
 )
@@ -1520,12 +1539,12 @@ _CREDENTIAL_NAME_HEAD = rf"(?:^|.*[\W_])(?:{_CREDENTIAL_NAME_TERMS})(?:s|\d+)?"
 # Matches a credential name whose tail is NOT only policy suffixes.
 _CREDENTIAL_NAME_RE = re.compile(
     rf"{_CREDENTIAL_NAME_HEAD}"
-    rf"(?!(?:[-_.]?(?:{_PASSWORD_POLICY_SUFFIXES}))+$){_WORD_END}",
+    rf"(?!(?:[-_.]?(?:{_PASSWORD_POLICY_SUFFIXES}))+$){_PLAIN_WORD_END}",
     re.IGNORECASE,
 )
 # Matches every credential name, policy-suffix tails included.
 _CREDENTIAL_NAME_ANY_RE = re.compile(
-    rf"{_CREDENTIAL_NAME_HEAD}{_WORD_END}", re.IGNORECASE
+    rf"{_CREDENTIAL_NAME_HEAD}{_PLAIN_WORD_END}", re.IGNORECASE
 )
 # Upper-case run followed by a capitalised word: `PINCode` -> `PIN_Code`.
 _ACRONYM_BOUNDARY = re.compile(r"(?<=[A-Z])(?=[A-Z][a-z])")
@@ -1662,6 +1681,72 @@ def _policy_tail_value_is_credential(value: object, tail: str) -> bool:
 
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 
+# Bounds of the key-arm container judge below. A context value can be arbitrarily
+# large and this runs on every prompt build with the per-conversation lock held.
+_CONTAINER_NODE_BUDGET = 256
+_CONTAINER_MAX_DEPTH = 16
+
+
+# DECISION plan-2026-11-05T134105-5ed71cf2/D-004
+# The key arm used to KEEP every non-`str` value, so `partner_key: ["sk_live_..."]`,
+# a one-key dict or `b"-----BEGIN ..."` reached the prompt (audit F-SU-02); walkers
+# test names of dict keys only, never a container held under an ambiguous name.
+# This judges the STRING LEAVES with the same value test, and fails CLOSED when it
+# cannot finish (node budget, depth bound, a cycle, a container subclass that
+# raises). Do NOT mirror the token arm (strip every container under an ambiguous
+# key name): that over-strips honest `order_key: [...]` lists the D-019 corpus
+# keeps. Do NOT loosen the exact-`str` rule of `_looks_like_credential_value`
+# (D-006): a `str` subclass leaf is still credential material. Do NOT apply this
+# to the token arm, whose non-`str` default is already fail-closed.
+def _key_value_is_credential(value: object, name: str) -> bool:
+    """Layer-2 verdict for the key arm: does *value* hold credential material?
+
+    Interface contract:
+        - ``value``: any object. An exact or subclassed ``str`` is judged by
+          :func:`_looks_like_credential_value` (unchanged). A ``bytes``/
+          ``bytearray`` is judged on its first ``_VALUE_SCAN_LIMIT`` bytes decoded
+          as latin-1, read through ``memoryview`` so a subclass cannot hook it.
+          A ``list``/``tuple``/``set``/``frozenset``/``dict`` (dict VALUES; its
+          keys are filtered by the walkers) is walked for string and bytes
+          leaves. Every other type is KEPT (False), as before.
+        - ``name``: the context key, forwarded to the leaf judge.
+        - Returns True when any leaf is credential-shaped, or when the walk
+          cannot finish: more than ``_CONTAINER_NODE_BUDGET`` nodes, deeper than
+          ``_CONTAINER_MAX_DEPTH``, a reference cycle, or any exception.
+        - Never raises; never logs or returns *value*.
+    """
+    try:
+        budget = [_CONTAINER_NODE_BUDGET]
+        return _walk_for_credential(value, name, 0, set(), budget)
+    except Exception:
+        return True
+
+
+def _walk_for_credential(
+    value: object, name: str, depth: int, active: set[int], budget: list[int]
+) -> bool:
+    """Recursive half of :func:`_key_value_is_credential` (raises are caught there)."""
+    budget[0] -= 1
+    if budget[0] < 0:
+        return True
+    if isinstance(value, str):
+        return _looks_like_credential_value(value, name)
+    if isinstance(value, (bytes, bytearray)):
+        raw = bytes(memoryview(value)[:_VALUE_SCAN_LIMIT])
+        return _looks_like_credential_value(raw.decode("latin-1"), name)
+    if isinstance(value, (list, tuple, set, frozenset, dict)):
+        if depth >= _CONTAINER_MAX_DEPTH or id(value) in active:
+            return True
+        active.add(id(value))
+        try:
+            items = value.values() if isinstance(value, dict) else value
+            for item in items:
+                if _walk_for_credential(item, name, depth + 1, active, budget):
+                    return True
+        finally:
+            active.discard(id(value))
+    return False
+
 
 def is_forbidden_context_entry(key: object, value: object = None) -> bool:
     """Return True if this context ENTRY must never reach an LLM prompt.
@@ -1680,6 +1765,11 @@ def is_forbidden_context_entry(key: object, value: object = None) -> bool:
         :func:`_looks_like_credential_value` and default to KEEP;
       - the non-allowlisted ``<qualifier>_token`` shape goes to
         :func:`_token_value_is_credential` and defaults to STRIP.
+
+      The key arm also judges the string leaves of a list, tuple, set, dict or
+      ``bytes`` value (:func:`_key_value_is_credential`, bounded, fail-closed).
+      A digit run directly after ``key``/``token``/``secret``/``credential``
+      is part of the same name (``key1``, ``private_key2``).
 
     Args:
         key: The context key. A non-``str`` key carries no name to match; the
@@ -1764,4 +1854,6 @@ def is_forbidden_context_entry(key: object, value: object = None) -> bool:
     ):
         return False
 
-    return _looks_like_credential_value(value, key)
+    # DECISION plan-2026-11-05T134105-5ed71cf2/D-004 -- containers and bytes are
+    # judged by their string leaves; see `_key_value_is_credential`.
+    return _key_value_is_credential(value, key)

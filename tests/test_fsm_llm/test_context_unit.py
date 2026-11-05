@@ -4646,3 +4646,286 @@ class TestCensusCorpusAdequacy:
             "re-blocks the push for the whole repo. If a literal was REMOVED on "
             "purpose, re-pin this dict in the SAME commit and say which row."
         )
+
+
+# ---------------------------------------------------------------------------
+# Audit 2026-11-05 (F-SU-01, F-SU-02): digit-suffixed credential names and
+# containers held under an ambiguous `*_key` name.
+# ---------------------------------------------------------------------------
+_AUDIT_PEM = (
+    "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END-----"
+)
+_AUDIT_STRIPE = "sk_live_9mK3aX7yB1nV5rD4jH2kM7"
+_AUDIT_JWT = (
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1"
+)
+_DIGIT_SUFFIXED_CREDENTIAL_NAMES = [
+    "private_key2",
+    "ssh_key1",
+    "signing_key1",
+    "key1",
+    "stripe_key2",
+    "secret1",
+    "client_secret2",
+    "credential1",
+    "credentials2",
+    "token2",
+    "access_token2",
+    "oauth_token2",
+    "secrets3",
+    "keys2",
+    "tokens2",
+    "ssh_key1_backup",
+    "CLIENT_SECRET2",
+    "clientSecret2",
+    "Key1",
+]
+
+
+class TestDigitSuffixedCredentialNames:
+    """F-SU-01: a digit run right after key/token/secret/credential is the same
+    name as without it."""
+
+    @pytest.mark.parametrize("name", _DIGIT_SUFFIXED_CREDENTIAL_NAMES)
+    @pytest.mark.parametrize("value", [_AUDIT_PEM, _AUDIT_STRIPE, _AUDIT_JWT])
+    def test_digit_suffixed_credential_names_forbid(self, name, value):
+        assert is_forbidden_context_entry(name, value) is True
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "key1",
+            "secret1",
+            "credential1",
+            "credentials2",
+            "token2",
+            "private_key2",
+            "ssh_key1",
+            "client_secret2",
+            "oauth_token2",
+            "access_token2",
+        ],
+    )
+    def test_the_name_alone_decides_the_layer_one_shapes(self, name):
+        assert is_forbidden_context_entry(name) is True
+
+    @pytest.mark.parametrize(
+        ("name", "value"),
+        [
+            ("order_key2", "ORD-1"),
+            ("cache_key1", "abc"),
+            ("max_tokens2", 4096),
+            ("completion_tokens2", 12),
+            ("prompt_tokens1", 7),
+            ("secretary1", "Ms Jones"),
+            ("keyboard2", "qwerty"),
+            ("tokenizer2", "gpt"),
+            ("keystone1", "x"),
+            ("monkey1", "banana"),
+        ],
+    )
+    def test_honest_digit_suffixed_names_are_kept(self, name, value):
+        assert is_forbidden_context_entry(name, value) is False
+
+    def test_layer_two_now_reads_the_value_of_an_ordinary_key_name_with_a_digit(self):
+        assert is_forbidden_context_entry("order_key2", _AUDIT_STRIPE) is True
+        assert is_forbidden_context_entry("order_key2", "ORD-1") is False
+
+    def test_a_digit_inside_the_safe_prefix_does_not_weaken_a_later_token(self):
+        # The safe-qualifier lookahead keeps its plain boundary: `max_tokens2_`
+        # must not become a safe prefix that exempts the bearer name after it.
+        assert is_forbidden_context_entry("max_tokens2_billed_tokens", _AUDIT_JWT)
+
+    def test_separated_digit_names_are_not_changed(self):
+        # `key_2` stays a layer-2 name: the value decides, the bare name does not.
+        assert is_forbidden_context_entry("stripe_key_2", _AUDIT_STRIPE) is True
+        assert is_forbidden_context_entry("order_key_2", "ORD-1") is False
+
+    def test_every_filter_path_drops_the_digit_suffixed_entries(self):
+        from fsm_llm.prompts import DataExtractionPromptBuilder
+
+        data = {
+            "private_key2": _AUDIT_PEM,
+            "secret1": "hunter2hunter2",
+            "token2": _AUDIT_JWT,
+            "order_key2": "ORD-1",
+            "max_tokens2": 4096,
+        }
+        kept = {"order_key2": "ORD-1", "max_tokens2": 4096}
+        assert (
+            DataExtractionPromptBuilder()._filter_context_for_security(dict(data))
+            == kept
+        )
+        assert clean_context_keys(dict(data), "c1", strip_forbidden_keys=True) == kept
+
+    def test_the_digit_suffix_stays_linear_on_adversarial_input(self):
+        import time
+
+        from fsm_llm.constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS
+
+        def per_char(make):
+            times = []
+            for step in range(6):
+                text = make(64 << step)
+                inner = max(1, 60_000 // len(text))
+                best = 1e9
+                for _ in range(3):
+                    start = time.perf_counter()
+                    for _ in range(inner):
+                        any(p.match(text) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
+                    best = min(best, (time.perf_counter() - start) / inner)
+                times.append(best / len(text))
+            return max(times) / min(times)
+
+        for label, make in {
+            '"key1_"*n': lambda n: "key1_" * n,
+            '"ssh_"*n+"key9"': lambda n: "ssh_" * n + "key9",
+            '"1"*n+"_token"': lambda n: "1" * n + "_token",
+            '"secret1"*n': lambda n: "secret1" * n,
+            '"a1"*n+"keys2"': lambda n: "a1" * n + "keys2",
+        }.items():
+            assert per_char(make) <= 2.5, label
+
+
+_DIFF_ATOMS = ("", "a", "ssh", "order", "max", "csrf", "api", "x_", "A", "_", "1")
+_DIFF_TRIGGERS = ("key", "keys", "token", "tokens", "secret", "secrets", "credential")
+_DIFF_VALUES = (_AUDIT_PEM, _AUDIT_STRIPE, "ORD-1", None, 4096)
+
+
+class TestDigitSuffixDifferential:
+    """Bounded in-repo form of the step-3 differential (the exhaustive run against
+    the parent file lived in the plan scratchpad): appending a digit run to a
+    trigger word never changes the verdict of the name it ends or continues."""
+
+    def test_a_digit_run_after_the_trigger_changes_nothing_but_the_digits(self):
+        import itertools
+
+        mismatches = []
+        for prefix in itertools.product(_DIFF_ATOMS, repeat=3):
+            head = "".join(prefix)
+            for trigger in _DIFF_TRIGGERS:
+                for tail in ("", "_old", "-x", ".v"):
+                    plain = head + trigger + tail
+                    digit = head + trigger + "2" + tail
+                    for value in _DIFF_VALUES:
+                        a = is_forbidden_context_entry(plain, value)
+                        b = is_forbidden_context_entry(digit, value)
+                        # A digit run may only ever ADD a strip, never lift one.
+                        if a and not b:
+                            mismatches.append((digit, value))
+        assert mismatches == [], mismatches[:10]
+
+
+class TestContainerValuesUnderAmbiguousKeyNames:
+    """F-SU-02: the key arm judges the string leaves of a container or bytes."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            [_AUDIT_STRIPE],
+            (_AUDIT_STRIPE,),
+            {_AUDIT_STRIPE},
+            frozenset({_AUDIT_STRIPE}),
+            {"v": _AUDIT_STRIPE},
+            ["ordinary", ["nested", {"deep": _AUDIT_PEM}]],
+            _AUDIT_PEM.encode(),
+            bytearray(_AUDIT_PEM.encode()),
+            [_AUDIT_STRIPE.encode()],
+        ],
+    )
+    @pytest.mark.parametrize("name", ["partner_key", "stripe_key", "sk"])
+    def test_containers_with_a_credential_leaf_forbid(self, name, value):
+        assert is_forbidden_context_entry(name, value) is True
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            ["alpha", "beta", "gamma"],
+            ("ORD-1", "ORD-2"),
+            {"a": "ORD-1", "b": 3},
+            {"a": [1, 2, None, True]},
+            [],
+            {},
+            b"ORD-1",
+            [1, 2.5, None],
+        ],
+    )
+    def test_ordinary_containers_are_kept(self, value):
+        assert is_forbidden_context_entry("order_key", value) is False
+
+    def test_every_filter_path_drops_the_container_entries(self):
+        from fsm_llm.prompts import DataExtractionPromptBuilder
+
+        data = {
+            "partner_key": [_AUDIT_STRIPE],
+            "vendor_key": (_AUDIT_STRIPE,),
+            "client_key": {"v": _AUDIT_STRIPE},
+            "blob_key": _AUDIT_PEM.encode(),
+            "order_key": ["alpha", "beta"],
+        }
+        builder = DataExtractionPromptBuilder()
+        assert builder._filter_context_for_security(dict(data)) == {
+            "order_key": ["alpha", "beta"]
+        }
+        assert clean_context_keys(dict(data), "c1", strip_forbidden_keys=True) == {
+            "order_key": ["alpha", "beta"]
+        }
+
+    def test_the_budget_depth_and_cycles_fail_closed_in_bounded_time(self):
+        import time
+
+        deep: list = ["ordinary"]
+        for _ in range(40):
+            deep = [deep]
+        cyclic: list = ["ordinary"]
+        cyclic.append(cyclic)
+        shared = ["ordinary"]
+        start = time.perf_counter()
+        results = {
+            "wide": is_forbidden_context_entry("order_key", ["w"] * 10_000),
+            "deep": is_forbidden_context_entry("order_key", deep),
+            "cycle": is_forbidden_context_entry("order_key", cyclic),
+            "shared": is_forbidden_context_entry("order_key", [shared, shared]),
+            "big_bytes": is_forbidden_context_entry("order_key", b"x" * 5_000_000),
+        }
+        assert time.perf_counter() - start < 1.0
+        assert results == {
+            "wide": True,
+            "deep": True,
+            "cycle": True,
+            "shared": False,
+            "big_bytes": False,
+        }
+
+    def test_a_raising_container_subclass_fails_closed(self):
+        class Boom(list):
+            def __iter__(self):
+                raise RuntimeError("hostile")
+
+        class BoomDict(dict):
+            def values(self):
+                raise RuntimeError("hostile")
+
+        assert is_forbidden_context_entry("order_key", Boom(["a"])) is True
+        assert is_forbidden_context_entry("order_key", BoomDict(a="b")) is True
+
+    def test_a_str_subclass_leaf_is_still_credential_material(self):
+        class Sneaky(str):
+            pass
+
+        assert is_forbidden_context_entry("order_key", [Sneaky("ORD-1")]) is True
+
+    def test_other_value_types_and_the_token_arm_are_unchanged(self):
+        assert is_forbidden_context_entry("order_key", object()) is False
+        assert is_forbidden_context_entry("order_key", 12345) is False
+        # token arm: non-str stays fail-closed, a number stays kept
+        assert is_forbidden_context_entry("billed_tokens", [1, 2]) is True
+        assert is_forbidden_context_entry("billed_tokens", 137) is False
+
+    def test_the_long_crypto_flood_stays_under_the_timing_pin(self):
+        import time
+
+        name = "ssh_" * 5000
+        start = time.perf_counter()
+        is_forbidden_context_entry(name, [_AUDIT_STRIPE])
+        assert time.perf_counter() - start < 0.5
