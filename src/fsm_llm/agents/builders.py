@@ -14,7 +14,7 @@ from fsm_llm.builders import refuse_named_options
 from fsm_llm.definitions import BuildError
 
 from . import create_agent
-from .definitions import AgentConfig, ToolDefinition
+from .definitions import AgentConfig, MetaBuilderConfig, ToolDefinition
 from .exceptions import AgentError
 from .tools import ToolRegistry
 
@@ -155,6 +155,19 @@ class ConfiguredAgentBuilder:
         """A private ``AgentConfig`` (set config overlaid by the options), or ``None``."""
         if self._config is None and not self._config_options:
             return None
-        base = self._config.model_copy() if self._config else AgentConfig()
+        # DECISION plan-2026-11-05T134105-5ed71cf2/D-013: the meta pattern
+        # starts from MetaBuilderConfig (defaults 0.7/4096, accepts max_turns).
+        # Do NOT build a plain AgentConfig for it: the agent would get the
+        # AgentConfig defaults and ``set_config_option("max_turns", n)`` would
+        # be refused. The pattern name is normalised as create_agent does.
+        pattern = self._pattern.strip().lower() if self._pattern else None
+        if pattern == "meta_builder":
+            base: AgentConfig = (
+                MetaBuilderConfig.from_agent_config(self._config)
+                if self._config
+                else MetaBuilderConfig()
+            )
+        else:
+            base = self._config.model_copy() if self._config else AgentConfig()
         fields = {name: getattr(base, name) for name in type(base).model_fields}
         return type(base)(**{**fields, **self._config_options})

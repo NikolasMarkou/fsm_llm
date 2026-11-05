@@ -58,6 +58,7 @@ from .constants import (
     MetaLogMessages,
 )
 from .definitions import (
+    AgentConfig,
     ArtifactType,
     MetaBuilderConfig,
     MetaBuilderResult,
@@ -313,13 +314,17 @@ class MetaBuilderAgent:
 
     def __init__(
         self,
-        config: MetaBuilderConfig | None = None,
+        config: AgentConfig | None = None,
         **api_kwargs: Any,
     ) -> None:
         _reject_misplaced_kwargs(type(self).__name__, api_kwargs)
-        if config is None:
-            config = MetaBuilderConfig()
-        self.meta_config = config
+        # A plain AgentConfig (create_agent, the builder) becomes a
+        # MetaBuilderConfig here; see MetaBuilderConfig.from_agent_config.
+        self.meta_config = (
+            MetaBuilderConfig()
+            if config is None
+            else MetaBuilderConfig.from_agent_config(config)
+        )
         self._api_kwargs = api_kwargs
 
         # The turn-by-turn session (``start``) and the result of ``run``.

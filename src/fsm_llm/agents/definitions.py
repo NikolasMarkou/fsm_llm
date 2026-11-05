@@ -531,6 +531,25 @@ class MetaBuilderConfig(AgentConfig):
     max_tokens: int = MetaDefaults.MAX_TOKENS
     max_turns: int = MetaDefaults.MAX_TURNS
 
+    @classmethod
+    def from_agent_config(cls, config: AgentConfig) -> MetaBuilderConfig:
+        """``config`` as a ``MetaBuilderConfig``.
+
+        A ``MetaBuilderConfig`` is returned unchanged. Any other
+        ``AgentConfig`` gives a new one carrying only the fields the caller set
+        (``model_fields_set``), so an unset ``temperature``/``max_tokens`` keep
+        the meta defaults (0.7/4096), not the ``AgentConfig`` ones. Raises
+        ``ValidationError`` when a carried value is invalid.
+        """
+        # DECISION plan-2026-11-05T134105-5ed71cf2/D-013: the meta pattern
+        # needs ``max_turns`` and the 0.7/4096 defaults, which a plain
+        # AgentConfig (what create_agent / the builder pass) lacks. Do NOT
+        # relax MetaBuilderConfig's extra="forbid" or copy every field of the
+        # plain config: that would turn its unset defaults into explicit values.
+        if isinstance(config, cls):
+            return config
+        return cls(**{name: getattr(config, name) for name in config.model_fields_set})
+
     @field_validator("max_turns")
     @classmethod
     def validate_max_turns(cls, v: int) -> int:

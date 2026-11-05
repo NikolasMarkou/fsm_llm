@@ -606,3 +606,70 @@ class TestRunsThroughCore:
 
         assert "litellm" not in inspect.getsource(meta_builder)
         assert not hasattr(MetaBuilderAgent, "_llm_call")
+
+
+class TestMetaBuilderThroughCreateAgent:
+    """F-AB-01: a plain AgentConfig reaching the meta pattern becomes a
+    MetaBuilderConfig; unset fields keep the meta defaults."""
+
+    def test_create_agent_plain_config_becomes_meta_config(self):
+        from fsm_llm.agents import create_agent
+        from fsm_llm.agents.definitions import AgentConfig
+
+        agent = create_agent("meta_builder", config=AgentConfig(model="x"))
+        assert isinstance(agent.meta_config, MetaBuilderConfig)
+        assert agent.meta_config.model == "x"
+        assert agent.meta_config.max_turns == 50
+        assert agent.meta_config.temperature == 0.7
+        assert agent.meta_config.max_tokens == 4096
+
+    def test_explicit_plain_fields_are_kept(self):
+        from fsm_llm.agents.definitions import AgentConfig
+
+        agent = MetaBuilderAgent(
+            config=AgentConfig(model="x", temperature=0.2, max_tokens=100)
+        )
+        assert agent.meta_config.temperature == 0.2
+        assert agent.meta_config.max_tokens == 100
+        assert agent.meta_config.max_turns == 50
+
+    def test_meta_config_is_kept_as_is(self):
+        config = MetaBuilderConfig(model="x", max_turns=3)
+        assert MetaBuilderAgent(config=config).meta_config is config
+
+    def test_builder_start_and_send_do_not_raise_attribute_error(self):
+        from fsm_llm.agents import ConfiguredAgentBuilder
+
+        agent = (
+            ConfiguredAgentBuilder().set_pattern("meta_builder").set_model("m").build()
+        )
+        assert agent.meta_config.temperature == 0.7
+        assert agent.meta_config.max_tokens == 4096
+        agent.start()
+        agent.send("a chatbot")
+
+    def test_builder_accepts_max_turns_and_keeps_explicit_temperature(self):
+        from fsm_llm.agents import ConfiguredAgentBuilder
+
+        agent = (
+            ConfiguredAgentBuilder()
+            .set_pattern(" Meta_Builder ")
+            .set_temperature(0.2)
+            .set_config_option("max_turns", 3)
+            .build()
+        )
+        assert agent.meta_config.max_turns == 3
+        assert agent.meta_config.temperature == 0.2
+        assert agent.meta_config.max_tokens == 4096
+
+    def test_builder_other_patterns_still_reject_max_turns(self):
+        from fsm_llm.agents import ConfiguredAgentBuilder
+        from fsm_llm.definitions import BuildError
+
+        with pytest.raises(BuildError):
+            (
+                ConfiguredAgentBuilder()
+                .set_pattern("react")
+                .set_config_option("max_turns", 3)
+                .build()
+            )
