@@ -185,6 +185,8 @@ class DebateAgent(BaseAgent):
         # state's extraction (current_state still JUDGE) and before transition
         # eval, so it records the current round's verdict and its max-round
         # consensus_reached is not overwritten by a later judge extraction.
+        # The gate reads the committed context, so that forced consensus also
+        # routes on the same turn (plan 5ed71cf2/D-005).
         api.register_handler(
             api.create_handler(HandlerNames.DEBATE_JUDGE)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)

@@ -2394,8 +2394,19 @@ class MessagePipeline:
 
         previous_state_id = instance.current_state
 
+        # DECISION plan-2026-11-05T134105-5ed71cf2/D-005
+        # The gate reads the COMMITTED context only. Everything extracted this
+        # turn was committed by `_execute_extraction_and_transition_pass`
+        # (None and empty values dropped first), and the CONTEXT_UPDATE
+        # handlers have run on it, so `instance.context` is the one source of
+        # truth. Do NOT pass `extraction_response.extracted_data` as a third
+        # argument: the evaluator would re-apply the model's value over a
+        # handler's overwrite or delete, and the gate would decide on a value
+        # the store no longer holds (a validator or veto could not guard the
+        # transition it exists for). The evaluator keeps the parameter for
+        # direct callers; the pipeline does not use it.
         evaluation = self.transition_evaluator.evaluate_transitions(
-            current_state, instance.context, extraction_response.extracted_data
+            current_state, instance.context
         )
         # DECISION plan-2026-09-30T062855-07ad3f8c/D-020
         # The outcome travels on the per-turn record. Do NOT widen this

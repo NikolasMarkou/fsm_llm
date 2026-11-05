@@ -138,9 +138,11 @@ class MakerCheckerAgent(BaseAgent):
         """Register agent handlers with the API."""
         # Revision tracker: CONTEXT_UPDATE fires after the check state's
         # extraction (current_state still CHECK) and before transition eval,
-        # so checker_passed/quality_score are available. A forced pass cannot
-        # route this turn (the evaluator overlays the extracted False); it
-        # routes check -> output after one more revise round (D-013).
+        # so checker_passed/quality_score are available. A forced pass
+        # routes this turn: the transition gate reads the committed context,
+        # which holds this handler's delta (plan 5ed71cf2/D-005; before it the
+        # evaluator overlaid the extracted False and the pass waited one more
+        # revise round, D-013).
         api.register_handler(
             api.create_handler(HandlerNames.MAKER_CHECKER_CHECKER)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
@@ -155,9 +157,11 @@ class MakerCheckerAgent(BaseAgent):
         # verdict; leaving it clears the consumed feedback. Do NOT clear on
         # check entry (it would erase the limiter's forced pass) or clear
         # feedback on entry (revise must still see it). Do NOT clear a True
-        # verdict: it is a forced pass (_track_revisions or the limiter) that
-        # lost to the extracted False on its own turn, because the evaluator
-        # overlays extracted data on context; kept, it routes check -> output.
+        # verdict: it is a forced pass (_track_revisions or the limiter); kept,
+        # it routes check -> output. (Before plan 5ed71cf2/D-005 the forced
+        # pass lost to the extracted False on its own turn, because the
+        # evaluator overlaid extracted data on context; the rule stays for a
+        # pass written after the gate ran, e.g. the limiter.)
         # With a True verdict do NOT move the draft either: the judged draft
         # must ship, not an unjudged redraft (step 3.2).
         # DECISION plan-2026-09-24T045559-3e4eb3e5/D-017

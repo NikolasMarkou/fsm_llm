@@ -715,3 +715,134 @@ class TestPostProcessingHandlerFailureRollsBackTransition:
         assert isinstance(response, str)
         assert api.get_current_state(conv_id) == "done"
         assert api.get_data(conv_id)["finished"] == "yes"
+
+
+# ----------------------------------------------------------------------
+# (i) the transition gate decides on the COMMITTED context (F-CP-01)
+# ----------------------------------------------------------------------
+
+
+class _StartOnlyContextUpdateHandler(BaseHandler):
+    """CONTEXT_UPDATE handler that runs in ``start`` and returns ``result``."""
+
+    def __init__(self, name, result):
+        super().__init__(name=name, priority=100)
+        self._result = result
+        self.calls = 0
+
+    def should_execute(
+        self, timing, current_state, target_state, context, updated_keys=None
+    ):
+        return timing == HandlerTiming.CONTEXT_UPDATE and current_state == "start"
+
+    def execute(self, context):
+        self.calls += 1
+        return dict(self._result)
+
+
+def _approval_fsm_definition():
+    """``start`` extracts ``approved``; the gate fires only for ``approved == "yes"``."""
+    return FSMDefinition.model_validate(
+        {
+            "name": "approval_gate_fsm",
+            "description": "Gate on an extracted key a handler may edit",
+            "version": "4.1",
+            "initial_state": "start",
+            "states": {
+                "start": {
+                    "id": "start",
+                    "description": "Start state",
+                    "purpose": "Collect the approval",
+                    "required_context_keys": ["approved"],
+                    "response_instructions": "Reply politely",
+                    "transitions": [
+                        {
+                            "target_state": "e",
+                            "description": "Approved",
+                            "priority": 100,
+                            "conditions": [
+                                {
+                                    "description": "approved is yes",
+                                    "requires_context_keys": ["approved"],
+                                    "logic": {"==": [{"var": "approved"}, "yes"]},
+                                }
+                            ],
+                        }
+                    ],
+                },
+                "e": {
+                    "id": "e",
+                    "description": "Terminal state",
+                    "purpose": "Wrap up",
+                    "response_instructions": "Say goodbye",
+                    "transitions": [],
+                },
+            },
+        }
+    )
+
+
+class TestContextUpdateOverwriteReachesTheGate:
+    """A CONTEXT_UPDATE handler's edit of an extracted key is what the gate sees.
+
+    The gate used to overlay the model's extracted value on the context AFTER
+    the handlers ran, so a validator, veto or sanitiser that rewrote or
+    removed an extracted key could not influence the transition it guarded.
+    """
+
+    @staticmethod
+    def _api(handler):
+        llm = MockLLM2Interface(extraction_data={"approved": "yes"})
+        api = API.from_definition(
+            _approval_fsm_definition(),
+            llm_interface=llm,
+            handler_error_mode="continue",
+            handlers=[handler] if handler is not None else [],
+        )
+        conversation_id, _ = api.start_conversation()
+        return api, conversation_id
+
+    def test_control_without_handler_still_fires(self):
+        api, conv_id = self._api(None)
+
+        api.converse("approve it", conv_id)
+
+        assert api.get_current_state(conv_id) == "e"
+
+    def test_handler_that_rewrites_the_key_blocks_the_transition(self):
+        handler = _StartOnlyContextUpdateHandler("veto", {"approved": "no"})
+        api, conv_id = self._api(handler)
+
+        api.converse("approve it", conv_id)
+
+        assert handler.calls == 1
+        assert api.get_data(conv_id)["approved"] == "no"
+        assert api.get_current_state(conv_id) == "start"
+
+    def test_handler_that_deletes_the_key_blocks_the_transition(self):
+        handler = _StartOnlyContextUpdateHandler("veto", {"approved": None})
+        api, conv_id = self._api(handler)
+
+        api.converse("approve it", conv_id)
+
+        assert handler.calls == 1
+        assert "approved" not in api.get_data(conv_id)
+        assert api.get_current_state(conv_id) == "start"
+
+    def test_handler_that_rewrites_the_key_blocks_the_transition_streaming(self):
+        handler = _StartOnlyContextUpdateHandler("veto", {"approved": "no"})
+        api, conv_id = self._api(handler)
+
+        list(api.converse_stream("approve it", conv_id))
+
+        assert handler.calls == 1
+        assert api.get_data(conv_id)["approved"] == "no"
+        assert api.get_current_state(conv_id) == "start"
+
+    def test_handler_that_confirms_the_value_lets_the_transition_fire(self):
+        handler = _StartOnlyContextUpdateHandler("normaliser", {"approved": "yes"})
+        api, conv_id = self._api(handler)
+
+        api.converse("approve it", conv_id)
+
+        assert api.get_current_state(conv_id) == "e"

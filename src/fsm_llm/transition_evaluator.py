@@ -126,7 +126,11 @@ class TransitionEvaluator:
         Args:
             current_state: Current state definition
             context: Current FSM context
-            extracted_data: Data extracted from latest user interaction
+            extracted_data: Optional data overlaid on the context. The
+                pipeline does NOT pass it: it commits the extraction first and
+                runs the CONTEXT_UPDATE handlers, so ``context`` already holds
+                what the gate must decide on (a handler's overwrite or delete
+                included). Pass it only for data not yet in ``context``.
 
         Returns:
             TransitionEvaluation with result and recommendations

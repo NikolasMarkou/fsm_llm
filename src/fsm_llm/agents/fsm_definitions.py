@@ -1695,11 +1695,14 @@ def build_debate_fsm(
                         {
                             # DECISION plan-2026-09-24T091842-c1d5bfbc/D-009
                             # Do NOT drop the round disjunct: consensus_reached
-                            # is now extracted every round, and transition
-                            # evaluation overlays this turn's extracted False
-                            # on the judge handler's max-round True, so the
-                            # cap must read current_round (bumped by that
-                            # handler, never extracted).
+                            # is now extracted every round, and before plan
+                            # 5ed71cf2/D-005 transition evaluation overlaid
+                            # this turn's extracted False on the judge
+                            # handler's max-round True. The gate now sees the
+                            # handler's value, but the cap still reads
+                            # current_round (bumped by that handler, never
+                            # extracted): a handler skipped on a null
+                            # extraction must not leave the cap unread.
                             "description": "Consensus reached or max rounds hit",
                             "logic": {
                                 "or": [
@@ -2104,9 +2107,11 @@ def build_maker_checker_fsm(
                     "priority": 10,
                     # DECISION plan-2026-09-24T091842-c1d5bfbc/D-007: a check
                     # turn at the budget ships the draft it just judged. Do NOT
-                    # rely on the forced checker_passed alone: this turn's
-                    # extracted False overlays it, so budget 1 needed 4 turns
-                    # against a 3-turn ceiling and raised BudgetExhaustedError.
+                    # rely on the forced checker_passed alone: before plan
+                    # 5ed71cf2/D-005 this turn's extracted False overlaid it,
+                    # so budget 1 needed 4 turns against a 3-turn ceiling and
+                    # raised BudgetExhaustedError; the limiter's flag is also
+                    # set after the gate may have read the verdict.
                     "conditions": [
                         {
                             "description": "Checker approved, or the budget is spent",
