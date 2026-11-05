@@ -5,7 +5,7 @@ Pre-built FSM definitions for agent patterns.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fsm_llm import typed_field_extraction
 from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT, has_internal_prefix
@@ -74,6 +74,9 @@ from .prompts import (
 )
 from .tools import ToolRegistry
 
+if TYPE_CHECKING:  # annotation only: core owns the name, agents keep no copy
+    from fsm_llm.definitions import TypedFieldType
+
 # Truncate task_description for FSM metadata (name/description fields),
 # while preserving the full text for prompt builders (semantic retrieval).
 _MAX_DESC = Defaults.MAX_TASK_PREVIEW_LENGTH
@@ -106,14 +109,101 @@ def _finalize_fsm(
     }
 
 
+def _is(key: str, value: Any) -> dict[str, Any]:
+    """JsonLogic ``{"==": [{"var": key}, value]}``."""
+    return {"==": [{"var": key}, value]}
+
+
+def _cond(description: str, logic: dict[str, Any]) -> dict[str, Any]:
+    """One transition condition: ``{"description", "logic"}``."""
+    return {"description": description, "logic": logic}
+
+
+def _edge(
+    target: str,
+    description: str,
+    priority: int,
+    *conditions: dict[str, Any],
+    empty: bool = False,
+) -> dict[str, Any]:
+    """One transition dict, the only spelling of the edge shape here.
+
+    Contract: ``conditions`` is absent when none are given, unless ``empty``
+    asks for the explicit ``"conditions": []`` (a builder's own spelling: core
+    loads ``[]`` and an absent list as different transitions and mints a
+    different ``fsm_id``, so a helper must not unify them). Never raises.
+    """
+    edge: dict[str, Any] = {
+        "target_state": target,
+        "description": description,
+        "priority": priority,
+    }
+    if conditions or empty:
+        edge["conditions"] = list(conditions)
+    return edge
+
+
+def _when(
+    target: str,
+    description: str,
+    priority: int,
+    condition_description: str,
+    logic: dict[str, Any],
+) -> dict[str, Any]:
+    """An edge with exactly one condition (:func:`_edge`, :func:`_cond`)."""
+    return _edge(target, description, priority, _cond(condition_description, logic))
+
+
+def _state(
+    state_id: str,
+    description: str,
+    purpose: str,
+    transitions: Sequence[dict[str, Any]] = (),
+    *,
+    response_instructions: str = "",
+    required: Sequence[str] | None = None,
+    fields: list[dict[str, Any]] | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    """One state dict, the only spelling of the state shape here.
+
+    Contract: always ``id``, ``description``, ``purpose``,
+    ``response_instructions`` and ``transitions`` (empty = terminal);
+    ``required`` adds ``required_context_keys`` (an empty list is kept);
+    ``fields`` adds ``field_extractions`` with an empty state-level
+    ``extraction_instructions`` (D-009 of plan 06a5ec0a: typed per-field values,
+    no bulk call); ``extra`` adds any other state key and may override
+    ``extraction_instructions``. Never raises.
+    """
+    state: dict[str, Any] = {
+        "id": state_id,
+        "description": description,
+        "purpose": purpose,
+    }
+    if required is not None:
+        state["required_context_keys"] = list(required)
+    if fields is not None:
+        state["extraction_instructions"] = ""
+        state["field_extractions"] = fields
+    state.update(extra)
+    state["response_instructions"] = response_instructions
+    state["transitions"] = list(transitions)
+    return state
+
+
+def _by_id(*states: dict[str, Any]) -> dict[str, Any]:
+    """The ``states`` mapping of an FSM: each state under its own ``id``
+    (the loader requires ``state.id == key``), in the order given."""
+    return {state["id"]: state for state in states}
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator-Workers FSM
 # ---------------------------------------------------------------------------
 
 
 def build_orchestrator_fsm(
-    task_description: str = "",
-    context_keys: Sequence[str] = (),
+    task_description: str = "", context_keys: Sequence[str] = ()
 ) -> dict[str, Any]:
     """
     Build an Orchestrator-Workers FSM definition.
@@ -145,110 +235,90 @@ def build_orchestrator_fsm(
     # takes the priority-900 edge to `synthesize`.
     judged = (ContextKeys.WORKER_RESULTS, *context_keys)
 
-    states: dict[str, Any] = {
-        OrchestratorStates.ORCHESTRATE: {
-            "id": OrchestratorStates.ORCHESTRATE,
-            "description": "Decompose the task into subtasks for delegation",
-            "purpose": "Analyze the task and create a delegation plan",
-            "required_context_keys": [ContextKeys.SUBTASKS],
-            "extraction_instructions": "",
-            "field_extractions": [
-                typed_field_extraction(
-                    ContextKeys.SUBTASKS,
-                    "any",
-                    fields[ContextKeys.SUBTASKS],
-                    context_keys=loop_field_context_keys(judged),
+    states = _by_id(
+        _state(
+            OrchestratorStates.ORCHESTRATE,
+            "Decompose the task into subtasks for delegation",
+            "Analyze the task and create a delegation plan",
+            [
+                _when(
+                    OrchestratorStates.DELEGATE,
+                    "Subtasks are ready for delegation",
+                    100,
+                    "Subtasks have been generated",
+                    {"has_context": ContextKeys.SUBTASKS},
+                ),
+                _edge(
+                    OrchestratorStates.SYNTHESIZE,
+                    "Fallback: skip to synthesis if decomposition stalls",
+                    900,
+                    empty=True,
+                ),
+            ],
+            required=[ContextKeys.SUBTASKS],
+            fields=[
+                _field(
+                    ContextKeys.SUBTASKS, "any", fields[ContextKeys.SUBTASKS], judged
                 )
             ],
-            "response_instructions": build_orchestrate_response_instructions(),
-            "transitions": [
-                {
-                    "target_state": OrchestratorStates.DELEGATE,
-                    "description": "Subtasks are ready for delegation",
-                    "priority": 100,
-                    "conditions": [
-                        {
-                            "description": "Subtasks have been generated",
-                            "logic": {"has_context": ContextKeys.SUBTASKS},
-                        }
-                    ],
-                },
-                {
-                    "target_state": OrchestratorStates.SYNTHESIZE,
-                    "description": "Fallback: skip to synthesis if decomposition stalls",
-                    "priority": 900,
-                    "conditions": [],
-                },
+            response_instructions=build_orchestrate_response_instructions(),
+        ),
+        _state(
+            OrchestratorStates.DELEGATE,
+            "Delegate subtasks to workers and collect results",
+            "Execute worker_factory for each subtask",
+            [
+                _edge(
+                    OrchestratorStates.COLLECT,
+                    "Workers have finished, review results",
+                    100,
+                )
             ],
-        },
-        OrchestratorStates.DELEGATE: {
-            "id": OrchestratorStates.DELEGATE,
-            "description": "Delegate subtasks to workers and collect results",
-            "purpose": "Execute worker_factory for each subtask",
-            "response_instructions": build_delegate_response_instructions(),
-            "transitions": [
-                {
-                    "target_state": OrchestratorStates.COLLECT,
-                    "description": "Workers have finished, review results",
-                    "priority": 100,
-                }
+            response_instructions=build_delegate_response_instructions(),
+        ),
+        _state(
+            OrchestratorStates.COLLECT,
+            "Review worker results and decide if more work is needed",
+            "Assess completeness of gathered results",
+            [
+                _when(
+                    OrchestratorStates.SYNTHESIZE,
+                    "All results collected, produce final answer",
+                    10,
+                    "All needed results are collected",
+                    _is(ContextKeys.ALL_COLLECTED, True),
+                ),
+                _when(
+                    OrchestratorStates.ORCHESTRATE,
+                    "More work needed, decompose further",
+                    300,
+                    "More subtasks are needed",
+                    _is(ContextKeys.ALL_COLLECTED, False),
+                ),
+                _edge(
+                    OrchestratorStates.SYNTHESIZE,
+                    "Fallback: synthesize with available results if decision stalls",
+                    900,
+                    empty=True,
+                ),
             ],
-        },
-        OrchestratorStates.COLLECT: {
-            "id": OrchestratorStates.COLLECT,
-            "description": "Review worker results and decide if more work is needed",
-            "purpose": "Assess completeness of gathered results",
-            "extraction_instructions": "",
-            "field_extractions": [
-                typed_field_extraction(
+            fields=[
+                _field(
                     ContextKeys.ALL_COLLECTED,
                     "bool",
                     fields[ContextKeys.ALL_COLLECTED],
-                    context_keys=loop_field_context_keys(judged),
+                    judged,
                 )
             ],
-            "response_instructions": build_collect_response_instructions(),
-            "transitions": [
-                {
-                    "target_state": OrchestratorStates.SYNTHESIZE,
-                    "description": "All results collected, produce final answer",
-                    "priority": 10,
-                    "conditions": [
-                        {
-                            "description": "All needed results are collected",
-                            "logic": {"==": [{"var": ContextKeys.ALL_COLLECTED}, True]},
-                        }
-                    ],
-                },
-                {
-                    "target_state": OrchestratorStates.ORCHESTRATE,
-                    "description": "More work needed, decompose further",
-                    "priority": 300,
-                    "conditions": [
-                        {
-                            "description": "More subtasks are needed",
-                            "logic": {
-                                "==": [{"var": ContextKeys.ALL_COLLECTED}, False]
-                            },
-                        }
-                    ],
-                },
-                {
-                    "target_state": OrchestratorStates.SYNTHESIZE,
-                    "description": "Fallback: synthesize with available results if decision stalls",
-                    "priority": 900,
-                    "conditions": [],
-                },
-            ],
-        },
-        OrchestratorStates.SYNTHESIZE: {
-            "id": OrchestratorStates.SYNTHESIZE,
-            "description": "Synthesize all worker results into a final answer",
-            "purpose": "Produce a comprehensive answer from all worker results",
-            "response_instructions": build_orchestrator_synthesize_response_instructions(),
-            "transitions": [],
-        },
-    }
+            response_instructions=build_collect_response_instructions(),
+        ),
+        _state(
+            OrchestratorStates.SYNTHESIZE,
+            "Synthesize all worker results into a final answer",
+            "Produce a comprehensive answer from all worker results",
+            response_instructions=build_orchestrator_synthesize_response_instructions(),
+        ),
+    )
 
     return _finalize_fsm(
         "orchestrator_agent",
@@ -308,210 +378,140 @@ def build_adapt_fsm(
     # a null takes the state's unconditional edge (3e4eb3e5/D-002).
     judged = (ContextKeys.ATTEMPT_RESULT, *context_keys)
 
-    states: dict[str, Any] = {
-        ADaPTStates.ATTEMPT: {
-            "id": ADaPTStates.ATTEMPT,
-            "description": "Attempt to solve the task directly",
-            "purpose": "Give a direct attempt at solving the task",
-            "required_context_keys": [ContextKeys.ATTEMPT_RESULT],
-            "extraction_instructions": "",
-            "field_extractions": [
+    def iteration_limit_edge() -> dict[str, Any]:
+        return _when(
+            ADaPTStates.COMBINE,
+            "Iteration limit reached, produce best-effort answer",
+            1,
+            "Should terminate due to iteration limit",
+            _is(ContextKeys.SHOULD_TERMINATE, True),
+        )
+
+    states = _by_id(
+        _state(
+            ADaPTStates.ATTEMPT,
+            "Attempt to solve the task directly",
+            "Give a direct attempt at solving the task",
+            [
+                iteration_limit_edge(),
+                _edge(ADaPTStates.ASSESS, "Evaluate the attempt quality", 100),
+            ],
+            required=[ContextKeys.ATTEMPT_RESULT],
+            fields=[
                 # DECISION plan-2026-09-29T103145-06a5ec0a/D-057
                 # `str`, not D-050's artifact `any`: an attempt is a short
                 # direct answer that the answer path reads only as a str
                 # (ADaPTAgent._extract_answer). Do NOT widen it to `any` for
                 # symmetry: a native object would then never reach the answer.
-                typed_field_extraction(
+                _field(
                     ContextKeys.ATTEMPT_RESULT,
                     "str",
                     fields[ContextKeys.ATTEMPT_RESULT],
-                    context_keys=loop_field_context_keys(context_keys),
+                    context_keys,
                 )
             ],
-            "response_instructions": build_attempt_response_instructions(),
-            "transitions": [
-                {
-                    "target_state": ADaPTStates.COMBINE,
-                    "description": "Iteration limit reached, produce best-effort answer",
-                    "priority": 1,
-                    "conditions": [
-                        {
-                            "description": "Should terminate due to iteration limit",
-                            "logic": {
-                                "==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]
-                            },
-                        }
-                    ],
-                },
-                {
-                    "target_state": ADaPTStates.ASSESS,
-                    "description": "Evaluate the attempt quality",
-                    "priority": 100,
-                },
-            ],
-        },
-        ADaPTStates.ASSESS: {
-            "id": ADaPTStates.ASSESS,
-            "description": "Assess whether the attempt succeeded",
-            "purpose": "Determine if the attempt is satisfactory or needs decomposition",
-            "required_context_keys": [ContextKeys.ATTEMPT_SUCCEEDED],
-            "extraction_instructions": "",
-            "field_extractions": [
-                typed_field_extraction(
-                    ContextKeys.ATTEMPT_SUCCEEDED,
-                    "bool",
-                    fields[ContextKeys.ATTEMPT_SUCCEEDED],
-                    context_keys=loop_field_context_keys(judged),
-                )
-            ],
-            "response_instructions": build_assess_response_instructions(),
-            "transitions": [
-                {
-                    "target_state": ADaPTStates.COMBINE,
-                    "description": "Iteration limit reached, produce best-effort answer",
-                    "priority": 1,
-                    "conditions": [
-                        {
-                            "description": "Should terminate due to iteration limit",
-                            "logic": {
-                                "==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]
-                            },
-                        }
-                    ],
-                },
-                {
-                    "target_state": ADaPTStates.COMBINE,
-                    "description": "Attempt succeeded, produce final answer",
-                    "priority": 10,
-                    "conditions": [
-                        {
-                            "description": "The attempt was successful",
-                            "logic": {
-                                "==": [{"var": ContextKeys.ATTEMPT_SUCCEEDED}, True]
-                            },
-                        }
-                    ],
-                },
-                {
-                    "target_state": ADaPTStates.DECOMPOSE,
-                    "description": "Attempt failed, decompose into subtasks",
-                    "priority": 150,
-                    "conditions": [
-                        {
-                            "description": "Attempt failed and depth allows decomposition",
-                            "logic": {
-                                "and": [
-                                    {
-                                        "==": [
-                                            {"var": ContextKeys.ATTEMPT_SUCCEEDED},
-                                            False,
-                                        ]
-                                    },
-                                    {
-                                        "<": [
-                                            {"var": ContextKeys.CURRENT_DEPTH},
-                                            max_depth,
-                                        ]
-                                    },
-                                ]
-                            },
-                        }
-                    ],
-                },
-                {
-                    "target_state": ADaPTStates.COMBINE,
-                    "description": "Attempt failed but depth limit reached, use best effort",
-                    "priority": 200,
-                    "conditions": [
-                        {
-                            "description": "Depth limit reached, force best effort",
-                            "logic": {
-                                "==": [{"var": ContextKeys.ATTEMPT_SUCCEEDED}, False]
-                            },
-                        }
-                    ],
-                },
+            response_instructions=build_attempt_response_instructions(),
+        ),
+        _state(
+            ADaPTStates.ASSESS,
+            "Assess whether the attempt succeeded",
+            "Determine if the attempt is satisfactory or needs decomposition",
+            [
+                iteration_limit_edge(),
+                _when(
+                    ADaPTStates.COMBINE,
+                    "Attempt succeeded, produce final answer",
+                    10,
+                    "The attempt was successful",
+                    _is(ContextKeys.ATTEMPT_SUCCEEDED, True),
+                ),
+                _when(
+                    ADaPTStates.DECOMPOSE,
+                    "Attempt failed, decompose into subtasks",
+                    150,
+                    "Attempt failed and depth allows decomposition",
+                    {
+                        "and": [
+                            _is(ContextKeys.ATTEMPT_SUCCEEDED, False),
+                            {"<": [{"var": ContextKeys.CURRENT_DEPTH}, max_depth]},
+                        ]
+                    },
+                ),
+                _when(
+                    ADaPTStates.COMBINE,
+                    "Attempt failed but depth limit reached, use best effort",
+                    200,
+                    "Depth limit reached, force best effort",
+                    _is(ContextKeys.ATTEMPT_SUCCEEDED, False),
+                ),
                 # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
                 # Unconditional lowest-priority fallback. Do NOT remove it or gate it:
                 # a missing attempt_succeeded would BLOCK `assess`, and no
                 # PRE_TRANSITION limiter runs on a BLOCKED turn, so the run burns the
                 # 3x loop ceiling. An unjudged attempt takes the best-effort path.
-                {
-                    "target_state": ADaPTStates.COMBINE,
-                    "description": "Fallback: use best effort if the assessment is unclear",
-                    "priority": 900,
-                },
-            ],
-        },
-        ADaPTStates.DECOMPOSE: {
-            "id": ADaPTStates.DECOMPOSE,
-            "description": "Decompose the task into simpler subtasks",
-            "purpose": "Break the task down for recursive solving",
-            "required_context_keys": [ContextKeys.SUBTASKS],
-            "extraction_instructions": "",
-            "field_extractions": [
-                typed_field_extraction(
-                    ContextKeys.SUBTASKS,
-                    "list",
-                    fields[ContextKeys.SUBTASKS],
-                    context_keys=loop_field_context_keys(judged),
-                ),
-                typed_field_extraction(
-                    ContextKeys.OPERATOR,
-                    "str",
-                    fields[ContextKeys.OPERATOR],
-                    context_keys=loop_field_context_keys(
-                        (*judged, ContextKeys.SUBTASKS)
-                    ),
-                    required=False,
+                _edge(
+                    ADaPTStates.COMBINE,
+                    "Fallback: use best effort if the assessment is unclear",
+                    900,
                 ),
             ],
-            "response_instructions": build_decompose_response_instructions(),
-            "transitions": [
-                {
-                    "target_state": ADaPTStates.COMBINE,
-                    "description": "Iteration limit reached, produce best-effort answer",
-                    "priority": 1,
-                    "conditions": [
-                        {
-                            "description": "Should terminate due to iteration limit",
-                            "logic": {
-                                "==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]
-                            },
-                        }
-                    ],
-                },
-                {
-                    "target_state": ADaPTStates.COMBINE,
-                    "description": "Subtasks defined, combine after recursive solving",
-                    "priority": 100,
-                    "conditions": [
-                        {
-                            "description": "Subtasks have been generated",
-                            "logic": {"has_context": ContextKeys.SUBTASKS},
-                        }
-                    ],
-                },
+            required=[ContextKeys.ATTEMPT_SUCCEEDED],
+            fields=[
+                _field(
+                    ContextKeys.ATTEMPT_SUCCEEDED,
+                    "bool",
+                    fields[ContextKeys.ATTEMPT_SUCCEEDED],
+                    judged,
+                )
+            ],
+            response_instructions=build_assess_response_instructions(),
+        ),
+        _state(
+            ADaPTStates.DECOMPOSE,
+            "Decompose the task into simpler subtasks",
+            "Break the task down for recursive solving",
+            [
+                iteration_limit_edge(),
+                _when(
+                    ADaPTStates.COMBINE,
+                    "Subtasks defined, combine after recursive solving",
+                    100,
+                    "Subtasks have been generated",
+                    {"has_context": ContextKeys.SUBTASKS},
+                ),
                 # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
                 # Unconditional lowest-priority fallback. Do NOT remove it or gate it:
                 # a missing subtasks list would BLOCK `decompose` (no PRE_TRANSITION
                 # limiter runs on a BLOCKED turn). The subtask executor returns {}
                 # without subtasks, so `combine` synthesizes the attempt alone.
-                {
-                    "target_state": ADaPTStates.COMBINE,
-                    "description": "Fallback: combine without subtasks if none were produced",
-                    "priority": 900,
-                },
+                _edge(
+                    ADaPTStates.COMBINE,
+                    "Fallback: combine without subtasks if none were produced",
+                    900,
+                ),
             ],
-        },
-        ADaPTStates.COMBINE: {
-            "id": ADaPTStates.COMBINE,
-            "description": "Combine all results into the final answer",
-            "purpose": "Synthesize attempt results and subtask results",
-            "response_instructions": build_combine_response_instructions(),
-            "transitions": [],
-        },
-    }
+            required=[ContextKeys.SUBTASKS],
+            fields=[
+                _field(
+                    ContextKeys.SUBTASKS, "list", fields[ContextKeys.SUBTASKS], judged
+                ),
+                _field(
+                    ContextKeys.OPERATOR,
+                    "str",
+                    fields[ContextKeys.OPERATOR],
+                    (*judged, ContextKeys.SUBTASKS),
+                    required=False,
+                ),
+            ],
+            response_instructions=build_decompose_response_instructions(),
+        ),
+        _state(
+            ADaPTStates.COMBINE,
+            "Combine all results into the final answer",
+            "Synthesize attempt results and subtask results",
+            response_instructions=build_combine_response_instructions(),
+        ),
+    )
 
     return _finalize_fsm(
         "adapt_agent",
@@ -578,10 +578,7 @@ def _tool_selection_field_extractions(
 # `typed_field_extraction`.)
 
 # Context every loop-field prompt sees: the task and the tool observations.
-_LOOP_FIELD_CONTEXT_KEYS: tuple[str, ...] = (
-    ContextKeys.TASK,
-    ContextKeys.OBSERVATIONS,
-)
+_LOOP_FIELD_CONTEXT_KEYS: tuple[str, ...] = (ContextKeys.TASK, ContextKeys.OBSERVATIONS)
 
 
 def loop_field_context_keys(extra_context_keys: Sequence[str] = ()) -> list[str]:
@@ -610,6 +607,25 @@ def loop_field_context_keys(extra_context_keys: Sequence[str] = ()) -> list[str]
     return list(dict.fromkeys((*_LOOP_FIELD_CONTEXT_KEYS, *extra_context_keys)))
 
 
+def _field(
+    name: str,
+    field_type: TypedFieldType,
+    instructions: str,
+    extra: Sequence[str] = (),
+    *,
+    required: bool = True,
+) -> dict[str, Any]:
+    """One agent typed field: ``typed_field_extraction`` over
+    :func:`loop_field_context_keys` ``(extra)``. Raises ``ValueError`` like both."""
+    return typed_field_extraction(
+        name,
+        field_type,
+        instructions,
+        context_keys=loop_field_context_keys(extra),
+        required=required,
+    )
+
+
 def _think_field_extractions(
     think_instructions: str,
     *,
@@ -631,9 +647,7 @@ def _think_field_extractions(
     keys = loop_field_context_keys((ContextKeys.AGENT_FEEDBACK, *context_keys))
     return [
         *_tool_selection_field_extractions(
-            think_instructions,
-            include_tool_name=include_tool_name,
-            context_keys=keys,
+            think_instructions, include_tool_name=include_tool_name, context_keys=keys
         ),
         typed_field_extraction(
             ContextKeys.SHOULD_TERMINATE,
@@ -685,26 +699,6 @@ def conclude_on_evidence_logic(
     }
 
 
-def _approval_think_transition() -> dict[str, Any]:
-    """The ``think -> await_approval`` edge shared by every approval-gated FSM.
-
-    Contract: returns a fresh transition dict at priority 150, which beats the
-    D-002 ``think -> act`` fallback (300) and loses to ``think -> conclude``
-    (10). Never raises.
-    """
-    return {
-        "target_state": AgentStates.AWAIT_APPROVAL,
-        "description": "Action requires human approval before execution",
-        "priority": 150,
-        "conditions": [
-            {
-                "description": "Approval is required for this action",
-                "logic": {"==": [{"var": ContextKeys.APPROVAL_REQUIRED}, True]},
-            }
-        ],
-    }
-
-
 def _await_approval_state() -> dict[str, Any]:
     """The ``await_approval`` state shared by every approval-gated FSM.
 
@@ -723,49 +717,154 @@ def _await_approval_state() -> dict[str, Any]:
     # inside the state that guards the approval (the old bulk pass cost one
     # LLM call per visit and let the reply fill an empty `tool_input` after
     # the ask and add keys of its own, live: `denied_tool_call`).
-    return {
-        "id": AgentStates.AWAIT_APPROVAL,
-        "description": "Waiting for human approval before executing action",
-        "purpose": "Hold the selected action until the approval decision is set",
-        # LOOP-09: an intermediate state; the driver asks the approver, so no
-        # Pass-2 prose (core skips Pass 2 on empty instructions).
-        "response_instructions": "",
-        "transitions": [
-            {
-                "target_state": AgentStates.CONCLUDE,
-                "description": "Terminate when framework signals completion",
-                "priority": 1,
-                "conditions": [
-                    {
-                        "description": "Framework or agent decided to terminate",
-                        "logic": {"==": [{"var": ContextKeys.SHOULD_TERMINATE}, True]},
-                    }
-                ],
-            },
-            {
-                "target_state": AgentStates.ACT,
-                "description": "Approval granted, proceed with action",
-                "priority": 10,
-                "conditions": [
-                    {
-                        "description": "User approved the action",
-                        "logic": {"==": [{"var": ContextKeys.APPROVAL_GRANTED}, True]},
-                    }
-                ],
-            },
-            {
-                "target_state": AgentStates.THINK,
-                "description": "Approval denied, reconsider approach",
-                "priority": 300,
-                "conditions": [
-                    {
-                        "description": "User denied the action",
-                        "logic": {"==": [{"var": ContextKeys.APPROVAL_GRANTED}, False]},
-                    }
-                ],
-            },
+    # LOOP-09: an intermediate state; the driver asks the approver, so no
+    # Pass-2 prose (core skips Pass 2 on empty instructions).
+    return _state(
+        AgentStates.AWAIT_APPROVAL,
+        "Waiting for human approval before executing action",
+        "Hold the selected action until the approval decision is set",
+        [
+            _when(
+                AgentStates.CONCLUDE,
+                "Terminate when framework signals completion",
+                1,
+                "Framework or agent decided to terminate",
+                _is(ContextKeys.SHOULD_TERMINATE, True),
+            ),
+            _when(
+                AgentStates.ACT,
+                "Approval granted, proceed with action",
+                10,
+                "User approved the action",
+                _is(ContextKeys.APPROVAL_GRANTED, True),
+            ),
+            _when(
+                AgentStates.THINK,
+                "Approval denied, reconsider approach",
+                300,
+                "User denied the action",
+                _is(ContextKeys.APPROVAL_GRANTED, False),
+            ),
         ],
-    }
+    )
+
+
+_TERMINATE_ON_EVIDENCE = (
+    "Agent decided to terminate AND a tool has run or termination is forced"
+)
+
+
+def _think_transitions(
+    conclude_description: str,
+    act_description: str = "Execute the selected tool",
+    *,
+    include_approval: bool = False,
+) -> list[dict[str, Any]]:
+    """The ``think`` edges of every tool loop (ReAct, Reflexion, ParallelReact).
+
+    Contract: ``think -> conclude`` p10 on :func:`conclude_on_evidence_logic`,
+    then ``think -> await_approval`` p150 when ``include_approval`` (it beats
+    the fallback and loses to conclude), then the D-002 unconditional
+    ``think -> act`` p300. The descriptions are the prompt-visible wording each
+    pattern keeps. Never raises.
+    """
+    transitions = [
+        # DECISION plan_2026-05-30_5598b755/D-004 [STALE]
+        # B4 under-call fix: do NOT conclude on the model's
+        # should_terminate alone — require evidence that a tool has
+        # run (observation_count > 0) OR that termination is forced
+        # (max_iterations_reached, set by the iteration limiter and
+        # the execute_tool stall-detector). This blocks the
+        # turn-1 "answer from memory" path (think -> conclude
+        # pre-empting think -> act) while preserving termination.
+        # Keyed on framework-only context vars so it is immune to the
+        # transition-evaluator re-merge of raw extracted should_terminate.
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-008
+        # Evidence guard, see conclude_on_evidence_logic.
+        _when(
+            AgentStates.CONCLUDE,
+            conclude_description,
+            10,
+            _TERMINATE_ON_EVIDENCE,
+            conclude_on_evidence_logic(),
+        )
+    ]
+    if include_approval:
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-005
+        # The approval edge (150) must beat the fallback below (300).
+        # Do NOT drop it while the agent registers the HITL gate: without
+        # it think -> act runs execute_tool before the driver asks, and
+        # every gated call burns an act/evaluate/reflect cycle on the
+        # D-004 refusal.
+        transitions.append(
+            _when(
+                AgentStates.AWAIT_APPROVAL,
+                "Action requires human approval before execution",
+                150,
+                "Approval is required for this action",
+                _is(ContextKeys.APPROVAL_REQUIRED, True),
+            )
+        )
+    # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
+    # Unconditional lowest-priority fallback. Do NOT gate this edge on the
+    # tool selection: a gated edge BLOCKS `think` on a null/unknown tool, and
+    # no PRE_TRANSITION or `act`-entry handler runs on a BLOCKED turn, so the
+    # run burns the 3x loop ceiling. `act` handles a missing/unknown tool (an
+    # empty batch for ParallelReact).
+    transitions.append(_edge(AgentStates.ACT, act_description, 300))
+    return transitions
+
+
+def _act_state(
+    description: str, purpose: str, next_state: str, next_description: str
+) -> dict[str, Any]:
+    """The ``act`` state of every tool loop: conclude p1 on evidence, else
+    ``next_state`` p900 (``think``, or Reflexion's ``evaluate``). Never raises."""
+    return _state(
+        AgentStates.ACT,
+        description,
+        purpose,
+        [
+            # DECISION plan_2026-05-30_5598b755/D-004 [STALE]
+            # Mirror the think->conclude guard: a should_terminate
+            # set on entry to act (e.g. the model wanted to quit
+            # without a tool) must NOT conclude unless a tool has
+            # run or termination is forced. The stall-detector and
+            # iteration limiter set max_iterations_reached, so a
+            # genuinely tool-free turn still concludes here.
+            _when(
+                AgentStates.CONCLUDE,
+                "Terminate when framework signals completion",
+                1,
+                "Framework/agent decided to terminate AND a tool has run or "
+                "termination is forced",
+                conclude_on_evidence_logic(),
+            ),
+            _edge(next_state, next_description, 900),
+        ],
+    )
+
+
+def _conclude_state(
+    response_instructions: str, required: Sequence[str] | None = None
+) -> dict[str, Any]:
+    """The terminal ``conclude`` state of every tool loop; ``required`` is the
+    output schema's field names (see :func:`_schema_field_names`) or ``None``."""
+    return _state(
+        AgentStates.CONCLUDE,
+        "Formulate and present the final answer",
+        "Synthesize all observations into a complete answer",
+        response_instructions=response_instructions,
+        required=required,
+    )
+
+
+def _schema_field_names(output_schema: type | None) -> list[str]:
+    """The field names of a pydantic ``output_schema`` (``[]`` for none or a
+    class without ``model_fields``)."""
+    if output_schema and hasattr(output_schema, "model_fields"):
+        return list(output_schema.model_fields.keys())
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -811,216 +910,126 @@ def build_reflexion_fsm(
         ContextKeys.EPISODIC_MEMORY,
     )
 
-    states: dict[str, Any] = {
-        ReflexionStates.THINK: {
-            "id": ReflexionStates.THINK,
-            "description": "Reason about the task and select the next tool to use",
-            "purpose": "Analyze the task, episodic memory, and previous observations",
-            "required_context_keys": [
+    states = _by_id(
+        _state(
+            ReflexionStates.THINK,
+            "Reason about the task and select the next tool to use",
+            "Analyze the task, episodic memory, and previous observations",
+            _think_transitions(
+                "Agent decided to terminate", include_approval=include_approval_state
+            ),
+            required=[
                 ContextKeys.TOOL_NAME,
                 ContextKeys.TOOL_INPUT,
                 ContextKeys.SHOULD_TERMINATE,
             ],
             # D-009 of plan 06a5ec0a: typed per-field values only, no bulk
             # call; the episodic memory stays in the think prompts.
-            "extraction_instructions": "",
-            "field_extractions": _think_field_extractions(
+            fields=_think_field_extractions(
                 think_instructions,
                 context_keys=(ContextKeys.EPISODIC_MEMORY, *context_keys),
             ),
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": ReflexionStates.CONCLUDE,
-                    "description": "Agent decided to terminate",
-                    "priority": 10,
-                    "conditions": [
-                        {
-                            # DECISION plan-2026-09-24T091842-c1d5bfbc/D-008
-                            # Evidence guard, see conclude_on_evidence_logic.
-                            "description": (
-                                "Agent decided to terminate AND a tool has run "
-                                "or termination is forced"
-                            ),
-                            "logic": conclude_on_evidence_logic(),
-                        }
-                    ],
-                },
-                # DECISION plan-2026-09-24T091842-c1d5bfbc/D-005
-                # The approval edge (150) must beat the fallback below (300).
-                # Do NOT drop it while the agent registers the HITL gate: without
-                # it think -> act runs execute_tool before the driver asks, and
-                # every gated call burns an act/evaluate/reflect cycle on the
-                # D-004 refusal.
-                *([_approval_think_transition()] if include_approval_state else []),
-                # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
-                # Unconditional lowest-priority fallback. Do NOT gate this edge on the
-                # tool selection: a gated edge BLOCKS `think` on a null/unknown tool, and
-                # no PRE_TRANSITION or `act`-entry handler runs on a BLOCKED turn, so the
-                # run burns the 3x loop ceiling. `act` handles a missing/unknown tool.
-                {
-                    "target_state": ReflexionStates.ACT,
-                    "description": "Execute the selected tool",
-                    "priority": 300,
-                },
+        ),
+        _act_state(
+            "Execute the selected tool and observe the result",
+            "Run the tool and record the observation",
+            ReflexionStates.EVALUATE,
+            "Evaluate the result quality",
+        ),
+        _state(
+            ReflexionStates.EVALUATE,
+            "Assess whether gathered information is sufficient",
+            "Evaluate answer quality and decide whether to reflect or conclude",
+            [
+                # DECISION plan-2026-09-24T091842-c1d5bfbc/D-008: a pass
+                # concludes only with tool evidence or a forced stop. Do
+                # NOT gate on evaluation_passed alone: a self-evaluated
+                # memory answer then succeeds with zero tool calls. The
+                # 900 fallback to reflect keeps evaluate from BLOCKING.
+                # A forced stop alone also concludes here (P2-W3): do NOT
+                # route it through reflect -> think, or max_iterations=1
+                # cycles to the 3-turn ceiling (BudgetExhaustedError).
+                _when(
+                    ReflexionStates.CONCLUDE,
+                    "Evaluation passed, produce final answer",
+                    10,
+                    "Passed on evidence, or forced stop",
+                    {
+                        "or": [
+                            conclude_on_evidence_logic(ContextKeys.EVALUATION_PASSED),
+                            _is(ContextKeys.MAX_ITERATIONS_REACHED, True),
+                        ]
+                    },
+                ),
+                _when(
+                    ReflexionStates.REFLECT,
+                    "Evaluation failed, reflect on approach",
+                    300,
+                    "Evaluation did not pass",
+                    _is(ContextKeys.EVALUATION_PASSED, False),
+                ),
+                _edge(
+                    ReflexionStates.REFLECT,
+                    "Fallback: reflect if evaluation result unclear",
+                    900,
+                    empty=True,
+                ),
             ],
-        },
-        ReflexionStates.ACT: {
-            "id": ReflexionStates.ACT,
-            "description": "Execute the selected tool and observe the result",
-            "purpose": "Run the tool and record the observation",
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": ReflexionStates.CONCLUDE,
-                    "description": "Terminate when framework signals completion",
-                    "priority": 1,
-                    "conditions": [
-                        {
-                            "description": (
-                                "Framework/agent decided to terminate AND a tool "
-                                "has run or termination is forced"
-                            ),
-                            "logic": conclude_on_evidence_logic(),
-                        }
-                    ],
-                },
-                {
-                    "target_state": ReflexionStates.EVALUATE,
-                    "description": "Evaluate the result quality",
-                    "priority": 900,
-                },
-            ],
-        },
-        ReflexionStates.EVALUATE: {
-            "id": ReflexionStates.EVALUATE,
-            "description": "Assess whether gathered information is sufficient",
-            "purpose": "Evaluate answer quality and decide whether to reflect or conclude",
-            "required_context_keys": [
-                ContextKeys.EVALUATION_SCORE,
-                ContextKeys.EVALUATION_PASSED,
-            ],
+            required=[ContextKeys.EVALUATION_SCORE, ContextKeys.EVALUATION_PASSED],
             # Typed per-field values only (D-009 of plan 06a5ec0a); an
             # intermediate state, so no Pass-2 prose (LOOP-09). With an
             # evaluation_fn the verdict is set on evaluate entry and these
             # extractions are skipped (skip-if-set).
-            "extraction_instructions": "",
-            "field_extractions": [
-                typed_field_extraction(
+            fields=[
+                _field(
                     ContextKeys.EVALUATION_PASSED,
                     "bool",
                     evaluate_fields[ContextKeys.EVALUATION_PASSED],
-                    context_keys=loop_field_context_keys(),
                 ),
-                typed_field_extraction(
+                _field(
                     ContextKeys.EVALUATION_SCORE,
                     "float",
                     evaluate_fields[ContextKeys.EVALUATION_SCORE],
-                    context_keys=loop_field_context_keys(),
                     required=False,
                 ),
-                typed_field_extraction(
+                _field(
                     ContextKeys.EVALUATION_FEEDBACK,
                     "str",
                     evaluate_fields[ContextKeys.EVALUATION_FEEDBACK],
-                    context_keys=loop_field_context_keys(),
                     required=False,
                 ),
             ],
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": ReflexionStates.CONCLUDE,
-                    "description": "Evaluation passed, produce final answer",
-                    "priority": 10,
-                    # DECISION plan-2026-09-24T091842-c1d5bfbc/D-008: a pass
-                    # concludes only with tool evidence or a forced stop. Do
-                    # NOT gate on evaluation_passed alone: a self-evaluated
-                    # memory answer then succeeds with zero tool calls. The
-                    # 900 fallback to reflect keeps evaluate from BLOCKING.
-                    # A forced stop alone also concludes here (P2-W3): do NOT
-                    # route it through reflect -> think, or max_iterations=1
-                    # cycles to the 3-turn ceiling (BudgetExhaustedError).
-                    "conditions": [
-                        {
-                            "description": "Passed on evidence, or forced stop",
-                            "logic": {
-                                "or": [
-                                    conclude_on_evidence_logic(
-                                        ContextKeys.EVALUATION_PASSED
-                                    ),
-                                    {
-                                        "==": [
-                                            {"var": ContextKeys.MAX_ITERATIONS_REACHED},
-                                            True,
-                                        ]
-                                    },
-                                ]
-                            },
-                        }
-                    ],
-                },
-                {
-                    "target_state": ReflexionStates.REFLECT,
-                    "description": "Evaluation failed, reflect on approach",
-                    "priority": 300,
-                    "conditions": [
-                        {
-                            "description": "Evaluation did not pass",
-                            "logic": {
-                                "==": [{"var": ContextKeys.EVALUATION_PASSED}, False]
-                            },
-                        }
-                    ],
-                },
-                {
-                    "target_state": ReflexionStates.REFLECT,
-                    "description": "Fallback: reflect if evaluation result unclear",
-                    "priority": 900,
-                    "conditions": [],
-                },
+        ),
+        _state(
+            ReflexionStates.REFLECT,
+            "Self-critique and plan a revised approach",
+            "Analyze what went wrong and generate lessons for next attempt",
+            [
+                _edge(
+                    ReflexionStates.THINK, "Return to thinking with updated memory", 100
+                )
             ],
-        },
-        ReflexionStates.REFLECT: {
-            "id": ReflexionStates.REFLECT,
-            "description": "Self-critique and plan a revised approach",
-            "purpose": "Analyze what went wrong and generate lessons for next attempt",
-            "required_context_keys": [ContextKeys.REFLECTION],
-            "extraction_instructions": "",
-            "field_extractions": [
-                typed_field_extraction(
+            required=[ContextKeys.REFLECTION],
+            fields=[
+                _field(
                     ContextKeys.REFLECTION,
                     "str",
                     reflect_fields[ContextKeys.REFLECTION],
-                    context_keys=loop_field_context_keys(reflect_context),
+                    reflect_context,
                 ),
-                typed_field_extraction(
+                _field(
                     ContextKeys.LESSONS,
                     "str",
                     reflect_fields[ContextKeys.LESSONS],
-                    context_keys=loop_field_context_keys(reflect_context),
+                    reflect_context,
                     required=False,
                 ),
             ],
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": ReflexionStates.THINK,
-                    "description": "Return to thinking with updated memory",
-                    "priority": 100,
-                }
-            ],
-        },
-        ReflexionStates.CONCLUDE: {
-            "id": ReflexionStates.CONCLUDE,
-            "description": "Formulate and present the final answer",
-            "purpose": "Synthesize all observations into a complete answer",
-            "response_instructions": build_conclude_response_instructions(
-                refused_actions=include_approval_state
-            ),
-            "transitions": [],
-        },
-    }
+        ),
+        _conclude_state(
+            build_conclude_response_instructions(refused_actions=include_approval_state)
+        ),
+    )
     if include_approval_state:
         states[ReflexionStates.AWAIT_APPROVAL] = _await_approval_state()
 
@@ -1040,8 +1049,7 @@ def build_reflexion_fsm(
 
 
 def build_plan_execute_fsm(
-    registry: ToolRegistry | None = None,
-    task_description: str = "",
+    registry: ToolRegistry | None = None, task_description: str = ""
 ) -> dict[str, Any]:
     """
     Build a Plan-and-Execute FSM definition.
@@ -1070,13 +1078,13 @@ def build_plan_execute_fsm(
     )
     has_tools = registry is not None and len(registry) > 0
     step_fields: list[dict[str, Any]] = [
-        typed_field_extraction(
+        _field(
             ContextKeys.STEP_RESULT,
             "str",
             build_execute_step_instructions(
                 registry, task_description=task_description, step_result=True
             ),
-            context_keys=loop_field_context_keys(step_context),
+            step_context,
             # With tools the step result is the tool observation.
             required=not has_tools,
         )
@@ -1084,129 +1092,103 @@ def build_plan_execute_fsm(
     if has_tools:
         step_fields = [
             *_tool_selection_field_extractions(
-                step_instructions,
-                context_keys=loop_field_context_keys(step_context),
+                step_instructions, context_keys=loop_field_context_keys(step_context)
             ),
             *step_fields,
         ]
 
-    states: dict[str, Any] = {
-        PlanExecuteStates.PLAN: {
-            "id": PlanExecuteStates.PLAN,
-            "description": "Decompose the task into a sequence of steps",
-            "purpose": "Create an actionable plan to solve the task",
-            "required_context_keys": [ContextKeys.PLAN_STEPS],
-            "extraction_instructions": "",
-            "field_extractions": [
-                typed_field_extraction(
+    states = _by_id(
+        _state(
+            PlanExecuteStates.PLAN,
+            "Decompose the task into a sequence of steps",
+            "Create an actionable plan to solve the task",
+            [
+                _when(
+                    PlanExecuteStates.EXECUTE_STEP,
+                    "Plan is ready, begin executing steps",
+                    100,
+                    "Plan steps have been generated",
+                    {"has_context": ContextKeys.PLAN_STEPS},
+                )
+            ],
+            required=[ContextKeys.PLAN_STEPS],
+            fields=[
+                _field(
                     ContextKeys.PLAN_STEPS,
                     "list",
                     build_plan_steps_instructions(
                         registry, task_description=task_description
                     ),
-                    context_keys=loop_field_context_keys(),
                 )
             ],
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": PlanExecuteStates.EXECUTE_STEP,
-                    "description": "Plan is ready, begin executing steps",
-                    "priority": 100,
-                    "conditions": [
-                        {
-                            "description": "Plan steps have been generated",
-                            "logic": {"has_context": ContextKeys.PLAN_STEPS},
-                        }
-                    ],
-                }
+        ),
+        _state(
+            PlanExecuteStates.EXECUTE_STEP,
+            "Execute the current plan step",
+            "Produce a result for the current step using tools or LLM",
+            [
+                _edge(
+                    PlanExecuteStates.CHECK_RESULT,
+                    "Step executed, check the result",
+                    100,
+                )
             ],
-        },
-        PlanExecuteStates.EXECUTE_STEP: {
-            "id": PlanExecuteStates.EXECUTE_STEP,
-            "description": "Execute the current plan step",
-            "purpose": "Produce a result for the current step using tools or LLM",
-            "extraction_instructions": "",
-            "field_extractions": step_fields,
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": PlanExecuteStates.CHECK_RESULT,
-                    "description": "Step executed, check the result",
-                    "priority": 100,
-                }
+            fields=step_fields,
+        ),
+        _state(
+            PlanExecuteStates.CHECK_RESULT,
+            "Assess the step result and decide next action",
+            "Determine if step succeeded and whether to continue, replan, or synthesize",
+            [
+                _when(
+                    PlanExecuteStates.SYNTHESIZE,
+                    "All steps complete, synthesize final answer",
+                    10,
+                    "All plan steps are complete",
+                    _is(ContextKeys.ALL_STEPS_COMPLETE, True),
+                ),
+                _when(
+                    PlanExecuteStates.REPLAN,
+                    "Step failed, revise the plan",
+                    150,
+                    "The step did not succeed",
+                    _is(ContextKeys.STEP_FAILED, True),
+                ),
+                _edge(
+                    PlanExecuteStates.EXECUTE_STEP, "Proceed to the next plan step", 300
+                ),
             ],
-        },
-        PlanExecuteStates.CHECK_RESULT: {
-            "id": PlanExecuteStates.CHECK_RESULT,
-            "description": "Assess the step result and decide next action",
-            "purpose": "Determine if step succeeded and whether to continue, replan, or synthesize",
-            "extraction_instructions": "",
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": PlanExecuteStates.SYNTHESIZE,
-                    "description": "All steps complete, synthesize final answer",
-                    "priority": 10,
-                    "conditions": [
-                        {
-                            "description": "All plan steps are complete",
-                            "logic": {
-                                "==": [{"var": ContextKeys.ALL_STEPS_COMPLETE}, True]
-                            },
-                        }
-                    ],
-                },
-                {
-                    "target_state": PlanExecuteStates.REPLAN,
-                    "description": "Step failed, revise the plan",
-                    "priority": 150,
-                    "conditions": [
-                        {
-                            "description": "The step did not succeed",
-                            "logic": {"==": [{"var": ContextKeys.STEP_FAILED}, True]},
-                        }
-                    ],
-                },
-                {
-                    "target_state": PlanExecuteStates.EXECUTE_STEP,
-                    "description": "Proceed to the next plan step",
-                    "priority": 300,
-                },
+            extraction_instructions="",
+        ),
+        _state(
+            PlanExecuteStates.REPLAN,
+            "Revise the remaining plan after a step failure",
+            "Incorporate lessons from the failure into a revised plan",
+            [
+                _edge(
+                    PlanExecuteStates.EXECUTE_STEP,
+                    "Resume execution with revised plan",
+                    100,
+                )
             ],
-        },
-        PlanExecuteStates.REPLAN: {
-            "id": PlanExecuteStates.REPLAN,
-            "description": "Revise the remaining plan after a step failure",
-            "purpose": "Incorporate lessons from the failure into a revised plan",
-            "extraction_instructions": "",
-            "field_extractions": [
-                typed_field_extraction(
+            fields=[
+                _field(
                     ContextKeys.PLAN_STEPS,
                     "list",
                     build_plan_steps_instructions(
                         registry, task_description=task_description, replan=True
                     ),
-                    context_keys=loop_field_context_keys(replan_context),
+                    replan_context,
                 )
             ],
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": PlanExecuteStates.EXECUTE_STEP,
-                    "description": "Resume execution with revised plan",
-                    "priority": 100,
-                }
-            ],
-        },
-        PlanExecuteStates.SYNTHESIZE: {
-            "id": PlanExecuteStates.SYNTHESIZE,
-            "description": "Combine all step results into a final answer",
-            "purpose": "Produce a comprehensive answer from all step results",
-            "response_instructions": build_synthesize_response_instructions(),
-            "transitions": [],
-        },
-    }
+        ),
+        _state(
+            PlanExecuteStates.SYNTHESIZE,
+            "Combine all step results into a final answer",
+            "Produce a comprehensive answer from all step results",
+            response_instructions=build_synthesize_response_instructions(),
+        ),
+    )
 
     return _finalize_fsm(
         "plan_execute_agent",
@@ -1252,78 +1234,34 @@ def build_react_fsm(
         "Terminate when you have gathered enough information to answer the task."
     )
 
-    # Think state transitions
-    # NOTE: the lowest passing priority number wins in TransitionEvaluator.
-    # Terminal transitions (conclude) get lowest priority numbers.
-    think_transitions: list[dict[str, Any]] = [
-        {
-            "target_state": AgentStates.CONCLUDE,
-            "description": "Task can be answered (a tool has run, or termination is forced)",
-            "priority": 10,
-            "conditions": [
-                {
-                    # DECISION plan_2026-05-30_5598b755/D-004 [STALE]
-                    # B4 under-call fix: do NOT conclude on the model's
-                    # should_terminate alone — require evidence that a tool has
-                    # run (observation_count > 0) OR that termination is forced
-                    # (max_iterations_reached, set by the iteration limiter and
-                    # the execute_tool stall-detector). This blocks the
-                    # turn-1 "answer from memory" path (think -> conclude
-                    # pre-empting think -> act) while preserving termination.
-                    # Keyed on framework-only context vars so it is immune to the
-                    # transition-evaluator re-merge of raw extracted should_terminate.
-                    "description": (
-                        "Agent decided to terminate AND a tool has run or "
-                        "termination is forced"
-                    ),
-                    "logic": conclude_on_evidence_logic(),
-                }
-            ],
-        },
-    ]
-
-    if include_approval_state:
-        think_transitions.append(_approval_think_transition())
-
-    # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
-    # Unconditional lowest-priority fallback. Do NOT gate this edge on the
-    # tool selection: a gated edge BLOCKS `think` on a null/unknown tool, and
-    # no PRE_TRANSITION or `act`-entry handler runs on a BLOCKED turn, so the
-    # run burns the 3x loop ceiling. `act` handles a missing/unknown tool.
-    think_transitions.append(
-        {
-            "target_state": AgentStates.ACT,
-            "description": "Execute the selected tool",
-            "priority": 300,
-        }
-    )
-
     think_instructions = build_think_extraction_instructions(
         registry, task_description=task_description
     )
-    think_state: dict[str, Any] = {
-        "id": AgentStates.THINK,
-        "description": "Reason about the task and select the next tool to use",
-        "purpose": "Analyze the task and previous observations to decide the next action",
-        "required_context_keys": [
+    think_state = _state(
+        AgentStates.THINK,
+        "Reason about the task and select the next tool to use",
+        "Analyze the task and previous observations to decide the next action",
+        _think_transitions(
+            "Task can be answered (a tool has run, or termination is forced)",
+            include_approval=include_approval_state,
+        ),
+        required=[
             ContextKeys.TOOL_NAME,
             ContextKeys.TOOL_INPUT,
             ContextKeys.SHOULD_TERMINATE,
         ],
+        fields=_think_field_extractions(
+            think_instructions,
+            include_tool_name=not use_classification,
+            context_keys=context_keys,
+        ),
         # DECISION plan-2026-09-29T103145-06a5ec0a/D-009: no state-level bulk
         # call (one more LLM call per turn for keys the typed fields already
         # fill from their own narrowed context). Do NOT empty it under use_classification: tool_name is classification-owned
         # there and relies on the bulk fill when the classifier declines
         # (21cd7f8e D-019).
-        "extraction_instructions": think_instructions if use_classification else "",
-        "field_extractions": _think_field_extractions(
-            think_instructions,
-            include_tool_name=not use_classification,
-            context_keys=context_keys,
-        ),
-        "response_instructions": "",
-        "transitions": think_transitions,
-    }
+        extraction_instructions=think_instructions if use_classification else "",
+    )
 
     if use_classification:
         schema = registry.to_classification_schema()
@@ -1336,57 +1274,21 @@ def build_react_fsm(
             }
         ]
 
-    states: dict[str, Any] = {
-        AgentStates.THINK: think_state,
-        AgentStates.ACT: {
-            "id": AgentStates.ACT,
-            "description": "Execute the selected tool and observe the result",
-            "purpose": "Run the tool and record the observation",
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": AgentStates.CONCLUDE,
-                    "description": "Terminate when framework signals completion",
-                    "priority": 1,
-                    "conditions": [
-                        {
-                            # DECISION plan_2026-05-30_5598b755/D-004 [STALE]
-                            # Mirror the think->conclude guard: a should_terminate
-                            # set on entry to act (e.g. the model wanted to quit
-                            # without a tool) must NOT conclude unless a tool has
-                            # run or termination is forced. The stall-detector and
-                            # iteration limiter set max_iterations_reached, so a
-                            # genuinely tool-free turn still concludes here.
-                            "description": (
-                                "Framework/agent decided to terminate AND a tool "
-                                "has run or termination is forced"
-                            ),
-                            "logic": conclude_on_evidence_logic(),
-                        }
-                    ],
-                },
-                {
-                    "target_state": AgentStates.THINK,
-                    "description": "Return to thinking with new observation",
-                    "priority": 900,
-                },
-            ],
-        },
-        AgentStates.CONCLUDE: {
-            "id": AgentStates.CONCLUDE,
-            "description": "Formulate and present the final answer",
-            "purpose": "Synthesize all observations into a complete answer",
-            "required_context_keys": (
-                list(output_schema.model_fields.keys())
-                if output_schema and hasattr(output_schema, "model_fields")
-                else []
-            ),
-            "response_instructions": build_conclude_response_instructions(
+    states = _by_id(
+        think_state,
+        _act_state(
+            "Execute the selected tool and observe the result",
+            "Run the tool and record the observation",
+            AgentStates.THINK,
+            "Return to thinking with new observation",
+        ),
+        _conclude_state(
+            build_conclude_response_instructions(
                 refused_actions=include_approval_state
             ),
-            "transitions": [],
-        },
-    }
+            _schema_field_names(output_schema),
+        ),
+    )
 
     if include_approval_state:
         states[AgentStates.AWAIT_APPROVAL] = _await_approval_state()
@@ -1401,14 +1303,100 @@ def build_react_fsm(
     )
 
 
+def _build_parallel_think_instructions(
+    registry: ToolRegistry, task_description: str
+) -> str:
+    """Per-field instructions for the parallel-think ``tool_calls`` list."""
+    return (
+        f"You are solving this task: {task_description}\n\n"
+        f"{registry.to_prompt_description()}\n\n"
+        "Decide which tools to call NEXT. You may call SEVERAL independent tools "
+        f"at once to work in parallel. '{ContextKeys.TOOL_CALLS}' is a JSON list "
+        "of tool calls, each an object with 'tool_name' (one of the available "
+        "tools) and 'tool_input' (an object of arguments). Use an empty list if "
+        "no tool is needed. Only batch tools whose inputs do not depend on each "
+        "other's results."
+    )
+
+
+def build_parallel_react_fsm(
+    registry: ToolRegistry,
+    task_description: str = "",
+    output_schema: type | None = None,
+    context_keys: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Build the think -> act(parallel) -> conclude FSM definition.
+
+    ``think`` extracts only typed per-field values (``tool_calls`` list,
+    ``should_terminate`` bool; D-009 of plan 06a5ec0a);
+    their prompts list ``task``, ``observations``, ``agent_feedback`` and
+    ``context_keys``, never ``agent_trace``. The FSM keeps its own name
+    (``ParallelReactAgent``) and fixed description: ``task_description`` only
+    reaches the think prompt.
+    """
+    extra = (ContextKeys.AGENT_FEEDBACK, *context_keys)
+
+    persona = (
+        "You are a methodical AI agent that solves tasks by using tools. "
+        "You can call multiple independent tools at once to work in parallel. "
+        "Review previous observations before deciding. Terminate when you have "
+        "enough information to answer."
+    )
+
+    states = _by_id(
+        _state(
+            AgentStates.THINK,
+            "Reason about the task and select one or more tools to run",
+            "Decide the next (possibly parallel) batch of tool calls",
+            _think_transitions(
+                "Task can be answered with current observations",
+                "Execute the selected tool batch",
+            ),
+            required=[ContextKeys.TOOL_CALLS, ContextKeys.SHOULD_TERMINATE],
+            fields=[
+                _field(
+                    ContextKeys.TOOL_CALLS,
+                    "list",
+                    _build_parallel_think_instructions(registry, task_description),
+                    extra,
+                ),
+                _field(
+                    ContextKeys.SHOULD_TERMINATE,
+                    "bool",
+                    build_think_terminate_instructions(),
+                    extra,
+                    required=False,
+                ),
+            ],
+        ),
+        _act_state(
+            "Execute the selected tools concurrently and observe",
+            "Run the tool batch and record observations",
+            AgentStates.THINK,
+            "Return to thinking with new observations",
+        ),
+        _conclude_state(
+            build_conclude_response_instructions(), _schema_field_names(output_schema)
+        ),
+    )
+
+    return _finalize_fsm(
+        "ParallelReactAgent",
+        "",
+        "ReAct agent with parallel tool dispatch",
+        AgentStates.THINK,
+        persona,
+        states,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Prompt Chain FSM
 # ---------------------------------------------------------------------------
 
 
 def build_prompt_chain_fsm(
-    chain: list[ChainStep],
-    task_description: str = "",
+    chain: list[ChainStep], task_description: str = ""
 ) -> dict[str, Any]:
     """
     Build a Prompt Chain FSM definition from a list of ChainStep objects.
@@ -1441,38 +1429,26 @@ def build_prompt_chain_fsm(
         if i > 0 and chain[i - 1].validation_fn is not None:
             # The gate of step i-1 runs on entry here (PromptChainAgent).
             transitions.append(
-                {
-                    "target_state": PromptChainStates.OUTPUT,
-                    "description": f"Stop: the gate of {chain[i - 1].name} failed",
-                    "priority": 50,
-                    "conditions": [
-                        {
-                            "description": "The previous step's gate failed",
-                            "logic": {
-                                "==": [
-                                    {"var": ContextKeys.FORCED_STOP_REASON},
-                                    StopReason.GATE_FAILED,
-                                ]
-                            },
-                        }
-                    ],
-                }
+                _when(
+                    PromptChainStates.OUTPUT,
+                    f"Stop: the gate of {chain[i - 1].name} failed",
+                    50,
+                    "The previous step's gate failed",
+                    _is(ContextKeys.FORCED_STOP_REASON, StopReason.GATE_FAILED),
+                )
             )
         transitions.append(
-            {
-                "target_state": next_state,
-                "description": f"Proceed to {'output' if is_last else step.name}",
-                "priority": 100,
-            }
+            _edge(next_state, f"Proceed to {'output' if is_last else step.name}", 100)
         )
 
-        states[state_id] = {
-            "id": state_id,
-            "description": f"Step {i + 1}: {step.name}",
-            "purpose": step.name,
-            "extraction_instructions": "",
-            "field_extractions": [
-                typed_field_extraction(
+        states[state_id] = _state(
+            state_id,
+            f"Step {i + 1}: {step.name}",
+            step.name,
+            transitions,
+            response_instructions=step.response_instructions,
+            fields=[
+                _field(
                     ContextKeys.CHAIN_STEP_RESULT,
                     "any",
                     build_chain_step_field_instructions(
@@ -1481,21 +1457,18 @@ def build_prompt_chain_fsm(
                         step.response_instructions,
                         step.extraction_instructions,
                     ),
-                    context_keys=loop_field_context_keys((ContextKeys.CHAIN_RESULTS,)),
+                    (ContextKeys.CHAIN_RESULTS,),
                 )
             ],
-            "response_instructions": step.response_instructions,
-            "transitions": transitions,
-        }
+        )
 
     # Output (terminal) state
-    states[PromptChainStates.OUTPUT] = {
-        "id": PromptChainStates.OUTPUT,
-        "description": "Produce the final output from the chain",
-        "purpose": "Synthesize all step results into a final answer",
-        "response_instructions": build_chain_output_response_instructions(),
-        "transitions": [],
-    }
+    states[PromptChainStates.OUTPUT] = _state(
+        PromptChainStates.OUTPUT,
+        "Produce the final output from the chain",
+        "Synthesize all step results into a final answer",
+        response_instructions=build_chain_output_response_instructions(),
+    )
 
     return _finalize_fsm(
         "prompt_chain_agent",
@@ -1512,9 +1485,7 @@ def build_prompt_chain_fsm(
 # ---------------------------------------------------------------------------
 
 
-def build_self_consistency_fsm(
-    task_description: str = "",
-) -> dict[str, Any]:
+def build_self_consistency_fsm(task_description: str = "") -> dict[str, Any]:
     """
     Build a simple single-state FSM for self-consistency sampling.
 
@@ -1528,16 +1499,15 @@ def build_self_consistency_fsm(
         "You are a precise AI assistant. Answer the given task directly and concisely."
     )
 
-    states: dict[str, Any] = {
-        SelfConsistencyStates.GENERATE: {
-            "id": SelfConsistencyStates.GENERATE,
-            "description": "Generate an answer to the task",
-            "purpose": "Produce a direct, complete answer to the task",
-            "extraction_instructions": "",
-            "response_instructions": build_generate_response_instructions(),
-            "transitions": [],
-        },
-    }
+    states = _by_id(
+        _state(
+            SelfConsistencyStates.GENERATE,
+            "Generate an answer to the task",
+            "Produce a direct, complete answer to the task",
+            response_instructions=build_generate_response_instructions(),
+            extraction_instructions="",
+        )
+    )
 
     return _finalize_fsm(
         "self_consistency_sample",
@@ -1588,74 +1558,72 @@ def build_debate_fsm(
     )
 
     def _debate_field(
-        name: str, context_keys: tuple[str, ...], *, required: bool = True
+        name: str, extra: tuple[str, ...], *, required: bool = True
     ) -> dict[str, Any]:
-        return typed_field_extraction(
-            name,
-            "str",
-            fields[name],
-            context_keys=loop_field_context_keys(context_keys),
-            required=required,
-        )
+        return _field(name, "str", fields[name], extra, required=required)
 
-    states: dict[str, Any] = {
-        DebateStates.PROPOSE: {
-            "id": DebateStates.PROPOSE,
-            "description": "Generate or refine a proposition for the task",
-            "purpose": "Present a well-reasoned argument or answer",
-            "extraction_instructions": "",
-            "field_extractions": [
+    states = _by_id(
+        _state(
+            DebateStates.PROPOSE,
+            "Generate or refine a proposition for the task",
+            "Present a well-reasoned argument or answer",
+            [_edge(DebateStates.CRITIQUE, "Proposition ready for critique", 100)],
+            fields=[
                 _debate_field(ContextKeys.PROPOSITION, (ContextKeys.DEBATE_ROUNDS,))
             ],
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": DebateStates.CRITIQUE,
-                    "description": "Proposition ready for critique",
-                    "priority": 100,
-                }
+        ),
+        _state(
+            DebateStates.CRITIQUE,
+            "Critically analyze the current proposition",
+            "Identify weaknesses, gaps, and counterpoints",
+            [
+                _edge(
+                    DebateStates.COUNTER,
+                    "Critique complete, allow counter-argument",
+                    100,
+                )
             ],
-        },
-        DebateStates.CRITIQUE: {
-            "id": DebateStates.CRITIQUE,
-            "description": "Critically analyze the current proposition",
-            "purpose": "Identify weaknesses, gaps, and counterpoints",
-            "extraction_instructions": "",
-            "field_extractions": [
-                _debate_field(ContextKeys.CRITIQUE, round_values[:1])
+            fields=[_debate_field(ContextKeys.CRITIQUE, round_values[:1])],
+        ),
+        _state(
+            DebateStates.COUNTER,
+            "Address the critique with counter-arguments",
+            "Strengthen the proposition by addressing criticisms",
+            [_edge(DebateStates.JUDGE, "Counter-argument ready for judgment", 100)],
+            fields=[_debate_field(ContextKeys.COUNTER_ARGUMENT, round_values[:2])],
+        ),
+        _state(
+            DebateStates.JUDGE,
+            "Evaluate the debate exchange and decide next action",
+            "Determine whether consensus has been reached",
+            [
+                # DECISION plan-2026-09-24T091842-c1d5bfbc/D-009
+                # Do NOT drop the round disjunct: consensus_reached
+                # is now extracted every round, and before plan
+                # 5ed71cf2/D-005 transition evaluation overlaid
+                # this turn's extracted False on the judge
+                # handler's max-round True. The cap reads
+                # current_round, never an extracted value: the
+                # judge's PRE_TRANSITION handler runs after this
+                # gate, and a judge that extracts null must not
+                # leave the cap unread. current_round advances on
+                # propose entry, so at the judge of round N it is
+                # N: the cap is `>=` (plan 5ed71cf2/D-009).
+                _when(
+                    DebateStates.CONCLUDE,
+                    "Consensus reached or max rounds hit",
+                    10,
+                    "Consensus reached or max rounds hit",
+                    {
+                        "or": [
+                            _is(ContextKeys.CONSENSUS_REACHED, True),
+                            {">=": [{"var": ContextKeys.CURRENT_ROUND}, max_rounds]},
+                        ]
+                    },
+                ),
+                _edge(DebateStates.PROPOSE, "Another round of debate needed", 300),
             ],
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": DebateStates.COUNTER,
-                    "description": "Critique complete, allow counter-argument",
-                    "priority": 100,
-                }
-            ],
-        },
-        DebateStates.COUNTER: {
-            "id": DebateStates.COUNTER,
-            "description": "Address the critique with counter-arguments",
-            "purpose": "Strengthen the proposition by addressing criticisms",
-            "extraction_instructions": "",
-            "field_extractions": [
-                _debate_field(ContextKeys.COUNTER_ARGUMENT, round_values[:2])
-            ],
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": DebateStates.JUDGE,
-                    "description": "Counter-argument ready for judgment",
-                    "priority": 100,
-                }
-            ],
-        },
-        DebateStates.JUDGE: {
-            "id": DebateStates.JUDGE,
-            "description": "Evaluate the debate exchange and decide next action",
-            "purpose": "Determine whether consensus has been reached",
-            "extraction_instructions": "",
-            "field_extractions": [
+            fields=[
                 # The verdict is recorded, never routed on: a null costs no
                 # retry call.
                 _debate_field(ContextKeys.JUDGE_VERDICT, round_values, required=False),
@@ -1667,76 +1635,27 @@ def build_debate_fsm(
                 # earlier rounds the live judge declined consensus every
                 # round (forced_pass). It is bounded by num_rounds, unlike
                 # agent_trace, which must stay out.
-                typed_field_extraction(
+                _field(
                     ContextKeys.CONSENSUS_REACHED,
                     "bool",
                     fields[ContextKeys.CONSENSUS_REACHED],
-                    context_keys=loop_field_context_keys(
-                        (
-                            *round_values,
-                            ContextKeys.CURRENT_ROUND,
-                            ContextKeys.DEBATE_ROUNDS,
-                        )
+                    (
+                        *round_values,
+                        ContextKeys.CURRENT_ROUND,
+                        ContextKeys.DEBATE_ROUNDS,
                     ),
                 ),
             ],
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": DebateStates.CONCLUDE,
-                    "description": "Consensus reached or max rounds hit",
-                    "priority": 10,
-                    "conditions": [
-                        {
-                            # DECISION plan-2026-09-24T091842-c1d5bfbc/D-009
-                            # Do NOT drop the round disjunct: consensus_reached
-                            # is now extracted every round, and before plan
-                            # 5ed71cf2/D-005 transition evaluation overlaid
-                            # this turn's extracted False on the judge
-                            # handler's max-round True. The cap reads
-                            # current_round, never an extracted value: the
-                            # judge's PRE_TRANSITION handler runs after this
-                            # gate, and a judge that extracts null must not
-                            # leave the cap unread. current_round advances on
-                            # propose entry, so at the judge of round N it is
-                            # N: the cap is `>=` (plan 5ed71cf2/D-009).
-                            "description": "Consensus reached or max rounds hit",
-                            "logic": {
-                                "or": [
-                                    {
-                                        "==": [
-                                            {"var": ContextKeys.CONSENSUS_REACHED},
-                                            True,
-                                        ]
-                                    },
-                                    {
-                                        ">=": [
-                                            {"var": ContextKeys.CURRENT_ROUND},
-                                            max_rounds,
-                                        ]
-                                    },
-                                ]
-                            },
-                        }
-                    ],
-                },
-                {
-                    "target_state": DebateStates.PROPOSE,
-                    "description": "Another round of debate needed",
-                    "priority": 300,
-                },
-            ],
-        },
-        DebateStates.CONCLUDE: {
-            "id": DebateStates.CONCLUDE,
-            "description": "Produce the final answer from the debate",
-            "purpose": "Synthesize the debate into a definitive answer",
+        ),
+        _state(
+            DebateStates.CONCLUDE,
+            "Produce the final answer from the debate",
+            "Synthesize the debate into a definitive answer",
+            response_instructions=build_debate_conclude_response_instructions(),
             # Terminal: core never extracts here; the reply is the answer.
-            "extraction_instructions": "",
-            "response_instructions": build_debate_conclude_response_instructions(),
-            "transitions": [],
-        },
-    }
+            extraction_instructions="",
+        ),
+    )
 
     return _finalize_fsm(
         "debate_agent",
@@ -1754,9 +1673,7 @@ def build_debate_fsm(
 
 
 def build_rewoo_fsm(
-    registry: ToolRegistry,
-    task_description: str = "",
-    context_keys: Sequence[str] = (),
+    registry: ToolRegistry, task_description: str = "", context_keys: Sequence[str] = ()
 ) -> dict[str, Any]:
     """
     Build a REWOO FSM definition from a tool registry.
@@ -1779,55 +1696,51 @@ def build_rewoo_fsm(
         "collected evidence. You think before you act, and you plan completely."
     )
 
-    states: dict[str, Any] = {
-        REWOOStates.PLAN_ALL: {
-            "id": REWOOStates.PLAN_ALL,
-            "description": "Create a complete plan of all tool calls needed",
-            "purpose": "Generate a full plan with tool calls and variable references",
-            "required_context_keys": [ContextKeys.PLAN_BLUEPRINT],
+    states = _by_id(
+        _state(
+            REWOOStates.PLAN_ALL,
+            "Create a complete plan of all tool calls needed",
+            "Generate a full plan with tool calls and variable references",
+            [
+                _edge(
+                    REWOOStates.EXECUTE_PLANS,
+                    "Plan is complete, proceed to execution",
+                    100,
+                )
+            ],
+            required=[ContextKeys.PLAN_BLUEPRINT],
             # No state-level bulk call (D-031 of plan 07ad3f8c, anchored in
             # build_orchestrator_fsm): `plan_blueprint` is the one key read.
-            "extraction_instructions": "",
-            "field_extractions": [
-                typed_field_extraction(
+            fields=[
+                _field(
                     ContextKeys.PLAN_BLUEPRINT,
                     "list",
                     build_rewoo_plan_field_instructions(
                         registry, task_description=task_description
                     ),
-                    context_keys=loop_field_context_keys(context_keys),
+                    context_keys,
                 )
             ],
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": REWOOStates.EXECUTE_PLANS,
-                    "description": "Plan is complete, proceed to execution",
-                    "priority": 100,
-                }
+        ),
+        _state(
+            REWOOStates.EXECUTE_PLANS,
+            "Execute all planned tool calls sequentially",
+            "Run every tool call from the plan, substituting variable references",
+            [
+                _edge(
+                    REWOOStates.SOLVE,
+                    "All plans executed, proceed to synthesize answer",
+                    100,
+                )
             ],
-        },
-        REWOOStates.EXECUTE_PLANS: {
-            "id": REWOOStates.EXECUTE_PLANS,
-            "description": "Execute all planned tool calls sequentially",
-            "purpose": "Run every tool call from the plan, substituting variable references",
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": REWOOStates.SOLVE,
-                    "description": "All plans executed, proceed to synthesize answer",
-                    "priority": 100,
-                }
-            ],
-        },
-        REWOOStates.SOLVE: {
-            "id": REWOOStates.SOLVE,
-            "description": "Synthesize the final answer from all evidence",
-            "purpose": "Combine the task, plan, and all tool results into a final answer",
-            "response_instructions": build_rewoo_solve_response_instructions(),
-            "transitions": [],
-        },
-    }
+        ),
+        _state(
+            REWOOStates.SOLVE,
+            "Synthesize the final answer from all evidence",
+            "Combine the task, plan, and all tool results into a final answer",
+            response_instructions=build_rewoo_solve_response_instructions(),
+        ),
+    )
 
     return _finalize_fsm(
         "rewoo_agent",
@@ -1844,9 +1757,7 @@ def build_rewoo_fsm(
 # ---------------------------------------------------------------------------
 
 
-def build_evalopt_fsm(
-    task_description: str = "",
-) -> dict[str, Any]:
+def build_evalopt_fsm(task_description: str = "") -> dict[str, Any]:
     """
     Build an Evaluator-Optimizer FSM definition.
 
@@ -1868,120 +1779,90 @@ def build_evalopt_fsm(
         "your output until it meets the required quality standards."
     )
 
-    states: dict[str, Any] = {
-        EvalOptStates.GENERATE: {
-            "id": EvalOptStates.GENERATE,
-            "description": "Generate an initial output for the task",
-            "purpose": "Produce the best possible first attempt at the task",
-            "extraction_instructions": "",
-            "field_extractions": [
-                typed_field_extraction(
-                    ContextKeys.GENERATED_OUTPUT,
-                    "any",
-                    fields[EvalOptStates.GENERATE],
-                    context_keys=loop_field_context_keys(),
-                )
-            ],
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": EvalOptStates.EVALUATE,
-                    "description": "Output generated, proceed to evaluation",
-                    "priority": 100,
-                    "conditions": [
-                        {
-                            "description": "Output has been generated",
-                            "logic": {"has_context": ContextKeys.GENERATED_OUTPUT},
-                        }
-                    ],
-                },
+    states = _by_id(
+        _state(
+            EvalOptStates.GENERATE,
+            "Generate an initial output for the task",
+            "Produce the best possible first attempt at the task",
+            [
+                _when(
+                    EvalOptStates.EVALUATE,
+                    "Output generated, proceed to evaluation",
+                    100,
+                    "Output has been generated",
+                    {"has_context": ContextKeys.GENERATED_OUTPUT},
+                ),
                 # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
                 # Unconditional lowest-priority fallback. Do NOT remove it or gate it:
                 # a missing generated_output would BLOCK `generate` (no PRE_TRANSITION
                 # limiter runs on a BLOCKED turn). `evaluate` judges the empty output,
                 # then `refine` retries and the refinement cap / limiter end the loop.
-                {
-                    "target_state": EvalOptStates.EVALUATE,
-                    "description": "Fallback: evaluate even if no output was extracted",
-                    "priority": 900,
-                },
+                _edge(
+                    EvalOptStates.EVALUATE,
+                    "Fallback: evaluate even if no output was extracted",
+                    900,
+                ),
             ],
-        },
-        EvalOptStates.EVALUATE: {
-            "id": EvalOptStates.EVALUATE,
-            "description": "Evaluate the generated output",
-            "purpose": "Run the external evaluation function on the current output",
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": EvalOptStates.OUTPUT,
-                    "description": "Evaluation passed, produce final output",
-                    "priority": 10,
-                    "conditions": [
-                        {
-                            "description": "Output passed evaluation",
-                            "logic": {
-                                "==": [{"var": ContextKeys.EVALUATION_PASSED}, True]
-                            },
-                        }
-                    ],
-                },
-                {
-                    "target_state": EvalOptStates.REFINE,
-                    "description": "Evaluation failed, refine the output",
-                    "priority": 300,
-                    "conditions": [
-                        {
-                            "description": "Output did not pass evaluation",
-                            "logic": {
-                                "==": [{"var": ContextKeys.EVALUATION_PASSED}, False]
-                            },
-                        }
-                    ],
-                },
-                {
-                    "target_state": EvalOptStates.OUTPUT,
-                    "description": "Fallback: produce output if evaluation stalls",
-                    "priority": 900,
-                    "conditions": [],
-                },
+            fields=[
+                _field(
+                    ContextKeys.GENERATED_OUTPUT, "any", fields[EvalOptStates.GENERATE]
+                )
             ],
-        },
-        EvalOptStates.REFINE: {
-            "id": EvalOptStates.REFINE,
-            "description": "Refine the output based on evaluation feedback",
-            "purpose": "Improve the output by addressing specific feedback points",
-            "extraction_instructions": "",
-            "field_extractions": [
-                typed_field_extraction(
+        ),
+        _state(
+            EvalOptStates.EVALUATE,
+            "Evaluate the generated output",
+            "Run the external evaluation function on the current output",
+            [
+                _when(
+                    EvalOptStates.OUTPUT,
+                    "Evaluation passed, produce final output",
+                    10,
+                    "Output passed evaluation",
+                    _is(ContextKeys.EVALUATION_PASSED, True),
+                ),
+                _when(
+                    EvalOptStates.REFINE,
+                    "Evaluation failed, refine the output",
+                    300,
+                    "Output did not pass evaluation",
+                    _is(ContextKeys.EVALUATION_PASSED, False),
+                ),
+                _edge(
+                    EvalOptStates.OUTPUT,
+                    "Fallback: produce output if evaluation stalls",
+                    900,
+                    empty=True,
+                ),
+            ],
+        ),
+        _state(
+            EvalOptStates.REFINE,
+            "Refine the output based on evaluation feedback",
+            "Improve the output by addressing specific feedback points",
+            [
+                _edge(
+                    EvalOptStates.EVALUATE,
+                    "Refined output ready for re-evaluation",
+                    100,
+                )
+            ],
+            fields=[
+                _field(
                     ContextKeys.GENERATED_OUTPUT,
                     "any",
                     fields[EvalOptStates.REFINE],
-                    context_keys=loop_field_context_keys(
-                        (
-                            ContextKeys.PREVIOUS_OUTPUT,
-                            ContextKeys.REFINEMENT_FEEDBACK,
-                        )
-                    ),
+                    (ContextKeys.PREVIOUS_OUTPUT, ContextKeys.REFINEMENT_FEEDBACK),
                 )
             ],
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": EvalOptStates.EVALUATE,
-                    "description": "Refined output ready for re-evaluation",
-                    "priority": 100,
-                }
-            ],
-        },
-        EvalOptStates.OUTPUT: {
-            "id": EvalOptStates.OUTPUT,
-            "description": "Present the final evaluated output",
-            "purpose": "Extract and present the final answer",
-            "response_instructions": build_evalopt_output_response_instructions(),
-            "transitions": [],
-        },
-    }
+        ),
+        _state(
+            EvalOptStates.OUTPUT,
+            "Present the final evaluated output",
+            "Extract and present the final answer",
+            response_instructions=build_evalopt_output_response_instructions(),
+        ),
+    )
 
     return _finalize_fsm(
         "evalopt_agent",
@@ -2030,34 +1911,81 @@ def build_maker_checker_fsm(
         "critically evaluating it to ensure the highest quality."
     )
 
-    states: dict[str, Any] = {
-        MakerCheckerStates.MAKE: {
-            "id": MakerCheckerStates.MAKE,
-            "description": "Maker generates a draft output",
-            "purpose": "Produce a high-quality draft following the maker instructions",
-            "extraction_instructions": "",
-            "field_extractions": [
-                typed_field_extraction(
-                    draft,
-                    "any",
-                    fields[MakerCheckerStates.MAKE],
-                    context_keys=loop_field_context_keys(),
+    states = _by_id(
+        _state(
+            MakerCheckerStates.MAKE,
+            "Maker generates a draft output",
+            "Produce a high-quality draft following the maker instructions",
+            [
+                _edge(
+                    MakerCheckerStates.CHECK,
+                    "Draft complete, proceed to checker review",
+                    100,
                 )
             ],
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": MakerCheckerStates.CHECK,
-                    "description": "Draft complete, proceed to checker review",
-                    "priority": 100,
-                }
+            fields=[_field(draft, "any", fields[MakerCheckerStates.MAKE])],
+        ),
+        _state(
+            MakerCheckerStates.CHECK,
+            "Checker evaluates the draft",
+            "Critically evaluate the draft against quality criteria",
+            [
+                # DECISION plan-2026-09-24T091842-c1d5bfbc/D-007: a check
+                # turn at the budget ships the draft it just judged. Do NOT
+                # rely on the forced checker_passed alone: before plan
+                # 5ed71cf2/D-005 this turn's extracted False overlaid it,
+                # so budget 1 needed 4 turns against a 3-turn ceiling and
+                # raised BudgetExhaustedError; the limiter's flag is also
+                # set after the gate may have read the verdict.
+                # DECISION plan-2026-11-05T134105-5ed71cf2/D-009: the
+                # revision cap is read here too, from revision_count
+                # (bumped on check entry), never from a handler that a
+                # null extraction skips. Do NOT rely on the check
+                # PRE_TRANSITION handler to route the cap: it runs after
+                # this gate.
+                _when(
+                    MakerCheckerStates.OUTPUT,
+                    "Draft passed review, produce final output",
+                    10,
+                    "Checker approved, or the budget is spent",
+                    {
+                        "or": [
+                            _is(ContextKeys.CHECKER_PASSED, True),
+                            _is(ContextKeys.MAX_ITERATIONS_REACHED, True),
+                            *(
+                                []
+                                if max_revisions is None
+                                else [
+                                    {
+                                        ">=": [
+                                            {"var": ContextKeys.REVISION_COUNT},
+                                            max_revisions,
+                                        ]
+                                    }
+                                ]
+                            ),
+                        ]
+                    },
+                ),
+                _when(
+                    MakerCheckerStates.REVISE,
+                    "Draft needs revision based on feedback",
+                    300,
+                    "Checker found issues with the draft",
+                    _is(ContextKeys.CHECKER_PASSED, False),
+                ),
+                # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
+                # Unconditional lowest-priority fallback. Do NOT remove it or gate it:
+                # a missing checker_passed would BLOCK `check`, and no PRE_TRANSITION
+                # limiter runs on a BLOCKED turn (FB-01), so the run burns the 3x
+                # loop ceiling. An unjudged draft is revised and re-checked.
+                _edge(
+                    MakerCheckerStates.REVISE,
+                    "Fallback: revise if checker result unclear",
+                    900,
+                    empty=True,
+                ),
             ],
-        },
-        MakerCheckerStates.CHECK: {
-            "id": MakerCheckerStates.CHECK,
-            "description": "Checker evaluates the draft",
-            "purpose": "Critically evaluate the draft against quality criteria",
-            "extraction_instructions": "",
             # DECISION plan-2026-09-29T103145-06a5ec0a/D-039
             # One call per field and turn: feedback first (the score and the
             # verdict prompts then show it), checker_passed optional (a null
@@ -2065,136 +1993,55 @@ def build_maker_checker_fsm(
             # _track_revisions passes on the score). Do NOT put these keys
             # back in required_context_keys: core mints an untyped `any`
             # config per key with the whole context, agent_trace included.
-            "field_extractions": [
-                typed_field_extraction(
+            fields=[
+                _field(
                     ContextKeys.CHECKER_FEEDBACK,
                     "str",
                     fields[ContextKeys.CHECKER_FEEDBACK],
-                    context_keys=loop_field_context_keys(judged),
+                    judged,
                 ),
-                typed_field_extraction(
+                _field(
                     ContextKeys.QUALITY_SCORE,
                     "float",
                     fields[ContextKeys.QUALITY_SCORE],
-                    context_keys=loop_field_context_keys(judged),
+                    judged,
                 ),
-                typed_field_extraction(
+                _field(
                     ContextKeys.CHECKER_PASSED,
                     "bool",
                     fields[ContextKeys.CHECKER_PASSED],
-                    context_keys=loop_field_context_keys(judged),
+                    judged,
                     required=False,
                 ),
             ],
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": MakerCheckerStates.OUTPUT,
-                    "description": "Draft passed review, produce final output",
-                    "priority": 10,
-                    # DECISION plan-2026-09-24T091842-c1d5bfbc/D-007: a check
-                    # turn at the budget ships the draft it just judged. Do NOT
-                    # rely on the forced checker_passed alone: before plan
-                    # 5ed71cf2/D-005 this turn's extracted False overlaid it,
-                    # so budget 1 needed 4 turns against a 3-turn ceiling and
-                    # raised BudgetExhaustedError; the limiter's flag is also
-                    # set after the gate may have read the verdict.
-                    # DECISION plan-2026-11-05T134105-5ed71cf2/D-009: the
-                    # revision cap is read here too, from revision_count
-                    # (bumped on check entry), never from a handler that a
-                    # null extraction skips. Do NOT rely on the check
-                    # PRE_TRANSITION handler to route the cap: it runs after
-                    # this gate.
-                    "conditions": [
-                        {
-                            "description": "Checker approved, or the budget is spent",
-                            "logic": {
-                                "or": [
-                                    {"==": [{"var": ContextKeys.CHECKER_PASSED}, True]},
-                                    {
-                                        "==": [
-                                            {"var": ContextKeys.MAX_ITERATIONS_REACHED},
-                                            True,
-                                        ]
-                                    },
-                                    *(
-                                        []
-                                        if max_revisions is None
-                                        else [
-                                            {
-                                                ">=": [
-                                                    {"var": ContextKeys.REVISION_COUNT},
-                                                    max_revisions,
-                                                ]
-                                            }
-                                        ]
-                                    ),
-                                ]
-                            },
-                        }
-                    ],
-                },
-                {
-                    "target_state": MakerCheckerStates.REVISE,
-                    "description": "Draft needs revision based on feedback",
-                    "priority": 300,
-                    "conditions": [
-                        {
-                            "description": "Checker found issues with the draft",
-                            "logic": {
-                                "==": [{"var": ContextKeys.CHECKER_PASSED}, False]
-                            },
-                        }
-                    ],
-                },
-                # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
-                # Unconditional lowest-priority fallback. Do NOT remove it or gate it:
-                # a missing checker_passed would BLOCK `check`, and no PRE_TRANSITION
-                # limiter runs on a BLOCKED turn (FB-01), so the run burns the 3x
-                # loop ceiling. An unjudged draft is revised and re-checked.
-                {
-                    "target_state": MakerCheckerStates.REVISE,
-                    "description": "Fallback: revise if checker result unclear",
-                    "priority": 900,
-                    "conditions": [],
-                },
+        ),
+        _state(
+            MakerCheckerStates.REVISE,
+            "Maker revises the draft based on checker feedback",
+            "Address all checker feedback and produce an improved draft",
+            [
+                _edge(
+                    MakerCheckerStates.CHECK,
+                    "Revised draft ready for re-evaluation",
+                    100,
+                )
             ],
-        },
-        MakerCheckerStates.REVISE: {
-            "id": MakerCheckerStates.REVISE,
-            "description": "Maker revises the draft based on checker feedback",
-            "purpose": "Address all checker feedback and produce an improved draft",
-            "extraction_instructions": "",
-            "field_extractions": [
-                typed_field_extraction(
+            fields=[
+                _field(
                     draft,
                     "any",
                     fields[MakerCheckerStates.REVISE],
-                    context_keys=loop_field_context_keys(
-                        (
-                            ContextKeys.PREVIOUS_DRAFT,
-                            ContextKeys.CHECKER_FEEDBACK,
-                        )
-                    ),
+                    (ContextKeys.PREVIOUS_DRAFT, ContextKeys.CHECKER_FEEDBACK),
                 )
             ],
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": MakerCheckerStates.CHECK,
-                    "description": "Revised draft ready for re-evaluation",
-                    "priority": 100,
-                }
-            ],
-        },
-        MakerCheckerStates.OUTPUT: {
-            "id": MakerCheckerStates.OUTPUT,
-            "description": "Present the final reviewed output",
-            "purpose": "Extract and present the final answer",
-            "response_instructions": build_maker_checker_output_response_instructions(),
-            "transitions": [],
-        },
-    }
+        ),
+        _state(
+            MakerCheckerStates.OUTPUT,
+            "Present the final reviewed output",
+            "Extract and present the final answer",
+            response_instructions=build_maker_checker_output_response_instructions(),
+        ),
+    )
 
     return _finalize_fsm(
         "maker_checker_agent",
@@ -2281,13 +2128,21 @@ def build_meta_builder_fsm() -> dict[str, Any]:
     type_switch = _flag_condition(
         keys.TYPE_SWITCH, "The user asked for a different artifact type"
     )
-    states: dict[str, Any] = {
-        states_.CLASSIFY: {
-            "id": states_.CLASSIFY,
-            "description": "Decide which kind of artifact the user wants",
-            "purpose": ("Classify the request as an FSM, a workflow or an agent"),
-            "extraction_instructions": "",
-            "response_instructions": "",
+    states = _by_id(
+        _state(
+            states_.CLASSIFY,
+            "Decide which kind of artifact the user wants",
+            "Classify the request as an FSM, a workflow or an agent",
+            [
+                _edge(
+                    states_.BUILD,
+                    "The user asked to build right away",
+                    10,
+                    build_requested,
+                ),
+                _edge(states_.COLLECT, "Collect the artifact's requirements", 900),
+            ],
+            extraction_instructions="",
             # DECISION plan-2026-10-01T093600-944e2692/D-035: the fallback is
             # `unknown`, not an artifact type. Do NOT make `fsm` the fallback
             # again: core stores the fallback at any confidence, so a vague
@@ -2296,7 +2151,7 @@ def build_meta_builder_fsm() -> dict[str, Any]:
             # idea". The classify exit handler resolves `unknown` (and a
             # discarded low-confidence intent) to the previous type, else the
             # keyword type. See decisions.md D-035.
-            "classification_extractions": [
+            classification_extractions=[
                 {
                     "field_name": keys.ARTIFACT_TYPE,
                     "intents": [
@@ -2314,140 +2169,115 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                     "context_keys": [keys.LATEST_REQUEST],
                 }
             ],
-            "transitions": [
-                {
-                    "target_state": states_.BUILD,
-                    "description": "The user asked to build right away",
-                    "priority": 10,
-                    "conditions": [build_requested],
-                },
-                {
-                    "target_state": states_.COLLECT,
-                    "description": "Collect the artifact's requirements",
-                    "priority": 900,
-                },
-            ],
-        },
-        states_.COLLECT: {
-            "id": states_.COLLECT,
-            "description": "Gather the artifact's requirements from the user",
-            "purpose": (
+        ),
+        _state(
+            states_.COLLECT,
+            "Gather the artifact's requirements from the user",
+            (
                 "Acknowledge each detail, ask about what is unclear and "
                 "invite the user to say 'build it'"
             ),
-            "extraction_instructions": "",
-            "response_instructions": meta_prompts.build_collect_response_instructions(),
-            "context_scope": {
+            [
+                _edge(
+                    states_.CLASSIFY,
+                    "The user switched to another artifact type",
+                    10,
+                    type_switch,
+                ),
+                _edge(
+                    states_.BUILD,
+                    "The user asked to build the artifact",
+                    20,
+                    build_requested,
+                ),
+            ],
+            response_instructions=meta_prompts.build_collect_response_instructions(),
+            extraction_instructions="",
+            context_scope={
                 "read_keys": [
                     keys.ARTIFACT_TYPE,
                     keys.REQUIREMENTS,
                     keys.VALIDATION_ERRORS,
                 ]
             },
-            "transitions": [
-                {
-                    "target_state": states_.CLASSIFY,
-                    "description": "The user switched to another artifact type",
-                    "priority": 10,
-                    "conditions": [type_switch],
-                },
-                {
-                    "target_state": states_.BUILD,
-                    "description": "The user asked to build the artifact",
-                    "priority": 20,
-                    "conditions": [build_requested],
-                },
-            ],
-        },
-        states_.BUILD: {
-            "id": states_.BUILD,
-            "description": "Generate the artifact spec in one structured call",
-            "purpose": (
+        ),
+        _state(
+            states_.BUILD,
+            "Generate the artifact spec in one structured call",
+            (
                 "Ask the model for the whole artifact spec as JSON matching "
                 "the per-type schema"
             ),
-            "response_instructions": "",
-            "completion": {
+            [
+                _edge(
+                    states_.DONE,
+                    "The assembled artifact validated",
+                    10,
+                    {
+                        "description": "The build produced a valid artifact",
+                        "requires_context_keys": [keys.BUILD_OUTCOME],
+                        "logic": {
+                            "===": [{"var": keys.BUILD_OUTCOME}, MetaBuildOutcome.VALID]
+                        },
+                    },
+                ),
+                _edge(
+                    states_.BUILD_FAILED,
+                    "The build did not produce a valid artifact",
+                    900,
+                ),
+            ],
+            completion={
                 "response_format_key": keys.BUILD_RESPONSE_FORMAT,
                 "messages_key": keys.BUILD_MESSAGES,
                 "result_key": keys.BUILD_REPLY,
             },
-            "transitions": [
-                {
-                    "target_state": states_.DONE,
-                    "description": "The assembled artifact validated",
-                    "priority": 10,
-                    "conditions": [
-                        {
-                            "description": "The build produced a valid artifact",
-                            "requires_context_keys": [keys.BUILD_OUTCOME],
-                            "logic": {
-                                "===": [
-                                    {"var": keys.BUILD_OUTCOME},
-                                    MetaBuildOutcome.VALID,
-                                ]
-                            },
-                        }
-                    ],
-                },
-                {
-                    "target_state": states_.BUILD_FAILED,
-                    "description": "The build did not produce a valid artifact",
-                    "priority": 900,
-                },
-            ],
-        },
-        states_.BUILD_FAILED: {
-            "id": states_.BUILD_FAILED,
-            "description": "The last build failed validation",
-            "purpose": (
+        ),
+        _state(
+            states_.BUILD_FAILED,
+            "The last build failed validation",
+            (
                 "Route the user's next message: build again, switch the "
                 "artifact type, or collect more details"
             ),
-            "extraction_instructions": "",
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": states_.CLASSIFY,
-                    "description": "The user switched to another artifact type",
-                    "priority": 10,
-                    "conditions": [type_switch],
-                },
-                {
-                    "target_state": states_.BUILD,
-                    "description": "The user asked to build again",
-                    "priority": 20,
-                    "conditions": [build_requested],
-                },
-                {
-                    "target_state": states_.COLLECT,
-                    "description": "Collect more details before the next build",
-                    "priority": 900,
-                },
+            [
+                _edge(
+                    states_.CLASSIFY,
+                    "The user switched to another artifact type",
+                    10,
+                    type_switch,
+                ),
+                _edge(
+                    states_.BUILD, "The user asked to build again", 20, build_requested
+                ),
+                _edge(
+                    states_.COLLECT, "Collect more details before the next build", 900
+                ),
             ],
-        },
-        states_.DONE: {
-            "id": states_.DONE,
-            "description": "The artifact is built and valid",
-            "purpose": "End the session with the valid artifact",
-            "response_instructions": "",
-            "transitions": [],
-        },
-    }
-    return {
-        "name": "meta_builder",
-        "description": (
+            extraction_instructions="",
+        ),
+        _state(
+            states_.DONE,
+            "The artifact is built and valid",
+            "End the session with the valid artifact",
+        ),
+    )
+    fsm = _finalize_fsm(
+        "meta_builder",
+        "",
+        (
             "Meta-builder: classify the artifact type, collect requirements, "
             "build the artifact with one structured completion"
         ),
-        "initial_state": states_.CLASSIFY,
-        "persona": (
+        states_.CLASSIFY,
+        (
             "A concise assistant that helps users design FSM-LLM artifacts: "
             "FSMs, workflows and agents"
         ),
-        "states": states,
-        "handler_only_keys": list(META_HANDLER_ONLY_KEYS),
-    }
+        states,
+    )
+    fsm["handler_only_keys"] = list(META_HANDLER_ONLY_KEYS)
+    return fsm
 
 
 # ---------------------------------------------------------------------------
@@ -2539,149 +2369,107 @@ def build_native_fc_fsm(
 
     force_edge: list[dict[str, Any]] = (
         [
-            {
-                "target_state": states_.FORCE_FINAL,
-                "description": "Force one call of the final tool",
-                "priority": 20,
-                "conditions": [force_pending],
-            }
+            _edge(
+                states_.FORCE_FINAL,
+                "Force one call of the final tool",
+                20,
+                force_pending,
+            )
         ]
         if forced_schemas
         else []
     )
     repair_edge: list[dict[str, Any]] = (
         [
-            {
-                "target_state": states_.REPAIR,
-                "description": "Repair the answer into the output schema",
-                "priority": 30,
-                "conditions": [repair_pending],
-            }
+            _edge(
+                states_.REPAIR,
+                "Repair the answer into the output schema",
+                30,
+                repair_pending,
+            )
         ]
         if repair
         else []
     )
 
-    def silent(state_id: str, description: str, purpose: str) -> dict[str, Any]:
-        return {
-            "id": state_id,
-            "description": description,
-            "purpose": purpose,
-            "response_instructions": "",
-        }
-
-    states: dict[str, Any] = {
-        states_.CALL_MODEL: {
-            **silent(
-                states_.CALL_MODEL,
-                "One model turn with the tools declared",
-                "Let the model call tools or give its final answer",
-            ),
-            "completion": {
+    states = _by_id(
+        _state(
+            states_.CALL_MODEL,
+            "One model turn with the tools declared",
+            "Let the model call tools or give its final answer",
+            [
+                _edge(
+                    states_.RUN_TOOLS,
+                    "The model asked for tools",
+                    10,
+                    _reply_kind_condition("calls"),
+                ),
+                *force_edge,
+                *repair_edge,
+                _edge(states_.CONCLUDE, "The model answered or garbled its turn", 900),
+            ],
+            completion={
                 "tools": schemas,
                 "instructions": instructions,
                 "messages_key": keys.TRANSCRIPT,
                 "result_key": keys.MODEL_REPLY,
             },
-            "transitions": [
-                {
-                    "target_state": states_.RUN_TOOLS,
-                    "description": "The model asked for tools",
-                    "priority": 10,
-                    "conditions": [_reply_kind_condition("calls")],
-                },
+        ),
+        _state(
+            states_.RUN_TOOLS,
+            "Run the model's tool calls",
+            "Run each call through the tool registry and record the results",
+            [
                 *force_edge,
                 *repair_edge,
-                {
-                    "target_state": states_.CONCLUDE,
-                    "description": "The model answered or garbled its turn",
-                    "priority": 900,
-                },
+                _edge(
+                    states_.CONCLUDE,
+                    "The model loop has ended",
+                    40,
+                    {
+                        "description": "The loop ended",
+                        "requires_context_keys": [keys.LOOP_END],
+                        "logic": {
+                            "in": [{"var": keys.LOOP_END}, list(NativeLoopEnd.ALL)]
+                        },
+                    },
+                ),
+                _edge(states_.CALL_MODEL, "Give the model the tool results", 900),
             ],
-        },
-        states_.RUN_TOOLS: {
-            **silent(
-                states_.RUN_TOOLS,
-                "Run the model's tool calls",
-                "Run each call through the tool registry and record the results",
-            ),
-            "transitions": [
-                *force_edge,
-                *repair_edge,
-                {
-                    "target_state": states_.CONCLUDE,
-                    "description": "The model loop has ended",
-                    "priority": 40,
-                    "conditions": [
-                        {
-                            "description": "The loop ended",
-                            "requires_context_keys": [keys.LOOP_END],
-                            "logic": {
-                                "in": [{"var": keys.LOOP_END}, list(NativeLoopEnd.ALL)]
-                            },
-                        }
-                    ],
-                },
-                {
-                    "target_state": states_.CALL_MODEL,
-                    "description": "Give the model the tool results",
-                    "priority": 900,
-                },
-            ],
-        },
-    }
+        ),
+    )
     if forced_schemas:
-        states[states_.FORCE_FINAL] = {
-            **silent(
-                states_.FORCE_FINAL,
-                "One model turn that must call the final tool",
-                "Make the model record its findings with the forced tool",
-            ),
-            "completion": {
+        states[states_.FORCE_FINAL] = _state(
+            states_.FORCE_FINAL,
+            "One model turn that must call the final tool",
+            "Make the model record its findings with the forced tool",
+            [*repair_edge, _edge(states_.CONCLUDE, "The forced turn is done", 900)],
+            completion={
                 "tools": forced_schemas,
                 "tool_choice": force_final_tool,
                 "instructions": instructions,
                 "messages_key": keys.FORCE_MESSAGES,
                 "result_key": keys.FORCED_REPLY,
             },
-            "transitions": [
-                *repair_edge,
-                {
-                    "target_state": states_.CONCLUDE,
-                    "description": "The forced turn is done",
-                    "priority": 900,
-                },
-            ],
-        }
+        )
     if repair:
-        states[states_.REPAIR] = {
-            **silent(
-                states_.REPAIR,
-                "One structured model turn with no tools",
-                "Get the final answer as JSON matching the output schema",
-            ),
-            "completion": {
+        states[states_.REPAIR] = _state(
+            states_.REPAIR,
+            "One structured model turn with no tools",
+            "Get the final answer as JSON matching the output schema",
+            [_edge(states_.CONCLUDE, "The repair turn is done", 900)],
+            completion={
                 "response_format_key": CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT,
                 "instructions": instructions,
                 "messages_key": keys.REPAIR_MESSAGES,
                 "result_key": keys.REPAIR_REPLY,
             },
-            "transitions": [
-                {
-                    "target_state": states_.CONCLUDE,
-                    "description": "The repair turn is done",
-                    "priority": 900,
-                }
-            ],
-        }
-    states[states_.CONCLUDE] = {
-        **silent(
-            states_.CONCLUDE,
-            "The run is over",
-            "Hold the answer, the trace and the run's outcome",
-        ),
-        "transitions": [],
-    }
+        )
+    states[states_.CONCLUDE] = _state(
+        states_.CONCLUDE,
+        "The run is over",
+        "Hold the answer, the trace and the run's outcome",
+    )
     fsm = _finalize_fsm(
         name="native_fc",
         task_description="",
@@ -2693,8 +2481,5 @@ def build_native_fc_fsm(
         persona="A capable AI agent that uses the provided tools",
         states=states,
     )
-    fsm["handler_only_keys"] = [
-        *fsm["handler_only_keys"],
-        *NATIVE_FC_HANDLER_ONLY_KEYS,
-    ]
+    fsm["handler_only_keys"] = [*fsm["handler_only_keys"], *NATIVE_FC_HANDLER_ONLY_KEYS]
     return fsm

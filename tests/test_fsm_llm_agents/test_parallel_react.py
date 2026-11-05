@@ -16,7 +16,6 @@ from fsm_llm.agents import (
     tool,
 )
 from fsm_llm.agents.constants import ContextKeys
-from fsm_llm.agents.parallel_react import TOOL_CALLS_KEY
 from fsm_llm.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
@@ -104,7 +103,7 @@ class TestNormalizeCalls:
 class TestDispatch:
     def _ctx(self, tool_calls):
         return {
-            TOOL_CALLS_KEY: tool_calls,
+            ContextKeys.TOOL_CALLS: tool_calls,
             ContextKeys.OBSERVATIONS: [],
             ContextKeys.AGENT_TRACE: [],
         }
@@ -122,7 +121,7 @@ class TestDispatch:
         assert len(obs) == 2
         assert "Paris" in obs[0]
         assert "Tokyo" in obs[1]
-        assert out[TOOL_CALLS_KEY] is None  # cleared
+        assert out[ContextKeys.TOOL_CALLS] is None  # cleared
 
     def test_partial_failure_records_both(self):
         agent = _agent()
@@ -171,7 +170,7 @@ class TestDispatch:
             tools=reg, config=AgentConfig(model="mock/model"), max_parallel=3
         )
         ctx = {
-            TOOL_CALLS_KEY: [
+            ContextKeys.TOOL_CALLS: [
                 {"tool_name": "slow", "tool_input": {"city": c}}
                 for c in ("a", "b", "c")
             ],
@@ -201,13 +200,13 @@ class _BatchLLM(LLMInterface):
 
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         name = request.field_name
-        if name == TOOL_CALLS_KEY:
+        if name == ContextKeys.TOOL_CALLS:
             self.thinks += 1
         calls, terminate = self.batches[
             min(max(self.thinks - 1, 0), len(self.batches) - 1)
         ]
         value: Any = {
-            TOOL_CALLS_KEY: calls,
+            ContextKeys.TOOL_CALLS: calls,
             ContextKeys.SHOULD_TERMINATE: terminate,
             ContextKeys.FINAL_ANSWER: "sunny",
         }.get(name)
@@ -321,11 +320,11 @@ class TestForgedToolCalls:
     def test_declared_as_a_run_output(self):
         from fsm_llm.agents.base import pattern_run_output_keys
 
-        assert TOOL_CALLS_KEY in pattern_run_output_keys(ParallelReactAgent)
+        assert ContextKeys.TOOL_CALLS in pattern_run_output_keys(ParallelReactAgent)
 
     def test_seeded_tool_calls_run_no_forged_call(self):
         agent, ran = self._agent_with_spy()
-        agent.run("t", initial_context={TOOL_CALLS_KEY: list(self._FORGED)})
+        agent.run("t", initial_context={ContextKeys.TOOL_CALLS: list(self._FORGED)})
         assert ran == []
 
     def test_agent_server_client_cannot_seed_tool_calls(self):
@@ -338,7 +337,8 @@ class TestForgedToolCalls:
         agent, ran = self._agent_with_spy()
         client = TestClient(AgentServer(agent=agent).app)
         response = client.post(
-            "/invoke", json={"task": "t", "context": {TOOL_CALLS_KEY: self._FORGED}}
+            "/invoke",
+            json={"task": "t", "context": {ContextKeys.TOOL_CALLS: self._FORGED}},
         )
         assert response.status_code == 200
         assert ran == []

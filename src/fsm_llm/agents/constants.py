@@ -235,6 +235,8 @@ class ContextKeys:
     # Tool selection (extracted by LLM in think state)
     TOOL_NAME = "tool_name"
     TOOL_INPUT = "tool_input"
+    # ParallelReact: the list of calls one think turn selects.
+    TOOL_CALLS = "tool_calls"
     REASONING = "reasoning"
     SHOULD_TERMINATE = "should_terminate"
 

@@ -23,6 +23,7 @@ from fsm_llm.agents.fsm_definitions import (
     build_evalopt_fsm,
     build_maker_checker_fsm,
     build_orchestrator_fsm,
+    build_parallel_react_fsm,
     build_plan_execute_fsm,
     build_prompt_chain_fsm,
     build_react_fsm,
@@ -30,7 +31,6 @@ from fsm_llm.agents.fsm_definitions import (
     build_rewoo_fsm,
     build_self_consistency_fsm,
 )
-from fsm_llm.agents.parallel_react import build_parallel_react_fsm
 
 
 def _search(query: str) -> str:

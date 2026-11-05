@@ -24,16 +24,14 @@ Example::
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, ClassVar
 
-from fsm_llm import API, typed_field_extraction
+from fsm_llm import API
 from fsm_llm.logging import logger
 
 from .base import BaseAgent, caller_prompt_keys
 from .constants import (
-    FRAMEWORK_ONLY_KEYS,
     REACT_THINK_FRESH_KEYS,
     AgentStates,
     ContextKeys,
@@ -42,7 +40,7 @@ from .constants import (
 )
 from .definitions import AgentConfig, AgentResult, ToolCall
 from .exceptions import AgentError
-from .fsm_definitions import conclude_on_evidence_logic, loop_field_context_keys
+from .fsm_definitions import build_parallel_react_fsm
 from .handlers import (
     ThinkTurnLimiter,
     call_label,
@@ -50,159 +48,7 @@ from .handlers import (
     record_tool_step,
     with_feedback,
 )
-from .prompts import (
-    build_conclude_response_instructions,
-    build_think_terminate_instructions,
-)
 from .tools import ToolRegistry, normalize_tool_input, redact_secret_entries
-
-TOOL_CALLS_KEY = "tool_calls"
-
-
-def _build_parallel_think_instructions(
-    registry: ToolRegistry, task_description: str
-) -> str:
-    """Per-field instructions for the parallel-think ``tool_calls`` list."""
-    return (
-        f"You are solving this task: {task_description}\n\n"
-        f"{registry.to_prompt_description()}\n\n"
-        "Decide which tools to call NEXT. You may call SEVERAL independent tools "
-        f"at once to work in parallel. '{TOOL_CALLS_KEY}' is a JSON list of tool "
-        "calls, each an object with 'tool_name' (one of the available tools) "
-        "and 'tool_input' (an object of arguments). Use an empty list if no "
-        "tool is needed. Only batch tools whose inputs do not depend on each "
-        "other's results."
-    )
-
-
-def build_parallel_react_fsm(
-    registry: ToolRegistry,
-    task_description: str = "",
-    output_schema: type | None = None,
-    context_keys: Sequence[str] = (),
-) -> dict[str, Any]:
-    """Build the think -> act(parallel) -> conclude FSM definition.
-
-    ``think`` extracts only typed per-field values (``tool_calls`` list,
-    ``should_terminate`` bool; D-009 of plan 06a5ec0a);
-    their prompts list ``task``, ``observations``, ``agent_feedback`` and
-    ``context_keys``, never ``agent_trace``.
-    """
-    extra = (ContextKeys.AGENT_FEEDBACK, *context_keys)
-
-    persona = (
-        "You are a methodical AI agent that solves tasks by using tools. "
-        "You can call multiple independent tools at once to work in parallel. "
-        "Review previous observations before deciding. Terminate when you have "
-        "enough information to answer."
-    )
-
-    think_state: dict[str, Any] = {
-        "id": AgentStates.THINK,
-        "description": "Reason about the task and select one or more tools to run",
-        "purpose": "Decide the next (possibly parallel) batch of tool calls",
-        "required_context_keys": [TOOL_CALLS_KEY, "should_terminate"],
-        "extraction_instructions": "",
-        "field_extractions": [
-            typed_field_extraction(
-                TOOL_CALLS_KEY,
-                "list",
-                _build_parallel_think_instructions(registry, task_description),
-                context_keys=loop_field_context_keys(extra),
-            ),
-            typed_field_extraction(
-                ContextKeys.SHOULD_TERMINATE,
-                "bool",
-                build_think_terminate_instructions(),
-                context_keys=loop_field_context_keys(extra),
-                required=False,
-            ),
-        ],
-        "response_instructions": "",
-        "transitions": [
-            {
-                "target_state": AgentStates.CONCLUDE,
-                "description": "Task can be answered with current observations",
-                "priority": 10,
-                "conditions": [
-                    {
-                        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-008
-                        # Do NOT revert to should_terminate alone: a turn-1
-                        # terminate with no batch would answer from memory.
-                        # See conclude_on_evidence_logic.
-                        "description": (
-                            "Agent decided to terminate AND a tool has run "
-                            "or termination is forced"
-                        ),
-                        "logic": conclude_on_evidence_logic(),
-                    }
-                ],
-            },
-            # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
-            # Unconditional lowest-priority fallback. Do NOT gate this edge on the
-            # tool selection: a gated edge BLOCKS `think` on a null/unknown tool, and
-            # no PRE_TRANSITION or `act`-entry handler runs on a BLOCKED turn, so the
-            # run burns the 3x loop ceiling. `act` handles an empty batch.
-            {
-                "target_state": AgentStates.ACT,
-                "description": "Execute the selected tool batch",
-                "priority": 300,
-            },
-        ],
-    }
-
-    states: dict[str, Any] = {
-        AgentStates.THINK: think_state,
-        AgentStates.ACT: {
-            "id": AgentStates.ACT,
-            "description": "Execute the selected tools concurrently and observe",
-            "purpose": "Run the tool batch and record observations",
-            "response_instructions": "",
-            "transitions": [
-                {
-                    "target_state": AgentStates.CONCLUDE,
-                    "description": "Terminate when framework signals completion",
-                    "priority": 1,
-                    "conditions": [
-                        {
-                            "description": (
-                                "Framework/agent decided to terminate AND a tool "
-                                "has run or termination is forced"
-                            ),
-                            "logic": conclude_on_evidence_logic(),
-                        }
-                    ],
-                },
-                {
-                    "target_state": AgentStates.THINK,
-                    "description": "Return to thinking with new observations",
-                    "priority": 900,
-                },
-            ],
-        },
-        AgentStates.CONCLUDE: {
-            "id": AgentStates.CONCLUDE,
-            "description": "Formulate and present the final answer",
-            "purpose": "Synthesize all observations into a complete answer",
-            "required_context_keys": (
-                list(output_schema.model_fields.keys())
-                if output_schema and hasattr(output_schema, "model_fields")
-                else []
-            ),
-            "response_instructions": build_conclude_response_instructions(),
-            "transitions": [],
-        },
-    }
-
-    return {
-        "name": "ParallelReactAgent",
-        "description": "ReAct agent with parallel tool dispatch",
-        "initial_state": AgentStates.THINK,
-        "persona": persona,
-        "states": states,
-        # D-051 of plan 06a5ec0a, as every _finalize_fsm builder.
-        "handler_only_keys": list(FRAMEWORK_ONLY_KEYS),
-    }
 
 
 class ParallelReactAgent(BaseAgent):
@@ -212,7 +58,7 @@ class ParallelReactAgent(BaseAgent):
     # `tool_calls` is the list `act` executes, and a seeded value is a set key
     # (skip-if-set), so the think extraction would be skipped and the caller's
     # calls would run with no model choice, also through AgentServer.
-    _run_output_keys: ClassVar[frozenset[str]] = frozenset({TOOL_CALLS_KEY})
+    _run_output_keys: ClassVar[frozenset[str]] = frozenset({ContextKeys.TOOL_CALLS})
 
     def __init__(
         self,
@@ -300,12 +146,15 @@ class ParallelReactAgent(BaseAgent):
         """Execute the extracted tool batch concurrently; record observations."""
         forced = forced_stop_skip(context)
         if forced is not None:  # LOOP-05: no tool after the forced stop
-            return {**forced, TOOL_CALLS_KEY: None}
-        calls = self._normalize_calls(context.get(TOOL_CALLS_KEY))
+            return {**forced, ContextKeys.TOOL_CALLS: None}
+        calls = self._normalize_calls(context.get(ContextKeys.TOOL_CALLS))
         if not calls:
             return with_feedback(
                 "No tools were selected.",
-                {ContextKeys.TOOL_STATUS: ToolRunStatus.SKIPPED, TOOL_CALLS_KEY: None},
+                {
+                    ContextKeys.TOOL_STATUS: ToolRunStatus.SKIPPED,
+                    ContextKeys.TOOL_CALLS: None,
+                },
             )
 
         # Submit in order; gather results in order for deterministic observations.
@@ -348,6 +197,6 @@ class ParallelReactAgent(BaseAgent):
             ContextKeys.TOOL_RESULT: f"Executed {len(calls)} tool(s).",
             ContextKeys.TOOL_STATUS: batch_status,
             **recorded,
-            TOOL_CALLS_KEY: None,
+            ContextKeys.TOOL_CALLS: None,
             ContextKeys.SHOULD_TERMINATE: None,
         }

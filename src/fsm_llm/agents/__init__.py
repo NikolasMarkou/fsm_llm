@@ -78,6 +78,7 @@ from .exceptions import (
     ToolExecutionError,
     ToolNotFoundError,
 )
+from .fsm_definitions import build_parallel_react_fsm
 from .hitl import (
     ApprovalCallback,
     ApprovalPolicy,
@@ -114,7 +115,7 @@ from .okf import (
     export_semantic_memory,
 )
 from .orchestrator import OrchestratorAgent
-from .parallel_react import ParallelReactAgent, build_parallel_react_fsm
+from .parallel_react import ParallelReactAgent
 from .plan_execute import PlanExecuteAgent
 from .prompt_chain import PromptChainAgent
 from .python_tools import (

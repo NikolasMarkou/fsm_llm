@@ -25,7 +25,7 @@ from fsm_llm.agents.handlers import AgentHandlers
 from fsm_llm.agents.hitl import HumanInTheLoop
 from fsm_llm.agents.memory_tools import create_memory_tools
 from fsm_llm.agents.native_fc import NativeFunctionCallingReactAgent
-from fsm_llm.agents.parallel_react import TOOL_CALLS_KEY, ParallelReactAgent
+from fsm_llm.agents.parallel_react import ParallelReactAgent
 from fsm_llm.agents.rewoo import REWOOAgent
 from fsm_llm.agents.tools import ToolRegistry, redact_secret_entries
 from fsm_llm.definitions import CompletionResponse, ModelToolCall
@@ -198,7 +198,9 @@ class TestSiblingExecutors:
             tools=tool.registry, config=AgentConfig(model="mock/model")
         )
         context = {
-            TOOL_CALLS_KEY: [{"tool_name": "lookup", "tool_input": dict(_INPUT)}],
+            ContextKeys.TOOL_CALLS: [
+                {"tool_name": "lookup", "tool_input": dict(_INPUT)}
+            ],
             ContextKeys.OBSERVATIONS: [],
             ContextKeys.AGENT_TRACE: [],
         }
