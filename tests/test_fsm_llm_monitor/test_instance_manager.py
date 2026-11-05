@@ -180,34 +180,6 @@ class TestInstanceManager:
         with pytest.raises(TypeError):
             mgr._get_workflow("ag1")
 
-    def test_launch_agent_requires_extension(self):
-        mgr = self._make_manager()
-        import pytest
-
-        import fsm_llm.monitor.instance_manager as im
-
-        old = im._HAS_AGENTS
-        try:
-            im._HAS_AGENTS = False
-            with pytest.raises(RuntimeError, match="not installed"):
-                mgr.launch_agent(task="do something")
-        finally:
-            im._HAS_AGENTS = old
-
-    def test_launch_workflow_requires_extension(self):
-        mgr = self._make_manager()
-        import pytest
-
-        import fsm_llm.monitor.instance_manager as im
-
-        old = im._HAS_WORKFLOWS
-        try:
-            im._HAS_WORKFLOWS = False
-            with pytest.raises(RuntimeError, match="not installed"):
-                mgr.launch_workflow()
-        finally:
-            im._HAS_WORKFLOWS = old
-
 
 class TestRegisterMonitorHandlers:
     def test_registers_7_handlers(self):
@@ -704,10 +676,10 @@ class TestFindExamplesDir:
         # src/fsm_llm/monitor/; a wrong depth silently returns None.
         from pathlib import Path
 
-        from fsm_llm.monitor.instance_manager import _find_examples_dir
+        from fsm_llm.monitor.instance_manager import find_examples_dir
 
         repo = Path(__file__).resolve().parents[2]
-        assert _find_examples_dir() == repo / "examples"
+        assert find_examples_dir() == repo / "examples"
 
 
 class TestWorkflowPresets:

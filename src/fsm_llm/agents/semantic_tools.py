@@ -29,7 +29,7 @@ EmbedTextsFn = Callable[[Sequence[str]], list[list[float]]]
 # import the provider SDK or call an embedding API here, and do NOT add an Embedder ABC
 # or per-class embedding code: the memory store and the tool registry share
 # this one function. See D-005.
-def _embedding_backend(embedding_model: str, embed_fn: EmbedFn | None) -> EmbedTextsFn:
+def embedding_backend(embedding_model: str, embed_fn: EmbedFn | None) -> EmbedTextsFn:
     """The batch embedding function of a semantic store or registry.
 
     Shared by :class:`SemanticToolRegistry` and
@@ -64,7 +64,7 @@ def _tool_text(tool: ToolDefinition) -> str:
     return f"{tool.name}: {tool.description}"
 
 
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
+def cosine_similarity(a: list[float], b: list[float]) -> float:
     """Compute cosine similarity between two vectors.
 
     Vectors of different length (e.g. cached under another embedding model)
@@ -125,7 +125,7 @@ class SemanticToolRegistry(ToolRegistry):
     ) -> None:
         super().__init__()
         self._embedding_model = embedding_model
-        self._embed_texts = _embedding_backend(embedding_model, embed_fn)
+        self._embed_texts = embedding_backend(embedding_model, embed_fn)
         self._default_top_k = top_k
         self._auto_embed = auto_embed
         # DECISION plan-2026-07-20T040150-876e7164/D-005 [STALE]: `_embeddings` gets its OWN
@@ -218,7 +218,7 @@ class SemanticToolRegistry(ToolRegistry):
             # Re-acquires the lock internally; must NOT be called while holding it.
             self._embed_tool(tool)
 
-        # Snapshot under the lock, score outside it: `_cosine_similarity` is pure
+        # Snapshot under the lock, score outside it: `cosine_similarity` is pure
         # CPU work over vectors that are never mutated in place, so it does not
         # need the lock, and holding it here would block every concurrent
         # `register()` for the duration of the scan.
@@ -228,7 +228,7 @@ class SemanticToolRegistry(ToolRegistry):
         # Score each tool
         scores: list[tuple[str, float]] = []
         for tool_name, tool_embedding in embedding_snapshot:
-            score = _cosine_similarity(query_embedding, tool_embedding)
+            score = cosine_similarity(query_embedding, tool_embedding)
             scores.append((tool_name, score))
 
         # Sort by score descending

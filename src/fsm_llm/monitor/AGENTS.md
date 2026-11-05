@@ -39,7 +39,7 @@ Frontend (`static/`, no build step, ES modules): `app.js` boots (checks `/api/au
 | File | Role | Notes |
 | --- | --- | --- |
 | `server.py` | FastAPI `app`, `configure`, `get_manager`, all routes, `/ws`, builder sessions, security middleware | Module globals: `_manager`, `_api_key`, `_CORS_ORIGINS`, `_TRUSTED_HOSTS`, `_flows`, `_builder_sessions`, `_builder_busy`, `_preset_cache` |
-| `instance_manager.py` | `InstanceManager`, `ManagedFSM/Agent/Workflow`, `_MonitorHandler`, `register_monitor_handlers`, `unregister_monitor_handlers`, `snapshot_from_api`, `validate_preset_id`, `_find_examples_dir` | Optional imports set `_HAS_WORKFLOWS`, `_HAS_AGENTS` |
+| `instance_manager.py` | `InstanceManager`, `ManagedFSM/Agent/Workflow`, `_MonitorHandler`, `register_monitor_handlers`, `unregister_monitor_handlers`, `snapshot_from_api`, `validate_preset_id`, `find_examples_dir` | Imports `fsm_llm.workflows` and `fsm_llm.agents` plainly (both ship in every install); `get_capabilities()` reports both `True` |
 | `collector.py` | `EventCollector`, `redact_context` | `threading.Lock`, `deque(maxlen)` for events and logs |
 | `otel.py` | `OTELExporter` | Own `TracerProvider`, never set as global |
 | `definitions.py` | Pydantic models, `normalize_message_history`, `model_to_dict` | Request/config bounds live here |
@@ -77,7 +77,7 @@ Exports (`__init__.__all__`, one static list): `__version__`, `EventCollector`, 
 - Builder: `POST /api/builder/start [K]` (501 if `fsm_llm.agents.meta_builder` missing, 429 at 50 sessions), `POST /api/builder/send [K]` (404 unknown, 409 while a send is in flight, including one that timed out and still runs; session removed on completion), `GET /api/builder/result/{sid} [K]` (`{busy: true}` while a send runs), `DELETE /api/builder/{sid} [K]` (409 while busy). Sessions expire 1 h after last use (swept on start and every 60 `/ws` cycles).
 - `WS /ws`: Host/Origin checked (close 4403); with a key the first client message must be `{"type": "auth", "api_key": "..."}` within 5 s (close 4401). A new client gets up to 50 past events and logs. Each `refresh_interval` sends `{type:"metrics", data, events?, logs?, log_count, instances, agent_updates?, workflow_updates?, dashboard_config?}`; events and logs stream from cursors (at most 50 per cycle, sent newest first, the rest next cycle; D-004); the manager is re-read each cycle. Serialized with `redacting_json_default` (D-008).
 
-Error mapping (`_raise_http`, used by the FSM, workflow, and agent routes): `KeyError`/`FileNotFoundError` -> 404, `ConversationBusyError` -> 409, `MonitorCapacityError` -> 429, `NotImplementedError` (extension missing) -> 501, `TypeError`/`ValueError` -> 400, other -> 500 `"Internal server error"` (message logged, not returned). `asyncio.TimeoutError` -> 504. Monitoring routes map `MonitorError` to 500.
+Error mapping (`_raise_http`, used by the FSM, workflow, and agent routes): `KeyError`/`FileNotFoundError` -> 404, `ConversationBusyError` -> 409, `MonitorCapacityError` -> 429, `NotImplementedError` -> 501, `TypeError`/`ValueError` -> 400, other -> 500 `"Internal server error"` (message logged, not returned). `asyncio.TimeoutError` -> 504. Monitoring routes map `MonitorError` to 500.
 
 ## Data shapes
 
@@ -100,7 +100,7 @@ Error mapping (`_raise_http`, used by the FSM, workflow, and agent routes): `Key
 - Agents: launchable set `_AGENT_CLASSES` = ReactAgent, ReflexionAgent, PlanExecuteAgent, REWOOAgent, ADaPTAgent, DebateAgent, SelfConsistencyAgent. EvaluatorOptimizer and MakerChecker are deliberately excluded (constructor args a form cannot supply; D-001 of plan 0c00a594). The first five (`_TOOL_BASED_AGENTS`) require non-empty tools; tools are stubs returning `stub_response`. Status goes `running -> cancelling -> cancelled` or `completed|failed`; a run that finishes after a cancel keeps its result with status `cancelled`; `get_agent_status` reconciles a dead thread. Iteration and tool-call events are emitted after the run from `result.trace`.
 - `destroy_instance` for agents sets the cancel flag and joins the thread for 1.5 s, logging a warning if still alive; there is no mid-run cancellation (D-007). For workflows it schedules `engine.shutdown()` on the loop that owns the engine.
 - Workflows: only `_WORKFLOW_PRESETS` (`demo_linear`, `demo_branching`), built with the workflows DSL from auto/condition steps (no LLM); `definition_json` alone raises `ValueError`. Run bookkeeping (active runs, `completed|failed|cancelled` events, `ManagedWorkflow.status`, step events) comes from the engine hook, whatever ended the run (D-006).
-- `validate_preset_id` rejects `..`, absolute paths, and anything resolving outside `examples/`. `_find_examples_dir` looks at `Path(__file__).resolve().parents[3] / "examples"`; None in a wheel install.
+- `validate_preset_id` rejects `..`, absolute paths, and anything resolving outside `examples/`. `find_examples_dir` looks at `Path(__file__).resolve().parents[3] / "examples"`; None in a wheel install.
 - `OTELExporter` must not register a global tracer provider. Callers must hold a reference to it while enabled.
 - `__main__` enables library logging; a library object (manager, server import) must never flip global loguru state (D-008). Embedders running `uvicorn fsm_llm.monitor.server:app` call `setup_logging()` themselves.
 - Core interaction: an attached monitor handler makes the core deep-copy the context at each handled timing, so a context value that cannot be deep-copied raises `TypeError` (core `handlers.py` D-025) only when the monitor is attached.
@@ -115,7 +115,7 @@ Error mapping (`_raise_http`, used by the FSM, workflow, and agent routes): `Key
 
 ## Failure modes
 
-- See the error mapping above. Agent type not launchable or missing tools -> 400 from `/api/agent/launch`; extension missing -> 501.
+- See the error mapping above. Agent type not launchable or missing tools -> 400 from `/api/agent/launch`; a `NotImplementedError` -> 501.
 - `snapshot_from_api` / `get_conversation_snapshot` return `None` on any exception (logged at DEBUG).
 - Calling `configure()` again without `api_key` and without the env var disables auth (WARNING logged).
 - `/ws` errors other than disconnect are logged at DEBUG and the socket is closed; the frontend reconnects with backoff, and a 4401 close forces the key prompt.

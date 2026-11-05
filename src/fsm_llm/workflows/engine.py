@@ -50,7 +50,7 @@ from .models import (
     WorkflowStatus,
     WorkflowStepResult,
 )
-from .steps import _STEP_EXECUTOR
+from .steps import STEP_EXECUTOR
 
 __all__ = ["MAX_STEPS_PER_RUN", "Timer", "WorkflowEngine"]
 
@@ -583,7 +583,7 @@ class WorkflowEngine:
             # Execute the step. When a workflow-level deadline is set, bound the
             # step itself by the remaining budget so a single long step cannot
             # run unbounded past the deadline.
-            token = _STEP_EXECUTOR.set(self.executor)
+            token = STEP_EXECUTOR.set(self.executor)
             try:
                 if instance.deadline is not None:
                     remaining = (
@@ -600,7 +600,7 @@ class WorkflowEngine:
                 else:
                     result = await current_step.execute(instance.context)
             finally:
-                _STEP_EXECUTOR.reset(token)
+                STEP_EXECUTOR.reset(token)
 
             if not isinstance(result, WorkflowStepResult):
                 raise WorkflowStepError(

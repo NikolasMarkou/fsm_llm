@@ -12,6 +12,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .constants import DEFAULT_MAX_HISTORY_ENTRIES
+from .exceptions import WorkflowStateError
 
 
 class WorkflowStatus(str, Enum):
@@ -160,8 +161,6 @@ class WorkflowInstance(BaseModel):
         only when it carries an error (so a RUNNING -> RUNNING step transition
         does not add a redundant "Status changed" entry).
         """
-        from .exceptions import WorkflowStateError
-
         allowed = _VALID_STATUS_TRANSITIONS.get(self.status, set())
         if status != self.status and status not in allowed:
             raise WorkflowStateError(

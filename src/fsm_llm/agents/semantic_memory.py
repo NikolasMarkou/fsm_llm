@@ -40,8 +40,8 @@ from typing import Annotated, Any
 from fsm_llm.logging import logger
 
 from .definitions import ToolDefinition
-from .semantic_tools import EmbedFn, _cosine_similarity, _embedding_backend
-from .tools import _infer_schema_from_hints
+from .semantic_tools import EmbedFn, cosine_similarity, embedding_backend
+from .tools import infer_schema_from_hints
 
 
 class MemoryEntry:
@@ -112,7 +112,7 @@ class SemanticMemoryStore:
     ) -> None:
         self._embedding_model = embedding_model
         self._persist_path = os.path.expanduser(persist_path) if persist_path else None
-        self._embed_texts = _embedding_backend(embedding_model, embed_fn)
+        self._embed_texts = embedding_backend(embedding_model, embed_fn)
         self._max_entries = max_entries
         self._entries: list[MemoryEntry] = []
         self._counter = 0
@@ -192,7 +192,7 @@ class SemanticMemoryStore:
             scored = self._substring_search(query, entries)
         else:
             scored = [
-                (e, _cosine_similarity(query_emb, e.embedding))
+                (e, cosine_similarity(query_emb, e.embedding))
                 for e in entries
                 if e.embedding is not None
             ]
@@ -429,7 +429,7 @@ def create_semantic_memory_tools(
             ToolDefinition(
                 name=fn.__name__,
                 description=(fn.__doc__ or "").strip().split("\n")[0],
-                parameter_schema=_infer_schema_from_hints(fn),
+                parameter_schema=infer_schema_from_hints(fn),
                 execute_fn=fn,
             )
         )

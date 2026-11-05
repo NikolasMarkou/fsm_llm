@@ -18,10 +18,10 @@ flowchart TD
     reasoning[fsm_llm.reasoning] --> core
     workflows[fsm_llm.workflows] --> core
     agents[fsm_llm.agents] --> core
-    agents -. ReasoningReactAgent, lazy import .-> reasoning
+    agents -- ReasoningReactAgent, imported with the package --> reasoning
     monitor[fsm_llm.monitor] --> core
-    monitor -. optional launch/builder .-> agents
-    monitor -. optional demo workflows .-> workflows
+    monitor -- launch, builder --> agents
+    monitor -- demo workflows --> workflows
     eval[fsm_llm.eval] --> core
 ```
 

@@ -162,7 +162,7 @@ class TestConversationStepResourceCleanup:
         mock_api_class.from_file.return_value = mock_api
 
         with patch.dict("sys.modules", {}):
-            with patch("fsm_llm.API", mock_api_class):
+            with patch("fsm_llm.workflows.steps.API", mock_api_class):
                 with patch("fsm_llm.api.API", mock_api_class):
                     result = await step.execute({})
 

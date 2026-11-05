@@ -46,6 +46,7 @@ from .definitions import (
     # Classification models
     ClassificationError,
     ClassificationExtractionConfig,
+    ClassificationPromptConfig,
     ClassificationResponseError,
     ClassificationResult,
     ClassificationSchema,
@@ -139,7 +140,6 @@ from .memory import (
 # Enhanced Prompt Building Components
 # --------------------------------------------------------------
 from .prompts import (
-    ClassificationPromptConfig,
     DataExtractionPromptBuilder,
     DataExtractionPromptConfig,
     FieldExtractionPromptBuilder,

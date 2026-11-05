@@ -970,12 +970,12 @@ class TestSemanticToolRegistry:
 
     def test_cosine_similarity(self):
         """Cosine similarity computation is correct."""
-        from fsm_llm.agents.semantic_tools import _cosine_similarity
+        from fsm_llm.agents.semantic_tools import cosine_similarity
 
-        assert _cosine_similarity([1, 0], [1, 0]) == pytest.approx(1.0)
-        assert _cosine_similarity([1, 0], [0, 1]) == pytest.approx(0.0)
-        assert _cosine_similarity([1, 0], [-1, 0]) == pytest.approx(-1.0)
-        assert _cosine_similarity([0, 0], [1, 1]) == pytest.approx(0.0)
+        assert cosine_similarity([1, 0], [1, 0]) == pytest.approx(1.0)
+        assert cosine_similarity([1, 0], [0, 1]) == pytest.approx(0.0)
+        assert cosine_similarity([1, 0], [-1, 0]) == pytest.approx(-1.0)
+        assert cosine_similarity([0, 0], [1, 1]) == pytest.approx(0.0)
 
     @patch("fsm_llm.agents.semantic_tools.SemanticToolRegistry._get_embedding")
     def test_retrieve_with_mock_embeddings(self, mock_embed):

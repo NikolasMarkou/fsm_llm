@@ -13,16 +13,11 @@ import warnings
 from pathlib import Path
 from typing import Any, cast
 
+import yaml
+
 from fsm_llm.logging import logger
 
 from .definitions import AgentConfig
-
-try:
-    import yaml
-
-    _HAS_YAML = True
-except ImportError:
-    _HAS_YAML = False
 
 
 class SOPDefinition:
@@ -235,10 +230,6 @@ class SOPRegistry:
         if path.suffix == ".json":
             return cast("dict[str, Any]", json.loads(text))
         elif path.suffix in (".yaml", ".yml"):
-            if not _HAS_YAML:
-                raise ImportError(
-                    "YAML support requires PyYAML. Install with: pip install pyyaml"
-                )
             return cast("dict[str, Any]", yaml.safe_load(text))
         else:
             raise ValueError(f"Unsupported file format: {path.suffix}")

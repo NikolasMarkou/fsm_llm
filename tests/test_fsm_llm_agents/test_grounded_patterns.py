@@ -17,7 +17,7 @@ import pytest
 from fsm_llm import typed_field_extraction
 from fsm_llm.agents.constants import ContextKeys
 from fsm_llm.agents.debate import DebateAgent
-from fsm_llm.agents.fsm_definitions import _loop_field_context_keys
+from fsm_llm.agents.fsm_definitions import loop_field_context_keys
 from fsm_llm.agents.handlers import make_fresh_keys_handler
 from fsm_llm.api import API
 from fsm_llm.definitions import (
@@ -303,7 +303,7 @@ class TestTypedFieldExtraction:
             "critique",
             "str",
             "Name the weakest point.",
-            context_keys=_loop_field_context_keys(
+            context_keys=loop_field_context_keys(
                 [ContextKeys.PROPOSITION, ContextKeys.TASK]
             ),
             required=False,
@@ -323,7 +323,7 @@ class TestTypedFieldExtraction:
     @pytest.mark.parametrize("field_type", ["str", "float", "list", "bool", "any"])
     def test_supported_types(self, field_type):
         field = typed_field_extraction(
-            "item", field_type, "x", context_keys=_loop_field_context_keys()
+            "item", field_type, "x", context_keys=loop_field_context_keys()
         )
         assert FieldExtractionConfig.model_validate(field).field_type == field_type
 
@@ -334,14 +334,14 @@ class TestTypedFieldExtraction:
                 "item",
                 field_type,  # type: ignore[arg-type]
                 "x",
-                context_keys=_loop_field_context_keys(),
+                context_keys=loop_field_context_keys(),
             )
 
     @pytest.mark.parametrize("key", [ContextKeys.AGENT_TRACE, "_max_iterations"])
     def test_trace_and_internal_context_keys_rejected(self, key):
         with pytest.raises(ValueError, match="not allowed"):
             typed_field_extraction(
-                "item", "str", "x", context_keys=_loop_field_context_keys([key])
+                "item", "str", "x", context_keys=loop_field_context_keys([key])
             )
 
     @pytest.mark.parametrize(
@@ -352,7 +352,7 @@ class TestTypedFieldExtraction:
         # meta-commentary (the envelope's `reasoning`), so it is refused.
         with pytest.raises(ValueError, match="envelope"):
             typed_field_extraction(
-                name, "str", "x", context_keys=_loop_field_context_keys()
+                name, "str", "x", context_keys=loop_field_context_keys()
             )
 
     def test_envelope_named_field_never_reaches_the_model(self):
@@ -364,7 +364,7 @@ class TestTypedFieldExtraction:
                 llm,
                 [
                     typed_field_extraction(
-                        "reasoning", "str", "x", context_keys=_loop_field_context_keys()
+                        "reasoning", "str", "x", context_keys=loop_field_context_keys()
                     )
                 ],
             )
@@ -379,7 +379,7 @@ class TestTypedFieldExtraction:
                     "critique",
                     "str",
                     "Name the flaw.",
-                    context_keys=_loop_field_context_keys(),
+                    context_keys=loop_field_context_keys(),
                 )
             ],
         )
@@ -398,7 +398,7 @@ class TestTypedFieldExtraction:
                     "critique",
                     "str",
                     "Name the flaw.",
-                    context_keys=_loop_field_context_keys(),
+                    context_keys=loop_field_context_keys(),
                 )
             ],
         )
@@ -419,7 +419,7 @@ class TestTypedFieldExtraction:
                     "critique",
                     "str",
                     "Name the flaw.",
-                    context_keys=_loop_field_context_keys(),
+                    context_keys=loop_field_context_keys(),
                 )
             ],
         )
@@ -460,7 +460,7 @@ class TestTypedFieldExtraction:
                     "critique",
                     "str",
                     "Name the flaw.",
-                    context_keys=_loop_field_context_keys(),
+                    context_keys=loop_field_context_keys(),
                 )
             ],
         )
@@ -2197,7 +2197,7 @@ class TestCoveredStatesMakeNoBulkCall:
 
     def test_typed_field_prompt_names_no_user_message(self):
         text = typed_field_extraction(
-            "draft", "str", "Write it.", context_keys=_loop_field_context_keys()
+            "draft", "str", "Write it.", context_keys=loop_field_context_keys()
         )["extraction_instructions"]
 
         assert text.endswith("'Already extracted:' context. Write it.")

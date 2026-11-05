@@ -21,7 +21,7 @@ from typing import Any, get_type_hints
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from fsm_llm.logging import logger
-from fsm_llm.runner import _redact_context
+from fsm_llm.utilities import redact_context
 
 from .constants import ContextKeys, Defaults, ErrorMessages, LogMessages
 from .definitions import ToolAnnotations, ToolCall, ToolDefinition, ToolResult
@@ -52,7 +52,7 @@ def _as_param_value(value: Any, prop: dict[str, Any] | None) -> Any:
     return value
 
 
-# Wrapper key for `redact_secret_entries`: `_redact_context` matches mapping
+# Wrapper key for `redact_secret_entries`: `redact_context` matches mapping
 # keys only, so a bare list or scalar is wrapped once. Not a secret-shaped name.
 _REDACT_WRAPPER_KEY = "value"
 
@@ -80,7 +80,7 @@ def redact_secret_entries(value: Any) -> Any:
     # at every level). Do NOT drop the key: the model and the reader should
     # still see which argument was passed. See decisions.md D-016.
     """
-    return _redact_context({_REDACT_WRAPPER_KEY: value})[_REDACT_WRAPPER_KEY]
+    return redact_context({_REDACT_WRAPPER_KEY: value})[_REDACT_WRAPPER_KEY]
 
 
 def normalize_tool_input(raw: Any) -> dict[str, Any]:
@@ -387,7 +387,7 @@ class ToolRegistry:
             ) or (
                 len(sig_params) == 1 and _is_dict_annotation(sig_params[0].annotation)
             )
-            parameter_schema = {} if dict_style else _infer_schema_from_hints(fn)
+            parameter_schema = {} if dict_style else infer_schema_from_hints(fn)
             if parameter_schema:
                 args_model = _args_model_from_hints(fn, tool_name)
 
@@ -778,7 +778,7 @@ class ToolRegistry:
         return self.register(tool.to_tool_definition())
 
 
-def _infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
+def infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
     """Infer a JSON-style parameter schema from a function's type hints.
 
     Supports standard Python types (str, int, float, bool, list, dict) and
@@ -1182,7 +1182,7 @@ def tool(
         if parameter_schema is not None:
             schema = parameter_schema
         else:
-            schema = _infer_schema_from_hints(fn)
+            schema = infer_schema_from_hints(fn)
             if schema:
                 args_model = _args_model_from_hints(fn, tool_name)
 

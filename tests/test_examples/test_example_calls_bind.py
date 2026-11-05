@@ -18,7 +18,7 @@ example is executed):
 - keywords forwarded through ``**kwargs``: ``API.from_file`` and
   ``API.from_definition`` forward to ``API.__init__``; ``create_agent`` to the
   pattern's constructor; an agent constructor's leftover keywords go through
-  ``BaseAgent``'s own denylist (``_reject_misplaced_kwargs``); a keyword that
+  ``BaseAgent``'s own denylist (``reject_misplaced_kwargs``); a keyword that
   lands in ``API.__init__``'s ``**llm_kwargs`` may not be one the LLM layer
   ignores (``RESERVED_LLM_CALL_KWARGS``), so renaming ``model`` is caught.
 
@@ -42,7 +42,7 @@ import pytest
 
 from fsm_llm import API
 from fsm_llm.agents import _PATTERNS, create_agent
-from fsm_llm.agents.base import BaseAgent, _reject_misplaced_kwargs
+from fsm_llm.agents.base import BaseAgent, reject_misplaced_kwargs
 from fsm_llm.constants import RESERVED_LLM_CALL_KWARGS
 
 pytestmark = pytest.mark.examples
@@ -330,7 +330,7 @@ class _Checker:
                 for p in inspect.signature(vars(cls)["__init__"]).parameters
             }
             try:
-                _reject_misplaced_kwargs(
+                reject_misplaced_kwargs(
                     target.__name__, dict.fromkeys(leftover - named)
                 )
             except TypeError as error:

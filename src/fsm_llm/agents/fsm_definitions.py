@@ -8,10 +8,16 @@ from collections.abc import Sequence
 from typing import Any
 
 from fsm_llm import typed_field_extraction
-from fsm_llm.constants import has_internal_prefix
+from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT, has_internal_prefix
 
+from . import meta_prompts
 from .constants import (
     FRAMEWORK_ONLY_KEYS,
+    META_ARTIFACT_TYPE_INTENTS,
+    META_HANDLER_ONLY_KEYS,
+    META_UNKNOWN_ARTIFACT_TYPE,
+    META_UNKNOWN_ARTIFACT_TYPE_DESCRIPTION,
+    NATIVE_FC_HANDLER_ONLY_KEYS,
     ADaPTStates,
     AgentStates,
     ContextKeys,
@@ -19,6 +25,13 @@ from .constants import (
     Defaults,
     EvalOptStates,
     MakerCheckerStates,
+    MetaBuilderStates,
+    MetaBuildOutcome,
+    MetaContextKeys,
+    MetaDefaults,
+    NativeFCContextKeys,
+    NativeFCStates,
+    NativeLoopEnd,
     OrchestratorStates,
     PlanExecuteStates,
     PromptChainStates,
@@ -28,6 +41,37 @@ from .constants import (
     StopReason,
 )
 from .definitions import ChainStep
+from .prompts import (
+    build_adapt_field_instructions,
+    build_assess_response_instructions,
+    build_attempt_response_instructions,
+    build_chain_output_response_instructions,
+    build_chain_step_field_instructions,
+    build_collect_response_instructions,
+    build_combine_response_instructions,
+    build_conclude_response_instructions,
+    build_debate_conclude_response_instructions,
+    build_debate_field_instructions,
+    build_decompose_response_instructions,
+    build_delegate_response_instructions,
+    build_evalopt_field_instructions,
+    build_evalopt_output_response_instructions,
+    build_evaluate_field_instructions,
+    build_execute_step_instructions,
+    build_generate_response_instructions,
+    build_maker_checker_field_instructions,
+    build_maker_checker_output_response_instructions,
+    build_orchestrate_response_instructions,
+    build_orchestrator_field_instructions,
+    build_orchestrator_synthesize_response_instructions,
+    build_plan_steps_instructions,
+    build_reflect_field_instructions,
+    build_rewoo_plan_field_instructions,
+    build_rewoo_solve_response_instructions,
+    build_synthesize_response_instructions,
+    build_think_extraction_instructions,
+    build_think_terminate_instructions,
+)
 from .tools import ToolRegistry
 
 # Truncate task_description for FSM metadata (name/description fields),
@@ -81,16 +125,8 @@ def build_orchestrator_fsm(
     ``subtasks`` and ``all_collected`` are explicit typed fields whose prompts
     show the task, ``worker_results`` and the caller's ``context_keys``
     (never ``agent_trace`` or ``skipped_subtasks``). Raises ``ValueError``
-    like :func:`_loop_field_context_keys` for a disallowed context key.
+    like :func:`loop_field_context_keys` for a disallowed context key.
     """
-    from .prompts import (
-        build_collect_response_instructions,
-        build_delegate_response_instructions,
-        build_orchestrate_response_instructions,
-        build_orchestrator_field_instructions,
-        build_orchestrator_synthesize_response_instructions,
-    )
-
     persona = (
         "You are an orchestrator AI agent that solves tasks by decomposing them "
         "into subtasks and delegating to workers. You analyze results, determine "
@@ -121,7 +157,7 @@ def build_orchestrator_fsm(
                     ContextKeys.SUBTASKS,
                     "any",
                     fields[ContextKeys.SUBTASKS],
-                    context_keys=_loop_field_context_keys(judged),
+                    context_keys=loop_field_context_keys(judged),
                 )
             ],
             "response_instructions": build_orchestrate_response_instructions(),
@@ -168,7 +204,7 @@ def build_orchestrator_fsm(
                     ContextKeys.ALL_COLLECTED,
                     "bool",
                     fields[ContextKeys.ALL_COLLECTED],
-                    context_keys=_loop_field_context_keys(judged),
+                    context_keys=loop_field_context_keys(judged),
                 )
             ],
             "response_instructions": build_collect_response_instructions(),
@@ -248,16 +284,8 @@ def build_adapt_fsm(
     prompts show the task, the attempt (assess, decompose) and the caller's
     ``context_keys``, never ``agent_trace``. The three loop states make no
     state-level bulk call. Raises ``ValueError`` like
-    :func:`_loop_field_context_keys`.
+    :func:`loop_field_context_keys`.
     """
-    from .prompts import (
-        build_adapt_field_instructions,
-        build_assess_response_instructions,
-        build_attempt_response_instructions,
-        build_combine_response_instructions,
-        build_decompose_response_instructions,
-    )
-
     persona = (
         "You are an adaptive AI agent that attempts tasks directly first. "
         "If the direct attempt is insufficient, you decompose the task into "
@@ -297,7 +325,7 @@ def build_adapt_fsm(
                     ContextKeys.ATTEMPT_RESULT,
                     "str",
                     fields[ContextKeys.ATTEMPT_RESULT],
-                    context_keys=_loop_field_context_keys(context_keys),
+                    context_keys=loop_field_context_keys(context_keys),
                 )
             ],
             "response_instructions": build_attempt_response_instructions(),
@@ -333,7 +361,7 @@ def build_adapt_fsm(
                     ContextKeys.ATTEMPT_SUCCEEDED,
                     "bool",
                     fields[ContextKeys.ATTEMPT_SUCCEEDED],
-                    context_keys=_loop_field_context_keys(judged),
+                    context_keys=loop_field_context_keys(judged),
                 )
             ],
             "response_instructions": build_assess_response_instructions(),
@@ -426,13 +454,13 @@ def build_adapt_fsm(
                     ContextKeys.SUBTASKS,
                     "list",
                     fields[ContextKeys.SUBTASKS],
-                    context_keys=_loop_field_context_keys(judged),
+                    context_keys=loop_field_context_keys(judged),
                 ),
                 typed_field_extraction(
                     ContextKeys.OPERATOR,
                     "str",
                     fields[ContextKeys.OPERATOR],
-                    context_keys=_loop_field_context_keys(
+                    context_keys=loop_field_context_keys(
                         (*judged, ContextKeys.SUBTASKS)
                     ),
                     required=False,
@@ -508,7 +536,7 @@ def _tool_selection_field_extractions(
     ``tool_name`` as ``str`` (omitted when ``include_tool_name`` is False, i.e.
     the classifier owns it) and ``tool_input`` as ``dict``. ``context_keys``,
     when given, narrows each prompt's context to those keys (see
-    :func:`_loop_field_context_keys`). Never raises.
+    :func:`loop_field_context_keys`). Never raises.
 
     # DECISION plan-2026-09-19T175721-21cd7f8e/D-024
     Do NOT drop these and rely on the auto-minted config from
@@ -557,7 +585,7 @@ _LOOP_FIELD_CONTEXT_KEYS: tuple[str, ...] = (
 )
 
 
-def _loop_field_context_keys(extra_context_keys: Sequence[str] = ()) -> list[str]:
+def loop_field_context_keys(extra_context_keys: Sequence[str] = ()) -> list[str]:
     """The ``context_keys`` of a loop field prompt: ``task``, ``observations``,
     then ``extra_context_keys`` (order kept, duplicates dropped).
 
@@ -599,11 +627,9 @@ def _think_field_extractions(
     never ``agent_trace``. ``think_instructions`` is the think prompt; pair
     the result with an empty state-level ``extraction_instructions`` unless the
     classifier owns ``tool_name`` (D-019 of plan 21cd7f8e keeps the bulk fill
-    there). Raises ``ValueError`` like :func:`_loop_field_context_keys`.
+    there). Raises ``ValueError`` like :func:`loop_field_context_keys`.
     """
-    from .prompts import build_think_terminate_instructions
-
-    keys = _loop_field_context_keys((ContextKeys.AGENT_FEEDBACK, *context_keys))
+    keys = loop_field_context_keys((ContextKeys.AGENT_FEEDBACK, *context_keys))
     return [
         *_tool_selection_field_extractions(
             think_instructions,
@@ -620,7 +646,7 @@ def _think_field_extractions(
     ]
 
 
-def _conclude_on_evidence_logic(
+def conclude_on_evidence_logic(
     flag: str = ContextKeys.SHOULD_TERMINATE,
 ) -> dict[str, Any]:
     """JsonLogic for a tool-loop ``conclude`` edge: terminate on evidence only.
@@ -765,13 +791,6 @@ def build_reflexion_fsm(
     think -> await_approval -> act, the same state and priorities as
     :func:`build_react_fsm`.
     """
-    from .prompts import (
-        build_conclude_response_instructions,
-        build_evaluate_field_instructions,
-        build_reflect_field_instructions,
-        build_think_extraction_instructions,
-    )
-
     persona = (
         "You are a reflective AI agent that solves tasks by using tools, "
         "then evaluating and critiquing your own work. "
@@ -819,12 +838,12 @@ def build_reflexion_fsm(
                     "conditions": [
                         {
                             # DECISION plan-2026-09-24T091842-c1d5bfbc/D-008
-                            # Evidence guard, see _conclude_on_evidence_logic.
+                            # Evidence guard, see conclude_on_evidence_logic.
                             "description": (
                                 "Agent decided to terminate AND a tool has run "
                                 "or termination is forced"
                             ),
-                            "logic": _conclude_on_evidence_logic(),
+                            "logic": conclude_on_evidence_logic(),
                         }
                     ],
                 },
@@ -863,7 +882,7 @@ def build_reflexion_fsm(
                                 "Framework/agent decided to terminate AND a tool "
                                 "has run or termination is forced"
                             ),
-                            "logic": _conclude_on_evidence_logic(),
+                            "logic": conclude_on_evidence_logic(),
                         }
                     ],
                 },
@@ -892,20 +911,20 @@ def build_reflexion_fsm(
                     ContextKeys.EVALUATION_PASSED,
                     "bool",
                     evaluate_fields[ContextKeys.EVALUATION_PASSED],
-                    context_keys=_loop_field_context_keys(),
+                    context_keys=loop_field_context_keys(),
                 ),
                 typed_field_extraction(
                     ContextKeys.EVALUATION_SCORE,
                     "float",
                     evaluate_fields[ContextKeys.EVALUATION_SCORE],
-                    context_keys=_loop_field_context_keys(),
+                    context_keys=loop_field_context_keys(),
                     required=False,
                 ),
                 typed_field_extraction(
                     ContextKeys.EVALUATION_FEEDBACK,
                     "str",
                     evaluate_fields[ContextKeys.EVALUATION_FEEDBACK],
-                    context_keys=_loop_field_context_keys(),
+                    context_keys=loop_field_context_keys(),
                     required=False,
                 ),
             ],
@@ -928,7 +947,7 @@ def build_reflexion_fsm(
                             "description": "Passed on evidence, or forced stop",
                             "logic": {
                                 "or": [
-                                    _conclude_on_evidence_logic(
+                                    conclude_on_evidence_logic(
                                         ContextKeys.EVALUATION_PASSED
                                     ),
                                     {
@@ -974,13 +993,13 @@ def build_reflexion_fsm(
                     ContextKeys.REFLECTION,
                     "str",
                     reflect_fields[ContextKeys.REFLECTION],
-                    context_keys=_loop_field_context_keys(reflect_context),
+                    context_keys=loop_field_context_keys(reflect_context),
                 ),
                 typed_field_extraction(
                     ContextKeys.LESSONS,
                     "str",
                     reflect_fields[ContextKeys.LESSONS],
-                    context_keys=_loop_field_context_keys(reflect_context),
+                    context_keys=loop_field_context_keys(reflect_context),
                     required=False,
                 ),
             ],
@@ -1033,12 +1052,6 @@ def build_plan_execute_fsm(
                                           -> replan (step failed) -> execute_step
                                           -> execute_step (next step)
     """
-    from .prompts import (
-        build_execute_step_instructions,
-        build_plan_steps_instructions,
-        build_synthesize_response_instructions,
-    )
-
     persona = (
         "You are a strategic AI agent that solves tasks by first creating a plan, "
         "then executing each step methodically. "
@@ -1064,7 +1077,7 @@ def build_plan_execute_fsm(
             build_execute_step_instructions(
                 registry, task_description=task_description, step_result=True
             ),
-            context_keys=_loop_field_context_keys(step_context),
+            context_keys=loop_field_context_keys(step_context),
             # With tools the step result is the tool observation.
             required=not has_tools,
         )
@@ -1073,7 +1086,7 @@ def build_plan_execute_fsm(
         step_fields = [
             *_tool_selection_field_extractions(
                 step_instructions,
-                context_keys=_loop_field_context_keys(step_context),
+                context_keys=loop_field_context_keys(step_context),
             ),
             *step_fields,
         ]
@@ -1092,7 +1105,7 @@ def build_plan_execute_fsm(
                     build_plan_steps_instructions(
                         registry, task_description=task_description
                     ),
-                    context_keys=_loop_field_context_keys(),
+                    context_keys=loop_field_context_keys(),
                 )
             ],
             "response_instructions": "",
@@ -1175,7 +1188,7 @@ def build_plan_execute_fsm(
                     build_plan_steps_instructions(
                         registry, task_description=task_description, replan=True
                     ),
-                    context_keys=_loop_field_context_keys(replan_context),
+                    context_keys=loop_field_context_keys(replan_context),
                 )
             ],
             "response_instructions": "",
@@ -1233,11 +1246,6 @@ def build_react_fsm(
     :func:`_think_field_extractions`); ``context_keys`` adds caller keys to
     those prompts (``caller_prompt_keys``).
     """
-    from .prompts import (
-        build_conclude_response_instructions,
-        build_think_extraction_instructions,
-    )
-
     # Build persona with tool awareness
     persona = (
         "You are a methodical AI agent that solves tasks by using tools step by step. "
@@ -1269,7 +1277,7 @@ def build_react_fsm(
                         "Agent decided to terminate AND a tool has run or "
                         "termination is forced"
                     ),
-                    "logic": _conclude_on_evidence_logic(),
+                    "logic": conclude_on_evidence_logic(),
                 }
             ],
         },
@@ -1354,7 +1362,7 @@ def build_react_fsm(
                                 "Framework/agent decided to terminate AND a tool "
                                 "has run or termination is forced"
                             ),
-                            "logic": _conclude_on_evidence_logic(),
+                            "logic": conclude_on_evidence_logic(),
                         }
                     ],
                 },
@@ -1413,11 +1421,6 @@ def build_prompt_chain_fsm(
     (user-owned). A step after a gated step (one with ``validation_fn``) also
     has an edge to ``output`` taken when that gate failed.
     """
-    from .prompts import (
-        build_chain_output_response_instructions,
-        build_chain_step_field_instructions,
-    )
-
     persona = (
         "You are a methodical AI assistant that processes tasks through a "
         "structured pipeline of steps. Execute each step carefully, building "
@@ -1479,7 +1482,7 @@ def build_prompt_chain_fsm(
                         step.response_instructions,
                         step.extraction_instructions,
                     ),
-                    context_keys=_loop_field_context_keys((ContextKeys.CHAIN_RESULTS,)),
+                    context_keys=loop_field_context_keys((ContextKeys.CHAIN_RESULTS,)),
                 )
             ],
             "response_instructions": step.response_instructions,
@@ -1522,8 +1525,6 @@ def build_self_consistency_fsm(
     it has no extraction instructions, and the sample is the reply, which ends
     with an ``Answer:`` line for the vote.
     """
-    from .prompts import build_generate_response_instructions
-
     persona = (
         "You are a precise AI assistant. Answer the given task directly and concisely."
     )
@@ -1573,11 +1574,6 @@ def build_debate_fsm(
     round's earlier values; state-level extraction and response instructions
     are empty, so no context-free bulk call runs and only ``conclude`` speaks.
     """
-    from .prompts import (
-        build_debate_conclude_response_instructions,
-        build_debate_field_instructions,
-    )
-
     # Use proposer persona as the top-level FSM persona since it starts
     persona = proposer_persona or (
         "You are a thoughtful AI that explores questions through structured debate. "
@@ -1599,7 +1595,7 @@ def build_debate_fsm(
             name,
             "str",
             fields[name],
-            context_keys=_loop_field_context_keys(context_keys),
+            context_keys=loop_field_context_keys(context_keys),
             required=required,
         )
 
@@ -1676,7 +1672,7 @@ def build_debate_fsm(
                     ContextKeys.CONSENSUS_REACHED,
                     "bool",
                     fields[ContextKeys.CONSENSUS_REACHED],
-                    context_keys=_loop_field_context_keys(
+                    context_keys=loop_field_context_keys(
                         (
                             *round_values,
                             ContextKeys.CURRENT_ROUND,
@@ -1776,13 +1772,8 @@ def build_rewoo_fsm(
     prompt shows the task and the caller's ``context_keys``, never
     ``agent_trace`` (DECISION D-053 of plan 06a5ec0a, anchored in
     :func:`build_adapt_fsm`). Raises ``ValueError`` like
-    :func:`_loop_field_context_keys`.
+    :func:`loop_field_context_keys`.
     """
-    from .prompts import (
-        build_rewoo_plan_field_instructions,
-        build_rewoo_solve_response_instructions,
-    )
-
     persona = (
         "You are a methodical AI agent that solves tasks by planning all tool calls "
         "upfront, then executing them, and finally synthesizing an answer from the "
@@ -1805,7 +1796,7 @@ def build_rewoo_fsm(
                     build_rewoo_plan_field_instructions(
                         registry, task_description=task_description
                     ),
-                    context_keys=_loop_field_context_keys(context_keys),
+                    context_keys=loop_field_context_keys(context_keys),
                 )
             ],
             "response_instructions": "",
@@ -1870,11 +1861,6 @@ def build_evalopt_fsm(
     are silent (empty response instructions); ``evaluation_passed`` is written
     only by the evaluation handler, never extracted.
     """
-    from .prompts import (
-        build_evalopt_field_instructions,
-        build_evalopt_output_response_instructions,
-    )
-
     fields = build_evalopt_field_instructions()
 
     persona = (
@@ -1894,7 +1880,7 @@ def build_evalopt_fsm(
                     ContextKeys.GENERATED_OUTPUT,
                     "any",
                     fields[EvalOptStates.GENERATE],
-                    context_keys=_loop_field_context_keys(),
+                    context_keys=loop_field_context_keys(),
                 )
             ],
             "response_instructions": "",
@@ -1972,7 +1958,7 @@ def build_evalopt_fsm(
                     ContextKeys.GENERATED_OUTPUT,
                     "any",
                     fields[EvalOptStates.REFINE],
-                    context_keys=_loop_field_context_keys(
+                    context_keys=loop_field_context_keys(
                         (
                             ContextKeys.PREVIOUS_OUTPUT,
                             ContextKeys.REFINEMENT_FEEDBACK,
@@ -2032,11 +2018,6 @@ def build_maker_checker_fsm(
     ``revision_count`` reaches it. The count is bumped on check entry, so the
     cap holds when the checker's extraction is null (plan 5ed71cf2/D-009).
     """
-    from .prompts import (
-        build_maker_checker_field_instructions,
-        build_maker_checker_output_response_instructions,
-    )
-
     fields = build_maker_checker_field_instructions(
         maker_instructions, checker_instructions
     )
@@ -2061,7 +2042,7 @@ def build_maker_checker_fsm(
                     draft,
                     "any",
                     fields[MakerCheckerStates.MAKE],
-                    context_keys=_loop_field_context_keys(),
+                    context_keys=loop_field_context_keys(),
                 )
             ],
             "response_instructions": "",
@@ -2090,19 +2071,19 @@ def build_maker_checker_fsm(
                     ContextKeys.CHECKER_FEEDBACK,
                     "str",
                     fields[ContextKeys.CHECKER_FEEDBACK],
-                    context_keys=_loop_field_context_keys(judged),
+                    context_keys=loop_field_context_keys(judged),
                 ),
                 typed_field_extraction(
                     "quality_score",
                     "float",
                     fields["quality_score"],
-                    context_keys=_loop_field_context_keys(judged),
+                    context_keys=loop_field_context_keys(judged),
                 ),
                 typed_field_extraction(
                     ContextKeys.CHECKER_PASSED,
                     "bool",
                     fields[ContextKeys.CHECKER_PASSED],
-                    context_keys=_loop_field_context_keys(judged),
+                    context_keys=loop_field_context_keys(judged),
                     required=False,
                 ),
             ],
@@ -2190,7 +2171,7 @@ def build_maker_checker_fsm(
                     draft,
                     "any",
                     fields[MakerCheckerStates.REVISE],
-                    context_keys=_loop_field_context_keys(
+                    context_keys=loop_field_context_keys(
                         (
                             ContextKeys.PREVIOUS_DRAFT,
                             ContextKeys.CHECKER_FEEDBACK,
@@ -2283,18 +2264,6 @@ def build_meta_builder_fsm() -> dict[str, Any]:
     ``review_presentation`` from ``build_reply``. All of those are
     ``handler_only_keys`` (``META_HANDLER_ONLY_KEYS``). Never raises.
     """
-    from .constants import (
-        META_ARTIFACT_TYPE_INTENTS,
-        META_HANDLER_ONLY_KEYS,
-        META_UNKNOWN_ARTIFACT_TYPE,
-        META_UNKNOWN_ARTIFACT_TYPE_DESCRIPTION,
-        MetaBuilderStates,
-        MetaBuildOutcome,
-        MetaContextKeys,
-        MetaDefaults,
-    )
-    from .meta_prompts import build_collect_response_instructions
-
     # DECISION plan-2026-10-01T093600-944e2692/D-011: five states with the
     # artifact type in context, and the build as a core completion state.
     # Do NOT split this into per-artifact-type states (three copies of the
@@ -2368,7 +2337,7 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                 "invite the user to say 'build it'"
             ),
             "extraction_instructions": "",
-            "response_instructions": build_collect_response_instructions(),
+            "response_instructions": meta_prompts.build_collect_response_instructions(),
             "context_scope": {
                 "read_keys": [
                     keys.ARTIFACT_TYPE,
@@ -2489,8 +2458,6 @@ def build_meta_builder_fsm() -> dict[str, Any]:
 
 def _reply_kind_condition(kind: str) -> dict[str, Any]:
     """Condition that passes when the ``call_model`` reply is of ``kind``."""
-    from .constants import NativeFCContextKeys
-
     key = NativeFCContextKeys.MODEL_REPLY
     return {
         "description": f"The model turn was {kind}",
@@ -2543,15 +2510,6 @@ def build_native_fc_fsm(
     the tools, write the nudge transcripts and the routing flags, and record
     the outcome. Their keys are ``handler_only_keys``. Never raises otherwise.
     """
-    from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT
-
-    from .constants import (
-        NATIVE_FC_HANDLER_ONLY_KEYS,
-        NativeFCContextKeys,
-        NativeFCStates,
-        NativeLoopEnd,
-    )
-
     schemas = [dict(schema) for schema in tool_schemas]
     if not schemas:
         raise ValueError("build_native_fc_fsm needs at least one tool schema")

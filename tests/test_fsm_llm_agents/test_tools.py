@@ -694,7 +694,7 @@ class TestToolRegistryConcurrency:
             assert errors == [], f"{call!r} raised {errors!r}"
 
 
-# 256 dims, not 3. `_cosine_similarity` is pure Python, so the vector width sets
+# 256 dims, not 3. `cosine_similarity` is pure Python, so the vector width sets
 # how long a reader spends *inside* the `_embeddings` iteration. A 3-dim vector
 # makes each scan so short that the pre-fix race almost never lands and the test
 # passes against un-fixed source — a false green under SC-19. 256 dims keeps the

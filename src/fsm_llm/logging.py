@@ -4,9 +4,6 @@ import datetime
 import json
 import os
 import sys
-from collections.abc import Callable
-from functools import wraps
-from typing import Any
 
 from loguru import logger
 
@@ -430,61 +427,6 @@ def setup_file_logging(log_dir="logs"):
     This is a convenience wrapper around setup_logging(sink="file").
     """
     setup_logging(sink=LOG_SINK_FILE, log_dir=log_dir)
-
-
-# --------------------------------------------------------------
-
-
-def with_conversation_context(func):
-    @wraps(func)  # Preserve function metadata
-    def wrapper(self, conversation_id, *args, **kwargs):
-        # Bind the conversation ID to the logger
-        log = logger.bind(conversation_id=conversation_id)
-
-        # Call the original function with the contextual logger
-        return func(self, conversation_id, *args, log=log, **kwargs)
-
-    return wrapper
-
-
-# --------------------------------------------------------------
-
-
-def handle_conversation_errors(
-    method_or_error_msg: Callable[..., Any] | str | None = None,
-):
-    """Decorator for handling common conversation-related errors in FSM_LLM methods.
-
-    Can be used in two ways:
-    1. @handle_conversation_errors - uses the method name in error messages
-    2. @handle_conversation_errors("Custom error message") - uses the provided message
-    """
-
-    def decorator(method):
-        from .definitions import FSMError
-
-        @wraps(method)
-        def wrapper(self, conversation_id, *args, **kwargs):
-            error_message = (
-                method_or_error_msg
-                if isinstance(method_or_error_msg, str)
-                else f"Failed in {method.__name__}"
-            )
-
-            try:
-                return method(self, conversation_id, *args, **kwargs)
-            except (ValueError, FSMError):
-                raise
-            except Exception as e:
-                logger.error(f"Error in {method.__name__}: {e!s}")
-                raise FSMError(f"{error_message}: {e!s}") from e
-
-        return wrapper
-
-    # Handle both @handle_conversation_errors and @handle_conversation_errors("msg")
-    if callable(method_or_error_msg):
-        return decorator(method_or_error_msg)
-    return decorator
 
 
 # --------------------------------------------------------------

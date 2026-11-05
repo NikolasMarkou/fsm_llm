@@ -21,7 +21,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
+from fsm_llm import API
 from fsm_llm.constants import has_internal_prefix
+from fsm_llm.definitions import ResponseGenerationRequest
 from fsm_llm.logging import logger
 
 from .constants import KEY_USER_INPUT, PARALLEL_DEEPCOPY_WARNING_THRESHOLD
@@ -33,7 +35,7 @@ from .models import WaitEventConfig, WorkflowStepResult
 #: Executor used for synchronous user callables. The engine sets it for the
 #: duration of a step when it was constructed with ``executor=...``; ``None``
 #: means the event loop's default executor.
-_STEP_EXECUTOR: contextvars.ContextVar[Executor | None] = contextvars.ContextVar(
+STEP_EXECUTOR: contextvars.ContextVar[Executor | None] = contextvars.ContextVar(
     "fsm_llm_workflows_step_executor", default=None
 )
 
@@ -74,7 +76,7 @@ async def _call_user_callable(fn: Callable[..., Any], *args: Any, **kwargs: Any)
     else:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
-            _STEP_EXECUTOR.get(), functools.partial(fn, *args, **kwargs)
+            STEP_EXECUTOR.get(), functools.partial(fn, *args, **kwargs)
         )
     if inspect.isawaitable(result):
         result = await result
@@ -367,8 +369,6 @@ class LLMProcessingStep(WorkflowStep):
         if callable(generate):
             raw = await self._with_timeout(_call_user_callable(generate, prompt))
         elif callable(getattr(llm, "generate_response", None)):
-            from fsm_llm.definitions import ResponseGenerationRequest
-
             system_prompt = self.system_prompt or "Follow the user's instructions."
             if len(prompt) > _MAX_CORE_USER_MESSAGE:
                 # ResponseGenerationRequest caps user_message; the system
@@ -552,7 +552,7 @@ class ConversationStep(WorkflowStep):
             # loop is not frozen and the time limit can actually fire.
             loop = asyncio.get_running_loop()
             fut = loop.run_in_executor(
-                _STEP_EXECUTOR.get(), self._run_conversation, dict(context)
+                STEP_EXECUTOR.get(), self._run_conversation, dict(context)
             )
             if limit is None:
                 return await fut
@@ -581,8 +581,6 @@ class ConversationStep(WorkflowStep):
     def _run_conversation(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Run the FSM conversation loop (synchronous; offloaded to an executor
         by ``execute`` so the event loop stays responsive)."""
-        from fsm_llm import API
-
         # Build initial context from workflow context using mapping
         conv_context: dict[str, Any] = {}
         for conv_key, workflow_key in self.initial_context.items():

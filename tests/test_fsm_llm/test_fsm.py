@@ -786,7 +786,7 @@ class TestGetConversationDataNestedFiltering:
         assert manager.get_conversation_data("conv-1")["root"]["name"] == "bob"
 
     def test_matched_keys_are_dropped_not_redacted(self):
-        """This site DROPS; ``runner._redact_context`` is the redactor (D-010)."""
+        """This site DROPS; ``utilities.redact_context`` is the redactor (D-010)."""
         manager = self._manager_with({"user": {"_internal_note": "secret"}})
 
         data = manager.get_conversation_data("conv-1")

@@ -14,6 +14,7 @@ from typing import Any
 
 from fsm_llm import API
 from fsm_llm.logging import logger
+from fsm_llm.reasoning import ReasoningEngine
 
 from .base import BaseAgent, caller_prompt_keys
 from .constants import (
@@ -36,14 +37,6 @@ from .fsm_definitions import build_react_fsm
 from .handlers import AgentHandlers, forced_stop_skip, next_step_number
 from .hitl import HumanInTheLoop
 from .tools import ToolRegistry, redact_secret_entries, refuse_execute_without_gated
-
-# Optional import — reasoning package may not be installed
-try:
-    from fsm_llm.reasoning import ReasoningEngine
-
-    _HAS_REASONING = True
-except ImportError:
-    _HAS_REASONING = False
 
 
 def _problem_text(tool_input: Any, task: Any = "") -> str:
@@ -130,8 +123,8 @@ class ReasoningReactAgent(BaseAgent):
     onto the stack (via ``ReasoningEngine``), executes it, and pops
     results back into the agent context under namespaced keys.
 
-    Requires ``fsm_llm.reasoning`` to be installed. Raises
-    ``AgentError`` at construction time if the package is missing.
+    ``fsm_llm.reasoning`` ships in every install and is imported with this
+    module.
 
     Usage::
 
@@ -160,12 +153,6 @@ class ReasoningReactAgent(BaseAgent):
         :param reasoning_model: Model for the reasoning engine (defaults to config.model)
         :param api_kwargs: Additional kwargs passed to fsm_llm.API
         """
-        if not _HAS_REASONING:
-            raise AgentError(
-                "ReasoningReactAgent requires fsm_llm.reasoning. "
-                "Reinstall from a clone of https://github.com/NikolasMarkou/fsm_llm: pip install -e ."
-            )
-
         super().__init__(config, **api_kwargs)
         self.hitl = hitl
 

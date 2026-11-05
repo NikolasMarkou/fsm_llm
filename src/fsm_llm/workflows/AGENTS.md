@@ -36,7 +36,7 @@ Step driver (`engine.py`): every entry point takes the instance lock, then calls
 
 `_run_current_step`:
 1. Deadline check (past deadline: FAILED, `WorkflowTimeoutError` raised).
-2. `step.execute(instance.context)` with `steps._STEP_EXECUTOR` bound to the engine executor; wrapped in `asyncio.wait_for(remaining)` when a deadline is set.
+2. `step.execute(instance.context)` with `steps.STEP_EXECUTOR` bound to the engine executor; wrapped in `asyncio.wait_for(remaining)` when a deadline is set.
 3. Non-`WorkflowStepResult` return raises `WorkflowStepError`.
 4. Merge `result.data` minus internal-prefix keys (except `STEP_INTERNAL_WHITELIST`), add a history entry (with `result.error`), emit `step_completed`.
 5. Success: truthy `next_state` is returned and the loop calls `_prepare_transition` (validate target, drop wait listeners/timers, pop `_waiting_info`/`_timer_info`, RUNNING). `next_state == ""` completes. Other falsy values go to `_handle_step_without_transition`: event wait consumes a matching buffered targeted event and continues (or completes if `success_state` is empty), else WAITING + `register_event_listener`; timer marker gives WAITING + `schedule_timer`; a step in `get_terminal_states()` completes; otherwise a WARNING and the instance stays RUNNING.
@@ -52,7 +52,7 @@ Wake-ups after WAITING: `process_event` -> `_deliver_event` -> `_transition_to_s
 | File | Role | Notes |
 | --- | --- | --- |
 | `engine.py` | `WorkflowEngine`, `Timer`, `LifecycleHook` alias | per-instance `asyncio.Lock`, `_listener_lock`, event buffers, timers dict, background tasks; module `__all__` |
-| `steps.py` | `WorkflowStep` ABC + 11 subclasses, `_call_user_callable`, `_STEP_EXECUTOR` ContextVar, `_lookup_path`, `_error_text` | Pydantic models, `arbitrary_types_allowed` |
+| `steps.py` | `WorkflowStep` ABC + 11 subclasses, `_call_user_callable`, `STEP_EXECUTOR` ContextVar, `_lookup_path`, `_error_text` | Pydantic models, `arbitrary_types_allowed` |
 | `definitions.py` | `WorkflowDefinition`, `WorkflowValidator`, `_serialize_step` | `validate()` raises `WorkflowValidationError` with all errors |
 | `dsl.py` | step factories, `WorkflowBuilder`, `workflow_builder`, pattern helpers | pattern helpers register steps, they do not wire them |
 | `models.py` | `WorkflowStatus`, `WorkflowEvent`, `WorkflowStepResult`, `WorkflowHistoryEntry`, `WorkflowInstance`, `EventListener`, `WaitEventConfig` | `_VALID_STATUS_TRANSITIONS` |
@@ -123,7 +123,7 @@ DSL (`dsl.py`): `create_workflow(workflow_id, name, description="")`, `workflow_
 - Internal-prefix result keys are dropped via `has_internal_prefix` (never re-inline `startswith("_")`), except the whitelist; do not remove the whitelist.
 - `next_state == ""` on ANY successful result means terminal for that route; no isinstance narrowing (D-013, D-020).
 - A failure result with no `next_state` FAILS the instance; no step falls back to its success route (D-003).
-- User callables go through `steps._call_user_callable`: async callables awaited, sync ones in `_STEP_EXECUTOR` (engine executor or loop default), a returned awaitable awaited (D-004).
+- User callables go through `steps._call_user_callable`: async callables awaited, sync ones in `STEP_EXECUTOR` (engine executor or loop default), a returned awaitable awaited (D-004).
 - `_handle_step_exception` and `cancel_workflow` never overwrite a terminal status (D-005, D-015). A cancel of a running chain goes through `_cancel_requests` (registered before the lock wait, checked at the top of each `_execute_workflow_step` iteration, removed in `cancel_workflow`'s `finally` and with the instance); never cancel the running task or take a second lock to do it (5ed71cf2/D-017).
 - Reported workflow timeout is the configured float, not truncated (D-011).
 - `Timer.cancel()` never cancels the task running it. Re-scheduling a timer or event timeout cancels the old task first.

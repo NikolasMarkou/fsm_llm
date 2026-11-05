@@ -22,7 +22,7 @@ from .constants import (
     LogMessages,
     REWOOStates,
 )
-from .definitions import AgentConfig, AgentResult, ToolCall
+from .definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
 from .exceptions import AgentError
 from .fsm_definitions import build_rewoo_fsm
 from .handlers import make_iteration_limiter
@@ -280,8 +280,6 @@ class REWOOAgent(BaseAgent):
 
     def _build_trace(self, final_context: dict[str, Any], iteration: int) -> Any:
         """Build agent trace from final context with REWOO-specific trace format."""
-        from .definitions import AgentTrace
-
         trace_data = final_context.get(ContextKeys.AGENT_TRACE, [])
         trace = AgentTrace(
             tool_calls=[],

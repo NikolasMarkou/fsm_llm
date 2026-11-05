@@ -29,11 +29,13 @@ from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 from starlette.requests import Request
 
+from fsm_llm import __version__ as core_version
 from fsm_llm.definitions import ConversationBusyError
 from fsm_llm.logging import logger
 from fsm_llm.utilities import redacting_json_default
 from fsm_llm.visualizer import build_fsm_graph
 
+from .__version__ import __version__
 from .constants import (
     MAX_BUILDER_SESSIONS,
     MAX_REQUEST_BODY_BYTES,
@@ -42,6 +44,9 @@ from .constants import (
 from .definitions import (
     BuilderSendRequest,
     BuilderStartRequest,
+    DashboardAlert,
+    DashboardConfig,
+    DashboardPanel,
     EndConversationRequest,
     FSMSnapshot,
     LaunchAgentRequest,
@@ -57,7 +62,7 @@ from .definitions import (
     WorkflowEventRequest,
 )
 from .exceptions import MonitorCapacityError, MonitorError
-from .instance_manager import InstanceManager, _find_examples_dir, validate_preset_id
+from .instance_manager import InstanceManager, find_examples_dir, validate_preset_id
 
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -425,7 +430,7 @@ def _raise_http(e: Exception, action: str) -> NoReturn:
 
     KeyError -> 404, TypeError (wrong instance type) / ValueError -> 400,
     ConversationBusyError -> 409, MonitorCapacityError -> 429,
-    NotImplementedError (extension missing) -> 501, anything else -> 500
+    NotImplementedError -> 501, anything else -> 500
     with a generic detail (the exception text is logged, never returned).
     """
     if isinstance(e, HTTPException):
@@ -582,8 +587,6 @@ def _parse_dashboard_config(req: dict[str, Any]) -> Any:
     """
     from pydantic import ValidationError
 
-    from .definitions import DashboardAlert, DashboardConfig, DashboardPanel
-
     wrapped = req.get("config")
     is_wrapped = (
         isinstance(wrapped, dict)
@@ -664,16 +667,7 @@ async def api_dashboard_config_delete() -> dict[str, str]:
 
 @app.get("/api/info")
 async def api_info() -> dict[str, str]:
-    from .__version__ import __version__
-
-    info: dict[str, str] = {"monitor_version": __version__}
-    try:
-        from fsm_llm import __version__ as cv
-
-        info["fsm_llm_version"] = cv
-    except ImportError:
-        pass
-    return info
+    return {"monitor_version": __version__, "fsm_llm_version": core_version}
 
 
 # --- REST API: Capabilities ---
@@ -1178,7 +1172,7 @@ def _resolve_preset_path(preset_id: str) -> Path:
 
     Raises HTTPException on invalid/missing preset.
     """
-    base = _find_examples_dir()
+    base = find_examples_dir()
     if base is None:
         raise HTTPException(status_code=404, detail="examples directory not found")
     try:
@@ -1215,7 +1209,7 @@ def _scan_fsm_presets() -> dict[str, list[dict[str, str]]]:
     Returns preset metadata only — no filesystem paths exposed. Run off the
     event loop via ``asyncio.to_thread``.
     """
-    base = _find_examples_dir()
+    base = find_examples_dir()
     if base is None:
         return {"fsm": []}
 

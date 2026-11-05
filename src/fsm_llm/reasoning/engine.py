@@ -547,7 +547,7 @@ class ReasoningEngine:
             return data
         except (FSMError, ValueError) as read_err:
             # get_data raises FSMError, or ValueError for a conversation
-            # whose stack is gone (core's handle_conversation_errors).
+            # whose stack is gone (core's `api.handle_conversation_errors`).
             _solve_log(conv_id).warning(
                 f"Could not read the partial context of {conv_id}: {read_err}"
             )

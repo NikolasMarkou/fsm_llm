@@ -403,10 +403,10 @@ class TestCosineDimensionMismatch:
     """MEM-04: vectors of different width score 0.0 with a WARNING."""
 
     def test_mismatch_scores_zero_and_warns(self):
-        from fsm_llm.agents.semantic_tools import _cosine_similarity
+        from fsm_llm.agents.semantic_tools import cosine_similarity
 
         score, captured = _capture_warnings(
-            lambda: _cosine_similarity([1.0, 0.0], [1.0, 0.0, 5.0])
+            lambda: cosine_similarity([1.0, 0.0], [1.0, 0.0, 5.0])
         )
         assert score == 0.0
         assert any("dimension" in m.lower() for m in captured)

@@ -99,11 +99,11 @@ from .ollama import (
     prepare_ollama_messages,
 )
 from .utilities import (
-    _remove_think_blocks,
-    _resolve_reasoning_trace,
     coerce_confidence,
     extract_json_from_text,
     parse_bool_word,
+    remove_think_blocks,
+    resolve_reasoning_trace,
     strip_think_and_fences,
 )
 
@@ -331,8 +331,7 @@ def _fill_empty_user_turns(
 def is_malformed_tool_call_error(exc: BaseException, *, tools_sent: bool) -> bool:
     """Whether a provider error is a garbled TOOL CALL rather than an outage.
 
-    Interface contract (callers: ``LiteLLMInterface.complete``, and native_fc's
-    own loop until it runs on ``complete``):
+    Interface contract (caller: ``LiteLLMInterface.complete``):
         - ``tools_sent``: whether the failed request carried tools. A request
           without tools cannot garble a tool call, so it is never one.
         - Returns ``True`` only when the error text contains one of
@@ -350,8 +349,7 @@ def is_malformed_tool_call_error(exc: BaseException, *, tools_sent: bool) -> boo
 def decode_tool_arguments(raw: Any) -> dict[str, Any] | None:
     """The arguments of one tool call as a dict, or ``None`` when malformed.
 
-    Interface contract (callers: the ``complete`` reply normaliser, and
-    native_fc's own loop until it runs on ``complete``):
+    Interface contract (caller: the ``complete`` reply normaliser):
         - A dict is returned as-is. A JSON string is decoded and must decode
           to an object. ``None`` or blank text means "no arguments": ``{}``.
         - Anything else (undecodable text; a JSON array, number, string or
@@ -583,7 +581,7 @@ def _completion_response(response: Any) -> CompletionResponse:
         - ``content`` is the text when it is a non-empty ``str``; a ``dict``
           content is sent back as its JSON text; empty content is ``None``.
           With no tool call, an empty content is recovered from the reasoning
-          trace (``_resolve_reasoning_trace``); with tool calls it is not
+          trace (``resolve_reasoning_trace``); with tool calls it is not
           (``content: None`` is their normal shape).
         - ``tool_calls`` is absent, ``None``, empty, or an iterable of calls
           (a list in every litellm reply), read once into a list; a ``str``,
@@ -668,7 +666,7 @@ def _completion_response(response: Any) -> CompletionResponse:
     if calls:
         return CompletionResponse(kind="calls", text=text, calls=tuple(calls))
     if text is None:
-        text = _resolve_reasoning_trace(message) or None
+        text = resolve_reasoning_trace(message) or None
     return CompletionResponse(kind="final", text=text)
 
 
@@ -1248,7 +1246,7 @@ class LiteLLMInterface(LLMInterface):
                 # chunk. Reuse the shared resolver so a Delta is read via the
                 # same field precedence as a Message — never hand-roll the
                 # `getattr(..., "thinking")` lookup here. See decisions.md D-002.
-                frag = _resolve_reasoning_trace(delta)
+                frag = resolve_reasoning_trace(delta)
                 if frag:
                     reasoning_parts.append(frag)
                 content = getattr(delta, "content", None)
@@ -1848,7 +1846,7 @@ class LiteLLMInterface(LLMInterface):
         # DECISION plan-2026-07-21T045419-9925aa3a/D-002
         # The reasoning-trace field-name resolution (reasoning_content ->
         # legacy thinking -> thinking_blocks) now lives in the SINGLE shared
-        # `_resolve_reasoning_trace` (utilities.py) so this reader and
+        # `resolve_reasoning_trace` (utilities.py) so this reader and
         # classification.py::_extract_response can never re-diverge. Do NOT
         # revert to a `hasattr(message, "thinking")`/`.thinking`-only read:
         # installed litellm RENAMES `thinking` to `reasoning_content` and
@@ -1856,7 +1854,7 @@ class LiteLLMInterface(LLMInterface):
         # `.thinking`-only read dead code for the project's own
         # DEFAULT_LLM_MODEL. Rationale + anti-simplification note live at the
         # resolver's D-002 anchor. See decisions.md D-001/D-002.
-        trace = _resolve_reasoning_trace(message)
+        trace = resolve_reasoning_trace(message)
         if not trace:
             return None
         logger.debug("Content empty but reasoning trace present, extracting from it")
@@ -1874,7 +1872,7 @@ class LiteLLMInterface(LLMInterface):
 
         Contract:
             - Parameter: ``trace`` — the raw reasoning-trace string (already
-              resolved via ``_resolve_reasoning_trace``; a non-empty ``str``).
+              resolved via ``resolve_reasoning_trace``; a non-empty ``str``).
             - Returns the last balanced JSON object found in ``trace`` (preferred,
               as the final answer), else the last non-empty line, else ``None``.
             - Never raises; JSON parse failures are swallowed per candidate.
@@ -1986,7 +1984,7 @@ class LiteLLMInterface(LLMInterface):
         # a think block exists nothing is parsed here; the terminal rung below
         # decides (D-030). See decisions.md D-009.
         if isinstance(content, str):
-            data = extract_json_from_text(_remove_think_blocks(content))
+            data = extract_json_from_text(remove_think_blocks(content))
             if isinstance(data, dict) and "message" in data:
                 message = data["message"]
                 if isinstance(message, str) and message.strip():
@@ -2098,7 +2096,7 @@ class LiteLLMInterface(LLMInterface):
         # Do NOT use strip_think_and_fences here: it would strip code fences from
         # a reply that is legitimately prose. Trade-off: a brace-shaped but
         # malformed envelope is now shown as text. See decisions.md D-030.
-        content = _remove_think_blocks(content).strip() or content
+        content = remove_think_blocks(content).strip() or content
         if self._looks_like_json(content):
             parsed: Any = extract_json_from_text(content)
             if parsed is None:

@@ -40,7 +40,7 @@ from fsm_llm.definitions import LLMResponseError
 from fsm_llm.handlers import HandlerExecutionError, clear_keys_delta
 from fsm_llm.logging import logger
 
-from .base import _reject_misplaced_kwargs
+from .base import reject_misplaced_kwargs
 from .constants import (
     META_BUILD_CALL_FAILED,
     META_BUILD_NEGATION_FILLERS,
@@ -317,7 +317,7 @@ class MetaBuilderAgent:
         config: AgentConfig | None = None,
         **api_kwargs: Any,
     ) -> None:
-        _reject_misplaced_kwargs(type(self).__name__, api_kwargs)
+        reject_misplaced_kwargs(type(self).__name__, api_kwargs)
         # A plain AgentConfig (create_agent, the builder) becomes a
         # MetaBuilderConfig here; see MetaBuilderConfig.from_agent_config.
         self.meta_config = (

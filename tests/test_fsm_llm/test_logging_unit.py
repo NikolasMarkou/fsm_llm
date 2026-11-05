@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm.logging import handle_conversation_errors, with_conversation_context
+from fsm_llm.api import handle_conversation_errors
+from fsm_llm.fsm import with_conversation_context
 
 
 class TestWithConversationContext:

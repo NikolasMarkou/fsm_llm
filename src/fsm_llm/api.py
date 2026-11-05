@@ -94,6 +94,7 @@ import time
 from collections.abc import Callable, Collection, Iterator, Mapping
 from contextlib import contextmanager
 from enum import Enum
+from functools import wraps
 from pathlib import Path
 from typing import Any, cast
 
@@ -133,7 +134,8 @@ from .llm import (
     implements_complete,
     interface_model,
 )
-from .logging import handle_conversation_errors, logger
+from .logging import logger
+from .memory import WorkingMemory
 from .prompts import (
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
@@ -141,6 +143,45 @@ from .prompts import (
 )
 from .session import SessionState, SessionStore
 from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+from .utilities import load_fsm_definition, load_fsm_from_file
+
+# --------------------------------------------------------------
+
+
+def handle_conversation_errors(
+    method_or_error_msg: Callable[..., Any] | str | None = None,
+):
+    """Decorator for handling common conversation-related errors in FSM_LLM methods.
+
+    Can be used in two ways:
+    1. @handle_conversation_errors - uses the method name in error messages
+    2. @handle_conversation_errors("Custom error message") - uses the provided message
+    """
+
+    def decorator(method):
+        @wraps(method)
+        def wrapper(self, conversation_id, *args, **kwargs):
+            error_message = (
+                method_or_error_msg
+                if isinstance(method_or_error_msg, str)
+                else f"Failed in {method.__name__}"
+            )
+
+            try:
+                return method(self, conversation_id, *args, **kwargs)
+            except (ValueError, FSMError):
+                raise
+            except Exception as e:
+                logger.error(f"Error in {method.__name__}: {e!s}")
+                raise FSMError(f"{error_message}: {e!s}") from e
+
+        return wrapper
+
+    # Handle both @handle_conversation_errors and @handle_conversation_errors("msg")
+    if callable(method_or_error_msg):
+        return decorator(method_or_error_msg)
+    return decorator
+
 
 # --------------------------------------------------------------
 
@@ -637,8 +678,6 @@ class API:
             elif fsm_id in self._temp_fsm_definitions:
                 return self._temp_fsm_definitions[fsm_id]
             else:
-                from .utilities import load_fsm_definition
-
                 return load_fsm_definition(fsm_id)
 
         # Initialize handler system (single instance shared with FSMManager)
@@ -699,8 +738,6 @@ class API:
 
         elif isinstance(fsm_definition, str):
             try:
-                from .utilities import load_fsm_from_file
-
                 fsm_def = load_fsm_from_file(fsm_definition)
             except Exception as e:
                 raise ValueError(
@@ -2187,8 +2224,6 @@ class API:
         # Single definition (not duplicated across if/else arms): duplicating
         # the hidden_buffers carry risks fixing one arm and not the other,
         # re-opening the D-032 hidden-buffer downgrade.
-        from .memory import WorkingMemory
-
         # Review N8 (plan-2026-09-20T165703-0d9c218e): no `buffers` signal (key
         # missing or JSON null) means the DEFAULT buffers; an explicit `{}`
         # keeps meaning zero buffers (the tested `from_dict({})` contract). Do

@@ -12,9 +12,6 @@ from fsm_llm.definitions import BuildError, FSMError
 class AgentError(FSMError):
     """Base exception for all agent-related errors."""
 
-    def __init__(self, message: str, details: dict[str, Any] | None = None):
-        super().__init__(message, details=details)
-
 
 class ToolExecutionError(AgentError):
     """Error during tool execution."""

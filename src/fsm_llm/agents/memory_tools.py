@@ -27,7 +27,7 @@ from typing import Annotated
 from fsm_llm.memory import BUFFER_CORE, WorkingMemory
 
 from .definitions import ToolDefinition
-from .tools import _infer_schema_from_hints, redact_secret_entries
+from .tools import infer_schema_from_hints, redact_secret_entries
 
 
 def create_memory_tools(
@@ -152,7 +152,7 @@ def create_memory_tools(
     # Build ToolDefinition objects with auto-inferred schemas
     tools = []
     for fn in (remember, recall, forget, list_memories):
-        schema = _infer_schema_from_hints(fn)
+        schema = infer_schema_from_hints(fn)
         tool_def = ToolDefinition(
             name=fn.__name__,
             description=(fn.__doc__ or "").strip().split("\n")[0],

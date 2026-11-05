@@ -31,6 +31,7 @@ from fsm_llm.context import ContextCompactor
 from fsm_llm.definitions import FSMError, RunBudgetExceededError
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
+from fsm_llm.utilities import extract_json_from_text
 
 from .constants import (
     CONFIG_OWNED_KWARGS,
@@ -48,7 +49,17 @@ from .constants import (
 )
 from .definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
 from .exceptions import AgentError, AgentTimeoutError, BudgetExhaustedError
+from .handlers import (
+    approval_grant,
+    call_label,
+    call_ran,
+    make_fresh_keys_handler,
+    recorded_forced_reason,
+    refusal_record,
+)
 from .hitl import ApprovalPolicy, HumanInTheLoop, make_hitl_checker
+from .summarization import make_observation_summarizer
+from .tools import normalize_tool_input
 
 
 def with_instructions(
@@ -379,11 +390,12 @@ _HITL_CTOR_KWARGS: frozenset[str] = frozenset(
 )
 
 
-def _reject_misplaced_kwargs(pattern: str, api_kwargs: Mapping[str, Any]) -> None:
+def reject_misplaced_kwargs(pattern: str, api_kwargs: Mapping[str, Any]) -> None:
     """Raise ``TypeError`` when *api_kwargs* holds a name that only lands there by mistake.
 
-    Called once from ``BaseAgent.__init__``. *pattern* is the concrete class
-    name, used in the message. Every other kwarg is left alone (D-003).
+    Called by ``BaseAgent.__init__`` and by the meta-builder agent. *pattern*
+    is the concrete class name, used in the message. Every other kwarg is left
+    alone (D-003).
     """
     # DECISION plan-2026-09-29T103145-06a5ec0a/D-003: a denylist, not a
     # whitelist. `hitl=`/`tools=` on a pattern without them used to be forwarded
@@ -468,7 +480,7 @@ class BaseAgent(ABC):
         config: AgentConfig | None = None,
         **api_kwargs: Any,
     ) -> None:
-        _reject_misplaced_kwargs(type(self).__name__, api_kwargs)
+        reject_misplaced_kwargs(type(self).__name__, api_kwargs)
         self.config = config or AgentConfig()
         self._api_kwargs = api_kwargs
         self._refuse_prompt_cache_with_injected_interface()
@@ -736,8 +748,6 @@ class BaseAgent(ABC):
         :attr:`_hitl_active`, ``should_terminate`` is also cleared on
         ``await_approval`` entry (a forced True is kept).
         """
-        from .handlers import make_fresh_keys_handler
-
         # DECISION plan-2026-09-29T103145-06a5ec0a/D-051: keep_limiter_forced
         # is False only here. Do NOT keep a limiter-forced should_terminate on
         # think entry: the model is then never asked on its last turn and a
@@ -908,9 +918,6 @@ class BaseAgent(ABC):
         (ReactAgent, ReflexionAgent, ReasoningReactAgent).  Subclasses must
         set ``self.hitl`` to a :class:`HumanInTheLoop` instance (or ``None``).
         """
-        from .handlers import approval_grant, call_label, call_ran, refusal_record
-        from .tools import normalize_tool_input
-
         hitl: HumanInTheLoop | None = getattr(self, "hitl", None)
         if hitl is None:
             return
@@ -1203,8 +1210,6 @@ class BaseAgent(ABC):
         output that ships) only a recorded reason counts; the bare flag says
         the budget ran out, not that the verdict was overridden. Never raises.
         """
-        from .handlers import recorded_forced_reason
-
         recorded = recorded_forced_reason(final_context)
         if recorded is not None:
             return recorded
@@ -1421,8 +1426,6 @@ class BaseAgent(ABC):
         # Opt-in observation summarization (config.auto_summarize_after).
         # No-op for agents that don't accumulate observations.
         if self.config.auto_summarize_after:
-            from .summarization import make_observation_summarizer
-
             summarizer = make_observation_summarizer(self.config.auto_summarize_after)
             api.register_handler(
                 api.create_handler("AgentObservationSummarizer")
@@ -1671,14 +1674,10 @@ class BaseAgent(ABC):
 
         # 2. Try parsing JSON from the answer string
         try:
-            import json as _json
-
-            from fsm_llm.utilities import extract_json_from_text
-
             data = extract_json_from_text(answer)
             if data is None:
                 # Try direct JSON parse
-                data = _json.loads(answer)
+                data = json.loads(answer)
 
             if isinstance(data, dict):
                 return schema(**data)
@@ -1691,10 +1690,6 @@ class BaseAgent(ABC):
 
         # 3. Scan tool observations for JSON matching the schema
         if context:
-            import json as _json
-
-            from fsm_llm.utilities import extract_json_from_text
-
             observations = context.get("observations", [])
             if isinstance(observations, list):
                 for obs in reversed(observations):

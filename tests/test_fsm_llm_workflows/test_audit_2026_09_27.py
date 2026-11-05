@@ -370,7 +370,7 @@ class TestFailClosedRouting:
         )
         from unittest.mock import patch
 
-        with patch("fsm_llm.API") as mock_api:
+        with patch("fsm_llm.workflows.steps.API") as mock_api:
             mock_api.from_definition.side_effect = RuntimeError("no model")
             result = await step.execute({})
         assert result.success is False
@@ -804,7 +804,7 @@ class TestConversationStepFixes:
             timeout=0.05,
             error_state="err",
         )
-        with patch("fsm_llm.API") as mock_cls:
+        with patch("fsm_llm.workflows.steps.API") as mock_cls:
             mock_cls.from_definition.return_value = self._mock_api(delay=0.3)
             result = await step.execute({})
         assert result.success is False
@@ -822,7 +822,7 @@ class TestConversationStepFixes:
             error_state="err",
             require_completion=True,
         )
-        with patch("fsm_llm.API") as mock_cls:
+        with patch("fsm_llm.workflows.steps.API") as mock_cls:
             mock_cls.from_definition.return_value = self._mock_api(ended=False)
             result = await step.execute({})
         assert result.success is False
@@ -839,7 +839,7 @@ class TestConversationStepFixes:
             fsm_definition={"name": "x"},
             use_user_input=True,
         )
-        with patch("fsm_llm.API") as mock_cls:
+        with patch("fsm_llm.workflows.steps.API") as mock_cls:
             mock_cls.from_definition.return_value = api
             await step.execute({"_user_input": "hello there"})
         api.converse.assert_called_once_with(

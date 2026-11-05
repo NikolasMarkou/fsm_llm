@@ -856,7 +856,7 @@ def concluded_on_evidence(leaving: str, context: Mapping[str, Any]) -> bool:
     ``leaving`` is ``think`` with ``should_terminate is True`` or Reflexion's
     ``evaluate`` with ``evaluation_passed is True``, and ``observation_count``
     is above 0: the first disjunct of the conclude edge
-    (``fsm_definitions._conclude_on_evidence_logic``), so this turn takes
+    (``fsm_definitions.conclude_on_evidence_logic``), so this turn takes
     that edge. Every other state gives False. Never raises.
     """
     verdict = _CONCLUDE_VERDICTS.get(leaving)

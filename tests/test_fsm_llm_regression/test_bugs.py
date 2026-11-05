@@ -503,7 +503,7 @@ class TestHandleConversationErrorsMasking:
 
     def test_non_conversation_valueerror_not_masked(self):
         """A ValueError about invalid state should NOT become 'Conversation not found'."""
-        from fsm_llm.logging import handle_conversation_errors
+        from fsm_llm.api import handle_conversation_errors
 
         @handle_conversation_errors
         def method_that_raises_state_error(self, conversation_id):

@@ -631,7 +631,7 @@ class TestInterfaceSurface:
             "apply_ollama_params",
             "prepare_ollama_messages",
             "is_ollama_model",
-            "_resolve_reasoning_trace",
+            "resolve_reasoning_trace",
             "_MALFORMED_TOOL_CALL_MARKERS",
         ):
             assert not hasattr(native_fc, name), name

@@ -7,16 +7,11 @@ base error also catches every evaluation failure.
 
 from __future__ import annotations
 
-from typing import Any
-
 from fsm_llm.definitions import FSMError
 
 
 class EvalError(FSMError):
     """Base exception for all evaluation errors (also: unwritable output root)."""
-
-    def __init__(self, message: str, details: dict[str, Any] | None = None):
-        super().__init__(message, details=details)
 
 
 class EvalConfigError(EvalError):

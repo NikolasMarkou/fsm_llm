@@ -12,9 +12,6 @@ from fsm_llm.definitions import FSMError
 class WorkflowError(FSMError):
     """Base exception for all workflow-related errors."""
 
-    def __init__(self, message: str, details: dict[str, Any] | None = None):
-        super().__init__(message, details=details)
-
 
 class WorkflowDefinitionError(WorkflowError):
     """Error in workflow definition structure or content."""

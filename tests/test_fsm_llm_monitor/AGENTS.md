@@ -92,13 +92,13 @@ Instance manager:
 - `snapshot_from_api(api, conv_id, show_internal_keys=...)`: internal prefixes `_`, `system_`, `internal_`, `__` (case-insensitive) hidden when False; secret-looking keys hidden either way; `last_extraction` is redacted.
 - `attach_api(api)` (`TestAttachApi`) registers the monitor handlers; nothing attached shows nothing; the attached API's conversations are listed and snapshotted; its listing or snapshot failures yield `[]` or `None`; snapshots honour `config.show_internal_keys`.
 - `destroy_instance`: agent -> `cancelled` with `cancel_event` set, bounded join (under 5 s) and one `logger.warning` naming the id if the thread is still alive; workflow -> `completed`; unknown id -> `KeyError`.
-- `_get_fsm`/`_get_workflow`/`_get_agent`: `KeyError` if missing, `TypeError` on wrong type. `launch_fsm()` without data: `ValueError` "Must provide". `_HAS_AGENTS`/`_HAS_WORKFLOWS` False: `RuntimeError` "not installed".
+- `_get_fsm`/`_get_workflow`/`_get_agent`: `KeyError` if missing, `TypeError` on wrong type. `launch_fsm()` without data: `ValueError` "Must provide".
 - `get_agent_status`: dead thread in `cancelling` -> `cancelled`; dead `running` without result -> `failed`. `cancel_agent` returns False on finished agents and emits `agent_cancelled` once.
 - `_AGENT_CLASSES` excludes `EvaluatorOptimizerAgent` and `MakerCheckerAgent`; includes `ReactAgent`, `DebateAgent`.
 - Workflow presets include `demo_linear` (3 steps) and `demo_branching` (`amount: 5000` -> `tier == "high"`). Completed instances leave `active_instance_ids`; advancing them is `KeyError`. `definition_json` -> `ValueError` "not supported". Status context hides secret and internal keys. Event delivery is not a step.
 - FSM lifecycle: terminal reply ends the conversation and marks `completed`; `start_conversation` reopens to `running`; unknown conversation end is `KeyError`. `_make_room()` evicts oldest finished instance or raises `MonitorCapacityError` when `max_instances` are all active.
 - Setting `mgr.config` resizes global buffers. `dashboard_config` assignment increments `dashboard_config_version`.
-- `_find_examples_dir()` must equal the repo `examples/` directory.
+- `find_examples_dir()` must equal the repo `examples/` directory.
 - Stub tools from `StubToolConfig` run with any parameters and return `stub_response`.
 
 OTEL (`test_otel.py`): constructing `OTELExporter` must not call `set_tracer_provider`; `enable(collector)` wraps `record_event`, idempotent, switching collectors restores the first; `disable()` restores and ends open spans; `_export_event` swallows exceptions and does nothing when disabled; trace id 32 chars, span id 16.

@@ -19,6 +19,7 @@ from .constants import (
 )
 from .definitions import (
     ClassificationError,
+    ClassificationPromptConfig,
     ClassificationResponseError,
     ClassificationResult,
     ClassificationSchema,
@@ -38,7 +39,6 @@ from .llm import (
 )
 from .logging import logger
 from .prompts import (
-    ClassificationPromptConfig,
     build_classification_context_block,
     build_classification_json_schema,
     build_classification_system_prompt,

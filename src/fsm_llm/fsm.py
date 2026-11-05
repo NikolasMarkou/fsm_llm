@@ -16,6 +16,7 @@ import uuid
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from datetime import datetime
+from functools import wraps
 from typing import Any, TypeVar
 
 from .constants import (
@@ -43,7 +44,7 @@ from .handlers import HandlerSystem, HandlerTiming
 # Local imports
 # --------------------------------------------------------------
 from .llm import LLMInterface
-from .logging import logger, with_conversation_context
+from .logging import logger
 from .pipeline import MessagePipeline
 from .prompts import (
     DataExtractionPromptBuilder,
@@ -64,7 +65,7 @@ from .utilities import filter_context_tree, load_fsm_definition
 # claims this site redacts "by original design"; that claim is FALSE at HEAD
 # and was false before this change too (the pre-change body was a single
 # `{k: v ... if not has_internal_prefix(k)}` comprehension). The redact-don't-
-# drop site is `runner._redact_context` (D-015/D-014), whose job is to show a
+# drop site is `utilities.redact_context` (D-015/D-014), whose job is to show a
 # CLI operator WHICH keys exist. This one feeds `API.get_data()`, whose return
 # value is application DATA: injecting the literal string "<redacted>" into it
 # would make a filtered key indistinguishable from a real value.
@@ -113,6 +114,23 @@ def _strip_internal_mapping(source: dict[Any, Any]) -> dict[Any, Any]:
 _SnapshotT = TypeVar("_SnapshotT")
 # Return type of one sync turn: ``str`` for a message, ``AdvanceResult`` for a step.
 _TurnT = TypeVar("_TurnT")
+
+
+# --------------------------------------------------------------
+
+
+def with_conversation_context(func):
+    """Bind ``conversation_id`` to a contextual logger passed as ``log=``."""
+
+    @wraps(func)  # Preserve function metadata
+    def wrapper(self, conversation_id, *args, **kwargs):
+        # Bind the conversation ID to the logger
+        log = logger.bind(conversation_id=conversation_id)
+
+        # Call the original function with the contextual logger
+        return func(self, conversation_id, *args, log=log, **kwargs)
+
+    return wrapper
 
 
 # --------------------------------------------------------------

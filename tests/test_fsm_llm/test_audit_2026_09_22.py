@@ -1948,17 +1948,17 @@ def _aliased_tower(levels: int, *, as_list: bool = False) -> dict:
 
 
 def _redact_in_thread(payload: Any) -> tuple[bool, float, Any]:
-    """Run ``_redact_context`` in a daemon thread so a super-linear walk FAILS
+    """Run ``redact_context`` in a daemon thread so a super-linear walk FAILS
     the test at the join timeout instead of hanging the suite."""
     import time
 
-    from fsm_llm.runner import _redact_context
+    from fsm_llm.utilities import redact_context
 
     box: dict[str, Any] = {}
 
     def _work() -> None:
         started = time.perf_counter()
-        box["result"] = _redact_context(payload)
+        box["result"] = redact_context(payload)
         box["elapsed"] = time.perf_counter() - started
 
     worker = threading.Thread(target=_work, daemon=True)
@@ -1968,13 +1968,13 @@ def _redact_in_thread(payload: Any) -> tuple[bool, float, Any]:
 
 
 class TestStep13RunnerRedaction:
-    """Step 13 (D-016): ``runner._redact_context`` had no cycle guard and no
+    """Step 13 (D-016): ``redact_context`` had no cycle guard and no
     memo. 3-way aliasing at depth 16 is 3**16 paths (more than 20 s), and a
     self-cycle recursed to the depth bound on every path."""
 
     @pytest.mark.parametrize("as_list", [False, True])
     def test_three_way_aliased_depth_16_finishes_under_one_second(self, as_list):
-        from fsm_llm.runner import _REDACTED
+        from fsm_llm.utilities import REDACTED
 
         payload = _aliased_tower(15, as_list=as_list)
         still_running, elapsed, result = _redact_in_thread(payload)
@@ -1988,20 +1988,20 @@ class TestStep13RunnerRedaction:
             children = node if as_list else [node["a"], node["b"], node["c"]]
             assert children[0] is children[1] is children[2]  # shared result
             node = children[0]
-        assert node == {"leaf": "x", "password": _REDACTED}
+        assert node == {"leaf": "x", "password": REDACTED}
 
     def test_aliased_output_equals_unaliased_output(self):
-        from fsm_llm.runner import _redact_context
+        from fsm_llm.utilities import redact_context
 
         payload = _aliased_tower(6)
         unaliased = json.loads(json.dumps(payload))
-        assert _redact_context(payload) == _redact_context(unaliased)
+        assert redact_context(payload) == redact_context(unaliased)
 
     def test_shared_subtree_at_different_depths_truncates_per_depth(self):
         """The memo is keyed by (id, depth): a subtree reached at depth 1 and
         at depth 12 must be cut by the bound differently, exactly as its
         un-aliased copies are."""
-        from fsm_llm.runner import _REDACTED, _redact_context
+        from fsm_llm.utilities import REDACTED, redact_context
 
         chain: dict = {"password": "deep-secret", "keep": "v"}
         for _ in range(8):
@@ -2013,15 +2013,15 @@ class TestStep13RunnerRedaction:
             cursor = cursor["down"]
         cursor["deep"] = chain
 
-        result = _redact_context(wrapper)
-        assert result == _redact_context(json.loads(json.dumps(wrapper)))
+        result = redact_context(wrapper)
+        assert result == redact_context(json.loads(json.dumps(wrapper)))
         rendered = json.dumps(result)
         assert "deep-secret" not in rendered
         assert '"keep": "v"' in rendered  # shallow copy walked in full
-        assert _REDACTED in rendered
+        assert REDACTED in rendered
 
     def test_self_cycle_terminates_with_the_placeholder(self):
-        from fsm_llm.runner import _CYCLE_PLACEHOLDER, _REDACTED
+        from fsm_llm.utilities import CYCLE_PLACEHOLDER, REDACTED
 
         payload: dict = {"name": "Alice", "password": "p"}
         payload["self"] = payload
@@ -2030,34 +2030,34 @@ class TestStep13RunnerRedaction:
         assert not still_running
         assert result == {
             "name": "Alice",
-            "password": _REDACTED,
-            "self": _CYCLE_PLACEHOLDER,
+            "password": REDACTED,
+            "self": CYCLE_PLACEHOLDER,
         }
         json.dumps(result)  # no "Circular reference detected"
 
     def test_list_self_cycle_is_replaced_not_dropped(self):
-        from fsm_llm.runner import _CYCLE_PLACEHOLDER, _redact_context
+        from fsm_llm.utilities import CYCLE_PLACEHOLDER, redact_context
 
         items: list = ["a"]
         items.append(items)
-        assert _redact_context({"items": items}) == {"items": ["a", _CYCLE_PLACEHOLDER]}
+        assert redact_context({"items": items}) == {"items": ["a", CYCLE_PLACEHOLDER]}
 
     def test_cycle_dependent_subtree_is_not_memoised(self):
         """``shared`` is reached twice at depth 2: first on the path
         root -> a -> shared, where its ``back`` edge closes a cycle to ``a``;
         then on root -> w -> shared, where ``a`` is NOT active and must be
         walked. Reusing the first result would print the wrong placeholder."""
-        from fsm_llm.runner import _CYCLE_PLACEHOLDER, _REDACTED, _redact_context
+        from fsm_llm.utilities import CYCLE_PLACEHOLDER, REDACTED, redact_context
 
         a: dict = {}
         shared: dict = {"back": a, "password": "s"}
         a["s"] = shared
-        result = _redact_context({"a": a, "w": {"s2": shared}})
+        result = redact_context({"a": a, "w": {"s2": shared}})
 
-        assert result["a"] == {"s": {"back": _CYCLE_PLACEHOLDER, "password": _REDACTED}}
+        assert result["a"] == {"s": {"back": CYCLE_PLACEHOLDER, "password": REDACTED}}
         assert result["w"]["s2"] == {
-            "back": {"s": _CYCLE_PLACEHOLDER},
-            "password": _REDACTED,
+            "back": {"s": CYCLE_PLACEHOLDER},
+            "password": REDACTED,
         }
 
     def test_acyclic_sibling_of_a_cycle_is_still_memoised(self):
@@ -2098,7 +2098,7 @@ class TestStep13RunnerRedaction:
         with (
             patch.object(logger, "enable"),
             patch.object(
-                runner_module, "_redact_context", wraps=runner_module._redact_context
+                runner_module, "redact_context", wraps=runner_module.redact_context
             ) as spy,
         ):
             assert self._run_main({"turn": 1}, {"turn": 1}) == 0
@@ -2116,7 +2116,7 @@ class TestStep13RunnerRedaction:
         sink_id = logger.add(lambda m: records.append(m.record), level="DEBUG")
         try:
             with patch.object(
-                runner_module, "_redact_context", wraps=runner_module._redact_context
+                runner_module, "redact_context", wraps=runner_module.redact_context
             ) as spy:
                 assert (
                     self._run_main(

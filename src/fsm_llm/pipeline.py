@@ -49,6 +49,7 @@ from .definitions import (
     BulkExtractionRequest,
     ClassificationError,
     ClassificationExtractionConfig,
+    ClassificationPromptConfig,
     ClassificationResult,
     ClassificationSchema,
     CompletionRequest,
@@ -75,7 +76,6 @@ from .llm import LLMInterface, check_tool_transcript, implements_complete
 from .logging import logger
 from .ollama import is_ollama_model
 from .prompts import (
-    ClassificationPromptConfig,
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,

@@ -19,9 +19,30 @@ from typing import Any, TypeVar
 _T = TypeVar("_T")
 
 from fsm_llm import API, HandlerTiming
+from fsm_llm.agents import (
+    ADaPTAgent,
+    AgentConfig,
+    DebateAgent,
+    PlanExecuteAgent,
+    ReactAgent,
+    ReflexionAgent,
+    REWOOAgent,
+    SelfConsistencyAgent,
+    ToolRegistry,
+)
 from fsm_llm.constants import DEFAULT_LLM_MODEL
 from fsm_llm.handlers import BaseHandler
 from fsm_llm.logging import logger
+from fsm_llm.workflows import (
+    WorkflowDefinition,
+    WorkflowEngine,
+    WorkflowEvent,
+    WorkflowStep,
+    WorkflowStepResult,
+    auto_step,
+    condition_step,
+    create_workflow,
+)
 
 from .collector import EventCollector, redact_context
 from .constants import (
@@ -60,156 +81,122 @@ from .exceptions import (
     MonitorInitializationError,
 )
 
-# Optional imports for workflows and agents
-_HAS_WORKFLOWS = False
-_HAS_AGENTS = False
 
-try:
-    from fsm_llm.workflows import (
-        WorkflowDefinition,
-        WorkflowEngine,
-        WorkflowEvent,
-        WorkflowStep,
-        WorkflowStepResult,
-        auto_step,
-        condition_step,
-        create_workflow,
+# DECISION plan_2026-05-29_0c00a594/D-002 [STALE]: the dashboard exposes a small set of
+# built-in, DSL-built workflow presets rather than accepting arbitrary
+# `definition_json`. WorkflowDefinition.steps are WorkflowStep ABC subclasses
+# carrying Python callables; there is no JSON->workflow loader, so arbitrary
+# user JSON cannot be turned into a runnable workflow. Presets use only pure
+# steps (auto/condition) so they run deterministically with no external LLM/API.
+class _TerminalStep(WorkflowStep):
+    """No-op terminal step (no outgoing transition) for monitor demo presets.
+
+    A step whose result carries no ``next_state`` and which references no
+    other state is treated as terminal by ``WorkflowDefinition`` and drives
+    the instance to COMPLETED.
+    """
+
+    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
+        return WorkflowStepResult.success_result(
+            message=f"Reached terminal step '{self.step_id}'"
+        )
+
+
+def _preset_linear() -> WorkflowDefinition:
+    """Linear pipeline: ingest -> process -> finish (auto-completes on launch)."""
+    wf = create_workflow(
+        "demo_linear",
+        "Demo: Linear Pipeline",
+        "Two automatic processing steps followed by a terminal step.",
     )
-
-    # DECISION plan_2026-05-29_0c00a594/D-002 [STALE]: the dashboard exposes a small set of
-    # built-in, DSL-built workflow presets rather than accepting arbitrary
-    # `definition_json`. WorkflowDefinition.steps are WorkflowStep ABC subclasses
-    # carrying Python callables; there is no JSON->workflow loader, so arbitrary
-    # user JSON cannot be turned into a runnable workflow. Presets use only pure
-    # steps (auto/condition) so they run deterministically with no external LLM/API.
-    class _TerminalStep(WorkflowStep):
-        """No-op terminal step (no outgoing transition) for monitor demo presets.
-
-        A step whose result carries no ``next_state`` and which references no
-        other state is treated as terminal by ``WorkflowDefinition`` and drives
-        the instance to COMPLETED.
-        """
-
-        async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
-            return WorkflowStepResult.success_result(
-                message=f"Reached terminal step '{self.step_id}'"
-            )
-
-    def _preset_linear() -> WorkflowDefinition:
-        """Linear pipeline: ingest -> process -> finish (auto-completes on launch)."""
-        wf = create_workflow(
-            "demo_linear",
-            "Demo: Linear Pipeline",
-            "Two automatic processing steps followed by a terminal step.",
+    wf.with_initial_step(
+        auto_step(
+            "ingest",
+            "Ingest",
+            next_state="process",
+            action=lambda ctx: {"ingested": True},
         )
-        wf.with_initial_step(
-            auto_step(
-                "ingest",
-                "Ingest",
-                next_state="process",
-                action=lambda ctx: {"ingested": True},
-            )
-        )
-        wf.with_step(
-            auto_step(
-                "process",
-                "Process",
-                next_state="finish",
-                action=lambda ctx: {"processed": True},
-            )
-        )
-        wf.with_step(_TerminalStep(step_id="finish", name="Finish"))
-        return wf
-
-    def _preset_branching() -> WorkflowDefinition:
-        """Conditional branch on the initial-context ``amount`` value."""
-        wf = create_workflow(
-            "demo_branching",
-            "Demo: Conditional Branch",
-            "Routes to a high/low path based on the 'amount' context value.",
-        )
-        wf.with_initial_step(
-            condition_step(
-                "route",
-                "Route by amount",
-                condition=lambda ctx: float(ctx.get("amount", 0) or 0) >= 1000,
-                true_state="high_path",
-                false_state="low_path",
-            )
-        )
-        wf.with_step(
-            auto_step(
-                "high_path",
-                "High Path",
-                next_state="finish",
-                action=lambda ctx: {"tier": "high"},
-            )
-        )
-        wf.with_step(
-            auto_step(
-                "low_path",
-                "Low Path",
-                next_state="finish",
-                action=lambda ctx: {"tier": "low"},
-            )
-        )
-        wf.with_step(_TerminalStep(step_id="finish", name="Finish"))
-        return wf
-
-    # Registry of preset builders. Each call returns a fresh WorkflowDefinition so
-    # concurrent launches never share mutable instance state.
-    _WORKFLOW_PRESETS: dict[str, Any] = {
-        "demo_linear": _preset_linear,
-        "demo_branching": _preset_branching,
-    }
-
-    _HAS_WORKFLOWS = True
-except ImportError:
-    _WORKFLOW_PRESETS = {}
-
-try:
-    from fsm_llm.agents import (
-        ADaPTAgent,
-        AgentConfig,
-        DebateAgent,
-        PlanExecuteAgent,
-        ReactAgent,
-        ReflexionAgent,
-        REWOOAgent,
-        SelfConsistencyAgent,
-        ToolRegistry,
     )
+    wf.with_step(
+        auto_step(
+            "process",
+            "Process",
+            next_state="finish",
+            action=lambda ctx: {"processed": True},
+        )
+    )
+    wf.with_step(_TerminalStep(step_id="finish", name="Finish"))
+    return wf
 
-    # DECISION plan_2026-05-29_0c00a594/D-001 [STALE]: EvaluatorOptimizerAgent and
-    # MakerCheckerAgent are intentionally NOT launchable from the dashboard.
-    # Their constructors require arguments that cannot be supplied from a web
-    # form (a Python `evaluation_fn` callable / maker+checker instruction strings),
-    # so launching them always raised TypeError. They remain importable as library
-    # classes and in flows.json for visualization. Do not re-add here without also
-    # wiring a way to supply their required constructor arguments.
-    _AGENT_CLASSES: dict[str, type] = {
-        "ReactAgent": ReactAgent,
-        "ReflexionAgent": ReflexionAgent,
-        "PlanExecuteAgent": PlanExecuteAgent,
-        "REWOOAgent": REWOOAgent,
-        "ADaPTAgent": ADaPTAgent,
-        "DebateAgent": DebateAgent,
-        "SelfConsistencyAgent": SelfConsistencyAgent,
-    }
 
-    # Agent types that require a ToolRegistry
-    _TOOL_BASED_AGENTS = {
-        "ReactAgent",
-        "ReflexionAgent",
-        "PlanExecuteAgent",
-        "REWOOAgent",
-        "ADaPTAgent",
-    }
+def _preset_branching() -> WorkflowDefinition:
+    """Conditional branch on the initial-context ``amount`` value."""
+    wf = create_workflow(
+        "demo_branching",
+        "Demo: Conditional Branch",
+        "Routes to a high/low path based on the 'amount' context value.",
+    )
+    wf.with_initial_step(
+        condition_step(
+            "route",
+            "Route by amount",
+            condition=lambda ctx: float(ctx.get("amount", 0) or 0) >= 1000,
+            true_state="high_path",
+            false_state="low_path",
+        )
+    )
+    wf.with_step(
+        auto_step(
+            "high_path",
+            "High Path",
+            next_state="finish",
+            action=lambda ctx: {"tier": "high"},
+        )
+    )
+    wf.with_step(
+        auto_step(
+            "low_path",
+            "Low Path",
+            next_state="finish",
+            action=lambda ctx: {"tier": "low"},
+        )
+    )
+    wf.with_step(_TerminalStep(step_id="finish", name="Finish"))
+    return wf
 
-    _HAS_AGENTS = True
-except ImportError:
-    _AGENT_CLASSES = {}
-    _TOOL_BASED_AGENTS = set()
+
+# Registry of preset builders. Each call returns a fresh WorkflowDefinition so
+# concurrent launches never share mutable instance state.
+_WORKFLOW_PRESETS: dict[str, Any] = {
+    "demo_linear": _preset_linear,
+    "demo_branching": _preset_branching,
+}
+
+# DECISION plan_2026-05-29_0c00a594/D-001 [STALE]: EvaluatorOptimizerAgent and
+# MakerCheckerAgent are intentionally NOT launchable from the dashboard.
+# Their constructors require arguments that cannot be supplied from a web
+# form (a Python `evaluation_fn` callable / maker+checker instruction strings),
+# so launching them always raised TypeError. They remain importable as library
+# classes and in flows.json for visualization. Do not re-add here without also
+# wiring a way to supply their required constructor arguments.
+_AGENT_CLASSES: dict[str, type] = {
+    "ReactAgent": ReactAgent,
+    "ReflexionAgent": ReflexionAgent,
+    "PlanExecuteAgent": PlanExecuteAgent,
+    "REWOOAgent": REWOOAgent,
+    "ADaPTAgent": ADaPTAgent,
+    "DebateAgent": DebateAgent,
+    "SelfConsistencyAgent": SelfConsistencyAgent,
+}
+
+# Agent types that require a ToolRegistry
+_TOOL_BASED_AGENTS = {
+    "ReactAgent",
+    "ReflexionAgent",
+    "PlanExecuteAgent",
+    "REWOOAgent",
+    "ADaPTAgent",
+}
 
 
 class ManagedFSM:
@@ -485,7 +472,7 @@ def _tools_used(tool_calls: Any) -> list[dict[str, Any]]:
     ]
 
 
-def _find_examples_dir() -> Path | None:
+def find_examples_dir() -> Path | None:
     """Locate the examples/ directory."""
     # parents[3] is the repo root: src/fsm_llm/monitor/instance_manager.py.
     base = Path(__file__).resolve().parents[3] / "examples"
@@ -729,8 +716,8 @@ class InstanceManager:
     def get_capabilities(self) -> dict[str, bool]:
         return {
             "fsm": True,
-            "workflows": _HAS_WORKFLOWS,
-            "agents": _HAS_AGENTS,
+            "workflows": True,
+            "agents": True,
         }
 
     # --- Instance Query ---
@@ -1179,9 +1166,6 @@ class InstanceManager:
         Arbitrary ``definition_json`` is intentionally unsupported (see
         DECISION plan_2026-05-29_0c00a594/D-002 [STALE]).
         """
-        if not _HAS_WORKFLOWS:
-            raise NotImplementedError("fsm_llm.workflows extension is not installed")
-
         if definition_json is not None and preset_id is None:
             raise ValueError(
                 "Custom workflow JSON is not supported via the dashboard; "
@@ -1498,9 +1482,6 @@ class InstanceManager:
         label: str = "",
     ) -> ManagedAgent:
         """Launch an agent in a background thread."""
-        if not _HAS_AGENTS:
-            raise NotImplementedError("fsm_llm.agents extension is not installed")
-
         if agent_type not in _AGENT_CLASSES:
             raise ValueError(
                 f"Unknown agent type: {agent_type}. "
@@ -1957,7 +1938,7 @@ class InstanceManager:
             return fsm_json
 
         if preset_id is not None:
-            base = _find_examples_dir()
+            base = find_examples_dir()
             if base is None:
                 raise FileNotFoundError("Examples directory not found")
             file_path = validate_preset_id(preset_id, base)

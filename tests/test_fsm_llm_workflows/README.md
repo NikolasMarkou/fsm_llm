@@ -12,7 +12,7 @@ Most tests build a step or a small workflow directly in Python, run it, and chec
 
 - Step tests call `await step.execute(context)` on one step and check the returned `WorkflowStepResult` (`success`, `next_state`, `data`, `error`).
 - Engine tests build a workflow with `create_workflow(...)`, `with_initial_step(...)` and `with_step(...)`, register it on a fresh `WorkflowEngine()`, call `start_workflow(...)`, then check the instance status (`PENDING`, `RUNNING`, `WAITING`, `COMPLETED`, `FAILED`, `CANCELLED`) and its context.
-- LLMs, agents and the core `fsm_llm.API` are replaced by small fake classes or `unittest.mock.MagicMock`. `ConversationStep` tests patch `fsm_llm.API`.
+- LLMs, agents and the core `fsm_llm.API` are replaced by small fake classes or `unittest.mock.MagicMock`. `ConversationStep` tests patch `fsm_llm.workflows.steps.API`.
 - Timing tests use real sleeps and tiny timeouts (0.05 s to 0.5 s). Most sleeps are short (0.01 s to 1 s); the 8 `slow` tests in `test_step_timeouts.py` sleep 5.0 s and rely on a 0.1 s step timeout to cut them off.
 
 Async tests need no decorator: the repository's `pyproject.toml` sets `asyncio_mode = "auto"`.

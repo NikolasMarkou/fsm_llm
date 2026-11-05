@@ -9,7 +9,6 @@ import pytest
 
 from fsm_llm.agents.constants import ContextKeys, ReasoningIntegrationKeys
 from fsm_llm.agents.definitions import AgentConfig
-from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.tools import ToolRegistry
 
 
@@ -66,24 +65,6 @@ class TestReasoningReactAgentImport:
         from fsm_llm.agents.reasoning_react import ReasoningReactAgent
 
         assert ReasoningReactAgent is not None
-
-    def test_missing_reasoning_raises_agent_error(self):
-        """ReasoningReactAgent should raise AgentError if reasoning is missing."""
-        # Mock the _HAS_REASONING flag to simulate missing package
-        import fsm_llm.agents.reasoning_react as rr_module
-
-        original = rr_module._HAS_REASONING
-
-        try:
-            rr_module._HAS_REASONING = False
-
-            registry = ToolRegistry()
-            registry.register_function(_dummy_tool, name="dummy", description="Dummy")
-
-            with pytest.raises(AgentError, match=r"requires fsm_llm\.reasoning"):
-                rr_module.ReasoningReactAgent(tools=registry)
-        finally:
-            rr_module._HAS_REASONING = original
 
     def test_conditional_import_in_init(self):
         """ReasoningReactAgent is imported unconditionally (reasoning always ships)."""

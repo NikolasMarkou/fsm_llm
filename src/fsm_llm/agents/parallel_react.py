@@ -42,12 +42,16 @@ from .constants import (
 )
 from .definitions import AgentConfig, AgentResult, AgentStep, ToolCall
 from .exceptions import AgentError
-from .fsm_definitions import _conclude_on_evidence_logic, _loop_field_context_keys
+from .fsm_definitions import conclude_on_evidence_logic, loop_field_context_keys
 from .handlers import (
     ThinkTurnLimiter,
     forced_stop_skip,
     next_step_number,
     with_feedback,
+)
+from .prompts import (
+    build_conclude_response_instructions,
+    build_think_terminate_instructions,
 )
 from .tools import ToolRegistry, normalize_tool_input, redact_secret_entries
 from .truncation import smart_truncate
@@ -84,11 +88,6 @@ def build_parallel_react_fsm(
     their prompts list ``task``, ``observations``, ``agent_feedback`` and
     ``context_keys``, never ``agent_trace``.
     """
-    from .prompts import (
-        build_conclude_response_instructions,
-        build_think_terminate_instructions,
-    )
-
     extra = (ContextKeys.AGENT_FEEDBACK, *context_keys)
 
     persona = (
@@ -109,13 +108,13 @@ def build_parallel_react_fsm(
                 TOOL_CALLS_KEY,
                 "list",
                 _build_parallel_think_instructions(registry, task_description),
-                context_keys=_loop_field_context_keys(extra),
+                context_keys=loop_field_context_keys(extra),
             ),
             typed_field_extraction(
                 ContextKeys.SHOULD_TERMINATE,
                 "bool",
                 build_think_terminate_instructions(),
-                context_keys=_loop_field_context_keys(extra),
+                context_keys=loop_field_context_keys(extra),
                 required=False,
             ),
         ],
@@ -130,12 +129,12 @@ def build_parallel_react_fsm(
                         # DECISION plan-2026-09-24T091842-c1d5bfbc/D-008
                         # Do NOT revert to should_terminate alone: a turn-1
                         # terminate with no batch would answer from memory.
-                        # See _conclude_on_evidence_logic.
+                        # See conclude_on_evidence_logic.
                         "description": (
                             "Agent decided to terminate AND a tool has run "
                             "or termination is forced"
                         ),
-                        "logic": _conclude_on_evidence_logic(),
+                        "logic": conclude_on_evidence_logic(),
                     }
                 ],
             },
@@ -170,7 +169,7 @@ def build_parallel_react_fsm(
                                 "Framework/agent decided to terminate AND a tool "
                                 "has run or termination is forced"
                             ),
-                            "logic": _conclude_on_evidence_logic(),
+                            "logic": conclude_on_evidence_logic(),
                         }
                     ],
                 },

@@ -1759,7 +1759,7 @@ def is_forbidden_context_entry(key: object, value: object = None) -> bool:
 
     The single decision point for the context-key security filter, shared by
     ``context.clean_context_keys``, ``prompts.BasePromptBuilder``'s
-    ``_is_forbidden_context_key`` and ``runner``'s log redaction. It combines:
+    ``_is_forbidden_context_key`` and ``utilities.redact_context``'s log redaction. It combines:
 
     * **Layer 1 (name)** -- ``COMPILED_FORBIDDEN_CONTEXT_PATTERNS``. Decides on
       the name alone and is authoritative in the STRIP direction.
