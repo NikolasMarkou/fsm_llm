@@ -2551,23 +2551,21 @@ def _mute_agent(pattern: str, llm: PromptGroundedLLM) -> BaseAgent:
     return PromptChainAgent(chain=chain, config=config, llm_interface=llm)
 
 
-_NO_ANSWER = "Agent could not determine an answer."
-
-
 class TestAnswerFallbacksNeverReturnAStateMarker:
     """When no field is filled, the answer fallback reads the replies of the
     states that spoke. A silent step contributes no text, so no fallback can
     return a ``[state]`` marker (on d4b1626 the loop collected ``[generate]``,
-    ``[evaluate]`` ... and a marker passed the ``MIN_ANSWER_LENGTH`` filter).
-    Every ADaPT state speaks, so its case pins the default text only."""
+    ``[evaluate]`` ... and a short marker was the shipped answer).
+    Every ADaPT state speaks. The replies are the short "ok": no pattern has a
+    minimum answer length (D-010 of plan 5ed71cf2), so each ships it."""
 
     @pytest.mark.parametrize(
         ("pattern", "answer", "outcome"),
         [
-            ("adapt", "ADaPT agent could not determine an answer.", "no_result"),
-            ("evaluator_optimizer", _NO_ANSWER, "forced_pass"),
+            ("adapt", "ok", "no_result"),
+            ("evaluator_optimizer", "ok", "forced_pass"),
             ("maker_checker", "ok", "forced_pass"),
-            ("prompt_chain", _NO_ANSWER, "no_result"),
+            ("prompt_chain", "ok", "no_result"),
         ],
     )
     def test_run_with_no_filled_field_never_answers_a_marker(

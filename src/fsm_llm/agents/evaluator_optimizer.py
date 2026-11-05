@@ -121,6 +121,11 @@ class EvaluatorOptimizerAgent(BaseAgent):
         # D-036: `generated_output` is this pattern's answer key (precedent
         # maker_checker.py DRAFT_OUTPUT); without it a
         # correct evaluator-passed run reads as prose-fallback, success=False.
+        # DECISION plan-2026-11-05T134105-5ed71cf2/D-010: no `_extract_answer`
+        # override and no minimum answer length here. The base chain ships the
+        # judged artifact when it is non-empty ("Paris", "42", "Yes" are
+        # answers); a `len(x) > 5` floor replaced it with the failure sentence
+        # under success=True. Do NOT re-add a length test. See decisions.md.
         return self._standard_run(
             task,
             fsm_def,
@@ -255,22 +260,3 @@ class EvaluatorOptimizerAgent(BaseAgent):
                 ContextKeys.EVALUATION_PASSED: True,
             },
         )
-
-    def _extract_answer(
-        self,
-        final_context: dict[str, Any],
-        responses: list[str],
-        extra_keys: list[str] | None = None,
-    ) -> str:
-        """Extract the final answer from context or responses."""
-        # Priority: generated_output > last response
-        # A native JSON artifact (`any` field, D-050) ships as JSON text.
-        output = artifact_text(final_context.get(ContextKeys.GENERATED_OUTPUT))
-        if len(output) > Defaults.MIN_ANSWER_LENGTH:
-            return output
-
-        for response in reversed(responses):
-            if response and len(response.strip()) > Defaults.MIN_ANSWER_LENGTH:
-                return response.strip()
-
-        return "Agent could not determine an answer."

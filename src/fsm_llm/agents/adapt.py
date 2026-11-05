@@ -415,13 +415,16 @@ class ADaPTAgent(BaseAgent):
             if parts:
                 return "\n\n".join(parts)
 
+        # DECISION plan-2026-11-05T134105-5ed71cf2/D-010: any non-empty
+        # attempt_result or reply is an answer; no minimum length ("Paris",
+        # "42" shipped the failure sentence). The envelope skip below stays.
         # Fall back to attempt_result if available
         attempt_result = final_context.get(ContextKeys.ATTEMPT_RESULT)
         if (
             not subtask_results
             and attempt_result
             and isinstance(attempt_result, str)
-            and len(attempt_result) > Defaults.MIN_ANSWER_LENGTH
+            and attempt_result.strip()
         ):
             return str(attempt_result)
 
@@ -432,7 +435,7 @@ class ADaPTAgent(BaseAgent):
         for response in reversed(responses):
             if (
                 response
-                and len(response.strip()) > Defaults.MIN_ANSWER_LENGTH
+                and response.strip()
                 and not self._is_extraction_envelope(response)
             ):
                 return response.strip()

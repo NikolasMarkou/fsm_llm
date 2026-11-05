@@ -222,16 +222,19 @@ class PromptChainAgent(BaseAgent):
         extra_keys: list[str] | None = None,
     ) -> str:
         """Extract the final answer from context or responses."""
+        # DECISION plan-2026-11-05T134105-5ed71cf2/D-010: any non-empty last
+        # result or reply is the answer. Do NOT re-add a minimum length: it
+        # dropped "Paris"/"42" and shipped the failure sentence as success.
         # The last chain step result
         chain_results = final_context.get(ContextKeys.CHAIN_RESULTS, [])
         if chain_results:
             last = artifact_text(chain_results[-1]).strip()
-            if len(last) > Defaults.MIN_ANSWER_LENGTH:
+            if last:
                 return last
 
         # Fall back to last non-empty response
         for response in reversed(responses):
-            if response and len(response.strip()) > Defaults.MIN_ANSWER_LENGTH:
+            if response and response.strip():
                 return response.strip()
 
         return "Agent could not determine an answer."

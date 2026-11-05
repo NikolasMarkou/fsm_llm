@@ -348,7 +348,9 @@ class TestEvalOptHandlers:
     def test_extract_answer_from_generated_output(self):
         agent = EvaluatorOptimizerAgent(evaluation_fn=_always_pass)
         context = {ContextKeys.GENERATED_OUTPUT: "The generated output here"}
-        answer = agent._extract_answer(context, ["response1"])
+        answer = agent._extract_answer(
+            context, ["response1"], [ContextKeys.GENERATED_OUTPUT]
+        )
         assert answer == "The generated output here"
 
     def test_extract_answer_fallback_to_response(self):
@@ -624,3 +626,51 @@ class TestEvaluationFnWrongType:
 
         # Pre-fix: ['v1'] (handler error swallowed, fallback shipped draft 1).
         assert seen == ["v1", "v2", "v3"]
+
+
+class _ShortOutputLLM(_PoemLLM):
+    """Extracts ``generated_output``; every reply is a long prose sentence, so
+    a wrongly skipped short artifact would be replaced by this prose."""
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="Here is a long closing sentence that is not the artifact.",
+            message_type="response",
+            reasoning="mock",
+        )
+
+
+class TestShortAnswer:
+    """F-AM-02 (D-010): the shipped answer is the artifact the evaluator
+    judged, however short; only an empty one falls through."""
+
+    @pytest.mark.parametrize("generated", ["Paris", "42", "Yes"])
+    def test_a_short_artifact_ships_as_the_answer(self, generated: str):
+        agent = EvaluatorOptimizerAgent(
+            evaluation_fn=_always_pass,
+            config=AgentConfig(max_iterations=10, timeout_seconds=30.0),
+            llm_interface=_ShortOutputLLM(generated),
+        )
+        result = agent.run("Name the capital of France")
+        assert result.answer == generated
+        assert result.success is True
+
+    def test_a_whitespace_artifact_falls_through_to_the_reply(self):
+        agent = EvaluatorOptimizerAgent(evaluation_fn=_always_pass)
+        answer = agent._extract_answer(
+            {ContextKeys.GENERATED_OUTPUT: "   "},
+            ["A real reply."],
+            [ContextKeys.GENERATED_OUTPUT],
+        )
+        assert answer == "A real reply."
+
+    def test_an_empty_run_still_ends_on_the_failure_sentence(self):
+        agent = EvaluatorOptimizerAgent(evaluation_fn=_always_pass)
+        answer = agent._extract_answer(
+            {ContextKeys.GENERATED_OUTPUT: " "},
+            [" ", ""],
+            [ContextKeys.GENERATED_OUTPUT],
+        )
+        assert answer == "Agent could not determine an answer."

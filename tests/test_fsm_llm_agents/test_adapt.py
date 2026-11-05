@@ -624,3 +624,41 @@ class TestADaPTDecomposedOutcome:
         result = _adapt(llm).run("root task")
         assert all(c.tool_name != "decompose" for c in result.trace.tool_calls)
         assert result.success is False
+
+
+class TestShortAnswer:
+    """F-AM-02 (D-010): a short attempt result or reply ships as the answer;
+    the extraction-envelope skip and an empty value stay."""
+
+    @pytest.mark.parametrize("value", ["Paris", "42", "Yes"])
+    def test_a_short_attempt_result_is_the_answer(self, value: str):
+        answer = ADaPTAgent()._extract_answer(
+            {ContextKeys.ATTEMPT_RESULT: value}, ["A long unrelated closing reply."]
+        )
+        assert answer == value
+
+    @pytest.mark.parametrize("value", ["Paris", "42", "Yes"])
+    def test_a_short_reply_is_the_answer(self, value: str):
+        assert ADaPTAgent()._extract_answer({}, [value]) == value
+
+    def test_a_short_envelope_is_still_skipped(self):
+        answer = ADaPTAgent()._extract_answer({}, ['{"extracted_data": {}}'])
+        assert answer == "ADaPT agent could not determine an answer."
+
+    def test_an_empty_run_still_ends_on_the_failure_sentence(self):
+        answer = ADaPTAgent()._extract_answer(
+            {ContextKeys.ATTEMPT_RESULT: "  "}, ["  ", ""]
+        )
+        assert answer == "ADaPT agent could not determine an answer."
+
+    @pytest.mark.parametrize("value", ["Paris", "42", "Yes"])
+    def test_a_run_ships_a_short_succeeded_attempt(self, value: str):
+        llm = _SilentKeysLLM(
+            silent=set(),
+            values={
+                ContextKeys.ATTEMPT_RESULT: value,
+                ContextKeys.ATTEMPT_SUCCEEDED: True,
+            },
+        )
+        result = _adapt(llm).run("Name the capital of France")
+        assert result.answer == value

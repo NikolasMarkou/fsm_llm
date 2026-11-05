@@ -574,7 +574,6 @@ class Defaults:
     MAX_TOOL_TIMEOUT_S = threading.TIMEOUT_MAX
     MAX_OBSERVATIONS = 20
     CONFIDENCE_THRESHOLD = 0.3
-    MIN_ANSWER_LENGTH = 5
     MAX_TASK_PREVIEW_LENGTH = 200
     # Cap on AgentConfig.instructions. They are prefixed to prompt slots that
     # core caps at 5000 chars; a ReAct think slot grows with the tool list, so

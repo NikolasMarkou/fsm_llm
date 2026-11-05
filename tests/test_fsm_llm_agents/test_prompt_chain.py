@@ -15,7 +15,14 @@ from fsm_llm.agents.definitions import AgentConfig, ChainStep
 from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.fsm_definitions import build_prompt_chain_fsm
 from fsm_llm.agents.prompt_chain import PromptChainAgent
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.definitions import (
+    FieldExtractionRequest,
+    FieldExtractionResponse,
+    FSMDefinition,
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+)
+from fsm_llm.llm import LLMInterface
 
 
 def _make_step(step_id: str, name: str, validation_fn=None) -> ChainStep:
@@ -446,3 +453,57 @@ class TestPromptChainHandlers:
         agent = PromptChainAgent(chain=chain)
         answer = agent._extract_answer({}, ["", ""])
         assert "could not" in answer.lower()
+
+
+class _ShortChainLLM(LLMInterface):
+    """Every extraction is ``value``; every reply is a long prose sentence."""
+
+    def __init__(self, value: str) -> None:
+        self.model = "mock-model"
+        self.value = value
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=self.value,
+            confidence=1.0,
+            reasoning="mock",
+            is_valid=True,
+        )
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="A long closing sentence that is not the chain result.",
+            message_type="response",
+            reasoning="mock",
+        )
+
+
+class TestShortAnswer:
+    """F-AM-02 (D-010): the last chain result ships however short; only an
+    empty one falls through."""
+
+    @pytest.mark.parametrize("value", ["Paris", "42", "Yes"])
+    def test_a_short_last_result_ships_as_the_answer(self, value: str):
+        agent = PromptChainAgent(
+            chain=_make_chain(2),
+            config=AgentConfig(max_iterations=10, timeout_seconds=30.0),
+            llm_interface=_ShortChainLLM(value),
+        )
+        result = agent.run("Name the capital of France")
+        assert result.answer == value
+        assert result.success is True
+
+    def test_a_whitespace_result_falls_through_to_the_reply(self):
+        agent = PromptChainAgent(chain=_make_chain(2))
+        answer = agent._extract_answer(
+            {ContextKeys.CHAIN_RESULTS: ["   "]}, ["A real reply."]
+        )
+        assert answer == "A real reply."
+
+    def test_an_empty_run_still_ends_on_the_failure_sentence(self):
+        agent = PromptChainAgent(chain=_make_chain(2))
+        answer = agent._extract_answer({ContextKeys.CHAIN_RESULTS: [" "]}, [" "])
+        assert answer == "Agent could not determine an answer."

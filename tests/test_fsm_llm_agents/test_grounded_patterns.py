@@ -1921,7 +1921,9 @@ class TestCutOffArtifactEnvelopeNeverShips:
             config=AgentConfig(output_schema=Recipe),
             llm_interface=PromptGroundedLLM(),
         )
-        answer = agent._extract_answer({ContextKeys.GENERATED_OUTPUT: recipe}, [])
+        answer = agent._extract_answer(
+            {ContextKeys.GENERATED_OUTPUT: recipe}, [], [ContextKeys.GENERATED_OUTPUT]
+        )
 
         assert json.loads(answer) == recipe
         assert agent._try_parse_structured_output(answer) == Recipe(**recipe)
