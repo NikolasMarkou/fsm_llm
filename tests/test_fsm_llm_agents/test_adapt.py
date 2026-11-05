@@ -273,6 +273,13 @@ class TestADaPTJSONLeakFix:
             '```json\n{"extracted_data": {"a": 1}}\n```'
         )
 
+    def test_envelope_detected_under_an_uppercase_fence(self):
+        # F-AP-18: the check keeps its own case-insensitive fence strip
+        # (utilities.strip_think_and_fences only knows lowercase ```json).
+        assert ADaPTAgent._is_extraction_envelope(
+            '```JSON\n{"extracted_data": {"a": 1}}\n```'
+        )
+
     def test_envelope_not_detected_prose(self):
         assert not ADaPTAgent._is_extraction_envelope("Paris is the capital of France.")
 
@@ -291,7 +298,7 @@ class TestADaPTJSONLeakFix:
         answer = agent._extract_answer(
             {}, ['{"extracted_data": {}, "reasoning": "Continue. has no info"}']
         )
-        assert answer == "ADaPT agent could not determine an answer."
+        assert answer == "Agent could not determine an answer."
 
     def test_extract_answer_keeps_prose_response(self):
         agent = ADaPTAgent()
@@ -643,13 +650,13 @@ class TestShortAnswer:
 
     def test_a_short_envelope_is_still_skipped(self):
         answer = ADaPTAgent()._extract_answer({}, ['{"extracted_data": {}}'])
-        assert answer == "ADaPT agent could not determine an answer."
+        assert answer == "Agent could not determine an answer."
 
     def test_an_empty_run_still_ends_on_the_failure_sentence(self):
         answer = ADaPTAgent()._extract_answer(
             {ContextKeys.ATTEMPT_RESULT: "  "}, ["  ", ""]
         )
-        assert answer == "ADaPT agent could not determine an answer."
+        assert answer == "Agent could not determine an answer."
 
     @pytest.mark.parametrize("value", ["Paris", "42", "Yes"])
     def test_a_run_ships_a_short_succeeded_attempt(self, value: str):

@@ -394,14 +394,6 @@ class TestPromptChainHandlers:
         # Routed on by the gate edge; caller context cannot seed it.
         assert result.get(ContextKeys.FORCED_STOP_REASON) == "gate_failed"
 
-    def test_gate_checker_no_validation_on_first_step(self):
-        chain = _make_chain(3)
-        agent = PromptChainAgent(chain=chain)
-        gate_fn = agent._make_gate_checker(0)
-        context = {}
-        result = gate_fn(context)
-        assert ContextKeys.GATE_PASSED not in result
-
     def test_iteration_limiter_increments(self):
         chain = _make_chain(2)
         agent = PromptChainAgent(chain=chain)

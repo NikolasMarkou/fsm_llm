@@ -287,6 +287,8 @@ class AgentConfig(BaseModel):
 
     When set to N>0, agents that opt in register a summarization handler that
     condenses observations once they exceed N entries. None (default) disables.
+    N must be below ``Defaults.MAX_OBSERVATIONS`` (the length observations are
+    pruned to).
     """
 
     verification_fn: Callable[..., Any] | None = Field(default=None, exclude=True)
@@ -329,6 +331,18 @@ class AgentConfig(BaseModel):
     def validate_optional_positive(cls, v: int | None) -> int | None:
         if v is not None and v < 1:
             raise ValueError("value must be a positive integer when set")
+        return v
+
+    @field_validator("auto_summarize_after")
+    @classmethod
+    def validate_auto_summarize_after(cls, v: int | None) -> int | None:
+        # Observations are pruned to MAX_OBSERVATIONS: a threshold at or above
+        # it never fires.
+        if v is not None and v >= Defaults.MAX_OBSERVATIONS:
+            raise ValueError(
+                f"auto_summarize_after must be below {Defaults.MAX_OBSERVATIONS} "
+                "(the observation list never grows past it)"
+            )
         return v
 
     @field_validator("max_iterations")

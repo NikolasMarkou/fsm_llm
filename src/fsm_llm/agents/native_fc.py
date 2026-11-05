@@ -524,8 +524,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         seed: int | None = None,
         **api_kwargs: Any,
     ) -> None:
-        if len(tools) == 0:
-            raise AgentError("Cannot create agent with empty tool registry")
+        self._require_tools(tools)
         super().__init__(config, **api_kwargs)
         self.tools = tools
         self._refuse_flagged_tools()
@@ -653,7 +652,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
             fsm_def,
             context,
             "native_fc",
-            extra_answer_keys=[_K.ANSWER],
+            success_keys=[_K.ANSWER],
             handlers=handlers,
         )
 

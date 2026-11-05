@@ -221,8 +221,7 @@ class ParallelReactAgent(BaseAgent):
         max_parallel: int = 4,
         **api_kwargs: Any,
     ) -> None:
-        if len(tools) == 0:
-            raise AgentError("Cannot create agent with empty tool registry")
+        self._require_tools(tools)
         if max_parallel < 1:
             raise AgentError("max_parallel must be >= 1")
         super().__init__(config, **api_kwargs)

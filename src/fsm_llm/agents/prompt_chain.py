@@ -134,7 +134,7 @@ class PromptChainAgent(BaseAgent):
             # Success key only: the last step's output is kept (not cleared on
             # output entry), so a chain whose last step produced nothing
             # reports no_result. The answer comes from _extract_answer.
-            extra_answer_keys=[ContextKeys.CHAIN_STEP_RESULT],
+            success_keys=[ContextKeys.CHAIN_STEP_RESULT],
         )
 
     def _register_handlers(self, api: API) -> None:
@@ -164,7 +164,7 @@ class PromptChainAgent(BaseAgent):
         ``step_index`` is 1..len(chain); ``len(chain)`` is the output state.
         """
         chain = self.chain
-        prev_step = chain[step_index - 1] if step_index > 0 else None
+        prev_step = chain[step_index - 1]
         # The next step extracts its own result (skip-if-set); on output the
         # last step's result stays as the success key.
         refresh = (
@@ -192,7 +192,7 @@ class PromptChainAgent(BaseAgent):
                 chain_results.append(step_result)
                 updates[ContextKeys.CHAIN_RESULTS] = chain_results
 
-            if prev_step is not None and prev_step.validation_fn is not None:
+            if prev_step.validation_fn is not None:
                 passed = prev_step.validation_fn(context)
                 updates[ContextKeys.GATE_PASSED] = passed
                 if not passed:
@@ -221,20 +221,10 @@ class PromptChainAgent(BaseAgent):
         responses: list[str],
         extra_keys: list[str] | None = None,
     ) -> str:
-        """Extract the final answer from context or responses."""
+        """The last chain step result, else the last non-empty reply."""
         # DECISION plan-2026-11-05T134105-5ed71cf2/D-010: any non-empty last
         # result or reply is the answer. Do NOT re-add a minimum length: it
         # dropped "Paris"/"42" and shipped the failure sentence as success.
-        # The last chain step result
         chain_results = final_context.get(ContextKeys.CHAIN_RESULTS, [])
-        if chain_results:
-            last = artifact_text(chain_results[-1]).strip()
-            if last:
-                return last
-
-        # Fall back to last non-empty response
-        for response in reversed(responses):
-            if response and response.strip():
-                return response.strip()
-
-        return ErrorMessages.NO_ANSWER
+        last = artifact_text(chain_results[-1]).strip() if chain_results else ""
+        return last or super()._extract_answer(final_context, responses)

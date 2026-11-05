@@ -18,7 +18,7 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     """Configure the argument parser."""
     parser = argparse.ArgumentParser(
         prog="fsm_llm.agents",
-        description="FSM-LLM Agentic Patterns: ReAct and HITL agents",
+        description="FSM-LLM agent patterns, tools, HITL approval and memory",
     )
     parser.add_argument(
         "--version",
@@ -40,7 +40,7 @@ def main() -> None:
 
     if args.info:
         print(f"fsm_llm.agents v{__version__}")
-        print("Agentic patterns for FSM-LLM:")
+        print("Agent patterns for FSM-LLM (18, see create_agent):")
         print("  - ReactAgent: ReAct (Reasoning + Acting) loop with tool use")
         print("  - HumanInTheLoop: Approval gates, escalation, and overrides")
         print("  - ToolRegistry: Tool management with schema and execution")

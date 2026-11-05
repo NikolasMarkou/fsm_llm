@@ -21,6 +21,7 @@ from .constants import (
     ADaPTStates,
     ContextKeys,
     Defaults,
+    ErrorMessages,
     HandlerNames,
     HandlerPriorities,
     LogMessages,
@@ -106,6 +107,7 @@ class ADaPTAgent(BaseAgent):
 
         # Register handlers (needs initial_context, depth and start_time for subtask executor)
         self._register_handlers(api, initial_context, _depth, start_time, holder=holder)
+        self._register_lifecycle_handlers(api, "adapt")
 
         context = self._init_context(
             task,
@@ -186,6 +188,12 @@ class ADaPTAgent(BaseAgent):
                 stop_reason=stop_reason,
                 trace=trace,
                 final_context=self._filter_context(final_context),
+                # The schema is for the run's answer; a subtask's goes to its parent.
+                structured_output=(
+                    self._try_parse_structured_output(answer, final_context)
+                    if _depth == 0
+                    else None
+                ),
             )
 
         except AgentError:
@@ -440,7 +448,7 @@ class ADaPTAgent(BaseAgent):
             ):
                 return response.strip()
 
-        return "ADaPT agent could not determine an answer."
+        return ErrorMessages.NO_ANSWER
 
     @staticmethod
     def _subtask_entries(final_context: dict[str, Any]) -> list[dict[str, Any]]:

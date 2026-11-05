@@ -2,7 +2,8 @@
 Observation summarization for long agent loops.
 
 Agents accumulate observations turn over turn; the stock loop only hard-prunes
-to the most recent ``MAX_OBSERVATIONS`` (dropping older context entirely). When
+to the most recent ``MAX_OBSERVATIONS`` (dropping older context entirely, so a
+list never grows past it and a threshold at or above it never fires). When
 ``AgentConfig.auto_summarize_after`` is set, agents instead *condense* the
 oldest observations into a single summary entry once the list grows past the
 threshold — retaining the gist of earlier steps instead of discarding them.
@@ -44,13 +45,23 @@ def make_observation_summarizer(
     Args:
         threshold: Observation count above which summarization triggers.
         keep_last: Recent entries to keep verbatim (default ``max(1,
-            threshold // 2)``).
+            threshold // 2)``, at most ``threshold - 1``). Must be below
+            ``threshold``, or the next turn would wrap the summary again.
         summarize_fn: Optional ``(entries) -> str`` summarizer (e.g. LLM-backed).
             Defaults to deterministic truncation.
+
+    Raises:
+        ValueError: ``threshold < 1`` or ``keep_last >= threshold``.
     """
     if threshold < 1:
         raise ValueError("threshold must be >= 1")
-    keep = keep_last if keep_last is not None else max(1, threshold // 2)
+    if keep_last is not None and keep_last >= threshold:
+        raise ValueError("keep_last must be < threshold")
+    keep = (
+        keep_last
+        if keep_last is not None
+        else min(max(1, threshold // 2), threshold - 1)
+    )
     summarize = summarize_fn or _default_summary
 
     def summarizer(context: dict[str, Any]) -> dict[str, Any]:

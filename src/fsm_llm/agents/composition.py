@@ -11,20 +11,22 @@ Two reusable building blocks for the "Claude-like" patterns:
 - :func:`default_llm_judge` — an LLM-as-judge ``evaluation_fn`` compatible with
   :class:`EvaluatorOptimizerAgent` (and usable anywhere an
   ``(output, context) -> EvaluationResult`` callable fits). Closes the gap that
-  EvaluatorOptimizer/MakerChecker/Debate require a hand-written evaluator.
+  EvaluatorOptimizer and Reflexion (the patterns that take an ``evaluation_fn``)
+  need a hand-written evaluator.
 
 Both are additive and import-light; nothing else depends on them.
 """
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from typing import Any
 
 from fsm_llm.definitions import CompletionRequest
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.logging import logger
-from fsm_llm.utilities import extract_json_from_text
+from fsm_llm.utilities import coerce_confidence, extract_json_from_text
 
 from .definitions import (
     AgentConfig,
@@ -48,9 +50,8 @@ def react_worker_factory(
 ) -> WorkerFn:
     """Build an OrchestratorAgent ``worker_factory`` backed by ReactAgent.
 
-    A *fresh* agent is created per subtask so concurrent delegation (the
-    orchestrator may run workers in a pool) never shares the stateful handler
-    bookkeeping of a single agent.
+    A *fresh* agent is created per subtask (the orchestrator runs workers one
+    after the other), so no subtask shares the handler bookkeeping of another.
 
     Example::
 
@@ -138,7 +139,7 @@ def default_llm_judge(
     def judge(output: str, context: dict[str, Any] | None = None) -> EvaluationResult:
         task = ""
         if context:
-            task = str(context.get("task") or context.get("_task") or "")
+            task = str(context.get("task") or "")
         prompt = _JUDGE_PROMPT.format(
             criteria_clause=criteria_clause, task=task, output=output
         )
@@ -151,11 +152,15 @@ def default_llm_judge(
                 passed=False, score=0.0, feedback=f"judge error: {e}"
             )
 
-        try:
-            score = float(parsed.get("score", 0.0))
-        except (TypeError, ValueError):
-            score = 0.0
-        score = max(0.0, min(1.0, score))
+        # coerce_confidence reads NaN and +-inf as 0.0, so a malformed score
+        # fails the judge; a bool is no score either (float(True) is 1.0).
+        # Do NOT fold this back into a bare max(0.0, min(1.0, float(...))):
+        # min(1.0, nan) is 1.0 (see the anchor in utilities.coerce_confidence).
+        score = 0.0
+        raw_score = parsed.get("score", 0.0)
+        if not isinstance(raw_score, bool):
+            with contextlib.suppress(TypeError, ValueError):
+                score = coerce_confidence(raw_score, 0.0)
         feedback = str(parsed.get("feedback", ""))
         return EvaluationResult(
             passed=score >= threshold, score=score, feedback=feedback

@@ -159,25 +159,15 @@ class DebateAgent(BaseAgent):
             context,
             "debate",
             max_iterations=self._fsm_budget(),
-            # Success key only; the answer is the conclude reply (see
-            # _extract_answer, D-036 of plan 06a5ec0a).
-            extra_answer_keys=[ContextKeys.PROPOSITION],
+            # DECISION plan-2026-09-29T103145-06a5ec0a/D-036
+            # The answer is the terminal conclude reply, NOT a context key: do
+            # NOT pass the round keys (or judge_verdict, PAT-03) as
+            # extra_answer_keys, which the base lookup prefers to the reply.
+            # ``proposition`` is the success key only, so a debate that
+            # produced no proposition reports success=False (a reply argued
+            # from nothing is no result).
+            success_keys=[ContextKeys.PROPOSITION],
         )
-
-    # DECISION plan-2026-09-29T103145-06a5ec0a/D-036
-    # The answer is the terminal conclude reply, NOT a context key: do NOT
-    # pass the round keys (or judge_verdict, PAT-03) to the base lookup, which
-    # prefers any extra key over the reply. ``proposition`` is passed to
-    # _standard_run only so a debate that produced no proposition reports
-    # success=False (a reply argued from nothing is no result).
-    def _extract_answer(
-        self,
-        final_context: dict[str, Any],
-        responses: list[str],
-        extra_keys: list[str] | None = None,
-    ) -> str:
-        """The conclude reply (no pattern answer key; ``extra_keys`` ignored)."""
-        return super()._extract_answer(final_context, responses, None)
 
     def _register_handlers(self, api: API) -> None:
         """Register debate-specific handlers with the API."""

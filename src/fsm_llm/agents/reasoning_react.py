@@ -196,8 +196,6 @@ class ReasoningReactAgent(BaseAgent):
                 },
             )
 
-        if len(self.tools) == 0:
-            raise AgentError("Cannot create agent with empty tool registry")
         self._refuse_unapprovable_flagged_tools()
 
         # Create reasoning engine
@@ -415,7 +413,3 @@ class ReasoningReactAgent(BaseAgent):
         self._register_think_loop_handlers(api, REACT_THINK_FRESH_KEYS)
 
         self._register_approval_gate(api)
-
-    def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
-        """Ask the HITL callback before each step (same driver as React)."""
-        self._handle_hitl_approval(api, conv_id)

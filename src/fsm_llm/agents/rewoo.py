@@ -23,7 +23,6 @@ from .constants import (
     REWOOStates,
 )
 from .definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
-from .exceptions import AgentError
 from .fsm_definitions import build_rewoo_fsm
 from .handlers import make_iteration_limiter
 from .tools import ToolRegistry, redact_secret_entries
@@ -81,8 +80,7 @@ class REWOOAgent(BaseAgent):
         config: AgentConfig | None = None,
         **api_kwargs: Any,
     ) -> None:
-        if len(tools) == 0:
-            raise AgentError("Cannot create agent with empty tool registry")
+        self._require_tools(tools)
 
         super().__init__(config, **api_kwargs)
         self.tools = tools

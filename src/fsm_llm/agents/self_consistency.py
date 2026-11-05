@@ -191,8 +191,18 @@ class SelfConsistencyAgent(BaseAgent):
                 details={"task": task, "num_samples": self.num_samples},
             )
 
-        # Aggregate
-        aggregated = self.aggregation_fn(samples)
+        # Aggregate. A failing function, or one that returns something that is
+        # not text, ends the run as an AgentError like every other pattern's
+        # failure; None is "no answer" (the no_result branch below).
+        try:
+            aggregated = self.aggregation_fn(samples)
+            if aggregated is not None and not isinstance(aggregated, str):
+                raise TypeError(f"returned {type(aggregated).__name__}, not str")
+        except Exception as e:
+            raise AgentError(
+                f"SelfConsistency aggregation_fn failed: {e}", details={"task": task}
+            ) from e
+        aggregated = aggregated or ""
 
         log.info(LogMessages.AGENT_COMPLETE.format(iterations=len(samples)))
 
@@ -204,11 +214,9 @@ class SelfConsistencyAgent(BaseAgent):
         structured = self._try_parse_structured_output(aggregated)
 
         # No sample text, or an empty aggregate, is no result (D-011).
-        answered = any(s.strip() for s in samples) and bool(
-            str(aggregated or "").strip()
-        )
+        answered = any(s.strip() for s in samples) and bool(aggregated.strip())
         # Share of samples whose final answer matches the aggregate's.
-        winner = _vote_key(str(aggregated or ""))
+        winner = _vote_key(aggregated)
         votes = sum(1 for s in samples if winner and _vote_key(s) == winner)
         return AgentResult(
             answer=aggregated,

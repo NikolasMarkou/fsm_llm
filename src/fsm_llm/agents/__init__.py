@@ -2,8 +2,9 @@
 FSM-LLM Agents
 ==============
 
-Agentic patterns (ReAct, Human-in-the-Loop) built on top of
-FSM-LLM's core, classification, and workflow packages.
+Agent patterns (ReAct and 17 others, see ``create_agent``), tools,
+Human-in-the-Loop approval, memory and MCP/A2A integration, built on the
+FSM-LLM core.
 
 Basic Usage:
     from fsm_llm.agents import ReactAgent, ToolRegistry

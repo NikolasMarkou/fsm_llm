@@ -56,8 +56,7 @@ class ReactAgent(BaseAgent):
         use_classification: bool = False,
         **api_kwargs: Any,
     ) -> None:
-        if len(tools) == 0:
-            raise AgentError("Cannot create agent with empty tool registry")
+        self._require_tools(tools)
 
         super().__init__(config, **api_kwargs)
         self.tools = tools
@@ -179,10 +178,6 @@ class ReactAgent(BaseAgent):
         one chunk (the answer, possibly empty); errors propagate from ``run()``.
         """
         yield self.run(task, initial_context).answer
-
-    def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
-        """Handle HITL approval gates before each step of the run."""
-        self._handle_hitl_approval(api, conv_id)
 
     # DECISION plan-2026-09-12T065608-089d0ec7/D-014
     # `handlers` is REQUIRED in practice: `run()`/`run_stream()` always pass

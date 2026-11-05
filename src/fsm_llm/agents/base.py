@@ -1,8 +1,8 @@
 """
 BaseAgent — Abstract base class for all fsm_llm agents.
 
-Extracts the common conversation loop, budget enforcement, answer extraction,
-trace building, and context filtering from the 12 agent implementations.
+The common conversation loop, budget enforcement, answer extraction, trace
+building and context filtering shared by the FSM agent patterns.
 """
 
 from __future__ import annotations
@@ -493,6 +493,12 @@ class BaseAgent(ABC):
         """
         return self._seconds_exempt_states & frozenset(api.fsm_definition.states)
 
+    @staticmethod
+    def _require_tools(tools: Any) -> None:
+        """Raise ``AgentError`` for an empty registry (tool patterns' ``__init__``)."""
+        if len(tools) == 0:
+            raise AgentError("Cannot create agent with empty tool registry")
+
     def _refuse_prompt_cache_with_injected_interface(self) -> None:
         """Raise ``AgentError`` when ``enable_prompt_cache`` meets ``llm_interface``.
 
@@ -628,17 +634,14 @@ class BaseAgent(ABC):
                 raise
             logger.debug(f"Conversation {conv_id} was already ended")
 
-    def _on_loop_iteration(  # noqa: B027
-        self,
-        api: API,
-        conv_id: str,
-        iteration: int,
-    ) -> None:
+    def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
         """Hook called before each step of the run (core's ``before_step``).
 
-        ``iteration`` is the step number, from 1. Override for HITL approval
-        gates or other between-step logic. Default is a no-op.
+        ``iteration`` is the step number, from 1. Runs the HITL approval driver
+        (a no-op for a pattern with no ``hitl``); override to add other
+        between-step logic and call ``super()``.
         """
+        self._handle_hitl_approval(api, conv_id)
 
     # ------------------------------------------------------------------
     # Context initialisation
@@ -1362,22 +1365,11 @@ class BaseAgent(ABC):
     # ------------------------------------------------------------------
 
     def _register_lifecycle_handlers(self, api: API, agent_type: str) -> None:
-        """Register the END_CONVERSATION, ERROR, and context-compactor handlers.
+        """Register the ERROR, context-compactor and summarizer handlers.
 
-        Extracted from ``_standard_run`` so the streaming path registers the
-        exact same lifecycle handlers (no behavior drift between run paths).
+        Shared by ``_standard_run``, its stream form and ADaPT, so every run
+        path registers the exact same lifecycle handlers.
         """
-        api.register_handler(
-            api.create_handler(HandlerNames.END_CONVERSATION)
-            .with_priority(HandlerPriorities.END_CONVERSATION)
-            .at(HandlerTiming.END_CONVERSATION)
-            .do(
-                lambda ctx: {
-                    "_agent_completed": True,
-                    "_agent_type": agent_type,
-                }
-            )
-        )
 
         def _error_handler(ctx: dict[str, Any]) -> dict[str, Any]:
             logger.warning(
@@ -1461,16 +1453,9 @@ class BaseAgent(ABC):
         """Streaming variant of ``_standard_run``.
 
         Runs the same FSM on ``API.run_until_terminal_stream`` and streams
-        each speaking state's reply token by token. States with empty
-        ``response_instructions`` (think/act) yield nothing; the final answer
-        state (conclude) streams its output. Yields raw text only — callers needing the structured
-        ``AgentResult``/trace should use ``run()``. Errors are wrapped exactly
-        like ``_standard_run``: budget and timeout errors propagate, anything
-        else is raised as ``AgentError``.
-
-        ``handlers``: see ``_standard_run``'s docstring — an optional,
-        call-local handler-state object threaded straight through to
-        ``_register_handlers`` (never round-tripped through ``self``).
+        each speaking state's reply (silent states yield nothing). Yields raw
+        text only; use ``run()`` for the ``AgentResult``/trace. Errors are
+        wrapped like ``_standard_run``'s. ``handlers``: see there.
         """
         start_time = time.monotonic()
         api = self._prepare_run_api(fsm_def, agent_type, handlers)
@@ -1515,11 +1500,17 @@ class BaseAgent(ABC):
         execution_evidence_keys: list[str] | None = None,
         handlers: Any = None,
         judged: bool = False,
+        success_keys: list[str] | None = None,
     ) -> AgentResult:
         """Standard run() implementation shared by most agents.
 
         Handles API creation, handler registration, conversation loop,
         answer extraction, trace building, and error wrapping.
+
+        ``extra_answer_keys``: context keys the answer is read from, before
+        the replies. ``success_keys``: keys whose non-empty value proves a
+        result (default ``extra_answer_keys``); a pattern whose answer is not
+        one of its keys (Debate, PromptChain, native_fc) passes only this.
 
         ``judged``: see ``_forced_stop_reason`` (EvalOpt, MakerChecker).
 
@@ -1561,7 +1552,7 @@ class BaseAgent(ABC):
             success, stop_reason = self._run_outcome(
                 final_context,
                 trace,
-                extra_answer_keys,
+                extra_answer_keys if success_keys is None else success_keys,
                 execution_evidence_keys,
                 judged=judged,
             )
@@ -1571,19 +1562,15 @@ class BaseAgent(ABC):
                     f"shipping its last answer with success=False."
                 )
             elif not success:
-                if execution_evidence_keys:
-                    logger.warning(
-                        f"Agent '{agent_type}' completed with no execution "
-                        f"evidence ({execution_evidence_keys}) — planner produced "
-                        f"synthesis filler without running planned work; marking "
-                        f"success=False."
-                    )
-                else:
-                    logger.warning(
-                        f"Agent '{agent_type}' completed with no answer key and no "
-                        f"tool calls — answer is prose-fallback only; marking "
-                        f"success=False."
-                    )
+                missing = (
+                    f"execution evidence ({execution_evidence_keys})"
+                    if execution_evidence_keys
+                    else "an answer key and any tool call"
+                )
+                logger.warning(
+                    f"Agent '{agent_type}' completed with no {missing}: its "
+                    f"answer is filler; marking success=False."
+                )
 
             return AgentResult(
                 answer=answer,
@@ -1616,10 +1603,12 @@ class BaseAgent(ABC):
     def _try_parse_structured_output(
         self, answer: str, context: dict[str, Any] | None = None
     ) -> Any:
-        """Validate *answer* against ``config.output_schema`` if set.
+        """Validate the run's output against ``config.output_schema`` if set.
 
-        Returns a Pydantic model instance on success, ``None`` on failure
-        or when no schema is configured.
+        Interface contract: returns a Pydantic model instance, or ``None``
+        when no schema is configured or no source validates. Sources, in
+        order: the JSON in *answer* (the model's own output), context keys
+        named like schema fields, JSON in the last tool observations.
         """
         # `output_schema` is declared `type | None` but `AgentConfig.validate_output_schema`
         # (definitions.py) guarantees any non-None value is a Pydantic BaseModel subclass,
@@ -1629,46 +1618,47 @@ class BaseAgent(ABC):
         if schema is None:
             return None
 
-        # 1. Try constructing from context keys (most reliable — uses Pass 1 data)
+        # 1. The answer's own JSON.
+        # DECISION plan-2026-11-05T185903-5980fbb7/D-004: this comes BEFORE the
+        # context keys. A key that shares a schema field's name (a caller's
+        # initial_context hint, `task`, a handler key) used to build a valid
+        # object from defaults, so the model's JSON was never read and the hint
+        # shipped as structured_output under success=True. Do NOT put the
+        # context-key step first again. See decisions.md D-004.
+        failure: str | None = None
+        try:
+            data = extract_json_from_text(answer)
+            if data is None:
+                data = json.loads(answer)
+            if isinstance(data, dict):
+                return schema(**data)
+            failure = f"expected dict, got {type(data).__name__}"
+        except Exception as e:
+            failure = str(e)
+
+        # 2. Context keys named like schema fields.
         # DECISION plan_2026-05-30_26c9510a/D-001 [STALE]: emit a diagnostic instead of
         # silently swallowing the validation error — a structured_output of None
         # otherwise gives no clue which fields were missing/invalid.
         if context:
-            try:
-                fields = {
-                    k: context[k]
-                    for k in schema.model_fields
-                    if k in context and context[k] is not None
-                }
-                if fields:
+            fields = {
+                k: context[k]
+                for k in schema.model_fields
+                if k in context and context[k] is not None
+            }
+            if fields:
+                try:
                     return schema(**fields)
-            except Exception as e:
-                logger.debug(
-                    f"Structured output: context-key construction of "
-                    f"{schema.__name__} failed ({e}); "
-                    f"present keys={sorted(fields)}, "
-                    f"schema keys={sorted(schema.model_fields)}. "
-                    f"Falling back to JSON parse."
-                )
+                except Exception as e:
+                    logger.debug(
+                        f"Structured output: context-key construction of "
+                        f"{schema.__name__} failed ({e}); "
+                        f"present keys={sorted(fields)}, "
+                        f"schema keys={sorted(schema.model_fields)}. "
+                        f"Falling back to the observations."
+                    )
 
-        # 2. Try parsing JSON from the answer string
-        try:
-            data = extract_json_from_text(answer)
-            if data is None:
-                # Try direct JSON parse
-                data = json.loads(answer)
-
-            if isinstance(data, dict):
-                return schema(**data)
-
-            logger.warning(
-                f"Structured output: expected dict, got {type(data).__name__}"
-            )
-        except Exception as e:
-            logger.warning(f"Structured output validation failed: {e}")
-
-        # 3. Scan tool observations for JSON matching the schema
-        if context:
+            # 3. Scan tool observations for JSON matching the schema
             observations = context.get("observations", [])
             if isinstance(observations, list):
                 for obs in reversed(observations):
@@ -1684,6 +1674,7 @@ class BaseAgent(ABC):
                         except Exception:
                             continue
 
+        logger.warning(f"Structured output validation failed: {failure}")
         return None
 
     @abstractmethod

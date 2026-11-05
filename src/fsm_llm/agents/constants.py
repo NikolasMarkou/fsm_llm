@@ -542,7 +542,6 @@ class HandlerNames:
     FEEDBACK_CONSUMED = "AgentFeedbackConsumed"
     APPROVAL_FRESH_KEYS = "AgentApprovalFreshKeys"
     HITL_GATE = "AgentHITLGate"
-    END_CONVERSATION = "AgentEndConversation"
     ERROR = "AgentError"
 
     # Pattern-specific handlers
