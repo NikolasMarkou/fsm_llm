@@ -82,7 +82,7 @@ from .prompts import (
     sanitize_text_for_prompt,
 )
 from .transition_evaluator import TransitionEvaluator
-from .utilities import filter_context_tree
+from .utilities import filter_context_tree, parse_bool_word
 
 # --- Type coercion dispatch for field extraction validation ---
 
@@ -109,7 +109,14 @@ def _coerce_bool(v: Any) -> bool:
     if isinstance(v, bool):
         return v
     if isinstance(v, str):
-        return v.lower() in ("true", "1", "yes")
+        # DECISION plan-2026-11-05T134105-5ed71cf2/D-008
+        # Closed yes/no vocabulary via the shared `parse_bool_word`; an unknown
+        # string RAISES (same except tuple as D-002) instead of becoming a valid
+        # `False`. Do NOT restore `v.lower() in (...)` with an else-False.
+        parsed = parse_bool_word(v)
+        if parsed is None:
+            raise ValueError(f"expected a yes/no word, got {v!r}")
+        return parsed
     if isinstance(v, (dict, list)):
         raise TypeError(f"expected bool, got {type(v).__name__}")
     return bool(v)

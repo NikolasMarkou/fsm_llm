@@ -559,6 +559,47 @@ def coerce_confidence(raw: Any, default: float) -> float:
 
 
 # --------------------------------------------------------------
+# Bool-word parsing
+# --------------------------------------------------------------
+
+_BOOL_TRUE_WORDS = frozenset({"true", "yes", "y", "1"})
+_BOOL_FALSE_WORDS = frozenset({"false", "no", "n", "0"})
+
+
+def parse_bool_word(text: str) -> bool | None:
+    """Read a model-supplied string as a bool, or ``None`` when it is not one.
+
+    Contract:
+        - Parameters: ``text`` is a ``str`` (any other type is the caller's
+          branch, not this helper's).
+        - Returns ``True`` for ``true/yes/y/1`` and ``False`` for
+          ``false/no/n/0`` after stripping whitespace, surrounding quotes and
+          trailing ``.!?,;:`` and case-folding; ``None`` for anything else
+          (including ``""``). Never raises.
+        - Shared by ``pipeline._coerce_bool`` (which raises ``ValueError`` on
+          ``None``) and the ``llm.py`` unstructured bool rung (which leaves the
+          field unset on ``None``), so the two readers cannot re-diverge.
+
+    # DECISION plan-2026-11-05T134105-5ed71cf2/D-008
+    # The vocabulary is CLOSED. Do NOT add "yeah", "sure", "nope",
+    # "affirmative" or a "anything else is False" default: a confident wrong
+    # ``False`` from an unreadable answer gated transitions (F-LC-01). An
+    # unknown word must stay invalid so the ladder re-asks. See decisions.md D-008.
+    """
+    word = text.strip()
+    previous = None
+    while word != previous:
+        previous = word
+        word = word.rstrip(".!?,;:").strip().strip("'\"`").strip()
+    word = word.casefold()
+    if word in _BOOL_TRUE_WORDS:
+        return True
+    if word in _BOOL_FALSE_WORDS:
+        return False
+    return None
+
+
+# --------------------------------------------------------------
 # JSON Processing Utilities
 # --------------------------------------------------------------
 

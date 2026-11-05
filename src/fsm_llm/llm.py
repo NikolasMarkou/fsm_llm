@@ -103,6 +103,7 @@ from .utilities import (
     _resolve_reasoning_trace,
     coerce_confidence,
     extract_json_from_text,
+    parse_bool_word,
     strip_think_and_fences,
 )
 
@@ -2297,10 +2298,9 @@ class LiteLLMInterface(LLMInterface):
                 except ValueError:
                     pass
             elif request.field_type == "bool":
-                if raw.lower() in ("true", "yes", "1"):
-                    coerced_value = True
-                elif raw.lower() in ("false", "no", "0"):
-                    coerced_value = False
+                # Same closed vocabulary as `pipeline._coerce_bool`
+                # (utilities.parse_bool_word, plan-2026-11-05T134105-5ed71cf2/D-008).
+                coerced_value = parse_bool_word(raw)
             elif request.field_type in ("dict", "list"):
                 # Strict: only accept JSON-parsed values of the correct type
                 try:
