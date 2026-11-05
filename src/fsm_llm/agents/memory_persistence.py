@@ -19,20 +19,22 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import tempfile
 from pathlib import Path
 
 from fsm_llm.memory import WorkingMemory
-from fsm_llm.session import FileSessionStore, SessionState, SessionStore
+from fsm_llm.session import (
+    SESSION_ID_RE,
+    FileSessionStore,
+    SessionState,
+    SessionStore,
+)
 from fsm_llm.utilities import redacting_json_default
-
-# Mirror FileSessionStore's id policy (path-traversal protection).
-_SAFE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _check_id(session_id: str) -> None:
-    if not session_id or not _SAFE_ID.match(session_id):
+    """Refuse a session id ``FileSessionStore`` would refuse (path-traversal guard)."""
+    if not SESSION_ID_RE.fullmatch(session_id):
         raise ValueError(
             f"invalid session id {session_id!r}: only [A-Za-z0-9_-] allowed"
         )
@@ -73,6 +75,10 @@ def save_working_memory(memory: WorkingMemory, path: str) -> None:
                 indent=2,
                 default=redacting_json_default,
             )
+            # Same durability as FileSessionStore.save: without the sync a
+            # crash can leave the renamed target empty.
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(tmp, target)
     finally:
         if os.path.exists(tmp):

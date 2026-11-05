@@ -15,7 +15,12 @@ from .constants import (
     has_internal_prefix,
     is_forbidden_context_entry,
 )
-from .definitions import FSMContext, ResponseGenerationRequest
+from .definitions import (
+    FSMContext,
+    ResponseGenerationRequest,
+    checked_key_names,
+)
+from .handlers import clear_keys_delta
 from .logging import logger
 from .utilities import filter_context_tree, redact_non_json_leaf
 
@@ -54,15 +59,23 @@ class ContextCompactor:
         transient_keys: set[str] | None = None,
         prune_on_entry: dict[str, set[str]] | None = None,
     ) -> None:
-        self.transient_keys: set[str] = transient_keys or set()
-        self.prune_on_entry: dict[str, set[str]] = prune_on_entry or {}
+        self.transient_keys: set[str] = (
+            set()
+            if transient_keys is None
+            else set(checked_key_names(transient_keys, argument="transient_keys"))
+        )
+        self.prune_on_entry: dict[str, set[str]] = {
+            state: set(checked_key_names(keys, argument=f"prune_on_entry[{state!r}]"))
+            for state, keys in (prune_on_entry or {}).items()
+        }
 
     def compact(self, context: dict[str, Any]) -> dict[str, Any]:
         """Clear transient keys from the previous turn.
 
         Intended as a ``PRE_PROCESSING`` handler callback.  Returns a dict
-        with ``None`` values for every transient key present in *context*,
-        which the handler system interprets as deletion.
+        with ``None`` values for every transient key holding a value in
+        *context* (``handlers.clear_keys_delta``, the one clear rule), which
+        the handler system interprets as deletion.
 
         The actual deletion (and, since D-018, the matching provenance
         digest cleanup) happens in ``MessagePipeline.execute_handlers``'s
@@ -70,7 +83,7 @@ class ContextCompactor:
         delta dict, it never touches ``context.data``/``context.metadata``
         directly. See decisions.md D-018.
         """
-        removals = {key: None for key in self.transient_keys if key in context}
+        removals = clear_keys_delta(self.transient_keys, context)
         if removals:
             logger.debug(f"Context compactor cleared transient keys: {list(removals)}")
         return removals
@@ -87,8 +100,7 @@ class ContextCompactor:
         ``pipeline.py``'s ``merge_delta``, not here.
         """
         target = context.get("_current_state", "")
-        keys_to_clear = self.prune_on_entry.get(target, set())
-        removals = {key: None for key in keys_to_clear if key in context}
+        removals = clear_keys_delta(self.prune_on_entry.get(target, set()), context)
         if removals:
             logger.debug(
                 f"Context compactor pruned keys on entry to '{target}': {list(removals)}"

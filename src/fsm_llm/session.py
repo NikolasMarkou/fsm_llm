@@ -39,9 +39,10 @@ from pydantic import BaseModel, Field
 from .logging import logger
 from .utilities import redacting_json_default
 
-# One id rule for _path and list_sessions, matched with fullmatch: ``$`` in a
-# ``re.match`` pattern also matches before a trailing newline ("abc\n").
-_SESSION_ID_RE = re.compile(r"[a-zA-Z0-9_\-]+")
+# One id rule for _path, list_sessions and ``MemorySessionStore``, matched with
+# ``fullmatch``: ``$`` in a ``re.match`` pattern also matches before a trailing
+# newline ("abc\n").
+SESSION_ID_RE = re.compile(r"[a-zA-Z0-9_\-]+")
 
 
 class SessionState(BaseModel):
@@ -161,7 +162,7 @@ class FileSessionStore(SessionStore):
 
     def _path(self, session_id: str) -> Path:
         # Validate session_id to prevent path traversal
-        if not _SESSION_ID_RE.fullmatch(session_id):
+        if not SESSION_ID_RE.fullmatch(session_id):
             raise ValueError(
                 f"Invalid session_id: {session_id!r}. "
                 "Only alphanumeric characters, hyphens, and underscores are allowed."
@@ -242,7 +243,7 @@ class FileSessionStore(SessionStore):
         return [
             p.stem
             for p in self._dir.glob("*.json")
-            if _SESSION_ID_RE.fullmatch(p.stem) and p.is_file()
+            if SESSION_ID_RE.fullmatch(p.stem) and p.is_file()
         ]
 
     def exists(self, session_id: str) -> bool:

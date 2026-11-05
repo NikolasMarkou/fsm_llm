@@ -164,8 +164,8 @@ def _unexpected_error(error: Exception, log_text: str, error_text: str) -> FSMEr
     ``FSMError("<error_text>: <error>")``; the caller raises it ``from error``.
     The one place that defines this wrapping for ``_turn_errors``,
     ``handle_conversation_errors``, ``push_fsm``, ``pop_fsm`` and
-    ``start_conversation`` (each keeps its own pass-through clause: the
-    ``ValueError`` pass-through is the contract of all but ``start_conversation``).
+    ``start_conversation`` (each keeps its own pass-through clause; ``ValueError``
+    and ``FSMError`` pass through unchanged at every one of them).
     """
     logger.error(f"{log_text}: {error!s}")
     return FSMError(f"{error_text}: {error!s}")
@@ -412,7 +412,9 @@ def _run_rounds(
     raises propagates unchanged and no step runs. Budgets must already be
     valid (``_check_run_budgets``). A step that raises in the caller ends the
     run: the generator is simply not resumed. A conversation ID that was never
-    started raises ``ValueError`` from the first "ended" question. A spent
+    started is not "ended" (``has_conversation_ended`` answers ``False`` for it),
+    so the first round is yielded after ``before_step(1)`` and the caller's own
+    first call on that ID raises ``ValueError``. A spent
     seconds budget does not stop a round whose current state (top of the
     stack) is in ``seconds_exempt``; the steps budget still applies there.
     """
@@ -909,6 +911,12 @@ class API:
             Tuple of (conversation_id, initial_response). The response is
             the empty string when the initial state is silent (empty
             ``response_instructions``): no LLM call, nothing in the history.
+
+        Raises:
+            FSMError: ``initial_context`` is neither ``None`` nor a dict, or the
+                start failed (any other unexpected error is wrapped in it).
+            ValueError: passes through unchanged, as at ``push_fsm`` and
+                ``pop_fsm``.
         """
         try:
             # Start conversation using enhanced FSM manager
@@ -932,7 +940,7 @@ class API:
 
             return conversation_id, response
 
-        except FSMError:
+        except (ValueError, FSMError):
             raise
         except Exception as e:
             raise _unexpected_error(
@@ -1254,8 +1262,9 @@ class API:
         ids are checked only if it is a pushed frame and ``before_step`` is
         given (the hook may pop it, D-052), against the frames below it; an
         ended run that steps nothing is not checked. An unknown conversation
-        ID raises ``ValueError`` (from ``has_conversation_ended``). Returns
-        the frozen set.
+        ID raises ``ValueError`` (from ``_get_current_fsm_conversation_id``:
+        ``has_conversation_ended`` answers ``False`` for it). Returns the
+        frozen set.
         """
         exempt = _seconds_exempt_set(seconds_exempt_states)
         ended = self.has_conversation_ended(conversation_id)
@@ -1848,7 +1857,13 @@ class API:
 
     @handle_conversation_errors
     def has_conversation_ended(self, conversation_id: str) -> bool:
-        """Check if current FSM has ended."""
+        """Check if current FSM has ended.
+
+        Returns ``True`` for a terminal state and for a conversation that has
+        ended and been closed (its snapshot is cached). An ID that was never
+        started, or whose snapshot is gone, answers ``False`` rather than
+        raising ``ValueError`` like the other getters.
+        """
         try:
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             ended: bool = self.fsm_manager.has_conversation_ended(current_fsm_id)

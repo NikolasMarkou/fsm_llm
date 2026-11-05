@@ -31,7 +31,7 @@ from .truncation import smart_truncate
 #      use (`web-search`). Core's pattern governs FSM state/context identifiers, which is
 #      a different contract; the two are deliberately not shared.
 #
-# Also deliberately NOT reusing `memory_persistence._SAFE_ID` (same charset, no cap):
+# Also deliberately NOT reusing `session.SESSION_ID_RE` (same charset, no cap):
 # that one guards filesystem path safety for conversation ids. Same regex today,
 # unrelated contracts — coupling them would make a provider bound govern file naming.
 #

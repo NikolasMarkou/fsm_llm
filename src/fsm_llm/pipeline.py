@@ -16,6 +16,7 @@ import copy
 import dataclasses
 import hashlib
 import json
+import math
 import re
 import threading
 import time
@@ -88,11 +89,29 @@ from .utilities import filter_context_tree, parse_bool_word
 
 
 def _coerce_int(v: Any) -> int:
-    return v if isinstance(v, int) else int(v)
+    """``v`` as an ``int``; ``ValueError`` for a bool, a non-integral or non-finite float.
+
+    A ``bool`` is not a count, ``3.7`` is not 3, and ``inf`` / ``nan`` have no
+    integer value (``int(inf)`` would raise ``OverflowError``, which the
+    validator's ``except`` does not name). ``"12"`` and ``3.0`` convert.
+    """
+    if isinstance(v, bool):
+        raise ValueError(f"expected an integer, got {v!r}")
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float) and not (math.isfinite(v) and v == int(v)):
+        raise ValueError(f"expected an integer, got {v!r}")
+    return int(v)
 
 
 def _coerce_float(v: Any) -> float:
-    return v if isinstance(v, float) else float(v)
+    """``v`` as a finite ``float``; ``ValueError`` for a bool, ``inf`` or ``nan``."""
+    if isinstance(v, bool):
+        raise ValueError(f"expected a number, got {v!r}")
+    result = v if isinstance(v, float) else float(v)
+    if not math.isfinite(result):
+        raise ValueError(f"expected a finite number, got {v!r}")
+    return result
 
 
 # DECISION plan-2026-09-19T175721-21cd7f8e/D-002
@@ -650,6 +669,7 @@ class MessagePipeline:
             FSMError: the current state is terminal (no transition evaluation
                 can run), or anything the turn body raises, after its rollback.
         """
+        self._require_non_terminal(instance, conversation_id)
         turn = self._run_turn(instance, None, conversation_id)
         if turn.transition_outcome is None:
             raise FSMError(f"Cannot advance from terminal state '{turn.state_before}'")
@@ -660,6 +680,20 @@ class MessagePipeline:
             response=turn.response,
             ended=not self.get_state(instance, conversation_id).transitions,
         )
+
+    def _require_non_terminal(
+        self, instance: FSMInstance, conversation_id: str
+    ) -> None:
+        """Raise ``FSMError`` before any work when the current state is terminal.
+
+        Contract: the one guard of ``advance`` and ``advance_stream``, so the
+        two agree: a terminal state runs no extraction, no handler and no LLM
+        call, and leaves the history alone.
+        """
+        if not self.get_state(instance, conversation_id).transitions:
+            raise FSMError(
+                f"Cannot advance from terminal state '{instance.current_state}'"
+            )
 
     def _run_turn(
         self, instance: FSMInstance, user_message: str | None, conversation_id: str
@@ -854,10 +888,7 @@ class MessagePipeline:
             FSMError: at the first ``next()`` when the current state is
                 terminal, or anything the turn body raises, after its rollback.
         """
-        if not self.get_state(instance, conversation_id).transitions:
-            raise FSMError(
-                f"Cannot advance from terminal state '{instance.current_state}'"
-            )
+        self._require_non_terminal(instance, conversation_id)
         yield from self._stream_turn(instance, None, conversation_id)
 
     def _stream_turn(
@@ -2131,6 +2162,11 @@ class MessagePipeline:
                 f"Field '{field_config.field_name}': "
                 f"value={response.value!r}, confidence={response.confidence:.2f}, "
                 f"valid={response.is_valid}"
+                + (
+                    f", rejected: {response.validation_error}"
+                    if response.validation_error
+                    else ""
+                )
             )
             results.append(response)
 
@@ -2944,10 +2980,10 @@ class MessagePipeline:
         the caller has already ruled out a silent state. ``user_message`` is the
         turn's text, ``None`` for a step without one. ``extraction_response`` is
         the Pass-1 result, or ``None`` for the greeting, which then has no
-        extracted data, no rejected corrections, no structured output format,
-        a ``""`` message in the prompt and ``None`` in the request. ``stream``
-        asks for plain text unless a terminal state carries a structured output
-        format. Returns the ``ResponseGenerationRequest``; raises what the
+        extracted data, no rejected corrections, a ``""`` message in the
+        prompt and ``None`` in the request. A terminal state carries the
+        structured output format, the greeting of a terminal initial state
+        included. ``stream`` asks for plain text unless that format is set. Returns the ``ResponseGenerationRequest``; raises what the
         prompt builder, ``fsm_resolver`` or the request model raise. It makes no
         LLM call and changes no instance state.
         """
@@ -2958,9 +2994,10 @@ class MessagePipeline:
         # outgoing transitions).  Applying it on intermediate states forces
         # the model to produce JSON when the prompt asks for free-form text,
         # which can cause small models to hang or produce garbage. The greeting
-        # does not read it yet (F-PI-09 of plan 5980fbb7).
+        # reads it too: a terminal initial state's greeting is the only reply
+        # that FSM ever gives.
         output_response_format = None
-        if not greeting and not current_state.transitions:
+        if not current_state.transitions:
             output_response_format = instance.context.data.get(
                 CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT
             )

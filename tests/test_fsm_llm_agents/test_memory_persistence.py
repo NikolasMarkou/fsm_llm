@@ -144,6 +144,37 @@ class TestMemorySessionStore:
             store.save_memory("../evil", _memory())
 
 
+class TestSessionIdAndDurabilityParityWithFileSessionStore:
+    """F-XD-13: same id rule and same fsync as ``FileSessionStore``."""
+
+    @pytest.mark.parametrize("bad", ["abc\n", "abc\n\n", "\n"])
+    def test_a_trailing_newline_is_refused_like_the_file_store(self, tmp_path, bad):
+        from fsm_llm.session import FileSessionStore
+
+        with pytest.raises(ValueError):
+            FileSessionStore(str(tmp_path))._path(bad)
+        with pytest.raises(ValueError):
+            MemorySessionStore(directory=str(tmp_path)).save_memory(bad, _memory())
+
+    def test_the_temp_file_is_synced_before_the_rename(self, tmp_path, monkeypatch):
+        import fsm_llm.agents.memory_persistence as mp
+
+        synced = []
+        real_replace = os.replace
+
+        def fake_fsync(fd):
+            synced.append(fd)
+
+        def checking_replace(src, dst):
+            assert synced, "os.replace ran before any fsync"
+            real_replace(src, dst)
+
+        monkeypatch.setattr(mp.os, "fsync", fake_fsync)
+        monkeypatch.setattr(mp.os, "replace", checking_replace)
+        save_working_memory(_memory(), str(tmp_path / "mem.json"))
+        assert len(synced) == 1
+
+
 class TestConcurrentSaveIsAtomic:
     """SC-8 / F-06: a fixed ``{target}.tmp`` name makes two concurrent saves of
     the same session race — one thread's ``os.replace`` consumes the shared temp

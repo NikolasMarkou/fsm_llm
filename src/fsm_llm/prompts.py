@@ -22,6 +22,7 @@ import html
 import json
 import re
 import textwrap
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, ClassVar
@@ -77,6 +78,31 @@ def _cap_history_line(text: str) -> str:
     if len(text) > _HISTORY_LINE_CHARS:
         return text[:_HISTORY_LINE_CHARS] + "..."
     return text
+
+
+def _history_messages(
+    exchanges: Iterable[Mapping[str, Any]],
+) -> Iterator[tuple[str, Any]]:
+    """The ``(role, message)`` pairs of ``exchanges``, one per message, in order.
+
+    Contract: the one role rule of the three history renderers (Pass-2 history,
+    field-extraction history, classifier context). ``role`` is ``"user"`` when
+    the key, lower-cased, is ``user``, else ``"system"``; any other key than
+    ``system`` is logged at WARNING and treated as ``system``. An entry with
+    several keys yields one pair per key (none is lost), and a message is
+    passed through untouched (an empty one included; the caller decides).
+    """
+    for exchange in exchanges:
+        for role, message in exchange.items():
+            normalised = str(role).lower()
+            if normalised == "user":
+                yield "user", message
+                continue
+            if normalised != "system":
+                logger.warning(
+                    f"Unknown role '{role}' in conversation history, treating as system"
+                )
+            yield "system", message
 
 
 class HistoryManagementStrategy(str, Enum):
@@ -689,23 +715,10 @@ class BasePromptBuilder:
             return summary_lines
 
         # Format and manage exchanges
-        formatted_exchanges = []
-        for exchange in recent_exchanges:
-            safe_exchange = {}
-            for role, message in exchange.items():
-                role_lower = role.lower()
-                sanitized_text = self._sanitize_text_for_prompt(message)
-
-                if role_lower == "user":
-                    safe_exchange["user"] = sanitized_text
-                elif role_lower == "system":
-                    safe_exchange["system"] = sanitized_text
-                else:
-                    logger.warning(
-                        f"Unknown role '{role}' in conversation history, treating as system"
-                    )
-                    safe_exchange["system"] = sanitized_text
-            formatted_exchanges.append(safe_exchange)
+        formatted_exchanges = [
+            {role: self._sanitize_text_for_prompt(message)}
+            for role, message in _history_messages(recent_exchanges)
+        ]
 
         # Apply history management strategy
         managed_exchanges = self._manage_conversation_history(formatted_exchanges)
@@ -1469,10 +1482,9 @@ def build_classification_context_block(
     parts: list[str] = []
 
     lines = [
-        f"{'user' if str(role).lower() == 'user' else 'assistant'}: "
+        f"{'user' if role == 'user' else 'assistant'}: "
         f"{_cap_history_line(sanitize(str(text)))}"
-        for exchange in context.get("history") or []
-        for role, text in exchange.items()
+        for role, text in _history_messages(context.get("history") or [])
     ]
     if lines:
         parts += ["<conversation_history>", *lines, "</conversation_history>"]
@@ -1618,12 +1630,20 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
             # consume budget slots and evict legitimate ones.
             filtered = self._filter_context_for_security(dynamic_context)
             filtered = self._limit_context_by_key_count(filtered)
+            ctx_json = None
             if filtered:
-                ctx_json = json.dumps(
-                    filtered,
-                    sort_keys=self.config.deterministic_output,
-                    default=str,
-                )
+                # Same guard as every sibling context section: a value that
+                # cannot be dumped (mixed-type keys under sort_keys, a huge
+                # int) drops the section with a WARNING and keeps the prompt.
+                try:
+                    ctx_json = json.dumps(
+                        filtered,
+                        sort_keys=self.config.deterministic_output,
+                        default=str,
+                    )
+                except (TypeError, ValueError, OverflowError) as e:
+                    logger.warning(f"Failed to serialize field-prompt context: {e}")
+            if ctx_json is not None:
                 # DECISION plan-2026-07-21T045419-9925aa3a/D-010
                 # Sanitize the dumped JSON before emitting. These values were
                 # extracted on a PRIOR turn -- the LLM wrote them -- so a value
@@ -1672,15 +1692,15 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
             # handles that shape. Splitting also makes the budget below count
             # MESSAGES rather than entries, which is what D-012 asked for.
             # See decisions.md D-019.
+            # The pairs come from `_history_messages`, the one role rule.
             formatted: list[dict[str, str]] = []
-            for entry in recent:
-                for role, message in entry.items():
-                    if not message:
-                        continue
-                    # Sanitize BEFORE the per-line cap so the cap still bounds
-                    # the text actually emitted into the prompt.
-                    msg = _cap_history_line(self._sanitize_text_for_prompt(message))
-                    formatted.append({"user" if role == "user" else "system": msg})
+            for role, message in _history_messages(recent):
+                if not message:
+                    continue
+                # Sanitize BEFORE the per-line cap so the cap still bounds
+                # the text actually emitted into the prompt.
+                msg = _cap_history_line(self._sanitize_text_for_prompt(message))
+                formatted.append({role: msg})
 
             managed = self._manage_conversation_history(formatted)
             if managed:

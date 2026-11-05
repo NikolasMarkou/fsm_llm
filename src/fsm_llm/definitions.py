@@ -395,7 +395,7 @@ def checked_key_names(keys: object, *, argument: str) -> tuple[str, ...]:
     """The names in ``keys``, checked to be a collection of ``str`` names.
 
     Contract (callers: :func:`typed_field_extraction`, ``handlers``
-    ``clear_keys_delta``/``clear_keys_on_entry``, ``API`` bounded runs'
+    ``clear_keys_delta``/``clear_keys_on_entry``, ``ContextCompactor``, ``API`` bounded runs'
     ``seconds_exempt_states``): ``keys`` must be an iterable of ``str`` that
     is not itself a ``str`` or ``bytes`` (whose characters would be taken as
     names). Returns the names in order, duplicates dropped (``()`` for an
@@ -1657,29 +1657,31 @@ class Conversation(BaseModel):
         ),
     )
 
+    def _clipped(self, message: str) -> str:
+        """``message`` cut to ``max_message_length``, ending in the truncation suffix.
+
+        Contract: a message within the limit is returned unchanged; a longer
+        one ends in ``MESSAGE_TRUNCATION_SUFFIX`` and is exactly
+        ``max_message_length`` long, or is a bare cut when the limit is not
+        longer than the suffix. The one truncation rule of both ``add_*``.
+        """
+        limit = self.max_message_length
+        if len(message) <= limit:
+            return message
+        suffix = MESSAGE_TRUNCATION_SUFFIX
+        if limit <= len(suffix):
+            return message[:limit]
+        return message[: limit - len(suffix)] + suffix
+
     def add_user_message(self, message: str) -> None:
         """Add user message with automatic truncation."""
-        if len(message) > self.max_message_length:
-            suffix = MESSAGE_TRUNCATION_SUFFIX
-            if self.max_message_length <= len(suffix):
-                message = message[: self.max_message_length]
-            else:
-                message = message[: self.max_message_length - len(suffix)] + suffix
-
-        self.exchanges.append({"user": message})
+        self.exchanges.append({"user": self._clipped(message)})
         # Trimming is deferred to add_system_message (turn completion) so a
         # rolled-back user turn isn't prematurely compressed into the summary.
 
     def add_system_message(self, message: str) -> None:
         """Add system message with automatic truncation."""
-        if len(message) > self.max_message_length:
-            suffix = MESSAGE_TRUNCATION_SUFFIX
-            if self.max_message_length <= len(suffix):
-                message = message[: self.max_message_length]
-            else:
-                message = message[: self.max_message_length - len(suffix)] + suffix
-
-        self.exchanges.append({"system": message})
+        self.exchanges.append({"system": self._clipped(message)})
         self._maintain_history_size()
 
     def get_recent(self, n: int | None = None) -> list[dict[str, str]]:

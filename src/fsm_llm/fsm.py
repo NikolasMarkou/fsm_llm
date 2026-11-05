@@ -19,6 +19,8 @@ from datetime import datetime
 from functools import wraps
 from typing import Any, Literal, TypeVar, overload
 
+from pydantic import ValidationError
+
 from .constants import (
     DEFAULT_MAX_FSM_CACHE_SIZE,
     DEFAULT_MAX_HISTORY_SIZE,
@@ -31,6 +33,7 @@ from .constants import (
 from .context import commit_with_key_rollback
 from .definitions import (
     AdvanceResult,
+    Conversation,
     ConversationBusyError,
     FSMContext,
     FSMDefinition,
@@ -228,6 +231,22 @@ class FSMManager:
                 f"max_fsm_cache_size must be >= 1, got {max_fsm_cache_size}"
             )
 
+        # The history and length limits have one definition, the ``Conversation``
+        # fields; validating through them here fails at construction, naming the
+        # argument, instead of at every ``start_conversation``.
+        try:
+            Conversation(
+                max_history_size=max_history_size,
+                max_message_length=max_message_length,
+            )
+        except ValidationError as e:
+            raise ValueError(
+                "; ".join(
+                    f"{err['loc'][0]}: {err['msg']}, got {err['input']!r}"
+                    for err in e.errors()
+                )
+            ) from None
+
         self.fsm_loader = fsm_loader
         self.llm_interface = llm_interface
 
@@ -404,11 +423,11 @@ class FSMManager:
         conversation_id = str(uuid.uuid4())
         log = logger.bind(conversation_id=conversation_id, package="fsm_llm")
 
+        if initial_context is not None and not isinstance(initial_context, dict):
+            raise FSMError(
+                f"initial_context must be a dict, got {type(initial_context).__name__}"
+            )
         if initial_context:
-            if not isinstance(initial_context, dict):
-                raise FSMError(
-                    f"initial_context must be a dict, got {type(initial_context).__name__}"
-                )
             instance.context.update(initial_context)
             log.info(f"Added initial context: {list(initial_context.keys())}")
 

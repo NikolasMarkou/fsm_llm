@@ -1011,8 +1011,8 @@ def create_handler(name: str = "LambdaHandler") -> HandlerBuilder:
 def clear_keys_delta(keys: Iterable[str], context: Mapping[str, Any]) -> dict[str, Any]:
     """The handler delta that clears ``keys`` from ``context``.
 
-    Contract (callers: :func:`clear_keys_on_entry`, agents
-    ``make_fresh_keys_handler`` and the meta-builder): returns ``{key: None}``
+    Contract (callers: :func:`clear_keys_on_entry`, ``ContextCompactor``,
+    agents ``make_fresh_keys_handler`` and the meta-builder): returns ``{key: None}``
     (core deletes the key) for each key in ``keys``, in order, whose value in
     ``context`` is not None; a key that is absent or None is left out, so
     nothing to clear gives ``{}``. Raises ``ValueError`` when ``keys`` is not
