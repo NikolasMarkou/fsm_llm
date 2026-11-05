@@ -688,12 +688,41 @@ class InstanceManager:
         longer be used afterwards)."""
         with self._lock:
             attached_api = self._attached_api
-            fsms = [i for i in self._instances.values() if isinstance(i, ManagedFSM)]
+            fsms = [
+                (inst_id, i)
+                for inst_id, i in self._instances.items()
+                if isinstance(i, ManagedFSM)
+            ]
         if attached_api is not None:
             unregister_monitor_handlers(attached_api, self._global_collector)
-        for inst in fsms:
-            unregister_monitor_handlers(inst.api, self._global_collector)
+        for inst_id, inst in fsms:
+            self._close_fsm_api(inst, inst_id)
         self._global_collector.cleanup()
+
+    def _close_fsm_api(self, inst: ManagedFSM, instance_id: str) -> None:
+        """End every live conversation of a manager-owned FSM API, then detach
+        the global collector's handlers.
+
+        # DECISION plan-2026-11-05T134105-5ed71cf2/D-015
+        # Close BEFORE unregistering: ``api.close()`` fires END_CONVERSATION,
+        # and an inactive handler records nothing, so the conversation stayed
+        # "active" on the global collector and its OTEL span was never ended.
+        # Do NOT swap the two calls back. The unregister stays in a
+        # ``finally`` so a failing close cannot leave the handlers on. Live
+        # conversations are cached first so the Conversations view keeps
+        # them, as for a conversation ended through ``end_conversation``.
+        # ``attach_api`` (a caller-owned API) is left alone on purpose:
+        # closing a caller's API is a policy choice.
+        """
+        api = inst.api
+        try:
+            for conversation_id in api.list_active_conversations():
+                self._cache_ended_conversation(api, conversation_id, instance_id)
+            api.close()
+        except Exception as e:
+            logger.debug(f"Failed to close FSM API of instance {instance_id}: {e}")
+        finally:
+            unregister_monitor_handlers(api, self._global_collector)
 
     # --- Capabilities ---
 
@@ -1824,13 +1853,9 @@ class InstanceManager:
             raise KeyError(f"Instance not found: {instance_id}")
 
         if isinstance(inst, ManagedFSM):
-            # Detach the global collector's handlers (the API object may be
-            # shared by the caller) and end every conversation.
-            unregister_monitor_handlers(inst.api, self._global_collector)
-            try:
-                inst.api.close()
-            except Exception as e:
-                logger.debug(f"Failed to close FSM API during instance destroy: {e}")
+            # End every conversation while the global handlers are still
+            # active, then detach them (see ``_close_fsm_api``).
+            self._close_fsm_api(inst, instance_id)
         elif isinstance(inst, ManagedWorkflow):
             # Stop the engine's timers and background runs on the loop that
             # owns them (destroy may run in a worker thread).

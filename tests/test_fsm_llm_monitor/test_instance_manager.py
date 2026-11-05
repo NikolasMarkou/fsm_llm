@@ -7,6 +7,8 @@ from typing import ClassVar
 from unittest import mock
 from unittest.mock import MagicMock
 
+import pytest
+
 from fsm_llm.monitor.constants import EVENT_INSTANCE_LAUNCHED
 from fsm_llm.monitor.definitions import MonitorConfig
 from fsm_llm.monitor.instance_manager import (
@@ -1200,3 +1202,113 @@ class TestAgentRunEventsOnTheCoreLoop:
             "conversation_end",
         ]
         assert inst.status == "completed"
+
+
+class TestDestroyClosesBeforeUnregister:
+    """F-MO-01: the manager closes a managed FSM's API while the global
+    collector's handlers are still active, so END_CONVERSATION reaches it."""
+
+    def _live_manager(self, monkeypatch):
+        from fsm_llm import API
+        from fsm_llm.monitor import instance_manager as im
+        from tests.conftest import MockLLM2Interface
+
+        llm = MockLLM2Interface(response_text="What is your name?")
+        real_from_definition = API.from_definition
+
+        def _from_definition(definition, **kwargs):
+            return real_from_definition(definition, llm_interface=llm)
+
+        monkeypatch.setattr(im.API, "from_definition", _from_definition)
+        mgr = InstanceManager(config=MonitorConfig())
+        mgr.global_collector.cleanup()
+        inst = mgr.launch_fsm(fsm_json=_CHAT_FSM)
+        conv_id, _ = mgr.start_conversation(inst.instance_id)
+        return mgr, inst, conv_id
+
+    def test_destroy_ends_the_live_conversation_on_the_global_collector(
+        self, monkeypatch
+    ):
+        mgr, inst, conv_id = self._live_manager(monkeypatch)
+        collector = mgr.global_collector
+        assert collector.get_metrics().active_conversations == 1
+
+        mgr.destroy_instance(inst.instance_id)
+
+        assert collector.get_metrics().active_conversations == 0
+        ends = [
+            e
+            for e in collector.get_events_by_conversation(conv_id)
+            if e.event_type == "conversation_end"
+        ]
+        assert len(ends) == 1
+
+    def test_destroy_keeps_the_live_conversation_in_the_ended_cache(self, monkeypatch):
+        mgr, inst, conv_id = self._live_manager(monkeypatch)
+
+        mgr.destroy_instance(inst.instance_id)
+
+        snap = mgr.get_conversation_snapshot(conv_id)
+        assert snap is not None
+        assert snap.is_terminal is True
+        assert snap.instance_id == inst.instance_id
+        assert snap.current_state == "ask"
+
+    def test_destroy_ends_the_otel_conversation_span(self, monkeypatch):
+        pytest.importorskip("opentelemetry.sdk.trace")
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
+        from fsm_llm.monitor.otel import OTELExporter
+
+        mgr, inst, _ = self._live_manager(monkeypatch)
+        sink = InMemorySpanExporter()
+        otel = OTELExporter(exporter=sink)
+        otel.enable(mgr.global_collector)
+        # Spans only start for events after enable: a second conversation.
+        conv2, _ = mgr.start_conversation(inst.instance_id)
+        assert conv2 in otel.active_conversations
+
+        mgr.destroy_instance(inst.instance_id)
+
+        # Before shutdown(): that would end every open span itself.
+        assert otel.active_conversations == []
+        otel._provider.force_flush()
+        names = [s.name for s in sink.get_finished_spans()]
+        assert "conversation" in names
+
+    def test_close_raising_still_unregisters_the_handlers(self, monkeypatch):
+        from fsm_llm.monitor.instance_manager import monitor_handlers_on
+
+        mgr, inst, _ = self._live_manager(monkeypatch)
+        api = inst.api
+        collector = mgr.global_collector
+        assert monitor_handlers_on(api, collector)
+        monkeypatch.setattr(
+            api, "close", MagicMock(side_effect=RuntimeError("close failed"))
+        )
+
+        mgr.destroy_instance(inst.instance_id)
+
+        assert all(not h.active for h in monitor_handlers_on(api, collector))
+
+    def test_shutdown_ends_live_conversations_of_managed_fsms(self, monkeypatch):
+        mgr, _, conv_id = self._live_manager(monkeypatch)
+        collector = mgr.global_collector
+        recorded: list[str] = []
+        real_record = collector.record_event
+
+        def _spy(event):
+            if event.conversation_id == conv_id:
+                recorded.append(event.event_type)
+            return real_record(event)
+
+        monkeypatch.setattr(collector, "record_event", _spy)
+
+        mgr.shutdown()
+
+        assert recorded.count("conversation_end") == 1
+        snap = mgr.get_conversation_snapshot(conv_id)
+        assert snap is not None
+        assert snap.is_terminal is True
