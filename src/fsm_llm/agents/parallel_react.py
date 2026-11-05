@@ -261,14 +261,7 @@ class ParallelReactAgent(BaseAgent):
             output_schema=self.config.output_schema,
             context_keys=caller_prompt_keys(initial_context),
         )
-        context = self._init_context(
-            task,
-            initial_context,
-            extra={
-                ContextKeys.OBSERVATIONS: [],
-                ContextKeys.ITERATION_BUDGET: self.config.max_iterations,
-            },
-        )
+        context = self._react_context(task, initial_context)
         return self._standard_run(
             task, fsm_def, context, "parallel_react", handlers=handlers
         )
@@ -281,12 +274,7 @@ class ParallelReactAgent(BaseAgent):
     def _register_handlers(
         self, api: API, handlers: ThinkTurnLimiter | None = None
     ) -> None:
-        if handlers is None:
-            raise AgentError(
-                "ParallelReactAgent._register_handlers called without a "
-                "handlers instance — this is a programming error, not a "
-                "runtime condition; run() must always pass one."
-            )
+        handlers = self._require_handlers(handlers)
         self._register_tool_executor(api, AgentStates.ACT, self._dispatch_parallel)
         self._register_iteration_limiter(api, handlers.check_iteration_limit)
         self._register_think_loop_handlers(api, REACT_THINK_FRESH_KEYS)

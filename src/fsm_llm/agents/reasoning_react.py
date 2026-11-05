@@ -1,8 +1,8 @@
 """
 ReasoningReactAgent — ReAct agent with integrated structured reasoning.
 
-Extends the ReAct pattern with a pseudo-tool ``reason`` that invokes
-FSM-LLM's reasoning engine via FSM stacking (push_fsm / pop_fsm).
+Extends the ReAct pattern with a pseudo-tool ``reason`` that runs
+FSM-LLM's reasoning engine (``ReasoningEngine.solve_problem``).
 The agent autonomously decides when to use structured reasoning versus
 regular tools.
 """
@@ -33,7 +33,6 @@ from .definitions import (
     ToolDefinition,
     ToolResult,
 )
-from .exceptions import AgentError
 from .fsm_definitions import build_react_fsm
 from .handlers import (
     AgentHandlers,
@@ -121,12 +120,12 @@ class _ReasonToolRegistry(ToolRegistry):
 
 class ReasoningReactAgent(BaseAgent):
     """
-    ReAct agent with integrated structured reasoning via FSM stacking.
+    ReAct agent with integrated structured reasoning.
 
-    Auto-registers a ``reason`` pseudo-tool in the tool registry.
-    When the LLM selects ``reason``, the agent pushes a reasoning FSM
-    onto the stack (via ``ReasoningEngine``), executes it, and pops
-    results back into the agent context under namespaced keys.
+    Adds a ``reason`` pseudo-tool to the agent's tool view (the caller's
+    registry is not mutated). When the LLM selects ``reason``, the ``act``
+    state-entry handler runs ``ReasoningEngine.solve_problem`` and writes the
+    results into the agent context under namespaced keys.
 
     ``fsm_llm.reasoning`` ships in every install and is imported with this
     module.
@@ -175,7 +174,8 @@ class ReasoningReactAgent(BaseAgent):
             )
             self.tools = tools
         else:
-            # A snapshot plus `reason`, so the caller's registry is not mutated.
+            # A live view of the caller's tools plus `reason` (D-052); the caller's
+            # registry is not mutated.
             self.tools = _ReasonToolRegistry(tools)
             self.tools.register_function(
                 self._reason_placeholder,
@@ -219,8 +219,8 @@ class ReasoningReactAgent(BaseAgent):
 
     @staticmethod
     def _reason_placeholder(params: dict) -> str:
-        """Placeholder — actual reasoning is intercepted in the run loop."""
-        return "Reasoning executed via FSM stacking."
+        """Placeholder — the ``act`` handler intercepts a ``reason`` call."""
+        return "Reasoning is run by the act handler."
 
     def run(
         self,
@@ -230,7 +230,7 @@ class ReasoningReactAgent(BaseAgent):
         """
         Run the agent on a task.
 
-        When the LLM selects the ``reason`` tool, the POST_TRANSITION
+        When the LLM selects the ``reason`` tool, the ``act`` state-entry
         handler intercepts the call and delegates to
         ``ReasoningEngine.solve_problem()`` instead of the placeholder.
         Results are stored under ``ReasoningIntegrationKeys`` in context.
@@ -252,9 +252,8 @@ class ReasoningReactAgent(BaseAgent):
         # state with "some tool has requires_approval": the policy may gate an
         # unflagged tool (or `reason`), and a gate without the state makes every
         # gated call a refused act turn instead of an ask.
-        # D-052: a registry can gain a flagged tool after construction.
-        self._refuse_unapprovable_flagged_tools()
-        handlers = AgentHandlers(self.tools, requires_approval=self._approval_predicate)
+        # D-052 refusal and the shared predicate: `_call_handlers`.
+        handlers = self._call_handlers(self.tools)
 
         fsm_def = build_react_fsm(
             self.tools,
@@ -262,16 +261,7 @@ class ReasoningReactAgent(BaseAgent):
             include_approval_state=self._hitl_active,
             context_keys=caller_prompt_keys(initial_context),
         )
-
-        # Build initial context
-        context = self._init_context(
-            task,
-            initial_context,
-            extra={
-                ContextKeys.OBSERVATIONS: [],
-                ContextKeys.ITERATION_BUDGET: self.config.max_iterations,
-            },
-        )
+        context = self._react_context(task, initial_context)
 
         return self._standard_run(
             task, fsm_def, context, "reasoning_react", handlers=handlers
@@ -284,8 +274,8 @@ class ReasoningReactAgent(BaseAgent):
 
         For non-reason tools, delegates to the standard AgentHandlers.execute_tool.
         For the 'reason' tool, runs ReasoningEngine.solve_problem() and returns
-        results under namespaced keys — all inside the POST_TRANSITION handler
-        so the FSM pipeline processes them at the correct time.
+        results under namespaced keys — all inside the ``act`` state-entry
+        handler so the FSM pipeline processes them at the correct time.
         """
         base_handler = handlers
         reason_name = ReasoningIntegrationKeys.REASONING_TOOL_NAME
@@ -399,12 +389,7 @@ class ReasoningReactAgent(BaseAgent):
         self, api: API, handlers: AgentHandlers | None = None
     ) -> None:
         """Register agent handlers with the API."""
-        if handlers is None:
-            raise AgentError(
-                "ReasoningReactAgent._register_handlers called without a "
-                "handlers instance — this is a programming error, not a "
-                "runtime condition; run() must always pass one."
-            )
+        handlers = self._require_handlers(handlers)
         self._register_tool_executor(
             api, AgentStates.ACT, self._make_reasoning_tool_executor(handlers)
         )

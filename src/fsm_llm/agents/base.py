@@ -20,7 +20,7 @@ from collections.abc import (
     Set,
 )
 from functools import partial
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar, TypeVar, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -50,6 +50,7 @@ from .constants import (
 from .definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
 from .exceptions import AgentError, AgentTimeoutError, BudgetExhaustedError
 from .handlers import (
+    AgentHandlers,
     approval_grant,
     call_label,
     call_ran,
@@ -59,7 +60,7 @@ from .handlers import (
 )
 from .hitl import ApprovalPolicy, HumanInTheLoop, make_hitl_checker
 from .summarization import make_observation_summarizer
-from .tools import tool_call_from_context
+from .tools import ToolRegistry, tool_call_from_context
 
 
 def _with_instructions(
@@ -442,6 +443,9 @@ def artifact_text(value: Any) -> str:
     return str(value)
 
 
+_H = TypeVar("_H")
+
+
 class BaseAgent(ABC):
     """Abstract base class for FSM-LLM agents.
 
@@ -498,6 +502,49 @@ class BaseAgent(ABC):
         """Raise ``AgentError`` for an empty registry (tool patterns' ``__init__``)."""
         if len(tools) == 0:
             raise AgentError("Cannot create agent with empty tool registry")
+
+    def _require_handlers(self, handlers: _H | None) -> _H:
+        """Return *handlers*; raise ``AgentError`` when a ReAct-family
+        ``_register_handlers`` got none.
+
+        ``run()`` always passes its call-local handlers (D-014 of plan
+        2026-09-12T065608-089d0ec7); ``None`` here is a programming error.
+        """
+        if handlers is None:
+            raise AgentError(
+                f"{type(self).__name__}._register_handlers called without a "
+                "handlers instance — this is a programming error, not a "
+                "runtime condition; run() must always pass one."
+            )
+        return handlers
+
+    def _call_handlers(self, tools: ToolRegistry) -> AgentHandlers:
+        """The call-local ``AgentHandlers`` of one HITL-capable run over *tools*.
+
+        Refuses a flagged tool nobody can approve first (D-052: a registry can
+        gain one after construction), then builds a fresh instance under the
+        run's single approval predicate. Never stored on ``self`` (D-014).
+        """
+        self._refuse_unapprovable_flagged_tools()
+        return AgentHandlers(tools, requires_approval=self._approval_predicate)
+
+    def _react_context(
+        self,
+        task: str,
+        initial_context: dict[str, Any] | None,
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """``_init_context`` for the ReAct family: no observations yet, the
+        iteration budget seeded, plus the pattern's own *extra* keys."""
+        return self._init_context(
+            task,
+            initial_context,
+            extra={
+                ContextKeys.OBSERVATIONS: [],
+                ContextKeys.ITERATION_BUDGET: self.config.max_iterations,
+                **(extra or {}),
+            },
+        )
 
     def _refuse_prompt_cache_with_injected_interface(self) -> None:
         """Raise ``AgentError`` when ``enable_prompt_cache`` meets ``llm_interface``.
@@ -1281,7 +1328,11 @@ class BaseAgent(ABC):
 
         for step in trace_data:
             if isinstance(step, dict) and "action" in step:
-                tool_name = step.get("action", "").split("(")[0]
+                # A pattern that names the tool itself (REWOO) wins over the
+                # `name(args)` label, which cuts a name holding "(".
+                tool_name = (
+                    step.get("tool_name") or step.get("action", "").split("(")[0]
+                )
                 if tool_name and tool_name != ContextKeys.NO_TOOL:
                     tool_input = step.get("tool_input", {})
                     if not isinstance(tool_input, dict):

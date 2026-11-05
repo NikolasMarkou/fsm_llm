@@ -527,15 +527,15 @@ def _tool_selection_field_extractions(
     think_instructions: str,
     *,
     include_tool_name: bool = True,
-    context_keys: Sequence[str] | None = None,
+    context_keys: Sequence[str],
 ) -> list[dict[str, Any]]:
     """Typed ``field_extractions`` for a think state's tool selection.
 
     Contract: ``think_instructions`` is the think prompt (tools, examples,
     rules); returns raw dicts for ``State(field_extractions=...)``:
     ``tool_name`` as ``str`` (omitted when ``include_tool_name`` is False, i.e.
-    the classifier owns it) and ``tool_input`` as ``dict``. ``context_keys``,
-    when given, narrows each prompt's context to those keys (see
+    the classifier owns it) and ``tool_input`` as ``dict``. ``context_keys``
+    (required) narrows each prompt's context to those keys (see
     :func:`loop_field_context_keys`). Never raises.
 
     # DECISION plan-2026-09-19T175721-21cd7f8e/D-024
@@ -549,13 +549,12 @@ def _tool_selection_field_extractions(
     fields = [("tool_input", "dict")]
     if include_tool_name:
         fields.insert(0, ("tool_name", "str"))
-    narrowed = {} if context_keys is None else {"context_keys": list(context_keys)}
     return [
         {
             "field_name": name,
             "field_type": field_type,
             "extraction_instructions": f"Extract the '{name}' field. {think_instructions}",
-            **narrowed,
+            "context_keys": list(context_keys),
         }
         for name, field_type in fields
     ]
@@ -1333,9 +1332,7 @@ def build_react_fsm(
                 "field_name": "tool_name",
                 "intents": schema["intents"],
                 "fallback_intent": schema["fallback_intent"],
-                "confidence_threshold": schema.get(
-                    "confidence_threshold", Defaults.TOOL_CONFIDENCE_THRESHOLD
-                ),
+                "confidence_threshold": schema["confidence_threshold"],
             }
         ]
 

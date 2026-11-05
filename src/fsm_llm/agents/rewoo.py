@@ -22,7 +22,7 @@ from .constants import (
     LogMessages,
     REWOOStates,
 )
-from .definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
+from .definitions import AgentConfig, AgentResult, ToolCall
 from .fsm_definitions import build_rewoo_fsm
 from .handlers import make_iteration_limiter
 from .tools import ToolRegistry, redact_secret_entries
@@ -275,31 +275,3 @@ class REWOOAgent(BaseAgent):
                 ContextKeys.SHOULD_TERMINATE: True,
             },
         )
-
-    def _build_trace(self, final_context: dict[str, Any], iteration: int) -> Any:
-        """Build agent trace from final context with REWOO-specific trace format."""
-        trace_data = final_context.get(ContextKeys.AGENT_TRACE, [])
-        trace = AgentTrace(
-            tool_calls=[],
-            total_iterations=final_context.get(ContextKeys.ITERATION_COUNT, iteration),
-        )
-
-        # Populate trace from stored tool calls
-        for step in trace_data:
-            if not isinstance(step, dict):
-                continue
-            tool_name = step.get("tool_name", "")
-            if not tool_name:
-                # Fall back to "action" key for cross-agent compatibility
-                action = step.get("action", "")
-                tool_name = action.split("(")[0] if action else ""
-            if tool_name and tool_name != ContextKeys.NO_TOOL:
-                trace.tool_calls.append(
-                    ToolCall(
-                        tool_name=tool_name,
-                        parameters=step.get("tool_input", {}),
-                        reasoning=str(step.get("thought", step.get("description", ""))),
-                    )
-                )
-
-        return trace

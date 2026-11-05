@@ -7,7 +7,8 @@ malformed score as 0), F-AP-04 (``aggregation_fn`` failures are agent errors),
 F-AP-05 (one empty-registry guard), F-XD-05 (the base hook asks for HITL
 approval), F-AP-10 (no END_CONVERSATION marker), F-AP-11 (Debate needs no
 ``_extract_answer`` override), F-AP-15 (the summariser never re-wraps its own
-summary and an unreachable threshold is refused).
+summary and an unreachable threshold is refused). Plan 5980fbb7 step 12
+(``TestReactFamilySharedSkeleton``): F-AR-01, F-AR-09, F-AR-11.
 """
 
 from __future__ import annotations
@@ -256,3 +257,90 @@ class TestSummariserDoesNotRewrapItsSummary:
         AgentConfig(auto_summarize_after=Defaults.MAX_OBSERVATIONS - 1)
         with pytest.raises(ValueError, match="auto_summarize_after"):
             AgentConfig(auto_summarize_after=Defaults.MAX_OBSERVATIONS)
+
+
+class TestReactFamilySharedSkeleton:
+    """F-AR-01, F-AR-09, F-AR-11: the ReAct family shares its run pieces."""
+
+    @staticmethod
+    def _registry() -> ToolRegistry:
+        registry = ToolRegistry()
+        registry.register_function(lambda p: "ok", name="t", description="a tool")
+        return registry
+
+    def test_run_and_run_stream_build_the_same_fsm_and_context(self):
+        agent = ReactAgent(tools=self._registry(), llm_interface=PromptGroundedLLM())
+        fsm_def, context, handlers = agent._react_inputs("a task", {"hint": "x"})
+        again = agent._react_inputs("a task", {"hint": "x"})
+        assert fsm_def == again[0]
+        assert context == again[1]
+        assert handlers is not again[2]  # call-local, never shared
+        assert context[ContextKeys.OBSERVATIONS] == []
+        assert context[ContextKeys.ITERATION_BUDGET] == agent.config.max_iterations
+
+    @pytest.mark.parametrize(
+        "module, cls",
+        [
+            ("react", "ReactAgent"),
+            ("reflexion", "ReflexionAgent"),
+            ("reasoning_react", "ReasoningReactAgent"),
+            ("parallel_react", "ParallelReactAgent"),
+        ],
+    )
+    def test_register_handlers_without_handlers_names_the_class(self, module, cls):
+        import importlib
+
+        agent_cls = getattr(importlib.import_module(f"fsm_llm.agents.{module}"), cls)
+        agent = agent_cls(tools=self._registry(), llm_interface=PromptGroundedLLM())
+        with pytest.raises(AgentError, match=f"{cls}._register_handlers called"):
+            agent._register_handlers(MagicMock(), None)
+
+    @pytest.mark.parametrize("with_fn", [False, True])
+    def test_reflexion_registers_one_evaluator_handler(self, with_fn):
+        from fsm_llm.agents import ReflexionAgent
+        from fsm_llm.agents.constants import HandlerNames
+        from fsm_llm.agents.definitions import EvaluationResult
+        from fsm_llm.agents.handlers import AgentHandlers
+
+        agent = ReflexionAgent(
+            tools=self._registry(),
+            llm_interface=PromptGroundedLLM(),
+            evaluation_fn=(lambda ctx: EvaluationResult(passed=True))
+            if with_fn
+            else None,
+        )
+        api = MagicMock()
+        agent._register_handlers(api, AgentHandlers(agent.tools))
+        names = [c.args[0] for c in api.create_handler.call_args_list if c.args]
+        assert names.count(HandlerNames.REFLEXION_EVALUATOR) == 1
+
+    def test_reflexion_shares_the_react_loop_states(self):
+        from fsm_llm.agents.constants import AgentStates, ReflexionStates
+
+        assert ReflexionStates.THINK is AgentStates.THINK
+        assert ReflexionStates.ACT is AgentStates.ACT
+        assert ReflexionStates.CONCLUDE is AgentStates.CONCLUDE
+
+    def test_rewoo_trace_is_the_base_trace_and_keeps_a_name_with_a_paren(self):
+        from fsm_llm.agents.rewoo import REWOOAgent
+
+        assert "_build_trace" not in vars(REWOOAgent)
+        agent = REWOOAgent(tools=self._registry(), llm_interface=PromptGroundedLLM())
+        trace = agent._build_trace(
+            {
+                ContextKeys.AGENT_TRACE: [
+                    {
+                        "action": "calc(x)(1)",
+                        "tool_name": "calc(x)",
+                        "tool_input": {"a": 1},
+                        "thought": "why",
+                    },
+                    {"action": "plain(2)", "thought": "t"},
+                ],
+                ContextKeys.ITERATION_COUNT: 2,
+            },
+            2,
+        )
+        assert [c.tool_name for c in trace.tool_calls] == ["calc(x)", "plain"]
+        assert trace.tool_calls[0].parameters == {"a": 1}
+        assert trace.tool_calls[0].reasoning == "why"

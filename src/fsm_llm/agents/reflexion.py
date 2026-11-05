@@ -16,6 +16,7 @@ from fsm_llm.logging import logger
 
 from .base import BaseAgent, caller_prompt_keys
 from .constants import (
+    REACT_THINK_FRESH_KEYS,
     ContextKeys,
     Defaults,
     HandlerNames,
@@ -30,7 +31,6 @@ from .definitions import (
     EvaluationResult,
     ReflexionMemory,
 )
-from .exceptions import AgentError
 from .fsm_definitions import build_reflexion_fsm
 from .handlers import AgentHandlers, make_fresh_keys_handler, run_evaluation_fn
 from .hitl import HumanInTheLoop
@@ -135,9 +135,8 @@ class ReflexionAgent(BaseAgent):
         # gate in _register_handlers and the D-004 refusal share ONE predicate
         # (BaseAgent._hitl_active), so a gated call is asked in await_approval
         # before `act` runs it; the refusal stays as the backstop.
-        # D-052: a registry can gain a flagged tool after construction.
-        self._refuse_unapprovable_flagged_tools()
-        handlers = AgentHandlers(self.tools, requires_approval=self._approval_predicate)
+        # D-052 refusal and the shared predicate: `_call_handlers`.
+        handlers = self._call_handlers(self.tools)
 
         fsm_def = build_reflexion_fsm(
             self.tools,
@@ -146,15 +145,10 @@ class ReflexionAgent(BaseAgent):
             context_keys=caller_prompt_keys(initial_context),
         )
 
-        context = self._init_context(
+        context = self._react_context(
             task,
             initial_context,
-            extra={
-                ContextKeys.OBSERVATIONS: [],
-                ContextKeys.EPISODIC_MEMORY: [],
-                ContextKeys.REFLECTION_COUNT: 0,
-                ContextKeys.ITERATION_BUDGET: self.config.max_iterations,
-            },
+            {ContextKeys.EPISODIC_MEMORY: [], ContextKeys.REFLECTION_COUNT: 0},
         )
 
         return self._standard_run(
@@ -171,20 +165,13 @@ class ReflexionAgent(BaseAgent):
         self, api: API, handlers: AgentHandlers | None = None
     ) -> None:
         """Register agent handlers with the API."""
-        if handlers is None:
-            raise AgentError(
-                "ReflexionAgent._register_handlers called without a "
-                "handlers instance — this is a programming error, not a "
-                "runtime condition; run() must always pass one."
-            )
+        handlers = self._require_handlers(handlers)
         self._register_tool_executor(api, ReflexionStates.ACT, handlers.execute_tool)
         self._register_iteration_limiter(api, handlers.check_iteration_limit)
         # should_terminate is refreshed on think entry like ReAct's, so the
         # last think turn gives its own verdict (D-051 of plan 06a5ec0a); the
         # max_reflections stop survives, it records a forced reason.
-        self._register_think_loop_handlers(
-            api, [ContextKeys.REASONING, ContextKeys.SHOULD_TERMINATE]
-        )
+        self._register_think_loop_handlers(api, REACT_THINK_FRESH_KEYS)
 
         # DECISION plan-2026-09-29T103145-06a5ec0a/D-031
         # The verdict is produced on evaluate ENTRY: evaluation_fn writes it
@@ -194,20 +181,16 @@ class ReflexionAgent(BaseAgent):
         # evaluate (the edge is already chosen by then, so a null extraction
         # takes the 900 fallback to reflect whatever the function said).
         # See decisions.md D-031.
-        if self.evaluation_fn is not None:
-            api.register_handler(
-                api.create_handler(HandlerNames.REFLEXION_EVALUATOR)
-                .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-                .on_state_entry(ReflexionStates.EVALUATE)
-                .do(self._make_evaluation_handler())
+        api.register_handler(
+            api.create_handler(HandlerNames.REFLEXION_EVALUATOR)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
+            .on_state_entry(ReflexionStates.EVALUATE)
+            .do(
+                make_fresh_keys_handler(_EVALUATION_KEYS)
+                if self.evaluation_fn is None
+                else self._make_evaluation_handler(self.evaluation_fn)
             )
-        else:
-            api.register_handler(
-                api.create_handler(HandlerNames.REFLEXION_EVALUATOR)
-                .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-                .on_state_entry(ReflexionStates.EVALUATE)
-                .do(make_fresh_keys_handler(_EVALUATION_KEYS))
-            )
+        )
 
         # REACT-01: reflect produces reflection/lessons, so they are cleared
         # on reflect entry and recorded on reflect EXIT, after the reflect
@@ -228,18 +211,16 @@ class ReflexionAgent(BaseAgent):
         # HITL: flag tools needing approval (same predicate as the FSM state)
         self._register_approval_gate(api)
 
-    def _make_evaluation_handler(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    @staticmethod
+    def _make_evaluation_handler(
+        evaluation_fn: Callable[[dict[str, Any]], EvaluationResult],
+    ) -> Callable[[dict[str, Any]], dict[str, Any]]:
         """Create the evaluate-entry handler that runs the external evaluation_fn.
 
         Its verdict replaces the self-evaluation: the keys it writes are set,
         so evaluate extracts nothing (skip-if-set). A raising or wrong-typed
         function is a failed evaluation (``run_evaluation_fn``), never a reason
         to fall back to the model's own verdict."""
-        if self.evaluation_fn is None:
-            raise AgentError(
-                "evaluation_fn must be set before creating evaluation handler"
-            )
-        evaluation_fn = self.evaluation_fn
 
         def handle_evaluation(context: dict[str, Any]) -> dict[str, Any]:
             eval_result = run_evaluation_fn(evaluation_fn, context)

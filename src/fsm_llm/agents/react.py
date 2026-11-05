@@ -17,12 +17,10 @@ from .base import BaseAgent, caller_prompt_keys
 from .constants import (
     REACT_THINK_FRESH_KEYS,
     AgentStates,
-    ContextKeys,
     Defaults,
     LogMessages,
 )
 from .definitions import AgentConfig, AgentResult
-from .exceptions import AgentError
 from .fsm_definitions import build_react_fsm
 from .handlers import AgentHandlers
 from .hitl import HumanInTheLoop
@@ -76,6 +74,26 @@ class ReactAgent(BaseAgent):
             )
         )
 
+    def _react_inputs(
+        self, task: str, initial_context: dict[str, Any] | None
+    ) -> tuple[dict[str, Any], dict[str, Any], AgentHandlers]:
+        """The FSM, initial context and call-local handlers of one run, shared
+        by ``run`` and ``run_stream`` so the two cannot drift.
+
+        The await_approval state is built under the SAME predicate that
+        registers the runtime approval gate (``BaseAgent._hitl_active``, D-001).
+        """
+        handlers = self._call_handlers(self.tools)
+        fsm_def = build_react_fsm(
+            self.tools,
+            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
+            include_approval_state=self._hitl_active,
+            use_classification=self.use_classification,
+            output_schema=self.config.output_schema,
+            context_keys=caller_prompt_keys(initial_context),
+        )
+        return fsm_def, self._react_context(task, initial_context), handlers
+
     def run(
         self,
         task: str,
@@ -95,30 +113,8 @@ class ReactAgent(BaseAgent):
         # `run()` call can ever overwrite the reference this call is about
         # to use. Do NOT reintroduce `self._handlers = AgentHandlers(...)`
         # in this method — see decisions.md D-014.
-        # D-052: a registry can gain a flagged tool after construction.
-        self._refuse_unapprovable_flagged_tools()
-        handlers = AgentHandlers(self.tools, requires_approval=self._approval_predicate)
-
-        # The await_approval state must be built under the SAME predicate that
-        # registers the runtime approval gate (BaseAgent._hitl_active, D-001).
-        fsm_def = build_react_fsm(
-            self.tools,
-            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
-            include_approval_state=self._hitl_active,
-            use_classification=self.use_classification,
-            output_schema=self.config.output_schema,
-            context_keys=caller_prompt_keys(initial_context),
-        )
-
-        context = self._init_context(
-            task,
-            initial_context,
-            extra={
-                ContextKeys.OBSERVATIONS: [],
-                ContextKeys.ITERATION_BUDGET: self.config.max_iterations,
-            },
-        )
-
+        # D-052 refusal and the shared predicate: `_call_handlers`.
+        fsm_def, context, handlers = self._react_inputs(task, initial_context)
         return self._standard_run(task, fsm_def, context, "react", handlers=handlers)
 
     def run_stream(
@@ -141,25 +137,7 @@ class ReactAgent(BaseAgent):
         # See D-014 note in run() above — call-local handlers, threaded
         # explicitly through `_standard_run_stream`'s `handlers=` parameter,
         # never assigned to `self._handlers`.
-        # D-052: a registry can gain a flagged tool after construction.
-        self._refuse_unapprovable_flagged_tools()
-        handlers = AgentHandlers(self.tools, requires_approval=self._approval_predicate)
-        fsm_def = build_react_fsm(
-            self.tools,
-            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
-            include_approval_state=self._hitl_active,
-            use_classification=self.use_classification,
-            output_schema=self.config.output_schema,
-            context_keys=caller_prompt_keys(initial_context),
-        )
-        context = self._init_context(
-            task,
-            initial_context,
-            extra={
-                ContextKeys.OBSERVATIONS: [],
-                ContextKeys.ITERATION_BUDGET: self.config.max_iterations,
-            },
-        )
+        fsm_def, context, handlers = self._react_inputs(task, initial_context)
         yield from self._standard_run_stream(
             task, fsm_def, context, "react", handlers=handlers
         )
@@ -194,12 +172,7 @@ class ReactAgent(BaseAgent):
         self, api: API, handlers: AgentHandlers | None = None
     ) -> None:
         """Register agent handlers with the API."""
-        if handlers is None:
-            raise AgentError(
-                "ReactAgent._register_handlers called without a handlers "
-                "instance — this is a programming error, not a runtime "
-                "condition; run()/run_stream() must always pass one."
-            )
+        handlers = self._require_handlers(handlers)
         self._register_tool_executor(api, AgentStates.ACT, handlers.execute_tool)
         self._register_iteration_limiter(api, handlers.check_iteration_limit)
         self._register_think_loop_handlers(api, REACT_THINK_FRESH_KEYS)

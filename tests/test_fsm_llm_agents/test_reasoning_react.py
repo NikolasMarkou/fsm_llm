@@ -159,6 +159,7 @@ class TestReasoningReactAgentHandlerReset:
         instance starting at iteration 0 — proves the shared-mutable-slot
         race this fix closes cannot reoccur (a stale `_current_iteration`
         from a prior call can never leak into the next call's instance)."""
+        from fsm_llm.agents import base as base_module
         from fsm_llm.agents import reasoning_react as rr_module
 
         registry = ToolRegistry()
@@ -167,7 +168,7 @@ class TestReasoningReactAgentHandlerReset:
         agent = rr_module.ReasoningReactAgent(tools=registry)
 
         created_instances = []
-        real_agent_handlers = rr_module.AgentHandlers
+        real_agent_handlers = base_module.AgentHandlers
 
         def tracking_ctor(registry_arg, **kwargs):
             instance = real_agent_handlers(registry_arg, **kwargs)
@@ -178,7 +179,7 @@ class TestReasoningReactAgentHandlerReset:
         # run() against a reachable Ollama advances the second instance's
         # _current_iteration before the assertion below.
         with (
-            patch.object(rr_module, "AgentHandlers", side_effect=tracking_ctor),
+            patch.object(base_module, "AgentHandlers", side_effect=tracking_ctor),
             patch.object(agent, "_standard_run", side_effect=_StubRunError),
         ):
             for _ in range(2):

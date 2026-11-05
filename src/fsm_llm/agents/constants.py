@@ -44,11 +44,13 @@ class AgentStates:
 class ReflexionStates:
     """States in the Reflexion agent FSM."""
 
-    THINK = "think"
-    ACT = "act"
+    # The shared loop states: the think handlers `_register_think_loop_handlers`
+    # registers by `AgentStates` name must land on these, so they alias them.
+    THINK = AgentStates.THINK
+    ACT = AgentStates.ACT
     EVALUATE = "evaluate"
     REFLECT = "reflect"
-    CONCLUDE = "conclude"
+    CONCLUDE = AgentStates.CONCLUDE
     # With HITL, the shared approval state (`_await_approval_state`).
     AWAIT_APPROVAL = AgentStates.AWAIT_APPROVAL
 
@@ -449,7 +451,7 @@ RESULT_DROPPED_CONTEXT_KEYS: frozenset[str] = frozenset(
 )
 
 
-# Loop values a ReAct think turn produces (react, reasoning_react,
+# Loop values a ReAct think turn produces (react, reflexion, reasoning_react,
 # parallel_react): cleared on think entry so each turn extracts them afresh.
 # The executors clear the tool selection themselves.
 REACT_THINK_FRESH_KEYS: tuple[str, ...] = (
