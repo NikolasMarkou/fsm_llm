@@ -44,13 +44,6 @@ from .utilities import redacting_json_default
 _SESSION_ID_RE = re.compile(r"[a-zA-Z0-9_\-]+")
 
 
-# The on-disk writers' name for the shared hook (`FileSessionStore.save` and
-# `fsm_llm.agents.memory_persistence.save_working_memory` import it from here).
-# The body lives in `utilities` because the prompt and websocket writers need
-# the same rule; do NOT re-implement it per writer.
-session_json_default = redacting_json_default
-
-
 class SessionState(BaseModel):
     """Serializable snapshot of a conversation's state."""
 
@@ -184,7 +177,7 @@ class FileSessionStore(SessionStore):
         written as its ``str()`` and loads back as that string. Anything else
         that is not JSON-native (set, bytes, a subclass of those scalars, a
         custom object) is written as ``"<redacted:TypeName>"``; its
-        ``str()`` is never called (see ``session_json_default``). The file
+        ``str()`` is never called (see ``utilities.redacting_json_default``). The file
         still holds the FULL context: secret-looking KEYS are removed only
         from LLM prompts. Keep the session directory as private as the data
         it stores.
@@ -196,7 +189,7 @@ class FileSessionStore(SessionStore):
         fd, tmp_name = tempfile.mkstemp(dir=str(self._dir), suffix=".tmp")
         try:
             with os.fdopen(fd, "w") as f:
-                f.write(json.dumps(data, indent=2, default=session_json_default))
+                f.write(json.dumps(data, indent=2, default=redacting_json_default))
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_name, str(path))

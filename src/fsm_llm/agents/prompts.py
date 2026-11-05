@@ -228,13 +228,13 @@ def build_evaluate_field_instructions() -> dict[str, str]:
         "reliable and consistent."
     )
     return {
-        "evaluation_passed": (
+        ContextKeys.EVALUATION_PASSED: (
             f"{criteria} true if they are sufficient, false otherwise."
         ),
-        "evaluation_score": (
+        ContextKeys.EVALUATION_SCORE: (
             f"{criteria} A number from 0.0 to 1.0 rating the answer quality."
         ),
-        "evaluation_feedback": (
+        ContextKeys.EVALUATION_FEEDBACK: (
             f"{_COMPOSE}{criteria} One or two sentences on what is good or missing."
         ),
     }
@@ -248,13 +248,13 @@ def build_reflect_field_instructions() -> dict[str, str]:
     memory, so a new episode's reflection differs from earlier ones.
     """
     return {
-        "reflection": (
+        ContextKeys.REFLECTION: (
             f"{_COMPOSE}The last evaluation found the answer insufficient (see "
             "evaluation_feedback). Critique what went wrong in this attempt "
             "and what to try differently. Do not repeat a reflection already "
             "in episodic_memory."
         ),
-        "lessons": (
+        ContextKeys.LESSONS: (
             f"{_COMPOSE}One short lesson to remember for the next attempt, based on "
             "evaluation_feedback and not already listed in episodic_memory."
         ),
@@ -478,7 +478,7 @@ def build_maker_checker_field_instructions(
             f"{_COMPOSE}Your review of the draft_output value as the checker: "
             "what is good and each specific issue to fix. " + criteria
         ),
-        "quality_score": (
+        ContextKeys.QUALITY_SCORE: (
             "Your rating of the draft_output value against the criteria, a "
             "number from 0.0 (unusable) to 1.0 (meets every criterion). " + criteria
         ),
@@ -599,10 +599,7 @@ def build_adapt_field_instructions(
     costs a whole decomposition). ``registry``/``task_description`` add the
     tool list to the ``attempt_result`` instructions.
     """
-    tool_section = ""
-    if registry is not None and len(registry) > 0:
-        tool_text, _ = _get_tool_list(registry, task_description)
-        tool_section = "\n\n" + tool_text
+    tool_section = _tool_section(registry, task_description)
     return {
         ContextKeys.ATTEMPT_RESULT: (
             f"{_COMPOSE}Your direct attempt at the task: a complete answer "

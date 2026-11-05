@@ -766,7 +766,7 @@ class ToolRegistry:
         return {
             "intents": intents,
             "fallback_intent": ContextKeys.NO_TOOL,
-            "confidence_threshold": 0.4,
+            "confidence_threshold": Defaults.TOOL_CONFIDENCE_THRESHOLD,
         }
 
     def register_python_tool(self, tool: Any) -> ToolRegistry:

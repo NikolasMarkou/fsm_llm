@@ -37,6 +37,7 @@ import tempfile
 import threading
 from typing import Annotated, Any
 
+from fsm_llm.llm import DEFAULT_EMBEDDING_MODEL
 from fsm_llm.logging import logger
 
 from .definitions import ToolDefinition
@@ -105,7 +106,7 @@ class SemanticMemoryStore:
 
     def __init__(
         self,
-        embedding_model: str = "ollama/qwen3-embedding:0.6b",
+        embedding_model: str = DEFAULT_EMBEDDING_MODEL,
         persist_path: str | None = None,
         embed_fn: EmbedFn | None = None,
         max_entries: int | None = None,
@@ -314,7 +315,7 @@ class SemanticMemoryStore:
         active_model = (
             embedding_model
             if embedding_model is not None
-            else (stored_model or "ollama/qwen3-embedding:0.6b")
+            else (stored_model or DEFAULT_EMBEDDING_MODEL)
         )
         store = cls(embedding_model=active_model, embed_fn=embed_fn)
         store._persist_path = os.path.expanduser(persist_path) if persist_path else None

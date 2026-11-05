@@ -24,12 +24,8 @@ import tempfile
 from pathlib import Path
 
 from fsm_llm.memory import WorkingMemory
-from fsm_llm.session import (
-    FileSessionStore,
-    SessionState,
-    SessionStore,
-    session_json_default,
-)
+from fsm_llm.session import FileSessionStore, SessionState, SessionStore
+from fsm_llm.utilities import redacting_json_default
 
 # Mirror FileSessionStore's id policy (path-traversal protection).
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -45,7 +41,7 @@ def _check_id(session_id: str) -> None:
 def save_working_memory(memory: WorkingMemory, path: str) -> None:
     """Atomically write a WorkingMemory snapshot to a JSON file.
 
-    Values are serialised through ``fsm_llm.session.session_json_default``:
+    Values are serialised through ``fsm_llm.utilities.redacting_json_default``:
     a non-JSON value outside its exact stdlib scalar keep-set is written as
     ``"<redacted:TypeName>"``, NOT as its ``str()`` (a ``set`` or a ``Path``
     does not survive the round trip as usable text).
@@ -75,7 +71,7 @@ def save_working_memory(memory: WorkingMemory, path: str) -> None:
                 fh,
                 ensure_ascii=False,
                 indent=2,
-                default=session_json_default,
+                default=redacting_json_default,
             )
         os.replace(tmp, target)
     finally:

@@ -19,6 +19,7 @@ from .constants import (
     LogMessages,
     ReflexionStates,
     StopReason,
+    ToolRunStatus,
 )
 from .definitions import AgentStep, EvaluationResult, ToolCall
 from .exceptions import AgentTimeoutError, BudgetExhaustedError
@@ -197,7 +198,7 @@ def forced_stop_skip(context: Mapping[str, Any]) -> dict[str, Any] | None:
     logger.info("Iteration budget reached: the selected tool is not run")
     return {
         ContextKeys.TOOL_RESULT: "Iteration budget reached; no tool was run.",
-        ContextKeys.TOOL_STATUS: "skipped",
+        ContextKeys.TOOL_STATUS: ToolRunStatus.SKIPPED,
         ContextKeys.TOOL_NAME: None,
         ContextKeys.TOOL_INPUT: None,
         ContextKeys.SHOULD_TERMINATE: True,
@@ -284,7 +285,9 @@ class ThinkTurnLimiter:
         leaving = context.get(ContextKeys.CURRENT_STATE) or AgentStates.THINK
         if leaving == AgentStates.THINK:
             self._current_iteration += 1
-        max_iterations = context.get("_max_iterations", Defaults.MAX_ITERATIONS)
+        max_iterations = context.get(
+            ContextKeys.ITERATION_BUDGET, Defaults.MAX_ITERATIONS
+        )
 
         logger.debug(
             LogMessages.ITERATION.format(
@@ -398,7 +401,7 @@ class AgentHandlers(ThinkTurnLimiter):
             if context.get(ContextKeys.APPROVAL_REQUIRED) and not unknown:
                 return {
                     ContextKeys.TOOL_RESULT: "Awaiting approval.",
-                    ContextKeys.TOOL_STATUS: "skipped",
+                    ContextKeys.TOOL_STATUS: ToolRunStatus.SKIPPED,
                 }
 
             # Block premature termination: must use at least one tool
@@ -410,7 +413,7 @@ class AgentHandlers(ThinkTurnLimiter):
                     f"{miss}You must use at least one tool before concluding. "
                     f"Available: {', '.join(tool_names)}",
                     {
-                        ContextKeys.TOOL_STATUS: "rejected",
+                        ContextKeys.TOOL_STATUS: ToolRunStatus.REJECTED,
                         **clear,
                         ContextKeys.SHOULD_TERMINATE: False,
                     },
@@ -430,7 +433,7 @@ class AgentHandlers(ThinkTurnLimiter):
                         "No tool was called for 3 consecutive iterations. "
                         "Terminating — provide your best answer now."
                     ),
-                    ContextKeys.TOOL_STATUS: "skipped",
+                    ContextKeys.TOOL_STATUS: ToolRunStatus.SKIPPED,
                     ContextKeys.SHOULD_TERMINATE: True,
                     # DECISION plan_2026-05-30_5598b755/D-004 [STALE]
                     # The act->conclude / think->conclude guards now require
@@ -450,14 +453,15 @@ class AgentHandlers(ThinkTurnLimiter):
                     f"You must select a tool from: {', '.join(tool_names)}. "
                     "Do not answer from memory — use a tool to gather information.",
                     {
-                        ContextKeys.TOOL_STATUS: "skipped",
+                        ContextKeys.TOOL_STATUS: ToolRunStatus.SKIPPED,
                         **clear,
                         ContextKeys.SHOULD_TERMINATE: None,
                     },
                 )
 
             return with_feedback(
-                "No tool was selected.", {ContextKeys.TOOL_STATUS: "skipped", **clear}
+                "No tool was selected.",
+                {ContextKeys.TOOL_STATUS: ToolRunStatus.SKIPPED, **clear},
             )
 
         refusal = self.approval_refusal(context)
@@ -697,7 +701,7 @@ class AgentHandlers(ThinkTurnLimiter):
             ContextKeys.TOOL_RESULT: (
                 f"Tool '{tool_name}' needs human approval before it can run."
             ),
-            ContextKeys.TOOL_STATUS: "awaiting_approval",
+            ContextKeys.TOOL_STATUS: ToolRunStatus.AWAITING_APPROVAL,
             ContextKeys.APPROVAL_REQUIRED: True,
             ContextKeys.APPROVAL_GRANTED: None,
             ContextKeys.DRIVER_APPROVAL: None,
@@ -722,7 +726,9 @@ class AgentHandlers(ThinkTurnLimiter):
         if ContextKeys.APPROVAL_GRANTED in context and not pending:
             delta = {**delta, ContextKeys.APPROVAL_GRANTED: None}
         if ContextKeys.DRIVER_APPROVAL in context:
-            refused = delta.get(ContextKeys.TOOL_STATUS) == "awaiting_approval"
+            refused = (
+                delta.get(ContextKeys.TOOL_STATUS) == ToolRunStatus.AWAITING_APPROVAL
+            )
             if not refused:
                 delta = {**delta, ContextKeys.DRIVER_APPROVAL: None}
         return delta

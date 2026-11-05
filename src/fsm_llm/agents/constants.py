@@ -6,7 +6,12 @@ from __future__ import annotations
 
 import threading
 
-from fsm_llm.constants import DEFAULT_LLM_MODEL
+from fsm_llm.constants import (
+    CONTEXT_KEY_AGENT_TRACE,
+    DEFAULT_LLM_MODEL,
+    DEFAULT_TEMPERATURE,
+)
+from fsm_llm.llm import DEFAULT_MAX_TOKENS
 
 # ---------------------------------------------------------------------------
 # Agent FSM state names
@@ -283,6 +288,16 @@ class ContextKeys:
     # (absent before the first one). Read by the ReAct-family limiter.
     CURRENT_STATE = "_current_state"
 
+    # Internal run keys: the executor seeds them with its own limits and a
+    # handler reads them back (internal prefix, so they never reach a prompt or
+    # `final_context`). One spelling here, not a literal per pattern.
+    ITERATION_BUDGET = "_max_iterations"
+    REPLAN_COUNT = "_replan_count"
+    MAX_REFINEMENTS = "_max_refinements"
+    MAX_REVISIONS = "_max_revisions"
+    QUALITY_THRESHOLD = "_quality_threshold"
+    MAX_ROUNDS = "_max_rounds"
+
     # HITL
     APPROVAL_REQUIRED = "approval_required"
     APPROVAL_GRANTED = "approval_granted"
@@ -294,7 +309,7 @@ class ContextKeys:
     APPROVALS_SPENT = "_approvals_spent"
 
     # Agent trace
-    AGENT_TRACE = "agent_trace"
+    AGENT_TRACE = CONTEXT_KEY_AGENT_TRACE
 
     # Reflexion
     EVALUATION_PASSED = "evaluation_passed"
@@ -331,6 +346,7 @@ class ContextKeys:
     PREVIOUS_OUTPUT = "previous_output"
 
     # Maker-Checker
+    QUALITY_SCORE = "quality_score"
     DRAFT_OUTPUT = "draft_output"
     CHECKER_FEEDBACK = "checker_feedback"
     CHECKER_PASSED = "checker_passed"
@@ -551,7 +567,10 @@ class HandlerNames:
     ORCHESTRATOR_DECISION_RESET = "OrchestratorDecisionReset"
     DEBATE_JUDGE = "DebateJudge"
     DEBATE_CONSENSUS_RESET = "DebateConsensusReset"
-    ADAPT_ASSESSOR = "ADaPTAssessor"
+    ADAPT_DECOMPOSE_TRACKER = "ADaPTAssessor"
+    ADAPT_SUBTASK_EXECUTOR = "subtask_executor"
+    CONTEXT_COMPACTOR = "AgentContextCompactor"
+    OBSERVATION_SUMMARIZER = "AgentObservationSummarizer"
 
 
 # ---------------------------------------------------------------------------
@@ -563,8 +582,8 @@ class Defaults:
     """Default configuration values."""
 
     MODEL = DEFAULT_LLM_MODEL
-    TEMPERATURE = 0.5
-    MAX_TOKENS = 1000
+    TEMPERATURE = DEFAULT_TEMPERATURE
+    MAX_TOKENS = DEFAULT_MAX_TOKENS
     MAX_ITERATIONS = 10
     TIMEOUT_SECONDS = 300.0
     MCP_TIMEOUT_SECONDS = 30.0
@@ -574,6 +593,8 @@ class Defaults:
     MAX_TOOL_TIMEOUT_S = threading.TIMEOUT_MAX
     MAX_OBSERVATIONS = 20
     CONFIDENCE_THRESHOLD = 0.3
+    # Tool-selection classification threshold (``to_classification_schema``).
+    TOOL_CONFIDENCE_THRESHOLD = 0.4
     MAX_TASK_PREVIEW_LENGTH = 200
     # Cap on AgentConfig.instructions. They are prefixed to prompt slots that
     # core caps at 5000 chars; a ReAct think slot grows with the tool list, so
@@ -659,7 +680,6 @@ class ReasoningIntegrationKeys:
 class MetaDefaults:
     """Default configuration values for the meta-builder."""
 
-    MODEL = DEFAULT_LLM_MODEL
     TEMPERATURE = 0.7
     MAX_TOKENS = 4096
     MAX_TURNS = 50
@@ -673,10 +693,10 @@ class MetaDefaults:
 
     # Agent builder defaults (for the agent artifact being built)
     AGENT_MODEL = "gpt-4o-mini"
-    AGENT_MAX_ITERATIONS = 10
-    AGENT_TIMEOUT_SECONDS = 300.0
-    AGENT_TEMPERATURE = 0.5
-    AGENT_MAX_TOKENS = 1000
+    AGENT_MAX_ITERATIONS = Defaults.MAX_ITERATIONS
+    AGENT_TIMEOUT_SECONDS = Defaults.TIMEOUT_SECONDS
+    AGENT_TEMPERATURE = Defaults.TEMPERATURE
+    AGENT_MAX_TOKENS = Defaults.MAX_TOKENS
 
 
 class MetaBuilderStates:
@@ -980,6 +1000,12 @@ class ToolRunStatus:
     # The call timed out: it may still be running and may still take effect.
     # Distinct from FAILED so no reader treats it as "safe to run again".
     UNKNOWN = "unknown"
+    # The three values below mean NO tool ran for the turn.
+    SKIPPED = "skipped"
+    REJECTED = "rejected"
+    AWAITING_APPROVAL = "awaiting_approval"
+    # Statuses that mean a tool really ran.
+    RAN = frozenset({SUCCESS, FAILED, UNKNOWN})
 
 
 class ErrorMessages:
@@ -1009,6 +1035,8 @@ class ErrorMessages:
         "settings. Enable caching on the interface you inject, or drop "
         "llm_interface"
     )
+    # The answer when no speaking state replied (base and PromptChain).
+    NO_ANSWER = "Agent could not determine an answer."
     EMPTY_CHAIN = "Cannot create prompt chain agent with empty chain"
     NO_SAMPLES = "num_samples must be at least 1"
     PROMPT_SLOT_OVERFLOW = (

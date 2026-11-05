@@ -1116,7 +1116,7 @@ class BaseAgent(ABC):
             if response and response.strip():
                 return response.strip()
 
-        return "Agent could not determine an answer."
+        return ErrorMessages.NO_ANSWER
 
     # ------------------------------------------------------------------
     # Trace building
@@ -1417,7 +1417,7 @@ class BaseAgent(ABC):
             },
         )
         api.register_handler(
-            api.create_handler("AgentContextCompactor")
+            api.create_handler(HandlerNames.CONTEXT_COMPACTOR)
             .with_priority(HandlerPriorities.END_CONVERSATION)
             .at(HandlerTiming.PRE_PROCESSING)
             .do(compactor.compact)
@@ -1428,7 +1428,7 @@ class BaseAgent(ABC):
         if self.config.auto_summarize_after:
             summarizer = make_observation_summarizer(self.config.auto_summarize_after)
             api.register_handler(
-                api.create_handler("AgentObservationSummarizer")
+                api.create_handler(HandlerNames.OBSERVATION_SUMMARIZER)
                 .with_priority(HandlerPriorities.END_CONVERSATION)
                 .at(HandlerTiming.PRE_PROCESSING)
                 .do(summarizer)

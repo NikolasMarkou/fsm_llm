@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from fsm_llm.constants import CLI_EXIT_INTERRUPTED
+from fsm_llm.constants import CLI_EXIT_INTERRUPTED, DEFAULT_LLM_MODEL, ENV_LLM_MODEL
 
 from .constants import MetaDefaults
 from .definitions import MetaBuilderConfig
@@ -29,7 +29,7 @@ def main_cli() -> None:
         "--model",
         type=str,
         default=None,
-        help=f"LLM model to use (default: {MetaDefaults.MODEL})",
+        help=f"LLM model to use (default: env {ENV_LLM_MODEL}, else {DEFAULT_LLM_MODEL})",
     )
     parser.add_argument(
         "--output",

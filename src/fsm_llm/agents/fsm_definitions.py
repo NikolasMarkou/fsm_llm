@@ -1333,7 +1333,9 @@ def build_react_fsm(
                 "field_name": "tool_name",
                 "intents": schema["intents"],
                 "fallback_intent": schema["fallback_intent"],
-                "confidence_threshold": schema.get("confidence_threshold", 0.4),
+                "confidence_threshold": schema.get(
+                    "confidence_threshold", Defaults.TOOL_CONFIDENCE_THRESHOLD
+                ),
             }
         ]
 
@@ -2074,9 +2076,9 @@ def build_maker_checker_fsm(
                     context_keys=loop_field_context_keys(judged),
                 ),
                 typed_field_extraction(
-                    "quality_score",
+                    ContextKeys.QUALITY_SCORE,
                     "float",
-                    fields["quality_score"],
+                    fields[ContextKeys.QUALITY_SCORE],
                     context_keys=loop_field_context_keys(judged),
                 ),
                 typed_field_extraction(

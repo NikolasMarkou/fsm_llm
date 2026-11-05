@@ -114,7 +114,7 @@ class EvaluatorOptimizerAgent(BaseAgent):
             initial_context,
             extra={
                 ContextKeys.REFINEMENT_COUNT: 0,
-                "_max_refinements": self.max_refinements,
+                ContextKeys.MAX_REFINEMENTS: self.max_refinements,
             },
         )
 
@@ -180,7 +180,7 @@ class EvaluatorOptimizerAgent(BaseAgent):
         """
         generated_output = context.get(ContextKeys.GENERATED_OUTPUT, "")
         refinement_count = context.get(ContextKeys.REFINEMENT_COUNT, 0)
-        max_refinements = context.get("_max_refinements", self.max_refinements)
+        max_refinements = context.get(ContextKeys.MAX_REFINEMENTS, self.max_refinements)
 
         # Run the external evaluation (a raise or a wrong-typed return is a
         # failed evaluation, never a swallowed handler error).

@@ -113,7 +113,7 @@ class ADaPTAgent(BaseAgent):
             extra={
                 ContextKeys.CURRENT_DEPTH: _depth,
                 ContextKeys.SUBTASK_RESULTS: [],
-                "_max_iterations": self.config.max_iterations,
+                ContextKeys.ITERATION_BUDGET: self.config.max_iterations,
             },
         )
 
@@ -215,7 +215,7 @@ class ADaPTAgent(BaseAgent):
             holder = RunEndingErrorHolder()
         # Depth tracker: logs decomposition events
         api.register_handler(
-            api.create_handler(HandlerNames.ADAPT_ASSESSOR)
+            api.create_handler(HandlerNames.ADAPT_DECOMPOSE_TRACKER)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(ADaPTStates.DECOMPOSE)
             .do(self._track_decomposition)
@@ -224,7 +224,7 @@ class ADaPTAgent(BaseAgent):
         # Subtask executor: intercepts DECOMPOSE->COMBINE transition,
         # runs recursive subtasks, and injects results before COMBINE
         api.register_handler(
-            api.create_handler("subtask_executor")
+            api.create_handler(HandlerNames.ADAPT_SUBTASK_EXECUTOR)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .at(HandlerTiming.PRE_TRANSITION)
             .on_state(ADaPTStates.DECOMPOSE)
@@ -393,7 +393,7 @@ class ADaPTAgent(BaseAgent):
         return make_iteration_limiter(
             Defaults.MAX_ITERATIONS,
             {ContextKeys.SHOULD_TERMINATE: True},
-            context_max_key="_max_iterations",
+            context_max_key=ContextKeys.ITERATION_BUDGET,
         )
 
     def _extract_answer(

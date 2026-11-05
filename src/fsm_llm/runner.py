@@ -12,45 +12,15 @@ from .constants import (
     CLI_EXIT_FAILURE,
     CLI_EXIT_INTERRUPTED,
     CLI_EXIT_OK,
+    DEFAULT_TEMPERATURE,
     ENV_FSM_PATH,
     ENV_LLM_MAX_TOKENS,
     ENV_LLM_MODEL,
     ENV_LLM_TEMPERATURE,
 )
+from .llm import DEFAULT_MAX_TOKENS
 from .logging import logger, setup_file_logging
-from .utilities import redact_context
-
-# --------------------------------------------------------------
-
-
-# DECISION plan-2026-09-20T114608-a8e47b88/D-014
-# `json.dumps(..., default=...)` on the two log sites below MUST use this
-# callable, never the bare builtin `str`. `default=str` calls `str(obj)`,
-# which for an arbitrary object falls back to `repr(obj)` -- so a
-# secret-bearing object under a benign key (e.g. `Creds(api_key='sk-...')`)
-# would serialize its field values verbatim into `logs/`, on the exact
-# path whose entire purpose (`utilities.redact_context`) is
-# to prevent that. Do NOT "simplify" this back to `default=str` even though
-# it is one token shorter -- this function returns only the object's TYPE
-# NAME, never its value, mirroring `utilities.redact_context`'s own established
-# WARNING-on-non-str-key pattern ("a `bytes` key here
-# means a secret is about to be written to a log verbatim. Do NOT downgrade
-# to debug."). See decisions.md D-014/D-015.
-def _json_default(obj: object) -> str:
-    """Safe ``json.dumps(default=...)`` fallback for a non-JSON-native
-    context value (e.g. ``datetime``, or a caller's custom object).
-
-    Returns a type-name placeholder and WARNs once per call -- never
-    ``str(obj)``/``repr(obj)``, since that would leak the object's own
-    field values (this is the CLI's redaction path).
-    """
-    logger.warning(
-        "Log-serialization fallback used for a non-JSON-native context "
-        f"value of type {type(obj).__name__!r}: only the type name is "
-        "logged, not its str()/repr() (which could leak a secret field)."
-    )
-    return f"<non-serializable: {type(obj).__name__}>"
-
+from .utilities import redact_context, redacting_json_default
 
 # --------------------------------------------------------------
 
@@ -80,8 +50,8 @@ def main(fsm_path, max_history_size, max_message_length):
     # Set up model from environment variables (API key handled by LiteLLM)
     llm_model = os.environ[ENV_LLM_MODEL]
     try:
-        temperature = float(os.environ.get(ENV_LLM_TEMPERATURE, 0.5))
-        max_tokens = int(os.environ.get(ENV_LLM_MAX_TOKENS, 1000))
+        temperature = float(os.environ.get(ENV_LLM_TEMPERATURE, DEFAULT_TEMPERATURE))
+        max_tokens = int(os.environ.get(ENV_LLM_MAX_TOKENS, DEFAULT_MAX_TOKENS))
     except ValueError as e:
         raise RuntimeError(
             f"Invalid environment variable value for temperature or max_tokens: {e}"
@@ -176,16 +146,18 @@ def main(fsm_path, max_history_size, max_message_length):
 
                 # Log the current state and context
                 data = fsm.get_data(conversation_id)
-                # default=_json_default (D-014), matching logging.py:90's own
-                # _record_to_json: a handler-stored non-JSON-native value
-                # (datetime, set, ...) must not crash the CLI's debug/dump
-                # logging path -- but the fallback must never str()/repr()
-                # the object (see _json_default's own docstring/D-014).
+                # DECISION plan-2026-09-20T114608-a8e47b88/D-014
+                # `default=redacting_json_default`, NEVER `default=str`: a
+                # handler-stored non-JSON-native value (datetime, set, ...)
+                # must not crash the CLI's debug/dump path, and `str(obj)`
+                # falls back to `repr(obj)`, which would write a secret field
+                # of a custom object (`Creds(api_key='sk-...')`) verbatim into
+                # `logs/`. The shared hook returns only the type name.
                 # Lazy (D-016): no redaction or dump runs unless DEBUG is on.
                 logger.opt(lazy=True).debug(
                     "Context data: {}",
                     lambda data=data: json.dumps(
-                        redact_context(data), default=_json_default
+                        redact_context(data), default=redacting_json_default
                     ),
                 )
 
@@ -202,7 +174,9 @@ def main(fsm_path, max_history_size, max_message_length):
                 return CLI_EXIT_FAILURE
 
         data = fsm.get_data(conversation_id)
-        dump = json.dumps(redact_context(data), indent=3, default=_json_default)
+        dump = json.dumps(
+            redact_context(data), indent=3, default=redacting_json_default
+        )
         logger.info("Data: \n{}", dump)
         print(f"Data: \n{dump}")
     finally:

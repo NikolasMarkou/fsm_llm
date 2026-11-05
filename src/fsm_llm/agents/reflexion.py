@@ -154,7 +154,7 @@ class ReflexionAgent(BaseAgent):
                 ContextKeys.OBSERVATIONS: [],
                 ContextKeys.EPISODIC_MEMORY: [],
                 ContextKeys.REFLECTION_COUNT: 0,
-                "_max_iterations": self.config.max_iterations,
+                ContextKeys.ITERATION_BUDGET: self.config.max_iterations,
             },
         )
 

@@ -149,7 +149,7 @@ class DebateAgent(BaseAgent):
             extra={
                 ContextKeys.DEBATE_ROUNDS: [],
                 ContextKeys.CURRENT_ROUND: 1,
-                "_max_rounds": self.num_rounds,
+                ContextKeys.MAX_ROUNDS: self.num_rounds,
             },
         )
 

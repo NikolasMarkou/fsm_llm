@@ -111,7 +111,7 @@ class OrchestratorAgent(BaseAgent):
             initial_context,
             extra={
                 ContextKeys.WORKER_RESULTS: [],
-                "_max_iterations": self.config.max_iterations,
+                ContextKeys.ITERATION_BUDGET: self.config.max_iterations,
             },
         )
 
@@ -297,5 +297,5 @@ class OrchestratorAgent(BaseAgent):
                 ContextKeys.ALL_COLLECTED: True,
                 ContextKeys.SHOULD_TERMINATE: True,
             },
-            context_max_key="_max_iterations",
+            context_max_key=ContextKeys.ITERATION_BUDGET,
         )

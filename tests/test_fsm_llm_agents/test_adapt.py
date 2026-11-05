@@ -253,8 +253,8 @@ class TestADaPTConstants:
     def test_defaults_max_decomposition_depth(self):
         assert Defaults.MAX_DECOMPOSITION_DEPTH == 3
 
-    def test_handler_name_adapt_assessor(self):
-        assert HandlerNames.ADAPT_ASSESSOR == "ADaPTAssessor"
+    def test_handler_name_adapt_decompose_tracker(self):
+        assert HandlerNames.ADAPT_DECOMPOSE_TRACKER == "ADaPTAssessor"
 
 
 class TestADaPTJSONLeakFix:

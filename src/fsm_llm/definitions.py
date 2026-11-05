@@ -63,6 +63,11 @@ if TYPE_CHECKING:
 ASCII_IDENTIFIER_PATTERN = r"^[a-zA-Z_][a-zA-Z0-9_]*$"
 _ASCII_IDENTIFIER = re.compile(ASCII_IDENTIFIER_PATTERN)
 
+# Cap of the free text a model returns in a response model (``message``,
+# ``reasoning``). ``llm.py`` truncates a recovered raw reply to it, so it must
+# build the same capped model the pydantic field declares: one definition here.
+RESPONSE_TEXT_MAX_LENGTH = 5000
+
 # --------------------------------------------------------------
 # Enums
 # --------------------------------------------------------------
@@ -136,7 +141,7 @@ class DataExtractionResponse(BaseModel):
     reasoning: str | None = Field(
         None,
         description="Internal reasoning for debugging (not shown to user)",
-        max_length=5000,
+        max_length=RESPONSE_TEXT_MAX_LENGTH,
     )
 
     rejected_corrections: dict[str, Any] = Field(
@@ -225,10 +230,16 @@ class ResponseGenerationResponse(BaseModel):
     Generated after all data extraction and transitions are complete.
     """
 
-    message: str = Field(..., description="Final user-facing message", max_length=5000)
+    message: str = Field(
+        ...,
+        description="Final user-facing message",
+        max_length=RESPONSE_TEXT_MAX_LENGTH,
+    )
 
     reasoning: str | None = Field(
-        None, description="Internal reasoning for debugging", max_length=5000
+        None,
+        description="Internal reasoning for debugging",
+        max_length=RESPONSE_TEXT_MAX_LENGTH,
     )
 
     message_type: str = Field(
@@ -538,7 +549,7 @@ class FieldExtractionResponse(BaseModel):
     reasoning: str | None = Field(
         default=None,
         description="Reasoning for the extraction decision",
-        max_length=5000,
+        max_length=RESPONSE_TEXT_MAX_LENGTH,
     )
 
     is_valid: bool = Field(

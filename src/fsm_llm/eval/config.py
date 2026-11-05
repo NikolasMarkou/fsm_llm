@@ -12,7 +12,6 @@ silently ignored setting.
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -26,7 +25,7 @@ from pydantic import (
     field_validator,
 )
 
-from fsm_llm.constants import DEFAULT_LLM_MODEL, ENV_LLM_MODEL
+from fsm_llm.llm import resolve_model as resolve_llm_model
 
 from .constants import (
     DEFAULT_EXAMPLES_DIR,
@@ -173,7 +172,4 @@ def resolve_model(config: EvalConfig) -> str:
     Read at call time, never at import. A blank value at either tier counts as
     absent and falls through.
     """
-    for candidate in (config.model, os.environ.get(ENV_LLM_MODEL)):
-        if candidate is not None and candidate.strip():
-            return candidate.strip()
-    return DEFAULT_LLM_MODEL
+    return resolve_llm_model(config.model)

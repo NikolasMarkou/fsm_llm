@@ -116,7 +116,7 @@ class ReactAgent(BaseAgent):
             initial_context,
             extra={
                 ContextKeys.OBSERVATIONS: [],
-                "_max_iterations": self.config.max_iterations,
+                ContextKeys.ITERATION_BUDGET: self.config.max_iterations,
             },
         )
 
@@ -158,7 +158,7 @@ class ReactAgent(BaseAgent):
             initial_context,
             extra={
                 ContextKeys.OBSERVATIONS: [],
-                "_max_iterations": self.config.max_iterations,
+                ContextKeys.ITERATION_BUDGET: self.config.max_iterations,
             },
         )
         yield from self._standard_run_stream(

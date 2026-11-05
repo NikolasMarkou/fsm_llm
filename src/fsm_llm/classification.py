@@ -32,6 +32,7 @@ from .definitions import (
     MultiClassificationResult,
 )
 from .llm import (
+    DEFAULT_LLM_TIMEOUT_SECONDS,
     LiteLLMInterface,
     LLMInterface,
     implements_complete,
@@ -153,7 +154,7 @@ class Classifier:
         else:
             self.model = model if model is not None else DEFAULT_LLM_MODEL
             connection: dict[str, Any] = {
-                "timeout": 120.0,
+                "timeout": DEFAULT_LLM_TIMEOUT_SECONDS,
                 **{
                     k: v
                     for k, v in llm_kwargs.items()

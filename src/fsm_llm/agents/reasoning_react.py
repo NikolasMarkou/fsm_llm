@@ -23,6 +23,7 @@ from .constants import (
     ContextKeys,
     LogMessages,
     ReasoningIntegrationKeys,
+    ToolRunStatus,
 )
 from .definitions import (
     AgentConfig,
@@ -266,7 +267,7 @@ class ReasoningReactAgent(BaseAgent):
             initial_context,
             extra={
                 ContextKeys.OBSERVATIONS: [],
-                "_max_iterations": self.config.max_iterations,
+                ContextKeys.ITERATION_BUDGET: self.config.max_iterations,
             },
         )
 
@@ -363,7 +364,7 @@ class ReasoningReactAgent(BaseAgent):
 
                 return {
                     ContextKeys.TOOL_RESULT: observation,
-                    ContextKeys.TOOL_STATUS: "success",
+                    ContextKeys.TOOL_STATUS: ToolRunStatus.SUCCESS,
                     ContextKeys.TOOL_ERROR: None,
                     ContextKeys.OBSERVATIONS: observations,
                     ContextKeys.OBSERVATION_COUNT: len(observations),
@@ -381,7 +382,7 @@ class ReasoningReactAgent(BaseAgent):
                 logger.warning(f"Reasoning failed, recording error: {e}", exc_info=True)
                 return {
                     ContextKeys.TOOL_RESULT: f"Reasoning failed: {e}",
-                    ContextKeys.TOOL_STATUS: "failed",
+                    ContextKeys.TOOL_STATUS: ToolRunStatus.FAILED,
                     ContextKeys.TOOL_ERROR: str(e),
                     ContextKeys.TOOL_NAME: None,
                     ContextKeys.TOOL_INPUT: None,

@@ -237,4 +237,4 @@ class PromptChainAgent(BaseAgent):
             if response and response.strip():
                 return response.strip()
 
-        return "Agent could not determine an answer."
+        return ErrorMessages.NO_ANSWER

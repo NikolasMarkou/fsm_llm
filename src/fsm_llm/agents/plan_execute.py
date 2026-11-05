@@ -31,11 +31,6 @@ from .fsm_definitions import build_plan_execute_fsm
 from .handlers import AgentHandlers, make_fresh_keys_handler
 from .tools import ToolRegistry
 
-# Tool statuses that mean a tool really ran for the step (AgentHandlers).
-_TOOL_RAN = frozenset(
-    {ToolRunStatus.SUCCESS, ToolRunStatus.FAILED, ToolRunStatus.UNKNOWN}
-)
-
 
 def _bounded_plan(value: Any) -> list[Any]:
     """``plan_steps`` as a list of at most ``Defaults.MAX_PLAN_STEPS`` steps.
@@ -169,7 +164,7 @@ class PlanExecuteAgent(BaseAgent):
                 ContextKeys.STEP_RESULTS: [],
                 ContextKeys.ALL_STEPS_COMPLETE: False,
                 ContextKeys.STEP_FAILED: False,
-                "_replan_count": 0,
+                ContextKeys.REPLAN_COUNT: 0,
             },
         )
 
@@ -315,7 +310,7 @@ class PlanExecuteAgent(BaseAgent):
             # a tool genuinely ran (else "skipped"/"rejected"). Do NOT edit
             # _has_execution_evidence instead (see decisions.md D-001).
             status = context.get(ContextKeys.TOOL_STATUS)
-            tool_ran = status in _TOOL_RAN
+            tool_ran = status in ToolRunStatus.RAN
             step_failed = status == ToolRunStatus.FAILED
             # A tool step records the tool observation, not the pre-tool note.
             observation = context.get(ContextKeys.TOOL_RESULT) if tool_ran else None
@@ -351,7 +346,7 @@ class PlanExecuteAgent(BaseAgent):
                 updates[ContextKeys.ALL_STEPS_COMPLETE] = True
                 updates[ContextKeys.FORCED_STOP_REASON] = StopReason.NO_RESULT
             elif step_failed:
-                if context.get("_replan_count", 0) >= max_replans:
+                if context.get(ContextKeys.REPLAN_COUNT, 0) >= max_replans:
                     logger.warning(
                         f"Step {current_index + 1} failed with {max_replans} "
                         "replans used: synthesizing the results so far"
@@ -383,7 +378,7 @@ class PlanExecuteAgent(BaseAgent):
 
         def handle_replan(context: dict[str, Any]) -> dict[str, Any]:
             return {
-                "_replan_count": context.get("_replan_count", 0) + 1,
+                ContextKeys.REPLAN_COUNT: context.get(ContextKeys.REPLAN_COUNT, 0) + 1,
                 ContextKeys.PREVIOUS_PLAN_STEPS: _bounded_plan(
                     context.get(ContextKeys.PLAN_STEPS, [])
                 ),

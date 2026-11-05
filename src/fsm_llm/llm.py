@@ -52,6 +52,7 @@ from __future__ import annotations
 import abc
 import json
 import math
+import os
 import re
 import threading
 import time
@@ -61,8 +62,10 @@ from typing import Any
 from litellm import completion, embedding, get_supported_openai_params
 
 from .constants import (
+    DEFAULT_LLM_MODEL,
     DEFAULT_TEMPERATURE,
     EMPTY_USER_MESSAGE_TURN,
+    ENV_LLM_MODEL,
     MALFORMED_TOOL_CALL_MARKERS,
     NEUTRAL_USER_TURN,
     RESERVED_EMBEDDING_CALL_KWARGS,
@@ -74,6 +77,7 @@ from .constants import (
     USAGE_KIND_STREAM,
 )
 from .definitions import (
+    RESPONSE_TEXT_MAX_LENGTH,
     BulkExtractionRequest,
     CompletionRequest,
     CompletionResponse,
@@ -107,14 +111,13 @@ from .utilities import (
     strip_think_and_fences,
 )
 
-# Mirrors ``ResponseGenerationResponse.message``'s ``max_length`` constraint
-# (definitions.py:154).  Duplicated deliberately rather than introspected out of
-# the pydantic model: the terminal raw-text rung of _parse_response_generation_
-# response must be able to truncate WITHOUT importing model internals.  The two
-# literals are kept in lockstep by a machine-checked cap-drift assertion in
-# tests/test_fsm_llm/test_llm_parse_fallback_seam.py — if you change one and not
-# the other, that test fails.
-_RESPONSE_MESSAGE_MAX_LEN = 5000
+# Defaults of the provider connection, defined once here (the one LLM layer) and
+# read by the API, the classifier, the CLI runner and the agents.
+DEFAULT_MAX_TOKENS = 1000
+DEFAULT_LLM_TIMEOUT_SECONDS = 120.0
+# The embedding model ``LiteLLMEmbedder`` consumers default to (a local Ollama
+# model; no key needed).
+DEFAULT_EMBEDDING_MODEL = "ollama/qwen3-embedding:0.6b"
 
 # Shown to the END USER when no human-readable text can be recovered from a
 # model response.  Referenced from two places in
@@ -453,6 +456,26 @@ def implements_complete(llm: Any) -> bool:
     return getattr(method, "__func__", None) is not LLMInterface.complete
 
 
+def resolve_model(model: str | None = None) -> str:
+    """The model name to use: *model*, else env ``LLM_MODEL``, else the default.
+
+    Interface contract (callers: ``API``, ``agents.resolve_agent_model`` and
+    ``eval.resolve_model``):
+        - *model*: an explicit name or ``None``.
+        - Returns the first non-blank candidate, stripped: *model*, then
+          ``$LLM_MODEL`` (read now, never at import), then
+          ``constants.DEFAULT_LLM_MODEL``. A blank value (``""`` or only
+          whitespace, e.g. an empty ``LLM_MODEL=`` line in a ``.env``) counts as
+          unset at either tier. Always a non-empty ``str``.
+        - Never raises. ``Classifier`` does not call it: it ignores the
+          environment on purpose (it uses the conversation's own interface).
+    """
+    for candidate in (model, os.environ.get(ENV_LLM_MODEL)):
+        if candidate is not None and candidate.strip():
+            return candidate.strip()
+    return DEFAULT_LLM_MODEL
+
+
 def interface_model(llm: Any) -> str | None:
     """The model name an injected interface states, if it states one.
 
@@ -677,7 +700,7 @@ def _safe_str(value: Any) -> str | None:
         value: any value read off a parsed LLM JSON payload.
 
     Returns:
-        ``value`` truncated to ``_RESPONSE_MESSAGE_MAX_LEN`` when it is a ``str``;
+        ``value`` truncated to ``RESPONSE_TEXT_MAX_LENGTH`` when it is a ``str``;
         ``None`` for every other type.
 
     Failure mode: none — total function, never raises.  It exists so that an
@@ -688,7 +711,7 @@ def _safe_str(value: Any) -> str | None:
     REQUIRED ``str`` field slice directly instead, so mypy keeps the non-optional
     type.
     """
-    return value[:_RESPONSE_MESSAGE_MAX_LEN] if isinstance(value, str) else None
+    return value[:RESPONSE_TEXT_MAX_LENGTH] if isinstance(value, str) else None
 
 
 # --------------------------------------------------------------
@@ -1032,8 +1055,8 @@ class LiteLLMInterface(LLMInterface):
         model: str,
         api_key: str | None = None,
         temperature: float = DEFAULT_TEMPERATURE,
-        max_tokens: int = 1000,
-        timeout: float | None = 120.0,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        timeout: float | None = DEFAULT_LLM_TIMEOUT_SECONDS,
         retries: int = 0,
         **kwargs,
     ):
@@ -1959,14 +1982,14 @@ class LiteLLMInterface(LLMInterface):
                         structured
                         and data
                         and "message" not in data
-                        and len(as_text) <= _RESPONSE_MESSAGE_MAX_LEN
+                        and len(as_text) <= RESPONSE_TEXT_MAX_LENGTH
                     ):
                         return ResponseGenerationResponse(
                             message=as_text, message_type="response"
                         )
                     raise ValueError("No usable message in response")
                 return ResponseGenerationResponse(
-                    message=message[:_RESPONSE_MESSAGE_MAX_LEN],
+                    message=message[:RESPONSE_TEXT_MAX_LENGTH],
                     message_type=_safe_str(data.get("message_type")) or "response",
                     reasoning=_safe_str(data.get("reasoning")),
                 )
@@ -1991,7 +2014,7 @@ class LiteLLMInterface(LLMInterface):
                     logger.debug("Extracted response JSON via fallback")
                     try:
                         return ResponseGenerationResponse(
-                            message=message[:_RESPONSE_MESSAGE_MAX_LEN],
+                            message=message[:RESPONSE_TEXT_MAX_LENGTH],
                             message_type=_safe_str(data.get("message_type"))
                             or "response",
                             reasoning=_safe_str(data.get("reasoning")),
@@ -2112,7 +2135,7 @@ class LiteLLMInterface(LLMInterface):
                 )
                 content = (recovered or "").strip() or _GENERIC_FALLBACK_MESSAGE
         return ResponseGenerationResponse(
-            message=content[:_RESPONSE_MESSAGE_MAX_LEN],
+            message=content[:RESPONSE_TEXT_MAX_LENGTH],
             message_type="response",
             reasoning="Unstructured response - used entire content as message",
         )
@@ -2395,7 +2418,7 @@ class LiteLLMEmbedder:
         model: str,
         *,
         api_key: str | None = None,
-        timeout: float | None = 120.0,
+        timeout: float | None = DEFAULT_LLM_TIMEOUT_SECONDS,
         retries: int = 0,
         **kwargs: Any,
     ) -> None:

@@ -101,8 +101,9 @@ from typing import Any, cast
 from pydantic import BaseModel, Field
 
 from .constants import (
-    DEFAULT_LLM_MODEL,
     DEFAULT_MAX_FSM_CACHE_SIZE,
+    DEFAULT_MAX_HISTORY_SIZE,
+    DEFAULT_MAX_MESSAGE_LENGTH,
     DEFAULT_MAX_STACK_DEPTH,
     DEFAULT_TEMPERATURE,
     FSM_ID_HASH_LENGTH,
@@ -129,10 +130,12 @@ from .handlers import (
     create_handler,
 )
 from .llm import (
+    DEFAULT_MAX_TOKENS,
     LiteLLMInterface,
     LLMInterface,
     implements_complete,
     interface_model,
+    resolve_model,
 )
 from .logging import logger
 from .memory import WorkingMemory
@@ -144,6 +147,9 @@ from .prompts import (
 from .session import SessionState, SessionStore
 from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 from .utilities import load_fsm_definition, load_fsm_from_file
+
+# Bound of the per-API cache of ended-conversation snapshots (oldest evicted).
+MAX_ENDED_CONVERSATIONS_CACHE = 10_000
 
 # --------------------------------------------------------------
 
@@ -555,8 +561,8 @@ class API:
         api_key: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
-        max_history_size: int = 5,
-        max_message_length: int = 1000,
+        max_history_size: int = DEFAULT_MAX_HISTORY_SIZE,
+        max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH,
         handlers: list[FSMHandler] | None = None,
         handler_error_mode: str = "continue",
         transition_config: TransitionEvaluatorConfig | None = None,
@@ -626,11 +632,11 @@ class API:
             )
         else:
             # Create default interface
-            model = model or os.environ.get("LLM_MODEL", DEFAULT_LLM_MODEL)
+            model = resolve_model(model)
             temperature = (
                 temperature if temperature is not None else DEFAULT_TEMPERATURE
             )
-            max_tokens = max_tokens if max_tokens is not None else 1000
+            max_tokens = max_tokens if max_tokens is not None else DEFAULT_MAX_TOKENS
 
             self.llm_interface = LiteLLMInterface(
                 model=model,
@@ -710,7 +716,7 @@ class API:
         self.conversation_stacks: dict[str, list[FSMStackFrame]] = {}
         self._last_accessed: dict[str, float] = {}
         self._ended_conversations: dict[str, dict[str, Any]] = {}
-        self._MAX_ENDED_CACHE: int = 10_000
+        self._MAX_ENDED_CACHE: int = MAX_ENDED_CONVERSATIONS_CACHE
 
         # Session persistence
         self._session_store = session_store
@@ -2096,7 +2102,7 @@ class API:
         Starts a new conversation pre-populated with the saved context
         and conversation history. Note: the persisted JSON round-trip is
         lossy for non-JSON-native context values, per
-        ``session.session_json_default``: an exact stdlib scalar
+        ``utilities.redacting_json_default``: an exact stdlib scalar
         (datetime/date/time/timedelta/Decimal/UUID) comes back as its
         ``str()``, while anything else (set, bytes, Path, Enum, a custom
         object) comes back as the placeholder ``"<redacted:TypeName>"``,

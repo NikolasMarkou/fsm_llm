@@ -418,12 +418,6 @@ class TestRedactingJsonDefault:
         assert redacting_json_default({1, 2}) == "<redacted:set>"
         assert redacting_json_default(b"x") == "<redacted:bytes>"
 
-    def test_session_hook_is_the_same_function(self):
-        from fsm_llm.session import session_json_default
-        from fsm_llm.utilities import redacting_json_default
-
-        assert session_json_default is redacting_json_default
-
     def test_json_dumps_never_leaks_an_objects_str(self):
         import json as _json
 

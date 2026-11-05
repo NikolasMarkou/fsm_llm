@@ -327,17 +327,30 @@ class TestRunnerJsonDumpsSurvivesNonJsonNativeContextValues:
         )
         assert result == 0
 
+    def test_datetime_in_final_dump_prints_as_its_string(self, capsys):
+        """F-AF-11: the CLI dump uses the one shared hook, so a date in the
+        context reads as its string (as in the prompt and the session file)
+        instead of the `<non-serializable: datetime>` placeholder."""
+        result = self._run_with_context(
+            per_turn_data={"turn": 1},
+            final_data={"seen_at": datetime(2026, 1, 2, 3, 4, 5)},
+        )
+        out = capsys.readouterr().out
+        assert result == 0
+        assert "2026-01-02 03:04:05" in out
+        assert "non-serializable" not in out
+
     def test_secret_bearing_object_gets_safe_placeholder_not_repr(self):
         """D-014/D-015 / review-iter-2.md WARNING 4 regression: `default=str`
         stringifies an arbitrary object via `repr()`, so a secret-bearing
         object under a benign key used to reach persisted logs verbatim --
-        on the CLI's own redaction path. Post-fix (`_json_default`), only a
-        type-name placeholder is logged, and one WARNING is emitted."""
+        on the CLI's own redaction path. Post-fix (the shared
+        `redacting_json_default`), only a type-name placeholder is logged."""
         from fsm_llm.logging import logger
 
         class Creds:
             """Stand-in for a caller's custom object whose repr leaks a
-            secret field value -- exactly what `_json_default` must not
+            secret field value -- exactly what `redacting_json_default` must not
             call."""
 
             def __init__(self, api_key: str):
@@ -373,18 +386,7 @@ class TestRunnerJsonDumpsSurvivesNonJsonNativeContextValues:
             assert "Creds(api_key=" not in message
 
         # The type-name placeholder DOES reach the final dump line.
-        assert any("<non-serializable: Creds>" in str(r["message"]) for r in records)
-
-        # Exactly one WARNING fired for the one non-serializable object.
-        warnings = [
-            r
-            for r in records
-            if r["level"].name == "WARNING" and "non-JSON-native" in str(r["message"])
-        ]
-        assert len(warnings) == 1, (
-            f"expected exactly 1 non-JSON-native WARNING, got "
-            f"{len(warnings)}: {[str(r['message']) for r in records]}"
-        )
+        assert any("<redacted:Creds>" in str(r["message"]) for r in records)
 
 
 class TestRunnerPrintsToTerminal:

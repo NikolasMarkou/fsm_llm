@@ -12,7 +12,7 @@ import math
 import threading
 from collections.abc import Callable, Sequence
 
-from fsm_llm.llm import LiteLLMEmbedder
+from fsm_llm.llm import DEFAULT_EMBEDDING_MODEL, LiteLLMEmbedder
 from fsm_llm.logging import logger
 
 from .definitions import ToolDefinition
@@ -117,7 +117,7 @@ class SemanticToolRegistry(ToolRegistry):
 
     def __init__(
         self,
-        embedding_model: str = "ollama/qwen3-embedding:0.6b",
+        embedding_model: str = DEFAULT_EMBEDDING_MODEL,
         top_k: int = 5,
         auto_embed: bool = True,
         *,

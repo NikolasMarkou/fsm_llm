@@ -63,7 +63,7 @@ class MakerCheckerAgent(BaseAgent):
             ContextKeys.DRAFT_OUTPUT,
             ContextKeys.CHECKER_FEEDBACK,
             ContextKeys.CHECKER_PASSED,
-            "quality_score",
+            ContextKeys.QUALITY_SCORE,
             ContextKeys.REVISION_COUNT,
             ContextKeys.PREVIOUS_DRAFT,
         }
@@ -120,8 +120,8 @@ class MakerCheckerAgent(BaseAgent):
             initial_context,
             extra={
                 ContextKeys.REVISION_COUNT: 0,
-                "_max_revisions": self.max_revisions,
-                "_quality_threshold": self.quality_threshold,
+                ContextKeys.MAX_REVISIONS: self.max_revisions,
+                ContextKeys.QUALITY_THRESHOLD: self.quality_threshold,
             },
         )
 
@@ -175,7 +175,7 @@ class MakerCheckerAgent(BaseAgent):
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .at(HandlerTiming.CONTEXT_UPDATE)
             .on_state(MakerCheckerStates.CHECK)
-            .when_keys_updated(ContextKeys.CHECKER_PASSED, "quality_score")
+            .when_keys_updated(ContextKeys.CHECKER_PASSED, ContextKeys.QUALITY_SCORE)
             .do(self._track_revisions)
         )
 
@@ -202,7 +202,9 @@ class MakerCheckerAgent(BaseAgent):
             if context.get(ContextKeys.CHECKER_PASSED) is True:
                 return {}
             delta = redraft_entry(context)
-            delta.update(dict.fromkeys((ContextKeys.CHECKER_PASSED, "quality_score")))
+            delta.update(
+                dict.fromkeys((ContextKeys.CHECKER_PASSED, ContextKeys.QUALITY_SCORE))
+            )
             return delta
 
         api.register_handler(
@@ -249,10 +251,10 @@ class MakerCheckerAgent(BaseAgent):
         handler running (plan 5ed71cf2/D-009).
         """
         revision_count = context.get(ContextKeys.REVISION_COUNT, 0)
-        max_revisions = context.get("_max_revisions", self.max_revisions)
+        max_revisions = context.get(ContextKeys.MAX_REVISIONS, self.max_revisions)
         # Typed float field (a dict-shaped checker_feedback, which an earlier
         # recovery read the score from, is now rejected by the str field).
-        quality_score = context.get("quality_score", 0.0)
+        quality_score = context.get(ContextKeys.QUALITY_SCORE, 0.0)
 
         # Record in trace
         trace = list(context.get(ContextKeys.AGENT_TRACE, []))
@@ -260,7 +262,7 @@ class MakerCheckerAgent(BaseAgent):
             {
                 "type": "check",
                 "revision_count": revision_count,
-                "quality_score": quality_score,
+                ContextKeys.QUALITY_SCORE: quality_score,
             }
         )
 
@@ -274,7 +276,9 @@ class MakerCheckerAgent(BaseAgent):
         result: dict[str, Any] = {ContextKeys.AGENT_TRACE: trace}
 
         # Auto-pass if quality score meets threshold
-        quality_threshold = context.get("_quality_threshold", self.quality_threshold)
+        quality_threshold = context.get(
+            ContextKeys.QUALITY_THRESHOLD, self.quality_threshold
+        )
         if (
             isinstance(quality_score, int | float)
             and quality_score >= quality_threshold
@@ -311,7 +315,7 @@ class MakerCheckerAgent(BaseAgent):
         """
         if context.get(ContextKeys.CHECKER_PASSED) is True:
             return {}
-        max_revisions = context.get("_max_revisions")
+        max_revisions = context.get(ContextKeys.MAX_REVISIONS)
         revisions_spent = (
             isinstance(max_revisions, int)
             and context.get(ContextKeys.REVISION_COUNT, 0) >= max_revisions

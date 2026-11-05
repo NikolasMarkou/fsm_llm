@@ -20,13 +20,13 @@ import pytest
 
 from fsm_llm.api import API
 from fsm_llm.definitions import (
+    RESPONSE_TEXT_MAX_LENGTH,
     FieldExtractionRequest,
     FieldExtractionResponse,
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import (
     _GENERIC_FALLBACK_MESSAGE,
-    _RESPONSE_MESSAGE_MAX_LEN,
     LiteLLMInterface,
 )
 
@@ -64,7 +64,7 @@ def field_request() -> FieldExtractionRequest:
 
 
 class TestCapDriftGuard:
-    """The duplicated 5000 literal cannot silently diverge from the model."""
+    """The shared cap is what the response model declares (one definition)."""
 
     def test_constant_matches_the_declared_model_max_length(self):
         metadata = ResponseGenerationResponse.model_fields["message"].metadata
@@ -72,10 +72,9 @@ class TestCapDriftGuard:
             m.max_length for m in metadata if getattr(m, "max_length", None) is not None
         ]
         assert declared, "ResponseGenerationResponse.message lost its max_length"
-        assert _RESPONSE_MESSAGE_MAX_LEN == declared[0], (
-            f"llm._RESPONSE_MESSAGE_MAX_LEN ({_RESPONSE_MESSAGE_MAX_LEN}) has drifted "
-            f"from ResponseGenerationResponse.message max_length ({declared[0]}); "
-            "update both (definitions.py and llm.py)"
+        assert RESPONSE_TEXT_MAX_LENGTH == declared[0], (
+            f"definitions.RESPONSE_TEXT_MAX_LENGTH ({RESPONSE_TEXT_MAX_LENGTH}) "
+            f"is not ResponseGenerationResponse.message max_length ({declared[0]})"
         )
 
 
@@ -92,7 +91,7 @@ class TestResponseGenerationLadderNeverRaises:
         result = llm._parse_response_generation_response(_FakeResponse(content))
 
         assert isinstance(result, ResponseGenerationResponse)
-        assert len(result.message) <= _RESPONSE_MESSAGE_MAX_LEN
+        assert len(result.message) <= RESPONSE_TEXT_MAX_LENGTH
         assert result.message  # usable, not empty
 
     def test_oversized_raw_text_at_the_terminal_rung(self, llm):
@@ -100,8 +99,8 @@ class TestResponseGenerationLadderNeverRaises:
         result = llm._parse_response_generation_response(_FakeResponse("B" * 12000))
 
         assert isinstance(result, ResponseGenerationResponse)
-        assert len(result.message) == _RESPONSE_MESSAGE_MAX_LEN
-        assert result.message == "B" * _RESPONSE_MESSAGE_MAX_LEN
+        assert len(result.message) == RESPONSE_TEXT_MAX_LENGTH
+        assert result.message == "B" * RESPONSE_TEXT_MAX_LENGTH
 
     def test_oversized_message_via_primary_structured_rung(self, llm):
         """Pure JSON >5000: primary rung fails, ladder still lands on its feet."""
@@ -110,7 +109,7 @@ class TestResponseGenerationLadderNeverRaises:
         result = llm._parse_response_generation_response(_FakeResponse(content))
 
         assert isinstance(result, ResponseGenerationResponse)
-        assert len(result.message) <= _RESPONSE_MESSAGE_MAX_LEN
+        assert len(result.message) <= RESPONSE_TEXT_MAX_LENGTH
 
     def test_oversized_reasoning_does_not_raise(self, llm):
         """`reasoning` carries the same 5000 cap as `message`."""
@@ -348,7 +347,7 @@ class TestTerminalRungNeverEmitsARawEnvelope:
             _FakeResponse(json.dumps({"message": "C" * 9000}))
         )
 
-        assert result.message == "C" * _RESPONSE_MESSAGE_MAX_LEN
+        assert result.message == "C" * RESPONSE_TEXT_MAX_LENGTH
         assert '"message":' not in result.message
 
     def test_oversized_reasoning_is_truncated_and_message_preserved(self, llm):
@@ -359,7 +358,7 @@ class TestTerminalRungNeverEmitsARawEnvelope:
 
         assert result.message == "Done."
         assert result.reasoning is not None
-        assert len(result.reasoning) == _RESPONSE_MESSAGE_MAX_LEN
+        assert len(result.reasoning) == RESPONSE_TEXT_MAX_LENGTH
 
     def test_field_extraction_oversized_reasoning_keeps_the_value(
         self, llm, field_request
@@ -375,7 +374,7 @@ class TestTerminalRungNeverEmitsARawEnvelope:
 
         assert result.value == "Paris", "a good value was discarded by a capped sibling"
         assert result.reasoning is not None
-        assert len(result.reasoning) == _RESPONSE_MESSAGE_MAX_LEN
+        assert len(result.reasoning) == RESPONSE_TEXT_MAX_LENGTH
 
 
 class TestEndToEndUserVisibleString:

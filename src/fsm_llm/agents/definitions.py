@@ -4,7 +4,6 @@ Pydantic models for the agents package.
 
 from __future__ import annotations
 
-import os
 import re
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -13,7 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from fsm_llm.constants import ENV_LLM_MODEL
+from fsm_llm.llm import resolve_model
 from fsm_llm.logging import logger
 
 from .constants import Defaults, MetaDefaults, ToolObservationPrefix, ToolRunStatus
@@ -214,10 +213,7 @@ def resolve_agent_model(model: str | None = None) -> str:
     SelfConsistency, ReasoningReact, meta builder, log lines),
     and every one of them needs a concrete string.
     """
-    if model:
-        return model
-    env = (os.environ.get(ENV_LLM_MODEL) or "").strip()
-    return env or Defaults.MODEL
+    return resolve_model(model)
 
 
 class AgentConfig(BaseModel):

@@ -267,7 +267,7 @@ class ParallelReactAgent(BaseAgent):
             initial_context,
             extra={
                 ContextKeys.OBSERVATIONS: [],
-                "_max_iterations": self.config.max_iterations,
+                ContextKeys.ITERATION_BUDGET: self.config.max_iterations,
             },
         )
         return self._standard_run(
@@ -325,7 +325,7 @@ class ParallelReactAgent(BaseAgent):
         if not calls:
             return with_feedback(
                 "No tools were selected.",
-                {ContextKeys.TOOL_STATUS: "skipped", TOOL_CALLS_KEY: None},
+                {ContextKeys.TOOL_STATUS: ToolRunStatus.SKIPPED, TOOL_CALLS_KEY: None},
             )
 
         # Submit in order; gather results in order for deterministic observations.
