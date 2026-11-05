@@ -14,14 +14,20 @@ from .constants import (
     CLI_EXIT_OK,
     DEFAULT_COMPLETION_RESULT_KEY,
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
+    TRANSITION_CLASSIFICATION_THRESHOLD_KEY,
 )
 from .definitions import (
+    MAX_CLASSIFICATION_INTENTS,
     CompletionResponse,
     FSMDefinition,
     State,
     Transition,
     TransitionCondition,
+    dangling_transition_message,
     logic_referenced_keys,
+    orphaned_states_message,
+    reachable_from,
+    unknown_initial_state_message,
 )
 from .logging import logger
 
@@ -44,6 +50,23 @@ def _string_literals(node: Any) -> set[str]:
     if isinstance(node, list):
         return set().union(*(_string_literals(v) for v in node))
     return set()
+
+
+def _condition_keys(state: dict[str, Any]) -> set[str]:
+    """Every context key a state's transition conditions gate on or read.
+
+    Contract: ``state`` is a raw state dict (already known well-typed); returns
+    the union of each condition's ``requires_context_keys`` and the keys its
+    ``logic`` reads (``definitions.logic_referenced_keys``). D-011 of plan
+    21cd7f8e: every optional list is read with ``or []``, never ``.get(k, [])``
+    (a dumped FSM holds an explicit ``None`` for an absent one).
+    """
+    keys: set[str] = set()
+    for transition in state.get("transitions") or []:
+        for condition in transition.get("conditions") or []:
+            keys.update(condition.get("requires_context_keys") or [])
+            keys |= logic_referenced_keys(condition.get("logic"))
+    return keys
 
 
 # --------------------------------------------------------------
@@ -237,6 +260,7 @@ class FSMValidator:
         self._validate_handler_only_keys()
         self._validate_completion_states()
         self._validate_unknown_keys()
+        self._validate_transition_classification_keys()
 
         # Stage 4-6: Analysis (won't affect validity but provides insights)
         self._analyze_state_complexity()
@@ -341,12 +365,16 @@ class FSMValidator:
                     # `FSMDefinition(**data)` and confirmed reachable; none is a
                     # speculative entry.
                     "int_parsing",
+                    "int_parsing_size",
                     "int_type",
+                    "int_from_float",
                     "float_parsing",
                     "float_type",
+                    "finite_number",
                     "bool_parsing",
                     "bool_type",
                     "string_type",
+                    "string_unicode",
                     "dict_type",
                     "list_type",
                     # Typed sub-models with `extra="forbid"` (ContextScope,
@@ -399,14 +427,21 @@ class FSMValidator:
         - All transition target states exist
         - No orphaned states (unreachable from initial state)
         """
-        # Check if initial state exists
+        # DECISION plan-2026-11-05T185903-5980fbb7/D-003: stage 0 already
+        # reported what `FSMDefinition`'s own structure validator raised (its
+        # first defect, with this very wording). Report a structural defect
+        # ONCE: skip a message a `Schema:` error already carries, keep the
+        # defects stage 0 did not reach (it raises at the first). Do NOT drop
+        # this stage when stage 0 failed: field errors stop pydantic's `after`
+        # validator, and the model validator stops at its first defect.
         if not self.initial_state:
-            self.result.add_error("No initial state defined")
+            if not any(
+                e.startswith("Schema: initial_state:") for e in self.result.errors
+            ):
+                self.result.add_error("No initial state defined")
             return
         elif self.initial_state not in self.states:
-            self.result.add_error(
-                f"Initial state '{self.initial_state}' not found in states"
-            )
+            self._add_structure_error(unknown_initial_state_message(self.initial_state))
             return
 
         # NOTE (F-23): there is deliberately no "No states defined" branch here.
@@ -425,16 +460,21 @@ class FSMValidator:
                         f"Missing target_state in transition from '{state_id}'"
                     )
                 elif target not in self.states:
-                    self.result.add_error(
-                        f"Transition from '{state_id}' to non-existent state '{target}'"
+                    self._add_structure_error(
+                        dangling_transition_message(state_id, target)
                     )
 
         # Check for orphaned states (not reachable from initial state)
         reachable_states = self._get_reachable_states()
         orphaned_states = set(self.states.keys()) - reachable_states
         if orphaned_states:
-            states_str = ", ".join(orphaned_states)
-            self.result.add_error(f"Orphaned states detected: {states_str}")
+            self._add_structure_error(orphaned_states_message(orphaned_states))
+
+    def _add_structure_error(self, message: str) -> None:
+        """Add ``message`` as an error unless an earlier error already says it
+        (stage 0 carries the model validator's text after ``Value error, ``)."""
+        if not any(error.endswith(message) for error in self.result.errors):
+            self.result.add_error(message)
 
     def _validate_terminal_states(self):
         """
@@ -501,12 +541,8 @@ class FSMValidator:
             if not required_keys:
                 continue  # No required keys to validate
 
-            # Collect every key name any transition condition actually gates on
-            gated_keys: set[str] = set()
-            for transition in state.get("transitions", []):
-                for condition in transition.get("conditions") or []:
-                    gated_keys.update(condition.get("requires_context_keys") or [])
-                    gated_keys |= logic_referenced_keys(condition.get("logic"))
+            # Every key name any transition condition actually gates on
+            gated_keys = _condition_keys(state)
 
             ungated = [key for key in required_keys if key not in gated_keys]
             if not ungated:
@@ -552,10 +588,7 @@ class FSMValidator:
                 referenced.add(fe.get("field_name"))
             for ce in state.get("classification_extractions") or []:
                 classified.add(ce.get("field_name"))
-            for transition in state.get("transitions") or []:
-                for cond in transition.get("conditions") or []:
-                    referenced.update(cond.get("requires_context_keys") or [])
-                    referenced |= logic_referenced_keys(cond.get("logic"))
+            referenced |= _condition_keys(state)
         referenced |= classified
         for key in listed:
             if key in classified:
@@ -701,6 +734,34 @@ class FSMValidator:
                         f"state '{state_id}' transition #{t_idx} condition #{c_idx}",
                     )
 
+    def _validate_transition_classification_keys(self) -> None:
+        """Warn on a ``transition_classification`` key that names no target.
+
+        Every key but the reserved threshold key names a target state of one
+        of the state's own transitions; the pipeline reads the config for the
+        tied options only (``config.get(opt.target_state, {})``), so a key
+        naming anything else (a typo, a state of another transition list) is
+        never used. WARNING tier only (D-008 of plan 9925aa3a, see
+        ``_validate_unknown_keys``): the loader accepts the shape, so an error
+        would make this validator stricter than ``API.from_file``. Shape errors
+        are the loader's (stage 0).
+        """
+        for state_id, state in self.states.items():
+            config = state.get("transition_classification")
+            if not isinstance(config, dict):
+                continue
+            targets = {t.get("target_state") for t in state.get("transitions") or []}
+            for key in config:
+                if (
+                    key != TRANSITION_CLASSIFICATION_THRESHOLD_KEY
+                    and key not in targets
+                ):
+                    self.result.add_warning(
+                        f"State '{state_id}' transition_classification key "
+                        f"'{key}' names no target of its transitions; it is "
+                        "never used"
+                    )
+
     def _analyze_state_complexity(self):
         """
         Analyze state complexity (number of transitions, conditions, etc.).
@@ -724,8 +785,9 @@ class FSMValidator:
             self.result.add_info(f"Complex states with many transitions: {states_str}")
 
         # A tie the classifier schema cannot hold stays in the state at run
-        # time (D-006 of plan-2026-11-05T134105-5ed71cf2): the schema takes 15
-        # intents, one of them the fallback, so 14 distinct targets at most.
+        # time (D-006 of plan-2026-11-05T134105-5ed71cf2): the schema takes
+        # MAX_CLASSIFICATION_INTENTS intents, one of them the fallback.
+        max_targets = MAX_CLASSIFICATION_INTENTS - 1
         for state_id, state in self.states.items():
             by_priority: dict[Any, set[Any]] = {}
             for t in state.get("transitions", []):
@@ -734,13 +796,13 @@ class FSMValidator:
                 )
             for priority, targets in by_priority.items():
                 if (
-                    len(targets) > 14
+                    len(targets) > max_targets
                     or TRANSITION_CLASSIFICATION_FALLBACK_INTENT in targets
                 ):
                     self.result.add_warning(
                         f"State '{state_id}': {len(targets)} transitions at "
                         f"priority {priority} go to distinct targets; if they "
-                        f"tie the classifier cannot hold them (at most 14, none "
+                        f"tie the classifier cannot hold them (at most {max_targets}, none "
                         f"named '{TRANSITION_CLASSIFICATION_FALLBACK_INTENT}') "
                         f"and the conversation stays in the state"
                     )
@@ -799,13 +861,7 @@ class FSMValidator:
         for state_id, targets in adjacency.items():
             for target in targets:
                 reverse[target].append(state_id)
-        can_finish = set(self._get_terminal_states())
-        queue = deque(can_finish)
-        while queue:
-            for source in reverse[queue.popleft()]:
-                if source not in can_finish:
-                    can_finish.add(source)
-                    queue.append(source)
+        can_finish = reachable_from(reverse, self._get_terminal_states())
 
         reachable = self._get_reachable_states()
         trapped = [s for s in self.states if s in reachable and s not in can_finish]
@@ -867,19 +923,15 @@ class FSMValidator:
         if not terminal_states:
             return  # This would be caught by the terminal state validation
 
-        # Find shortest paths to each terminal state using BFS
-        paths = {}
+        # Find the shortest path to each terminal state using BFS
         for terminal in terminal_states:
             shortest_path = self._find_shortest_path(self.initial_state, terminal)
+            # No path: caught by the terminal-state reachability check.
             if shortest_path:
-                paths[terminal] = shortest_path
                 path_str = " → ".join(shortest_path)
                 self.result.add_info(
                     f"Shortest path to terminal state '{terminal}': {path_str}"
                 )
-            else:
-                # This case would be caught by terminal state reachability check
-                pass
 
     def _get_reachable_states(self) -> set[str]:
         """
@@ -893,27 +945,16 @@ class FSMValidator:
         """
         if self._reachable_states_cache is not None:
             return self._reachable_states_cache
-        # Build adjacency list once, then BFS — O(V + E) instead of O(V²)
-        adjacency: dict[str, list[str]] = {}
-        for state_id, state in self.states.items():
-            targets = []
-            for transition in state.get("transitions", []):
-                target = transition.get("target_state", "")
-                if target:
-                    targets.append(target)
-            adjacency[state_id] = targets
-
-        reachable = {self.initial_state}
-        queue = deque([self.initial_state])
-        while queue:
-            current = queue.popleft()
-            for target in adjacency.get(current, []):
-                if target not in reachable:
-                    reachable.add(target)
-                    queue.append(target)
-
-        self._reachable_states_cache = reachable
-        return reachable
+        adjacency = {
+            state_id: [
+                target
+                for transition in state.get("transitions", [])
+                if (target := transition.get("target_state", ""))
+            ]
+            for state_id, state in self.states.items()
+        }
+        self._reachable_states_cache = reachable_from(adjacency, [self.initial_state])
+        return self._reachable_states_cache
 
     def _get_terminal_states(self) -> set[str]:
         """
@@ -987,25 +1028,17 @@ class FSMValidator:
         seen_cycles = set()
 
         for cycle in cycles:
-            # Normalize the cycle to start from the smallest state ID
-            # This helps identify the same cycle starting from different points
-            if not cycle:
-                continue
-
-            # Strip trailing duplicate before normalizing
-            simple_cycle = cycle[:-1] if cycle and cycle[-1] == cycle[0] else cycle
-            if not simple_cycle:
-                continue
+            # Every cycle is `[*path[cycle_start:], node]`: two or more entries,
+            # the last equal to the first. Drop the repeat, then normalize to
+            # start from the smallest state ID so one cycle found from two entry
+            # points (or twice through parallel transitions) is kept once.
+            simple_cycle = cycle[:-1]
             min_idx = simple_cycle.index(min(simple_cycle))
-            normalized = simple_cycle[min_idx:] + simple_cycle[:min_idx]
-
-            # Create a tuple for comparison (hashable)
-            cycle_tuple = tuple(normalized)
+            cycle_tuple = tuple(simple_cycle[min_idx:] + simple_cycle[:min_idx])
 
             if cycle_tuple not in seen_cycles:
                 seen_cycles.add(cycle_tuple)
-                # Store the original cycle format (as list)
-                unique_cycles.append(cycle[:-1] if cycle[-1] == cycle[0] else cycle)
+                unique_cycles.append(simple_cycle)
 
         return unique_cycles
 
@@ -1076,6 +1109,12 @@ def validate_fsm_from_file(json_file: str) -> FSMValidationResult:
         with open(json_file, encoding="utf-8") as f:
             fsm_data = json.load(f)
 
+        if not isinstance(fsm_data, dict):
+            # The loader's sentence (`utilities.load_fsm_from_file`).
+            result = FSMValidationResult(json_file)
+            result.add_error("FSM definition must be a JSON object")
+            return result
+
         # Create a validator and run the validation
         validator = FSMValidator(fsm_data)
         return validator.validate()
@@ -1090,6 +1129,11 @@ def validate_fsm_from_file(json_file: str) -> FSMValidationResult:
         # Handle case when file isn't valid JSON
         result = FSMValidationResult(json_file)
         result.add_error(f"'{json_file}' is not a valid JSON file")
+        return result
+
+    except UnicodeDecodeError:
+        result = FSMValidationResult(json_file)
+        result.add_error(f"'{json_file}' is not valid UTF-8 text")
         return result
 
     except Exception as e:

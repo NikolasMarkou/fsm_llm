@@ -13,12 +13,13 @@ Key Changes:
 
 from __future__ import annotations
 
+import math
 import re
 from collections import deque
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, get_args
+from typing import Any, ClassVar, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -30,6 +31,7 @@ from .constants import (
     DEFAULT_COMPLETION_RESULT_KEY,
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
+    DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
     EXTRACTION_ENVELOPE_KEYS,
     FIELD_PROMPT_CONTEXT_LABEL,
     JSONLOGIC_RAW_ARGUMENT_OPERATIONS,
@@ -47,16 +49,14 @@ from .constants import (
 # --------------------------------------------------------------
 from .logging import logger
 
-if TYPE_CHECKING:
-    from .memory import WorkingMemory  # noqa: F401
-
 # --------------------------------------------------------------
 # Identifier charset policy
 # --------------------------------------------------------------
 
 # The single source of truth for every identifier-shaped field in this module:
-# `State.id`, `Transition.target_state`, `FSMDefinition.initial_state` and
-# `IntentDefinition.name`. ASCII-only, letter-or-underscore first. Two spellings
+# `State.id`, `Transition.target_state`, `TransitionOption.target_state` and
+# `IntentDefinition.name` (`FSMDefinition.initial_state` has only `min_length`; it
+# is bound by `initial_state in states`). ASCII-only, letter-or-underscore first. Two spellings
 # because pydantic's `Field(pattern=)` wants the source string while
 # `IntentDefinition.validate_name_format` needs a compiled object -- see the
 # D-025 anchor there for why that field must NOT migrate to `pattern=`.
@@ -67,6 +67,18 @@ _ASCII_IDENTIFIER = re.compile(ASCII_IDENTIFIER_PATTERN)
 # ``reasoning``). ``llm.py`` truncates a recovered raw reply to it, so it must
 # build the same capped model the pydantic field declares: one definition here.
 RESPONSE_TEXT_MAX_LENGTH = 5000
+
+#: Largest ``priority`` a transition or condition may carry (lower wins).
+MAX_PRIORITY = 1000
+
+#: Most intents a classification schema holds, the fallback included. The
+#: ``intents`` field cap and the validator's tie warning (a tie of more
+#: distinct targets than ``MAX_CLASSIFICATION_INTENTS - 1`` cannot be
+#: classified) both read it; lives here, not in ``constants.py`` (pinned).
+MAX_CLASSIFICATION_INTENTS = 15
+
+#: The field-type vocabulary of a per-field extraction (config and request).
+FieldType = Literal["str", "int", "float", "bool", "list", "dict", "any"]
 
 # --------------------------------------------------------------
 # Enums
@@ -86,14 +98,13 @@ class TransitionEvaluationResult(str, Enum):
 # --------------------------------------------------------------
 
 
-class BulkExtractionRequest(BaseModel):
-    """Request for free-form bulk data extraction from a state's
-    ``extraction_instructions`` (no per-field schema).
+class _PromptRequest(BaseModel):
+    """The two fields every Pass 1 / Pass 2 request carries, and their caps.
 
-    Deliberately minimal (only the two fields the prompt needs): unlike
-    ``FieldExtractionRequest`` this is not targeting one named field, so a
-    required ``field_name``/``field_type`` would not fit. See
-    ``LLMInterface.extract_bulk_data`` for the ABC contract this feeds.
+    Contract: ``system_prompt`` is required (1..30000 chars); ``user_message``
+    is required but may be ``None`` (the turn has no user message: a step, the
+    greeting), which is not an empty message (0..10000 chars). Unknown fields
+    are refused. Subclasses add their own fields after these two.
     """
 
     # DECISION plan-2026-09-30T062855-07ad3f8c/D-044: request models refuse
@@ -104,7 +115,7 @@ class BulkExtractionRequest(BaseModel):
 
     system_prompt: str = Field(
         ...,
-        description="Prompt describing what free-form data to extract",
+        description="The prompt the request sends as its system turn",
         min_length=1,
         max_length=30000,
     )
@@ -112,12 +123,23 @@ class BulkExtractionRequest(BaseModel):
     user_message: str | None = Field(
         ...,
         description=(
-            "User input to extract data from; None when the turn has no user "
+            "The user's input for this request; None when the turn has no user "
             "message (a step, the greeting), which is not an empty message"
         ),
         min_length=0,
         max_length=10000,
     )
+
+
+class BulkExtractionRequest(_PromptRequest):
+    """Request for free-form bulk data extraction from a state's
+    ``extraction_instructions`` (no per-field schema).
+
+    Deliberately minimal (only the two fields the prompt needs): unlike
+    ``FieldExtractionRequest`` this is not targeting one named field, so a
+    required ``field_name``/``field_type`` would not fit. See
+    ``LLMInterface.extract_bulk_data`` for the ABC contract this feeds.
+    """
 
 
 class DataExtractionResponse(BaseModel):
@@ -167,7 +189,7 @@ class DataExtractionResponse(BaseModel):
 # --------------------------------------------------------------
 
 
-class ResponseGenerationRequest(BaseModel):
+class ResponseGenerationRequest(_PromptRequest):
     """
     Request for generating user-facing response based on final state.
 
@@ -177,25 +199,6 @@ class ResponseGenerationRequest(BaseModel):
     Never built for a silent state (empty ``response_instructions``): the
     pipeline makes no LLM call there.
     """
-
-    model_config = ConfigDict(extra="forbid")
-
-    system_prompt: str = Field(
-        ...,
-        description="Prompt focused on response generation for current state",
-        min_length=1,
-        max_length=30000,
-    )
-
-    user_message: str | None = Field(
-        ...,
-        description=(
-            "Original user message for context; None when the turn has no user "
-            "message (a step, the greeting), which is not an empty message"
-        ),
-        min_length=0,
-        max_length=10000,
-    )
 
     transition_occurred: bool = Field(
         default=False, description="Whether a state transition occurred"
@@ -279,13 +282,24 @@ class TransitionOption(BaseModel):
         default=100,
         description="Priority for this transition (lower = higher priority)",
         ge=0,
-        le=1000,
+        le=MAX_PRIORITY,
     )
 
 
 # --------------------------------------------------------------
 # Field Extraction Models (targeted single-field extraction)
 # --------------------------------------------------------------
+
+
+def _is_finite_number(value: object) -> bool:
+    """True for an int/float (not a bool) or a string that ``float()`` reads,
+    and whose ``float()`` is finite: what ``min_value``/``max_value`` accept."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (ValueError, OverflowError):
+        return False
 
 
 class FieldExtractionConfig(BaseModel):
@@ -302,7 +316,7 @@ class FieldExtractionConfig(BaseModel):
         max_length=100,
     )
 
-    field_type: Literal["str", "int", "float", "bool", "list", "dict", "any"] = Field(
+    field_type: FieldType = Field(
         default="str",
         description="Expected type: str, int, float, bool, list, dict, any",
     )
@@ -370,9 +384,18 @@ class FieldExtractionConfig(BaseModel):
 
         Raises ``ValueError`` naming the offending key, so a bad rule fails at
         load instead of as a ``TypeError`` on the first extraction turn (D-023).
-        ``min_value``/``max_value`` stay ``float()``-coerced at use and are not
-        checked here.
+        ``min_value``/``max_value`` stay ``float()``-coerced at use, so they
+        must be a finite number or a string ``float()`` reads as one (not a
+        bool, ``None`` or a container): the extractor skips a numeric check
+        when the VALUE is not a number, which is right, but it would also skip
+        it for a non-numeric RULE and silently disable the check.
         """
+        for key in ("min_value", "max_value"):
+            if key in rules and not _is_finite_number(rules[key]):
+                raise ValueError(
+                    f"validation_rules {key!r} must be a finite number, "
+                    f"got {rules[key]!r}"
+                )
         for key in ("min_length", "max_length"):
             v = rules.get(key)
             if key in rules and (not isinstance(v, int) or isinstance(v, bool)):
@@ -479,27 +502,8 @@ def typed_field_extraction(
     }
 
 
-class FieldExtractionRequest(BaseModel):
+class FieldExtractionRequest(_PromptRequest):
     """Request for extracting a single specific field from user input."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    system_prompt: str = Field(
-        ...,
-        description="Focused prompt for single-field extraction",
-        min_length=1,
-        max_length=30000,
-    )
-
-    user_message: str | None = Field(
-        ...,
-        description=(
-            "User input to extract the field from; None when the turn has no user "
-            "message (a step, the greeting), which is not an empty message"
-        ),
-        min_length=0,
-        max_length=10000,
-    )
 
     field_name: str = Field(
         ...,
@@ -508,7 +512,7 @@ class FieldExtractionRequest(BaseModel):
         max_length=100,
     )
 
-    field_type: Literal["str", "int", "float", "bool", "list", "dict", "any"] = Field(
+    field_type: FieldType = Field(
         default="str",
         description="Expected type of the extracted value",
     )
@@ -761,12 +765,91 @@ class ClassificationPromptConfig:
             )
 
 
-class ClassificationExtractionConfig(BaseModel):
+class IntentDefinition(BaseModel):
+    """A single intent class within a classification schema."""
+
+    name: str = Field(description="Snake_case identifier used for handler routing")
+    description: str = Field(description="Human-readable description shown to the LLM")
+
+    @model_validator(mode="after")
+    def validate_name_format(self) -> IntentDefinition:
+        # DECISION plan-2026-07-19T191147-4b664252/D-025 [STALE]: this check is a
+        # `model_validator` raising ValueError ON PURPOSE. Do NOT "simplify" it to
+        # `Field(pattern=_ASCII_IDENTIFIER.pattern)` to match `State.id` /
+        # `Transition.target_state`, even though that reads cleaner and enforces the
+        # identical charset. A `pattern=` violation is a `string_pattern_mismatch`
+        # error, and `validator.py`'s ALLOW-list (see D-013) deliberately EXCLUDES
+        # that type -- so the swap would make `fsm-llm-validate` report is_valid=True
+        # on an FSM that `API.from_file` then refuses to load. A ValueError from a
+        # `model_validator` is a `value_error`, which the ALLOW-list DOES promote to
+        # ERROR tier. The regex is shared; the enforcement mechanism must not be.
+        if not _ASCII_IDENTIFIER.match(self.name):
+            raise ValueError(
+                f"Intent name must be alphanumeric ASCII with underscores, "
+                f"got '{self.name}'"
+            )
+        return self
+
+
+class ClassificationSchema(BaseModel):
+    """
+    Defines the complete set of intents for a classifier.
+
+    Enforces mutual exclusivity guidelines: at most
+    ``MAX_CLASSIFICATION_INTENTS`` intents per schema and a mandatory fallback
+    class.
+    """
+
+    # DECISION plan-2026-07-19T191147-4b664252/D-013 [STALE]: the 15-intent cap
+    # is declared HERE, once. `ClassificationExtractionConfig` (a state's
+    # `classification_extractions` entry) inherits this class, so what loads
+    # and what `MessagePipeline._execute_classification_extractions` builds at
+    # runtime cannot disagree: an uncapped config used to pass `API.from_file`
+    # and `fsm-llm-validate` and then fail on first ENTRY to the state (F-09).
+    # Do NOT re-declare `intents` / `fallback_intent` on a subclass or copy the
+    # cap into another model; use `MAX_CLASSIFICATION_INTENTS`. See
+    # decisions.md D-013.
+    intents: list[IntentDefinition] = Field(
+        min_length=2,
+        max_length=MAX_CLASSIFICATION_INTENTS,
+        description=f"List of intent definitions (2-{MAX_CLASSIFICATION_INTENTS})",
+    )
+    fallback_intent: str = Field(
+        description="Name of the fallback intent for ambiguous inputs"
+    )
+    confidence_threshold: float = Field(
+        default=DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
+        ge=0.0,
+        le=1.0,
+        description="Below this threshold, the classifier signals low confidence",
+    )
+
+    @model_validator(mode="after")
+    def validate_schema(self) -> ClassificationSchema:
+        names = [i.name for i in self.intents]
+        if len(names) != len(set(names)):
+            raise ValueError("Intent names must be unique")
+        if self.fallback_intent not in names:
+            raise ValueError(
+                f"Fallback intent '{self.fallback_intent}' must be in the intent list"
+            )
+        return self
+
+    @property
+    def intent_names(self) -> list[str]:
+        return [i.name for i in self.intents]
+
+
+class ClassificationExtractionConfig(ClassificationSchema):
     """Configuration for classification-based extraction of a categorical value.
 
     Declared on a :class:`State` via ``classification_extractions`` to classify
     user input into predefined categories and store the result in context.
     Runs during Pass 1 alongside field extractions, before transition evaluation.
+
+    The intent set (``intents``, ``fallback_intent``, ``confidence_threshold``
+    and their rules, the cap included) is :class:`ClassificationSchema`'s; this
+    class adds where the result goes and how the classifier is run.
     """
 
     field_name: str = Field(
@@ -774,32 +857,6 @@ class ClassificationExtractionConfig(BaseModel):
         description="Context key to store the classified intent in",
         min_length=1,
         max_length=100,
-    )
-
-    # DECISION plan-2026-07-19T191147-4b664252/D-013 [STALE]: this cap MUST stay in
-    # lockstep with its sibling `ClassificationSchema.intents` (same file,
-    # `max_length=15`), which `MessagePipeline._execute_classification_extractions`
-    # builds FROM this config at conversation runtime. Leaving this side
-    # uncapped is F-09: the FSM passes `API.from_file` and `fsm-llm-validate`
-    # clean, then fails on first ENTRY to the state -- silently skipped when
-    # `required=False`, a mid-conversation `ClassificationError` when True.
-    # Do NOT relax this back to a docstring "recommended"; if the sibling's cap
-    # ever moves, move this one in the same commit. See decisions.md D-013.
-    intents: list[IntentDefinition] = Field(
-        min_length=2,
-        max_length=15,
-        description="Classification categories (2-15)",
-    )
-
-    fallback_intent: str = Field(
-        description="Intent to use when classification is ambiguous or low-confidence",
-    )
-
-    confidence_threshold: float = Field(
-        default=0.6,
-        ge=0.0,
-        le=1.0,
-        description="Below this threshold, extraction is treated as failed",
     )
 
     required: bool = Field(
@@ -854,17 +911,6 @@ class ClassificationExtractionConfig(BaseModel):
             raise ValueError(f"invalid prompt_config: {e}") from e
         return value
 
-    @model_validator(mode="after")
-    def validate_fallback_in_intents(self) -> ClassificationExtractionConfig:
-        names = [i.name for i in self.intents]
-        if self.fallback_intent not in names:
-            raise ValueError(
-                f"Fallback intent '{self.fallback_intent}' must be in the intent list"
-            )
-        if len(names) != len(set(names)):
-            raise ValueError("Intent names must be unique")
-        return self
-
 
 # --------------------------------------------------------------
 # Enhanced Transition Condition Models
@@ -914,7 +960,7 @@ def _walk_logic_nodes(node: Any, _depth: int = 0) -> Iterator[tuple[str, Any]]:
             logic dict, or one operator argument).
         _depth: the `evaluate_logic` depth of `node` (0 for the root).
     Yields: each `(operator key, raw argument value)` pair encountered, in
-        traversal order. Callers: `_walk_logic_operators` (load-time operator
+        traversal order. Callers: `TransitionCondition._validate_logic` (load-time operator
         allow-list) and `logic_referenced_keys` (validator gating checks).
     Raises: ValueError if an evaluated position is deeper than
         MAX_JSONLOGIC_DEPTH, or an operator dict has zero keys (D-007) or more
@@ -942,13 +988,6 @@ def _walk_logic_nodes(node: Any, _depth: int = 0) -> Iterator[tuple[str, Any]]:
         arguments = [arguments]
     for argument in arguments:
         yield from _walk_logic_nodes(argument, _depth + 1)
-
-
-def _walk_logic_operators(node: Any, _depth: int = 0) -> Iterator[str]:
-    """Yield every operator key in a JsonLogic `node` (see `_walk_logic_nodes`
-    for which positions are visited and what raises)."""
-    for operator, _arguments in _walk_logic_nodes(node, _depth):
-        yield operator
 
 
 def logic_referenced_keys(logic: Any) -> set[str]:
@@ -1021,7 +1060,7 @@ class TransitionCondition(BaseModel):
         default=100,
         description="Priority for condition evaluation (lower = earlier)",
         ge=0,
-        le=1000,
+        le=MAX_PRIORITY,
     )
 
     @model_validator(mode="after")
@@ -1044,7 +1083,7 @@ class TransitionCondition(BaseModel):
         unknown = sorted(
             {
                 op
-                for op in _walk_logic_operators(self.logic)
+                for op, _arguments in _walk_logic_nodes(self.logic)
                 if op not in ALLOWED_JSONLOGIC_OPERATIONS
             }
         )
@@ -1083,7 +1122,10 @@ class Transition(BaseModel):
     )
 
     priority: int = Field(
-        default=100, description="Priority for transition selection", ge=0, le=1000
+        default=100,
+        description="Priority for transition selection",
+        ge=0,
+        le=MAX_PRIORITY,
     )
 
     llm_description: str | None = Field(
@@ -1505,6 +1547,48 @@ class State(BaseModel):
 # --------------------------------------------------------------
 
 
+def reachable_from(
+    adjacency: Mapping[str, Iterable[str]], starts: Iterable[str]
+) -> set[str]:
+    """Every node reachable from ``starts`` along ``adjacency``, starts included.
+
+    The one graph walk of the FSM tooling (forward reachability for the
+    definition, the validator and the artifact builders; pass a reversed
+    adjacency for "can reach"). Contract: ``adjacency`` maps a node to the
+    nodes it points at; a node missing from it, or a target that is not a key,
+    is reached but has no successors (no ``KeyError``); an empty or ``None``
+    target is the caller's to drop. Returns a new set. Breadth-first, O(V + E).
+    """
+    reached = set(starts)
+    queue = deque(reached)
+    while queue:
+        for target in adjacency.get(queue.popleft(), ()):
+            if target not in reached:
+                reached.add(target)
+                queue.append(target)
+    return reached
+
+
+def unknown_initial_state_message(initial_state: str) -> str:
+    """The structural defect "``initial_state`` names no state"."""
+    return f"Initial state '{initial_state}' not found in states"
+
+
+def dangling_transition_message(state_id: str, target: str) -> str:
+    """The structural defect "a transition points at a state that is not defined"."""
+    return f"Invalid transition from '{state_id}' to non-existent state '{target}'"
+
+
+def orphaned_states_message(orphans: Iterable[str]) -> str:
+    """The structural defect "states no path from the initial state reaches"."""
+    return f"Orphaned states detected: {sorted(orphans)}"
+
+
+# The three messages above are the structure defects of `FSMDefinition` that
+# `FSMValidator` also finds on the raw dicts; one wording lets the validator
+# report each defect once (it skips a message a `Schema:` error already says).
+
+
 class FSMDefinition(BaseModel):
     """
     Complete FSM definition for the 2-pass architecture.
@@ -1563,9 +1647,7 @@ class FSMDefinition(BaseModel):
 
         # Basic structure validation
         if self.initial_state not in self.states:
-            raise ValueError(
-                f"Initial state '{self.initial_state}' not found in states"
-            )
+            raise ValueError(unknown_initial_state_message(self.initial_state))
 
         # Validate state.id matches dict key
         for state_id, state in self.states.items():
@@ -1579,7 +1661,7 @@ class FSMDefinition(BaseModel):
             for transition in state.transitions:
                 if transition.target_state not in self.states:
                     raise ValueError(
-                        f"Invalid transition from '{state_id}' to non-existent state '{transition.target_state}'"
+                        dangling_transition_message(state_id, transition.target_state)
                     )
 
         # Terminal state validation
@@ -1591,11 +1673,17 @@ class FSMDefinition(BaseModel):
             raise ValueError("FSM must have at least one terminal state")
 
         # Reachability validation
-        reachable_states = self._calculate_reachable_states()
+        reachable_states = reachable_from(
+            {
+                state_id: [t.target_state for t in state.transitions]
+                for state_id, state in self.states.items()
+            },
+            [self.initial_state],
+        )
         orphaned_states = set(self.states.keys()) - reachable_states
 
         if orphaned_states:
-            raise ValueError(f"Orphaned states detected: {sorted(orphaned_states)}")
+            raise ValueError(orphaned_states_message(orphaned_states))
 
         # Validate terminal state reachability
         reachable_terminals = terminal_states.intersection(reachable_states)
@@ -1604,22 +1692,6 @@ class FSMDefinition(BaseModel):
 
         logger.debug(f"FSM '{self.name}' validation successful")
         return self
-
-    def _calculate_reachable_states(self) -> set:
-        """Calculate all states reachable from initial state."""
-        reachable = {self.initial_state}
-        to_process = deque([self.initial_state])
-
-        while to_process:
-            current = to_process.popleft()
-            current_state = self.states[current]
-
-            for transition in current_state.transitions:
-                if transition.target_state not in reachable:
-                    reachable.add(transition.target_state)
-                    to_process.append(transition.target_state)
-
-        return reachable
 
 
 # --------------------------------------------------------------
@@ -1689,9 +1761,11 @@ class Conversation(BaseModel):
 
         Args:
             n: Number of exchange pairs (each pair = 1 user + 1 system message)
-               to return. Returns up to ``n * 2`` individual messages. If fewer
-               than ``n * 2`` messages exist, all are returned. Defaults to
-               max_history_size.
+               to return. Returns the last ``n * 2`` individual messages (a
+               window of messages, not of pairs: a silent state adds no reply
+               and a step adds no user message, so the window can hold fewer
+               than ``n`` turns). If fewer than ``n * 2`` messages exist, all
+               are returned. Defaults to max_history_size.
         """
         if n is None:
             n = self.max_history_size
@@ -1824,8 +1898,6 @@ class FSMContext(BaseModel):
     ``fsm_llm.memory.WorkingMemory`` for the full statement.
     """
 
-    model_config = {"arbitrary_types_allowed": True}
-
     data: dict[str, Any] = Field(
         default_factory=dict, description="Conversation context data"
     )
@@ -1933,8 +2005,8 @@ class FSMInstance(BaseModel):
     )
 
     persona: str | None = Field(
-        default="Helpful AI assistant",
-        description="Conversation persona",
+        default=None,
+        description="Conversation persona (None: the definition's persona)",
         max_length=MAX_PERSONA_LENGTH,
     )
 
@@ -2038,71 +2110,6 @@ class AdvanceResult(BaseModel):
 # --------------------------------------------------------------
 
 
-class IntentDefinition(BaseModel):
-    """A single intent class within a classification schema."""
-
-    name: str = Field(description="Snake_case identifier used for handler routing")
-    description: str = Field(description="Human-readable description shown to the LLM")
-
-    @model_validator(mode="after")
-    def validate_name_format(self) -> IntentDefinition:
-        # DECISION plan-2026-07-19T191147-4b664252/D-025 [STALE]: this check is a
-        # `model_validator` raising ValueError ON PURPOSE. Do NOT "simplify" it to
-        # `Field(pattern=_ASCII_IDENTIFIER.pattern)` to match `State.id` /
-        # `Transition.target_state`, even though that reads cleaner and enforces the
-        # identical charset. A `pattern=` violation is a `string_pattern_mismatch`
-        # error, and `validator.py`'s ALLOW-list (see D-013) deliberately EXCLUDES
-        # that type -- so the swap would make `fsm-llm-validate` report is_valid=True
-        # on an FSM that `API.from_file` then refuses to load. A ValueError from a
-        # `model_validator` is a `value_error`, which the ALLOW-list DOES promote to
-        # ERROR tier. The regex is shared; the enforcement mechanism must not be.
-        if not _ASCII_IDENTIFIER.match(self.name):
-            raise ValueError(
-                f"Intent name must be alphanumeric ASCII with underscores, "
-                f"got '{self.name}'"
-            )
-        return self
-
-
-class ClassificationSchema(BaseModel):
-    """
-    Defines the complete set of intents for a classifier.
-
-    Enforces mutual exclusivity guidelines: max 15 intents per schema
-    and a mandatory fallback class.
-    """
-
-    intents: list[IntentDefinition] = Field(
-        min_length=2,
-        max_length=15,
-        description="List of intent definitions (2-15)",
-    )
-    fallback_intent: str = Field(
-        description="Name of the fallback intent for ambiguous inputs"
-    )
-    confidence_threshold: float = Field(
-        default=0.6,
-        ge=0.0,
-        le=1.0,
-        description="Below this threshold, the classifier signals low confidence",
-    )
-
-    @model_validator(mode="after")
-    def validate_schema(self) -> ClassificationSchema:
-        names = [i.name for i in self.intents]
-        if len(names) != len(set(names)):
-            raise ValueError("Intent names must be unique")
-        if self.fallback_intent not in names:
-            raise ValueError(
-                f"Fallback intent '{self.fallback_intent}' must be in the intent list"
-            )
-        return self
-
-    @property
-    def intent_names(self) -> list[str]:
-        return [i.name for i in self.intents]
-
-
 def _coerce_entity_values(v: Any) -> dict[str, str | None]:
     """Coerce raw LLM ``entities`` into ``{name: str | None}``.
 
@@ -2164,7 +2171,9 @@ class ClassificationResult(BaseModel):
 
     #: Fixed threshold for is_below_default_threshold (no schema available).
     #: For schema-aware checks, use Classifier.is_low_confidence() instead.
-    DEFAULT_CONFIDENCE_THRESHOLD: ClassVar[float] = 0.6
+    DEFAULT_CONFIDENCE_THRESHOLD: ClassVar[float] = (
+        DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE
+    )
 
     @property
     def is_below_default_threshold(self) -> bool:

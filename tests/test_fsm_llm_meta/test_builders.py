@@ -652,3 +652,33 @@ class TestBuilderErrorHierarchy:
         assert err.details == {"k": 1}
         assert err.errors == ["boom"]
         assert str(err) == "boom"
+
+
+class TestFSMBuilderReportsAnOrphanOnce:
+    """F-XD-12: the builder's own reachability walk no longer repeats the fact
+    FSMDefinition already reported (plan 5980fbb7, step 6)."""
+
+    def test_one_orphan_is_one_error(self):
+        b = FSMArtifactBuilder()
+        b.set_overview("Test", "Test FSM")
+        b.add_state("start", "Start", "Start")
+        b.add_state("mid", "Mid", "Mid")
+        b.add_state("orphan", "Orphan", "Orphan")
+        b.add_transition("start", "mid", "go")
+        b.initial_state = "start"
+        errors = [e for e in b.validate_complete() if "orphan" in e.lower()]
+        assert len(errors) == 1, errors
+
+    def test_an_orphan_is_still_reported_when_a_field_error_hides_the_model_check(
+        self,
+    ):
+        b = FSMArtifactBuilder()
+        b.set_overview("Test", "Test FSM")
+        b.add_state("start", "Start", "Start")
+        b.add_state("mid", "Mid", "Mid")
+        b.add_state("orphan", "Orphan", "Orphan")
+        b.add_transition("start", "mid", "go")
+        b.initial_state = "start"
+        b.states["mid"]["description"] = "x" * 5000
+        errors = b.validate_complete()
+        assert any("orphan" in e.lower() for e in errors), errors

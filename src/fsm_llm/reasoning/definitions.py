@@ -35,6 +35,19 @@ class ConfidenceLevel(str, Enum):
     VERY_HIGH = "very_high"
 
 
+def _confidence_level(confidence: float) -> ConfidenceLevel:
+    """The category of a 0..1 confidence: >= 0.9 very high, >= 0.7 high,
+    >= 0.5 medium, else low (the one table of ``ReasoningStep`` and
+    ``SolutionResult``)."""
+    if confidence >= 0.9:
+        return ConfidenceLevel.VERY_HIGH
+    if confidence >= 0.7:
+        return ConfidenceLevel.HIGH
+    if confidence >= 0.5:
+        return ConfidenceLevel.MEDIUM
+    return ConfidenceLevel.LOW
+
+
 class ReasoningStepType(str, Enum):
     """Types of reasoning steps in the process."""
 
@@ -159,14 +172,7 @@ class ReasoningStep(TimestampedModel):
     @property
     def confidence_level(self) -> ConfidenceLevel:
         """Get categorical confidence level."""
-        if self.confidence >= 0.9:
-            return ConfidenceLevel.VERY_HIGH
-        elif self.confidence >= 0.7:
-            return ConfidenceLevel.HIGH
-        elif self.confidence >= 0.5:
-            return ConfidenceLevel.MEDIUM
-        else:
-            return ConfidenceLevel.LOW
+        return _confidence_level(self.confidence)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -546,14 +552,7 @@ class SolutionResult(TimestampedModel):
     @property
     def confidence_level(self) -> ConfidenceLevel:
         """Categorical confidence level."""
-        if self.confidence >= 0.9:
-            return ConfidenceLevel.VERY_HIGH
-        elif self.confidence >= 0.7:
-            return ConfidenceLevel.HIGH
-        elif self.confidence >= 0.5:
-            return ConfidenceLevel.MEDIUM
-        else:
-            return ConfidenceLevel.LOW
+        return _confidence_level(self.confidence)
 
     @computed_field  # type: ignore[prop-decorator]
     @property

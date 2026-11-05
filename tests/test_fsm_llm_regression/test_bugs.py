@@ -149,21 +149,18 @@ class TestMd5Usage:
 
 
 class TestBfsPerformance:
-    """B7: _calculate_reachable_states uses list.pop(0) instead of deque."""
+    """B7: the reachability walk uses a deque, not list.pop(0)."""
 
     def test_reachable_states_uses_deque(self):
-        """_calculate_reachable_states should use collections.deque for BFS."""
+        """``reachable_from`` (the one walk FSMDefinition, the validator and the
+        builders share) should use collections.deque for BFS."""
         import inspect
 
-        from fsm_llm.definitions import FSMDefinition
+        from fsm_llm.definitions import reachable_from
 
-        source = inspect.getsource(FSMDefinition._calculate_reachable_states)
-        assert "deque" in source, (
-            "_calculate_reachable_states should use deque, not list.pop(0)"
-        )
-        assert ".pop(0)" not in source, (
-            "_calculate_reachable_states should not use pop(0)"
-        )
+        source = inspect.getsource(reachable_from)
+        assert "deque" in source, "reachable_from should use deque, not list.pop(0)"
+        assert ".pop(0)" not in source, "reachable_from should not use pop(0)"
 
 
 # ── B8: Unnecessary hasattr ──────────────────────────────────

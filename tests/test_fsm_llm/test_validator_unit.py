@@ -179,7 +179,10 @@ class TestValidatorInitialState:
         data["initial_state"] = ""
         result = FSMValidator(data).validate()
         assert result.is_valid is False
-        assert any("initial state" in e.lower() for e in result.errors)
+        # Reported once (F-DV-07): the loader's `Schema:` line says it, the
+        # structure stage does not repeat it.
+        named = [e for e in result.errors if "initial" in e.lower()]
+        assert len(named) == 1, named
 
     def test_initial_state_not_in_states(self):
         data = _valid_fsm_data()
@@ -473,7 +476,7 @@ def _fsm_with_bad_fallback_intent():
     """FSM whose classification_extractions fallback_intent is not in intents.
 
     Reproducer from findings/schema-validation.md #2: the
-    ClassificationExtractionConfig.validate_fallback_in_intents model_validator
+    ClassificationSchema.validate_schema model_validator
     raises ValueError, so FSMDefinition(**data) fails while FSMValidator used to
     report is_valid=True with zero errors (the S4 false green).
     """
@@ -1090,7 +1093,7 @@ _VALIDATOR_VIOLATIONS = {
         ("states", "start", "field_extractions", 0, "validation_rules"),
         {"totally_bogus_rule_key": 1},
     ),
-    ("ClassificationExtractionConfig", "validate_fallback_in_intents"): (
+    ("ClassificationExtractionConfig", "validate_schema"): (
         ("states", "start", "classification_extractions", 0, "fallback_intent"),
         "not_a_declared_intent",
     ),
@@ -1536,9 +1539,20 @@ class TestNoStatesDefinedBranchRemoved:
         assert validator.result.errors == ["Initial state 'start' not found in states"]
 
     def test_absent_initial_state_still_reports_its_own_error(self):
-        """Vacuity guard for the arm above: the two error paths stay distinct."""
+        """Vacuity guard for the arm above: the two error paths stay distinct.
+
+        Alone, the structure stage says "No initial state defined"; inside
+        ``validate()`` the loader's ``Schema:`` line already says it, and it is
+        reported once (F-DV-07).
+        """
+        alone = FSMValidator({"name": "x", "states": {}})
+        alone._validate_fsm_structure()
+        assert alone.result.errors == ["No initial state defined"]
+
         result = FSMValidator({"name": "x", "states": {}}).validate()
-        assert any("No initial state defined" in e for e in result.errors)
+        assert result.is_valid is False
+        assert any(e.startswith("Schema: initial_state:") for e in result.errors)
+        assert not any("No initial state defined" in e for e in result.errors)
 
 
 # ------------------------------------------------------------------

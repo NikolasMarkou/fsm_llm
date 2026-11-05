@@ -17,7 +17,7 @@ from typing import Any, ClassVar
 
 from pydantic import ValidationError
 
-from fsm_llm.definitions import BuildError, FSMDefinition
+from fsm_llm.definitions import BuildError, FSMDefinition, reachable_from
 from fsm_llm.logging import logger
 
 from .constants import MetaDefaults
@@ -365,29 +365,38 @@ class FSMArtifactBuilder(ArtifactBuilder):
         if errors:
             return errors
 
-        # Structural validation via FSMDefinition
+        # Structural validation via FSMDefinition. Its own structure validator
+        # (dangling targets, orphans) runs only when no field failed, and it
+        # then reports the defect itself (empty ``loc``): do not say it again.
+        structure_checked = True
         try:
             FSMDefinition(**self.to_dict())
         except ValidationError as e:
             for err in e.errors():
                 loc = " -> ".join(str(part) for part in err["loc"])
                 errors.append(f"{loc}: {err['msg']}")
+                structure_checked = structure_checked and not err["loc"]
         except (TypeError, KeyError, ValueError) as e:
             errors.append(str(e))
+            structure_checked = False
 
-        # Reachability: BFS from initial state
-        if self.initial_state and self.initial_state in self.states:
-            reachable: set[str] = set()
-            queue = [self.initial_state]
-            while queue:
-                current = queue.pop(0)
-                if current in reachable:
-                    continue
-                reachable.add(current)
-                for t in self.states.get(current, {}).get("transitions", []):
-                    target = t.get("target_state", "")
-                    if target and target not in reachable:
-                        queue.append(target)
+        # A field error stopped that check: reachability and targets here.
+        if (
+            not structure_checked
+            and self.initial_state
+            and self.initial_state in self.states
+        ):
+            reachable = reachable_from(
+                {
+                    sid: [
+                        target
+                        for t in state["transitions"]
+                        if (target := t.get("target_state", ""))
+                    ]
+                    for sid, state in self.states.items()
+                },
+                [self.initial_state],
+            )
 
             unreachable = set(self.states.keys()) - reachable
             if unreachable:

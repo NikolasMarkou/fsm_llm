@@ -100,13 +100,6 @@ from .definitions import TransitionEvaluationError
 from .logging import logger
 
 # --------------------------------------------------------------
-# Type definitions
-# --------------------------------------------------------------
-
-#: Type hint for JsonLogic expressions - can be a dict with operations or primitive values
-JsonLogicExpression = dict[str, Any] | Any
-
-# --------------------------------------------------------------
 # Comparison operators
 # --------------------------------------------------------------
 
@@ -262,10 +255,6 @@ def less(a: Any, b: Any, *args: Any) -> bool:
     Returns:
         bool: True if values satisfy the less-than relationship, False otherwise
 
-    Raises:
-        TypeError: If values cannot be converted for comparison
-        ValueError: If numeric conversion fails
-
     Example:
         >>> less(1, 2)
         True
@@ -279,7 +268,8 @@ def less(a: Any, b: Any, *args: Any) -> bool:
           as float(10) < float(2) = False. If conversion fails (e.g. non-numeric
           strings), native comparison is used: less("abc", "def") = True.
         - Chained comparisons evaluate left-to-right
-        - Type conversion errors result in False return value
+        - Never raises: operands that cannot be ordered at all (a ``TypeError``
+          from the native comparison) give False
     """
     # Always attempt numeric conversion for comparisons
     try:
@@ -695,7 +685,7 @@ operations: dict[str, Callable[..., Any]] = {
     # Note: Access operators handled directly in evaluate_logic()
     # "var", "missing", "missing_some", "has_context", "context_length"
     # Membership operators
-    "in": lambda a, b: _membership(a, b),
+    "in": _membership,
     "contains": lambda a, b: _membership(b, a),
     # Arithmetic operators
     "+": lambda *args: sum(float(arg) for arg in args),
@@ -927,7 +917,7 @@ def _evaluate_short_circuit(
 
 
 def evaluate_logic(
-    logic: JsonLogicExpression, data: dict[str, Any] | None = None, _depth: int = 0
+    logic: Any, data: dict[str, Any] | None = None, _depth: int = 0
 ) -> Any:
     """
     Evaluate a JsonLogic expression against provided data.
@@ -998,9 +988,7 @@ def evaluate_logic(
     return result
 
 
-def _evaluate_logic(
-    logic: JsonLogicExpression, data: dict[str, Any] | None, _depth: int
-) -> Any:
+def _evaluate_logic(logic: Any, data: dict[str, Any] | None, _depth: int) -> Any:
     """Body of ``evaluate_logic``; may return ``_UNDEFINED``. Recursion goes
     through ``evaluate_logic`` with ``_depth + 1`` (no conversion there)."""
     # Guard against deeply nested logic (DoS protection)
@@ -1083,11 +1071,9 @@ def _evaluate_logic(
         if operator in _UNDEFINED_PROPAGATING_OPERATORS:
             return _UNDEFINED
 
-    # Get the operation function from the registry
-    operation = operations.get(operator)
-    if operation is None:
-        logger.warning(f"Unsupported operation in condition: '{operator}'")
-        return False
+    # Every allowed operator is in exactly one of the three dispatch tables
+    # (pinned by test_audit_sweeps), and the first two returned above.
+    operation = operations[operator]
 
     # Apply the operation with error handling
     try:
