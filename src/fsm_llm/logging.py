@@ -310,9 +310,18 @@ def setup_logging(
             # so a later JSON sink copied that key into its own line. The line
             # is rendered in a callable format and returned as a literal
             # template (braces escaped), so it never touches the record.
+            # DECISION plan-2026-11-05T134105-5ed71cf2/D-018
+            # loguru parses the RETURNED string as colour markup, so `<` is
+            # written as the JSON escape `\u003c` (valid JSON, decodes back to
+            # `<`, nothing for the markup parser to read). Do NOT use a
+            # backslash-before-`<` escape: a JSON-escaped backslash directly
+            # before `<` would be halved. Do NOT end the template with
+            # `{exception}`: it appends a multi-line traceback after the JSON
+            # line, and the JSON already has exception_type/exception_message.
             def _json_file_format(record):
                 line = _record_to_json(record)
-                return line.replace("{", "{{").replace("}", "}}") + "\n{exception}"
+                escaped = line.replace("{", "{{").replace("}", "}}")
+                return escaped.replace("<", "\\u003c") + "\n"
 
             handler_id = logger.add(
                 file_path,
