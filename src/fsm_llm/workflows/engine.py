@@ -1324,7 +1324,22 @@ class WorkflowEngine:
             # NOTE (W-ISSUE-004): the step budget restarts here (timer-mediated
             # transition); loops through a timer are allowed by design.
             try:
-                await self._transition_to_state(instance, next_state)
+                if next_state == "":
+                    # DECISION plan-2026-11-05T134105-5ed71cf2/D-002
+                    # An empty timer target is the terminal-route marker the
+                    # validator accepts (same as wait_event success_state="",
+                    # see _deliver_event). Do NOT send it to
+                    # _transition_to_state: it would raise "Invalid next
+                    # state" and FAIL the instance after the full delay. Do
+                    # NOT apply this to APICallStep(failure_state=""): a
+                    # failure with an empty route still fails (workflows
+                    # D-003; completing would hide the error).
+                    self._drop_wait_resources(instance_id)
+                    instance.context.pop(KEY_WAITING_INFO, None)
+                    instance.context.pop(KEY_TIMER_INFO, None)
+                    self._set_status(instance, WorkflowStatus.COMPLETED)
+                else:
+                    await self._transition_to_state(instance, next_state)
             except Exception as e:
                 self._fail(instance, e)
 

@@ -800,3 +800,88 @@ class TestCancelMidChain:
         assert instance.status == WorkflowStatus.CANCELLED
         assert instance.context[KEY_CANCELLATION_REASON] == "bye"
         assert engine._cancel_requests == {}
+
+
+class TestTimerEmptyNextState:
+    """F-WE-02 (plan 5ed71cf2 step 16): the validator accepts
+    ``TimerStep(next_state="")`` as a terminal step, like
+    ``wait_event_step(success_state="")``, but the engine used to run the
+    expiry through ``_transition_to_state`` and FAIL the instance with
+    ``Invalid next state``. An empty target now completes the workflow.
+    """
+
+    @staticmethod
+    def _engine(next_state: str, extra_steps: dict | None = None):
+        from fsm_llm.workflows.definitions import WorkflowDefinition
+        from fsm_llm.workflows.dsl import auto_step, timer_step
+
+        steps = {"w": timer_step("w", "w", 0.05, next_state)}
+        steps.update(extra_steps or {})
+        engine = WorkflowEngine()
+        engine.register_workflow(
+            WorkflowDefinition(
+                workflow_id="wf-timer",
+                name="Timer",
+                steps=steps,
+                initial_step_id="w",
+            )
+        )
+        return engine, auto_step
+
+    async def _wait_terminal(self, engine, iid):
+        from fsm_llm.workflows.models import WorkflowStatus
+
+        terminal = {
+            WorkflowStatus.COMPLETED,
+            WorkflowStatus.FAILED,
+            WorkflowStatus.CANCELLED,
+        }
+        for _ in range(200):
+            if engine.workflow_instances[iid].status in terminal:
+                return engine.workflow_instances[iid]
+            await asyncio.sleep(0.01)
+        raise AssertionError("instance never reached a terminal status")
+
+    async def test_empty_next_state_completes_after_expiry(self):
+        from fsm_llm.workflows.constants import (
+            KEY_TIMER_EXPIRED,
+            KEY_TIMER_INFO,
+        )
+        from fsm_llm.workflows.models import WorkflowStatus
+
+        engine, _ = self._engine("")
+        iid = await engine.start_workflow("wf-timer", wait=False)
+        instance = await self._wait_terminal(engine, iid)
+
+        assert instance.status == WorkflowStatus.COMPLETED
+        assert KEY_TIMER_EXPIRED in instance.context
+        assert KEY_TIMER_INFO not in instance.context
+        assert f"{iid}_timer" not in engine.timers
+        await engine.shutdown()
+
+    async def test_valid_next_state_still_transitions(self):
+        from fsm_llm.workflows.dsl import auto_step
+        from fsm_llm.workflows.models import WorkflowStatus
+
+        engine, _ = self._engine(
+            "done", {"done": auto_step("done", "Done", "", lambda ctx: {"hit": 1})}
+        )
+        iid = await engine.start_workflow("wf-timer", wait=False)
+        instance = await self._wait_terminal(engine, iid)
+
+        assert instance.status == WorkflowStatus.COMPLETED
+        assert instance.context.get("hit") == 1
+        await engine.shutdown()
+
+    async def test_invalid_non_empty_next_state_still_fails(self):
+        from fsm_llm.workflows.models import WorkflowStatus
+
+        # The validator rejects an unknown non-empty target at registration,
+        # so retarget the registered step to reach the engine-side guard.
+        engine, _ = self._engine("")
+        engine.workflow_definitions["wf-timer"].steps["w"].next_state = "nowhere"
+        iid = await engine.start_workflow("wf-timer", wait=False)
+        instance = await self._wait_terminal(engine, iid)
+
+        assert instance.status == WorkflowStatus.FAILED
+        await engine.shutdown()
