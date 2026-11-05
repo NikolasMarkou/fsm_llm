@@ -28,7 +28,7 @@ from .constants import (
 )
 from .definitions import AgentConfig, AgentResult
 from .fsm_definitions import build_plan_execute_fsm
-from .handlers import AgentHandlers, make_fresh_keys_handler, make_iteration_limiter
+from .handlers import AgentHandlers, make_fresh_keys_handler
 from .tools import ToolRegistry
 
 # Tool statuses that mean a tool really ran for the step (AgentHandlers).
@@ -169,7 +169,6 @@ class PlanExecuteAgent(BaseAgent):
                 ContextKeys.STEP_RESULTS: [],
                 ContextKeys.ALL_STEPS_COMPLETE: False,
                 ContextKeys.STEP_FAILED: False,
-                "_max_iterations": self.config.max_iterations,
                 "_replan_count": 0,
             },
         )
@@ -206,8 +205,17 @@ class PlanExecuteAgent(BaseAgent):
                 api, PlanExecuteStates.CHECK_RESULT, handlers.execute_tool
             )
 
-        # Iteration limiter
-        self._register_iteration_limiter(api, self._make_iteration_limiter())
+        # DECISION plan-2026-11-05T134105-5ed71cf2/D-011
+        # No iteration limiter here. It counted every PRE_TRANSITION (2k+1 for
+        # a k-step plan) and set `max_iterations_reached`, which no edge of
+        # this FSM reads, so it routed nothing: it only made `forced_stop_skip`
+        # skip every later tool and `_run_outcome` report success=False for a
+        # plan of 4 or more steps at the default max_iterations=10. The bound
+        # is core's step ceiling (`max_iterations * FSM_BUDGET_MULTIPLIER`,
+        # `BaseAgent._run_budgets`), which ends a runaway loop with
+        # BudgetExhaustedError. Do NOT re-register `make_iteration_limiter`
+        # (or a copy) without an edge that reads its flag and a bound that
+        # counts steps and replans, not transitions. See decisions.md D-011.
 
         # Plan step tracker
         api.register_handler(
@@ -249,16 +257,16 @@ class PlanExecuteAgent(BaseAgent):
             .do(self._make_replan_handler())
         )
 
-    def _make_iteration_limiter(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
-        """Create the iteration limiter handler (shared rule, see handlers)."""
-        return make_iteration_limiter(
-            self.config.max_iterations,
-            {
-                ContextKeys.MAX_ITERATIONS_REACHED: True,
-                ContextKeys.SHOULD_TERMINATE: True,
-            },
-            context_max_key="_max_iterations",
-        )
+    def _build_trace(self, final_context: dict[str, Any], iteration: int) -> Any:
+        """The trace, with ``total_iterations`` the run's loop turns.
+
+        No limiter counts into ``iteration_count`` here (D-011 of plan
+        5ed71cf2), so the seeded 0 would be reported; *iteration* is core's
+        step count, the number of loop turns the run took.
+        """
+        trace = super()._build_trace(final_context, iteration)
+        trace.total_iterations = iteration
+        return trace
 
     def _make_step_tracker(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
         """Create the execute_step entry handler that bounds the plan and
@@ -349,6 +357,12 @@ class PlanExecuteAgent(BaseAgent):
                         "replans used: synthesizing the results so far"
                     )
                     updates[ContextKeys.ALL_STEPS_COMPLETE] = True
+                    # DECISION plan-2026-11-05T134105-5ed71cf2/D-011
+                    # Same seam as the UNKNOWN branch (D-047): the cap cuts the
+                    # plan short, so the run did not reach its goal. Do NOT
+                    # leave it unrecorded (an earlier successful step reads as
+                    # evidence and the run ships success=True).
+                    updates[ContextKeys.FORCED_STOP_REASON] = StopReason.NO_RESULT
             else:
                 next_index = current_index + 1
                 updates[ContextKeys.CURRENT_STEP_INDEX] = next_index

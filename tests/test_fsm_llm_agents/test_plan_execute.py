@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import ClassVar
 
+import pytest
+
 from fsm_llm.agents.constants import (
     ContextKeys,
     Defaults,
@@ -579,3 +581,129 @@ class TestPlanHandlers:
             ContextKeys.CURRENT_STEP_INDEX: 0,
             ContextKeys.STEP_FAILED: False,
         }
+
+
+# ---------------------------------------------------------------------------
+# F-AR-01 / F-AR-02 (plan 5ed71cf2, D-011): the default max_iterations
+# ---------------------------------------------------------------------------
+
+
+class _StepPlanLLM(LLMInterface):
+    """Plan of ``n`` steps. Each execute_step turn selects the ``work`` tool
+    with this step's number (read from ``current_step_description``); the
+    steps named in ``failing`` are sent to the ``flaky`` tool, which raises."""
+
+    def __init__(self, n_steps: int, failing: frozenset[int] = frozenset()) -> None:
+        self.model = "mock-model"
+        self.n_steps = n_steps
+        self.failing = failing
+
+    def extract_field(self, request):
+        desc = str((request.context or {}).get("current_step_description", ""))
+        k = int(desc.split("/")[0].removeprefix("Step ")) if desc else 0
+        values = {
+            ContextKeys.PLAN_STEPS: [f"s{i + 1}" for i in range(self.n_steps)],
+            "step_result": f"note {k}" if k else None,
+            ContextKeys.TOOL_NAME: ("flaky" if k in self.failing else "work")
+            if k
+            else None,
+            ContextKeys.TOOL_INPUT: {"n": k} if k else None,
+        }
+        value = values.get(request.field_name)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=1.0 if value is not None else 0.0,
+            reasoning="mock",
+            is_valid=value is not None,
+        )
+
+    def generate_response(self, request):
+        return ResponseGenerationResponse(
+            message="done", message_type="response", reasoning="mock"
+        )
+
+
+def _work_registry(ran: list[int]) -> ToolRegistry:
+    def work(n: int) -> str:
+        ran.append(n)
+        return f"worked {n}"
+
+    def flaky(n: int) -> str:
+        ran.append(n)
+        raise RuntimeError(f"step {n} always fails")
+
+    schema = {"properties": {"n": {"type": "integer"}}, "required": ["n"]}
+    registry = ToolRegistry()
+    registry.register_function(work, parameter_schema=schema)
+    registry.register_function(flaky, parameter_schema=schema)
+    return registry
+
+
+class TestPlanExecuteNormalPlan:
+    """F-AR-01: at the DEFAULT ``max_iterations`` (10) a plan of 4 or more
+    steps ran into the limiter, which flagged the run as forced-stopped and
+    made every later tool skip. The existing loop tests use 20 and hid it."""
+
+    @pytest.mark.parametrize("n_steps", [4, 5, 8])
+    def test_normal_plan_runs_every_tool_and_succeeds(self, n_steps):
+        ran: list[int] = []
+        agent = PlanExecuteAgent(
+            tools=_work_registry(ran),
+            config=AgentConfig(timeout_seconds=30.0),
+            llm_interface=_StepPlanLLM(n_steps),
+        )
+        assert agent.config.max_iterations == Defaults.MAX_ITERATIONS == 10
+
+        result = agent.run("Do the work")
+
+        assert ran == list(range(1, n_steps + 1))
+        entries = result.final_context[ContextKeys.STEP_RESULTS]
+        assert [e["success"] for e in entries] == [True] * n_steps
+        assert result.final_context[ContextKeys.MAX_ITERATIONS_REACHED] is False
+        assert result.success is True
+        assert result.stop_reason == "evidence"
+        # no limiter counts here: the trace reports core's loop turns
+        assert result.trace.total_iterations >= 2 * n_steps
+
+
+class TestPlanExecuteReplanCap:
+    """F-AR-02: a failed step past ``max_replans`` cuts the plan short; the
+    run did not reach its goal, whatever an earlier step achieved."""
+
+    def test_replan_cap_ends_as_a_failed_run_with_no_result(self):
+        ran: list[int] = []
+        agent = PlanExecuteAgent(
+            tools=_work_registry(ran),
+            config=AgentConfig(timeout_seconds=30.0),
+            max_replans=0,
+            llm_interface=_StepPlanLLM(3, failing=frozenset({2})),
+        )
+
+        result = agent.run("Do the work")
+
+        assert ran == [1, 2]  # s3 never ran
+        entries = result.final_context[ContextKeys.STEP_RESULTS]
+        assert [e["success"] for e in entries] == [True, False]
+        assert result.success is False
+        assert result.stop_reason == "no_result"
+
+    def test_checker_records_no_result_at_the_cap(self):
+        updates = PlanExecuteAgent(max_replans=1)._make_result_checker()(
+            {
+                ContextKeys.PLAN_STEPS: ["a", "b"],
+                ContextKeys.TOOL_STATUS: "failed",
+                "_replan_count": 1,
+            }
+        )
+        assert updates[ContextKeys.FORCED_STOP_REASON] == "no_result"
+
+    def test_a_failure_under_the_cap_does_not_record_a_stop(self):
+        updates = PlanExecuteAgent(max_replans=1)._make_result_checker()(
+            {
+                ContextKeys.PLAN_STEPS: ["a", "b"],
+                ContextKeys.TOOL_STATUS: "failed",
+                "_replan_count": 0,
+            }
+        )
+        assert ContextKeys.FORCED_STOP_REASON not in updates
