@@ -452,3 +452,88 @@ class TestRunnerPrintsToTerminal:
         finally:
             reset_handlers()
         assert "System: REPLY" in capsys.readouterr().out
+
+
+class TestRunnerSurvivesUnencodableOutput:
+    """A model reply the terminal cannot encode (a lone surrogate on UTF-8, an
+    emoji on cp1252 or ascii) must not end the session with exit 1: the runner
+    writes it through `cli_support.escape_unencodable_output` (backslashreplace),
+    as the OKF and skills CLIs do."""
+
+    _LONE = json.loads('"partial emoji \\ud83d"')
+
+    def _streams(self, monkeypatch, encoding):
+        import io
+        import sys
+
+        out = io.TextIOWrapper(io.BytesIO(), encoding=encoding, errors="strict")
+        err = io.TextIOWrapper(io.BytesIO(), encoding=encoding, errors="strict")
+        monkeypatch.setattr(sys, "stdout", out)
+        monkeypatch.setattr(sys, "stderr", err)
+        return out, err
+
+    @staticmethod
+    def _text(stream):
+        stream.flush()
+        return stream.buffer.getvalue().decode(stream.encoding)
+
+    def _run(self, api, inputs):
+        helper = TestRunnerPrintsToTerminal()
+        return helper._run(api, inputs=inputs)
+
+    def _api(self, greeting, replies, ended):
+        api = MagicMock()
+        api.start_conversation.return_value = ("conv-1", greeting)
+        api.has_conversation_ended.side_effect = ended
+        api.converse.side_effect = replies
+        api.get_data.return_value = {}
+        return api
+
+    def test_lone_surrogate_reply_keeps_session_going(self, monkeypatch):
+        out, err = self._streams(monkeypatch, "utf-8")
+        api = self._api("HELLO", [self._LONE, "SECOND"], [False, False, True])
+        assert self._run(api, ("one", "two")) == 0
+        assert api.converse.call_count == 2
+        text = self._text(out)
+        assert "partial emoji \\ud83d" in text
+        assert "System: SECOND" in text
+        assert "Error:" not in self._text(err)
+
+    def test_lone_surrogate_greeting_keeps_session_going(self, monkeypatch):
+        out, _ = self._streams(monkeypatch, "utf-8")
+        api = self._api(self._LONE, ["REPLY"], [False, True])
+        assert self._run(api, ("hi",)) == 0
+        text = self._text(out)
+        assert "partial emoji \\ud83d" in text
+        assert "System: REPLY" in text
+
+    @pytest.mark.parametrize("encoding", ["cp1252", "ascii"])
+    def test_non_encodable_char_survives_on_narrow_stdout(self, monkeypatch, encoding):
+        out, err = self._streams(monkeypatch, encoding)
+        api = self._api("café ☃", ["snow ☃ done"], [False, True])
+        assert self._run(api, ("hi",)) == 0
+        text = self._text(out)
+        assert "\\u2603" in text
+        assert "System: snow" in text
+        assert "Error:" not in self._text(err)
+
+    def test_greeting_failure_still_ends_conversation(self, monkeypatch):
+        """The greeting print sits inside the try/finally: a failure there
+        still ends the conversation."""
+        self._streams(monkeypatch, "utf-8")
+        api = self._api("HELLO", ["x"], [True])
+
+        def _fail_on_reply(*args, **kwargs):
+            if str(args[0]).startswith("System:"):
+                raise OSError("closed")
+
+        with patch("fsm_llm.runner.print", _fail_on_reply, create=True):
+            with pytest.raises(OSError):
+                self._run(api, ())
+        api.end_conversation.assert_called_once_with("conv-1")
+
+    def test_error_line_survives_unencodable_message(self, monkeypatch):
+        _out, err = self._streams(monkeypatch, "ascii")
+        api = self._api("HELLO", [RuntimeError("bad ☃")], [False, True])
+        assert self._run(api, ("hi",)) == 1
+        assert "bad \\u2603" in self._text(err)

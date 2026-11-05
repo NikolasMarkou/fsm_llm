@@ -7,6 +7,7 @@ import sys
 import dotenv
 
 from .api import API
+from .cli_support import escape_unencodable_output
 from .constants import (
     CLI_EXIT_FAILURE,
     CLI_EXIT_INTERRUPTED,
@@ -242,23 +243,28 @@ def main(fsm_path, max_history_size, max_message_length):
 
     logger.info(f"Starting conversation with FSM: {fsm_source}")
     logger.info("Type 'exit' to end the conversation.")
-    # DECISION plan-2026-11-05T134105-5ed71cf2/D-019
+    # DECISION plan-2026-11-05T134105-5ed71cf2/D-018
     # The terminal gets the CLI's product (reply, hint, data dump, failure)
     # through print(), NOT the logger: setup_file_logging() swaps loguru's
     # default sink for one that skips fsm_llm records (93d78536/D-011) and
     # every record of this module is an fsm_llm record. Do NOT "fix" this by
     # adding a console sink (it fights D-011's host-record dedup) or by
     # touching replace_default_handler. The logger calls stay for the file log.
+    # A reply the terminal cannot encode (lone surrogate, cp1252/ascii stdout)
+    # is written as \uXXXX through the shared cli_support helper; do NOT add a
+    # second escape routine here, and do NOT let a print end the session.
+    escape_unencodable_output()
     print("Type 'exit' to end the conversation.")
 
     # Start a new conversation
     conversation_id, response = fsm.start_conversation()
-    # A silent state replies "": print no empty "System:" line for it.
-    if response:
-        logger.info(f"System: {response}")
-        print(f"System: {response}")
 
     try:
+        # A silent state replies "": print no empty "System:" line for it.
+        if response:
+            logger.info(f"System: {response}")
+            print(f"System: {response}")
+
         # Main conversation loop
         while not fsm.has_conversation_ended(conversation_id):
             # Get user input
