@@ -353,3 +353,69 @@ class TestIterationLimiterBoundary:
         assert at[ContextKeys.ITERATION_COUNT] == limit - 1
         assert at[ContextKeys.CONSENSUS_REACHED] is True
         assert at[ContextKeys.SHOULD_TERMINATE] is True
+
+
+class _NullJudgeLLM(_DecisionLLM):
+    """Judge fields (``judge_verdict``, ``consensus_reached``) always extract null.
+
+    ``null_keys`` extend the nulls; every other field is plain text. When
+    ``consensus`` is given the judge answers that value for ``consensus_reached``
+    instead (the non-null control).
+    """
+
+    NULL_KEYS = frozenset({ContextKeys.CONSENSUS_REACHED, ContextKeys.JUDGE_VERDICT})
+
+    def __init__(self, consensus: bool | None = None) -> None:
+        super().__init__(ContextKeys.CONSENSUS_REACHED, [bool(consensus)])
+        self._consensus = consensus
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        name = request.field_name
+        if self._consensus is None and name in self.NULL_KEYS:
+            return FieldExtractionResponse(
+                field_name=name,
+                value=None,
+                confidence=0.0,
+                reasoning="m",
+                is_valid=False,
+            )
+        return super().extract_field(request)
+
+
+class TestDebateNullExtraction:
+    """F-AM-01: the round count and the cap survive a judge that extracts null."""
+
+    @pytest.mark.parametrize("rounds", [1, 2, 3])
+    def test_null_judge_stops_at_the_round_cap(self, rounds):
+        agent = DebateAgent(num_rounds=rounds, llm_interface=_NullJudgeLLM())
+        result, states = _run_recording_states(agent, "topic")
+
+        assert states.count(DebateStates.JUDGE) == rounds
+        assert len(result.final_context[ContextKeys.DEBATE_ROUNDS]) == rounds
+        assert [r["round_num"] for r in result.final_context["debate_rounds"]] == list(
+            range(1, rounds + 1)
+        )
+        assert (result.success, result.stop_reason) == (False, "forced_pass")
+
+    @pytest.mark.parametrize("rounds", [1, 2, 3, 5, 8])
+    def test_non_null_judge_keeps_exact_round_counts(self, rounds):
+        agent = DebateAgent(
+            num_rounds=rounds,
+            llm_interface=_DecisionLLM(ContextKeys.CONSENSUS_REACHED, [False]),
+        )
+        result, states = _run_recording_states(agent, "topic")
+
+        assert states.count(DebateStates.JUDGE) == rounds
+        assert len(result.final_context[ContextKeys.DEBATE_ROUNDS]) == rounds
+        assert (result.success, result.stop_reason) == (False, "forced_pass")
+
+    def test_judge_consensus_before_the_cap_is_a_success(self):
+        agent = DebateAgent(
+            num_rounds=5,
+            llm_interface=_DecisionLLM(ContextKeys.CONSENSUS_REACHED, [False, True]),
+        )
+        result, states = _run_recording_states(agent, "topic")
+
+        assert states.count(DebateStates.JUDGE) == 2
+        assert len(result.final_context[ContextKeys.DEBATE_ROUNDS]) == 2
+        assert (result.success, result.stop_reason) == (True, "answered")

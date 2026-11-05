@@ -1698,11 +1698,13 @@ def build_debate_fsm(
                             # is now extracted every round, and before plan
                             # 5ed71cf2/D-005 transition evaluation overlaid
                             # this turn's extracted False on the judge
-                            # handler's max-round True. The gate now sees the
-                            # handler's value, but the cap still reads
-                            # current_round (bumped by that handler, never
-                            # extracted): a handler skipped on a null
-                            # extraction must not leave the cap unread.
+                            # handler's max-round True. The cap reads
+                            # current_round, never an extracted value: the
+                            # judge's PRE_TRANSITION handler runs after this
+                            # gate, and a judge that extracts null must not
+                            # leave the cap unread. current_round advances on
+                            # propose entry, so at the judge of round N it is
+                            # N: the cap is `>=` (plan 5ed71cf2/D-009).
                             "description": "Consensus reached or max rounds hit",
                             "logic": {
                                 "or": [
@@ -1713,7 +1715,7 @@ def build_debate_fsm(
                                         ]
                                     },
                                     {
-                                        ">": [
+                                        ">=": [
                                             {"var": ContextKeys.CURRENT_ROUND},
                                             max_rounds,
                                         ]

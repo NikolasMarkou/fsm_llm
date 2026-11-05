@@ -1517,10 +1517,13 @@ class TestDebateLoop:
 
         assert result.answer == _CONCLUDE_TEXT
         assert result.success is False
-        # Nothing was ever extracted, so the judge handler (CONTEXT_UPDATE)
-        # never ran and the limiter forced the consensus: a forced stop
-        # outranks no_result (D-051 of plan 06a5ec0a).
-        assert result.stop_reason == "max_iterations"
+        # Nothing was ever extracted. The judge's exit handler still counts
+        # the round (plan 5ed71cf2/D-009, F-AM-01) and the round cap forces
+        # the consensus: a forced stop outranks no_result (D-051 of plan
+        # 06a5ec0a). Before the fix the handler never ran and the generic
+        # limiter forced it (max_iterations) after more turns.
+        assert result.stop_reason == "forced_pass"
+        assert len(result.final_context[ContextKeys.DEBATE_ROUNDS]) == 1
 
     def test_only_conclude_speaks_and_no_bulk_call_runs(self):
         llm, _ = self._run()

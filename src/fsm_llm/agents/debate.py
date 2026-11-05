@@ -181,16 +181,23 @@ class DebateAgent(BaseAgent):
 
     def _register_handlers(self, api: API) -> None:
         """Register debate-specific handlers with the API."""
-        # Round tracker + debate history: CONTEXT_UPDATE fires after the judge
-        # state's extraction (current_state still JUDGE) and before transition
-        # eval, so it records the current round's verdict and its max-round
-        # consensus_reached is not overwritten by a later judge extraction.
-        # The gate reads the committed context, so that forced consensus also
-        # routes on the same turn (plan 5ed71cf2/D-005).
+        # DECISION plan-2026-11-05T134105-5ed71cf2/D-009
+        # Round record + forced reason: PRE_TRANSITION on judge, NOT
+        # CONTEXT_UPDATE. Core skips every CONTEXT_UPDATE handler on a turn
+        # that committed no extracted key (a judge that returns null for the
+        # verdict and consensus), which left the round uncounted and the loop
+        # to the generic limiter (F-AM-01). The judge always transitions (its
+        # p300 fallback edge), so this runs on every judge exit. It runs after
+        # the gate, so it cannot route: the cap is the judge -> conclude
+        # edge's own `current_round >= max_rounds` disjunct, and this handler
+        # records the round and the forced reason. It runs before the
+        # iteration limiter (lower priority number) so a cap on the same turn
+        # is recorded as forced_pass, as the CONTEXT_UPDATE handler did.
+        # Do NOT move this back to CONTEXT_UPDATE or key it on extraction.
         api.register_handler(
             api.create_handler(HandlerNames.DEBATE_JUDGE)
-            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .at(HandlerTiming.CONTEXT_UPDATE)
+            .with_priority(HandlerPriorities.ITERATION_LIMITER - 1)
+            .at(HandlerTiming.PRE_TRANSITION)
             .on_state(DebateStates.JUDGE)
             .do(self._make_judge_handler())
         )
@@ -203,19 +210,35 @@ class DebateAgent(BaseAgent):
         # the limiter's forced True (PRE_TRANSITION runs before entry;
         # plan-2026-09-24T045559-3e4eb3e5/D-013). The round values are
         # cleared there too (skip-if-set froze them after round 1, PAT-03);
-        # the judge handler already recorded them in debate_rounds.
+        # the judge handler already recorded them in debate_rounds. The
+        # round number advances here too (plan 5ed71cf2/D-009): the round
+        # is already recorded at judge exit, and this entry runs whatever
+        # the judge extracted.
+        clear_round = make_fresh_keys_handler(_ROUND_KEYS)
+
+        def on_propose_entry(context: dict[str, Any]) -> dict[str, Any]:
+            delta = clear_round(context)
+            delta[ContextKeys.CURRENT_ROUND] = (
+                context.get(ContextKeys.CURRENT_ROUND, 1) + 1
+            )
+            return delta
+
         api.register_handler(
             api.create_handler(HandlerNames.DEBATE_CONSENSUS_RESET)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
             .on_state_entry(DebateStates.PROPOSE)
-            .do(make_fresh_keys_handler(_ROUND_KEYS))
+            .do(on_propose_entry)
         )
 
         # Iteration limiter
         self._register_iteration_limiter(api, self._make_iteration_limiter())
 
     def _make_judge_handler(self) -> Any:
-        """Create a handler that tracks rounds and records debate history."""
+        """Create the judge-exit handler: record the round, force the cap.
+
+        Does not advance ``current_round`` (propose entry does, so a null
+        judge extraction still counts the round).
+        """
         num_rounds = self.num_rounds
 
         def handle_judge(context: dict[str, Any]) -> dict[str, Any]:
@@ -262,9 +285,6 @@ class DebateAgent(BaseAgent):
                 if context.get(ContextKeys.CONSENSUS_REACHED) is not True:
                     updates[ContextKeys.FORCED_STOP_REASON] = StopReason.FORCED_PASS
                 updates[ContextKeys.CONSENSUS_REACHED] = True
-
-            # Increment round for next cycle
-            updates[ContextKeys.CURRENT_ROUND] = current_round + 1
 
             return updates
 
