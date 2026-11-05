@@ -1,6 +1,6 @@
 # test_fsm_llm
 
-The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 61 test files (4,981 collected tests) plus a `fixtures/` package of labelled secret-filter data.
+The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 62 test files (5,185 collected tests) plus a `fixtures/` package of labelled secret-filter data.
 
 ## What it is for
 
@@ -62,7 +62,7 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_intent_entities_seam.py` - `None` entity values survive intent classification.
 - `test_core_hardening_seam.py` - session file writes, logging redaction, bounded context, read concurrency.
 - `test_audit_iter1_seam.py` to `test_audit_iter4_seam.py` - four audit-fix loops of one plan; later files reuse helpers from earlier ones.
-- `test_audit_2026_09_21.py`, `test_audit_2026_09_22.py`, `test_audit_sweeps.py` - two core audits and cross-module agreement sweeps.
+- `test_audit_2026_09_21.py`, `test_audit_2026_09_22.py`, `test_audit_2026_11_05.py`, `test_audit_sweeps.py` - two core audits and cross-module agreement sweeps.
 - `test_review_round1_core.py`, `test_review_round2_core.py`, `test_review_fixes_core.py`, `test_review_fixes_core_round2.py` - findings of two review rounds of the step-driver and LLM-layer plans; each class pins one accepted finding.
 - `test_validator_unit.py`, `test_visualizer_unit.py` - `FSMValidator` and the ASCII visualizer, including their CLIs.
 - `test_runner_unit.py`, `test_utilities_unit.py` - the interactive runner's redaction and JSON helpers, FSM file loading.

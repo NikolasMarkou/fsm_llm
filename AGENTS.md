@@ -166,7 +166,7 @@ FSM definition (JSON, v4.1):
 ## Working here
 
 ```bash
-make test           # pytest -v (9,647 tests)
+make test           # pytest -v (9,935 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy src/fsm_llm/ --ignore-missing-imports
@@ -179,17 +179,17 @@ make counts         # python scripts/doc_counts.py (fails when a documented test
 ```
 
 ```bash
-pytest                                 # Run all tests (9,647 collected)
-pytest tests/test_fsm_llm/            # Core package tests (4,981 tests)
-pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (191 tests)
-pytest tests/test_fsm_llm_workflows/  # Workflows tests (269 tests)
-pytest tests/test_fsm_llm_agents/     # Agents tests (2,540 tests)
-pytest tests/test_fsm_llm_monitor/    # Monitor tests (391 tests)
-pytest tests/test_fsm_llm_meta/       # Meta-builder tests (437 tests)
+pytest                                 # Run all tests (9,935 collected)
+pytest tests/test_fsm_llm/            # Core package tests (5,185 tests)
+pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (194 tests)
+pytest tests/test_fsm_llm_workflows/  # Workflows tests (277 tests)
+pytest tests/test_fsm_llm_agents/     # Agents tests (2,602 tests)
+pytest tests/test_fsm_llm_monitor/    # Monitor tests (396 tests)
+pytest tests/test_fsm_llm_meta/       # Meta-builder tests (443 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (264 tests)
 pytest tests/test_examples/           # Example validation tests (67 tests)
 pytest tests/test_fsm_llm_eval/       # Eval tests (261 tests)
-# The 9 suites above sum to 9,401. The remaining 246 are five root-level files:
+# The 9 suites above sum to 9,689. The remaining 246 are five root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (45),
 #   tests/test_bench_common.py (19), tests/test_agents_bench.py (132)
 #   and tests/test_skills_bench.py (38)

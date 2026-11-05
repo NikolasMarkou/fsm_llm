@@ -1,7 +1,7 @@
 # test_fsm_llm_workflows
 
 Path: `tests/test_fsm_llm_workflows`
-Purpose: pytest suite (269 tests, 7 files) for `fsm_llm.workflows`, the in-memory async workflow engine in `src/fsm_llm/workflows/`.
+Purpose: pytest suite (277 tests, 7 files) for `fsm_llm.workflows`, the in-memory async workflow engine in `src/fsm_llm/workflows/`.
 
 ## Scope
 
@@ -34,7 +34,7 @@ flowchart LR
 | `test_steps.py` | 25 | `AutoTransitionStep` (sync/async action, action error raises `WorkflowStepError`), `ConditionStep`, `APICallStep` (exception gives failure to `failure_state`), `WaitForEventStep` `_waiting_info`, `TimerStep` `_timer_info`, `ParallelStep` (default `step_<i>_<key>` aggregation, custom aggregation, context isolation), `ConversationStep` (needs exactly one of `fsm_file`/`fsm_definition`, mappings, `max_turns`) |
 | `test_new_steps.py` | 46 | `SwitchStep` (case, default, missing key, numeric value stringified, no default fails); `RetryStep` (retries failures and bare exceptions, re-raises original exception type on exhaustion); `AgentStep`; DSL `agent_step`, `retry_step`, `switch_step`; `remove_instance`, `max_completed_instances` purge |
 | `test_step_timeouts.py` | 21 (8 `slow`) | `timeout` default `None`; async actions/conditions over timeout raise `WorkflowStepError` whose `.cause` says "timed out"; sync actions are not wrapped; `APICallStep` and `ParallelStep` return failure instead; `_with_timeout` direct calls |
-| `test_audit_fixes.py` | 21 | F-001 parallel failure without `error_state`; F-002 `process_event` uses `.pop(` not `del self.event_listeners` (source inspection); F-004 `end_conversation` called on exception; F-007 missing template var gives failure; F-010 no `conversation_map`; F4 per-instance lock (no double execution, lock dropped on remove/purge); F5 terminal guards on `_handle_step_exception` and `cancel_workflow`; F7 sub-second `workflow_timeout` reported as float |
+| `test_audit_fixes.py` | 29 | F-001 parallel failure without `error_state`; F-002 `process_event` uses `.pop(` not `del self.event_listeners` (source inspection); F-004 `end_conversation` called on exception; F-007 missing template var gives failure; F-010 no `conversation_map`; F4 per-instance lock (no double execution, lock dropped on remove/purge); F5 terminal guards on `_handle_step_exception` and `cancel_workflow`; F7 sub-second `workflow_timeout` reported as float |
 | `test_audit_2026_09_27.py` | 74 | 2026-09-27 audit: 21 classes grouped by finding id (H, M and L series) plus `TestReviewFollowUp` |
 | `__init__.py` | 0 | Empty |
 
@@ -42,7 +42,7 @@ flowchart LR
 
 This directory exports nothing; its surface is the pytest entry points and the module-level helpers that tests share.
 
-- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_workflows/` (269 tests); `-m "not slow"` skips the 8 `slow` tests in `test_step_timeouts.py`.
+- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_workflows/` (277 tests); `-m "not slow"` skips the 8 `slow` tests in `test_step_timeouts.py`.
 - Helpers in `test_audit_2026_09_27.py`:
   - `_wait_then_done(workflow_id: str, event_type: str = "go", **wait_kwargs) -> WorkflowDefinition`: a `wait_event_step("wait", ...)` routed to a terminal `auto_step("done", ..., next_state="")`.
   - `async _settle(seconds: float = 0.05) -> None`: `asyncio.sleep` wrapper used to let background work finish.
@@ -106,7 +106,7 @@ Behaviour pinned by `test_audit_2026_09_27.py` (2026-09-27 audit findings in the
 
 ## Working here
 
-- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_workflows/` (about 10 s); `-m "not slow"` runs 261.
+- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_workflows/` (about 10 s); `-m "not slow"` runs 269.
 - New audit regressions: add a class per finding in the matching audit file, or a new `test_audit_<date>.py`; put helpers at module top with a `_` prefix (`_wait_then_done`, `_settle`, `_CoreLikeLLM`, `_RecordingAgent`).
 - Mark any test that sleeps near a second or more with `@pytest.mark.slow`.
 - Custom steps subclass `WorkflowStep` and implement `async def execute(self, context)`; extra pydantic fields are declared as class attributes (see `_SlowStep`).

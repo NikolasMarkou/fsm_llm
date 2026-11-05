@@ -1,6 +1,6 @@
 # test_fsm_llm_monitor
 
-The pytest suite for `fsm_llm.monitor`, the web dashboard package of FSM-LLM (source in `src/fsm_llm/monitor/`). It lives at `tests/test_fsm_llm_monitor/` and collects 391 tests in 7 files.
+The pytest suite for `fsm_llm.monitor`, the web dashboard package of FSM-LLM (source in `src/fsm_llm/monitor/`). It lives at `tests/test_fsm_llm_monitor/` and collects 396 tests in 7 files.
 
 ## What it is for
 
@@ -28,7 +28,7 @@ flowchart LR
 - `__init__.py` - empty package marker.
 - `test_app.py` - HTTP routes, static files, public exports, version, API-key gate, WebSocket redaction hook, and that the UI log levels, Max Iterations limit and log CSS match the server constants (128 tests).
 - `test_server_security.py` - Origin and Host checks, body size limit, security headers, key-gated reads, WebSocket auth, error-to-status mapping, request bounds, dashboard config parsing, builder guards, preset path validation (36 tests).
-- `test_instance_manager.py` - `ManagedFSM`/`ManagedWorkflow`/`ManagedAgent`, `InstanceManager` lookups, destroy, activity, workflow presets, disabled agent types, agent status resolution, stub tools (73 tests).
+- `test_instance_manager.py` - `ManagedFSM`/`ManagedWorkflow`/`ManagedAgent`, `InstanceManager` lookups, destroy, activity, workflow presets, disabled agent types, agent status resolution, stub tools (78 tests).
 - `test_collector.py` - `EventCollector` buffers, metrics, log filtering, handler callbacks, loguru sink, cursors, thread safety (45 tests).
 - `test_definitions.py` - Pydantic models and helpers in `definitions.py` (50 tests).
 - `test_otel.py` - `OTELExporter` enable, disable, shutdown and event routing (22 tests).

@@ -1,7 +1,7 @@
 # test_fsm_llm
 
 Path: `tests/test_fsm_llm`
-Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass MessagePipeline, transitions, prompts, LLM wrapper, handlers, memory, validator, visualizer, logging), 61 test files, 4,981 collected tests.
+Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass MessagePipeline, transitions, prompts, LLM wrapper, handlers, memory, validator, visualizer, logging), 62 test files, 5,185 collected tests.
 
 ## Scope
 
@@ -27,7 +27,7 @@ Three test styles:
 | --- | --- | --- |
 | Unit | `*_unit.py`, `test_pipeline.py`, `test_fsm.py`, `test_expressions.py`, `test_memory.py`, ... | call one module directly |
 | Seam | `*_seam.py`, `test_pipeline_handler_contract.py`, `test_turn_guard_deterministic.py` | go through `API.converse` / `converse_stream` / `push_fsm` / `pop_fsm`, or `LiteLLMInterface` with `patch("fsm_llm.llm.completion")` |
-| Audit regression | `test_audit_2026_09_21.py`, `test_audit_2026_09_22.py`, `test_audit_iter1_seam.py`..`test_audit_iter4_seam.py`, `test_audit_sweeps.py` | one class per plan step, tests named after the audit id (`test_a1_*`, `test_p0_1_*`), each run RED before its fix |
+| Audit regression | `test_audit_2026_09_21.py`, `test_audit_2026_09_22.py`, `test_audit_2026_11_05.py`, `test_audit_iter1_seam.py`..`test_audit_iter4_seam.py`, `test_audit_sweeps.py` | one class per plan step, tests named after the audit id (`test_a1_*`, `test_p0_1_*`), each run RED before its fix |
 
 ```mermaid
 flowchart TD
@@ -175,7 +175,7 @@ Seam files fake the backend with `patch("fsm_llm.llm.completion", ...)` returnin
 - New regression for a public-path bug: add a seam test that drives `API.converse` or patched `fsm_llm.llm.completion`, not only a helper-level test.
 - Reuse helpers from earlier seam files by import rather than copying, and keep their names stable.
 - Do not relabel, delete or regenerate corpus rows to improve a rate; do not add filter words to catch one corpus entry. Add names from real vocabulary without reading `constants.py` first.
-- After adding or removing tests, re-measure with the first command below. The suite count (4,981) is pinned by `tests/test_packaging.py::test_per_suite_table` (marked slow), which compares a measured `--collect-only` count per suite against a documented literal of the form `pytest tests/test_fsm_llm/  # ... (N tests)`; run that test after changing the count. The counts stated in this file (61 test files, 4,981 tests, 14 slow) are not pinned by any test and must be updated by hand.
+- After adding or removing tests, re-measure with the first command below. The suite count (5,185) is pinned by `tests/test_packaging.py::test_per_suite_table` (marked slow), which compares a measured `--collect-only` count per suite against a documented literal of the form `pytest tests/test_fsm_llm/  # ... (N tests)`; run that test after changing the count. The counts stated in this file (62 test files, 5,185 tests, 14 slow) are not pinned by any test and must be updated by hand.
 
 ```bash
 .venv/bin/python -m pytest tests/test_fsm_llm/ --collect-only -q | tail -1
