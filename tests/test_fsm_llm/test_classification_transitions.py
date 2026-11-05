@@ -1480,3 +1480,96 @@ class TestClassifierUsesConversationInterface:
         assert classifier.model == DEFAULT_LLM_MODEL
         assert isinstance(classifier._llm, LiteLLMInterface)
         assert classifier._llm.timeout == 120.0
+
+
+# ---------------------------------------------------------------------------
+# Tests: tie sets the classifier schema cannot hold (F-DV-01)
+# ---------------------------------------------------------------------------
+
+
+def _tie_fsm(targets: list[str]) -> dict[str, Any]:
+    """``a`` (initial) owns one unconditioned, equal-priority exit per target,
+    so every turn in ``a`` is a tie of ``len(targets)`` distinct targets."""
+    states: dict[str, Any] = {
+        "a": {
+            "id": "a",
+            "description": "d",
+            "purpose": "p",
+            "response_instructions": "r",
+            "transitions": [
+                {"target_state": t, "description": f"go {t}"} for t in targets
+            ],
+        }
+    }
+    for t in targets:
+        states[t] = {
+            "id": t,
+            "description": "d",
+            "purpose": "p",
+            "response_instructions": "bye",
+        }
+    return {
+        "name": "ties",
+        "description": "d",
+        "initial_state": "a",
+        "states": states,
+    }
+
+
+class TestOversizedTieSets:
+    """A tie set the classifier schema cannot hold (more than 14 distinct
+    targets, a target named like the fallback intent) stays in the state with
+    a WARNING and a fallback record; it never fails the turn. RED on the
+    parent: the schema was built outside the soft-fail ``try`` and raised
+    ``FSMError`` (pydantic ``ValidationError`` inside)."""
+
+    @pytest.mark.parametrize(
+        "targets",
+        [
+            [f"t{i}" for i in range(15)],
+            [TRANSITION_CLASSIFICATION_FALLBACK_INTENT, "b"],
+        ],
+        ids=["fifteen-targets", "fallback-named-target"],
+    )
+    def test_turn_stays_in_the_state(self, targets):
+        llm = _RecordingInterface()
+        api = API.from_definition(_tie_fsm(targets), llm_interface=llm)
+        conv_id, _ = api.start_conversation()
+
+        api.converse("hello", conv_id)
+
+        assert api.get_current_state(conv_id) == "a"
+        assert llm.requests == []
+
+    def test_schema_failure_records_a_fallback(self):
+        fsm_def, _ = _route_fsm()
+        mock_llm = MagicMock(spec=LLMInterface)
+        mock_llm.model = "gpt-4"
+        pipeline = _make_pipeline(mock_llm, fsm_def)
+        instance = _make_instance(current_state="route")
+        targets = [f"t{i}" for i in range(15)]
+
+        result = pipeline._resolve_ambiguous_transition(
+            _make_ambiguous_evaluation(*targets),
+            "hello",
+            DataExtractionResponse(),
+            instance,
+            "conv-1",
+        )
+
+        assert result is None
+        record = instance.context.metadata[METADATA_KEY_TRANSITION_CLASSIFICATION]
+        assert record["fallback"] is True
+        assert "error" in record
+
+    def test_fourteen_targets_still_classify(self):
+        targets = [f"t{i}" for i in range(14)]
+        schema = MessagePipeline._build_transition_classification_schema(
+            _make_state("a", transitions=[_make_transition(t) for t in targets]),
+            [
+                TransitionOption(target_state=t, description="d", priority=100)
+                for t in targets
+            ],
+        )
+
+        assert len(schema.intents) == 15

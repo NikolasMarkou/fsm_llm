@@ -430,5 +430,65 @@ class TestWorkingContextPreparation:
         assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
 
 
+class TestSameTargetTies:
+    """Two passing transitions to one target at one priority are one
+    candidate, not an ambiguity (F-DV-01). Priority stays decisive."""
+
+    def test_two_same_target_transitions_are_deterministic(self):
+        state = _make_state(
+            "start", [_make_transition("done"), _make_transition("done")]
+        )
+        result = TransitionEvaluator().evaluate_transitions(state, _make_context())
+
+        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
+        assert result.deterministic_transition == "done"
+
+    def test_mixed_tie_offers_one_option_per_target_in_definition_order(self):
+        state = _make_state(
+            "start",
+            [
+                _make_transition("done", description="first done"),
+                _make_transition("other"),
+                _make_transition("done", description="second done"),
+            ],
+        )
+        result = TransitionEvaluator().evaluate_transitions(state, _make_context())
+
+        assert result.result_type == TransitionEvaluationResult.AMBIGUOUS
+        assert [o.target_state for o in result.available_options] == ["done", "other"]
+        assert result.available_options[0].description == "first done"
+
+    def test_lower_priority_value_still_wins_over_a_same_target_group(self):
+        state = _make_state(
+            "start",
+            [
+                _make_transition("done"),
+                _make_transition("done"),
+                _make_transition("other", priority=50),
+            ],
+        )
+        result = TransitionEvaluator().evaluate_transitions(state, _make_context())
+
+        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
+        assert result.deterministic_transition == "other"
+
+    def test_only_passing_same_target_transitions_collapse(self):
+        failing = _make_condition(logic={"==": [{"var": "k"}, "no"]})
+        state = _make_state(
+            "start",
+            [
+                _make_transition("done"),
+                _make_transition("done", conditions=[failing]),
+                _make_transition("other"),
+            ],
+        )
+        result = TransitionEvaluator().evaluate_transitions(
+            state, _make_context({"k": "yes"})
+        )
+
+        assert result.result_type == TransitionEvaluationResult.AMBIGUOUS
+        assert [o.target_state for o in result.available_options] == ["done", "other"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

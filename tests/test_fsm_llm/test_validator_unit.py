@@ -322,6 +322,48 @@ class TestValidatorCycleDetection:
 # ==================================================================
 
 
+class TestOversizedTieSetsValidator:
+    """A priority group the classifier schema cannot hold is a WARNING."""
+
+    @staticmethod
+    def _fsm(targets):
+        states = {t: {"id": t, "description": t, "purpose": "p"} for t in targets}
+        states["start"] = {
+            "id": "start",
+            "description": "Start",
+            "purpose": "Begin",
+            "transitions": [
+                {"target_state": t, "description": f"go {t}"} for t in targets
+            ],
+        }
+        return {
+            "name": "ties",
+            "description": "d",
+            "initial_state": "start",
+            "states": states,
+        }
+
+    def test_fifteen_distinct_targets_at_one_priority_warn(self):
+        result = FSMValidator(self._fsm([f"t{i}" for i in range(15)])).validate()
+
+        assert any("classifier cannot hold" in w for w in result.warnings)
+
+    def test_fallback_named_target_warns(self):
+        result = FSMValidator(self._fsm(["_stay_in_state", "b"])).validate()
+
+        assert any("classifier cannot hold" in w for w in result.warnings)
+
+    def test_fourteen_targets_and_same_target_pairs_do_not_warn(self):
+        targets = [f"t{i}" for i in range(14)]
+        data = self._fsm(targets)
+        data["states"]["start"]["transitions"].append(
+            {"target_state": "t0", "description": "again"}
+        )
+        result = FSMValidator(data).validate()
+
+        assert not any("classifier cannot hold" in w for w in result.warnings)
+
+
 class TestValidatorComplexFSM:
     def test_multiple_issues(self):
         data = {

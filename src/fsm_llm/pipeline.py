@@ -2722,14 +2722,16 @@ class MessagePipeline:
 
         current_state = self.get_state(instance, conversation_id)
 
-        schema = self._build_transition_classification_schema(
-            current_state,
-            evaluation.available_options,
-        )
-
         try:
             # Inside the try, as at the extraction site: a construction
             # failure degrades to "stay" like a classify() failure (review W2).
+            # The schema build is in it too: a tie set the schema cannot hold
+            # arrives as ClassificationError (plan-2026-11-05T134105-5ed71cf2/
+            # D-006).
+            schema = self._build_transition_classification_schema(
+                current_state,
+                evaluation.available_options,
+            )
             classifier = self._get_classifier(schema, None)
             result: ClassificationResult = classifier.classify(
                 user_message,
@@ -2916,11 +2918,23 @@ class MessagePipeline:
             )
         )
 
-        return ClassificationSchema(
-            intents=intents,
-            fallback_intent=TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
-            confidence_threshold=confidence_threshold,
-        )
+        # DECISION plan-2026-11-05T134105-5ed71cf2/D-006: a tie set the schema
+        # cannot hold (a target named like the fallback intent, 15 or more
+        # distinct tied targets) is a ClassificationError, so the turn stays
+        # with a WARNING instead of failing. Do NOT truncate to 14 candidates
+        # (it picks winners by definition order) and do NOT add ValidationError
+        # to _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS (0d9c218e/D-001: the tuple
+        # stays closed; a programming error must still propagate).
+        try:
+            return ClassificationSchema(
+                intents=intents,
+                fallback_intent=TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
+                confidence_threshold=confidence_threshold,
+            )
+        except ValidationError as e:
+            raise ClassificationError(
+                f"Cannot classify the tied transitions from state '{state.id}': {e}"
+            ) from e
 
     def _execute_state_transition(
         self, instance: FSMInstance, target_state: str, conversation_id: str

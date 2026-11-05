@@ -394,6 +394,16 @@ class TransitionEvaluator:
             for score in passing_transitions
             if score["transition"].priority == lowest
         ]
+        # DECISION plan-2026-11-05T134105-5ed71cf2/D-006: tied transitions to
+        # the SAME target are one candidate ("go to done if A or if B"), not
+        # an ambiguity. Collapse by target in definition order (the first of
+        # a group speaks for it); priority and ranking are untouched. Do NOT
+        # hand the duplicates to the classifier: its schema needs unique
+        # intent names and raised before the soft-fail `try`.
+        first_per_target: dict[str, dict[str, Any]] = {}
+        for score in tied:
+            first_per_target.setdefault(score["transition"].target_state, score)
+        tied = list(first_per_target.values())
         if len(tied) == 1:
             return self._create_deterministic_result(tied[0])
 

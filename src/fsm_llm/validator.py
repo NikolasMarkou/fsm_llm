@@ -9,7 +9,12 @@ from pydantic import BaseModel, ValidationError
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-from .constants import CLI_EXIT_FAILURE, CLI_EXIT_OK, DEFAULT_COMPLETION_RESULT_KEY
+from .constants import (
+    CLI_EXIT_FAILURE,
+    CLI_EXIT_OK,
+    DEFAULT_COMPLETION_RESULT_KEY,
+    TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
+)
 from .definitions import (
     CompletionResponse,
     FSMDefinition,
@@ -717,6 +722,28 @@ class FSMValidator:
                 [f"'{s}' ({t} transitions)" for s, t in complex_states]
             )
             self.result.add_info(f"Complex states with many transitions: {states_str}")
+
+        # A tie the classifier schema cannot hold stays in the state at run
+        # time (D-006 of plan-2026-11-05T134105-5ed71cf2): the schema takes 15
+        # intents, one of them the fallback, so 14 distinct targets at most.
+        for state_id, state in self.states.items():
+            by_priority: dict[Any, set[Any]] = {}
+            for t in state.get("transitions", []):
+                by_priority.setdefault(t.get("priority", 100), set()).add(
+                    t.get("target_state")
+                )
+            for priority, targets in by_priority.items():
+                if (
+                    len(targets) > 14
+                    or TRANSITION_CLASSIFICATION_FALLBACK_INTENT in targets
+                ):
+                    self.result.add_warning(
+                        f"State '{state_id}': {len(targets)} transitions at "
+                        f"priority {priority} go to distinct targets; if they "
+                        f"tie the classifier cannot hold them (at most 14, none "
+                        f"named '{TRANSITION_CLASSIFICATION_FALLBACK_INTENT}') "
+                        f"and the conversation stays in the state"
+                    )
 
     def _detect_cycles(self):
         """
