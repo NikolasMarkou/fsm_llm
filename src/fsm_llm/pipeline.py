@@ -16,7 +16,6 @@ import copy
 import dataclasses
 import hashlib
 import json
-import math
 import re
 import threading
 import time
@@ -83,35 +82,14 @@ from .prompts import (
     sanitize_text_for_prompt,
 )
 from .transition_evaluator import TransitionEvaluator
-from .utilities import filter_context_tree, parse_bool_word
+from .utilities import (
+    coerce_float,
+    coerce_int,
+    filter_context_tree,
+    parse_bool_word,
+)
 
 # --- Type coercion dispatch for field extraction validation ---
-
-
-def _coerce_int(v: Any) -> int:
-    """``v`` as an ``int``; ``ValueError`` for a bool, a non-integral or non-finite float.
-
-    A ``bool`` is not a count, ``3.7`` is not 3, and ``inf`` / ``nan`` have no
-    integer value (``int(inf)`` would raise ``OverflowError``, which the
-    validator's ``except`` does not name). ``"12"`` and ``3.0`` convert.
-    """
-    if isinstance(v, bool):
-        raise ValueError(f"expected an integer, got {v!r}")
-    if isinstance(v, int):
-        return v
-    if isinstance(v, float) and not (math.isfinite(v) and v == int(v)):
-        raise ValueError(f"expected an integer, got {v!r}")
-    return int(v)
-
-
-def _coerce_float(v: Any) -> float:
-    """``v`` as a finite ``float``; ``ValueError`` for a bool, ``inf`` or ``nan``."""
-    if isinstance(v, bool):
-        raise ValueError(f"expected a number, got {v!r}")
-    result = v if isinstance(v, float) else float(v)
-    if not math.isfinite(result):
-        raise ValueError(f"expected a finite number, got {v!r}")
-    return result
 
 
 # DECISION plan-2026-09-19T175721-21cd7f8e/D-002
@@ -185,8 +163,8 @@ def _coerce_dict(v: Any) -> Any:
 
 
 _TYPE_COERCERS: dict[str, Callable[[Any], Any]] = {
-    "int": _coerce_int,
-    "float": _coerce_float,
+    "int": coerce_int,
+    "float": coerce_float,
     "bool": _coerce_bool,
     "str": _coerce_str,
     "list": _coerce_list,

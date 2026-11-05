@@ -226,8 +226,8 @@ def build_ollama_response_format(
 
     Args:
         call_type: ``"data_extraction"`` or ``"field_extraction"``. Any other
-            value (``"response_generation"``, ``"transition_decision"``) has no
-            schema: transitions are decided by rules, never by an LLM call.
+            value (``"response_generation"``, ``"classification"``) has no
+            schema here: the classifier sends its own ``response_format``.
         field_type: Only read for ``"field_extraction"``: the declared
             ``FieldExtractionConfig.field_type`` selects the ``value`` type union
             (see ``_VALUE_TYPES_BY_FIELD_TYPE``). ``None`` or an unknown type

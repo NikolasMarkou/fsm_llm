@@ -682,6 +682,47 @@ def coerce_confidence(raw: Any, default: float) -> float:
 
 
 # --------------------------------------------------------------
+# Number coercion
+# --------------------------------------------------------------
+
+
+def coerce_int(v: Any) -> int:
+    """``v`` as an ``int``; ``ValueError`` for a bool, a non-integral or non-finite float.
+
+    Interface contract (callers: the field validation of ``pipeline.py`` and
+    the unstructured rung of ``llm.py``'s field extraction, so both read a
+    number the same way):
+        - A ``bool`` is not a count, ``3.7`` is not 3, and ``inf`` / ``nan``
+          have no integer value (``int(inf)`` would raise ``OverflowError``,
+          which the callers' ``except`` does not name). ``"12"`` and ``3.0``
+          convert.
+        - Failure mode: ``ValueError`` (``int("x")`` raises it too);
+          ``TypeError`` for a value ``int()`` cannot take (``None``, a list).
+    """
+    if isinstance(v, bool):
+        raise ValueError(f"expected an integer, got {v!r}")
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float) and not (math.isfinite(v) and v == int(v)):
+        raise ValueError(f"expected an integer, got {v!r}")
+    return int(v)
+
+
+def coerce_float(v: Any) -> float:
+    """``v`` as a finite ``float``; ``ValueError`` for a bool, ``inf`` or ``nan``.
+
+    Same callers and failure mode as ``coerce_int``; the strings ``"nan"``,
+    ``"inf"`` and ``"1e999"`` are refused like the floats they spell.
+    """
+    if isinstance(v, bool):
+        raise ValueError(f"expected a number, got {v!r}")
+    result = v if isinstance(v, float) else float(v)
+    if not math.isfinite(result):
+        raise ValueError(f"expected a finite number, got {v!r}")
+    return result
+
+
+# --------------------------------------------------------------
 # Bool-word parsing
 # --------------------------------------------------------------
 
@@ -792,6 +833,40 @@ def _match_brace_partners(text: str, brace_positions: list[int]) -> dict[int, in
             i += 1
 
     return partner
+
+
+def balanced_json_objects(text: str) -> list[str]:
+    """The outermost balanced ``{...}`` spans of *text* that parse as JSON.
+
+    Interface contract (caller: ``llm.py`` reasoning-trace recovery):
+        - *text*: any ``str`` (anything else gives ``[]``).
+        - Returns the source text of each outermost span (one that is not
+          inside an earlier returned span), in order of appearance, that
+          ``json.loads`` accepts; the objects inside a span that does not
+          parse are skipped with it (as ``extract_json_from_text`` does).
+          ``[]`` when there is none.
+        - String and escape aware (a ``}`` inside a JSON string does not end
+          a span): it reads spans through ``_match_brace_partners``.
+        - Never raises.
+    """
+    if not isinstance(text, str):
+        return []
+    positions = [m.start() for m in re.finditer(r"\{", text)]
+    partner = _match_brace_partners(text, positions)
+    spans: list[str] = []
+    skip_until = -1
+    for start in positions:
+        end = partner.get(start)
+        if start <= skip_until or end is None:
+            continue
+        span = text[start : end + 1]
+        skip_until = end
+        try:
+            json.loads(span)
+        except (json.JSONDecodeError, RecursionError):
+            continue
+        spans.append(span)
+    return spans
 
 
 def extract_json_from_text(text: str) -> dict[str, Any] | None:

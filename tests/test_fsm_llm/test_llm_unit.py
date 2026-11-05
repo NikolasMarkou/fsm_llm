@@ -766,11 +766,11 @@ class TestStreamReasoningFragmentAccumulation:
             f"accumulated reasoning not recovered from fragments: {out}"
         )
 
-    def test_stream_recovers_when_whole_trace_is_on_final_delta_only(self):
-        """Defensive fallback: a provider that lumps the whole trace on the last
-        delta (no per-chunk fragments) still recovers — accumulation of a single
-        fragment equals that fragment, and the ``last_delta`` fallback covers a
-        trace that never appears in per-chunk ``reasoning_content``.
+    def test_stream_recovers_a_trace_held_by_one_chunk(self):
+        """A trace delivered whole in a single chunk's ``reasoning_content`` (the
+        other chunks carry none) is recovered: the accumulation across chunks of
+        one fragment is that fragment. There is no separate "final delta only"
+        path; ``reasoning_parts`` is the only source the stream tail reads.
         """
         chunks = [
             _real_delta_chunk(content="", reasoning_content=None),

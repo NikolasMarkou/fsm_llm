@@ -277,12 +277,11 @@ class TestTransitionEvaluatorLowConfidence:
             {
                 "transition": state.transitions[0],
                 "passes_conditions": True,
-                "evaluation_notes": [],
                 "failed_conditions": [],
             }
         ]
 
-        result = evaluator._determine_evaluation_result(transition_scores, state, {})
+        result = evaluator._determine_evaluation_result(transition_scores, state)
 
         # Should be DETERMINISTIC — only one valid path, don't block it
         assert result.result_type == TransitionEvaluationResult.DETERMINISTIC, (

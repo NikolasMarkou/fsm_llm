@@ -63,6 +63,25 @@ def _reasoning_text(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
 
+def _confidence_of(raw: Any) -> float:
+    """A model-supplied ``confidence`` as a clamped ``[0, 1]`` float.
+
+    ``NaN`` / ``±inf`` become 0.0 (so ``is_low_confidence`` fires, never 1.0,
+    D-001 in ``utilities.coerce_confidence``); a value ``float()`` cannot read
+    (``{...}``, ``null``, text) is warned about and becomes 0.0. Never raises.
+    """
+    try:
+        return coerce_confidence(raw, 0.0)
+    except (ValueError, TypeError):
+        logger.warning(f"Invalid confidence value {raw!r}, defaulting to 0.0")
+        return 0.0
+
+
+def _entities_of(raw: Any) -> dict:
+    """A model-supplied ``entities`` as a ``dict``; anything else becomes ``{}``."""
+    return raw if isinstance(raw, dict) else {}
+
+
 # --------------------------------------------------------------
 # Classifier
 # --------------------------------------------------------------
@@ -223,7 +242,10 @@ class Classifier:
             ClassificationResult with intent, confidence, reasoning, and entities.
 
         Raises:
-            ClassificationResponseError: If the LLM response cannot be parsed.
+            ClassificationError: ``complete`` failed (an outage, an unreadable
+                reply).
+            ClassificationResponseError: The reply is not a classification
+                (it is a ``ClassificationError`` too).
         """
         raw = self._call_llm(user_message, multi_intent=False, context=context)
         return self._parse_single(raw)
@@ -377,24 +399,11 @@ class Classifier:
             )
             intent = self.schema.fallback_intent
 
-        raw_confidence = data.get("confidence", 0.0)
-        try:
-            # coerce_confidence maps NaN/±inf → 0.0 (so is_low_confidence fires,
-            # NOT 1.0) and clamps; a `{...}`/`null` still raises for the existing
-            # warn+default-0.0 rung below (D-001, utilities.py).
-            confidence = coerce_confidence(raw_confidence, 0.0)
-        except (ValueError, TypeError):
-            logger.warning(
-                f"Invalid confidence value {raw_confidence!r}, defaulting to 0.0"
-            )
-            confidence = 0.0
         return ClassificationResult(
             reasoning=_reasoning_text(data.get("reasoning")),
             intent=intent,
-            confidence=confidence,
-            entities=data.get("entities", {})
-            if isinstance(data.get("entities"), dict)
-            else {},
+            confidence=_confidence_of(data.get("confidence", 0.0)),
+            entities=_entities_of(data.get("entities")),
         )
 
     def _parse_multi(self, data: dict) -> MultiClassificationResult:
@@ -419,23 +428,11 @@ class Classifier:
                     f"response, falling back to '{self.schema.fallback_intent}'"
                 )
                 name = self.schema.fallback_intent
-            raw_confidence = item.get("confidence", 0.0)
-            try:
-                # NaN/±inf → 0.0 via the shared coercer; `{...}`/`null` still
-                # raises for the warn+default-0.0 rung (D-001, utilities.py).
-                confidence = coerce_confidence(raw_confidence, 0.0)
-            except (ValueError, TypeError):
-                logger.warning(
-                    f"Invalid confidence value {raw_confidence!r}, defaulting to 0.0"
-                )
-                confidence = 0.0
             scored.append(
                 IntentScore(
                     intent=name,
-                    confidence=confidence,
-                    entities=item.get("entities", {})
-                    if isinstance(item.get("entities"), dict)
-                    else {},
+                    confidence=_confidence_of(item.get("confidence", 0.0)),
+                    entities=_entities_of(item.get("entities")),
                 )
             )
 
@@ -486,10 +483,10 @@ class HierarchicalClassifier:
 
     Stage 1 classifies the domain, stage 2 classifies the intent within
     that domain using a domain-specific schema. Every stage is a
-    ``Classifier`` built with the same ``model``, ``llm``, ``api_key``,
-    ``config`` and ``llm_kwargs`` (same rules and errors as ``Classifier``):
-    with ``llm`` they all send through that one interface, without it each
-    builds its own interface for ``model`` (default ``DEFAULT_LLM_MODEL``).
+    ``Classifier`` with the same ``model``, ``llm``, ``api_key``, ``config``
+    and ``llm_kwargs`` (same rules and errors as ``Classifier``) and all of
+    them send through ONE interface: the injected ``llm``, or the one built
+    for ``model`` (default ``DEFAULT_LLM_MODEL``).
     """
 
     def __init__(
@@ -503,13 +500,23 @@ class HierarchicalClassifier:
         **llm_kwargs,
     ) -> None:
         self.schema = schema
-        shared: dict[str, Any] = dict(
-            model=model, llm=llm, api_key=api_key, config=config, **llm_kwargs
+        self._domain_classifier = Classifier(
+            schema=schema.domain_schema,
+            model=model,
+            llm=llm,
+            api_key=api_key,
+            config=config,
+            **llm_kwargs,
         )
-
-        self._domain_classifier = Classifier(schema=schema.domain_schema, **shared)
+        # One interface (one connection, one usage meter) for every stage: the
+        # domain stage built it from `model`/`api_key`/`llm_kwargs` or took the
+        # injected `llm`, the intent stages send through the same one.
         self._intent_classifiers: dict[str, Classifier] = {
-            domain: Classifier(schema=intent_schema, **shared)
+            domain: Classifier(
+                schema=intent_schema,
+                llm=self._domain_classifier._llm,
+                config=self._domain_classifier.config,
+            )
             for domain, intent_schema in schema.intent_schemas.items()
         }
 

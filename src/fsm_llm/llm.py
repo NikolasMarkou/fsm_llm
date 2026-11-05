@@ -4,7 +4,8 @@ LLM Interface Module for FSM-Driven Conversational AI.
 This module provides the core interface and implementation for Large Language Model (LLM)
 communication within the fsm-llm library's 2-pass architecture. It defines how
 FSM-driven applications interact with various LLM providers while maintaining clear
-separation of concerns between data extraction, response generation, and transition decisions.
+separation of concerns between data extraction and response generation (transitions are
+decided by rules; the LLM is asked only to break a tie, through the classifier).
 
 Architecture Overview
 ---------------------
@@ -32,8 +33,17 @@ Core Methods
 generate_response(request: ResponseGenerationRequest) -> ResponseGenerationResponse
     Generate user-facing messages based on final state context and extracted data.
 
+generate_response_stream(request: ResponseGenerationRequest) -> Iterator[str]
+    The same Pass 2 reply, streamed as text fragments.
+
 extract_field(request: FieldExtractionRequest) -> FieldExtractionResponse
     Extract a single specific field from user input with custom instructions.
+
+extract_bulk_data(request: BulkExtractionRequest) -> DataExtractionResponse
+    Extract several fields from one user input in a single request.
+
+complete(request: CompletionRequest) -> CompletionResponse
+    The one request primitive: tool calling, plain and structured completion.
 
 Integration with FSM System
 ---------------------------
@@ -103,7 +113,10 @@ from .ollama import (
     prepare_ollama_messages,
 )
 from .utilities import (
+    balanced_json_objects,
     coerce_confidence,
+    coerce_float,
+    coerce_int,
     extract_json_from_text,
     parse_bool_word,
     remove_think_blocks,
@@ -119,16 +132,16 @@ DEFAULT_LLM_TIMEOUT_SECONDS = 120.0
 # model; no key needed).
 DEFAULT_EMBEDDING_MODEL = "ollama/qwen3-embedding:0.6b"
 
-# Shown to the END USER when no human-readable text can be recovered from a
-# model response.  Referenced from two places in
-# _parse_response_generation_response (the non-text-content branch and the
-# terminal rung's envelope guard) — one string, one place to change it.
 # DECISION plan-2026-09-22T080837-8b258a25/D-035: guards apology_retry_count.
 # Do NOT move it into __init__: tests build LiteLLMInterface via __new__, and the
 # D-020 branch would then raise AttributeError. Increments are rare, so one
 # process-wide lock costs nothing.
 _APOLOGY_COUNT_LOCK = threading.Lock()
 
+# Shown to the END USER when no human-readable text can be recovered from a
+# model response.  Referenced from two places in
+# _parse_response_generation_response (the non-text-content branch and the
+# terminal rung's envelope guard) — one string, one place to change it.
 _GENERIC_FALLBACK_MESSAGE = (
     "I'm sorry, I couldn't generate a proper response. Please try again."
 )
@@ -610,8 +623,8 @@ def _completion_response(response: Any) -> CompletionResponse:
           (a list in every litellm reply), read once into a list; a ``str``,
           ``bytes``, mapping or non-iterable is ``LLMResponseError``
           ("Malformed LLM response shape: ...").
-        - Tool calls: every call needs a non-empty ``str`` id, a function
-          name and arguments that decode to a JSON object
+        - Tool calls: every call needs a non-empty ``str`` id, unique within
+          the turn, a function name and arguments that decode to a JSON object
           (``decode_tool_arguments``); if ANY call fails that, the turn is
           ``malformed`` with no calls, the valid ones included, and its text
           kept.
@@ -663,10 +676,12 @@ def _completion_response(response: Any) -> CompletionResponse:
     # (a tool ran with parameters the model never sent) or drop only the bad
     # call. The reasoning trace is recovered only without tool calls
     # (bf7ffe24/D-003: `content: None` is their normal shape). See D-027.
-    # An id-less call makes the turn malformed too (D-039): its result could
-    # not be paired in the next turn (check_tool_transcript refuses it), so
-    # it is refused here, before any tool runs, not after.
+    # An id-less call makes the turn malformed too (D-039), and so does an id
+    # repeated within the turn: its result could not be paired in the next
+    # turn (check_tool_transcript refuses both), so it is refused here,
+    # before any tool runs, not after.
     calls: list[ModelToolCall] = []
+    seen_ids: set[str] = set()
     for raw_call in raw_calls:
         function = getattr(raw_call, "function", None)
         name = getattr(function, "name", None)
@@ -678,13 +693,15 @@ def _completion_response(response: Any) -> CompletionResponse:
             or arguments is None
             or not isinstance(call_id, str)
             or not call_id
+            or call_id in seen_ids
         ):
             logger.warning(
-                "Model tool-call turn is malformed (a call with no id, no tool "
-                "name or arguments that are not a JSON object); none of its "
-                "calls is returned"
+                "Model tool-call turn is malformed (a call with no id or a "
+                "repeated id, no tool name or arguments that are not a JSON "
+                "object); none of its calls is returned"
             )
             return CompletionResponse(kind="malformed", text=text)
+        seen_ids.add(call_id)
         calls.append(ModelToolCall(id=call_id, name=name, arguments=arguments))
     if calls:
         return CompletionResponse(kind="calls", text=text, calls=tuple(calls))
@@ -718,14 +735,8 @@ def _safe_str(value: Any) -> str | None:
 # Usage counters
 # --------------------------------------------------------------
 
-_COUNTER_FIELDS = (
-    "calls",
-    "errors",
-    "usage_missing",
-    "prompt_tokens",
-    "completion_tokens",
-    "total_tokens",
-)
+# The counters of one kind: exactly the fields of ``LLMCallCounts``.
+_COUNTER_FIELDS = tuple(LLMCallCounts.model_fields)
 
 
 def _reply_field(obj: Any, name: str) -> Any:
@@ -841,6 +852,55 @@ def _meter_of(owner: Any) -> _UsageMeter:
     return meter
 
 
+class _Metered:
+    """The provider-call counters shared by ``LiteLLMInterface`` and the embedder.
+
+    Interface contract: a subclass sends every provider request through
+    ``_meter_of(self)`` and gets ``usage`` and ``reset_usage`` for free. The
+    ``_usage_meter`` class attribute (``None``) is what lets an instance built
+    with ``__new__`` count too.
+    """
+
+    # Provider-call counters, created on first use (see _meter_of).
+    _usage_meter: _UsageMeter | None = None
+
+    def usage(self) -> LLMUsage:
+        """A frozen snapshot of this object's provider-call counters.
+
+        Counts every provider request it sent since it was built or since the
+        last ``reset_usage``: totals plus ``by_kind`` (see ``LLMUsage``). Safe
+        to call while other threads use it.
+        """
+        return _meter_of(self).snapshot()
+
+    def reset_usage(self) -> LLMUsage:
+        """Clear the counters and return the snapshot they held.
+
+        The read and the clear are one atomic step, so a request made
+        concurrently is counted either in the returned snapshot or in the
+        next one, never lost.
+        """
+        return _meter_of(self).snapshot(reset=True)
+
+
+def _checked_model(model: str) -> None:
+    """Raise ``ValueError`` unless *model* is a non-blank string."""
+    if not model or not model.strip():
+        raise ValueError("model must be a non-empty string")
+
+
+def _warn_reserved_kwargs(
+    owner: str, kwargs: dict[str, Any], reserved: frozenset[str]
+) -> None:
+    """Warn that *owner* ignores the keys of *kwargs* the framework sets per call."""
+    dropped = sorted(reserved.intersection(kwargs))
+    if dropped:
+        logger.warning(
+            f"{owner} ignores reserved call kwargs {dropped}; "
+            "the framework sets them per call"
+        )
+
+
 def _connection_params(
     model: str,
     kwargs: dict[str, Any],
@@ -891,8 +951,10 @@ class LLMInterface(abc.ABC):
     """
     Abstract interface for LLM communication supporting the 2-pass architecture.
 
-    This interface defines methods for data extraction, response generation, and
-    transition decision making, allowing implementations to optimize for different use cases.
+    This interface defines methods for data extraction, response generation and the
+    ``complete`` request primitive (tool calling, plain and structured completion),
+    allowing implementations to optimize for different use cases. Transitions are
+    decided by rules, never by a method here.
     """
 
     @abc.abstractmethod
@@ -1035,7 +1097,7 @@ class LLMInterface(abc.ABC):
 # --------------------------------------------------------------
 
 
-class LiteLLMInterface(LLMInterface):
+class LiteLLMInterface(LLMInterface, _Metered):
     """
     LiteLLM-based implementation supporting multiple providers.
 
@@ -1047,8 +1109,6 @@ class LiteLLMInterface(LLMInterface):
     _supported_params_memo: tuple[str, list[str] | None] | None = None
     # Times the D-020 apology retry fired on this instance (read-only for callers).
     apology_retry_count: int = 0
-    # Provider-call counters, created on first use (see _meter_of).
-    _usage_meter: _UsageMeter | None = None
 
     def __init__(
         self,
@@ -1101,8 +1161,7 @@ class LiteLLMInterface(LLMInterface):
                 validation ceremony).
             **kwargs: Additional LiteLLM parameters
         """
-        if not model or not model.strip():
-            raise ValueError("model must be a non-empty string")
+        _checked_model(model)
         if not 0.0 <= temperature <= 2.0:
             raise ValueError(
                 f"temperature must be between 0.0 and 2.0, got {temperature}"
@@ -1116,12 +1175,7 @@ class LiteLLMInterface(LLMInterface):
         self.timeout = timeout
         self.retries = retries
         self.kwargs = kwargs
-        dropped = sorted(RESERVED_LLM_CALL_KWARGS.intersection(kwargs))
-        if dropped:
-            logger.warning(
-                f"LiteLLMInterface ignores reserved call kwargs {dropped}; "
-                "the framework sets them per call"
-            )
+        _warn_reserved_kwargs("LiteLLMInterface", kwargs, RESERVED_LLM_CALL_KWARGS)
 
         # Configure API keys based on model type
         self._configure_api_keys(api_key)
@@ -1244,7 +1298,6 @@ class LiteLLMInterface(LLMInterface):
 
             accumulated: list[str] = []
             reasoning_parts: list[str] = []
-            last_delta = None
             for chunk in response:
                 # DECISION plan-2026-09-20T114608-a8e47b88/D-022
                 # `getattr(chunk, "choices", None)` replaces
@@ -1263,7 +1316,6 @@ class LiteLLMInterface(LLMInterface):
                 delta = getattr(choices[0], "delta", None)
                 if delta is None:
                     continue
-                last_delta = delta
                 # Accumulate reasoning the same way content is accumulated: a
                 # provider may stream `reasoning_content` as one fragment per
                 # chunk. Reuse the shared resolver so a Delta is read via the
@@ -1286,16 +1338,9 @@ class LiteLLMInterface(LLMInterface):
             # available and recovery fails where the non-streaming path succeeds.
             if not "".join(accumulated):
                 full_trace = "".join(reasoning_parts)
-                if full_trace:
-                    recovered = self._recover_content_from_trace(full_trace)
-                else:
-                    # Defensive: a provider that puts the whole trace only on the
-                    # final delta object (not in per-chunk reasoning_content).
-                    recovered = (
-                        self._extract_content_from_thinking(last_delta)
-                        if last_delta is not None
-                        else None
-                    )
+                recovered = (
+                    self._recover_content_from_trace(full_trace) if full_trace else None
+                )
                 if not recovered:
                     raise LLMResponseError("LLM returned empty content")
                 yield recovered
@@ -1548,24 +1593,6 @@ class LiteLLMInterface(LLMInterface):
             raise
         meter.record(kind, None if stream else response)
         return response
-
-    def usage(self) -> LLMUsage:
-        """A frozen snapshot of this interface's provider-call counters.
-
-        Counts every provider request this instance sent since it was built
-        or since the last ``reset_usage``: totals plus ``by_kind`` (see
-        ``LLMUsage``). Safe to call while other threads use the interface.
-        """
-        return _meter_of(self).snapshot()
-
-    def reset_usage(self) -> LLMUsage:
-        """Clear the counters and return the snapshot they held.
-
-        The read and the clear are one atomic step, so a request made
-        concurrently is counted either in the returned snapshot or in the
-        next one, never lost.
-        """
-        return _meter_of(self).snapshot(reset=True)
 
     def _supported_openai_params(self) -> list[str] | None:
         """Return litellm's supported-param list for ``self.model``, memoised.
@@ -1898,44 +1925,19 @@ class LiteLLMInterface(LLMInterface):
               resolved via ``resolve_reasoning_trace``; a non-empty ``str``).
             - Returns the last balanced JSON object found in ``trace`` (preferred,
               as the final answer), else the last non-empty line, else ``None``.
-            - Never raises; JSON parse failures are swallowed per candidate.
+            - Never raises; a span that is not JSON is skipped.
         """
-        thinking = trace
-        # Find JSON objects using proper parsing — supports multi-line JSON
-        json_candidates: list[str] = []
-        # First try line-by-line for single-line JSON
-        for line in thinking.split("\n"):
-            line = line.strip()
-            if line.startswith("{"):
-                try:
-                    json.loads(line)
-                    json_candidates.append(line)
-                except json.JSONDecodeError:
-                    pass
-        # If no single-line JSON found, try extracting multi-line JSON blocks
-        if not json_candidates:
-            depth = 0
-            start = -1
-            for i, ch in enumerate(thinking):
-                if ch == "{":
-                    if depth == 0:
-                        start = i
-                    depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0 and start >= 0:
-                        candidate = thinking[start : i + 1]
-                        try:
-                            json.loads(candidate)
-                            json_candidates.append(candidate)
-                        except json.JSONDecodeError:
-                            pass
-                        start = -1
-        if json_candidates:
-            # Prefer the last JSON object (most likely the final answer)
-            return json_candidates[-1]
+        # The objects come from the one string-aware scanner
+        # (`utilities.balanced_json_objects`), outermost spans only: a line
+        # scan plus a string-blind brace count returned an inner one-line
+        # fragment or a lone `}` for a pretty-printed object. The last object
+        # wins here (the first-wins split with `extract_json_from_text` is
+        # the open D-023 and stays as it is).
+        objects = balanced_json_objects(trace)
+        if objects:
+            return objects[-1]
         # Fallback: use the last substantial line
-        lines = [line.strip() for line in thinking.strip().split("\n") if line.strip()]
+        lines = [line.strip() for line in trace.strip().split("\n") if line.strip()]
         return lines[-1] if lines else None
 
     def _parse_response_generation_response(
@@ -2308,14 +2310,12 @@ class LiteLLMInterface(LLMInterface):
                 # A free-text `complaint` / `error_message` field is the
                 # canonical victim. See decisions.md D-022.
                 coerced_value = raw
-            elif request.field_type == "int":
+            elif request.field_type in ("int", "float"):
+                # The pipeline's number rules (utilities.coerce_int/_float):
+                # no bool, no 3.7 as 3, no inf or nan.
+                number = coerce_int if request.field_type == "int" else coerce_float
                 try:
-                    coerced_value = int(raw)
-                except ValueError:
-                    pass
-            elif request.field_type == "float":
-                try:
-                    coerced_value = float(raw)
+                    coerced_value = number(raw)
                 except ValueError:
                     pass
             elif request.field_type == "bool":
@@ -2388,7 +2388,7 @@ class LiteLLMInterface(LLMInterface):
 # --------------------------------------------------------------
 
 
-class LiteLLMEmbedder:
+class LiteLLMEmbedder(_Metered):
     """Text embeddings through LiteLLM: the one ``embedding`` call of fsm_llm.
 
     An embedder has its own model and connection kwargs (``api_key``,
@@ -2402,9 +2402,6 @@ class LiteLLMEmbedder:
         embedder = LiteLLMEmbedder("ollama/qwen3-embedding:0.6b")
         vectors = embedder.embed(["first text", "second text"])
     """
-
-    # Provider-call counters, created on first use (see _meter_of).
-    _usage_meter: _UsageMeter | None = None
 
     # DECISION plan-2026-10-01T093600-944e2692/D-005: one concrete embedder
     # owns the one ``embedding`` binding. Do NOT add an ``embed`` method to
@@ -2438,18 +2435,12 @@ class LiteLLMEmbedder:
         Raises:
             ValueError: ``model`` is empty.
         """
-        if not model or not model.strip():
-            raise ValueError("model must be a non-empty string")
+        _checked_model(model)
         self.model = model
         self.timeout = timeout
         self.retries = retries
         self.kwargs: dict[str, Any] = dict(kwargs)
-        dropped = sorted(RESERVED_EMBEDDING_CALL_KWARGS.intersection(kwargs))
-        if dropped:
-            logger.warning(
-                f"LiteLLMEmbedder ignores reserved call kwargs {dropped}; "
-                "the framework sets them per call"
-            )
+        _warn_reserved_kwargs("LiteLLMEmbedder", kwargs, RESERVED_EMBEDDING_CALL_KWARGS)
         if api_key:
             self.kwargs["api_key"] = api_key
 
@@ -2492,14 +2483,6 @@ class LiteLLMEmbedder:
             raise
         meter.record(USAGE_KIND_EMBED, response)
         return _embedding_vectors(response, len(batch))
-
-    def usage(self) -> LLMUsage:
-        """A frozen snapshot of this embedder's provider-call counters."""
-        return _meter_of(self).snapshot()
-
-    def reset_usage(self) -> LLMUsage:
-        """Clear the counters and return the snapshot they held (atomically)."""
-        return _meter_of(self).snapshot(reset=True)
 
 
 def _embedding_vectors(response: Any, expected: int) -> list[list[float]]:

@@ -111,7 +111,7 @@ class TestFloatingPointTiebreaker:
             },
         ]
 
-        result = evaluator._determine_evaluation_result(scores, current_state, {})
+        result = evaluator._determine_evaluation_result(scores, current_state)
 
         # BUG: Without fix, confidence_gap == 1.11e-16 != 0, so tiebreaker skipped → AMBIGUOUS
         # With fix: abs(gap) < epsilon triggers tiebreaker → DETERMINISTIC (t1 wins, lower priority)
