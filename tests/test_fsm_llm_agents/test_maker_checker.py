@@ -326,33 +326,40 @@ class TestMakerCheckerConstants:
 class TestMakerCheckerHandlers:
     """Tests for internal handler methods without requiring LLM."""
 
-    def test_track_revisions_increments(self):
+    def test_track_revisions_does_not_count(self):
+        # F-AM-01: the count is bumped on check entry (it must advance when
+        # the checker extracts null and this handler never runs).
         agent = MakerCheckerAgent(
             maker_instructions="draft",
             checker_instructions="review",
         )
         context = {
-            ContextKeys.REVISION_COUNT: 0,
+            ContextKeys.REVISION_COUNT: 1,
             ContextKeys.AGENT_TRACE: [],
             "_max_revisions": 3,
         }
         result = agent._track_revisions(context)
-        assert result[ContextKeys.REVISION_COUNT] == 1
+        assert ContextKeys.REVISION_COUNT not in result
+        assert result[ContextKeys.AGENT_TRACE][0]["revision_count"] == 1
 
-    def test_track_revisions_forces_pass_at_max(self):
+    def test_force_pass_at_the_revision_cap(self):
         agent = MakerCheckerAgent(
             maker_instructions="draft",
             checker_instructions="review",
             max_revisions=2,
         )
-        context = {
-            ContextKeys.REVISION_COUNT: 1,
-            ContextKeys.AGENT_TRACE: [],
-            "_max_revisions": 2,
+        base = {ContextKeys.AGENT_TRACE: [], "_max_revisions": 2}
+        under = {**base, ContextKeys.REVISION_COUNT: 1}
+        at = {**base, ContextKeys.REVISION_COUNT: 2}
+        assert agent._force_pass_at_limit(under) == {}
+        assert agent._force_pass_at_limit(at) == {
+            ContextKeys.CHECKER_PASSED: True,
+            ContextKeys.FORCED_STOP_REASON: "forced_pass",
         }
-        result = agent._track_revisions(context)
-        assert result[ContextKeys.REVISION_COUNT] == 2
-        assert result[ContextKeys.CHECKER_PASSED] is True
+        # A pass the checker gave itself is not a forced pass.
+        assert (
+            agent._force_pass_at_limit({**at, ContextKeys.CHECKER_PASSED: True}) == {}
+        )
 
     def test_track_revisions_no_force_under_max(self):
         agent = MakerCheckerAgent(
@@ -767,3 +774,65 @@ class TestPreviousDraftStaysOutOfFinalContext:
         assert ContextKeys.PREVIOUS_DRAFT not in llm.checker_contexts[0]
         assert llm.checker_contexts[1][ContextKeys.PREVIOUS_DRAFT] == "d1"
         assert "d1" in llm.checker_prompts[1]
+
+
+# -------------------------------------------------------------------------
+# F-AM-01: the revision cap survives a checker that extracts null
+# -------------------------------------------------------------------------
+
+
+class _NullCheckerLLM(_CheckerSilentLLM):
+    """Checker fields (feedback, score, verdict) all extract null."""
+
+    _SILENT = frozenset(
+        {ContextKeys.CHECKER_PASSED, "quality_score", "checker_feedback"}
+    )
+
+
+def _run_recording_states(agent: Any, task: str) -> tuple[Any, list[str]]:
+    """Run the agent; return (result, state before each loop turn)."""
+    states: list[str] = []
+    real_hook = agent._on_loop_iteration
+
+    def _hook(api: Any, conv_id: str, iteration: int) -> None:
+        states.append(api.get_current_state(conv_id))
+        real_hook(api, conv_id, iteration)
+
+    agent._on_loop_iteration = _hook
+    return agent.run(task), states
+
+
+class TestMakerCheckerNullExtraction:
+    @pytest.mark.parametrize("llm_cls", [_CheckerSilentLLM, _NullCheckerLLM])
+    @pytest.mark.parametrize("max_revisions", [1, 2, 3])
+    def test_null_checker_stops_at_the_revision_cap(self, llm_cls, max_revisions):
+        agent = MakerCheckerAgent(
+            maker_instructions="Write",
+            checker_instructions="Check",
+            max_revisions=max_revisions,
+            config=AgentConfig(max_iterations=40),
+            llm_interface=llm_cls(),
+        )
+        result, states = _run_recording_states(agent, "Write a haiku")
+
+        assert states.count("check") == max_revisions
+        assert result.final_context[ContextKeys.REVISION_COUNT] == max_revisions
+        assert (result.success, result.stop_reason) == (False, "forced_pass")
+        assert not result.final_context.get(ContextKeys.MAX_ITERATIONS_REACHED)
+
+    @pytest.mark.parametrize("max_revisions", [2, 4])
+    def test_always_rejecting_checker_keeps_exact_revision_counts(self, max_revisions):
+        llm = _AlwaysRejectLLM()
+        agent = MakerCheckerAgent(
+            maker_instructions="Write",
+            checker_instructions="Check",
+            max_revisions=max_revisions,
+            config=AgentConfig(max_iterations=40),
+            llm_interface=llm,
+        )
+        result, states = _run_recording_states(agent, "Write a haiku")
+
+        assert states.count("check") == max_revisions
+        assert result.final_context[ContextKeys.REVISION_COUNT] == max_revisions
+        assert (result.success, result.stop_reason) == (False, "forced_pass")
+        assert result.answer == llm.judged[-1]

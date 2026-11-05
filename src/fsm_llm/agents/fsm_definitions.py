@@ -2017,6 +2017,7 @@ def build_maker_checker_fsm(
     maker_instructions: str,
     checker_instructions: str,
     task_description: str = "",
+    max_revisions: int | None = None,
 ) -> dict[str, Any]:
     """
     Build a Maker-Checker FSM definition.
@@ -2026,6 +2027,10 @@ def build_maker_checker_fsm(
     - check: checker persona evaluates the draft
     - revise: maker persona revises based on feedback
     - output: terminal state with final answer
+
+    ``max_revisions`` (optional): the check -> output edge also fires once
+    ``revision_count`` reaches it. The count is bumped on check entry, so the
+    cap holds when the checker's extraction is null (plan 5ed71cf2/D-009).
     """
     from .prompts import (
         build_maker_checker_field_instructions,
@@ -2114,6 +2119,12 @@ def build_maker_checker_fsm(
                     # so budget 1 needed 4 turns against a 3-turn ceiling and
                     # raised BudgetExhaustedError; the limiter's flag is also
                     # set after the gate may have read the verdict.
+                    # DECISION plan-2026-11-05T134105-5ed71cf2/D-009: the
+                    # revision cap is read here too, from revision_count
+                    # (bumped on check entry), never from a handler that a
+                    # null extraction skips. Do NOT rely on the check
+                    # PRE_TRANSITION handler to route the cap: it runs after
+                    # this gate.
                     "conditions": [
                         {
                             "description": "Checker approved, or the budget is spent",
@@ -2126,6 +2137,18 @@ def build_maker_checker_fsm(
                                             True,
                                         ]
                                     },
+                                    *(
+                                        []
+                                        if max_revisions is None
+                                        else [
+                                            {
+                                                ">=": [
+                                                    {"var": ContextKeys.REVISION_COUNT},
+                                                    max_revisions,
+                                                ]
+                                            }
+                                        ]
+                                    ),
                                 ]
                             },
                         }

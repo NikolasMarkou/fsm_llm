@@ -111,6 +111,7 @@ class MakerCheckerAgent(BaseAgent):
             maker_instructions=self.maker_instructions,
             checker_instructions=self.checker_instructions,
             task_description=task,
+            max_revisions=self.max_revisions,
         )
 
         # Build initial context
@@ -136,13 +137,39 @@ class MakerCheckerAgent(BaseAgent):
 
     def _register_handlers(self, api: API) -> None:
         """Register agent handlers with the API."""
-        # Revision tracker: CONTEXT_UPDATE fires after the check state's
-        # extraction (current_state still CHECK) and before transition eval,
-        # so checker_passed/quality_score are available. A forced pass
-        # routes this turn: the transition gate reads the committed context,
-        # which holds this handler's delta (plan 5ed71cf2/D-005; before it the
-        # evaluator overlaid the extracted False and the pass waited one more
-        # revise round, D-013).
+
+        # DECISION plan-2026-11-05T134105-5ed71cf2/D-009
+        # revision_count advances on check ENTRY, NOT in the CONTEXT_UPDATE
+        # tracker below: core skips every CONTEXT_UPDATE handler on a turn
+        # that committed no extracted key (a checker that returns null for the
+        # score and the verdict), which left the count at 0 and the loop to
+        # max_iterations (F-AM-01). The cap itself is the check -> output
+        # edge's `revision_count >= max_revisions` disjunct plus the check
+        # PRE_TRANSITION handler (_force_pass_at_limit), which records the
+        # forced pass; PRE_TRANSITION runs after the gate, so it cannot route.
+        # Do NOT move the count back into _track_revisions or key it on
+        # extraction. Entry does not clear anything (D-013 below).
+        def count_revision(context: dict[str, Any]) -> dict[str, Any]:
+            return {
+                ContextKeys.REVISION_COUNT: context.get(ContextKeys.REVISION_COUNT, 0)
+                + 1
+            }
+
+        api.register_handler(
+            api.create_handler(HandlerNames.MAKER_CHECKER_REVISION_COUNT)
+            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
+            .on_state_entry(MakerCheckerStates.CHECK)
+            .do(count_revision)
+        )
+
+        # Trace + quality auto-pass: CONTEXT_UPDATE fires after the check
+        # state's extraction (current_state still CHECK) and before transition
+        # eval, so checker_passed/quality_score are available. Only on a turn
+        # that extracted one of them. A pass written here routes this turn:
+        # the transition gate reads the committed context, which holds this
+        # handler's delta (plan 5ed71cf2/D-005; before it the evaluator
+        # overlaid the extracted False and the pass waited one more revise
+        # round, D-013).
         api.register_handler(
             api.create_handler(HandlerNames.MAKER_CHECKER_CHECKER)
             .with_priority(HandlerPriorities.TOOL_EXECUTOR)
@@ -211,16 +238,17 @@ class MakerCheckerAgent(BaseAgent):
 
     def _track_revisions(self, context: dict[str, Any]) -> dict[str, Any]:
         """
-        Track revision count and force pass if max revisions reached.
+        Record the check in the trace and auto-pass on a high quality score.
 
         Called as a CONTEXT_UPDATE handler on the check state, after its
         extraction and before transition evaluation (current_state is still
         CHECK), so checker_passed/quality_score reflect the current turn.
-        Increments revision_count, auto-passes when quality_score meets the
-        threshold, and forces checker_passed=True if the maximum number of
-        revisions has been reached.
+        ``revision_count`` is already bumped by the check-entry handler and
+        the revision cap is enforced by the check edge and
+        :meth:`_force_pass_at_limit`, neither of which depends on this
+        handler running (plan 5ed71cf2/D-009).
         """
-        revision_count = context.get(ContextKeys.REVISION_COUNT, 0) + 1
+        revision_count = context.get(ContextKeys.REVISION_COUNT, 0)
         max_revisions = context.get("_max_revisions", self.max_revisions)
         # Typed float field (a dict-shaped checker_feedback, which an earlier
         # recovery read the score from, is now rejected by the str field).
@@ -243,10 +271,7 @@ class MakerCheckerAgent(BaseAgent):
             )
         )
 
-        result: dict[str, Any] = {
-            ContextKeys.REVISION_COUNT: revision_count,
-            ContextKeys.AGENT_TRACE: trace,
-        }
+        result: dict[str, Any] = {ContextKeys.AGENT_TRACE: trace}
 
         # Auto-pass if quality score meets threshold
         quality_threshold = context.get("_quality_threshold", self.quality_threshold)
@@ -258,17 +283,6 @@ class MakerCheckerAgent(BaseAgent):
                 f"Quality score {quality_score:.2f} >= threshold {quality_threshold:.2f}, approving"
             )
             result[ContextKeys.CHECKER_PASSED] = True
-
-        # Force checker_passed if max revisions reached
-        elif revision_count >= max_revisions:
-            logger.info(
-                f"Max revisions ({max_revisions}) reached, forcing checker approval"
-            )
-            result[ContextKeys.CHECKER_PASSED] = True
-            # The draft ships, but a pass the checker did not give itself
-            # reports success=False (D-011).
-            if context.get(ContextKeys.CHECKER_PASSED) is not True:
-                result[ContextKeys.FORCED_STOP_REASON] = StopReason.FORCED_PASS
 
         return result
 
@@ -286,15 +300,25 @@ class MakerCheckerAgent(BaseAgent):
 
     @staticmethod
     def _force_pass_at_limit(context: dict[str, Any]) -> dict[str, Any]:
-        """Force ``checker_passed`` once the limiter has flagged the budget.
+        """Force ``checker_passed`` once the budget or the revision cap is spent.
 
         Registered on the check state only (D-007); returns ``{}`` otherwise.
-        A pass the checker (or its quality score) gave on this turn is not
-        overridden, so it records no forced reason (D-051 of plan 06a5ec0a).
+        The cap is ``revision_count >= _max_revisions`` (the count is bumped
+        on check entry, so a check turn whose extraction was null still
+        counts; plan 5ed71cf2/D-009). A pass the checker (or its quality
+        score) gave on this turn is not overridden, so it records no forced
+        reason (D-051 of plan 06a5ec0a).
         """
-        if context.get(ContextKeys.MAX_ITERATIONS_REACHED) is not True:
-            return {}
         if context.get(ContextKeys.CHECKER_PASSED) is True:
+            return {}
+        max_revisions = context.get("_max_revisions")
+        revisions_spent = (
+            isinstance(max_revisions, int)
+            and context.get(ContextKeys.REVISION_COUNT, 0) >= max_revisions
+        )
+        if context.get(ContextKeys.MAX_ITERATIONS_REACHED) is not True and not (
+            revisions_spent
+        ):
             return {}
         return {
             ContextKeys.CHECKER_PASSED: True,

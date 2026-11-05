@@ -545,6 +545,7 @@ class HandlerNames:
     MAKER_CHECKER_REVISE_ENTRY = "MakerCheckerReviseEntry"
     MAKER_CHECKER_REVISE_EXIT = "MakerCheckerReviseExit"
     MAKER_CHECKER_FORCE_PASS = "MakerCheckerForcePass"
+    MAKER_CHECKER_REVISION_COUNT = "MakerCheckerRevisionCount"
     CHAIN_GATE_CHECKER = "ChainGateChecker"
     ORCHESTRATOR_DELEGATOR = "OrchestratorDelegator"
     ORCHESTRATOR_DECISION_RESET = "OrchestratorDecisionReset"
