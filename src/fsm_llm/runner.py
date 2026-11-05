@@ -36,10 +36,8 @@ def main(fsm_path, max_history_size, max_message_length):
     # Load environment variables from .env file
     dotenv.load_dotenv()
 
-    # Enable logging for CLI usage (library disables it by default)
-    logger.enable("fsm_llm")
-
-    # Set up file logging now that we're actually running
+    # Enable logging for CLI usage (the library disables it by default): file
+    # logging enables the library loggers itself.
     setup_file_logging()
 
     # Check if critical environment variables are set
@@ -145,7 +143,6 @@ def main(fsm_path, max_history_size, max_message_length):
                     print(f"System: {response}")
 
                 # Log the current state and context
-                data = fsm.get_data(conversation_id)
                 # DECISION plan-2026-09-20T114608-a8e47b88/D-014
                 # `default=redacting_json_default`, NEVER `default=str`: a
                 # handler-stored non-JSON-native value (datetime, set, ...)
@@ -156,8 +153,9 @@ def main(fsm_path, max_history_size, max_message_length):
                 # Lazy (D-016): no redaction or dump runs unless DEBUG is on.
                 logger.opt(lazy=True).debug(
                     "Context data: {}",
-                    lambda data=data: json.dumps(
-                        redact_context(data), default=redacting_json_default
+                    lambda: json.dumps(
+                        redact_context(fsm.get_data(conversation_id)),
+                        default=redacting_json_default,
                     ),
                 )
 

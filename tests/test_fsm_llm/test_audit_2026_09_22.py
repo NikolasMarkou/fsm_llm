@@ -2113,6 +2113,8 @@ class TestStep13RunnerRedaction:
         from fsm_llm.logging import logger
 
         records: list = []
+        # setup_file_logging (patched here) is what enables the library loggers
+        logger.enable("fsm_llm")
         sink_id = logger.add(lambda m: records.append(m.record), level="DEBUG")
         try:
             with patch.object(

@@ -80,6 +80,7 @@ from .constants import (
 
 def main_cli():
     """Entry point for the CLI."""
+    from .logging import setup_cli_logging
     from .runner import main as main_runner
     from .validator import main as main_validator
     from .visualizer import main as main_visualizer
@@ -136,8 +137,10 @@ def main_cli():
                 max_message_length=args.message_length,
             )
         elif args.mode == "validate":
+            setup_cli_logging("INFO")
             return main_validator(fsm_path=args.fsm)
         elif args.mode == "visualize":
+            setup_cli_logging("INFO")
             return main_visualizer(fsm_path=args.fsm, style=args.style)
         else:
             raise ValueError(f"Invalid mode {args.mode}")

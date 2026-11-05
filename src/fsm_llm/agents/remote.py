@@ -8,12 +8,12 @@ RemoteAgentTool wraps a remote agent URL as a local tool.
 from __future__ import annotations
 
 import asyncio
-import hmac
 import json
 import uuid
 from typing import Any
 
 from fsm_llm.logging import logger
+from fsm_llm.security import api_key_matches, checked_api_key, presented_api_key
 
 from .base import strip_caller_context
 from .constants import Defaults
@@ -71,17 +71,6 @@ def _require_httpx() -> None:
             "Remote agent client requires 'httpx'. "
             'From a clone: pip install -e ".[a2a]" or pip install httpx'
         )
-
-
-def _checked_api_key(api_key: str | None) -> str | None:
-    """Return ``api_key`` unchanged; ValueError if it is empty or whitespace-only."""
-    # DECISION plan-2026-09-24T091842-c1d5bfbc/D-006: reject an empty key. Do
-    # NOT accept it (compare_digest(b"", b"") is True, so an empty header would
-    # authenticate) and do NOT map it to None (an operator who passed
-    # os.getenv("KEY", "") would silently get an open server).
-    if api_key is not None and not api_key.strip():
-        raise ValueError("api_key must be a non-empty string, or None for no auth")
-    return api_key
 
 
 def _server_context(context: dict[str, Any] | None) -> dict[str, Any]:
@@ -163,7 +152,7 @@ class AgentServer:
         self._port = port
         self._name = name or getattr(agent, "__class__", type(agent)).__name__
         self._timeout = timeout
-        self._api_key = _checked_api_key(api_key)
+        self._api_key = checked_api_key(api_key)
         self._max_input_chars = max_input_chars
         self._max_concurrent = max_concurrent
         self._slots = asyncio.Semaphore(max_concurrent)
@@ -176,24 +165,12 @@ class AgentServer:
         """
         if self._api_key is None:
             return
-        auth_header = request.headers.get("authorization", "")
-        token: str | None = None
-        if auth_header.lower().startswith("bearer "):
-            token = auth_header[len("bearer ") :].strip()
-        if token is None:
-            token = request.headers.get("x-api-key")
-        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-006: a byte-for-byte copy
-        # of the monitor's `_require_api_key` compare (fsm_llm/monitor/
-        # server.py, its D-016/D-020 anchors). Do NOT compare with `!=` (timing
-        # side channel) and do NOT pass `str` to `compare_digest`: its str
-        # overload raises TypeError on non-ASCII input, turning an
-        # attacker-sent header byte into a 500. Encode both sides with
-        # `surrogateescape` first. Not imported from the monitor so agents
-        # carries no monitor dependency; review both copies together.
-        if token is None or not hmac.compare_digest(
-            token.encode("utf-8", "surrogateescape"),
-            self._api_key.encode("utf-8", "surrogateescape"),
-        ):
+        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-006
+        # The compare is `security.api_key_matches` (hmac.compare_digest on
+        # surrogateescape bytes), shared with the monitor server through core so
+        # agents carry no monitor dependency. Do NOT compare with `!=` or hand
+        # `str` to compare_digest here, and do NOT copy the body back.
+        if not api_key_matches(presented_api_key(request.headers), self._api_key):
             raise HTTPException(status_code=401, detail="missing or invalid API key")
 
     def _check_input_size(self, request: _InvokeRequest) -> None:
@@ -437,7 +414,7 @@ class RemoteAgentTool:
         self._name = name
         self._description = description
         self._timeout = timeout
-        self._api_key = _checked_api_key(api_key)
+        self._api_key = checked_api_key(api_key)
 
     def _answer(self, data: Any) -> str:
         """The answer in an ``/invoke`` response body.

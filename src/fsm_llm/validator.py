@@ -29,7 +29,7 @@ from .definitions import (
     reachable_from,
     unknown_initial_state_message,
 )
-from .logging import logger
+from .logging import enable_library_logging, logger, setup_cli_logging
 
 # The result kinds a completion state can produce, read off the one model
 # that defines them: every kind with tools, all but ``calls`` without.
@@ -1154,8 +1154,11 @@ def main(fsm_path):
     # body of the `fsm-llm-validate` console script and of `fsm-llm --mode validate`,
     # and every line it produces goes out through `logger`. Without this opt-in the
     # tool writes ZERO bytes on success AND on failure, and only the exit code
-    # speaks. Mirrors `runner.py`'s identical line. See decisions.md D-014.
-    logger.enable("fsm_llm")
+    # speaks. Mirrors `runner.py` (file logging enables it). See decisions.md
+    # D-014. The enable goes through the one `enable_library_logging`; the
+    # console script and `fsm-llm --mode validate` also call
+    # `setup_cli_logging("INFO")` before this, so no DEBUG record is printed.
+    enable_library_logging()
 
     # Run validation
     validation_result = validate_fsm_from_file(fsm_path)
@@ -1189,6 +1192,7 @@ def main_cli():
         "--fsm", "-f", required=True, help="Path to FSM definition JSON file"
     )
     args = parser.parse_args()
+    setup_cli_logging("INFO")
     sys.exit(main(fsm_path=args.fsm))
 
 

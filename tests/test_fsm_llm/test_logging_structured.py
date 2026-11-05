@@ -77,22 +77,28 @@ class TestPrepareLogRecord:
     """Tests for the prepare_log_record filter."""
 
     def test_adds_default_conversation_id(self):
-        record = {"extra": {}}
+        record = {"name": "fsm_llm.x", "extra": {}}
         result = prepare_log_record(record)
         assert result["extra"]["conversation_id"] == LOG_DEFAULT_CONVERSATION_ID
 
     def test_preserves_existing_conversation_id(self):
-        record = {"extra": {"conversation_id": "conv-123"}}
+        record = {"name": "fsm_llm.x", "extra": {"conversation_id": "conv-123"}}
         result = prepare_log_record(record)
         assert result["extra"]["conversation_id"] == "conv-123"
 
-    def test_adds_default_package(self):
-        record = {"extra": {}}
+    def test_adds_default_package_to_a_library_record(self):
+        record = {"name": "fsm_llm.agents.react", "extra": {}}
         result = prepare_log_record(record)
         assert result["extra"]["package"] == "fsm_llm"
 
+    def test_host_record_gets_no_package_but_a_conversation_id(self):
+        record = {"name": "myapp.views", "extra": {}}
+        result = prepare_log_record(record)
+        assert "package" not in result["extra"]
+        assert result["extra"]["conversation_id"] == LOG_DEFAULT_CONVERSATION_ID
+
     def test_preserves_existing_package(self):
-        record = {"extra": {"package": "fsm_llm.agents"}}
+        record = {"name": "fsm_llm.x", "extra": {"package": "fsm_llm.agents"}}
         result = prepare_log_record(record)
         assert result["extra"]["package"] == "fsm_llm.agents"
 
@@ -131,7 +137,8 @@ class TestSetupLogging:
         assert "function" in entry
         assert "line" in entry
         assert entry["conversation_id"] == LOG_DEFAULT_CONVERSATION_ID
-        assert entry["package"] == "fsm_llm"
+        # logged by the test module (a host record): not labelled as the library
+        assert "package" not in entry
 
     def test_json_output_with_bound_context(self):
         """JSON output should include bound context fields."""

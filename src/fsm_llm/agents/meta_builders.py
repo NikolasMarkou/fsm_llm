@@ -317,7 +317,7 @@ class FSMArtifactBuilder(ArtifactBuilder):
             "name": self.name or "unnamed_fsm",
             "description": self.description or "No description",
             "initial_state": self.initial_state or "",
-            "version": "4.1",
+            "version": FSMDefinition.model_fields["version"].default,
             "states": dict(self.states),
         }
         if self.persona:

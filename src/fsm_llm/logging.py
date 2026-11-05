@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import sys
+from collections.abc import Callable
 
 from loguru import logger
 
@@ -30,10 +31,16 @@ from .constants import (
 
 
 def prepare_log_record(record):
-    """Filter to ensure all log records have standard context fields."""
+    """Filter to ensure all log records have standard context fields.
+
+    ``conversation_id`` is defaulted for every record (the contextual human
+    format reads it). ``package`` is defaulted only for a library record: the
+    stdout, file and JSON sinks also carry host records, which must not be
+    labelled as the library's.
+    """
     if "conversation_id" not in record["extra"]:
         record["extra"]["conversation_id"] = LOG_DEFAULT_CONVERSATION_ID
-    if "package" not in record["extra"]:
+    if "package" not in record["extra"] and _is_library_record(record):
         record["extra"]["package"] = "fsm_llm"
     return record
 
@@ -61,25 +68,29 @@ logger.disable("fsm_llm")
 LIBRARY_LOGGER_NAMES: tuple[str, ...] = ("fsm_llm",)
 
 
-_library_logging_enabled = False
-
-
 def enable_library_logging() -> None:
-    """Re-enable log output of every package in ``LIBRARY_LOGGER_NAMES``."""
-    global _library_logging_enabled
-    _library_logging_enabled = True
+    """Re-enable log output of every package in ``LIBRARY_LOGGER_NAMES``.
+
+    ``setup_logging()`` and the CLI entry points call it; subpackages never
+    disable logging themselves (D-004).
+    """
     for name in LIBRARY_LOGGER_NAMES:
         logger.enable(name)
 
 
-def is_library_logging_enabled() -> bool:
-    """True once ``enable_library_logging()`` has run in this process.
+def _setting(
+    value: str | None, env_name: str, default: str, *, fold: Callable[[str], str]
+) -> str:
+    """The first non-blank of ``value`` and the env var, case-folded, else ``default``.
 
-    ``setup_logging()``, ``enable_debug_logging()`` and the CLI entry points
-    call it. The flag only reports that call; nothing reads it to decide
-    whether to log. Subpackages never disable logging themselves (D-004).
+    One reading of a text setting for ``setup_logging`` and ``setup_cli_logging``
+    (a ``.env`` line ``FSM_LLM_LOG_LEVEL=`` is blank, ``info`` is a level).
     """
-    return _library_logging_enabled
+    for candidate in (value, os.environ.get(env_name)):
+        text = (candidate or "").strip()
+        if text:
+            return fold(text)
+    return default
 
 
 def setup_cli_logging(default_level: str) -> int:
@@ -107,7 +118,7 @@ def setup_cli_logging(default_level: str) -> int:
         logger.remove(0)
     except ValueError:
         pass
-    level = os.environ.get(ENV_LOG_LEVEL, "").strip().upper() or default_level
+    level = _setting(None, ENV_LOG_LEVEL, default_level, fold=str.upper)
     try:
         logger.level(level)
     except ValueError:
@@ -210,9 +221,10 @@ def _record_to_json(record) -> str:
         "function": record["function"],
         "line": record["line"],
     }
-    # Include all extra fields (conversation_id, package, agent_type, etc.)
+    # Include all extra fields (conversation_id, package, agent_type, etc.);
+    # a bound extra named like a core field above cannot replace it.
     for key, value in extra.items():
-        entry[key] = value
+        entry.setdefault(key, value)
     # Include exception info if present
     if record["exception"] is not None:
         exc = record["exception"]
@@ -232,6 +244,10 @@ def _make_json_sink(target):
         target.flush()
 
     return sink
+
+
+_SINKS = (LOG_SINK_STDERR, LOG_SINK_STDOUT, LOG_SINK_FILE)
+_FORMATS = (LOG_FORMAT_HUMAN, LOG_FORMAT_JSON)
 
 
 def setup_logging(
@@ -254,14 +270,20 @@ def setup_logging(
         sink: Output destination — "stderr", "stdout", or "file".
         format: Log format — "human" (colored text) or "json" (JSONL).
             If None, reads from FSM_LLM_LOG_FORMAT env var, defaulting to "human".
-        level: Log level — "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL".
-            If None, reads from FSM_LLM_LOG_LEVEL env var, defaulting to "DEBUG".
+        level: Log level — "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
+            (any case). If None or blank, reads from FSM_LLM_LOG_LEVEL env var
+            (a blank value counts as unset), defaulting to "DEBUG".
         log_dir: Directory for log files (only used when sink="file").
         rotation: File rotation trigger (e.g., "10 MB", "00:00", "1 week").
         retention: How long to keep old log files (e.g., "1 month", "10 days").
         compression: Compression for rotated files (e.g., "zip", "gz").
         context: If True, include conversation_id in human-readable format.
             Always included in JSON format.
+
+    Raises:
+        ValueError: ``sink`` or the resolved ``format`` is not one of the
+            ``LOG_SINK_*`` / ``LOG_FORMAT_*`` values, or the level is not a
+            loguru level. Nothing is registered then.
 
     Returns:
         Handler ID (can be used with logger.remove() to unregister), or
@@ -286,11 +308,14 @@ def setup_logging(
         # FSM_LLM_LOG_LEVEL=WARNING FSM_LLM_LOG_FORMAT=json
         setup_logging()
     """
-    # Resolve level from env var or default
-    resolved_level = level or os.environ.get(ENV_LOG_LEVEL, LOG_DEFAULT_LEVEL)
-
-    # Resolve format from env var or default
-    resolved_format = format or os.environ.get(ENV_LOG_FORMAT, LOG_FORMAT_HUMAN)
+    resolved_level = _setting(level, ENV_LOG_LEVEL, LOG_DEFAULT_LEVEL, fold=str.upper)
+    resolved_format = _setting(format, ENV_LOG_FORMAT, LOG_FORMAT_HUMAN, fold=str.lower)
+    if sink not in _SINKS:
+        raise ValueError(f"unknown log sink {sink!r}; use one of {', '.join(_SINKS)}")
+    if resolved_format not in _FORMATS:
+        raise ValueError(
+            f"unknown log format {resolved_format!r}; use one of {', '.join(_FORMATS)}"
+        )
 
     enable_library_logging()
     if sink == LOG_SINK_FILE:
@@ -423,12 +448,44 @@ def register_stream_handler(
 # --------------------------------------------------------------
 
 
-def setup_file_logging(log_dir="logs"):
+def setup_file_logging(log_dir: str = "logs") -> int:
     """Set up file logging with rotation. Call explicitly when file logging is needed.
 
-    This is a convenience wrapper around setup_logging(sink="file").
+    This is a convenience wrapper around setup_logging(sink="file"): it
+    returns that call's handler id (-1 when file logging is already set up).
     """
-    setup_logging(sink=LOG_SINK_FILE, log_dir=log_dir)
+    return setup_logging(sink=LOG_SINK_FILE, log_dir=log_dir)
+
+
+# --------------------------------------------------------------
+
+
+def enable_debug_logging() -> None:
+    """Enable debug logging for development.
+
+    Drops the handlers this library registered, then registers one human
+    stderr handler at DEBUG through ``setup_logging`` (the format of
+    ``LOG_HUMAN_FORMAT``, whatever ``FSM_LLM_LOG_FORMAT`` says).
+
+    Note: the dedup against a later ``setup_logging()`` call (D-013) only
+    covers the EXACT ``(stderr, human, context=False)`` triple this handler
+    registers itself under. A ``setup_logging()`` call requesting a
+    different format (e.g. ``FSM_LLM_LOG_FORMAT=json``) or ``context=True``
+    on the same stderr sink still registers as a distinct handler and still
+    duplicates log lines -- by design, since those are legitimately
+    different handler shapes, not a dedup gap.
+    """
+    # DECISION plan-2026-09-20T114608-a8e47b88/D-013
+    # Register through setup_logging() itself, so the handler lands under
+    # setup_logging()'s own (sink, format, context) key. A hand-built
+    # logger.add() would leave that key empty and a later
+    # setup_logging(sink="stderr", format="human") would add a SECOND stderr
+    # handler, duplicating every subsequent log line. Do NOT re-inline a
+    # stream sink or its format string here (it drifted once: no date).
+    # Only library-registered handlers are removed (not the user's), which
+    # also lets setup_file_logging be called again.
+    reset_handlers()
+    setup_logging(sink=LOG_SINK_STDERR, format=LOG_FORMAT_HUMAN, level="DEBUG")
 
 
 # --------------------------------------------------------------

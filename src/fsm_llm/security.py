@@ -6,17 +6,24 @@ secret-looking context-entry filter (`is_forbidden_context_entry` and its
 name, value-shape and vocabulary layers). These are the single decision
 points every context filter imports; never re-inline either check.
 
+Also holds the shared path-confinement check (`resolve_within`) and the
+API-key compare of the two HTTP servers (`presented_api_key`,
+`api_key_matches`, `checked_api_key`).
+
 This module imports only the standard library, never `fsm_llm.constants`.
-`fsm_llm.constants` re-exports every public name (and every private name a
-caller references) from here, so existing imports keep working.
+`fsm_llm.constants` re-exports five public names from here
+(`FORBIDDEN_CONTEXT_PATTERNS`, `COMPILED_FORBIDDEN_CONTEXT_PATTERNS`,
+`INTERNAL_KEY_PREFIXES`, `has_internal_prefix`, `is_forbidden_context_entry`);
+every other name, private ones included, is imported from here.
 """
 
 from __future__ import annotations
 
+import hmac
 import math
 import os
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -71,8 +78,8 @@ def has_internal_prefix(key: str, prefixes: Iterable[str] | None = None) -> bool
 def resolve_within(root: Path, relative: str | os.PathLike[str]) -> Path | None:
     """Resolve *relative* under *root* and return it only if it stays inside.
 
-    This is the shared comparison used by the OKF bundle loader and writer
-    and the Agent Skills reads; other sites keep
+    This is the shared comparison used by the OKF bundle loader and writer,
+    the Agent Skills reads and the monitor's preset ids; other sites keep
     their own checks. Never re-inline it in any of them.
 
     Interface contract:
@@ -107,6 +114,67 @@ def resolve_within(root: Path, relative: str | os.PathLike[str]) -> Path | None:
     if resolved == root or root in resolved.parents:
         return resolved
     return None
+
+
+# --------------------------------------------------------------
+# API Key Check (monitor server, AgentServer)
+# --------------------------------------------------------------
+
+
+def checked_api_key(api_key: str | None) -> str | None:
+    """Return ``api_key`` unchanged; ``ValueError`` if it is empty or blank.
+
+    Interface contract: ``None`` means "no auth" and passes through; a ``str``
+    that is empty or whitespace-only raises ``ValueError``.
+    """
+    # DECISION plan-2026-09-24T091842-c1d5bfbc/D-006
+    # Reject an empty key. Do NOT accept it (compare_digest(b"", b"") is True,
+    # so an empty header would authenticate) and do NOT map it to None (an
+    # operator who passed os.getenv("KEY", "") would silently get an open
+    # server). An empty ENV VAR still means "unset", decided by the caller.
+    if api_key is not None and not api_key.strip():
+        raise ValueError("api_key must be a non-empty string, or None for no auth")
+    return api_key
+
+
+def presented_api_key(headers: Mapping[str, str]) -> str | None:
+    """The key a request presents: ``Authorization: Bearer <key>``, else ``X-API-Key``.
+
+    Interface contract: ``headers`` is a case-insensitive mapping (Starlette's
+    ``request.headers``) or a dict with lower-case names. A Bearer value is
+    stripped; ``Authorization`` with another scheme falls through to
+    ``X-API-Key``. Returns ``None`` when neither is present.
+    """
+    auth_header = headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        return auth_header[len("bearer ") :].strip()
+    return headers.get("x-api-key")
+
+
+def api_key_matches(token: str | None, expected: str) -> bool:
+    """True when ``token`` equals ``expected``, compared in constant time.
+
+    Interface contract: ``expected`` is a configured, already-checked key
+    (``checked_api_key``). Anything but a ``str`` ``token`` (``None`` for an
+    absent header, a ``bytes`` value) is refused. Never raises for any ``str``,
+    non-ASCII and lone-surrogate text included.
+    """
+    # DECISION plan-2026-09-12T065608-089d0ec7/D-016
+    # hmac.compare_digest, never `!=`: a plain comparison short-circuits on the
+    # first differing byte and leaks the key through response timing. The
+    # `isinstance` check comes first because compare_digest(None, key) raises
+    # TypeError instead of returning False.
+    #
+    # DECISION plan-2026-09-12T065608-089d0ec7/D-020
+    # Do NOT pass `str` to compare_digest: its str overload raises TypeError
+    # unless BOTH sides are ASCII, which would turn an attacker-sent
+    # non-ASCII header into a 500. Encode both sides to bytes first, with
+    # `surrogateescape` so an undecodable header byte encodes losslessly
+    # instead of raising UnicodeEncodeError.
+    return isinstance(token, str) and hmac.compare_digest(
+        token.encode("utf-8", "surrogateescape"),
+        expected.encode("utf-8", "surrogateescape"),
+    )
 
 
 # --------------------------------------------------------------
@@ -596,9 +664,9 @@ FORBIDDEN_CONTEXT_PATTERNS = [
     # policy/status tokens. See the D-026 block above before editing.
     rf"(?:^|.*[\W_])passwords?(?!(?:[-_.]?(?:{_PASSWORD_POLICY_SUFFIXES}))+$)",
     # Secret-related keys (not "secretary"); a digit run may follow (`secret1`).
-    r"(?:^|.*[\W_])secret(?:s)?\d*(?:[\W_].*|$)",
-    r".*(?:api[-_.]?key|key[-_.]?api).*",  # API key patterns (both orderings, with dash/underscore/dot)
-    r"(?:^|.*[\W_])credential(?:s)?\d*(?:[\W_].*|$)",  # Credential-related keys
+    rf"(?:^|.*[\W_])secret(?:s)?{_WORD_END}",
+    r".*(?:api[-_.]?key|key[-_.]?api)",  # API key patterns (both orderings, with dash/underscore/dot)
+    rf"(?:^|.*[\W_])credential(?:s)?{_WORD_END}",  # Credential-related keys
     # DECISION plan-2026-07-20T040150-876e7164/D-015 [STALE] -- cryptographic key
     # material. This is an ENUMERATED CRYPTO DENYLIST and it FAILS OPEN on
     # vocabulary nobody listed; it is NOT a class control and must not be
@@ -647,7 +715,7 @@ FORBIDDEN_CONTEXT_PATTERNS = [
     rf"{_TOKEN_TRIGGER}{_WORD_END}"
     rf"|(?:^|.*[\W_]){_TOKEN_TRIGGER}\d*[-_.]?"
     rf"(?:{_TOKEN_MATERIAL_HEADS})s?{_PLAIN_WORD_END}",
-    r"(?:^|.*[\W_])oauth[-_.]?token(?:s)?(?:[\W_].*|$)",  # OAuth token patterns
+    rf"(?:^|.*[\W_])oauth[-_.]?token(?:s)?{_PLAIN_WORD_END}",  # OAuth token patterns
 ]
 
 # Pre-compiled versions for performance (avoid recompiling in loops)

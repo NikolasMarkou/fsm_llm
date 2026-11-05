@@ -505,11 +505,9 @@ def filter_context_tree(
           ``"too_deep"`` -- callers that want depth-drops to log/format
           differently from a policy drop must check for this exact value).
           Defaults to a no-op.
-        - Recursion mirrors the two original implementations exactly: a
-          dict value recurses at the SAME depth it was scheduled at; a
-          list/tuple's own elements each get one additional depth increment
-          beyond that (this asymmetry existed identically in both original
-          implementations and is preserved verbatim, not "fixed").
+        - Depth: the top-level mapping is depth 0 and every nested container
+          (a dict value or a list/tuple element) sits one level deeper than
+          its parent; one deeper than ``max_depth`` is dropped.
         - Scalars pass through unchanged at any depth (or through ``leaf``
           when given); only dict/list/tuple containers are ever subject to
           the depth bound.
@@ -536,11 +534,13 @@ def filter_context_tree(
           ``MAX_CONTEXT_FILTER_NODES + CONTEXT_FILTER_CYCLIC_WORK_FACTOR *
           distinct_items`` items it raises ``ContextFilterWorkError`` (only a
           cycle that is itself heavily aliased gets there).
-        - Three call sites today: `fsm.py::_strip_internal_mapping` (silent,
+        - Four call sites today: `fsm.py::_strip_internal_mapping` (silent,
           bare-prefix predicate), `context.py::clean_mapping` (5-reason
-          predicate, logging `on_drop`) and `pipeline.py::_json_native_values`
+          predicate, logging `on_drop`), `pipeline.py::_json_native_values`
           (forbidden-entry predicate on the classification `context_snapshot`)
-          -- a "same shape, different behavior" extraction, not a policy merge.
+          and `monitor/collector.py::redact_context` (the dashboard's display
+          filter, with a `leaf` hook) -- a "same shape, different behavior"
+          extraction, not a policy merge.
 
     # DECISION plan-2026-09-21T203800-8a03483a/D-011
     # The depth bound alone does not bound WORK: 3-way aliasing at 14 levels
@@ -947,6 +947,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
                 logger.debug("Code block JSON parsing failed")
 
     # Strategy 3: Find balanced JSON objects
+    closing_index: dict[int, int] = {}  # Strategy 4 reads it as well
     try:
         # Find all potential JSON start positions
         brace_positions = [m.start() for m in re.finditer(r"\{", scan_text)]
@@ -1068,34 +1069,17 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         # For extracted_data, find the key and then use balanced braces
         ed_match = re.search(r'"extracted_data"\s*:\s*\{', text)
         if ed_match:
-            # Start balanced brace matching from the opening brace
+            # The object's closing brace is the one Strategy 3 already matched
+            # (`closing_index`, string/escape aware, same `scan_text`).
             brace_start = text.index("{", ed_match.start())
-            depth = 0
-            in_str = False
-            esc = False
-            for i, ch in enumerate(text[brace_start:], brace_start):
-                if esc:
-                    esc = False
-                    continue
-                if ch == "\\":
-                    esc = True
-                    continue
-                if ch == '"':
-                    in_str = not in_str
-                    continue
-                if not in_str:
-                    if ch == "{":
-                        depth += 1
-                    elif ch == "}":
-                        depth -= 1
-                        if depth == 0:
-                            try:
-                                extracted["extracted_data"] = json.loads(
-                                    text[brace_start : i + 1]
-                                )
-                            except json.JSONDecodeError:
-                                extracted["extracted_data"] = {}
-                            break
+            end_pos = closing_index.get(brace_start)
+            if end_pos is not None:
+                try:
+                    extracted["extracted_data"] = json.loads(
+                        text[brace_start : end_pos + 1]
+                    )
+                except json.JSONDecodeError:
+                    extracted["extracted_data"] = {}
 
         # CF5: `intent`/`confidence` are AUXILIARY classification keys. G4 added
         # their capture here, which flipped a previously-None result into a dict

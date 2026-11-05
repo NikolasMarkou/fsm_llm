@@ -331,6 +331,39 @@ class BasePromptBuilder:
         text = text.replace("</", "&lt;/")
         return text
 
+    def _dump_json(self, obj: Any, what: str, **dumps_kwargs: Any) -> str | None:
+        """``json.dumps(obj, default=str, **dumps_kwargs)``, or ``None`` with a WARNING.
+
+        Interface contract (every prompt section that embeds a JSON dump):
+        ``what`` names the section in the warning. A value that cannot be dumped
+        (mixed-type keys under ``sort_keys``, an int past the digit limit) drops
+        that one section instead of failing the prompt; this never raises for
+        those errors.
+        """
+        try:
+            return json.dumps(obj, default=str, **dumps_kwargs)
+        except (TypeError, ValueError, OverflowError) as e:
+            logger.warning(f"Failed to serialize {what}: {e}")
+            return None
+
+    def _json_cdata_block(self, tag: str, obj: Any, what: str) -> list[str]:
+        """``<tag><![CDATA[ pretty JSON of obj ]]></tag>`` plus a blank line, as lines.
+
+        Interface contract: the dump goes through ``_escape_cdata`` so it
+        cannot close the block or the prompt's own tags. Returns ``[]`` when
+        ``obj`` cannot be dumped (see ``_dump_json``). The caller has already
+        applied the security filter and the key cap.
+        """
+        dumped = self._dump_json(obj, what, indent=1, separators=(",", ": "))
+        if dumped is None:
+            return []
+        return [
+            f"<{tag}><![CDATA[",
+            self._escape_cdata(dumped),
+            f"]]></{tag}>",
+            "",
+        ]
+
     # ========================================================================
     # HISTORY MANAGEMENT (From old version)
     # ========================================================================
@@ -614,20 +647,7 @@ class BasePromptBuilder:
         if not user_context:
             return []
 
-        try:
-            context_json = json.dumps(
-                user_context, indent=1, separators=(",", ": "), default=str
-            )
-            safe_context_json = self._escape_cdata(context_json)
-            return [
-                "<current_context><![CDATA[",
-                safe_context_json,
-                "]]></current_context>",
-                "",
-            ]
-        except (TypeError, ValueError, OverflowError) as e:
-            logger.warning(f"Failed to serialize context: {e}")
-            return []
+        return self._json_cdata_block("current_context", user_context, "context")
 
     # ========================================================================
     # SHARED SECTION FACTORIES (used by all prompt builders)
@@ -724,20 +744,11 @@ class BasePromptBuilder:
         managed_exchanges = self._manage_conversation_history(formatted_exchanges)
 
         if managed_exchanges:
-            try:
-                history_json = json.dumps(
-                    managed_exchanges, indent=1, separators=(",", ": "), default=str
-                )
-                safe_history_json = self._escape_cdata(history_json)
-                return [
-                    *summary_lines,
-                    "<conversation_history><![CDATA[",
-                    safe_history_json,
-                    "]]></conversation_history>",
-                    "",
-                ]
-            except (TypeError, ValueError, OverflowError) as e:
-                logger.warning(f"Failed to serialize conversation history: {e}")
+            block = self._json_cdata_block(
+                "conversation_history", managed_exchanges, "conversation history"
+            )
+            if block:
+                return [*summary_lines, *block]
 
         return summary_lines
 
@@ -1072,18 +1083,7 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         if not data:
             return []
 
-        try:
-            data_json = json.dumps(data, indent=1, separators=(",", ": "), default=str)
-            safe_data_json = self._escape_cdata(data_json)
-            return [
-                "<extracted_data><![CDATA[",
-                safe_data_json,
-                "]]></extracted_data>",
-                "",
-            ]
-        except (TypeError, ValueError, OverflowError) as e:
-            logger.warning(f"Failed to serialize extracted data: {e}")
-            return []
+        return self._json_cdata_block("extracted_data", data, "extracted data")
 
     def _build_rejected_corrections_section(
         self, rejected_corrections: dict[str, Any], extraction_failed: bool = False
@@ -1116,10 +1116,10 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
         data = self._filter_context_for_security(rejected_corrections)
         if not data:
             return notice
-        try:
-            data_json = json.dumps(data, indent=1, separators=(",", ": "), default=str)
-        except (TypeError, ValueError, OverflowError) as e:
-            logger.warning(f"Failed to serialize rejected corrections: {e}")
+        data_json = self._dump_json(
+            data, "rejected corrections", indent=1, separators=(",", ": ")
+        )
+        if data_json is None:
             return notice
         return [
             *notice,
@@ -1243,6 +1243,24 @@ class ResponseGenerationPromptBuilder(BasePromptBuilder):
 # ============================================================================
 
 
+def _reasoning_property() -> dict:
+    """The ``reasoning`` schema property both classification shapes carry."""
+    return {
+        "type": "string",
+        "description": "Chain-of-thought explanation before classification",
+    }
+
+
+def _confidence_property() -> dict:
+    """The ``confidence`` schema property both classification shapes carry."""
+    return {
+        "type": "number",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "description": "Model confidence in this classification",
+    }
+
+
 def build_classification_json_schema(
     schema: ClassificationSchema,
     *,
@@ -1266,12 +1284,7 @@ def build_classification_json_schema(
                 "enum": intent_enum,
                 "description": "Classified intent name",
             },
-            "confidence": {
-                "type": "number",
-                "minimum": 0.0,
-                "maximum": 1.0,
-                "description": "Model confidence in this classification",
-            },
+            "confidence": _confidence_property(),
         }
         intent_score_required = ["intent", "confidence"]
         if include_entities:
@@ -1286,10 +1299,7 @@ def build_classification_json_schema(
         required: list[str] = []
 
         if include_reasoning:
-            properties["reasoning"] = {
-                "type": "string",
-                "description": "Chain-of-thought explanation before classification",
-            }
+            properties["reasoning"] = _reasoning_property()
             required.append("reasoning")
 
         properties["intents"] = {
@@ -1311,10 +1321,7 @@ def build_classification_json_schema(
         required = []
 
         if include_reasoning:
-            properties["reasoning"] = {
-                "type": "string",
-                "description": "Chain-of-thought explanation before classification",
-            }
+            properties["reasoning"] = _reasoning_property()
             required.append("reasoning")
 
         properties["intent"] = {
@@ -1324,12 +1331,7 @@ def build_classification_json_schema(
         }
         required.append("intent")
 
-        properties["confidence"] = {
-            "type": "number",
-            "minimum": 0.0,
-            "maximum": 1.0,
-            "description": "Model confidence in this classification",
-        }
+        properties["confidence"] = _confidence_property()
         required.append("confidence")
 
         if include_entities:
@@ -1497,11 +1499,9 @@ def build_classification_context_block(
         builder._filter_context_for_security(dict(context.get("data") or {}))
     )
     if data:
-        try:
-            data_json = json.dumps(data, default=str, sort_keys=True)
+        data_json = builder._dump_json(data, "classifier context data", sort_keys=True)
+        if data_json is not None:
             parts.append(f"<context_data>{sanitize(data_json)}</context_data>")
-        except (TypeError, ValueError, OverflowError) as e:
-            logger.warning(f"Classifier context data not serializable, dropped: {e}")
 
     if not parts:
         return ""
@@ -1529,10 +1529,10 @@ def build_classification_context_block(
 
 @dataclass(frozen=True)
 class FieldExtractionPromptConfig(BasePromptConfig):
-    """Configuration for field extraction prompts."""
+    """Configuration for field extraction prompts (``include_conversation_history``
+    is the base setting)."""
 
     include_context_data: bool = True
-    include_conversation_history: bool = True
 
 
 class FieldExtractionPromptBuilder(BasePromptBuilder):
@@ -1632,17 +1632,14 @@ class FieldExtractionPromptBuilder(BasePromptBuilder):
             filtered = self._limit_context_by_key_count(filtered)
             ctx_json = None
             if filtered:
-                # Same guard as every sibling context section: a value that
-                # cannot be dumped (mixed-type keys under sort_keys, a huge
-                # int) drops the section with a WARNING and keeps the prompt.
-                try:
-                    ctx_json = json.dumps(
-                        filtered,
-                        sort_keys=self.config.deterministic_output,
-                        default=str,
-                    )
-                except (TypeError, ValueError, OverflowError) as e:
-                    logger.warning(f"Failed to serialize field-prompt context: {e}")
+                # Same guard as every sibling context section (`_dump_json`): a
+                # value that cannot be dumped (mixed-type keys under sort_keys,
+                # a huge int) drops the section with a WARNING, keeps the prompt.
+                ctx_json = self._dump_json(
+                    filtered,
+                    "field-prompt context",
+                    sort_keys=self.config.deterministic_output,
+                )
             if ctx_json is not None:
                 # DECISION plan-2026-07-21T045419-9925aa3a/D-010
                 # Sanitize the dumped JSON before emitting. These values were

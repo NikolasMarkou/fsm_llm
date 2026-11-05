@@ -1250,17 +1250,17 @@ class TestApiKeyGate:
         test pins that `compare_digest` is actually the mechanism used, so a
         regression back to a plain `!=` comparison would be caught if this
         spy is ever tightened to assert call counts."""
-        import fsm_llm.monitor.server as server_module
+        import fsm_llm.security as security_module
 
         calls: list[tuple[bytes, bytes]] = []
-        original = server_module.hmac.compare_digest
+        original = security_module.hmac.compare_digest
 
         def _spy(a: bytes, b: bytes) -> bool:
             calls.append((a, b))
             return original(a, b)
 
         configure(manager=InstanceManager(), api_key="s3cr3t")
-        server_module.hmac.compare_digest = _spy
+        security_module.hmac.compare_digest = _spy
         try:
             client = TestClient(app)
             resp = client.post(
@@ -1274,7 +1274,7 @@ class TestApiKeyGate:
             # test_non_ascii_api_key_header_returns_401_not_500 below).
             assert calls == [(b"s3cr3t", b"s3cr3t")]
         finally:
-            server_module.hmac.compare_digest = original
+            security_module.hmac.compare_digest = original
 
     def test_non_ascii_api_key_header_returns_401_not_500(self):
         """D-020: a malformed/non-ASCII X-API-Key header must 401, never 500.

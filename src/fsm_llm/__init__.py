@@ -120,7 +120,7 @@ from .handlers import (
 # LLM Interface Components
 # --------------------------------------------------------------
 from .llm import LiteLLMEmbedder, LiteLLMInterface, LLMInterface, tool_exchange
-from .logging import setup_logging
+from .logging import enable_debug_logging, setup_logging
 
 # --------------------------------------------------------------
 # Working Memory
@@ -470,53 +470,6 @@ def quick_start(fsm_file: str, model: str | None = None) -> API:
 # --------------------------------------------------------------
 # Development and Debug Helpers
 # --------------------------------------------------------------
-
-
-def enable_debug_logging():
-    """Enable debug logging for development.
-
-    Note: the dedup against a later ``setup_logging()`` call (D-013) only
-    covers the EXACT ``(stderr, human, context=False)`` triple this handler
-    registers itself under. A ``setup_logging()`` call requesting a
-    different format (e.g. ``FSM_LLM_LOG_FORMAT=json``) or ``context=True``
-    on the same stderr sink still registers as a distinct handler and still
-    duplicates log lines -- by design, since those are legitimately
-    different handler shapes, not a dedup gap.
-    """
-    from .constants import LOG_FORMAT_HUMAN, LOG_SINK_STDERR
-    from .logging import (
-        enable_library_logging,
-        library_only,
-        logger,
-        register_stream_handler,
-        replace_default_handler,
-        reset_handlers,
-    )
-
-    # Re-enable the library loggers
-    enable_library_logging()
-    replace_default_handler()
-
-    # Only remove library-registered handlers (not user's handlers), and let
-    # setup_file_logging be called again.
-    reset_handlers()
-
-    handler_id = logger.add(
-        sys.stderr,
-        level="DEBUG",
-        format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | <cyan>{name}:{function}:{line}</cyan> | {message}",
-        filter=library_only,
-    )
-
-    # DECISION plan-2026-09-20T114608-a8e47b88/D-013
-    # Register this handler under setup_logging()'s own (sink, format,
-    # context) key. Without this, a later setup_logging(sink="stderr",
-    # format="human") call cannot see this handler already exists and adds a
-    # SECOND stderr handler, duplicating every subsequent log line.
-    # context=False matches this handler's own (non-contextual) format string
-    # above -- do NOT pass a different triple. register_stream_handler builds
-    # the key with setup_logging()'s own _stream_key, so the shapes cannot drift.
-    register_stream_handler(handler_id, LOG_SINK_STDERR, LOG_FORMAT_HUMAN, False)
 
 
 def disable_warnings():

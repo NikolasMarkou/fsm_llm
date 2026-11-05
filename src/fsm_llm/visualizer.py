@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict
 # --------------------------------------------------------------
 from .constants import CLI_EXIT_FAILURE, CLI_EXIT_OK
 from .definitions import FSMDefinition, Transition
-from .logging import logger
+from .logging import enable_library_logging, logger, setup_cli_logging
 
 # --------------------------------------------------------------
 
@@ -1650,8 +1650,9 @@ def main(fsm_path, style: str = "full", *, output_format: str = "ascii"):
     # `logging.py`'s import-time `logger.disable("fsm_llm")` is deliberate library
     # hygiene; this function is the APPLICATION (the `fsm-llm-visualize` console
     # script and `fsm-llm --mode visualize`) and must opt back in, or the diagram
-    # it exists to print never reaches the user. See decisions.md D-014.
-    logger.enable("fsm_llm")
+    # it exists to print never reaches the user. See decisions.md D-014. The
+    # enable goes through the one `enable_library_logging`.
+    enable_library_logging()
 
     diagram = visualize_fsm_from_file(fsm_path, style, output_format=output_format)
 
@@ -1692,6 +1693,7 @@ def main_cli():
         help="Output format (default: ascii); --style applies to ascii only",
     )
     args = parser.parse_args()
+    setup_cli_logging("INFO")
     sys.exit(
         main(fsm_path=args.fsm, style=args.style, output_format=args.output_format)
     )

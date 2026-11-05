@@ -9,7 +9,6 @@ and workflows.
 from __future__ import annotations
 
 import asyncio
-import hmac
 import json
 import os
 import re
@@ -32,6 +31,7 @@ from starlette.requests import Request
 from fsm_llm import __version__ as core_version
 from fsm_llm.definitions import ConversationBusyError
 from fsm_llm.logging import logger
+from fsm_llm.security import api_key_matches, checked_api_key, presented_api_key
 from fsm_llm.utilities import redacting_json_default
 from fsm_llm.visualizer import build_fsm_graph
 
@@ -294,12 +294,11 @@ def configure(
     """
     global _manager, _flows, _CORS_ORIGINS, _CORS_ORIGIN_REGEX, _api_key
     # DECISION plan-2026-09-24T091842-c1d5bfbc/D-006: raise on an empty or
-    # whitespace-only api_key, before any global changes. Do NOT store it
-    # (compare_digest(b"", b"") is True, so an empty header would authenticate)
-    # and do NOT map it to None (a caller passing os.getenv("KEY", "") would
-    # silently get an open monitor). The env var "" still means unset.
-    if api_key is not None and not api_key.strip():
-        raise ValueError("api_key must be a non-empty string, or None for no auth")
+    # whitespace-only api_key, before any global changes (`checked_api_key`).
+    # Do NOT store it and do NOT map it to None (a caller passing
+    # os.getenv("KEY", "") would silently get an open monitor). The env var ""
+    # still means unset.
+    checked_api_key(api_key)
     new_api_key = (
         api_key
         if api_key is not None
@@ -382,47 +381,14 @@ def _require_api_key(request: Request) -> None:
     """
     if _api_key is None:
         return
-    auth_header = request.headers.get("authorization", "")
-    token: str | None = None
-    if auth_header.lower().startswith("bearer "):
-        token = auth_header[len("bearer ") :].strip()
-    if token is None:
-        token = request.headers.get("x-api-key")
-    # DECISION plan-2026-09-12T065608-089d0ec7/D-016: use hmac.compare_digest
-    # instead of `!=` — plain string comparison short-circuits on the first
-    # differing byte, letting an attacker who can measure response-time
-    # differences across many requests narrow down the correct key
-    # character-by-character (a timing side-channel). `token is not None` is
-    # checked first because compare_digest requires both arguments to be
-    # str/bytes — `hmac.compare_digest(None, _api_key)` raises TypeError,
-    # it does not return False. See decisions.md D-016.
-    #
-    # DECISION plan-2026-09-12T065608-089d0ec7/D-020: do NOT pass `token`/
-    # `_api_key` to `hmac.compare_digest` as `str` — CPython's `str` overload
-    # of `compare_digest` refuses to compare two `str` objects unless BOTH
-    # are ASCII-only and raises `TypeError` otherwise (this is a NEW crash
-    # D-016's own fix introduced: the old `token != _api_key` never raised on
-    # non-ASCII input). A single non-ASCII byte in an `X-API-Key`/
-    # `Authorization` header — attacker-controlled, unauthenticated — would
-    # therefore turn a 401 into an unhandled 500. Encode both sides to
-    # `bytes` first (`surrogateescape` so an un-decodable header byte still
-    # encodes losslessly instead of raising `UnicodeEncodeError`); comparing
-    # `bytes` is always well-defined for `compare_digest` and preserves the
-    # constant-time property D-016 needs. See decisions.md D-020.
-    if token is None or not hmac.compare_digest(
-        token.encode("utf-8", "surrogateescape"),
-        _api_key.encode("utf-8", "surrogateescape"),
-    ):
+    # The compare itself (hmac.compare_digest on surrogateescape bytes, D-016,
+    # D-020) is `security.api_key_matches`, shared with `AgentServer`.
+    if not api_key_matches(presented_api_key(request.headers), _api_key):
         raise HTTPException(status_code=401, detail="missing or invalid API key")
 
 
 def _api_key_matches(token: str | None) -> bool:
-    if _api_key is None:
-        return True
-    return token is not None and hmac.compare_digest(
-        token.encode("utf-8", "surrogateescape"),
-        _api_key.encode("utf-8", "surrogateescape"),
-    )
+    return _api_key is None or api_key_matches(token, _api_key)
 
 
 def _raise_http(e: Exception, action: str) -> NoReturn:

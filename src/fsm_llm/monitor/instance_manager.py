@@ -33,6 +33,7 @@ from fsm_llm.agents import (
 from fsm_llm.constants import DEFAULT_LLM_MODEL
 from fsm_llm.handlers import BaseHandler
 from fsm_llm.logging import logger
+from fsm_llm.security import resolve_within
 from fsm_llm.workflows import (
     WorkflowDefinition,
     WorkflowEngine,
@@ -492,11 +493,16 @@ def validate_preset_id(preset_id: str, base: Path) -> Path:
     """
     if ".." in preset_id or preset_id.startswith("/"):
         raise ValueError("Invalid preset ID")
-    file_path = base / preset_id
+    # The confinement test is the shared `security.resolve_within`; the lexical
+    # pre-check above stays, as it also refuses `sub/../x.json`, which would
+    # land inside.
     try:
-        file_path.resolve().relative_to(base.resolve())
-    except ValueError as e:
+        confined = resolve_within(base.resolve(), preset_id)
+    except ValueError as e:  # an embedded NUL byte
         raise ValueError("Invalid preset ID") from e
+    if confined is None:
+        raise ValueError("Invalid preset ID")
+    file_path = base / preset_id
     if not file_path.exists():
         raise FileNotFoundError(f"Preset not found: {preset_id}")
     return file_path
