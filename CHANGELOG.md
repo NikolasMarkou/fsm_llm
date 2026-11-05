@@ -63,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- OKF and Agent Skills (plan 5980fbb7 step 9): `check_bundle` reports `check-deadline` once even after `backlinks` already left it in `bundle.issues` (it was listed twice and `fsm-llm-okf validate` counted two errors); the frontmatter bracket pre-check (`frontmatter._flow_depth_exceeded`) no longer counts `[` and `{` inside a quoted scalar or a `#` comment, so a flat description with over 64 literal brackets loads instead of being refused as `frontmatter-too-deep` (genuinely nested flow collections are still refused at the cap, and the brackets of all quoted spans together are bounded at 4 times the cap because the span reading is a heuristic); `fsm-llm-okf validate` hints `--max-seconds` next to a `check-deadline` issue too, not only `load-deadline`. `fsm-llm-okf validate` now also control-strips each issue line, as `fsm-llm-skills` already did. `okf.py` has a static `__all__` and no longer keeps the private aliases `_Note` and `_SURROGATE_RE`. `fsm-llm-okf validate` and `fsm-llm-skills validate` share one report loop and one `--max-seconds` argument in `cli_support` (`report_issues`, `add_max_seconds`); output is unchanged.
+
 A pass over `src/fsm_llm` fixed 21 CRITICAL and HIGH findings. Each has a test that fails on the parent commit.
 
 - `fsm-llm` (the runner) prints the greeting, each `System:` reply, the `Type 'exit'...` hint and the final redacted `Data:` dump to stdout with `print()`, and a failure to stderr. They used to go only to the logger, so after `setup_file_logging` (or with library logging off) a terminal session showed nothing. The file log keeps the `logger` records; a silent reply prints no `System:` line.

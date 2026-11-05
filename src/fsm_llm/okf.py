@@ -52,6 +52,31 @@ from .definitions import OKFError
 from .logging import logger
 from .security import resolve_within
 
+__all__ = [
+    "INCOMPLETE_CODES",
+    "OKFBundle",
+    "OKFConcept",
+    "OKFIssue",
+    "OKFLimits",
+    "TrustTier",
+    "body_page",
+    "capped_issues",
+    "capped_line",
+    "capped_note",
+    "check_bundle",
+    "close_ids",
+    "has_lone_surrogate",
+    "incomplete_note",
+    "iso_utc",
+    "load_bundle",
+    "parse_concept_text",
+    "parse_okf_datetime",
+    "strip_unsafe_text",
+    "text_page",
+    "write_bundle",
+    "writes_within_caps",
+]
+
 # --- Untrusted-text helper (shared by every output path) ---
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?")
 _LINE_BREAKS = "\n\r\t\u2028\u2029\x0b\x0c\x85"
@@ -258,8 +283,6 @@ _MAX_FILE_WARNINGS = 25
 
 
 # The one frontmatter seam is ``frontmatter.py``; these names stay module globals (tests patch them).
-_Note = _fm.Note
-_SURROGATE_RE = _fm.SURROGATE_RE
 _split_frontmatter = _fm.split_frontmatter
 _read_bytes = _fm.read_bytes
 _load_yaml = partial(
@@ -267,7 +290,7 @@ _load_yaml = partial(
 )
 
 
-def _text(data: dict[str, Any], key: str, note: _Note) -> str | None:
+def _text(data: dict[str, Any], key: str, note: _fm.Note) -> str | None:
     value = data.get(key)
     if value is None or isinstance(value, str):
         return value
@@ -278,7 +301,7 @@ def _text(data: dict[str, Any], key: str, note: _Note) -> str | None:
     return None
 
 
-def _tags(value: Any, note: _Note) -> list[str]:
+def _tags(value: Any, note: _fm.Note) -> list[str]:
     if isinstance(value, str):
         note("warning", "tags-string", "'tags' is a string; split on commas")
         items: list[Any] = value.split(",")
@@ -293,7 +316,9 @@ def _tags(value: Any, note: _Note) -> list[str]:
     return [s for i in items if i is not None and (s := str(i).strip())]
 
 
-def _mapping_list(data: dict[str, Any], key: str, note: _Note) -> list[dict[Any, Any]]:
+def _mapping_list(
+    data: dict[str, Any], key: str, note: _fm.Note
+) -> list[dict[Any, Any]]:
     """A list of mappings; a bare mapping is a one-element list (spec MUST for
     ``verified``). Other entries are dropped with a warning."""
     value = data.get(key)
@@ -309,7 +334,7 @@ def _mapping_list(data: dict[str, Any], key: str, note: _Note) -> list[dict[Any,
     return kept
 
 
-def _check_timestamp(label: str, value: Any, note: _Note) -> None:
+def _check_timestamp(label: str, value: Any, note: _fm.Note) -> None:
     code = parse_okf_datetime(value)[1]
     if code == "invalid":
         note("warning", "timestamp-invalid", f"{label} is not a timestamp: {value!r}")
@@ -328,7 +353,7 @@ def _check_timestamp(label: str, value: Any, note: _Note) -> None:
 
 
 def _check_timestamps(
-    stale_after: Any, generated: Any, verified: Any, note: _Note
+    stale_after: Any, generated: Any, verified: Any, note: _fm.Note
 ) -> None:
     """Check ``stale_after``, ``generated.at`` and every ``verified[].at``."""
     stamps = [
@@ -360,7 +385,7 @@ def parse_concept_text(concept_id: str, text: str) -> tuple[OKFConcept, list[OKF
     return concept, issues
 
 
-def _build_concept(concept_id: str, text: str, note: _Note) -> OKFConcept:
+def _build_concept(concept_id: str, text: str, note: _fm.Note) -> OKFConcept:
     raw, body, problem = _split_frontmatter(text)
     if problem:
         note("error", problem, f"no complete frontmatter block ({problem})")
@@ -736,7 +761,7 @@ def capped_issues(
     return [*order[:cap], kind(severity="info", code="issues-truncated", message=extra)]
 
 
-def capped_note(emit: Callable[..., None], cap: int, what: str) -> _Note:
+def capped_note(emit: Callable[..., None], cap: int, what: str) -> _fm.Note:
     """A ``note(severity, code, message)`` that calls ``emit(severity=, code=,
     message=)`` for at most *cap* warnings, then once for an info
     ``issues-truncated`` ("further warnings for this *what* are not shown"), then
@@ -847,7 +872,7 @@ def load_bundle(
             if not all(re.match(r"\d{4}-\d{2}-\d{2}", h) for h in headings):
                 issue("log-heading", rel)
             return
-        note: _Note = lambda s, c, m: issues.append(  # noqa: E731
+        note: _fm.Note = lambda s, c, m: issues.append(  # noqa: E731
             OKFIssue(severity=s, code=c, message=m, path=rel)
         )
         data = _load_yaml(raw, note) if raw is not None else {}
@@ -981,7 +1006,8 @@ def check_bundle(bundle: OKFBundle) -> list[OKFIssue]:
         add("info", "okf-version-unknown", f"okf_version {version!r} unknown")
     for c in bundle:
         if time.monotonic() > deadline:
-            out.append(_CHECK_DEADLINE)
+            if _CHECK_DEADLINE not in out:  # backlinks may have left it behind
+                out.append(_CHECK_DEADLINE)
             break
         note = partial(add, cid=c.id)
 
@@ -1097,7 +1123,7 @@ def _render_concept(concept: OKFConcept) -> bytes:
             f"concept {concept.id!r}: frontmatter cannot be written ({why})"
         ) from exc
     body = concept.body + ("\n" if concept.body and concept.body[-1] != "\n" else "")
-    if lone or _SURROGATE_RE.search(body):  # YAML would escape it
+    if lone or _fm.SURROGATE_RE.search(body):  # YAML would escape it
         raise OKFError(f"concept {concept.id!r}: holds a lone surrogate (not UTF-8)")
     # DECISION plan-2026-10-21T140931-095ea5f8/D-018
     # The loader's bounds and measure: do NOT write what `load_bundle` rejects.

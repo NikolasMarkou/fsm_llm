@@ -20,12 +20,17 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections import Counter
 from collections.abc import Callable, Sequence
 from typing import TextIO
 
 from .agent_skills import SkillCatalog, SkillLimits, incomplete_note, load_skills
-from .cli_support import exit_main, positive_seconds, report_error, run_cli
+from .cli_support import (
+    add_max_seconds,
+    exit_main,
+    report_error,
+    report_issues,
+    run_cli,
+)
 from .constants import (
     CLI_EXIT_FAILURE,
     CLI_EXIT_OK,
@@ -63,13 +68,13 @@ def _load(args: argparse.Namespace) -> SkillCatalog:
 def _cmd_validate(args: argparse.Namespace) -> int:
     """check skills against the Agent Skills rules"""
     catalog = _load(args)
-    for issue in catalog.issues:  # load_skills caps the list and says so
-        hint = " (raise with --max-seconds)" if issue.code == "load-deadline" else ""
-        _say(f"{issue.severity} {issue.code} {issue.path or '-'} {issue.message}{hint}")
-    n = Counter(issue.severity for issue in catalog.issues)
-    e, w, i = n["error"], n["warning"], n["info"]
-    _say(f"{len(catalog)} skills, {e} errors, {w} warnings, {i} info", sys.stderr)
-    return CLI_EXIT_FAILURE if e or (args.strict and w) else CLI_EXIT_OK
+    return report_issues(  # load_skills caps the list and says so
+        catalog.issues,
+        label="skills",
+        count=len(catalog),
+        strict=args.strict,
+        where=lambda issue: issue.path or "-",
+    )
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
@@ -121,12 +126,7 @@ def _build_parser() -> argparse.ArgumentParser:
         for positional in lead:
             command.add_argument(positional, help="skill name")
         command.add_argument("paths", nargs="+", metavar="PATH")
-        command.add_argument(
-            "--max-seconds",
-            type=positive_seconds,
-            default=SKILL_MAX_LOAD_SECONDS,
-            help="wall-clock budget of the load (default %(default)s)",
-        )
+        add_max_seconds(command, SKILL_MAX_LOAD_SECONDS)
         return command
 
     add("validate", _cmd_validate).add_argument("--strict", action="store_true")

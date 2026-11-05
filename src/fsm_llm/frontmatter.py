@@ -87,16 +87,52 @@ def split_frontmatter(text: str) -> tuple[str | None, str, str | None]:
     return rest[: closing.start()], rest[closing.end() :].removeprefix("\n"), None
 
 
+_QUOTE_STARTS = " \t\n[{,:-?"  # what may precede the quote that opens a quoted scalar
+_HIDDEN_FACTOR = 4  # bracket levels a quoted span may hide, in units of max_depth
+
+
 def _flow_depth_exceeded(raw: str, max_depth: int) -> bool:
-    """Bound nested ``[``/``{`` first (PyYAML's scanner is quadratic on them)."""
-    depth = 0
-    for ch in raw:
-        if ch in "[{":
+    """Bound nested ``[``/``{`` first (PyYAML's scanner is quadratic on them).
+
+    Brackets inside a quoted scalar or a ``#`` comment are text, not nesting, so
+    a flat string such as ``"uses [[[ as a literal"`` is not refused. The span
+    reading is a heuristic (it cannot tell a plain-scalar apostrophe from a
+    quote without parsing), so it is never trusted past a bound: the net open
+    brackets of all quoted spans together may not exceed
+    ``_HIDDEN_FACTOR * max_depth``, which keeps the real nesting, and so the
+    scanner's cost, bounded however the spans are misread.
+    """
+    depth = hidden = span = 0
+    quote, prev, i, end = "", " ", 0, len(raw)
+    while i < end:
+        ch = raw[i]
+        i += 1
+        if quote:
+            if ch == "\\" and quote == '"':
+                i += 1  # an escaped character
+            elif ch == quote:
+                if quote == "'" and raw[i : i + 1] == "'":
+                    i += 1  # '' is a quote inside the string
+                else:
+                    quote, hidden, span = "", hidden + span, 0
+            elif ch in "[{":
+                span += 1
+                if hidden + span > _HIDDEN_FACTOR * max_depth:
+                    return True
+            elif ch in "]}" and span:
+                span -= 1
+        elif ch in "'\"" and prev in _QUOTE_STARTS:
+            quote = ch
+        elif ch == "#" and prev in " \t\n":  # a comment runs to the end of the line
+            newline = raw.find("\n", i)
+            i, ch = (end if newline < 0 else newline), "\n"
+        elif ch in "[{":
             depth += 1
             if depth > max_depth:
                 return True
         elif ch in "]}" and depth:
             depth -= 1
+        prev = ch
     return False
 
 

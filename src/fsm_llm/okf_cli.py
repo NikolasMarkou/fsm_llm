@@ -34,7 +34,13 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from .cli_support import exit_main, positive_seconds, report_error, run_cli
+from .cli_support import (
+    add_max_seconds,
+    exit_main,
+    report_error,
+    report_issues,
+    run_cli,
+)
 from .constants import (
     CLI_EXIT_FAILURE,
     CLI_EXIT_OK,
@@ -62,7 +68,6 @@ _PROG = "fsm-llm-okf"
 _MAX_STORE_BYTES = 64 * 1024 * 1024
 _MAX_ID_ARG_CHARS = 500
 _HEADER_FIELD_CHARS = 500
-_SEVERITIES = ("error", "warning", "info")
 
 
 def _err(message: str) -> None:
@@ -86,19 +91,13 @@ def _load(args: argparse.Namespace) -> OKFBundle:
 def _cmd_validate(args: argparse.Namespace) -> int:
     bundle = _load(args)
     issues = check_bundle(bundle)
-    for issue in issues:  # check_bundle caps the list and says so
-        where = issue.id or issue.path or "-"
-        hint = " (raise with --max-seconds)" if issue.code == "load-deadline" else ""
-        print(f"{issue.severity} {issue.code} {where} {issue.message}{hint}")
-    count = {s: sum(1 for i in issues if i.severity == s) for s in _SEVERITIES}
-    print(
-        f"{len(bundle)} concepts, {count['error']} errors, "
-        f"{count['warning']} warnings, {count['info']} info",
-        file=sys.stderr,
+    return report_issues(  # check_bundle caps the list and says so
+        issues,
+        label="concepts",
+        count=len(bundle),
+        strict=args.strict,
+        where=lambda issue: issue.id or issue.path or "-",
     )
-    if count["error"] or (args.strict and count["warning"]):
-        return CLI_EXIT_FAILURE
-    return CLI_EXIT_OK
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
@@ -214,13 +213,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     loads = argparse.ArgumentParser(add_help=False)  # shared by the loading commands
     loads.add_argument("path", help="bundle root directory")
-    loads.add_argument(
-        "--max-seconds",
-        type=positive_seconds,
-        default=OKF_MAX_LOAD_SECONDS,
-        metavar="SECONDS",
-        help="wall-clock budget of the load (default %(default)s)",
-    )
+    add_max_seconds(loads, OKF_MAX_LOAD_SECONDS, metavar="SECONDS")
 
     def add(
         name: str,

@@ -543,13 +543,12 @@ class TestOneYamlLoader:
 
 
 class TestOkfKeepsItsWiring:
-    """``okf.py`` imports the seam under its old private names (monkeypatch
-    targets of the OKF tests) and hands it the OKF limits."""
+    """``okf.py`` keeps three private names of the seam (monkeypatch targets of
+    the OKF tests) and hands it the OKF limits."""
 
     def test_the_private_names_are_the_shared_functions(self) -> None:
         assert okf_module._split_frontmatter is split_frontmatter
         assert okf_module._read_bytes is read_bytes
-        assert okf_module._SURROGATE_RE is SURROGATE_RE
 
     def test_okf_passes_its_own_limits(self) -> None:
         load = okf_module._load_yaml
