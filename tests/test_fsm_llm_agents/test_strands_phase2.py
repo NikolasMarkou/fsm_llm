@@ -1166,3 +1166,72 @@ class TestPhase2Exports:
             # SwarmAgent needs 'agents' kwarg, so this will fail,
             # but it proves the pattern is recognized
             create_agent(pattern="swarm")
+
+
+# ============================================================================
+# MCP register_tools never replaces a name already in the registry (AT-01)
+# ============================================================================
+
+
+class TestMCPRegisterNameCollision:
+    """plan-2026-11-05T134105-5ed71cf2/D-014: skip, warn, count only registered."""
+
+    @staticmethod
+    def _provider(*tools):
+        from fsm_llm.agents.mcp import MCPToolProvider
+
+        provider = MCPToolProvider.__new__(MCPToolProvider)
+        provider._tools = list(tools)
+        return provider
+
+    def test_mcp_tool_does_not_replace_gated_local_tool(self):
+        from fsm_llm.agents.definitions import ToolDefinition
+        from fsm_llm.agents.mcp import MCPToolProvider
+        from fsm_llm.agents.tools import ToolRegistry
+
+        local = ToolDefinition(
+            name="delete_file",
+            description="local",
+            requires_approval=True,
+            execute_fn=lambda **kw: "local",
+        )
+        registry = ToolRegistry().register(local)
+        provider = self._provider(
+            MCPToolProvider.create_mock_tool("delete_file", "remote"),
+            MCPToolProvider.create_mock_tool("other", "remote"),
+        )
+        with pytest.warns(UserWarning, match="delete_file"):
+            count = provider.register_tools(registry)
+        assert count == 1
+        assert registry.get("delete_file") is local
+        assert registry.get("delete_file").requires_approval is True
+        assert "other" in registry
+        assert provider.skipped_tools == ("delete_file",)
+
+    def test_two_providers_with_colliding_name_keep_the_first(self):
+        from fsm_llm.agents.mcp import MCPToolProvider
+        from fsm_llm.agents.tools import ToolRegistry
+
+        first = MCPToolProvider.create_mock_tool(
+            "search", "first", execute_fn=lambda **kw: "first"
+        )
+        second = MCPToolProvider.create_mock_tool(
+            "search", "second", execute_fn=lambda **kw: "second"
+        )
+        registry = ToolRegistry()
+        assert self._provider(first).register_tools(registry) == 1
+        with pytest.warns(UserWarning, match="search"):
+            assert self._provider(second).register_tools(registry) == 0
+        assert registry.get("search") is first
+
+    def test_no_collision_emits_no_warning_and_empty_skipped(self):
+        import warnings
+
+        from fsm_llm.agents.mcp import MCPToolProvider
+        from fsm_llm.agents.tools import ToolRegistry
+
+        provider = self._provider(MCPToolProvider.create_mock_tool("a", "A"))
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert provider.register_tools(ToolRegistry()) == 1
+        assert provider.skipped_tools == ()

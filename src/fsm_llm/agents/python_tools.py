@@ -17,9 +17,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel
+
 from fsm_llm.logging import logger
 
-from .definitions import ToolDefinition
+from .definitions import ToolAnnotations, ToolDefinition
 from .tools import ToolRegistry
 
 # DECISION plan-2026-10-23T043147-4c2042f3/D-032: "skill" now means only Agent
@@ -56,6 +58,38 @@ class PythonToolDefinition:
     category: str = "general"
     requires_approval: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+    annotations: ToolAnnotations = field(default_factory=ToolAnnotations)
+    timeout_s: float | None = None
+    args_model: type[BaseModel] | None = None
+
+    # DECISION plan-2026-11-05T134105-5ed71cf2/D-014: `annotations`,
+    # `timeout_s` and `args_model` ride along from a `@tool` function to the
+    # registered ToolDefinition (defaults equal ToolDefinition's). Do NOT
+    # rebuild a definition from name/description/schema at a conversion site:
+    # a loaded `@tool(timeout_s=...)` then ran with no timeout, no retry
+    # safety and the coarse schema. `metadata` stays here only: ToolDefinition
+    # has no such field, so there is nothing to carry it to.
+    @classmethod
+    def _from_tool_definition(
+        cls, tool_def: ToolDefinition, category: str
+    ) -> PythonToolDefinition:
+        """The one conversion from a ``@tool`` function's ``ToolDefinition``.
+
+        Interface contract: *tool_def* needs ``execute_fn``; returns a
+        ``PythonToolDefinition`` carrying every ``ToolDefinition`` field the
+        registry uses. Never raises for a well-formed definition.
+        """
+        return cls(
+            name=tool_def.name,
+            description=tool_def.description,
+            execute=tool_def.execute_fn,  # type: ignore[arg-type]
+            parameter_schema=tool_def.parameter_schema,
+            requires_approval=tool_def.requires_approval,
+            category=category,
+            annotations=tool_def.annotations,
+            timeout_s=tool_def.timeout_s,
+            args_model=tool_def.args_model,
+        )
 
     def to_tool_definition(self) -> ToolDefinition:
         """Convert this Python tool to a ``ToolDefinition`` for registration."""
@@ -64,6 +98,9 @@ class PythonToolDefinition:
             description=self.description,
             parameter_schema=self.parameter_schema,
             requires_approval=self.requires_approval,
+            annotations=self.annotations,
+            timeout_s=self.timeout_s,
+            args_model=self.args_model,
             execute_fn=self.execute,
         )
 
@@ -172,16 +209,7 @@ class PythonToolLoader:
                     f"Function {fn.__name__} has no _tool_definition; skipping"
                 )
                 continue
-            tools.append(
-                PythonToolDefinition(
-                    name=tool_def.name,
-                    description=tool_def.description,
-                    execute=tool_def.execute_fn,
-                    parameter_schema=tool_def.parameter_schema,
-                    requires_approval=tool_def.requires_approval,
-                    category=category,
-                )
-            )
+            tools.append(PythonToolDefinition._from_tool_definition(tool_def, category))
         return tools
 
     @staticmethod
@@ -298,13 +326,8 @@ class PythonToolLoader:
                     continue
                 tool_attrs[tool_def.name] = (attr_name, tool_def.execute_fn)
                 tools.append(
-                    PythonToolDefinition(
-                        name=tool_def.name,
-                        description=tool_def.description,
-                        execute=tool_def.execute_fn,
-                        parameter_schema=tool_def.parameter_schema,
-                        requires_approval=tool_def.requires_approval,
-                        category=category_override or "general",
+                    PythonToolDefinition._from_tool_definition(
+                        tool_def, category_override or "general"
                     )
                 )
 

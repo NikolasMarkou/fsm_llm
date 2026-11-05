@@ -350,3 +350,67 @@ class TestFromDirectoryWarns:
             tools = PythonToolLoader.from_directory(tmp_path)
 
         assert [t.name for t in tools] == ["lookup"]
+
+
+_MODULE_TOOL_FIELDS = textwrap.dedent(
+    """
+    from enum import Enum
+    from typing import Optional
+
+    from fsm_llm.agents.definitions import ToolAnnotations
+    from fsm_llm.agents.tools import tool
+
+
+    class Mode(str, Enum):
+        fast = "fast"
+        slow = "slow"
+
+
+    @tool(timeout_s=5, annotations=ToolAnnotations(read_only=True))
+    def lookup(query: str, mode: Mode = Mode.fast, limit: Optional[int] = None) -> str:
+        \"\"\"Look something up.\"\"\"
+        return query
+    """
+)
+
+
+class TestPythonToolCarriesToolFields:
+    """plan-2026-11-05T134105-5ed71cf2/D-014: timeout_s, annotations, args_model
+    of a @tool function survive every conversion path."""
+
+    @staticmethod
+    def _check(definition) -> None:
+        assert definition.timeout_s == 5.0
+        assert definition.annotations.read_only is True
+        assert definition.args_model is not None
+        props = definition.args_model.model_json_schema()["properties"]
+        assert "mode" in props and "limit" in props
+
+    def test_from_directory(self, tmp_path: Path) -> None:
+        (tmp_path / "t.py").write_text(_MODULE_TOOL_FIELDS, encoding="utf-8")
+        tools = PythonToolLoader.from_directory(tmp_path)
+        assert len(tools) == 1
+        self._check(tools[0].to_tool_definition())
+        registry = PythonToolLoader.to_tool_registry(tools)
+        self._check(registry.get("lookup"))
+
+    def test_from_functions(self, tmp_path: Path) -> None:
+        (tmp_path / "t.py").write_text(_MODULE_TOOL_FIELDS, encoding="utf-8")
+        spec = importlib.util.spec_from_file_location("_t_fields", tmp_path / "t.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        tools = PythonToolLoader.from_functions(module.lookup)
+        self._check(tools[0].to_tool_definition())
+        registry = PythonToolLoader.to_tool_registry(tools)
+        self._check(registry.get("lookup"))
+
+    def test_defaults_equal_tool_definition_defaults(self) -> None:
+        from fsm_llm.agents.definitions import ToolDefinition
+        from fsm_llm.agents.python_tools import PythonToolDefinition
+
+        bare = PythonToolDefinition(name="x", description="d", execute=lambda: 1)
+        built = bare.to_tool_definition()
+        reference = ToolDefinition(name="x", description="d", execute_fn=lambda: 1)
+        assert built.timeout_s is reference.timeout_s is None
+        assert built.args_model is None
+        assert built.annotations == reference.annotations

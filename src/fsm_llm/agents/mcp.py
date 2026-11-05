@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import warnings
 from typing import Any
 
 from fsm_llm.logging import logger
@@ -129,6 +130,7 @@ class MCPToolProvider:
 
     # Class-level default so instances built via ``__new__`` still have one.
     _timeout: float | None = Defaults.MCP_TIMEOUT_SECONDS
+    _skipped: tuple[str, ...] = ()
 
     def __init__(
         self,
@@ -319,22 +321,49 @@ class MCPToolProvider:
     def register_tools(self, registry: Any) -> int:
         """Register all discovered tools with a ToolRegistry.
 
-        Must call discover_tools() (async) first.
+        Must call discover_tools() (async) first. A tool whose name is already
+        in *registry* is skipped, never replaced: the earlier tool (a local
+        one, possibly approval-gated, or an earlier provider's) stays. Skipped
+        names raise a ``UserWarning`` (visible with the library logger off)
+        and stay in ``skipped_tools`` until the next call.
 
         Args:
             registry: A ToolRegistry instance.
 
         Returns:
-            Number of tools registered.
+            Number of tools registered (skipped and failed ones not counted).
         """
+        # DECISION plan-2026-11-05T134105-5ed71cf2/D-014: skip a name already
+        # in the registry. Do NOT call `registry.register` for it:
+        # `ToolRegistry.register` is last-wins, so a server-chosen name
+        # silently replaced a local tool and its `requires_approval` gate (the
+        # MCP tool is built ungated), and `count` still counted it. Do NOT
+        # change `register` itself (documented public behaviour).
         count = 0
+        skipped: list[str] = []
         for tool in self._tools:
+            if tool.name in registry:
+                skipped.append(tool.name)
+                continue
             try:
                 registry.register(tool)
                 count += 1
             except Exception as e:
                 logger.warning(f"Failed to register MCP tool '{tool.name}': {e}")
+        self._skipped = tuple(skipped)
+        if skipped:
+            message = (
+                "MCP tools not registered, the name is already in the registry: "
+                + ", ".join(skipped)
+            )
+            logger.warning(message)
+            warnings.warn(message, UserWarning, stacklevel=2)
         return count
+
+    @property
+    def skipped_tools(self) -> tuple[str, ...]:
+        """Names the last ``register_tools`` call skipped (already registered)."""
+        return self._skipped
 
     @property
     def tools(self) -> list[ToolDefinition]:
