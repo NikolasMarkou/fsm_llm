@@ -2102,7 +2102,10 @@ class TestStep13RunnerRedaction:
             ) as spy,
         ):
             assert self._run_main({"turn": 1}, {"turn": 1}) == 0
-        assert spy.call_count == 0
+        # The per-turn debug dump stays lazy (no redaction while logging is
+        # disabled). The final dump is the CLI's printed product (F-HM-01), so
+        # it is redacted once for the terminal whatever the log level is.
+        assert spy.call_count == 1
 
     def test_debug_dump_redacts_when_debug_is_enabled(self):
         """Vacuity guard: with a DEBUG sink the dumps still run, redacted."""

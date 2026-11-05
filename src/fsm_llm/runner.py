@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 
 import dotenv
 
@@ -241,12 +242,21 @@ def main(fsm_path, max_history_size, max_message_length):
 
     logger.info(f"Starting conversation with FSM: {fsm_source}")
     logger.info("Type 'exit' to end the conversation.")
+    # DECISION plan-2026-11-05T134105-5ed71cf2/D-019
+    # The terminal gets the CLI's product (reply, hint, data dump, failure)
+    # through print(), NOT the logger: setup_file_logging() swaps loguru's
+    # default sink for one that skips fsm_llm records (93d78536/D-011) and
+    # every record of this module is an fsm_llm record. Do NOT "fix" this by
+    # adding a console sink (it fights D-011's host-record dedup) or by
+    # touching replace_default_handler. The logger calls stay for the file log.
+    print("Type 'exit' to end the conversation.")
 
     # Start a new conversation
     conversation_id, response = fsm.start_conversation()
     # A silent state replies "": print no empty "System:" line for it.
     if response:
         logger.info(f"System: {response}")
+        print(f"System: {response}")
 
     try:
         # Main conversation loop
@@ -270,6 +280,7 @@ def main(fsm_path, max_history_size, max_message_length):
                 )
                 if response:
                     logger.info(f"System: {response}")
+                    print(f"System: {response}")
 
                 # Log the current state and context
                 data = fsm.get_data(conversation_id)
@@ -293,15 +304,15 @@ def main(fsm_path, max_history_size, max_message_length):
                 return CLI_EXIT_INTERRUPTED
             except Exception as e:
                 logger.exception(e)
+                print(f"Error: {e}", file=sys.stderr)
                 # C8: was -1, which the shell sees as 255; every other
                 # failure path of the three CLIs exits 1.
                 return CLI_EXIT_FAILURE
 
         data = fsm.get_data(conversation_id)
-        logger.opt(lazy=True).info(
-            "Data: \n{}",
-            lambda: json.dumps(_redact_context(data), indent=3, default=_json_default),
-        )
+        dump = json.dumps(_redact_context(data), indent=3, default=_json_default)
+        logger.info("Data: \n{}", dump)
+        print(f"Data: \n{dump}")
     finally:
         # Clean up when done — always runs even on exception
         fsm.end_conversation(conversation_id)

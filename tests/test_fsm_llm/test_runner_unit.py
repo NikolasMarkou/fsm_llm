@@ -381,3 +381,74 @@ class TestRunnerJsonDumpsSurvivesNonJsonNativeContextValues:
             f"expected exactly 1 non-JSON-native WARNING, got "
             f"{len(warnings)}: {[str(r['message']) for r in records]}"
         )
+
+
+class TestRunnerPrintsToTerminal:
+    """F-HM-01 / F-AF-01. `setup_file_logging()` swaps loguru's default sink
+    for one that skips `fsm_llm` records, and `runner` records are `fsm_llm`
+    records, so a reply written only through `logger.info` never reached the
+    terminal. The CLI prints its product (reply, hint, data dump) to stdout
+    and the failure to stderr."""
+
+    def _run(self, api, *, patch_logging=True, inputs=("hi",)):
+        env = {"LLM_MODEL": "test-model"}
+        feed = iter(inputs)
+        with patch.dict(os.environ, env, clear=True):
+            with patch("fsm_llm.runner.dotenv.load_dotenv"):
+                with patch("fsm_llm.runner.API.from_file", return_value=api):
+                    with patch("builtins.input", side_effect=lambda _p="": next(feed)):
+                        from fsm_llm import runner
+
+                        if patch_logging:
+                            with patch("fsm_llm.runner.setup_file_logging"):
+                                return runner.main("/tmp/t.json", 5, 1000)
+                        return runner.main("/tmp/t.json", 5, 1000)
+
+    def _api(self, greeting="HELLO", reply="REPLY", data=None):
+        api = MagicMock()
+        api.start_conversation.return_value = ("conv-1", greeting)
+        api.has_conversation_ended.side_effect = [False, True]
+        api.converse.return_value = reply
+        api.get_data.return_value = data if data is not None else {}
+        return api
+
+    def test_greeting_reply_and_hint_on_stdout(self, capsys):
+        assert self._run(self._api()) == 0
+        out = capsys.readouterr().out
+        assert "System: HELLO" in out
+        assert "System: REPLY" in out
+        assert "Type 'exit' to end the conversation." in out
+
+    def test_empty_reply_prints_no_system_line(self, capsys):
+        assert self._run(self._api(greeting="", reply="")) == 0
+        assert "System:" not in capsys.readouterr().out
+
+    def test_final_data_dump_is_redacted_on_stdout(self, capsys):
+        api = self._api(data={"name": "Ada", "api_key": "sk-live-abcdef0123456789"})
+        assert self._run(api) == 0
+        out = capsys.readouterr().out
+        assert "Data:" in out
+        assert '"name": "Ada"' in out
+        assert "sk-live-abcdef0123456789" not in out
+        assert "<redacted>" in out
+
+    def test_failure_text_on_stderr_and_exit_1(self, capsys):
+        api = self._api()
+        api.converse.side_effect = RuntimeError("provider exploded")
+        assert self._run(api) == 1
+        assert "provider exploded" in capsys.readouterr().err
+
+    def test_reply_reaches_terminal_with_real_file_logging(
+        self, capsys, tmp_path, monkeypatch
+    ):
+        """The real `setup_file_logging` (handler swap) is exercised: the
+        reply must still be on stdout."""
+        from fsm_llm.logging import reset_handlers
+
+        monkeypatch.chdir(tmp_path)
+        reset_handlers()
+        try:
+            assert self._run(self._api(), patch_logging=False) == 0
+        finally:
+            reset_handlers()
+        assert "System: REPLY" in capsys.readouterr().out
