@@ -96,7 +96,7 @@ from contextlib import contextmanager
 from enum import Enum
 from functools import wraps
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 from pydantic import BaseModel, Field
 
@@ -148,10 +148,63 @@ from .session import SessionState, SessionStore
 from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 from .utilities import load_fsm_definition, load_fsm_from_file
 
+# Result type of one `_read_or_ended` read.
+_ReadT = TypeVar("_ReadT")
+
 # Bound of the per-API cache of ended-conversation snapshots (oldest evicted).
 MAX_ENDED_CONVERSATIONS_CACHE = 10_000
 
 # --------------------------------------------------------------
+
+
+def _unexpected_error(error: Exception, log_text: str, error_text: str) -> FSMError:
+    """The ``FSMError`` that stands for an unexpected ``error`` at an ``API`` entry.
+
+    Contract: logs ``"<log_text>: <error>"`` at ERROR and returns
+    ``FSMError("<error_text>: <error>")``; the caller raises it ``from error``.
+    The one place that defines this wrapping for ``_turn_errors``,
+    ``handle_conversation_errors``, ``push_fsm``, ``pop_fsm`` and
+    ``start_conversation`` (each keeps its own pass-through clause: the
+    ``ValueError`` pass-through is the contract of all but ``start_conversation``).
+    """
+    logger.error(f"{log_text}: {error!s}")
+    return FSMError(f"{error_text}: {error!s}")
+
+
+def _read_or_ended(
+    api: API,
+    conversation_id: str,
+    read: Callable[[FSMManager, str], _ReadT],
+    cache_key: str,
+    default: _ReadT,
+) -> _ReadT:
+    """Read from the live conversation, else from the ended-conversation cache.
+
+    Contract (``get_data``, ``get_current_state``, ``get_conversation_history``):
+    ``read(api.fsm_manager, frame_id)`` is the manager call for the top frame.
+    Its result is returned. ``ConversationBusyError`` always re-raises. Any other
+    ``ValueError``/``KeyError``/``FSMError`` is answered from the cache entry's
+    ``cache_key`` (``default`` when absent) only when the conversation is gone
+    and an entry exists; otherwise it re-raises. ``has_conversation_ended`` keeps
+    its own ladder: it answers ``False``, not an error, for a gone conversation
+    with no entry. A module function, not a method (07ad3f8c/D-021).
+    """
+    # DECISION plan-2026-09-22T080837-8b258a25/D-004
+    # All four getters: busy re-raises first; any other error answers from
+    # the ended cache ONLY if `_conversation_gone` (stack or instance torn
+    # down). Do NOT fall back on a live conversation: a StateNotFoundError
+    # there is a real failure, not "ended". Do NOT drop the catch-all:
+    # teardown mid-read raises a not-found FSMError. See D-004, D-039.
+    try:
+        current_fsm_id = api._get_current_fsm_conversation_id(conversation_id)
+        return read(api.fsm_manager, current_fsm_id)
+    except ConversationBusyError:
+        raise
+    except (ValueError, KeyError, FSMError):
+        cached = api._ended_cache_entry(conversation_id)
+        if cached and api._conversation_gone(conversation_id):
+            return cast(_ReadT, cached.get(cache_key, default))
+        raise
 
 
 def handle_conversation_errors(
@@ -178,8 +231,9 @@ def handle_conversation_errors(
             except (ValueError, FSMError):
                 raise
             except Exception as e:
-                logger.error(f"Error in {method.__name__}: {e!s}")
-                raise FSMError(f"{error_message}: {e!s}") from e
+                raise _unexpected_error(
+                    e, f"Error in {method.__name__}", error_message
+                ) from e
 
         return wrapper
 
@@ -270,8 +324,9 @@ def _turn_errors(doing: str, do: str) -> Iterator[None]:
     except (ValueError, FSMError):
         raise
     except Exception as e:
-        logger.error(f"Error {doing} message: {e!s}")
-        raise FSMError(f"Failed to {do} message: {e!s}") from e
+        raise _unexpected_error(
+            e, f"Error {doing} message", f"Failed to {do} message"
+        ) from e
 
 
 def _auto_save_session(api: API, conversation_id: str) -> None:
@@ -880,8 +935,9 @@ class API:
         except FSMError:
             raise
         except Exception as e:
-            logger.error(f"Error starting conversation: {e!s}")
-            raise FSMError(f"Failed to start conversation: {e!s}") from e
+            raise _unexpected_error(
+                e, "Error starting conversation", "Failed to start conversation"
+            ) from e
 
     def converse(self, user_message: str, conversation_id: str) -> str:
         """
@@ -1305,8 +1361,7 @@ class API:
         except (FSMError, ValueError):
             raise
         except Exception as e:
-            logger.error(f"Error pushing FSM: {e!s}")
-            raise FSMError(f"Failed to push FSM: {e!s}") from e
+            raise _unexpected_error(e, "Error pushing FSM", "Failed to push FSM") from e
         finally:
             if not push_succeeded:
                 try:
@@ -1498,7 +1553,7 @@ class API:
             # with another live conversation survives this pop.
             self._release_unreferenced_temp_definitions()
 
-            response = self._generate_resume_message(previous_frame, context_to_merge)
+            response = self._generate_resume_message(context_to_merge)
             with self._stack_lock:
                 stack_depth = len(self.conversation_stacks.get(conversation_id, []))
             logger.info(
@@ -1510,8 +1565,7 @@ class API:
         except (FSMError, ValueError):
             raise
         except Exception as e:
-            logger.error(f"Error popping FSM: {e!s}")
-            raise FSMError(f"Failed to pop FSM: {e!s}") from e
+            raise _unexpected_error(e, "Error popping FSM", "Failed to pop FSM") from e
 
     def _get_frame_context(self, frame: FSMStackFrame) -> dict[str, Any]:
         """Get conversation data for a stack frame.
@@ -1611,13 +1665,11 @@ class API:
 
         if strategy == ContextMergeStrategy.UPDATE:
             merged_context = {**current_context, **context_to_merge}
-        elif strategy == ContextMergeStrategy.PRESERVE:
+        else:  # ContextMergeStrategy.PRESERVE: the enum has two members
             merged_context = current_context.copy()
             for key, value in context_to_merge.items():
                 if key not in current_context:
                     merged_context[key] = value
-        else:
-            raise ValueError(f"Unknown merge strategy {strategy}")
 
         # Only pass changed keys to avoid triggering handlers for unchanged data
         diff = {
@@ -1628,9 +1680,7 @@ class API:
         if diff:
             self.fsm_manager.update_conversation_context(conversation_id, diff)
 
-    def _generate_resume_message(
-        self, previous_frame: FSMStackFrame, merged_context: dict[str, Any]
-    ) -> str:
+    def _generate_resume_message(self, merged_context: dict[str, Any]) -> str:
         """Generate message for resuming previous FSM."""
         if merged_context:
             context_keys = list(merged_context.keys())[:3]
@@ -1788,25 +1838,13 @@ class API:
     @handle_conversation_errors
     def get_data(self, conversation_id: str) -> dict[str, Any]:
         """Get collected data from current FSM."""
-        # DECISION plan-2026-09-22T080837-8b258a25/D-004
-        # All four getters: busy re-raises first; any other error answers from
-        # the ended cache ONLY if `_conversation_gone` (stack or instance torn
-        # down). Do NOT fall back on a live conversation: a StateNotFoundError
-        # there is a real failure, not "ended". Do NOT drop the catch-all:
-        # teardown mid-read raises a not-found FSMError. See D-004, D-039.
-        try:
-            current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-            data: dict[str, Any] = self.fsm_manager.get_conversation_data(
-                current_fsm_id
-            )
-            return data
-        except ConversationBusyError:
-            raise
-        except (ValueError, KeyError, FSMError):
-            cached = self._ended_cache_entry(conversation_id)
-            if cached and self._conversation_gone(conversation_id):
-                return cast(dict[str, Any], cached.get("data", {}))
-            raise
+        return _read_or_ended(
+            self,
+            conversation_id,
+            lambda manager, frame_id: manager.get_conversation_data(frame_id),
+            "data",
+            {},
+        )
 
     @handle_conversation_errors
     def has_conversation_ended(self, conversation_id: str) -> bool:
@@ -1825,34 +1863,24 @@ class API:
     @handle_conversation_errors
     def get_current_state(self, conversation_id: str) -> str:
         """Get current state of active FSM."""
-        try:
-            current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-            state: str = self.fsm_manager.get_conversation_state(current_fsm_id)
-            return state
-        except ConversationBusyError:
-            raise
-        except (ValueError, KeyError, FSMError):
-            cached = self._ended_cache_entry(conversation_id)
-            if cached and self._conversation_gone(conversation_id):
-                return cast(str, cached.get("state", "unknown"))
-            raise
+        return _read_or_ended(
+            self,
+            conversation_id,
+            lambda manager, frame_id: manager.get_conversation_state(frame_id),
+            "state",
+            "unknown",
+        )
 
     @handle_conversation_errors
     def get_conversation_history(self, conversation_id: str) -> list[dict[str, str]]:
         """Get conversation history for current FSM (cached history once ended)."""
-        try:
-            current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-            history: list[dict[str, str]] = self.fsm_manager.get_conversation_history(
-                current_fsm_id
-            )
-            return history
-        except ConversationBusyError:
-            raise
-        except (ValueError, KeyError, FSMError):
-            cached = self._ended_cache_entry(conversation_id)
-            if cached and self._conversation_gone(conversation_id):
-                return cast(list[dict[str, str]], cached.get("history", []))
-            raise
+        return _read_or_ended(
+            self,
+            conversation_id,
+            lambda manager, frame_id: manager.get_conversation_history(frame_id),
+            "history",
+            [],
+        )
 
     def _frame_instance_present(self, frame_id: str) -> bool:
         """True if the FSMManager still holds ``frame_id``'s instance. After a

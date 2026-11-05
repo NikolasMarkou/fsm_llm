@@ -43,7 +43,7 @@ from .constants import (
     has_internal_prefix,
     is_forbidden_context_entry,
 )
-from .context import clean_context_keys
+from .context import clean_context_keys, commit_with_key_rollback
 from .definitions import (
     AdvanceResult,
     BulkExtractionRequest,
@@ -278,6 +278,30 @@ def _record_transition_classification(
     instance.context.metadata[METADATA_KEY_TRANSITION_CLASSIFICATION] = record
 
 
+def _is_agent_managed(data: dict[str, Any]) -> bool:
+    """True when ``data`` is the context of an agent-managed FSM (it carries the
+    ``agent_trace`` key); the pipeline then skips the extra extraction calls."""
+    return CONTEXT_KEY_AGENT_TRACE in data
+
+
+def _classification_record(
+    result: ClassificationResult, confidence_threshold: float
+) -> dict[str, Any]:
+    """The inspectable record of one classification: ``intent``, ``confidence``,
+    ``reasoning``, ``entities``, plus ``low_confidence: True`` when the
+    confidence is below ``confidence_threshold`` (the same ``<`` rule at every
+    site). Returns a new dict the caller may extend."""
+    record: dict[str, Any] = {
+        "intent": result.intent,
+        "confidence": result.confidence,
+        "reasoning": result.reasoning,
+        "entities": dict(result.entities),
+    }
+    if result.confidence < confidence_threshold:
+        record["low_confidence"] = True
+    return record
+
+
 def _drop_forbidden_entry(key: Any, value: Any, _full_key: str) -> str | None:
     """``filter_context_tree`` predicate: drop a secret-shaped entry."""
     if isinstance(key, str) and is_forbidden_context_entry(key, value):
@@ -326,6 +350,54 @@ class _BulkFailed(dict):
     ``context.metadata`` (it is serialised into the session file) and do NOT
     encode it as a key inside ``rejected_corrections`` (braids two meanings).
     """
+
+
+_NOT_CAPTURED: Any = object()
+
+
+@dataclasses.dataclass(slots=True)
+class _TurnSnapshot:
+    """The in-memory instance state a failed turn rolls back (internal).
+
+    Interface contract: ``capture(instance, working_memory=True)`` deep-copies
+    ``context.data`` and ``context.metadata`` (and ``context.working_memory``
+    unless ``working_memory=False``, the per-transition snapshot) and records
+    ``current_state``; it returns the snapshot. ``restore(instance)`` puts them
+    back: ``data`` and ``metadata`` are cleared and refilled in place,
+    ``working_memory`` is rebound to the copy (skipped when it was not
+    captured), ``current_state`` is reassigned. Neither call raises beyond what
+    ``copy.deepcopy`` raises. The one list of what a turn can roll back lives
+    here; the callers keep their own try shapes (07ad3f8c/D-007, D-025).
+    """
+
+    state: str
+    data: dict[str, Any]
+    metadata: dict[str, Any]
+    working_memory: Any
+
+    @classmethod
+    def capture(
+        cls, instance: FSMInstance, *, working_memory: bool = True
+    ) -> _TurnSnapshot:
+        return cls(
+            state=instance.current_state,
+            data=copy.deepcopy(instance.context.data),
+            working_memory=(
+                copy.deepcopy(instance.context.working_memory)
+                if working_memory
+                else _NOT_CAPTURED
+            ),
+            metadata=copy.deepcopy(instance.context.metadata),
+        )
+
+    def restore(self, instance: FSMInstance) -> None:
+        instance.current_state = self.state
+        instance.context.data.clear()
+        instance.context.data.update(self.data)
+        if self.working_memory is not _NOT_CAPTURED:
+            instance.context.working_memory = self.working_memory
+        instance.context.metadata.clear()
+        instance.context.metadata.update(self.metadata)
 
 
 @dataclasses.dataclass(slots=True)
@@ -403,7 +475,6 @@ class MessagePipeline:
         self,
         instance: FSMInstance,
         timing: HandlerTiming,
-        conversation_id: str,
         current_state: str | None = None,
         target_state: str | None = None,
         updated_keys: set[str] | None = None,
@@ -631,11 +702,8 @@ class MessagePipeline:
             # side effects (I/O) cannot be undone — only in-memory instance
             # state (current_state, context.data, working_memory, metadata) is
             # restored on Pass-2 failure. See D-012.
-            pre_turn_state = instance.current_state
-            pre_turn_data = copy.deepcopy(instance.context.data)
-            pre_turn_wm = copy.deepcopy(instance.context.working_memory)
-            pre_turn_metadata = copy.deepcopy(instance.context.metadata)
-            turn = _TurnRecord(state_before=pre_turn_state, state_after=pre_turn_state)
+            snapshot = _TurnSnapshot.capture(instance)
+            turn = _TurnRecord(state_before=snapshot.state, state_after=snapshot.state)
 
             # DECISION plan-2026-09-21T203800-8a03483a/D-002 (A8): a transition
             # classification record belongs to the turn that produced it. Clear
@@ -648,7 +716,7 @@ class MessagePipeline:
             # DECISION plan-2026-09-12T065608-089d0ec7/D-002
             # Widened turn-atomicity: PRE_PROCESSING and POST_PROCESSING handler
             # calls are now EACH individually wrapped in their own restore-on-
-            # exception block (reusing the D-012 pre_turn_* snapshots above, no
+            # exception block (reusing the D-012 `_TurnSnapshot` above, no
             # new snapshot logic). Two SEPARATE try/except blocks, not one block
             # spanning PRE_PROCESSING through Pass 2: Pass 1
             # (_execute_extraction_and_transition_pass) deliberately stays
@@ -695,18 +763,12 @@ class MessagePipeline:
                 self.execute_handlers(
                     instance,
                     HandlerTiming.PRE_PROCESSING,
-                    conversation_id,
                     current_state=instance.current_state,
                 )
             except Exception:
                 # Restore the pre-turn in-memory state so the turn is atomic.
                 # Covers all handler-mutable fields, not just state+data (D-012).
-                instance.current_state = pre_turn_state
-                instance.context.data.clear()
-                instance.context.data.update(pre_turn_data)
-                instance.context.working_memory = pre_turn_wm
-                instance.context.metadata.clear()
-                instance.context.metadata.update(pre_turn_metadata)
+                snapshot.restore(instance)
                 raise
 
             # Pass 1: Data extraction + transition evaluation + execution
@@ -728,7 +790,6 @@ class MessagePipeline:
                 self.execute_handlers(
                     instance,
                     HandlerTiming.POST_PROCESSING,
-                    conversation_id,
                     current_state=instance.current_state,
                 )
 
@@ -750,12 +811,7 @@ class MessagePipeline:
                 # transition + extracted data when the exception originated in
                 # POST_PROCESSING (see the D-017 comment above), not only when
                 # it originated in Pass 2.
-                instance.current_state = pre_turn_state
-                instance.context.data.clear()
-                instance.context.data.update(pre_turn_data)
-                instance.context.working_memory = pre_turn_wm
-                instance.context.metadata.clear()
-                instance.context.metadata.update(pre_turn_metadata)
+                snapshot.restore(instance)
                 raise
 
     def process_stream(
@@ -850,10 +906,7 @@ class MessagePipeline:
             #      user already saw is kept (documented boundary; a yielded chunk
             #      cannot be un-yielded, same as H2's "external side effects not
             #      undone").
-            pre_turn_state = instance.current_state
-            pre_turn_data = copy.deepcopy(instance.context.data)
-            pre_turn_wm = copy.deepcopy(instance.context.working_memory)
-            pre_turn_metadata = copy.deepcopy(instance.context.metadata)
+            snapshot = _TurnSnapshot.capture(instance)
 
             # DECISION plan-2026-09-21T203800-8a03483a/D-002 (A8): streaming
             # mirror of the per-turn clear in process(); after the snapshot.
@@ -880,19 +933,13 @@ class MessagePipeline:
                 self.execute_handlers(
                     instance,
                     HandlerTiming.PRE_PROCESSING,
-                    conversation_id,
                     current_state=instance.current_state,
                 )
             except Exception:
                 # Restore the pre-turn in-memory state so the streaming turn is
                 # atomic. Covers all handler-mutable fields (D-004, mirrors D-012/
                 # D-013). GeneratorExit deliberately does NOT reach here.
-                instance.current_state = pre_turn_state
-                instance.context.data.clear()
-                instance.context.data.update(pre_turn_data)
-                instance.context.working_memory = pre_turn_wm
-                instance.context.metadata.clear()
-                instance.context.metadata.update(pre_turn_metadata)
+                snapshot.restore(instance)
                 raise
 
             # Pass 1: Data extraction + transition (runs fully)
@@ -911,7 +958,6 @@ class MessagePipeline:
                 self.execute_handlers(
                     instance,
                     HandlerTiming.POST_PROCESSING,
-                    conversation_id,
                     current_state=instance.current_state,
                 )
 
@@ -928,12 +974,7 @@ class MessagePipeline:
                 # Restore the pre-turn in-memory state so the streaming turn is
                 # atomic. Covers all handler-mutable fields (D-004, mirrors D-012/
                 # D-013). GeneratorExit deliberately does NOT reach here.
-                instance.current_state = pre_turn_state
-                instance.context.data.clear()
-                instance.context.data.update(pre_turn_data)
-                instance.context.working_memory = pre_turn_wm
-                instance.context.metadata.clear()
-                instance.context.metadata.update(pre_turn_metadata)
+                snapshot.restore(instance)
                 raise
 
     def _stream_response_generation_pass(
@@ -961,52 +1002,15 @@ class MessagePipeline:
             log.debug("Silent state: no response")
             return
 
-        fsm_def = self.fsm_resolver(instance.fsm_id)
-
-        # Only enforce structured output format on terminal states (no
-        # outgoing transitions).  Applying it on intermediate states forces
-        # the model to produce JSON when the prompt asks for free-form text,
-        # which can cause small models to hang or produce garbage.
-        output_response_format = None
-        if not current_state.transitions:
-            output_response_format = instance.context.data.get(
-                CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT
-            )
-
-        # DECISION plan-2026-09-19T175721-21cd7f8e/D-003: stream plain text
-        # unless the terminal state carries a structured output format.  The
-        # sync prompt (JSON envelope) is unchanged; the stream yields and
-        # persists raw deltas, so the envelope must never be requested here.
-        system_prompt = self.response_generation_prompt_builder.build_response_prompt(
-            instance=instance,
-            state=current_state,
-            fsm_definition=fsm_def,
-            extracted_data=extraction_response.extracted_data,
-            transition_occurred=transition_occurred,
-            previous_state=previous_state,
-            # None (a step without a user message) selects the prompt's
-            # no-message wording (07ad3f8c/D-035).
-            user_message=user_message,
-            plain_text_response=output_response_format is None,
-            context=self._apply_context_scope(
-                instance.context.get_merged_data(), current_state, conversation_id
-            ),
-            # DECISION plan-2026-09-19T175721-21cd7f8e/D-032
-            # read_keys scopes THIS channel too: a refused value is a context
-            # value. Do NOT pass the raw dict (final review concern 3): the key
-            # the state hides from <current_context> then leaks here.
-            rejected_corrections=self._apply_context_scope(
-                extraction_response.rejected_corrections, current_state, conversation_id
-            ),
-            extraction_failed=extraction_response.extraction_failed,
-        )
-
-        request = ResponseGenerationRequest(
-            system_prompt=system_prompt,
-            user_message=user_message,
-            transition_occurred=transition_occurred,
-            response_format=output_response_format,
-            temperature=_response_temperature(instance),
+        request = self._build_response_request(
+            instance,
+            current_state,
+            conversation_id,
+            user_message,
+            extraction_response,
+            transition_occurred,
+            previous_state,
+            stream=True,
         )
 
         # Accumulate chunks to store in conversation history
@@ -1102,29 +1106,10 @@ class MessagePipeline:
             log.debug("Silent initial state: no response")
             return ""
 
-        fsm_def = self.fsm_resolver(instance.fsm_id)
-
-        system_prompt = self.response_generation_prompt_builder.build_response_prompt(
-            instance=instance,
-            state=current_state,
-            fsm_definition=fsm_def,
-            extracted_data={},
-            transition_occurred=False,
-            previous_state=None,
-            user_message="",
-            context=self._apply_context_scope(
-                instance.context.get_merged_data(), current_state, conversation_id
-            ),
-        )
-
-        # The greeting has no user message: the request says so with None
-        # (07ad3f8c/D-044). The prompt above keeps the conversational wording
-        # it is built with for "" (07ad3f8c/D-035).
-        request = ResponseGenerationRequest(
-            system_prompt=system_prompt,
-            user_message=None,
-            transition_occurred=False,
-            temperature=_response_temperature(instance),
+        # The greeting has no extraction response and no user message: the
+        # builder takes `None` for both (07ad3f8c/D-035, D-044 inside it).
+        request = self._build_response_request(
+            instance, current_state, conversation_id, None, None, False, None
         )
 
         response = self.llm_interface.generate_response(request)
@@ -1170,9 +1155,8 @@ class MessagePipeline:
             # silently removed from the calls the consumer runs. Every other
             # state's model-extracted data is still cleaned. See D-021.
             if self.get_state(instance, conversation_id).completion is None:
-                extraction_response.extracted_data = self._clean_empty_context_keys(
-                    data=extraction_response.extracted_data,
-                    conversation_id=conversation_id,
+                extraction_response.extracted_data = clean_context_keys(
+                    extraction_response.extracted_data, conversation_id
                 )
 
             if extraction_response.extracted_data:
@@ -1195,44 +1179,23 @@ class MessagePipeline:
                 # from history — get_data() and history disagreed, and the extraction
                 # skip-guard below meant a retry never re-ran. Precedence note: if a
                 # handler delta touched one of `committed`'s keys, the rollback wins.
-                # BOUNDARY (known, deliberate): the snapshot is SHALLOW. Key coverage
-                # is exact — `FSMContext.update` writes precisely `new_data`'s keys and
-                # derives nothing, so no extraction-written key escapes the restore —
-                # but `pre_commit` holds the SAME object as `context.data[key]`. A
-                # CONTEXT_UPDATE handler that mutates a pre-existing dict/list value
-                # IN PLACE before failing is therefore NOT restored. Do not "fix" this
-                # with a deep copy: that reintroduces exactly the (a)-shaped cost this
-                # decision rejected, on every turn, to undo a mutation that handlers
-                # are contractually supposed to make by returning a delta rather than
-                # by reaching into `context.data`.
-                pre_commit = {
-                    key: instance.context.data[key]
-                    for key in committed
-                    if key in instance.context.data
-                }
-                instance.context.update(committed)
-
-                # Notify handlers about context updates
-                try:
-                    self.execute_handlers(
+                # The snapshot is SHALLOW on purpose: see `commit_with_key_rollback`
+                # (context.py), which holds the BOUNDARY note and does the commit.
+                commit_with_key_rollback(
+                    instance.context,
+                    committed,
+                    lambda: self.execute_handlers(
                         instance,
                         HandlerTiming.CONTEXT_UPDATE,
-                        conversation_id,
                         current_state=instance.current_state,
                         updated_keys=set(committed.keys()),
-                    )
-                except Exception as handler_err:
-                    log.warning(
+                    ),
+                    lambda handler_err: log.warning(
                         f"CONTEXT_UPDATE handler failed "
                         f"({type(handler_err).__name__}: {handler_err}), rolling back "
                         f"extracted keys {sorted(committed)}"
-                    )
-                    for key in committed:
-                        if key in pre_commit:
-                            instance.context.data[key] = pre_commit[key]
-                        else:
-                            instance.context.data.pop(key, None)
-                    raise
+                    ),
+                )
                 # DECISION plan-2026-09-19T175721-21cd7f8e/D-015: recorded only
                 # after the handlers succeeded, so a rollback leaves no stale
                 # provenance; a handler edit of a key fails the digest compare.
@@ -1241,7 +1204,7 @@ class MessagePipeline:
         # Step 3: Transition Evaluation and Execution
         transition_occurred, previous_state = (
             self._execute_transition_evaluation_and_execution(
-                instance, user_message, extraction_response, conversation_id, turn=turn
+                instance, user_message, conversation_id, turn=turn
             )
         )
 
@@ -1251,7 +1214,7 @@ class MessagePipeline:
         # message (e.g., providing email+age when the FSM just collected
         # the name).  Skipped for agent-managed FSMs (detected by
         # "agent_trace" context key) to avoid extra LLM calls.
-        is_agent_fsm = CONTEXT_KEY_AGENT_TRACE in instance.context.data
+        is_agent_fsm = _is_agent_managed(instance.context.data)
         if transition_occurred and not is_agent_fsm:
             new_state = self.get_state(instance, conversation_id)
             # DECISION plan-2026-09-19T175721-21cd7f8e/D-033: the target state
@@ -1266,8 +1229,7 @@ class MessagePipeline:
             missing_configs = [
                 c
                 for c in new_configs
-                if c.field_name not in instance.context.data
-                or instance.context.data.get(c.field_name) is None
+                if instance.context.data.get(c.field_name) is None
             ]
             # DECISION plan-2026-09-19T175721-21cd7f8e/D-034: a transition into
             # a state whose own keys the pipeline already filled (a back edge)
@@ -1361,9 +1323,7 @@ class MessagePipeline:
                         )
 
                     if post_data:
-                        post_data = self._clean_empty_context_keys(
-                            data=post_data, conversation_id=conversation_id
-                        )
+                        post_data = clean_context_keys(post_data, conversation_id)
                         if post_data:
                             instance.context.update(post_data)
                             # DECISION plan-2026-09-19T175721-21cd7f8e/D-015
@@ -1372,7 +1332,6 @@ class MessagePipeline:
                             self.execute_handlers(
                                 instance,
                                 HandlerTiming.CONTEXT_UPDATE,
-                                conversation_id,
                                 current_state=instance.current_state,
                                 updated_keys=set(post_data.keys()),
                             )
@@ -1530,8 +1489,6 @@ class MessagePipeline:
             # DECISION plan-2026-09-19T175721-21cd7f8e/D-050: a failed call is
             # not "nothing to extract"; see _BulkFailed.
             return _BulkFailed()
-
-        return {}
 
     def _handler_only_keys(self, instance: FSMInstance) -> frozenset[str]:
         """Keys no extraction may write (D-033): the FSM author's
@@ -1727,7 +1684,7 @@ class MessagePipeline:
             # has_context gate can pass (plan_execute `plan_steps`); without this
             # the seed hides the key from extraction. Non-agent FSMs keep "empty
             # is set": do NOT widen this to every FSM (D-036 rejected that).
-            agent_managed = CONTEXT_KEY_AGENT_TRACE in existing
+            agent_managed = _is_agent_managed(existing)
             all_configs = [
                 c
                 for c in all_configs
@@ -1857,7 +1814,7 @@ class MessagePipeline:
             bulk_failed = isinstance(bulk_data, _BulkFailed)
             if bulk_data:
                 existing = instance.context.data
-                agent_managed = CONTEXT_KEY_AGENT_TRACE in existing
+                agent_managed = _is_agent_managed(existing)
                 prov = instance.context.metadata.get(PROVENANCE_METADATA_KEY, {})
                 # DECISION plan-2026-09-19T175721-21cd7f8e/D-019: a
                 # classification-owned key absent because the classifier was
@@ -2193,6 +2150,12 @@ class MessagePipeline:
         if not response.is_valid or response.value is None:
             return response
 
+        def rejected(error: str, **changes: Any) -> FieldExtractionResponse:
+            """``response`` marked invalid with ``error`` (and ``changes``)."""
+            return response.model_copy(
+                update={"is_valid": False, "validation_error": error, **changes}
+            )
+
         # Reject values that are obviously the field name echoed back —
         # small models sometimes confuse the JSON template keys with values.
         if isinstance(response.value, str) and response.value.strip().lower() in (
@@ -2200,13 +2163,11 @@ class MessagePipeline:
             "field_name",
             "value",
         ):
-            return FieldExtractionResponse(
-                field_name=response.field_name,
+            return rejected(
+                "Extracted value matches field name (model confusion)",
                 value=None,
                 confidence=0.0,
                 reasoning="Model echoed field name instead of extracting a value",
-                is_valid=False,
-                validation_error="Extracted value matches field name (model confusion)",
             )
 
         # A self-reported confidence of exactly 0.0 means the model could not
@@ -2221,30 +2182,16 @@ class MessagePipeline:
         # Known cliff: a correct value the model scored exactly 0 is dropped
         # while 0.05 is kept. See decisions.md D-016.
         if response.confidence == 0.0:
-            return FieldExtractionResponse(
-                field_name=response.field_name,
-                value=response.value,
-                confidence=0.0,
-                reasoning=response.reasoning,
-                is_valid=False,
-                validation_error="Model reported zero confidence in the value",
-            )
+            return rejected("Model reported zero confidence in the value")
 
         # Confidence threshold check
         if (
             config.confidence_threshold > 0.0
             and response.confidence < config.confidence_threshold
         ):
-            return FieldExtractionResponse(
-                field_name=response.field_name,
-                value=response.value,
-                confidence=response.confidence,
-                reasoning=response.reasoning,
-                is_valid=False,
-                validation_error=(
-                    f"Confidence {response.confidence:.2f} below threshold "
-                    f"{config.confidence_threshold:.2f}"
-                ),
+            return rejected(
+                f"Confidence {response.confidence:.2f} below threshold "
+                f"{config.confidence_threshold:.2f}"
             )
 
         # Type coercion via dispatch
@@ -2254,124 +2201,62 @@ class MessagePipeline:
             if coercer is not None:
                 value = coercer(value)
         except (ValueError, TypeError, json.JSONDecodeError) as e:
-            return FieldExtractionResponse(
-                field_name=response.field_name,
-                value=response.value,
-                confidence=response.confidence,
-                reasoning=response.reasoning,
-                is_valid=False,
-                validation_error=(f"Type coercion to {config.field_type} failed: {e}"),
+            return rejected(f"Type coercion to {config.field_type} failed: {e}")
+
+        # Validation rules. The pattern is compiled at load
+        # (`FieldExtractionConfig._check_validation_rule_types`), so a bad regex
+        # never reaches here.
+        rules = config.validation_rules or {}
+        if "allowed_values" in rules and value not in rules["allowed_values"]:
+            return rejected(
+                f"Value {value!r} not in allowed values: {rules['allowed_values']}",
+                value=value,
             )
 
-        # Validation rules
-        rules = config.validation_rules or {}
-        if "allowed_values" in rules:
-            if value not in rules["allowed_values"]:
-                return FieldExtractionResponse(
-                    field_name=response.field_name,
+        if isinstance(value, str):
+            if "min_length" in rules and len(value) < rules["min_length"]:
+                return rejected(
+                    f"Value length {len(value)} below minimum {rules['min_length']}",
                     value=value,
-                    confidence=response.confidence,
-                    reasoning=response.reasoning,
-                    is_valid=False,
-                    validation_error=(
-                        f"Value {value!r} not in allowed values: "
-                        f"{rules['allowed_values']}"
-                    ),
+                )
+            if "max_length" in rules and len(value) > rules["max_length"]:
+                return rejected(
+                    f"Value length {len(value)} exceeds maximum {rules['max_length']}",
+                    value=value,
                 )
 
-        if "min_length" in rules and isinstance(value, str):
-            if len(value) < rules["min_length"]:
-                return FieldExtractionResponse(
-                    field_name=response.field_name,
-                    value=value,
-                    confidence=response.confidence,
-                    reasoning=response.reasoning,
-                    is_valid=False,
-                    validation_error=(
-                        f"Value length {len(value)} below minimum {rules['min_length']}"
-                    ),
-                )
-
-        if "max_length" in rules and isinstance(value, str):
-            if len(value) > rules["max_length"]:
-                return FieldExtractionResponse(
-                    field_name=response.field_name,
-                    value=value,
-                    confidence=response.confidence,
-                    reasoning=response.reasoning,
-                    is_valid=False,
-                    validation_error=(
-                        f"Value length {len(value)} exceeds maximum "
-                        f"{rules['max_length']}"
-                    ),
-                )
-
+        # Non-numeric values skip the numeric range checks.
         if "min_value" in rules:
             try:
                 if float(value) < float(rules["min_value"]):
-                    return FieldExtractionResponse(
-                        field_name=response.field_name,
+                    return rejected(
+                        f"Value {value!r} is below minimum {rules['min_value']}",
                         value=value,
-                        confidence=response.confidence,
-                        reasoning=response.reasoning,
-                        is_valid=False,
-                        validation_error=(
-                            f"Value {value!r} is below minimum {rules['min_value']}"
-                        ),
                     )
             except (TypeError, ValueError):
-                pass  # non-numeric values skip numeric range check
+                pass
 
         if "max_value" in rules:
             try:
                 if float(value) > float(rules["max_value"]):
-                    return FieldExtractionResponse(
-                        field_name=response.field_name,
+                    return rejected(
+                        f"Value {value!r} exceeds maximum {rules['max_value']}",
                         value=value,
-                        confidence=response.confidence,
-                        reasoning=response.reasoning,
-                        is_valid=False,
-                        validation_error=(
-                            f"Value {value!r} exceeds maximum {rules['max_value']}"
-                        ),
                     )
             except (TypeError, ValueError):
-                pass  # non-numeric values skip numeric range check
+                pass
 
-        if "pattern" in rules and isinstance(value, str):
-            import re
-
-            try:
-                if not re.match(rules["pattern"], value):
-                    return FieldExtractionResponse(
-                        field_name=response.field_name,
-                        value=value,
-                        confidence=response.confidence,
-                        reasoning=response.reasoning,
-                        is_valid=False,
-                        validation_error=(
-                            f"Value does not match pattern: {rules['pattern']}"
-                        ),
-                    )
-            except re.error as e:
-                logger.error(f"Invalid regex pattern {rules['pattern']!r}: {e}")
-                return FieldExtractionResponse(
-                    field_name=response.field_name,
-                    value=value,
-                    confidence=0.0,
-                    reasoning=f"Invalid regex pattern: {e}",
-                    is_valid=False,
-                    validation_error=f"Invalid regex pattern: {e}",
-                )
+        if (
+            "pattern" in rules
+            and isinstance(value, str)
+            and not re.match(rules["pattern"], value)
+        ):
+            return rejected(
+                f"Value does not match pattern: {rules['pattern']}", value=value
+            )
 
         # All checks passed — return with coerced value
-        return FieldExtractionResponse(
-            field_name=response.field_name,
-            value=value,
-            confidence=response.confidence,
-            reasoning=response.reasoning,
-            is_valid=True,
-        )
+        return response.model_copy(update={"value": value, "validation_error": None})
 
     # ----------------------------------------------------------
     # Pass 1: Transition evaluation and execution
@@ -2381,7 +2266,6 @@ class MessagePipeline:
         self,
         instance: FSMInstance,
         user_message: str | None,
-        extraction_response: DataExtractionResponse,
         conversation_id: str,
         *,
         turn: _TurnRecord | None = None,
@@ -2432,7 +2316,7 @@ class MessagePipeline:
 
         elif evaluation.result_type == TransitionEvaluationResult.AMBIGUOUS:
             target_state = self._resolve_ambiguous_transition(
-                evaluation, user_message, extraction_response, instance, conversation_id
+                evaluation, user_message, instance, conversation_id
             )
             log.info(
                 f"LLM-assisted transition selected: {target_state}"
@@ -2643,14 +2527,9 @@ class MessagePipeline:
                 # of EVERY classification of this field (fallback and
                 # discarded low-confidence ones too) is the inspectable
                 # record; see _record_classification_result.
-                full_result: dict[str, Any] = {
-                    "intent": result.intent,
-                    "confidence": result.confidence,
-                    "reasoning": result.reasoning,
-                    "entities": dict(result.entities),
-                }
-                if result.confidence < config.confidence_threshold:
-                    full_result["low_confidence"] = True
+                full_result = _classification_record(
+                    result, config.confidence_threshold
+                )
                 if config.context_keys:
                     full_result["context_snapshot"] = _json_native_values(
                         instance.context.data, config.context_keys
@@ -2668,7 +2547,7 @@ class MessagePipeline:
                     continue
 
                 # Skip low confidence
-                if result.confidence < config.confidence_threshold:
+                if "low_confidence" in full_result:
                     # LV2-05 (D-037): an accepted stall (D-016), now visible: a
                     # gated key left unset here holds the state with no other trace.
                     log.warning(
@@ -2705,7 +2584,6 @@ class MessagePipeline:
         self,
         evaluation: TransitionEvaluation,
         user_message: str | None,
-        extraction_response: DataExtractionResponse,
         instance: FSMInstance,
         conversation_id: str,
     ) -> str | None:
@@ -2784,18 +2662,11 @@ class MessagePipeline:
         # here, because a patched Classifier returns a truthy mock and would
         # silently turn every mocked transition into a stay. Do NOT route this
         # through an exception: the soft-fail tuple above stays closed.
-        low_confidence = result.confidence < schema.confidence_threshold
+        record = _classification_record(result, schema.confidence_threshold)
+        low_confidence = "low_confidence" in record
 
         # Store the classification record in metadata
         # (plan-2026-09-21T203800-8a03483a/D-005).
-        record: dict[str, Any] = {
-            "intent": result.intent,
-            "confidence": result.confidence,
-            "reasoning": result.reasoning,
-            "entities": dict(result.entities),
-        }
-        if low_confidence:
-            record["low_confidence"] = True
         _record_transition_classification(instance, record)
 
         # Store as transition decision for debugging
@@ -2953,7 +2824,6 @@ class MessagePipeline:
         self.execute_handlers(
             instance,
             HandlerTiming.PRE_TRANSITION,
-            conversation_id,
             current_state=old_state,
             target_state=target_state,
         )
@@ -2963,10 +2833,9 @@ class MessagePipeline:
         # DECISION plan-2026-09-20T114608-a8e47b88/D-024
         # Snapshot AND restore instance.context.metadata alongside
         # instance.context.data, mirroring the turn-atomicity rollback pattern
-        # already used correctly at the pre_turn_* sites (search
-        # `pre_turn_metadata` in this file: pipeline.py:475-479/521-526/
-        # 606-611/647-652 all clear()+update() data AND metadata together from
-        # one pre-captured deepcopy pair). Before D-018, `merge_delta` never
+        # already used correctly at the turn-level sites (search
+        # `_TurnSnapshot` in this file: its `restore` clear()+update()s data
+        # AND metadata together from one pre-captured deepcopy pair). Before D-018, `merge_delta` never
         # touched `metadata`, so a data-only snapshot here was safe -- D-018
         # made `merge_delta` ALSO pop a deleted key's provenance digest out of
         # `context.metadata[PROVENANCE_METADATA_KEY]` on a None-delta deletion. So a
@@ -2976,8 +2845,7 @@ class MessagePipeline:
         # its digest permanently gone -- data and metadata desynced. Do NOT
         # snapshot `data` only "because metadata isn't touched here" -- that
         # premise is no longer true. See decisions.md D-024.
-        old_context_snapshot = copy.deepcopy(instance.context.data)
-        old_metadata_snapshot = copy.deepcopy(instance.context.metadata)
+        snapshot = _TurnSnapshot.capture(instance, working_memory=False)
 
         instance.current_state = target_state
         instance.context.data.update(
@@ -2992,7 +2860,6 @@ class MessagePipeline:
             self.execute_handlers(
                 instance,
                 HandlerTiming.POST_TRANSITION,
-                conversation_id,
                 current_state=target_state,
                 target_state=target_state,
             )
@@ -3000,11 +2867,7 @@ class MessagePipeline:
             log.warning(
                 f"POST_TRANSITION handler failed ({type(handler_err).__name__}: {handler_err}), rolling back state from {target_state} to {old_state}"
             )
-            instance.current_state = old_state
-            instance.context.data.clear()
-            instance.context.data.update(old_context_snapshot)
-            instance.context.metadata.clear()
-            instance.context.metadata.update(old_metadata_snapshot)
+            snapshot.restore(instance)
             raise
 
         log.info(f"State transition executed: {old_state} -> {target_state}")
@@ -3045,52 +2908,14 @@ class MessagePipeline:
             log.debug("Silent state: no response")
             return None
 
-        fsm_def = self.fsm_resolver(instance.fsm_id)
-
-        system_prompt = self.response_generation_prompt_builder.build_response_prompt(
-            instance=instance,
-            state=current_state,
-            fsm_definition=fsm_def,
-            extracted_data=extraction_response.extracted_data,
-            transition_occurred=transition_occurred,
-            previous_state=previous_state,
-            # None (a step without a user message) selects the prompt's
-            # no-message wording (07ad3f8c/D-035).
-            user_message=user_message,
-            # DECISION plan-2026-09-19T175721-21cd7f8e/D-005: scope the
-            # PROMPT, the only context channel (request.context is gone). Do NOT
-            # revert to full instance.context.data: read_keys would then
-            # promise scoping the prompt never delivered (hidden values leaked).
-            # DECISION plan-2026-09-21T203800-8a03483a/D-008: the prompt gets
-            # WorkingMemory under data (get_merged_data), scoped the same way,
-            # at all three Pass-2 sites (sync, stream, greeting). Do NOT feed
-            # WM through a request field only, and do NOT merge hidden buffers.
-            context=self._apply_context_scope(
-                instance.context.get_merged_data(), current_state, conversation_id
-            ),
-            # DECISION plan-2026-09-19T175721-21cd7f8e/D-032
-            # read_keys scopes THIS channel too: a refused value is a context
-            # value. Do NOT pass the raw dict (final review concern 3): the key
-            # the state hides from <current_context> then leaks here.
-            rejected_corrections=self._apply_context_scope(
-                extraction_response.rejected_corrections, current_state, conversation_id
-            ),
-            extraction_failed=extraction_response.extraction_failed,
-        )
-
-        # Only enforce structured output format on terminal states
-        output_response_format = None
-        if not current_state.transitions:
-            output_response_format = instance.context.data.get(
-                CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT
-            )
-
-        request = ResponseGenerationRequest(
-            system_prompt=system_prompt,
-            user_message=user_message,
-            transition_occurred=transition_occurred,
-            response_format=output_response_format,
-            temperature=_response_temperature(instance),
+        request = self._build_response_request(
+            instance,
+            current_state,
+            conversation_id,
+            user_message,
+            extraction_response,
+            transition_occurred,
+            previous_state,
         )
 
         response = self.llm_interface.generate_response(request)
@@ -3099,6 +2924,105 @@ class MessagePipeline:
 
         log.debug("Response generation pass completed")
         return response.message
+
+    def _build_response_request(
+        self,
+        instance: FSMInstance,
+        current_state: State,
+        conversation_id: str,
+        user_message: str | None,
+        extraction_response: DataExtractionResponse | None,
+        transition_occurred: bool,
+        previous_state: str | None,
+        *,
+        stream: bool = False,
+    ) -> ResponseGenerationRequest:
+        """Build the Pass-2 request of the sync turn, the stream turn or the greeting.
+
+        Interface contract (private; three callers: ``_execute_response_generation_pass``,
+        ``_stream_response_generation_pass``, ``generate_initial_response``):
+        the caller has already ruled out a silent state. ``user_message`` is the
+        turn's text, ``None`` for a step without one. ``extraction_response`` is
+        the Pass-1 result, or ``None`` for the greeting, which then has no
+        extracted data, no rejected corrections, no structured output format,
+        a ``""`` message in the prompt and ``None`` in the request. ``stream``
+        asks for plain text unless a terminal state carries a structured output
+        format. Returns the ``ResponseGenerationRequest``; raises what the
+        prompt builder, ``fsm_resolver`` or the request model raise. It makes no
+        LLM call and changes no instance state.
+        """
+        fsm_def = self.fsm_resolver(instance.fsm_id)
+        greeting = extraction_response is None
+
+        # Only enforce structured output format on terminal states (no
+        # outgoing transitions).  Applying it on intermediate states forces
+        # the model to produce JSON when the prompt asks for free-form text,
+        # which can cause small models to hang or produce garbage. The greeting
+        # does not read it yet (F-PI-09 of plan 5980fbb7).
+        output_response_format = None
+        if not greeting and not current_state.transitions:
+            output_response_format = instance.context.data.get(
+                CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT
+            )
+
+        extracted_data: dict[str, Any] = {}
+        extraction_failed = False
+        if extraction_response is not None:
+            extracted_data = extraction_response.extracted_data
+            extraction_failed = extraction_response.extraction_failed
+
+        # DECISION plan-2026-09-19T175721-21cd7f8e/D-005: scope the
+        # PROMPT, the only context channel (request.context is gone). Do NOT
+        # revert to full instance.context.data: read_keys would then
+        # promise scoping the prompt never delivered (hidden values leaked).
+        # DECISION plan-2026-09-21T203800-8a03483a/D-008: the prompt gets
+        # WorkingMemory under data (get_merged_data), scoped the same way,
+        # at all three Pass-2 sites (sync, stream, greeting; now this one
+        # builder). Do NOT feed WM through a request field only, and do NOT
+        # merge hidden buffers.
+        context = self._apply_context_scope(
+            instance.context.get_merged_data(), current_state, conversation_id
+        )
+        rejected_corrections = None
+        if extraction_response is not None:
+            # DECISION plan-2026-09-19T175721-21cd7f8e/D-032
+            # read_keys scopes THIS channel too: a refused value is a context
+            # value. Do NOT pass the raw dict (final review concern 3): the key
+            # the state hides from <current_context> then leaks here.
+            rejected_corrections = self._apply_context_scope(
+                extraction_response.rejected_corrections, current_state, conversation_id
+            )
+
+        # DECISION plan-2026-09-19T175721-21cd7f8e/D-003: stream plain text
+        # unless the terminal state carries a structured output format.  The
+        # sync prompt (JSON envelope) is unchanged; the stream yields and
+        # persists raw deltas, so the envelope must never be requested here.
+        system_prompt = self.response_generation_prompt_builder.build_response_prompt(
+            instance=instance,
+            state=current_state,
+            fsm_definition=fsm_def,
+            extracted_data=extracted_data,
+            transition_occurred=transition_occurred,
+            previous_state=previous_state,
+            # None (a step without a user message) selects the prompt's
+            # no-message wording (07ad3f8c/D-035); the greeting keeps the
+            # conversational wording it is built with for "".
+            user_message="" if greeting else user_message,
+            plain_text_response=stream and output_response_format is None,
+            context=context,
+            rejected_corrections=rejected_corrections,
+            extraction_failed=extraction_failed,
+        )
+
+        # The greeting has no user message: the request says so with None
+        # (07ad3f8c/D-044).
+        return ResponseGenerationRequest(
+            system_prompt=system_prompt,
+            user_message=None if greeting else user_message,
+            transition_occurred=transition_occurred,
+            response_format=output_response_format,
+            temperature=_response_temperature(instance),
+        )
 
     # ----------------------------------------------------------
     # Utilities
@@ -3135,10 +3059,3 @@ class MessagePipeline:
                 f"{missing} but they are not in context"
             )
         return scoped
-
-    @staticmethod
-    def _clean_empty_context_keys(
-        data: dict[str, Any], conversation_id: str, remove_none_values: bool = True
-    ) -> dict[str, Any]:
-        """Clean invalid keys from context data. Delegates to context module."""
-        return clean_context_keys(data, conversation_id, remove_none_values)

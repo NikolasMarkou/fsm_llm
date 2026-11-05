@@ -170,7 +170,7 @@ class TestContextCleaningEmptyHandlers:
     """B1: CONTEXT_UPDATE handlers should not fire when all extracted data is cleaned away."""
 
     def test_handlers_not_called_after_cleaning_empties_data(self):
-        """If _clean_empty_context_keys removes all keys, CONTEXT_UPDATE handlers should not fire."""
+        """If clean_context_keys removes all keys, CONTEXT_UPDATE handlers should not fire."""
         from fsm_llm.definitions import FSMContext, FSMDefinition, FSMInstance
         from fsm_llm.fsm import FSMManager
         from fsm_llm.handlers import HandlerSystem, HandlerTiming

@@ -2,8 +2,8 @@
 Unit tests for the MessagePipeline class.
 
 Tests cover: pipeline creation, get_state resolution, execute_handlers context
-management, generate_initial_response, full 2-pass process(), and
-_clean_empty_context_keys delegation.
+management, generate_initial_response, full 2-pass process(), and the
+context-key cleaning the extraction commit relies on.
 """
 
 from unittest.mock import MagicMock
@@ -31,6 +31,7 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
     return mock_llm
 
 
+from fsm_llm.context import clean_context_keys
 from fsm_llm.definitions import (
     ContextScope,
     FieldExtractionConfig,
@@ -249,7 +250,7 @@ class TestExecuteHandlers:
         instance = _make_instance(context_data={"original": "data"})
 
         pipeline.execute_handlers(
-            instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
+            instance, HandlerTiming.PRE_PROCESSING, current_state="start"
         )
 
         # Handler should have seen the original data
@@ -264,7 +265,7 @@ class TestExecuteHandlers:
         instance = _make_instance(context_data={"existing": "data"})
 
         pipeline.execute_handlers(
-            instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
+            instance, HandlerTiming.PRE_PROCESSING, current_state="start"
         )
 
         assert instance.context.data["new_key"] == "new_value"
@@ -282,7 +283,7 @@ class TestExecuteHandlers:
         )
 
         pipeline.execute_handlers(
-            instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
+            instance, HandlerTiming.PRE_PROCESSING, current_state="start"
         )
 
         assert "to_delete" not in instance.context.data
@@ -298,7 +299,7 @@ class TestExecuteHandlers:
 
         # Should not raise
         pipeline.execute_handlers(
-            instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
+            instance, HandlerTiming.PRE_PROCESSING, current_state="start"
         )
         assert "nonexistent" not in instance.context.data
 
@@ -314,7 +315,6 @@ class TestExecuteHandlers:
         pipeline.execute_handlers(
             instance,
             HandlerTiming.ERROR,
-            "conv-1",
             current_state="start",
             error_context={"error_type": "TestError", "error_msg": "something failed"},
         )
@@ -339,7 +339,7 @@ class TestExecuteHandlers:
 
         # Should not raise
         pipeline.execute_handlers(
-            instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
+            instance, HandlerTiming.PRE_PROCESSING, current_state="start"
         )
 
     def test_handler_exception_propagated_in_raise_mode(self):
@@ -358,7 +358,7 @@ class TestExecuteHandlers:
 
         with pytest.raises(Exception):
             pipeline.execute_handlers(
-                instance, HandlerTiming.PRE_PROCESSING, "conv-1", current_state="start"
+                instance, HandlerTiming.PRE_PROCESSING, current_state="start"
             )
 
     def test_uses_instance_current_state_when_current_state_not_provided(self):
@@ -369,7 +369,7 @@ class TestExecuteHandlers:
         pipeline = _make_pipeline(handler_system=hs)
         instance = _make_instance(current_state="start")
 
-        pipeline.execute_handlers(instance, HandlerTiming.PRE_PROCESSING, "conv-1")
+        pipeline.execute_handlers(instance, HandlerTiming.PRE_PROCESSING)
 
         # Handler should have been called (indicating current_state was resolved)
         assert handler.captured_context is not None
@@ -397,7 +397,6 @@ class TestExecuteHandlers:
         pipeline.execute_handlers(
             instance,
             HandlerTiming.CONTEXT_UPDATE,
-            "conv-1",
             current_state="start",
             updated_keys={"user_name"},
         )
@@ -1071,36 +1070,30 @@ class TestProcessStreamPass2FailureIsAtomic:
 
 
 # ══════════════════════════════════════════════════════════════
-# 6. _clean_empty_context_keys()
+# 6. clean_context_keys()
 # ══════════════════════════════════════════════════════════════
 
 
 class TestCleanEmptyContextKeys:
-    """Tests for MessagePipeline._clean_empty_context_keys static method."""
+    """Tests for ``context.clean_context_keys``, which the pipeline calls directly."""
 
-    def test_delegates_to_context_module(self):
-        """Should call clean_context_keys from the context module."""
+    def test_drops_internal_keys(self):
+        """The pipeline's extraction commit goes through clean_context_keys."""
         data = {"user_name": "Alice", "_internal": "hidden"}
-        result = MessagePipeline._clean_empty_context_keys(
-            data=data, conversation_id="conv-1"
-        )
+        result = clean_context_keys(data, "conv-1")
         # Internal keys should be removed
         assert "_internal" not in result
         assert result["user_name"] == "Alice"
 
     def test_removes_none_values_by_default(self):
         data = {"name": "Alice", "age": None}
-        result = MessagePipeline._clean_empty_context_keys(
-            data=data, conversation_id="conv-1"
-        )
+        result = clean_context_keys(data, "conv-1")
         assert "age" not in result
         assert result["name"] == "Alice"
 
     def test_preserves_none_when_disabled(self):
         data = {"name": "Alice", "age": None}
-        result = MessagePipeline._clean_empty_context_keys(
-            data=data, conversation_id="conv-1", remove_none_values=False
-        )
+        result = clean_context_keys(data, "conv-1", remove_none_values=False)
         assert result["age"] is None
 
     def test_removes_internal_prefix_keys(self):
@@ -1111,9 +1104,7 @@ class TestCleanEmptyContextKeys:
             "internal_state": "remove",
             "__dunder": "remove",
         }
-        result = MessagePipeline._clean_empty_context_keys(
-            data=data, conversation_id="conv-1"
-        )
+        result = clean_context_keys(data, "conv-1")
         assert "user_data" in result
         assert "_private" not in result
         assert "system_info" not in result
@@ -1122,18 +1113,14 @@ class TestCleanEmptyContextKeys:
 
     def test_removes_empty_string_keys(self):
         data = {"": "empty_key_value", "valid": "data"}
-        result = MessagePipeline._clean_empty_context_keys(
-            data=data, conversation_id="conv-1"
-        )
+        result = clean_context_keys(data, "conv-1")
         assert "" not in result
         assert result["valid"] == "data"
 
     def test_preserves_empty_lists_and_strings(self):
         """Empty lists and empty string values are semantically meaningful."""
         data = {"allergies": [], "note": "", "name": "Alice"}
-        result = MessagePipeline._clean_empty_context_keys(
-            data=data, conversation_id="conv-1"
-        )
+        result = clean_context_keys(data, "conv-1")
         assert result["allergies"] == []
         assert result["note"] == ""
         assert result["name"] == "Alice"

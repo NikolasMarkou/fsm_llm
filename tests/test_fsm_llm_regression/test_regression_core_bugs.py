@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fsm_llm.definitions import (
-    DataExtractionResponse,
     FSMContext,
     FSMDefinition,
     ResponseGenerationResponse,
@@ -84,9 +83,6 @@ class TestVB1SelfTransitionSuppressed:
                 manager._pipeline._execute_transition_evaluation_and_execution(
                     instance,
                     "test",
-                    DataExtractionResponse(
-                        extracted_data={}, confidence=1.0, reasoning="m"
-                    ),
                     cid,
                 )
             )

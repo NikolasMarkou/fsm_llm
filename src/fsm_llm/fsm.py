@@ -17,7 +17,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from datetime import datetime
 from functools import wraps
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar, overload
 
 from .constants import (
     DEFAULT_MAX_FSM_CACHE_SIZE,
@@ -28,6 +28,7 @@ from .constants import (
     PROVENANCE_METADATA_KEY,
     has_internal_prefix,
 )
+from .context import commit_with_key_rollback
 from .definitions import (
     AdvanceResult,
     ConversationBusyError,
@@ -131,6 +132,59 @@ def with_conversation_context(func):
         return func(self, conversation_id, *args, log=log, **kwargs)
 
     return wrapper
+
+
+@overload
+def _conversation_entry(
+    manager: FSMManager,
+    conversation_id: str,
+    *,
+    missing_lock: Literal["raise", "keyerror"],
+) -> tuple[FSMInstance, threading.RLock]: ...
+
+
+@overload
+def _conversation_entry(
+    manager: FSMManager,
+    conversation_id: str,
+    *,
+    missing_lock: Literal["unlocked"],
+) -> tuple[FSMInstance, threading.RLock | None]: ...
+
+
+def _conversation_entry(
+    manager: FSMManager,
+    conversation_id: str,
+    *,
+    missing_lock: Literal["raise", "keyerror", "unlocked"],
+) -> tuple[FSMInstance, threading.RLock | None]:
+    """The instance and the per-conversation lock of ``conversation_id``.
+
+    Interface contract: the CALLER HOLDS ``manager._lock`` (the lookup reads
+    ``instances`` and ``_conversation_locks`` and takes no lock of its own, so
+    the ``_lock -> conv_lock`` order is the caller's). A module function, not a
+    method, so the nested ``_stream`` closure of ``_open_locked_stream`` can
+    use it without a ``self._helper`` dispatch (4c63deac/D-002). Raises
+    ``FSMError("Conversation <id> not found")`` for an unknown conversation.
+    ``missing_lock`` is what an instance with no lock means (a broken
+    create-together / remove-together invariant, L11), and each caller keeps
+    the policy it had: ``"raise"`` an ``FSMError`` (reads, ``update_conversation_context``),
+    ``"keyerror"`` a bare ``KeyError`` (the turn and stream bodies), ``"unlocked"``
+    returns ``None`` for the lock and the caller proceeds without it
+    (``set_conversation_state``, ``end_conversation``).
+    """
+    if conversation_id not in manager.instances:
+        raise FSMError(f"Conversation {conversation_id} not found")
+    conv_lock = manager._conversation_locks.get(conversation_id)
+    if conv_lock is None:
+        if missing_lock == "raise":
+            raise FSMError(
+                f"Conversation {conversation_id} has an instance but no "
+                "per-conversation lock (broken invariant)"
+            )
+        if missing_lock == "keyerror":
+            raise KeyError(conversation_id)
+    return manager.instances[conversation_id], conv_lock
 
 
 # --------------------------------------------------------------
@@ -565,9 +619,9 @@ class FSMManager:
         # turn guard (21cd7f8e/D-018) and the error-clause order (21cd7f8e/D-009,
         # a02151fe/D-014) would then have to hold in two places.
         with self._lock:
-            if conversation_id not in self.instances:
-                raise FSMError(f"Conversation {conversation_id} not found")
-            conv_lock = self._conversation_locks[conversation_id]
+            _, conv_lock = _conversation_entry(
+                self, conversation_id, missing_lock="keyerror"
+            )
             self._enter_turn(conversation_id, conv_lock)
         try:
             return self._process_message_locked(conversation_id, message, log, run)
@@ -678,9 +732,9 @@ class FSMManager:
             # cheap, and it correctly handles a conversation that vanished
             # between call and first iteration.
             with self._lock:
-                if conversation_id not in self.instances:
-                    raise FSMError(f"Conversation {conversation_id} not found")
-                conv_lock = self._conversation_locks[conversation_id]
+                _, conv_lock = _conversation_entry(
+                    self, conversation_id, missing_lock="keyerror"
+                )
                 self._enter_turn(conversation_id, conv_lock)
             try:
                 instance = self.instances[conversation_id]
@@ -699,7 +753,7 @@ class FSMManager:
                     # ERROR handlers run here too (they used to never run on the
                     # stream path). GeneratorExit / KeyboardInterrupt / SystemExit
                     # are separate arms below and deliberately fire nothing.
-                    self._fire_error_handlers(instance, conversation_id, e, log)
+                    self._fire_error_handlers(instance, e, log)
                     raise
                 except GeneratorExit:
                     # Consumer abandoned the iterator before Pass 2 finished
@@ -718,7 +772,7 @@ class FSMManager:
                     raise
                 except Exception as e:
                     self._rollback_user_message(instance, message, log)
-                    self._fire_error_handlers(instance, conversation_id, e, log)
+                    self._fire_error_handlers(instance, e, log)
                     what = (
                         "advance conversation" if message is None else "process message"
                     )
@@ -764,7 +818,7 @@ class FSMManager:
             # re-raised UNWRAPPED. Do NOT restore the bare rollback-and-raise: it
             # made ERROR handlers unreachable for the main real failure while
             # docs/handlers.md promises "ERROR -- On any exception".
-            self._fire_error_handlers(instance, conversation_id, e, log)
+            self._fire_error_handlers(instance, e, log)
             raise
         except (KeyboardInterrupt, SystemExit):
             # DECISION plan-2026-07-18T162030-a02151fe/D-014 [STALE]
@@ -784,13 +838,12 @@ class FSMManager:
             what = "advance conversation" if message is None else "process message"
             log.error(f"Failed to {what}: {e!s}\n{traceback.format_exc()}")
             self._rollback_user_message(instance, message, log)
-            self._fire_error_handlers(instance, conversation_id, e, log)
+            self._fire_error_handlers(instance, e, log)
             raise FSMError(f"Failed to {what}: {e!s}") from e
 
     def _fire_error_handlers(
         self,
         instance: FSMInstance,
-        conversation_id: str,
         exc: BaseException,
         log: Any,
     ) -> None:
@@ -810,7 +863,6 @@ class FSMManager:
             self._pipeline.execute_handlers(
                 instance,
                 HandlerTiming.ERROR,
-                conversation_id,
                 current_state=instance.current_state,
                 error_context={
                     "_error": str(exc),
@@ -934,15 +986,8 @@ class FSMManager:
         # longer takes _lock (leaf _fsm_cache_lock, D-036 of 8b258a25), but a cache
         # miss runs fsm_loader (arbitrary code) under conv_lock. See D-005.
         with self._lock:
-            if conversation_id not in self.instances:
-                raise FSMError(f"Conversation {conversation_id} not found")
-            instance = self.instances[conversation_id]
-            conv_lock = self._conversation_locks.get(conversation_id)
-
-        if conv_lock is None:
-            raise FSMError(
-                f"Conversation {conversation_id} has an instance but no "
-                "per-conversation lock (broken invariant)"
+            instance, conv_lock = _conversation_entry(
+                self, conversation_id, missing_lock="raise"
             )
 
         if not bounded:
@@ -998,10 +1043,7 @@ class FSMManager:
 
         return is_ended
 
-    @with_conversation_context
-    def get_conversation_data(
-        self, conversation_id: str, log: Any = None
-    ) -> dict[str, Any]:
+    def get_conversation_data(self, conversation_id: str) -> dict[str, Any]:
         """Get collected context data (internal metadata keys filtered out).
 
         The internal-prefix filter is applied at every nesting level -- inside
@@ -1019,8 +1061,7 @@ class FSMManager:
             lambda inst: _strip_internal_mapping(inst.context.data),
         )
 
-    @with_conversation_context
-    def get_conversation_state(self, conversation_id: str, log: Any = None) -> str:
+    def get_conversation_state(self, conversation_id: str) -> str:
         """Get current state of conversation."""
         return self._read_under_lock(conversation_id, lambda inst: inst.current_state)
 
@@ -1051,10 +1092,9 @@ class FSMManager:
         # Acquiring `conv_lock` only AFTER `_lock` is released preserves the
         # canonical `_lock -> conv_lock` order. See decisions.md D-004.
         with self._lock:
-            if conversation_id not in self.instances:
-                raise FSMError(f"Conversation {conversation_id} not found")
-            instance = self.instances[conversation_id]
-            conv_lock = self._conversation_locks.get(conversation_id)
+            instance, conv_lock = _conversation_entry(
+                self, conversation_id, missing_lock="unlocked"
+            )
 
         fsm_def = self.get_fsm_definition(instance.fsm_id)
         if state_name not in fsm_def.states:
@@ -1066,10 +1106,7 @@ class FSMManager:
         else:
             instance.current_state = state_name
 
-    @with_conversation_context
-    def get_conversation_history(
-        self, conversation_id: str, log: Any = None
-    ) -> list[dict[str, str]]:
+    def get_conversation_history(self, conversation_id: str) -> list[dict[str, str]]:
         """Get conversation history."""
         # get_recent() returns a NEW list; taking it under conv_lock keeps it
         # consistent with a concurrent turn's exchanges mutation (C1).
@@ -1079,10 +1116,7 @@ class FSMManager:
         )
 
     # DECISION plan-2026-09-20T114608-a8e47b88/D-005
-    @with_conversation_context
-    def get_conversation_snapshot(
-        self, conversation_id: str, log: Any = None
-    ) -> dict[str, Any]:
+    def get_conversation_snapshot(self, conversation_id: str) -> dict[str, Any]:
         """Get one point-in-time-consistent read of everything ``save_session``
         needs, under a SINGLE ``_read_under_lock`` hold.
 
@@ -1241,20 +1275,13 @@ class FSMManager:
             raise FSMError("context_update must be a dictionary")
 
         with self._lock:
-            if conversation_id not in self.instances:
-                raise FSMError(f"Conversation {conversation_id} not found")
-            conv_lock = self._conversation_locks.get(conversation_id)
-            instance = self.instances[conversation_id]
-
             # L11: an instance present with no per-conversation lock is a broken
             # create-together / remove-together invariant. Fail loud instead of
             # silently proceeding with an UNLOCKED write (which would race the
-            # 2-pass write path). Mirrors the same guard in _read_under_lock.
-            if conv_lock is None:
-                raise FSMError(
-                    f"Conversation {conversation_id} has an instance but no "
-                    "per-conversation lock (broken invariant)"
-                )
+            # 2-pass write path): missing_lock="raise", as in _read_under_lock.
+            instance, conv_lock = _conversation_entry(
+                self, conversation_id, missing_lock="raise"
+            )
 
             # Acquire per-conversation lock while still holding _lock to prevent
             # the conversation from being cleaned up between lookup and acquire.
@@ -1280,46 +1307,28 @@ class FSMManager:
                 # already SUCCEEDED, which D-006 guarantees survive at this timing
                 # point. Precedence note: if a handler delta touched one of
                 # `context_update`'s own keys, the rollback wins.
-                # BOUNDARY (known, deliberate): the snapshot is SHALLOW. Key
-                # coverage is exact — `FSMContext.update` writes precisely
-                # `new_data`'s keys and derives nothing — but `pre_commit` holds
-                # the SAME objects as `context.data[key]`. A handler that mutates
-                # a pre-existing dict/list value IN PLACE before failing is
-                # therefore NOT restored. Do not "fix" this with a deep copy:
-                # D-005/D-020 rejected exactly that, because handlers are
-                # contractually supposed to return a delta rather than reach into
-                # `context.data`, and the copy cost would be paid on every call.
-                pre_commit = {
-                    key: instance.context.data[key]
-                    for key in context_update
-                    if key in instance.context.data
-                }
-                instance.context.update(context_update)
-
-                try:
-                    self._execute_handlers(
+                # The snapshot is SHALLOW on purpose: see
+                # `commit_with_key_rollback` (context.py), which holds the
+                # BOUNDARY note and does the commit.
+                commit_with_key_rollback(
+                    instance.context,
+                    context_update,
+                    lambda: self._execute_handlers(
                         HandlerTiming.CONTEXT_UPDATE,
                         conversation_id,
                         updated_keys=set(context_update.keys()),
-                    )
-                except Exception as handler_err:
-                    log.error(
+                    ),
+                    lambda handler_err: log.error(
                         f"CONTEXT_UPDATE handler failed "
                         f"({type(handler_err).__name__}: {handler_err}), rolling "
                         f"back keys {sorted(context_update)}"
-                    )
-                    for key in context_update:
-                        if key in pre_commit:
-                            instance.context.data[key] = pre_commit[key]
-                        else:
-                            instance.context.data.pop(key, None)
-                    raise
+                    ),
+                )
         finally:
-            if conv_lock is not None:
-                try:
-                    conv_lock.release()
-                except RuntimeError:
-                    pass  # Lock was already released or cleaned up
+            try:
+                conv_lock.release()
+            except RuntimeError:
+                pass  # Lock was already released or cleaned up
 
     # ----------------------------------------------------------
     # Conversation lifecycle (end / cleanup)
@@ -1335,9 +1344,9 @@ class FSMManager:
     def end_conversation(self, conversation_id: str, log: Any = None) -> None:
         """End conversation and clean up resources."""
         with self._lock:
-            if conversation_id not in self.instances:
-                raise FSMError(f"Conversation {conversation_id} not found")
-            conv_lock = self._conversation_locks.get(conversation_id)
+            _, conv_lock = _conversation_entry(
+                self, conversation_id, missing_lock="unlocked"
+            )
 
         # Acquire per-conversation lock to ensure no concurrent process_message.
         # Use timeout to prevent indefinite blocking if a thread is stuck.
@@ -1377,10 +1386,7 @@ class FSMManager:
             logger.info(f"Cleaned up {len(stale_ids)} stale conversation locks")
         return stale_ids
 
-    @with_conversation_context
-    def get_complete_conversation(
-        self, conversation_id: str, log: Any = None
-    ) -> dict[str, Any]:
+    def get_complete_conversation(self, conversation_id: str) -> dict[str, Any]:
         """Get complete conversation data for analysis.
 
         ``metadata`` is a shallow copy of ``context.metadata``. Besides
@@ -1477,7 +1483,6 @@ class FSMManager:
         self._pipeline.execute_handlers(
             self.instances[conversation_id],
             timing,
-            conversation_id,
             current_state=current_state,
             target_state=target_state,
             updated_keys=updated_keys,

@@ -54,7 +54,6 @@ from fsm_llm.definitions import (
     ClassificationSchema,
     CompletionRequest,
     CompletionResponse,
-    DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
     FSMContext,
@@ -300,7 +299,6 @@ class TestClassificationAutoMode:
             result = pipeline._resolve_ambiguous_transition(
                 evaluation,
                 "I have a billing question",
-                DataExtractionResponse(),
                 instance,
                 "conv-1",
             )
@@ -484,7 +482,7 @@ class TestClassificationFallbackBehavior:
             mock_cls.return_value = mock_classifier_instance
 
             result = pipeline._resolve_ambiguous_transition(
-                evaluation, "message", DataExtractionResponse(), instance, "conv-1"
+                evaluation, "message", instance, "conv-1"
             )
 
         assert result == "a"
@@ -529,7 +527,6 @@ class TestClassificationContextStorage:
             result = pipeline._resolve_ambiguous_transition(
                 evaluation,
                 "billing question",
-                DataExtractionResponse(),
                 instance,
                 "conv-1",
             )
@@ -770,7 +767,7 @@ class TestClassifierCache:
                 _make_ambiguous_evaluation("a", "b"),
             ):
                 pipeline._resolve_ambiguous_transition(
-                    evaluation, "msg", DataExtractionResponse(), instance, "conv-1"
+                    evaluation, "msg", instance, "conv-1"
                 )
 
         assert mock_cls.call_count == 2
@@ -1107,7 +1104,6 @@ class TestAmbiguousTransitionWithoutUserMessage:
             result = pipeline._resolve_ambiguous_transition(
                 _make_ambiguous_evaluation("billing", "support"),
                 None,
-                DataExtractionResponse(),
                 instance,
                 "conv-1",
             )
@@ -1141,7 +1137,6 @@ class TestAmbiguousTransitionWithoutUserMessage:
             result = pipeline._resolve_ambiguous_transition(
                 _make_ambiguous_evaluation("billing", "support"),
                 None,
-                DataExtractionResponse(),
                 instance,
                 "conv-1",
             )
@@ -1170,7 +1165,6 @@ class TestAmbiguousTransitionWithoutUserMessage:
             result = pipeline._resolve_ambiguous_transition(
                 _make_ambiguous_evaluation("billing", "support"),
                 None,
-                DataExtractionResponse(),
                 self._instance(),
                 "conv-1",
             )
@@ -1552,7 +1546,6 @@ class TestOversizedTieSets:
         result = pipeline._resolve_ambiguous_transition(
             _make_ambiguous_evaluation(*targets),
             "hello",
-            DataExtractionResponse(),
             instance,
             "conv-1",
         )

@@ -7,6 +7,7 @@ kept separate from the orchestration classes.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from .constants import (
@@ -14,7 +15,7 @@ from .constants import (
     has_internal_prefix,
     is_forbidden_context_entry,
 )
-from .definitions import ResponseGenerationRequest
+from .definitions import FSMContext, ResponseGenerationRequest
 from .logging import logger
 from .utilities import filter_context_tree, redact_non_json_leaf
 
@@ -322,3 +323,48 @@ def clean_context_keys(
         log.debug(f"Removed context keys: {removed_keys}")
 
     return cleaned
+
+
+def commit_with_key_rollback(
+    context: FSMContext,
+    committed: dict[str, Any],
+    notify: Callable[[], None],
+    on_failure: Callable[[Exception], None],
+) -> None:
+    """Write ``committed`` into ``context.data``, run ``notify``, undo only those
+    keys if ``notify`` raises.
+
+    Interface contract (callers: the Pass-1 extraction commit in
+    ``pipeline.py`` and ``FSMManager.update_conversation_context``):
+    ``committed`` is the delta to write (``FSMContext.update`` writes exactly
+    its keys). ``notify`` fires the CONTEXT_UPDATE handlers and takes no
+    argument. On an ``Exception`` from ``notify``, ``on_failure(error)`` is
+    called first (the caller logs there), then each committed key is restored
+    to its prior value, or removed when it had none, and the error is
+    re-raised unchanged. Returns ``None``. ``BaseException`` is not caught.
+
+    BOUNDARY (known, deliberate, shapes 4b664252/D-005 and 876e7164/D-009):
+    the snapshot is SHALLOW. Key coverage is exact (``FSMContext.update`` writes
+    precisely ``committed``'s keys and derives nothing, so no committed key
+    escapes the restore) but ``pre_commit`` holds the SAME objects as
+    ``context.data[key]``. A CONTEXT_UPDATE handler that mutates a pre-existing
+    dict/list value IN PLACE before failing is therefore NOT restored. Do not
+    "fix" this with a deep copy or a full ``context.data`` restore: that
+    reintroduces a per-call copy to undo a mutation handlers are contractually
+    supposed to make by returning a delta, and would also discard the deltas of
+    CONTEXT_UPDATE handlers that already SUCCEEDED, which survive at this
+    timing point. Precedence: if a handler delta touched one of ``committed``'s
+    keys, the rollback wins.
+    """
+    pre_commit = {key: context.data[key] for key in committed if key in context.data}
+    context.update(committed)
+    try:
+        notify()
+    except Exception as handler_err:
+        on_failure(handler_err)
+        for key in committed:
+            if key in pre_commit:
+                context.data[key] = pre_commit[key]
+            else:
+                context.data.pop(key, None)
+        raise
