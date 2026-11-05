@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import contextvars
 import json
 import threading
 import uuid
@@ -316,6 +317,15 @@ class ManagedAgent:
 ManagedInstance = ManagedFSM | ManagedWorkflow | ManagedAgent
 
 
+# The (current_state, target_state) the core passed to the last ``should_execute``
+# of this context; ``execute`` reads it back (D-003 below). A ContextVar, not a
+# ``threading.local``: with ``handler_timeout`` the core runs ``execute`` on a
+# worker thread that starts from a copy of the caller's context.
+_HANDLER_STATES: contextvars.ContextVar[tuple[str | None, str | None]] = (
+    contextvars.ContextVar("monitor_handler_states", default=(None, None))
+)
+
+
 class _MonitorHandler(BaseHandler):
     """Observer handler that hands the core's state arguments to a monitor
     callback.
@@ -325,8 +335,11 @@ class _MonitorHandler(BaseHandler):
     # only; the handler context has no ``_target_state``. Do NOT go back to a
     # ``create_handler(...).do(callback)`` lambda that reads the states from
     # the context: every transition event then had an empty target. The
-    # states are kept per thread between ``should_execute`` and ``execute``
-    # (the core calls them back to back on the same thread).
+    # states are kept in ``_HANDLER_STATES`` between ``should_execute`` and
+    # ``execute`` (the core calls them back to back). Do NOT go back to a
+    # ``threading.local``: with ``handler_timeout`` set ``execute`` runs on a
+    # worker thread and read ``None, None`` (plan-2026-11-05T185903-5980fbb7,
+    # F-HV-01); the worker starts from ``contextvars.copy_context()``.
     """
 
     def __init__(
@@ -342,7 +355,6 @@ class _MonitorHandler(BaseHandler):
         self.callback = callback
         self.collector = collector
         self.active = True
-        self._states = threading.local()
 
     def should_execute(
         self,
@@ -354,13 +366,11 @@ class _MonitorHandler(BaseHandler):
     ) -> bool:
         if not self.active or timing != self.timing:
             return False
-        self._states.current = current_state
-        self._states.target = target_state
+        _HANDLER_STATES.set((current_state, target_state))
         return True
 
     def execute(self, context: dict[str, Any]) -> dict[str, Any]:
-        current = getattr(self._states, "current", None)
-        target = getattr(self._states, "target", None)
+        current, target = _HANDLER_STATES.get()
         self.callback(context, current_state=current, target_state=target)
         # Observe only: never write into the conversation context.
         return {}

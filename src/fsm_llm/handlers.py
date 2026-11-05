@@ -70,6 +70,7 @@ Advanced Conditional Logic::
 
 from __future__ import annotations
 
+import contextvars
 import copy
 import math
 import numbers
@@ -132,8 +133,8 @@ class FSMHandler(Protocol):
     in the FSM execution lifecycle. The key innovation is the ``should_execute`` method,
     which allows each handler to make autonomous decisions about when to run.
 
-    The protocol supports both synchronous and asynchronous execution patterns,
-    with priority-based ordering for deterministic execution sequences.
+    Handlers are synchronous callables (``execute`` returns a dict, never a
+    coroutine), ordered by priority for deterministic execution sequences.
     """
 
     @property
@@ -560,8 +561,13 @@ class HandlerSystem:
             except BaseException as exc:  # re-raised on the caller's thread
                 outcome["error"] = exc
 
+        # The worker runs in a copy of the caller's context, so a ContextVar the
+        # caller set (a monitor handler's states, F-HV-01) is visible to it.
         worker = threading.Thread(
-            target=_run, name=f"fsm-handler-{handler_name}", daemon=True
+            target=contextvars.copy_context().run,
+            args=(_run,),
+            name=f"fsm-handler-{handler_name}",
+            daemon=True,
         )
         worker.start()
         worker.join(self.handler_timeout)
@@ -689,7 +695,8 @@ class HandlerBuilder:
     - Fluent method chaining for readable configuration
     - Support for multiple condition types (timing, state, context, etc.)
     - Custom condition lambdas for complex logic
-    - Both synchronous and asynchronous execution support
+    - Synchronous execution only: an ``async def`` execution lambda builds
+      but fails at run time ("non-dict result: coroutine")
     - Priority-based execution control
     - Critical handlers via ``.critical()`` (failures raise even in "continue" mode)
 
@@ -878,11 +885,7 @@ class HandlerBuilder:
         :return: Self for method chaining
         :rtype: HandlerBuilder
         """
-        if self.timings is None:
-            self.timings = set()
-        self.timings.add(HandlerTiming.POST_TRANSITION)
-        self.target_states.update(states)
-        return self
+        return self.at(HandlerTiming.POST_TRANSITION).on_target_state(*states)
 
     def on_state_exit(self, *states: str) -> HandlerBuilder:
         """
@@ -895,11 +898,7 @@ class HandlerBuilder:
         :return: Self for method chaining
         :rtype: HandlerBuilder
         """
-        if self.timings is None:
-            self.timings = set()
-        self.timings.add(HandlerTiming.PRE_TRANSITION)
-        self.states.update(states)
-        return self
+        return self.at(HandlerTiming.PRE_TRANSITION).on_state(*states)
 
     def on_context_update(self, *keys: str) -> HandlerBuilder:
         """
@@ -912,11 +911,7 @@ class HandlerBuilder:
         :return: Self for method chaining
         :rtype: HandlerBuilder
         """
-        if self.timings is None:
-            self.timings = set()
-        self.timings.add(HandlerTiming.CONTEXT_UPDATE)
-        self.updated_keys.update(keys)
-        return self
+        return self.at(HandlerTiming.CONTEXT_UPDATE).when_keys_updated(*keys)
 
     def do(self, execution: ExecutionLambda) -> BaseHandler:
         """
@@ -940,8 +935,9 @@ class HandlerBuilder:
         Build a handler from the current configuration.
 
         This method creates the final handler instance based on all the configuration
-        set through the fluent interface. It automatically detects whether the
-        execution lambda is async and configures the handler appropriately.
+        set through the fluent interface. It does not inspect the execution
+        lambda beyond ``callable``: an ``async def`` one builds and fails when
+        it runs (the handler gets a coroutine, not a dict).
 
         :return: Configured BaseHandler instance
         :rtype: BaseHandler
@@ -1069,6 +1065,12 @@ def clear_keys_on_entry(
 # --------------------------------------------------------------
 
 
+def _as_set(names: Iterable[str] | str | None) -> set[str]:
+    """``names`` as a set: a bare ``str`` is one name (not its characters),
+    ``None`` is empty."""
+    return {names} if isinstance(names, str) else set(names or ())
+
+
 class LambdaHandler(BaseHandler):
     """
     Internal implementation of a handler using lambda functions.
@@ -1124,24 +1126,12 @@ class LambdaHandler(BaseHandler):
         self.condition_lambdas = condition_lambdas
         self.execution_lambda = execution_lambda
         self.timings = timings
-        self.states = states
-        self.target_states = target_states
-        self.required_keys = required_keys
-        self.updated_keys = updated_keys
-        self.not_states = (
-            {not_states}
-            if isinstance(not_states, str)
-            else set(not_states)
-            if not_states is not None
-            else set()
-        )
-        self.not_target_states = (
-            {not_target_states}
-            if isinstance(not_target_states, str)
-            else set(not_target_states)
-            if not_target_states is not None
-            else set()
-        )
+        self.states = _as_set(states)
+        self.target_states = _as_set(target_states)
+        self.required_keys = _as_set(required_keys)
+        self.updated_keys = _as_set(updated_keys)
+        self.not_states = _as_set(not_states)
+        self.not_target_states = _as_set(not_target_states)
 
     def should_execute(
         self,

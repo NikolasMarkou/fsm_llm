@@ -1140,6 +1140,26 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
 # --------------------------------------------------------------
 
 
+def read_json_object(file_path: str) -> dict[str, Any]:
+    """Read a raw FSM definition file: UTF-8 JSON whose top level is an object.
+
+    The one reader of ``load_fsm_from_file``, ``validate_fsm_from_file`` and
+    ``visualize_fsm_from_file``; each keeps its own wording for a failure.
+
+    Raises:
+        FileNotFoundError, OSError: the file cannot be opened.
+        UnicodeDecodeError: the file is not UTF-8 text.
+        json.JSONDecodeError: the text is not JSON.
+        ValueError: the JSON is not an object ("FSM definition must be a JSON
+            object").
+    """
+    with open(file_path, encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError("FSM definition must be a JSON object")
+    return data
+
+
 def load_fsm_from_file(file_path: str) -> FSMDefinition:
     """
     Load FSM definition from JSON file with enhanced validation.
@@ -1162,12 +1182,7 @@ def load_fsm_from_file(file_path: str) -> FSMDefinition:
             raise FileNotFoundError(f"FSM definition file not found: {file_path}")
 
         # Load and parse JSON
-        with open(file_path, encoding="utf-8") as f:
-            fsm_data = json.load(f)
-
-        # Validate basic structure
-        if not isinstance(fsm_data, dict):
-            raise ValueError("FSM definition must be a JSON object")
+        fsm_data = read_json_object(file_path)
 
         # Create and validate FSM definition
         fsm_definition = FSMDefinition(**fsm_data)

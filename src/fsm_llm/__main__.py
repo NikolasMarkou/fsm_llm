@@ -83,6 +83,7 @@ def main_cli():
     from .logging import setup_cli_logging
     from .runner import main as main_runner
     from .validator import main as main_validator
+    from .visualizer import ASCII_STYLES
     from .visualizer import main as main_visualizer
 
     parser = argparse.ArgumentParser(
@@ -101,7 +102,7 @@ def main_cli():
         "--style",
         "-s",
         default="full",
-        choices=["full", "compact", "minimal"],
+        choices=ASCII_STYLES,
         help="Visualization style (default: full)",
     )
 

@@ -114,6 +114,31 @@ class TestTransitionStates:
         visited = collector.get_metrics().states_visited
         assert visited == {"greet": 1, "checkout": 1}
 
+    def test_states_survive_a_handler_timeout(self):
+        """F-HV-01: with ``handler_timeout`` the handler runs in a worker thread;
+        the states set by ``should_execute`` must still reach ``execute``."""
+        from fsm_llm.handlers import HandlerSystem
+
+        collector = EventCollector()
+        api = _FakeAPI()
+        api.handler_system = HandlerSystem(handler_timeout=5)
+        api.register_handler = api.handler_system.register_handler
+        register_monitor_handlers(api, collector)
+
+        api.handler_system.execute_handlers(
+            HandlerTiming.PRE_TRANSITION,
+            "greet",
+            "checkout",
+            {"_conversation_id": "c1"},
+        )
+
+        transitions = [
+            e for e in collector.get_events() if e.event_type == EVENT_STATE_TRANSITION
+        ]
+        assert [(e.source_state, e.target_state) for e in transitions] == [
+            ("greet", "checkout")
+        ]
+
     def test_capture_log_records_transition_and_end_state(self):
         agent = ManagedAgent("a1")
         collector = EventCollector()

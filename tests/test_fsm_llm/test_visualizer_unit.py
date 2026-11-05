@@ -253,7 +253,7 @@ class TestCreateStateBoxes:
         terminal = {"end"}
         ordered = sort_states_logically(data["states"], "start", terminal, metrics)
 
-        boxes = create_state_boxes(ordered, "start", terminal, data["states"], metrics)
+        boxes = create_state_boxes(ordered, "start", terminal, data["states"])
         assert "start" in boxes
         assert "end" in boxes
         # Each box is a list of strings
@@ -269,7 +269,7 @@ class TestCreateStateBoxes:
         terminal = {"end"}
         ordered = sort_states_logically(data["states"], "start", terminal, metrics)
 
-        boxes = create_state_boxes(ordered, "start", terminal, data["states"], metrics)
+        boxes = create_state_boxes(ordered, "start", terminal, data["states"])
         start_text = "\n".join(boxes["start"])
         assert "start" in start_text
 
@@ -1074,7 +1074,7 @@ class TestTruncationIsVisibleAndUnambiguous:
             },
         }
 
-    @pytest.mark.parametrize("style", ["full", "compact", "detailed"])
+    @pytest.mark.parametrize("style", ["full", "compact", "minimal"])
     def test_two_same_prefix_states_do_not_render_identically(self, style):
         """The defect, stated directly. Under a head-only slice both ids became
         `...pending_manual_review` and the diagram showed one node where the FSM
@@ -1092,7 +1092,7 @@ class TestTruncationIsVisibleAndUnambiguous:
             f"diagram is ambiguous:\n" + "\n".join(sorted(duplicates))
         )
 
-    @pytest.mark.parametrize("style", ["full", "compact", "detailed"])
+    @pytest.mark.parametrize("style", ["full", "compact", "minimal"])
     def test_both_distinguishing_suffixes_survive(self, style):
         """Stronger than 'the rows differ': the part that actually tells the two
         states apart must be present, not merely some incidental difference."""

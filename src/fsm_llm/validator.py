@@ -30,6 +30,7 @@ from .definitions import (
     unknown_initial_state_message,
 )
 from .logging import enable_library_logging, logger, setup_cli_logging
+from .utilities import read_json_object
 
 # The result kinds a completion state can produce, read off the one model
 # that defines them: every kind with tools, all but ``calls`` without.
@@ -1104,43 +1105,25 @@ def validate_fsm_from_file(json_file: str) -> FSMValidationResult:
     Raises:
         No exceptions - all errors are captured in the result object
     """
+    result = FSMValidationResult(json_file)
     try:
-        # Load and parse the JSON file
-        with open(json_file, encoding="utf-8") as f:
-            fsm_data = json.load(f)
-
-        if not isinstance(fsm_data, dict):
-            # The loader's sentence (`utilities.load_fsm_from_file`).
-            result = FSMValidationResult(json_file)
-            result.add_error("FSM definition must be a JSON object")
-            return result
-
-        # Create a validator and run the validation
-        validator = FSMValidator(fsm_data)
-        return validator.validate()
-
+        fsm_data = read_json_object(json_file)
     except FileNotFoundError:
-        # Handle case when file doesn't exist
-        result = FSMValidationResult(json_file)
         result.add_error(f"File '{json_file}' not found")
-        return result
-
     except json.JSONDecodeError:
-        # Handle case when file isn't valid JSON
-        result = FSMValidationResult(json_file)
         result.add_error(f"'{json_file}' is not a valid JSON file")
-        return result
-
     except UnicodeDecodeError:
-        result = FSMValidationResult(json_file)
         result.add_error(f"'{json_file}' is not valid UTF-8 text")
-        return result
-
+    except ValueError as e:
+        result.add_error(str(e))  # the loader's sentence: not a JSON object
     except Exception as e:
-        # Catch-all for other exceptions
-        result = FSMValidationResult(json_file)
         result.add_error(f"Error validating FSM: {e!s}")
-        return result
+    else:
+        try:
+            return FSMValidator(fsm_data).validate()
+        except Exception as e:
+            result.add_error(f"Error validating FSM: {e!s}")
+    return result
 
 
 # --------------------------------------------------------------

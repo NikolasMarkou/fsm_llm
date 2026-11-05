@@ -48,14 +48,11 @@ class TestVisualizerBoxTruncation:
                 "purpose": "Testing",
             }
         }
-        state_metrics = {long_id: {"depth": 0}}
-
         boxes = create_state_boxes(
             ordered_states=[long_id],
             initial_state=long_id,
             terminal_states=set(),
             states=states,
-            state_metrics=state_metrics,
         )
 
         box_lines = boxes[long_id]
@@ -71,14 +68,11 @@ class TestVisualizerBoxTruncation:
 
         state_id = "greeting"
         states = {state_id: {"description": "Say hello", "purpose": "Greet user"}}
-        state_metrics = {state_id: {"depth": 0}}
-
         boxes = create_state_boxes(
             ordered_states=[state_id],
             initial_state=state_id,
             terminal_states=set(),
             states=states,
-            state_metrics=state_metrics,
         )
 
         box_lines = boxes[state_id]

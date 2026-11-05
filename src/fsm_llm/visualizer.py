@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict
 from .constants import CLI_EXIT_FAILURE, CLI_EXIT_OK
 from .definitions import FSMDefinition, Transition
 from .logging import enable_library_logging, logger, setup_cli_logging
+from .utilities import read_json_object
 
 # --------------------------------------------------------------
 
@@ -73,6 +74,20 @@ ICONS = {
     "branching": "+",  # States with multiple outbound transitions
     "merge": "o",  # States with multiple inbound transitions
     "key": "#",  # Used for required keys
+}
+
+# The ASCII layouts of `visualize_fsm_ascii` (CLI `--style`).
+ASCII_STYLES: tuple[str, ...] = ("full", "compact", "minimal")
+
+# What an FSM without a name is called in every renderer.
+_DEFAULT_NAME = "Unnamed FSM"
+
+# The compact diagram's per-state prefix, keyed like `BOX_STYLES`.
+_COMPACT_PREFIXES = {
+    "both": "╔═╤═╝ ",
+    "initial": "╔═══> ",
+    "terminal": "┗━━━> ",
+    "default": "────> ",
 }
 
 # Width, in characters, of the content area BETWEEN the two vertical glyphs of a
@@ -200,6 +215,55 @@ def _one_line(value: Any, default: str) -> str:
     return " ".join(str(value).split()) if value else default
 
 
+def _is_terminal(state: dict[str, Any]) -> bool:
+    """The one terminal rule: a state without transitions."""
+    return not _transitions_of(state)
+
+
+def _box_style_name(is_initial: bool, is_terminal: bool) -> str:
+    """The ``BOX_STYLES`` key of a state: ``both``, ``initial``, ``terminal`` or
+    ``default``."""
+    if is_initial and is_terminal:
+        return "both"
+    if is_initial:
+        return "initial"
+    return "terminal" if is_terminal else "default"
+
+
+def _state_type_label(is_initial: bool, is_terminal: bool) -> str:
+    """`` (INITIAL)``, `` (TERMINAL)``, `` (INITIAL, TERMINAL)`` or ``""``."""
+    kinds = [k for k, on in (("INITIAL", is_initial), ("TERMINAL", is_terminal)) if on]
+    return f" ({', '.join(kinds)})" if kinds else ""
+
+
+def _state_icons(metrics: dict[str, Any]) -> list[str]:
+    """The icons of a state: user input, branching, merge (in that order)."""
+    return [
+        icon
+        for icon, on in (
+            (ICONS["input"], metrics.get("required_keys")),
+            (ICONS["branching"], metrics.get("outbound", 0) > 1),
+            (ICONS["merge"], metrics.get("inbound", 0) > 1),
+        )
+        if on
+    ]
+
+
+def _known_states_hint(states: dict[str, Any]) -> str:
+    """``defined states: 'a', 'b', ...`` (the first five ids, sorted)."""
+    known = ", ".join(repr(s) for s in sorted(states)[:5]) or "<none>"
+    suffix = ", ..." if len(states) > 5 else ""
+    return f"defined states: {known}{suffix}"
+
+
+def _key_list(value: Any, what: str) -> list[str]:
+    """``value`` (``None`` is none) as a list of context key names, or ``ValueError``."""
+    keys = value or []
+    if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys):
+        raise ValueError(f"{what} must be a list of strings, got {value!r}")
+    return keys
+
+
 def _require_definition_shapes(states: Any) -> None:
     """Reject a definition whose ``states`` or their parts are not mappings.
 
@@ -254,11 +318,9 @@ def _require_initial_state(states: dict[str, Any], initial_state: str) -> None:
     # definition behind a plausible-looking diagram. See decisions.md D-021.
     if initial_state in states:
         return
-    known = ", ".join(repr(s) for s in sorted(states)[:5]) or "<none>"
-    suffix = ", ..." if len(states) > 5 else ""
     raise ValueError(
         f"initial_state {initial_state!r} is not present in 'states' "
-        f"(defined states: {known}{suffix})"
+        f"({_known_states_hint(states)})"
     )
 
 
@@ -301,11 +363,9 @@ def _require_valid_transition_targets(states: dict[str, Any]) -> None:
             target = transition.get("target_state", "")
             if target in states:
                 continue
-            known = ", ".join(repr(s) for s in sorted(states)[:5]) or "<none>"
-            suffix = ", ..." if len(states) > 5 else ""
             raise ValueError(
                 f"Transition from {state_id!r} to non-existent state {target!r} "
-                f"(defined states: {known}{suffix})"
+                f"({_known_states_hint(states)})"
             )
 
 
@@ -315,44 +375,53 @@ def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
 
     Args:
         fsm_data: The FSM definition as a dictionary
-        style: Visualization style - "full", "compact", or "minimal"
+        style: Visualization style, one of ``ASCII_STYLES``: "full", "compact"
+            or "minimal"
 
     Returns:
         A string containing the ASCII visualization
 
     Raises:
-        ValueError: if ``initial_state`` is not present in ``states``, or if any
-            transition names a ``target_state`` that is not a key of ``states``.
+        ValueError: if ``style`` is unknown, ``states``, a state or a transition
+            is not a mapping, a key list is not a list of strings,
+            ``initial_state`` is not present in ``states``, or any transition
+            names a ``target_state`` that is not a key of ``states``. Every
+            style refuses the same input, so a renderer failure is never
+            hidden behind a half diagram.
     """
+    if style not in ASCII_STYLES:
+        raise ValueError(
+            f"unknown style {style!r} (choose from {', '.join(ASCII_STYLES)})"
+        )
     states = fsm_data.get("states", {})
     initial_state = fsm_data.get("initial_state", "")
     persona = fsm_data.get("persona", None)
 
+    _require_definition_shapes(states)
     _require_initial_state(states, initial_state)
     _require_valid_transition_targets(states)
 
-    # Find terminal states (those with no outgoing transitions)
-    terminal_states = {
-        state_id for state_id, state in states.items() if not _transitions_of(state)
-    }
-
     # Build a representation of the graph structure and analyze it
     graph, state_metrics = build_graph_representation(states, initial_state)
+    terminal_states = {s for s, m in state_metrics.items() if m["is_terminal"]}
 
     # Create ASCII visualization
     lines = []
 
     # Create header based on style
+    name = _one_line(fsm_data.get("name"), _DEFAULT_NAME)
     if style != "minimal":
-        lines.extend(create_fancy_header(_one_line(fsm_data.get("name"), "FSM")))
+        lines.extend(create_fancy_header(name))
     else:
         # Simple header for minimal style
-        lines.append(f"FSM: {_one_line(fsm_data.get('name'), 'Unnamed FSM')}")
+        lines.append(f"FSM: {name}")
         lines.append("")
 
     # Add metadata based on style
     if style == "full":
-        lines.extend(create_metadata_section(fsm_data, initial_state, state_metrics))
+        lines.extend(
+            create_metadata_section(fsm_data, initial_state, state_metrics, graph)
+        )
 
         # Add persona section if available
         if persona:
@@ -364,7 +433,7 @@ def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
         )
 
         # Add transitions section
-        lines.extend(create_transitions_section(graph, states))
+        lines.extend(create_transitions_section(graph))
     elif style == "compact" and persona:
         # In compact mode, just show a simplified persona section
         lines.append("╭" + "─" * 60 + "╮")
@@ -384,45 +453,38 @@ def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
         lines.append("")
 
     # Create diagram based on style
-    try:
-        if style != "minimal":
-            lines.append("")
-            lines.append("╭" + "─" * 60 + "╮")
-            lines.append("│" + " STATE DIAGRAM ".center(60) + "│")
-            lines.append("╰" + "─" * 60 + "╯")
-            lines.append("")
-
-            # Add legend
-            lines.extend(
-                create_legend(
-                    initial_state in terminal_states,
-                    any(
-                        len(state_metrics.get(s, {}).get("required_keys", [])) > 0
-                        for s in states
-                    ),
-                )
-            )
-
+    if style != "minimal":
+        lines.append("")
+        lines.append("╭" + "─" * 60 + "╮")
+        lines.append("│" + " STATE DIAGRAM ".center(60) + "│")
+        lines.append("╰" + "─" * 60 + "╯")
         lines.append("")
 
-        # Generate diagram based on selected style
-        if style == "minimal":
-            diagram_lines = generate_minimal_ascii_diagram(
-                graph, initial_state, terminal_states, states, state_metrics
+        # Add legend
+        lines.extend(
+            create_legend(
+                initial_state in terminal_states,
+                any(len(m["required_keys"]) > 0 for m in state_metrics.values()),
             )
-        elif style == "compact":
-            diagram_lines = generate_compact_ascii_diagram(
-                graph, initial_state, terminal_states, states, state_metrics
-            )
-        else:  # full
-            diagram_lines = generate_enhanced_ascii_diagram(
-                graph, initial_state, terminal_states, states, state_metrics
-            )
+        )
 
-        lines.extend(diagram_lines)
-    except Exception as e:
-        lines.append(f"Could not generate diagram: {e}")
+    lines.append("")
 
+    # Generate diagram based on selected style
+    if style == "minimal":
+        diagram_lines = generate_minimal_ascii_diagram(
+            graph, initial_state, terminal_states, state_metrics
+        )
+    elif style == "compact":
+        diagram_lines = generate_compact_ascii_diagram(
+            graph, initial_state, terminal_states, states, state_metrics
+        )
+    else:  # full
+        diagram_lines = generate_enhanced_ascii_diagram(
+            graph, initial_state, terminal_states, states, state_metrics
+        )
+
+    lines.extend(diagram_lines)
     return "\n".join(lines)
 
 
@@ -454,6 +516,7 @@ def create_metadata_section(
     fsm_data: dict[str, Any],
     initial_state: str,
     state_metrics: dict[str, dict[str, Any]],
+    graph: dict[str, list],
 ) -> list[str]:
     """Create the metadata section of the visualization."""
     lines = [
@@ -498,7 +561,7 @@ def create_metadata_section(
     )
     lines.append(_section_box_row(f"Branching States: {branching_states}"))
 
-    max_path = find_longest_path(state_metrics)
+    max_path = find_longest_path(graph, initial_state)
     lines.append(_section_box_row(f"Maximum Path Length: {max_path}"))
 
     lines.append("└" + "─" * 60 + "┘")
@@ -564,26 +627,13 @@ def create_states_section(
 
     for state_id in sorted_states:
         state = states[state_id]
-        state_type = []
-        if state_id == initial_state:
-            state_type.append("INITIAL")
-        if state_id in terminal_states:
-            state_type.append("TERMINAL")
-
-        state_type_str = f" ({', '.join(state_type)})" if state_type else ""
+        is_initial = state_id == initial_state
+        is_terminal = state_id in terminal_states
+        state_type_str = _state_type_label(is_initial, is_terminal)
         metrics = state_metrics.get(state_id, {})
 
         # Create a mini box for each state with appropriate decoration
-        if state_id == initial_state and state_id in terminal_states:
-            box_style = "both"
-        elif state_id == initial_state:
-            box_style = "initial"
-        elif state_id in terminal_states:
-            box_style = "terminal"
-        else:
-            box_style = "default"
-
-        style = BOX_STYLES[box_style]
+        style = BOX_STYLES[_box_style_name(is_initial, is_terminal)]
 
         width = _STATES_BOX_INNER_WIDTH
         vertical = style["vertical"]
@@ -604,13 +654,7 @@ def create_states_section(
         state_line = f" {state_id}{state_type_str}"
 
         # Add icons for state properties
-        icons = []
-        if metrics.get("required_keys"):
-            icons.append(f"{ICONS['input']}")
-        if metrics.get("outbound", 0) > 1:
-            icons.append(f"{ICONS['branching']}")
-        if metrics.get("inbound", 0) > 1:
-            icons.append(f"{ICONS['merge']}")
+        icons = _state_icons(metrics)
 
         if icons:
             icon_str = " " + " ".join(icons)
@@ -662,9 +706,7 @@ def create_states_section(
     return lines
 
 
-def create_transitions_section(
-    graph: dict[str, list], states: dict[str, Any]
-) -> list[str]:
+def create_transitions_section(graph: dict[str, list]) -> list[str]:
     """Create the transitions section of the visualization."""
     lines = [
         "┌" + "─" * 60 + "┐",
@@ -765,7 +807,12 @@ def build_graph_representation(
             # Extract required context keys if available
             required_keys: list[str] = []
             for condition in transition.get("conditions") or []:
-                required_keys.extend(condition.get("requires_context_keys") or [])
+                required_keys.extend(
+                    _key_list(
+                        condition.get("requires_context_keys"),
+                        f"'requires_context_keys' of a condition of state {state_id!r}",
+                    )
+                )
 
             # Add this transition to the targets list
             targets.append((target, desc, required_keys))
@@ -776,8 +823,11 @@ def build_graph_representation(
         state_metrics[state_id] = {
             "outbound": len(targets),
             "inbound": 0,
-            "required_keys": state.get("required_context_keys") or [],
-            "is_terminal": len(targets) == 0,
+            "required_keys": _key_list(
+                state.get("required_context_keys"),
+                f"'required_context_keys' of state {state_id!r}",
+            ),
+            "is_terminal": _is_terminal(state),
             "depth": 0,  # Will be calculated in the next pass
         }
 
@@ -811,8 +861,7 @@ def calculate_depths(
         return  # Can't determine depths without an initial state
 
     # Start with the initial state at depth 0
-    visited = set([initial_state])
-    state_metrics[initial_state]["depth"] = 0
+    visited = {initial_state}
 
     # Use breadth-first search to calculate depths
     current_depth = 0
@@ -832,19 +881,36 @@ def calculate_depths(
         current_frontier = next_frontier
 
 
-def find_longest_path(state_metrics: dict[str, dict[str, Any]]) -> int:
-    """Find the length of the longest path through the FSM."""
-    if not state_metrics:
-        return 0
+def find_longest_path(graph: dict[str, list], initial_state: str) -> int:
+    """The number of states on the longest path from ``initial_state``.
 
-    # The longest path is the maximum depth of any terminal state
-    max_depth = 0
-    for _state_id, metrics in state_metrics.items():
-        if metrics.get("is_terminal", False):
-            max_depth = max(max_depth, metrics.get("depth", 0))
-
-    # Add 1 to count the states rather than transitions
-    return max_depth + 1
+    A transition back to a state already on the current path (a loop) is not
+    followed, so the walk is over the graph without its back edges and every
+    state is visited once.
+    """
+    # best[s]: states on the longest path that starts at s (s included)
+    best: dict[str, int] = {}
+    on_path = {initial_state}
+    stack = [(initial_state, iter(graph.get(initial_state, [])), 0)]
+    while stack:
+        state_id, targets, below = stack.pop()
+        for target, _desc, _keys in targets:
+            if target in best:
+                below = max(below, best[target])
+            elif target not in on_path:
+                on_path.add(target)
+                stack.append((state_id, targets, below))
+                stack.append((target, iter(graph.get(target, [])), 0))
+                break
+        else:
+            on_path.discard(state_id)
+            best[state_id] = below + 1
+            if stack:
+                parent, parent_targets, parent_below = stack.pop()
+                stack.append(
+                    (parent, parent_targets, max(parent_below, best[state_id]))
+                )
+    return best[initial_state]
 
 
 def sort_states_logically(
@@ -967,7 +1033,7 @@ def generate_enhanced_ascii_diagram(
 
     # Create state boxes
     state_boxes = create_state_boxes(
-        ordered_states, initial_state, terminal_states, states, state_metrics
+        ordered_states, initial_state, terminal_states, states
     )
 
     # Generate the diagram layout
@@ -997,18 +1063,11 @@ def generate_enhanced_ascii_diagram(
                     diagram_lines.append(self_loop_line)
                     continue
 
-                # Store connection info for drawing later
-                try:
-                    target_idx = ordered_states.index(target)
-                    if target_idx > i:  # Forward connection
-                        direction = "forward"
-                    else:  # Backward connection
-                        direction = "backward"
-
-                    connections.append((i, target_idx, direction, desc, required_keys))
-                except ValueError:
-                    # Target state not in ordered_states (shouldn't happen in valid FSMs)
-                    pass
+                # Store connection info for drawing later (every target is a
+                # state: `_require_valid_transition_targets`)
+                target_idx = ordered_states.index(target)
+                direction = "forward" if target_idx > i else "backward"
+                connections.append((i, target_idx, direction, desc, required_keys))
 
             # Add spacing between states
             diagram_lines.append("")
@@ -1074,24 +1133,12 @@ def generate_compact_ascii_diagram(
     # Create a more compact representation
     for _i, state_id in enumerate(ordered_states):
         # Determine the box style based on state type
-        if state_id == initial_state and state_id in terminal_states:
-            prefix = "╔═╤═╝ "
-        elif state_id == initial_state:
-            prefix = "╔═══> "
-        elif state_id in terminal_states:
-            prefix = "┗━━━> "
-        else:
-            prefix = "────> "
+        prefix = _COMPACT_PREFIXES[
+            _box_style_name(state_id == initial_state, state_id in terminal_states)
+        ]
 
         # Add icons for state properties
-        icons = []
-        metrics = state_metrics.get(state_id, {})
-        if metrics.get("required_keys"):
-            icons.append(f"{ICONS['input']}")
-        if metrics.get("outbound", 0) > 1:
-            icons.append(f"{ICONS['branching']}")
-        if metrics.get("inbound", 0) > 1:
-            icons.append(f"{ICONS['merge']}")
+        icons = _state_icons(state_metrics.get(state_id, {}))
 
         icon_str = " " + " ".join(icons) if icons else ""
 
@@ -1151,14 +1198,13 @@ def generate_minimal_ascii_diagram(
     graph: dict[str, list],
     initial_state: str,
     terminal_states: set[str],
-    states: dict[str, Any],
     state_metrics: dict[str, dict[str, Any]],
 ) -> list[str]:
     """Generate a minimal ASCII diagram showing just the states and connections."""
     diagram_lines: list[str] = []
 
     # Sort states by depth for better layout
-    ordered_states = sort_states_by_depth(initial_state, graph, state_metrics)
+    ordered_states = sort_states_by_depth(initial_state, state_metrics)
 
     # Create a mapping of states to their line position in the diagram
     state_positions = {}
@@ -1213,7 +1259,7 @@ def generate_minimal_ascii_diagram(
 
 
 def sort_states_by_depth(
-    initial_state: str, graph: dict[str, list], state_metrics: dict[str, dict[str, Any]]
+    initial_state: str, state_metrics: dict[str, dict[str, Any]]
 ) -> list[str]:
     """Sort states by their depth from the initial state for better layout."""
     depth_groups = defaultdict(list)
@@ -1237,12 +1283,18 @@ def sort_states_by_depth(
     return ordered_states
 
 
+def _box_row(vertical: str, content: str, box_width: int) -> str:
+    """One row of a STATE DIAGRAM box: ``vertical``, a space, ``content``,
+    padded or elided (``_fit``, head and tail kept) to ``box_width`` columns with
+    the closing ``vertical`` last. ``content`` is the text without borders."""
+    return _fit(f"{vertical} {content}", box_width - 1).ljust(box_width - 1) + vertical
+
+
 def create_state_boxes(
     ordered_states: list[str],
     initial_state: str,
     terminal_states: set[str],
     states: dict[str, Any],
-    state_metrics: dict[str, dict[str, Any]],
 ) -> dict[str, list[str]]:
     """Create enhanced boxes for each state."""
     state_boxes = {}
@@ -1252,14 +1304,8 @@ def create_state_boxes(
         is_terminal = state_id in terminal_states
 
         # Choose appropriate box style
-        if is_initial and is_terminal:
-            style = BOX_STYLES["both"]
-        elif is_initial:
-            style = BOX_STYLES["initial"]
-        elif is_terminal:
-            style = BOX_STYLES["terminal"]
-        else:
-            style = BOX_STYLES["default"]
+        style = BOX_STYLES[_box_style_name(is_initial, is_terminal)]
+        vertical = style["vertical"]
 
         # Get state details
         state_data = states.get(state_id, {})
@@ -1280,14 +1326,6 @@ def create_state_boxes(
         # Create the box
         box = []
 
-        # State type label
-        state_type = []
-        if is_initial:
-            state_type.append("INITIAL")
-        if is_terminal:
-            state_type.append("TERMINAL")
-        state_type_str = f" ({', '.join(state_type)})" if state_type else ""
-
         # Box header
         box.append(
             f"{style['topleft']}{style['horizontal'] * (box_width - 2)}{style['topright']}"
@@ -1304,50 +1342,36 @@ def create_state_boxes(
         # exact same defect for `create_states_section`/`create_transitions_section`
         # (D-033). Routing through `_fit` completes that sweep; it does not
         # reverse D-033. Do NOT go back to a bare slice here. See decisions.md D-002.
+        # The `_fit` now lives in `_box_row`, which every row of this box uses.
         box.append(
-            _fit(
-                f"{style['vertical']} {state_id}{state_type_str}", box_width - 1
-            ).ljust(box_width - 1)
-            + f"{style['vertical']}"
+            _box_row(
+                vertical,
+                f"{state_id}{_state_type_label(is_initial, is_terminal)}",
+                box_width,
+            )
         )
 
         # Add state description
-        box.append(
-            f"{style['vertical']}{style['title_sep'] * (box_width - 2)}{style['vertical']}"
-        )
+        box.append(f"{vertical}{style['title_sep'] * (box_width - 2)}{vertical}")
         if description:
-            wrapped_desc = textwrap.wrap(description, width=box_width - 4)
-            for line in wrapped_desc:
-                box.append(
-                    f"{style['vertical']} {line}".ljust(box_width - 1)
-                    + f"{style['vertical']}"
-                )
+            for line in textwrap.wrap(description, width=box_width - 4):
+                box.append(_box_row(vertical, line, box_width))
 
         # Add empty line for separation
-        box.append(f"{style['vertical']}".ljust(box_width - 1) + f"{style['vertical']}")
+        box.append(_box_row(vertical, "", box_width))
 
         # Add purpose
         if purpose:
-            wrapped_purpose = textwrap.wrap(f"Purpose: {purpose}", width=box_width - 4)
-            for line in wrapped_purpose:
-                box.append(
-                    f"{style['vertical']} {line}".ljust(box_width - 1)
-                    + f"{style['vertical']}"
-                )
+            for line in textwrap.wrap(f"Purpose: {purpose}", width=box_width - 4):
+                box.append(_box_row(vertical, line, box_width))
 
         # Add required context keys
         required_keys = state_data.get("required_context_keys") or []
         if required_keys:
-            box.append(
-                f"{style['vertical']}".ljust(box_width - 1) + f"{style['vertical']}"
-            )
+            box.append(_box_row(vertical, "", box_width))
             key_str = ", ".join(required_keys)
-            wrapped_keys = textwrap.wrap(f"Requires: {key_str}", width=box_width - 4)
-            for line in wrapped_keys:
-                box.append(
-                    f"{style['vertical']} {line}".ljust(box_width - 1)
-                    + f"{style['vertical']}"
-                )
+            for line in textwrap.wrap(f"Requires: {key_str}", width=box_width - 4):
+                box.append(_box_row(vertical, line, box_width))
 
         # Box footer
         box.append(
@@ -1374,14 +1398,10 @@ def detect_loops(
     # Detect loops between states
     for i, state_id in enumerate(ordered_states):
         for target, desc, _ in graph.get(state_id, []):
-            if target != state_id:  # Skip self-loops (already handled)
-                try:
-                    target_idx = ordered_states.index(target)
-                    if target_idx < i:
-                        # Found a backward loop
-                        found_loops.append((state_id, target, desc))
-                except ValueError:
-                    pass
+            # Skip self-loops (already handled); every target is a state
+            # (`_require_valid_transition_targets`)
+            if target != state_id and ordered_states.index(target) < i:
+                found_loops.append((state_id, target, desc))  # a backward loop
 
     return found_loops
 
@@ -1472,7 +1492,7 @@ def build_fsm_graph(fsm: FSMDefinition | dict[str, Any]) -> FSMGraph:
                 description=state.get("description") or "",
                 purpose=state.get("purpose") or "",
                 is_initial=state_id == initial_state,
-                is_terminal=not transitions,
+                is_terminal=_is_terminal(state),
             )
         )
         for transition in transitions:
@@ -1486,7 +1506,7 @@ def build_fsm_graph(fsm: FSMDefinition | dict[str, Any]) -> FSMGraph:
                 )
             )
     return FSMGraph(
-        name=_one_line(data.get("name"), "FSM"),
+        name=_one_line(data.get("name"), _DEFAULT_NAME),
         initial_state=initial_state,
         nodes=tuple(nodes),
         edges=tuple(edges),
@@ -1495,7 +1515,7 @@ def build_fsm_graph(fsm: FSMDefinition | dict[str, Any]) -> FSMGraph:
 
 def _edge_label(edge: FSMGraphEdge) -> str:
     """``P<priority> <description>`` on one line (whitespace runs collapsed)."""
-    return f"P{edge.priority} {' '.join(edge.description.split())}".rstrip()
+    return f"P{edge.priority} {_one_line(edge.description, '')}".rstrip()
 
 
 def _unused_id(wanted: str, taken: set[str]) -> str:
@@ -1527,7 +1547,7 @@ _MERMAID_ENTITIES = str.maketrans(
 
 def _mermaid_text(value: str) -> str:
     """``value`` as one line of Mermaid label text, significant characters escaped."""
-    return " ".join(value.split()).translate(_MERMAID_ENTITIES)
+    return _one_line(value, "").translate(_MERMAID_ENTITIES)
 
 
 def to_mermaid(graph: FSMGraph) -> str:
@@ -1614,7 +1634,7 @@ def visualize_fsm_from_file(
 
     Args:
         json_file: Path to the JSON file containing the FSM definition
-        style: ASCII style - "full", "compact", or "minimal" (ASCII only)
+        style: ASCII style, one of ``ASCII_STYLES`` (ASCII only)
         output_format: one of ``OUTPUT_FORMATS``: "ascii", "mermaid" or "dot"
 
     Returns:
@@ -1622,8 +1642,7 @@ def visualize_fsm_from_file(
         (missing file, invalid JSON, invalid definition, unknown format).
     """
     try:
-        with open(json_file) as f:
-            fsm_data = json.load(f)
+        fsm_data = read_json_object(json_file)
 
         if output_format == "ascii":
             return visualize_fsm_ascii(fsm_data, style)
@@ -1682,7 +1701,7 @@ def main_cli():
         "--style",
         "-s",
         default="full",
-        choices=["full", "compact", "minimal"],
+        choices=ASCII_STYLES,
         help="ASCII visualization style (default: full)",
     )
     parser.add_argument(
