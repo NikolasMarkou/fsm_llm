@@ -277,6 +277,28 @@ SOLVE_DRIVER_KEYS: tuple[str, ...] = (
 # times.
 HYBRID_EVALUATION_STATE = "critical_evaluation"
 
+# The first hybrid state, where the critical_evaluation back edge re-enters.
+HYBRID_FIRST_STATE = "identify_components"
+
+# Keys the looped hybrid states extract, plus the refinement flag. Core
+# extracts a key only while it is unset, so without clearing them on every
+# entry to HYBRID_FIRST_STATE the back edge re-runs no extraction and the
+# flag stays True. ``hybrid_loop_count`` is NOT here: it is handler-only and
+# must survive the loop (D-054). Keys built after the loop
+# (``integrated_solution``, ``final_hybrid_solution``) are not here either.
+HYBRID_CLEARED_KEYS: tuple[str, ...] = (
+    ContextKeys.PROBLEM_ASPECTS,
+    ContextKeys.REASONING_MAP,
+    ContextKeys.ANALYTICAL_BREAKDOWN,
+    ContextKeys.COMPONENT_RELATIONSHIPS,
+    ContextKeys.LOGICAL_CONCLUSIONS,
+    ContextKeys.REASONING_CHAIN,
+    ContextKeys.CREATIVE_INSIGHTS,
+    ContextKeys.NOVEL_APPROACHES,
+    ContextKeys.EVALUATION_RESULTS,
+    ContextKeys.NEEDS_REFINEMENT,
+)
+
 
 class HandlerNames:
     """Handler names for registration."""
@@ -289,6 +311,7 @@ class HandlerNames:
     RETRY_LIMITER = "RetryLimiter"
     RETRY_KEY_CLEARER = "RetryKeyClearer"
     HYBRID_LOOP_COUNTER = "HybridLoopCounter"
+    HYBRID_KEY_CLEARER = "HybridKeyClearer"
 
 
 class Defaults:

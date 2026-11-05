@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from .constants import (
     HYBRID_EVALUATION_STATE,
+    HYBRID_FIRST_STATE,
     ORCHESTRATOR_HANDLER_ONLY_KEYS,
     ClassifierStates,
     ContextKeys,
@@ -1361,14 +1362,14 @@ analogical_fsm = {
 hybrid_fsm = {
     "name": "hybrid_reasoning",
     "description": "Systematically combines multiple reasoning approaches for comprehensive problem solving with loop prevention mechanisms",
-    "initial_state": "identify_components",
+    "initial_state": HYBRID_FIRST_STATE,
     "persona": "You are a master strategist who skillfully combines different reasoning approaches to tackle complex problems from multiple complementary angles.",
     # The loop counter is written only by the HybridLoopCounter handler on
     # critical_evaluation exit (D-054); the model never sets it.
     "handler_only_keys": [ContextKeys.HYBRID_LOOP_COUNT],
     "states": {
-        "identify_components": {
-            "id": "identify_components",
+        HYBRID_FIRST_STATE: {
+            "id": HYBRID_FIRST_STATE,
             "description": "Break problem into components requiring different reasoning approaches",
             "purpose": f"Map '{ContextKeys.PROBLEM_ASPECTS}' to reasoning types in '{ContextKeys.REASONING_MAP}'",
             "required_context_keys": [
@@ -1530,7 +1531,7 @@ hybrid_fsm = {
                     ],
                 },
                 {
-                    "target_state": "identify_components",
+                    "target_state": HYBRID_FIRST_STATE,
                     "description": "Refinement needed (limited loops remaining)",
                     "priority": 2,
                     "conditions": [

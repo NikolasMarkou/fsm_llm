@@ -30,6 +30,7 @@ from fsm_llm.reasoning import (
     ReasoningExecutionError,
 )
 from fsm_llm.reasoning.constants import (
+    HYBRID_CLEARED_KEYS,
     HYBRID_EVALUATION_STATE,
     ORCHESTRATOR_HANDLER_ONLY_KEYS,
     ContextKeys,
@@ -444,6 +445,57 @@ class TestHybridLoopCounter:
         assert _replies_from(llm, "finalize_hybrid") == 1
         assert context["hybrid_reasoning_completed"] is True
         assert context[ContextKeys.FINAL_HYBRID_SOLUTION] == "Socrates is mortal"
+
+
+# The keys the five looped hybrid states extract (required_context_keys).
+_HYBRID_BODY_KEYS = (
+    ContextKeys.PROBLEM_ASPECTS,
+    ContextKeys.REASONING_MAP,
+    ContextKeys.ANALYTICAL_BREAKDOWN,
+    ContextKeys.COMPONENT_RELATIONSHIPS,
+    ContextKeys.LOGICAL_CONCLUSIONS,
+    ContextKeys.REASONING_CHAIN,
+    ContextKeys.CREATIVE_INSIGHTS,
+    ContextKeys.NOVEL_APPROACHES,
+    ContextKeys.EVALUATION_RESULTS,
+)
+
+
+class TestHybridRefinementReExtracts:
+    """The hybrid back edge re-runs the body extractions (F-RS-01)."""
+
+    def _solve(self):
+        llm = _ClaimingLLM(_HYBRID_SCRIPT, claims={ContextKeys.NEEDS_REFINEMENT: True})
+        _solution, trace_info = _engine(llm).solve_problem(
+            _PROBLEM,
+            {ContextKeys.PREFERRED_REASONING_TYPE: ReasoningType.HYBRID.value},
+        )
+        return llm, trace_info["final_context"]
+
+    def test_each_body_key_is_requested_once_per_pass(self):
+        llm, _context = self._solve()
+
+        passes = 1 + Defaults.MAX_HYBRID_LOOPS
+        for key in _HYBRID_BODY_KEYS:
+            assert len(llm.field_requests(key)) == passes, key
+
+    def test_the_loop_still_ends_at_the_cap(self):
+        llm, context = self._solve()
+
+        passes = 1 + Defaults.MAX_HYBRID_LOOPS
+        assert context["hybrid_reasoning_completed"] is True
+        assert _replies_from(llm, HYBRID_EVALUATION_STATE) == passes
+        assert _replies_from(llm, "finalize_hybrid") == 1
+
+    def test_the_cleared_set_is_the_body_plus_the_refinement_flag(self):
+        assert set(HYBRID_CLEARED_KEYS) == {
+            *_HYBRID_BODY_KEYS,
+            ContextKeys.NEEDS_REFINEMENT,
+        }
+        # Counter stays handler-only (D-054); later keys are not looped.
+        assert ContextKeys.HYBRID_LOOP_COUNT not in HYBRID_CLEARED_KEYS
+        assert ContextKeys.INTEGRATED_SOLUTION not in HYBRID_CLEARED_KEYS
+        assert ContextKeys.FINAL_HYBRID_SOLUTION not in HYBRID_CLEARED_KEYS
 
 
 # problem_components never arrives: problem_analysis never leaves.

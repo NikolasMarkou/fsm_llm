@@ -23,7 +23,9 @@ from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .constants import (
+    HYBRID_CLEARED_KEYS,
     HYBRID_EVALUATION_STATE,
+    HYBRID_FIRST_STATE,
     RETRY_CLEARED_KEYS,
     SOLVE_DRIVER_KEYS,
     ContextKeys,
@@ -193,6 +195,22 @@ class ReasoningEngine:
             .on_state_entry(OrchestratorStates.VALIDATE_REFINE)
             .critical()
             .do(self._check_retry_limit)
+        )
+
+        # DECISION plan-2026-11-05T134105-5ed71cf2/D-016: clear the hybrid
+        # body keys and needs_refinement on EVERY entry to the first hybrid
+        # state so the critical_evaluation back edge re-runs the analysis
+        # (core extracts only unset keys; without this the loop is a no-op
+        # and needs_refinement stays True). Do NOT add hybrid_loop_count
+        # here: it is handler-only and the counter bounds the loop (D-054).
+        # Same shape as the retry clear above (D-053); the first entry finds
+        # nothing to clear.
+        self.orchestrator.register_handler(
+            clear_keys_on_entry(
+                HYBRID_CLEARED_KEYS,
+                state=HYBRID_FIRST_STATE,
+                name=HandlerNames.HYBRID_KEY_CLEARER,
+            )
         )
 
         # Hybrid back-edge counter: strategy FSMs run on the orchestrator API,
