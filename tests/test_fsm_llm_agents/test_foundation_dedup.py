@@ -201,6 +201,78 @@ class TestTimedApprovalRunsLikeATimedTool:
 
         HumanInTheLoop(approval_timeout=timeout)
 
+    @staticmethod
+    def _integer_like(value: int):
+        """A numpy-integer stand-in: not an ``int`` subclass, but a registered
+        ``numbers.Integral`` with ``__index__``, which ``thread.join`` takes."""
+        import numbers
+
+        class IntegerLike:
+            def __init__(self, n: int) -> None:
+                self._n = n
+
+            def __index__(self) -> int:
+                return self._n
+
+            def __int__(self) -> int:
+                return self._n
+
+            def __float__(self) -> float:
+                return float(self._n)
+
+        numbers.Integral.register(IntegerLike)
+        return IntegerLike(value)
+
+    def test_an_integer_like_timeout_that_the_old_code_took_constructs(self):
+        """REVIEW2-C3: pre-plan ``thread.join(timeout=np.int64(5))`` worked;
+        the shared predicate refused it. ``float`` and ``Integral`` pass."""
+        from fsm_llm.agents.hitl import HumanInTheLoop
+        from fsm_llm.agents.tools import check_timeout
+
+        check_timeout("t", self._integer_like(5))
+        hitl = HumanInTheLoop(
+            approval_callback=lambda _request: True,
+            approval_timeout=self._integer_like(5),
+        )
+        assert hitl.request_approval(self._call(), {}) is True
+
+    def test_a_real_numpy_scalar_timeout_constructs_when_numpy_is_installed(self):
+        np = pytest.importorskip("numpy")
+        from fsm_llm.agents.hitl import HumanInTheLoop
+
+        for value in (np.int64(5), np.float64(5.0)):
+            HumanInTheLoop(approval_timeout=value)
+
+    @pytest.mark.parametrize(
+        "timeout",
+        [0, -3, 10**400, -(10**400), int(Defaults.MAX_TOOL_TIMEOUT_S) + 1],
+        ids=["zero", "negative", "huge", "huge-negative", "over-limit"],
+    )
+    def test_an_integer_like_out_of_range_is_still_refused_not_an_overflow(
+        self, timeout
+    ):
+        from fsm_llm.agents.exceptions import ToolExecutionError
+        from fsm_llm.agents.tools import check_timeout
+
+        with pytest.raises(ToolExecutionError):
+            check_timeout("t", self._integer_like(timeout))
+        with pytest.raises(ToolExecutionError):
+            check_timeout("t", timeout)
+
+    @pytest.mark.parametrize("kind", ["decimal", "fraction"])
+    def test_what_the_old_join_refused_stays_refused(self, kind):
+        """``thread.join(timeout=Decimal(5))`` and ``Fraction(5)`` raised
+        ``TypeError`` on the parent: they never worked, so they stay refused."""
+        import decimal
+        import fractions
+
+        from fsm_llm.agents.exceptions import ToolExecutionError
+        from fsm_llm.agents.hitl import HumanInTheLoop
+
+        value = decimal.Decimal(5) if kind == "decimal" else fractions.Fraction(5)
+        with pytest.raises(ToolExecutionError):
+            HumanInTheLoop(approval_timeout=value)
+
 
 class TestFromFunctionsWithoutAName:
     """F-AB-07: a partial has no ``__name__``; the skip warning must not crash."""

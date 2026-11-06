@@ -9,6 +9,8 @@ import functools
 import inspect
 import json
 import math
+import numbers
+import operator
 import re
 import threading
 import time
@@ -895,12 +897,22 @@ def check_timeout(tool_name: str, timeout_s: Any) -> None:
     Interface contract: the one timeout predicate, shared by
     ``call_with_timeout`` (every timed call) and ``HumanInTheLoop.__init__``
     (so a bad ``approval_timeout`` fails at construction). Returns ``None``.
+    A number is a ``float`` or a ``numbers.Integral`` (an ``int``, ``np.int64``):
+    what ``thread.join(timeout=...)`` took before this check existed.
+    ``Decimal``, ``Fraction`` and ``np.float32`` were a ``TypeError`` there and
+    stay refused. An integer is compared as an integer, so ``10**400`` is
+    refused, not an ``OverflowError``.
     """
+    number = (
+        operator.index(timeout_s)
+        if isinstance(timeout_s, numbers.Integral) and not isinstance(timeout_s, bool)
+        else timeout_s
+    )
     if (
         isinstance(timeout_s, bool)
-        or not isinstance(timeout_s, (int, float))
-        or not math.isfinite(timeout_s)
-        or not 0 < timeout_s <= Defaults.MAX_TOOL_TIMEOUT_S
+        or not isinstance(number, (int, float))
+        or not (isinstance(number, int) or math.isfinite(number))
+        or not 0 < number <= Defaults.MAX_TOOL_TIMEOUT_S
     ):
         raise ToolExecutionError(
             ErrorMessages.TOOL_BAD_TIMEOUT.format(
