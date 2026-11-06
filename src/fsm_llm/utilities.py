@@ -58,8 +58,8 @@ def resolve_reasoning_trace(message: Any) -> str | None:
     # read. The installed litellm range RENAMES the raw `thinking` field to
     # `reasoning_content` and DELETES `thinking` before building the
     # Message/Delta object, so a `.thinking`-only read is DEAD CODE for the
-    # project's own DEFAULT_LLM_MODEL (ollama_chat/qwen3.5:4b). `reasoning_content`
-    # is read FIRST; the legacy `thinking` string is kept so the D-023 divergence
+    # project's former DEFAULT_LLM_MODEL (ollama_chat/qwen3.5:4b, measured).
+    # `reasoning_content` is read FIRST; the legacy `thinking` string is kept so the D-023 divergence
     # tests stay green; `thinking_blocks` is a last-resort join of the provider's
     # typed reasoning segments. This is the SINGLE resolver shared by
     # llm.py::_extract_content_from_thinking and llm.py::_completion_response

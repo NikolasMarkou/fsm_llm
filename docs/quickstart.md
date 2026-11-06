@@ -7,7 +7,7 @@ Welcome to FSM-LLM! This tutorial will have you building stateful conversations 
 ## Prerequisites
 
 - Python 3.10 or higher
-- An LLM: a local Ollama model (the default is `ollama_chat/qwen3.5:4b`), or any LiteLLM provider such as OpenAI with its API key (set `LLM_MODEL` and the provider's key)
+- An LLM: a local Ollama model (the default is `ollama_chat/bonsai-2:27b`), or any LiteLLM provider such as OpenAI with its API key (set `LLM_MODEL` and the provider's key)
 
 ## 1. Installation
 
@@ -37,7 +37,7 @@ Environment variables used by the library and the `fsm-llm` command:
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `LLM_MODEL` | none | litellm model id. **Required by the `fsm-llm` CLI**; the `API` class uses it when no `model=` is passed, then falls back to `ollama_chat/qwen3.5:4b` |
+| `LLM_MODEL` | none | litellm model id. **Required by the `fsm-llm` CLI**; the `API` class uses it when no `model=` is passed, then falls back to `ollama_chat/bonsai-2:27b` |
 | `LLM_TEMPERATURE` | `0.5` | CLI only |
 | `LLM_MAX_TOKENS` | `1000` | CLI only |
 | `FSM_PATH` | none | not usable with `fsm-llm`: `--fsm` is checked first and is mandatory |

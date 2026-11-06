@@ -47,7 +47,7 @@ A full FSM snippet has to pass the loader. Minimum per state: `id`, `description
 Facts the guides state that must stay in step with the code:
 
 - `API.__init__` parameters and defaults: `max_history_size=5`, `max_message_length=1000`, `handler_error_mode="continue"`, `max_fsm_cache_size=64`, `**llm_kwargs`.
-- `DEFAULT_LLM_MODEL = "ollama_chat/qwen3.5:4b"`, `DEFAULT_MAX_STACK_DEPTH = 10`.
+- `DEFAULT_LLM_MODEL = "ollama_chat/bonsai-2:27b"`, `DEFAULT_MAX_STACK_DEPTH = 10`.
 - `TransitionEvaluatorConfig` fields: `strict_condition_matching`, `detailed_logging` (the three no-op confidence fields were removed).
 - Core step driver: `API.advance`, `advance_stream`, `run_until_terminal(conv_id, *, max_steps, max_seconds=None, before_step=None)`, `run_until_terminal_stream`, `AdvanceResult`, `RunBudgetExceededError`; a silent state makes no call, returns `""` and adds nothing to history. Graph export: `build_fsm_graph`, `to_mermaid`, `to_dot`, `fsm-llm-visualize --format`.
 - Console scripts (`pyproject.toml`): `fsm-llm`, `fsm-llm-visualize`, `fsm-llm-validate`, `fsm-llm-monitor`, `fsm-llm-meta`, `fsm-llm-eval`, `fsm-llm-okf`, `fsm-llm-skills`.

@@ -48,7 +48,7 @@ CONTEXT_FILTER_CYCLIC_WORK_FACTOR = 16
 # LLM Configuration Defaults
 # --------------------------------------------------------------
 
-DEFAULT_LLM_MODEL = "ollama_chat/qwen3.5:4b"
+DEFAULT_LLM_MODEL = "ollama_chat/bonsai-2:27b"
 DEFAULT_TEMPERATURE = 0.5
 
 # Provider completion-call kwargs the framework owns on every call. A constructor's

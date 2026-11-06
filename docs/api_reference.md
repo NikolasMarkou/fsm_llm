@@ -225,7 +225,7 @@ if reply.kind == "calls":
 llm.usage()          # LLMUsage{calls, errors, usage_missing, prompt/completion/total_tokens, by_kind}
 llm.reset_usage()    # returns the snapshot it cleared
 
-vectors = LiteLLMEmbedder("ollama/qwen3-embedding:0.6b").embed(["a", "b"])  # one request
+vectors = LiteLLMEmbedder("ollama/embeddinggemma-2:740m").embed(["a", "b"])  # one request
 ```
 
 Usage counters count every provider call of that instance once, per kind (`generate`, `extract`, `classify`, `stream`, `complete`; `embed` for the embedder): a raising call counts as a call and an error, a streamed call with usage missing. `LiteLLMEmbedder(model, *, api_key=None, timeout=120.0, retries=0, **kwargs)` has its own model, credentials and counters; no texts means no request and `[]`; a missing, uneven or non-finite vector raises `LLMResponseError`.
@@ -848,7 +848,7 @@ Exception
 
 ```python
 from fsm_llm.constants import (
-    DEFAULT_LLM_MODEL,       # "ollama_chat/qwen3.5:4b"
+    DEFAULT_LLM_MODEL,       # "ollama_chat/bonsai-2:27b"
     DEFAULT_TEMPERATURE,     # 0.5, the API and LiteLLMInterface default
     DEFAULT_MAX_HISTORY_SIZE, # 5
     DEFAULT_MAX_MESSAGE_LENGTH, # 1000

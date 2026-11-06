@@ -193,6 +193,25 @@ def provider(monkeypatch) -> _EmbeddingProvider:
     return fake
 
 
+class TestLegacyFileWithoutModel:
+    """Plan 0068b055 step 0 (D-015): a file written before ``embedding_model``
+    was stored loads with the current default embedder; a stored name wins."""
+
+    def test_legacy_file_without_model_uses_new_default(self):
+        from fsm_llm.llm import DEFAULT_EMBEDDING_MODEL
+
+        data = SemanticMemoryStore(embed_fn=_fake_embed).to_dict()
+        data.pop("embedding_model", None)
+        restored = SemanticMemoryStore.from_dict(data, embed_fn=_fake_embed)
+        assert restored._embedding_model == DEFAULT_EMBEDDING_MODEL
+        assert DEFAULT_EMBEDDING_MODEL == "ollama/embeddinggemma-2:740m"
+
+    def test_stored_model_is_kept(self):
+        store = SemanticMemoryStore(embedding_model="x/old", embed_fn=_fake_embed)
+        restored = SemanticMemoryStore.from_dict(store.to_dict(), embed_fn=_fake_embed)
+        assert restored._embedding_model == "x/old"
+
+
 class TestDefaultEmbedder:
     """Plan 944e2692 step 8 (D-005): with no ``embed_fn`` the store embeds
     through core's ``LiteLLMEmbedder`` (its meter counts every request)."""

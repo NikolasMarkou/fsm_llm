@@ -103,7 +103,7 @@ class SemanticToolRegistry(ToolRegistry):
         from fsm_llm.agents.semantic_tools import SemanticToolRegistry
 
         registry = SemanticToolRegistry(
-            embedding_model="ollama/qwen3-embedding:0.6b",
+            embedding_model="ollama/embeddinggemma-2:740m",
         )
         registry.register_function(search_web, name="search", description="Search the web")
         registry.register_function(calc, name="calculator", description="Do math")

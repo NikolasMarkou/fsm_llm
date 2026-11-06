@@ -104,7 +104,7 @@ print(report.overall)   # {"k": ..., "n": ..., "rate": ..., "wilson_ci": [lo, hi
 ## Things to know
 
 - Settings come in layers, later ones winning: built-in defaults, the `config` object inside a dataset, a `--config FILE` (JSON), then flags. An unknown key or a bad value is an error (exit 1), not a silently ignored setting.
-- The model is the first set of: `--model`, `model` in the `--config` file, `model` in the dataset's `config`, `$LLM_MODEL`, the framework default (`ollama_chat/qwen3.5:4b`). A dataset that sets `model` therefore beats an exported `LLM_MODEL`. Example scripts get the chosen model as `LLM_MODEL` in their environment.
+- The model is the first set of: `--model`, `model` in the `--config` file, `model` in the dataset's `config`, `$LLM_MODEL`, the framework default (`ollama_chat/bonsai-2:27b`). A dataset that sets `model` therefore beats an exported `LLM_MODEL`. Example scripts get the chosen model as `LLM_MODEL` in their environment.
 - An `fsm` path in a case is relative to the dataset file; `output_root`, `output_dir` and `examples_dir` are relative to the current directory, wherever they are set.
 - Exit codes: `0` finished (even with low scores), `1` usage or input error (including a file that is not UTF-8 or not JSON, a missing examples directory, and no example matching the filters), `2` only when `--fail-under PCT` is given and the score is below it, `130` interrupted. Use `--fail-under` in CI; the comparison is exact, so 57 of 100 passes `--fail-under 57`.
 - Ctrl-C stops a run: work not yet started is cancelled, the report files are written for what finished (marked "Interrupted"), and the command exits 130.

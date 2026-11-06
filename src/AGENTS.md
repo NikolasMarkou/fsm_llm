@@ -75,7 +75,7 @@ flowchart LR
 ## Public interface
 
 - Core Python API: `API(fsm_definition, llm_interface=None, model=None, ...)`; `API.from_file(path, **kw)`, `API.from_definition(...)`; `start_conversation(initial_context=None) -> (conv_id, greeting)`, `converse(msg, conv_id) -> str`, `converse_stream(msg, conv_id) -> Iterator[str]`, `advance(conv_id) -> AdvanceResult` and `advance_stream(conv_id)` (one turn with no user message), `run_until_terminal(conv_id, *, max_steps, max_seconds=None, before_step=None)` and `run_until_terminal_stream` (steps until a terminal state; `RunBudgetExceededError` on a spent budget), `get_data`, `get_current_state`, `has_conversation_ended`, `end_conversation`, `update_context`; `push_fsm`/`pop_fsm` (max depth 10); `save_session`/`load_session`/`restore_session` (need a session store, else `FSMError`); `register_handler`.
-- Model resolution: `model` arg, then env `LLM_MODEL`, then `DEFAULT_LLM_MODEL` (`ollama_chat/qwen3.5:4b`).
+- Model resolution: `model` arg, then env `LLM_MODEL`, then `DEFAULT_LLM_MODEL` (`ollama_chat/bonsai-2:27b`).
 - Console scripts (`pyproject.toml` `[project.scripts]`):
 
 | Script | Target |

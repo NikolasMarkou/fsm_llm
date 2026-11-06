@@ -130,7 +130,7 @@ DEFAULT_MAX_TOKENS = 1000
 DEFAULT_LLM_TIMEOUT_SECONDS = 120.0
 # The embedding model ``LiteLLMEmbedder`` consumers default to (a local Ollama
 # model; no key needed).
-DEFAULT_EMBEDDING_MODEL = "ollama/qwen3-embedding:0.6b"
+DEFAULT_EMBEDDING_MODEL = "ollama/embeddinggemma-2:740m"
 
 # DECISION plan-2026-09-22T080837-8b258a25/D-035: guards apology_retry_count.
 # Do NOT move it into __init__: tests build LiteLLMInterface via __new__, and the
@@ -2399,7 +2399,7 @@ class LiteLLMEmbedder(_Metered):
 
     Example::
 
-        embedder = LiteLLMEmbedder("ollama/qwen3-embedding:0.6b")
+        embedder = LiteLLMEmbedder("ollama/embeddinggemma-2:740m")
         vectors = embedder.embed(["first text", "second text"])
     """
 
@@ -2421,7 +2421,7 @@ class LiteLLMEmbedder(_Metered):
     ) -> None:
         """
         Args:
-            model: Embedding model identifier (e.g. ``"ollama/qwen3-embedding:0.6b"``,
+            model: Embedding model identifier (e.g. ``"ollama/embeddinggemma-2:740m"``,
                 ``"text-embedding-3-small"``).
             api_key: Optional API key (the environment is used when omitted).
             timeout: Seconds per provider request (``None`` for no timeout).

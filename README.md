@@ -77,7 +77,7 @@ Run it:
 ```python
 from fsm_llm import API
 
-api = API.from_file("greeter.json")   # no model given: env LLM_MODEL, else ollama_chat/qwen3.5:4b
+api = API.from_file("greeter.json")   # no model given: env LLM_MODEL, else ollama_chat/bonsai-2:27b
 conv_id, opening = api.start_conversation()
 print("bot:", opening)
 print("bot:", api.converse("Hi, I'm Alice.", conv_id))
@@ -411,7 +411,7 @@ Good places to help, all taken from recorded open items:
 
 Things to know:
 
-- The `fsm-llm` command needs `LLM_MODEL`. The Python `API` falls back to `LLM_MODEL`, then to `ollama_chat/qwen3.5:4b`.
+- The `fsm-llm` command needs `LLM_MODEL`. The Python `API` falls back to `LLM_MODEL`, then to `ollama_chat/bonsai-2:27b`.
 - The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`; both also replace loguru's default handler, so a library record prints once.
 - One conversation handles one message at a time: a second `converse` on a conversation that is mid-turn raises `FSMError`.
 - Upgrading a clone from before the 2026-09-29 restructure: delete the old `src/fsm_llm_<sub>/` folders by hand (`make clean` does not remove them), then `pip install -e .`. A leftover folder breaks imports.

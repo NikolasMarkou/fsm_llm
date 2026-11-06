@@ -933,3 +933,53 @@ class TestFieldExtractionNaNConfidence:
 
         # Falls through to the unstructured str-coercion rung; must not raise.
         assert isinstance(result, FieldExtractionResponse)
+
+
+class TestDefaultModel:
+    """Plan 0068b055 step 0 (D-014, D-015): the framework defaults are the
+    user's chat model and embedder, and every model-less consumer reads the
+    constant, not a copy."""
+
+    def test_default_llm_model_is_bonsai_27b(self):
+        from fsm_llm.constants import DEFAULT_LLM_MODEL
+
+        assert DEFAULT_LLM_MODEL == "ollama_chat/bonsai-2:27b"
+
+    def test_default_embedding_model_is_embeddinggemma(self):
+        from fsm_llm.llm import DEFAULT_EMBEDDING_MODEL
+
+        assert DEFAULT_EMBEDDING_MODEL == "ollama/embeddinggemma-2:740m"
+
+    def test_model_less_api_resolves_to_the_default(self, monkeypatch):
+        from fsm_llm import API
+        from fsm_llm.classification import Classifier
+        from fsm_llm.constants import DEFAULT_LLM_MODEL, ENV_LLM_MODEL
+        from fsm_llm.definitions import ClassificationSchema, IntentDefinition
+
+        monkeypatch.delenv(ENV_LLM_MODEL, raising=False)
+        fsm = {
+            "name": "m",
+            "description": "d",
+            "initial_state": "a",
+            "states": {
+                "a": {
+                    "id": "a",
+                    "description": "start",
+                    "purpose": "p",
+                    "transitions": [
+                        {"target_state": "b", "description": "go", "priority": 1}
+                    ],
+                },
+                "b": {"id": "b", "description": "end", "purpose": "p"},
+            },
+        }
+        assert API.from_definition(fsm).llm_interface.model == DEFAULT_LLM_MODEL
+        assert DEFAULT_LLM_MODEL == "ollama_chat/bonsai-2:27b"
+        schema = ClassificationSchema(
+            intents=[
+                IntentDefinition(name="a", description="first"),
+                IntentDefinition(name="b", description="second"),
+            ],
+            fallback_intent="a",
+        )
+        assert Classifier(schema).model == DEFAULT_LLM_MODEL

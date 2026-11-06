@@ -86,4 +86,4 @@ class TestDefaultNumbersHaveOneHome:
     def test_values_are_unchanged(self):
         assert DEFAULT_MAX_TOKENS == 1000
         assert DEFAULT_LLM_TIMEOUT_SECONDS == 120.0
-        assert DEFAULT_EMBEDDING_MODEL == "ollama/qwen3-embedding:0.6b"
+        assert DEFAULT_EMBEDDING_MODEL == "ollama/embeddinggemma-2:740m"

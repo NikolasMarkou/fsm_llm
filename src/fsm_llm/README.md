@@ -205,7 +205,7 @@ fsm-llm-skills validate ./skills         # check Agent Skills folders (also list
 
 ## Things to know
 
-- Any provider litellm supports works. The default model is `ollama_chat/qwen3.5:4b`, or whatever `LLM_MODEL` is set to. API keys come from the usual provider environment variables.
+- Any provider litellm supports works. The default model is `ollama_chat/bonsai-2:27b`, or whatever `LLM_MODEL` is set to. API keys come from the usual provider environment variables.
 - To use your own LLM client, pass `llm_interface=` to `API`. Do not pass `model`, `temperature`, `max_tokens` or other LLM settings beside it: `API` refuses them, because the interface owns them.
 - Core installs need loguru, litellm, pydantic, python-dotenv and pyyaml (>=6.0, for OKF and Agent Skills frontmatter).
 - Extras: `reasoning`, `workflows`, `agents` and `eval` add no packages; `monitor` adds fastapi, uvicorn and jinja2; `mcp`, `otel` and `a2a` add optional integrations for agents and the monitor.
