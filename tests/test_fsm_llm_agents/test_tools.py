@@ -1535,6 +1535,46 @@ class _RuleModel(BaseModel):
     x: int
 
 
+def _real(fn, **annotations):
+    """Give ``fn`` real (not string) annotations: this module uses
+    ``from __future__ import annotations``, and a string ``"dict"`` takes a
+    different branch of the dispatch than the object ``dict``."""
+    fn.__annotations__ = annotations
+    return fn
+
+
+def _positional_bare(seen):
+    def f(payload: dict) -> str:
+        seen.append(payload)
+        return "ok"
+
+    return _real(f, payload=dict)
+
+
+def _positional_default(seen):
+    def f(payload: dict = None) -> str:
+        seen.append(payload)
+        return "ok"
+
+    return _real(f, payload=dict)
+
+
+def _positional_only(seen):
+    def f(payload: dict, /) -> str:
+        seen.append(payload)
+        return "ok"
+
+    return _real(f, payload=dict)
+
+
+def _positional_star(seen):
+    def f(*args: dict) -> str:
+        seen.append(args[0])
+        return "ok"
+
+    return _real(f, args=dict)
+
+
 def _signature_cases():
     """(id, function) pairs: each signature in a different shape."""
 
@@ -1545,6 +1585,13 @@ def _signature_cases():
     def one_int_kwargs(a: int, **kw) -> str: ...
 
     def kwonly_dict(*, payload: dict[str, Any]) -> str: ...
+
+    def kwonly_dict_bare(*, payload: dict) -> str: ...
+
+    def kwonly_dict_default(*, payload: dict = None) -> str: ...
+
+    _real(kwonly_dict_bare, payload=dict)
+    _real(kwonly_dict_default, payload=dict)
 
     def lone_kwargs(**kwargs: Any) -> str: ...
 
@@ -1562,6 +1609,8 @@ def _signature_cases():
         ("dict", dict_bare),
         ("dict-generic", dict_generic),
         ("kwonly-dict", kwonly_dict),
+        ("kwonly-dict-bare", kwonly_dict_bare),
+        ("kwonly-dict-default", kwonly_dict_default),
         ("int-and-kwargs", one_int_kwargs),
         ("lone-kwargs", lone_kwargs),
         ("lone-args", lone_args),
@@ -1612,6 +1661,112 @@ class TestOneSchemaRule:
         result = registry.execute(
             ToolCall(tool_name="kwonly", parameters={"payload": {"x": 1}})
         )
+        assert result.success, result.error
+        assert seen == [{"x": 1}]
+
+    @pytest.mark.parametrize("via", ["tool", "register_function"])
+    @pytest.mark.parametrize("shape", ["bare", "default", "generic", "method"])
+    def test_keyword_only_dict_parameter_is_called_by_keyword(self, via, shape):
+        """The schema names ``payload``, so the call must pass it by keyword,
+        whatever the spelling of the annotation (D-018, pass-2 concern 1)."""
+        seen: list = []
+
+        def bare(*, payload: dict) -> str:
+            seen.append(payload)
+            return "ok"
+
+        def with_default(*, payload: dict = None) -> str:
+            seen.append(payload)
+            return "ok"
+
+        def generic(*, payload: dict[str, Any]) -> str:
+            seen.append(payload)
+            return "ok"
+
+        class Holder:
+            def method(self, *, payload: dict) -> str:
+                seen.append(payload)
+                return "ok"
+
+        _real(bare, payload=dict)
+        _real(with_default, payload=dict)
+        _real(generic, payload=dict[str, Any])
+        _real(Holder.method, payload=dict)
+        fn = {
+            "bare": bare,
+            "default": with_default,
+            "generic": generic,
+            "method": Holder().method,
+        }[shape]
+        if via == "tool" and shape == "method":
+            pytest.skip(
+                "@tool sets an attribute on the function; a bound method has none"
+            )
+        registry = ToolRegistry()
+        if via == "tool":
+            registry.register(tool(fn)._tool_definition)
+            name = tool(fn)._tool_definition.name
+        else:
+            registry.register_function(fn, name="kw", description="d")
+            name = "kw"
+        schema = registry.get(name).parameter_schema
+        assert list(schema["properties"]) == ["payload"]
+        result = registry.execute(
+            ToolCall(tool_name=name, parameters={"payload": {"x": 1}})
+        )
+        assert result.success, result.error
+        assert seen == [{"x": 1}]
+
+    def test_annotated_dict_parameter_is_a_named_property_called_by_keyword(self):
+        """Unchanged by the keyword-only rule: ``Annotated[dict, ...]`` is not
+        read as a dict-style annotation, so the schema names the parameter."""
+        seen: list = []
+
+        def run(payload: typing.Annotated[dict, "the payload"]) -> str:
+            seen.append(payload)
+            return "ok"
+
+        _real(run, payload=typing.Annotated[dict, "the payload"])
+        registry = ToolRegistry()
+        registry.register_function(run, name="run", description="d")
+        assert list(registry.get("run").parameter_schema["properties"]) == ["payload"]
+        result = registry.execute(
+            ToolCall(tool_name="run", parameters={"payload": {"x": 1}})
+        )
+        assert result.success, result.error
+        assert seen == [{"x": 1}]
+
+    def test_lone_keyword_dict_kwargs_is_called_by_keyword(self):
+        seen: list = []
+
+        def run(**kw: dict) -> str:
+            seen.append(kw)
+            return "ok"
+
+        _real(run, kw=dict)
+        registry = ToolRegistry()
+        registry.register_function(run, name="run", description="d")
+        result = registry.execute(ToolCall(tool_name="run", parameters={"a": {"x": 1}}))
+        assert result.success, result.error
+        assert seen == [{"a": {"x": 1}}]
+
+    @pytest.mark.parametrize(
+        "make",
+        [
+            pytest.param(lambda seen: _positional_bare(seen), id="bare"),
+            pytest.param(lambda seen: _positional_default(seen), id="default"),
+            pytest.param(lambda seen: _positional_only(seen), id="positional-only"),
+            pytest.param(lambda seen: _positional_star(seen), id="lone-star-args"),
+        ],
+    )
+    def test_positional_dict_style_calls_are_unchanged(self, make):
+        """What the keyword-only rule must not move: a lone positional (or
+        ``*args``) parameter still receives the whole arguments object."""
+        seen: list = []
+        fn = make(seen)
+        registry = ToolRegistry()
+        registry.register_function(fn, name="p", description="d")
+        result = registry.execute(ToolCall(tool_name="p", parameters={"x": 1}))
         assert result.success, result.error
         assert seen == [{"x": 1}]
 

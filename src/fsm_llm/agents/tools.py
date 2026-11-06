@@ -556,8 +556,17 @@ class ToolRegistry:
         # DECISION plan-2026-09-24T091842-c1d5bfbc/D-024: a lone ``**kwargs``
         # is not the dict-style param. Do NOT pass it the dict positionally:
         # every zero-argument MCP tool and monitor stub tool failed that way.
-        var_kw = first_param.kind is inspect.Parameter.VAR_KEYWORD
-        if param_count == 1 and not schema_props and not var_kw:
+        # DECISION plan-2026-11-06T093029-0068b055/D-009 (extended by D-018): the
+        # dict goes in BY POSITION, so only a parameter that can take one is
+        # dict-style. A keyword-only ``payload: dict`` (plain, ``dict[...]``, or
+        # ``= None``) is a named schema property: call it by keyword. Do NOT pass
+        # it the dict positionally (TypeError on every call) and do NOT widen
+        # the bare-dict rule beyond the single-parameter case.
+        by_position = first_param.kind not in (
+            inspect.Parameter.KEYWORD_ONLY,
+            inspect.Parameter.VAR_KEYWORD,
+        )
+        if param_count == 1 and not schema_props and by_position:
             # Dict-style tool: single param with no schema -> pass dict
             return fn(parameters)
         # Detect the dict-style pattern: fn(params: dict) with schema
@@ -567,9 +576,13 @@ class ToolRegistry:
         # dict-style form only when the schema does not name the parameter; do
         # NOT widen the bare-`dict` rule, a schema-named dict param is called
         # by keyword.
-        if param_count == 1 and (
-            ann is dict
-            or (_is_dict_annotation(ann) and first_param.name not in schema_props)
+        if (
+            param_count == 1
+            and by_position
+            and (
+                ann is dict
+                or (_is_dict_annotation(ann) and first_param.name not in schema_props)
+            )
         ):
             # A dict-style function expects a single dict; pass parameters directly
             return fn(parameters)
@@ -846,9 +859,9 @@ def infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
     # DECISION plan-2026-11-06T093029-0068b055/D-009: ONE rule for ``@tool`` and
     # ``register_function``. A lone POSITIONAL dict-style parameter (unannotated,
     # ``dict``, ``dict[...]``, or its string form) is the dict-style call: schema
-    # ``{}``. A keyword-only one keeps its named schema (the dict-style call
-    # passes the dict positionally and would raise TypeError); do NOT widen the
-    # rule to every kind.
+    # ``{}``. A keyword-only one keeps its named schema and ``_invoke_tool_fn``
+    # calls it by keyword (the dict-style call passes the dict positionally and
+    # would raise TypeError); do NOT widen the rule to every kind.
     # ``*args``/``**kwargs`` are never properties (the model cannot name them)
     # and never required. Do NOT re-add a second pre-check in
     # ``register_function`` (the two drifted apart once), and do NOT list
