@@ -82,48 +82,54 @@ CATEGORY_TIMEOUTS: dict[str, int] = {
     "meta": 120,
 }
 
-# Per-example timeout overrides (for known slow examples)
+# Per-example timeout overrides (for known slow examples).
+# An example whose agent runs on the default AgentConfig.timeout_seconds
+# (300 s) gets 360 here, budget + 60: at 300 the agent's own timeout and the
+# harness timeout fired together (an Error: Agent timed out line or a
+# score-1 kill, by chance); at 360 the agent's timeout always fires first.
+# tests/test_fsm_llm_eval/test_timeout_table.py pins this against the
+# examples' source.
 EXAMPLE_TIMEOUTS: dict[str, int] = {
     "advanced/e_commerce": 300,
     "reasoning/math_tutor": 300,
     "agents/reflexion": 240,
-    "agents/debate": 300,
-    "agents/evaluator_optimizer": 300,
-    "agents/orchestrator": 300,
+    "agents/debate": 360,
+    "agents/evaluator_optimizer": 360,
+    "agents/orchestrator": 360,
     "agents/adapt": 240,
-    "agents/memory_agent": 300,
+    "agents/memory_agent": 360,
     "agents/concurrent_react": 240,
-    "agents/agent_as_tool": 300,
+    "agents/agent_as_tool": 360,
     "agents/structured_output": 240,
     "agents/react_hitl_combined": 240,
     "agents/skill_loader": 240,
-    "agents/orchestrator_specialist": 300,
-    "agents/hierarchical_orchestrator": 300,
-    "agents/pipeline_review": 300,
-    "agents/adapt_with_memory": 300,
-    "agents/react_structured_pipeline": 300,
-    "agents/multi_debate_panel": 300,
+    "agents/orchestrator_specialist": 360,
+    "agents/hierarchical_orchestrator": 360,
+    "agents/pipeline_review": 360,
+    "agents/adapt_with_memory": 360,
+    "agents/react_structured_pipeline": 360,
+    "agents/multi_debate_panel": 360,
     "agents/reflexion_code_gen": 240,
-    "agents/agent_memory_chain": 300,
+    "agents/agent_memory_chain": 360,
     "agents/debate_with_tools": 240,
-    "agents/eval_opt_structured": 300,
-    "agents/legal_document_review": 300,
-    "agents/investment_portfolio": 300,
-    "agents/security_audit": 300,
-    "agents/medical_literature": 300,
-    "agents/architecture_review": 300,
-    "agents/supply_chain_optimizer": 300,
-    "agents/regulatory_compliance": 300,
+    "agents/eval_opt_structured": 360,
+    "agents/legal_document_review": 360,
+    "agents/investment_portfolio": 360,
+    "agents/security_audit": 360,
+    "agents/medical_literature": 360,
+    "agents/architecture_review": 360,
+    "agents/supply_chain_optimizer": 360,
+    "agents/regulatory_compliance": 360,
     "intermediate/adaptive_quiz": 300,
     "meta/meta_review_loop": 240,
     "meta/meta_from_spec": 240,
     "meta/build_fsm": 240,
     "meta/build_agent": 240,
     "meta/build_workflow": 240,
-    "workflows/workflow_agent_loop": 300,
+    "workflows/workflow_agent_loop": 360,
     "workflows/loan_processing": 300,
-    "workflows/release_management": 300,
-    "workflows/customer_onboarding": 300,
+    "workflows/release_management": 360,
+    "workflows/customer_onboarding": 360,
 }
 
 # Stdin inputs for interactive examples (those with input() calls).
