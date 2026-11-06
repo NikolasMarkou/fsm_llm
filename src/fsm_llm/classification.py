@@ -35,6 +35,7 @@ from .llm import (
     DEFAULT_LLM_TIMEOUT_SECONDS,
     LiteLLMInterface,
     LLMInterface,
+    cut_off_note,
     implements_complete,
     interface_model,
 )
@@ -341,30 +342,34 @@ class Classifier:
         except LLMResponseError as e:
             raise ClassificationError(f"Classification LLM call failed: {e!s}") from e
         logger.debug(f"Classification call completed in {time.time() - start:.2f}s")
-        return self._extract_response(response)
+        return self._extract_response(response, max_tokens=self.config.max_tokens)
 
     # ----------------------------------------------------------
     # Response Extraction
     # ----------------------------------------------------------
 
     @staticmethod
-    def _extract_response(response: CompletionResponse) -> dict:
+    def _extract_response(
+        response: CompletionResponse, max_tokens: int | None = None
+    ) -> dict:
         """
         Extract a JSON dict from a classification reply.
 
         ``response.text`` is the reply content, or the model's reasoning trace
         when the content was empty (recovered by the LLM layer for a reply
         with no tool call). Raises ``ClassificationResponseError`` when there
-        is no text or no JSON object in it.
+        is no text or no JSON object in it; when the provider cut the reply
+        off at ``max_tokens`` (``response.truncated``) the error says so.
         """
         text = response.text
+        cut = f" ({cut_off_note(max_tokens)})" if response.truncated else ""
         if response.kind != "final" or not text:
-            raise ClassificationResponseError("LLM returned empty content")
+            raise ClassificationResponseError(f"LLM returned empty content{cut}")
         data = extract_json_from_text(text)
         if data is not None:
             return data
         raise ClassificationResponseError(
-            f"Failed to parse LLM JSON.\nResponse: {text[:200]}"
+            f"Failed to parse LLM JSON{cut}.\nResponse: {text[:200]}"
         )
 
     # ----------------------------------------------------------

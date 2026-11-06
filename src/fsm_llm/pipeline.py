@@ -2054,7 +2054,14 @@ class MessagePipeline:
             f"Completion turn: kind={reply.kind}, calls={[c.name for c in reply.calls]}"
         )
         return DataExtractionResponse(
-            extracted_data={config.result_key: reply.model_dump(mode="json")},
+            # `finish_reason` stays out of the committed result: its shape is
+            # the documented {kind, text, calls} (the provider's reason is on
+            # the CompletionResponse and in the WARNING for a cut reply).
+            extracted_data={
+                config.result_key: reply.model_dump(
+                    mode="json", exclude={"finish_reason"}
+                )
+            },
             confidence=1.0,
         )
 

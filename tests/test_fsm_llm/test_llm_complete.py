@@ -443,7 +443,9 @@ _TOOL_REQUEST = CompletionRequest(messages=_TRANSCRIPT[:2], tools=[_ADD_TOOL])
 class TestCompleteReplies:
     def test_a_final_text_reply(self):
         response, _ = _complete(_TOOL_REQUEST, _reply("The answer is 5."))
-        assert response == CompletionResponse(kind="final", text="The answer is 5.")
+        assert response == CompletionResponse(
+            kind="final", text="The answer is 5.", finish_reason="stop"
+        )
 
     def test_a_tool_call_reply_decodes_arguments(self):
         response, _ = _complete(
@@ -482,7 +484,9 @@ class TestCompleteReplies:
             CompletionRequest(messages=_TRANSCRIPT[:2]),
             _reply("", reasoning='{"answer": "5"}'),
         )
-        assert response == CompletionResponse(kind="final", text='{"answer": "5"}')
+        assert response == CompletionResponse(
+            kind="final", text='{"answer": "5"}', finish_reason="stop"
+        )
 
     def test_reasoning_is_not_recovered_beside_tool_calls(self):
         response, _ = _complete(
@@ -494,7 +498,9 @@ class TestCompleteReplies:
 
     def test_an_empty_reply_is_a_final_without_text(self):
         response, _ = _complete(_TOOL_REQUEST, _reply(""))
-        assert response == CompletionResponse(kind="final", text=None)
+        assert response == CompletionResponse(
+            kind="final", text=None, finish_reason="stop"
+        )
 
     def test_a_dict_content_is_returned_as_json_text(self):
         reply = _reply("placeholder")

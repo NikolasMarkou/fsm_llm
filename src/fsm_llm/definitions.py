@@ -773,6 +773,11 @@ class ModelToolCall(BaseModel):
     )
 
 
+# The provider's ``finish_reason`` for a reply cut off at ``max_tokens``: the one
+# signal that tells a cut fragment from a whole reply (plan 0068b055 D-024).
+FINISH_REASON_LENGTH = "length"
+
+
 class CompletionResponse(BaseModel):
     """What one ``LLMInterface.complete`` call returned.
 
@@ -786,6 +791,11 @@ class CompletionResponse(BaseModel):
         no id, or the provider's own malformed-tool-call error). It carries no calls, so
         none of the turn's calls runs, the valid ones included.
 
+    ``finish_reason`` is the provider's own reason the reply ended (``stop``,
+    ``length``, ``tool_calls``, ...), ``None`` when it sent none. ``length``
+    (``truncated``) means the reply was cut off at ``max_tokens``: its ``text``
+    (and any tool-call arguments) may be a fragment.
+
     A provider outage is not a response: ``complete`` raises. Frozen.
     """
 
@@ -798,6 +808,15 @@ class CompletionResponse(BaseModel):
     calls: tuple[ModelToolCall, ...] = Field(
         default=(), description="Requested tool calls (only for kind='calls')"
     )
+    finish_reason: str | None = Field(
+        default=None,
+        description="Provider's finish reason (length: cut off at max_tokens)",
+    )
+
+    @property
+    def truncated(self) -> bool:
+        """True when the provider cut the reply off at ``max_tokens``."""
+        return self.finish_reason == FINISH_REASON_LENGTH
 
     @model_validator(mode="after")
     def _calls_match_kind(self) -> CompletionResponse:

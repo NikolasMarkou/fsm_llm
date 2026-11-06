@@ -517,6 +517,21 @@ class TestCompletionTurn:
             "calls": [{"id": "call_1", "name": "add", "arguments": {"a": 2, "b": 3}}],
         }
 
+    def test_result_keeps_the_documented_shape_beside_a_finish_reason(self):
+        """D-024: the provider's ``finish_reason`` is on the CompletionResponse
+        and in the WARNING, never in the committed ``{kind, text, calls}``."""
+        reply = CompletionResponse(kind="final", text="5", finish_reason="length")
+        llm = _ScriptedLLM(reply)
+        api = API.from_definition(_tool_fsm(), llm_interface=llm)
+        conv_id = _start(api)
+        _to_call_model(api, conv_id)
+        api.advance(conv_id)
+        assert _context(api, conv_id)[_RESULT] == {
+            "kind": "final",
+            "text": "5",
+            "calls": [],
+        }
+
     @pytest.mark.parametrize(
         "reply, target",
         [(_final("5"), "done"), (CompletionResponse(kind="malformed"), "failed")],

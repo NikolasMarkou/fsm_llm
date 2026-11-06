@@ -88,6 +88,7 @@ from .constants import (
     USAGE_KIND_STREAM,
 )
 from .definitions import (
+    FINISH_REASON_LENGTH,
     RESPONSE_TEXT_MAX_LENGTH,
     BulkExtractionRequest,
     CompletionRequest,
@@ -156,6 +157,16 @@ _APOLOGY_COUNT_LOCK = threading.Lock()
 # terminal rung's envelope guard) — one string, one place to change it.
 _GENERIC_FALLBACK_MESSAGE = (
     "I'm sorry, I couldn't generate a proper response. Please try again."
+)
+
+# Shown to the END USER when a reply that opened as a JSON envelope was cut off
+# by max_tokens (provider finish_reason "length") and so cannot be parsed. A
+# different text from the generic fallback on purpose: the apology retry of
+# generate_response fires on the generic message only, and a retry at the same
+# max_tokens would be cut at the same place (D-024).
+_CUT_OFF_FALLBACK_MESSAGE = (
+    "I'm sorry, my answer was cut off before it was finished. "
+    "Please try again or ask for a shorter answer."
 )
 
 # Top-level keys of the bulk-extraction envelope the pipeline asks for
@@ -618,6 +629,35 @@ def check_tool_transcript(messages: Sequence[Any]) -> None:
             )
 
 
+def _finish_reason(response: Any) -> str | None:
+    """The provider's ``finish_reason`` of a reply: ``choices[0].finish_reason``.
+
+    Contract: ``response`` is a raw provider reply (any shape). Returns the
+    reason as a non-empty ``str``, or ``None`` when the reply has no choices,
+    no such attribute, or a value that is not a ``str``. Never raises. This is
+    the one reader; every ``finish_reason`` of this module comes from here.
+    """
+    try:
+        reason = response.choices[0].finish_reason
+    except (AttributeError, IndexError, KeyError, TypeError):
+        return None
+    return reason if isinstance(reason, str) and reason else None
+
+
+def cut_off_note(max_tokens: int | None) -> str:
+    """The sentence that names a reply cut off at ``max_tokens``.
+
+    Contract: ``max_tokens`` is the limit that was in force (``None`` when
+    unknown). Returns one sentence, with advice, for an error message or a
+    ``validation_error``. Never raises.
+    """
+    limit = f"max_tokens={max_tokens}" if max_tokens is not None else "max_tokens"
+    return (
+        f"the reply was cut off at {limit} (finish_reason=length); raise "
+        "max_tokens (LLM_MAX_TOKENS) or ask for a shorter answer"
+    )
+
+
 def _completion_response(response: Any) -> CompletionResponse:
     """Normalise one provider reply into a ``CompletionResponse``.
 
@@ -692,6 +732,7 @@ def _completion_response(response: Any) -> CompletionResponse:
     # repeated within the turn: its result could not be paired in the next
     # turn (check_tool_transcript refuses both), so it is refused here,
     # before any tool runs, not after.
+    finish_reason = _finish_reason(response)
     calls: list[ModelToolCall] = []
     seen_ids: set[str] = set()
     for raw_call in raw_calls:
@@ -712,14 +753,21 @@ def _completion_response(response: Any) -> CompletionResponse:
                 "repeated id, no tool name or arguments that are not a JSON "
                 "object); none of its calls is returned"
             )
-            return CompletionResponse(kind="malformed", text=text)
+            return CompletionResponse(
+                kind="malformed", text=text, finish_reason=finish_reason
+            )
         seen_ids.add(call_id)
         calls.append(ModelToolCall(id=call_id, name=name, arguments=arguments))
     if calls:
-        return CompletionResponse(kind="calls", text=text, calls=tuple(calls))
+        return CompletionResponse(
+            kind="calls",
+            text=text,
+            calls=tuple(calls),
+            finish_reason=finish_reason,
+        )
     if text is None:
         text = resolve_reasoning_trace(message) or None
-    return CompletionResponse(kind="final", text=text)
+    return CompletionResponse(kind="final", text=text, finish_reason=finish_reason)
 
 
 def _safe_str(value: Any) -> str | None:
@@ -1450,13 +1498,19 @@ class LiteLLMInterface(LLMInterface, _Metered):
                 content = strip_think_and_fences(content)
                 try:
                     data = json.loads(content)
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as e:
                     # One recovery rung (D-010): prose around a JSON object.
                     # `extract_json_from_text` returns a dict or None, so a
                     # None means there is genuinely nothing parseable and the
                     # original decode error is raised below as before.
                     data = extract_json_from_text(content)
                     if data is None:
+                        if _finish_reason(response) == FINISH_REASON_LENGTH:
+                            raise LLMResponseError(
+                                "Bulk data extraction failed: "
+                                f"{cut_off_note(self.max_tokens)}; the cut text "
+                                f"is not valid JSON ({e!s})"
+                            ) from e
                         raise
             elif isinstance(content, dict):
                 data = content
@@ -1604,6 +1658,20 @@ class LiteLLMInterface(LLMInterface, _Metered):
             meter.record_error(kind)
             raise
         meter.record(kind, None if stream else response)
+        # DECISION plan-2026-11-06T093029-0068b055/D-024: finish_reason
+        # "length" is read HERE, once per non-streamed reply (a streamed one
+        # is not read, as for usage). A cut reply is warned about but never
+        # raised on: it may be prose that is fine as far as it goes. Do NOT
+        # add a per-method check beside this one (a second site drifts); the
+        # parse paths read the same reason through `_finish_reason` to name
+        # the cause in their own errors. See decisions.md D-024.
+        if not stream and _finish_reason(response) == FINISH_REASON_LENGTH:
+            logger.warning(
+                f"Reply from '{call_params.get('model', self.model)}' "
+                f"({call_type}) was cut off at "
+                f"max_tokens={call_params.get('max_tokens')}; raise max_tokens "
+                "(or LLM_MAX_TOKENS) if the full reply is needed"
+            )
         return response
 
     def _supported_openai_params(self) -> list[str] | None:
@@ -2114,7 +2182,9 @@ class LiteLLMInterface(LLMInterface, _Metered):
         # DIFFERENT SIGNAL entirely: schema provenance, or a response-format flag
         # recording that structured output was requested for this call.
         # That signal now exists for the structured branch (`structured`, D-020),
-        # but this raw-text rung is still schema-blind.
+        # but this raw-text rung is still schema-blind. For a reply the provider
+        # CUT OFF the different signal is finish_reason "length"
+        # (plan-2026-11-06T093029-0068b055/D-024, below).
         # See decisions.md D-022.
         # D-030 (below) narrows the over-firing part: brace-shaped text that does
         # not PARSE as JSON is prose and is no longer replaced.
@@ -2132,10 +2202,12 @@ class LiteLLMInterface(LLMInterface, _Metered):
         # provider may inline them); keep the original when nothing else is left.
         # Do NOT use strip_think_and_fences here: it would strip code fences from
         # a reply that is legitimately prose. Trade-off: a brace-shaped but
-        # malformed envelope is now shown as text. See decisions.md D-030.
+        # malformed envelope is now shown as text, unless the provider cut it
+        # off at max_tokens (D-024 below). See decisions.md D-030.
         content = remove_think_blocks(content).strip() or content
+        parsed: Any = None
         if self._looks_like_json(content):
-            parsed: Any = extract_json_from_text(content)
+            parsed = extract_json_from_text(content)
             if parsed is None:
                 try:
                     parsed = json.loads(content)  # a valid array envelope
@@ -2148,6 +2220,29 @@ class LiteLLMInterface(LLMInterface, _Metered):
                     else None
                 )
                 content = (recovered or "").strip() or _GENERIC_FALLBACK_MESSAGE
+        # DECISION plan-2026-11-06T093029-0068b055/D-024: finish_reason is the
+        # DIFFERENT signal D-022 asked for, for the TRUNCATED case only. A reply
+        # the provider cut off at max_tokens (finish_reason "length") that
+        # opens as a JSON envelope and does NOT parse is a half envelope
+        # (live: `{ "message": "CONSOLIDATED ... Recommend`, shipped with
+        # success=True): it is replaced by _CUT_OFF_FALLBACK_MESSAGE. The
+        # decision is finish_reason AND unparsability, never the text shape
+        # alone (D-022 still binds): a cut PROSE reply is shipped as is (the
+        # WARNING in `_send` names it), and a whole reply is untouched. Do NOT
+        # salvage the fragment's prefix here (a half answer shown as whole) and
+        # do NOT reuse the generic message (D-020 would retry at the same
+        # max_tokens and be cut at the same place). See decisions.md D-024.
+        if (
+            parsed is None
+            and _finish_reason(response) == FINISH_REASON_LENGTH
+            and content.startswith(("{", "["))
+        ):
+            logger.warning(
+                "Response generation was cut off at "
+                f"max_tokens={self.max_tokens} inside a JSON envelope; "
+                "not shown as the reply"
+            )
+            content = _CUT_OFF_FALLBACK_MESSAGE
         return ResponseGenerationResponse(
             message=content[:RESPONSE_TEXT_MAX_LENGTH],
             message_type="response",
@@ -2367,7 +2462,11 @@ class LiteLLMInterface(LLMInterface, _Metered):
             confidence=0.0,
             reasoning="Failed to extract field from LLM response",
             is_valid=False,
-            validation_error="Extraction produced no usable value",
+            validation_error=(
+                "Extraction produced no usable value: " + cut_off_note(self.max_tokens)
+                if _finish_reason(response) == FINISH_REASON_LENGTH
+                else "Extraction produced no usable value"
+            ),
         )
 
     @staticmethod
