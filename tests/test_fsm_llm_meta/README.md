@@ -1,6 +1,6 @@
 # test_fsm_llm_meta
 
-Pytest suite for the meta-builder in the `fsm-llm` repository: the part of `fsm_llm.agents` that turns a conversation or a text spec into an FSM, workflow, or agent definition. It lives at `tests/test_fsm_llm_meta/` and holds 473 tests in 13 files.
+Pytest suite for the meta-builder in the `fsm-llm` repository: the part of `fsm_llm.agents` that turns a conversation or a text spec into an FSM, workflow, or agent definition. It lives at `tests/test_fsm_llm_meta/` and holds 496 tests in 13 files.
 
 ## What it is for
 
@@ -28,12 +28,12 @@ flowchart LR
 - `test_meta_fsm.py` - the meta FSM: structure, gates, the build request and its schemas, a run through the core engine (52 tests).
 - `test_meta_conversation.py` - whole conversations by behaviour: each artifact kind, a type switch, a failed then fixed build, outages, `max_turns`, what the monitor reads (41 tests).
 - `test_review_fixes_meta.py` - review fixes: malformed build replies, keyword hints and negation, the build prompt sentence (90 tests).
-- `test_agent.py` - `MetaBuilderAgent`: config, start/send lifecycle, type detection, build triggers, result building, output helpers, schema-echo rejection, provider-failure handling, workflow `step_type` enum, runs through core (53 tests).
+- `test_agent.py` - `MetaBuilderAgent`: config, start/send lifecycle, type detection, build triggers, result building, output helpers, schema-echo rejection, provider-failure handling, workflow `step_type` enum, runs through core (55 tests).
 - `test_builders.py` - core behavior of the three builders: add, remove, update, transitions, `to_dict`, validation, summaries at three detail levels (91 tests).
-- `test_builders_elaborate.py` - builder edge cases, config type checks, `VALID_STEP_TYPES`, exception attributes and hierarchy, `MetaBuilderConfig` range checks, summary content (47 tests).
-- `test_tools.py` - tool registries from `create_fsm_tools`, `create_workflow_tools`, `create_agent_tools`, `create_builder_tools`, plus two newer classes (34 tests): `TestToolReplyText` pins the exact reply text of every meta tool as a golden script run on a fresh builder (so later replies depend on earlier calls), and `TestToolWarningIsolation` runs 8 threads against one registry and checks each call's reply carries only its own warnings, and that warnings left by direct builder mutators do not leak into a later reply.
+- `test_builders_elaborate.py` - builder edge cases, config type checks, `VALID_STEP_TYPES`, exception attributes and hierarchy, `MetaBuilderConfig` range checks, summary content (57 tests).
+- `test_tools.py` - tool registries from `create_fsm_tools`, `create_workflow_tools`, `create_agent_tools`, `create_builder_tools`, plus two newer classes (35 tests): `TestToolReplyText` pins the exact reply text of every meta tool as a golden script run on a fresh builder (so later replies depend on earlier calls), and `TestToolWarningIsolation` runs 8 threads against one registry and checks each call's reply carries only its own warnings, and that warnings left by direct builder mutators do not leak into a later reply.
 - `test_integration.py` - reachability errors, workflow transitions, tool registries mutating a builder, `final_context` on the result, type alias ordering (11 tests).
-- `test_definitions.py` - `ArtifactType`, `BuildProgress`, `MetaBuilderConfig`, `MetaBuilderResult` (16 tests).
+- `test_definitions.py` - `ArtifactType`, `BuildProgress`, `MetaBuilderConfig`, `MetaBuilderResult` (26 tests).
 - `test_prompts.py` - welcome, review and collect-turn messages from `fsm_llm.agents.meta_prompts` (4 tests).
 - `test_meta_cleanup_fixes.py` - the 2026-11-05 meta fixes (plan 5980fbb7 step 14): trigger punctuation, build reply parsing, retryable start, atomic `save_artifact`, one orphan error (32 tests).
 - `test_handlers.py`, `test_handlers_elaborate.py` - one import check each: `MetaBuilderAgent` imports from `fsm_llm.agents.meta_builder`. The old handlers module no longer exists.

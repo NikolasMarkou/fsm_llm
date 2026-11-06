@@ -85,7 +85,7 @@ fsm-llm-eval examples [options]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--model` | `$LLM_MODEL` or `ollama_chat/qwen3.5:4b` | LLM model identifier |
+| `--model` | `$LLM_MODEL` or `ollama_chat/bonsai-2:27b` | LLM model identifier |
 | `--workers` | 4 | Parallel workers, one example subprocess each (increase for GPU utilization) |
 | `--timeout` | 120 | Default timeout per example (seconds) |
 | `--category` | all | Filter by category (basic, agents, etc.) |

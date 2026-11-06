@@ -63,7 +63,7 @@ Loop (RC1, the conversational pipeline used as an agent engine):
 | LOOP-06 | TRUE | Fixed, step 15: `agent_feedback` key carries executor warnings and HITL denials; a denial is not an observation |
 | LOOP-07 | TRUE | Partly fixed, step 15: no blind bulk call per think turn; one call per typed field remains |
 | LOOP-08 | TRUE | Fixed, steps 14-15: `agent_trace` kept out of per-field prompts by `context_keys`; not capped (declined) |
-| LOOP-09 | PARTIAL | Fixed, steps 15, 17-21: intermediate states have empty `response_instructions`. PromptChain step replies stay user-owned |
+| LOOP-09 | TRUE (PromptChain step replies stay user-owned) | Fixed, steps 15, 17-21: intermediate states have empty `response_instructions`. Orchestrator (`orchestrate`, `delegate`, `collect`) and ADaPT (`attempt`, `assess`, `decompose`) joined in plan 0068b055 step 7: only `synthesize` and `combine` speak, 3 to 5 fewer model calls per run. Mocked evidence only (`PromptGroundedLLM`: call counts, judge prompts keep their evidence, golden dicts diffed); whether a small model judges as well without the narration is carried as F-AR-05-LIVE |
 | LOOP-10 | PARTIAL | Fixed, steps 15, 17, 18, 20: routing fields typed `bool`/`float`/`list` |
 | LOOP-11 | PARTIAL | Fixed, steps 14-21: per-field wording points to the task and observations; generated text fields open with a "compose it yourself" sentence |
 | LOOP-12 | TRUE | Fixed, step 3: run-output keys stripped from caller context; `observation_count` seeded 0. Fix 3.1 (D-052): each pattern's own drafts, verdicts and answers (`_run_output_keys`) are stripped too, also on AgentGraph edges and Swarm hand-offs |

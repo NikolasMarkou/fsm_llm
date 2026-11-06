@@ -169,9 +169,9 @@ class FSMContext:
     working_memory: WorkingMemory  # Named buffers (core, scratch, environment, reasoning)
 ```
 
-`get_user_visible_data()` (which merges the non-hidden buffers into `data`, minus internal keys) enters the Pass-1 per-field extraction prompt (`_execute_field_extractions`, when a field's `context_keys` is left at its default) and both classifier call sites. The three Pass-2 sites (`_execute_response_generation_pass`, `_stream_response_generation_pass`, and `generate_initial_response` when a greeting is generated) build the `<current_context>` block from `get_merged_data()`, scoped by `read_keys`; the prompt is the only context channel, since `ResponseGenerationRequest` carries no context field. `update_context`/handlers write `data` only; a value that must reach the shipped response prompt belongs in `data`. `working_memory` is also `exclude=True`, so `FSMContext.model_dump()` omits it (sessions persist it through `WorkingMemory.to_dict()`).
+`get_user_visible_data()` (which merges the non-hidden buffers into `data`, minus internal keys and secret-looking entries; the one key policy lives in `security.py`, so a key named exactly `system` is an ordinary visible key, unlike `system_*`) enters the Pass-1 per-field extraction prompt (`_execute_field_extractions`, when a field's `context_keys` is left at its default) and both classifier call sites. The three Pass-2 sites (`_execute_response_generation_pass`, `_stream_response_generation_pass`, and `generate_initial_response` when a greeting is generated) build the `<current_context>` block from `get_merged_data()`, scoped by `read_keys`; the prompt is the only context channel, since `ResponseGenerationRequest` carries no context field. `update_context`/handlers write `data` only; a value that must reach the shipped response prompt belongs in `data`. `working_memory` is also `exclude=True`, so `FSMContext.model_dump()` omits it (sessions persist it through `WorkingMemory.to_dict()`).
 
-Special keys (prefixed with `_`): `_conversation_id`, `_conversation_start`, `_fsm_id`, `_timestamp`, and, once a transition has happened, `_current_state`, `_previous_state`, `_transition_timestamp`. ERROR handlers additionally see `_error` and `_traceback`. The raw user message is not in the context, so handlers see extracted keys only.
+Special keys (prefixed with `_`): `_conversation_id`, `_conversation_start`, `_fsm_id`, `_timestamp`, and, once a transition has happened, `_current_state`, `_previous_state`, `_transition_timestamp`. ERROR handlers additionally see `_error` and `_traceback`. Formats: `_conversation_start` is naive local-time ISO text (`datetime.now().isoformat()`), `_timestamp` and `_transition_timestamp` are epoch seconds (floats), and none of the three is persisted by `save_session` (UTC-aware values are carried, not built). The raw user message is not in the context, so handlers see extracted keys only.
 
 ### Context in Stacked FSMs
 
@@ -200,7 +200,7 @@ Priority ordering (lower first). Error modes: `"continue"` (log + skip) or `"rai
 
 ## Performance
 
-- **Conversation history limits**: `max_history_size` (default 5), `max_message_length` (default 1000)
+- **Conversation history limits**: `max_history_size` (default 5) is the number of exchanges stored per conversation and also the number of messages the extraction and response prompts show (the last N, passed unchanged to the default prompt builders, so the unit of the shown window is messages); the history token budget (default 3000) can cut the window below N, so at most N messages are shown. `max_message_length` (default 1000)
 - **FSM definition caching**: LRU cache (max 64) for loaded definitions
 - **Handler pre-filtering**: Only check handlers matching current timing
 - **Thread safety**: Per-conversation RLocks in FSMManager

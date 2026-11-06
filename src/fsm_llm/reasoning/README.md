@@ -73,7 +73,7 @@ print(solution)
 print(trace["summary"])
 ```
 
-`solve_problem(problem, initial_context=None)` also takes a dictionary of extra context. `trace` has the keys `reasoning_trace`, `summary`, `final_context` and `all_responses`. The solve examples call a live model. Any litellm model name works. The default is `ollama_chat/qwen3.5:4b`: unlike `API` and the agents, `ReasoningEngine` does not read `LLM_MODEL`, so pass `model=` (or `--model`) to use another one.
+`solve_problem(problem, initial_context=None)` also takes a dictionary of extra context. `trace` has the keys `reasoning_trace`, `summary`, `final_context` and `all_responses`. The solve examples call a live model. Any litellm model name works. The default is `ollama_chat/bonsai-2:27b` (`DEFAULT_LLM_MODEL`): unlike `API` and the agents, `ReasoningEngine` does not read `LLM_MODEL`, so pass `model=` (or `--model`) to use another one.
 
 The command line also takes `--context '{"audience": "child"}'` (extra context as a JSON object), `--quiet` (print the solution only) and `--version`. `--quiet` and `--verbose` cannot be combined.
 
