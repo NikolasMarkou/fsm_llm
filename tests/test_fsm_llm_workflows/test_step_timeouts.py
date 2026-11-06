@@ -117,7 +117,7 @@ class TestAutoTransitionStepTimeout:
 
     @pytest.mark.asyncio
     @pytest.mark.slow
-    async def test_slow_async_action_raises_workflow_step_error(self):
+    async def test_slow_async_action_returns_a_timeout_failure(self):
         async def slow_action(ctx):
             await asyncio.sleep(5.0)
             return {"result": "never"}
@@ -130,12 +130,11 @@ class TestAutoTransitionStepTimeout:
             timeout=0.1,
         )
 
-        with pytest.raises(WorkflowStepError) as exc_info:
-            await step.execute({})
+        result = await step.execute({})
 
-        # The outer exception wraps the timeout; check the cause chain
-        assert exc_info.value.cause is not None
-        assert "timed out" in str(exc_info.value.cause)
+        assert result.success is False
+        assert result.next_state is None
+        assert "timed out" in (result.error or "")
 
     @pytest.mark.asyncio
     async def test_sync_action_not_affected_by_timeout(self):
@@ -170,10 +169,9 @@ class TestAutoTransitionStepTimeout:
             timeout=0.1,
         )
 
-        with pytest.raises(WorkflowStepError) as exc_info:
-            await step.execute({})
+        result = await step.execute({})
 
-        assert exc_info.value.step_id == "my_step_id"
+        assert "my_step_id" in (result.error or "")
 
     @pytest.mark.asyncio
     @pytest.mark.slow
@@ -190,12 +188,9 @@ class TestAutoTransitionStepTimeout:
             timeout=0.1,
         )
 
-        with pytest.raises(WorkflowStepError) as exc_info:
-            await step.execute({})
+        result = await step.execute({})
 
-        # Duration appears in the cause (the inner timeout WorkflowStepError)
-        assert exc_info.value.cause is not None
-        assert "0.1" in str(exc_info.value.cause)
+        assert "0.1s" in (result.error or "")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -276,7 +271,7 @@ class TestConditionStepTimeout:
 
     @pytest.mark.asyncio
     @pytest.mark.slow
-    async def test_slow_async_condition_raises_workflow_step_error(self):
+    async def test_slow_async_condition_returns_a_timeout_failure(self):
         async def slow_check(ctx):
             await asyncio.sleep(5.0)
             return True
@@ -290,12 +285,11 @@ class TestConditionStepTimeout:
             timeout=0.1,
         )
 
-        with pytest.raises(WorkflowStepError) as exc_info:
-            await step.execute({})
+        result = await step.execute({})
 
-        # The outer exception wraps the timeout; check the cause chain
-        assert exc_info.value.cause is not None
-        assert "timed out" in str(exc_info.value.cause)
+        assert result.success is False
+        assert result.next_state is None
+        assert "timed out" in (result.error or "")
 
     @pytest.mark.asyncio
     @pytest.mark.slow
@@ -313,10 +307,9 @@ class TestConditionStepTimeout:
             timeout=0.1,
         )
 
-        with pytest.raises(WorkflowStepError) as exc_info:
-            await step.execute({})
+        result = await step.execute({})
 
-        assert exc_info.value.step_id == "cond_step"
+        assert "cond_step" in (result.error or "")
 
 
 # ══════════════════════════════════════════════════════════════

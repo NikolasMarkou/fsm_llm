@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from fsm_llm.definitions import reachable_from
 from fsm_llm.logging import logger
 
 # --------------------------------------------------------------
@@ -16,15 +17,8 @@ from fsm_llm.logging import logger
 from .constants import PAUSING_STEP_TYPES
 from .exceptions import WorkflowDefinitionError, WorkflowValidationError
 from .steps import (
-    AgentStep,
-    APICallStep,
-    AutoTransitionStep,
-    ConditionStep,
-    ConversationStep,
-    LLMProcessingStep,
     ParallelStep,
     RetryStep,
-    SwitchStep,
     TimerStep,
     WaitForEventStep,
     WorkflowStep,
@@ -64,8 +58,8 @@ def _serialize_step(step: WorkflowStep) -> dict[str, Any]:
       recursive call so nested steps keep their `type` tag and stripped
       callables.
 
-    Mirrors the ``RetryStep`` recursion precedent in `_get_referenced_states`
-    (`hasattr(step, "step") and isinstance(step.step, WorkflowStep)`).
+    Mirrors the ``RetryStep`` recursion precedent in
+    ``RetryStep.referenced_states``.
     Failure mode: none — every `WorkflowStep` subclass either has no nested
     steps (returned as-is) or is one of the two known nesting shapes above.
     """
@@ -169,11 +163,11 @@ class WorkflowDefinition(BaseModel):
         # Warn about states that cannot reach any terminal state
         terminal_states = self.get_terminal_states()
         if terminal_states and self.initial_step_id:
+            adjacency = self._adjacency()
             for step_id in self.steps:
                 if step_id in terminal_states:
                     continue
-                reachable = self._find_reachable_states(step_id)
-                if not reachable & terminal_states:
+                if not reachable_from(adjacency, [step_id]) & terminal_states:
                     logger.warning(
                         f"State '{step_id}' has no path to any terminal state — "
                         "workflow may not terminate from this state"
@@ -213,10 +207,7 @@ class WorkflowDefinition(BaseModel):
         all_states = set(self.steps.keys())
 
         for step_id, step in self.steps.items():
-            # Check different step types for state references
-            referenced_states = self._get_referenced_states(step)
-
-            for state in referenced_states:
+            for state in step.referenced_states():
                 if state not in all_states:
                     errors.append(
                         f"Step '{step_id}' references unknown state: '{state}'"
@@ -224,73 +215,18 @@ class WorkflowDefinition(BaseModel):
 
         return errors
 
-    def _get_referenced_states(self, step: WorkflowStep) -> set[str]:
-        """Get all states referenced by a step."""
-        referenced_states = set()
-
-        if isinstance(step, AutoTransitionStep):
-            referenced_states.add(step.next_state)
-            if step.error_state:
-                referenced_states.add(step.error_state)
-        elif isinstance(step, APICallStep):
-            referenced_states.add(step.success_state)
-            referenced_states.add(step.failure_state)
-        elif isinstance(step, ConditionStep):
-            referenced_states.add(step.true_state)
-            referenced_states.add(step.false_state)
-            if step.error_state:
-                referenced_states.add(step.error_state)
-        elif isinstance(step, AgentStep):
-            if step.success_state:
-                referenced_states.add(step.success_state)
-            if step.error_state:
-                referenced_states.add(step.error_state)
-        elif isinstance(step, LLMProcessingStep):
-            referenced_states.add(step.next_state)
-            if step.error_state:
-                referenced_states.add(step.error_state)
-        elif isinstance(step, TimerStep):
-            referenced_states.add(step.next_state)
-        elif isinstance(step, ParallelStep):
-            referenced_states.add(step.next_state)
-            if step.error_state:
-                referenced_states.add(step.error_state)
-        elif isinstance(step, ConversationStep):
-            if step.success_state:
-                referenced_states.add(step.success_state)
-            if step.error_state:
-                referenced_states.add(step.error_state)
-        elif isinstance(step, WaitForEventStep):
-            referenced_states.add(step.config.success_state)
-            if step.config.timeout_state:
-                referenced_states.add(step.config.timeout_state)
-        elif isinstance(step, SwitchStep):
-            referenced_states.update(step.cases.values())
-            if step.default_state:
-                referenced_states.add(step.default_state)
-        elif isinstance(step, RetryStep):
-            # Recurse into the wrapped step to find its transitions
-            if hasattr(step, "step") and isinstance(step.step, WorkflowStep):
-                referenced_states.update(self._get_referenced_states(step.step))
-        else:
-            # Fallback for custom WorkflowStep subclasses:
-            # introspect for fields ending in '_state' that have string values
-            for field_name in type(step).model_fields:
-                if field_name.endswith("_state"):
-                    value = getattr(step, field_name, None)
-                    if isinstance(value, str) and value:
-                        referenced_states.add(value)
-
-        # Filter out empty strings (terminal step markers)
-        referenced_states.discard("")
-        return referenced_states
+    def _adjacency(self) -> dict[str, set[str]]:
+        """Step id -> the states it can route to (``referenced_states``)."""
+        return {
+            step_id: step.referenced_states() for step_id, step in self.steps.items()
+        }
 
     def _validate_reachability(self) -> list[str]:
         """Validate that all states are reachable from the initial state."""
         if not self.initial_step_id:
             return ["Cannot validate reachability without initial step"]
 
-        reachable_states = self._find_reachable_states(self.initial_step_id)
+        reachable_states = reachable_from(self._adjacency(), [self.initial_step_id])
         all_states = set(self.steps.keys())
         unreachable_states = all_states - reachable_states
 
@@ -302,38 +238,13 @@ class WorkflowDefinition(BaseModel):
 
         return errors
 
-    def _find_reachable_states(self, start_state: str) -> set[str]:
-        """Find all states reachable from the start state using DFS."""
-        visited = set()
-        stack = [start_state]
-
-        while stack:
-            current_state = stack.pop()
-            if current_state in visited:
-                continue
-
-            visited.add(current_state)
-
-            if current_state in self.steps:
-                step = self.steps[current_state]
-                next_states = self._get_referenced_states(step)
-
-                for next_state in next_states:
-                    if next_state not in visited:
-                        stack.append(next_state)
-
-        return visited
-
     def get_terminal_states(self) -> set[str]:
         """Get all terminal states (states with no outgoing transitions)."""
-        terminal_states = set()
-
-        for step_id, step in self.steps.items():
-            referenced_states = self._get_referenced_states(step)
-            if not referenced_states:
-                terminal_states.add(step_id)
-
-        return terminal_states
+        return {
+            step_id
+            for step_id, step in self.steps.items()
+            if not step.referenced_states()
+        }
 
     def has_cycles(self) -> bool:
         """Check if the workflow graph has any cycle (including loops that
@@ -341,7 +252,7 @@ class WorkflowDefinition(BaseModel):
 
         Uses an iterative DFS with WHITE/GRAY/BLACK coloring to avoid
         RecursionError on large workflow graphs (W-ISSUE-003). Consistent
-        with the iterative pattern used in _find_reachable_states.
+        with the iterative walk of ``reachable_from``.
         """
         return self._has_cycle(pausing_breaks_cycle=False)
 
@@ -387,7 +298,7 @@ class WorkflowDefinition(BaseModel):
                 return set()
             if pausing_breaks_cycle and self._is_pausing_step(step):
                 return set()
-            return self._get_referenced_states(step)
+            return step.referenced_states()
 
         for start in list(self.steps):
             if color.get(start, WHITE) != WHITE:
@@ -427,36 +338,3 @@ class WorkflowDefinition(BaseModel):
 
         workflow_dict["steps"] = steps_dict
         return workflow_dict
-
-
-# --------------------------------------------------------------
-
-
-class WorkflowValidator:
-    """Utility class for validating workflows."""
-
-    @staticmethod
-    def validate_workflow(workflow: WorkflowDefinition) -> list[str]:
-        """Validate a workflow definition and return a list of errors."""
-        try:
-            workflow.validate()
-            return []
-        except WorkflowValidationError as e:
-            return e.validation_errors
-
-    @staticmethod
-    def validate_workflow_collection(
-        workflows: dict[str, WorkflowDefinition],
-    ) -> dict[str, list[str]]:
-        """Validate a collection of workflows."""
-        validation_results = {}
-
-        for workflow_id, workflow in workflows.items():
-            errors = WorkflowValidator.validate_workflow(workflow)
-            if errors:
-                validation_results[workflow_id] = errors
-
-        return validation_results
-
-
-# --------------------------------------------------------------

@@ -26,7 +26,12 @@ from fsm_llm.constants import has_internal_prefix
 from fsm_llm.definitions import ResponseGenerationRequest
 from fsm_llm.logging import logger
 
-from .constants import KEY_USER_INPUT, PARALLEL_DEEPCOPY_WARNING_THRESHOLD
+from .constants import (
+    KEY_TIMER_INFO,
+    KEY_USER_INPUT,
+    KEY_WAITING_INFO,
+    PARALLEL_DEEPCOPY_WARNING_THRESHOLD,
+)
 from .exceptions import WorkflowStepError
 from .models import WaitEventConfig, WorkflowStepResult
 
@@ -100,17 +105,49 @@ class WorkflowStep(BaseModel, ABC):
         """Execute the step. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement execute()")
 
+    def referenced_states(self) -> set[str]:
+        """The states this step can route to (empty markers dropped).
+
+        Interface contract: the non-empty string values of the model fields
+        whose name ends in ``_state`` (``next_state``, ``error_state``, ...).
+        A step that names states elsewhere (a nested model, a mapping, a
+        wrapped step) overrides this; ``WorkflowDefinition`` reads nothing else
+        for validation, reachability and terminal detection. Never raises.
+        """
+        states: set[str] = set()
+        for name in type(self).model_fields:
+            value = getattr(self, name, None)
+            if name.endswith("_state") and isinstance(value, str) and value:
+                states.add(value)
+        return states
+
     async def _with_timeout(self, coro):
-        """Wrap a coroutine with ``asyncio.wait_for`` if timeout is configured."""
-        if self.timeout is not None:
+        """Wrap a coroutine with ``asyncio.wait_for`` if timeout is configured.
+
+        A ``TimeoutError`` raised by the awaited code itself is not this
+        step's time limit and propagates unchanged.
+        """
+        if self.timeout is None:
+            return await coro
+        raised = False
+
+        async def run():
+            nonlocal raised
             try:
-                return await asyncio.wait_for(coro, timeout=self.timeout)
-            except asyncio.TimeoutError as e:
-                raise WorkflowStepError(
-                    step_id=self.step_id,
-                    message=f"Step timed out after {self.timeout}s",
-                ) from e
-        return await coro
+                return await coro
+            except asyncio.TimeoutError:
+                raised = True
+                raise
+
+        try:
+            return await asyncio.wait_for(run(), timeout=self.timeout)
+        except asyncio.TimeoutError as e:
+            if raised:
+                raise
+            raise WorkflowStepError(
+                step_id=self.step_id,
+                message=f"Step timed out after {self.timeout}s",
+            ) from e
 
 
 class AutoTransitionStep(WorkflowStep):
@@ -118,7 +155,8 @@ class AutoTransitionStep(WorkflowStep):
 
     ``action`` may return a dict (merged into the context) or ``None``. When
     the action fails, the step routes to ``error_state`` if one is set and
-    raises ``WorkflowStepError`` otherwise (the instance then FAILS).
+    returns a failure result with no route otherwise (the instance then
+    FAILS).
     """
 
     next_state: str
@@ -147,15 +185,11 @@ class AutoTransitionStep(WorkflowStep):
             )
         except Exception as e:
             logger.error(f"Error in auto transition step {self.step_id}: {e!s}")
-            if self.error_state:
-                return WorkflowStepResult.failure_result(
-                    error=_error_text(e),
-                    next_state=self.error_state,
-                    message=f"Auto-transition failed, transitioning to {self.error_state}",
-                )
-            raise WorkflowStepError(
-                step_id=self.step_id, message="Auto-transition failed", cause=e
-            ) from e
+            return WorkflowStepResult.failure_result(
+                error=_error_text(e),
+                next_state=self.error_state,
+                message=f"Auto-transition failed: {e!s}",
+            )
 
 
 class APICallStep(WorkflowStep):
@@ -236,7 +270,7 @@ class ConditionStep(WorkflowStep):
     """A step that evaluates a condition and transitions accordingly.
 
     When the condition raises, the step routes to ``error_state`` if one is
-    set and raises ``WorkflowStepError`` otherwise.
+    set and returns a failure result with no route otherwise.
     """
 
     condition: Callable[[dict[str, Any]], bool]
@@ -261,15 +295,11 @@ class ConditionStep(WorkflowStep):
             )
         except Exception as e:
             logger.error(f"Error in condition step {self.step_id}: {e!s}")
-            if self.error_state:
-                return WorkflowStepResult.failure_result(
-                    error=_error_text(e),
-                    next_state=self.error_state,
-                    message=f"Condition evaluation failed, transitioning to {self.error_state}",
-                )
-            raise WorkflowStepError(
-                step_id=self.step_id, message="Condition evaluation failed", cause=e
-            ) from e
+            return WorkflowStepResult.failure_result(
+                error=_error_text(e),
+                next_state=self.error_state,
+                message=f"Condition evaluation failed: {e!s}",
+            )
 
 
 class LLMProcessingStep(WorkflowStep):
@@ -299,6 +329,19 @@ class LLMProcessingStep(WorkflowStep):
         "You are a precise assistant. Follow the instructions in the user "
         "message and answer with exactly what they ask for."
     )
+
+    @field_validator("llm_interface")
+    @classmethod
+    def _validate_llm_interface(cls, v: Any) -> Any:
+        if not (
+            callable(getattr(v, "generate", None))
+            or callable(getattr(v, "generate_response", None))
+        ):
+            raise ValueError(
+                "llm_interface must provide generate(prompt) or "
+                "generate_response(ResponseGenerationRequest)"
+            )
+        return v
 
     @field_validator("output_mapping")
     @classmethod
@@ -368,7 +411,7 @@ class LLMProcessingStep(WorkflowStep):
         generate = getattr(llm, "generate", None)
         if callable(generate):
             raw = await self._with_timeout(_call_user_callable(generate, prompt))
-        elif callable(getattr(llm, "generate_response", None)):
+        else:
             system_prompt = self.system_prompt or "Follow the user's instructions."
             if len(prompt) > _MAX_CORE_USER_MESSAGE:
                 # ResponseGenerationRequest caps user_message; the system
@@ -383,11 +426,6 @@ class LLMProcessingStep(WorkflowStep):
                 )
             raw = await self._with_timeout(
                 _call_user_callable(llm.generate_response, request)
-            )
-        else:
-            raise TypeError(
-                "llm_interface must provide generate(prompt) or "
-                "generate_response(ResponseGenerationRequest)"
             )
         if isinstance(raw, str):
             return raw
@@ -424,6 +462,14 @@ class WaitForEventStep(WorkflowStep):
 
     config: WaitEventConfig
 
+    def referenced_states(self) -> set[str]:
+        """The success state and the timeout state of the wait."""
+        return {
+            state
+            for state in (self.config.success_state, self.config.timeout_state)
+            if state
+        }
+
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Set up the workflow to wait for an event."""
         waiting_info = {
@@ -438,7 +484,7 @@ class WaitForEventStep(WorkflowStep):
         }
 
         return WorkflowStepResult.success_result(
-            data={"_waiting_info": waiting_info},
+            data={KEY_WAITING_INFO: waiting_info},
             message=f"Waiting for event of type {self.config.event_type}",
         )
 
@@ -469,7 +515,7 @@ class TimerStep(WorkflowStep):
         }
 
         return WorkflowStepResult.success_result(
-            data={"_timer_info": timer_info},
+            data={KEY_TIMER_INFO: timer_info},
             message=f"Timer set for {self.delay_seconds} seconds, will transition to {self.next_state}",
         )
 
@@ -541,9 +587,6 @@ class ConversationStep(WorkflowStep):
         limits = [t for t in (self.timeout, self.conversation_timeout) if t is not None]
         return min(limits) if limits else None
 
-    def _failure_state(self) -> str | None:
-        return self.error_state
-
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Execute an FSM conversation and return collected data."""
         limit = self._effective_timeout()
@@ -566,7 +609,7 @@ class ConversationStep(WorkflowStep):
                 )
                 return WorkflowStepResult.failure_result(
                     error=f"Conversation timed out after {limit}s",
-                    next_state=self._failure_state(),
+                    next_state=self.error_state,
                     message="Conversation timed out",
                 )
             return fut.result()
@@ -574,7 +617,7 @@ class ConversationStep(WorkflowStep):
             logger.error(f"Error in conversation step {self.step_id}: {e!s}")
             return WorkflowStepResult.failure_result(
                 error=_error_text(e),
-                next_state=self._failure_state(),
+                next_state=self.error_state,
                 message=f"Conversation failed: {e!s}",
             )
 
@@ -660,7 +703,7 @@ class ConversationStep(WorkflowStep):
                 success=False,
                 data=output_data,
                 error=f"Conversation did not reach a terminal state in {turn} turns",
-                next_state=self._failure_state(),
+                next_state=self.error_state,
                 message="Conversation did not complete",
             )
 
@@ -679,6 +722,8 @@ class ParallelStep(WorkflowStep):
     ``next_state`` is ignored; their data is merged as ``step_<index>_<key>``
     (internal-prefix keys are dropped first) or by ``aggregation_function``.
     Event and timer steps cannot be children (they only pause a workflow).
+    ``aggregation_function(results)`` may be sync (run in the step executor)
+    or async.
 
     If any child fails, the step fails: it routes to ``error_state``, or
     FAILS the instance when none is set, and still reports the data of the
@@ -731,7 +776,7 @@ class ParallelStep(WorkflowStep):
                 )
 
             # Aggregate results
-            aggregated_data = self._aggregate_results(results)
+            aggregated_data = await self._aggregate_results(results)
 
             return WorkflowStepResult.success_result(
                 data=aggregated_data,
@@ -823,10 +868,16 @@ class ParallelStep(WorkflowStep):
                     aggregated_data[f"{prefix}{key}"] = value
         return aggregated_data
 
-    def _aggregate_results(self, results: list[WorkflowStepResult]) -> dict[str, Any]:
-        """Aggregate results from parallel steps."""
+    async def _aggregate_results(
+        self, results: list[WorkflowStepResult]
+    ) -> dict[str, Any]:
+        """Aggregate results from parallel steps (``aggregation_function`` may
+        be sync, run in the step executor, or async)."""
         if self.aggregation_function:
-            return self.aggregation_function(results)
+            aggregated: dict[str, Any] = await _call_user_callable(
+                self.aggregation_function, results
+            )
+            return aggregated
         return self._default_aggregate(results)
 
 
@@ -860,8 +911,6 @@ class AgentStep(WorkflowStep):
     ``agent_<step_id>_answer``/``agent_<step_id>_success`` (per step). An
     agent that reports ``success=False`` fails the step.
     """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     agent: Any = Field(exclude=True)
     """A ``BaseAgent`` instance (or any object with a ``run(task)`` method)."""
@@ -985,13 +1034,17 @@ class RetryStep(WorkflowStep):
         )
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
     step: Any = Field(exclude=True)
     """The inner ``WorkflowStep`` to retry."""
     max_retries: int = 3
     backoff_factor: float = 1.0
     """Delay multiplier between retries (seconds). Delay = backoff_factor * attempt."""
+
+    def referenced_states(self) -> set[str]:
+        """The wrapped step's states (none for a duck-typed non-step)."""
+        if isinstance(self.step, WorkflowStep):
+            return self.step.referenced_states()
+        return set()
 
     @field_validator("step")
     @classmethod
@@ -1096,6 +1149,10 @@ class SwitchStep(WorkflowStep):
     default_state: str | None = None
     """State to transition to when the key value doesn't match any case.
     ``None`` means no default (the instance FAILS). Use ``""`` for terminal."""
+
+    def referenced_states(self) -> set[str]:
+        """Every case target and the default state."""
+        return {*self.cases.values(), *super().referenced_states()} - {""}
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Evaluate the context key and route to the matching state."""

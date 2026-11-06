@@ -87,9 +87,8 @@ class TestWaitForEventStepValidation:
     """F-004: WaitForEventStep success/timeout states must be validated."""
 
     def test_wait_event_step_states_are_validated(self):
-        """_get_referenced_states must include WaitForEventStep states."""
+        """The referenced states of a WaitForEventStep include both states."""
         try:
-            from fsm_llm.workflows.definitions import WorkflowDefinition
             from fsm_llm.workflows.models import WaitEventConfig
             from fsm_llm.workflows.steps import WaitForEventStep
 
@@ -104,14 +103,7 @@ class TestWaitForEventStepValidation:
                 ),
             )
 
-            referenced = WorkflowDefinition._get_referenced_states(
-                WorkflowDefinition(
-                    workflow_id="test",
-                    name="test",
-                    steps={"wait_payment": step},
-                ),
-                step,
-            )
+            referenced = step.referenced_states()
             assert "payment_done" in referenced
             assert "payment_timeout" in referenced
         except ImportError:

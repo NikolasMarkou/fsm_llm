@@ -90,10 +90,6 @@ class Timer:
         self.expires_at = expires_at
         self.task = task
 
-    def is_expired(self) -> bool:
-        """Check if the timer has expired."""
-        return datetime.now(timezone.utc) > self.expires_at
-
     def cancel(self) -> None:
         """Cancel the timer task (never the task that is currently running,
         which would abort the very transition that task is performing)."""
@@ -104,6 +100,16 @@ class Timer:
                 current = None
             if self.task is not current:
                 self.task.cancel()
+
+
+def _timer_key(instance_id: str, kind: str, event_type: str = "") -> str:
+    """Key of an instance's timer in ``WorkflowEngine.timers``.
+
+    ``kind`` is ``"timer"`` (``{id}_timer``), ``"deadline"`` (``{id}_deadline``)
+    or ``"timeout"`` with the ``event_type`` waited for
+    (``{id}_{event_type}_timeout``). The one spelling of the three keys.
+    """
+    return "_".join(part for part in (instance_id, event_type, kind) if part)
 
 
 class WorkflowEngine:
@@ -152,7 +158,6 @@ class WorkflowEngine:
         self.workflow_instances: dict[str, WorkflowInstance] = {}
         self.event_listeners: dict[str, dict[str, EventListener]] = {}
         self.timers: dict[str, Timer] = {}
-        self._listener_lock = asyncio.Lock()
         self._instance_locks: dict[str, asyncio.Lock] = {}
         # Cancels waiting for an instance lock, by instance id. Registered by
         # `cancel_workflow` BEFORE it awaits the lock, removed in its
@@ -221,14 +226,6 @@ class WorkflowEngine:
         # this same `asyncio.Lock` at those inner levels would deadlock on
         # the very first reentrant call -- `asyncio.Lock` is NOT reentrant.
         # See decisions.md D-003.
-        #
-        # Lock-ordering note: several outermost entry points call into a
-        # method that acquires `self._listener_lock` internally
-        # (`register_event_listener`, `_cleanup_workflow_resources`) while the
-        # instance lock is already held. The ordering is consistently
-        # instance-lock-then-listener-lock everywhere in this file; never
-        # the reverse. Do not add a call path that acquires
-        # `self._listener_lock` first and this instance lock second.
 
         Interface contract: keyed by `instance_id`; returns the same
         `asyncio.Lock` object for repeated calls with the same id until that
@@ -264,8 +261,23 @@ class WorkflowEngine:
             self._purge_oldest_terminal_instances()
 
     def _fail(self, instance: WorkflowInstance, error: Exception) -> None:
-        """FAIL an instance unless it is already terminal."""
+        """FAIL an instance unless it is already terminal.
+
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-005
+        # Do NOT call update_status(FAILED, ...) unconditionally. If the
+        # instance is already terminal (e.g. a concurrent cancel_workflow won
+        # the race for this instance's lock before a step exception was
+        # handled), update_status raises WorkflowStateError (terminal states
+        # map to an empty transition set in _VALID_STATUS_TRANSITIONS) from
+        # inside an except-block handler, which REPLACES the original
+        # exception -- the caller never sees the real error. See
+        # decisions.md D-005.
+        """
         if instance.is_terminal():
+            logger.debug(
+                f"Instance {instance.instance_id} already terminal "
+                f"({instance.status.value}); not overwriting with FAILED"
+            )
             return
         self._set_status(instance, WorkflowStatus.FAILED, error)
 
@@ -293,8 +305,7 @@ class WorkflowEngine:
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
         self._background_tasks.clear()
-        async with self._listener_lock:
-            self.event_listeners.clear()
+        self.event_listeners.clear()
         self._event_buffers.clear()
 
     def register_workflow(self, workflow: WorkflowDefinition) -> None:
@@ -351,10 +362,7 @@ class WorkflowEngine:
                 message="Engine has been shut down",
             )
         # Check concurrent workflow limit
-        active_workflows = len(
-            [i for i in self.workflow_instances.values() if i.is_active()]
-        )
-        if active_workflows >= self.max_concurrent_workflows:
+        if len(self.get_active_workflows()) >= self.max_concurrent_workflows:
             raise WorkflowResourceError(
                 resource_type="workflow_engine",
                 resource_id="concurrent_limit",
@@ -388,6 +396,7 @@ class WorkflowEngine:
         # Store and execute
         self.workflow_instances[instance_id] = instance
         self._instance_definitions[instance_id] = workflow_def
+        self._set_status(instance, WorkflowStatus.RUNNING)
         log = logger.bind(
             workflow_id=workflow_id,
             instance_id=instance_id,
@@ -396,7 +405,7 @@ class WorkflowEngine:
         log.info(f"Started workflow instance: {instance_id} (workflow: {workflow_id})")
 
         if instance.deadline is not None:
-            self._schedule_deadline(instance)
+            self._arm_deadline(instance)
 
         if not wait:
             task = asyncio.ensure_future(
@@ -424,8 +433,6 @@ class WorkflowEngine:
                 ):
                     return
                 await self._execute_workflow_step(instance)
-        except asyncio.CancelledError:
-            raise
         except Exception as e:
             logger.error(
                 f"Background run of instance {instance.instance_id} ended with: {e!s}"
@@ -452,7 +459,8 @@ class WorkflowEngine:
         instance_id: str,
         initial_context: dict[str, Any] | None,
     ) -> WorkflowInstance:
-        """Create a new workflow instance."""
+        """Create a new (PENDING) workflow instance; ``start_workflow`` moves it
+        to RUNNING once the engine holds it, so hooks hear the change."""
         if not workflow_def.initial_step_id:
             raise WorkflowDefinitionError(
                 workflow_id=workflow_def.workflow_id,
@@ -473,7 +481,6 @@ class WorkflowEngine:
             "instance_id": instance_id,
         }
 
-        instance.update_status(WorkflowStatus.RUNNING)
         return instance
 
     # ------------------------------------------------------------------
@@ -511,7 +518,6 @@ class WorkflowEngine:
                 instance.context[KEY_CANCELLATION_REASON] = request.reason
                 self._set_status(instance, WorkflowStatus.CANCELLED)
                 request.honored = True
-                await self._cleanup_workflow_resources(instance.instance_id)
                 return
 
             if steps_run >= self.max_steps_per_run:
@@ -535,7 +541,8 @@ class WorkflowEngine:
             try:
                 self._prepare_transition(instance, next_state)
             except Exception as e:
-                await self._handle_step_exception(instance, e)
+                logger.error(f"Error executing step {instance.current_step_id}: {e!s}")
+                self._fail(instance, e)
                 return
 
     async def _run_current_step(self, instance: WorkflowInstance) -> str | None:
@@ -651,7 +658,8 @@ class WorkflowEngine:
             return self._handle_failed_step(instance, result)
 
         except Exception as e:
-            await self._handle_step_exception(instance, e)
+            logger.error(f"Error executing step {instance.current_step_id}: {e!s}")
+            self._fail(instance, e)
             # Propagate workflow-level timeouts to the caller, matching the
             # behavior of the step-boundary deadline check above.
             if isinstance(e, WorkflowTimeoutError):
@@ -727,28 +735,6 @@ class WorkflowEngine:
         self._fail(instance, error)
         return None
 
-    async def _handle_step_exception(
-        self, instance: WorkflowInstance, exception: Exception
-    ) -> None:
-        """Handle an exception during step execution."""
-        logger.error(f"Error executing step {instance.current_step_id}: {exception!s}")
-        # DECISION plan-2026-09-12T065608-089d0ec7/D-005
-        # Do NOT call update_status(FAILED, ...) unconditionally here. If the
-        # instance is already terminal (e.g. a concurrent cancel_workflow won
-        # the race for this instance's lock before this exception path ran),
-        # update_status raises WorkflowStateError (terminal states map to an
-        # empty transition set in _VALID_STATUS_TRANSITIONS) from inside this
-        # except-block handler, which REPLACES the original exception `e` in
-        # _execute_workflow_step's except block -- the caller never sees the
-        # real error. See decisions.md D-005.
-        if instance.is_terminal():
-            logger.debug(
-                f"Instance {instance.instance_id} already terminal "
-                f"({instance.status.value}); not overwriting with FAILED"
-            )
-            return
-        self._set_status(instance, WorkflowStatus.FAILED, exception)
-
     def _prepare_transition(self, instance: WorkflowInstance, next_state: str) -> None:
         """Validate ``next_state`` and move the instance onto it (RUNNING)."""
         workflow_def = self._definition_for(instance)
@@ -761,14 +747,21 @@ class WorkflowEngine:
             )
 
         logger.info(f"Transitioning from {instance.current_step_id} to {next_state}")
-        # Leaving a step ends its wait: drop the instance's listeners and wait
-        # timers (not its deadline watchdog) so a stale listener cannot wake
-        # it later at a different step.
+        instance.current_step_id = next_state
+        self._leave_wait(instance, WorkflowStatus.RUNNING)
+
+    def _leave_wait(self, instance: WorkflowInstance, status: WorkflowStatus) -> None:
+        """End the instance's wait and move it to ``status``.
+
+        The one exit from a wait, onto the next step (RUNNING) or out of the
+        workflow (COMPLETED): drop the instance's listeners and wait timers
+        (not its deadline watchdog) so a stale listener cannot wake it later
+        at a different step, clear both wait markers, then set the status.
+        """
         self._drop_wait_resources(instance.instance_id)
         instance.context.pop(KEY_WAITING_INFO, None)
         instance.context.pop(KEY_TIMER_INFO, None)
-        instance.current_step_id = next_state
-        self._set_status(instance, WorkflowStatus.RUNNING)
+        self._set_status(instance, status)
 
     async def _transition_to_state(
         self, instance: WorkflowInstance, next_state: str
@@ -820,8 +813,7 @@ class WorkflowEngine:
                 self._apply_event(instance, waiting_info.get("event_mapping"), buffered)
                 if success_state:
                     return success_state
-                instance.context.pop(KEY_WAITING_INFO, None)
-                self._set_status(instance, WorkflowStatus.COMPLETED)
+                self._leave_wait(instance, WorkflowStatus.COMPLETED)
                 return None
             logger.info(
                 f"Workflow instance {instance.instance_id} is waiting for event"
@@ -889,16 +881,7 @@ class WorkflowEngine:
         """
         if not event_type:
             raise WorkflowEventError(event_type="", message="event_type is required")
-        instance = self.workflow_instances.get(instance_id)
-        if instance is None:
-            raise WorkflowInstanceError(
-                instance_id=instance_id, message="Workflow instance not found"
-            )
-        if instance.is_terminal():
-            raise WorkflowInstanceError(
-                instance_id=instance_id,
-                message=f"Instance is {instance.status.value}; cannot listen for events",
-            )
+        instance = self._live_instance(instance_id, "listen for events")
 
         # Create listener
         listener = EventListener(
@@ -918,11 +901,7 @@ class WorkflowEngine:
                 seconds=timeout_seconds
             )
 
-        # Store listener under lock to prevent races with process_event
-        async with self._listener_lock:
-            if event_type not in self.event_listeners:
-                self.event_listeners[event_type] = {}
-            self.event_listeners[event_type][instance_id] = listener
+        self.event_listeners.setdefault(event_type, {})[instance_id] = listener
         logger.info(
             f"Registered event listener: instance {instance_id} for event {event_type}"
         )
@@ -933,53 +912,17 @@ class WorkflowEngine:
         # the listener then expired silently, later events were skipped, and
         # the instance stayed WAITING forever. No timeout_state -> FAILED.
         if timeout_seconds is not None:
-            await self._schedule_event_timeout(
-                instance_id, event_type, timeout_state, timeout_seconds
+            self._arm_timer(
+                _timer_key(instance_id, "timeout", event_type),
+                instance_id,
+                timeout_state,
+                timeout_seconds,
+                lambda: self._handle_event_timeout(
+                    instance_id, event_type, timeout_state
+                ),
+                "event timeout",
             )
-
-    async def _schedule_event_timeout(
-        self,
-        instance_id: str,
-        event_type: str,
-        timeout_state: str | None,
-        timeout_seconds: float,
-    ) -> None:
-        """Schedule a timeout for an event listener."""
-        timeout_task = asyncio.create_task(
-            self._event_timeout_task(
-                instance_id, event_type, timeout_state, timeout_seconds
-            )
-        )
-
-        timer_key = f"{instance_id}_{event_type}_timeout"
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
-        # Cancel any existing timeout task under this key before replacing it,
-        # otherwise re-arming (e.g. re-advancing a WAITING step) orphans the old
-        # asyncio.Task, which can still fire and cause a double transition.
-        existing = self.timers.get(timer_key)
-        if existing is not None:
-            existing.cancel()
-        self.timers[timer_key] = Timer(
-            instance_id, timeout_state, expires_at, timeout_task
-        )
-
-        logger.info(f"Set up event timeout: {timeout_seconds} seconds")
-
-    async def _event_timeout_task(
-        self,
-        instance_id: str,
-        event_type: str,
-        timeout_state: str | None,
-        timeout_seconds: float,
-    ) -> None:
-        """Task to handle event timeouts."""
-        try:
-            await asyncio.sleep(timeout_seconds)
-            await self._handle_event_timeout(instance_id, event_type, timeout_state)
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Error in event timeout task: {e!s}")
+            logger.info(f"Set up event timeout: {timeout_seconds} seconds")
 
     async def _handle_event_timeout(
         self, instance_id: str, event_type: str, timeout_state: str | None
@@ -996,7 +939,7 @@ class WorkflowEngine:
         # F4: hold the per-instance lock across the status re-check and the
         # transition, so this timeout cannot interleave with a concurrent
         # advance_workflow/cancel_workflow/process_event transition on the
-        # same instance (instance-lock, then listener-lock, never the reverse).
+        # same instance.
         async with self._get_instance_lock(instance_id):
             # DECISION plan_2026-05-29_5b2fbb09/D-001 [STALE]
             # If the event already fired, process_event has consumed the listener
@@ -1011,14 +954,8 @@ class WorkflowEngine:
                 )
                 return
 
-            # This timer has fired: drop its entry (it is not "active" any more).
-            timer_key = f"{instance_id}_{event_type}_timeout"
-            timer = self.timers.get(timer_key)
-            if timer is not None and timer.task is asyncio.current_task():
-                self.timers.pop(timer_key, None)
-
-            async with self._listener_lock:
-                self.event_listeners.get(event_type, {}).pop(instance_id, None)
+            self._forget_timer(_timer_key(instance_id, "timeout", event_type))
+            self.event_listeners.get(event_type, {}).pop(instance_id, None)
 
             instance.context[KEY_TIMEOUT] = {
                 "event_type": event_type,
@@ -1059,33 +996,32 @@ class WorkflowEngine:
         event_type = event.event_type
         target = event.instance_id
 
-        # Collect matching listeners under the listener lock (no awaits
-        # inside), consuming them so a second event cannot claim them.
+        # Collect matching listeners (no awaits inside), consuming them so a
+        # second event cannot claim them.
         # DECISION plan-2026-09-27T120000-5d1e7a3b/D-001
         # Do NOT mutate instance context here: delivery happens below under
         # each instance's own lock, after its status is re-checked.
         candidates: list[tuple[str, EventListener]] = []
-        async with self._listener_lock:
-            listeners = self.event_listeners.get(event_type, {})
-            for instance_id, listener in list(listeners.items()):
-                if target is not None and instance_id != target:
-                    continue
-                if instance_id not in self.workflow_instances:
-                    listeners.pop(instance_id, None)
-                    continue
-                # Skip expired listeners (their timeout task handles them)
-                if listener.is_expired():
-                    logger.warning(
-                        f"Skipping expired listener for event '{event_type}' "
-                        f"on instance {instance_id}"
-                    )
-                    continue
-                if not self._correlates(
-                    listener.correlation_key, listener.correlation_value, event
-                ):
-                    continue
+        listeners = self.event_listeners.get(event_type, {})
+        for instance_id, listener in list(listeners.items()):
+            if target is not None and instance_id != target:
+                continue
+            if instance_id not in self.workflow_instances:
                 listeners.pop(instance_id, None)
-                candidates.append((instance_id, listener))
+                continue
+            # Skip expired listeners (their timeout task handles them)
+            if listener.is_expired():
+                logger.warning(
+                    f"Skipping expired listener for event '{event_type}' "
+                    f"on instance {instance_id}"
+                )
+                continue
+            if not self._correlates(
+                listener.correlation_key, listener.correlation_value, event
+            ):
+                continue
+            listeners.pop(instance_id, None)
+            candidates.append((instance_id, listener))
 
         if not candidates:
             if target is not None:
@@ -1170,9 +1106,7 @@ class WorkflowEngine:
                 if listener.success_state:
                     await self._transition_to_state(instance, listener.success_state)
                 else:
-                    self._drop_wait_resources(instance_id)
-                    instance.context.pop(KEY_WAITING_INFO, None)
-                    self._set_status(instance, WorkflowStatus.COMPLETED)
+                    self._leave_wait(instance, WorkflowStatus.COMPLETED)
         except Exception as e:
             logger.error(
                 f"Delivering event '{event_type}' to {instance_id} failed: {e!s}"
@@ -1245,8 +1179,7 @@ class WorkflowEngine:
 
     def _cancel_event_timeout(self, instance_id: str, event_type: str) -> None:
         """Cancel an event timeout."""
-        timer_key = f"{instance_id}_{event_type}_timeout"
-        timer = self.timers.pop(timer_key, None)
+        timer = self.timers.pop(_timer_key(instance_id, "timeout", event_type), None)
         if timer is not None:
             timer.cancel()
 
@@ -1254,43 +1187,85 @@ class WorkflowEngine:
     # Timers and deadlines
     # ------------------------------------------------------------------
 
-    async def schedule_timer(
-        self, instance_id: str, delay_seconds: float, next_state: str
-    ) -> None:
-        """Schedule a timer that moves a WAITING instance to ``next_state``."""
-        if instance_id not in self.workflow_instances:
+    def _live_instance(self, instance_id: str, purpose: str) -> WorkflowInstance:
+        """The instance ``instance_id`` if it exists and is not terminal.
+
+        Raises ``WorkflowInstanceError`` for an unknown or finished instance
+        (``purpose`` completes "cannot ..."): the one guard of the entry
+        points that arm something for an instance.
+        """
+        instance = self.workflow_instances.get(instance_id)
+        if instance is None:
             raise WorkflowInstanceError(
                 instance_id=instance_id, message="Workflow instance not found"
             )
-        timer_task = asyncio.create_task(
-            self._timer_task(instance_id, delay_seconds, next_state)
-        )
+        if instance.is_terminal():
+            raise WorkflowInstanceError(
+                instance_id=instance_id,
+                message=f"Instance is {instance.status.value}; cannot {purpose}",
+            )
+        return instance
 
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
-        timer_key = f"{instance_id}_timer"
-        # Cancel any existing timer under this key before replacing it, otherwise
-        # re-arming (e.g. re-advancing a WAITING TimerStep) orphans the old
-        # asyncio.Task, which can still fire and cause a double transition.
-        existing = self.timers.get(timer_key)
+    def _arm_timer(
+        self,
+        key: str,
+        instance_id: str,
+        next_state: str | None,
+        delay: float,
+        handler: Callable[[], Any],
+        label: str,
+    ) -> None:
+        """Run ``await handler()`` after ``delay`` seconds as the timer ``key``.
+
+        Interface contract: ``handler`` is a zero-argument coroutine function;
+        a timer already stored under ``key`` is cancelled first (re-arming must
+        not orphan a task that could still fire and transition twice). The
+        task swallows its own cancellation and logs any other error under
+        ``label``. Needs a running loop; never raises.
+        """
+
+        async def fire() -> None:
+            try:
+                await asyncio.sleep(delay)
+                await handler()
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"Error in {label} task: {e!s}")
+
+        task = asyncio.create_task(fire())
+        existing = self.timers.get(key)
         if existing is not None:
             existing.cancel()
-        self.timers[timer_key] = Timer(instance_id, next_state, expires_at, timer_task)
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+        self.timers[key] = Timer(instance_id, next_state, expires_at, task)
 
+    def _forget_timer(self, key: str) -> None:
+        """Drop the entry ``key`` when it is the task running this call (a timer
+        that fired; a timer re-armed meanwhile keeps its entry)."""
+        timer = self.timers.get(key)
+        if timer is not None and timer.task is asyncio.current_task():
+            del self.timers[key]
+
+    async def schedule_timer(
+        self, instance_id: str, delay_seconds: float, next_state: str
+    ) -> None:
+        """Schedule a timer that moves a WAITING instance to ``next_state``.
+
+        Raises ``WorkflowInstanceError`` for an unknown or finished instance.
+        """
+        self._live_instance(instance_id, "schedule a timer")
+        self._arm_timer(
+            _timer_key(instance_id, "timer"),
+            instance_id,
+            next_state,
+            delay_seconds,
+            lambda: self._handle_timer_expiration(instance_id, next_state),
+            "timer",
+        )
         logger.info(
             f"Scheduled timer for instance {instance_id}: {delay_seconds} seconds"
         )
-
-    async def _timer_task(
-        self, instance_id: str, delay_seconds: float, next_state: str
-    ) -> None:
-        """Task to handle timer expirations."""
-        try:
-            await asyncio.sleep(delay_seconds)
-            await self._handle_timer_expiration(instance_id, next_state)
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Error in timer task: {e!s}")
 
     async def _handle_timer_expiration(self, instance_id: str, next_state: str) -> None:
         """Handle a timer expiration."""
@@ -1316,10 +1291,7 @@ class WorkflowEngine:
                 "expired_at": datetime.now(timezone.utc).isoformat()
             }
 
-            # Clean up timer
-            timer_key = f"{instance_id}_timer"
-            if timer_key in self.timers:
-                del self.timers[timer_key]
+            self._forget_timer(_timer_key(instance_id, "timer"))
 
             # NOTE (W-ISSUE-004): the step budget restarts here (timer-mediated
             # transition); loops through a timer are allowed by design.
@@ -1334,42 +1306,35 @@ class WorkflowEngine:
                     # NOT apply this to APICallStep(failure_state=""): a
                     # failure with an empty route still fails (workflows
                     # D-003; completing would hide the error).
-                    self._drop_wait_resources(instance_id)
-                    instance.context.pop(KEY_WAITING_INFO, None)
-                    instance.context.pop(KEY_TIMER_INFO, None)
-                    self._set_status(instance, WorkflowStatus.COMPLETED)
+                    self._leave_wait(instance, WorkflowStatus.COMPLETED)
                 else:
                     await self._transition_to_state(instance, next_state)
             except Exception as e:
                 self._fail(instance, e)
 
-    def _schedule_deadline(self, instance: WorkflowInstance) -> None:
+    def _arm_deadline(self, instance: WorkflowInstance) -> None:
         """Arm a watchdog that FAILS the instance if it is still WAITING at
         its deadline (a step boundary never comes while it waits)."""
         assert instance.deadline is not None
+        instance_id = instance.instance_id
         delay = max(
             0.0, (instance.deadline - datetime.now(timezone.utc)).total_seconds()
         )
-        task = asyncio.ensure_future(self._deadline_task(instance.instance_id, delay))
-        self.timers[f"{instance.instance_id}_deadline"] = Timer(
-            instance.instance_id, None, instance.deadline, task
+        self._arm_timer(
+            _timer_key(instance_id, "deadline"),
+            instance_id,
+            None,
+            delay,
+            lambda: self._handle_deadline(instance_id),
+            "deadline",
         )
-
-    async def _deadline_task(self, instance_id: str, delay: float) -> None:
-        try:
-            await asyncio.sleep(delay)
-            await self._handle_deadline(instance_id)
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Error in deadline task: {e!s}")
 
     async def _handle_deadline(self, instance_id: str) -> None:
         instance = self.workflow_instances.get(instance_id)
         if instance is None:
             return
         async with self._get_instance_lock(instance_id):
-            self.timers.pop(f"{instance_id}_deadline", None)
+            self._forget_timer(_timer_key(instance_id, "deadline"))
             if instance.status != WorkflowStatus.WAITING:
                 return
             logger.warning(
@@ -1468,10 +1433,6 @@ class WorkflowEngine:
                 else:
                     instance.context[KEY_CANCELLATION_REASON] = reason
                     self._set_status(instance, WorkflowStatus.CANCELLED)
-
-                    # Clean up resources (already released by _set_status; kept
-                    # so the listener lock is observed on this path too)
-                    await self._cleanup_workflow_resources(instance_id)
         finally:
             if self._cancel_requests.get(instance_id) is request:
                 del self._cancel_requests[instance_id]
@@ -1482,7 +1443,7 @@ class WorkflowEngine:
     def _drop_wait_resources(self, instance_id: str) -> None:
         """Drop the listeners, event timeouts and timer of ``instance_id``
         (everything tied to its current wait; the deadline watchdog stays)."""
-        deadline_key = f"{instance_id}_deadline"
+        deadline_key = _timer_key(instance_id, "deadline")
         for timer_key, timer in list(self.timers.items()):
             if timer.instance_id == instance_id and timer_key != deadline_key:
                 timer.cancel()
@@ -1510,11 +1471,6 @@ class WorkflowEngine:
         for listeners in self.event_listeners.values():
             listeners.pop(instance_id, None)
         self._event_buffers.pop(instance_id, None)
-
-    async def _cleanup_workflow_resources(self, instance_id: str) -> None:
-        """Clean up resources for a workflow instance (under the listener lock)."""
-        async with self._listener_lock:
-            self._release_instance_resources(instance_id)
 
     def remove_instance(self, instance_id: str) -> bool:
         """Remove a terminal workflow instance from memory.

@@ -508,9 +508,7 @@ class WorkflowBuilder:
             raise BuildError(
                 str(exc), errors=[str(e) for e in exc.validation_errors]
             ) from exc
-        except WorkflowDefinitionError as exc:
-            raise BuildError(str(exc)) from exc
-        except ValueError as exc:
+        except (WorkflowDefinitionError, ValueError) as exc:
             raise BuildError(str(exc)) from exc
         return wf
 

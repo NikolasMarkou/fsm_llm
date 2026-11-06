@@ -958,7 +958,13 @@ class TestEngineApi:
 
         assert engine.get_workflow_status(iid) == WorkflowStatus.COMPLETED
         names = [n for n, _ in seen]
-        assert names == ["step_started", "step_completed", "status_changed"]
+        assert names == [
+            "status_changed",
+            "step_started",
+            "step_completed",
+            "status_changed",
+        ]
+        assert seen[0][1]["status"] == "running"
         assert seen[-1][1]["status"] == "completed"
 
     async def test_user_input_removed_after_advance(self):
@@ -1075,9 +1081,9 @@ class TestSmallerFixes:
         step = AutoTransitionStep(
             step_id="a", name="A", next_state="n", action=lambda c: ["x"]
         )
-        with pytest.raises(WorkflowStepError) as exc_info:
-            asyncio.run(step.execute({}))
-        assert "must return a dict" in str(exc_info.value.cause)
+        result = asyncio.run(step.execute({}))
+        assert result.success is False
+        assert "must return a dict" in (result.error or "")
 
     async def test_history_records_step_error_without_redundant_entries(self):
         wf = create_workflow("h", "h")

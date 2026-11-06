@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm.workflows.exceptions import WorkflowStepError
 from fsm_llm.workflows.models import WaitEventConfig
 from fsm_llm.workflows.steps import (
     APICallStep,
@@ -69,8 +68,10 @@ class TestAutoTransitionStep:
         step = AutoTransitionStep(
             step_id="s1", name="Test", next_state="done", action=bad_action
         )
-        with pytest.raises(WorkflowStepError):
-            await step.execute({})
+        result = await step.execute({})
+        assert result.success is False
+        assert result.next_state is None
+        assert result.error == "boom"
 
 
 # ---------------------------------------------------------------------------
@@ -137,8 +138,10 @@ class TestConditionStep:
             true_state="go",
             false_state="wait",
         )
-        with pytest.raises(WorkflowStepError):
-            await step.execute({})
+        result = await step.execute({})
+        assert result.success is False
+        assert result.next_state is None
+        assert result.error == "check failed"
 
 
 # ---------------------------------------------------------------------------

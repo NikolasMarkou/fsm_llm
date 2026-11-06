@@ -62,22 +62,6 @@ class DependencyResolver:
                 self._dependents[dep].add(step_id)
         return self
 
-    def add_dependency(self, step_id: str, depends_on: str) -> DependencyResolver:
-        """Add a single dependency for a step, registering both steps.
-
-        Args:
-            step_id: The dependent step.
-            depends_on: The step it depends on.
-
-        Returns:
-            Self for chaining.
-        """
-        self._steps.add(step_id)
-        self._steps.add(depends_on)
-        self._dependencies[step_id].add(depends_on)
-        self._dependents[depends_on].add(step_id)
-        return self
-
     def resolve(self) -> list[list[str]]:
         """Compute execution waves using Kahn's algorithm (topological sort).
 
@@ -151,27 +135,10 @@ class DependencyResolver:
                         queue.append(dependent)
         return processed < len(self._steps)
 
-    def get_dependencies(self, step_id: str) -> set[str]:
-        """Get direct dependencies for a step."""
-        return set(self._dependencies.get(step_id, set()))
-
-    def get_dependents(self, step_id: str) -> set[str]:
-        """Get steps that depend on the given step."""
-        return set(self._dependents.get(step_id, set()))
-
-    def get_all_steps(self) -> set[str]:
-        """Get all registered step IDs."""
-        return set(self._steps)
-
     @property
     def step_count(self) -> int:
         """Return the number of registered steps."""
         return len(self._steps)
-
-    @property
-    def dependency_count(self) -> int:
-        """Return the total number of dependency edges."""
-        return sum(len(deps) for deps in self._dependencies.values())
 
     def clear(self) -> None:
         """Remove all steps and dependencies."""

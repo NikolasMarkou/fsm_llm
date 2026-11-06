@@ -727,7 +727,7 @@ class TestDependencyResolver:
             }
         )
         assert resolver.step_count == 2
-        assert resolver.dependency_count == 1
+        assert resolver.resolve() == [["fetch"], ["process"]]
 
     def test_clear(self):
         """clear() removes all state."""

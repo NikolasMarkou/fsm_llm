@@ -26,6 +26,11 @@ class WorkflowStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+#: Statuses an instance never leaves.
+_TERMINAL_STATUSES = frozenset(
+    {WorkflowStatus.COMPLETED, WorkflowStatus.FAILED, WorkflowStatus.CANCELLED}
+)
+
 # Valid status transitions — prevents illegal state changes like COMPLETED→RUNNING
 _VALID_STATUS_TRANSITIONS: dict[WorkflowStatus, set[WorkflowStatus]] = {
     WorkflowStatus.PENDING: {
@@ -63,8 +68,6 @@ class WorkflowEvent(BaseModel):
     to every instance whose wait matches the event (broadcast). A targeted
     event that arrives before the instance waits for it is buffered for that
     instance and consumed by its next matching wait."""
-
-    model_config = ConfigDict()
 
     def model_dump(self, **kwargs) -> dict[str, Any]:
         """Custom serialization with datetime handling."""
@@ -172,11 +175,7 @@ class WorkflowInstance(BaseModel):
         self.status = status
         self.updated_at = datetime.now(timezone.utc)
 
-        if changed and status in [
-            WorkflowStatus.COMPLETED,
-            WorkflowStatus.FAILED,
-            WorkflowStatus.CANCELLED,
-        ]:
+        if changed and status in _TERMINAL_STATUSES:
             self.completed_at = datetime.now(timezone.utc)
 
         if error:
@@ -224,11 +223,7 @@ class WorkflowInstance(BaseModel):
 
     def is_terminal(self) -> bool:
         """Check if the workflow is in a terminal state."""
-        return self.status in [
-            WorkflowStatus.COMPLETED,
-            WorkflowStatus.FAILED,
-            WorkflowStatus.CANCELLED,
-        ]
+        return self.status in _TERMINAL_STATUSES
 
 
 class EventListener(BaseModel):

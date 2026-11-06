@@ -409,7 +409,7 @@ class TestInstanceLockConcurrency:
 class TestHandleStepExceptionTerminalGuard:
     """F5: an exception raised while the instance is already terminal
     (CANCELLED/COMPLETED) must not be masked by a WorkflowStateError raised
-    from inside _handle_step_exception's own update_status(FAILED, ...) call
+    from inside the engine's own update_status(FAILED, ...) call (`_fail`)
     -- the original exception must always propagate unchanged.
 
     Regression test for plan-2026-09-12T065608-089d0ec7 step 4 (D-005).
@@ -427,7 +427,7 @@ class TestHandleStepExceptionTerminalGuard:
         )
 
     async def test_noop_when_instance_already_cancelled(self):
-        """Calling _handle_step_exception on an already-CANCELLED instance
+        """Calling _fail on an already-CANCELLED instance
         must not raise WorkflowStateError and must not overwrite the status."""
         from fsm_llm.workflows.models import WorkflowStatus
 
@@ -436,7 +436,7 @@ class TestHandleStepExceptionTerminalGuard:
 
         # Before the fix, this line raised WorkflowStateError from inside
         # update_status (CANCELLED -> FAILED is not a valid transition).
-        await engine._handle_step_exception(instance, ValueError("boom"))
+        engine._fail(instance, ValueError("boom"))
 
         assert instance.status == WorkflowStatus.CANCELLED
 
@@ -447,7 +447,7 @@ class TestHandleStepExceptionTerminalGuard:
         engine = WorkflowEngine()
         instance = self._make_instance(WorkflowStatus.COMPLETED)
 
-        await engine._handle_step_exception(instance, ValueError("boom"))
+        engine._fail(instance, ValueError("boom"))
 
         assert instance.status == WorkflowStatus.COMPLETED
 

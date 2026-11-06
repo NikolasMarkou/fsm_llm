@@ -23,10 +23,7 @@ from .__version__ import __version__
 from .constants import MAX_STEPS_PER_RUN
 
 # Workflow definition and validation
-from .definitions import (
-    WorkflowDefinition,
-    WorkflowValidator,
-)
+from .definitions import WorkflowDefinition
 from .dependency_resolver import DependencyResolver
 
 # DSL and builder functions
@@ -129,7 +126,6 @@ __all__ = [
     "ConversationStep",
     # Definition & Validation
     "WorkflowDefinition",
-    "WorkflowValidator",
     # Engine
     "WorkflowEngine",
     "Timer",

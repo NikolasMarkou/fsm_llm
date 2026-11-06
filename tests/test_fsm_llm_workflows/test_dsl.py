@@ -2,6 +2,8 @@
 Unit tests for the workflow DSL factory functions and WorkflowBuilder.
 """
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from fsm_llm import BuildError
@@ -123,7 +125,7 @@ class TestLlmStep:
     """Test llm_step factory."""
 
     def test_basic(self):
-        mock_llm = object()
+        mock_llm = MagicMock()
         step = llm_step(
             "s1",
             "LLM Process",
@@ -139,7 +141,7 @@ class TestLlmStep:
         assert step.error_state is None
 
     def test_with_error_state(self):
-        mock_llm = object()
+        mock_llm = MagicMock()
         step = llm_step(
             "s1",
             "LLM",
