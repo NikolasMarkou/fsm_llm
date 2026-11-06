@@ -88,6 +88,17 @@ def _is_level(name: str) -> bool:
     return True
 
 
+#: ``(env name, folded value)`` of every bad env setting already reported, so a
+#: notice prints once per distinct bad value per process, not once per call.
+_REPORTED_BAD_SETTINGS: set[tuple[str, str]] = set()
+
+#: The level a direct ``setup_logging()`` uses for an env level it cannot read
+#: (``WARN``, ``FATAL``, a typo). An env level is usually set to NARROW the
+#: output, so the fallback is the quiet end of the usual range, never the DEBUG
+#: default of an unset variable. A command passes its own default instead.
+_BAD_ENV_LEVEL_FALLBACK = "WARNING"
+
+
 def _setting(
     value: str | None,
     env_name: str,
@@ -95,6 +106,7 @@ def _setting(
     *,
     fold: Callable[[str], str],
     is_valid: Callable[[str], bool],
+    bad_env_default: str | None = None,
 ) -> str:
     """The first non-blank of ``value`` and the env var, case-folded, else ``default``.
 
@@ -102,8 +114,9 @@ def _setting(
     (a ``.env`` line ``FSM_LLM_LOG_LEVEL=`` is blank, ``info`` is a level).
     Interface contract: an explicit ``value`` is returned as is (the caller
     refuses a bad one with ``ValueError``); an env value that ``is_valid``
-    rejects is a host setting, not a call, so it is reported once on stderr and
-    ``default`` is used. Never raises.
+    rejects is a host setting, not a call, so it is reported on stderr (once
+    per distinct ``(env_name, value)`` per process) and ``bad_env_default``, or
+    ``default`` when that is ``None``, is used. Never raises.
     """
     text = (value or "").strip()
     if text:
@@ -112,11 +125,14 @@ def _setting(
     if not text:
         return default
     if not is_valid(text):
-        print(
-            f"fsm_llm: ignoring unknown {env_name}={text!r}; using {default}",
-            file=sys.stderr,
-        )
-        return default
+        fallback = default if bad_env_default is None else bad_env_default
+        if (env_name, text) not in _REPORTED_BAD_SETTINGS:
+            _REPORTED_BAD_SETTINGS.add((env_name, text))
+            print(
+                f"fsm_llm: ignoring unknown {env_name}={text!r}; using {fallback}",
+                file=sys.stderr,
+            )
+        return fallback
     return text
 
 
@@ -129,7 +145,8 @@ def setup_cli_logging(default_level: str) -> int:
         - ``default_level``: loguru level name used when ``FSM_LLM_LOG_LEVEL``
           is unset, blank, or not a loguru level; a valid env value wins
           (case-insensitive). An invalid one, and an unknown
-          ``FSM_LLM_LOG_FORMAT``, is reported on stderr, not raised.
+          ``FSM_LLM_LOG_FORMAT``, is reported on stderr (once per distinct value),
+          not raised.
         - Removes loguru's pre-installed default handler (id 0: stderr, every
           level) if it is still there, then registers one stderr handler via
           ``setup_logging``. Returns that handler id, or -1 when a matching
@@ -294,7 +311,9 @@ def setup_logging(
             If None, reads from FSM_LLM_LOG_FORMAT env var, defaulting to "human".
         level: Log level — "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
             (any case). If None or blank, reads from FSM_LLM_LOG_LEVEL env var
-            (a blank value counts as unset), defaulting to "DEBUG".
+            (a blank value counts as unset), defaulting to "DEBUG". An env
+            level that is not a loguru level (``WARN``, ``FATAL``) is reported
+            once on stderr and read as "WARNING", not "DEBUG".
         log_dir: Directory for log files (only used when sink="file").
         rotation: File rotation trigger (e.g., "10 MB", "00:00", "1 week").
         retention: How long to keep old log files (e.g., "1 month", "10 days").
@@ -331,7 +350,12 @@ def setup_logging(
         setup_logging()
     """
     resolved_level = _setting(
-        level, ENV_LOG_LEVEL, LOG_DEFAULT_LEVEL, fold=str.upper, is_valid=_is_level
+        level,
+        ENV_LOG_LEVEL,
+        LOG_DEFAULT_LEVEL,
+        fold=str.upper,
+        is_valid=_is_level,
+        bad_env_default=_BAD_ENV_LEVEL_FALLBACK,
     )
     resolved_format = _setting(
         format,

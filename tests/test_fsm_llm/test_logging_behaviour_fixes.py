@@ -55,6 +55,8 @@ _REPO = Path(__file__).resolve().parents[2]
 def _clean_handlers(monkeypatch):
     monkeypatch.delenv(ENV_LOG_LEVEL, raising=False)
     monkeypatch.delenv(ENV_LOG_FORMAT, raising=False)
+    # a fresh once-per-process notice guard for each test (REVIEW2-C2)
+    monkeypatch.setattr(log_module, "_REPORTED_BAD_SETTINGS", set(), raising=False)
     reset_handlers()
     yield
     reset_handlers()
@@ -410,4 +412,60 @@ class TestUnknownEnvFormatDoesNotCrashTheCommands:
         logger.debug("debug-shows")
         captured = capsys.readouterr()
         assert f"ignoring unknown {ENV_LOG_LEVEL}='LOUD'" in captured.err
-        assert "debug-shows" in captured.out
+        assert "debug-shows" not in captured.out  # REVIEW2-C2: not the DEBUG default
+
+
+class TestUnknownEnvLevel:
+    """REVIEW2-C2: what a direct ``setup_logging()`` does with a bad env level."""
+
+    def test_a_bad_env_level_falls_back_to_the_quiet_level_not_debug(
+        self, monkeypatch, capsys
+    ):
+        """REVIEW2-C2: ``FSM_LLM_LOG_LEVEL=WARN`` (not a loguru level) asked for
+        less output; the notice used to say "using DEBUG", the most verbose."""
+        monkeypatch.setenv(ENV_LOG_LEVEL, "WARN")
+        setup_logging(sink=LOG_SINK_STDOUT)
+        logger.debug("debug-line")
+        logger.info("info-line")
+        logger.warning("warning-line")
+        captured = capsys.readouterr()
+        assert "using WARNING" in captured.err
+        assert "debug-line" not in captured.out
+        assert "info-line" not in captured.out
+        assert "warning-line" in captured.out
+
+    def test_an_unset_env_level_is_still_the_debug_default(self, capsys):
+        setup_logging(sink=LOG_SINK_STDOUT)
+        logger.debug("debug-line")
+        captured = capsys.readouterr()
+        assert "debug-line" in captured.out
+        assert "ignoring unknown" not in captured.err
+
+    def test_the_notice_prints_once_per_bad_value(self, monkeypatch, capsys):
+        monkeypatch.setenv(ENV_LOG_LEVEL, "WARN")
+        setup_logging(sink=LOG_SINK_STDOUT)
+        setup_logging(sink=LOG_SINK_STDOUT)  # dedup returns -1, same bad value
+        setup_logging(sink=LOG_SINK_STDERR)
+        err = capsys.readouterr().err
+        assert err.count(f"ignoring unknown {ENV_LOG_LEVEL}='WARN'") == 1
+        monkeypatch.setenv(ENV_LOG_LEVEL, "FATAL")
+        setup_logging(sink=LOG_SINK_STDOUT)
+        setup_logging(sink=LOG_SINK_STDOUT)
+        err = capsys.readouterr().err
+        assert err.count(f"ignoring unknown {ENV_LOG_LEVEL}='FATAL'") == 1
+        assert "'WARN'" not in err
+
+    def test_an_explicit_bad_level_argument_still_raises_every_time(self):
+        for _ in range(2):
+            with pytest.raises(ValueError):
+                setup_logging(sink=LOG_SINK_STDOUT, level="WARN")
+
+    def test_a_cli_keeps_its_own_default_level_for_a_bad_env_level(
+        self, monkeypatch, capsys
+    ):
+        from fsm_llm.logging import setup_cli_logging
+
+        monkeypatch.setenv(ENV_LOG_LEVEL, "WARN")
+        setup_cli_logging("INFO")
+        err = capsys.readouterr().err
+        assert "using INFO" in err
