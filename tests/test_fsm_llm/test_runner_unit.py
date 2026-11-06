@@ -444,6 +444,39 @@ class TestRunnerPrintsToTerminal:
         assert self._run(api) == 1
         assert "provider exploded" in capsys.readouterr().err
 
+    def test_first_call_failure_is_an_error_line_and_exit_1_not_a_traceback(
+        self, capsys
+    ):
+        """Live finding D3: the failure of the first model call
+        (`start_conversation`) used to escape as a raw traceback while the same
+        failure on a later turn printed `Error: ...` and exited 1."""
+        api = self._api()
+        api.start_conversation.side_effect = RuntimeError("model not found")
+        assert self._run(api) == 1
+        captured = capsys.readouterr()
+        assert captured.err.strip() == "Error: model not found"
+        assert "Traceback" not in captured.err
+        assert captured.out.strip() == "Type 'exit' to end the conversation."
+        api.converse.assert_not_called()
+        api.end_conversation.assert_not_called()  # no conversation was started
+
+    def test_first_call_failure_and_later_failure_share_one_report(self, capsys):
+        first = self._api()
+        first.start_conversation.side_effect = RuntimeError("boom")
+        later = self._api()
+        later.converse.side_effect = RuntimeError("boom")
+        assert self._run(first) == self._run(later) == 1
+        errs = capsys.readouterr().err.splitlines()
+        assert errs == ["Error: boom", "Error: boom"]
+
+    def test_ctrl_c_on_the_first_call_still_propagates_to_main_cli(self):
+        """Exit 130 is `__main__`'s job (it maps KeyboardInterrupt); the REPL
+        must not swallow it into a failure."""
+        api = self._api()
+        api.start_conversation.side_effect = KeyboardInterrupt
+        with pytest.raises(KeyboardInterrupt):
+            self._run(api)
+
     def test_reply_reaches_terminal_with_real_file_logging(
         self, capsys, tmp_path, monkeypatch
     ):

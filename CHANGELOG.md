@@ -136,6 +136,7 @@ A pass over `src/fsm_llm` fixed 21 CRITICAL and HIGH findings. Each has a test t
 - `WorkflowEngine.cancel_workflow` on a RUNNING chain registers a cancel request before waiting for the instance lock, and the run loop honours it between steps (the step in flight finishes, later steps do not run). It returns `True`; before, it waited for the lock, found a terminal instance and returned `False`. A workflow that completes on its own before the loop sees the request still returns `False`.
 - `timer_step(..., next_state="")` completes the workflow on expiry, like `wait_event_step(..., success_state="")`, instead of failing with `Invalid next state`.
 - Monitor: `InstanceManager.destroy_instance` for a managed FSM caches the live conversations' snapshots and calls `api.close()` before it unregisters the global collector's handlers (in a `finally`), so `conversation_end` is recorded, the snapshot survives and OTEL spans end. `shutdown()` does the same for every managed FSM, so it now closes manager-owned FSM APIs (ending their live conversations). `attach_api` is unchanged: the caller's API is never closed.
+- `fsm-llm` (plan 0068b055 step 12.13, live finding D3): a failure of the very first model call (`start_conversation`, e.g. a model that is not installed) now prints `Error: ...` on stderr and exits 1, like a failure of any later turn; it used to end with a raw Python traceback. Ctrl-C still exits 130.
 
 Known open after this pass, for a later pass:
 

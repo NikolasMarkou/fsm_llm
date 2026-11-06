@@ -27,6 +27,20 @@ from .utilities import redact_context, redacting_json_default
 # --------------------------------------------------------------
 
 
+def _report_failure(e: Exception) -> int:
+    """Log *e*, print ``Error: <e>`` on stderr and return the failure exit code.
+
+    Interface contract: the one failure report of the REPL, shared by the first
+    model call (``start_conversation``) and every later turn. Returns
+    ``CLI_EXIT_FAILURE`` (1; C8: it was -1, which the shell sees as 255, and
+    every other failure path of the three CLIs exits 1). Never raises for a
+    message the terminal cannot encode (``escape_unencodable_output`` ran).
+    """
+    logger.exception(e)
+    print(f"Error: {e}", file=sys.stderr)
+    return CLI_EXIT_FAILURE
+
+
 def main(fsm_path, max_history_size, max_message_length):
     """
     Run an interactive FSM conversation from the CLI.
@@ -112,8 +126,14 @@ def main(fsm_path, max_history_size, max_message_length):
     escape_unencodable_output()
     print("Type 'exit' to end the conversation.")
 
-    # Start a new conversation
-    conversation_id, response = fsm.start_conversation()
+    # Start a new conversation. A failure of this first model call is reported
+    # like a failure of any later turn (``Error: ...``, exit 1), not as a raw
+    # traceback; Ctrl-C still propagates to ``__main__`` (exit 130). No
+    # conversation exists yet, so there is nothing to end.
+    try:
+        conversation_id, response = fsm.start_conversation()
+    except Exception as e:
+        return _report_failure(e)
 
     try:
         # A silent state replies "": print no empty "System:" line for it.
@@ -167,11 +187,7 @@ def main(fsm_path, max_history_size, max_message_length):
                 logger.info("Interrupted during a turn")
                 return CLI_EXIT_INTERRUPTED
             except Exception as e:
-                logger.exception(e)
-                print(f"Error: {e}", file=sys.stderr)
-                # C8: was -1, which the shell sees as 255; every other
-                # failure path of the three CLIs exits 1.
-                return CLI_EXIT_FAILURE
+                return _report_failure(e)
 
         data = fsm.get_data(conversation_id)
         dump = json.dumps(
