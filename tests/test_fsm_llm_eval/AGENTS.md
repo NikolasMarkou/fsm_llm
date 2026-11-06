@@ -1,7 +1,7 @@
 # test_fsm_llm_eval
 
 Path: `tests/test_fsm_llm_eval`
-Purpose: Offline pytest suite (274 tests, 8 files) for `fsm_llm.eval` and the `fsm-llm-eval` CLI (`fsm_llm.eval.__main__`), plus parity with `scripts/bench_common.py`.
+Purpose: Offline pytest suite (420 tests, 10 files) for `fsm_llm.eval` and the `fsm-llm-eval` CLI (`fsm_llm.eval.__main__`), plus parity with `scripts/bench_common.py`.
 
 ## Scope
 
@@ -36,10 +36,12 @@ Test doubles and fixtures:
 | `test_cases.py` | 65 | `load_cases`, `check_expectations`, `run_case_trial`, `run_cases`, `run_dataset`, `run` subcommand, checks hook, interrupt, `--fail-under` boundary |
 | `test_cli.py` | 23 | `main_cli`/`build_parser` for `examples`: exit codes, `--list`, config errors, runs, `--fail-under`, Ctrl-C |
 | `test_config.py` | 34 | `EvalConfig`, `merge_config`, `load_config`, `resolve_model`, reserved `llm_kwargs` |
+| `test_example_inputs.py` | 74 | every `EXAMPLE_INPUTS` script pinned against its example's source: only an example that reads stdin has one, no trailing `quit` for the `meta/build_*` scripts, `agents/react_hitl_combined` asks for a gated tool |
 | `test_examples.py` | 37 | `discover_examples`, `get_timeout`, `run_examples`, `run_example`, `create_output_dir`, logs, `results.json`, `scorecard.md` |
 | `test_records.py` | 21 | `append_row`, `read_rows`, `write_json`, `utc_now`, `git_commit`, `git_short_hash`, `model_slug`, `make_run_dir`, exceptions |
-| `test_scoring.py` | 36 | `classify_result` golden parity, `SCORE_LABELS`, `MAX_SCORE` |
+| `test_scoring.py` | 52 | `classify_result` golden parity, `SCORE_LABELS`, `MAX_SCORE`, `TestReportedFailure` (a line-anchored `Error:` or `Success: False` caps at 2, an extraction rate of at most 50% is partial) |
 | `test_stats.py` | 30 | `wilson_ci`, `fisher_exact_two_sided`, `pass_rate`, `below_percent` |
+| `test_timeout_table.py` | 56 | the harness timeout table against the agent budgets found by an `ast` scan of `examples/`: no harness timeout ties or is below an `AgentConfig` budget; the 23 examples on the default 300 s budget are at 360 s |
 | `__init__.py` | 0 | Empty package marker |
 
 ## Public interface under test
@@ -72,7 +74,7 @@ Run dir name: `YYYY-MM-DD_HH-MM_<short hash or "unknown">_<model_slug>`, collisi
 
 ## Invariants and constraints
 
-- Golden table in `test_scoring.py`: never regenerate from the new `classify_result`. A mismatch means the rubric changed. `test_table_reaches_every_score` requires scores 0 to `MAX_SCORE` all appear; ids must be unique.
+- Golden table in `test_scoring.py`: never regenerate from the new `classify_result`. A mismatch means the rubric changed. The table holds for inputs with no `Error:` line, no `Success: False` line and no extraction rate of exactly 50% or lower; `TestReportedFailure` pins the 2026-11-06 changes to those. `test_table_reaches_every_score` requires scores 0 to `MAX_SCORE` all appear; ids must be unique.
 - `classify_result` must ignore a precomputed `result.score`/`result.failures`.
 - Parity pairs must stay byte-identical (JSON output, JSONL rows) and value-identical (stats, rejections of impossible counts via `ValueError`).
 - The bench script must not import `fsm_llm` (it pulls litellm, which opens a socket; D-008 of plan 581c2634).
@@ -104,5 +106,5 @@ Run dir name: `YYYY-MM-DD_HH-MM_<short hash or "unknown">_<model_slug>`, collisi
 - Name tests after the defect they guard; many docstrings start `Defect guarded:` with a review id (W1, W2, W6, NOTE 10, NOTE 15).
 - Keep every case test able to both pass and fail (use `_passing()` and `_failing()`), so a checker that checks nothing is caught.
 - A new helper mirrored in `scripts/bench_common.py` needs a parity test in `test_bench_parity.py`.
-- After adding or removing tests, re-measure with `.venv/bin/python -m pytest tests/test_fsm_llm_eval --collect-only -q | tail -1` and update the `pytest tests/test_fsm_llm_eval/ ... (274 tests)` line and totals in the root `AGENTS.md`; `tests/test_packaging.py` checks those literals against collection.
+- After adding or removing tests, re-measure with `.venv/bin/python -m pytest tests/test_fsm_llm_eval --collect-only -q | tail -1` and update the `pytest tests/test_fsm_llm_eval/ ... (420 tests)` line and totals in the root `AGENTS.md`; `tests/test_packaging.py` checks those literals against collection.
 - Run: `.venv/bin/python -m pytest tests/test_fsm_llm_eval/`.

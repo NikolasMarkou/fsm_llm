@@ -29,7 +29,7 @@ flowchart TD
 
 Message-free step: `API.advance(conv_id)` runs the same turn with no user message (nothing added to history for a user, no-message prompt variants, the LLM layer sends a neutral user turn) and returns a frozen `AdvanceResult`; `run_until_terminal(conv_id, *, max_steps, max_seconds=None, before_step=None)` loops it until a terminal state and raises `RunBudgetExceededError` on a spent budget. Agents, workflow agent steps and the reasoning engine run on these loops; they never send a synthetic message. When the top of the stack is an ended pushed FSM, the loop calls `before_step` once (not a step, no budget check) so the hook can pop it and the run continues on the parent.
 
-One LLM layer (`src/fsm_llm/llm.py`, the only module that imports litellm): `LLMInterface.complete(CompletionRequest) -> CompletionResponse` is the one primitive for tool calling, plain and structured completion; `LiteLLMInterface` builds every request in one builder and sends it through one send path, counting each call (`usage()`); `LiteLLMEmbedder` makes embeddings. A state with the optional `completion` field makes its Pass 1 one `complete` call (tools or a structured turn) over a consumer-owned transcript and writes `{kind, text, calls}` to its result key; core runs no tool. `native_fc` and the meta-builder are FSMs built on it.
+One LLM layer (`src/fsm_llm/llm.py`, the only module that imports litellm): `LLMInterface.complete(CompletionRequest) -> CompletionResponse` is the one primitive for tool calling, plain and structured completion; `LiteLLMInterface` builds every request in one builder and sends it through one send path, counting each call (`usage()`); `LiteLLMEmbedder` makes embeddings. A state with the optional `completion` field makes its Pass 1 one `complete` call (tools or a structured turn) over a consumer-owned transcript and writes `{kind, text, calls}` to its result key; core runs no tool. `native_fc` and the meta-builder are FSMs built on it. Importing `fsm_llm.llm` sets `litellm.suppress_debug_info = True` once (litellm's red "Give Feedback" banner on a provider error would print to the host's stdout); a host that wants the banner sets it False after importing `fsm_llm`. `CompletionResponse` carries the provider's `finish_reason` and a `truncated` property (`finish_reason == "length"`, cut at `max_tokens`): `_send` logs one WARNING per cut non-streamed reply, a cut bulk or field extraction and a cut classification say so in their error, and a cut reply that opens `{`/`[` and does not parse is replaced in Pass 2 by a cut-off message, never shown as a half JSON envelope; a cut prose reply is shipped as is. The completion-state result stays `{kind, text, calls}`.
 
 `import fsm_llm` loads only the core; `fsm_llm/__init__.py` never imports a subpackage. Import one by name (`from fsm_llm.agents import create_agent`). Every subpackage ships in every install; an extra only adds third-party deps.
 
@@ -161,12 +161,12 @@ FSM definition (JSON, v4.1):
 - Subpackage roots subclass `FSMError`: `ReasoningEngineError`, `WorkflowError`, `AgentError` (incl. `MetaBuilderError`), `EvalError` (`EvalConfigError`, `EvalDatasetError`). `MonitorError` subclasses `Exception` only.
 - `LLMInterface.complete` raises `LLMResponseError` for every failure (a malformed tool call is `kind="malformed"`, not an error); a completion-state outage rolls the turn back. The classifier soft-fails (stays) only on `ClassificationError`. A failed reasoning solve, a spent 170-step budget included, raises `ReasoningExecutionError` with `details["partial_context"]`; `native_fc` and the meta-builder wrap provider outages as `AgentError`/`BuilderError` chained from `LLMResponseError`.
 - `test_packaging.py` fails on count drift or a subpackage missing from a build/CI slot. A clone from before the 2026-09-29 restructure must delete its old `src/fsm_llm_<sub>/` dirs by hand (`make clean` no longer does), then `pip install -e .`.
-- Eval baselines: Run 006 in `EVALUATE.md` is 95.3% (N=3 median, 101 examples, `ollama_chat/qwen3.5:4b`, commit `2df048f`); Run 007 (N=1, 2026-10-01) is 96.0% on the core step driver vs 96.8% for `d4b1626` run the same day; a later 9b run was 80.9% (N=1, `CHANGELOG.md`). Runs from before and after the 2026-09-29 restructure are not comparable. The heuristic overstates; the mocked test suite says nothing about model quality.
+- Eval baselines: Run 006 in `EVALUATE.md` is 95.3% (N=3 median, 101 examples, `ollama_chat/qwen3.5:4b`, commit `2df048f`); Run 007 (N=1, 2026-10-01) is 96.0% on the core step driver vs 96.8% for `d4b1626` run the same day; a later 9b run was 80.9% (N=1, `CHANGELOG.md`). Runs from before and after the 2026-09-29 restructure are not comparable. Neither are scores from before and after the 2026-11-06 scorer change: a clean exit that prints a line-anchored `Error:` or `Success: False` is now capped at 2, and an extraction rate of at most 50% is partial. Use `--workers 1` against a model server with one slot (`OLLAMA_NUM_PARALLEL=1`): extra workers queue and the example timeout counts the wait. The heuristic overstates; the mocked test suite says nothing about model quality.
 
 ## Working here
 
 ```bash
-make test           # pytest -v (11,123 tests)
+make test           # pytest -v (11,305 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy src/fsm_llm/ --ignore-missing-imports
@@ -179,8 +179,8 @@ make counts         # python scripts/doc_counts.py (fails when a documented test
 ```
 
 ```bash
-pytest                                 # Run all tests (11,123 collected)
-pytest tests/test_fsm_llm/            # Core package tests (5,622 tests)
+pytest                                 # Run all tests (11,305 collected)
+pytest tests/test_fsm_llm/            # Core package tests (5,658 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (232 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (319 tests)
 pytest tests/test_fsm_llm_agents/     # Agents tests (3,127 tests)
@@ -188,8 +188,8 @@ pytest tests/test_fsm_llm_monitor/    # Monitor tests (457 tests)
 pytest tests/test_fsm_llm_meta/       # Meta-builder tests (515 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (264 tests)
 pytest tests/test_examples/           # Example validation tests (67 tests)
-pytest tests/test_fsm_llm_eval/       # Eval tests (274 tests)
-# The 9 suites above sum to 10,877. The remaining 246 are five root-level files:
+pytest tests/test_fsm_llm_eval/       # Eval tests (420 tests)
+# The 9 suites above sum to 11,059. The remaining 246 are five root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (45),
 #   tests/test_bench_common.py (19), tests/test_agents_bench.py (132)
 #   and tests/test_skills_bench.py (38)

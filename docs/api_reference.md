@@ -210,7 +210,7 @@ class LLMInterface(ABC):
     def complete(self, request: CompletionRequest) -> CompletionResponse: ...
 ```
 
-`CompletionRequest{messages, tools=None, tool_choice=None, response_format=None, temperature=None, max_tokens=None, call_type="completion"}` (frozen, unknown fields refused): `tools` (OpenAI function schemas) and `response_format` never together, `tool_choice` only with `tools`; `None` temperature/max_tokens keep the interface's. `CompletionResponse{kind, text, calls}` (frozen): `kind` is `"calls"`, `"final"` or `"malformed"`, `calls` a tuple of `ModelToolCall{id, name, arguments: dict}`. A tool call without an id or name, or whose arguments are not a JSON object, and a provider "malformed tool call" error, give `kind="malformed"` with no calls. Every other failure raises `LLMResponseError`.
+`CompletionRequest{messages, tools=None, tool_choice=None, response_format=None, temperature=None, max_tokens=None, call_type="completion"}` (frozen, unknown fields refused): `tools` (OpenAI function schemas) and `response_format` never together, `tool_choice` only with `tools`; `None` temperature/max_tokens keep the interface's. `CompletionResponse{kind, text, calls, finish_reason=None}` (frozen): `kind` is `"calls"`, `"final"` or `"malformed"`, `calls` a tuple of `ModelToolCall{id, name, arguments: dict}`, `finish_reason` the provider's own reason the reply ended (`stop`, `length`, `tool_calls`, ... or `None` when it sent none) and `truncated` a property, true when it is `"length"` (the reply was cut off at `max_tokens`; `text` and the call arguments may be a fragment, a cut call may come back `malformed`). A non-streamed cut reply is logged as one WARNING by `LiteLLMInterface` (model, call type, the `max_tokens` in force); a streamed reply is not read. The completion-state result written to `result_key` stays `{kind, text, calls}`. A tool call without an id or name, or whose arguments are not a JSON object, and a provider "malformed tool call" error, give `kind="malformed"` with no calls. Every other failure raises `LLMResponseError`.
 
 ```python
 from fsm_llm import CompletionRequest, LiteLLMInterface, LiteLLMEmbedder, tool_exchange
@@ -264,7 +264,7 @@ A state with empty `response_instructions` is never sent to the interface: no `g
 
 `FSMDefinition.handler_only_keys: list[str]` (default `[]`, opt-in): keys a user message can never write. They are dropped from the bulk return, the per-field configs and the post-transition configs; a handler write, `update_context` and `initial_context` still work. Only listed keys are covered: an unlisted gate key stays writable and a classification-owned key is not covered. A stacked child FSM uses its own list. `fsm-llm-validate` reports a listed key that no state references as INFO and warns (never errors) when a listed key is a `classification_extractions` field name.
 
-`LiteLLMInterface` is the built-in implementation supporting 100+ providers via litellm; it implements `generate_response_stream` (the Pass-2 streaming path behind `API.converse_stream`) and `complete`. It is the only place the package calls litellm. Constructor kwargs named in `constants.RESERVED_LLM_CALL_KWARGS` (`model`, `messages`, `temperature`, `max_tokens`, `stream`, `response_format`, `tools`, `tool_choice`, `functions`, `function_call`, `n`) are ignored with a WARNING. Every Pass-2 request carries `ResponseGenerationRequest.temperature` (the conversation's internal `_response_temperature`, else `None` for the interface's own); a custom interface should honour it.
+`LiteLLMInterface` is the built-in implementation supporting 100+ providers via litellm; it implements `generate_response_stream` (the Pass-2 streaming path behind `API.converse_stream`) and `complete`. It is the only place the package calls litellm. Importing `fsm_llm.llm` sets `litellm.suppress_debug_info = True` once: litellm prints a red "Give Feedback / Get Help" banner to stdout on every mapped provider exception while it is False (its default), so the library silences it; a host that wants the banner back sets `litellm.suppress_debug_info = False` after importing `fsm_llm`. A reply cut off at `max_tokens` is detected through `finish_reason`: a bulk extraction whose cut reply is not valid JSON raises `LLMResponseError` saying it was cut off at `max_tokens=N`, a field extraction left with no value and a classification parse error say so too, and response generation replaces a cut reply that opens as a JSON envelope (`{` or `[`) and does not parse by a cut-off message (`I'm sorry, my answer was cut off before it was finished. ...`) instead of showing the half envelope; a cut prose reply is shipped as is, with only the WARNING (library logging is off until `setup_logging()`). Constructor kwargs named in `constants.RESERVED_LLM_CALL_KWARGS` (`model`, `messages`, `temperature`, `max_tokens`, `stream`, `response_format`, `tools`, `tool_choice`, `functions`, `function_call`, `n`) are ignored with a WARNING. Every Pass-2 request carries `ResponseGenerationRequest.temperature` (the conversation's internal `_response_temperature`, else `None` for the interface's own); a custom interface should honour it.
 
 ## WorkingMemory (`fsm_llm`)
 
@@ -498,7 +498,7 @@ Settings precedence: built-in defaults < a dataset's embedded `config` (`run` on
 | Field | Default | Used by | Meaning |
 |-------|---------|---------|---------|
 | `model` | `None` | both | `None` = `$LLM_MODEL`, else `DEFAULT_LLM_MODEL`, read when the run starts |
-| `workers` | `4` | both | Parallel threads (>= 1) |
+| `workers` | `4` | both | Parallel threads (>= 1). Only useful when the model server runs requests in parallel; with one slot (`OLLAMA_NUM_PARALLEL=1`) they queue, and the per-example timeout counts the wait: use 1 |
 | `timeout` | `120` | examples | Seconds for an example no timeout table names (>= 1) |
 | `output_root` | `"evaluation"` | both | Parent of auto-named run directories |
 | `output_dir` | `None` | both | Exact run directory; must be new or empty |
@@ -541,7 +541,8 @@ report = run_dataset("cases.json", config="eval.json", trials=5,
 config = merge_config({"workers": 2}, load_config("eval.json"))  # later layers win
 model = resolve_model(config)
 
-# Examples: subprocess per script, heuristic score 0-4 per example
+# Examples: subprocess per script, heuristic score 0-4 per example (a clean exit that printed
+# an `Error:` or `Success: False` line is capped at 2, an extraction rate of at most 50% is partial)
 targets = discover_examples(config)
 run_dir = open_run_dir(config.output_dir, config.output_root, model)
 report = run_examples(targets, config, model, run_dir)   # ExampleReport

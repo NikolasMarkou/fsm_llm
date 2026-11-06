@@ -7,11 +7,11 @@ This document defines the evaluation methodology for testing FSM-LLM examples ag
 ## Quick Start
 
 ```bash
-# Automated parallel evaluation (recommended)
+# Automated parallel evaluation (recommended when the server can serve requests in parallel)
 fsm-llm-eval examples --model ollama_chat/bonsai-2:27b --workers 4
 
-# With more parallelism for higher GPU utilization
-fsm-llm-eval examples --workers 8
+# One worker: use it when the server has ONE slot (for example OLLAMA_NUM_PARALLEL=1)
+fsm-llm-eval examples --workers 1
 
 # Only a specific category
 fsm-llm-eval examples --category agents
@@ -86,7 +86,7 @@ fsm-llm-eval examples [options]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--model` | `$LLM_MODEL` or `ollama_chat/bonsai-2:27b` | LLM model identifier |
-| `--workers` | 4 | Parallel workers, one example subprocess each (increase for GPU utilization) |
+| `--workers` | 4 | Parallel workers, one example subprocess each. More workers only help when the model server runs requests in parallel. On a server with one slot (for example `OLLAMA_NUM_PARALLEL=1`) they queue behind each other, and the per-example timeout counts the wait, so examples time out that finish alone: use `--workers 1`, or raise the server's parallelism |
 | `--timeout` | 120 | Default timeout per example (seconds) |
 | `--category` | all | Filter by category (basic, agents, etc.) |
 | `--filter` | all | Substring match on example name |
@@ -103,7 +103,10 @@ The runner auto-discovers examples, classifies them as interactive or automated,
 - basic/intermediate: 120s (default)
 - agents/workflows/advanced: 180s
 - reasoning: 300s
-- Known slow examples (e_commerce, reflexion, orchestrator, etc.): 240-300s
+- Known slow examples (e_commerce, reflexion, orchestrator, etc.): 240-360s. The 23 examples whose agents run on the default `AgentConfig.timeout_seconds` (300 s) are at 360 s (budget + 60 s), so the agent's own timeout (an `Error: Agent timed out after 300.0 seconds` line) always comes before a harness kill; `tests/test_fsm_llm_eval/test_timeout_table.py` scans `examples/` and fails when a harness timeout ties or is below an example's own agent budget.
+- The timeout clock also runs while a request waits for a busy server, so too many workers for the server's slots show up as timeouts (score 1), not as slowness: see `--workers` above.
+
+Stdin scripts (`EXAMPLE_INPUTS` in the same file) are checked against the examples by `tests/test_fsm_llm_eval/test_example_inputs.py`: an example that never reads stdin has none, the `meta/build_*` scripts end without `quit` (the builder reads to EOF and would take `quit` as a message), and `agents/react_hitl_combined` is sent a task that calls a gated tool so its `y` answers a real approval prompt (a model that skips the gated tool still turns the `y` into a second task).
 
 A per-example value wins over the category value, which wins over `--timeout`, so `--timeout` cannot shorten a tabled example. To change a tabled value, pass a config file, for example `{"example_timeouts": {"agents/debate": 400}, "category_timeouts": {"agents": 240}}`; table entries in the file are merged over the built-in ones. Settings precedence is built-in defaults < `--config FILE` < flags; unknown keys are an error.
 
@@ -170,6 +173,8 @@ Each example receives a single score from 0-4:
 | **2** | **PARTIAL** | Partially functional. Some features work but key behaviors fail (transitions don't fire, tools not used, gets stuck). Requires workarounds. |
 | **1** | **BROKEN** | Starts but fails at core function. Crashes mid-run, hits iteration limits, produces wrong results, infinite loops. |
 | **0** | **CRASH** | Cannot start. Import errors, validation failures, crashes before any useful output. |
+
+**Rules the automatic scorer applies on top of the table** (since 2026-11-06, plan `0068b055`): a run that exits 0 but prints a line starting with `Error:` (or `Error during ...`; indentation allowed, stdout only) or a line starting with `Success: False` is capped at 2 (failure codes `F-CODE` and `F-MODEL`), and an extraction rate of at most 50% (`Extraction rate: 1/2 (50%)`) is a partial failure (exactly 50% used to pass). `Error:` quoted mid-line in prose, `Error Rate:` metric lines, `ValueError: ...` and stderr are not read. **Scores before this change (Runs 001 to 010) were given by the older rule, so they are not comparable with scores after it**: an example that said it failed but exited cleanly could score 4. The heuristic still overstates.
 
 ### Distinguishing Scores
 
@@ -497,7 +502,7 @@ Quick reference for all evaluation runs. The raw run directories (`scorecard.md`
 - **Raw logs**: 0 envelope leaks (`"field_name"`, `"extracted_data"`), 0 `Continue.`, 0 tracebacks at HEAD; agents `Success: True`/`False` lines 22/4
 - **Rule** (pre-registered, plan `944e2692` D-016): total within 8 points of the baseline, no code-caused 4 -> 1 drop, 0 F-CODE, rebuilt examples within 1 point, 0 leaks: met (the `reasoning_stacking` clause through the solo re-runs, D-063)
 
-### Run 010 -- 2026-11-06 (plan `0068b055`, first live evidence on `ollama_chat/bonsai-2:27b`; the agents category is partial)
+### Run 010 -- 2026-11-06 (plan `0068b055`, first live evidence on `ollama_chat/bonsai-2:27b`; the agents category was completed in a later session)
 
 - **Model**: `ollama_chat/bonsai-2:27b` (Q2_0, 26.9B, one GPU, context 32768) with the embedder `ollama/embeddinggemma-2:740m` | **Commit**: `8da28be` (the F-AR-05 comparison arms are `8a62490` and `8da28be`) | **N**: 1 per category, **3** per arm in the F-AR-05 comparison | **Workers**: 2 (4 for `fsm-llm-eval run`) | **Timeouts**: default 120 s plus the built-in overrides
 - **Not comparable with Runs 001 to 009.** Every earlier run was on `ollama_chat/qwen3.5:4b`. The default model changed in this plan (D-014), the model is larger and slower per call (about 10 to 35 s a call here, with 2 workers sharing one GPU), and the 4b figures (Run 006 and Run 007) are not a baseline for it. Nothing below was compared with them. The 0-4 score is a heuristic that overstates (see the Run 006 note), and the sample is one run per category.
@@ -515,9 +520,12 @@ Quick reference for all evaluation runs. The raw run directories (`scorecard.md`
 | workflows | 8 | 32/32 = 100.0% | 8 x 4 |
 | reasoning | 1 | 4/4 = 100.0% | 1 x 4 |
 | meta | 5 | 20/20 = 100.0% | 5 x 4 |
-| agents | 48 (31 finished) | partial: 109/124 = 87.9% of the 31 that finished, parsed from stdout | 26 x 4, 5 x 1 |
+| agents | 48 | 141/192 = 73.4% as the harness scored them at 2 workers (first session: 109/124 for 31 examples, parsed from stdout; second session: the other 17); 183/192 = 95.3% with the 14 timeouts re-run alone (old scorer, see below) | 31 x 4 and 17 x 1 at 2 workers |
 
-- **Agents category is partial in this entry.** The run was cut at 2100 s (SIGTERM from `timeout`, exit 124) before it wrote a scorecard, so 17 of 48 examples were not run and the 109/124 figure is a stdout parse of the 31 that finished, not a scorecard. The five scored 1 (timeouts with an empty log) were `legal_document_review`, `orchestrator_specialist`, `pipeline_review`, `plan_execute` and `plan_execute_recovery`. Run alone, `plan_execute` finished in about 110 s (success, 13 iterations) and `orchestrator_specialist` hit its own 300 s agent budget: model speed under contention, not a loop. The agents category was completed in a later step, see the plan summary.
+- **Agents category** (two sessions, scores below are from the scorer that existed at the time, before the 2026-11-06 rubric change in section 3). First session: the run was cut at 2100 s (SIGTERM from `timeout`, exit 124) before it wrote a scorecard, so 17 of 48 examples were not run and 109/124 = 87.9% was a stdout parse of the 31 that finished (26 x 4, 5 x 1; the five scored 1 were `legal_document_review`, `orchestrator_specialist`, `pipeline_review`, `plan_execute` and `plan_execute_recovery`). Second session (HEAD `6368411` for the first batches; a docs-only commit landed during it, the code under test did not change): all 48 examples have now run. The 16 of the 17 not-run examples that went through the batch (`--workers 2`, table timeouts) scored 5 x 4 and 11 x 1 (timeouts at 180 to 300 s); the 17th, `supply_chain_optimizer`, scored 1 in every run of the first session. Counting the 31 earlier ones, the harness scored the category 31 x 4 and 17 x 1 = 141/192 = 73.4%.
+- **The timeouts were queueing, not the examples.** The server ran with `OLLAMA_NUM_PARALLEL:1` on one GPU, so two workers interleave: every request of one waits for the other's current generation, and the example timeout counts the wait. At 2 workers 14 examples timed out (the 11 of the batch plus `legal_document_review`, `pipeline_review` and `supply_chain_optimizer`) and every one of them finished when run alone (`--workers 1`, a 600 or 900 s limit set through `--config` because `--timeout` cannot lift a tabled value): 11 s to 307 s, steady progress, no loop. The server log shows the clients killed at the harness timeout while queued (HTTP 499 after 3m50s, 4m20s and 5m0s) and 8 `Load failed ... client connection closed` lines. The host GPU was also used by another project during the run, so outside contention cannot be excluded. With the 14 re-run alone the category reads 45 x 4 and 3 x 1 (`orchestrator_specialist`, `plan_execute`, `plan_execute_recovery`, not re-run in this session; the first two were shown slow, not looping, in the first one) = 183/192 = 95.3% by the old scorer. `supply_chain_optimizer` run alone took 306.6 s: the agent's own 300 s budget fired (`Error: Agent timed out after 300.0 seconds`), the run exited cleanly and the old scorer gave it 4. `basic/story_time` alone with `--timeout 600` took 100.6 s (score 4); it needs more than the 120 s default.
+- **What the old scorer let through, and the rescoring.** Several of those 4s are failed runs: `Error: Agent timed out` (`supply_chain_optimizer`), `Success: False` with no tool run (`rewoo_multi_step`), `Success: False` with a quality score of 0.55 (`regulatory_compliance`), `Success: False` after three reflections (`reflexion`). The scorer was changed for this (CHANGELOG, step 12.19). Its commit message states that rescoring 116 logs of that session changed 9 and left 107; the commit and the plan changelog do not name the nine. Rescoring the logs that are still on disk now (127, the run directories of that day plus the solo-run directories; the live-run directories of the later steps were not read) with the fixed scorer finds eight that change, each from 4 to 2: `agents/reflexion`, `agents/regulatory_compliance`, `agents/rewoo_multi_step`, `agents/skill_loader` (an extraction rate of exactly 50%), `agents/supply_chain_optimizer`, `agents/medical_literature` (one of the F-AR-05 before-arm logs), `classification/multi_intent` and `advanced/multi_level_stack` (both an extraction rate of exactly 50%). The ninth could not be identified. No health figure for the agents category under the fixed scorer is claimed, and the table above is not rescored: **the per-category numbers above are not comparable with scores from the fixed scorer.**
+- **Other live findings of that session, all handled in this plan** (see the CHANGELOG Unreleased entries): a reply cut by `max_tokens` was shipped as the answer (`legal_document_review`, `security_audit`; 4 of the `regulatory_compliance` calls, 7 of 12 in `pipeline_review`) and `rewoo_multi_step` lost its plan to a cut `plan_blueprint` field (fixed as far as detection and a named cause, step 12.23; the carry into the agent result is a Known open row); litellm's provider-error banner printed to stdout in 9 of the 16 batch logs and none of the 15 solo ones (suppressed at import, step 12.20); `react_hitl_combined` was sent a task that asked for no approval, so its `y` ran as a second task (step 12.22); 23 examples had a harness timeout equal to the agent's own 300 s budget (now 360 s, step 12.21). The other 27 examples that run on the default 300 s agent budget have a harness timeout below it (120 to 240 s) and keep it: there the harness is the hang detector and fires first.
 - **F-AR-05-LIVE** (the silent Orchestrator and ADaPT intermediate states, commit `c73dab7`): the 7 agents examples that use the pattern (`adapt`, `adapt_with_memory`, `medical_literature`, `orchestrator`, `orchestrator_specialist`, `hierarchical_orchestrator`, `supply_chain_optimizer`), same model, same day, runs interleaved, N=3 per arm, before arm `8a62490` (the parent of `c73dab7`) in a scratch worktree, after arm `8da28be`. Health over the 7: before 67.9 / 67.9 / 67.9 (median 67.9, spread 0.0), after 78.6 / 67.9 / 78.6 (median 78.6, spread 10.7). The whole difference is `hierarchical_orchestrator` (timeout at 300 s in all three before runs, finished in 204 s and 218 s in two of three after runs). `orchestrator_specialist` and `supply_chain_optimizer` time out in both arms, so their quality is unmeasured. Wall time of the examples that finish fell by about half (`orchestrator` 93 s to 38 s, `adapt` 65 s to 32 s, medians). Verdict by the rule of plan decision D-017: do not revert `c73dab7`. Caveat: the scorer saturates (6 of 7 examples score 4 in both arms), so this shows the change did not lower the score, and it does not show that the answers are as good; the after arm also holds the later 12.x fixes, none of which touches these patterns.
 
 ---

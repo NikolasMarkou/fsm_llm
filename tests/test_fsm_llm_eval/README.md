@@ -1,6 +1,6 @@
 # test_fsm_llm_eval
 
-The pytest suite for `fsm_llm.eval`, the evaluation package of the FSM-LLM repository, and for its command line `fsm-llm-eval`. It lives at `tests/test_fsm_llm_eval/` and holds 274 tests in 8 files.
+The pytest suite for `fsm_llm.eval`, the evaluation package of the FSM-LLM repository, and for its command line `fsm-llm-eval`. It lives at `tests/test_fsm_llm_eval/` and holds 420 tests in 10 files.
 
 ## What it is for
 
@@ -21,8 +21,10 @@ The pytest suite for `fsm_llm.eval`, the evaluation package of the FSM-LLM repos
 - `test_cli.py` - the `examples` subcommand: usage errors, `--list`, config errors, runs, `--fail-under`, Ctrl-C.
 - `test_config.py` - `EvalConfig` defaults, layered merging, validation, model resolution, LLM settings.
 - `test_examples.py` - example discovery, timeout precedence, subprocess runs, log files, `results.json` and `scorecard.md`, output directories, interrupts (Ctrl-C and SIGTERM).
+- `test_example_inputs.py` - every stdin script in `EXAMPLE_INPUTS` checked against the example it feeds (no script for an example that never reads stdin, no trailing `quit` for the meta builders, a gated-tool task for `react_hitl_combined`).
 - `test_records.py` - JSONL rows, JSON writing, UTC time, git hashes, model slugs, run directory names, exception hierarchy.
-- `test_scoring.py` - golden table for `classify_result` and the score labels.
+- `test_scoring.py` - golden table for `classify_result`, the score labels, and the rule that a line-anchored `Error:` or `Success: False`, or an extraction rate of at most 50%, cannot score 4.
+- `test_timeout_table.py` - reads the examples' source with `ast` and checks that no harness timeout ties or is below an agent's own `timeout_seconds` budget.
 - `test_stats.py` - Wilson interval, Fisher exact test, `pass_rate`, and exact `below_percent` threshold checks.
 
 ## How to use it
@@ -38,6 +40,6 @@ Run from the repository root with the project virtualenv:
 
 - Run from the repository root. `test_cases.py` imports `tests.conftest`, and several tests read real repository files: `evaluation/datasets/simple_greeting_cases.json`, `scripts/bench_common.py`, and the `examples/` tree.
 - Git tests compare against `git rev-parse HEAD`, so the checkout must be a git repository.
-- Do not regenerate the golden table in `test_scoring.py` from the current code. It exists to keep new scores comparable with old runs.
+- Do not regenerate the golden table in `test_scoring.py` from the current code. It pins the original rubric for every input the 2026-11-06 change (`Error:` and `Success: False` lines, extraction at most 50%) does not touch; `TestReportedFailure` pins the change.
 - `test_examples.py` starts real subprocesses and one of them waits for a 1 second timeout. One slow-marked test starts a real `fsm-llm-eval examples` process, sends it SIGTERM and checks the partial report and exit 130.
-- The repository root `AGENTS.md` states this suite's test count (274). `tests/test_packaging.py` checks that number against `pytest --collect-only`, so update it when adding or removing tests.
+- The repository root `AGENTS.md` states this suite's test count (420). `tests/test_packaging.py` checks that number against `pytest --collect-only`, so update it when adding or removing tests.

@@ -43,7 +43,7 @@ The examples score is a heuristic: it reads the example's exit code, timing and 
 
 ## How to use it
 
-The package ships in every install; the `eval` extra adds no third-party dependency (`pip install -e ".[eval]"` is the same as `pip install -e .`). Both commands need a reachable model unless you pass a fake LLM from Python. Shared flags are `--model`, `--workers` (default 4), `--output-dir`, `--config` and `--fail-under`.
+The package ships in every install; the `eval` extra adds no third-party dependency (`pip install -e ".[eval]"` is the same as `pip install -e .`). Both commands need a reachable model unless you pass a fake LLM from Python. Shared flags are `--model`, `--workers` (default 4), `--output-dir`, `--config` and `--fail-under`. Extra workers only help when the model server runs requests in parallel: on a server with one slot (for example `OLLAMA_NUM_PARALLEL=1`) they queue behind each other, and an example's timeout counts the wait, so examples time out that finish alone. Use `--workers 1` there, or raise the server's parallelism.
 
 Examples (run from the repository root, where `examples/` lives):
 
