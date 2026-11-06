@@ -196,7 +196,9 @@ _RUN_MAX_TAGS = 20
 
 
 def _int(value: Any, default: int, low: int, high: int) -> int:
-    """*value* as an int clamped to ``low..high``; *default* when it is not one."""
+    """*value* as an int clamped to ``low..high``; *default* for a bool or non-int."""
+    if isinstance(value, bool):
+        return default
     try:
         number = int(value)
     except (TypeError, ValueError, OverflowError):
@@ -469,7 +471,8 @@ class OKFMemoryBackend:
           returned text is always re-built from the bundle concept named by the
           hit's ``metadata["id"]`` (hits for ids not in the bundle, and for
           deprecated ones, are dropped), never taken from the store. An empty
-          store, or a store that raises, falls back to the lexical path.
+          store, a store that raises and a store with no usable hit (its embedding
+          provider down) fall back to the lexical path.
         - ``include_deprecated`` as in ``create_okf_tools``. A bundle loaded
           incompletely is logged once at construction and shown by
           ``incomplete``; the lines themselves stay as above.
@@ -518,7 +521,11 @@ class OKFMemoryBackend:
         return count
 
     def _store_hits(self, query: str, k: int) -> list[tuple[OKFConcept, float]] | None:
-        """Concept hits ranked by the store, or ``None`` to use the lexical path."""
+        """Concept hits ranked by the store, or ``None`` for the lexical path.
+
+        ``None`` also for no usable hit: a store whose provider is down finds
+        nothing, which must not hide the lexical path.
+        """
         store = self._store
         if store is None or len(store) == 0:
             return None
@@ -539,7 +546,7 @@ class OKFMemoryBackend:
                 continue
             ok = isinstance(score, (int, float)) and math.isfinite(score)
             hits.append((concept, min(max(float(score), 0.0), 1.0) if ok else 0.0))
-        return hits[:k]
+        return hits[:k] or None
 
     def search(self, query: str, k: int = 5) -> list[tuple[str, float, dict[str, Any]]]:
         count = _int(k, 5, 1, OKF_SUMMARY_MAX_ITEMS)

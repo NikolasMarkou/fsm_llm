@@ -595,6 +595,7 @@ class Defaults:
     MAX_ITERATIONS = 10
     TIMEOUT_SECONDS = 300.0
     MCP_TIMEOUT_SECONDS = 30.0
+    REMOTE_TOOL_TIMEOUT_SECONDS = 120.0  # RemoteAgentTool's HTTP call
     MAX_OBSERVATION_LENGTH = 2000
     # Largest per-call tool ``timeout_s``: the most a thread wait accepts
     # (``threading.TIMEOUT_MAX``; a larger wait raises OverflowError).

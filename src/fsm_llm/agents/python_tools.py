@@ -227,7 +227,7 @@ class PythonToolLoader:
         Returns:
             ToolRegistry with all Python tools registered.
         """
-        reg = registry or ToolRegistry()
+        reg = registry if registry is not None else ToolRegistry()
         for tool in python_tools:
             reg.register(tool.to_tool_definition())
         return reg

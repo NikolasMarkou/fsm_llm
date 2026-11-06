@@ -135,7 +135,7 @@ class AgentServer:
         host: str = "127.0.0.1",
         port: int = 8500,
         name: str | None = None,
-        timeout: float = 300.0,
+        timeout: float = Defaults.TIMEOUT_SECONDS,
         api_key: str | None = None,
         max_input_chars: int | None = DEFAULT_MAX_INPUT_CHARS,
         max_concurrent: int = Defaults.SERVER_MAX_CONCURRENT,
@@ -258,39 +258,14 @@ class AgentServer:
             self._check_input_size(request)
             run = await self._start_run(request)
             try:
-                # F10 (plan-2026-09-12T065608-089d0ec7/D-014, supersedes the
-                # D-004 note previously here): asyncio.wait_for only detaches
-                # from this awaited future on timeout — the asyncio.to_thread
-                # executor thread keeps running self._agent.run to completion
-                # in the background, since Python threads cannot be forcibly
-                # cancelled. This is an accepted trade-off, not a bug — but
-                # ONLY as of D-014's real per-call-local AgentHandlers fix
-                # (react.py/parallel_react.py). D-004's earlier fix (reusing
-                # a reassigned `self._handlers` attribute) did NOT actually
-                # achieve isolation between calls (see decisions.md D-013/
-                # D-014), so this comment's claim was false until D-014
-                # landed. Now that AgentHandlers is a true call-local object
-                # never round-tripped through `self`, an orphaned thread
-                # cannot corrupt a DIFFERENT request's counters — it just
-                # wastes CPU/LLM-call budget harmlessly until it finishes on
-                # its own, and its result is discarded. Cooperative
-                # cancellation (a deadline check inside the ReAct loop) would
-                # close this fully but is a materially larger change, out of
-                # scope for this plan.
-                #
-                # SCOPE: `AgentServer` wraps `agent: Any`. The isolation
-                # above originally held ONLY for `ReactAgent`/
-                # `ParallelReactAgent` (the two classes D-014 fixed here in
-                # this package). `ReflexionAgent`, `PlanExecuteAgent`, and
-                # `ReasoningReactAgent` used to keep a single `self._handlers`
-                # reused across calls (`.reset()`, not rebuilt per call) --
-                # that residual has since been CLOSED: plan
-                # plan-2026-09-12T135914-45a654de's D-012 applied the same
-                # call-local `AgentHandlers` pattern (threaded per-call,
-                # never round-tripped through `self`) to all three of those
-                # classes. `AgentServer` may now be pointed at any of the 5
-                # agent classes above without reopening the F9-shaped
-                # cross-request corruption -- see decisions.md D-012/D-014.
+                # F10 (plan-2026-09-12T065608-089d0ec7/D-014): `wait_for` only
+                # detaches from the run future on timeout; the worker thread
+                # keeps running `self._agent.run` (threads cannot be
+                # cancelled), wastes budget harmlessly and its result is
+                # discarded. Accepted trade-off: every agent class builds a
+                # call-local `AgentHandlers` per run (D-014, plan
+                # 45a654de/D-012), so an orphaned run cannot corrupt another
+                # request's counters. Cooperative cancellation is out of scope.
                 result = await self._await_run(run)
                 return _InvokeResponse(
                     answer=result.answer,
@@ -406,7 +381,7 @@ class RemoteAgentTool:
         url: str,
         name: str,
         description: str,
-        timeout: float = 120.0,
+        timeout: float = Defaults.REMOTE_TOOL_TIMEOUT_SECONDS,
         api_key: str | None = None,
     ) -> None:
         _require_httpx()
@@ -432,11 +407,15 @@ class RemoteAgentTool:
             )
         return answer
 
-    def _headers(self) -> dict[str, str]:
-        """Auth headers shared by ``invoke`` and ``ainvoke``."""
-        if self._api_key is None:
-            return {}
-        return {"Authorization": f"Bearer {self._api_key}"}
+    def _post_args(self, task: str, context: dict[str, Any] | None) -> dict[str, Any]:
+        """The ``post`` arguments shared by ``invoke`` and ``ainvoke``."""
+        payload: dict[str, Any] = {"task": task}
+        if context:
+            payload["context"] = context
+        headers = {}
+        if self._api_key is not None:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        return {"json": payload, "headers": headers}
 
     def invoke(self, task: str, context: dict[str, Any] | None = None) -> str:
         """Invoke the remote agent synchronously.
@@ -452,13 +431,9 @@ class RemoteAgentTool:
             ToolExecutionError: the server reported ``success: false``.
         """
         _require_httpx()
-        payload: dict[str, Any] = {"task": task}
-        if context:
-            payload["context"] = context
-
         with httpx.Client(timeout=self._timeout) as client:
             response = client.post(
-                f"{self._url}/invoke", json=payload, headers=self._headers()
+                f"{self._url}/invoke", **self._post_args(task, context)
             )
             response.raise_for_status()
             return self._answer(response.json())
@@ -466,13 +441,9 @@ class RemoteAgentTool:
     async def ainvoke(self, task: str, context: dict[str, Any] | None = None) -> str:
         """Invoke the remote agent asynchronously (same contract as ``invoke``)."""
         _require_httpx()
-        payload: dict[str, Any] = {"task": task}
-        if context:
-            payload["context"] = context
-
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.post(
-                f"{self._url}/invoke", json=payload, headers=self._headers()
+                f"{self._url}/invoke", **self._post_args(task, context)
             )
             response.raise_for_status()
             return self._answer(response.json())

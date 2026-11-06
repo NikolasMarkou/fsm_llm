@@ -1321,10 +1321,10 @@ def capped_line(value: object, cap: int = OKF_SUMMARY_FIELD_CHARS) -> str:
 
 def text_page(text: str, offset: Any, size: int) -> tuple[str, int | None, int]:
     """``(page, next offset or None, length)`` of *text*, which the caller has
-    already control-stripped; ``offset`` is clamped into the text (a non-int is
-    0) and pages add up to it. Shared by OKF bodies and Agent Skills files."""
+    already control-stripped; ``offset`` is clamped into the text (a bool or
+    other non-int is 0) and pages add up to it. Shared by OKF bodies and Agent Skills files."""
     try:
-        start = min(max(int(offset), 0), len(text))
+        start = 0 if isinstance(offset, bool) else min(max(int(offset), 0), len(text))
     except (TypeError, ValueError, OverflowError):
         start = 0
     end = min(start + size, len(text))

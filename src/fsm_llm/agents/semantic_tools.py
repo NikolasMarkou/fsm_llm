@@ -180,12 +180,18 @@ class SemanticToolRegistry(ToolRegistry):
 
         Args:
             query: The user query or task description.
-            top_k: Number of tools to return. Defaults to self._default_top_k.
+            top_k: Number of tools to return (at least 1). Defaults to
+                self._default_top_k.
 
         Returns:
             List of ToolDefinitions, most relevant first.
+
+        Raises:
+            ValueError: the number to return is below 1.
         """
-        k = top_k or self._default_top_k
+        k = self._default_top_k if top_k is None else top_k
+        if k < 1:
+            raise ValueError(f"top_k must be at least 1, got {k}")
         all_tools = self.list_tools()
 
         # Fallback for small registries

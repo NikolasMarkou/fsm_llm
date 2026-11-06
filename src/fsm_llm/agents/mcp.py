@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import json
 import warnings
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fsm_llm.logging import logger
@@ -85,19 +87,28 @@ def _mcp_annotations(mcp_tool: Any) -> ToolAnnotations:
 def _format_mcp_result(result: Any, tool_name: str | None = None) -> str:
     """Format an MCP tool result into a string.
 
+    A result with ``content`` is the text of its items; one with none shows
+    its ``structuredContent`` as JSON, else ``""`` (never the object's repr).
+
     Raises:
         ToolExecutionError: the result carries the MCP error flag; the message
             is the result's text, so ``ToolRegistry.execute`` reports it.
     """
-    text = str(result)
-    if hasattr(result, "content") and result.content:
-        parts = []
-        for item in result.content:
-            if hasattr(item, "text"):
-                parts.append(item.text)
-            else:
-                parts.append(str(item))
-        text = "\n".join(parts)
+    if not hasattr(result, "content"):
+        text = str(result)
+    elif result.content:
+        text = "\n".join(
+            item.text if hasattr(item, "text") else str(item) for item in result.content
+        )
+    else:
+        structured = getattr(result, "structuredContent", None) or getattr(
+            result, "structured_content", None
+        )
+        text = (
+            json.dumps(structured, default=str, ensure_ascii=False)
+            if structured
+            else ""
+        )
     # DECISION plan-2026-09-24T091842-c1d5bfbc/D-026: raise on the error flag,
     # read under BOTH spellings (1.x isError, 2.x is_error) and only when it
     # `is True`. Do NOT return the text (a tool error became a success), and
@@ -106,6 +117,36 @@ def _format_mcp_result(result: Any, tool_name: str | None = None) -> str:
     if any(flag is True for flag in flags):
         raise ToolExecutionError(f"MCP tool error: {text}", tool_name=tool_name)
     return text
+
+
+@asynccontextmanager
+async def _open_session(
+    server_params: Any | None, server_url: str | None
+) -> AsyncIterator[Any]:
+    """Yield an initialised ``ClientSession`` over stdio or SSE (one per use).
+
+    Interface contract: *server_params* selects stdio, else *server_url* selects
+    SSE; with neither, ``ValueError``. Discovery and every tool call open their
+    own session and close it on exit. ``stdio_client`` and ``ClientSession`` are
+    read from this module at call time (tests replace them).
+    """
+    transport: Any
+    if server_params is not None:
+        transport = stdio_client(server_params)
+    elif server_url is not None:
+        try:
+            from mcp.client.sse import sse_client
+        except ImportError:
+            raise ImportError(
+                "SSE client requires additional MCP dependencies"
+            ) from None
+        transport = sse_client(server_url)
+    else:
+        raise ValueError("No server_params or server_url configured")
+    async with transport as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            yield session
 
 
 class MCPToolProvider:
@@ -143,7 +184,6 @@ class MCPToolProvider:
         self._server_url = server_url
         self._timeout = timeout
         self._tools: list[ToolDefinition] = []
-        self._session: Any | None = None
 
     @classmethod
     def from_stdio(
@@ -192,55 +232,19 @@ class MCPToolProvider:
         """
         _require_mcp()
 
-        if self._server_params is not None:
-            discovery = self._discover_stdio()
-        elif self._server_url is not None:
-            discovery = self._discover_http()
-        else:
-            raise ValueError("No server_params or server_url configured")
         try:
-            return await asyncio.wait_for(discovery, timeout=self._timeout)
+            return await asyncio.wait_for(self._discover(), timeout=self._timeout)
         # asyncio.TimeoutError, not the builtin: they differ on Python 3.10.
         except asyncio.TimeoutError as e:
             raise AgentTimeoutError(self._timeout or 0.0) from e
 
-    async def _discover_stdio(self) -> list[ToolDefinition]:
-        """Discover tools via stdio transport."""
-        tools: list[ToolDefinition] = []
-        # discover_tools only calls this with params set; narrows for mypy,
-        # which sees the real mcp signatures when the mcp extra is installed.
-        assert self._server_params is not None
-        async with stdio_client(self._server_params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.list_tools()
-                for mcp_tool in result.tools:
-                    tool_def = self._convert_mcp_tool(mcp_tool)
-                    tools.append(tool_def)
+    async def _discover(self) -> list[ToolDefinition]:
+        """List the server's tools over its transport."""
+        async with _open_session(self._server_params, self._server_url) as session:
+            result = await session.list_tools()
+        tools = [self._convert_mcp_tool(mcp_tool) for mcp_tool in result.tools]
         self._tools = tools
-        logger.info(f"Discovered {len(tools)} tools from MCP stdio server")
-        return tools
-
-    async def _discover_http(self) -> list[ToolDefinition]:
-        """Discover tools via HTTP/SSE transport."""
-        try:
-            from mcp.client.sse import sse_client
-        except ImportError:
-            raise ImportError(
-                "SSE client requires additional MCP dependencies"
-            ) from None
-
-        tools: list[ToolDefinition] = []
-        assert self._server_url is not None  # as above
-        async with sse_client(self._server_url) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.list_tools()
-                for mcp_tool in result.tools:
-                    tool_def = self._convert_mcp_tool(mcp_tool)
-                    tools.append(tool_def)
-        self._tools = tools
-        logger.info(f"Discovered {len(tools)} tools from MCP HTTP server")
+        logger.info(f"Discovered {len(tools)} tools from MCP server")
         return tools
 
     def _convert_mcp_tool(self, mcp_tool: Any) -> ToolDefinition:
@@ -273,22 +277,8 @@ class MCPToolProvider:
             """Create an executor that reconnects per call."""
 
             async def call(**kwargs: Any) -> Any:
-                if server_params is not None:
-                    async with stdio_client(server_params) as (rd, wr):
-                        async with ClientSession(rd, wr) as sess:
-                            await sess.initialize()
-                            result = await sess.call_tool(tool_name, arguments=kwargs)
-                            return result
-                elif server_url is not None:
-                    from mcp.client.sse import sse_client
-
-                    async with sse_client(server_url) as (rd, wr):
-                        async with ClientSession(rd, wr) as sess:
-                            await sess.initialize()
-                            result = await sess.call_tool(tool_name, arguments=kwargs)
-                            return result
-                else:
-                    raise ValueError("No server_params or server_url configured")
+                async with _open_session(server_params, server_url) as session:
+                    return await session.call_tool(tool_name, arguments=kwargs)
 
             async def execute(**kwargs: Any) -> str:
                 try:

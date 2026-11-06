@@ -154,13 +154,21 @@ class SOPRegistry:
 
         Args:
             path: Path to the SOP definition file.
+
+        Raises:
+            FileNotFoundError: no such file.
+            ValueError: the file is not a readable SOP definition (bad JSON or
+                YAML, not a mapping, no ``name``, an invalid ``config_overrides``).
         """
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"SOP file not found: {path}")
 
-        data = self._load_file(path)
-        return self.register_from_dict(data)
+        try:
+            sop = SOPDefinition.from_dict(self._load_file(path))
+        except (ValueError, KeyError, TypeError, AttributeError, yaml.YAMLError) as e:
+            raise ValueError(f"SOP file {path}: {type(e).__name__}: {e}") from e
+        return self.register(sop)
 
     def register_directory(self, directory: str | Path) -> int:
         """Register all SOP files from a directory.

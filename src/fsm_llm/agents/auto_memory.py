@@ -105,10 +105,7 @@ def augment_task_with_memories(
         results = [r for r in results if r[1] >= min_score]
     if not results:
         return task
-    lines = [header]
-    for text, _score, _meta in results:
-        lines.append(f"- {text}")
-    block = "\n".join(lines)
+    block = "\n".join([header, *(f"- {text}" for text, _score, _meta in results)])
     return f"{block}\n\n{task}"
 
 

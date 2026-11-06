@@ -30,6 +30,12 @@ from .definitions import READ_ONLY_ANNOTATIONS, ToolDefinition
 from .tools import redact_secret_entries, tool
 
 
+def _preview(value: object, cap: int) -> str:
+    """``str(value)`` cut to *cap* characters with a ``...`` tail."""
+    text = str(value)
+    return text[:cap] + "..." if len(text) > cap else text
+
+
 def create_memory_tools(
     memory: WorkingMemory,
 ) -> list[ToolDefinition]:
@@ -87,10 +93,7 @@ def create_memory_tools(
         lines = [f"Found {len(results)} matching memories:"]
         for buffer_name, key, raw in results:
             value = redact_secret_entries({key: raw})[key]
-            value_preview = str(value)[:200]
-            if len(str(value)) > 200:
-                value_preview += "..."
-            lines.append(f"  [{buffer_name}] {key} = {value_preview}")
+            lines.append(f"  [{buffer_name}] {key} = {_preview(value, 200)}")
         return "\n".join(lines)
 
     @tool
@@ -124,11 +127,7 @@ def create_memory_tools(
             if not data:
                 return f"Buffer '{buffer}' is empty."
             lines = [f"Buffer '{buffer}' ({len(data)} entries):"]
-            for key, value in data.items():
-                preview = str(value)[:100]
-                if len(str(value)) > 100:
-                    preview += "..."
-                lines.append(f"  {key} = {preview}")
+            lines.extend(f"  {key} = {_preview(v, 100)}" for key, v in data.items())
             return "\n".join(lines)
 
         # List all buffers
@@ -146,11 +145,7 @@ def create_memory_tools(
         lines = [f"Working memory ({total} total entries):"]
         for buf_name, data in shown.items():
             lines.append(f"\n  [{buf_name}] ({len(data)} entries):")
-            for key, value in data.items():
-                preview = str(value)[:100]
-                if len(str(value)) > 100:
-                    preview += "..."
-                lines.append(f"    {key} = {preview}")
+            lines.extend(f"    {key} = {_preview(v, 100)}" for key, v in data.items())
         return "\n".join(lines)
 
     return [fn._tool_definition for fn in (remember, recall, forget, list_memories)]

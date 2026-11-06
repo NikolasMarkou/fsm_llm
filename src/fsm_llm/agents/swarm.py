@@ -85,7 +85,7 @@ class SwarmAgent(BaseAgent):
         self._agents = agents
         self._entry_agent = entry_agent
         self._max_handoffs = max_handoffs
-        self._memory = memory or WorkingMemory()
+        self._memory = memory if memory is not None else WorkingMemory()
 
     def run(
         self,
@@ -107,6 +107,7 @@ class SwarmAgent(BaseAgent):
         handoff_count = 0
         all_traces: list[dict[str, Any]] = []
         all_tool_calls: list[Any] = []
+        iterations = 0
         last_result: AgentResult | None = None
         # Set when the handoff cap cut off a requested handoff (forced stop).
         capped = False
@@ -151,10 +152,14 @@ class SwarmAgent(BaseAgent):
                     answer=f"Swarm failed at agent '{current_agent_name}': {e}",
                     success=False,
                     stop_reason=StopReason.NO_RESULT,
-                    trace=AgentTrace(total_iterations=handoff_count),
+                    trace=AgentTrace(
+                        tool_calls=all_tool_calls, total_iterations=iterations
+                    ),
                     final_context={
                         **context,
                         "_swarm_handoff_chain": handoff_chain,
+                        "_swarm_handoff_count": handoff_count,
+                        "_swarm_traces": all_traces,
                         "_swarm_error": str(e),
                     },
                 )
@@ -168,6 +173,7 @@ class SwarmAgent(BaseAgent):
                 }
             )
             all_tool_calls.extend(result.trace.tool_calls)
+            iterations += result.trace.total_iterations
 
             # Check for handoff
             next_agent = result.final_context.get("next_agent")
@@ -249,10 +255,10 @@ class SwarmAgent(BaseAgent):
                 final_context=context,
             )
 
-        # Merge traces from all agents in the handoff chain
+        # Merge traces from all agents in the handoff chain (iterations are
+        # summed as AgentGraph does, not counted as agents run).
         combined_trace = AgentTrace(
-            tool_calls=all_tool_calls,
-            total_iterations=handoff_count + 1,
+            tool_calls=all_tool_calls, total_iterations=iterations
         )
 
         final_context = {

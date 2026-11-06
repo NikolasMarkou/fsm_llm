@@ -80,6 +80,28 @@ class MemoryEntry:
         )
 
 
+def _read_payload(path: str) -> Any | None:
+    """The parsed JSON of a store file, or ``None`` for a blank one.
+
+    Raises ``ValueError`` naming *path* for a file that is not valid JSON.
+    """
+    with open(path, encoding="utf-8") as fh:
+        raw = fh.read()
+    if not raw.strip():
+        return None
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-026
+    # Do NOT degrade a corrupt file to "log a WARNING and start empty": the
+    # first add() auto-persists and would overwrite the unreadable file,
+    # silently losing every stored memory. Raise and leave the file alone.
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"Cannot load semantic memory file {path!r}: {e}. Refusing to "
+            "start empty and overwrite it; repair or move the file."
+        ) from e
+
+
 class SemanticMemoryStore:
     """Embedding-backed, persistable long-term memory.
 
@@ -125,7 +147,9 @@ class SemanticMemoryStore:
         # lock-free write body) while the lock is already held.
         self._lock = threading.Lock()
         if self._persist_path and os.path.exists(self._persist_path):
-            self._load_persisted(self._persist_path)
+            data = _read_payload(self._persist_path)
+            if data is not None:
+                self._apply_data(data, repr(self._persist_path))
 
     # ------------------------------------------------------------------
     # Embedding
@@ -242,25 +266,6 @@ class SemanticMemoryStore:
             "entries": [e.to_dict() for e in self._entries],
         }
 
-    def _load_persisted(self, path: str) -> None:
-        """Load the existing ``persist_path`` file into this fresh store."""
-        with open(path, encoding="utf-8") as fh:
-            raw = fh.read()
-        if not raw.strip():
-            return
-        # DECISION plan-2026-09-29T103145-06a5ec0a/D-026
-        # Do NOT degrade a corrupt file to "log a WARNING and start empty": the
-        # first add() auto-persists and would overwrite the unreadable file,
-        # silently losing every stored memory. Raise and leave the file alone.
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError as e:
-            raise ValueError(
-                f"Cannot load semantic memory file {path!r}: {e}. Refusing to "
-                "start empty and overwrite it; repair or move the file."
-            ) from e
-        self._apply_data(data, repr(path))
-
     def _apply_data(self, data: Any, source: str) -> None:
         """Restore entries, id counter and an unset ``max_entries`` from a
         :meth:`to_dict` payload; warn when its embedding model differs from
@@ -376,11 +381,21 @@ class SemanticMemoryStore:
         path: str,
         embed_fn: EmbedFn | None = None,
     ) -> SemanticMemoryStore:
-        """Load a store from a JSON file (re-uses cached embeddings)."""
+        """Load a store from a JSON file (re-uses cached embeddings).
+
+        Same rules as ``SemanticMemoryStore(persist_path=...)`` on an existing
+        file (a blank file is an empty store, a corrupt or invalid one raises
+        ``ValueError`` naming the path), except that the stored embedding model
+        is adopted. A missing file raises ``FileNotFoundError``.
+        """
         expanded = os.path.expanduser(path)
-        with open(expanded, encoding="utf-8") as fh:
-            data = json.load(fh)
-        return cls.from_dict(data, persist_path=expanded, embed_fn=embed_fn)
+        data = _read_payload(expanded)
+        model = data.get("embedding_model") if isinstance(data, dict) else None
+        store = cls(embedding_model=model or DEFAULT_EMBEDDING_MODEL, embed_fn=embed_fn)
+        store._persist_path = expanded
+        if data is not None:
+            store._apply_data(data, repr(expanded))
+        return store
 
     def _maybe_persist_locked(self) -> None:
         """Auto-persist from a locked CRUD path. Caller holds ``self._lock``;
