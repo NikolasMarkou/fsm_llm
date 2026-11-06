@@ -303,8 +303,9 @@ def run_examples(
           (:func:`run_example`); the interpreter is ``config.python`` or
           ``sys.executable``, the working directory the parent of
           ``config.examples_dir``.
-        - Each log is written as its example finishes, then ``progress`` is
-          called. A worker that raises becomes a score-0 result with the
+        - ``run_dir/logs/`` is created before the first example starts, so it
+          exists even when the run is interrupted before one finishes. Each log
+          is written as its example finishes, then ``progress`` is called. A worker that raises becomes a score-0 result with the
           error text.
         - Ctrl-C (``KeyboardInterrupt``) or SIGTERM (main thread only) cancels
           the examples not yet started and returns a partial report
@@ -314,6 +315,11 @@ def run_examples(
     python = config.python or sys.executable
     cwd = Path(config.examples_dir).resolve().parent
     results: list[ExampleResult] = []
+    # The closing banner and the scorecard name ``logs/``; an interrupt before
+    # the first example finished used to leave no such directory (live finding
+    # D5, live-runs-3). Create it up front, here and not in ``create_output_dir``,
+    # so a caller that passes its own ``run_dir`` gets it too.
+    (run_dir / "logs").mkdir(parents=True, exist_ok=True)
 
     def record(target: ExampleTarget, future: Future[ExampleResult]) -> None:
         try:

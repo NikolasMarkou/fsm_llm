@@ -432,6 +432,35 @@ class TestInterrupt:
         scorecard = (run_dir / "scorecard.md").read_text(encoding="utf-8")
         assert "**Interrupted**: yes" in scorecard
 
+    def test_an_interrupt_before_any_example_finishes_still_leaves_logs_dir(
+        self, examples_dir, monkeypatch
+    ):
+        """Live finding D5 (live-runs-3): SIGTERM before the first example
+        finished left no `logs/` although the closing banner prints its path.
+        The interrupt is simulated where SIGTERM lands (the completion wait of
+        `run_interruptible`), so no real signal is sent."""
+        from fsm_llm.eval import _pool
+
+        def fake(target, *args):
+            time.sleep(0.05)
+            return examples_mod._crashed(target, "fake")
+
+        def interrupted_wait(_futures):
+            raise KeyboardInterrupt
+            yield  # pragma: no cover  (makes this a generator like as_completed)
+
+        monkeypatch.setattr(examples_mod, "run_example", fake)
+        monkeypatch.setattr(_pool, "as_completed", interrupted_wait)
+        config = _config(examples_dir, workers=1)
+        run_dir = create_output_dir(config, "m")
+
+        report = run_examples(discover_examples(config), config, "m", run_dir)
+
+        assert report.interrupted is True
+        assert report.results == []
+        assert (run_dir / "logs").is_dir()  # the banner's Logs: path exists
+        assert json.loads((run_dir / "results.json").read_text())["interrupted"] is True
+
     @pytest.mark.slow  # about 6 s: a real CLI process (imports litellm) and 1 s timeouts
     def test_sigterm_to_the_cli_writes_the_partial_report_and_exits_130(
         self, tmp_path: Path
