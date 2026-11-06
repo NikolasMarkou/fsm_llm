@@ -158,5 +158,6 @@ class TestApprovalPrompts:
 
     def test_react_hitl_combined_script_is_pinned(self):
         assert EXAMPLE_INPUTS["agents/react_hitl_combined"] == (
-            "Research recent AI papers and publish a summary report\ny\nquit\n"
+            "Use the publish_report tool to publish a one-paragraph summary of "
+            "recent AI papers\ny\nquit\n"
         )

@@ -156,8 +156,10 @@ EXAMPLE_INPUTS: dict[str, str] = {
     "agents/hitl_approval": "Send an email to bob@example.com saying hello\ny\nquit\n",
     # The task must call a gated tool (publish_report, archive_data) for the example
     # to ask for approval; the "y" answers that one prompt. A task that calls no
-    # gated tool would turn the "y" into a second task.
-    "agents/react_hitl_combined": "Research recent AI papers and publish a summary report\ny\nquit\n",
+    # gated tool would turn the "y" into a second task. It names the tool: the
+    # default model skipped the gated tool on "... and publish a summary report"
+    # (3 of 3 live runs, live-runs-3 D2) and claimed the publication in prose.
+    "agents/react_hitl_combined": "Use the publish_report tool to publish a one-paragraph summary of recent AI papers\ny\nquit\n",
     "agents/classified_dispatch": "Search for information about climate change\nquit\n",
     "agents/classified_tools": "Calculate the sum of 15, 23, and 100\nquit\n",
     "agents/full_pipeline": "Look up the latest news about AI\nquit\n",
