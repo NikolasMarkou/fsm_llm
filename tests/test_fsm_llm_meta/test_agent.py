@@ -662,6 +662,34 @@ class TestMetaBuilderThroughCreateAgent:
         assert agent.meta_config.temperature == 0.2
         assert agent.meta_config.max_tokens == 4096
 
+    def test_create_agent_meta_builder_with_prompt_cache_is_refused(self):
+        """F-AM-05: the plain config's non-default unread field reaches
+        ``from_agent_config`` and is refused (the parent accepted and ignored it)."""
+        from pydantic import ValidationError
+
+        from fsm_llm.agents import create_agent
+        from fsm_llm.agents.definitions import AgentConfig
+
+        with pytest.raises(ValidationError, match="enable_prompt_cache"):
+            create_agent(
+                "meta_builder", config=AgentConfig(model="x", enable_prompt_cache=True)
+            )
+
+    def test_configured_builder_default_meta_build_still_works(self):
+        """Guard: ``config_with`` marks every unread field set at its default;
+        the refusal compares values, so the builder still builds."""
+        from fsm_llm.agents import ConfiguredAgentBuilder
+
+        agent = (
+            ConfiguredAgentBuilder()
+            .set_pattern("meta_builder")
+            .set_model("m")
+            .set_config_option("max_turns", 3)
+            .build()
+        )
+        assert agent.meta_config.max_turns == 3
+        assert agent.meta_config.enable_prompt_cache is False
+
     def test_builder_other_patterns_still_reject_max_turns(self):
         from fsm_llm.agents import ConfiguredAgentBuilder
         from fsm_llm.definitions import BuildError

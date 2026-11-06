@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from fsm_llm.llm import resolve_model
 from fsm_llm.logging import logger
@@ -545,6 +545,22 @@ class BuildProgress(BaseModel):
         return len(self.missing) == 0 and self.total_required > 0
 
 
+# AgentConfig fields the meta-builder never reads (checked against
+# meta_builder.py, which uses model, temperature, max_tokens, timeout_seconds
+# and max_turns only). ``max_iterations`` (D-012) and ``instructions`` stay
+# accepted.
+_UNREAD_AGENT_FIELDS = (
+    "enable_prompt_cache",
+    "max_history_size",
+    "transition_config",
+    "output_schema",
+    "reflect_every_n",
+    "auto_summarize_after",
+    "verification_fn",
+    "force_final_tool",
+)
+
+
 class MetaBuilderConfig(AgentConfig):
     """Configuration for the meta-builder agent.
 
@@ -552,7 +568,9 @@ class MetaBuilderConfig(AgentConfig):
     LLM interface; ``timeout_seconds`` is its per-request timeout;
     ``max_turns`` caps ``send`` calls. ``max_iterations`` is inherited from
     ``AgentConfig`` and not read by the meta-builder (kept so existing callers
-    that pass it keep validating, D-012).
+    that pass it keep validating, D-012), and so is ``instructions`` (ignored,
+    documented). The other inherited fields the meta-builder never reads
+    (``_UNREAD_AGENT_FIELDS``) are refused when set to a non-default value.
     """
 
     temperature: float = MetaDefaults.TEMPERATURE
@@ -584,6 +602,32 @@ class MetaBuilderConfig(AgentConfig):
         if v < 1:
             raise ValueError("max_turns must be at least 1")
         return v
+
+    @model_validator(mode="after")
+    def refuse_unread_agent_fields(self) -> MetaBuilderConfig:
+        """Raise ``ValueError`` naming an unread inherited field set off its default.
+
+        Contract: runs on every construction (``from_agent_config`` and
+        ``config_with`` included); returns ``self`` unchanged otherwise.
+        """
+        # DECISION plan-2026-11-06T093029-0068b055/D-010: the meta-builder
+        # reads only model, temperature, max_tokens, timeout_seconds and
+        # max_turns, so a non-default value for these fields would be accepted
+        # and ignored. Refuse it (D-038, never drop). Do NOT consult
+        # ``model_fields_set``: ConfiguredAgentBuilder._config_for_build marks
+        # all of them "set" at their defaults, so the signal is the value
+        # against the field default. Do NOT silently accept or honour them
+        # here (that would copy BaseAgent._create_api logic).
+        for name in _UNREAD_AGENT_FIELDS:
+            default = AgentConfig.model_fields[name].get_default(
+                call_default_factory=True
+            )
+            if getattr(self, name) != default:
+                raise ValueError(
+                    f"{name} is not used by the meta-builder agent and cannot "
+                    f"be set (default {default!r})"
+                )
+        return self
 
 
 class MetaBuilderResult(AgentResult):

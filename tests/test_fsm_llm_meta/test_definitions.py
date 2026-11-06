@@ -3,6 +3,7 @@ from __future__ import annotations
 """Tests for meta-agent definitions and models."""
 
 import pytest
+from pydantic import BaseModel
 
 from fsm_llm.agents.definitions import (
     ArtifactType,
@@ -91,6 +92,72 @@ class TestMetaBuilderConfig:
     def test_invalid_max_turns(self):
         with pytest.raises(ValueError, match="max_turns must be at least 1"):
             MetaBuilderConfig(max_turns=0)
+
+
+class _Out(BaseModel):
+    answer: str = ""
+
+
+def _verify(answer, context):
+    return True
+
+
+class TestMetaConfigRefusesUnreadFields:
+    """F-AM-05 (D-010 of plan 0068b055): the meta-builder reads only model,
+    temperature, max_tokens, timeout_seconds and max_turns, so a non-default
+    value for another inherited field is refused, not silently ignored. The
+    parent commit accepted every one of them."""
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("enable_prompt_cache", True),
+            ("max_history_size", 2),
+            ("transition_config", object()),
+            ("output_schema", _Out),
+            ("reflect_every_n", 3),
+            ("auto_summarize_after", 4),
+            ("verification_fn", _verify),
+            ("force_final_tool", "finish"),
+        ],
+    )
+    def test_non_default_unread_field_is_refused(self, field, value):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match=field):
+            MetaBuilderConfig(**{field: value})
+
+    def test_max_iterations_and_instructions_are_still_accepted(self):
+        config = MetaBuilderConfig(max_iterations=20, instructions="be brief")
+        assert config.max_iterations == 20
+        assert config.instructions == "be brief"
+
+    def test_defaults_pass_and_model_fields_set_is_not_consulted(self):
+        """Every unread field passed explicitly at its default is accepted (the
+        shape ``config_with`` gives), so ``model_fields_set`` is no signal."""
+        from fsm_llm.agents.definitions import AgentConfig, config_with
+
+        base = MetaBuilderConfig()
+        again = config_with(base)
+        assert {"enable_prompt_cache", "force_final_tool", "output_schema"} <= (
+            again.model_fields_set
+        )
+        explicit = MetaBuilderConfig(
+            **{
+                name: getattr(AgentConfig(), name)
+                for name in (
+                    "enable_prompt_cache",
+                    "max_history_size",
+                    "transition_config",
+                    "output_schema",
+                    "reflect_every_n",
+                    "auto_summarize_after",
+                    "verification_fn",
+                    "force_final_tool",
+                )
+            }
+        )
+        assert explicit.enable_prompt_cache is False
 
 
 class TestMetaBuilderResult:
