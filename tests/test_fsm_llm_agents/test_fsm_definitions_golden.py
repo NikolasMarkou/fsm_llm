@@ -15,6 +15,12 @@ caller); the ``*_approval`` cases cover its edge.
 
 Do NOT regenerate a value to make a failure go away: a difference means a
 builder now emits a different prompt or routing contract.
+
+Re-pinned once for F-AR-05 (plan 0068b055 step 7, D-013): ``adapt``,
+``adapt_depth``, ``orchestrator`` and ``orchestrator_keys`` moved because the
+six intermediate states (orchestrate, delegate, collect; attempt, assess,
+decompose) lost their ``response_instructions``. The dicts were diffed before
+the re-pin: only those six fields changed, nothing else.
 """
 
 from __future__ import annotations
@@ -246,12 +252,12 @@ _CASES: dict[str, tuple[Callable[[], Any], bool]] = {
 #: case name -> (sha256 of the canonical JSON, fsm_id or "" for a fragment)
 _GOLDEN: dict[str, tuple[str, str]] = {
     "adapt": (
-        "b0b9483606634f86f9752cc7e79c2b3d685e9b7d675c7d14685dd54809d6d0af",
-        "fsm_adapt_agent_c657876f",
+        "63b05f8048f8238f053d66f4ee93e1301f7fab8990627a9fa7ab18c32b1cb61f",
+        "fsm_adapt_agent_df1964dd",
     ),
     "adapt_depth": (
-        "38261b6fc9b25444b16cca60eac99feada50a2424fc3f10c650bd78fe476cb69",
-        "fsm_adapt_agent_2f0d9497",
+        "c08b304e2723ebdf2b0e76b13e542000a9b21bd3f38d014adbc7c79495fa3166",
+        "fsm_adapt_agent_2e615993",
     ),
     "await_approval_state": (
         "393e8623fb20ed25ddea4f976ed2feae6905132dc4606d18ad0ec26c485bd08a",
@@ -334,12 +340,12 @@ _GOLDEN: dict[str, tuple[str, str]] = {
         "fsm_native_fc_c3dde2da",
     ),
     "orchestrator": (
-        "e1c54a1a028138b17e742cba089a52c1e7f0759f55b7db59f7a3e454fc25cd78",
-        "fsm_orchestrator_agent_bffe227f",
+        "cd5d125a4c5a28980cd30a1b04d75fcdace1365b1d06cd95e1d8030b6e78a24d",
+        "fsm_orchestrator_agent_4631f149",
     ),
     "orchestrator_keys": (
-        "7e0d38f5b588a1f7dba8c58e71878be706f7843b496f9a1182aecacfe749a483",
-        "fsm_orchestrator_agent_3d90072d",
+        "637823f3f2ec86532eac83f488ea4c0e17857937ed056fe12004b97011798af2",
+        "fsm_orchestrator_agent_a20a809d",
     ),
     "parallel_react": (
         "73753f1d2acac8a0ed36d6328f66310132c9751496acd959f873f7f1d1c64b48",

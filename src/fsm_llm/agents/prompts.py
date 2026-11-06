@@ -499,30 +499,6 @@ def build_maker_checker_output_response_instructions() -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_orchestrate_response_instructions() -> str:
-    """Build response instructions for the orchestrate state."""
-    return (
-        "Explain how you are decomposing the task into subtasks and "
-        "your delegation strategy."
-    )
-
-
-def build_delegate_response_instructions() -> str:
-    """Build response instructions for the delegate state."""
-    return (
-        "Summarize which subtasks were delegated and report the status "
-        "of each worker execution."
-    )
-
-
-def build_collect_response_instructions() -> str:
-    """Build response instructions for the collect state."""
-    return (
-        "Summarize the worker results and explain whether all needed "
-        "information has been gathered."
-    )
-
-
 def build_orchestrator_field_instructions() -> dict[str, str]:
     """Per-field instructions for the orchestrator's typed fields.
 
@@ -560,30 +536,6 @@ def build_orchestrator_synthesize_response_instructions() -> str:
 # ---------------------------------------------------------------------------
 # ADaPT prompts
 # ---------------------------------------------------------------------------
-
-
-def build_attempt_response_instructions() -> str:
-    """Build response instructions for the ADaPT attempt state."""
-    return (
-        "Present your attempt at solving the task. Be thorough but note "
-        "any areas of uncertainty."
-    )
-
-
-def build_assess_response_instructions() -> str:
-    """Build response instructions for the ADaPT assess state."""
-    return (
-        "Explain your assessment of the attempt quality. "
-        "If the attempt failed, explain what went wrong."
-    )
-
-
-def build_decompose_response_instructions() -> str:
-    """Build response instructions for the ADaPT decompose state."""
-    return (
-        "Explain how you are breaking the task into subtasks and "
-        "why this decomposition should help solve the problem."
-    )
 
 
 def build_adapt_field_instructions() -> dict[str, str]:

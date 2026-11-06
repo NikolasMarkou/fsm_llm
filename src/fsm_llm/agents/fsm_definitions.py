@@ -43,17 +43,12 @@ from .constants import (
 from .definitions import ChainStep
 from .prompts import (
     build_adapt_field_instructions,
-    build_assess_response_instructions,
-    build_attempt_response_instructions,
     build_chain_output_response_instructions,
     build_chain_step_field_instructions,
-    build_collect_response_instructions,
     build_combine_response_instructions,
     build_conclude_response_instructions,
     build_debate_conclude_response_instructions,
     build_debate_field_instructions,
-    build_decompose_response_instructions,
-    build_delegate_response_instructions,
     build_evalopt_field_instructions,
     build_evalopt_output_response_instructions,
     build_evaluate_field_instructions,
@@ -61,7 +56,6 @@ from .prompts import (
     build_generate_response_instructions,
     build_maker_checker_field_instructions,
     build_maker_checker_output_response_instructions,
-    build_orchestrate_response_instructions,
     build_orchestrator_field_instructions,
     build_orchestrator_synthesize_response_instructions,
     build_plan_steps_instructions,
@@ -233,6 +227,13 @@ def build_orchestrator_fsm(
     # added `delegation_plan` and `reasoning`, which nothing read. Do NOT add
     # bulk instructions back as a second chance for a null field: a null
     # takes the priority-900 edge to `synthesize`.
+    # DECISION plan-2026-11-06T093029-0068b055/D-013: `orchestrate`,
+    # `delegate` and `collect` are silent (no `response_instructions`); only
+    # `synthesize` speaks. Do NOT re-add narration to an intermediate state: a
+    # silent state makes no model call, and the evidence the judges read
+    # (`worker_results`) is in `<current_context>`, not in the replies. The
+    # old narration cost 3 calls a round and was written before `all_collected`
+    # was judged. Mocked evidence only; live quality is F-AR-05-LIVE.
     judged = (ContextKeys.WORKER_RESULTS, *context_keys)
 
     states = _by_id(
@@ -261,7 +262,6 @@ def build_orchestrator_fsm(
                     ContextKeys.SUBTASKS, "any", fields[ContextKeys.SUBTASKS], judged
                 )
             ],
-            response_instructions=build_orchestrate_response_instructions(),
         ),
         _state(
             OrchestratorStates.DELEGATE,
@@ -274,7 +274,6 @@ def build_orchestrator_fsm(
                     100,
                 )
             ],
-            response_instructions=build_delegate_response_instructions(),
         ),
         _state(
             OrchestratorStates.COLLECT,
@@ -310,7 +309,6 @@ def build_orchestrator_fsm(
                     judged,
                 )
             ],
-            response_instructions=build_collect_response_instructions(),
         ),
         _state(
             OrchestratorStates.SYNTHESIZE,
@@ -383,6 +381,13 @@ def build_adapt_fsm(
     # decompose's bulk call, is a typed optional field (a null means AND).
     # Do NOT add bulk instructions back as a second chance for a null field:
     # a null takes the state's unconditional edge (3e4eb3e5/D-002).
+    # DECISION plan-2026-11-06T093029-0068b055/D-013: `attempt`, `assess` and
+    # `decompose` are silent (no `response_instructions`); only `combine`
+    # speaks. Do NOT re-add narration to an intermediate state: a silent state
+    # makes no model call, `attempt_result` the judges read is in
+    # `<current_context>`, and the `assess` narration was written BEFORE
+    # `attempt_succeeded` was judged, so it could only bias the verdict.
+    # Mocked evidence only; live quality is F-AR-05-LIVE.
     judged = (ContextKeys.ATTEMPT_RESULT, *context_keys)
 
     def iteration_limit_edge() -> dict[str, Any]:
@@ -417,7 +422,6 @@ def build_adapt_fsm(
                     context_keys,
                 )
             ],
-            response_instructions=build_attempt_response_instructions(),
         ),
         _state(
             ADaPTStates.ASSESS,
@@ -471,7 +475,6 @@ def build_adapt_fsm(
                     judged,
                 )
             ],
-            response_instructions=build_assess_response_instructions(),
         ),
         _state(
             ADaPTStates.DECOMPOSE,
@@ -510,7 +513,6 @@ def build_adapt_fsm(
                     required=False,
                 ),
             ],
-            response_instructions=build_decompose_response_instructions(),
         ),
         _state(
             ADaPTStates.COMBINE,

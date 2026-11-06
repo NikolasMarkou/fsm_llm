@@ -2301,15 +2301,24 @@ class TestOrchestratorOnTheCoreLoop:
         assert [len(results) for results in seen] == [1, 2]
         assert (result.success, result.stop_reason) == (True, "evidence")
         assert result.answer == _ORCHESTRATOR_REPLIES["synthesize"]
-        round_replies = [
-            _ORCHESTRATOR_REPLIES[state]
-            for state in ("orchestrate", "delegate", "collect")
-        ]
+        # F-AR-05 (D-013): the intermediate states are silent, so two rounds
+        # leave one spoken reply (parent: seven) and make 5 calls (parent: 11).
+        # The collector still judges from the evidence, not from a reply.
         assert [entry["system"] for entry in run.history] == [
-            *round_replies,
-            *round_replies,
-            _ORCHESTRATOR_REPLIES["synthesize"],
+            _ORCHESTRATOR_REPLIES["synthesize"]
         ]
+        assert _spoken(run.llm) == ["synthesize"]
+        assert len(run.llm.requests) == 5
+        judged = [
+            request
+            for request in run.llm.calls("extract_field")
+            if request.field_name == ContextKeys.ALL_COLLECTED
+        ]
+        assert len(judged) == 2
+        for request in judged:
+            assert ContextKeys.WORKER_RESULTS in (request.context or {})
+            assert f'"{ContextKeys.WORKER_RESULTS}"' in request.system_prompt
+            assert "Recent conversation" not in request.system_prompt
 
 
 # -- ADaPT ------------------------------------------------------------------
@@ -2377,7 +2386,19 @@ class TestAdaptOnTheCoreLoop:
         assert (result.success, result.stop_reason) == (True, "answered")
         # The answer is the attempt the assessor accepted, not the combine reply.
         assert result.answer == _ROOT_ATTEMPT
-        assert _spoken(run.llm) == ["attempt", "assess", "combine"]
+        # F-AR-05 (D-013): only `combine` speaks (parent: attempt, assess,
+        # combine), so the run makes 3 calls (parent: 5). The verdict is judged
+        # from `attempt_result`, which stays in the prompt, not from a reply.
+        assert _spoken(run.llm) == ["combine"]
+        assert len(run.llm.requests) == 3
+        (judged,) = [
+            request
+            for request in run.llm.calls("extract_field")
+            if request.field_name == ContextKeys.ATTEMPT_SUCCEEDED
+        ]
+        assert (judged.context or {})[ContextKeys.ATTEMPT_RESULT] == _ROOT_ATTEMPT
+        assert _ROOT_ATTEMPT in judged.system_prompt
+        assert "Recent conversation" not in judged.system_prompt
 
     def test_decomposed_run_answers_from_its_subtasks_and_no_bulk_call_runs(self):
         result, run = _adapt_run(decompose=True)
@@ -2556,8 +2577,9 @@ class TestAnswerFallbacksNeverReturnAStateMarker:
     states that spoke. A silent step contributes no text, so no fallback can
     return a ``[state]`` marker (on d4b1626 the loop collected ``[generate]``,
     ``[evaluate]`` ... and a short marker was the shipped answer).
-    Every ADaPT state speaks. The replies are the short "ok": no pattern has a
-    minimum answer length (D-010 of plan 5ed71cf2), so each ships it."""
+    ADaPT's `combine` is the one state that speaks. The replies are the short
+    "ok": no pattern has a minimum answer length (D-010 of plan 5ed71cf2), so
+    each ships it."""
 
     @pytest.mark.parametrize(
         ("pattern", "answer", "outcome"),

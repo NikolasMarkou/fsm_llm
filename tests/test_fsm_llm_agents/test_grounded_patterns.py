@@ -2111,6 +2111,172 @@ class TestOrchestratorWorkers:
             ]
 
 
+_SILENT_TASK = "Plan the trip"
+_SILENT_ROOT_ATTEMPT = "Direct answer to the root task."
+
+
+def _silent_orchestrator_run() -> tuple[object, PromptGroundedLLM]:
+    """One delegation round: one subtask, collected as soon as it is back."""
+    from fsm_llm.agents import AgentConfig, AgentResult, OrchestratorAgent
+
+    def worker(subtask: str) -> AgentResult:
+        return AgentResult(answer=f"done {subtask}", success=True)
+
+    llm = _TurnAwareLLM(
+        {
+            ContextKeys.SUBTASKS: lambda _t, _ctx: ["pick dates"],
+            ContextKeys.ALL_COLLECTED: lambda _t, ctx: bool(
+                ctx.get(ContextKeys.WORKER_RESULTS)
+            ),
+        },
+        responses={
+            "orchestrate": "Splitting the work.",
+            "delegate": "The workers are done.",
+            "collect": "Reviewing the results.",
+            "synthesize": "The trip: dates first.",
+        },
+    )
+    agent = OrchestratorAgent(
+        worker_factory=worker, config=AgentConfig(max_iterations=12), llm_interface=llm
+    )
+    return agent.run(_SILENT_TASK), llm
+
+
+def _silent_adapt_run(*, decompose: bool) -> tuple[object, PromptGroundedLLM]:
+    """The root attempt is judged a failure when ``decompose`` and split into
+    one subtask; every subtask attempt succeeds."""
+    from fsm_llm.agents import ADaPTAgent, AgentConfig
+
+    def is_root(ctx: dict) -> bool:
+        return ctx.get(ContextKeys.TASK) == _SILENT_TASK
+
+    llm = _TurnAwareLLM(
+        {
+            ContextKeys.ATTEMPT_RESULT: lambda _t, ctx: (
+                _SILENT_ROOT_ATTEMPT if is_root(ctx) else "Answer for the subtask."
+            ),
+            ContextKeys.ATTEMPT_SUCCEEDED: lambda _t, ctx: (
+                not (decompose and is_root(ctx))
+            ),
+            ContextKeys.SUBTASKS: lambda _t, _ctx: ["pick dates"],
+            ContextKeys.OPERATOR: lambda _t, _ctx: "AND",
+        },
+        responses={
+            "attempt": "Attempt reply text.",
+            "assess": "Assess reply text.",
+            "decompose": "Decompose reply text.",
+            "combine": "Combined final reply.",
+        },
+    )
+    agent = ADaPTAgent(
+        config=AgentConfig(max_iterations=10), max_depth=1, llm_interface=llm
+    )
+    return agent.run(_SILENT_TASK), llm
+
+
+class TestIntermediateStatesAreSilent:
+    """F-AR-05 (D-013): Orchestrator ``orchestrate``/``delegate``/``collect``
+    and ADaPT ``attempt``/``assess``/``decompose`` make no reply call. Only
+    ``synthesize`` and ``combine`` speak, so a run makes 3 to 5 fewer model
+    calls. Mocked evidence only: whether a small model judges as well without
+    the narration is the carried row F-AR-05-LIVE."""
+
+    def test_orchestrator_intermediate_states_are_silent(self):
+        _, llm = _silent_orchestrator_run()
+
+        assert _spoken_states(llm) == {"synthesize"}
+
+    def test_orchestrator_one_round_makes_three_calls(self):
+        result, llm = _silent_orchestrator_run()
+
+        # Two typed fields (subtasks, all_collected) and the one reply.
+        assert [kind for kind, _ in llm.requests] == [
+            "extract_field",
+            "extract_field",
+            "generate_response",
+        ]
+        assert result.answer == "The trip: dates first."
+
+    def test_adapt_direct_success_makes_three_calls(self):
+        result, llm = _silent_adapt_run(decompose=False)
+
+        # attempt_result, attempt_succeeded and the `combine` reply.
+        assert [kind for kind, _ in llm.requests] == [
+            "extract_field",
+            "extract_field",
+            "generate_response",
+        ]
+        assert _spoken_states(llm) == {"combine"}
+        assert result.answer == _SILENT_ROOT_ATTEMPT
+
+    def test_adapt_depth_one_decomposition_makes_ten_calls(self):
+        from fsm_llm.agents import ADaPTAgent, AgentConfig
+
+        # The root attempt is grounded in the task and judged a failure; the
+        # one subtask run finds no evidence for its attempt (parent: 15 calls,
+        # 7 of them replies from attempt/assess/decompose states).
+        llm = PromptGroundedLLM(
+            facts={
+                ContextKeys.ATTEMPT_RESULT: ("A direct answer", _SILENT_TASK),
+                ContextKeys.ATTEMPT_SUCCEEDED: (False, "A direct answer"),
+                ContextKeys.SUBTASKS: (["pick dates"], "A direct answer"),
+            },
+            responses={
+                "attempt": "Narr: attempt",
+                "assess": "Narr: assess",
+                "decompose": "Narr: decompose",
+                "combine": "FINAL",
+            },
+        )
+        result = ADaPTAgent(
+            config=AgentConfig(max_iterations=10), max_depth=1, llm_interface=llm
+        ).run(_SILENT_TASK)
+
+        # 8 typed-field calls and one `combine` reply per run (root and subtask).
+        assert [kind for kind, _ in llm.requests].count("extract_field") == 8
+        assert len(llm.requests) == 10
+        assert len(llm.calls("generate_response")) == 2
+        assert _spoken_states(llm) == {"combine"}
+        assert result.answer == "FINAL"
+
+    def test_judge_prompts_carry_evidence_without_narration(self):
+        _, orchestrator_llm = _silent_orchestrator_run()
+        _, adapt_llm = _silent_adapt_run(decompose=True)
+
+        judges = {
+            ContextKeys.ALL_COLLECTED: (
+                orchestrator_llm,
+                ContextKeys.WORKER_RESULTS,
+                "done pick dates",
+            ),
+            ContextKeys.ATTEMPT_SUCCEEDED: (
+                adapt_llm,
+                ContextKeys.ATTEMPT_RESULT,
+                _SILENT_ROOT_ATTEMPT,
+            ),
+            ContextKeys.SUBTASKS: (
+                adapt_llm,
+                ContextKeys.ATTEMPT_RESULT,
+                _SILENT_ROOT_ATTEMPT,
+            ),
+            ContextKeys.OPERATOR: (
+                adapt_llm,
+                ContextKeys.ATTEMPT_RESULT,
+                _SILENT_ROOT_ATTEMPT,
+            ),
+        }
+        for field, (llm, evidence_key, evidence) in judges.items():
+            requests = _field_requests(llm, field)
+            assert requests, field
+            # The first request of the root run is the one that sees the root
+            # attempt (ADaPT sub-runs judge their own subtask attempt).
+            request = requests[0]
+            assert evidence_key in (request.context or {}), field
+            assert evidence in request.system_prompt, field
+            assert "Recent conversation" not in request.system_prompt, field
+            assert "reply text" not in request.system_prompt, field
+
+
 def _no_trace_run_requests(pattern: str) -> tuple[PromptGroundedLLM, dict]:
     """Run ``pattern`` through the real API on the grounded fake with a
     caller hint; returns the fake and the caller context used."""
