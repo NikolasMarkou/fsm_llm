@@ -212,6 +212,135 @@ class TestLegacyFileWithoutModel:
         assert restored._embedding_model == "x/old"
 
 
+def _saved_store(path: str, model: str) -> None:
+    """A persisted store whose file records ``model`` (stub embedder, 3-wide)."""
+    store = SemanticMemoryStore(
+        embedding_model=model, persist_path=path, embed_fn=_fake_embed
+    )
+    store.add("My cat sleeps all day")
+    store.add("Paris is my favourite travel spot")
+
+
+class TestConstructorAdoptsRecordedModel:
+    """Plan 0068b055 D-018 (pass-2 concern 3): ``embedding_model`` defaults to
+    ``None``; a persisted store reopened through its constructor keeps the model
+    its file recorded, like ``load`` and ``from_dict``. An explicit model wins."""
+
+    def test_default_is_none(self):
+        import inspect
+
+        default = inspect.signature(SemanticMemoryStore).parameters["embedding_model"]
+        assert default.default is None
+
+    def test_reopened_store_keeps_the_recorded_model_and_searches(
+        self, tmp_path, provider
+    ):
+        path = str(tmp_path / "mem.json")
+        _saved_store(path, "ollama/qwen3-embedding:0.6b")
+
+        reopened = SemanticMemoryStore(persist_path=path)
+
+        assert reopened._embedding_model == "ollama/qwen3-embedding:0.6b"
+        hits = reopened.search("tell me about my pet", k=1)
+        assert hits[0][0] == "My cat sleeps all day"
+        assert hits[0][1] > 0.0
+        assert {r["model"] for r in provider.requests} == {
+            "ollama/qwen3-embedding:0.6b"
+        }
+
+    def test_explicit_model_wins_and_warns(self, tmp_path):
+        from fsm_llm.logging import logger
+
+        path = str(tmp_path / "mem.json")
+        _saved_store(path, "model-A")
+
+        logger.enable("fsm_llm")
+        captured: list[str] = []
+        sink_id = logger.add(lambda msg: captured.append(str(msg)), level="WARNING")
+        try:
+            reopened = SemanticMemoryStore(
+                embedding_model="model-B", persist_path=path, embed_fn=_fake_embed
+            )
+        finally:
+            logger.remove(sink_id)
+            logger.disable("fsm_llm")
+
+        assert reopened._embedding_model == "model-B"
+        joined = "\n".join(captured)
+        assert "mismatch" in joined.lower()
+        assert "model-A" in joined and "model-B" in joined
+
+    def test_matching_recorded_model_does_not_warn(self, tmp_path):
+        from fsm_llm.logging import logger
+
+        path = str(tmp_path / "mem.json")
+        _saved_store(path, "model-A")
+
+        logger.enable("fsm_llm")
+        captured: list[str] = []
+        sink_id = logger.add(lambda msg: captured.append(str(msg)), level="WARNING")
+        try:
+            SemanticMemoryStore(persist_path=path, embed_fn=_fake_embed)
+        finally:
+            logger.remove(sink_id)
+            logger.disable("fsm_llm")
+
+        assert not any("mismatch" in m.lower() for m in captured)
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            None,  # the file does not exist
+            "",  # a blank file
+            '{"counter": 0, "entries": []}',  # a legacy file: no recorded model
+            '{"embedding_model": "", "entries": []}',
+            '{"embedding_model": 7, "entries": []}',
+        ],
+        ids=["missing", "blank", "legacy", "blank-model", "non-string-model"],
+    )
+    def test_no_usable_recorded_model_uses_the_default(self, tmp_path, content):
+        from fsm_llm.llm import DEFAULT_EMBEDDING_MODEL
+
+        path = tmp_path / "mem.json"
+        if content is not None:
+            path.write_text(content, encoding="utf-8")
+
+        store = SemanticMemoryStore(persist_path=str(path), embed_fn=_fake_embed)
+
+        assert store._embedding_model == DEFAULT_EMBEDDING_MODEL
+
+    def test_no_persist_path_uses_the_default(self):
+        from fsm_llm.llm import DEFAULT_EMBEDDING_MODEL
+
+        assert (
+            SemanticMemoryStore(embed_fn=_fake_embed)._embedding_model
+            == DEFAULT_EMBEDDING_MODEL
+        )
+
+    def test_the_file_is_read_once(self, tmp_path, monkeypatch):
+        import fsm_llm.agents.semantic_memory as module
+
+        path = str(tmp_path / "mem.json")
+        _saved_store(path, "model-A")
+        reads: list[str] = []
+        real = module._read_payload
+        monkeypatch.setattr(
+            module, "_read_payload", lambda p: reads.append(p) or real(p)
+        )
+
+        store = SemanticMemoryStore(persist_path=path, embed_fn=_fake_embed)
+
+        assert len(reads) == 1
+        assert len(store) == 2
+
+    def test_invalid_file_still_raises_and_is_left_untouched(self, tmp_path):
+        target = tmp_path / "mem.json"
+        target.write_text("[1, 2, 3]", encoding="utf-8")
+        with pytest.raises(ValueError, match=r"mem\.json"):
+            SemanticMemoryStore(persist_path=str(target), embed_fn=_fake_embed)
+        assert target.read_text(encoding="utf-8") == "[1, 2, 3]"
+
+
 class TestDefaultEmbedder:
     """Plan 944e2692 step 8 (D-005): with no ``embed_fn`` the store embeds
     through core's ``LiteLLMEmbedder`` (its meter counts every request)."""

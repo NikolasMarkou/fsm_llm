@@ -102,13 +102,31 @@ def _read_payload(path: str) -> Any | None:
         ) from e
 
 
+def _recorded_model(data: Any) -> str | None:
+    """The embedding model a store payload records, or ``None``.
+
+    ``None`` for a payload that is not a dict, has no ``embedding_model`` key or
+    holds a blank or non-string value. Never raises. The one rule shared by the
+    constructor, :meth:`SemanticMemoryStore.load` and
+    :meth:`SemanticMemoryStore.from_dict`.
+    """
+    model = data.get("embedding_model") if isinstance(data, dict) else None
+    return model if isinstance(model, str) and model else None
+
+
 class SemanticMemoryStore:
     """Embedding-backed, persistable long-term memory.
 
     Args:
         embedding_model: Embedding model id of the default
             :class:`fsm_llm.llm.LiteLLMEmbedder`. Any LiteLLM embedding
-            provider works (OpenAI, Ollama, Cohere, ...).
+            provider works (OpenAI, Ollama, Cohere, ...). Default ``None``:
+            the model recorded in an existing ``persist_path`` file (as
+            :meth:`load` and :meth:`from_dict` do), else
+            ``DEFAULT_EMBEDDING_MODEL`` (a file with no recorded model, a
+            blank or a missing one). An explicit value always wins; when it
+            differs from the recorded one the cached vectors may not match and
+            a WARNING says so.
         persist_path: If set, :meth:`add` / :meth:`forget` auto-save to this
             JSON file. Also used as the default path for :meth:`save`. When the
             file already exists it is loaded here (entries, cached embeddings
@@ -128,13 +146,26 @@ class SemanticMemoryStore:
 
     def __init__(
         self,
-        embedding_model: str = DEFAULT_EMBEDDING_MODEL,
+        embedding_model: str | None = None,
         persist_path: str | None = None,
         embed_fn: EmbedFn | None = None,
         max_entries: int | None = None,
     ) -> None:
-        self._embedding_model = embedding_model
         self._persist_path = os.path.expanduser(persist_path) if persist_path else None
+        # DECISION plan-2026-11-06T093029-0068b055/D-018: the persisted file is
+        # read BEFORE the embedding backend is built, so an omitted
+        # ``embedding_model`` can adopt the model the file recorded (its vectors
+        # only compare against that model's queries). Do NOT default the
+        # parameter to ``DEFAULT_EMBEDDING_MODEL`` again: a store saved under
+        # model A then searched under the new default scores 0.0 everywhere,
+        # with only a WARNING that library logging hides. Read the file once;
+        # ``_apply_data`` takes the same payload.
+        data = None
+        if self._persist_path and os.path.exists(self._persist_path):
+            data = _read_payload(self._persist_path)
+        if embedding_model is None:
+            embedding_model = _recorded_model(data) or DEFAULT_EMBEDDING_MODEL
+        self._embedding_model = embedding_model
         self._embed_texts = embedding_backend(embedding_model, embed_fn)
         self._max_entries = max_entries
         self._entries: list[MemoryEntry] = []
@@ -146,10 +177,8 @@ class SemanticMemoryStore:
         # MUST NOT re-acquire it — persistence runs via _save_locked() (the
         # lock-free write body) while the lock is already held.
         self._lock = threading.Lock()
-        if self._persist_path and os.path.exists(self._persist_path):
-            data = _read_payload(self._persist_path)
-            if data is not None:
-                self._apply_data(data, repr(self._persist_path))
+        if data is not None:
+            self._apply_data(data, repr(self._persist_path))
 
     # ------------------------------------------------------------------
     # Embedding
@@ -316,11 +345,10 @@ class SemanticMemoryStore:
         stored load unbounded). ``persist_path`` is only the future save
         target: the payload is ``data``, the file is not read.
         """
-        stored_model = data.get("embedding_model")
         active_model = (
             embedding_model
             if embedding_model is not None
-            else (stored_model or DEFAULT_EMBEDDING_MODEL)
+            else (_recorded_model(data) or DEFAULT_EMBEDDING_MODEL)
         )
         store = cls(embedding_model=active_model, embed_fn=embed_fn)
         store._persist_path = os.path.expanduser(persist_path) if persist_path else None
@@ -390,8 +418,10 @@ class SemanticMemoryStore:
         """
         expanded = os.path.expanduser(path)
         data = _read_payload(expanded)
-        model = data.get("embedding_model") if isinstance(data, dict) else None
-        store = cls(embedding_model=model or DEFAULT_EMBEDDING_MODEL, embed_fn=embed_fn)
+        store = cls(
+            embedding_model=_recorded_model(data) or DEFAULT_EMBEDDING_MODEL,
+            embed_fn=embed_fn,
+        )
         store._persist_path = expanded
         if data is not None:
             store._apply_data(data, repr(expanded))
