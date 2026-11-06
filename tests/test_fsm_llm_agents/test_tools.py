@@ -1750,6 +1750,96 @@ class TestOneSchemaRule:
         assert result.success, result.error
         assert seen == [{"a": {"x": 1}}]
 
+    def _run_kwonly(self, fn):
+        """Register ``fn`` and call it with ``payload={"x": 1}``; the schema
+        must name ``payload``."""
+        registry = ToolRegistry()
+        registry.register_function(fn, name="kw", description="d")
+        assert list(registry.get("kw").parameter_schema["properties"]) == ["payload"]
+        return registry.execute(
+            ToolCall(tool_name="kw", parameters={"payload": {"x": 1}})
+        )
+
+    def test_pin_functools_wraps_wrapper_of_a_keyword_only_function(self):
+        """PIN (step 12.9, passes at 11dd49d): ``inspect.signature`` follows
+        ``__wrapped__``, so a ``functools.wraps`` wrapper of a keyword-only dict
+        function is called by keyword."""
+        import functools
+
+        seen: list = []
+
+        def inner(*, payload: dict) -> str:
+            seen.append(payload)
+            return "ok"
+
+        _real(inner, payload=dict)
+
+        @functools.wraps(inner)
+        def wrapper(*args, **kwargs):
+            return inner(*args, **kwargs)
+
+        result = self._run_kwonly(wrapper)
+        assert result.success, result.error
+        assert seen == [{"x": 1}]
+
+    def test_pin_async_keyword_only_method(self):
+        """PIN (step 12.9): an ``async`` method with a keyword-only dict
+        parameter is called by keyword and awaited."""
+        seen: list = []
+
+        class Holder:
+            async def method(self, *, payload: dict) -> str:
+                seen.append(payload)
+                return "ok"
+
+        _real(Holder.method, payload=dict)
+        result = self._run_kwonly(Holder().method)
+        assert result.success, result.error
+        assert seen == [{"x": 1}]
+
+    def test_pin_callable_instance_with_a_keyword_only_dict(self):
+        """PIN (step 12.9): a callable instance is read through its
+        ``__call__``; its keyword-only dict is called by keyword."""
+        seen: list = []
+
+        class Callable_:
+            def __call__(self, *, payload: dict) -> str:
+                seen.append(payload)
+                return "ok"
+
+        _real(Callable_.__call__, payload=dict)
+        result = self._run_kwonly(Callable_())
+        assert result.success, result.error
+        assert seen == [{"x": 1}]
+
+    def test_pin_star_wrapper_with_a_keyword_only_dict_signature(self):
+        """PIN (step 12.9): a wrapper declared ``(*a, **k)`` whose
+        ``__signature__`` is a keyword-only dict signature is read through that
+        signature, so it now receives ``payload=`` BY KEYWORD (the schema names
+        ``payload``). The dict is never passed positionally to a keyword-only
+        signature, so a wrapper that forwards ``*a`` positionally to its inner
+        function must be given a ``__signature__`` that matches the inner
+        function."""
+        import inspect
+
+        seen: list = []
+
+        def inner(*, payload: dict) -> str:
+            seen.append(payload)
+            return "ok"
+
+        _real(inner, payload=dict)
+
+        def wrapper(*args, **kwargs):
+            seen.append((args, tuple(kwargs)))
+            return inner(**kwargs)
+
+        wrapper.__signature__ = inspect.signature(inner)  # type: ignore[attr-defined]
+        result = self._run_kwonly(wrapper)
+        assert result.success, result.error
+        assert seen[0] == ((), ("payload",))
+        assert seen[1] == {"x": 1}
+
     @pytest.mark.parametrize(
         "make",
         [

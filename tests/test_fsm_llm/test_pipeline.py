@@ -1930,8 +1930,11 @@ class TestPromptTooLargeError:
     def test_over_cap_prompt_with_a_larger_history_window_raises_the_typed_error(
         self,
     ):
-        """PIN (steps 1 and 3): ``max_history_size=20`` widens the prompt window
-        but the cap still applies and the step-1 error is the one raised."""
+        """PIN (steps 1 and 3): with ``max_history_size=20`` the cap still
+        applies and the step-1 error is the one raised. The overflow comes from
+        the 40,000-char ``big_notes`` context entry, not from the wider history
+        window (the history holds no long message), so this pins that a larger
+        window changes neither the cap nor the error, not a history overflow."""
         from fsm_llm.definitions import FSMError, LLMResponseError
 
         api, _ = self._api(_cap_fsm(), max_history_size=20)
