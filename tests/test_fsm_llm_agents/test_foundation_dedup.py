@@ -170,16 +170,36 @@ class TestTimedApprovalRunsLikeATimedTool:
         with pytest.raises(SystemExit):
             hitl.request_approval(self._call(), {})
 
-    @pytest.mark.parametrize("timeout", [0, -1.0, float("nan")])
-    def test_a_bad_timeout_is_refused_not_a_silent_denial(self, timeout):
+    @pytest.mark.parametrize(
+        "timeout", [0, -1.0, float("nan"), float("inf"), "5", True, [1]]
+    )
+    def test_a_bad_timeout_is_refused_at_construction(self, timeout):
+        """REVIEW-C9: a misconfiguration fails when the object is built, with
+        the predicate ``call_with_timeout`` uses, not at the first gated call."""
+        from fsm_llm.agents.exceptions import ToolExecutionError
+        from fsm_llm.agents.hitl import HumanInTheLoop
+
+        with pytest.raises(ToolExecutionError):
+            HumanInTheLoop(
+                approval_callback=lambda _request: True, approval_timeout=timeout
+            )
+
+    def test_a_timeout_set_later_is_still_refused_not_a_silent_denial(self):
         from fsm_llm.agents.exceptions import ToolExecutionError
         from fsm_llm.agents.hitl import HumanInTheLoop
 
         hitl = HumanInTheLoop(
-            approval_callback=lambda _request: True, approval_timeout=timeout
+            approval_callback=lambda _request: True, approval_timeout=5.0
         )
+        hitl._approval_timeout = 0
         with pytest.raises(ToolExecutionError):
             hitl.request_approval(self._call(), {})
+
+    @pytest.mark.parametrize("timeout", [None, 0.5, 5, 60.0])
+    def test_a_good_timeout_or_none_constructs(self, timeout):
+        from fsm_llm.agents.hitl import HumanInTheLoop
+
+        HumanInTheLoop(approval_timeout=timeout)
 
 
 class TestFromFunctionsWithoutAName:

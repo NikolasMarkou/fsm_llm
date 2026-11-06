@@ -888,6 +888,28 @@ class ToolTimedOut(ToolExecutionError):
 # never be reported as a plain failure, and a retry-safe one would be re-run),
 # and do NOT report a timeout as a failure: its outcome is unknown
 # (`ToolResult.timed_out`).
+def check_timeout(tool_name: str, timeout_s: Any) -> None:
+    """Raise ``ToolExecutionError`` (``TOOL_BAD_TIMEOUT``) unless *timeout_s* is
+    a finite number in ``(0, Defaults.MAX_TOOL_TIMEOUT_S]`` (a bool is not one).
+
+    Interface contract: the one timeout predicate, shared by
+    ``call_with_timeout`` (every timed call) and ``HumanInTheLoop.__init__``
+    (so a bad ``approval_timeout`` fails at construction). Returns ``None``.
+    """
+    if (
+        isinstance(timeout_s, bool)
+        or not isinstance(timeout_s, (int, float))
+        or not math.isfinite(timeout_s)
+        or not 0 < timeout_s <= Defaults.MAX_TOOL_TIMEOUT_S
+    ):
+        raise ToolExecutionError(
+            ErrorMessages.TOOL_BAD_TIMEOUT.format(
+                name=tool_name, timeout=timeout_s, limit=Defaults.MAX_TOOL_TIMEOUT_S
+            ),
+            tool_name=tool_name,
+        )
+
+
 def call_with_timeout(call: Callable[[], Any], tool_name: str, timeout_s: float) -> Any:
     """Run *call* in a daemon worker thread and wait at most *timeout_s* seconds.
 
@@ -907,18 +929,7 @@ def call_with_timeout(call: Callable[[], Any], tool_name: str, timeout_s: float)
         - Also the timed wait of ``HumanInTheLoop.request_approval`` (the
           callback is the "tool"; a ``ToolTimedOut`` means denied).
     """
-    if (
-        isinstance(timeout_s, bool)
-        or not isinstance(timeout_s, (int, float))
-        or not math.isfinite(timeout_s)
-        or not 0 < timeout_s <= Defaults.MAX_TOOL_TIMEOUT_S
-    ):
-        raise ToolExecutionError(
-            ErrorMessages.TOOL_BAD_TIMEOUT.format(
-                name=tool_name, timeout=timeout_s, limit=Defaults.MAX_TOOL_TIMEOUT_S
-            ),
-            tool_name=tool_name,
-        )
+    check_timeout(tool_name, timeout_s)
     timed_out_error = ToolTimedOut(
         ErrorMessages.TOOL_TIMED_OUT.format(name=tool_name, timeout=timeout_s),
         tool_name=tool_name,

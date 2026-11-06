@@ -19,6 +19,7 @@ from .exceptions import ApprovalDeniedError
 from .tools import (
     ToolTimedOut,
     call_with_timeout,
+    check_timeout,
     redact_secret_entries,
     tool_call_from_context,
 )
@@ -66,10 +67,13 @@ class HumanInTheLoop:
         :param confidence_threshold: Escalate if agent confidence falls below this.
         :param approval_timeout: Max seconds to wait for approval. None = no limit.
             If exceeded, the tool call is treated as denied. A value that is not
-            a finite number in ``(0, Defaults.MAX_TOOL_TIMEOUT_S]`` makes
-            ``request_approval`` raise ``ToolExecutionError`` (not a silent
-            denial of every request).
+            a finite number in ``(0, Defaults.MAX_TOOL_TIMEOUT_S]`` raises
+            ``ToolExecutionError`` here, at construction (``request_approval``
+            keeps the same refusal as a backstop; neither is a silent denial
+            of every request).
         """
+        if approval_timeout is not None:
+            check_timeout("approval_callback", approval_timeout)
         self._approval_policy = approval_policy
         self._approval_timeout = approval_timeout
         self._approval_callback = approval_callback
