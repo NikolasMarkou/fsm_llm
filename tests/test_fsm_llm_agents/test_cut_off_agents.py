@@ -29,8 +29,16 @@ from tests.test_fsm_llm_agents.test_advance_driver import (
     _registry,
 )
 from tests.test_fsm_llm_agents.test_grounded_patterns import (
+    _CHAIN_TASK,
+    _HAIKU,
+    _SILENT_ROOT_ATTEMPT,
+    _SILENT_TASK,
+    _chain_derived,
     _lookup_step,
+    _passing_evaluation,
     _rewoo_registry,
+    _stage,
+    _TurnAwareLLM,
 )
 
 # What core ships for a reply cut inside a JSON envelope (llm.py, D-024).
@@ -38,6 +46,17 @@ _CUT_OFF_MESSAGE = (
     "I'm sorry, my answer was cut off before it was finished. "
     "Please try again or ask for a shorter answer."
 )
+
+
+def _cut_in_states(
+    out: ResponseGenerationResponse,
+    request: ResponseGenerationRequest,
+    cut_states: tuple[str, ...],
+) -> ResponseGenerationResponse:
+    """``out`` as a cut-off reply when the request is for one of ``cut_states``."""
+    if not any(f"<current_state>{s}<" in request.system_prompt for s in cut_states):
+        return out
+    return out.model_copy(update={"message": _CUT_OFF_MESSAGE, "truncated": True})
 
 
 class _CutReplyLLM(PromptGroundedLLM):
@@ -50,18 +69,24 @@ class _CutReplyLLM(PromptGroundedLLM):
     def generate_response(
         self, request: ResponseGenerationRequest
     ) -> ResponseGenerationResponse:
-        out = super().generate_response(request)
-        state = next(
-            (
-                s
-                for s in self.cut_states
-                if f"<current_state>{s}<" in request.system_prompt
-            ),
-            None,
+        return _cut_in_states(
+            super().generate_response(request), request, self.cut_states
         )
-        if state is None:
-            return out
-        return out.model_copy(update={"message": _CUT_OFF_MESSAGE, "truncated": True})
+
+
+class _CutTurnAwareLLM(_TurnAwareLLM):
+    """``_TurnAwareLLM`` whose reply in ``cut_states`` comes back cut off."""
+
+    def __init__(self, derived: dict, *, cut_states: tuple[str, ...], **kw: Any):
+        super().__init__(derived, **kw)
+        self.cut_states = cut_states
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return _cut_in_states(
+            super().generate_response(request), request, self.cut_states
+        )
 
 
 class _CutFirstToolNameLLM(PromptGroundedLLM):
@@ -238,3 +263,209 @@ class TestRewooCutPlan:
 
         assert calls == ["capital"]
         assert (result.success, result.stop_reason) == (True, StopReason.EVIDENCE)
+
+
+class TestTheAnswerSourceDecidesTruncation:
+    """Step 12.33 (D-027): a cut reply that is not the answer is not a truncated
+    run. EvalOpt, MakerChecker, ADaPT and PromptChain read their answer from a
+    context key; only the unused closing reply was cut (review pass 3, WARNING 1)."""
+
+    def _evalopt(self, llm: PromptGroundedLLM):
+        from fsm_llm.agents import AgentConfig, EvaluatorOptimizerAgent
+
+        return EvaluatorOptimizerAgent(
+            evaluation_fn=_passing_evaluation,
+            max_refinements=1,
+            config=AgentConfig(max_iterations=10),
+            llm_interface=llm,
+        )
+
+    def _maker_checker(self, llm: PromptGroundedLLM):
+        from fsm_llm.agents import AgentConfig, MakerCheckerAgent
+
+        return MakerCheckerAgent(
+            maker_instructions="Write a haiku.",
+            checker_instructions="Review the haiku.",
+            max_revisions=1,
+            config=AgentConfig(max_iterations=10),
+            llm_interface=llm,
+        )
+
+    def test_evalopt_whole_answer_with_a_cut_closing_reply_is_answered(self):
+        llm = _CutReplyLLM(
+            facts={"generated_output": (_HAIKU, "haiku")}, cut_states=("output",)
+        )
+
+        result = self._evalopt(llm).run("Write a haiku about rain")
+
+        assert llm.calls("generate_response")  # the closing reply was asked for
+        assert result.answer == _HAIKU
+        assert (result.success, result.stop_reason) == (True, StopReason.ANSWERED)
+
+    def test_maker_checker_whole_answer_with_a_cut_closing_reply_is_answered(self):
+        llm = _CutReplyLLM(
+            facts={
+                "draft_output": (_HAIKU, "haiku"),
+                "quality_score": (0.95, "haiku"),
+            },
+            cut_states=("output",),
+        )
+
+        result = self._maker_checker(llm).run("Write a haiku about rain")
+
+        assert result.answer == _HAIKU
+        assert (result.success, result.stop_reason) == (True, StopReason.ANSWERED)
+
+    def test_adapt_whole_attempt_with_a_cut_combine_reply_is_answered(self):
+        from fsm_llm.agents import ADaPTAgent, AgentConfig
+
+        llm = _CutReplyLLM(
+            facts={
+                ContextKeys.ATTEMPT_RESULT: (_SILENT_ROOT_ATTEMPT, _SILENT_TASK),
+                ContextKeys.ATTEMPT_SUCCEEDED: (True, _SILENT_ROOT_ATTEMPT),
+            },
+            cut_states=("combine",),
+        )
+
+        result = ADaPTAgent(
+            config=AgentConfig(max_iterations=10), max_depth=1, llm_interface=llm
+        ).run(_SILENT_TASK)
+
+        assert result.answer == _SILENT_ROOT_ATTEMPT
+        assert (result.success, result.stop_reason) == (True, StopReason.ANSWERED)
+
+    def test_adapt_without_an_attempt_answers_from_the_cut_reply_and_flags_it(self):
+        """The answer IS the reply here: the cut is the answer's."""
+        from fsm_llm.agents import ADaPTAgent, AgentConfig
+
+        llm = _CutReplyLLM(default_response="whole", cut_states=("combine",))
+
+        result = ADaPTAgent(
+            config=AgentConfig(max_iterations=10), max_depth=1, llm_interface=llm
+        ).run(_SILENT_TASK)
+
+        assert result.answer == _CUT_OFF_MESSAGE
+        assert (result.success, result.stop_reason) == (False, StopReason.TRUNCATED)
+
+    def test_prompt_chain_whole_result_with_a_cut_output_reply_is_answered(self):
+        from fsm_llm.agents import ChainStep, PromptChainAgent
+
+        chain = [
+            ChainStep(
+                step_id=f"s{i}",
+                name=f"Stage {i}",
+                extraction_instructions=f"Extract stage {i} text.",
+                response_instructions=f"Present stage {i}.",
+            )
+            for i in range(2)
+        ]
+        llm = _CutTurnAwareLLM(
+            _chain_derived(),
+            cut_states=("output",),
+            responses={"output": "Final note."},
+        )
+
+        result = PromptChainAgent(chain=chain, llm_interface=llm).run(_CHAIN_TASK)
+
+        assert result.answer == _stage(1)
+        assert (result.success, result.stop_reason) == (True, StopReason.ANSWERED)
+
+    def test_react_cut_final_reply_is_still_truncated(self):
+        """RED guard: the answer IS the reply, so the cut still counts."""
+        llm = _CutReplyLLM(
+            facts=_FACTS, default_response=_ANSWER, cut_states=("conclude",)
+        )
+
+        result = _react(llm, []).run(_TASK)
+
+        assert (result.success, result.stop_reason) == (False, StopReason.TRUNCATED)
+        assert result.answer == _CUT_OFF_MESSAGE
+
+
+class TestAnswerWasCutOffSeam:
+    """``BaseAgent._answer_was_cut_off`` and the judged last-round path."""
+
+    @staticmethod
+    def _agent(**kw: Any):
+        from fsm_llm.agents import MakerCheckerAgent
+
+        return MakerCheckerAgent(
+            maker_instructions="m",
+            checker_instructions="c",
+            llm_interface=PromptGroundedLLM(),
+            **kw,
+        )
+
+    def test_no_record_is_not_cut(self):
+        agent = self._agent()
+        assert (
+            agent._answer_was_cut_off({"draft_output": "x"}, ["draft_output"]) is False
+        )
+
+    def test_a_malformed_record_is_not_cut(self):
+        agent = self._agent()
+        for bad in ("yes", 1, [], {}, None):
+            assert agent._answer_was_cut_off({CONTEXT_KEY_CUT_OFF: bad}, None) is False
+
+    def test_reply_answer_counts_a_cut_reply_or_a_cut_field(self):
+        agent = self._agent()
+        assert agent._answer_was_cut_off({CONTEXT_KEY_CUT_OFF: {"reply": True}}, None)
+        assert agent._answer_was_cut_off(
+            {CONTEXT_KEY_CUT_OFF: {"fields": ["x"]}}, ["draft_output"]
+        )
+
+    def test_key_answer_ignores_a_cut_reply_and_other_fields(self):
+        agent = self._agent()
+        ctx = {"draft_output": "whole"}
+        assert not agent._answer_was_cut_off(
+            {**ctx, CONTEXT_KEY_CUT_OFF: {"reply": True}}, ["draft_output"]
+        )
+        assert not agent._answer_was_cut_off(
+            {**ctx, CONTEXT_KEY_CUT_OFF: {"fields": ["quality_score"]}},
+            ["draft_output"],
+        )
+
+    def test_key_answer_counts_its_own_cut_field(self):
+        agent = self._agent()
+        assert agent._answer_was_cut_off(
+            {"draft_output": "half", CONTEXT_KEY_CUT_OFF: {"fields": ["draft_output"]}},
+            ["draft_output"],
+        )
+
+    def test_an_empty_answer_key_falls_back_to_the_reply(self):
+        agent = self._agent()
+        assert agent._answer_was_cut_off(
+            {"draft_output": "", CONTEXT_KEY_CUT_OFF: {"reply": True}},
+            ["draft_output"],
+        )
+
+    def test_a_judged_pattern_on_the_limiter_round_still_reports_a_cut(self):
+        """Review pass 3 note 4: the bare limiter flag hid the cut."""
+        from fsm_llm.agents.base import BaseAgent
+        from fsm_llm.agents.definitions import AgentTrace
+
+        agent = self._agent()
+        ctx = {
+            ContextKeys.MAX_ITERATIONS_REACHED: True,
+            CONTEXT_KEY_CUT_OFF: {"reply": True},
+        }
+        cut = agent._answer_was_cut_off(ctx, None)
+        trace = AgentTrace(tool_calls=[], total_iterations=1)
+
+        assert BaseAgent._run_outcome(
+            ctx, trace, None, judged=True, answer_cut_off=cut
+        ) == (
+            False,
+            StopReason.TRUNCATED,
+        )
+
+    def test_a_recorded_forced_reason_outranks_a_cut(self):
+        from fsm_llm.agents.base import BaseAgent
+        from fsm_llm.agents.definitions import AgentTrace
+
+        ctx = {ContextKeys.FORCED_STOP_REASON: StopReason.FORCED_PASS}
+        trace = AgentTrace(tool_calls=[], total_iterations=1)
+
+        assert BaseAgent._run_outcome(
+            ctx, trace, ["k"], judged=True, answer_cut_off=True
+        ) == (False, StopReason.FORCED_PASS)

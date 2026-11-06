@@ -655,18 +655,18 @@ class BaseAgent(ABC):
                 steps and steps[-1].ended
             ):
                 final_context[ContextKeys.FORCED_STOP_REASON] = StopReason.ENDED
-            elif self._forced_stop_reason(
-                final_context
-            ) is None and self._last_turn_cut_off(api, conv_id):
-                # DECISION plan-2026-11-06T093029-0068b055/D-025: a run whose
-                # LAST turn had its reply (or an extraction) cut off at
-                # max_tokens did not produce a whole answer: success=False,
-                # `truncated`, the fragment still ships. Do NOT repeat this
-                # per pattern (every `_standard_run` pattern and ADaPT get it
-                # here, once), do NOT override a reason that already forced
-                # the stop, and do NOT read an earlier turn's cut (the record
-                # is cleared every turn). See decisions.md D-025.
-                final_context[ContextKeys.FORCED_STOP_REASON] = StopReason.TRUNCATED
+            else:
+                # DECISION plan-2026-11-06T093029-0068b055/D-025 (answer source:
+                # D-027): the LAST turn's cut-off record rides out in
+                # `final_context` and is judged ONCE, by `_answer_was_cut_off`
+                # inside `_run_outcome`, where the answer source is known. Do
+                # NOT turn it into a stop reason here (an answer read from a
+                # context key is whole when only an unused reply was cut), do
+                # NOT repeat this per pattern, and do NOT read an earlier turn's
+                # cut (the record is cleared every turn). See decisions.md D-027.
+                cut = self._last_turn_cut_off(api, conv_id)
+                if cut:
+                    final_context[CONTEXT_KEY_CUT_OFF] = cut
             log.info(LogMessages.AGENT_COMPLETE.format(iterations=len(steps)))
             return [r for r in replies if r is not None], final_context, len(steps)
 
@@ -674,21 +674,23 @@ class BaseAgent(ABC):
             self._end_run_conversation(api, conv_id)
 
     @staticmethod
-    def _last_turn_cut_off(api: API, conv_id: str) -> bool:
-        """True when core recorded a provider cut-off in the run's last turn.
+    def _last_turn_cut_off(api: API, conv_id: str) -> dict[str, Any]:
+        """Core's cut-off record of the run's last turn, or ``{}``.
 
         Interface contract (caller: ``_run_conversation_loop``): reads
-        ``CONTEXT_KEY_CUT_OFF`` from the top frame's UNFILTERED context
+        ``CONTEXT_KEY_CUT_OFF`` (``{"reply": True}`` and/or
+        ``{"fields": [names]}``) from the top frame's UNFILTERED context
         (``fsm_manager.copy_raw_context_data``: ``api.get_data`` drops internal
-        keys). False when the conversation is no longer active or the key is
-        absent or empty.
+        keys) and returns a copy. ``{}`` when the conversation is no longer
+        active or the key is absent, empty or not a mapping.
         """
         if conv_id not in api.list_active_conversations():
-            return False
+            return {}
         raw = api.fsm_manager.copy_raw_context_data(
             api.get_sub_conversation_id(conv_id)
         )
-        return bool(raw and raw.get(CONTEXT_KEY_CUT_OFF))
+        record = raw.get(CONTEXT_KEY_CUT_OFF) if raw else None
+        return dict(record) if isinstance(record, dict) else {}
 
     @staticmethod
     def _end_run_conversation(api: API, conv_id: str) -> None:
@@ -1228,6 +1230,53 @@ class BaseAgent(ABC):
                     return True
         return False
 
+    def _answer_source_keys(
+        self, final_context: dict[str, Any], extra_answer_keys: list[str] | None
+    ) -> list[str] | None:
+        """The context keys the run's answer text is read from, ``None`` for a reply.
+
+        Interface contract (caller: ``_answer_was_cut_off``): the default
+        mirrors ``_extract_answer``: the first of *extra_answer_keys* with
+        non-empty text is the answer's one source (``[key]``); none has text
+        and the answer is the last reply (``None``). A pattern that overrides
+        ``_extract_answer`` overrides this too: a list names the keys (``[]``
+        when nothing in this run's own turns is the answer: ADaPT's
+        decomposition, whose sub-runs report their own cut-offs). Never raises.
+        """
+        for key in extra_answer_keys or []:
+            if artifact_text(final_context.get(key)).strip():
+                return [key]
+        return None
+
+    def _answer_was_cut_off(
+        self, final_context: dict[str, Any], extra_answer_keys: list[str] | None
+    ) -> bool:
+        """True when the text that ships as the answer was cut off at ``max_tokens``.
+
+        Interface contract (callers: ``_standard_run``, ``ADaPTAgent.run``;
+        the one place that turns core's cut-off record into a verdict):
+        *final_context* carries ``CONTEXT_KEY_CUT_OFF`` when the last turn was
+        cut (``_run_conversation_loop``). Answer drawn from the replies
+        (``_answer_source_keys`` is ``None``): any cut of the last turn counts
+        (``reply``, or a field it extracted). Answer drawn from context keys:
+        only a cut of one of THOSE fields counts; an unused reply that was cut
+        beside a whole answer does not. Never raises.
+        """
+        # DECISION plan-2026-11-06T093029-0068b055/D-027: decide truncation
+        # where the answer source is known. Do NOT flag "the last reply was
+        # cut" for a pattern whose answer is a context key (EvalOpt,
+        # MakerChecker, ADaPT, PromptChain): the whole answer then read as
+        # success=False in 12.28. Do NOT copy this rule into a pattern: it
+        # overrides `_answer_source_keys` only. See decisions.md D-027.
+        record = final_context.get(CONTEXT_KEY_CUT_OFF)
+        if not isinstance(record, dict) or not record:
+            return False
+        fields = record.get("fields") or []
+        source = self._answer_source_keys(final_context, extra_answer_keys)
+        if source is None:
+            return bool(record.get("reply") or fields)
+        return any(key in fields for key in source)
+
     @staticmethod
     def _completion_is_real(
         final_context: dict[str, Any],
@@ -1281,6 +1330,7 @@ class BaseAgent(ABC):
         extra_answer_keys: list[str] | None,
         execution_evidence_keys: list[str] | None = None,
         judged: bool = False,
+        answer_cut_off: bool = False,
     ) -> tuple[bool, str]:
         """Compute ``(success, stop_reason)`` for a finished FSM run.
 
@@ -1291,6 +1341,9 @@ class BaseAgent(ABC):
         Returns:
             ``(False, <forced reason>)`` when the run was forced to stop
             (``_forced_stop_reason``, ``judged`` passed through);
+            ``(False, "truncated")`` with ``answer_cut_off`` (the caller's
+            ``_answer_was_cut_off``; no forced reason outranks it, so a judged
+            pattern's bare limiter flag does not hide a cut);
             ``(False, "no_result")`` when a handler recorded
             ``StopReason.NO_RESULT`` under ``forced_stop_reason`` (the run
             ended without a result its own rule accepts: native_fc); else, in
@@ -1314,6 +1367,8 @@ class BaseAgent(ABC):
         forced = BaseAgent._forced_stop_reason(final_context, judged=judged)
         if forced is not None:
             return False, forced
+        if answer_cut_off:
+            return False, StopReason.TRUNCATED
         # DECISION plan-2026-10-01T093600-944e2692/D-028: a pattern whose
         # success rule is stricter than "an answer key or a tool call" (native
         # function calling: the loop reached a tool-call-free final turn with
@@ -1639,6 +1694,9 @@ class BaseAgent(ABC):
                 extra_answer_keys if success_keys is None else success_keys,
                 execution_evidence_keys,
                 judged=judged,
+                answer_cut_off=self._answer_was_cut_off(
+                    final_context, extra_answer_keys
+                ),
             )
             if stop_reason in StopReason.FORCED:
                 logger.warning(

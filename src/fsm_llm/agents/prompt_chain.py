@@ -228,3 +228,12 @@ class PromptChainAgent(BaseAgent):
         chain_results = final_context.get(ContextKeys.CHAIN_RESULTS, [])
         last = artifact_text(chain_results[-1]).strip() if chain_results else ""
         return last or super()._extract_answer(final_context, responses)
+
+    def _answer_source_keys(
+        self, final_context: dict[str, Any], extra_answer_keys: list[str] | None
+    ) -> list[str] | None:
+        """Where ``_extract_answer`` reads the answer (see the base)."""
+        chain_results = final_context.get(ContextKeys.CHAIN_RESULTS, [])
+        if chain_results and artifact_text(chain_results[-1]).strip():
+            return [ContextKeys.CHAIN_STEP_RESULT]
+        return None

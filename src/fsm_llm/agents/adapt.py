@@ -180,9 +180,12 @@ class ADaPTAgent(BaseAgent):
                     else None
                 )
                 success, stop_reason = self._run_outcome(
-                    final_context, trace, attempt_keys
+                    final_context,
+                    trace,
+                    attempt_keys,
+                    answer_cut_off=self._answer_was_cut_off(final_context, None),
                 )
-            if not success and not subtask_results and forced is None:
+            if stop_reason == StopReason.NO_RESULT and not subtask_results:
                 logger.warning(
                     "ADaPT completed with no answer key and no tool calls — "
                     "answer is fallback-only; marking success=False."
@@ -455,6 +458,17 @@ class ADaPTAgent(BaseAgent):
                 return response.strip()
 
         return ErrorMessages.NO_ANSWER
+
+    def _answer_source_keys(
+        self, final_context: dict[str, Any], extra_answer_keys: list[str] | None
+    ) -> list[str] | None:
+        """Where ``_extract_answer`` reads this run's answer (see the base)."""
+        if self._subtask_entries(final_context):
+            return []  # the sub-runs flag their own cut-offs (their entries)
+        attempt_result = final_context.get(ContextKeys.ATTEMPT_RESULT)
+        if isinstance(attempt_result, str) and attempt_result.strip():
+            return [ContextKeys.ATTEMPT_RESULT]
+        return None
 
     @staticmethod
     def _subtask_entries(final_context: dict[str, Any]) -> list[dict[str, Any]]:
