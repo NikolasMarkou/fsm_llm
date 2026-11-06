@@ -231,7 +231,7 @@ Plan scale: 7 files added (tests and docs only, 0 source files); source net +3,1
 - REACT-05: reasoning-engine input is not length-capped. MEM-03/04: O(n^2) rewrite per `add` and embedding under the store lock.
 - Examples to re-check in the final G3 (D-040): adapt, hierarchical_orchestrator, maker_checker_code.
 - Review pass 2 residue (D-056), shipped as known limits:
-  - A long generated artifact can still be cut off by the per-field `max_tokens` budget; it ships truncated, marked only by a WARNING and confidence 0.3, and an unjudged PromptChain run can report `success=True`. Needs an output-budget change (Track B).
+  - A long generated artifact can still be cut off by the per-field `max_tokens` budget; it ships truncated, marked by a WARNING and confidence 0.3 (and, when the cut is in the run's last turn, `stop_reason="truncated"` with `success=False`, step 12.28 of plan 0068b055), and an unjudged PromptChain run whose cut was in an earlier turn can report `success=True`. Needs an output-budget change (Track B).
   - Orchestrator: subtasks dropped over `max_workers` are invisible to the collect judge and do not affect `success` (D-049 traded re-delegation for bounded calls).
   - AgentGraph has no failure routing: a node with `success=False` takes no edge, so no fallback branch can be built.
   - `FSMValidator` flags the framework `handler_only_keys` on agent FSMs as possible typos (false alarm in `fsm-llm-validate`).

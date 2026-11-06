@@ -1,6 +1,6 @@
 # tests
 
-The whole pytest test tree of the FSM-LLM repository, at `tests/`. It holds 11,305 collected tests: nine suite folders, one per part of the `fsm_llm` package, plus five test files at this level and the shared `conftest.py`.
+The whole pytest test tree of the FSM-LLM repository, at `tests/`. It holds 11,349 collected tests: nine suite folders, one per part of the `fsm_llm` package, plus five test files at this level and the shared `conftest.py`.
 
 ## What it is for
 
@@ -41,19 +41,19 @@ flowchart TD
 
 | Folder | Tests | What it checks |
 | --- | --- | --- |
-| `test_fsm_llm/` | 5,658 | Core framework: `API`, `FSMManager`, the 2-pass `MessagePipeline`, transition rules, JsonLogic, prompts, the LiteLLM wrapper, handlers, working memory, validator, visualizer, logging, and the secret filter measured against labelled corpora in `fixtures/`, the message-free `advance` and `run_until_terminal` loops, the `complete` LLM primitive, the core builders, OKF, the shared `frontmatter` seam and Agent Skills with `fsm-llm-skills` |
-| `test_fsm_llm_agents/` | 3,127 | Every agent pattern (ReAct, Reflexion, Plan-Execute, Debate and others), tools, human approval (HITL) security, memory, MCP, remote serving, the agents CLI, the agents run loops, `ConfiguredAgentBuilder` and the OKF and Agent Skills tools |
+| `test_fsm_llm/` | 5,690 | Core framework: `API`, `FSMManager`, the 2-pass `MessagePipeline`, transition rules, JsonLogic, prompts, the LiteLLM wrapper, handlers, working memory, validator, visualizer, logging, and the secret filter measured against labelled corpora in `fixtures/`, the message-free `advance` and `run_until_terminal` loops, the `complete` LLM primitive, the core builders, OKF, the shared `frontmatter` seam and Agent Skills with `fsm-llm-skills` |
+| `test_fsm_llm_agents/` | 3,138 | Every agent pattern (ReAct, Reflexion, Plan-Execute, Debate and others), tools, human approval (HITL) security, memory, MCP, remote serving, the agents CLI, the agents run loops, `ConfiguredAgentBuilder` and the OKF and Agent Skills tools |
 | `test_fsm_llm_meta/` | 515 | The meta-builder in `fsm_llm.agents`: FSM, workflow and agent artifact builders, builder tools (golden reply text, concurrency isolation), prompts, `MetaBuilderAgent` |
 | `test_fsm_llm_reasoning/` | 232 | Reasoning engine constants, models, exceptions, handlers, strategy fallback, CLI logging and JSON output, and whole scripted solves on the core step loop |
 | `test_fsm_llm_workflows/` | 319 | Async workflow engine: step types, DSL and `WorkflowBuilder`, engine lifecycle, timeouts, audit fixes |
 | `test_fsm_llm_monitor/` | 457 | FastAPI dashboard: routes, security checks, instance manager, event collector, data models, OpenTelemetry exporter |
-| `test_fsm_llm_eval/` | 420 | `fsm_llm.eval` and the `fsm-llm-eval` CLI: example scoring, case datasets, config, statistics, result files |
+| `test_fsm_llm_eval/` | 421 | `fsm_llm.eval` and the `fsm-llm-eval` CLI: example scoring, case datasets, config, statistics, result files |
 | `test_fsm_llm_regression/` | 264 | One class per fixed bug across core, reasoning, workflows, CLI and packaging text |
 | `test_examples/` | 67 | Every JSON file under `examples/` (14 today) loads, parses as an `FSMDefinition` and passes `FSMValidator` (43 tests), and every call into `fsm_llm` in the `examples/**/*.py` scripts still binds to the live signature, checked with `ast` and `inspect.signature` without running an example (24 tests) |
 
 ## Files at this level
 
-- `conftest.py` - shared fixtures (`mock_llm2_interface`, `mock_llm_interface`, `sample_fsm_definition`, `sample_fsm_definition_v2`, `test_fixtures_root`), fake LLMs (`MockLLM2Interface`, with `configure_mock_extract_field` to script its field answers, and `PromptGroundedLLM`, which answers a field only when its evidence is in the prompt and raises `LLMResponseError` from `complete`), the `block_network` function that the agents and meta suites call from their own autouse fixtures (it refuses every IPv4/IPv6 connect, loopback included, unless the test is marked `real_llm` or `integration`), the `ollama_available(model_tag)` probe (one 3 second GET to `localhost:11434/api/tags`, never raises) and marker registration.
+- `conftest.py` - shared fixtures (`mock_llm2_interface`, `mock_llm_interface`, `sample_fsm_definition`, `sample_fsm_definition_v2`, `test_fixtures_root`), fake LLMs (`MockLLM2Interface`, with `configure_mock_extract_field` to script its field answers and `cut_reply=`/`cut_fields=` to script a reply or field cut off at `max_tokens`, and `PromptGroundedLLM`, which answers a field only when its evidence is in the prompt and raises `LLMResponseError` from `complete`), the `block_network` function that the agents and meta suites call from their own autouse fixtures (it refuses every IPv4/IPv6 connect, loopback included, unless the test is marked `real_llm` or `integration`), the `ollama_available(model_tag)` probe (one 3 second GET to `localhost:11434/api/tags`, never raises) and marker registration.
 - `__init__.py` - empty; makes `tests` a package so files can import `tests.conftest`.
 - `test_packaging.py` - 45 tests (7 of them `slow`): the single `fsm_llm` package and its five subpackages are named in every build and CI file, the monitor's static files ship, every subpackage has an install extra, module docstrings are real, no `src` module binds a top-level name twice, and every test count written in the root `AGENTS.md` and `README.md` matches a fresh collection (the second slow class does the same for the known count shapes of every `.md` file, through `scripts/doc_counts.py`, and one parametrized offline test pins those shapes).
 - `test_bench_common.py` - 19 offline tests for `scripts/bench_common.py`, the stdlib helpers that `agents_bench.py` and `skills_bench.py` share: no socket at import, stdlib-only top-level imports, no direct `litellm` reference, Wilson interval, Fisher exact test, the manifest-field constant, JSONL row round trip, wire-digest masking, the restore-on-raise contract of `captured_wire`, `manifest_differences` and `pinned_drift`.
@@ -80,7 +80,7 @@ make coverage    # same run with --cov=fsm_llm
 ## Things to know
 
 - Always run from the repository root. Many files import `tests.conftest` or each other as `tests.<folder>.<file>`.
-- Markers: `slow` (42 tests), `integration` 20 and `real_llm` 19 (the 19 are the same live tests; the 20th `integration` test is the opt-in real-home-directory skills test, armed by `FSM_LLM_REAL_SKILLS=1`), `examples` (67). `-m "not slow"` runs 11,263 tests. The 42 slow tests are the live files (`test_integration_ollama.py` 12, `test_live_classification_memory.py` 7, marked as whole modules), `test_handler_timeout.py` 7, `test_step_timeouts.py` 8 and the 7 count-pinning tests in `test_packaging.py`.
+- Markers: `slow` (42 tests), `integration` 20 and `real_llm` 19 (the 19 are the same live tests; the 20th `integration` test is the opt-in real-home-directory skills test, armed by `FSM_LLM_REAL_SKILLS=1`), `examples` (67). `-m "not slow"` runs 11,307 tests. The 42 slow tests are the live files (`test_integration_ollama.py` 12, `test_live_classification_memory.py` 7, marked as whole modules), `test_handler_timeout.py` 7, `test_step_timeouts.py` 8 and the 7 count-pinning tests in `test_packaging.py`.
 - `pyproject.toml` sets `asyncio_mode = "auto"`, so async tests need no decorator, and `addopts = "-v --tb=short"`.
 - Library logging is off by default. Tests that check a log line enable `fsm_llm` logging with a temporary loguru sink; pytest's `caplog` cannot see loguru output.
 - Some tests skip when an optional package is missing: `mcp` (all of `test_mcp_stdio.py`), `fastapi` and `httpx` in the agents suite, the OpenTelemetry SDK, or a subpackage that fails to import. The monitor suite imports `fastapi.testclient` at module level, so without the monitor extra it errors at collection instead of skipping.

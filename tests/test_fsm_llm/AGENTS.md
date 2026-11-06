@@ -1,7 +1,7 @@
 # test_fsm_llm
 
 Path: `tests/test_fsm_llm`
-Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass MessagePipeline, transitions, prompts, LLM wrapper, handlers, memory, validator, visualizer, logging), 73 test files, 5,658 collected tests.
+Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass MessagePipeline, transitions, prompts, LLM wrapper, handlers, memory, validator, visualizer, logging), 75 test files, 5,690 collected tests.
 
 ## Scope
 
@@ -78,6 +78,8 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_llm_unit.py`, `test_ollama.py` | `LiteLLMInterface`, `fsm_llm.ollama` | stream guards, reasoning-content recovery |
 | `test_llm_parse_fallback_seam.py` | parse ladder JSON -> embedded JSON -> raw text never raises | |
 | `test_llm_finish_reason.py` | `CompletionResponse.finish_reason` / `truncated`, the one `length` WARNING in `_send`, cut-off text in bulk-extraction, field-extraction and classifier errors, the cut-envelope fallback message | a cut brace-opening reply is replaced, a cut prose reply and a `stop` reply are untouched |
+| `test_cut_off_record.py` | the turn's cut-off record `definitions.CONTEXT_KEY_CUT_OFF` (D-025) | `{"reply": True}` / `{"fields": [...]}` written from `truncated=True` responses (`MockLLM2Interface(cut_reply=, cut_fields=)`), absent when nothing was cut, cleared every turn, restored on rollback, never in `get_data`, prompts or a saved session, a completion state's `result_key`, `llm.py` setting the flag |
+| `test_internal_key_seeding_log.py` | `FSMContext.update` logs no WARNING for an internal-prefix key (D-026) | seeding, `push_fsm` and `update_context` are quiet; the accidental paths (extraction, handler delta) keep their own guards |
 | `test_llm_provider_banner.py` | importing `fsm_llm.llm` sets `litellm.suppress_debug_info = True`; a provider error prints no banner; a host can set it back to False | |
 | `test_handlers_unit.py`, `test_handler_timeout.py` | `HandlerSystem`, `HandlerBuilder`, `LambdaHandler`, timeouts | 7 timeout tests are `slow` |
 | `test_pipeline_handler_contract.py` | handler failures through `API.converse` | critical propagation, rollback |
@@ -111,7 +113,7 @@ Fixtures and helpers from `tests/conftest.py` (shared by all suites):
 
 | Name | Kind | Use |
 | --- | --- | --- |
-| `MockLLM2Interface(extraction_data=None, response_text="Hello! How can I help you?", transition_target=None)` | `LLMInterface` subclass | 2-pass mock; `extract_field` returns `extraction_data[field_name]`, records calls in `call_history` |
+| `MockLLM2Interface(extraction_data=None, response_text="Hello! How can I help you?", transition_target=None, cut_reply=False, cut_fields=())` | `LLMInterface` subclass | 2-pass mock; `extract_field` returns `extraction_data[field_name]`, records calls in `call_history`; `cut_reply=True` flags the Pass-2 reply `truncated`, a name in `cut_fields` comes back with value `None` and `truncated=True` (plain attributes, changeable between turns) |
 | `configure_mock_extract_field(mock_llm, mock_data=None)` | function | gives a `Mock(spec=LLMInterface)` a working `extract_field` side effect |
 | `mock_llm_interface`, `mock_llm2_interface` | fixtures | the two mock styles above |
 | `sample_fsm_definition`, `sample_fsm_definition_v2` | fixtures | v3.0 and v4.1 FSM definitions |
@@ -178,7 +180,7 @@ Seam files fake the backend with `patch("fsm_llm.llm.completion", ...)` returnin
 - New regression for a public-path bug: add a seam test that drives `API.converse` or patched `fsm_llm.llm.completion`, not only a helper-level test.
 - Reuse helpers from earlier seam files by import rather than copying, and keep their names stable.
 - Do not relabel, delete or regenerate corpus rows to improve a rate; do not add filter words to catch one corpus entry. Add names from real vocabulary without reading `constants.py` first.
-- After adding or removing tests, re-measure with the first command below. The suite count (5,658) is pinned by `tests/test_packaging.py::test_per_suite_table` (marked slow), which compares a measured `--collect-only` count per suite against a documented literal of the form `pytest tests/test_fsm_llm/  # ... (N tests)`; run that test after changing the count. The counts stated in this file (73 test files, 5,658 tests, 14 slow) are not pinned by any test and must be updated by hand.
+- After adding or removing tests, re-measure with the first command below. The suite count (5,690) is pinned by `tests/test_packaging.py::test_per_suite_table` (marked slow), which compares a measured `--collect-only` count per suite against a documented literal of the form `pytest tests/test_fsm_llm/  # ... (N tests)`; run that test after changing the count. The counts stated in this file (75 test files, 5,690 tests, 14 slow) are not pinned by any test and must be updated by hand.
 
 ```bash
 .venv/bin/python -m pytest tests/test_fsm_llm/ --collect-only -q | tail -1

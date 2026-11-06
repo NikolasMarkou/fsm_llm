@@ -305,8 +305,8 @@ def run_examples(
           ``config.examples_dir``.
         - ``run_dir/logs/`` is created before the first example starts, so it
           exists even when the run is interrupted before one finishes. Each log
-          is written as its example finishes, then ``progress`` is called. A worker that raises becomes a score-0 result with the
-          error text.
+          is written as its example finishes, then ``progress`` is called. A
+          worker that raises becomes a score-0 result with the error text.
         - Ctrl-C (``KeyboardInterrupt``) or SIGTERM (main thread only) cancels
           the examples not yet started and returns a partial report
           (``interrupted=True``, finished examples only), still written to disk.

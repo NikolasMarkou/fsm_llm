@@ -5,10 +5,10 @@ Purpose: Pytest suite for the FSM-LLM agents package (`src/fsm_llm/agents`, impo
 
 ## Scope
 
-- In: 75 `test_*.py` files, `mcp_fixture_server.py` (a real stdio MCP server, not a test), empty `__init__.py`, and `conftest.py`, whose autouse fixture calls `tests.conftest.block_network`: every IPv4/IPv6 connect (loopback included) raises `ConnectionRefusedError` unless the test is marked `real_llm` or `integration`. Global fixtures and `PromptGroundedLLM` come from `tests/conftest.py` (adds `src` to `sys.path`); most older files build their own mocks.
+- In: 77 `test_*.py` files, `mcp_fixture_server.py` (a real stdio MCP server, not a test), empty `__init__.py`, and `conftest.py`, whose autouse fixture calls `tests.conftest.block_network`: every IPv4/IPv6 connect (loopback included) raises `ConnectionRefusedError` unless the test is marked `real_llm` or `integration`. Global fixtures and `PromptGroundedLLM` come from `tests/conftest.py` (adds `src` to `sys.path`); most older files build their own mocks.
 - Also in (historical placement, not agents code): `test_review_fixes.py` covers core `API.converse_stream` auto-save, `FileSessionStore._path` validation, `FSMManager.seed_restored_conversation`, and `fsm_llm.monitor.otel.OTELExporter` thread safety; `test_strands_phase2.py` covers `fsm_llm.workflows.dependency_resolver.DependencyResolver` and `OTELExporter`.
 - Out: live-LLM agent tests (none here; no test calls a real provider, and the network block enforces it), meta-builder internals beyond the CLI.
-- Current size: 3,127 collected (all pass; `test_mcp_stdio.py` skips as a whole module with the project `.venv`, which lacks `mcp`). Re-measure with `pytest tests/test_fsm_llm_agents --collect-only -q | tail -1`.
+- Current size: 3,138 collected (all pass; `test_mcp_stdio.py` skips as a whole module with the project `.venv`, which lacks `mcp`). Re-measure with `pytest tests/test_fsm_llm_agents --collect-only -q | tail -1`.
 
 ## Architecture
 
@@ -40,6 +40,7 @@ Fake LLM conventions:
 - Invalid field: return `value=None, is_valid=False, confidence=0.0`.
 - Bulk-prompt fakes parse requested keys with `re.findall(r'- "(\w+)"', request.system_prompt)` (`_DecisionLLM` in debate/orchestrator).
 - `test_forced_stop_flag.py` imports `_AlwaysRejectLLM` from `.test_maker_checker`; renaming it breaks that file.
+- `test_cut_off_agents.py` and `test_internal_key_log.py` import `_ANSWER`, `_FACTS`, `_TASK` and `_registry` from `.test_advance_driver`; renaming them breaks both files.
 
 Observation hooks used by loop tests:
 
@@ -64,6 +65,8 @@ Observation hooks used by loop tests:
 | `test_react.py` | ReactAgent | `_hitl_active`, policy-only builds `await_approval`, concurrent `run()` isolation (barrier in `build_react_fsm`), single-use approval |
 | `test_think_fallback.py` | `think` never BLOCKs | Null/unknown tool for React, Reflexion, ParallelReact, ReasoningReact, PlanExecute; loop bounds `MAX_ITERATIONS + 2` / `+ 3` |
 | `test_premature_terminate_guard.py` | ReAct conclude guard | `(should_terminate AND observation_count > 0) OR max_iterations_reached` on think and act (D-051 of plan 06a5ec0a) |
+| `test_cut_off_agents.py` | A final reply cut by `max_tokens` (D-025) | `ReactAgent` gives `success=False`, `stop_reason="truncated"` and keeps the answer; a stop already forced keeps its reason; a cut in an earlier turn is not flagged; `REWOOAgent` on a cut `plan_blueprint` runs no tool, sets `plan_cut_off` and answers `ErrorMessages.REWOO_PLAN_CUT_OFF` |
+| `test_internal_key_log.py` | No internal-prefix WARNING per agent run (D-026) | a ReAct run seeds its `_max_iterations` and other driver keys without a log line |
 | `test_forced_stop_flag.py` | Forged `max_iterations_reached` | React, Reflexion, MakerChecker |
 | `test_completion_guard.py`, `test_plan_execute_evidence.py` | `_completion_is_real`, `_has_execution_evidence` | Evidence keys `WORKER_RESULTS`, `EVIDENCE`, `STEP_RESULTS`; step success tied to `TOOL_STATUS == "success"` |
 | `test_handlers.py` | `AgentHandlers`, `make_iteration_limiter`, `make_fresh_keys_handler` | ReAct-family limiter counts think exits (`max_iterations=N` gives N think turns for N >= 2; N = 1 behaves like 2); factory limiter forces at count `max - 1`; empty-input recovery only for string-compatible or single list params |

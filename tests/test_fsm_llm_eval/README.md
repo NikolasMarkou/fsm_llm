@@ -1,6 +1,6 @@
 # test_fsm_llm_eval
 
-The pytest suite for `fsm_llm.eval`, the evaluation package of the FSM-LLM repository, and for its command line `fsm-llm-eval`. It lives at `tests/test_fsm_llm_eval/` and holds 420 tests in 10 files.
+The pytest suite for `fsm_llm.eval`, the evaluation package of the FSM-LLM repository, and for its command line `fsm-llm-eval`. It lives at `tests/test_fsm_llm_eval/` and holds 421 tests in 10 files.
 
 ## What it is for
 
@@ -20,8 +20,8 @@ The pytest suite for `fsm_llm.eval`, the evaluation package of the FSM-LLM repos
 - `test_cases.py` - dataset loading, expectation checks, single trials, whole runs, `run_dataset`, the `run` subcommand, interrupts and `--fail-under`.
 - `test_cli.py` - the `examples` subcommand: usage errors, `--list`, config errors, runs, `--fail-under`, Ctrl-C.
 - `test_config.py` - `EvalConfig` defaults, layered merging, validation, model resolution, LLM settings.
-- `test_examples.py` - example discovery, timeout precedence, subprocess runs, log files, `results.json` and `scorecard.md`, output directories, interrupts (Ctrl-C and SIGTERM).
-- `test_example_inputs.py` - every stdin script in `EXAMPLE_INPUTS` checked against the example it feeds (no script for an example that never reads stdin, no trailing `quit` for the meta builders, a gated-tool task for `react_hitl_combined`).
+- `test_examples.py` - example discovery, timeout precedence, subprocess runs, log files, `results.json` and `scorecard.md`, output directories, interrupts (Ctrl-C and SIGTERM, including one before the first example finishes, which still leaves `logs/`).
+- `test_example_inputs.py` - every stdin script in `EXAMPLE_INPUTS` checked against the example it feeds (no script for an example that never reads stdin, no trailing `quit` for the meta builders, a task naming the gated `publish_report` tool for `react_hitl_combined`).
 - `test_records.py` - JSONL rows, JSON writing, UTC time, git hashes, model slugs, run directory names, exception hierarchy.
 - `test_scoring.py` - golden table for `classify_result`, the score labels, and the rule that a line-anchored `Error:` or `Success: False`, or an extraction rate of at most 50%, cannot score 4.
 - `test_timeout_table.py` - reads the examples' source with `ast` and checks that no harness timeout ties or is below an agent's own `timeout_seconds` budget.

@@ -48,6 +48,8 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_definitions.py` - pydantic models, including the tool name rule (ASCII, 1 to 64 chars).
 - `test_evaluator_optimizer.py` - EvaluatorOptimizerAgent, its FSM, refine re-extraction, forced stop.
 - `test_exceptions.py` - agent exception hierarchy.
+- `test_cut_off_agents.py` - a final reply cut by `max_tokens` ends a ReAct run with `success=False` and `stop_reason="truncated"` (answer still shipped); REWOO stops on a cut plan and runs no tool.
+- `test_internal_key_log.py` - a ReAct run logs no `internal-prefix key` WARNING for the keys it seeds.
 - `test_forced_stop_flag.py` - a model cannot forge `max_iterations_reached`.
 - `test_grounded_patterns.py` - each pattern run through the real `API` with `PromptGroundedLLM`, a fake that only answers when the prompt contains the evidence.
 - `test_fsm_definitions.py` - ReAct FSM shape, required keys on planner states, typed `tool_name`/`tool_input`.
@@ -113,7 +115,7 @@ From the repo root, with the project virtualenv:
 .venv/bin/python -m pytest tests/test_fsm_llm_agents/ --collect-only -q | tail -1
 ```
 
-The whole suite needs no network or API key; the `conftest.py` network block makes sure of it. A default run (about 20 seconds) collects 3,127 tests. If a new test must open a real connection, mark it `real_llm` or `integration`; otherwise it fails with `ConnectionRefusedError`.
+The whole suite needs no network or API key; the `conftest.py` network block makes sure of it. A default run (about 20 seconds) collects 3,138 tests. If a new test must open a real connection, mark it `real_llm` or `integration`; otherwise it fails with `ConnectionRefusedError`.
 
 ## Things to know
 

@@ -374,7 +374,7 @@ Contributions are welcome, from a typo fix to a new agent pattern. Full rules ar
 
 ```bash
 make install-dev    # editable install with every extra, plus pre-commit hooks
-make test           # Run full test suite (11,305 tests)
+make test           # Run full test suite (11,349 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy on src/fsm_llm/
@@ -399,7 +399,7 @@ Rules to know before you open a pull request:
 
 Good places to help, all taken from recorded open items:
 
-- **Agents** ([docs/agents_roadmap.md](docs/agents_roadmap.md), Known open items and Track B): `AgentGraph` has no failure routing, so a fallback branch cannot be built; Orchestrator subtasks dropped over `max_workers` do not affect `success`; a reply cut off by `max_tokens` is now detected (`finish_reason`, a WARNING, a named cause in extraction errors, no half JSON envelope shown as a reply), but the cut is not yet carried into the agent result, so REWOO loses its plan, `native_fc` ends a turn `malformed` and a long meta-builder artifact can still ship truncated without a flag; Swarm never hands off by itself; real human-in-the-loop for REWOO, PlanExecute, ParallelReact and native_fc; MCP v2 and A2A v1.0.
+- **Agents** ([docs/agents_roadmap.md](docs/agents_roadmap.md), Known open items and Track B): `AgentGraph` has no failure routing, so a fallback branch cannot be built; Orchestrator subtasks dropped over `max_workers` do not affect `success`; a reply cut off by `max_tokens` is detected (`finish_reason`, a WARNING, a named cause in extraction errors, no half JSON envelope shown as a reply) and a cut final reply of an agent run ends it with `success=False` and `stop_reason="truncated"` (REWOO stops on a cut plan), but a cut `native_fc` tool call, a `SelfConsistencyAgent` sample, a long meta-builder artifact, a streamed reply and a cut in an earlier turn are still not flagged; Swarm never hands off by itself; real human-in-the-loop for REWOO, PlanExecute, ParallelReact and native_fc; MCP v2 and A2A v1.0.
 - **Core** (`CHANGELOG.md`, Unreleased, Known open): validating an `FSMDefinition` for the first time from several threads at once can race; the message-free `classification_extractions` path has offline coverage only; nothing was checked live on a non-Ollama provider.
 - **Reasoning** (`CHANGELOG.md`, Known open): cheaper typed per-key reasoning fields were tried and reverted after losing answers on a pre-registered probe, so a new attempt needs its own probe; a `final_context` passed back as `initial_context` still carries the previous problem's analysis.
 - **Measurement**: every live number here comes from one small local model. Runs on other models and providers are welcome, as new pre-registered blocks (see `scripts/bench_data/README.md`).
