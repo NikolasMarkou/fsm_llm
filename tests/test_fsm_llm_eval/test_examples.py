@@ -7,7 +7,10 @@ current interpreter, so no LLM and no repository example is touched.
 from __future__ import annotations
 
 import json
+import signal
+import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -312,7 +315,6 @@ class TestTimeoutPartialOutput:
     ):
         """`subprocess.TimeoutExpired.stdout` is `bytes` even for a text-mode
         run on some Python versions and `str` on others: both are text."""
-        import subprocess
 
         def _expire(*args, **kwargs):
             raise subprocess.TimeoutExpired(cmd="x", timeout=1, output=out, stderr=err)
@@ -429,3 +431,109 @@ class TestInterrupt:
         assert data["total_examples"] == 1
         scorecard = (run_dir / "scorecard.md").read_text(encoding="utf-8")
         assert "**Interrupted**: yes" in scorecard
+
+    @pytest.mark.slow  # about 6 s: a real CLI process (imports litellm) and 1 s timeouts
+    def test_sigterm_to_the_cli_writes_the_partial_report_and_exits_130(
+        self, tmp_path: Path
+    ):
+        """Live finding D5: `timeout` sends SIGTERM, which used to end the
+        process with a run directory holding logs only (no scorecard.md, no
+        results.json). SIGTERM is now read like Ctrl-C."""
+        root = tmp_path / "examples"
+        for name in ("a", "b", "c"):
+            _write(root / "basic" / name / "run.py", _SLOW_SCRIPT)
+        out = tmp_path / "run"
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "fsm_llm.eval",
+                "examples",
+                "--examples-dir",
+                str(root),
+                "--output-dir",
+                str(out),
+                "--model",
+                "m",
+                "--workers",
+                "1",
+                "--timeout",
+                "1",
+            ],
+            cwd=tmp_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            assert proc.stdout is not None
+            # The progress line of the first finished example: the pool is
+            # running, so the SIGTERM handler is installed, and two examples
+            # are still queued or running.
+            for line in proc.stdout:
+                if "[ 1/3]" in line:
+                    break
+            else:
+                pytest.fail("the CLI never reported a first example")
+            proc.send_signal(signal.SIGTERM)
+            _, err = proc.communicate(timeout=60)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+        assert proc.returncode == 130, err
+        assert "Traceback" not in err
+        data = json.loads((out / "results.json").read_text(encoding="utf-8"))
+        assert data["interrupted"] is True
+        assert 1 <= data["total_examples"] < 3
+        scorecard = (out / "scorecard.md").read_text(encoding="utf-8")
+        assert "**Interrupted**: yes" in scorecard
+
+
+class TestSigtermAsInterrupt:
+    """`sigterm_as_interrupt`: the handler lives for the run only."""
+
+    def test_sigterm_raises_keyboard_interrupt_and_the_handler_is_restored(self):
+        from fsm_llm.eval._pool import sigterm_as_interrupt
+
+        before = signal.getsignal(signal.SIGTERM)
+        with sigterm_as_interrupt():
+            assert signal.getsignal(signal.SIGTERM) is not before
+            with pytest.raises(KeyboardInterrupt):
+                signal.raise_signal(signal.SIGTERM)
+        assert signal.getsignal(signal.SIGTERM) is before
+
+    def test_the_handler_is_restored_when_the_block_raises(self):
+        from fsm_llm.eval._pool import sigterm_as_interrupt
+
+        before = signal.getsignal(signal.SIGTERM)
+        with pytest.raises(RuntimeError):
+            with sigterm_as_interrupt():
+                raise RuntimeError("boom")
+        assert signal.getsignal(signal.SIGTERM) is before
+
+    def test_nothing_is_installed_off_the_main_thread(self):
+        """`signal.signal` raises ValueError outside the main thread."""
+        from fsm_llm.eval._pool import run_interruptible
+
+        before = signal.getsignal(signal.SIGTERM)
+        seen: list = []
+
+        def body() -> None:
+            seen.append(run_interruptible(lambda x: x, [1, 2], 2, lambda i, f: None))
+            seen.append(signal.getsignal(signal.SIGTERM))
+
+        worker = threading.Thread(target=body)
+        worker.start()
+        worker.join(10)
+        assert seen == [False, before]
+
+    def test_an_ignored_sigterm_stays_ignored(self):
+        from fsm_llm.eval._pool import sigterm_as_interrupt
+
+        previous = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        try:
+            with sigterm_as_interrupt():
+                assert signal.getsignal(signal.SIGTERM) is signal.SIG_IGN
+        finally:
+            signal.signal(signal.SIGTERM, previous)

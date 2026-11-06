@@ -306,9 +306,9 @@ def run_examples(
         - Each log is written as its example finishes, then ``progress`` is
           called. A worker that raises becomes a score-0 result with the
           error text.
-        - Ctrl-C (``KeyboardInterrupt``) cancels the examples not yet started
-          and returns a partial report (``interrupted=True``, finished examples
-          only), still written to disk.
+        - Ctrl-C (``KeyboardInterrupt``) or SIGTERM (main thread only) cancels
+          the examples not yet started and returns a partial report
+          (``interrupted=True``, finished examples only), still written to disk.
         - Returns the report with results sorted by name.
     """
     python = config.python or sys.executable

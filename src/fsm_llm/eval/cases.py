@@ -398,8 +398,9 @@ def run_cases(
           :func:`run_case_trial` (with ``checks``); trial numbers start at 1.
         - Each trial's row is appended to ``run_dir/rows.jsonl`` and flushed as
           it finishes, then ``progress`` is called.
-        - Ctrl-C (``KeyboardInterrupt``) cancels the trials not yet started and
-          returns a partial report (``interrupted=True``, finished trials only).
+        - Ctrl-C (``KeyboardInterrupt``) or SIGTERM (main thread only) cancels
+          the trials not yet started and returns a partial report
+          (``interrupted=True``, finished trials only).
         - Writes ``results.json`` and ``summary.md`` (:func:`write_case_report`)
           and returns the report; ``dataset`` is recorded there when given.
     """

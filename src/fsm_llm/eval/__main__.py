@@ -18,8 +18,8 @@ only) < ``--config FILE`` < explicit flags.
 **Exit codes.** ``0`` success, also for low scores unless ``--fail-under`` is
 given; ``1`` usage error, bad config or dataset, unwritable output, or nothing
 matched; ``2`` only when ``--fail-under PCT`` is given and the score is below it;
-``130`` interrupted by Ctrl-C (queued work is cancelled and a partial report is
-written).
+``130`` interrupted by Ctrl-C or SIGTERM (queued work is cancelled and a partial
+report is written).
 """
 
 from __future__ import annotations
