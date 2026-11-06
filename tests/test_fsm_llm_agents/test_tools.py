@@ -1593,6 +1593,12 @@ def _signature_cases():
     _real(kwonly_dict_bare, payload=dict)
     _real(kwonly_dict_default, payload=dict)
 
+    def dict_beside_int(n: int, p: dict[str, Any]) -> str: ...
+
+    def dict_beside_unannotated(p: dict[str, Any], q) -> str: ...
+
+    def kwonly_optional_dict(*, p: typing.Optional[dict[str, Any]] = None) -> str: ...  # noqa: UP045
+
     def lone_kwargs(**kwargs: Any) -> str: ...
 
     def lone_args(*args) -> str: ...
@@ -1611,6 +1617,9 @@ def _signature_cases():
         ("kwonly-dict", kwonly_dict),
         ("kwonly-dict-bare", kwonly_dict_bare),
         ("kwonly-dict-default", kwonly_dict_default),
+        ("dict-beside-int", dict_beside_int),
+        ("dict-beside-unannotated", dict_beside_unannotated),
+        ("kwonly-optional-dict", kwonly_optional_dict),
         ("int-and-kwargs", one_int_kwargs),
         ("lone-kwargs", lone_kwargs),
         ("lone-args", lone_args),
@@ -1619,6 +1628,12 @@ def _signature_cases():
         ("list-int", list_int),
         ("pydantic-model", pydantic_model),
     ]
+
+
+def _registered(fn):
+    registry = ToolRegistry()
+    registry.register_function(fn, name="t")
+    return registry.get("t")
 
 
 class TestOneSchemaRule:
@@ -1641,6 +1656,52 @@ class TestOneSchemaRule:
                 from_decorator.args_model.model_json_schema()
                 == from_register.args_model.model_json_schema()
             )
+
+    @pytest.mark.parametrize(
+        "shape", ["generic", "bare", "optional", "typing-dict", "beside-int"]
+    )
+    def test_dict_parameter_that_is_not_the_lone_positional_is_an_object(self, shape):
+        """A ``dict[...]`` parameter that is named (keyword-only, or beside
+        another parameter) is advertised as ``object``, never ``string``, by
+        both the coarse schema and the args model (live finding D2)."""
+
+        def generic(*, payload: dict[str, Any]) -> str: ...
+
+        def bare(*, payload: dict) -> str: ...
+
+        def optional(*, payload: typing.Optional[dict[str, Any]] = None) -> str: ...  # noqa: UP045
+
+        def typing_dict(*, payload: typing.Dict[str, int]) -> str: ...  # noqa: UP006
+
+        def beside_int(n: int, payload: dict[str, Any]) -> str: ...
+
+        fn = {
+            "generic": generic,
+            "bare": bare,
+            "optional": optional,
+            "typing-dict": typing_dict,
+            "beside-int": beside_int,
+        }[shape]
+        for definition in (
+            tool(fn)._tool_definition,
+            _registered(fn),
+        ):
+            assert definition.parameter_schema["properties"]["payload"] == {
+                "type": "object"
+            }
+
+    def test_unannotated_sibling_keeps_the_object_schema_without_args_model(self):
+        """No args model exists when a parameter has no annotation, so the
+        coarse schema is what the model is shown."""
+
+        def mixed(payload: dict[str, Any], note) -> str: ...
+
+        definition = tool(mixed)._tool_definition
+        assert definition.args_model is None
+        assert definition.parameter_schema["properties"]["payload"] == {
+            "type": "object"
+        }
+        assert definition.parameter_schema["properties"]["note"] == {"type": "string"}
 
     def test_keyword_only_dict_parameter_keeps_its_named_schema(self):
         """The lone-dict `{}` rule is for a parameter the dict can be passed to

@@ -907,6 +907,12 @@ def infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
             inner = opts[0] if len(opts) == 1 else hint
         if inner is list or typing.get_origin(inner) in _LIST_ORIGINS:
             hint, elem = list, typing.get_args(inner)[:1]
+        # A ``dict`` generic, bare or in Optional, is an ``object`` like bare
+        # ``dict`` (the args model already says so); the "string" default
+        # advertised a keyword-only ``dict[str, Any]`` as a string. The lone
+        # positional dict-style rule above (D-009) is untouched.
+        elif inner is dict or typing.get_origin(inner) is dict:
+            hint = dict
         # Default to "string" for missing or unknown types
         if hint is None:
             hint = str
