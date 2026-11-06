@@ -1434,6 +1434,7 @@ class MessagePipeline:
         string is a message the user sent empty, D-044).
         """
         log = logger.bind(conversation_id=conversation_id)
+        prompt_context: dict[str, Any] | None = None
 
         if user_message is None:
             # DECISION plan-2026-09-30T062855-07ad3f8c/D-023
@@ -1445,14 +1446,14 @@ class MessagePipeline:
             # gates <current_context> has in Pass 2. Do NOT skip the bulk call
             # on a message-free turn either: a bulk-only state would then
             # never extract anything. See decisions.md D-023.
+            prompt_context = self._apply_context_scope(
+                instance.context.get_user_visible_data(),
+                state,
+                conversation_id,
+            )
             source_sections = (
                 self.data_extraction_prompt_builder.build_extraction_source_sections(
-                    instance,
-                    self._apply_context_scope(
-                        instance.context.get_user_visible_data(),
-                        state,
-                        conversation_id,
-                    ),
+                    instance, prompt_context
                 )
             )
             source = "\n".join(source_sections).rstrip() or "(no context available)"
@@ -1489,8 +1490,10 @@ class MessagePipeline:
         # implements `extract_bulk_data` (default raises NotImplementedError,
         # mirroring `extract_field`). See decisions.md D-015.
         try:
-            request = BulkExtractionRequest(
-                system_prompt=prompt, user_message=user_message
+            request = BulkExtractionRequest.checked(
+                system_prompt=prompt,
+                user_message=user_message,
+                prompt_context=prompt_context,
             )
             response = self.llm_interface.extract_bulk_data(request)
             # Filter out None/empty values — extract_bulk_data returns the
@@ -2122,7 +2125,8 @@ class MessagePipeline:
 
             # Build request. None (no user message) stays None on the request:
             # the LLM layer fills the provider turn (07ad3f8c/D-044).
-            request = FieldExtractionRequest(
+            request = FieldExtractionRequest.checked(
+                prompt_context=dynamic_context,
                 system_prompt=system_prompt,
                 user_message=user_message,
                 field_name=field_config.field_name,
@@ -3053,7 +3057,8 @@ class MessagePipeline:
 
         # The greeting has no user message: the request says so with None
         # (07ad3f8c/D-044).
-        return ResponseGenerationRequest(
+        return ResponseGenerationRequest.checked(
+            prompt_context=context,
             system_prompt=system_prompt,
             user_message=None if greeting else user_message,
             transition_occurred=transition_occurred,

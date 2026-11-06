@@ -1729,3 +1729,161 @@ class TestNoCorrectionWithoutUserMessage:
         configure_mock_extract_field(pipeline.llm_interface, {})
         resp = pipeline._execute_data_extraction(instance, None, "c")
         assert resp.extracted_data == {"findings": "navy"}
+
+
+# ══════════════════════════════════════════════════════════════
+# An over-cap prompt is a typed error that names what to shrink
+# (plan 0068b055, D-002)
+# ══════════════════════════════════════════════════════════════
+
+
+def _cap_fsm(*, extraction_instructions=None, max_message_length=None):
+    """start (replies, may bulk-extract) -> done; ``max_message_length`` is not
+    part of the definition, the caller passes it to the API."""
+    start = {
+        "id": "start",
+        "description": "start",
+        "purpose": "talk",
+        "response_instructions": "Reply briefly.",
+        "transitions": [
+            {
+                "target_state": "done",
+                "description": "when the user says bye",
+                "priority": 100,
+                "conditions": [
+                    {
+                        "description": "bye is set",
+                        "requires_context_keys": ["bye"],
+                        "logic": {"==": [{"var": "bye"}, True]},
+                    }
+                ],
+            }
+        ],
+    }
+    if extraction_instructions:
+        start["extraction_instructions"] = extraction_instructions
+    return {
+        "name": "CapBot",
+        "description": "prompt cap",
+        "initial_state": "start",
+        "states": {
+            "start": start,
+            "done": {
+                "id": "done",
+                "description": "done",
+                "purpose": "wrap up",
+                "response_instructions": "Say goodbye.",
+            },
+        },
+    }
+
+
+class TestPromptTooLargeError:
+    def _api(self, fsm, **kwargs):
+        from fsm_llm import API
+        from tests.conftest import MockLLM2Interface
+
+        llm = MockLLM2Interface()
+        return API.from_definition(fsm, llm_interface=llm, **kwargs), llm
+
+    def test_oversized_context_value_names_key_and_cap(self):
+        from fsm_llm.definitions import FSMError, LLMResponseError
+
+        api, _ = self._api(_cap_fsm())
+        conv, _ = api.start_conversation()
+        api.update_context(conv, {"big_notes": "x" * 40000})
+        with pytest.raises(FSMError) as info:
+            api.converse("hello", conv)
+        text = str(info.value)
+        chain = []
+        exc = info.value
+        while exc is not None:
+            chain.append(exc)
+            exc = exc.__cause__ or exc.__context__
+        assert "big_notes" in text and "30000" in text
+        assert any(isinstance(c, LLMResponseError) for c in chain)
+        assert "validation error" not in text.lower()
+        assert "pydantic" not in text.lower()
+
+    def test_oversized_message_names_max_message_length(self):
+        from fsm_llm.definitions import FSMError
+
+        api, _ = self._api(_cap_fsm(), max_message_length=50000)
+        conv, _ = api.start_conversation()
+        with pytest.raises(FSMError) as info:
+            api.converse("y" * 12000, conv)
+        text = str(info.value)
+        assert "max_message_length" in text and "10000" in text
+        assert "validation error" not in text.lower()
+
+    def test_bulk_site_warning_names_the_key(self):
+        from loguru import logger
+
+        from fsm_llm.pipeline import _BulkFailed
+
+        state = State(
+            id="start",
+            description="start",
+            purpose="collect",
+            extraction_instructions="Extract the notes.",
+            transitions=[],
+        )
+        pipeline = _make_pipeline(fsm_def=_make_fsm_definition({"start": state}))
+        instance = _make_instance(context_data={"big_notes": "x" * 40000})
+        records: list[str] = []
+        sink = logger.add(lambda m: records.append(m.record["message"]))
+        logger.enable("fsm_llm")
+        try:
+            # A message-free turn builds the bulk prompt from the context.
+            result = pipeline._bulk_extract_from_instructions(
+                instance, None, state, "conv-1"
+            )
+        finally:
+            logger.disable("fsm_llm")
+            logger.remove(sink)
+        assert isinstance(result, _BulkFailed)  # the soft site stays soft
+        warned = [r for r in records if "Bulk extraction fallback failed" in r]
+        assert warned and "big_notes" in warned[0] and "30000" in warned[0]
+
+    def test_failed_turn_rolls_back_and_next_turn_works(self):
+        from fsm_llm.definitions import FSMError
+
+        api, _ = self._api(_cap_fsm())
+        conv, _ = api.start_conversation()
+        before_history = list(api.get_conversation_history(conv))
+        api.update_context(conv, {"big_notes": "x" * 40000})
+        with pytest.raises(FSMError):
+            api.converse("hello", conv)
+        assert api.get_current_state(conv) == "start"
+        assert api.get_conversation_history(conv) == before_history
+        api.update_context(conv, {"big_notes": "small"})
+        assert api.converse("hello again", conv)
+
+    def test_prompt_under_cap_is_unchanged(self):
+        api, llm = self._api(_cap_fsm())
+        conv, _ = api.start_conversation()
+        value = "z" * 20000
+        api.update_context(conv, {"big_notes": value})
+        api.converse("hello", conv)
+        prompts = [r.system_prompt for kind, r in llm.call_history]
+        assert any(value in p for p in prompts)
+
+    def test_internal_and_secret_keys_are_never_named(self):
+        from fsm_llm.definitions import LLMResponseError, ResponseGenerationRequest
+
+        # The helper is reached directly: update_context refuses these keys.
+        with pytest.raises(LLMResponseError) as info:
+            ResponseGenerationRequest.checked(
+                prompt_context={
+                    "_hidden_blob": "h" * 40000,
+                    "api_key": "k" * 40000,
+                    "big_notes": "x" * 35000,
+                    "other": "o" * 100,
+                },
+                system_prompt="p" * 40000,
+                user_message="hi",
+            )
+        text = str(info.value)
+        assert "big_notes (35000 characters)" in text
+        assert "_hidden_blob" not in text and "api_key" not in text
+        assert "x" * 50 not in text and "k" * 50 not in text

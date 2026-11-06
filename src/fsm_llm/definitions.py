@@ -19,9 +19,16 @@ from collections import deque
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, ClassVar, Literal, get_args
+from typing import Any, ClassVar, Literal, TypeVar, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from .constants import (
     ALLOWED_JSONLOGIC_OPERATIONS,
@@ -42,6 +49,7 @@ from .constants import (
     RESERVED_CONTEXT_KEYS,
     TRANSITION_CLASSIFICATION_THRESHOLD_KEY,
     has_internal_prefix,
+    is_forbidden_context_entry,
 )
 
 # --------------------------------------------------------------
@@ -102,13 +110,55 @@ class TransitionEvaluationResult(str, Enum):
 # --------------------------------------------------------------
 
 
+#: Request caps: the longest system prompt and the longest user message a
+#: Pass 1 / Pass 2 request carries. The user-message cap also applies when
+#: ``max_message_length`` is larger (it is configurable up to 50,000).
+PROMPT_MAX_CHARS = 30000
+USER_MESSAGE_MAX_CHARS = 10000
+
+_PROMPT_CAPS = {
+    "system_prompt": PROMPT_MAX_CHARS,
+    "user_message": USER_MESSAGE_MAX_CHARS,
+}
+_LARGEST_CONTEXT_ENTRIES_NAMED = 3
+
+_PromptRequestT = TypeVar("_PromptRequestT", bound="_PromptRequest")
+
+
+def _largest_public_context_keys(context: Mapping[str, Any] | None) -> str:
+    """The largest public entries of ``context`` as ``key (N characters)``,
+    comma-joined, or ``""`` when there are none. Names and sizes only, never
+    values; internal-prefix and secret-looking entries are skipped."""
+    sizes: list[tuple[int, str]] = []
+    for key, value in (context or {}).items():
+        if not isinstance(key, str):
+            continue
+        if has_internal_prefix(key) or is_forbidden_context_entry(key, value):
+            continue
+        try:
+            sizes.append((len(str(value)), key))
+        except Exception:
+            continue
+    sizes.sort(key=lambda item: (-item[0], item[1]))
+    return ", ".join(
+        f"{key} ({size} characters)"
+        for size, key in sizes[:_LARGEST_CONTEXT_ENTRIES_NAMED]
+    )
+
+
 class _PromptRequest(BaseModel):
     """The two fields every Pass 1 / Pass 2 request carries, and their caps.
 
-    Contract: ``system_prompt`` is required (1..30000 chars); ``user_message``
-    is required but may be ``None`` (the turn has no user message: a step, the
-    greeting), which is not an empty message (0..10000 chars). Unknown fields
-    are refused. Subclasses add their own fields after these two.
+    Contract: ``system_prompt`` is required (1..``PROMPT_MAX_CHARS`` chars);
+    ``user_message`` is required but may be ``None`` (the turn has no user
+    message: a step, the greeting), which is not an empty message
+    (0..``USER_MESSAGE_MAX_CHARS`` chars). Unknown fields are refused.
+    Subclasses add their own fields after these two.
+
+    Build a request on a turn with ``checked``, not the bare constructor: the
+    only failure it rewrites is an over-cap ``system_prompt`` or
+    ``user_message``, which becomes an ``LLMResponseError`` naming the field,
+    its length, the cap and (system prompt) the largest context keys.
     """
 
     # DECISION plan-2026-09-30T062855-07ad3f8c/D-044: request models refuse
@@ -121,7 +171,7 @@ class _PromptRequest(BaseModel):
         ...,
         description="The prompt the request sends as its system turn",
         min_length=1,
-        max_length=30000,
+        max_length=PROMPT_MAX_CHARS,
     )
 
     user_message: str | None = Field(
@@ -131,8 +181,72 @@ class _PromptRequest(BaseModel):
             "message (a step, the greeting), which is not an empty message"
         ),
         min_length=0,
-        max_length=10000,
+        max_length=USER_MESSAGE_MAX_CHARS,
     )
+
+    # DECISION plan-2026-11-06T093029-0068b055/D-002: an over-cap prompt is a
+    # typed, rolled-back error that names the field, the cap and the largest
+    # PUBLIC context keys (names and sizes, never values). Do NOT truncate the
+    # largest leaves here (silent data loss, a model-visible change, and the
+    # data paths never truncate), do NOT raise or drop the cap, and do NOT
+    # re-inline the key checks below: has_internal_prefix and
+    # is_forbidden_context_entry are the one policy. Any other ValidationError
+    # is re-raised unchanged.
+    @classmethod
+    def checked(
+        cls: type[_PromptRequestT],
+        *,
+        prompt_context: Mapping[str, Any] | None = None,
+        **fields: Any,
+    ) -> _PromptRequestT:
+        """Build the request; an over-cap prompt raises ``LLMResponseError``.
+
+        Parameters: ``fields`` are the model's own fields (as for the
+        constructor); ``prompt_context`` is the context mapping the system
+        prompt was built from, read only to name its largest keys.
+        Returns the request. Raises ``LLMResponseError`` (chained from the
+        ``ValidationError``) when every validation error is an over-cap
+        ``system_prompt`` / ``user_message``; any other ``ValidationError``
+        propagates unchanged.
+        """
+        try:
+            return cls(**fields)
+        except ValidationError as e:
+            over = [
+                err["loc"][0]
+                for err in e.errors()
+                if err["type"] == "string_too_long"
+                and len(err["loc"]) == 1
+                and err["loc"][0] in _PROMPT_CAPS
+            ]
+            if not over or len(over) != len(e.errors()):
+                raise
+            parts = []
+            for field in over:
+                cap = _PROMPT_CAPS[field]
+                length = len(fields[field])
+                if field == "user_message":
+                    parts.append(
+                        f"the user message is {length} characters but a request "
+                        f"carries at most {cap} (max_message_length may be set "
+                        f"higher, the request cap still applies); send a "
+                        f"shorter message"
+                    )
+                else:
+                    named = _largest_public_context_keys(prompt_context)
+                    parts.append(
+                        f"the system prompt is {length} characters but a request "
+                        f"carries at most {cap}"
+                        + (
+                            f"; the largest context entries are {named} "
+                            "(names and character counts only)"
+                            if named
+                            else ""
+                        )
+                        + "; shrink or remove them, scope the state with "
+                        "context_scope read_keys, or shorten the history"
+                    )
+            raise LLMResponseError("Prompt too large: " + "; and ".join(parts)) from e
 
 
 class BulkExtractionRequest(_PromptRequest):

@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # --------------------------------------------------------------
 from fsm_llm import API
 from fsm_llm.constants import has_internal_prefix
-from fsm_llm.definitions import ResponseGenerationRequest
+from fsm_llm.definitions import USER_MESSAGE_MAX_CHARS, ResponseGenerationRequest
 from fsm_llm.logging import logger
 
 from .constants import (
@@ -43,10 +43,6 @@ from .models import WaitEventConfig, WorkflowStepResult
 STEP_EXECUTOR: contextvars.ContextVar[Executor | None] = contextvars.ContextVar(
     "fsm_llm_workflows_step_executor", default=None
 )
-
-
-#: ``fsm_llm.definitions.ResponseGenerationRequest.user_message`` max_length.
-_MAX_CORE_USER_MESSAGE = 10000
 
 
 def _is_async_callable(fn: Any) -> bool:
@@ -413,15 +409,15 @@ class LLMProcessingStep(WorkflowStep):
             raw = await self._with_timeout(_call_user_callable(generate, prompt))
         else:
             system_prompt = self.system_prompt or "Follow the user's instructions."
-            if len(prompt) > _MAX_CORE_USER_MESSAGE:
+            if len(prompt) > USER_MESSAGE_MAX_CHARS:
                 # ResponseGenerationRequest caps user_message; the system
                 # prompt allows much more, so carry a long prompt there.
-                request = ResponseGenerationRequest(
+                request = ResponseGenerationRequest.checked(
                     system_prompt=f"{system_prompt}\n\n{prompt}",
                     user_message="Follow the instructions above.",
                 )
             else:
-                request = ResponseGenerationRequest(
+                request = ResponseGenerationRequest.checked(
                     system_prompt=system_prompt, user_message=prompt
                 )
             raw = await self._with_timeout(
