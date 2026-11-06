@@ -52,8 +52,11 @@ from .logging import logger
 from .pipeline import MessagePipeline
 from .prompts import (
     DataExtractionPromptBuilder,
+    DataExtractionPromptConfig,
     FieldExtractionPromptBuilder,
+    FieldExtractionPromptConfig,
     ResponseGenerationPromptBuilder,
+    ResponsePromptConfig,
 )
 from .transition_evaluator import TransitionEvaluator
 from .utilities import filter_context_tree, load_fsm_definition
@@ -283,14 +286,33 @@ class FSMManager:
         )
 
         # Prompt builders (stored for attribute access by tests/API)
+        # DECISION plan-2026-11-06T093029-0068b055/D-004
+        # The default builders show `max_history_size` messages: the number is
+        # passed UNCHANGED as `max_history_messages` (the unit of the default 5,
+        # so default prompts stay byte-identical). Do NOT pass `2 * max_history_size`
+        # (the honest exchange unit): it grows every default prompt from 5 to 10
+        # messages and moves the eval baselines (carried, needs a live run), and
+        # D-038 / test_bugs.py pin the unmultiplied number. Do NOT leave the
+        # defaults config-less either: then the knob only sizes storage and the
+        # model never sees a larger window. api.py builds no builders of its own
+        # so this stays the one site.
         self.data_extraction_prompt_builder = (
-            data_extraction_prompt_builder or DataExtractionPromptBuilder()
+            data_extraction_prompt_builder
+            or DataExtractionPromptBuilder(
+                DataExtractionPromptConfig(max_history_messages=max_history_size)
+            )
         )
         self.response_generation_prompt_builder = (
-            response_generation_prompt_builder or ResponseGenerationPromptBuilder()
+            response_generation_prompt_builder
+            or ResponseGenerationPromptBuilder(
+                ResponsePromptConfig(max_history_messages=max_history_size)
+            )
         )
         self.field_extraction_prompt_builder = (
-            field_extraction_prompt_builder or FieldExtractionPromptBuilder()
+            field_extraction_prompt_builder
+            or FieldExtractionPromptBuilder(
+                FieldExtractionPromptConfig(max_history_messages=max_history_size)
+            )
         )
 
         # Transition evaluator

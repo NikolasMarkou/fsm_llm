@@ -139,11 +139,6 @@ from .llm import (
 )
 from .logging import logger
 from .memory import WorkingMemory
-from .prompts import (
-    DataExtractionPromptBuilder,
-    FieldExtractionPromptBuilder,
-    ResponseGenerationPromptBuilder,
-)
 from .session import SessionState, SessionStore
 from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 from .utilities import load_fsm_definition, load_fsm_from_file
@@ -638,7 +633,8 @@ class API:
             api_key: API key (if using default interface)
             temperature: LLM temperature parameter
             max_tokens: Maximum tokens for LLM responses
-            max_history_size: Maximum conversation history size
+            max_history_size: Exchanges stored per conversation; the prompt shows the
+                last ``max_history_size`` messages (default 5)
             max_message_length: Maximum message length
             handlers: Optional list of handlers
             handler_error_mode: Handler error handling mode
@@ -710,10 +706,11 @@ class API:
         self.fsm_definition, self.fsm_id = self.process_fsm_definition(fsm_definition)
         _require_classifier_interface(self.fsm_definition, self.llm_interface)
 
-        # Create enhanced prompt builders
-        data_extraction_prompt_builder = DataExtractionPromptBuilder()
-        response_generation_prompt_builder = ResponseGenerationPromptBuilder()
-        field_extraction_prompt_builder = FieldExtractionPromptBuilder()
+        # DECISION plan-2026-11-06T093029-0068b055/D-004
+        # No prompt builders are built here: FSMManager builds the defaults with
+        # `max_history_messages=max_history_size` (one site, see fsm.py). Do NOT
+        # construct config-less builders here again: they would pin the window
+        # to 5 messages and make `max_history_size` inert for the model.
 
         # Create transition evaluator
         evaluator_config = transition_config or TransitionEvaluatorConfig()
@@ -752,9 +749,6 @@ class API:
         self.fsm_manager = FSMManager(
             fsm_loader=custom_fsm_loader,
             llm_interface=self.llm_interface,
-            data_extraction_prompt_builder=data_extraction_prompt_builder,
-            response_generation_prompt_builder=response_generation_prompt_builder,
-            field_extraction_prompt_builder=field_extraction_prompt_builder,
             transition_evaluator=transition_evaluator,
             max_history_size=max_history_size,
             max_message_length=max_message_length,

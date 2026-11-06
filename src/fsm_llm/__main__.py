@@ -111,7 +111,7 @@ def main_cli():
         "-n",
         type=int,
         default=DEFAULT_MAX_HISTORY_SIZE,
-        help=f"Maximum number of conversation exchanges to include in history (default: {DEFAULT_MAX_HISTORY_SIZE})",
+        help=f"Exchanges stored per conversation; the last N messages are shown to the model (default: {DEFAULT_MAX_HISTORY_SIZE})",
     )
     parser.add_argument(
         "--message-length",

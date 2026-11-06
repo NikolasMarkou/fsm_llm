@@ -1142,3 +1142,199 @@ class TestBaseExceptionRollsBackUserMessage:
         ):
             with pytest.raises(FSMError):
                 api.converse("hello", conv_id)
+
+
+# ======================================================================
+# F-SU-02: the prompt history window follows max_history_size
+# ======================================================================
+
+_PARENT_DEFAULT_PROMPT = (
+    "<task>\n"
+    "You are the Response Generation component in a conversational AI system.\n"
+    "Your responsibility is to:\n"
+    "- Generate appropriate user-facing responses based on the <persona>,\n"
+    "- Respond based on the current conversation state and context,\n"
+    "- Acknowledge any new information that was extracted from user input,\n"
+    "- Guide the conversation naturally toward the current state's purpose.\n"
+    "- Maintain consistent persona and conversational flow.\n"
+    "</task>\n"
+    "\n"
+    "<response_generation>\n"
+    "<persona>\n"
+    "Pal\n"
+    "</persona>\n"
+    "\n"
+    "<final_state_context>\n"
+    "<current_state>chat</current_state>\n"
+    "<purpose>talk</purpose>\n"
+    "<response_instructions>\n"
+    "Reply briefly\n"
+    "</response_instructions>\n"
+    "</final_state_context>\n"
+    "\n"
+    "<user_message>\n"
+    "<original_input>message number 11</original_input>\n"
+    "</user_message>\n"
+    "\n"
+    "<conversation_summary>system: Hello! How can I help you? | user: message number 0 | system: Hello! How can I help you? | user: message number 1 | system: Hello! How can I help you? | user: message number 2 | system: Hello! How can I help you? | user: message number 3 | system: Hello! How can I help you? | user: message number 4 | system: Hello! How can I help you? | user: message number 5 | system: Hello! How can I help you?</conversation_summary>\n"
+    "\n"
+    "<conversation_history><![CDATA[\n"
+    "[\n"
+    " {\n"
+    '  "user": "message number 9"\n'
+    " },\n"
+    " {\n"
+    '  "system": "Hello! How can I help you?"\n'
+    " },\n"
+    " {\n"
+    '  "user": "message number 10"\n'
+    " },\n"
+    " {\n"
+    '  "system": "Hello! How can I help you?"\n'
+    " },\n"
+    " {\n"
+    '  "user": "message number 11"\n'
+    " }\n"
+    "]\n"
+    "]]></conversation_history>\n"
+    "\n"
+    "<response_format>\n"
+    "Your response must be valid JSON with the following structure:\n"
+    "{\n"
+    '    "message": "Your natural response to the user",\n'
+    '    "reasoning": "Brief internal reasoning (optional)"\n'
+    "}\n"
+    "\n"
+    "Where:\n"
+    "\t- `message` is REQUIRED and contains the natural, user-facing response text.\n"
+    "\t- `reasoning` is OPTIONAL and explains your response decisions (not shown to user).\n"
+    "\n"
+    "Important:\n"
+    "\t- Return ONLY valid JSON - no markdown code fences, no additional text\n"
+    "\t- Acknowledge new information when appropriate\n"
+    "\t- Guide toward the current state's purpose when needed\n"
+    "</response_format>\n"
+    "\n"
+    "<guidelines>\n"
+    "Response Generation Guidelines:\n"
+    "- Acknowledge new information the user has provided when it's significant.\n"
+    "- Guide the conversation toward the current state's purpose when appropriate.\n"
+    "- Ask follow-up questions if more information is needed.\n"
+    "- Maintain consistent persona based on the <persona>.\n"
+    "- Don't mention technical system details or internal states to users.\n"
+    "</guidelines>\n"
+    "\n"
+    "</response_generation>"
+)
+
+_LOOP_FSM = {
+    "name": "Loop",
+    "description": "d",
+    "initial_state": "chat",
+    "persona": "Pal",
+    "states": {
+        "chat": {
+            "id": "chat",
+            "description": "chatting",
+            "purpose": "talk",
+            "response_instructions": "Reply briefly",
+            "transitions": [
+                {
+                    "target_state": "done",
+                    "description": "never",
+                    "priority": 100,
+                    "conditions": [{"description": "never", "logic": {"==": [1, 2]}}],
+                }
+            ],
+        },
+        "done": {
+            "id": "done",
+            "description": "end",
+            "purpose": "end",
+            "response_instructions": "bye",
+        },
+    },
+}
+
+
+def _converse_twelve_turns(api, llm):
+    """Run 12 turns and return the last Pass-2 (response) system prompt."""
+    conv_id, _ = api.start_conversation()
+    for i in range(12):
+        api.converse(f"message number {i}", conv_id)
+    return [r.system_prompt for n, r in llm.call_history if n == "generate_response"][
+        -1
+    ]
+
+
+def _shown_messages(prompt: str) -> int:
+    import re
+
+    block = re.search(
+        r"<conversation_history>(.*?)</conversation_history>", prompt, re.S
+    )
+    assert block is not None
+    return len(re.findall(r'^ \{\n  "(?:user|system)":', block.group(1), re.M))
+
+
+class TestHistoryWindowFollowsMaxHistorySize:
+    """D-004: the number is the prompt window in messages, passed unchanged."""
+
+    def test_prompt_shows_max_history_size_messages(self):
+        from tests.conftest import MockLLM2Interface
+
+        llm = MockLLM2Interface()
+        api = API.from_definition(_LOOP_FSM, llm_interface=llm, max_history_size=20)
+        prompt = _converse_twelve_turns(api, llm)
+        assert _shown_messages(prompt) == 20
+        # Nothing was trimmed from storage, so no summary of dropped turns.
+        assert "<conversation_summary>" not in prompt
+
+    def test_fsm_manager_default_builders_follow_size(self):
+        from fsm_llm.fsm import FSMManager
+
+        manager = FSMManager(
+            fsm_loader=lambda fsm_id: FSMDefinition.model_validate(_LOOP_FSM),
+            llm_interface=Mock(spec=LLMInterface),
+            max_history_size=8,
+        )
+        for builder in (
+            manager.data_extraction_prompt_builder,
+            manager.response_generation_prompt_builder,
+            manager.field_extraction_prompt_builder,
+        ):
+            assert builder.config.max_history_messages == 8
+        # The pipeline's builders are the same objects, not a second default.
+        pipeline = manager._pipeline
+        assert pipeline.data_extraction_prompt_builder is (
+            manager.data_extraction_prompt_builder
+        )
+        assert pipeline.field_extraction_prompt_builder is (
+            manager.field_extraction_prompt_builder
+        )
+
+    def test_default_size_prompt_is_byte_identical(self):
+        from tests.conftest import MockLLM2Interface
+
+        llm = MockLLM2Interface()
+        api = API.from_definition(_LOOP_FSM, llm_interface=llm)
+        assert _converse_twelve_turns(api, llm) == _PARENT_DEFAULT_PROMPT
+
+    def test_agent_config_max_history_size_reaches_the_prompt(self):
+        from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry
+        from tests.conftest import MockLLM2Interface
+
+        def echo(query: str) -> str:
+            """Echo the query."""
+            return query
+
+        registry = ToolRegistry()
+        registry.register_function(echo, name="echo", description="Echo the query")
+        llm = MockLLM2Interface()
+        agent = ReactAgent(
+            tools=registry,
+            config=AgentConfig(max_history_size=20),
+            llm_interface=llm,
+        )
+        api = agent._create_api(_LOOP_FSM)
+        assert _shown_messages(_converse_twelve_turns(api, llm)) == 20
