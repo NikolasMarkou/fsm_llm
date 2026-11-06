@@ -887,8 +887,12 @@ def find_longest_path(graph: dict[str, list], initial_state: str) -> int:
     """The number of states on the longest path from ``initial_state``.
 
     A transition back to a state already on the current path (a loop) is not
-    followed, so the walk is over the graph without its back edges and every
-    state is visited once.
+    followed, so every state is visited once. Exact for a graph without loops.
+    With loops it is a LOWER BOUND of the longest simple path (never above it):
+    a state's best length is memoised under the path that first reached it and
+    reused under another, so the answer can depend on the order of the
+    transitions. The exact value is NP-hard in general, and a diagram label
+    does not need it.
     """
     # best[s]: states on the longest path that starts at s (s included)
     best: dict[str, int] = {}
