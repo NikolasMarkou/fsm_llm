@@ -9,6 +9,12 @@ HANDLER/HOOK sections) and is pinned by a golden parity table in
 ``tests/test_fsm_llm_eval/test_scoring.py``: change it only for rubric
 reasons, and never together with a structural change, or new scores stop
 being comparable with the historical runs in ``EVALUATE.md``.
+
+Rubric change (plan 0068b055, step 12.19): a run that exits 0 but prints an
+``Error:`` line or ``Success: False`` is capped at 2, and an extraction rate of
+exactly 50% (or lower) is a partial failure. Scores of such runs are lower than
+before, so older example scores and baselines are not comparable with new ones
+(the heuristic already overstated).
 """
 
 from __future__ import annotations
@@ -18,6 +24,17 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - typing only; examples imports this module
     from .examples import ExampleResult
+
+
+#: A line the example itself printed as an error: ``Error: ...`` or
+#: ``Error during ...``, optionally indented. Anchored at the line start so
+#: prose that quotes ``Error:`` mid-line, ``ValueError: x`` and metric lines such
+#: as ``Error Rate: 0.02%`` do not match.
+_ERROR_LINE = re.compile(r"^[ \t]*Error(?::|[ \t]+during\b)", re.MULTILINE)
+#: A line the example printed to say the run did not reach its goal.
+_SUCCESS_FALSE = re.compile(r"^[ \t]*Success:[ \t]*False\b", re.MULTILINE)
+#: Highest score of a run that exited 0 but printed one of the two lines above.
+_REPORTED_FAILURE_CAP = 2
 
 
 def _parse_extraction_rate(stdout: str) -> tuple[int, int] | None:
@@ -72,6 +89,12 @@ def classify_result(result: ExampleResult) -> tuple[int, list[str]]:
     3. Error signals in output (tracebacks, tool failures, parse errors)
     4. Extraction quality (extraction rate, field completion, state movement)
     5. Handler activity (for examples with handler analytics)
+
+    A clean exit that printed an ``Error:`` line or ``Success: False`` ran but
+    reported failure: it adds ``F-CODE`` / ``F-MODEL`` and the score is capped
+    at ``_REPORTED_FAILURE_CAP`` (2, "PARTIAL": some features work, a key
+    behaviour fails). An extraction rate of at most 50% is a partial failure
+    (the boundary 50% itself used to pass).
     """
     failures: list[str] = []
     combined = result.stdout + result.stderr
@@ -129,6 +152,17 @@ def classify_result(result: ExampleResult) -> tuple[int, list[str]]:
         if "F-CODE" not in failures:
             failures.append("F-PARSE")
 
+    # The example itself said the run failed (added after the legacy signals so
+    # the F-PARSE rule above sees the same F-CODE state as before).
+    reported_failure = False
+    if _ERROR_LINE.search(result.stdout):
+        if "F-CODE" not in failures:
+            failures.append("F-CODE")
+        reported_failure = True
+    if _SUCCESS_FALSE.search(result.stdout):
+        failures.append("F-MODEL")
+        reported_failure = True
+
     # ------------------------------------------------------------------
     # Check extraction quality (FSM examples print extraction summaries)
     # ------------------------------------------------------------------
@@ -139,8 +173,8 @@ def classify_result(result: ExampleResult) -> tuple[int, list[str]]:
             # Zero extraction — nothing was captured despite running
             if "F-EXTRACT" not in failures:
                 failures.append("F-EXTRACT")
-        elif total > 0 and extracted < total * 0.5:
-            # Less than 50% extraction — partial failure
+        elif total > 0 and extracted * 2 <= total:
+            # At most 50% extraction — partial failure
             if "F-EXTRACT" not in failures:
                 failures.append("F-EXTRACT")
 
@@ -187,14 +221,18 @@ def classify_result(result: ExampleResult) -> tuple[int, list[str]]:
 
     if has_extract_fail and has_trans_fail:
         # Both extraction and transitions failed — broken
-        return 1, failures
-
-    if has_extract_fail:
+        score = 1
+    elif has_extract_fail:
         # Extraction failed but may have transitioned (or no transitions expected)
         if extraction and extraction[0] == 0:
-            return 1, failures  # Zero extraction = broken
-        return 2, failures  # Partial extraction = partial
+            score = 1  # Zero extraction = broken
+        else:
+            score = 2  # Partial extraction = partial
+    elif len(failures) == 1:
+        score = 3
+    else:
+        score = 2
 
-    if len(failures) == 1:
-        return 3, failures
-    return 2, failures
+    if reported_failure:
+        score = min(score, _REPORTED_FAILURE_CAP)
+    return score, failures

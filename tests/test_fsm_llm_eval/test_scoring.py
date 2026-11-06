@@ -7,6 +7,11 @@ return exactly the same (score, failures) for each row: new example scores
 stay comparable with the historical runs in EVALUATE.md. Do NOT regenerate
 this table from the new function; a mismatch means the rubric changed.
 
+Rubric changes after the move (iteration 1 of plan 0068b055, step 12.19) are
+NOT in this table: the golden rows hold for every input that carries no
+``Error:`` line, no ``Success: False`` line and no extraction rate of exactly
+50% or lower-but-nonzero; ``TestReportedFailure`` below pins the changes.
+
 The rows cover every return statement: the four score-0 crash branches, both
 timeout returns, each output signal (traceback, tool, extraction keywords,
 budget, parse), the extraction-rate, [MISSING], stuck-state and handler
@@ -264,3 +269,69 @@ class TestScoreLabels:
         result = _result(0, "clean", "", 1.0, False)
         result.score, result.failures = 0, ["F-CODE"]
         assert classify_result(result) == (4, [])
+
+
+def _run(stdout, *, exit_code=0, stderr=""):
+    return classify_result(_result(exit_code, stdout, stderr, 10.0, False))
+
+
+class TestReportedFailure:
+    """Rubric change (step 12.19): a run that says it failed cannot score 4."""
+
+    def test_error_line_caps_the_score(self):
+        score, failures = _run("Task: x\nError: Agent timed out after 300.0 seconds\n")
+        assert score == 2
+        assert failures == ["F-CODE"]
+
+    def test_indented_error_line_counts(self):
+        assert _run("step 1\n  Error: tool exploded\n")[0] == 2
+
+    def test_error_during_line_counts(self):
+        assert _run("Error during conversation: boom\n")[0] == 2
+
+    def test_success_false_caps_the_score(self):
+        score, failures = _run("Answer: none\nSuccess: False\nTools used: []\n")
+        assert score == 2
+        assert failures == ["F-MODEL"]
+
+    def test_success_true_is_unchanged(self):
+        assert _run("Success: True\n") == (4, [])
+
+    def test_error_line_and_success_false_together(self):
+        score, failures = _run("Error: x\nSuccess: False\n")
+        assert score == 2
+        assert failures == ["F-CODE", "F-MODEL"]
+
+    def test_error_line_does_not_raise_a_worse_score_than_the_cap(self):
+        # zero extraction is 1 already; the cap never lifts a score
+        assert _run("Error: x\nExtraction rate: 0/2 (0%)")[0] == 1
+
+    def test_mid_line_error_in_prose_is_unchanged(self):
+        out = "The agent said: the tool returned Error: file missing, so I retried."
+        assert _run(out) == (4, [])
+
+    def test_error_rate_metric_is_unchanged(self):
+        assert _run("  Error Rate:     0.02%\n") == (4, [])
+
+    def test_exception_class_name_is_unchanged(self):
+        assert _run("ValueError: shown as data\n") == (4, [])
+
+    def test_stderr_error_line_is_not_read(self):
+        assert _run("fine\n", stderr="Error: noisy log line\n") == (4, [])
+
+    def test_nonzero_exit_keeps_its_existing_score(self):
+        assert _run("Error: boom\n" + "x" * 400, exit_code=1)[0] == 2
+
+    def test_fifty_percent_extraction_is_a_partial_failure(self):
+        score, failures = _run("Extraction rate: 1/2 (50%)\n")
+        assert (score, failures) == (2, ["F-EXTRACT"])
+
+    def test_two_of_four_is_a_partial_failure(self):
+        assert _run("Extraction rate: 2/4 (50%)")[0] == 2
+
+    def test_just_above_half_still_passes(self):
+        assert _run("Extraction rate: 3/5 (60%)\n") == (4, [])
+
+    def test_clean_run_stays_four(self):
+        out = "Answer: 42\nSuccess: True\nExtraction rate: 2/2 (100%)\n"
+        assert _run(out) == (4, [])
