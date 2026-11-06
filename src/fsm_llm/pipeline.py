@@ -472,12 +472,17 @@ class MessagePipeline:
         self,
         instance: FSMInstance,
         timing: HandlerTiming,
+        *,
         current_state: str | None = None,
         target_state: str | None = None,
         updated_keys: set[str] | None = None,
         error_context: dict[str, Any] | None = None,
     ) -> None:
         """Execute handlers at specified timing point.
+
+        Everything after ``timing`` is keyword-only: the method lost its old
+        third positional parameter ``conversation_id``, and a positional caller
+        must fail loudly instead of binding it to ``current_state``.
 
         Deep-copies instance context before passing to handlers, then merges
         the delta dict back into the instance. A handler returning a key with

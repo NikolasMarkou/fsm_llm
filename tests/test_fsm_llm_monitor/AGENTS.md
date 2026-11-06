@@ -1,7 +1,7 @@
 # test_fsm_llm_monitor
 
 Path: `tests/test_fsm_llm_monitor`
-Purpose: pytest suite (453 collected tests) for `fsm_llm.monitor`, the FastAPI dashboard package in `src/fsm_llm/monitor/`.
+Purpose: pytest suite (455 collected tests) for `fsm_llm.monitor`, the FastAPI dashboard package in `src/fsm_llm/monitor/`.
 
 ## Scope
 
@@ -37,7 +37,7 @@ Manager test pattern: `InstanceManager(config=MonitorConfig())`, then `mgr.globa
 | `test_definitions.py` | models, `normalize_message_history`, `model_to_dict` | 50 tests |
 | `test_otel.py` | `OTELExporter` | 20 tests; autouse `_mock_otel` fixture |
 | `test_audit_2026_09_28.py` | regression tests for the 2026-09-28 audit (non-HTTP) | 38 tests; module-level `pytest.importorskip("fsm_llm.workflows")` (line 436) skips all 37 when workflows is missing |
-| `test_instance_manager_fixes.py` | 2026-11-05 instance manager and collector fixes (plan 5980fbb7 step 16) | 11 tests |
+| `test_instance_manager_fixes.py` | 2026-11-05 instance manager and collector fixes (plan 5980fbb7 step 16) | 13 tests |
 | `test_server_consistency.py` | 2026-11-05 server and SPA fixes (plan 5980fbb7 step 17) | 57 tests |
 
 ## Public interface

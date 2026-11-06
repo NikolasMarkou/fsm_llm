@@ -1,7 +1,7 @@
 # test_fsm_llm
 
 Path: `tests/test_fsm_llm`
-Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass MessagePipeline, transitions, prompts, LLM wrapper, handlers, memory, validator, visualizer, logging), 70 test files, 5,504 collected tests.
+Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass MessagePipeline, transitions, prompts, LLM wrapper, handlers, memory, validator, visualizer, logging), 71 test files, 5,545 collected tests.
 
 ## Scope
 
@@ -88,7 +88,7 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_intent_entities_seam.py` | `IntentScore` keeps `None` entities | |
 | `test_core_hardening_seam.py` | `FileSessionStore.save`, `setup_logging`, bounded context, locks | |
 | `test_audit_sweeps.py` | operator table, context-filter, config, sanitizer agreement | |
-| `test_core_behaviour_fixes.py`, `test_definitions_behaviour_fixes.py`, `test_llm_layer_behaviour_fixes.py`, `test_logging_behaviour_fixes.py`, `test_handlers_visualizer_fixes.py`, `test_okf_cli_frontmatter_fixes.py`, `test_resolve_model.py`, `test_api_key_compare_sites.py` | 2026-11-05 source pass (plan 5980fbb7 steps 2 to 9): one class per fixed finding | each fails on the parent commit |
+| `test_core_behaviour_fixes.py`, `test_definitions_behaviour_fixes.py`, `test_llm_layer_behaviour_fixes.py`, `test_logging_behaviour_fixes.py`, `test_handlers_visualizer_fixes.py`, `test_visualizer_golden.py`, `test_okf_cli_frontmatter_fixes.py`, `test_resolve_model.py`, `test_api_key_compare_sites.py` | 2026-11-05 source pass (plan 5980fbb7 steps 2 to 9): one class per fixed finding | each fails on the parent commit (`test_visualizer_golden.py` is a golden pin of the renderers instead) |
 | `test_validator_unit.py` | `FSMValidator`, agrees with the loader, `fsm-llm-validate` output | |
 | `test_visualizer_unit.py` | ASCII visualizer, box alignment, truncation, CLI output | |
 | `test_runner_unit.py`, `test_utilities_unit.py` | runner redaction, `extract_json_from_text`, FSM loading | |
@@ -176,7 +176,7 @@ Seam files fake the backend with `patch("fsm_llm.llm.completion", ...)` returnin
 - New regression for a public-path bug: add a seam test that drives `API.converse` or patched `fsm_llm.llm.completion`, not only a helper-level test.
 - Reuse helpers from earlier seam files by import rather than copying, and keep their names stable.
 - Do not relabel, delete or regenerate corpus rows to improve a rate; do not add filter words to catch one corpus entry. Add names from real vocabulary without reading `constants.py` first.
-- After adding or removing tests, re-measure with the first command below. The suite count (5,504) is pinned by `tests/test_packaging.py::test_per_suite_table` (marked slow), which compares a measured `--collect-only` count per suite against a documented literal of the form `pytest tests/test_fsm_llm/  # ... (N tests)`; run that test after changing the count. The counts stated in this file (70 test files, 5,504 tests, 14 slow) are not pinned by any test and must be updated by hand.
+- After adding or removing tests, re-measure with the first command below. The suite count (5,545) is pinned by `tests/test_packaging.py::test_per_suite_table` (marked slow), which compares a measured `--collect-only` count per suite against a documented literal of the form `pytest tests/test_fsm_llm/  # ... (N tests)`; run that test after changing the count. The counts stated in this file (71 test files, 5,545 tests, 14 slow) are not pinned by any test and must be updated by hand.
 
 ```bash
 .venv/bin/python -m pytest tests/test_fsm_llm/ --collect-only -q | tail -1

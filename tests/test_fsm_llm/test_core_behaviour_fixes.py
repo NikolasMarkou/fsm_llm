@@ -478,3 +478,22 @@ class TestPathDefinitionIsAcceptedEverywhere:
             APIBuilder().set_definition(fsm_path).set_llm_interface(MockLLM2Interface())
         )
         assert built.build().fsm_definition.name == "b"
+
+
+class TestExecuteHandlersTakesItsStateArgumentsByKeyword:
+    """REVIEW-C6: ``MessagePipeline.execute_handlers`` lost its third positional
+    parameter ``conversation_id``; an old positional call bound the id to
+    ``current_state`` with no error."""
+
+    def test_an_old_positional_call_raises(self):
+        from fsm_llm.handlers import HandlerTiming
+
+        api = API.from_definition(_TWO_STATE, llm_interface=MockLLM2Interface())
+        cid, _ = api.start_conversation()
+        pipeline = api.fsm_manager._pipeline
+        instance = api.fsm_manager.instances[cid]
+        with pytest.raises(TypeError):
+            pipeline.execute_handlers(instance, HandlerTiming.PRE_PROCESSING, cid, "s")
+        pipeline.execute_handlers(
+            instance, HandlerTiming.PRE_PROCESSING, current_state="s"
+        )
