@@ -370,6 +370,14 @@ class ResponseGenerationResponse(BaseModel):
         default="response", description="Type of the response message"
     )
 
+    truncated: bool = Field(
+        default=False,
+        description=(
+            "True when the provider cut the reply off at max_tokens: the message "
+            "is a fragment or the cut-off apology (plan 0068b055 D-025)"
+        ),
+    )
+
 
 # --------------------------------------------------------------
 # Enhanced Transition Decision Models
@@ -687,6 +695,14 @@ class FieldExtractionResponse(BaseModel):
         description="Validation error message if is_valid is False",
     )
 
+    truncated: bool = Field(
+        default=False,
+        description=(
+            "True when the provider cut the extraction reply off at max_tokens "
+            "(plan 0068b055 D-025)"
+        ),
+    )
+
 
 # --------------------------------------------------------------
 # Completion Models (LLMInterface.complete)
@@ -776,6 +792,20 @@ class ModelToolCall(BaseModel):
 # The provider's ``finish_reason`` for a reply cut off at ``max_tokens``: the one
 # signal that tells a cut fragment from a whole reply (plan 0068b055 D-024).
 FINISH_REASON_LENGTH = "length"
+
+# DECISION plan-2026-11-06T093029-0068b055/D-025
+# The turn's cut-off record: a `context.data` key (internal prefix, so it is in
+# no prompt, no `API.get_data` view and no handler-visible user data; handlers
+# and `fsm_manager.get_complete_conversation(...)["collected_data"]` do see it).
+# Value: a JSON-native dict `{"reply": True}` (Pass 2 reply cut by max_tokens)
+# and/or `{"fields": [names]}` (extractions cut, in call order); the key is
+# ABSENT when nothing was cut. The pipeline removes it at the start of every
+# turn and writes it only through `MessagePipeline` (`_record_cut_off`), so it
+# describes the LAST turn only. Do NOT put it in the completion-state result
+# `{kind, text, calls}` (documented shape), do NOT re-inline the literal, and do
+# NOT add a second flag for the same fact. It lives here, not in `constants.py`
+# (a hash-pinned bench file). See decisions.md D-025.
+CONTEXT_KEY_CUT_OFF = "_cut_off"
 
 
 class CompletionResponse(BaseModel):

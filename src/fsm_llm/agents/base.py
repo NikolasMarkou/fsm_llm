@@ -28,7 +28,11 @@ from fsm_llm import API
 from fsm_llm.api import llm_settings_for
 from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT, has_internal_prefix
 from fsm_llm.context import ContextCompactor
-from fsm_llm.definitions import FSMError, RunBudgetExceededError
+from fsm_llm.definitions import (
+    CONTEXT_KEY_CUT_OFF,
+    FSMError,
+    RunBudgetExceededError,
+)
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 from fsm_llm.utilities import extract_json_from_text
@@ -651,11 +655,40 @@ class BaseAgent(ABC):
                 steps and steps[-1].ended
             ):
                 final_context[ContextKeys.FORCED_STOP_REASON] = StopReason.ENDED
+            elif self._forced_stop_reason(
+                final_context
+            ) is None and self._last_turn_cut_off(api, conv_id):
+                # DECISION plan-2026-11-06T093029-0068b055/D-025: a run whose
+                # LAST turn had its reply (or an extraction) cut off at
+                # max_tokens did not produce a whole answer: success=False,
+                # `truncated`, the fragment still ships. Do NOT repeat this
+                # per pattern (every `_standard_run` pattern and ADaPT get it
+                # here, once), do NOT override a reason that already forced
+                # the stop, and do NOT read an earlier turn's cut (the record
+                # is cleared every turn). See decisions.md D-025.
+                final_context[ContextKeys.FORCED_STOP_REASON] = StopReason.TRUNCATED
             log.info(LogMessages.AGENT_COMPLETE.format(iterations=len(steps)))
             return [r for r in replies if r is not None], final_context, len(steps)
 
         finally:
             self._end_run_conversation(api, conv_id)
+
+    @staticmethod
+    def _last_turn_cut_off(api: API, conv_id: str) -> bool:
+        """True when core recorded a provider cut-off in the run's last turn.
+
+        Interface contract (caller: ``_run_conversation_loop``): reads
+        ``CONTEXT_KEY_CUT_OFF`` from the top frame's UNFILTERED context
+        (``fsm_manager.copy_raw_context_data``: ``api.get_data`` drops internal
+        keys). False when the conversation is no longer active or the key is
+        absent or empty.
+        """
+        if conv_id not in api.list_active_conversations():
+            return False
+        raw = api.fsm_manager.copy_raw_context_data(
+            api.get_sub_conversation_id(conv_id)
+        )
+        return bool(raw and raw.get(CONTEXT_KEY_CUT_OFF))
 
     @staticmethod
     def _end_run_conversation(api: API, conv_id: str) -> None:

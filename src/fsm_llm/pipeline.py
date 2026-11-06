@@ -45,6 +45,7 @@ from .constants import (
 )
 from .context import clean_context_keys, commit_with_key_rollback
 from .definitions import (
+    CONTEXT_KEY_CUT_OFF,
     AdvanceResult,
     BulkExtractionRequest,
     ClassificationError,
@@ -290,6 +291,43 @@ def _record_transition_classification(
     # ``clean_context_keys`` anyway. Supersedes the data-key half of
     # plan-2026-09-21T203800-8a03483a/D-005.
     instance.context.metadata[METADATA_KEY_TRANSITION_CLASSIFICATION] = record
+
+
+def _was_cut_off(response: Any) -> bool:
+    """True when ``response.truncated`` is exactly ``True`` (a provider cut-off).
+
+    Contract: any object; a response without the attribute (a test double, a
+    third-party ``LLMInterface`` returning a duck-typed reply) is not cut off.
+    Never raises.
+    """
+    return getattr(response, "truncated", False) is True
+
+
+def _record_cut_off(
+    instance: FSMInstance, *, reply: bool = False, field: str | None = None
+) -> None:
+    """Note in ``context.data[CONTEXT_KEY_CUT_OFF]`` that a model reply was cut.
+
+    Contract: ``reply=True`` records the Pass-2 reply; ``field`` appends the name
+    of an extraction (a field, or a completion state's result key) once. The
+    record is a new dict each call (copy-on-write: a snapshot a caller holds
+    never changes) holding JSON-native values only. Written straight into
+    ``context.data``: the key is internal, so it never reaches a prompt or
+    ``API.get_data``. The turn bodies (``_run_turn``, ``_stream_turn``) and the
+    greeting remove it before they start, so it describes the current turn only.
+    A streamed reply is never flagged (the stream carries no finish reason).
+    """
+    # DECISION plan-2026-11-06T093029-0068b055/D-025: ONE key, set by the
+    # pipeline from the `truncated` flag the LLM layer puts on a response. Do
+    # NOT re-derive the cut in an agent from text (D-022 forbids a text-shape
+    # guess) and do NOT add a second key per kind of reply. See decisions.md D-025.
+    data = instance.context.data
+    record = dict(data.get(CONTEXT_KEY_CUT_OFF) or {})
+    if reply:
+        record["reply"] = True
+    if field is not None and field not in record.get("fields", []):
+        record["fields"] = [*record.get("fields", []), field]
+    data[CONTEXT_KEY_CUT_OFF] = record
 
 
 def _is_agent_managed(data: dict[str, Any]) -> bool:
@@ -746,6 +784,10 @@ class MessagePipeline:
             # from process_stream() (same clear there). The record lives in
             # metadata only (A4, plan-2026-09-21T203800-8a03483a/D-005).
             instance.context.metadata.pop(METADATA_KEY_TRANSITION_CLASSIFICATION, None)
+            # D-025: the cut-off record, like the classification record, belongs
+            # to the turn that produced it (after the snapshot: a rolled-back
+            # turn restores the prior one).
+            instance.context.data.pop(CONTEXT_KEY_CUT_OFF, None)
 
             # DECISION plan-2026-09-12T065608-089d0ec7/D-002
             # Widened turn-atomicity: PRE_PROCESSING and POST_PROCESSING handler
@@ -942,6 +984,10 @@ class MessagePipeline:
             # DECISION plan-2026-09-21T203800-8a03483a/D-002 (A8): streaming
             # mirror of the per-turn clear in process(); after the snapshot.
             instance.context.metadata.pop(METADATA_KEY_TRANSITION_CLASSIFICATION, None)
+            # D-025: the cut-off record, like the classification record, belongs
+            # to the turn that produced it (after the snapshot: a rolled-back
+            # turn restores the prior one).
+            instance.context.data.pop(CONTEXT_KEY_CUT_OFF, None)
 
             # DECISION plan-2026-09-12T065608-089d0ec7/D-002
             # Widened turn-atomicity, streaming mirror of process()'s guard
@@ -1126,6 +1172,7 @@ class MessagePipeline:
         """
         log = logger.bind(conversation_id=conversation_id)
 
+        instance.context.data.pop(CONTEXT_KEY_CUT_OFF, None)  # D-025
         current_state = self.get_state(instance, conversation_id)
 
         if _is_silent(current_state):
@@ -1146,6 +1193,8 @@ class MessagePipeline:
         response = self.llm_interface.generate_response(request)
         instance.last_response_generation = response
         instance.context.conversation.add_system_message(response.message)
+        if _was_cut_off(response):
+            _record_cut_off(instance, reply=True)
 
         log.info("Generated initial response")
         return response.message
@@ -2053,6 +2102,8 @@ class MessagePipeline:
         log.debug(
             f"Completion turn: kind={reply.kind}, calls={[c.name for c in reply.calls]}"
         )
+        if _was_cut_off(reply):
+            _record_cut_off(instance, field=config.result_key)
         return DataExtractionResponse(
             # `finish_reason` stays out of the committed result: its shape is
             # the documented {kind, text, calls} (the provider's reason is on
@@ -2168,6 +2219,8 @@ class MessagePipeline:
 
             # Validate and coerce
             response = self._validate_field_extraction(response, field_config)
+            if _was_cut_off(response):
+                _record_cut_off(instance, field=field_config.field_name)
 
             log.debug(
                 f"Field '{field_config.field_name}': "
@@ -2968,6 +3021,8 @@ class MessagePipeline:
         response = self.llm_interface.generate_response(request)
         instance.last_response_generation = response
         instance.context.conversation.add_system_message(response.message)
+        if _was_cut_off(response):
+            _record_cut_off(instance, reply=True)
 
         log.debug("Response generation pass completed")
         return response.message

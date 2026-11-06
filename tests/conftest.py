@@ -133,11 +133,19 @@ class MockLLM2Interface(LLMInterface):
         extraction_data=None,
         response_text="Hello! How can I help you?",
         transition_target=None,
+        cut_reply=False,
+        cut_fields=(),
     ):
         self.extraction_data = extraction_data or {}
         self.response_text = response_text
         self.transition_target = transition_target
         self.call_history = []
+        # A provider cut-off at max_tokens (plan 0068b055 D-025): when True the
+        # Pass-2 reply carries `truncated=True`; a field named in `cut_fields`
+        # comes back unusable (value None) with `truncated=True`. Both are plain
+        # attributes, so a test can change them between turns.
+        self.cut_reply = cut_reply
+        self.cut_fields = set(cut_fields)
 
     def generate_response(
         self, request: ResponseGenerationRequest
@@ -147,19 +155,22 @@ class MockLLM2Interface(LLMInterface):
             message=self.response_text,
             message_type="response",
             reasoning="Mock response",
+            truncated=self.cut_reply,
         )
 
     def extract_field(self, request):
         self.call_history.append(("extract_field", request))
         from fsm_llm.definitions import FieldExtractionResponse
 
-        value = self.extraction_data.get(request.field_name)
+        cut = request.field_name in self.cut_fields
+        value = None if cut else self.extraction_data.get(request.field_name)
         return FieldExtractionResponse(
             field_name=request.field_name,
             value=value,
             confidence=1.0 if value is not None else 0.0,
             reasoning="Mock field extraction",
             is_valid=value is not None,
+            truncated=cut,
         )
 
 

@@ -67,7 +67,7 @@ import re
 import threading
 import time
 from collections.abc import Iterator, Mapping, Sequence
-from typing import Any
+from typing import Any, TypeVar
 
 import litellm
 from litellm import completion, embedding, get_supported_openai_params
@@ -656,6 +656,26 @@ def cut_off_note(max_tokens: int | None) -> str:
         f"the reply was cut off at {limit} (finish_reason=length); raise "
         "max_tokens (LLM_MAX_TOKENS) or ask for a shorter answer"
     )
+
+
+_CutOffResponse = TypeVar(
+    "_CutOffResponse", ResponseGenerationResponse, FieldExtractionResponse
+)
+
+
+def _flag_cut_off(parsed: _CutOffResponse, response: Any) -> _CutOffResponse:
+    """``parsed`` with ``truncated=True`` when the provider cut ``response`` off.
+
+    Contract: ``parsed`` is the ``ResponseGenerationResponse`` or
+    ``FieldExtractionResponse`` read from the raw provider ``response``. Returns
+    ``parsed`` itself when ``_finish_reason(response)`` is not ``length`` (or it
+    is flagged already), else a copy with ``truncated=True``. Never raises. The
+    one place the flag is set, for both response kinds; the pipeline reads it
+    (plan 0068b055 D-025).
+    """
+    if _finish_reason(response) == FINISH_REASON_LENGTH and not parsed.truncated:
+        return parsed.model_copy(update={"truncated": True})
+    return parsed
 
 
 def _completion_response(response: Any) -> CompletionResponse:
@@ -1286,8 +1306,11 @@ class LiteLLMInterface(LLMInterface, _Metered):
             logger.debug(f"Response generation completed in {response_time:.2f}s")
 
             # Parse response for response generation
-            parsed = self._parse_response_generation_response(
-                response, structured=request.response_format is not None
+            parsed = _flag_cut_off(
+                self._parse_response_generation_response(
+                    response, structured=request.response_format is not None
+                ),
+                response,
             )
             # DECISION plan-2026-09-19T175721-21cd7f8e/D-020: the apology means
             # the model produced nothing usable (live: `{"message": ""}` on a
@@ -1301,14 +1324,17 @@ class LiteLLMInterface(LLMInterface, _Metered):
                 with _APOLOGY_COUNT_LOCK:
                     self.apology_retry_count += 1
                 try:
-                    return self._parse_response_generation_response(
-                        self._make_llm_call(
-                            messages,
-                            "response_generation",
-                            response_format=request.response_format,
-                            temperature=request.temperature,
+                    retried = self._make_llm_call(
+                        messages,
+                        "response_generation",
+                        response_format=request.response_format,
+                        temperature=request.temperature,
+                    )
+                    return _flag_cut_off(
+                        self._parse_response_generation_response(
+                            retried, structured=request.response_format is not None
                         ),
-                        structured=request.response_format is not None,
+                        retried,
                     )
                 except Exception as retry_error:
                     logger.warning(f"Response generation retry failed: {retry_error!s}")
@@ -1445,7 +1471,9 @@ class LiteLLMInterface(LLMInterface, _Metered):
                 f"completed in {response_time:.2f}s"
             )
 
-            return self._parse_field_extraction_response(response, request)
+            return _flag_cut_off(
+                self._parse_field_extraction_response(response, request), response
+            )
 
         except LLMResponseError:
             raise

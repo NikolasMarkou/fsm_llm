@@ -12,15 +12,18 @@ from collections.abc import Callable
 from typing import Any
 
 from fsm_llm import API
+from fsm_llm.definitions import CONTEXT_KEY_CUT_OFF
 from fsm_llm.logging import logger
 
 from .base import BaseAgent, caller_prompt_keys
 from .constants import (
     ContextKeys,
+    ErrorMessages,
     HandlerNames,
     HandlerPriorities,
     LogMessages,
     REWOOStates,
+    StopReason,
 )
 from .definitions import AgentConfig, AgentResult, ToolCall
 from .fsm_definitions import build_rewoo_fsm
@@ -71,6 +74,7 @@ class REWOOAgent(BaseAgent):
             ContextKeys.PLAN_BLUEPRINT,
             ContextKeys.EVIDENCE,
             ContextKeys.EVIDENCE_STATUS,
+            ContextKeys.PLAN_CUT_OFF,
         }
     )
 
@@ -128,13 +132,27 @@ class REWOOAgent(BaseAgent):
         # EVIDENCE_STATUS (a per-step success flag), NOT the `evidence` mapping.
         # Do NOT go back to `evidence`: failed calls store their error text
         # there, so a run whose every tool failed read as success=True.
-        return self._standard_run(
+        result = self._standard_run(
             task,
             fsm_def,
             context,
             "rewoo",
             execution_evidence_keys=[ContextKeys.EVIDENCE_STATUS],
         )
+        # DECISION plan-2026-11-06T093029-0068b055/D-025: a plan cut off at
+        # max_tokens ships the cause as the answer, not the `solve` state's
+        # filler about evidence that does not exist. The `solve` call has
+        # already been made by then (the FSM is linear; adding a branch for the
+        # rare cut is not worth a second plan path). Do NOT run the cut plan's
+        # prefix and do NOT retry at a higher cap here.
+        if result.final_context.get(ContextKeys.PLAN_CUT_OFF) is True:
+            return result.model_copy(
+                update={
+                    "answer": ErrorMessages.REWOO_PLAN_CUT_OFF,
+                    "structured_output": None,
+                }
+            )
+        return result
 
     def _register_handlers(self, api: API) -> None:
         """Register agent handlers with the API."""
@@ -148,6 +166,25 @@ class REWOOAgent(BaseAgent):
 
     def _execute_all_plans(self, context: dict[str, Any]) -> dict[str, Any]:
         """Execute all planned tool calls, substituting #EN variable references."""
+        # DECISION plan-2026-11-06T093029-0068b055/D-025: the plan field was cut
+        # off at max_tokens in THIS turn (core's cut-off record names it): the
+        # plan is incomplete or lost, so run nothing and record `truncated`.
+        # Do NOT fall through to the empty-plan run below (it left no cause
+        # visible, live: rewoo_multi_step) and do NOT execute a salvaged prefix
+        # (half a plan runs tools the full plan would have ordered or gated).
+        cut = context.get(CONTEXT_KEY_CUT_OFF)
+        if isinstance(cut, dict) and ContextKeys.PLAN_BLUEPRINT in cut.get(
+            "fields", ()
+        ):
+            logger.warning(
+                "REWOO plan_blueprint was cut off at max_tokens: no tool runs"
+            )
+            return {
+                ContextKeys.EVIDENCE: {},
+                ContextKeys.EVIDENCE_STATUS: [],
+                ContextKeys.PLAN_CUT_OFF: True,
+                ContextKeys.FORCED_STOP_REASON: StopReason.TRUNCATED,
+            }
         plan_blueprint = context.get(ContextKeys.PLAN_BLUEPRINT, [])
         if not isinstance(plan_blueprint, list):
             logger.warning("plan_blueprint is not a list, skipping execution")

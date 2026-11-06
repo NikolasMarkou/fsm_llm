@@ -341,6 +341,9 @@ class ContextKeys:
     # success rule reads it (at least one True), not the evidence mapping.
     EVIDENCE_STATUS = "evidence_status"
     PLAN_BLUEPRINT = "plan_blueprint"
+    # True once the plan extraction was cut off at max_tokens, so no tool ran
+    # (written only by REWOO's plan executor; a run output).
+    PLAN_CUT_OFF = "plan_cut_off"
 
     # Evaluator-Optimizer
     GENERATED_OUTPUT = "generated_output"
@@ -424,12 +427,20 @@ class StopReason:
     # thread, a monitor) before it reached a final state; recorded by
     # ``BaseAgent._run_conversation_loop``, the last output still ships.
     ENDED = "ended"
+    # DECISION plan-2026-11-06T093029-0068b055/D-025: the final turn's reply
+    # (or an extraction it needed) was cut off by the provider at max_tokens,
+    # so the answer is a fragment or the cut-off apology. Recorded by
+    # ``BaseAgent._run_conversation_loop`` from core's cut-off record
+    # (``CONTEXT_KEY_CUT_OFF``), and by REWOO's plan executor for a cut plan;
+    # the answer text still ships. Only when no other reason forced the stop.
+    # Do NOT report it as success. See decisions.md D-025.
+    TRUNCATED = "truncated"
 
     # Reasons a forcing handler may record in ``ContextKeys.FORCED_STOP_REASON``
     # (the prompt-chain gate handler records ``GATE_FAILED``; the run loop
-    # records ``ENDED``).
+    # records ``ENDED`` and ``TRUNCATED``).
     FORCED: frozenset[str] = frozenset(
-        {MAX_ITERATIONS, FORCED_PASS, STALLED, GATE_FAILED, ENDED}
+        {MAX_ITERATIONS, FORCED_PASS, STALLED, GATE_FAILED, ENDED, TRUNCATED}
     )
 
 
@@ -1051,6 +1062,12 @@ class ErrorMessages:
     )
     # The answer when no speaking state replied (base and PromptChain).
     NO_ANSWER = "Agent could not determine an answer."
+    # REWOO's answer when its plan was cut off at max_tokens: no tool ran.
+    REWOO_PLAN_CUT_OFF = (
+        "The plan was cut off at max_tokens before it was complete, so no tool "
+        "ran. Raise AgentConfig.max_tokens (or LLM_MAX_TOKENS) or give the "
+        "agent a smaller task."
+    )
     EMPTY_CHAIN = "Cannot create prompt chain agent with empty chain"
     PROMPT_SLOT_OVERFLOW = (
         "Agent prompt too long: {slot} exceeds core's {limit}-character "
