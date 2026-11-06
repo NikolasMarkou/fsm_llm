@@ -215,6 +215,90 @@ class TestAgentConfig:
         assert config.max_iterations == 20
 
 
+_NUMERIC_FIELDS = (
+    "max_iterations",
+    "timeout_seconds",
+    "temperature",
+    "max_tokens",
+    "max_history_size",
+    "reflect_every_n",
+    "auto_summarize_after",
+)
+
+
+class TestAgentConfigNumericFields:
+    """F-AM-06b: no bool and no non-finite float is a configured number."""
+
+    @pytest.mark.parametrize("field", _NUMERIC_FIELDS)
+    @pytest.mark.parametrize("value", [True, False])
+    def test_a_bool_is_refused_for_every_numeric_field(self, field, value):
+        with pytest.raises(ValueError, match="not a bool"):
+            AgentConfig(**{field: value})
+
+    @pytest.mark.parametrize("field", ["timeout_seconds", "temperature"])
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    def test_non_finite_floats_are_refused(self, field, value):
+        with pytest.raises(ValueError):
+            AgentConfig(**{field: value})
+
+    @pytest.mark.parametrize("field", ["timeout_seconds", "temperature"])
+    def test_a_non_finite_digit_string_is_refused(self, field):
+        for text in ("nan", "inf", "-inf"):
+            with pytest.raises(ValueError):
+                AgentConfig(**{field: text})
+
+    @pytest.mark.parametrize("field", ["timeout_seconds", "temperature"])
+    @pytest.mark.parametrize(
+        "big",
+        [
+            pytest.param(10**400, id="10e400"),
+            pytest.param(-(10**400), id="neg-10e400"),
+            pytest.param(10**5000, id="5000-digits"),
+        ],
+    )
+    def test_an_int_too_large_for_a_float_is_a_clean_error(self, field, big):
+        # The error path must not stringify the int in full (the 4300-digit
+        # limit would turn it into a ValueError from the formatter).
+        with pytest.raises(ValueError) as info:
+            AgentConfig(**{field: big})
+        assert len(str(info.value)) < 2000
+
+    def test_the_timeout_message_names_the_rule(self):
+        with pytest.raises(ValueError, match="finite positive"):
+            AgentConfig(timeout_seconds=float("nan"))
+
+    def test_valid_values_are_exactly_as_before(self):
+        """Pin: ints for float fields, digit strings and integral floats coerce."""
+        config = AgentConfig(
+            max_iterations="7",
+            timeout_seconds=30,
+            temperature=1,
+            max_tokens=5.0,
+            max_history_size=3,
+        )
+        assert config.max_iterations == 7
+        assert config.timeout_seconds == 30.0
+        assert config.temperature == 1.0
+        assert config.max_tokens == 5
+        assert AgentConfig(temperature=0).temperature == 0.0
+        assert AgentConfig(timeout_seconds=1e300).timeout_seconds == 1e300
+        assert AgentConfig(max_history_size=None).max_history_size is None
+
+    @pytest.mark.parametrize("blank", ["", "   "])
+    def test_a_blank_model_is_refused(self, blank):
+        with pytest.raises(ValueError, match="model must not be blank"):
+            AgentConfig(model=blank)
+
+    def test_meta_builder_config_inherits_the_rules(self):
+        from fsm_llm.agents.definitions import MetaBuilderConfig
+
+        with pytest.raises(ValueError):
+            MetaBuilderConfig(timeout_seconds=float("nan"))
+        with pytest.raises(ValueError):
+            MetaBuilderConfig(temperature=True)
+        assert MetaBuilderConfig().timeout_seconds > 0
+
+
 class TestAgentResult:
     """Tests for AgentResult model."""
 

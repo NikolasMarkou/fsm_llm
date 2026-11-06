@@ -921,15 +921,19 @@ class AgentArtifactBuilder(ArtifactBuilder):
     }
     _CONFIG_NUMERIC: ClassVar[set[str]] = {"timeout_seconds", "temperature"}
     _CONFIG_INT: ClassVar[set[str]] = {"max_iterations", "max_tokens"}
+    _JSON_INT_MAX: ClassVar[int] = 2**63 - 1
 
     @classmethod
     def _config_problems(cls, config: dict[str, Any]) -> dict[str, str]:
         """Map each invalid config key to a reason; an empty dict means valid.
 
-        Contract: ``config`` is the whole artifact config dict. The ranges come
-        from ``AgentConfig``'s own validators (one source), plus two rules it
-        lacks: a ``bool`` is not an integer here, and ``model`` is not blank.
-        Never raises; a non-validation error from pydantic is not expected.
+        Contract: ``config`` is the whole artifact config dict. The rules come
+        from ``AgentConfig``'s own validators (one source: ranges, finite
+        floats, no bool, non-blank ``model``), plus the one rule only an
+        artifact needs: an int field stays within ``_JSON_INT_MAX`` so the
+        artifact is always JSON-serialisable (``json.dumps`` raises on an int
+        of more than 4300 digits). Never raises; a non-validation error from
+        pydantic is not expected.
         """
         # DECISION plan-2026-11-06T093029-0068b055/D-011: validate through
         # ``AgentConfig`` (the agent this artifact describes), NOT through
@@ -949,11 +953,13 @@ class AgentArtifactBuilder(ArtifactBuilder):
                 reason = err["msg"].removeprefix("Value error, ")
                 problems.setdefault(key, reason)
         for key in cls._CONFIG_INT:
-            if isinstance(config.get(key), bool):
-                problems[key] = "expects int, got bool"
-        model = config.get("model")
-        if isinstance(model, str) and not model.strip():
-            problems["model"] = "model must not be blank"
+            value = config.get(key)
+            if (
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and abs(value) > cls._JSON_INT_MAX
+            ):
+                problems.setdefault(key, f"must be at most {cls._JSON_INT_MAX}")
         return problems
 
     def set_config(self, **kwargs: Any) -> AgentArtifactBuilder:

@@ -221,6 +221,17 @@ class TestAgentConfigValidation:
             ("timeout_seconds", -3),
             ("max_tokens", True),
             ("model", ""),
+            ("temperature", float("nan")),
+            ("temperature", float("inf")),
+            ("temperature", True),
+            ("timeout_seconds", float("nan")),
+            ("timeout_seconds", float("inf")),
+            ("timeout_seconds", float("-inf")),
+            ("timeout_seconds", True),
+            ("max_iterations", True),
+            pytest.param("max_iterations", 10**400, id="iter-10e400"),
+            pytest.param("max_iterations", 10**5000, id="iter-5000-digits"),
+            pytest.param("max_tokens", 10**5000, id="tokens-5000-digits"),
         ],
     )
     def test_set_config_skips_each_bad_value_with_a_warning(
@@ -264,6 +275,44 @@ class TestAgentConfigValidation:
         errors = agent_builder.validate_complete()
         assert any("'max_tokens'" in e for e in errors)
         assert any("'bogus'" in e for e in errors)
+
+    @pytest.mark.parametrize(
+        "key,value",
+        [
+            ("temperature", float("nan")),
+            ("temperature", True),
+            ("timeout_seconds", float("nan")),
+            ("timeout_seconds", float("inf")),
+            ("timeout_seconds", True),
+            ("max_iterations", True),
+            pytest.param("max_tokens", 10**5000, id="tokens-5000-digits"),
+        ],
+    )
+    def test_validate_complete_rejects_a_poked_value_with_a_bounded_message(
+        self, agent_builder: AgentArtifactBuilder, key: str, value
+    ):
+        agent_builder.set_agent_type("react").set_overview("A", "d")
+        agent_builder.add_tool("t", "d")
+        agent_builder.config[key] = value
+        errors = agent_builder.validate_complete()
+        assert any(f"'{key}'" in e for e in errors)
+        assert all(len(e) < 500 for e in errors)
+
+    def test_the_artifact_stays_valid_json_after_refused_values(
+        self, agent_builder: AgentArtifactBuilder
+    ):
+        """A refused NaN/inf/huge int never reaches the config, so the artifact
+        serialises with ``allow_nan=False``."""
+        import json
+
+        agent_builder.set_config(
+            temperature=float("nan"),
+            timeout_seconds=float("inf"),
+            max_iterations=10**5000,
+            max_tokens=True,
+        )
+        assert len(agent_builder.take_warnings()) == 4
+        json.dumps(agent_builder.config, allow_nan=False)
 
     def test_in_range_values_are_unchanged(self, agent_builder: AgentArtifactBuilder):
         warnings = agent_builder.set_config(

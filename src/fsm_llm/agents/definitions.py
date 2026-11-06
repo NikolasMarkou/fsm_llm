@@ -4,6 +4,7 @@ Pydantic models for the agents package.
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -326,6 +327,34 @@ class AgentConfig(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
+    @field_validator(
+        "max_iterations",
+        "timeout_seconds",
+        "temperature",
+        "max_tokens",
+        "max_history_size",
+        "reflect_every_n",
+        "auto_summarize_after",
+        mode="before",
+    )
+    @classmethod
+    def refuse_bool_number(cls, v: Any) -> Any:
+        # DECISION plan-2026-11-06T093029-0068b055/D-020: do NOT accept a bool
+        # as a number. ``True`` is an ``int`` subclass and pydantic coerces it
+        # to 1 / 1.0, so ``temperature=True`` or ``max_iterations=True`` would
+        # run as a silent 1; it is a caller mistake, not a value. Digit strings
+        # and integral floats still coerce as before.
+        if isinstance(v, bool):
+            raise ValueError("must be a number, not a bool")
+        return v
+
+    @field_validator("model")
+    @classmethod
+    def validate_model(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("model must not be blank")
+        return v
+
     @field_validator("max_history_size", "reflect_every_n", "auto_summarize_after")
     @classmethod
     def validate_optional_positive(cls, v: int | None) -> int | None:
@@ -383,8 +412,9 @@ class AgentConfig(BaseModel):
     @field_validator("timeout_seconds")
     @classmethod
     def validate_timeout_seconds(cls, v: float) -> float:
-        if v <= 0:
-            raise ValueError("timeout_seconds must be positive")
+        # NaN passes ``v <= 0`` and inf is no limit at all: both are refused.
+        if not math.isfinite(v) or v <= 0:
+            raise ValueError("timeout_seconds must be a finite positive number")
         return v
 
 
