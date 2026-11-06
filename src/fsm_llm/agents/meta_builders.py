@@ -20,7 +20,7 @@ from pydantic import ValidationError
 from fsm_llm.definitions import BuildError, FSMDefinition, reachable_from
 from fsm_llm.logging import logger
 
-from .constants import Defaults, MetaDefaults
+from .constants import MetaDefaults
 from .definitions import AgentConfig, ArtifactType, BuildProgress
 from .exceptions import BuilderError
 
@@ -928,11 +928,10 @@ class AgentArtifactBuilder(ArtifactBuilder):
 
         Contract: ``config`` is the whole artifact config dict. The rules come
         from ``AgentConfig``'s own validators (one source: ranges, finite
-        floats, no bool, non-blank ``model``), plus the one rule only an
-        artifact needs: an int field stays within ``Defaults.MAX_INT_LIMIT`` so the
-        artifact is always JSON-serialisable (``json.dumps`` raises on an int
-        of more than 4300 digits). Never raises; a non-validation error from
-        pydantic is not expected.
+        floats, no bool, non-blank ``model``, an int field at most
+        ``Defaults.MAX_INT_LIMIT`` so the artifact is always JSON-serialisable:
+        ``json.dumps`` raises on an int of more than 4300 digits). Never
+        raises; a non-validation error from pydantic is not expected.
         """
         # DECISION plan-2026-11-06T093029-0068b055/D-011: validate through
         # ``AgentConfig`` (the agent this artifact describes), NOT through
@@ -951,14 +950,6 @@ class AgentArtifactBuilder(ArtifactBuilder):
                 key = str(loc[0]) if loc else "?"
                 reason = err["msg"].removeprefix("Value error, ")
                 problems.setdefault(key, reason)
-        for key in cls._CONFIG_INT:
-            value = config.get(key)
-            if (
-                isinstance(value, int)
-                and not isinstance(value, bool)
-                and abs(value) > Defaults.MAX_INT_LIMIT
-            ):
-                problems.setdefault(key, f"must be at most {Defaults.MAX_INT_LIMIT}")
         return problems
 
     def set_config(self, **kwargs: Any) -> AgentArtifactBuilder:

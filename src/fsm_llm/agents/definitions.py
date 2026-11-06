@@ -348,6 +348,22 @@ class AgentConfig(BaseModel):
             raise ValueError("must be a number, not a bool")
         return v
 
+    @field_validator(
+        "max_iterations", "max_tokens", "max_history_size", "reflect_every_n"
+    )
+    @classmethod
+    def bound_int_limit(cls, v: int | None) -> int | None:
+        # DECISION plan-2026-11-06T093029-0068b055/D-030 (extends D-020,
+        # step 12.35): an int field stops at ``Defaults.MAX_INT_LIMIT``, the bound
+        # ``require_int_limit`` puts on every constructor limit. Do NOT accept
+        # more: ``max_iterations=10**5000`` was valid and its ``repr()`` raised
+        # (the 4300-digit conversion limit), as did every log line and JSON
+        # dump of the config. Do NOT clamp (a refusal tells the caller);
+        # ``auto_summarize_after`` is already capped far below this.
+        if v is not None and v > Defaults.MAX_INT_LIMIT:
+            raise ValueError(f"must be at most {Defaults.MAX_INT_LIMIT}")
+        return v
+
     @field_validator("model")
     @classmethod
     def validate_model(cls, v: str) -> str:

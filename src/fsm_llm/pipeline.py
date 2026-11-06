@@ -1481,6 +1481,16 @@ class MessagePipeline:
         conversation instead of a message; the request carries ``None``
         (the LLM layer sends the neutral instruction), never ``""`` (an empty
         string is a message the user sent empty, D-044).
+
+        Failure: any exception from the call is swallowed here (a WARNING) and
+        the return is the ``_BulkFailed`` marker, so a turn goes on with
+        ``extraction_failed=True``. That includes the ``LLMResponseError`` that
+        ``extract_bulk_data`` raises for a reply cut off at ``max_tokens`` that
+        is not valid JSON: the turn does NOT fail. A cut reply that still
+        parses is committed as is. Neither case is recorded in the cut-off
+        record (``_record_cut_off``): only Pass-2 replies, field extractions and
+        completion-state calls are (D-025); a bulk cut stays unflagged
+        (CHANGELOG Known open).
         """
         log = logger.bind(conversation_id=conversation_id)
         prompt_context: dict[str, Any] | None = None

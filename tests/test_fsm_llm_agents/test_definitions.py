@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from fsm_llm.agents.constants import Defaults
 from fsm_llm.agents.definitions import (
     AgentConfig,
     AgentResult,
@@ -297,6 +298,56 @@ class TestAgentConfigNumericFields:
         with pytest.raises(ValueError):
             MetaBuilderConfig(temperature=True)
         assert MetaBuilderConfig().timeout_seconds > 0
+
+
+_INT_FIELDS = ("max_iterations", "max_tokens", "max_history_size", "reflect_every_n")
+
+
+class TestAgentConfigIntegerBound:
+    """Review pass 3 note 7: ``AgentConfig(max_iterations=10**5000)`` was
+    accepted and its ``repr()`` raised (4300-digit limit), the bug class of
+    ``num_rounds`` in step 12.8. Every int field stops at
+    ``Defaults.MAX_INT_LIMIT``."""
+
+    @pytest.mark.parametrize("field", _INT_FIELDS)
+    @pytest.mark.parametrize(
+        "big",
+        [
+            pytest.param(10**5000, id="5000-digits"),
+            pytest.param(Defaults.MAX_INT_LIMIT + 1, id="limit-plus-one"),
+        ],
+    )
+    def test_an_int_past_the_limit_is_refused_with_a_short_message(self, field, big):
+        with pytest.raises(ValueError, match="must be at most") as info:
+            AgentConfig(**{field: big})
+        assert len(str(info.value)) < 2000
+
+    @pytest.mark.parametrize("field", _INT_FIELDS)
+    def test_the_limit_itself_is_accepted_and_the_config_has_a_repr(self, field):
+        config = AgentConfig(**{field: Defaults.MAX_INT_LIMIT})
+        assert getattr(config, field) == Defaults.MAX_INT_LIMIT
+        assert field in repr(config)
+        assert config.model_dump_json()  # serialises
+
+    def test_a_huge_float_for_an_int_field_is_refused_too(self):
+        with pytest.raises(ValueError):
+            AgentConfig(max_tokens=1e30)
+
+    def test_meta_builder_config_inherits_the_bound(self):
+        from fsm_llm.agents.definitions import MetaBuilderConfig
+
+        for field in ("max_iterations", "max_tokens"):
+            with pytest.raises(ValueError, match="must be at most"):
+                MetaBuilderConfig(**{field: 10**5000})
+        assert repr(MetaBuilderConfig(max_tokens=Defaults.MAX_INT_LIMIT))
+
+    def test_the_artifact_builder_reports_the_same_reason(self):
+        from fsm_llm.agents.meta_builders import AgentArtifactBuilder
+
+        builder = AgentArtifactBuilder().set_config(max_tokens=10**5000)
+        warnings = builder.take_warnings()
+        assert any("must be at most" in w and "max_tokens" in w for w in warnings)
+        assert builder.config["max_tokens"] != 10**5000
 
 
 class TestAgentResult:

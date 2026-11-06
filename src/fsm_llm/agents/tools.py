@@ -4,6 +4,7 @@ Tool registry for agent tool management.
 
 from __future__ import annotations
 
+import collections.abc
 import contextvars
 import functools
 import inspect
@@ -158,6 +159,40 @@ def _is_dict_annotation(ann: Any) -> bool:
     )
 
 
+# Mapping types a tool parameter can be advertised as ``object``: ``dict``, the
+# abstract ``Mapping``/``MutableMapping`` and a ``TypedDict``. The lone-positional
+# dict-style CALL (``_is_dict_annotation``) is deliberately narrower: dict only.
+_MAPPING_ORIGINS = (dict, collections.abc.Mapping, collections.abc.MutableMapping)
+
+
+def _is_mapping_hint(hint: Any) -> bool:
+    """True for ``dict``/``dict[...]``/``typing.Dict``, ``Mapping``,
+    ``MutableMapping`` (bare or parametrized) and a ``TypedDict`` class.
+    Never raises."""
+    origin = typing.get_origin(hint) or hint
+    return origin in _MAPPING_ORIGINS or (
+        isinstance(hint, type) and typing.is_typeddict(hint)
+    )
+
+
+def _without_none(hint: Any) -> Any:
+    """The one non-``None`` member of ``Optional[X]`` (``X | None``), else *hint*."""
+    if typing.get_origin(hint) in (typing.Union, types.UnionType):
+        members = [a for a in typing.get_args(hint) if a is not type(None)]
+        if len(members) == 1:
+            return members[0]
+    return hint
+
+
+def _takes_mapping(annotation: Any) -> bool:
+    """True when a parameter's raw annotation is a mapping type, bare or in
+    ``Optional`` (a string annotation counts only when it spells ``dict``).
+    Never raises."""
+    return _is_dict_annotation(annotation) or _is_mapping_hint(
+        _without_none(annotation)
+    )
+
+
 _VAR_KINDS = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
 _POSITIONAL_KINDS = (
     inspect.Parameter.POSITIONAL_ONLY,
@@ -265,7 +300,21 @@ def _fallback_arguments(
         k for k, p in sig.parameters.items() if p.default is inspect.Parameter.empty
     ]
     stray = [v for k, v in params.items() if k not in sig.parameters]
-    if len(names) == 1 and stray:
+    # DECISION plan-2026-11-06T093029-0068b055/D-030 (extends D-009, step 12.35):
+    # a stray value is never mapped into a KEYWORD-ONLY mapping-typed parameter.
+    # A model that sends the flat object ``{"x": 1}`` for ``*, payload: dict``
+    # would run the tool with ``payload=1``, a scalar in a dict parameter; the
+    # call fails with the "requires parameters" message instead, so the model can
+    # name it. Do NOT pass the whole flat object in as the dict: that is the
+    # bare-dict rule, which is for a lone POSITIONAL parameter only. Do NOT widen
+    # this to positional parameters here: tests of the HITL executor rely on the
+    # old mapping for ``fn(params: dict, _name="x")`` (carried, CHANGELOG).
+    mapping_params = {
+        k
+        for k, p in sig.parameters.items()
+        if p.kind is inspect.Parameter.KEYWORD_ONLY and _takes_mapping(p.annotation)
+    }
+    if len(names) == 1 and stray and names[0] not in mapping_params:
         # Single-param function: pass the first misnamed value
         mapped = {names[0]: _as_param_value(stray[0], schema_props.get(names[0]))}
         logger.debug(f"Tool kwarg mismatch, retrying: {redact_secret_entries(mapped)}")
@@ -274,7 +323,12 @@ def _fallback_arguments(
         # Only positional-map a single required param from a single misnamed
         # value; for >=2 params the LLM's value order is untrusted and would
         # silently swap args.
-        if len(required) == 1 and len(params) == 1 and len(stray) == 1:
+        if (
+            len(required) == 1
+            and len(params) == 1
+            and len(stray) == 1
+            and required[0] not in mapping_params
+        ):
             mapped = {
                 required[0]: _as_param_value(stray[0], schema_props.get(required[0]))
             }
@@ -561,7 +615,7 @@ class ToolRegistry:
         # DECISION plan-2026-09-24T091842-c1d5bfbc/D-024: a lone ``**kwargs``
         # is not the dict-style param. Do NOT pass it the dict positionally:
         # every zero-argument MCP tool and monitor stub tool failed that way.
-        # DECISION plan-2026-11-06T093029-0068b055/D-009 (extended by D-018): the
+        # DECISION plan-2026-11-06T093029-0068b055/D-018 (extends D-009): the
         # dict goes in BY POSITION, so only a parameter that can take one is
         # dict-style. A keyword-only ``payload: dict`` (plain, ``dict[...]``, or
         # ``= None``) is a named schema property: call it by keyword. Do NOT pass
@@ -901,17 +955,15 @@ def infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
         # generic, bare or in Optional, is an ``array`` with ``items`` (OpenAI
         # rejects an array without them). Do NOT map it to "string": the
         # positional fallback then passes str(list). Other Optionals unchanged.
-        inner, elem = hint, ()
-        if typing.get_origin(hint) in (typing.Union, types.UnionType):
-            opts = [a for a in typing.get_args(hint) if a is not type(None)]
-            inner = opts[0] if len(opts) == 1 else hint
+        inner, elem = _without_none(hint), ()
         if inner is list or typing.get_origin(inner) in _LIST_ORIGINS:
             hint, elem = list, typing.get_args(inner)[:1]
-        # A ``dict`` generic, bare or in Optional, is an ``object`` like bare
+        # A mapping type (``dict``/``dict[...]``, ``Mapping``, ``MutableMapping``,
+        # a ``TypedDict``), bare or in Optional, is an ``object`` like bare
         # ``dict`` (the args model already says so); the "string" default
-        # advertised a keyword-only ``dict[str, Any]`` as a string. The lone
-        # positional dict-style rule above (D-009) is untouched.
-        elif inner is dict or typing.get_origin(inner) is dict:
+        # advertised it as a string. The lone positional dict-style rule above
+        # (D-009) is untouched and stays dict-only.
+        elif _is_mapping_hint(inner):
             hint = dict
         # Default to "string" for missing or unknown types
         if hint is None:

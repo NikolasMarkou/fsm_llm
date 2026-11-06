@@ -2,8 +2,8 @@
 
 The provider's ``finish_reason`` is read once: it lands on
 ``CompletionResponse``, a WARNING names the cut, the structured parse paths
-name it in their errors, and a half JSON envelope is never shipped as the
-reply. A cut PROSE reply and every ``stop`` reply behave as before. Provider
+name it in their errors, and an unreadable half JSON envelope is never
+shipped as the reply (a readable but partial ``message`` is, flagged cut). A cut PROSE reply and every ``stop`` reply behave as before. Provider
 replies are real litellm ``ModelResponse`` objects; the provider is
 ``fsm_llm.llm.completion``, patched.
 """
@@ -315,3 +315,42 @@ class TestResponseGenerationNeverShipsAHalfEnvelope:
                 )
             )
         assert "cut off" in out.message
+
+
+class TestSalvagedCutReplyIsFlagged:
+    """Review pass 3 note 3: the rungs that read a ``message`` out of a cut
+    envelope can ship a partial text (``Use the config {\\``); the reply is
+    still flagged ``truncated``, which is what an agent run reads. The wording
+    "a half JSON answer is never shown" covers the unreadable envelope only."""
+
+    @staticmethod
+    def _response(content: str, finish: str | None):
+        llm = LiteLLMInterface("gpt-4o", max_tokens=1000)
+        with _Provider(_reply(content, finish)):
+            return llm.generate_response(
+                ResponseGenerationRequest(system_prompt="s", user_message="u")
+            )
+
+    @pytest.mark.parametrize(
+        "content, shipped",
+        [
+            (
+                '{"message": "Use the config {\\"retries\\": 3} and then step two is',
+                "Use the config {\\",
+            ),
+            ('[{"message": "a"}, {"mess', "a"),
+            ('{"message": "a", "note": {"x": 1', "a"),
+            (_CUT_PROSE, _CUT_PROSE),
+        ],
+        ids=["nested-object", "cut-array", "whole-message", "prose"],
+    )
+    def test_a_partial_text_shipped_from_a_cut_reply_carries_truncated(
+        self, content, shipped
+    ):
+        out = self._response(content, "length")
+        assert out.message == shipped
+        assert out.truncated is True
+
+    def test_the_same_reply_without_a_cut_is_not_flagged(self):
+        out = self._response('{"message": "a", "note": {"x": 1', "stop")
+        assert out.truncated is False

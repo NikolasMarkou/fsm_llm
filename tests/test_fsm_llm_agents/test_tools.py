@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Tests for fsm_llm.agents.tools module."""
 
+import collections.abc
 import sys
 import threading
 import time
@@ -1535,6 +1536,10 @@ class _RuleModel(BaseModel):
     x: int
 
 
+class _Point(typing.TypedDict):
+    x: int
+
+
 def _real(fn, **annotations):
     """Give ``fn`` real (not string) annotations: this module uses
     ``from __future__ import annotations``, and a string ``"dict"`` takes a
@@ -1599,6 +1604,21 @@ def _signature_cases():
 
     def kwonly_optional_dict(*, p: typing.Optional[dict[str, Any]] = None) -> str: ...  # noqa: UP045
 
+    def kwonly_mapping(*, p: collections.abc.Mapping[str, Any]) -> str: ...
+
+    def kwonly_mutable_mapping(
+        *, p: collections.abc.MutableMapping[str, Any]
+    ) -> str: ...
+
+    def kwonly_typeddict(*, p: _Point) -> str: ...
+
+    def mapping_beside_int(n: int, p: typing.Mapping[str, int]) -> str: ...
+
+    _real(kwonly_mapping, p=collections.abc.Mapping[str, Any])
+    _real(kwonly_mutable_mapping, p=collections.abc.MutableMapping[str, Any])
+    _real(kwonly_typeddict, p=_Point)
+    _real(mapping_beside_int, n=int, p=typing.Mapping[str, int])
+
     def lone_kwargs(**kwargs: Any) -> str: ...
 
     def lone_args(*args) -> str: ...
@@ -1620,6 +1640,10 @@ def _signature_cases():
         ("dict-beside-int", dict_beside_int),
         ("dict-beside-unannotated", dict_beside_unannotated),
         ("kwonly-optional-dict", kwonly_optional_dict),
+        ("kwonly-mapping", kwonly_mapping),
+        ("kwonly-mutable-mapping", kwonly_mutable_mapping),
+        ("kwonly-typeddict", kwonly_typeddict),
+        ("mapping-beside-int", mapping_beside_int),
         ("int-and-kwargs", one_int_kwargs),
         ("lone-kwargs", lone_kwargs),
         ("lone-args", lone_args),
@@ -1689,6 +1713,118 @@ class TestOneSchemaRule:
             assert definition.parameter_schema["properties"]["payload"] == {
                 "type": "object"
             }
+
+    @pytest.mark.parametrize(
+        "annotation",
+        [
+            collections.abc.Mapping,
+            collections.abc.Mapping[str, Any],
+            collections.abc.MutableMapping[str, Any],
+            typing.Mapping[str, int],
+            typing.MutableMapping[str, int],
+            typing.Optional[collections.abc.Mapping[str, Any]],  # noqa: UP045
+            _Point,
+        ],
+        ids=[
+            "bare-mapping",
+            "mapping",
+            "mutable-mapping",
+            "typing-mapping",
+            "typing-mutable-mapping",
+            "optional-mapping",
+            "typeddict",
+        ],
+    )
+    def test_mapping_like_parameter_is_an_object_not_a_string(self, annotation):
+        """Review pass 3 note 9: ``Mapping``, ``MutableMapping`` and a
+        ``TypedDict`` advertised ``string`` (the default for an unknown hint);
+        they take the same normalisation as ``dict[...]`` (step 12.12)."""
+
+        def fn(*, payload) -> str: ...
+
+        _real(fn, payload=annotation)
+        for definition in (tool(fn)._tool_definition, _registered(fn)):
+            assert definition.parameter_schema["properties"]["payload"] == {
+                "type": "object"
+            }
+
+    def test_a_lone_positional_mapping_is_not_the_dict_style_call(self):
+        """RED guard: only ``dict`` spellings are the bare-dict rule; a lone
+        positional ``Mapping`` is a named property, called by keyword."""
+        seen: list = []
+
+        def fn(payload) -> str:
+            seen.append(payload)
+            return "ok"
+
+        _real(fn, payload=collections.abc.Mapping[str, Any])
+        registry = ToolRegistry()
+        registry.register_function(fn, name="m")
+        assert registry.get("m").parameter_schema["properties"]["payload"] == {
+            "type": "object"
+        }
+        result = registry.execute(
+            ToolCall(tool_name="m", parameters={"payload": {"x": 1}})
+        )
+        assert result.success, result.error
+        assert seen == [{"x": 1}]
+
+    @pytest.mark.parametrize("via", ["tool", "register_function"])
+    @pytest.mark.parametrize("shape", ["dict", "generic", "mapping", "typeddict"])
+    def test_a_flat_object_is_not_passed_into_a_dict_parameter_as_a_scalar(
+        self, via, shape
+    ):
+        """Review pass 3 note 8: ``{"x": 1}`` sent for a lone keyword-only dict
+        parameter ``payload`` used to run the tool with ``payload=1`` (the
+        single-parameter fallback). The call is refused with the message that
+        names the expected parameter, so the model can retry; the bare-dict
+        rule is NOT widened to keyword-only parameters (D-009, D-018)."""
+        seen: list = []
+
+        def fn(*, payload) -> str:
+            seen.append(payload)
+            return "ok"
+
+        _real(
+            fn,
+            payload={
+                "dict": dict,
+                "generic": dict[str, Any],
+                "mapping": collections.abc.Mapping[str, Any],
+                "typeddict": _Point,
+            }[shape],
+        )
+        registry = ToolRegistry()
+        if via == "tool":
+            registry.register(tool(fn)._tool_definition)
+            name = tool(fn)._tool_definition.name
+        else:
+            registry.register_function(fn, name="kw")
+            name = "kw"
+        flat = registry.execute(ToolCall(tool_name=name, parameters={"x": 1}))
+        assert flat.success is False
+        assert "payload" in (flat.error or "")
+        assert seen == []
+        named = registry.execute(
+            ToolCall(tool_name=name, parameters={"payload": {"x": 1}})
+        )
+        assert named.success, named.error
+        assert seen == [{"x": 1}]
+
+    def test_the_lone_value_fallback_still_serves_a_scalar_parameter(self):
+        """RED guard: a misnamed key for a str/int parameter is still remapped."""
+        seen: list = []
+
+        def fn(*, payload) -> str:
+            seen.append(payload)
+            return "ok"
+
+        _real(fn, payload=str)
+        registry = ToolRegistry()
+        registry.register_function(fn, name="s")
+        result = registry.execute(ToolCall(tool_name="s", parameters={"text": "hi"}))
+        assert result.success, result.error
+        assert seen == ["hi"]
 
     def test_unannotated_sibling_keeps_the_object_schema_without_args_model(self):
         """No args model exists when a parameter has no annotation, so the
