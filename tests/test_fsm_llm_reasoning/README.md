@@ -25,7 +25,7 @@ Each test imports from `fsm_llm.reasoning.*` and calls classes or static methods
 - `test_golden_tables.py` - 21 tests that pin the 11 FSM definitions and the strategy tables by sha256.
 - `test_handlers.py` - 39 tests for `ReasoningHandlers`, `ContextManager`, and `OutputFormatter`.
 
-194 tests in total.
+232 tests in total.
 
 ## How to use it
 

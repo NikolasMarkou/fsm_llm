@@ -94,7 +94,7 @@ Model behaviour pinned in `test_definitions.py`:
 
 ## Working here
 
-- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_reasoning/` (194 tests: audit_fixes 27, cli_logging 2, cli_output 3, constants 26, definitions 28, engine 10, engine_scripted 51, exceptions 8, handlers 39).
+- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_reasoning/` (232 tests: audit_fixes 27, cli_logging 2, cli_output 3, constants 26, definitions 28, engine 10, engine_scripted 51, exceptions 8, handlers 39).
 - Conventions: files `test_<module>.py`, classes `Test<Feature>`, local helpers prefixed `_` (for example `_make_engine`, `_PROBE`).
 - When changing a pinned constant, state name, or source string in `src/fsm_llm/reasoning/`, update the matching assertion here in the same change, and read any `# DECISION` anchors near the edited code first (D-009 fallback, D-016 verbose logging, D-004 logging off by default are referenced in these tests).
 - Keep tests offline: build engines with `object.__new__` and hand-set attributes rather than constructing `ReasoningEngine` with a model.

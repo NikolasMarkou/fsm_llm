@@ -31,6 +31,7 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `__init__.py` - empty; makes the folder a package so `test_forced_stop_flag.py` can import from `test_maker_checker.py`.
 - `conftest.py` - autouse fixture `_offline_network`, which calls `block_network` from `tests/conftest.py`: for every test it patches `socket.socket.connect` and `connect_ex` (loopback included, because the default model is a local Ollama) so any IPv4/IPv6 connection raises `ConnectionRefusedError` at once, naming the address. Unix sockets (MCP stdio, asyncio self-pipes) stay open, and tests marked `real_llm` or `integration` are exempt. The patch is undone at teardown.
 - `fixtures/native_fc_golden_requests.json` - recorded requests that `test_native_fc_golden.py` compares against.
+- `test_foundation_dedup.py`, `test_patterns_fixes.py`, `test_integrations_fixes.py` - tests of the 2026-11-05 source pass (plan 5980fbb7 steps 10, 11, 15), one class per fixed finding; `test_fsm_definitions_golden.py` pins the sha256 and `fsm_id` of 53 builder cases.
 - `mcp_fixture_server.py` - a real stdio MCP server used by `test_mcp_stdio.py` (not a test). Tools `add`, `slow`, `fail`; flag `--hang`.
 - `test_advance_driver.py` - agents run on core's bounded loops (`run_until_terminal`) with no synthetic turn: loop hook, core budgets, HITL approval through `before_step`, VerifiedReact reflection and AutoMemory on the loop.
 - `test_adapt.py` - ADaPTAgent, its FSM, `DecompositionResult`, JSON-envelope leak fix, assess/decompose fallback edges.
@@ -111,7 +112,7 @@ From the repo root, with the project virtualenv:
 .venv/bin/python -m pytest tests/test_fsm_llm_agents/ --collect-only -q | tail -1
 ```
 
-The whole suite needs no network or API key; the `conftest.py` network block makes sure of it. A default run (about 20 seconds) collects 2,602 tests. If a new test must open a real connection, mark it `real_llm` or `integration`; otherwise it fails with `ConnectionRefusedError`.
+The whole suite needs no network or API key; the `conftest.py` network block makes sure of it. A default run (about 20 seconds) collects 2,733 tests. If a new test must open a real connection, mark it `real_llm` or `integration`; otherwise it fails with `ConnectionRefusedError`.
 
 ## Things to know
 

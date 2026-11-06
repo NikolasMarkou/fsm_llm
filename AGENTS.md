@@ -166,7 +166,7 @@ FSM definition (JSON, v4.1):
 ## Working here
 
 ```bash
-make test           # pytest -v (10,011 tests)
+make test           # pytest -v (10,554 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy src/fsm_llm/ --ignore-missing-imports
@@ -179,17 +179,17 @@ make counts         # python scripts/doc_counts.py (fails when a documented test
 ```
 
 ```bash
-pytest                                 # Run all tests (10,011 collected)
-pytest tests/test_fsm_llm/            # Core package tests (5,261 tests)
-pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (194 tests)
-pytest tests/test_fsm_llm_workflows/  # Workflows tests (277 tests)
-pytest tests/test_fsm_llm_agents/     # Agents tests (2,602 tests)
-pytest tests/test_fsm_llm_monitor/    # Monitor tests (396 tests)
-pytest tests/test_fsm_llm_meta/       # Meta-builder tests (443 tests)
+pytest                                 # Run all tests (10,554 collected)
+pytest tests/test_fsm_llm/            # Core package tests (5,504 tests)
+pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (232 tests)
+pytest tests/test_fsm_llm_workflows/  # Workflows tests (319 tests)
+pytest tests/test_fsm_llm_agents/     # Agents tests (2,733 tests)
+pytest tests/test_fsm_llm_monitor/    # Monitor tests (453 tests)
+pytest tests/test_fsm_llm_meta/       # Meta-builder tests (473 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (264 tests)
 pytest tests/test_examples/           # Example validation tests (67 tests)
-pytest tests/test_fsm_llm_eval/       # Eval tests (261 tests)
-# The 9 suites above sum to 9,765. The remaining 246 are five root-level files:
+pytest tests/test_fsm_llm_eval/       # Eval tests (263 tests)
+# The 9 suites above sum to 10,308. The remaining 246 are five root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (45),
 #   tests/test_bench_common.py (19), tests/test_agents_bench.py (132)
 #   and tests/test_skills_bench.py (38)

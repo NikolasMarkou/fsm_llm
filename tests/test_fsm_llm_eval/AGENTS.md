@@ -1,7 +1,7 @@
 # test_fsm_llm_eval
 
 Path: `tests/test_fsm_llm_eval`
-Purpose: Offline pytest suite (261 tests, 8 files) for `fsm_llm.eval` and the `fsm-llm-eval` CLI (`fsm_llm.eval.__main__`), plus parity with `scripts/bench_common.py`.
+Purpose: Offline pytest suite (263 tests, 8 files) for `fsm_llm.eval` and the `fsm-llm-eval` CLI (`fsm_llm.eval.__main__`), plus parity with `scripts/bench_common.py`.
 
 ## Scope
 
@@ -36,7 +36,7 @@ Test doubles and fixtures:
 | `test_cases.py` | 65 | `load_cases`, `check_expectations`, `run_case_trial`, `run_cases`, `run_dataset`, `run` subcommand, checks hook, interrupt, `--fail-under` boundary |
 | `test_cli.py` | 23 | `main_cli`/`build_parser` for `examples`: exit codes, `--list`, config errors, runs, `--fail-under`, Ctrl-C |
 | `test_config.py` | 34 | `EvalConfig`, `merge_config`, `load_config`, `resolve_model`, reserved `llm_kwargs` |
-| `test_examples.py` | 24 | `discover_examples`, `get_timeout`, `run_examples`, `run_example`, `create_output_dir`, logs, `results.json`, `scorecard.md` |
+| `test_examples.py` | 26 | `discover_examples`, `get_timeout`, `run_examples`, `run_example`, `create_output_dir`, logs, `results.json`, `scorecard.md` |
 | `test_records.py` | 21 | `append_row`, `read_rows`, `write_json`, `utc_now`, `git_commit`, `git_short_hash`, `model_slug`, `make_run_dir`, exceptions |
 | `test_scoring.py` | 36 | `classify_result` golden parity, `SCORE_LABELS`, `MAX_SCORE` |
 | `test_stats.py` | 30 | `wilson_ci`, `fisher_exact_two_sided`, `pass_rate`, `below_percent` |
@@ -104,5 +104,5 @@ Run dir name: `YYYY-MM-DD_HH-MM_<short hash or "unknown">_<model_slug>`, collisi
 - Name tests after the defect they guard; many docstrings start `Defect guarded:` with a review id (W1, W2, W6, NOTE 10, NOTE 15).
 - Keep every case test able to both pass and fail (use `_passing()` and `_failing()`), so a checker that checks nothing is caught.
 - A new helper mirrored in `scripts/bench_common.py` needs a parity test in `test_bench_parity.py`.
-- After adding or removing tests, re-measure with `.venv/bin/python -m pytest tests/test_fsm_llm_eval --collect-only -q | tail -1` and update the `pytest tests/test_fsm_llm_eval/ ... (261 tests)` line and totals in the root `AGENTS.md`; `tests/test_packaging.py` checks those literals against collection.
+- After adding or removing tests, re-measure with `.venv/bin/python -m pytest tests/test_fsm_llm_eval --collect-only -q | tail -1` and update the `pytest tests/test_fsm_llm_eval/ ... (263 tests)` line and totals in the root `AGENTS.md`; `tests/test_packaging.py` checks those literals against collection.
 - Run: `.venv/bin/python -m pytest tests/test_fsm_llm_eval/`.
