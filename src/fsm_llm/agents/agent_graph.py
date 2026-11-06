@@ -18,7 +18,7 @@ from fsm_llm.logging import logger
 
 from .base import BaseAgent, pattern_run_output_keys, strip_caller_context
 from .constants import StopReason
-from .definitions import AgentConfig, AgentResult, AgentTrace
+from .definitions import AgentResult, AgentTrace
 from .exceptions import AgentTimeoutError, BudgetExhaustedError
 
 
@@ -144,7 +144,6 @@ class AgentGraph:
         self,
         task: str,
         initial_context: dict[str, Any] | None = None,
-        config: AgentConfig | None = None,
     ) -> AgentResult:
         """Execute the graph starting from the entry node.
 
@@ -160,6 +159,10 @@ class AgentGraph:
         edge, and the graph reports ``success=False`` with its reason. The answer is the last executed node's,
         which the order makes a sink of the executed subgraph.
         """
+        # DECISION plan-2026-11-06T093029-0068b055/D-012: run() takes no config.
+        # It was never read, and a graph config has no defined meaning for member
+        # agents that are already built. Do NOT add it back, an alias or a raising
+        # stub; configure each member agent when you build it.
         # DECISION plan-2026-09-29T103145-06a5ec0a/D-044: Kahn order, each node
         # once after all its predecessors, contexts merged. Do NOT go back to a
         # BFS with first-arrival contexts: a convergence node ran before a

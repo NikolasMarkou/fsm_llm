@@ -72,9 +72,12 @@ class SwarmAgent(BaseAgent):
         max_handoffs: int = 10,
         memory: WorkingMemory | None = None,
         config: AgentConfig | None = None,
-        **api_kwargs: Any,
     ) -> None:
-        super().__init__(config=config, **api_kwargs)
+        # DECISION plan-2026-11-06T093029-0068b055/D-012: no **api_kwargs. A swarm
+        # builds no API (its members own theirs), so forwarded kwargs such as
+        # llm_interface= or even bogus=1 were accepted and inert. Do NOT add them
+        # back, an alias or a raising stub; a mistyped name is a plain TypeError.
+        super().__init__(config=config)
         if not agents:
             raise ValueError("SwarmAgent requires at least one agent")
         if entry_agent not in agents:

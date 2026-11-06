@@ -579,3 +579,51 @@ class TestAgentGraphBuilderIsolation:
 
         assert graph_a._nodes["one"] is a1 and graph_b._nodes["one"] is a1
         assert graph_b._nodes["two"] is a2
+
+
+class TestInertParametersRemoved:
+    """F-XC-01 / F-AI-06 (D-012): ``AgentGraph.run(config=)`` and
+    ``SwarmAgent(**api_kwargs)`` were accepted and ignored."""
+
+    @staticmethod
+    def _agent():
+        from types import SimpleNamespace
+
+        return SimpleNamespace(name="a")
+
+    def test_agent_graph_run_takes_no_config(self):
+        from fsm_llm.agents.agent_graph import AgentGraphBuilder
+
+        graph = (
+            AgentGraphBuilder().add_node("one", self._agent()).set_entry("one").build()
+        )
+
+        with pytest.raises(TypeError, match="config"):
+            graph.run("task", config=AgentConfig(max_iterations=1))
+
+    @pytest.mark.parametrize(
+        "kwargs", [{"bogus": 1}, {"llm_interface": object()}, {"seed": 3}]
+    )
+    def test_swarm_agent_refuses_unknown_and_api_kwargs(self, kwargs):
+        from fsm_llm.agents.swarm import SwarmAgent
+
+        with pytest.raises(TypeError, match=next(iter(kwargs))):
+            SwarmAgent({"a": self._agent()}, "a", **kwargs)
+
+    def test_swarm_agent_documented_parameters_still_work(self):
+        from fsm_llm.agents.swarm import SwarmAgent
+
+        swarm = SwarmAgent(
+            {"a": self._agent()}, "a", 3, None, AgentConfig(max_iterations=2)
+        )
+
+        assert swarm.entry_agent == "a"
+
+    def test_create_agent_swarm_with_api_kwargs_raises(self):
+        with pytest.raises(TypeError, match="llm_interface"):
+            create_agent(
+                "swarm",
+                agents={"a": self._agent()},
+                entry_agent="a",
+                llm_interface=object(),
+            )
