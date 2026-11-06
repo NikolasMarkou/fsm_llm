@@ -4975,3 +4975,79 @@ class TestContainerValuesUnderAmbiguousKeyNames:
         start = time.perf_counter()
         is_forbidden_context_entry(name, [_AUDIT_STRIPE])
         assert time.perf_counter() - start < 0.5
+
+
+class TestUserVisibleData:
+    """D-003 (plan 0068b055): key policy is `security.py` only.
+
+    A user key named ``system`` is an ordinary key; ``_``/``system_``/
+    ``internal_`` keys stay hidden.
+    """
+
+    def test_bare_system_key_is_visible_like_any_key(self):
+        from fsm_llm.definitions import FSMContext
+
+        context = FSMContext()
+        context.data.update(
+            {"system": "s", "notes": "n", "system_x": "h", "_x": "h", "internal_x": "h"}
+        )
+
+        assert context.get_user_visible_data() == {"system": "s", "notes": "n"}
+
+    def test_bare_system_value_reaches_per_field_extraction_prompt(self):
+        from fsm_llm import API
+        from tests.conftest import MockLLM2Interface
+
+        fsm = {
+            "name": "t",
+            "description": "d",
+            "initial_state": "a",
+            "states": {
+                "a": {
+                    "id": "a",
+                    "description": "d",
+                    "purpose": "p",
+                    "response_instructions": "say hi",
+                    "required_context_keys": ["nm"],
+                    "transitions": [
+                        {
+                            "target_state": "b",
+                            "description": "x",
+                            "priority": 100,
+                            "conditions": [
+                                {
+                                    "description": "c",
+                                    "requires_context_keys": ["go"],
+                                    "logic": {"==": [{"var": "go"}, True]},
+                                }
+                            ],
+                        }
+                    ],
+                },
+                "b": {
+                    "id": "b",
+                    "description": "d",
+                    "purpose": "p",
+                    "response_instructions": "bye",
+                },
+            },
+        }
+        llm = MockLLM2Interface()
+        api = API.from_definition(fsm, llm_interface=llm)
+        conv_id, _ = api.start_conversation()
+        api.update_context(
+            conv_id,
+            {"system": "MARK_BARE", "system_x": "MARK_PREFIXED", "notes": "MARK_NOTE"},
+        )
+        api.converse("hello", conv_id)
+
+        prompts = [
+            req.system_prompt
+            for kind, req in llm.call_history
+            if kind == "extract_field"
+        ]
+        assert prompts, "the state must run at least one per-field extraction"
+        for prompt in prompts:
+            assert "MARK_NOTE" in prompt
+            assert "MARK_BARE" in prompt
+            assert "MARK_PREFIXED" not in prompt

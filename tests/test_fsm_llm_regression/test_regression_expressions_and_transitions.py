@@ -182,20 +182,28 @@ class TestGreaterThanChaining:
 
 
 class TestHandlerMetadataLeak:
-    """B9: Handler metadata under 'system' key should be filtered by get_user_visible_data."""
+    """B9: handler metadata under internal-prefix keys is filtered by get_user_visible_data.
+
+    D-003 (plan 0068b055): the bare key ``system`` is no longer special-cased;
+    it is an ordinary key. Metadata belongs under ``_``/``system_``/``internal_``.
+    """
 
     def test_system_key_filtered_from_visible_data(self):
         from fsm_llm.definitions import FSMContext
 
         ctx = FSMContext()
         ctx.data["name"] = "Alice"
-        ctx.data["system"] = {"handlers": {"PRE_PROCESSING": [{"name": "h1"}]}}
+        ctx.data["system_x"] = {"handlers": {"PRE_PROCESSING": [{"name": "h1"}]}}
+        ctx.data["_x"] = "hidden"
+        ctx.data["internal_x"] = "hidden"
+        ctx.data["system"] = "visible"
 
         visible = ctx.get_user_visible_data()
-        assert "system" not in visible, (
-            "Handler metadata under 'system' key should not appear in user-visible data"
-        )
-        assert "name" in visible
+        for hidden in ("system_x", "_x", "internal_x"):
+            assert hidden not in visible, (
+                f"Handler metadata under {hidden!r} should not appear in user-visible data"
+            )
+        assert visible == {"name": "Alice", "system": "visible"}
 
 
 # ── B14: Validator cycle normalization broken ─────────────────
