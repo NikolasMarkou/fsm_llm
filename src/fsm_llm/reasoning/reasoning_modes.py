@@ -8,6 +8,8 @@ All FSMs use standardized context keys from constants.py.
 
 from __future__ import annotations
 
+from typing import Any
+
 from .constants import (
     HYBRID_EVALUATION_STATE,
     HYBRID_FIRST_STATE,
@@ -17,6 +19,13 @@ from .constants import (
     Defaults,
     OrchestratorStates,
 )
+
+# The no-questions rule keeps every FSM message-free: the sentences that carry it
+# are written once here, never inline.
+_NO_QUESTIONS = "Do not ask questions or request additional input from the user."
+_IMPORTANT_NO_QUESTIONS = f"IMPORTANT: {_NO_QUESTIONS}"
+_PRESENT_FINDINGS = f"Present your findings clearly and concisely. {_NO_QUESTIONS}"
+_PRESENT_FINAL = f"Present the final result clearly. {_NO_QUESTIONS}"
 
 # ============================================================================
 # ORCHESTRATOR FSM - Main control flow with retry management
@@ -35,14 +44,13 @@ orchestrator_fsm = {
     "handler_only_keys": list(ORCHESTRATOR_HANDLER_ONLY_KEYS),
     "states": {
         OrchestratorStates.PROBLEM_ANALYSIS: {
-            "id": OrchestratorStates.PROBLEM_ANALYSIS,
             "description": "Initial analysis of the problem",
             "purpose": f"Analyze the '{ContextKeys.PROBLEM_STATEMENT}' to identify '{ContextKeys.PROBLEM_TYPE}', '{ContextKeys.PROBLEM_COMPONENTS}', and '{ContextKeys.CONSTRAINTS}'",
             "required_context_keys": [
                 ContextKeys.PROBLEM_TYPE,
                 ContextKeys.PROBLEM_COMPONENTS,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Break down the problem systematically. For simple arithmetic (e.g., '1+1'), set problem_type='arithmetic' and components as operands/operator.
 
             Identify:
@@ -51,9 +59,9 @@ orchestrator_fsm = {
             - Any constraints or limitations
             - The expected outcome or goal
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Work with the problem statement provided in the context.
+            {_IMPORTANT_NO_QUESTIONS} Work with the problem statement provided in the context.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": OrchestratorStates.STRATEGY_SELECTION,
@@ -72,14 +80,13 @@ orchestrator_fsm = {
             ],
         },
         OrchestratorStates.STRATEGY_SELECTION: {
-            "id": OrchestratorStates.STRATEGY_SELECTION,
             "description": "Select appropriate reasoning strategy",
             "purpose": f"Choose '{ContextKeys.REASONING_STRATEGY}' based on problem analysis. For arithmetic, choose 'simple_calculator'.",
             "required_context_keys": [
                 ContextKeys.REASONING_STRATEGY,
                 ContextKeys.STRATEGY_RATIONALE,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Select the most appropriate reasoning strategy based on the problem analysis:
             - If problem_type is 'arithmetic', set reasoning_strategy to 'simple_calculator'
             - For logical problems, consider 'deductive' or 'analytical'
@@ -92,9 +99,9 @@ orchestrator_fsm = {
 
             Provide clear rationale for your choice.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Make the strategy selection based on your problem analysis.
+            {_IMPORTANT_NO_QUESTIONS} Make the strategy selection based on your problem analysis.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": OrchestratorStates.EXECUTE_REASONING,
@@ -103,14 +110,13 @@ orchestrator_fsm = {
             ],
         },
         OrchestratorStates.EXECUTE_REASONING: {
-            "id": OrchestratorStates.EXECUTE_REASONING,
             "description": "Execute selected reasoning strategy",
             "purpose": "Apply the chosen reasoning approach through specialized FSM execution",
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             The appropriate reasoning FSM will be executed here by handlers based on the selected strategy.
             This state serves as a coordination point for specialized reasoning execution.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. The execution will be handled automatically.
+            {_IMPORTANT_NO_QUESTIONS} The execution will be handled automatically.
             """,
             "response_instructions": "Acknowledge the current state of reasoning. Do not ask questions or request additional input from the user.",
             "transitions": [
@@ -121,7 +127,6 @@ orchestrator_fsm = {
             ],
         },
         OrchestratorStates.SYNTHESIZE_SOLUTION: {
-            "id": OrchestratorStates.SYNTHESIZE_SOLUTION,
             "description": "Synthesize solution from reasoning results",
             "purpose": f"Create '{ContextKeys.PROPOSED_SOLUTION}' and '{ContextKeys.KEY_INSIGHTS}' from reasoning results",
             "required_context_keys": [
@@ -140,9 +145,9 @@ orchestrator_fsm = {
 
             Create a clear, actionable solution with supporting insights.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Synthesize based on available reasoning outputs.
+            {_IMPORTANT_NO_QUESTIONS} Synthesize based on available reasoning outputs.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": OrchestratorStates.VALIDATE_REFINE,
@@ -151,10 +156,9 @@ orchestrator_fsm = {
             ],
         },
         OrchestratorStates.VALIDATE_REFINE: {
-            "id": OrchestratorStates.VALIDATE_REFINE,
             "description": "Validate solution with retry limit protection",
             "purpose": f"Check '{ContextKeys.VALIDATION_RESULT}' and retry if needed (max {Defaults.MAX_RETRIES} times)",
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Validate the proposed solution:
 
             - Check if the solution adequately addresses the original problem
@@ -165,9 +169,9 @@ orchestrator_fsm = {
 
             Handlers set validation_result and manage retry_count to prevent infinite loops.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Validate based on the solution quality and completeness.
+            {_IMPORTANT_NO_QUESTIONS} Validate based on the solution quality and completeness.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": OrchestratorStates.FINAL_ANSWER,
@@ -224,14 +228,13 @@ orchestrator_fsm = {
             ],
         },
         OrchestratorStates.FINAL_ANSWER: {
-            "id": OrchestratorStates.FINAL_ANSWER,
             "description": "Present final answer with complete reasoning trace",
             "purpose": f"Set '{ContextKeys.FINAL_SOLUTION}' and final metadata",
             "required_context_keys": [
                 ContextKeys.FINAL_SOLUTION,
                 ContextKeys.REASONING_TRACE,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Present the final solution with complete context:
 
             Set final_solution to:
@@ -243,9 +246,9 @@ orchestrator_fsm = {
             - Complete reasoning_trace showing the path taken
             - Summary of key insights and approach used
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Present the final solution based on the reasoning process.
+            {_IMPORTANT_NO_QUESTIONS} Present the final solution based on the reasoning process.
             """,
-            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINAL,
             "transitions": [],
         },
     },
@@ -263,14 +266,13 @@ classifier_fsm = {
     "persona": "You are an expert problem analyst who identifies the best reasoning approach for any given problem.",
     "states": {
         ClassifierStates.ANALYZE_DOMAIN: {
-            "id": ClassifierStates.ANALYZE_DOMAIN,
             "description": "Identify problem domain and context",
             "purpose": f"Determine '{ContextKeys.PROBLEM_DOMAIN}' and '{ContextKeys.DOMAIN_INDICATORS}'",
             "required_context_keys": [
                 ContextKeys.PROBLEM_DOMAIN,
                 ContextKeys.DOMAIN_INDICATORS,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Analyze the problem domain:
 
             Identify the primary domain (mathematics, logic, creativity, analysis, evaluation, etc.) and specific indicators:
@@ -283,9 +285,9 @@ classifier_fsm = {
             - Explanatory: Seeks to explain phenomena or observations
             - Comparative: Involves analogies, similarities, pattern matching
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Analyze the domain based on the problem statement provided.
+            {_IMPORTANT_NO_QUESTIONS} Analyze the domain based on the problem statement provided.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": ClassifierStates.ANALYZE_STRUCTURE,
@@ -294,14 +296,13 @@ classifier_fsm = {
             ],
         },
         ClassifierStates.ANALYZE_STRUCTURE: {
-            "id": ClassifierStates.ANALYZE_STRUCTURE,
             "description": "Analyze problem structure and complexity",
             "purpose": f"Identify '{ContextKeys.PROBLEM_STRUCTURE}' and '{ContextKeys.STRUCTURAL_ELEMENTS}'",
             "required_context_keys": [
                 ContextKeys.PROBLEM_STRUCTURE,
                 ContextKeys.STRUCTURAL_ELEMENTS,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Analyze the structural characteristics:
 
             Identify structure type and key elements:
@@ -313,9 +314,9 @@ classifier_fsm = {
 
             Document structural elements like components, relationships, dependencies, constraints.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Analyze structure from the given problem.
+            {_IMPORTANT_NO_QUESTIONS} Analyze structure from the given problem.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": ClassifierStates.IDENTIFY_REASONING_NEEDS,
@@ -324,14 +325,13 @@ classifier_fsm = {
             ],
         },
         ClassifierStates.IDENTIFY_REASONING_NEEDS: {
-            "id": ClassifierStates.IDENTIFY_REASONING_NEEDS,
             "description": "Identify specific reasoning requirements",
             "purpose": f"Determine '{ContextKeys.REASONING_REQUIREMENTS}' and '{ContextKeys.KEY_CHALLENGES}'",
             "required_context_keys": [
                 ContextKeys.REASONING_REQUIREMENTS,
                 ContextKeys.KEY_CHALLENGES,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Identify what type of reasoning is needed:
 
             For simple calculations, set reasoning_requirements='direct computation'.
@@ -347,9 +347,9 @@ classifier_fsm = {
 
             Document key challenges that the reasoning approach must address.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Determine requirements based on your analysis.
+            {_IMPORTANT_NO_QUESTIONS} Determine requirements based on your analysis.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": ClassifierStates.RECOMMEND_STRATEGY,
@@ -358,7 +358,6 @@ classifier_fsm = {
             ],
         },
         ClassifierStates.RECOMMEND_STRATEGY: {
-            "id": ClassifierStates.RECOMMEND_STRATEGY,
             "description": "Recommend optimal reasoning strategy",
             "purpose": f"Set '{ContextKeys.RECOMMENDED_REASONING_TYPE}', '{ContextKeys.STRATEGY_JUSTIFICATION}', and '{ContextKeys.ALTERNATIVE_APPROACHES}'",
             "required_context_keys": [
@@ -366,7 +365,7 @@ classifier_fsm = {
                 ContextKeys.STRATEGY_JUSTIFICATION,
                 ContextKeys.ALTERNATIVE_APPROACHES,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Recommend the best reasoning strategy:
 
             Choose from available strategies:
@@ -382,9 +381,9 @@ classifier_fsm = {
 
             Provide clear justification and identify 1-2 alternative approaches that could also work.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Make recommendation based on your complete analysis.
+            {_IMPORTANT_NO_QUESTIONS} Make recommendation based on your complete analysis.
             """,
-            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINAL,
             "transitions": [],
         },
     },
@@ -402,7 +401,6 @@ simple_calculator_fsm = {
     "persona": "You are a precise calculator that performs arithmetic operations accurately.",
     "states": {
         "extract_elements": {
-            "id": "extract_elements",
             "description": "Extract operands and operator from problem",
             "purpose": f"Extract '{ContextKeys.OPERAND1}', '{ContextKeys.OPERAND2}', and '{ContextKeys.OPERATOR}'",
             "required_context_keys": [
@@ -410,7 +408,7 @@ simple_calculator_fsm = {
                 ContextKeys.OPERAND2,
                 ContextKeys.OPERATOR,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Extract the mathematical elements from the problem:
 
             - Identify the first number (operand1)
@@ -421,9 +419,9 @@ simple_calculator_fsm = {
 
             For expressions like "2 + 3", set operand1=2, operand2=3, operator="+"
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Extract elements from the available problem information.
+            {_IMPORTANT_NO_QUESTIONS} Extract elements from the available problem information.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "perform_calculation",
@@ -432,11 +430,10 @@ simple_calculator_fsm = {
             ],
         },
         "perform_calculation": {
-            "id": "perform_calculation",
             "description": "Calculate the arithmetic result",
             "purpose": f"Calculate and store result in '{ContextKeys.CALCULATION_RESULT}'",
             "required_context_keys": [ContextKeys.CALCULATION_RESULT],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Perform the arithmetic calculation:
 
             - Execute the operation: operand1 operator operand2
@@ -451,9 +448,9 @@ simple_calculator_fsm = {
             - 5 * 4 = 20
             - 2^3 = 8
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Perform calculation with extracted elements.
+            {_IMPORTANT_NO_QUESTIONS} Perform calculation with extracted elements.
             """,
-            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINAL,
             "transitions": [],
         },
     },
@@ -471,7 +468,6 @@ analytical_fsm = {
     "persona": "You are a methodical analytical thinker who breaks down complex problems systematically.",
     "states": {
         "decompose": {
-            "id": "decompose",
             "description": "Break down the problem into component parts",
             "purpose": f"Identify '{ContextKeys.COMPONENTS}', '{ContextKeys.ATTRIBUTES}', and '{ContextKeys.RELATIONSHIPS}'",
             "required_context_keys": [
@@ -479,7 +475,7 @@ analytical_fsm = {
                 ContextKeys.ATTRIBUTES,
                 ContextKeys.RELATIONSHIPS,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Systematically decompose the problem:
 
             - Break the problem into smaller, manageable components
@@ -490,9 +486,9 @@ analytical_fsm = {
 
             Focus on creating a clear structural understanding of the problem space.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Decompose based on the problem as presented.
+            {_IMPORTANT_NO_QUESTIONS} Decompose based on the problem as presented.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "analyze_components",
@@ -501,14 +497,13 @@ analytical_fsm = {
             ],
         },
         "analyze_components": {
-            "id": "analyze_components",
             "description": "Analyze each component in detail",
             "purpose": f"Create '{ContextKeys.COMPONENT_ANALYSIS}' and identify '{ContextKeys.DATA_REQUIREMENTS}'",
             "required_context_keys": [
                 ContextKeys.COMPONENT_ANALYSIS,
                 ContextKeys.DATA_REQUIREMENTS,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Conduct detailed analysis of each component:
 
             - Examine the function and role of each component
@@ -519,9 +514,9 @@ analytical_fsm = {
 
             Create comprehensive component analysis with clear insights.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Analyze components based on your decomposition.
+            {_IMPORTANT_NO_QUESTIONS} Analyze components based on your decomposition.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "identify_patterns",
@@ -530,7 +525,6 @@ analytical_fsm = {
             ],
         },
         "identify_patterns": {
-            "id": "identify_patterns",
             "description": "Find patterns and dependencies between components",
             "purpose": f"Identify '{ContextKeys.PATTERNS}', '{ContextKeys.CAUSAL_LINKS}', and '{ContextKeys.DEPENDENCIES}'",
             "required_context_keys": [
@@ -538,7 +532,7 @@ analytical_fsm = {
                 ContextKeys.CAUSAL_LINKS,
                 ContextKeys.DEPENDENCIES,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Identify patterns and relationships:
 
             - Look for recurring patterns across components
@@ -549,9 +543,9 @@ analytical_fsm = {
 
             Focus on understanding the dynamic interactions between components.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Identify patterns from your component analysis.
+            {_IMPORTANT_NO_QUESTIONS} Identify patterns from your component analysis.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "integrate_findings",
@@ -560,14 +554,13 @@ analytical_fsm = {
             ],
         },
         "integrate_findings": {
-            "id": "integrate_findings",
             "description": "Synthesize understanding from all analytical work",
             "purpose": f"Create '{ContextKeys.INTEGRATED_ANALYSIS}' and '{ContextKeys.KEY_INSIGHTS}'",
             "required_context_keys": [
                 ContextKeys.INTEGRATED_ANALYSIS,
                 ContextKeys.KEY_INSIGHTS,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Integrate all analytical findings:
 
             - Synthesize component analysis, patterns, and relationships
@@ -578,9 +571,9 @@ analytical_fsm = {
 
             Provide integrated analysis that brings together all analytical work into coherent understanding.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Integrate based on your complete analytical process.
+            {_IMPORTANT_NO_QUESTIONS} Integrate based on your complete analytical process.
             """,
-            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINAL,
             "transitions": [],
         },
     },
@@ -598,11 +591,10 @@ deductive_fsm = {
     "persona": "You are a logical thinker who applies established principles and rules to reach certain conclusions through valid reasoning.",
     "states": {
         "identify_premises": {
-            "id": "identify_premises",
             "description": "Identify the general rules, principles, and assumptions",
             "purpose": f"Establish '{ContextKeys.PREMISES}' and identify '{ContextKeys.ASSUMPTIONS}'",
             "required_context_keys": [ContextKeys.PREMISES, ContextKeys.ASSUMPTIONS],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Identify the starting points for deductive reasoning:
 
             - What general rules, laws, or principles apply to this problem?
@@ -613,9 +605,9 @@ deductive_fsm = {
 
             Be explicit about both obvious and hidden assumptions that underlie the reasoning.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Work with the premises and information already provided in the problem.
+            {_IMPORTANT_NO_QUESTIONS} Work with the premises and information already provided in the problem.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "apply_logic",
@@ -624,14 +616,13 @@ deductive_fsm = {
             ],
         },
         "apply_logic": {
-            "id": "apply_logic",
             "description": "Apply logical rules to derive conclusions step by step",
             "purpose": f"Document '{ContextKeys.LOGICAL_STEPS}' and '{ContextKeys.INTERMEDIATE_CONCLUSIONS}'",
             "required_context_keys": [
                 ContextKeys.LOGICAL_STEPS,
                 ContextKeys.INTERMEDIATE_CONCLUSIONS,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Apply logical reasoning systematically:
 
             - What follows logically from the established premises?
@@ -642,9 +633,9 @@ deductive_fsm = {
 
             Show your logical work clearly, step by step, ensuring valid inferences.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Apply logical reasoning to the premises you've identified.
+            {_IMPORTANT_NO_QUESTIONS} Apply logical reasoning to the premises you've identified.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "derive_conclusion",
@@ -653,14 +644,13 @@ deductive_fsm = {
             ],
         },
         "derive_conclusion": {
-            "id": "derive_conclusion",
             "description": "Reach final conclusions and assess logical validity",
             "purpose": f"State final '{ContextKeys.CONCLUSION}' and assess '{ContextKeys.LOGICAL_VALIDITY}'",
             "required_context_keys": [
                 ContextKeys.CONCLUSION,
                 ContextKeys.LOGICAL_VALIDITY,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Derive the final conclusion and validate the reasoning:
 
             - What specific conclusion follows from the complete logical chain?
@@ -671,9 +661,9 @@ deductive_fsm = {
 
             State your conclusion clearly and provide honest assessment of the logical validity.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Derive your conclusion from the logical steps you've taken.
+            {_IMPORTANT_NO_QUESTIONS} Derive your conclusion from the logical steps you've taken.
             """,
-            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINAL,
             "transitions": [],
         },
     },
@@ -691,14 +681,13 @@ inductive_fsm = {
     "persona": "You are an empirical thinker who discovers patterns by carefully examining specific examples and building general understanding from evidence.",
     "states": {
         "gather_observations": {
-            "id": "gather_observations",
             "description": "Collect and organize specific observations and data points",
             "purpose": f"Identify '{ContextKeys.OBSERVATIONS}' and '{ContextKeys.DATA_POINTS}' relevant to the problem",
             "required_context_keys": [
                 ContextKeys.OBSERVATIONS,
                 ContextKeys.DATA_POINTS,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Systematically gather specific, concrete observations:
 
             - What specific examples, cases, or instances are available?
@@ -709,9 +698,9 @@ inductive_fsm = {
 
             Focus on collecting concrete, specific observations rather than general statements or theories.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Work with the observations and data available in the problem context.
+            {_IMPORTANT_NO_QUESTIONS} Work with the observations and data available in the problem context.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "identify_commonalities",
@@ -720,11 +709,10 @@ inductive_fsm = {
             ],
         },
         "identify_commonalities": {
-            "id": "identify_commonalities",
             "description": "Find patterns and commonalities across observations",
             "purpose": f"Identify '{ContextKeys.COMMONALITIES}' and '{ContextKeys.TRENDS}' in the data",
             "required_context_keys": [ContextKeys.COMMONALITIES, ContextKeys.TRENDS],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Systematically look for patterns across your observations:
 
             - What do multiple cases, examples, or instances have in common?
@@ -735,9 +723,9 @@ inductive_fsm = {
 
             Identify both obvious and subtle patterns that might not be immediately apparent.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Find patterns in the observations you've systematically gathered.
+            {_IMPORTANT_NO_QUESTIONS} Find patterns in the observations you've systematically gathered.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "form_hypothesis",
@@ -746,14 +734,13 @@ inductive_fsm = {
             ],
         },
         "form_hypothesis": {
-            "id": "form_hypothesis",
             "description": "Form general hypothesis based on observed patterns",
             "purpose": f"Create '{ContextKeys.HYPOTHESIS}' supported by '{ContextKeys.SUPPORTING_EVIDENCE}'",
             "required_context_keys": [
                 ContextKeys.HYPOTHESIS,
                 ContextKeys.SUPPORTING_EVIDENCE,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Form a well-grounded general hypothesis from the identified patterns:
 
             - What general rule, principle, or law might explain the observed patterns?
@@ -764,9 +751,9 @@ inductive_fsm = {
 
             Make your hypothesis specific enough to be testable while being general enough to be useful for prediction.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Form your hypothesis based on the patterns you've systematically identified.
+            {_IMPORTANT_NO_QUESTIONS} Form your hypothesis based on the patterns you've systematically identified.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "test_generalization",
@@ -775,7 +762,6 @@ inductive_fsm = {
             ],
         },
         "test_generalization": {
-            "id": "test_generalization",
             "description": "Test the strength and limits of the generalization",
             "purpose": f"Evaluate with '{ContextKeys.TEST_RESULTS}', '{ContextKeys.COUNTER_EXAMPLES}', and '{ContextKeys.GENERALIZATION_STRENGTH}'",
             "required_context_keys": [
@@ -783,7 +769,7 @@ inductive_fsm = {
                 ContextKeys.COUNTER_EXAMPLES,
                 ContextKeys.GENERALIZATION_STRENGTH,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Rigorously test your generalization against available evidence:
 
             - How well does it predict or explain other cases not used in forming it?
@@ -794,9 +780,9 @@ inductive_fsm = {
 
             Rate the strength of your generalization from 1-10 based on the quality and quantity of supporting evidence.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Test your generalization rigorously with all available information.
+            {_IMPORTANT_NO_QUESTIONS} Test your generalization rigorously with all available information.
             """,
-            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINAL,
             "transitions": [],
         },
     },
@@ -814,11 +800,10 @@ creative_fsm = {
     "persona": "You are an innovative creative thinker who generates novel solutions by seeing problems from fresh perspectives and making unexpected connections.",
     "states": {
         "explore_perspectives": {
-            "id": "explore_perspectives",
             "description": "Explore the problem from multiple creative perspectives",
             "purpose": f"Generate '{ContextKeys.PERSPECTIVES}' and '{ContextKeys.REFRAMINGS}' of the problem",
             "required_context_keys": [ContextKeys.PERSPECTIVES, ContextKeys.REFRAMINGS],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Systematically explore the problem through different creative lenses:
 
             - How would different people approach this (child, artist, engineer, scientist, entrepreneur)?
@@ -829,9 +814,9 @@ creative_fsm = {
 
             Generate multiple fresh ways of viewing and framing the problem to unlock creative potential.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Generate diverse perspectives based on the problem as stated.
+            {_IMPORTANT_NO_QUESTIONS} Generate diverse perspectives based on the problem as stated.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "generate_ideas",
@@ -840,14 +825,13 @@ creative_fsm = {
             ],
         },
         "generate_ideas": {
-            "id": "generate_ideas",
             "description": "Brainstorm creative and unconventional ideas without judgment",
             "purpose": f"Create '{ContextKeys.CREATIVE_IDEAS}' and '{ContextKeys.UNCONVENTIONAL_APPROACHES}'",
             "required_context_keys": [
                 ContextKeys.CREATIVE_IDEAS,
                 ContextKeys.UNCONVENTIONAL_APPROACHES,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Generate creative ideas through divergent thinking:
 
             - What wild, impossible, or seemingly silly ideas come to mind?
@@ -858,22 +842,21 @@ creative_fsm = {
 
             Focus on quantity and novelty over immediate practicality. Suspend judgment and let creativity flow freely.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Generate ideas freely based on your thorough perspective exploration.
+            {_IMPORTANT_NO_QUESTIONS} Generate ideas freely based on your thorough perspective exploration.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {"target_state": "combine_concepts", "description": "Ideas generated"}
             ],
         },
         "combine_concepts": {
-            "id": "combine_concepts",
             "description": "Combine and synthesize ideas in novel ways",
             "purpose": f"Create '{ContextKeys.COMBINATIONS}' and develop '{ContextKeys.NOVEL_SOLUTIONS}'",
             "required_context_keys": [
                 ContextKeys.COMBINATIONS,
                 ContextKeys.NOVEL_SOLUTIONS,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Systematically combine ideas in unexpected and innovative ways:
 
             - What happens when we merge different approaches or solutions?
@@ -884,22 +867,21 @@ creative_fsm = {
 
             Create truly novel solutions that integrate multiple creative elements in unexpected ways.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Combine the ideas you've generated in innovative ways.
+            {_IMPORTANT_NO_QUESTIONS} Combine the ideas you've generated in innovative ways.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {"target_state": "evaluate_novelty", "description": "Concepts combined"}
             ],
         },
         "evaluate_novelty": {
-            "id": "evaluate_novelty",
             "description": "Evaluate creative solutions for novelty, feasibility, and impact",
             "purpose": f"Select '{ContextKeys.BEST_CREATIVE_SOLUTION}' and rate '{ContextKeys.INNOVATION_RATING}'",
             "required_context_keys": [
                 ContextKeys.BEST_CREATIVE_SOLUTION,
                 ContextKeys.INNOVATION_RATING,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Critically evaluate your creative solutions using convergent thinking:
 
             - Which solutions are most genuinely novel and original?
@@ -910,9 +892,9 @@ creative_fsm = {
 
             Select the most promising creative solution and provide a detailed innovation assessment.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Evaluate and select based on the creative solutions you've systematically developed.
+            {_IMPORTANT_NO_QUESTIONS} Evaluate and select based on the creative solutions you've systematically developed.
             """,
-            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINAL,
             "transitions": [],
         },
     },
@@ -930,11 +912,10 @@ critical_fsm = {
     "persona": "You are a rigorous critical thinker who carefully evaluates arguments, evidence, and reasoning to separate truth from error and strong arguments from weak ones.",
     "states": {
         "identify_claims": {
-            "id": "identify_claims",
             "description": "Identify and categorize the main claims and arguments",
             "purpose": f"Extract '{ContextKeys.CLAIMS}' and '{ContextKeys.ARGUMENTS}' from the problem or text",
             "required_context_keys": [ContextKeys.CLAIMS, ContextKeys.ARGUMENTS],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Systematically identify what is being claimed or argued:
 
             - What are the main conclusions, assertions, or claims being made?
@@ -945,9 +926,9 @@ critical_fsm = {
 
             Clearly separate main arguments from supporting points and distinguish between different types of claims.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Work with the claims and arguments present in the given material.
+            {_IMPORTANT_NO_QUESTIONS} Work with the claims and arguments present in the given material.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "examine_evidence",
@@ -956,14 +937,13 @@ critical_fsm = {
             ],
         },
         "examine_evidence": {
-            "id": "examine_evidence",
             "description": "Critically examine the quality and sufficiency of supporting evidence",
             "purpose": f"Assess '{ContextKeys.EVIDENCE_QUALITY}' and identify '{ContextKeys.EVIDENCE_GAPS}'",
             "required_context_keys": [
                 ContextKeys.EVIDENCE_QUALITY,
                 ContextKeys.EVIDENCE_GAPS,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Rigorously examine the evidence supporting the identified claims:
 
             - What evidence is actually provided? Is it relevant, sufficient, and appropriate?
@@ -974,15 +954,14 @@ critical_fsm = {
 
             Be specific about both strengths and critical weaknesses of the evidence base.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Evaluate the evidence that is already available in the material.
+            {_IMPORTANT_NO_QUESTIONS} Evaluate the evidence that is already available in the material.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {"target_state": "analyze_logic", "description": "Evidence examined"}
             ],
         },
         "analyze_logic": {
-            "id": "analyze_logic",
             "description": "Analyze logical structure and identify reasoning flaws",
             "purpose": f"Conduct '{ContextKeys.LOGICAL_ANALYSIS}', identify '{ContextKeys.ASSUMPTIONS}' and '{ContextKeys.FALLACIES}'",
             "required_context_keys": [
@@ -990,7 +969,7 @@ critical_fsm = {
                 ContextKeys.ASSUMPTIONS,
                 ContextKeys.FALLACIES,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Systematically analyze the logical structure and identify flaws:
 
             - Do the conclusions actually follow logically from the stated premises?
@@ -1001,9 +980,9 @@ critical_fsm = {
 
             Identify specific logical strengths and weaknesses with clear examples.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Analyze the logical structure of what has been provided.
+            {_IMPORTANT_NO_QUESTIONS} Analyze the logical structure of what has been provided.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "consider_alternatives",
@@ -1012,14 +991,13 @@ critical_fsm = {
             ],
         },
         "consider_alternatives": {
-            "id": "consider_alternatives",
             "description": "Consider alternative explanations and strong counter-arguments",
             "purpose": f"Identify '{ContextKeys.ALTERNATIVE_EXPLANATIONS}' and '{ContextKeys.COUNTER_ARGUMENTS}'",
             "required_context_keys": [
                 ContextKeys.ALTERNATIVE_EXPLANATIONS,
                 ContextKeys.COUNTER_ARGUMENTS,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Systematically consider alternatives and opposing viewpoints:
 
             - What alternative explanations, interpretations, or conclusions are plausible?
@@ -1030,9 +1008,9 @@ critical_fsm = {
 
             Present fair and intellectually honest alternatives rather than weak straw man arguments.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Generate thoughtful alternatives based on your systematic analysis.
+            {_IMPORTANT_NO_QUESTIONS} Generate thoughtful alternatives based on your systematic analysis.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "form_judgment",
@@ -1041,14 +1019,13 @@ critical_fsm = {
             ],
         },
         "form_judgment": {
-            "id": "form_judgment",
             "description": "Form comprehensive critical assessment with justified confidence level",
             "purpose": f"Provide '{ContextKeys.CRITICAL_ASSESSMENT}' and '{ContextKeys.CONFIDENCE_RATING}'",
             "required_context_keys": [
                 ContextKeys.CRITICAL_ASSESSMENT,
                 ContextKeys.CONFIDENCE_RATING,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Form a well-reasoned overall critical judgment:
 
             - How strong and convincing are the arguments when all factors are considered?
@@ -1059,9 +1036,9 @@ critical_fsm = {
 
             Provide a fair, balanced evaluation with a confidence rating from 1-10 and clear justification.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Form your critical judgment based on your complete systematic analysis.
+            {_IMPORTANT_NO_QUESTIONS} Form your critical judgment based on your complete systematic analysis.
             """,
-            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINAL,
             "transitions": [],
         },
     },
@@ -1079,14 +1056,13 @@ abductive_fsm = {
     "persona": "You are a detective and investigator who excels at finding the most plausible explanations for puzzling observations and unexplained phenomena.",
     "states": {
         "identify_observations": {
-            "id": "identify_observations",
             "description": "Identify key observations that require explanation",
             "purpose": f"Catalog '{ContextKeys.OBSERVATIONS}' and identify '{ContextKeys.SURPRISING_ELEMENTS}' that require explanation",
             "required_context_keys": [
                 ContextKeys.OBSERVATIONS,
                 ContextKeys.SURPRISING_ELEMENTS,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Systematically identify what needs to be explained:
 
             - What specific facts, phenomena, or observations are we trying to explain?
@@ -1097,9 +1073,9 @@ abductive_fsm = {
 
             Focus on concrete, specific observations rather than interpretations or preliminary explanations.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Work with the observations already provided in the problem context.
+            {_IMPORTANT_NO_QUESTIONS} Work with the observations already provided in the problem context.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "generate_hypotheses",
@@ -1108,14 +1084,13 @@ abductive_fsm = {
             ],
         },
         "generate_hypotheses": {
-            "id": "generate_hypotheses",
             "description": "Generate multiple potential explanations",
             "purpose": f"Create '{ContextKeys.POTENTIAL_HYPOTHESES}' with '{ContextKeys.HYPOTHESIS_RATIONALES}' for each explanation",
             "required_context_keys": [
                 ContextKeys.POTENTIAL_HYPOTHESES,
                 ContextKeys.HYPOTHESIS_RATIONALES,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Generate multiple plausible explanations for the observations:
 
             - What could reasonably account for what we observe?
@@ -1126,9 +1101,9 @@ abductive_fsm = {
 
             For each hypothesis, provide a clear rationale explaining why it could account for the observations.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Generate comprehensive hypotheses based on the observations you've identified.
+            {_IMPORTANT_NO_QUESTIONS} Generate comprehensive hypotheses based on the observations you've identified.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "evaluate_hypotheses",
@@ -1137,14 +1112,13 @@ abductive_fsm = {
             ],
         },
         "evaluate_hypotheses": {
-            "id": "evaluate_hypotheses",
             "description": "Systematically evaluate each hypothesis against standard criteria",
             "purpose": f"Create '{ContextKeys.HYPOTHESIS_EVALUATIONS}' using '{ContextKeys.EVALUATION_CRITERIA}' for systematic assessment",
             "required_context_keys": [
                 ContextKeys.HYPOTHESIS_EVALUATIONS,
                 ContextKeys.EVALUATION_CRITERIA,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Systematically evaluate each hypothesis using standard criteria for explanatory adequacy:
 
             - Explanatory scope: How comprehensively does it explain the observations?
@@ -1156,9 +1130,9 @@ abductive_fsm = {
 
             Rate each hypothesis systematically on these dimensions with clear justifications.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Evaluate based on the hypotheses you've systematically generated.
+            {_IMPORTANT_NO_QUESTIONS} Evaluate based on the hypotheses you've systematically generated.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "select_best_explanation",
@@ -1167,7 +1141,6 @@ abductive_fsm = {
             ],
         },
         "select_best_explanation": {
-            "id": "select_best_explanation",
             "description": "Select most plausible explanation with clear justification",
             "purpose": f"Choose '{ContextKeys.BEST_HYPOTHESIS}' with '{ContextKeys.SELECTION_JUSTIFICATION}', '{ContextKeys.CONFIDENCE_IN_EXPLANATION}', and '{ContextKeys.NEXT_STEPS_FOR_VALIDATION}'",
             "required_context_keys": [
@@ -1176,7 +1149,7 @@ abductive_fsm = {
                 ContextKeys.CONFIDENCE_IN_EXPLANATION,
                 ContextKeys.NEXT_STEPS_FOR_VALIDATION,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Select the best explanation through careful comparative analysis:
 
             - Which hypothesis best balances all the evaluative criteria?
@@ -1187,9 +1160,9 @@ abductive_fsm = {
 
             Provide clear, detailed justification for your selection and acknowledge appropriate levels of uncertainty.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Make your selection based on your systematic evaluation process.
+            {_IMPORTANT_NO_QUESTIONS} Make your selection based on your systematic evaluation process.
             """,
-            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINAL,
             "transitions": [],
         },
     },
@@ -1207,14 +1180,13 @@ analogical_fsm = {
     "persona": "You are an expert at finding meaningful connections and analogies. You help solve problems by identifying similar situations and transferring insights across domains.",
     "states": {
         "define_target_problem": {
-            "id": "define_target_problem",
             "description": "Clearly define and characterize the target problem",
             "purpose": f"Analyze the problem to identify '{ContextKeys.TARGET_PROBLEM_DESCRIPTION}' and '{ContextKeys.KEY_FEATURES_OF_TARGET}'",
             "required_context_keys": [
                 ContextKeys.TARGET_PROBLEM_DESCRIPTION,
                 ContextKeys.KEY_FEATURES_OF_TARGET,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Systematically define and characterize the target problem:
 
             - What is the core challenge, question, or problem we're trying to solve?
@@ -1225,9 +1197,9 @@ analogical_fsm = {
 
             Create a clear, comprehensive characterization of the target problem for analogical matching.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Work only with the information already provided in the problem statement and context.
+            {_IMPORTANT_NO_QUESTIONS} Work only with the information already provided in the problem statement and context.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "find_source_analogs",
@@ -1236,7 +1208,6 @@ analogical_fsm = {
             ],
         },
         "find_source_analogs": {
-            "id": "find_source_analogs",
             "description": "Identify potential analogous situations across various domains",
             "purpose": f"Find '{ContextKeys.POTENTIAL_ANALOGS}' with '{ContextKeys.RATIONALE_FOR_CHOICE}' and '{ContextKeys.SIMILARITY_CRITERIA_USED}'",
             "required_context_keys": [
@@ -1244,7 +1215,7 @@ analogical_fsm = {
                 ContextKeys.RATIONALE_FOR_CHOICE,
                 ContextKeys.SIMILARITY_CRITERIA_USED,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Systematically search for analogous situations across different domains:
 
             - What situations, problems, or systems share important structural similarities?
@@ -1255,9 +1226,9 @@ analogical_fsm = {
 
             Provide 2-4 potential analogs with clear rationale for why each might offer valuable insights.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Search for analogs based on your target problem characterization.
+            {_IMPORTANT_NO_QUESTIONS} Search for analogs based on your target problem characterization.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "map_correspondences",
@@ -1266,7 +1237,6 @@ analogical_fsm = {
             ],
         },
         "map_correspondences": {
-            "id": "map_correspondences",
             "description": "Create systematic mapping between source analog and target problem",
             "purpose": f"Select best analog and create detailed mapping with '{ContextKeys.SELECTED_ANALOG}', '{ContextKeys.ANALOGICAL_MAPPING}', '{ContextKeys.IDENTIFIED_SIMILARITIES}', '{ContextKeys.IDENTIFIED_DIFFERENCES}'",
             "required_context_keys": [
@@ -1275,7 +1245,7 @@ analogical_fsm = {
                 ContextKeys.IDENTIFIED_SIMILARITIES,
                 ContextKeys.IDENTIFIED_DIFFERENCES,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Create systematic correspondences between the most promising analog and target:
 
             - Choose the analog with the strongest structural and functional similarities
@@ -1286,9 +1256,9 @@ analogical_fsm = {
 
             Be precise about what maps to what and provide clear justification for the correspondences.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Create the mapping based on your analysis of potential analogs.
+            {_IMPORTANT_NO_QUESTIONS} Create the mapping based on your analysis of potential analogs.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "transfer_insights",
@@ -1297,14 +1267,13 @@ analogical_fsm = {
             ],
         },
         "transfer_insights": {
-            "id": "transfer_insights",
             "description": "Transfer knowledge and solutions from analog to target domain",
             "purpose": f"Generate '{ContextKeys.TRANSFERRED_INSIGHTS_OR_SOLUTIONS}' and '{ContextKeys.POTENTIAL_INFERENCES}'",
             "required_context_keys": [
                 ContextKeys.TRANSFERRED_INSIGHTS_OR_SOLUTIONS,
                 ContextKeys.POTENTIAL_INFERENCES,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Systematically transfer insights using the analogical mapping:
 
             - What solutions, strategies, or approaches worked effectively in the source domain?
@@ -1315,9 +1284,9 @@ analogical_fsm = {
 
             Be specific and explicit about how insights from the analog apply to and illuminate the target problem.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Generate insights based on the systematic analogical mapping you've created.
+            {_IMPORTANT_NO_QUESTIONS} Generate insights based on the systematic analogical mapping you've created.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "evaluate_analogy_fit",
@@ -1326,7 +1295,6 @@ analogical_fsm = {
             ],
         },
         "evaluate_analogy_fit": {
-            "id": "evaluate_analogy_fit",
             "description": "Critically evaluate the analogy's validity and practical utility",
             "purpose": f"Assess analogy with '{ContextKeys.ANALOGY_STRENGTHS}', '{ContextKeys.ANALOGY_WEAKNESSES_OR_LIMITATIONS}', '{ContextKeys.ADAPTED_SOLUTION_OR_UNDERSTANDING}', '{ContextKeys.ANALOGY_CONFIDENCE_RATING}'",
             "required_context_keys": [
@@ -1335,7 +1303,7 @@ analogical_fsm = {
                 ContextKeys.ADAPTED_SOLUTION_OR_UNDERSTANDING,
                 ContextKeys.ANALOGY_CONFIDENCE_RATING,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Critically and systematically evaluate the analogical reasoning:
 
             - What are the strongest, most compelling aspects of this analogy?
@@ -1346,9 +1314,9 @@ analogical_fsm = {
 
             Provide balanced evaluation with adapted solution and justified confidence rating.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Complete your evaluation with the information developed through your systematic analogical process.
+            {_IMPORTANT_NO_QUESTIONS} Complete your evaluation with the information developed through your systematic analogical process.
             """,
-            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINAL,
             "transitions": [],
         },
     },
@@ -1369,14 +1337,13 @@ hybrid_fsm = {
     "handler_only_keys": [ContextKeys.HYBRID_LOOP_COUNT],
     "states": {
         HYBRID_FIRST_STATE: {
-            "id": HYBRID_FIRST_STATE,
             "description": "Break problem into components requiring different reasoning approaches",
             "purpose": f"Map '{ContextKeys.PROBLEM_ASPECTS}' to reasoning types in '{ContextKeys.REASONING_MAP}'",
             "required_context_keys": [
                 ContextKeys.PROBLEM_ASPECTS,
                 ContextKeys.REASONING_MAP,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Systematically analyze the problem to identify aspects requiring different reasoning approaches:
 
             - What parts need systematic analytical breakdown and decomposition?
@@ -1387,9 +1354,9 @@ hybrid_fsm = {
 
             Create a comprehensive map of problem aspects to appropriate reasoning approaches.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Analyze the problem as presented to identify reasoning needs.
+            {_IMPORTANT_NO_QUESTIONS} Analyze the problem as presented to identify reasoning needs.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "apply_analytical",
@@ -1398,14 +1365,13 @@ hybrid_fsm = {
             ],
         },
         "apply_analytical": {
-            "id": "apply_analytical",
             "description": "Apply systematic analytical reasoning to understand problem structure",
             "purpose": f"Create '{ContextKeys.ANALYTICAL_BREAKDOWN}' and '{ContextKeys.COMPONENT_RELATIONSHIPS}'",
             "required_context_keys": [
                 ContextKeys.ANALYTICAL_BREAKDOWN,
                 ContextKeys.COMPONENT_RELATIONSHIPS,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Apply systematic analytical thinking to the problem:
 
             - Break down complex aspects into simpler, more manageable components
@@ -1416,9 +1382,9 @@ hybrid_fsm = {
 
             Provide thorough analytical breakdown that will inform other reasoning approaches.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Proceed with systematic analytical breakdown based on your component identification.
+            {_IMPORTANT_NO_QUESTIONS} Proceed with systematic analytical breakdown based on your component identification.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "apply_logical",
@@ -1427,14 +1393,13 @@ hybrid_fsm = {
             ],
         },
         "apply_logical": {
-            "id": "apply_logical",
             "description": "Apply logical reasoning to derive sound conclusions",
             "purpose": f"Establish '{ContextKeys.LOGICAL_CONCLUSIONS}' and '{ContextKeys.REASONING_CHAIN}'",
             "required_context_keys": [
                 ContextKeys.LOGICAL_CONCLUSIONS,
                 ContextKeys.REASONING_CHAIN,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Apply systematic logical reasoning to the analytical findings:
 
             - What can be logically deduced from the analytical breakdown and identified relationships?
@@ -1445,9 +1410,9 @@ hybrid_fsm = {
 
             Build a clear, valid chain of logical reasoning that builds on the analytical foundation.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Apply logical reasoning systematically to your analytical findings.
+            {_IMPORTANT_NO_QUESTIONS} Apply logical reasoning systematically to your analytical findings.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "apply_creative",
@@ -1456,14 +1421,13 @@ hybrid_fsm = {
             ],
         },
         "apply_creative": {
-            "id": "apply_creative",
             "description": "Apply creative thinking to generate novel approaches and insights",
             "purpose": f"Generate '{ContextKeys.CREATIVE_INSIGHTS}' and '{ContextKeys.NOVEL_APPROACHES}'",
             "required_context_keys": [
                 ContextKeys.CREATIVE_INSIGHTS,
                 ContextKeys.NOVEL_APPROACHES,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Apply creative thinking to complement and enhance the analytical and logical work:
 
             - What new perspectives or insights emerge from viewing the analysis creatively?
@@ -1474,9 +1438,9 @@ hybrid_fsm = {
 
             Generate creative insights that meaningfully enhance rather than contradict the systematic reasoning.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Generate creative insights building on your comprehensive analytical and logical work.
+            {_IMPORTANT_NO_QUESTIONS} Generate creative insights building on your comprehensive analytical and logical work.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": HYBRID_EVALUATION_STATE,
@@ -1485,11 +1449,10 @@ hybrid_fsm = {
             ],
         },
         HYBRID_EVALUATION_STATE: {
-            "id": HYBRID_EVALUATION_STATE,
             "description": "Critically evaluate all findings with systematic loop prevention",
             "purpose": f"Create '{ContextKeys.EVALUATION_RESULTS}' and determine if refinement needed (maximum {Defaults.MAX_HYBRID_LOOPS} loops)",
             "required_context_keys": [ContextKeys.EVALUATION_RESULTS],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Critically evaluate the integration of all reasoning approaches:
 
             - How effectively do the analytical, logical, and creative approaches complement each other?
@@ -1500,9 +1463,9 @@ hybrid_fsm = {
 
             Set needs_refinement=True only for serious, fundamental issues.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Evaluate comprehensively based on your multi-faceted analysis.
+            {_IMPORTANT_NO_QUESTIONS} Evaluate comprehensively based on your multi-faceted analysis.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "integrate_solution",
@@ -1559,14 +1522,13 @@ hybrid_fsm = {
             ],
         },
         "integrate_solution": {
-            "id": "integrate_solution",
             "description": "Integrate insights from all reasoning approaches into comprehensive solution",
             "purpose": f"Create '{ContextKeys.INTEGRATED_SOLUTION}' with '{ContextKeys.REASONING_SYNTHESIS_NOTES}'",
             "required_context_keys": [
                 ContextKeys.INTEGRATED_SOLUTION,
                 ContextKeys.REASONING_SYNTHESIS_NOTES,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Systematically integrate all reasoning approaches into a comprehensive, unified solution:
 
             - How do analytical insights, logical conclusions, and creative innovations combine synergistically?
@@ -1577,9 +1539,9 @@ hybrid_fsm = {
 
             Synthesize rather than merely summarize—create genuine integration that leverages the strengths of each approach.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Integrate systematically based on your comprehensive multi-approach analysis.
+            {_IMPORTANT_NO_QUESTIONS} Integrate systematically based on your comprehensive multi-approach analysis.
             """,
-            "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINDINGS,
             "transitions": [
                 {
                     "target_state": "finalize_hybrid",
@@ -1588,14 +1550,13 @@ hybrid_fsm = {
             ],
         },
         "finalize_hybrid": {
-            "id": "finalize_hybrid",
             "description": "Present final hybrid solution with complete reasoning synthesis",
             "purpose": f"Finalize '{ContextKeys.FINAL_HYBRID_SOLUTION}' and '{ContextKeys.REASONING_SYNTHESIS}'",
             "required_context_keys": [
                 ContextKeys.FINAL_HYBRID_SOLUTION,
                 ContextKeys.REASONING_SYNTHESIS,
             ],
-            "extraction_instructions": """
+            "extraction_instructions": f"""
             Present the final comprehensive hybrid solution with complete synthesis:
 
             - What is your final, most comprehensive and well-reasoned solution?
@@ -1606,9 +1567,9 @@ hybrid_fsm = {
 
             Provide a complete synthesis that demonstrates and showcases the power of systematically combined reasoning approaches.
 
-            IMPORTANT: Do not ask questions or request additional input from the user. Present your final integrated solution based on the complete hybrid reasoning process.
+            {_IMPORTANT_NO_QUESTIONS} Present your final integrated solution based on the complete hybrid reasoning process.
             """,
-            "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+            "response_instructions": _PRESENT_FINAL,
             "transitions": [],
         },
     },
@@ -1619,7 +1580,7 @@ hybrid_fsm = {
 # FSM REGISTRY - Complete collection for easy access and management
 # ============================================================================
 
-ALL_REASONING_FSMS = {
+ALL_REASONING_FSMS: dict[str, dict[str, Any]] = {
     "orchestrator": orchestrator_fsm,
     "classifier": classifier_fsm,
     "simple_calculator": simple_calculator_fsm,
@@ -1632,3 +1593,11 @@ ALL_REASONING_FSMS = {
     "analogical": analogical_fsm,
     "hybrid": hybrid_fsm,
 }
+
+# Core requires a state's "id" to equal its key in "states": written here once
+# instead of beside every state.
+for _fsm in ALL_REASONING_FSMS.values():
+    _fsm["states"] = {
+        state_id: {"id": state_id, **state}
+        for state_id, state in _fsm["states"].items()
+    }

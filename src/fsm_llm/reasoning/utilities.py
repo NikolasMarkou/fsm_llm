@@ -9,13 +9,17 @@ from typing import Any
 
 from fsm_llm.logging import logger
 
-from .constants import ErrorMessages, ReasoningType
+from .constants import STRATEGIES, ErrorMessages, ReasoningType
 from .reasoning_modes import ALL_REASONING_FSMS
 
 
-def load_fsm_definition(fsm_name: str) -> dict[str, Any]:
+def get_reasoning_fsm(fsm_name: str) -> dict[str, Any]:
     """
-    Load an FSM definition from the Python dictionary store.
+    Load a reasoning FSM definition from the Python dictionary store.
+
+    Not ``fsm_llm.load_fsm_definition`` (an id or path, returning an
+    ``FSMDefinition``): this returns a deep copy of the dict in
+    ``ALL_REASONING_FSMS``.
 
     :param fsm_name: Name of the FSM
     :return: FSM definition dictionary
@@ -29,6 +33,14 @@ def load_fsm_definition(fsm_name: str) -> dict[str, Any]:
     return copy.deepcopy(fsm_dict)
 
 
+# Every spelling ``map_reasoning_type`` accepts: the nine values and the aliases
+# of ``STRATEGIES``.
+_TYPE_MAP: dict[str, str] = {
+    **{value: value for value in STRATEGIES},
+    **{alias: value for value, spec in STRATEGIES.items() for alias in spec.aliases},
+}
+
+
 def map_reasoning_type(type_str: str) -> str:
     """
     Map a reasoning type string to a standardized value.
@@ -36,81 +48,13 @@ def map_reasoning_type(type_str: str) -> str:
     :param type_str: Input reasoning type string
     :return: Standardized reasoning type that matches ReasoningType enum values
     """
-    # Comprehensive mapping including aliases
-    type_map = {
-        # Direct mappings
-        "analytical": ReasoningType.ANALYTICAL.value,
-        "deductive": ReasoningType.DEDUCTIVE.value,
-        "inductive": ReasoningType.INDUCTIVE.value,
-        "creative": ReasoningType.CREATIVE.value,
-        "critical": ReasoningType.CRITICAL.value,
-        "hybrid": ReasoningType.HYBRID.value,
-        "simple_calculator": ReasoningType.SIMPLE_CALCULATOR.value,
-        "abductive": ReasoningType.ABDUCTIVE.value,
-        "analogical": ReasoningType.ANALOGICAL.value,
-        # Aliases for calculator
-        "direct computation": ReasoningType.SIMPLE_CALCULATOR.value,
-        "direct calculation": ReasoningType.SIMPLE_CALCULATOR.value,
-        "arithmetic": ReasoningType.SIMPLE_CALCULATOR.value,
-        "calculation": ReasoningType.SIMPLE_CALCULATOR.value,
-        "math": ReasoningType.SIMPLE_CALCULATOR.value,
-        "calculator": ReasoningType.SIMPLE_CALCULATOR.value,
-        "compute": ReasoningType.SIMPLE_CALCULATOR.value,
-        "numeric": ReasoningType.SIMPLE_CALCULATOR.value,
-        # Aliases for analytical
-        "analyze": ReasoningType.ANALYTICAL.value,
-        "analysis": ReasoningType.ANALYTICAL.value,
-        # Aliases for deductive
-        "deduce": ReasoningType.DEDUCTIVE.value,
-        "deduction": ReasoningType.DEDUCTIVE.value,
-        "logic": ReasoningType.DEDUCTIVE.value,
-        "logical": ReasoningType.DEDUCTIVE.value,
-        "syllogism": ReasoningType.DEDUCTIVE.value,
-        # Aliases for inductive
-        "induce": ReasoningType.INDUCTIVE.value,
-        "induction": ReasoningType.INDUCTIVE.value,
-        "pattern": ReasoningType.INDUCTIVE.value,
-        "observation": ReasoningType.INDUCTIVE.value,
-        "generalize": ReasoningType.INDUCTIVE.value,
-        # Aliases for creative
-        "create": ReasoningType.CREATIVE.value,
-        "innovation": ReasoningType.CREATIVE.value,
-        "innovative": ReasoningType.CREATIVE.value,
-        "brainstorm": ReasoningType.CREATIVE.value,
-        "divergent": ReasoningType.CREATIVE.value,
-        # Aliases for critical
-        "critique": ReasoningType.CRITICAL.value,
-        "evaluation": ReasoningType.CRITICAL.value,
-        "evaluate": ReasoningType.CRITICAL.value,
-        "assessment": ReasoningType.CRITICAL.value,
-        "judge": ReasoningType.CRITICAL.value,
-        # Aliases for hybrid
-        "mixed": ReasoningType.HYBRID.value,
-        "combined": ReasoningType.HYBRID.value,
-        "multi": ReasoningType.HYBRID.value,
-        # Aliases for abductive
-        "explain": ReasoningType.ABDUCTIVE.value,
-        "explanation": ReasoningType.ABDUCTIVE.value,
-        "hypothesis": ReasoningType.ABDUCTIVE.value,
-        "abduction": ReasoningType.ABDUCTIVE.value,
-        "diagnose": ReasoningType.ABDUCTIVE.value,
-        # Aliases for analogical
-        "analogy": ReasoningType.ANALOGICAL.value,
-        "comparison": ReasoningType.ANALOGICAL.value,
-        "compare": ReasoningType.ANALOGICAL.value,
-        "similar": ReasoningType.ANALOGICAL.value,
-    }
-
-    # Normalize input
     normalized = type_str.lower().strip()
 
-    # Return mapped value or default to analytical
-    mapped_value = type_map.get(normalized, ReasoningType.ANALYTICAL.value)
-
-    if normalized not in type_map:
+    if normalized not in _TYPE_MAP:
         logger.warning(f"Unknown reasoning type '{type_str}', defaulting to analytical")
+        return ReasoningType.ANALYTICAL.value
 
-    return mapped_value
+    return _TYPE_MAP[normalized]
 
 
 def get_available_reasoning_types() -> dict[str, str]:
@@ -119,16 +63,4 @@ def get_available_reasoning_types() -> dict[str, str]:
 
     :return: Dictionary of type -> description
     """
-    descriptions = {
-        ReasoningType.SIMPLE_CALCULATOR: "Direct arithmetic calculations",
-        ReasoningType.ANALYTICAL: "Breaking down complex problems into components",
-        ReasoningType.DEDUCTIVE: "Deriving specific conclusions from general principles",
-        ReasoningType.INDUCTIVE: "Finding patterns from specific observations",
-        ReasoningType.CREATIVE: "Generating novel solutions through divergent thinking",
-        ReasoningType.CRITICAL: "Evaluating arguments and evidence",
-        ReasoningType.HYBRID: "Combining multiple reasoning approaches",
-        ReasoningType.ABDUCTIVE: "Finding the best explanation for observations",
-        ReasoningType.ANALOGICAL: "Transferring insights through analogies",
-    }
-
-    return {rt.value: descriptions[rt] for rt in descriptions}
+    return {value: spec.description for value, spec in STRATEGIES.items()}

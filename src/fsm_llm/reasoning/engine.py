@@ -8,6 +8,7 @@ Enhanced with loop prevention, context management, and standardized handling.
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any
 
 from fsm_llm import (
@@ -38,8 +39,13 @@ from .constants import (
 )
 from .definitions import ReasoningClassificationResult, ReasoningTrace
 from .exceptions import ReasoningClassificationError, ReasoningExecutionError
-from .handlers import ContextManager, OutputFormatter, ReasoningHandlers
-from .utilities import load_fsm_definition, map_reasoning_type
+from .handlers import (
+    ContextManager,
+    OutputFormatter,
+    ReasoningHandlers,
+    retries_exhausted,
+)
+from .utilities import get_reasoning_fsm, map_reasoning_type
 
 
 class ReasoningEngine:
@@ -75,32 +81,13 @@ class ReasoningEngine:
         logger.info(LogMessages.ENGINE_INITIALIZED.format(model=model))
 
     def _load_fsm_definitions(self):
-        """Load all FSM definitions with error handling."""
-        try:
-            self.main_fsm = load_fsm_definition("orchestrator")
-            self.classifier_fsm = load_fsm_definition("classifier")
-
-            # Load reasoning FSMs
-            self.reasoning_fsms = {}
-            failed_fsms = []
-            for reasoning_type in ReasoningType:
-                try:
-                    fsm = load_fsm_definition(reasoning_type.value)
-                    self.reasoning_fsms[reasoning_type] = fsm
-                except Exception as e:
-                    failed_fsms.append(reasoning_type.value)
-                    logger.warning(
-                        f"Could not load FSM for {reasoning_type.value}: {e}"
-                    )
-            if failed_fsms:
-                logger.error(
-                    f"Failed to load {len(failed_fsms)} reasoning FSM(s): "
-                    f"{', '.join(failed_fsms)}. These reasoning types will "
-                    "fall back to analytical."
-                )
-        except Exception as e:
-            logger.error(f"Failed to load core FSM definitions: {e}")
-            raise
+        """Load every FSM definition (all are in the package, so a miss raises)."""
+        self.main_fsm = get_reasoning_fsm("orchestrator")
+        self.classifier_fsm = get_reasoning_fsm("classifier")
+        self.reasoning_fsms = {
+            reasoning_type: get_reasoning_fsm(reasoning_type.value)
+            for reasoning_type in ReasoningType
+        }
 
     def _initialize_apis(self):
         """Initialize APIs with all necessary handlers."""
@@ -179,15 +166,12 @@ class ReasoningEngine:
             .do(self.handlers.prune_context)
         )
 
-        # Reasoning tracer for both APIs
-        tracer = (
+        # Reasoning tracer (the classifier's own trace is never read)
+        self.orchestrator.register_handler(
             self.orchestrator.create_handler(HandlerNames.REASONING_TRACER)
             .at(HandlerTiming.POST_TRANSITION)
             .do(self.handlers.update_reasoning_trace)
         )
-
-        self.orchestrator.register_handler(tracer)
-        self.classifier.register_handler(tracer)
 
         # Retry limiter for validation loops
         self.orchestrator.register_handler(
@@ -281,10 +265,7 @@ class ReasoningEngine:
         finally:
             # Clean up classifier conversation on any error path
             if conv_id is not None:
-                try:
-                    self.classifier.end_conversation(conv_id)
-                except Exception as cleanup_err:
-                    logger.debug(f"Cleanup error (suppressed): {cleanup_err}")
+                _end_quietly(self.classifier, conv_id)
 
         classification = _classification_from(result)
 
@@ -316,10 +297,12 @@ class ReasoningEngine:
             orchestrator_strategy = None
         classified_type = context.get(ContextKeys.CLASSIFIED_PROBLEM_TYPE)
 
-        # Priority: direct computation > classified type > orchestrator strategy
-        if orchestrator_strategy == "direct computation":
-            reasoning_type_str = "simple_calculator"
-        elif classified_type:
+        # DECISION plan-2026-11-05T185903-5980fbb7/D-006: the classified type
+        # beats the orchestrator's strategy for every spelling. Do NOT re-add a
+        # `reasoning_strategy == "direct computation"` override (or move it to
+        # "simple_calculator"): no prompt asks for that literal, and forcing
+        # the calculator over the classifier is a model-behaviour change.
+        if classified_type:
             reasoning_type_str = map_reasoning_type(classified_type)
         elif orchestrator_strategy:
             reasoning_type_str = map_reasoning_type(orchestrator_strategy)
@@ -409,7 +392,7 @@ class ReasoningEngine:
         retry_count = verdict.get(
             ContextKeys.RETRY_COUNT, context.get(ContextKeys.RETRY_COUNT, 0)
         )
-        max_reached = retry_count >= Defaults.MAX_RETRIES
+        max_reached = retries_exhausted(retry_count)
 
         if max_reached:
             logger.warning(ErrorMessages.MAX_RETRIES_EXCEEDED)
@@ -451,6 +434,7 @@ class ReasoningEngine:
         context[ContextKeys.REASONING_TRACE] = []
         context[ContextKeys.RETRY_COUNT] = 0
 
+        started = time.monotonic()
         # Start orchestrator
         conv_id, initial_response = self.orchestrator.start_conversation(context)
         log = _solve_log(conv_id)
@@ -492,6 +476,7 @@ class ReasoningEngine:
                 final_confidence=final_context.get(
                     ContextKeys.SOLUTION_CONFIDENCE, 0.0
                 ),
+                execution_time_seconds=time.monotonic() - started,
             )
 
             log.info(LogMessages.PROBLEM_SOLVED.format(steps=trace_info.total_steps))
@@ -505,7 +490,7 @@ class ReasoningEngine:
             }
         finally:
             # Always clean up the conversation, even if post-processing raises
-            self._end_quietly(conv_id)
+            _end_quietly(self.orchestrator, conv_id)
 
     def _failed_solve(
         self, conv_id: str, stack: _StrategyStack, message: str
@@ -525,7 +510,7 @@ class ReasoningEngine:
         # end_conversation core answers get_data only from its bounded
         # ended-conversation cache, which may already have evicted it.
         partial_context = self._read_partial_context(conv_id)
-        self._end_quietly(conv_id)
+        _end_quietly(self.orchestrator, conv_id)
         return ReasoningExecutionError(
             message,
             details={
@@ -552,16 +537,6 @@ class ReasoningEngine:
                 f"Could not read the partial context of {conv_id}: {read_err}"
             )
             return None
-
-    def _end_quietly(self, conv_id: str) -> None:
-        """End the orchestrator conversation; a failure is logged, not raised
-        (it runs on paths that already return or raise a result)."""
-        try:
-            self.orchestrator.end_conversation(conv_id)
-        except Exception as cleanup_err:
-            _solve_log(conv_id).warning(
-                f"Failed to clean up conversation {conv_id}: {cleanup_err}"
-            )
 
     def _extract_reasoning_types(
         self, final_context: dict[str, Any], trace_steps: list[dict[str, Any]]
@@ -631,6 +606,17 @@ def _classification_from(result: dict[str, Any]) -> ReasoningClassificationResul
 def _solve_log(conversation_id: str) -> Any:
     """The logger bound to one solve's orchestrator conversation."""
     return logger.bind(conversation_id=conversation_id, package="fsm_llm.reasoning")
+
+
+def _end_quietly(api: API, conv_id: str) -> None:
+    """End ``conv_id`` on ``api``; a failure is logged, not raised (it runs on
+    paths that already return or raise a result)."""
+    try:
+        api.end_conversation(conv_id)
+    except Exception as cleanup_err:
+        _solve_log(conv_id).warning(
+            f"Failed to clean up conversation {conv_id}: {cleanup_err}"
+        )
 
 
 class _StrategyStack:

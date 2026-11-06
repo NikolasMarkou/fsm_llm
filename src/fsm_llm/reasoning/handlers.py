@@ -8,10 +8,17 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from fsm_llm.constants import MESSAGE_TRUNCATION_SUFFIX
 from fsm_llm.logging import logger
 
-from .constants import ContextKeys, Defaults, ErrorMessages, LogMessages, ReasoningType
-from .definitions import ValidationResult
+from .constants import (
+    STRATEGIES,
+    ContextKeys,
+    Defaults,
+    ErrorMessages,
+    LogMessages,
+    ReasoningType,
+)
 
 # Stop-words filtered out during solution-relevance checking in validate_solution.
 # Without this, common words (the, is, a) cause near-universal overlap, making the
@@ -105,6 +112,25 @@ def _is_solution(value: Any) -> bool:
     return value is not None and value != ""
 
 
+def retries_exhausted(retry_count: int) -> bool:
+    """True when ``retry_count`` has reached ``Defaults.MAX_RETRIES``.
+
+    Contract: the one retry-limit rule, shared by ``validate_solution`` (after
+    its increment) and ``ReasoningEngine._check_retry_limit``.
+    """
+    return retry_count >= Defaults.MAX_RETRIES
+
+
+# Orchestrator keys ``extract_final_solution`` reads, in order: the two the
+# SYNTHESIZE/FINAL states set, then one per strategy (the keys
+# ``merge_reasoning_results`` writes, not the raw sub-FSM keys).
+_SOLUTION_KEYS: tuple[str, ...] = (
+    ContextKeys.FINAL_SOLUTION,
+    ContextKeys.PROPOSED_SOLUTION,
+    *(spec.solution_key for spec in STRATEGIES.values()),
+)
+
+
 class ReasoningHandlers:
     """Collection of handlers for the reasoning engine."""
 
@@ -131,8 +157,7 @@ class ReasoningHandlers:
         is_simple_problem = (
             "arithmetic" in problem_type
             or "calculation" in problem_type
-            or reasoning_strategy == "direct computation"
-            or reasoning_strategy == "simple_calculator"
+            or reasoning_strategy == ReasoningType.SIMPLE_CALCULATOR.value
             or context.get(ContextKeys.REASONING_TYPE_SELECTED)
             == ReasoningType.SIMPLE_CALCULATOR.value
         )
@@ -196,41 +221,28 @@ class ReasoningHandlers:
         # Handle retry logic. Increment first, then derive the flag from the
         # post-increment count so MAX_RETRIES_REACHED stays consistent with the
         # returned RETRY_COUNT and with engine._check_retry_limit (both use
-        # retry_count >= MAX_RETRIES).
-        if not is_valid and retry_count < Defaults.MAX_RETRIES:
+        # retries_exhausted).
+        if not is_valid and not retries_exhausted(retry_count):
             retry_count += 1
             logger.info(
                 LogMessages.RETRY_ATTEMPT.format(
                     current=retry_count, max=Defaults.MAX_RETRIES
                 )
             )
-        max_retries_reached = retry_count >= Defaults.MAX_RETRIES
 
-        # Calculate confidence
-        num_checks = len(validation_checks)
-        confidence = (
-            sum(validation_checks.values()) / num_checks if num_checks > 0 else 0.0
-        )
-
-        validation = ValidationResult(
-            is_valid=is_valid,
-            confidence=confidence,
-            checks=validation_checks,
-            issues=[k for k, v in validation_checks.items() if not v],
-        )
+        # Confidence is the fraction of checks passed
+        confidence = sum(validation_checks.values()) / len(validation_checks)
 
         logger.info(
-            LogMessages.VALIDATION_RESULT.format(
-                valid=validation.is_valid, confidence=validation.confidence
-            )
+            LogMessages.VALIDATION_RESULT.format(valid=is_valid, confidence=confidence)
         )
 
         return {
             ContextKeys.RETRY_COUNT: retry_count,
-            ContextKeys.VALIDATION_CHECKS: validation.checks,
-            ContextKeys.VALIDATION_RESULT: validation.is_valid,
-            ContextKeys.SOLUTION_CONFIDENCE: validation.confidence,
-            ContextKeys.MAX_RETRIES_REACHED: max_retries_reached,
+            ContextKeys.VALIDATION_CHECKS: validation_checks,
+            ContextKeys.VALIDATION_RESULT: is_valid,
+            ContextKeys.SOLUTION_CONFIDENCE: confidence,
+            ContextKeys.MAX_RETRIES_REACHED: retries_exhausted(retry_count),
         }
 
     @staticmethod
@@ -266,13 +278,8 @@ class ReasoningHandlers:
         # Prune old traces if getting too long
         if len(trace) > Defaults.MAX_TRACE_STEPS:
             # Keep first few and last many
-            keep_start = min(5, Defaults.MAX_TRACE_STEPS)
-            keep_end = max(0, Defaults.MAX_TRACE_STEPS - keep_start)
-            trace = (
-                trace[:keep_start] + trace[-keep_end:]
-                if keep_end > 0
-                else trace[:keep_start]
-            )
+            keep_end = Defaults.MAX_TRACE_STEPS - Defaults.TRACE_KEEP_START
+            trace = trace[: Defaults.TRACE_KEEP_START] + trace[-keep_end:]
             logger.debug(f"Pruned reasoning trace to {len(trace)} steps")
 
         if previous_state and current_state:
@@ -346,7 +353,8 @@ class ReasoningHandlers:
                     f"{len(value)} to {Defaults.PRUNE_STRING_MAX_LENGTH} chars"
                 )
                 pruned_updates[key] = (
-                    value[: Defaults.PRUNE_STRING_MAX_LENGTH] + "...[truncated]"
+                    value[: Defaults.PRUNE_STRING_MAX_LENGTH]
+                    + MESSAGE_TRUNCATION_SUFFIX
                 )
 
         if pruned_updates:
@@ -412,88 +420,13 @@ class ContextManager:
         :param reasoning_type: Type of reasoning executed
         :return: Mapped results for orchestrator
         """
-        results = {}
-
-        # Map based on reasoning type using constants
-        if reasoning_type == ReasoningType.ANALYTICAL.value:
-            results[ContextKeys.KEY_INSIGHTS] = sub_fsm_context.get(
-                ContextKeys.KEY_INSIGHTS
-            )
-            results[ContextKeys.INTEGRATED_ANALYSIS] = sub_fsm_context.get(
-                ContextKeys.INTEGRATED_ANALYSIS
-            )
-
-        elif reasoning_type == ReasoningType.DEDUCTIVE.value:
-            results[ContextKeys.DEDUCTIVE_CONCLUSION] = sub_fsm_context.get(
-                ContextKeys.CONCLUSION
-            )
-            results[ContextKeys.LOGICAL_VALIDITY] = sub_fsm_context.get(
-                ContextKeys.LOGICAL_VALIDITY
-            )
-
-        elif reasoning_type == ReasoningType.INDUCTIVE.value:
-            results[ContextKeys.INDUCTIVE_HYPOTHESIS] = sub_fsm_context.get(
-                ContextKeys.HYPOTHESIS
-            )
-            results[ContextKeys.GENERALIZATION_STRENGTH] = sub_fsm_context.get(
-                ContextKeys.GENERALIZATION_STRENGTH
-            )
-
-        elif reasoning_type == ReasoningType.CREATIVE.value:
-            results[ContextKeys.BEST_CREATIVE_SOLUTION] = sub_fsm_context.get(
-                ContextKeys.BEST_CREATIVE_SOLUTION
-            )
-            results[ContextKeys.INNOVATION_RATING] = sub_fsm_context.get(
-                ContextKeys.INNOVATION_RATING
-            )
-
-        elif reasoning_type == ReasoningType.CRITICAL.value:
-            results[ContextKeys.CRITICAL_ASSESSMENT] = sub_fsm_context.get(
-                ContextKeys.CRITICAL_ASSESSMENT
-            )
-            results[ContextKeys.ASSESSMENT_CONFIDENCE] = sub_fsm_context.get(
-                ContextKeys.CONFIDENCE_RATING
-            )
-
-        elif reasoning_type == ReasoningType.SIMPLE_CALCULATOR.value:
-            # Direct mapping for calculator results
-            calculation_result = sub_fsm_context.get(ContextKeys.CALCULATION_RESULT)
-            if calculation_result is not None:
-                results[ContextKeys.CALCULATION_RESULT] = calculation_result
-                # Also set as proposed solution for consistency
-                results[ContextKeys.PROPOSED_SOLUTION] = calculation_result
-
-            if ContextKeys.CALCULATION_ERROR in sub_fsm_context:
-                results[ContextKeys.CALCULATION_ERROR_DETAILS] = sub_fsm_context.get(
-                    ContextKeys.CALCULATION_ERROR
-                )
-
-        elif reasoning_type == ReasoningType.HYBRID.value:
-            results[ContextKeys.FINAL_HYBRID_SOLUTION] = sub_fsm_context.get(
-                ContextKeys.FINAL_HYBRID_SOLUTION
-            )
-            results[ContextKeys.HYBRID_SYNTHESIS_SUMMARY] = sub_fsm_context.get(
-                ContextKeys.REASONING_SYNTHESIS
-            )
-
-        elif reasoning_type == ReasoningType.ABDUCTIVE.value:
-            results[ContextKeys.BEST_EXPLANATION] = sub_fsm_context.get(
-                ContextKeys.BEST_HYPOTHESIS
-            )
-            results[ContextKeys.EXPLANATION_CONFIDENCE] = sub_fsm_context.get(
-                ContextKeys.CONFIDENCE_IN_EXPLANATION
-            )
-
-        elif reasoning_type == ReasoningType.ANALOGICAL.value:
-            results[ContextKeys.ANALOGICAL_SOLUTION] = sub_fsm_context.get(
-                ContextKeys.ADAPTED_SOLUTION_OR_UNDERSTANDING
-            )
-            results[ContextKeys.ANALOGY_CONFIDENCE] = sub_fsm_context.get(
-                ContextKeys.ANALOGY_CONFIDENCE_RATING
-            )
-
-        # Filter out None values
-        results = {k: v for k, v in results.items() if v is not None}
+        spec = STRATEGIES.get(reasoning_type)
+        sources = spec.results if spec else {}
+        results = {
+            key: sub_fsm_context[source]
+            for key, source in sources.items()
+            if sub_fsm_context.get(source) is not None
+        }
 
         # Log overwrites for debugging
         for key in results:
@@ -519,25 +452,7 @@ class OutputFormatter:
         :param context: Final context
         :return: Formatted solution string
         """
-        # Priority order for solution extraction.
-        # First two are set by the orchestrator's SYNTHESIZE/FINAL states.
-        # Remaining are the per-reasoning-type keys set by merge_reasoning_results
-        # (must match the keys that merge actually writes, not the raw sub-FSM keys).
-        solution_keys = [
-            ContextKeys.FINAL_SOLUTION,
-            ContextKeys.PROPOSED_SOLUTION,
-            ContextKeys.CALCULATION_RESULT,
-            ContextKeys.INTEGRATED_ANALYSIS,
-            ContextKeys.DEDUCTIVE_CONCLUSION,
-            ContextKeys.INDUCTIVE_HYPOTHESIS,
-            ContextKeys.BEST_CREATIVE_SOLUTION,
-            ContextKeys.CRITICAL_ASSESSMENT,
-            ContextKeys.FINAL_HYBRID_SOLUTION,
-            ContextKeys.BEST_EXPLANATION,
-            ContextKeys.ANALOGICAL_SOLUTION,
-        ]
-
-        for key in solution_keys:
+        for key in _SOLUTION_KEYS:
             solution = context.get(key)
             if _is_solution(solution):
                 logger.debug(f"Extracted final solution from context key '{key}'")

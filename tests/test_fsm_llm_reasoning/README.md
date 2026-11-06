@@ -13,6 +13,7 @@ Each test imports from `fsm_llm.reasoning.*` and calls classes or static methods
 ## Files
 
 - `__init__.py` - empty, marks the directory as a package.
+- `test_audit_2026_11_05.py` - 17 tests for the reasoning audit fixes of plan 5980fbb7 step 18 (CLI escape and save, execution time, strategy choice, tracer, truncation marker, strategy table).
 - `test_audit_fixes.py` - 27 tests that pin audit fixes: context size limits, pruning constants, solution key coverage, exception re-raise order, removed dead code, and redacted JSON output.
 - `test_cli_logging.py` - 2 tests that the CLI `--verbose` flag turns library logging on and that it stays off without it.
 - `test_cli_output.py` - 3 tests that CLI JSON output and JSON save files list `reasoning_types_used` as a sorted list built from a real `ReasoningTrace`.
@@ -21,6 +22,7 @@ Each test imports from `fsm_llm.reasoning.*` and calls classes or static methods
 - `test_engine.py` - 10 tests for models, handlers, `map_reasoning_type`, and the rule that a missing reasoning FSM may only fall back to analytical.
 - `test_engine_scripted.py` - 51 tests that run whole solves offline through the core engine with a scripted `LLMInterface`: orchestrator, classifier FSM, pushed and popped strategy FSM, validation retry loop, forced pop, spent step budget, failures that keep `partial_context`, caller context that cannot drive the push.
 - `test_exceptions.py` - 8 tests for `ReasoningEngineError`, `ReasoningExecutionError`, `ReasoningClassificationError`.
+- `test_golden_tables.py` - 21 tests that pin the 11 FSM definitions and the strategy tables by sha256.
 - `test_handlers.py` - 39 tests for `ReasoningHandlers`, `ContextManager`, and `OutputFormatter`.
 
 194 tests in total.

@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from fsm_llm.cli_support import escape_unencodable_output
 from fsm_llm.logging import logger, setup_cli_logging
 from fsm_llm.utilities import redacting_json_default
 
@@ -292,33 +293,18 @@ def _format_detailed_output(solution: str, trace_info: dict[str, Any]) -> str:
     if remaining_steps > 0:
         lines.append(f"  ... ({remaining_steps} more steps)")
 
-    # Add metadata
-    lines.extend(
-        [
-            "",
-            "Metadata:",
-            f"  • Confidence: {trace.get('final_confidence', 'unknown')}",
-            f"  • Total Steps: {trace.get('total_steps', 0)}",
-            f"  • Reasoning Types: {', '.join(trace.get('reasoning_types_used', []))}",
-        ]
-    )
-
     return "\n".join(lines)
 
 
 def _format_text_output(solution: str, trace_info: dict[str, Any]) -> str:
     """Format output as simple text."""
-    lines = [
-        f"Solution: {solution}",
-        "",
-        trace_info.get("summary", "No summary available"),
-    ]
-
-    trace = trace_info.get("reasoning_trace", {})
-    if "final_confidence" in trace:
-        lines.append(f"Confidence: {trace['final_confidence']}")
-
-    return "\n".join(lines)
+    return "\n".join(
+        [
+            f"Solution: {solution}",
+            "",
+            trace_info.get("summary", "No summary available"),
+        ]
+    )
 
 
 def save_results_to_file(
@@ -463,6 +449,8 @@ def main() -> int:
     Returns:
         int: Exit code (0 for success, non-zero for error)
     """
+    # An unencodable character is written as \uXXXX, never ends a finished solve.
+    escape_unencodable_output()
     try:
         # Parse and validate arguments
         parser = setup_argument_parser()
@@ -502,10 +490,7 @@ def main() -> int:
         # Format and display output
         output = format_solution_output(solution, trace_info, args.output, args.quiet)
 
-        if not args.quiet:
-            print(output)
-        else:
-            print(solution)
+        print(output)
 
         # Save results if requested
         if args.save:
