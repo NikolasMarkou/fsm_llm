@@ -637,8 +637,8 @@ class TestSessionRestoreRoundTrip:
         RED before the NC1 fix: restore_session registers the conversation
         via start_conversation(_suppress_start=True), replays history/WM,
         then set_conversation_state raises FSMError -- but nothing tears the
-        just-created conversation down, so active_conversations /
-        conversation_stacks / fsm_manager.instances all grow by 1 and the
+        just-created conversation down, so conversation_stacks /
+        fsm_manager.instances both grow by 1 and the
         leaked conv_id is invisible to the caller (never returned).
         """
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -657,7 +657,7 @@ class TestSessionRestoreRoundTrip:
                 ),
             )
 
-            before_active = len(api.active_conversations)
+            before_active = len(api.conversation_stacks)
             before_stacks = len(api.conversation_stacks)
             before_instances = len(api.fsm_manager.instances)
 
@@ -665,7 +665,7 @@ class TestSessionRestoreRoundTrip:
                 api.restore_session("conv-bad")
 
             # No half-restored conversation may survive the failure.
-            assert len(api.active_conversations) == before_active
+            assert len(api.conversation_stacks) == before_active
             assert len(api.conversation_stacks) == before_stacks
             assert len(api.fsm_manager.instances) == before_instances
 
@@ -702,7 +702,7 @@ class TestSessionRestoreRoundTrip:
                 ),
             )
 
-            before_active = len(api.active_conversations)
+            before_active = len(api.conversation_stacks)
 
             with pytest.raises(FSMError):
                 api.restore_session("conv-bad")
@@ -713,7 +713,7 @@ class TestSessionRestoreRoundTrip:
                 "(consistent with _cleanup_after_failed_start / D-006)"
             )
             # ...and no conversation leaked.
-            assert len(api.active_conversations) == before_active
+            assert len(api.conversation_stacks) == before_active
 
     def test_restore_no_side_effects(self):
         """restore_session fires NO START_CONVERSATION handler and burns NO

@@ -137,6 +137,13 @@ def with_conversation_context(func):
     return wrapper
 
 
+def _unexpected_turn_failure(log: Any, message: str | None, exc: Exception) -> FSMError:
+    """Log an unexpected turn failure (call inside its ``except`` arm); return the FSMError to raise."""
+    what = "advance conversation" if message is None else "process message"
+    log.error(f"Failed to {what}: {exc!s}\n{traceback.format_exc()}")
+    return FSMError(f"Failed to {what}: {exc!s}")
+
+
 @overload
 def _conversation_entry(
     manager: FSMManager,
@@ -790,12 +797,10 @@ class FSMManager:
                     self._rollback_user_message(instance, message, log)
                     raise
                 except Exception as e:
+                    failure = _unexpected_turn_failure(log, message, e)
                     self._rollback_user_message(instance, message, log)
                     self._fire_error_handlers(instance, e, log)
-                    what = (
-                        "advance conversation" if message is None else "process message"
-                    )
-                    raise FSMError(f"Failed to {what}: {e!s}") from e
+                    raise failure from e
             finally:
                 self._active_turns.discard(conversation_id)
                 conv_lock.release()
@@ -854,11 +859,10 @@ class FSMManager:
             self._rollback_user_message(instance, message, log)
             raise
         except Exception as e:
-            what = "advance conversation" if message is None else "process message"
-            log.error(f"Failed to {what}: {e!s}\n{traceback.format_exc()}")
+            failure = _unexpected_turn_failure(log, message, e)
             self._rollback_user_message(instance, message, log)
             self._fire_error_handlers(instance, e, log)
-            raise FSMError(f"Failed to {what}: {e!s}") from e
+            raise failure from e
 
     def _fire_error_handlers(
         self,
@@ -911,7 +915,7 @@ class FSMManager:
             # under "continue" never reaches here).
             log.error(
                 "ERROR-timing handler failed while unwinding a failed "
-                f"process_message: {handler_err} "
+                f"turn: {handler_err} "
                 f"(original failure being unwound: {exc!s})"
             )
             raise handler_err from exc

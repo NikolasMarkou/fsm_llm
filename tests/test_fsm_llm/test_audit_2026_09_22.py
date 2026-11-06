@@ -558,7 +558,7 @@ class TestStep3RestoreLockOrder:
 
     def test_p0_3_seed_failure_tears_down_the_new_conversation(self):
         api, _ = _restore_api()
-        before = set(api.active_conversations)
+        before = set(api.conversation_stacks)
         with patch.object(
             api.fsm_manager,
             "seed_restored_conversation",
@@ -567,7 +567,7 @@ class TestStep3RestoreLockOrder:
         ):
             with pytest.raises(FSMError, match="seed failed"):
                 api.restore_session("saved")
-        assert set(api.active_conversations) == before
+        assert set(api.conversation_stacks) == before
 
 
 # ---------------------------------------------------------------------------

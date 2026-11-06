@@ -170,7 +170,6 @@ class TestVB3DoubleWrappedFSMError:
         api._stack_lock = __import__("threading").Lock()
         api.fsm_definition = MagicMock()
         api.fsm_id = "test-fsm"
-        api.active_conversations = {}
         api.conversation_stacks = {}
 
         mock_manager = MagicMock()
@@ -192,7 +191,6 @@ class TestVB3DoubleWrappedFSMError:
 
         api = API.__new__(API)
         api._stack_lock = __import__("threading").Lock()
-        api.active_conversations = {"c1": "f1"}
         api.conversation_stacks = {"c1": [MagicMock(fsm_conversation_id="c1")]}
 
         mock_manager = MagicMock()

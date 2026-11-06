@@ -466,10 +466,7 @@ def run_dataset(
     else:
         layer = config
     merged = merge_config(embedded, layer, overrides)
-    git_cwd = Path(path).resolve().parent
-    run_dir = open_run_dir(
-        merged.output_dir, merged.output_root, resolve_model(merged), cwd=git_cwd
-    )
+    run_dir = create_run_dir(merged, resolve_model(merged), path)
     return run_cases(
         cases,
         merged,
@@ -478,6 +475,18 @@ def run_dataset(
         progress=progress,
         dataset=path,
         checks=checks,
+    )
+
+
+def _dataset_dir(dataset: str | Path) -> Path:
+    """The directory of ``dataset``: the repository whose commit a run records."""
+    return Path(dataset).resolve().parent
+
+
+def create_run_dir(config: EvalConfig, model: str, dataset: str | Path) -> Path:
+    """:func:`~fsm_llm.eval.records.open_run_dir`, named after the dataset's git commit."""
+    return open_run_dir(
+        config.output_dir, config.output_root, model, cwd=_dataset_dir(dataset)
     )
 
 
@@ -493,8 +502,7 @@ def write_case_report(
     report: CaseReport, config: EvalConfig, dataset: str | Path | None = None
 ) -> Path:
     """Write ``results.json`` and ``summary.md``; return the summary path."""
-    git_cwd = Path(dataset).resolve().parent if dataset is not None else None
-    git_hash = git_short_hash(git_cwd)
+    git_hash = git_short_hash(_dataset_dir(dataset) if dataset is not None else None)
     overall = report.overall
     lo, hi = overall["wilson_ci"]
     lines = [

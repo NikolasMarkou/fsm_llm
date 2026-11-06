@@ -312,7 +312,6 @@ class TestPopFsmStackOrder:
         api._last_accessed = {}
 
         # Setup conversation with 2-frame stack
-        api.active_conversations = {"conv1": True}
         frame1 = FSMStackFrame(fsm_definition=fsm_def, conversation_id="conv1_root")
         frame2 = FSMStackFrame(fsm_definition=fsm_def, conversation_id="conv1_sub")
         api.conversation_stacks = {"conv1": [frame1, frame2]}

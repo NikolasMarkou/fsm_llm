@@ -454,7 +454,6 @@ class TestConversationMemoryLeak:
         from fsm_llm.definitions import FSMDefinition, State
 
         api = API.__new__(API)
-        api.active_conversations = {"conv1": True}
         api.conversation_stacks = {
             "conv1": [
                 FSMStackFrame(
@@ -485,9 +484,6 @@ class TestConversationMemoryLeak:
 
         assert "conv1" not in api.conversation_stacks, (
             "conversation_stacks should be cleaned up after end_conversation"
-        )
-        assert "conv1" not in api.active_conversations, (
-            "active_conversations should be cleaned up after end_conversation"
         )
 
 

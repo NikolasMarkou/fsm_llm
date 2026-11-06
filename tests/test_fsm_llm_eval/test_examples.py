@@ -99,6 +99,37 @@ class TestDiscovery:
         assert discover_examples(_config(tmp_path / "nope")) == []
 
 
+class TestUndecodableBytesBehaviour:
+    """F-WE-08: a non-UTF-8 byte in a script or in its output is data, not a crash."""
+
+    def test_discovery_survives_an_undecodable_script(self, examples_dir: Path):
+        (examples_dir / "basic" / "latin" / "run.py").parent.mkdir(parents=True)
+        (examples_dir / "basic" / "latin" / "run.py").write_bytes(
+            b"# caf\xe9\nx = input('?')\n"
+        )
+        targets = {t.name: t for t in discover_examples(_config(examples_dir))}
+        assert targets["basic/latin"].interactive is True
+        assert "basic/ok" in targets
+
+    def test_a_run_whose_output_is_not_utf8_is_scored_not_crashed(self, tmp_path: Path):
+        script = tmp_path / "run.py"
+        script.write_text(
+            "import sys\nsys.stdout.buffer.write(b'caf\\xe9\\n')\n", encoding="utf-8"
+        )
+        target = ExampleTarget(
+            name="basic/bytes",
+            category="basic",
+            path=script,
+            interactive=False,
+            stdin_data=None,
+            timeout=30,
+        )
+        result = run_example(target, "m", sys.executable, tmp_path)
+        assert result.exit_code == 0
+        assert result.error is None
+        assert result.stdout.startswith("caf")
+
+
 class TestTimeoutPrecedence:
     def test_example_table_beats_category_and_default(self):
         assert get_timeout("advanced/e_commerce", "advanced", 10) == 300

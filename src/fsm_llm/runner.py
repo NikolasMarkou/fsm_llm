@@ -1,3 +1,5 @@
+"""The ``fsm-llm`` chat REPL (``--mode run``)."""
+
 from __future__ import annotations
 
 import json

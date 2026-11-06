@@ -1,3 +1,5 @@
+"""FSM diagrams: the graph model (``FSMGraph``), Mermaid and DOT export, the ASCII renderer."""
+
 from __future__ import annotations
 
 import json

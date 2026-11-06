@@ -171,7 +171,7 @@ class TestAPILifecycle:
         conv_id, _ = api.start_conversation()
         api.end_conversation(conv_id)
 
-        assert conv_id not in api.active_conversations
+        assert conv_id not in api.conversation_stacks
         assert conv_id not in api.conversation_stacks
 
     def test_context_manager(self, greeting_fsm_dict, mock_llm2_interface):
@@ -181,10 +181,10 @@ class TestAPILifecycle:
             llm_interface=mock_llm2_interface,
         ) as api:
             conv_id, _ = api.start_conversation()
-            assert conv_id in api.active_conversations
+            assert conv_id in api.conversation_stacks
 
         # After exit, conversations should be cleaned up
-        assert len(api.active_conversations) == 0
+        assert len(api.conversation_stacks) == 0
 
     def test_has_conversation_ended_initial_state(
         self, greeting_fsm_dict, mock_llm2_interface

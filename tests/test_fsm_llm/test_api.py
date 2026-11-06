@@ -558,7 +558,7 @@ class TestRobustConversations:
         # Verify conversation started correctly
         assert isinstance(conv_id, str)
         assert isinstance(response, str)
-        assert conv_id in api.active_conversations
+        assert conv_id in api.conversation_stacks
 
         # Verify initial state matches FSM definition
         current_state = api.get_current_state(conv_id)
@@ -777,8 +777,8 @@ class TestFSMDefinitionEquivalence:
         conv_id1, _ = api_minimal.start_conversation()
         conv_id2, _ = api_complete.start_conversation()
 
-        assert conv_id1 in api_minimal.active_conversations
-        assert conv_id2 in api_complete.active_conversations
+        assert conv_id1 in api_minimal.conversation_stacks
+        assert conv_id2 in api_complete.conversation_stacks
 
 
 # ======================================================================
@@ -906,7 +906,7 @@ class TestRobustEdgeCases:
         api.end_conversation(conv_id)
 
         # Verify conversation was properly cleaned up from active_conversations
-        assert conv_id not in api.active_conversations
+        assert conv_id not in api.conversation_stacks
 
         # Verify conversation_stacks is cleaned up (was a known bug, now fixed)
         assert conv_id not in api.conversation_stacks
@@ -957,7 +957,7 @@ class TestPerformanceAndIntegration:
             conversations.append(conv_id)
 
         # Verify all conversations are active
-        assert len(api.active_conversations) == 5
+        assert len(api.conversation_stacks) == 5
         assert len(api.conversation_stacks) == 5
 
         # Verify each conversation has proper isolation
@@ -970,7 +970,7 @@ class TestPerformanceAndIntegration:
         for conv_id in conversations:
             api.end_conversation(conv_id)
 
-        assert len(api.active_conversations) == 0
+        assert len(api.conversation_stacks) == 0
 
     def test_transition_evaluator_integration(self, complex_fsm, mock_llm_interface):
         """Test integration with the transition evaluator."""
@@ -993,7 +993,7 @@ class TestPerformanceAndIntegration:
             fsm_definition=complete_simple_fsm, llm_interface=mock_llm_interface
         ) as api:
             conv_id, _ = api.start_conversation()
-            assert conv_id in api.active_conversations
+            assert conv_id in api.conversation_stacks
 
             # Use the API normally
             response = api.converse("Hello", conv_id)

@@ -1,5 +1,6 @@
 """
-The skeleton shared by ``fsm-llm-okf`` and ``fsm-llm-skills``: exit-code mapping,
+The skeleton shared by ``fsm-llm-okf`` and ``fsm-llm-skills`` (the ``fsm-llm``
+runner uses only the unencodable-output escape): exit-code mapping,
 BrokenPipe parking, the unencodable-output escape, the ``--max-seconds`` argument
 and the ``validate`` report. Each CLI keeps its parser, commands, loader and
 program name. Interface contract: ``run_cli`` returns 0, 1 or 130 and lets a

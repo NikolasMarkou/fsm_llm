@@ -30,25 +30,19 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from fsm_llm.constants import CLI_EXIT_INTERRUPTED
+from fsm_llm.constants import CLI_EXIT_FAILURE, CLI_EXIT_INTERRUPTED, CLI_EXIT_OK
 
-from .cases import TrialResult, load_cases, run_cases
+from .cases import TrialResult, create_run_dir, load_cases, run_cases
 from .config import EvalConfig, load_config, merge_config, resolve_model
-from .constants import (
-    EXIT_BELOW_THRESHOLD,
-    EXIT_ERROR,
-    EXIT_OK,
-    MAX_SCORE,
-    SCORE_LABELS,
-)
+from .constants import EXIT_BELOW_THRESHOLD, SCORE_LABELS
 from .examples import (
     ExampleResult,
     create_output_dir,
     discover_examples,
     run_examples,
+    score_totals,
 )
 from .exceptions import EvalError
-from .records import open_run_dir
 from .stats import below_percent
 
 __all__ = ["main_cli", "run"]
@@ -67,7 +61,7 @@ class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> Any:
         self.print_usage(sys.stderr)
         print(f"{self.prog}: error: {message}", file=sys.stderr)
-        raise SystemExit(EXIT_ERROR)
+        raise SystemExit(CLI_EXIT_FAILURE)
 
 
 def _add_common_options(parser: argparse.ArgumentParser) -> None:
@@ -189,18 +183,18 @@ def _cmd_examples(args: argparse.Namespace) -> int:
     examples_dir = Path(config.examples_dir).resolve()
     if not examples_dir.is_dir():
         print(f"Examples directory not found: {examples_dir}", file=sys.stderr)
-        return EXIT_ERROR
+        return CLI_EXIT_FAILURE
     targets = discover_examples(config)
     if not targets:
         print(f"No examples found matching filters in {examples_dir}", file=sys.stderr)
-        return EXIT_ERROR
+        return CLI_EXIT_FAILURE
     if args.list:
         print(f"Discovered {len(targets)} examples:\n")
         for t in targets:
             mode = "interactive" if t.interactive else "automated"
             stdin = "has stdin" if t.stdin_data else "no stdin"
             print(f"  {t.name:45s} [{mode}, {stdin}]")
-        return EXIT_OK
+        return CLI_EXIT_OK
 
     model = resolve_model(config)
     run_dir = create_output_dir(config, model)
@@ -214,11 +208,9 @@ def _cmd_examples(args: argparse.Namespace) -> int:
     print()
 
     report = run_examples(targets, config, model, run_dir, progress=_print_progress)
-    score_sum = sum(r.score for r in report.results)
+    score_sum, max_score = score_totals(report.results)
     print(f"\n{_RULE}")
-    print(
-        f"  Health Score: {score_sum}/{len(report.results) * MAX_SCORE} = {report.health:.1f}%"
-    )
+    print(f"  Health Score: {score_sum}/{max_score} = {report.health:.1f}%")
     print(
         f"  Wall time:   {report.wall_time:.1f}s ({len(report.results)} examples, {config.workers} workers)"
     )
@@ -228,7 +220,6 @@ def _cmd_examples(args: argparse.Namespace) -> int:
     print(_RULE)
     if report.interrupted:
         return _interrupted(f"{len(report.results)} of {len(targets)} examples")
-    max_score = len(report.results) * MAX_SCORE
     if config.fail_under is not None and below_percent(
         score_sum, max_score, config.fail_under
     ):
@@ -237,7 +228,7 @@ def _cmd_examples(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return EXIT_BELOW_THRESHOLD
-    return EXIT_OK
+    return CLI_EXIT_OK
 
 
 def _interrupted(done: str) -> int:
@@ -277,11 +268,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(f"Loaded {len(cases)} cases from {args.dataset}:\n")
         for case in cases:
             print(f"  {case.id:45s} [{len(case.turns)} turns] {case.description}")
-        return EXIT_OK
+        return CLI_EXIT_OK
 
     model = resolve_model(config)
-    git_cwd = Path(args.dataset).resolve().parent
-    run_dir = open_run_dir(config.output_dir, config.output_root, model, cwd=git_cwd)
+    run_dir = create_run_dir(config, model, args.dataset)
     print("FSM-LLM Conversation Evaluation", _RULE, sep="\n")
     print(f"  Model:    {model}")
     print(f"  Dataset:  {args.dataset}")
@@ -318,7 +308,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return EXIT_BELOW_THRESHOLD
-    return EXIT_OK
+    return CLI_EXIT_OK
 
 
 def main_cli(argv: Sequence[str] | None = None) -> int:
@@ -339,16 +329,16 @@ def main_cli(argv: Sequence[str] | None = None) -> int:
         from .__version__ import __version__
 
         print(f"{_PROG} {__version__}")
-        return EXIT_OK
+        return CLI_EXIT_OK
     handler: Callable[[argparse.Namespace], int] | None = getattr(args, "func", None)
     if handler is None:
         parser.print_help(sys.stderr)
-        return EXIT_ERROR
+        return CLI_EXIT_FAILURE
     try:
         return handler(args)
     except EvalError as exc:
         print(f"{_PROG}: error: {exc}", file=sys.stderr)
-        return EXIT_ERROR
+        return CLI_EXIT_FAILURE
     except KeyboardInterrupt:  # before or after the runs (they handle their own)
         print(f"{_PROG}: interrupted", file=sys.stderr)
         return CLI_EXIT_INTERRUPTED

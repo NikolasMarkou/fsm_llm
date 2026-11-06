@@ -6,13 +6,14 @@ commit of the fix it guards.
 
 from __future__ import annotations
 
+import json
 import math
 from contextlib import contextmanager
 from typing import Any, ClassVar
 
 import pytest
 
-from fsm_llm import API, ContextCompactor
+from fsm_llm import API, APIBuilder, ContextCompactor
 from fsm_llm.definitions import (
     Conversation,
     FieldExtractionConfig,
@@ -383,3 +384,67 @@ class TestRejectedExtractionReasonIsLogged:
             api.converse("my number is 3.7", cid)
         joined = "\n".join(records)
         assert "Type coercion to int failed" in joined
+
+
+class TestStreamFailureIsLoggedLikeTheSyncTurn:
+    """F-AF-09: a failing stream turn left no ERROR line, the sync turn did."""
+
+    def _failing_api(self, monkeypatch):
+        api = API.from_definition(
+            _TWO_STATE, llm_interface=MockLLM2Interface(response_text="x")
+        )
+        cid, _ = api.start_conversation()
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("pipeline exploded")
+
+        monkeypatch.setattr(api.fsm_manager._pipeline, "process", boom)
+        monkeypatch.setattr(api.fsm_manager._pipeline, "process_stream", boom)
+        return api, cid
+
+    def _error_records(self, run):
+        records: list[str] = []
+        logger.enable("fsm_llm")
+        sink_id = logger.add(lambda msg: records.append(str(msg)), level="ERROR")
+        try:
+            with pytest.raises(FSMError, match="Failed to process message"):
+                run()
+        finally:
+            logger.remove(sink_id)
+            logger.disable("fsm_llm")
+        return records
+
+    def test_sync_turn_logs_the_failure(self, monkeypatch):
+        api, cid = self._failing_api(monkeypatch)
+        records = self._error_records(lambda: api.converse("hi", cid))
+        assert any("pipeline exploded" in r for r in records)
+
+    def test_stream_turn_logs_the_failure(self, monkeypatch):
+        api, cid = self._failing_api(monkeypatch)
+        records = self._error_records(lambda: list(api.converse_stream("hi", cid)))
+        assert any("pipeline exploded" in r for r in records)
+
+
+class TestPathDefinitionIsAcceptedEverywhere:
+    """F-AF-19: ``API(Path)`` was refused while ``API.from_file(Path)`` worked."""
+
+    @pytest.fixture
+    def fsm_path(self, tmp_path):
+        path = tmp_path / "fsm.json"
+        path.write_text(json.dumps(_TWO_STATE), encoding="utf-8")
+        return path
+
+    def test_constructor_takes_a_path(self, fsm_path):
+        api = API(fsm_definition=fsm_path, llm_interface=MockLLM2Interface())
+        assert api.fsm_definition.name == "b"
+
+    def test_process_fsm_definition_takes_a_path(self, fsm_path):
+        definition, _ = API.process_fsm_definition(fsm_path)
+        assert definition.initial_state == "s"
+
+    def test_from_file_and_builder_still_take_a_path(self, fsm_path):
+        assert API.from_file(fsm_path, llm_interface=MockLLM2Interface()).fsm_id
+        built = (
+            APIBuilder().set_definition(fsm_path).set_llm_interface(MockLLM2Interface())
+        )
+        assert built.build().fsm_definition.name == "b"

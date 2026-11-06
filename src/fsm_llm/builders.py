@@ -106,7 +106,9 @@ class APIBuilder:
     """
 
     def __init__(self) -> None:
-        self._definition: FSMDefinition | dict[str, Any] | str | None = None
+        self._definition: (
+            FSMDefinition | dict[str, Any] | str | os.PathLike[str] | None
+        ) = None
         self._handlers: list[Any] = []
         self._llm_options: dict[str, Any] = {}
         self._set: dict[str, Any] = {}
@@ -118,9 +120,7 @@ class APIBuilder:
     def set_definition(
         self, definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str]
     ) -> APIBuilder:
-        self._definition = (
-            os.fspath(definition) if isinstance(definition, os.PathLike) else definition
-        )
+        self._definition = definition
         return self
 
     def set_llm_interface(self, llm_interface: Any) -> APIBuilder:

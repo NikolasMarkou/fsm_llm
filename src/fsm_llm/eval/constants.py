@@ -25,13 +25,9 @@ UTC_TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 GIT_UNKNOWN = "unknown"
 
 # ---------------------------------------------------------------------------
-# CLI exit codes
+# CLI exit codes (0, 1 and 130 are core's ``CLI_EXIT_*``; a usage error exits 1)
 # ---------------------------------------------------------------------------
 
-#: Success, including a low score when no ``--fail-under`` threshold is set.
-EXIT_OK = 0
-#: Usage error, bad config or dataset, unwritable output, or nothing matched.
-EXIT_ERROR = 1
 #: The run finished but scored below the ``--fail-under`` threshold.
 EXIT_BELOW_THRESHOLD = 2
 

@@ -77,6 +77,10 @@ MAX_PRIORITY = 1000
 #: classified) both read it; lives here, not in ``constants.py`` (pinned).
 MAX_CLASSIFICATION_INTENTS = 15
 
+#: Longest ``Conversation.summary`` (and ``ContextCompactor`` summary), in
+#: characters; lives here, not in ``constants.py`` (pinned).
+CONVERSATION_SUMMARY_MAX_CHARS = 2000
+
 #: The field-type vocabulary of a per-field extraction (config and request).
 FieldType = Literal["str", "int", "float", "bool", "list", "dict", "any"]
 
@@ -1699,6 +1703,15 @@ class FSMDefinition(BaseModel):
 # --------------------------------------------------------------
 
 
+def exchange_preview_lines(exchanges: list[dict[str, str]], width: int) -> list[str]:
+    """One ``"role: message"`` line per message, each message cut to ``width`` + ``...``."""
+    return [
+        f"{role}: {message[:width]}{'...' if len(message) > width else ''}"
+        for exchange in exchanges
+        for role, message in exchange.items()
+    ]
+
+
 class Conversation(BaseModel):
     """Enhanced conversation management for the 2-pass architecture."""
 
@@ -1847,33 +1860,15 @@ class Conversation(BaseModel):
 
         Produces a compact text representation of the trimmed exchanges
         and appends it to the existing summary (if any). Caps total
-        summary length at 2000 characters.
+        summary length at ``CONVERSATION_SUMMARY_MAX_CHARS`` characters.
         """
         if not trimmed_exchanges:
             return
 
-        lines: list[str] = []
-        for exchange in trimmed_exchanges:
-            for role, message in exchange.items():
-                # Compact: first 100 chars of each message
-                preview = message[:100]
-                if len(message) > 100:
-                    preview += "..."
-                lines.append(f"{role}: {preview}")
-
-        new_text = " | ".join(lines)
-
-        if self.summary:
-            combined = f"{self.summary} | {new_text}"
-        else:
-            combined = new_text
-
-        # Cap summary length
-        max_summary = 2000
-        if len(combined) > max_summary:
-            combined = combined[:max_summary]
-
-        self.summary = combined
+        # Compact: first 100 chars of each message
+        new_text = " | ".join(exchange_preview_lines(trimmed_exchanges, 100))
+        combined = f"{self.summary} | {new_text}" if self.summary else new_text
+        self.summary = combined[:CONVERSATION_SUMMARY_MAX_CHARS]
 
 
 class FSMContext(BaseModel):

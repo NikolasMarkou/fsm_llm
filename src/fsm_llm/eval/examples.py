@@ -144,7 +144,8 @@ def discover_examples(config: EvalConfig) -> list[ExampleTarget]:
         if config.name_filter and config.name_filter not in name:
             continue
         try:
-            interactive = "input(" in script.read_text()
+            text = script.read_text(encoding="utf-8", errors="replace")
+            interactive = "input(" in text
         except OSError:
             interactive = False
         targets.append(
@@ -190,6 +191,8 @@ def run_example(
             input=target.stdin_data,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=target.timeout,
             env=env,
         )
@@ -257,10 +260,15 @@ def write_example_log(result: ExampleResult, output_dir: Path) -> Path:
     return log_path
 
 
+def score_totals(results: list[ExampleResult]) -> tuple[int, int]:
+    """``(score sum, maximum possible)`` of ``results``: the one health arithmetic."""
+    return sum(r.score for r in results), len(results) * MAX_SCORE
+
+
 def health_score(results: list[ExampleResult]) -> float:
     """Percentage of the maximum score reached; 0.0 for no results."""
-    max_possible = len(results) * MAX_SCORE
-    return sum(r.score for r in results) / max_possible * 100 if max_possible else 0.0
+    score_sum, max_possible = score_totals(results)
+    return score_sum / max_possible * 100 if max_possible else 0.0
 
 
 def create_output_dir(config: EvalConfig, model: str) -> Path:
@@ -339,8 +347,7 @@ def write_scorecard(
     now = now or datetime.now()
     results = report.results
     total = len(results)
-    score_sum = sum(r.score for r in results)
-    max_possible = total * MAX_SCORE
+    score_sum, max_possible = score_totals(results)
     dist = {i: sum(1 for r in results if r.score == i) for i in range(MAX_SCORE + 1)}
     cat_scores: dict[str, list[int]] = {}
     failure_counts: dict[str, int] = {}

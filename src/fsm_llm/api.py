@@ -612,7 +612,7 @@ class API:
 
     def __init__(
         self,
-        fsm_definition: FSMDefinition | dict[str, Any] | str,
+        fsm_definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str],
         llm_interface: LLMInterface | None = None,
         model: str | None = None,
         api_key: str | None = None,
@@ -769,7 +769,6 @@ class API:
 
         # FSM stacking support
         self._stack_lock = threading.Lock()
-        self.active_conversations: dict[str, bool] = {}
         self.conversation_stacks: dict[str, list[FSMStackFrame]] = {}
         self._last_accessed: dict[str, float] = {}
         self._ended_conversations: dict[str, dict[str, Any]] = {}
@@ -782,7 +781,7 @@ class API:
 
     @classmethod
     def process_fsm_definition(
-        cls, fsm_definition: FSMDefinition | dict[str, Any] | str
+        cls, fsm_definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str]
     ) -> tuple[FSMDefinition, str]:
         """Process FSM definition input and return standardized format.
 
@@ -799,9 +798,9 @@ class API:
             except Exception as e:
                 raise ValueError(f"Invalid FSM definition dictionary: {e!s}") from e
 
-        elif isinstance(fsm_definition, str):
+        elif isinstance(fsm_definition, (str, os.PathLike)):
             try:
-                fsm_def = load_fsm_from_file(fsm_definition)
+                fsm_def = load_fsm_from_file(os.fspath(fsm_definition))
             except Exception as e:
                 raise ValueError(
                     f"Failed to load FSM from file '{fsm_definition}': {e!s}"
@@ -810,7 +809,7 @@ class API:
         else:
             raise ValueError(
                 f"Invalid FSM definition type: {type(fsm_definition)}. "
-                f"Must be FSMDefinition, dict, or str"
+                f"Must be FSMDefinition, dict, str or a path"
             )
 
         # DECISION plan-2026-09-20T114608-a8e47b88/D-016 (its dumped form
@@ -860,7 +859,7 @@ class API:
         """Create API instance from FSM definition file."""
         if not os.path.exists(path):
             raise FileNotFoundError(f"FSM definition file not found: {path}")
-        return cls(fsm_definition=str(path), **kwargs)
+        return cls(fsm_definition=path, **kwargs)
 
     @classmethod
     def from_definition(
@@ -928,7 +927,6 @@ class API:
 
             # Track conversation and initialize stack
             with self._stack_lock:
-                self.active_conversations[conversation_id] = True
                 self.conversation_stacks[conversation_id] = [
                     FSMStackFrame(
                         fsm_definition=self.fsm_definition,
@@ -1297,7 +1295,7 @@ class API:
     ) -> str:
         """Push new FSM onto conversation stack with enhanced context management."""
         with self._stack_lock:
-            if conversation_id not in self.active_conversations:
+            if conversation_id not in self.conversation_stacks:
                 raise FSMError(f"Conversation not found: {conversation_id}")
             self._validate_stack_depth(conversation_id)
 
@@ -1509,7 +1507,7 @@ class API:
         # method — that blocks list_active_conversations/push_fsm on other conversations
         # for the full duration of FSM teardown I/O.
         with self._stack_lock:
-            if conversation_id not in self.active_conversations:
+            if conversation_id not in self.conversation_stacks:
                 raise FSMError(f"Conversation not found: {conversation_id}")
             stack = self.conversation_stacks[conversation_id]
             if len(stack) <= 1:
@@ -1925,7 +1923,7 @@ class API:
         """
         # DECISION plan-2026-09-21T203800-8a03483a/D-050
         # Read the cache, then end the frames, and only THEN drop the API
-        # bookkeeping. Do NOT pop conversation_stacks / active_conversations /
+        # bookkeeping. Do NOT pop conversation_stacks /
         # _last_accessed first: a refused end (C12) then vanished from the API
         # while its FSMManager instance stayed allocated, and no sweep could
         # find it again (review W2). Do NOT swallow a refusal: a frame whose
@@ -1984,7 +1982,6 @@ class API:
         # FSMManager under _stack_lock (the snapshot was taken above). D-003.
         with self._stack_lock:
             self.conversation_stacks.pop(conversation_id, None)
-            self.active_conversations.pop(conversation_id, None)
             self._last_accessed.pop(conversation_id, None)
             if ended_cache is not None:
                 self._ended_conversations[conversation_id] = ended_cache
@@ -2002,7 +1999,7 @@ class API:
     def list_active_conversations(self) -> list[str]:
         """List all active conversation IDs."""
         with self._stack_lock:
-            return list(self.active_conversations.keys())
+            return list(self.conversation_stacks)
 
     def cleanup_stale_conversations(
         self, max_idle_seconds: float = 3600.0
@@ -2207,7 +2204,7 @@ class API:
         # DECISION plan-2026-07-21T072826-e3131cc2/D-003: restore_session must
         # NOT leak a half-registered conversation on partial-setup failure. Once
         # start_conversation(_suppress_start=True) has registered conv_id in
-        # active_conversations / conversation_stacks / fsm_manager.instances,
+        # conversation_stacks / fsm_manager.instances,
         # ANY exception in history replay, WorkingMemory restore, or the
         # set_conversation_state validation below (which RAISES FSMError for a
         # corrupted/foreign/redeployed FSM whose saved current_state no longer
@@ -2250,7 +2247,7 @@ class API:
             self.fsm_manager.set_conversation_state(current_fsm_id, state.current_state)
         except Exception:
             # Best-effort teardown of the just-created conversation. end_conversation
-            # removes conv_id from active_conversations / conversation_stacks and
+            # removes conv_id from conversation_stacks and
             # ends the FSM instance (fsm_manager.instances). Swallow any teardown
             # error so it never masks the original failure.
             try:
@@ -2298,7 +2295,7 @@ class API:
 
     def close(self) -> None:
         """Clean up all active conversations and release resources."""
-        for conversation_id in list(self.active_conversations.keys()):
+        for conversation_id in self.list_active_conversations():
             try:
                 self.end_conversation(conversation_id)
             except Exception as e:

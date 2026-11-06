@@ -16,9 +16,11 @@ from .constants import (
     is_forbidden_context_entry,
 )
 from .definitions import (
+    CONVERSATION_SUMMARY_MAX_CHARS,
     FSMContext,
     ResponseGenerationRequest,
     checked_key_names,
+    exchange_preview_lines,
 )
 from .handlers import clear_keys_delta
 from .logging import logger
@@ -135,13 +137,7 @@ class ContextCompactor:
             return None
 
         # Build text from all exchanges for summarization
-        lines: list[str] = []
-        for exchange in conversation.exchanges:
-            for role, message in exchange.items():
-                preview = message[:200]
-                if len(message) > 200:
-                    preview += "..."
-                lines.append(f"{role}: {preview}")
+        lines = exchange_preview_lines(conversation.exchanges, 200)
 
         if not lines:
             return None
@@ -159,7 +155,7 @@ class ContextCompactor:
                 )
                 response = llm_interface.generate_response(request)
                 summary = response.message
-                conversation.summary = summary[:2000]
+                conversation.summary = summary[:CONVERSATION_SUMMARY_MAX_CHARS]
                 logger.debug("Context compactor: LLM-powered summary generated")
                 result: str | None = conversation.summary
                 return result
@@ -170,10 +166,7 @@ class ContextCompactor:
                 )
 
         # Fallback: simple text concatenation
-        summary_text = " | ".join(lines)
-        if len(summary_text) > 2000:
-            summary_text = summary_text[:2000]
-        conversation.summary = summary_text
+        conversation.summary = " | ".join(lines)[:CONVERSATION_SUMMARY_MAX_CHARS]
         logger.debug("Context compactor: text-based summary generated")
         fallback_result: str | None = conversation.summary
         return fallback_result

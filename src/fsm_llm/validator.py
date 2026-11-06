@@ -1,3 +1,5 @@
+"""FSM definition validation: ``fsm-llm-validate`` and the structural checks behind it."""
+
 from __future__ import annotations
 
 import json

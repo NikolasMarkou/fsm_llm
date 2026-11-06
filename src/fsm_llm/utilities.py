@@ -1,13 +1,10 @@
 """
-This module provides utility functions for FSM definition loading,
-JSON processing, and other common operations in the enhanced
-FSM-LLM framework.
+Utility functions of the FSM-LLM framework.
 
 Key Features:
-- Enhanced FSM definition loading with validation
-- Improved JSON extraction for LLM responses
-- Error handling and logging integration
-- Support for new FSM definition format
+- FSM definition loading with validation
+- JSON extraction from LLM responses and think-block stripping
+- Context redaction and the shared context-tree filter
 """
 
 from __future__ import annotations

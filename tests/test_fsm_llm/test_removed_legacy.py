@@ -106,7 +106,7 @@ class TestRemovedCoreNames:
         api = API.from_definition(_FSM, llm_interface=mock_llm2_interface)
         conv_id, _ = api.start_conversation()
         api.close()
-        assert conv_id not in api.active_conversations
+        assert conv_id not in api.conversation_stacks
 
     @pytest.mark.parametrize(
         "name",

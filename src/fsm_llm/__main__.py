@@ -12,7 +12,7 @@ package:
 
 All heavy-lifting is delegated to the corresponding ``main`` functions in
 :pyfile:`runner.py`, :pyfile:`validator.py`, and :pyfile:`visualizer.py`.  That
-keeps this file small and prevents cyclic imports while still allowing users to
+keeps this file small while still allowing users to
 invoke the framework with the canonical
 
 ------------------------------------------------------------------------------
@@ -41,7 +41,7 @@ Optional switches
 ``--mode`` *(default: ``run``)*
     • ``run`` - chat with the FSM using the model and environment settings
     • ``validate`` - lint the FSM and emit a pass/fail report
-    • ``visualize`` - render an ASCII diagram to stdout (or ``--output``)
+    • ``visualize`` - render an ASCII diagram to stdout
 
 ``--style, -s`` *(visualize only)*
     Rendering style: ``full`` (rich, multi-section), ``compact``, or ``minimal``.

@@ -1,3 +1,5 @@
+"""Library logging: loguru setup, the ``fsm_llm`` disable-by-default rule, CLI sinks."""
+
 from __future__ import annotations
 
 import datetime
