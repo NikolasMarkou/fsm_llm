@@ -75,7 +75,7 @@ flowchart LR
 ## Public interface
 
 - Core Python API: `API(fsm_definition, llm_interface=None, model=None, ...)`; `API.from_file(path, **kw)`, `API.from_definition(...)`; `start_conversation(initial_context=None) -> (conv_id, greeting)`, `converse(msg, conv_id) -> str`, `converse_stream(msg, conv_id) -> Iterator[str]`, `advance(conv_id) -> AdvanceResult` and `advance_stream(conv_id)` (one turn with no user message), `run_until_terminal(conv_id, *, max_steps, max_seconds=None, before_step=None)` and `run_until_terminal_stream` (steps until a terminal state; `RunBudgetExceededError` on a spent budget), `get_data`, `get_current_state`, `has_conversation_ended`, `end_conversation`, `update_context`; `push_fsm`/`pop_fsm` (max depth 10); `save_session`/`load_session`/`restore_session` (need a session store, else `FSMError`); `register_handler`.
-- Model resolution: `model` arg, then env `LLM_MODEL`, then `DEFAULT_LLM_MODEL` (`ollama_chat/bonsai-2:27b`).
+- Model resolution: `model` arg, then env `LLM_MODEL`, then `DEFAULT_LLM_MODEL` (`ollama_chat/bonsai-2:27b`). The process environment and a `.env` file (loaded when `fsm_llm` is imported, via litellm, and by the `fsm-llm` CLI; python-dotenv searches upward from the loading module's directory, which is the repository root in a checkout) set `LLM_MODEL` BEFORE the built-in default, so a stale `.env` silently beats `DEFAULT_LLM_MODEL`; `LITELLM_MODE=PRODUCTION` stops litellm's load.
 - Console scripts (`pyproject.toml` `[project.scripts]`):
 
 | Script | Target |

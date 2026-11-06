@@ -70,7 +70,7 @@ One LLM layer (`src/fsm_llm/llm.py`, the only module that imports litellm): `LLM
 
 Core: `API` (`from_file`, `from_definition`, `start_conversation`, `converse`, `converse_stream`, `advance`, `advance_stream`, `run_until_terminal`, `run_until_terminal_stream`, `get_data`, `push_fsm`/`pop_fsm`, `save_session`/`restore_session`), `AdvanceResult`, `FSMManager`, `MessagePipeline`, `HandlerTiming` (8 points), `create_handler`, `clear_keys_on_entry`, `typed_field_extraction`, `Classifier` (`llm=` takes an interface), `LiteLLMInterface` (`complete`, `usage`, `reset_usage`), `CompletionRequest`, `CompletionResponse`, `ModelToolCall`, `LLMUsage`, `LiteLLMEmbedder`, `tool_exchange`, `CompletionStateConfig`, `WorkingMemory`, `FileSessionStore`, graph export `build_fsm_graph`, `to_mermaid`, `to_dot`. OKF is imported by module name: core `fsm_llm.okf` (`load_bundle`, `write_bundle`, `check_bundle`), `fsm_llm.okf_bridge` (`bundle_from_memory_entries`, `create_okf_handler`) and, for agents, `fsm_llm.agents` (`create_okf_tools`, `OKFMemoryBackend`, `export_semantic_memory`, `export_agent_result`). Agent Skills likewise: core `fsm_llm.agent_skills` (`load_skills`, `SkillCatalog`, `SkillLimits`; `SkillCatalog.files_under` is the one directory-listing rule) and, for agents, `fsm_llm.agents.create_skill_tools`.
 
-Model resolution: `model=` argument, then env `LLM_MODEL`, then `DEFAULT_LLM_MODEL` (`ollama_chat/bonsai-2:27b`). `.env.example` lists `OPENAI_API_KEY`, `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`.
+Model resolution: `model=` argument, then env `LLM_MODEL`, then `DEFAULT_LLM_MODEL` (`ollama_chat/bonsai-2:27b`). The process environment and a `.env` file (loaded when `fsm_llm` is imported, via litellm, and by the `fsm-llm` CLI; python-dotenv searches upward from the loading module's directory, which is the repository root in a checkout) set `LLM_MODEL` BEFORE the built-in default, so a stale `.env` silently beats `DEFAULT_LLM_MODEL`; `LITELLM_MODE=PRODUCTION` stops litellm's load. `.env.example` lists `OPENAI_API_KEY`, `LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`.
 
 ```bash
 fsm-llm --fsm <path.json>            # Run FSM interactively (needs env LLM_MODEL)
@@ -166,7 +166,7 @@ FSM definition (JSON, v4.1):
 ## Working here
 
 ```bash
-make test           # pytest -v (10,756 tests)
+make test           # pytest -v (11,123 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy src/fsm_llm/ --ignore-missing-imports
@@ -179,17 +179,17 @@ make counts         # python scripts/doc_counts.py (fails when a documented test
 ```
 
 ```bash
-pytest                                 # Run all tests (10,756 collected)
-pytest tests/test_fsm_llm/            # Core package tests (5,619 tests)
+pytest                                 # Run all tests (11,123 collected)
+pytest tests/test_fsm_llm/            # Core package tests (5,622 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (232 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (319 tests)
-pytest tests/test_fsm_llm_agents/     # Agents tests (2,795 tests)
-pytest tests/test_fsm_llm_monitor/    # Monitor tests (455 tests)
-pytest tests/test_fsm_llm_meta/       # Meta-builder tests (496 tests)
+pytest tests/test_fsm_llm_agents/     # Agents tests (3,127 tests)
+pytest tests/test_fsm_llm_monitor/    # Monitor tests (457 tests)
+pytest tests/test_fsm_llm_meta/       # Meta-builder tests (515 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (264 tests)
 pytest tests/test_examples/           # Example validation tests (67 tests)
-pytest tests/test_fsm_llm_eval/       # Eval tests (263 tests)
-# The 9 suites above sum to 10,510. The remaining 246 are five root-level files:
+pytest tests/test_fsm_llm_eval/       # Eval tests (274 tests)
+# The 9 suites above sum to 10,877. The remaining 246 are five root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (45),
 #   tests/test_bench_common.py (19), tests/test_agents_bench.py (132)
 #   and tests/test_skills_bench.py (38)

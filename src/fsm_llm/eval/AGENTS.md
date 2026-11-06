@@ -49,7 +49,7 @@ Scoring (`classify_result`, checked in order): score 0 when `exit_code == -1`, o
 | `cases.py` | `Expectations`, `ConversationCase`, `TrialResult`, `CaseReport`, `load_cases`, `check_expectations`, `run_case_trial`, `run_cases`, `run_dataset`, `write_case_report` | D-004 anchors on `run_cases` and `Expectations._at_least_one_check` |
 | `records.py` | `append_row`, `read_rows`, `write_json`, `utc_now`, `git_commit`, `git_short_hash`, `model_slug`, `make_run_dir`, `open_run_dir` | run dirs never reused |
 | `stats.py` | `wilson_ci`, `fisher_exact_two_sided`, `pass_rate`, `below_percent` | stdlib only; `below_percent` is the exact `--fail-under` test (not exported from `__init__`) |
-| `_pool.py` | `run_interruptible(work, items, workers, on_done) -> bool` | returns `True` when interrupted |
+| `_pool.py` | `run_interruptible(work, items, workers, on_done) -> bool`, `sigterm_as_interrupt()` | returns `True` when interrupted; SIGTERM raises `KeyboardInterrupt` for the run only (main thread, not over `SIG_IGN`), the old handler is restored |
 | `constants.py` | defaults, exit codes, `SCORE_LABELS`, `EXAMPLE_INPUTS`, `EXAMPLE_TIMEOUTS`, `CATEGORY_TIMEOUTS`, `EXAMPLE_SCRIPT_NAMES` | tables moved verbatim from `scripts/eval.py` (`0facf56`) |
 | `exceptions.py` | `EvalError`, `EvalConfigError`, `EvalDatasetError` | rooted at `fsm_llm.definitions.FSMError` |
 | `__init__.py`, `__version__.py` | static `__all__`, version re-export | |
@@ -61,7 +61,7 @@ CLI (`fsm-llm-eval`, `python -m fsm_llm.eval`):
 - `examples [--model M] [--workers N] [--timeout S] [--category C] [--filter S] [--output-dir D] [--examples-dir P] [--python EXE] [--config FILE] [--fail-under PCT] [--list]`. `--filter` maps to `name_filter`.
 - `run DATASET [--model M] [--trials N] [--temperature T] [--max-tokens N] [--workers N] [--output-dir D] [--config FILE] [--fail-under PCT] [--list]`.
 - Top level: `--version`; no subcommand prints help to stderr and returns 1.
-- Exit codes: `0` success, also for low scores; `1` usage error, bad config or dataset (incl. non-UTF-8, invalid JSON), unwritable output, missing examples dir, no example matched; `2` only with `--fail-under PCT` when the health score (`examples`) or overall pass rate (`run`) is below PCT (`below_percent`, exact rationals); `130` Ctrl-C (`fsm_llm.constants.CLI_EXIT_INTERRUPTED`), after the partial report is written. `main_cli` catches `EvalError` (stderr, exit 1) and a stray `KeyboardInterrupt` (exit 130).
+- Exit codes: `0` success, also for low scores; `1` usage error, bad config or dataset (incl. non-UTF-8, invalid JSON), unwritable output, missing examples dir, no example matched; `2` only with `--fail-under PCT` when the health score (`examples`) or overall pass rate (`run`) is below PCT (`below_percent`, exact rationals); `130` Ctrl-C or SIGTERM (`fsm_llm.constants.CLI_EXIT_INTERRUPTED`), after the partial report is written. `main_cli` catches `EvalError` (stderr, exit 1) and a stray `KeyboardInterrupt` (exit 130).
 
 `EvalConfig` fields and defaults: `model=None` (resolved at run time by `resolve_model`: `config.model`, then `$LLM_MODEL`, then `fsm_llm.constants.DEFAULT_LLM_MODEL` = `ollama_chat/bonsai-2:27b`; blank counts as absent), `workers=4` (>=1), `timeout=120` (>=1), `output_root="evaluation"`, `output_dir=None`, `fail_under=None` (0-100), `examples_dir="examples"`, `python=None` (running interpreter), `category=None`, `name_filter=None`, `example_inputs={}`, `example_timeouts={}`, `category_timeouts={}` (merged over the built-in tables), `trials=3` (>=1, cases only), `temperature=None` (>=0), `max_tokens=None` (>=1), `llm_kwargs={}`.
 
@@ -75,7 +75,7 @@ Python:
 - `discover_examples(config) -> list[ExampleTarget]` (`[]` when the dir is missing or nothing matches); `get_timeout(name, category, default, example_timeouts=EXAMPLE_TIMEOUTS, category_timeouts=CATEGORY_TIMEOUTS) -> int`; `run_example(target, model, python, cwd) -> ExampleResult` (never raises); `run_examples(targets, config, model, run_dir, progress=None) -> ExampleReport`; `write_example_log(result, output_dir) -> Path`; `write_scorecard(report, config, git_hash, now=None) -> Path`.
 - `load_cases(path) -> (cases, embedded_config)`; `run_cases(cases, config, run_dir, *, llm_interface_factory=None, progress=None, dataset=None, checks=()) -> CaseReport`; `run_dataset(path, *, config=None, llm_interface_factory=None, checks=(), progress=None, **overrides) -> CaseReport` (load, layer `embedded < config (file path, mapping, or EvalConfig with only its set fields) < overrides`, open the run dir, run); `run_case_trial(case, config, trial, llm_interface_factory=None, *, checks=()) -> TrialResult` (never raises); `check_expectations(expect, trial) -> list[str]` (`[]` = pass); `write_case_report(report, config, dataset=None) -> Path`.
 - A check is `Callable[[TrialResult], list[str]]` (failure messages); a raising check becomes a trial error. Progress callbacks: `(completed, total, result_or_trial)`.
-- `ExampleReport.interrupted` / `CaseReport.interrupted`: `True` after Ctrl-C; results then hold only finished work.
+- `ExampleReport.interrupted` / `CaseReport.interrupted`: `True` after Ctrl-C or SIGTERM; results then hold only finished work.
 - `pass_rate(k, n) -> {"k","n","rate","wilson_ci":[lo,hi]}` (n=0 -> rate 0.0, CI `[0.0, 1.0]`); `wilson_ci(k, n, z=1.96)`; `fisher_exact_two_sided(k1, n1, k2, n2)`; `below_percent(k, n, percent)` (n=0 is below any positive percent). Impossible counts raise `ValueError`.
 - `open_run_dir(output_dir, output_root, model, cwd=None) -> Path`; `make_run_dir(root, model, cwd=None, now=None) -> Path`.
 
@@ -112,9 +112,9 @@ Python:
 ## Failure modes
 
 - `EvalError(FSMError)(message, details=None)` -> `EvalConfigError` (bad config file, unknown key, bad value, reserved `llm_kwargs`, bad embedded config), `EvalDatasetError` (missing or malformed dataset, invalid case, missing FSM file, duplicate id, zero cases, malformed JSONL line with its number). Unwritable output raises `EvalError`. The CLI reports all of them on stderr and exits 1.
-- Example timeout: partial output kept, `exit_code=None`, `timed_out=True`, score 1 (`F-LOOP`). Interpreter missing: `exit_code=-1`, score 0. A worker future that raises becomes a score-0 result with `runner error: ...`.
+- Example timeout: partial output kept (the child runs with `PYTHONUNBUFFERED=1` beside `PYTHONDONTWRITEBYTECODE`, so output printed before the kill reaches the log instead of dying in a block-buffered pipe; `TimeoutExpired` output is `bytes` on Python 3.11 and is decoded), `exit_code=None`, `timed_out=True`, score 1 (`F-LOOP`). Interpreter missing: `exit_code=-1`, score 0. A worker future that raises becomes a score-0 result with `runner error: ...`.
 - A hung LLM call in a case trial cannot be killed in-process; the trial waits for litellm's own request timeout.
-- Ctrl-C: queued work is cancelled, in-flight work finishes in the background unreported, the partial report is written with `interrupted: true`, and the CLI exits 130. Any other exception from `on_done` cancels the queue and propagates.
+- Ctrl-C and SIGTERM (what `timeout(1)` sends; `_pool.sigterm_as_interrupt` turns it into `KeyboardInterrupt` inside `run_interruptible`): queued work is cancelled, in-flight work finishes in the background unreported, the partial report is written with `interrupted: true`, and the CLI exits 130. Any other exception from `on_done` cancels the queue and propagates.
 - `api.close()` failure marks the trial failed with `close failed: ...` unless an error is already set.
 - `git_commit` (bench semantics) raises when git fails; `git_short_hash` returns `unknown`.
 

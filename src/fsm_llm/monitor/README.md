@@ -56,7 +56,7 @@ fsm-llm-monitor --port 9000 --no-browser
 python -m fsm_llm.monitor --info
 ```
 
-The command exits with 0 after `--version` and `--info`, and with 1 if `fastapi`, `uvicorn` or `jinja2` is missing. Other flags: `--host` (default `127.0.0.1`), `--api-key` and `--otel` (below).
+The command exits with 0 after `--version` and `--info`, and with 1 if `fastapi`, `uvicorn` or `jinja2` is missing. The health route is `GET /health`; the FSM routes are under `/api/fsm/...`. The OpenAPI document (`/openapi.json`, UI at `/api/docs`) reports the package version. Other flags: `--host` (default `127.0.0.1`), `--api-key` and `--otel` (below).
 
 Screens: Dashboard (metrics, events, instances, activity), Control Center (instance table with a detail drawer and chat), Visualizer (FSM graphs from core `build_fsm_graph`; agent and workflow graphs from `flows.json`), Logs, Builder (design an FSM or agent by chatting with a meta-builder agent), Settings. Keys `1` to `6` switch screens, `?` shows the shortcuts.
 

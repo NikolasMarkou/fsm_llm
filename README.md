@@ -357,7 +357,7 @@ The examples are evaluation baselines: `fsm-llm-eval examples` runs them in para
 | `fsm-llm-eval run <dataset.json\|.jsonl> [--trials N]` | Run scripted conversations and report pass rates |
 | `python -m fsm_llm.reasoning "problem" [--type T]` | Solve a problem with the reasoning engine (no console script) |
 
-`fsm-llm` needs `LLM_MODEL` (set in the environment or a `.env` file) and stops with `Missing required environment variable: LLM_MODEL` without it. It also reads `LLM_TEMPERATURE` (default 0.5) and `LLM_MAX_TOKENS` (default 1000). `.env.example` lists the variables. Exit codes: 0 ok, 1 failure, 130 Ctrl-C; `fsm-llm-eval` exits 2 below `--fail-under`.
+`fsm-llm` needs `LLM_MODEL` (set in the environment or a `.env` file) and stops with `Missing required environment variable: LLM_MODEL` without it. It also reads `LLM_TEMPERATURE` (default 0.5) and `LLM_MAX_TOKENS` (default 1000). `.env.example` lists the variables. Exit codes: 0 ok, 1 failure (a failed first model call prints `Error: ...` like a later turn), 130 Ctrl-C; `fsm-llm-eval` exits 2 below `--fail-under` and 130 on Ctrl-C or SIGTERM.
 
 ## Documentation
 
@@ -374,7 +374,7 @@ Contributions are welcome, from a typo fix to a new agent pattern. Full rules ar
 
 ```bash
 make install-dev    # editable install with every extra, plus pre-commit hooks
-make test           # Run full test suite (10,756 tests)
+make test           # Run full test suite (11,123 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy on src/fsm_llm/
@@ -411,7 +411,7 @@ Good places to help, all taken from recorded open items:
 
 Things to know:
 
-- The `fsm-llm` command needs `LLM_MODEL`. The Python `API` falls back to `LLM_MODEL`, then to `ollama_chat/bonsai-2:27b`.
+- The `fsm-llm` command needs `LLM_MODEL`. The Python `API` falls back to `LLM_MODEL`, then to `ollama_chat/bonsai-2:27b`. A `.env` file (loaded when `fsm_llm` is imported, and by `fsm-llm`) sets `LLM_MODEL` before that built-in default, so a stale `.env` silently beats it.
 - The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`; both also replace loguru's default handler, so a library record prints once.
 - One conversation handles one message at a time: a second `converse` on a conversation that is mid-turn raises `FSMError`.
 - Upgrading a clone from before the 2026-09-29 restructure: delete the old `src/fsm_llm_<sub>/` folders by hand (`make clean` does not remove them), then `pip install -e .`. A leftover folder breaks imports.

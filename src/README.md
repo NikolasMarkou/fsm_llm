@@ -100,6 +100,6 @@ fsm-llm-skills validate ./skills      # check Agent Skills folders (also list, s
 
 - Core dependencies: loguru, litellm (>=1.83.0,<2.0), pydantic (>=2.0), python-dotenv, pyyaml (>=6.0, parses Open Knowledge Format and Agent Skills frontmatter), tenacity. Tenacity is not imported by the code but litellm's retry path needs it.
 - Extras: `reasoning`, `workflows`, `agents` and `eval` add nothing; `monitor` adds fastapi, uvicorn and jinja2; `mcp`, `otel` and `a2a` add optional integrations.
-- The default model is `ollama_chat/bonsai-2:27b`, or whatever `LLM_MODEL` is set to.
+- The default model is `ollama_chat/bonsai-2:27b`, or whatever `LLM_MODEL` is set to. A `.env` file counts as setting it (it is loaded when `fsm_llm` is imported, and by the `fsm-llm` command), so a stale `.env` beats the default.
 - The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`.
 - `src/fsm_llm_agents`, `src/fsm_llm_reasoning`, `src/fsm_llm_workflows` and `src/fsm_llm_monitor` are leftovers from the layout before 2026-09-29 with separate top-level packages. They are not part of the current source and `make clean` does not remove them: delete them by hand in an old clone.

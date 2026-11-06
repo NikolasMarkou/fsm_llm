@@ -8,7 +8,7 @@ This document defines the evaluation methodology for testing FSM-LLM examples ag
 
 ```bash
 # Automated parallel evaluation (recommended)
-fsm-llm-eval examples --model ollama_chat/qwen3.5:4b --workers 4
+fsm-llm-eval examples --model ollama_chat/bonsai-2:27b --workers 4
 
 # With more parallelism for higher GPU utilization
 fsm-llm-eval examples --workers 8
@@ -107,7 +107,7 @@ The runner auto-discovers examples, classifies them as interactive or automated,
 
 A per-example value wins over the category value, which wins over `--timeout`, so `--timeout` cannot shorten a tabled example. To change a tabled value, pass a config file, for example `{"example_timeouts": {"agents/debate": 400}, "category_timeouts": {"agents": 240}}`; table entries in the file are merged over the built-in ones. Settings precedence is built-in defaults < `--config FILE` < flags; unknown keys are an error.
 
-**Exit codes**: `0` the run finished (also with a low score), `1` usage error, bad config (including a file that is not UTF-8 or not JSON), unwritable output, a missing examples directory, or no example matched, `2` only when `--fail-under PCT` is given and the health score is below it (compared exactly: 116/200 meets 58), `130` interrupted. Ctrl-C cancels the examples not yet started and still writes `scorecard.md` and `results.json` for the finished ones, marked interrupted (`"interrupted": true`).
+**Exit codes**: `0` the run finished (also with a low score), `1` usage error, bad config (including a file that is not UTF-8 or not JSON), unwritable output, a missing examples directory, or no example matched, `2` only when `--fail-under PCT` is given and the health score is below it (compared exactly: 116/200 meets 58), `130` interrupted. Ctrl-C cancels the examples not yet started and still writes `scorecard.md` and `results.json` for the finished ones, marked interrupted (`"interrupted": true`). SIGTERM (what `timeout(1)` and service managers send) is read the same way as Ctrl-C, for `examples` and `run`: the partial report is written and the exit code is 130. Before that change a `timeout`-killed run left a directory holding `logs/` only. The handler lives for the run only, and is not installed off the main thread or over an ignored SIGTERM.
 
 ### Prerequisites
 
@@ -116,6 +116,8 @@ A per-example value wins over the category value, which wins over `--timeout`, s
 ollama list  # for Ollama models
 # or set OPENAI_API_KEY for cloud models
 ```
+
+**Which model runs.** The model is `--model`, then the process environment `LLM_MODEL`, then the built-in default `ollama_chat/bonsai-2:27b`. A `.env` file is loaded when `fsm_llm` is imported (litellm does it) and by the `fsm-llm` CLI, and it fills `LLM_MODEL` when the process environment leaves it unset, before the built-in default is consulted, so a stale `.env` silently beats the default. python-dotenv searches upward from the loading module's own directory, not from the current directory: in a checkout with `.venv` inside it, that is the repository root. The scorecard and `results.json` name the model that really ran, so read them. `LITELLM_MODE=PRODUCTION` stops litellm's load; `env -u LLM_MODEL` alone does not.
 
 ### Manual (single example)
 
@@ -293,7 +295,7 @@ All evaluation results live in the `evaluation/` directory. `fsm-llm-eval` gener
 
 ### Output Structure
 
-Each run creates a timestamped directory:
+Each run creates a timestamped directory (the names below are an illustration of the layout, not directories that exist in the repository):
 
 ```
 evaluation/
@@ -318,7 +320,7 @@ evaluation/
 
 1. **`scorecard.md`** -- date, git commit, model, scores table (per-example with score/duration/failures), summary (health score, distribution, category breakdown, top failure codes), timing stats. "Total wall time" is the real elapsed time of the run; "Total example time" is the sum of the example durations (sequential equivalent). Scorecards written by `scripts/eval.py` before the `fsm_llm.eval` move labelled that sum "Total wall time", so compare old and new runs on "Total example time"
 2. **`results.json`** -- same data in machine-readable format for scripting, diffing, and trend analysis. The keys of the old format are unchanged; newer runs add `wall_time_s`, `workers`, `default_timeout` and `evaluator`
-3. **`logs/<category>/<name>.log`** -- full stdout+stderr capture per example, with metadata header (exit code, duration, timeout status)
+3. **`logs/<category>/<name>.log`** -- full stdout+stderr capture per example, with metadata header (exit code, duration, timeout status). The example child runs with `PYTHONUNBUFFERED=1`, so the log of an example killed by its timeout holds the output it printed before the kill (earlier runs left such a log empty, which made a slow model look like a loop)
 
 ### Custom Output Directory
 
@@ -337,23 +339,23 @@ diff <(jq '.results[] | {name, score}' evaluation/run_a/results.json) \
      <(jq '.results[] | {name, score}' evaluation/run_b/results.json)
 
 # Filter by model
-ls evaluation/*qwen3.5*
+ls evaluation/*bonsai*
 
 # Check a specific example's log
-cat evaluation/2026-03-29_14-38_0aec60a_qwen3.5-4b/logs/agents/agents_debate.log
+cat evaluation/<run-dir>/logs/agents/agents_debate.log
 ```
 
 ---
 
 ## 9. Evaluation Log Index
 
-Quick reference for all evaluation runs. Each entry links to its result file.
+Quick reference for all evaluation runs. The raw run directories (`scorecard.md`, `results.json`, `logs/`) of Runs 001 to 009 were removed from `evaluation/` on 2026-11-06 together with the other qwen3.5 run directories; the numbers in each entry below are the record. The scorecard text of Run 001, the last of these directories that git tracked, is recoverable from git history with `git show 72388e6^:evaluation/2026-04-01_23-35_4025a78_qwen3.5-4b/scorecard.md` (and `results.json` the same way). Entries that give a path name the directory the run wrote; it no longer exists.
 
 ---
 
 ### Run 001 -- 2026-04-01 (100 Examples, Honest Scoring Baseline, 75.0%)
 
-- **File**: [`evaluation/2026-04-01_23-35_4025a78_qwen3.5-4b/scorecard.md`](evaluation/2026-04-01_23-35_4025a78_qwen3.5-4b/scorecard.md)
+- **File**: `evaluation/2026-04-01_23-35_4025a78_qwen3.5-4b/scorecard.md` (directory removed 2026-11-06; recover it with `git show 72388e6^:evaluation/2026-04-01_23-35_4025a78_qwen3.5-4b/scorecard.md`)
 - **Model**: `ollama_chat/qwen3.5:4b`
 - **Commit**: `4025a78`
 - **Examples**: 100 (all with standardized verification output)
@@ -368,7 +370,7 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 
 ### Run 002 -- 2026-04-02 (100 Examples, Extraction Pipeline Improvements, 88.0%)
 
-- **File**: [`evaluation/2026-04-02_08-28_830692b_qwen3.5-4b/scorecard.md`](evaluation/2026-04-02_08-28_830692b_qwen3.5-4b/scorecard.md)
+- **File**: `evaluation/2026-04-02_08-28_830692b_qwen3.5-4b/scorecard.md` (directory removed 2026-11-06)
 - **Model**: `ollama_chat/qwen3.5:4b`
 - **Commit**: `830692b`
 - **Examples**: 100
@@ -392,7 +394,7 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 
 ### Run 003 -- 2026-04-02 (100 Examples, Example Fixes + Eval Input Improvements, 90.2%)
 
-- **File**: [`evaluation/iter8/scorecard.md`](evaluation/iter8/scorecard.md)
+- **File**: `evaluation/iter8/scorecard.md` (directory removed 2026-11-06)
 - **Model**: `ollama_chat/qwen3.5:4b`
 - **Commit**: `e6cf19d`
 - **Examples**: 100
@@ -409,7 +411,7 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 
 ### Run 004 -- 2026-04-02 (100 Examples, Debate Bug Fix, 90.8%)
 
-- **File**: [`evaluation/2026-04-02_10-24_7fa6633_qwen3.5-4b/scorecard.md`](evaluation/2026-04-02_10-24_7fa6633_qwen3.5-4b/scorecard.md)
+- **File**: `evaluation/2026-04-02_10-24_7fa6633_qwen3.5-4b/scorecard.md` (directory removed 2026-11-06)
 - **Model**: `ollama_chat/qwen3.5:4b`
 - **Commit**: `7fa6633`
 - **Examples**: 100
@@ -424,7 +426,7 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 
 ### Run 005 -- 2026-04-02 (100 Examples, Iterative Improvements, 95.8%)
 
-- **File**: [`evaluation/2026-04-02_16-11_0b2b7f8_qwen3.5-4b/scorecard.md`](evaluation/2026-04-02_16-11_0b2b7f8_qwen3.5-4b/scorecard.md)
+- **File**: `evaluation/2026-04-02_16-11_0b2b7f8_qwen3.5-4b/scorecard.md` (directory removed 2026-11-06)
 - **Model**: `ollama_chat/qwen3.5:4b`
 - **Commit**: `0b2b7f8`
 - **Examples**: 100
@@ -460,7 +462,7 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 
 ### Run 007 -- 2026-10-01 (101 Examples, core step driver A/B against `d4b1626` on the same day, 96.0% vs 96.8%)
 
-- **Files**: `evaluation/2026-10-01_09-23_0f0789c_qwen3.5-4b/scorecard.md` (HEAD) and `evaluation/2026-10-01_09-54_d4b1626_qwen3.5-4b_same-day-baseline/scorecard.md` (baseline, run from an isolated `d4b1626` worktree with `PYTHONPATH=<worktree>/src`; `results.json` records `git_commit` `d4b1626`)
+- **Files** (directories removed 2026-11-06): `evaluation/2026-10-01_09-23_0f0789c_qwen3.5-4b/scorecard.md` (HEAD) and `evaluation/2026-10-01_09-54_d4b1626_qwen3.5-4b_same-day-baseline/scorecard.md` (baseline, run from an isolated `d4b1626` worktree with `PYTHONPATH=<worktree>/src`; `results.json` records `git_commit` `d4b1626`)
 - **Model**: `ollama_chat/qwen3.5:4b` (digest `2a654d98e6fb`) | **Workers**: 4 | **Timeouts**: default 120 s plus the built-in overrides (eval code and `examples/` unchanged since `d4b1626`) | **N**: 1 per commit, run one after the other
 - **Commits**: `0f0789c` (plan `07ad3f8c` iteration 1: agent loops on core `advance`/`run_until_terminal`, no synthetic "Continue." turn) vs `d4b1626`
 - **Examples**: 101
@@ -474,7 +476,7 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 
 ### Run 008 -- 2026-10-01 (48 agents Examples, after the PlanExecute planner fix, 92.2%)
 
-- **File**: `evaluation/2026-10-01_10-50_e9ef064_qwen3.5-4b/scorecard.md`
+- **File**: `evaluation/2026-10-01_10-50_e9ef064_qwen3.5-4b/scorecard.md` (directory removed 2026-11-06)
 - **Model**: `ollama_chat/qwen3.5:4b` (digest `2a654d98e6fb`) | **Workers**: 4 | **Timeouts**: default 120 s plus the built-in overrides (same settings as Run 007) | **N**: 1 | **Category**: agents only (`--category agents`), started 07:50 UTC, nothing else on Ollama
 - **Commit**: `e9ef064` (plan `07ad3f8c` step 24.1: the PlanExecute `plan_steps`/replan field adds no tool-less step unless the task asks for one and no confirm/wait step, D-055)
 - **Health Score**: agents 177/192 = 92.2% (Run 007 same day: `0f0789c` 180/192, `d4b1626` 183/192; G3 `d4b1626` 2026-09-29: 178/192)
@@ -485,7 +487,7 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 
 ### Run 009 -- 2026-10-01 (101 Examples, one LLM layer A/B against `e1f63a9` on the same day, 95.5% vs 90.8%)
 
-- **Files**: `evaluation/2026-10-01_22-19_7c823be_qwen3.5-4b/scorecard.md` (HEAD) and `evaluation/2026-10-01_21-32_e1f63a9_qwen3.5-4b_same-day-baseline/scorecard.md` (baseline); both run from isolated worktrees with `PYTHONPATH=<worktree>/src`, one after the other (21:32 and 22:19 UTC)
+- **Files** (directories removed 2026-11-06): `evaluation/2026-10-01_22-19_7c823be_qwen3.5-4b/scorecard.md` (HEAD) and `evaluation/2026-10-01_21-32_e1f63a9_qwen3.5-4b_same-day-baseline/scorecard.md` (baseline); both run from isolated worktrees with `PYTHONPATH=<worktree>/src`, one after the other (21:32 and 22:19 UTC)
 - **Model**: `ollama_chat/qwen3.5:4b` (digest `2a654d98e6fb`) | **Workers**: 4 | **Timeouts**: default 120 s plus the built-in overrides | **N**: 1 per commit | **Load**: Ollama was shared with an external `qwen3.5:9b-q8_0` server under load during both runs, so timeouts are higher than in Run 007
 - **Commits**: `7c823be` (plan `944e2692`: one LLM layer, core completion state, native_fc and the meta-builder as FSMs on core, reasoning engine on core's run loop; the last reasoning fix `6496430` landed during the run and its examples were re-run, below) vs `e1f63a9`
 - **Health Score**: `7c823be` 95.5% (386/404) vs `e1f63a9` 90.8% (367/404), +19 points
@@ -494,6 +496,29 @@ Quick reference for all evaluation runs. Each entry links to its result file.
 - **Rebuilt paths**: the 5 meta examples, `reasoning/math_tutor` and `agents/reasoning_tool` score 4 at HEAD; at `6496430` `reasoning/math_tutor` 4 (8.1 s) and `agents/reasoning_tool` 4 (11.8 s) run alone
 - **Raw logs**: 0 envelope leaks (`"field_name"`, `"extracted_data"`), 0 `Continue.`, 0 tracebacks at HEAD; agents `Success: True`/`False` lines 22/4
 - **Rule** (pre-registered, plan `944e2692` D-016): total within 8 points of the baseline, no code-caused 4 -> 1 drop, 0 F-CODE, rebuilt examples within 1 point, 0 leaks: met (the `reasoning_stacking` clause through the solo re-runs, D-063)
+
+### Run 010 -- 2026-11-06 (plan `0068b055`, first live evidence on `ollama_chat/bonsai-2:27b`; the agents category is partial)
+
+- **Model**: `ollama_chat/bonsai-2:27b` (Q2_0, 26.9B, one GPU, context 32768) with the embedder `ollama/embeddinggemma-2:740m` | **Commit**: `8da28be` (the F-AR-05 comparison arms are `8a62490` and `8da28be`) | **N**: 1 per category, **3** per arm in the F-AR-05 comparison | **Workers**: 2 (4 for `fsm-llm-eval run`) | **Timeouts**: default 120 s plus the built-in overrides
+- **Not comparable with Runs 001 to 009.** Every earlier run was on `ollama_chat/qwen3.5:4b`. The default model changed in this plan (D-014), the model is larger and slower per call (about 10 to 35 s a call here, with 2 workers sharing one GPU), and the 4b figures (Run 006 and Run 007) are not a baseline for it. Nothing below was compared with them. The 0-4 score is a heuristic that overstates (see the Run 006 note), and the sample is one run per category.
+- **Run environment**: the repository `.env` (untracked) still named `ollama_chat/qwen3.5:4b` and, through litellm, beat the built-in default, so every run used `LITELLM_MODE=PRODUCTION` with `LLM_MODEL`, `LLM_TEMPERATURE` and `LLM_MAX_TOKENS` unset to make the default apply. See the note under "Prerequisites".
+- **Smoke**: a greeting FSM with no model argument ran on `bonsai-2:27b` (6 calls, 0 errors); `SemanticMemoryStore` with the real embedder returned 768-dimensional vectors and ranked all three probes correctly (relevant scores 0.73 to 0.84 against 0.52 to 0.59); a ReAct agent called a function tool and a keyword-only `dict` tool in one batch and answered correctly.
+- **`fsm-llm-eval run`** on `evaluation/datasets/simple_greeting_cases.json`, `--trials 3`: 12/12 = 100.0% (Wilson 95% CI [75.7%, 100.0%]), 4 cases of 3 trials, `name_is_extracted` 3/3.
+- **`fsm-llm-eval examples`, health per category** (score sum over 4 per example):
+
+| Category | Examples | Health | Distribution |
+|---|---|---|---|
+| basic | 14 | 53/56 = 94.6% | 13 x 4, 1 x 1 (`story_time`, timeout at 120 s) |
+| classification | 5 | 20/20 = 100.0% | 5 x 4 |
+| intermediate | 3 | 12/12 = 100.0% | 3 x 4 |
+| advanced | 17 | 68/68 = 100.0% | 17 x 4 |
+| workflows | 8 | 32/32 = 100.0% | 8 x 4 |
+| reasoning | 1 | 4/4 = 100.0% | 1 x 4 |
+| meta | 5 | 20/20 = 100.0% | 5 x 4 |
+| agents | 48 (31 finished) | partial: 109/124 = 87.9% of the 31 that finished, parsed from stdout | 26 x 4, 5 x 1 |
+
+- **Agents category is partial in this entry.** The run was cut at 2100 s (SIGTERM from `timeout`, exit 124) before it wrote a scorecard, so 17 of 48 examples were not run and the 109/124 figure is a stdout parse of the 31 that finished, not a scorecard. The five scored 1 (timeouts with an empty log) were `legal_document_review`, `orchestrator_specialist`, `pipeline_review`, `plan_execute` and `plan_execute_recovery`. Run alone, `plan_execute` finished in about 110 s (success, 13 iterations) and `orchestrator_specialist` hit its own 300 s agent budget: model speed under contention, not a loop. The agents category was completed in a later step, see the plan summary.
+- **F-AR-05-LIVE** (the silent Orchestrator and ADaPT intermediate states, commit `c73dab7`): the 7 agents examples that use the pattern (`adapt`, `adapt_with_memory`, `medical_literature`, `orchestrator`, `orchestrator_specialist`, `hierarchical_orchestrator`, `supply_chain_optimizer`), same model, same day, runs interleaved, N=3 per arm, before arm `8a62490` (the parent of `c73dab7`) in a scratch worktree, after arm `8da28be`. Health over the 7: before 67.9 / 67.9 / 67.9 (median 67.9, spread 0.0), after 78.6 / 67.9 / 78.6 (median 78.6, spread 10.7). The whole difference is `hierarchical_orchestrator` (timeout at 300 s in all three before runs, finished in 204 s and 218 s in two of three after runs). `orchestrator_specialist` and `supply_chain_optimizer` time out in both arms, so their quality is unmeasured. Wall time of the examples that finish fell by about half (`orchestrator` 93 s to 38 s, `adapt` 65 s to 32 s, medians). Verdict by the rule of plan decision D-017: do not revert `c73dab7`. Caveat: the scorer saturates (6 of 7 examples score 4 in both arms), so this shows the change did not lower the score, and it does not show that the answers are as good; the after arm also holds the later 12.x fixes, none of which touches these patterns.
 
 ---
 

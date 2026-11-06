@@ -56,6 +56,7 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_hitl_security.py` - a gated tool runs only on a driver grant bound to that exact call.
 - `test_integration_methods.py` - `to_classification_schema`, ReAct FSM used as a workflow step, reasoning key uniqueness.
 - `test_maker_checker.py` - MakerCheckerAgent, its FSM, re-judging each round, forced pass only on a check turn.
+- `test_limits.py` - `require_int_limit` and every `max_*` / `num_*` constructor limit: a bool, float (also 1.0, NaN, inf), string, `None`, a value below the minimum and an int past 2**63-1 are refused with a bounded message.
 - `test_mcp_stdio.py` - `MCPToolProvider` against the real fixture server (skipped without `mcp`).
 - `test_memory_persistence.py` - `save_working_memory`/`load_working_memory`, `MemorySessionStore`, atomic saves.
 - `test_memory_tools.py` - `create_memory_tools` over `WorkingMemory`.
@@ -112,7 +113,7 @@ From the repo root, with the project virtualenv:
 .venv/bin/python -m pytest tests/test_fsm_llm_agents/ --collect-only -q | tail -1
 ```
 
-The whole suite needs no network or API key; the `conftest.py` network block makes sure of it. A default run (about 20 seconds) collects 2,795 tests. If a new test must open a real connection, mark it `real_llm` or `integration`; otherwise it fails with `ConnectionRefusedError`.
+The whole suite needs no network or API key; the `conftest.py` network block makes sure of it. A default run (about 20 seconds) collects 3,127 tests. If a new test must open a real connection, mark it `real_llm` or `integration`; otherwise it fails with `ConnectionRefusedError`.
 
 ## Things to know
 

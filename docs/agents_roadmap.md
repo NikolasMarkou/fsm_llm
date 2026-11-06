@@ -277,7 +277,7 @@ Two "before" records for later agent changes. Both measure the agents code of co
 
 | Point | Commit | Model | Workers | Health | Envelope leaks | `Success:` lines (True / False) | stop_reason lines | Output |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Baseline | `d4b1626` | `ollama_chat/qwen3.5:4b` | 4 | 178/192 = 92.7% | 0 | 20 / 9 | 0 | `evaluation/2026-09-29_22-12_d4b1626_g3-baseline/` (gitignored, local only) |
+| Baseline | `d4b1626` | `ollama_chat/qwen3.5:4b` | 4 | 178/192 = 92.7% | 0 | 20 / 9 | 0 | `evaluation/2026-09-29_22-12_d4b1626_g3-baseline/` (gitignored, local only; the directory was removed 2026-11-06) |
 
 Score distribution: 43 PASS, 1 PARTIAL, 4 BROKEN. Wall time 1,517.5 s for 48 examples.
 
@@ -395,9 +395,9 @@ cd <worktree at d4b1626> && PYTHONPATH=$PWD/src LLM_MODEL=ollama_chat/qwen3.5:4b
 
 | Point | Commit | Started (UTC) | Health | agents | Distribution (4/2/1) | Timeouts | F-CODE | Wall time | Output (gitignored, local only) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| HEAD | `0f0789c` | 06:23 | 388/404 = 96.0% | 180/192 | 95 / 2 / 4 | 4 | 0 | 1,897 s | `evaluation/2026-10-01_09-23_0f0789c_qwen3.5-4b/` |
-| Same-day baseline | `d4b1626` | 06:55 | 391/404 = 96.8% | 183/192 | 96 / 2 / 3 | 3 | 0 | 2,030 s | `evaluation/2026-10-01_09-54_d4b1626_qwen3.5-4b_same-day-baseline/` |
-| G3 baseline (2026-09-29, agents only) | `d4b1626` | | | 178/192 | | 4 | 0 | 1,518 s | `evaluation/2026-09-29_22-12_d4b1626_g3-baseline/` |
+| HEAD | `0f0789c` | 06:23 | 388/404 = 96.0% | 180/192 | 95 / 2 / 4 | 4 | 0 | 1,897 s | `evaluation/2026-10-01_09-23_0f0789c_qwen3.5-4b/` (removed 2026-11-06) |
+| Same-day baseline | `d4b1626` | 06:55 | 391/404 = 96.8% | 183/192 | 96 / 2 / 3 | 3 | 0 | 2,030 s | `evaluation/2026-10-01_09-54_d4b1626_qwen3.5-4b_same-day-baseline/` (removed 2026-11-06) |
+| G3 baseline (2026-09-29, agents only) | `d4b1626` | | | 178/192 | | 4 | 0 | 1,518 s | `evaluation/2026-09-29_22-12_d4b1626_g3-baseline/` (removed 2026-11-06) |
 
 All non-agent categories score the same at both commits (advanced 64/68, basic 56/56, classification 20/20, intermediate 12/12, meta 20/20, reasoning 4/4, workflows 32/32; the two advanced PARTIALs `multi_level_stack` and `support_pipeline` are F-EXTRACT at both).
 
@@ -415,4 +415,4 @@ Read from the raw logs:
 - `Success: True` / `Success: False` lines in agents logs: `0f0789c` 22 / 3 (architecture_review, eval_opt_structured, regulatory_compliance); `d4b1626` 22 / 4 (eval_opt_structured, legal_document_review, reflexion, regulatory_compliance). Every example printing `Success: False` still scores 4. No example prints a `stop_reason`.
 - Timeouts at both commits: plan_execute (180 s), orchestrator_specialist (300 s), supply_chain_optimizer (300 s); plan_execute_recovery only at `0f0789c`. Timed-out logs hold no output.
 - Total agents wall time: 4,597 s at `0f0789c`, 5,157 s at `d4b1626`.
-- Step 24.1 (`e9ef064`, D-055): after the PlanExecute planner fix (no tool-less, no confirm/wait plan steps) the agents category alone scored 177/192 (`evaluation/2026-10-01_10-50_e9ef064_qwen3.5-4b/`, EVALUATE.md Run 008); `plan_execute_recovery` run alone fell from 24 to 20 LLM calls but still times out at 180 s under 4 workers, so D-044 (b) stays FAILED; `hierarchical_orchestrator` (code unchanged) timed out at 300 s this run.
+- Step 24.1 (`e9ef064`, D-055): after the PlanExecute planner fix (no tool-less, no confirm/wait plan steps) the agents category alone scored 177/192 (run directory `evaluation/2026-10-01_10-50_e9ef064_qwen3.5-4b/`, removed 2026-11-06; EVALUATE.md Run 008 keeps the numbers); `plan_execute_recovery` run alone fell from 24 to 20 LLM calls but still times out at 180 s under 4 workers, so D-044 (b) stays FAILED; `hierarchical_orchestrator` (code unchanged) timed out at 300 s this run.

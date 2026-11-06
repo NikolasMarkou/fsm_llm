@@ -5,10 +5,10 @@ Purpose: Pytest suite for the FSM-LLM agents package (`src/fsm_llm/agents`, impo
 
 ## Scope
 
-- In: 74 `test_*.py` files, `mcp_fixture_server.py` (a real stdio MCP server, not a test), empty `__init__.py`, and `conftest.py`, whose autouse fixture calls `tests.conftest.block_network`: every IPv4/IPv6 connect (loopback included) raises `ConnectionRefusedError` unless the test is marked `real_llm` or `integration`. Global fixtures and `PromptGroundedLLM` come from `tests/conftest.py` (adds `src` to `sys.path`); most older files build their own mocks.
+- In: 75 `test_*.py` files, `mcp_fixture_server.py` (a real stdio MCP server, not a test), empty `__init__.py`, and `conftest.py`, whose autouse fixture calls `tests.conftest.block_network`: every IPv4/IPv6 connect (loopback included) raises `ConnectionRefusedError` unless the test is marked `real_llm` or `integration`. Global fixtures and `PromptGroundedLLM` come from `tests/conftest.py` (adds `src` to `sys.path`); most older files build their own mocks.
 - Also in (historical placement, not agents code): `test_review_fixes.py` covers core `API.converse_stream` auto-save, `FileSessionStore._path` validation, `FSMManager.seed_restored_conversation`, and `fsm_llm.monitor.otel.OTELExporter` thread safety; `test_strands_phase2.py` covers `fsm_llm.workflows.dependency_resolver.DependencyResolver` and `OTELExporter`.
 - Out: live-LLM agent tests (none here; no test calls a real provider, and the network block enforces it), meta-builder internals beyond the CLI.
-- Current size: 2,795 collected (all pass; `test_mcp_stdio.py` skips as a whole module with the project `.venv`, which lacks `mcp`). Re-measure with `pytest tests/test_fsm_llm_agents --collect-only -q | tail -1`.
+- Current size: 3,127 collected (all pass; `test_mcp_stdio.py` skips as a whole module with the project `.venv`, which lacks `mcp`). Re-measure with `pytest tests/test_fsm_llm_agents --collect-only -q | tail -1`.
 
 ## Architecture
 
@@ -67,6 +67,7 @@ Observation hooks used by loop tests:
 | `test_forced_stop_flag.py` | Forged `max_iterations_reached` | React, Reflexion, MakerChecker |
 | `test_completion_guard.py`, `test_plan_execute_evidence.py` | `_completion_is_real`, `_has_execution_evidence` | Evidence keys `WORKER_RESULTS`, `EVIDENCE`, `STEP_RESULTS`; step success tied to `TOOL_STATUS == "success"` |
 | `test_handlers.py` | `AgentHandlers`, `make_iteration_limiter`, `make_fresh_keys_handler` | ReAct-family limiter counts think exits (`max_iterations=N` gives N think turns for N >= 2; N = 1 behaves like 2); factory limiter forces at count `max - 1`; empty-input recovery only for string-compatible or single list params |
+| `test_limits.py` | `require_int_limit` and every `max_*` / `num_*` constructor limit (plan 0068b055 step 12.8) | Refused: bool, float (1.0, NaN, inf), str, None, below the minimum, above `Defaults.MAX_INT_LIMIT`; the message holds a bounded prefix of the value (a 5000-digit int must not make the error path raise) |
 | `test_tools.py` | `ToolRegistry`, `@tool`, `normalize_tool_input` | Thread-safety with `fine_grained_gil` fixture (`sys.setswitchinterval(1e-6)`), 256-dim stub embeddings, dict/list/kwargs calling conventions |
 | `test_okf.py` | `fsm_llm.agents.okf`: `create_okf_tools`, `OKFMemoryBackend`, exporters | Offline; injection containment, observation wrapper and echo margin, incomplete-bundle signal |
 | `test_agent_skills.py` | `create_skill_tools` over a `SkillCatalog` | Three read-only tools, reply never over its budget (`TestReplyBudget`), injection stays out of descriptions, clamped parameters, scripted `native_fc` and `ReactAgent` runs, an `ast` pin that nothing is executed; ASCII file (controls via `chr`) |

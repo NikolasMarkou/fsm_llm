@@ -43,7 +43,7 @@ Environment variables used by the library and the `fsm-llm` command:
 | `FSM_PATH` | none | not usable with `fsm-llm`: `--fsm` is checked first and is mandatory |
 | `OPENAI_API_KEY` etc. | none | provider keys, read by litellm |
 
-A `.env` file is looked up relative to the installed package, not your working directory, so prefer `export` for the CLI.
+A `.env` file is looked up relative to the installed package, not your working directory, so prefer `export` for the CLI. The `.env` value fills `LLM_MODEL` before the built-in default, so a stale `.env` silently beats `ollama_chat/bonsai-2:27b`; it is loaded when `fsm_llm` is imported, too.
 
 ## 3. Your First Bot
 
