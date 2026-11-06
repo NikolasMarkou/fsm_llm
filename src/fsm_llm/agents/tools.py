@@ -153,6 +153,22 @@ def _is_dict_annotation(ann: Any) -> bool:
     )
 
 
+_VAR_KINDS = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+
+
+def _accepts_extra_keywords(sig: inspect.Signature) -> bool:
+    """True when the function names a parameter AND takes ``**kw``.
+
+    Such a function receives every key the model sends (the schema lists only
+    the named ones). A lone ``**kw`` is excluded on purpose: it declares nothing,
+    so an explicit schema (an MCP tool) stays its contract and filters.
+    """
+    params = list(sig.parameters.values())
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params) and any(
+        p.kind not in _VAR_KINDS for p in params
+    )
+
+
 def _unwrap_nested_tool_input(
     parameters: dict[str, Any], schema_props: dict[str, Any]
 ) -> dict[str, Any]:
@@ -394,17 +410,9 @@ class ToolRegistry:
 
         args_model: type[BaseModel] | None = None
         if parameter_schema is None:
-            # TOOL-03: infer like ``@tool`` so a one-param annotated function is
-            # called by keyword, not handed the whole dict. A single unannotated
-            # or dict-annotated param keeps ``{}`` (dict-style call). A function
-            # taking ``**kwargs`` keeps ``{}`` so every key still reaches it.
-            sig_params = list(inspect.signature(fn).parameters.values())
-            dict_style = any(
-                p.kind is inspect.Parameter.VAR_KEYWORD for p in sig_params
-            ) or (
-                len(sig_params) == 1 and _is_dict_annotation(sig_params[0].annotation)
-            )
-            parameter_schema = {} if dict_style else infer_schema_from_hints(fn)
+            # TOOL-03: infer like ``@tool``; both go through the one rule in
+            # ``infer_schema_from_hints`` (D-009), so they cannot disagree.
+            parameter_schema = infer_schema_from_hints(fn)
             if parameter_schema:
                 args_model = _args_model_from_hints(fn, tool_name)
 
@@ -476,6 +484,15 @@ class ToolRegistry:
         schema_props: dict[str, Any] = schema.get("properties", {})
         if schema_props and isinstance(parameters, dict):
             unknown = [k for k in parameters if k not in schema_props]
+            if unknown and tool.execute_fn is not None:
+                try:
+                    takes_extras = _accepts_extra_keywords(
+                        inspect.signature(tool.execute_fn)
+                    )
+                except (TypeError, ValueError):
+                    takes_extras = False
+                if takes_extras:
+                    unknown = []  # they reach the function's ``**kw``
             if unknown:
                 logger.warning(
                     f"Tool '{tool.name}' received unknown parameters: "
@@ -555,7 +572,7 @@ class ToolRegistry:
         # Multi-param or schema-aware: pass as **kwargs
         sent = _unwrap_nested_tool_input(parameters, schema_props)
         params = sent
-        if schema_props:
+        if schema_props and not _accepts_extra_keywords(sig):
             params = {k: v for k, v in sent.items() if k in schema_props}
         # DECISION plan-2026-09-29T103145-06a5ec0a/D-023: bind BEFORE calling.
         # When the arguments bind, the tool runs exactly once and a TypeError
@@ -801,8 +818,11 @@ def infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
     Supports standard Python types (str, int, float, bool, list, dict) and
     ``typing.Annotated[T, "description"]`` for per-parameter descriptions.
 
-    Returns an empty dict for dict-style single-param functions (``params: dict``)
-    and for zero-parameter functions.
+    Returns an empty dict for dict-style single-param functions (``params: dict``,
+    ``dict[...]``, or unannotated), for zero-parameter functions, and for a
+    function whose only parameters are ``*args``/``**kwargs``. ``*args`` and
+    ``**kwargs`` are never properties and never required: ``@tool`` and
+    ``register_function`` share this one rule.
     """
     # A partial or a callable instance carries no annotations of its own: read
     # them from the wrapped function / the class's __call__ (review item 3).
@@ -813,16 +833,26 @@ def infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
         return {}
 
     sig = inspect.signature(fn)
-    params = [p for p in sig.parameters.values() if p.name not in ("self", "cls")]
+    all_params = [p for p in sig.parameters.values() if p.name not in ("self", "cls")]
 
-    if not params:
+    if not all_params:
         return {}
 
-    # Dict-style tool: single dict parameter → skip inference
-    if len(params) == 1:
-        raw_hint = hints.get(params[0].name)
-        if raw_hint is dict or raw_hint is None:
+    # DECISION plan-2026-11-06T093029-0068b055/D-009: ONE rule for ``@tool`` and
+    # ``register_function``. A lone dict-style parameter (unannotated, ``dict``,
+    # ``dict[...]``, or its string form) is the dict-style call: schema ``{}``.
+    # ``*args``/``**kwargs`` are never properties (the model cannot name them)
+    # and never required. Do NOT re-add a second pre-check in
+    # ``register_function`` (the two drifted apart once), and do NOT list
+    # ``**kw`` as a property: it bound as a required string and lost every
+    # argument. Runtime side: ``_invoke_tool_fn`` passes extras to ``**kw``.
+    if len(all_params) == 1:
+        raw_hint = hints.get(all_params[0].name)
+        if raw_hint is None or _is_dict_annotation(raw_hint):
             return {}
+    params = [p for p in all_params if p.kind not in _VAR_KINDS]
+    if not params:
+        return {}
 
     properties: dict[str, Any] = {}
     required: list[str] = []

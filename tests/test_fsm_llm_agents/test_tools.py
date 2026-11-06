@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Annotated, Any
 
 import pytest
+from pydantic import BaseModel
 
 from fsm_llm.agents.definitions import ToolCall, ToolDefinition
 from fsm_llm.agents.exceptions import ToolNotFoundError
@@ -1132,14 +1133,35 @@ class TestListToolInput:
 
     @pytest.mark.parametrize(
         "annotation",
-        [list, typing.Optional[int], dict[str, int], str],  # noqa: UP045
-        ids=["bare-list", "Optional-int", "dict-generic", "str"],
+        [list, typing.Optional[int], str],  # noqa: UP045
+        ids=["bare-list", "Optional-int", "str"],
     )
     def test_other_annotations_keep_their_schema(self, annotation):
         fn, _ = self._list_tool(annotation)
         prop = fn._tool_definition.parameter_schema["properties"]["tags"]
         expected = {"type": "array"} if annotation is list else {"type": "string"}
         assert prop == expected
+
+    def test_lone_dict_generic_param_is_the_dict_style_call(self):
+        """A lone ``dict[str, int]`` parameter is the dict-style form (plan
+        0068b055 D-009, the one rule ``register_function`` already applied):
+        the whole dict reaches the function and the model-visible schema is
+        the empty object, not a ``string`` property it could not fill."""
+        fn, seen = self._list_tool(dict[str, int])
+        definition = fn._tool_definition
+        assert definition.parameter_schema == {}
+        assert definition.args_model is None
+        registry = ToolRegistry()
+        registry.register(definition)
+        assert registry.get_json_schemas()[0]["function"]["parameters"] == {
+            "type": "object",
+            "properties": {},
+        }
+        result = registry.execute(
+            ToolCall(tool_name="tag", parameters={"a": 1, "b": 2})
+        )
+        assert result.success, result.error
+        assert seen == [{"a": 1, "b": 2}]
 
     def test_approval_grant_binds_the_list_consistently(self):
         """The driver writes the grant from an already-normalized input and the
@@ -1505,3 +1527,146 @@ class TestToolArgumentBinding:
         )
         assert result.success, result.error
         assert seen == [("a", {"k": 1})]
+
+
+class _RuleModel(BaseModel):
+    x: int
+
+
+def _signature_cases():
+    """(id, function) pairs: each signature in a different shape."""
+
+    def dict_bare(p: dict) -> str: ...
+
+    def dict_generic(p: dict[str, Any]) -> str: ...
+
+    def one_int_kwargs(a: int, **kw) -> str: ...
+
+    def lone_kwargs(**kwargs: Any) -> str: ...
+
+    def lone_args(*args) -> str: ...
+
+    def int_and_args(a: int, *args: int) -> str: ...
+
+    def optional_and_default(a: typing.Optional[int] = None, b: str = "x") -> str: ...  # noqa: UP045
+
+    def list_int(items: list[int]) -> str: ...
+
+    def pydantic_model(m: _RuleModel) -> str: ...
+
+    return [
+        ("dict", dict_bare),
+        ("dict-generic", dict_generic),
+        ("int-and-kwargs", one_int_kwargs),
+        ("lone-kwargs", lone_kwargs),
+        ("lone-args", lone_args),
+        ("int-and-args", int_and_args),
+        ("optional-and-default", optional_and_default),
+        ("list-int", list_int),
+        ("pydantic-model", pydantic_model),
+    ]
+
+
+class TestOneSchemaRule:
+    """DECISION plan-2026-11-06T093029-0068b055/D-009 (F-AB-05): ``@tool`` and
+    ``register_function`` infer a tool's schema by one rule, and a function
+    that takes ``**kw`` receives every key the model sends."""
+
+    @pytest.mark.parametrize(
+        "fn", [f for _, f in _signature_cases()], ids=[i for i, _ in _signature_cases()]
+    )
+    def test_tool_and_register_function_agree_on_every_signature(self, fn):
+        from_decorator = tool(fn)._tool_definition
+        registry = ToolRegistry()
+        registry.register_function(fn, name=from_decorator.name)
+        from_register = registry.get(from_decorator.name)
+        assert from_decorator.parameter_schema == from_register.parameter_schema
+        assert (from_decorator.args_model is None) == (from_register.args_model is None)
+        if from_decorator.args_model is not None:
+            assert (
+                from_decorator.args_model.model_json_schema()
+                == from_register.args_model.model_json_schema()
+            )
+
+    def test_lone_kwargs_tool_receives_every_argument(self):
+        seen: list[dict] = []
+
+        @tool
+        def echo(**kwargs: Any) -> str:
+            seen.append(kwargs)
+            return "ok"
+
+        registry = ToolRegistry()
+        registry.register(echo._tool_definition)
+        result = registry.execute(ToolCall(tool_name="echo", parameters={"q": 1}))
+        assert result.success, result.error
+        assert seen == [{"q": 1}]
+
+    def test_named_plus_kwargs_tool_receives_extras(self):
+        seen: list = []
+
+        @tool
+        def search(query: str, **options: Any) -> str:
+            seen.append((query, options))
+            return "ok"
+
+        definition = search._tool_definition
+        assert list(definition.parameter_schema["properties"]) == ["query"]
+        assert definition.parameter_schema["required"] == ["query"]
+        registry = ToolRegistry()
+        registry.register(definition)
+        result = registry.execute(
+            ToolCall(tool_name="search", parameters={"query": "x", "limit": 3})
+        )
+        assert result.success, result.error
+        assert seen == [("x", {"limit": 3})]
+
+    def test_var_positional_is_never_a_required_property(self):
+        seen: list = []
+
+        @tool
+        def total(a: int, *args: int) -> int:
+            seen.append(a)
+            return a
+
+        schema = total._tool_definition.parameter_schema
+        assert list(schema["properties"]) == ["a"]
+        assert schema["required"] == ["a"]
+        registry = ToolRegistry()
+        registry.register(total._tool_definition)
+        result = registry.execute(ToolCall(tool_name="total", parameters={"a": 4}))
+        assert result.success, result.error
+        assert seen == [4]
+
+    def test_model_visible_schema_of_a_lone_dict_tool_is_empty_object(self):
+        @tool
+        def run(params: dict) -> str:
+            return "ok"
+
+        registry = ToolRegistry()
+        registry.register(run._tool_definition)
+        assert registry.get_json_schemas()[0]["function"]["parameters"] == {
+            "type": "object",
+            "properties": {},
+        }
+
+    def test_explicit_schema_still_filters_a_lone_kwargs_tool(self):
+        """A lone ``**kw`` declares nothing, so an explicit schema (an MCP
+        tool) stays its contract: unlisted keys are dropped as before."""
+        seen: list[dict] = []
+
+        def execute(**kwargs: Any) -> str:
+            seen.append(kwargs)
+            return "ok"
+
+        registry = ToolRegistry()
+        registry.register_function(
+            execute,
+            name="mcp",
+            parameter_schema={"properties": {"city": {"type": "string"}}},
+        )
+        result = registry.execute(
+            ToolCall(tool_name="mcp", parameters={"city": "x", "extra": 1})
+        )
+        assert result.success, result.error
+        assert seen == [{"city": "x"}]
