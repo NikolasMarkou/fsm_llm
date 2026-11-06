@@ -24,13 +24,14 @@ from fsm_llm.definitions import (
     FSMInstance,
 )
 from fsm_llm.fsm import FSMManager
+from fsm_llm.llm import _embedding_vectors
 from fsm_llm.logging import logger
 from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
 )
-from fsm_llm.utilities import coerce_float, coerce_int
+from fsm_llm.utilities import coerce_confidence, coerce_float, coerce_int
 from tests.conftest import MockLLM2Interface
 
 _TWO_STATE = {
@@ -153,6 +154,165 @@ class TestNumericCoercionRejectsWhatIsNotANumber:
         out = _validate("float", good)
         assert out.is_valid is True
         assert out.value == float(good)
+
+
+def _validate_with_rules(
+    field_type: str, value: Any, rules: dict[str, Any]
+) -> FieldExtractionResponse:
+    return MessagePipeline._validate_field_extraction(
+        FieldExtractionResponse(
+            field_name="n", value=value, confidence=1.0, is_valid=True
+        ),
+        FieldExtractionConfig(
+            field_name="n",
+            field_type=field_type,  # type: ignore[arg-type]
+            extraction_instructions="get n",
+            confidence_threshold=0.0,
+            validation_rules=rules,
+        ),
+    )
+
+
+def _range_machine(field_type: str, rules: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": "R",
+        "description": "d",
+        "initial_state": "ask",
+        "states": {
+            "ask": {
+                "id": "ask",
+                "description": "ask",
+                "purpose": "get n",
+                "field_extractions": [
+                    {
+                        "field_name": "n",
+                        "field_type": field_type,
+                        "extraction_instructions": "n",
+                        "validation_rules": rules,
+                    }
+                ],
+                "response_instructions": "ask",
+                "transitions": [
+                    {
+                        "target_state": "done",
+                        "description": "has n",
+                        "priority": 1,
+                        "conditions": [
+                            {"description": "n", "requires_context_keys": ["n"]}
+                        ],
+                    }
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "end",
+                "purpose": "end",
+                "response_instructions": "bye",
+            },
+        },
+    }
+
+
+_HUGE_VALUES = [
+    pytest.param(10**400, id="int-1e400"),
+    pytest.param(-(10**400), id="int-neg-1e400"),
+    pytest.param("1" * 400, id="digit-string-400"),
+]
+
+
+class TestRangeRulesNeverOverflow:
+    """REVIEW2-C1 (F-PI-01): ``float(10**400)`` raised ``OverflowError`` out of
+    the ``min_value``/``max_value`` checks, so a 400-digit number from the model
+    ended the turn with ``FSMError``. A huge value is out of range: an invalid
+    extraction, never an exception."""
+
+    @pytest.mark.parametrize("field_type", ["int", "any"])
+    @pytest.mark.parametrize("huge", _HUGE_VALUES)
+    @pytest.mark.parametrize("rule", ["min_value", "max_value"])
+    def test_a_huge_value_with_a_range_rule_is_decided_not_raised(
+        self, field_type, huge, rule
+    ):
+        out = _validate_with_rules(field_type, huge, {rule: 10})
+        positive = isinstance(huge, str) or huge > 0
+        out_of_range = positive if rule == "max_value" else not positive
+        assert out.is_valid is (not out_of_range)
+        if out_of_range:
+            assert out.validation_error
+
+    @pytest.mark.parametrize("huge", _HUGE_VALUES)
+    def test_a_huge_value_is_rejected_by_the_matching_bound_of_a_closed_range(
+        self, huge
+    ):
+        positive = isinstance(huge, str) or huge > 0
+        out = _validate_with_rules("int", huge, {"min_value": 0, "max_value": 10})
+        assert out.is_valid is False
+        assert ("exceeds maximum" if positive else "below minimum") in (
+            out.validation_error or ""
+        )
+
+    def test_a_huge_value_below_an_enormous_max_still_passes(self):
+        """The check is numeric, not skipped: 10**308 fits a float bound of
+        1e308 * 1.5 only as an exact comparison, and 10**309 does not."""
+        rules = {"max_value": 1.7e308}
+        assert _validate_with_rules("int", 10**308, rules).is_valid is True
+        assert _validate_with_rules("int", 10**309, rules).is_valid is False
+        assert _validate_with_rules("int", 10**400, rules).is_valid is False
+        low = {"min_value": -1.7e308}
+        assert _validate_with_rules("int", -(10**308), low).is_valid is True
+        assert _validate_with_rules("int", -(10**309), low).is_valid is False
+
+    @pytest.mark.parametrize("field_type", ["int", "float", "any"])
+    @pytest.mark.parametrize(
+        ("value", "valid"), [(5, True), (0, True), (10, True), (11, False), (-1, False)]
+    )
+    def test_a_normal_value_keeps_its_verdict(self, field_type, value, valid):
+        out = _validate_with_rules(field_type, value, {"min_value": 0, "max_value": 10})
+        assert out.is_valid is valid
+
+    def test_a_float_field_with_a_huge_value_is_invalid_with_a_range_rule(self):
+        for huge in (10**400, -(10**400), "1" * 400):
+            out = _validate_with_rules("float", huge, {"min_value": 0, "max_value": 10})
+            assert out.is_valid is False
+
+    @pytest.mark.parametrize("field_type", ["int", "any"])
+    @pytest.mark.parametrize("huge", _HUGE_VALUES)
+    def test_converse_survives_a_huge_number_and_stays_in_the_state(
+        self, field_type, huge
+    ):
+        machine = _range_machine(field_type, {"min_value": 0, "max_value": 10})
+        llm = MockLLM2Interface(extraction_data={"n": huge})
+        api = API.from_definition(machine, llm_interface=llm)
+        cid, _ = api.start_conversation()
+        api.converse("a very big number", cid)
+        assert api.get_current_state(cid) == "ask"
+        assert "n" not in api.get_data(cid)
+
+    def test_converse_still_accepts_an_in_range_number(self):
+        machine = _range_machine("int", {"min_value": 0, "max_value": 10})
+        llm = MockLLM2Interface(extraction_data={"n": 7})
+        api = API.from_definition(machine, llm_interface=llm)
+        cid, _ = api.start_conversation()
+        api.converse("seven", cid)
+        assert api.get_current_state(cid) == "done"
+        assert api.get_data(cid)["n"] == 7
+
+
+class TestOtherFloatSitesDoNotOverflow:
+    """REVIEW2-C1 sweep: the same ``float()``/``math.isfinite`` on an integer
+    too large for a float, at the two other model/provider-fed sites."""
+
+    @pytest.mark.parametrize("huge", [10**400, -(10**400)], ids=["pos", "neg"])
+    def test_a_huge_confidence_reads_as_the_default_like_infinity(self, huge):
+        assert coerce_confidence(huge, 0.5) == 0.5
+        assert coerce_confidence(math.inf, 0.5) == 0.5
+
+    @pytest.mark.parametrize("huge", [10**400, -(10**400)], ids=["pos", "neg"])
+    def test_an_embedding_with_a_huge_integer_is_a_refused_reply(self, huge):
+        from fsm_llm.definitions import LLMResponseError
+
+        reply = {"data": [{"index": 0, "embedding": [0.5, huge]}]}
+        with pytest.raises(LLMResponseError, match="non-finite"):
+            _embedding_vectors(reply, 1)
 
 
 class TestAdvanceOnATerminalStateIsRefusedBeforeAnyWork:

@@ -2509,7 +2509,11 @@ def _embedding_vectors(response: Any, expected: int) -> list[list[float]]:
             raise LLMResponseError(f"Embedding reply item {position} is not a vector")
         if not vector:
             raise LLMResponseError(f"Embedding reply item {position} is empty")
-        if not all(math.isfinite(x) for x in vector):
+        try:
+            finite = all(math.isfinite(x) for x in vector)
+        except OverflowError:  # an integer past float range is no finite float
+            finite = False
+        if not finite:
             raise LLMResponseError(
                 f"Embedding reply item {position} holds a non-finite value"
             )

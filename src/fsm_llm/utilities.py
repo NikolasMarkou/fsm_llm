@@ -658,8 +658,9 @@ def coerce_confidence(raw: Any, default: float) -> float:
           ``null`` so the caller's parse-fallback ladder catches those exactly
           as before — this helper deliberately does NOT swallow them.
         - Only ``NaN``/``±inf`` (which ``float()`` accepts and ``min``/``max``
-          leave un-clamped) are mapped to ``default``; the result is then
-          clamped to ``[0, 1]``.
+          leave un-clamped) and an integer past float range (``10**400``,
+          whose ``float()`` raises ``OverflowError``) are mapped to
+          ``default``; the result is then clamped to ``[0, 1]``.
         - Shared by llm.py (2 rungs) and classification.py (2 parsers) so the
           four confidence-parse sites can never re-diverge.
 
@@ -672,7 +673,10 @@ def coerce_confidence(raw: Any, default: float) -> float:
     # certainty), defeating `is_low_confidence` (G6). This guard is the fix.
     # See decisions.md D-001.
     """
-    value = float(raw)  # may raise TypeError/ValueError — intentional
+    try:
+        value = float(raw)  # may raise TypeError/ValueError — intentional
+    except OverflowError:  # an integer past float range is as unreadable as inf
+        return default
     if math.isnan(value) or math.isinf(value):
         return default
     return min(max(value, 0.0), 1.0)

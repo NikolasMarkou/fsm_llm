@@ -162,6 +162,23 @@ def _coerce_dict(v: Any) -> Any:
     raise TypeError(f"expected dict, got {type(v).__name__}")
 
 
+def _number_for_range(value: Any) -> Any:
+    """``value`` as what a ``min_value``/``max_value`` rule compares.
+
+    Interface contract: ``float(value)`` as before (``TypeError`` or
+    ``ValueError`` for a value that is no number, which the range checks read
+    as "not numeric, skip"), except an integer too large for a float
+    (``10**400``, whose ``float()`` raises ``OverflowError``) is returned as
+    it is. Python compares an ``int`` with a ``float`` exactly and without
+    overflow, so a huge value is simply above a max or below a min, and one
+    inside an enormous bound still passes. Never raises ``OverflowError``.
+    """
+    try:
+        return float(value)
+    except OverflowError:
+        return value
+
+
 _TYPE_COERCERS: dict[str, Callable[[Any], Any]] = {
     "int": coerce_int,
     "float": coerce_float,
@@ -2247,7 +2264,7 @@ class MessagePipeline:
         # Non-numeric values skip the numeric range checks.
         if "min_value" in rules:
             try:
-                if float(value) < float(rules["min_value"]):
+                if _number_for_range(value) < _number_for_range(rules["min_value"]):
                     return rejected(
                         f"Value {value!r} is below minimum {rules['min_value']}",
                         value=value,
@@ -2257,7 +2274,7 @@ class MessagePipeline:
 
         if "max_value" in rules:
             try:
-                if float(value) > float(rules["max_value"]):
+                if _number_for_range(value) > _number_for_range(rules["max_value"]):
                     return rejected(
                         f"Value {value!r} exceeds maximum {rules['max_value']}",
                         value=value,
