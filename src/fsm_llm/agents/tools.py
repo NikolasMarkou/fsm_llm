@@ -154,6 +154,10 @@ def _is_dict_annotation(ann: Any) -> bool:
 
 
 _VAR_KINDS = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+_POSITIONAL_KINDS = (
+    inspect.Parameter.POSITIONAL_ONLY,
+    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+)
 
 
 def _accepts_extra_keywords(sig: inspect.Signature) -> bool:
@@ -818,8 +822,9 @@ def infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
     Supports standard Python types (str, int, float, bool, list, dict) and
     ``typing.Annotated[T, "description"]`` for per-parameter descriptions.
 
-    Returns an empty dict for dict-style single-param functions (``params: dict``,
-    ``dict[...]``, or unannotated), for zero-parameter functions, and for a
+    Returns an empty dict for dict-style single-param functions (a positional
+    ``params: dict``, ``dict[...]``, or unannotated; a keyword-only one keeps its
+    named schema), for zero-parameter functions, and for a
     function whose only parameters are ``*args``/``**kwargs``. ``*args`` and
     ``**kwargs`` are never properties and never required: ``@tool`` and
     ``register_function`` share this one rule.
@@ -839,14 +844,17 @@ def infer_schema_from_hints(fn: Callable[..., Any]) -> dict[str, Any]:
         return {}
 
     # DECISION plan-2026-11-06T093029-0068b055/D-009: ONE rule for ``@tool`` and
-    # ``register_function``. A lone dict-style parameter (unannotated, ``dict``,
-    # ``dict[...]``, or its string form) is the dict-style call: schema ``{}``.
+    # ``register_function``. A lone POSITIONAL dict-style parameter (unannotated,
+    # ``dict``, ``dict[...]``, or its string form) is the dict-style call: schema
+    # ``{}``. A keyword-only one keeps its named schema (the dict-style call
+    # passes the dict positionally and would raise TypeError); do NOT widen the
+    # rule to every kind.
     # ``*args``/``**kwargs`` are never properties (the model cannot name them)
     # and never required. Do NOT re-add a second pre-check in
     # ``register_function`` (the two drifted apart once), and do NOT list
     # ``**kw`` as a property: it bound as a required string and lost every
     # argument. Runtime side: ``_invoke_tool_fn`` passes extras to ``**kw``.
-    if len(all_params) == 1:
+    if len(all_params) == 1 and all_params[0].kind in _POSITIONAL_KINDS:
         raw_hint = hints.get(all_params[0].name)
         if raw_hint is None or _is_dict_annotation(raw_hint):
             return {}

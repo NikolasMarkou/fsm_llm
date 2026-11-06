@@ -1144,9 +1144,11 @@ class TestListToolInput:
 
     def test_lone_dict_generic_param_is_the_dict_style_call(self):
         """A lone ``dict[str, int]`` parameter is the dict-style form (plan
-        0068b055 D-009, the one rule ``register_function`` already applied):
-        the whole dict reaches the function and the model-visible schema is
-        the empty object, not a ``string`` property it could not fill."""
+        0068b055 D-009, the one rule ``register_function`` always applied and
+        test_register_function_keeps_legacy_single_dict_param pins): the model
+        sees an empty object schema and the whole arguments object is the
+        dict. The parent's ``@tool`` showed the typed ``args_model`` property
+        instead; a typed schema for this form is carried (F-AB-05b)."""
         fn, seen = self._list_tool(dict[str, int])
         definition = fn._tool_definition
         assert definition.parameter_schema == {}
@@ -1542,6 +1544,8 @@ def _signature_cases():
 
     def one_int_kwargs(a: int, **kw) -> str: ...
 
+    def kwonly_dict(*, payload: dict[str, Any]) -> str: ...
+
     def lone_kwargs(**kwargs: Any) -> str: ...
 
     def lone_args(*args) -> str: ...
@@ -1557,6 +1561,7 @@ def _signature_cases():
     return [
         ("dict", dict_bare),
         ("dict-generic", dict_generic),
+        ("kwonly-dict", kwonly_dict),
         ("int-and-kwargs", one_int_kwargs),
         ("lone-kwargs", lone_kwargs),
         ("lone-args", lone_args),
@@ -1587,6 +1592,28 @@ class TestOneSchemaRule:
                 from_decorator.args_model.model_json_schema()
                 == from_register.args_model.model_json_schema()
             )
+
+    def test_keyword_only_dict_parameter_keeps_its_named_schema(self):
+        """The lone-dict `{}` rule is for a parameter the dict can be passed to
+        by position; a keyword-only one is named and called by keyword."""
+        seen: list = []
+
+        @tool
+        def kwonly(*, payload: dict[str, Any]) -> str:
+            """Take a payload."""
+            seen.append(payload)
+            return f"payload={payload}"
+
+        schema = kwonly._tool_definition.parameter_schema
+        assert list(schema["properties"]) == ["payload"]
+        assert schema["required"] == ["payload"]
+        registry = ToolRegistry()
+        registry.register(kwonly._tool_definition)
+        result = registry.execute(
+            ToolCall(tool_name="kwonly", parameters={"payload": {"x": 1}})
+        )
+        assert result.success, result.error
+        assert seen == [{"x": 1}]
 
     def test_lone_kwargs_tool_receives_every_argument(self):
         seen: list[dict] = []
