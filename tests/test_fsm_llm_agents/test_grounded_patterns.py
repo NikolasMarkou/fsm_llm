@@ -2277,6 +2277,85 @@ class TestIntermediateStatesAreSilent:
             assert "reply text" not in request.system_prompt, field
 
 
+class TestForcedStopBeforeTheSpeakingState:
+    """PIN (D-013, review #11): a run closed from outside before its speaking
+    state ships ``ErrorMessages.NO_ANSWER`` (``success=False``, stop reason
+    ``ended``). On the parent (8a62490) the intermediate narration shipped as
+    the answer ("Splitting the work.", "Attempt reply text."): the intermediate
+    states spoke, so the last non-empty reply was one of them."""
+
+    @staticmethod
+    def _closing(base, stop_at):
+        class Closing(base):
+            def _on_loop_iteration(self, api, conv_id, iteration):
+                if iteration == stop_at:
+                    api.end_conversation(conv_id)
+                    return
+                super()._on_loop_iteration(api, conv_id, iteration)
+
+        return Closing
+
+    @pytest.mark.parametrize("stop_at", [1, 2, 3])
+    def test_orchestrator_answers_no_answer(self, stop_at):
+        from fsm_llm.agents import AgentConfig, AgentResult, OrchestratorAgent
+        from fsm_llm.agents.constants import ErrorMessages
+
+        llm = _TurnAwareLLM(
+            {
+                ContextKeys.SUBTASKS: lambda _t, _ctx: ["pick dates"],
+                ContextKeys.ALL_COLLECTED: lambda _t, ctx: bool(
+                    ctx.get(ContextKeys.WORKER_RESULTS)
+                ),
+            },
+            responses={
+                "orchestrate": "Splitting the work.",
+                "delegate": "The workers are done.",
+                "collect": "Reviewing the results.",
+                "synthesize": "The trip: dates first.",
+            },
+        )
+        agent = self._closing(OrchestratorAgent, stop_at)(
+            worker_factory=lambda t: AgentResult(answer=f"done {t}", success=True),
+            config=AgentConfig(max_iterations=12),
+            llm_interface=llm,
+        )
+        result = agent.run(_SILENT_TASK)
+
+        assert result.answer == ErrorMessages.NO_ANSWER
+        assert result.success is False
+        assert result.stop_reason == "ended"
+        assert not llm.calls("generate_response")
+
+    @pytest.mark.parametrize("stop_at", [1, 2, 3])
+    def test_adapt_answers_no_answer(self, stop_at):
+        from fsm_llm.agents import ADaPTAgent, AgentConfig
+        from fsm_llm.agents.constants import ErrorMessages
+
+        llm = _TurnAwareLLM(
+            {
+                ContextKeys.ATTEMPT_RESULT: lambda _t, _ctx: "",
+                ContextKeys.ATTEMPT_SUCCEEDED: lambda _t, _ctx: False,
+                ContextKeys.SUBTASKS: lambda _t, _ctx: ["x"],
+                ContextKeys.OPERATOR: lambda _t, _ctx: "AND",
+            },
+            responses={
+                "attempt": "Attempt reply text.",
+                "assess": "Assess reply text.",
+                "decompose": "Decompose reply text.",
+                "combine": "Combined final reply.",
+            },
+        )
+        agent = self._closing(ADaPTAgent, stop_at)(
+            config=AgentConfig(max_iterations=10), max_depth=1, llm_interface=llm
+        )
+        result = agent.run(_SILENT_TASK)
+
+        assert result.answer == ErrorMessages.NO_ANSWER
+        assert result.success is False
+        assert result.stop_reason == "ended"
+        assert not llm.calls("generate_response")
+
+
 def _no_trace_run_requests(pattern: str) -> tuple[PromptGroundedLLM, dict]:
     """Run ``pattern`` through the real API on the grounded fake with a
     caller hint; returns the fake and the caller context used."""

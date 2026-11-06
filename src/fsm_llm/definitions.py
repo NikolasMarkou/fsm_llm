@@ -234,17 +234,20 @@ class _PromptRequest(BaseModel):
                     )
                 else:
                     named = _largest_public_context_keys(prompt_context)
+                    # The advice names context entries, so it is given only when
+                    # entries were named; a workflow prompt or a long user message
+                    # folded into the prompt has none.
+                    advice = (
+                        f"; the largest context entries are {named} "
+                        "(names and character counts only); shrink or remove "
+                        "them, scope the state with context_scope read_keys, or "
+                        "shorten the history"
+                        if named
+                        else "; shorten the prompt or the history"
+                    )
                     parts.append(
                         f"the system prompt is {length} characters but a request "
-                        f"carries at most {cap}"
-                        + (
-                            f"; the largest context entries are {named} "
-                            "(names and character counts only)"
-                            if named
-                            else ""
-                        )
-                        + "; shrink or remove them, scope the state with "
-                        "context_scope read_keys, or shorten the history"
+                        f"carries at most {cap}" + advice
                     )
             raise LLMResponseError("Prompt too large: " + "; and ".join(parts)) from e
 

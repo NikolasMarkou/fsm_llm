@@ -1888,6 +1888,110 @@ class TestPromptTooLargeError:
         assert "_hidden_blob" not in text and "api_key" not in text
         assert "x" * 50 not in text and "k" * 50 not in text
 
+    # -- step 12.3: interaction pins (steps 1+2, 1+3) and the no-keys wording --
+
+    def test_bare_system_key_is_named_while_system_x_and_secrets_are_not(self):
+        """PIN (steps 1 and 2): a bare ``system`` entry is public and reaches
+        the prompt, so the step-1 error names it; ``system_x`` (internal
+        prefix) never reaches a prompt and a secret-looking key is never named."""
+        from fsm_llm.definitions import FSMError, LLMResponseError
+
+        api, _ = self._api(_cap_fsm())
+        conv, _ = api.start_conversation()
+        api.update_context(conv, {"system": "s" * 40000})
+        with pytest.raises(FSMError) as info:
+            api.converse("hello", conv)
+        assert "system (40000 characters)" in str(info.value)
+
+        # A 40,000-char ``system_x`` is kept out of every prompt: no error.
+        api2, _ = self._api(_cap_fsm())
+        conv2, _ = api2.start_conversation()
+        api2.update_context(conv2, {"system_x": "s" * 40000})
+        assert api2.converse("hello", conv2)
+
+        # And through the helper, a prompt that is over the cap for another
+        # reason never names ``system_x`` or a secret-looking key.
+        with pytest.raises(LLMResponseError) as direct:
+            from fsm_llm.definitions import ResponseGenerationRequest
+
+            ResponseGenerationRequest.checked(
+                prompt_context={
+                    "system_x": "s" * 40000,
+                    "api_key": "k" * 40000,
+                    "system": "s" * 35000,
+                },
+                system_prompt="p" * 40000,
+                user_message="hi",
+            )
+        text = str(direct.value)
+        assert "system (35000 characters)" in text
+        assert "system_x" not in text and "api_key" not in text
+
+    def test_over_cap_prompt_with_a_larger_history_window_raises_the_typed_error(
+        self,
+    ):
+        """PIN (steps 1 and 3): ``max_history_size=20`` widens the prompt window
+        but the cap still applies and the step-1 error is the one raised."""
+        from fsm_llm.definitions import FSMError, LLMResponseError
+
+        api, _ = self._api(_cap_fsm(), max_history_size=20)
+        conv, _ = api.start_conversation()
+        api.update_context(conv, {"big_notes": "x" * 40000})
+        with pytest.raises(FSMError) as info:
+            api.converse("hello", conv)
+        text = str(info.value)
+        assert "big_notes" in text and "30000" in text
+        assert "validation error" not in text.lower()
+        exc, chain = info.value, []
+        while exc is not None:
+            chain.append(exc)
+            exc = exc.__cause__ or exc.__context__
+        assert any(isinstance(c, LLMResponseError) for c in chain)
+
+    def test_no_keys_named_gives_site_neutral_advice(self):
+        """A call with no ``prompt_context`` (a workflow prompt, a long user
+        message folded into the prompt) names no entries, so the advice about
+        context entries is not given."""
+        from fsm_llm.definitions import LLMResponseError, ResponseGenerationRequest
+
+        with pytest.raises(LLMResponseError) as info:
+            ResponseGenerationRequest.checked(
+                system_prompt="p" * 40000, user_message="hi"
+            )
+        text = str(info.value)
+        assert "the system prompt is 40000 characters" in text and "30000" in text
+        assert "shorten the prompt or the history" in text
+        assert "context_scope" not in text and "shrink or remove" not in text
+        assert "largest context entries" not in text
+
+    def test_keys_named_keeps_the_context_entry_advice(self):
+        from fsm_llm.definitions import LLMResponseError, ResponseGenerationRequest
+
+        with pytest.raises(LLMResponseError) as info:
+            ResponseGenerationRequest.checked(
+                prompt_context={"big_notes": "x" * 35000},
+                system_prompt="p" * 40000,
+                user_message="hi",
+            )
+        text = str(info.value)
+        assert "big_notes (35000 characters)" in text
+        assert "shrink or remove them, scope the state with" in text
+        assert "context_scope read_keys, or shorten the history" in text
+
+    def test_user_message_branch_wording_is_unchanged(self):
+        from fsm_llm.definitions import LLMResponseError, ResponseGenerationRequest
+
+        with pytest.raises(LLMResponseError) as info:
+            ResponseGenerationRequest.checked(
+                prompt_context={"big_notes": "x" * 100},
+                system_prompt="p",
+                user_message="m" * 12000,
+            )
+        text = str(info.value)
+        assert "the user message is 12000 characters" in text
+        assert "send a shorter message" in text
+        assert "context_scope" not in text
+
 
 class TestSeededTimestampFormats:
     """F-AF-23 (D-006): the formats of the seeded timestamp keys, as the docs
