@@ -259,6 +259,76 @@ class TestRunExamples:
         assert report.wall_time >= max(r.duration for r in report.results)
 
 
+class TestTimeoutPartialOutput:
+    """Live finding D4: a timed-out example's log was empty because the child's
+    block-buffered stdout pipe was lost when it was killed."""
+
+    def _target(self, tmp_path: Path, body: str, timeout: int = 1) -> ExampleTarget:
+        script = tmp_path / "run.py"
+        script.write_text(body, encoding="utf-8")
+        return ExampleTarget(
+            name="agents/buffered",
+            category="agents",
+            path=script,
+            interactive=False,
+            stdin_data=None,
+            timeout=timeout,
+        )
+
+    def test_unflushed_print_survives_the_timeout(self, tmp_path: Path):
+        target = self._target(
+            tmp_path, "import time\nprint('unflushed line')\ntime.sleep(30)\n"
+        )
+        result = run_example(target, "m", sys.executable, tmp_path)
+        assert result.timed_out is True
+        assert "unflushed line" in result.stdout
+
+    def test_partial_output_reaches_the_log_file(self, tmp_path: Path):
+        target = self._target(
+            tmp_path, "import time\nprint('unflushed line')\ntime.sleep(30)\n"
+        )
+        result = run_example(target, "m", sys.executable, tmp_path)
+        log = examples_mod.write_example_log(result, tmp_path / "out")
+        text = log.read_text(encoding="utf-8")
+        assert "# Timed out: True" in text
+        assert "unflushed line" in text.split("=== STDOUT ===")[1]
+
+    def test_the_child_environment_is_unbuffered(self, tmp_path: Path):
+        target = self._target(
+            tmp_path,
+            "import os\nprint('u=' + os.environ.get('PYTHONUNBUFFERED', ''))\n",
+            timeout=30,
+        )
+        result = run_example(target, "m", sys.executable, tmp_path)
+        assert "u=1" in result.stdout
+
+    @pytest.mark.parametrize(
+        "out, err",
+        [(b"partial \xe9", b"warn"), ("partial text", "warn"), (None, None)],
+        ids=["bytes", "str", "none"],
+    )
+    def test_timeout_output_is_decoded_from_bytes_or_str(
+        self, tmp_path: Path, monkeypatch, out, err
+    ):
+        """`subprocess.TimeoutExpired.stdout` is `bytes` even for a text-mode
+        run on some Python versions and `str` on others: both are text."""
+        import subprocess
+
+        def _expire(*args, **kwargs):
+            raise subprocess.TimeoutExpired(cmd="x", timeout=1, output=out, stderr=err)
+
+        monkeypatch.setattr(examples_mod.subprocess, "run", _expire)
+        target = self._target(tmp_path, "pass\n")
+        result = run_example(target, "m", sys.executable, tmp_path)
+        assert result.timed_out is True
+        assert isinstance(result.stdout, str) and isinstance(result.stderr, str)
+        if out is not None:
+            assert result.stdout.startswith("partial")
+            assert result.stderr == "warn"
+        else:
+            assert (result.stdout, result.stderr) == ("", "")
+
+
 class TestFailureRecording:
     def test_crashed_worker_is_recorded_not_dropped(self, examples_dir, monkeypatch):
         real = examples_mod.run_example

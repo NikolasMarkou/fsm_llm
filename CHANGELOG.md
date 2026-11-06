@@ -137,6 +137,7 @@ A pass over `src/fsm_llm` fixed 21 CRITICAL and HIGH findings. Each has a test t
 - `timer_step(..., next_state="")` completes the workflow on expiry, like `wait_event_step(..., success_state="")`, instead of failing with `Invalid next state`.
 - Monitor: `InstanceManager.destroy_instance` for a managed FSM caches the live conversations' snapshots and calls `api.close()` before it unregisters the global collector's handlers (in a `finally`), so `conversation_end` is recorded, the snapshot survives and OTEL spans end. `shutdown()` does the same for every managed FSM, so it now closes manager-owned FSM APIs (ending their live conversations). `attach_api` is unchanged: the caller's API is never closed.
 - `fsm-llm` (plan 0068b055 step 12.13, live finding D3): a failure of the very first model call (`start_conversation`, e.g. a model that is not installed) now prints `Error: ...` on stderr and exits 1, like a failure of any later turn; it used to end with a raw Python traceback. Ctrl-C still exits 130.
+- `fsm-llm-eval examples` (plan 0068b055 step 12.14, live finding D4): the example subprocess now runs with `PYTHONUNBUFFERED=1`, so a timed-out example's log holds the output it printed before the kill (its stdout pipe was block-buffered and lost, leaving an empty log; `run_example` documented the partial output). `TimeoutExpired` output is `bytes` on Python 3.11 and is decoded (a `str` is accepted too).
 
 Known open after this pass, for a later pass:
 

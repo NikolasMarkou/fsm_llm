@@ -175,14 +175,22 @@ def run_example(
 ) -> ExampleResult:
     """Run one example to completion or timeout and return its scored result.
 
-    The subprocess gets a copy of the environment plus ``LLM_MODEL=model`` and
-    ``PYTHONDONTWRITEBYTECODE=1``, the target's stdin script (or none), and
-    ``cwd``. Never raises: a timeout gives ``exit_code=None, timed_out=True``
-    with the partial output; any other failure to run gives ``exit_code=-1``.
+    The subprocess gets a copy of the environment plus ``LLM_MODEL=model``,
+    ``PYTHONDONTWRITEBYTECODE=1`` and ``PYTHONUNBUFFERED=1``, the target's stdin
+    script (or none), and ``cwd``. Never raises: a timeout gives
+    ``exit_code=None, timed_out=True`` with the partial output; any other
+    failure to run gives ``exit_code=-1``.
+
+    ``PYTHONUNBUFFERED`` matters on a timeout: the child's stdout is a pipe, so
+    Python block-buffers it, and a child killed at the timeout loses whatever
+    was not flushed, leaving the partial output (and the log) empty. With it,
+    every print reaches the pipe at once. The partial output of a timeout may
+    arrive as ``bytes`` or ``str``; ``_decode`` accepts both.
     """
     env = os.environ.copy()
     env["LLM_MODEL"] = model
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
     start = time.monotonic()
     try:
         proc = subprocess.run(
