@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 from contextlib import contextmanager
+from decimal import Decimal
 from typing import Any, ClassVar
 
 import pytest
@@ -29,6 +30,7 @@ from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
 )
+from fsm_llm.utilities import coerce_float, coerce_int
 from tests.conftest import MockLLM2Interface
 
 _TWO_STATE = {
@@ -110,6 +112,34 @@ class TestNumericCoercionRejectsWhatIsNotANumber:
     def test_float_field_rejects_non_finite_and_bool(self, bad):
         out = _validate("float", bad)
         assert out.is_valid is False
+
+    @pytest.mark.parametrize(
+        ("field_type", "huge"),
+        [
+            pytest.param("float", 10**400, id="float-int-1e400"),
+            pytest.param("float", -(10**400), id="float-int-neg-1e400"),
+            pytest.param("float", "1" * 400, id="float-400-digit-string"),
+            pytest.param("float", Decimal("Infinity"), id="float-decimal-inf"),
+            pytest.param("int", Decimal("Infinity"), id="int-decimal-inf"),
+            pytest.param("int", Decimal("-Infinity"), id="int-decimal-neg-inf"),
+        ],
+    )
+    def test_a_number_too_large_for_a_float_is_invalid_not_an_exception(
+        self, field_type, huge
+    ):
+        """REVIEW-C3: ``float(10**400)`` and ``int(Decimal('Infinity'))`` raise
+        ``OverflowError``, which ``_validate_field_extraction`` does not name;
+        a model-written 400-digit JSON number reached it on both extraction
+        paths (per field and bulk), which share this function."""
+        out = _validate(field_type, huge)
+        assert out.is_valid is False
+        assert out.validation_error
+
+    def test_the_helpers_keep_their_value_error_contract(self):
+        with pytest.raises(ValueError):
+            coerce_float(10**400)
+        with pytest.raises(ValueError):
+            coerce_int(Decimal("Infinity"))
 
     @pytest.mark.parametrize("good", [7, 3.0, "12", -4])
     def test_int_field_still_takes_integral_values(self, good):

@@ -690,9 +690,9 @@ def coerce_int(v: Any) -> int:
     the unstructured rung of ``llm.py``'s field extraction, so both read a
     number the same way):
         - A ``bool`` is not a count, ``3.7`` is not 3, and ``inf`` / ``nan``
-          have no integer value (``int(inf)`` would raise ``OverflowError``,
-          which the callers' ``except`` does not name). ``"12"`` and ``3.0``
-          convert.
+          have no integer value (``int(inf)`` and ``int(Decimal("Infinity"))``
+          raise ``OverflowError``, which the callers' ``except`` does not
+          name, so it is converted). ``"12"`` and ``3.0`` convert.
         - Failure mode: ``ValueError`` (``int("x")`` raises it too);
           ``TypeError`` for a value ``int()`` cannot take (``None``, a list).
     """
@@ -702,18 +702,26 @@ def coerce_int(v: Any) -> int:
         return v
     if isinstance(v, float) and not (math.isfinite(v) and v == int(v)):
         raise ValueError(f"expected an integer, got {v!r}")
-    return int(v)
+    try:
+        return int(v)
+    except OverflowError:  # int(Decimal("Infinity")): no integer value either
+        raise ValueError(f"expected an integer, got {v!r}") from None
 
 
 def coerce_float(v: Any) -> float:
     """``v`` as a finite ``float``; ``ValueError`` for a bool, ``inf`` or ``nan``.
 
     Same callers and failure mode as ``coerce_int``; the strings ``"nan"``,
-    ``"inf"`` and ``"1e999"`` are refused like the floats they spell.
+    ``"inf"`` and ``"1e999"`` are refused like the floats they spell, and an
+    integer too large for a float (``10**400``, whose ``float()`` raises
+    ``OverflowError``) is a ``ValueError`` too.
     """
     if isinstance(v, bool):
         raise ValueError(f"expected a number, got {v!r}")
-    result = v if isinstance(v, float) else float(v)
+    try:
+        result = v if isinstance(v, float) else float(v)
+    except OverflowError:  # float(10**400): too large for a float
+        raise ValueError(f"expected a finite number, got {str(v)[:40]!r}") from None
     if not math.isfinite(result):
         raise ValueError(f"expected a finite number, got {v!r}")
     return result
