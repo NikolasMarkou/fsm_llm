@@ -132,7 +132,9 @@ EXAMPLE_TIMEOUTS: dict[str, int] = {
     "workflows/customer_onboarding": 360,
 }
 
-# Stdin inputs for interactive examples (those with input() calls).
+# Stdin inputs for interactive examples (those with input() calls or a
+# run_interactive() session). tests/test_fsm_llm_eval/test_example_inputs.py pins
+# every script against its example's source.
 # Each value is a newline-separated string piped to stdin.
 EXAMPLE_INPUTS: dict[str, str] = {
     # basic
@@ -147,26 +149,25 @@ EXAMPLE_INPUTS: dict[str, str] = {
     "advanced/yoga_instructions": "I want to do some yoga\nI'm a beginner\nquit\n",
     "advanced/support_pipeline": "Hi, I'm Sarah and my order hasn't arrived\nOrder number 12345\nyes that fixed it\nno thanks\nquit\nquit\nquit\n",
     # classification
-    "classification/intent_routing": "I want to cancel my subscription\nI need help with billing\nquit\n",
     "classification/smart_helpdesk": "My internet is down\nI've already tried restarting the router\nquit\n",
-    "classification/classified_transitions": "I want to buy something\nA new laptop\nquit\n",
     "classification/classified_transitions_manual": "I want to buy something\nA new laptop\nquit\n",
     # agents (interactive)
     "agents/react_search": "What is the population of Tokyo?\nquit\n",
     "agents/hitl_approval": "Send an email to bob@example.com saying hello\ny\nquit\n",
-    "agents/react_hitl_combined": "Search for weather in Paris\ny\nquit\nquit\n",
+    # The task must call a gated tool (publish_report, archive_data) for the example
+    # to ask for approval; the "y" answers that one prompt. A task that calls no
+    # gated tool would turn the "y" into a second task.
+    "agents/react_hitl_combined": "Research recent AI papers and publish a summary report\ny\nquit\n",
     "agents/classified_dispatch": "Search for information about climate change\nquit\n",
     "agents/classified_tools": "Calculate the sum of 15, 23, and 100\nquit\n",
     "agents/full_pipeline": "Look up the latest news about AI\nquit\n",
     "agents/hierarchical_tools": "What is 15 times 23?\nquit\n",
     "agents/reasoning_stacking": "What is the square root of 144?\nquit\n",
-    "agents/reasoning_tool": "Solve: if x + 5 = 12, what is x?\nquit\n",
-    "agents/tool_decorator": "What is 5 plus 3?\nquit\n",
-    "agents/skill_loader": "What time is it?\nquit\n",
     # reasoning
     "reasoning/math_tutor": "What is 15 + 27?\nquit\n",
-    # meta
-    "meta/build_fsm": "Build a simple greeting bot\nyes\nquit\n",
-    "meta/build_workflow": "Build a workflow for order processing with validation payment and fulfillment\nyes\nquit\n",
-    "meta/build_agent": "Build a research agent that can search the web and summarize using ReAct pattern\nyes\nquit\n",
+    # meta: run_interactive reads until EOF and sends every line to the builder, so
+    # no "quit" line (it would cost one more model call)
+    "meta/build_fsm": "Build a simple greeting bot\nyes\n",
+    "meta/build_workflow": "Build a workflow for order processing with validation payment and fulfillment\nyes\n",
+    "meta/build_agent": "Build a research agent that can search the web and summarize using ReAct pattern\nyes\n",
 }
