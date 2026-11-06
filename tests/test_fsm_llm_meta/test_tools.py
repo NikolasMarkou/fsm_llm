@@ -238,6 +238,15 @@ class TestAgentTools:
         assert result.success
         assert len(agent_builder.tools) == 0
 
+    def test_agent_tool_temperature_nine_is_rejected_not_stored(
+        self, agent_builder: AgentArtifactBuilder
+    ):
+        registry = create_agent_tools(agent_builder)
+        result = registry.execute(_make_call("set_config", temperature=9.0))
+        assert result.success
+        assert "temperature" in result.result
+        assert agent_builder.config["temperature"] == 0.5
+
 
 class TestCreateBuilderTools:
     def test_dispatch_fsm(self, fsm_builder: FSMArtifactBuilder):

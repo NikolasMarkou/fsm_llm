@@ -210,6 +210,103 @@ class TestAgentBuilderConfigValidation:
         assert b.config["max_tokens"] == MetaDefaults.AGENT_MAX_TOKENS
 
 
+class TestAgentConfigValidation:
+    """F-AM-06: the artifact config is validated through ``AgentConfig``."""
+
+    @pytest.mark.parametrize(
+        "key,value",
+        [
+            ("max_iterations", -1),
+            ("temperature", 9),
+            ("timeout_seconds", -3),
+            ("max_tokens", True),
+            ("model", ""),
+        ],
+    )
+    def test_set_config_skips_each_bad_value_with_a_warning(
+        self, agent_builder: AgentArtifactBuilder, key: str, value
+    ):
+        before = dict(agent_builder.config)
+        warnings = agent_builder.set_config(**{key: value}).take_warnings()
+        assert any(key in w for w in warnings)
+        assert agent_builder.config == before
+
+    def test_set_config_keeps_the_good_keys_of_a_mixed_call(
+        self, agent_builder: AgentArtifactBuilder
+    ):
+        warnings = agent_builder.set_config(
+            max_iterations=-1, temperature=0.2, model="  "
+        ).take_warnings()
+        assert len(warnings) == 2
+        assert agent_builder.config["temperature"] == 0.2
+        assert agent_builder.config["max_iterations"] == (
+            MetaDefaults.AGENT_MAX_ITERATIONS
+        )
+
+    def test_validate_complete_rejects_a_poked_invalid_config(
+        self, agent_builder: AgentArtifactBuilder
+    ):
+        agent_builder.set_agent_type("react").set_overview("A", "d")
+        agent_builder.add_tool("t", "d")
+        assert agent_builder.validate_complete() == []
+        agent_builder.config.update(max_iterations=-1, temperature=9, model=" ")
+        errors = agent_builder.validate_complete()
+        for key in ("max_iterations", "temperature", "model"):
+            assert any(f"'{key}'" in e for e in errors)
+
+    def test_validate_complete_rejects_a_poked_bool_and_unknown_key(
+        self, agent_builder: AgentArtifactBuilder
+    ):
+        agent_builder.set_agent_type("react").set_overview("A", "d")
+        agent_builder.add_tool("t", "d")
+        agent_builder.config["max_tokens"] = True
+        agent_builder.config["bogus"] = 1
+        errors = agent_builder.validate_complete()
+        assert any("'max_tokens'" in e for e in errors)
+        assert any("'bogus'" in e for e in errors)
+
+    def test_in_range_values_are_unchanged(self, agent_builder: AgentArtifactBuilder):
+        warnings = agent_builder.set_config(
+            model="gpt-4o",
+            max_iterations=25,
+            timeout_seconds=30,
+            temperature=0,
+            max_tokens=2048,
+        ).take_warnings()
+        assert warnings == []
+        assert agent_builder.config == {
+            "model": "gpt-4o",
+            "max_iterations": 25,
+            "timeout_seconds": 30,
+            "temperature": 0,
+            "max_tokens": 2048,
+        }
+        assert AgentArtifactBuilder().set_config(temperature=2).take_warnings() == []
+
+    def test_artifact_config_accepts_every_agentconfig_key(self):
+        """Step 9 interaction: the artifact builder is judged by AgentConfig only.
+
+        ``MetaBuilderConfig`` refuses unread fields such as ``enable_prompt_cache``
+        and ``max_history_size``; they are valid data about the generated agent
+        and must not be rejected here. The builder's own allow-list still decides
+        which keys ``set_config`` takes; ``validate_complete`` accepts a config
+        dict carrying them.
+        """
+        from fsm_llm.agents.definitions import AgentConfig, MetaBuilderConfig
+
+        with pytest.raises(ValueError):
+            MetaBuilderConfig(enable_prompt_cache=True)
+        assert AgentConfig(enable_prompt_cache=True, max_history_size=7)
+
+        b = AgentArtifactBuilder()
+        b.set_agent_type("react").set_overview("A", "d")
+        b.add_tool("t", "d")
+        b.config.update(enable_prompt_cache=True, max_history_size=7)
+        assert b.validate_complete() == []
+        b.config["max_history_size"] = 0
+        assert any("'max_history_size'" in e for e in b.validate_complete())
+
+
 class TestAgentBuilderSetType:
     def test_all_valid_types_accepted(self, agent_builder: AgentArtifactBuilder):
         for agent_type in AgentArtifactBuilder.VALID_AGENT_TYPES:

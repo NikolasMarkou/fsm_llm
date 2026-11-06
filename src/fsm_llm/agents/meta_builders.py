@@ -21,7 +21,7 @@ from fsm_llm.definitions import BuildError, FSMDefinition, reachable_from
 from fsm_llm.logging import logger
 
 from .constants import MetaDefaults
-from .definitions import ArtifactType, BuildProgress
+from .definitions import AgentConfig, ArtifactType, BuildProgress
 from .exceptions import BuilderError
 
 
@@ -922,8 +922,47 @@ class AgentArtifactBuilder(ArtifactBuilder):
     _CONFIG_NUMERIC: ClassVar[set[str]] = {"timeout_seconds", "temperature"}
     _CONFIG_INT: ClassVar[set[str]] = {"max_iterations", "max_tokens"}
 
+    @classmethod
+    def _config_problems(cls, config: dict[str, Any]) -> dict[str, str]:
+        """Map each invalid config key to a reason; an empty dict means valid.
+
+        Contract: ``config`` is the whole artifact config dict. The ranges come
+        from ``AgentConfig``'s own validators (one source), plus two rules it
+        lacks: a ``bool`` is not an integer here, and ``model`` is not blank.
+        Never raises; a non-validation error from pydantic is not expected.
+        """
+        # DECISION plan-2026-11-06T093029-0068b055/D-011: validate through
+        # ``AgentConfig`` (the agent this artifact describes), NOT through
+        # ``MetaBuilderConfig``: that class refuses fields the meta-builder
+        # never reads (step 9) and would reject keys that are valid data about
+        # the generated agent. Do NOT copy the ranges here. Do NOT switch
+        # ``MetaDefaults.AGENT_MODEL`` in this change: it is a fixed template
+        # value, not the runtime default (``resolve_agent_model()``), and the
+        # change is carried for the owner.
+        problems: dict[str, str] = {}
+        try:
+            AgentConfig.model_validate(config)
+        except ValidationError as exc:
+            for err in exc.errors():
+                loc = err["loc"]
+                key = str(loc[0]) if loc else "?"
+                reason = err["msg"].removeprefix("Value error, ")
+                problems.setdefault(key, reason)
+        for key in cls._CONFIG_INT:
+            if isinstance(config.get(key), bool):
+                problems[key] = "expects int, got bool"
+        model = config.get("model")
+        if isinstance(model, str) and not model.strip():
+            problems["model"] = "model must not be blank"
+        return problems
+
     def set_config(self, **kwargs: Any) -> AgentArtifactBuilder:
-        """Update agent config fields."""
+        """Update agent config fields.
+
+        A value of the wrong type or outside the ``AgentConfig`` range logs a
+        warning and is skipped (the config keeps its previous value). The
+        default ``model`` is a fixed template value, not the runtime default.
+        """
         warnings: list[str] = []
         for key, value in kwargs.items():
             if key not in self._CONFIG_ALLOWED:
@@ -950,6 +989,10 @@ class AgentArtifactBuilder(ArtifactBuilder):
                         f"got {type(value).__name__}; skipping"
                     )
                     continue
+            reason = self._config_problems({**self.config, key: value}).get(key)
+            if reason is not None:
+                warnings.append(f"Config '{key}' rejected ({reason}); skipping")
+                continue
             self.config[key] = value
         self._warnings.extend(warnings)
         return self
@@ -1015,8 +1058,10 @@ class AgentArtifactBuilder(ArtifactBuilder):
 
         An agent artifact is not directly loadable: each tool needs an
         ``execute_fn`` that a JSON spec cannot carry, so a caller still wires
-        the tools by hand. This checks the agent type, the name and that every
-        tool has a name and a description.
+        the tools by hand. This checks the agent type, the name, that every
+        tool has a name and a description, and that ``config`` passes
+        ``AgentConfig`` (``set_config`` already refuses a bad value; this
+        catches a dict edited directly).
         """
         errors: list[str] = []
         if not self.agent_type:
@@ -1030,6 +1075,8 @@ class AgentArtifactBuilder(ArtifactBuilder):
                 errors.append("Tool name is required")
             if not t.get("description"):
                 errors.append(f"Tool '{t.get('name', '?')}' needs a description")
+        for key, reason in self._config_problems(self.config).items():
+            errors.append(f"Config '{key}' is invalid: {reason}")
         return errors
 
     def get_missing_fields(self) -> list[str]:
