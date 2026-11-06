@@ -139,6 +139,7 @@ A pass over `src/fsm_llm` fixed 21 CRITICAL and HIGH findings. Each has a test t
 - `fsm-llm` (plan 0068b055 step 12.13, live finding D3): a failure of the very first model call (`start_conversation`, e.g. a model that is not installed) now prints `Error: ...` on stderr and exits 1, like a failure of any later turn; it used to end with a raw Python traceback. Ctrl-C still exits 130.
 - `fsm-llm-eval examples` (plan 0068b055 step 12.14, live finding D4): the example subprocess now runs with `PYTHONUNBUFFERED=1`, so a timed-out example's log holds the output it printed before the kill (its stdout pipe was block-buffered and lost, leaving an empty log; `run_example` documented the partial output). `TimeoutExpired` output is `bytes` on Python 3.11 and is decoded (a `str` is accepted too).
 - `fsm-llm-eval examples` and `run` (plan 0068b055 step 12.15, live finding D5): SIGTERM (what `timeout(1)` and service managers send) during a run is now read like Ctrl-C: queued work is cancelled, `scorecard.md`/`results.json` (or `summary.md`) are written with `interrupted: true`, and the exit code is 130. It used to end the process with a run directory holding `logs/` only. The handler exists for the run only and the previous one is restored; it is not installed off the main thread or over an ignored (`SIG_IGN`) SIGTERM.
+- Monitor (plan 0068b055 step 12.16, live finding D7): the OpenAPI document (`/openapi.json`, `/api/docs`) now reports the package version in `info.version` (it reported FastAPI's default `0.1.0`).
 
 Known open after this pass, for a later pass:
 

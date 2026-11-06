@@ -123,7 +123,12 @@ _TRUSTED_HOSTS: list[str] = _env_list("FSM_LLM_MONITOR_TRUSTED_HOSTS") or [
     "testserver",
 ]
 
-app = FastAPI(title="FSM-LLM Monitor", docs_url="/api/docs", lifespan=_lifespan)
+app = FastAPI(
+    title="FSM-LLM Monitor",
+    version=__version__,
+    docs_url="/api/docs",
+    lifespan=_lifespan,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_CORS_ORIGINS,

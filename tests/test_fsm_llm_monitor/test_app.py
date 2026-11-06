@@ -245,6 +245,24 @@ class TestWebServer:
         assert "order_processing" in data["workflows"]
 
 
+class TestOpenApiVersion:
+    """Live finding D7: the OpenAPI document reported FastAPI's default 0.1.0."""
+
+    def test_openapi_info_version_is_the_package_version(self):
+        from fsm_llm.monitor import __version__
+
+        assert app.openapi()["info"]["version"] == __version__
+        assert app.version == __version__
+
+    def test_served_openapi_json_carries_the_package_version(self):
+        from fsm_llm.monitor import __version__
+
+        with TestClient(app) as client:
+            response = client.get("/openapi.json")
+        assert response.status_code == 200
+        assert response.json()["info"]["version"] == __version__
+
+
 class TestMonitorImports:
     """Verify all public exports import correctly."""
 
