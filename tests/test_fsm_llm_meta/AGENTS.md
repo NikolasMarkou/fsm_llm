@@ -11,7 +11,7 @@ Covers these source modules (all under `src/fsm_llm/agents/`):
 - `fsm_definitions.py` (`build_meta_builder_fsm`: `classify`, `collect`, `build`, `build_failed`, `done`)
 - `meta_builders.py` (`FSMArtifactBuilder`, `WorkflowArtifactBuilder`, `AgentArtifactBuilder`)
 - `meta_tools.py` (`create_fsm_tools`, `create_workflow_tools`, `create_agent_tools`, `create_builder_tools`)
-- `meta_prompts.py` (`build_welcome_message`, `build_followup_message`, `build_review_presentation`, `build_output_message`, collect instructions, `artifact_schema`, `build_response_format`, `build_artifact_prompt`)
+- `meta_prompts.py` (`build_welcome_message`, `build_review_presentation`, `build_meta_collect_response_instructions`, `artifact_schema`, `build_response_format`, `build_artifact_prompt`)
 - `meta_output.py` (`format_artifact_json`, `format_summary`, `save_artifact`)
 - `definitions.py` (`ArtifactType`, `BuildProgress`, `MetaBuilderConfig`, `MetaBuilderResult`, `ToolCall`)
 - `exceptions.py` (`MetaBuilderError`, `BuilderError`, `MetaValidationError`, `OutputError`, `AgentError`)
@@ -108,7 +108,7 @@ Definitions and exceptions:
 
 Agent:
 - `send` before `start` raises "not been started"; second `start` raises "already been started"; `send` after completion raises "already completed"; reaching `max_turns` raises "Maximum turns"; `get_result` before completion raises "not complete".
-- `_build_type_aliases()` orders longer aliases first ("finite state machine" before "state machine", "data pipeline" before "pipeline"). Unknown text defaults to `ArtifactType.FSM`.
+- `_TYPE_ALIASES` (module constant) orders longer aliases first ("finite state machine" before "state machine", "data pipeline" before "pipeline"). Unknown text defaults to `ArtifactType.FSM`.
 - `_is_build_trigger` accepts "build it", "go", "done", "approve", "yes", "lgtm"; build phrases match on word boundaries and a governing negation ("don't build it yet") blocks them; a switch word plus a build phrase reclassifies first; `start(msg)` never builds.
 - `_is_schema_echo` flags JSON-schema-shaped specs; `run` raises `MetaValidationError` matching "JSON schema" on an echo (DECISION plan_2026-05-30_26c9510a/D-001, marked STALE); any wrong-typed or null field of a build reply is a `MALFORMED` build (`send`: failed-build reply with one error per field; `run`: `MetaValidationError(errors=...)`).
 - A build-call outage raises `BuilderError` from `run`, chained from core's `LLMResponseError`, which chains the provider exception; an empty model answer is an invalid build, not an error (DECISION plan-2026-07-20T040150-876e7164/D-006, marked STALE). From `send` the outage keeps the session open with the failed-build reply. A collect-reply outage returns the canned reply ending with `META_BUILD_PROMPT`.

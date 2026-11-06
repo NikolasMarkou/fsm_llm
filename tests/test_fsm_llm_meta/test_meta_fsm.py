@@ -41,7 +41,7 @@ from fsm_llm.agents.meta_builders import AgentArtifactBuilder, WorkflowArtifactB
 from fsm_llm.agents.meta_prompts import (
     artifact_schema,
     build_artifact_prompt,
-    build_collect_response_instructions,
+    build_meta_collect_response_instructions,
     build_response_format,
 )
 from fsm_llm.constants import has_internal_prefix
@@ -164,7 +164,7 @@ class TestStructure:
         for state_id in _SILENT:
             assert fsm.states[state_id].response_instructions == "", state_id
         collect = fsm.states[S.COLLECT].response_instructions
-        assert collect == build_collect_response_instructions()
+        assert collect == build_meta_collect_response_instructions()
         assert "Say 'build it' when you're ready" in collect
         for key in (K.ARTIFACT_TYPE, K.REQUIREMENTS, K.VALIDATION_ERRORS):
             assert key in collect
@@ -182,7 +182,7 @@ class TestStructure:
         """
         from fsm_llm.agents.meta_builder import MetaBuilderAgent
 
-        collect = build_collect_response_instructions()
+        collect = build_meta_collect_response_instructions()
         sentence = "Say 'build it' when you're ready."
         assert collect.endswith(f"this exact sentence: {sentence}")
         assert MetaBuilderAgent._is_build_trigger(sentence.lower())

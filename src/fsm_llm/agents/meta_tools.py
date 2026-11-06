@@ -33,15 +33,6 @@ def _fmt(msg: str, warnings: list[str]) -> str:
     return msg
 
 
-def _safe(fn: Any, *args: Any, **kwargs: Any) -> str:
-    """Call *fn* and return its result string, catching BuilderError."""
-    try:
-        result: str = fn(*args, **kwargs)
-        return result
-    except BuilderError as e:
-        return f"Error: {e}"
-
-
 _AnyBuilder = FSMArtifactBuilder | WorkflowArtifactBuilder | AgentArtifactBuilder
 
 # DECISION plan-2026-10-02T052921-89b03f61/D-013
@@ -60,22 +51,24 @@ _builder_locks: weakref.WeakKeyDictionary[Any, threading.RLock] = (
 _builder_locks_guard = threading.Lock()
 
 
-def _call(builder: _AnyBuilder, body: Any, *, safe: bool = True) -> str:
+def _call(builder: _AnyBuilder, body: Any) -> str:
     """Run one tool body on *builder* alone, with no stale warnings.
 
     Parameters: the bound *builder*; *body*, a zero-argument callable returning
-    the reply string (it mutates, then reads ``builder.take_warnings()``);
-    *safe*, True to turn a ``BuilderError`` into ``"Error: ..."`` (the tools
-    that never caught it pass False, so their refusals are unchanged).
-    Returns the body's reply. Any other exception propagates; the lock is
-    released either way. Direct builder calls are not serialised against tool
-    calls.
+    the reply string (it mutates, then reads ``builder.take_warnings()``).
+    Returns the body's reply, or ``"Error: ..."`` when the body raises
+    ``BuilderError``. Any other exception propagates; the lock is released
+    either way. Direct builder calls are not serialised against tool calls.
     """
     with _builder_locks_guard:
         lock = _builder_locks.setdefault(builder, threading.RLock())
     with lock:
         builder.take_warnings()
-        return _safe(body) if safe else body()
+        try:
+            result: str = body()
+            return result
+        except BuilderError as e:
+            return f"Error: {e}"
 
 
 def _make_validate_tool(builder: _AnyBuilder) -> Any:
@@ -94,7 +87,7 @@ def _make_validate_tool(builder: _AnyBuilder) -> Any:
                 return f"Valid (warnings: {'; '.join(warnings)})"
             return "Valid: no errors or warnings"
 
-        return _call(builder, body, safe=False)
+        return _call(builder, body)
 
     return validate
 
@@ -105,9 +98,7 @@ def _make_summary_tool(builder: _AnyBuilder) -> Any:
     @tool
     def get_summary() -> str:
         """Get the current builder state as a human-readable summary."""
-        return _call(
-            builder, lambda: builder.get_summary(detail_level="full"), safe=False
-        )
+        return _call(builder, lambda: builder.get_summary(detail_level="full"))
 
     return get_summary
 
@@ -133,7 +124,7 @@ def create_fsm_tools(builder: FSMArtifactBuilder) -> ToolRegistry:
             )
             return _fmt(f"Overview set: name='{name}'", builder.take_warnings())
 
-        return _call(builder, body, safe=False)
+        return _call(builder, body)
 
     @tool
     def add_state(
@@ -195,7 +186,7 @@ def create_fsm_tools(builder: FSMArtifactBuilder) -> ToolRegistry:
             builder.remove_state(state_id)
             return f"Removed state '{state_id}'"
 
-        return _call(builder, body, safe=False)
+        return _call(builder, body)
 
     @tool
     def add_transition(
@@ -231,7 +222,7 @@ def create_fsm_tools(builder: FSMArtifactBuilder) -> ToolRegistry:
             builder.remove_transition(from_state, target_state)
             return "Removed transition"
 
-        return _call(builder, body, safe=False)
+        return _call(builder, body)
 
     @tool
     def set_initial_state(state_id: str) -> str:
@@ -281,7 +272,7 @@ def create_workflow_tools(builder: WorkflowArtifactBuilder) -> ToolRegistry:
             )
             return _fmt(f"Overview set: name='{name}'", builder.take_warnings())
 
-        return _call(builder, body, safe=False)
+        return _call(builder, body)
 
     @tool
     def add_step(
@@ -314,7 +305,7 @@ def create_workflow_tools(builder: WorkflowArtifactBuilder) -> ToolRegistry:
             builder.remove_step(step_id)
             return f"Removed step '{step_id}'"
 
-        return _call(builder, body, safe=False)
+        return _call(builder, body)
 
     @tool
     def set_step_transition(
@@ -377,7 +368,7 @@ def create_agent_tools(builder: AgentArtifactBuilder) -> ToolRegistry:
             builder.set_overview(name=name, description=description)
             return _fmt(f"Overview set: name='{name}'", builder.take_warnings())
 
-        return _call(builder, body, safe=False)
+        return _call(builder, body)
 
     @tool
     def set_agent_type(agent_type: str) -> str:
@@ -411,7 +402,7 @@ def create_agent_tools(builder: AgentArtifactBuilder) -> ToolRegistry:
             builder.remove_tool(name)
             return f"Removed tool '{name}'"
 
-        return _call(builder, body, safe=False)
+        return _call(builder, body)
 
     @tool
     def set_config(
@@ -440,7 +431,7 @@ def create_agent_tools(builder: AgentArtifactBuilder) -> ToolRegistry:
             builder.set_config(**kwargs)
             return _fmt("Config updated", builder.take_warnings())
 
-        return _call(builder, body, safe=False)
+        return _call(builder, body)
 
     for fn in [
         set_overview,

@@ -695,6 +695,7 @@ class MetaDefaults:
     # Builder defaults
     DEFAULT_PRIORITY = 100
     SUMMARY_TRUNCATE_WIDTH = 80
+    SUMMARY_LINE_WIDTH = 40  # the description beside a name in a standard summary
 
     # Artifact-type classification (the ``classify`` state of the meta FSM)
     TYPE_CONFIDENCE_THRESHOLD = 0.4

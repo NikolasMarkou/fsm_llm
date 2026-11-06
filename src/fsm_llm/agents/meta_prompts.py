@@ -4,9 +4,9 @@ Prompt and request builders for the meta-builder.
 Build request: ``build_artifact_prompt`` (the one user turn of the build
 call), ``artifact_schema`` (the per-type extraction schema) and
 ``build_response_format`` (the response format of the meta FSM's ``build``
-completion state). Collect turn: ``build_collect_response_instructions``
-(the ``collect`` state's Pass-2 instructions). Also the review presentation,
-welcome message, follow-up helpers and output formatting.
+completion state). Collect turn: ``build_meta_collect_response_instructions``
+(the ``collect`` state's Pass-2 instructions). Also the review presentation
+and the welcome message.
 """
 
 from __future__ import annotations
@@ -213,7 +213,7 @@ def build_artifact_prompt(artifact_type: ArtifactType, requirement: str) -> str:
 # ------------------------------------------------------------------
 
 
-def build_collect_response_instructions() -> str:
+def build_meta_collect_response_instructions() -> str:
     """Return the Pass-2 instructions of the meta FSM's ``collect`` state.
 
     The reply reads the artifact type and the requirements gathered so far
@@ -285,44 +285,4 @@ def build_welcome_message() -> str:
         "  2. A Workflow for multi-step async processes\n"
         "  3. An Agent for tool-using AI agents\n\n"
         "Describe what you'd like to create."
-    )
-
-
-def build_followup_message(
-    artifact_type: ArtifactType | None,
-    has_name: bool,
-    has_description: bool,
-) -> str:
-    """Build a follow-up question for missing intake fields."""
-    if artifact_type is None:
-        return (
-            "What type of artifact would you like to build?\n"
-            "  - FSM: for stateful conversations\n"
-            "  - Workflow: for multi-step processes\n"
-            "  - Agent: for tool-using AI agents"
-        )
-
-    missing: list[str] = []
-    if not has_name:
-        missing.append("a name")
-    if not has_description:
-        missing.append("a description of what it should do")
-
-    type_label = artifact_type.value.upper()
-    if missing:
-        return (
-            f"Building a {type_label}. I still need {' and '.join(missing)}. "
-            f"You can also describe the components (states, steps, or tools) "
-            f"you want included."
-        )
-
-    return f"Building a {type_label}. Describe the components you want included."
-
-
-def build_output_message(artifact_json: str) -> str:
-    """Build the final output message presenting the artifact JSON."""
-    return (
-        f"Your artifact is ready! Here is the JSON definition:\n\n"
-        f"{artifact_json}\n\n"
-        f"You can save this to a file and use it with fsm-llm."
     )

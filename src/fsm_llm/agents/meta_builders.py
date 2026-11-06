@@ -84,21 +84,82 @@ class ArtifactBuilder(ABC):
     def validate_complete(self) -> list[str]: ...
 
     @abstractmethod
-    def get_progress(self) -> BuildProgress: ...
-
-    @abstractmethod
     def get_missing_fields(self) -> list[str]: ...
 
-    @abstractmethod
+    # How many items ``get_missing_fields`` can name: the denominator of
+    # ``get_progress`` (a subclass sets it).
+    _TOTAL_REQUIRED: ClassVar[int]
+
+    def get_progress(self) -> BuildProgress:
+        """Progress: ``_TOTAL_REQUIRED`` items, one short per missing field."""
+        missing = self.get_missing_fields()
+        total = self._TOTAL_REQUIRED
+        return BuildProgress(
+            total_required=total,
+            completed=total - min(len(missing), total),
+            missing=missing,
+            warnings=self.validate_partial(),
+        )
+
     def get_summary(self, detail_level: str = "full") -> str:
         """Human-readable summary for LLM context injection.
 
         Args:
             detail_level: One of ``"minimal"`` (names + counts),
                 ``"standard"`` (names + short descriptions + targets),
-                or ``"full"`` (everything including instructions).
+                or ``"full"`` (everything including instructions); any other
+                value reads as ``"full"``.
         """
-        ...
+        if detail_level == "minimal":
+            return self._get_minimal_summary()
+        if detail_level == "standard":
+            return self._get_standard_summary()
+        return self._get_full_summary()
+
+    @abstractmethod
+    def _get_minimal_summary(self) -> str: ...
+
+    @abstractmethod
+    def _get_standard_summary(self) -> str: ...
+
+    @abstractmethod
+    def _get_full_summary(self) -> str: ...
+
+    def _missing_line(self) -> list[str]:
+        """The ``Missing: ...`` tail of the minimal and standard summaries."""
+        missing = self.get_missing_fields()
+        return [f"Missing: {', '.join(missing)}"] if missing else []
+
+    def _still_missing_lines(self) -> list[str]:
+        """The ``Still missing:`` tail of the full summary."""
+        missing = self.get_missing_fields()
+        if not missing:
+            return []
+        return ["\nStill missing:", *(f"  - {m}" for m in missing)]
+
+    @staticmethod
+    def _node_markers(node_id: str, node: dict[str, Any], initial: str | None) -> str:
+        """``[INITIAL]`` / ``[TERMINAL]`` for a state or step of a graph."""
+        marker = " [INITIAL]" if node_id == initial else ""
+        return marker + (" [TERMINAL]" if not node["transitions"] else "")
+
+    @classmethod
+    def _graph_minimal_lines(
+        cls,
+        nodes: dict[str, dict[str, Any]],
+        initial: str | None,
+        noun: str,
+        edge_noun: str,
+    ) -> list[str]:
+        """The node list and edge count of a graph's minimal summary."""
+        if not nodes:
+            return [f"{noun}: none yet"]
+        labels = [nid + cls._node_markers(nid, n, initial) for nid, n in nodes.items()]
+        edges = sum(len(n["transitions"]) for n in nodes.values())
+        return [
+            f"{noun} ({len(nodes)}): {', '.join(labels)}",
+            f"{edge_noun}: {edges} defined",
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -254,9 +315,7 @@ class FSMArtifactBuilder(ArtifactBuilder):
         priority: int = MetaDefaults.DEFAULT_PRIORITY,
         conditions: list[dict[str, Any]] | None = None,
     ) -> FSMArtifactBuilder:
-        """Add a transition between states. Warnings go to ``take_warnings()``; returns self."""
-        warnings: list[str] = []
-
+        """Add a transition between states; returns self."""
         if from_state not in self.states:
             raise BuilderError(
                 f"Source state '{from_state}' not found",
@@ -279,7 +338,6 @@ class FSMArtifactBuilder(ArtifactBuilder):
 
         self.states[from_state]["transitions"].append(transition)
         logger.debug(f"Added transition '{from_state}' -> '{target_state}'")
-        self._warnings.extend(warnings)
         return self
 
     def remove_transition(
@@ -298,15 +356,13 @@ class FSMArtifactBuilder(ArtifactBuilder):
         return self
 
     def set_initial_state(self, state_id: str) -> FSMArtifactBuilder:
-        """Set the initial state. Warnings go to ``take_warnings()``; returns self."""
-        warnings: list[str] = []
+        """Set the initial state; returns self."""
         if state_id not in self.states:
             raise BuilderError(
                 f"State '{state_id}' not found",
                 action="set_initial_state",
             )
         self.initial_state = state_id
-        self._warnings.extend(warnings)
         return self
 
     # -- Serialization ------------------------------------------------------
@@ -447,54 +503,21 @@ class FSMArtifactBuilder(ArtifactBuilder):
 
         return missing
 
-    def get_progress(self) -> BuildProgress:
-        """Return current build progress."""
-        missing = self.get_missing_fields()
-        warnings = self.validate_partial()
-
-        # Count required items: name, description, initial_state, >=1 state, >=1 terminal
-        total = 5
-        completed = total - min(len(missing), total)
-
-        return BuildProgress(
-            total_required=total,
-            completed=completed,
-            missing=missing,
-            warnings=warnings,
-        )
-
-    def get_summary(self, detail_level: str = "full") -> str:
-        """Human-readable summary for LLM context injection."""
-        if detail_level == "minimal":
-            return self._get_minimal_summary()
-        if detail_level == "standard":
-            return self._get_standard_summary()
-        return self._get_full_summary()
+    _TOTAL_REQUIRED: ClassVar[int] = (
+        5  # name, description, initial state, a state, a terminal
+    )
 
     def _get_minimal_summary(self) -> str:
-        parts: list[str] = [
-            "=== FSM Builder Status ===",
-            f"Name: {self.name or '(not set)'} | Initial: {self.initial_state or '(not set)'}",
-        ]
-        if self.states:
-            state_labels = []
-            for sid in self.states:
-                label = sid
-                if sid == self.initial_state:
-                    label += " [INITIAL]"
-                if not self.states[sid]["transitions"]:
-                    label += " [TERMINAL]"
-                state_labels.append(label)
-            parts.append(f"States ({len(self.states)}): {', '.join(state_labels)}")
-            total_transitions = sum(len(s["transitions"]) for s in self.states.values())
-            parts.append(f"Transitions: {total_transitions} defined")
-        else:
-            parts.append("States: none yet")
-
-        missing = self.get_missing_fields()
-        if missing:
-            parts.append(f"Missing: {', '.join(missing)}")
-        return "\n".join(parts)
+        return "\n".join(
+            [
+                "=== FSM Builder Status ===",
+                f"Name: {self.name or '(not set)'} | Initial: {self.initial_state or '(not set)'}",
+                *self._graph_minimal_lines(
+                    self.states, self.initial_state, "States", "Transitions"
+                ),
+                *self._missing_line(),
+            ]
+        )
 
     def _get_standard_summary(self) -> str:
         parts: list[str] = [
@@ -504,18 +527,12 @@ class FSMArtifactBuilder(ArtifactBuilder):
             f"States ({len(self.states)}):",
         ]
         for sid, state in self.states.items():
-            marker = " [INITIAL]" if sid == self.initial_state else ""
-            if not state["transitions"]:
-                marker += " [TERMINAL]"
-            desc = state.get("description", "")[:40]
+            marker = self._node_markers(sid, state, self.initial_state)
+            desc = state.get("description", "")[: MetaDefaults.SUMMARY_LINE_WIDTH]
             parts.append(f"  - {sid}{marker}: {desc}")
             for t in state["transitions"]:
                 parts.append(f"    -> {t['target_state']}")
-
-        missing = self.get_missing_fields()
-        if missing:
-            parts.append(f"Missing: {', '.join(missing)}")
-        return "\n".join(parts)
+        return "\n".join([*parts, *self._missing_line()])
 
     def _get_full_summary(self) -> str:
         parts: list[str] = []
@@ -529,11 +546,9 @@ class FSMArtifactBuilder(ArtifactBuilder):
         parts.append(f"States ({len(self.states)}):")
 
         for sid, state in self.states.items():
-            marker = " [INITIAL]" if sid == self.initial_state else ""
-            is_terminal = not state["transitions"]
-            terminal_marker = " [TERMINAL]" if is_terminal else ""
+            marker = self._node_markers(sid, state, self.initial_state)
             parts.append(
-                f"  - {sid}{marker}{terminal_marker}: {state.get('description', '(no description)')}"
+                f"  - {sid}{marker}: {state.get('description', '(no description)')}"
             )
 
             if state.get("extraction_instructions"):
@@ -552,13 +567,7 @@ class FSMArtifactBuilder(ArtifactBuilder):
                     f"    -> {t['target_state']}: {t['description']}{cond_str}"
                 )
 
-        missing = self.get_missing_fields()
-        if missing:
-            parts.append("\nStill missing:")
-            for m in missing:
-                parts.append(f"  - {m}")
-
-        return "\n".join(parts)
+        return "\n".join([*parts, *self._still_missing_lines()])
 
 
 # ---------------------------------------------------------------------------
@@ -601,11 +610,9 @@ class WorkflowArtifactBuilder(ArtifactBuilder):
         description: str,
     ) -> WorkflowArtifactBuilder:
         """Set basic workflow metadata."""
-        warnings: list[str] = []
         self.workflow_id = workflow_id.strip()
         self.name = name.strip()
         self.description = description.strip()
-        self._warnings.extend(warnings)
         return self
 
     def add_step(
@@ -670,8 +677,6 @@ class WorkflowArtifactBuilder(ArtifactBuilder):
         condition: str | None = None,
     ) -> WorkflowArtifactBuilder:
         """Add a transition between steps."""
-        warnings: list[str] = []
-
         if from_step not in self.steps:
             raise BuilderError(
                 f"Source step '{from_step}' not found",
@@ -688,7 +693,6 @@ class WorkflowArtifactBuilder(ArtifactBuilder):
             transition["condition"] = condition
 
         self.steps[from_step]["transitions"].append(transition)
-        self._warnings.extend(warnings)
         return self
 
     def set_initial_step(self, step_id: str) -> WorkflowArtifactBuilder:
@@ -774,49 +778,19 @@ class WorkflowArtifactBuilder(ArtifactBuilder):
             missing.append("Initial step")
         return missing
 
-    def get_progress(self) -> BuildProgress:
-        missing = self.get_missing_fields()
-        warnings = self.validate_partial()
-        total = 4  # id, name, >=1 step, initial step
-        completed = total - min(len(missing), total)
-        return BuildProgress(
-            total_required=total,
-            completed=completed,
-            missing=missing,
-            warnings=warnings,
-        )
-
-    def get_summary(self, detail_level: str = "full") -> str:
-        if detail_level == "minimal":
-            return self._get_minimal_summary()
-        if detail_level == "standard":
-            return self._get_standard_summary()
-        return self._get_full_summary()
+    _TOTAL_REQUIRED: ClassVar[int] = 4  # id, name, a step, initial step
 
     def _get_minimal_summary(self) -> str:
-        parts: list[str] = [
-            "=== Workflow Builder Status ===",
-            f"Name: {self.name or '(not set)'} | Initial: {self.initial_step_id or '(not set)'}",
-        ]
-        if self.steps:
-            step_labels = []
-            for sid in self.steps:
-                label = sid
-                if sid == self.initial_step_id:
-                    label += " [INITIAL]"
-                if not self.steps[sid]["transitions"]:
-                    label += " [TERMINAL]"
-                step_labels.append(label)
-            parts.append(f"Steps ({len(self.steps)}): {', '.join(step_labels)}")
-            total_transitions = sum(len(s["transitions"]) for s in self.steps.values())
-            parts.append(f"Connections: {total_transitions} defined")
-        else:
-            parts.append("Steps: none yet")
-
-        missing = self.get_missing_fields()
-        if missing:
-            parts.append(f"Missing: {', '.join(missing)}")
-        return "\n".join(parts)
+        return "\n".join(
+            [
+                "=== Workflow Builder Status ===",
+                f"Name: {self.name or '(not set)'} | Initial: {self.initial_step_id or '(not set)'}",
+                *self._graph_minimal_lines(
+                    self.steps, self.initial_step_id, "Steps", "Connections"
+                ),
+                *self._missing_line(),
+            ]
+        )
 
     def _get_standard_summary(self) -> str:
         parts: list[str] = [
@@ -826,19 +800,12 @@ class WorkflowArtifactBuilder(ArtifactBuilder):
             f"Steps ({len(self.steps)}):",
         ]
         for sid, step in self.steps.items():
-            marker = " [INITIAL]" if sid == self.initial_step_id else ""
-            if not step["transitions"]:
-                marker += " [TERMINAL]"
-            parts.append(
-                f"  - {sid}{marker} ({step['step_type']}): {step['name'][:40]}"
-            )
+            marker = self._node_markers(sid, step, self.initial_step_id)
+            name = step["name"][: MetaDefaults.SUMMARY_LINE_WIDTH]
+            parts.append(f"  - {sid}{marker} ({step['step_type']}): {name}")
             for t in step["transitions"]:
                 parts.append(f"    -> {t['target']}")
-
-        missing = self.get_missing_fields()
-        if missing:
-            parts.append(f"Missing: {', '.join(missing)}")
-        return "\n".join(parts)
+        return "\n".join([*parts, *self._missing_line()])
 
     def _get_full_summary(self) -> str:
         parts: list[str] = []
@@ -850,23 +817,13 @@ class WorkflowArtifactBuilder(ArtifactBuilder):
         parts.append(f"Steps ({len(self.steps)}):")
 
         for sid, step in self.steps.items():
-            marker = " [INITIAL]" if sid == self.initial_step_id else ""
-            is_terminal = not step["transitions"]
-            terminal_marker = " [TERMINAL]" if is_terminal else ""
-            parts.append(
-                f"  - {sid}{marker}{terminal_marker} ({step['step_type']}): {step['name']}"
-            )
+            marker = self._node_markers(sid, step, self.initial_step_id)
+            parts.append(f"  - {sid}{marker} ({step['step_type']}): {step['name']}")
             for t in step["transitions"]:
                 cond_str = f" [if: {t['condition']}]" if t.get("condition") else ""
                 parts.append(f"    -> {t['target']}{cond_str}")
 
-        missing = self.get_missing_fields()
-        if missing:
-            parts.append("\nStill missing:")
-            for m in missing:
-                parts.append(f"  - {m}")
-
-        return "\n".join(parts)
+        return "\n".join([*parts, *self._still_missing_lines()])
 
 
 # ---------------------------------------------------------------------------
@@ -932,7 +889,6 @@ class AgentArtifactBuilder(ArtifactBuilder):
 
     def set_agent_type(self, agent_type: str) -> AgentArtifactBuilder:
         """Set the agent pattern type."""
-        warnings: list[str] = []
         agent_type = agent_type.strip().lower()
         # Resolve common LLM variations
         agent_type = self._AGENT_TYPE_ALIASES.get(agent_type, agent_type)
@@ -943,7 +899,6 @@ class AgentArtifactBuilder(ArtifactBuilder):
                 action="set_agent_type",
             )
         self.agent_type = agent_type
-        self._warnings.extend(warnings)
         return self
 
     def set_overview(
@@ -1087,24 +1042,7 @@ class AgentArtifactBuilder(ArtifactBuilder):
             missing.append("At least one tool")
         return missing
 
-    def get_progress(self) -> BuildProgress:
-        missing = self.get_missing_fields()
-        warnings = self.validate_partial()
-        total = 3
-        completed = total - min(len(missing), total)
-        return BuildProgress(
-            total_required=total,
-            completed=completed,
-            missing=missing,
-            warnings=warnings,
-        )
-
-    def get_summary(self, detail_level: str = "full") -> str:
-        if detail_level == "minimal":
-            return self._get_minimal_summary()
-        if detail_level == "standard":
-            return self._get_standard_summary()
-        return self._get_full_summary()
+    _TOTAL_REQUIRED: ClassVar[int] = 3  # agent type, name, a tool
 
     def _get_minimal_summary(self) -> str:
         parts: list[str] = [
@@ -1117,10 +1055,7 @@ class AgentArtifactBuilder(ArtifactBuilder):
         else:
             parts.append("Tools: none yet")
 
-        missing = self.get_missing_fields()
-        if missing:
-            parts.append(f"Missing: {', '.join(missing)}")
-        return "\n".join(parts)
+        return "\n".join([*parts, *self._missing_line()])
 
     def _get_standard_summary(self) -> str:
         parts: list[str] = [
@@ -1130,12 +1065,11 @@ class AgentArtifactBuilder(ArtifactBuilder):
             f"Tools ({len(self.tools)}):",
         ]
         for t in self.tools:
-            parts.append(f"  - {t['name']}: {t['description'][:40]}")
+            parts.append(
+                f"  - {t['name']}: {t['description'][: MetaDefaults.SUMMARY_LINE_WIDTH]}"
+            )
 
-        missing = self.get_missing_fields()
-        if missing:
-            parts.append(f"Missing: {', '.join(missing)}")
-        return "\n".join(parts)
+        return "\n".join([*parts, *self._missing_line()])
 
     def _get_full_summary(self) -> str:
         parts: list[str] = []
@@ -1156,10 +1090,4 @@ class AgentArtifactBuilder(ArtifactBuilder):
                 schema_str = f" (params: {', '.join(params.keys())})" if params else ""
             parts.append(f"  - {t['name']}: {t['description']}{schema_str}")
 
-        missing = self.get_missing_fields()
-        if missing:
-            parts.append("\nStill missing:")
-            for m in missing:
-                parts.append(f"  - {m}")
-
-        return "\n".join(parts)
+        return "\n".join([*parts, *self._still_missing_lines()])

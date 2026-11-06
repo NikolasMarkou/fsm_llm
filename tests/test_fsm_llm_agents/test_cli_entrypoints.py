@@ -47,9 +47,12 @@ def _install_fake_agent(monkeypatch, outcome) -> None:
     monkeypatch.setattr(meta_cli, "MetaBuilderAgent", _FakeAgent)
 
 
-def _run_meta_cli(monkeypatch, *argv: str) -> None:
+def _run_meta_cli(monkeypatch, *argv: str) -> int:
+    """The exit code of ``fsm-llm-meta`` on ``argv`` (``main_cli`` exits with it)."""
     monkeypatch.setattr("sys.argv", ["fsm-llm-meta", *argv])
-    meta_cli.main_cli()
+    with pytest.raises(SystemExit) as exc:
+        meta_cli.main_cli()
+    return int(exc.value.code or 0)
 
 
 class TestMetaCli:
@@ -57,7 +60,7 @@ class TestMetaCli:
         _install_fake_agent(monkeypatch, _valid_result())
         out = tmp_path / "sub" / "artifact.json"
 
-        _run_meta_cli(monkeypatch, "--output", str(out))
+        assert _run_meta_cli(monkeypatch, "--output", str(out)) == 0
 
         assert out.exists()
         assert json.loads(out.read_text(encoding="utf-8")) == _ARTIFACT
@@ -66,18 +69,18 @@ class TestMetaCli:
     def test_no_output_prints_artifact_json(self, monkeypatch, capsys):
         _install_fake_agent(monkeypatch, _valid_result())
 
-        _run_meta_cli(monkeypatch)
+        assert _run_meta_cli(monkeypatch) == 0
 
         assert "Generated artifact JSON:" in capsys.readouterr().out
 
     def test_meta_builder_error_exits_1(self, monkeypatch, capsys):
         _install_fake_agent(monkeypatch, MetaBuilderError("boom"))
 
-        with pytest.raises(SystemExit) as exc:
-            _run_meta_cli(monkeypatch)
+        assert _run_meta_cli(monkeypatch) == 1
 
-        assert exc.value.code == 1
-        assert "Error: boom" in capsys.readouterr().out
+        captured = capsys.readouterr()
+        assert "fsm-llm-meta: error: boom" in captured.err
+        assert "boom" not in captured.out
 
     def test_keyboard_interrupt_at_the_prompt_exits_130(self, monkeypatch, capsys):
         """Ctrl-C at the ``> `` prompt exits 130 like every project CLI. The
@@ -94,13 +97,11 @@ class TestMetaCli:
 
         monkeypatch.setattr("builtins.input", interrupted)
 
-        with pytest.raises(SystemExit) as exc:
-            _run_meta_cli(monkeypatch)
+        assert _run_meta_cli(monkeypatch) == 130
 
-        out = capsys.readouterr().out
-        assert exc.value.code == 130
-        assert "Aborted." in out
-        assert "validation errors" not in out
+        captured = capsys.readouterr()
+        assert "fsm-llm-meta: interrupted" in captured.err
+        assert "validation errors" not in captured.out + captured.err
 
     def test_eof_at_the_prompt_still_ends_the_session(self, monkeypatch, capsys):
         """EOF (Ctrl-D) stays a normal end of the session."""
@@ -123,10 +124,7 @@ class TestMetaCli:
         _install_fake_agent(monkeypatch, result)
         out = tmp_path / "artifact.json"
 
-        with pytest.raises(SystemExit) as exc:
-            _run_meta_cli(monkeypatch, "--output", str(out))
-
-        assert exc.value.code == 1
+        assert _run_meta_cli(monkeypatch, "--output", str(out)) == 1
         assert not out.exists()
 
 

@@ -2191,7 +2191,7 @@ def build_meta_builder_fsm() -> dict[str, Any]:
                     build_requested,
                 ),
             ],
-            response_instructions=meta_prompts.build_collect_response_instructions(),
+            response_instructions=meta_prompts.build_meta_collect_response_instructions(),
             extraction_instructions="",
             context_scope={
                 "read_keys": [

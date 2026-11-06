@@ -198,14 +198,12 @@ class TestMalformedBuildReplyIsAValidationError:
                 super().__init__(config, llm_interface=llm, **kw)
 
         monkeypatch.setattr(cli, "MetaBuilderAgent", Injected)
-        monkeypatch.setattr(sys, "argv", ["fsm-llm-meta", "--model", "gpt-4o-mini"])
         monkeypatch.setattr(sys, "stdin", io.StringIO("a greeting bot\nbuild it\n"))
-        with pytest.raises(SystemExit) as excinfo:
-            cli.main_cli()
-        assert excinfo.value.code == 1
-        out = capsys.readouterr().out
-        assert "Build reply field 'transitions'" in out
-        assert "validation errors" in out
+        assert cli.main(["--model", "gpt-4o-mini"]) == 1
+        captured = capsys.readouterr()
+        assert "Build reply field 'transitions'" in captured.out
+        assert "validation errors" in captured.err
+        assert "Traceback" not in captured.out + captured.err
 
 
 class TestNoSessionStateBesideTheFSM:

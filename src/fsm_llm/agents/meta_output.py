@@ -5,6 +5,9 @@ Output formatting and file writing for meta-agent artifacts.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -38,10 +41,19 @@ def save_artifact(artifact: dict[str, Any], path: str | Path) -> Path:
     """
     path = Path(path).resolve()
 
+    # Serialise first (a bad artifact creates nothing), then write a temp file
+    # beside the target and rename it over: a failed write leaves the old
+    # artifact whole. The finally-with-unlink is a no-op after the rename.
+    tmp: str | None = None
     try:
+        data = format_artifact_json(artifact).encode("utf-8")
         path.parent.mkdir(parents=True, exist_ok=True)
-        content = format_artifact_json(artifact)
-        path.write_text(content, encoding="utf-8")
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
         logger.info(f"Artifact saved to {path}")
         return path
     except (OSError, TypeError, ValueError) as e:
@@ -49,6 +61,10 @@ def save_artifact(artifact: dict[str, Any], path: str | Path) -> Path:
             f"Failed to save artifact: {e}",
             path=str(path),
         ) from e
+    finally:
+        if tmp is not None:
+            with suppress(OSError):
+                os.unlink(tmp)
 
 
 def format_summary(result: MetaBuilderResult) -> str:

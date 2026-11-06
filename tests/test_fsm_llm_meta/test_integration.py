@@ -8,7 +8,7 @@ type detection, and result building.
 from __future__ import annotations
 
 from fsm_llm.agents.definitions import ArtifactType
-from fsm_llm.agents.meta_builder import MetaBuilderAgent
+from fsm_llm.agents.meta_builder import _TYPE_ALIASES, MetaBuilderAgent
 from fsm_llm.agents.meta_builders import (
     FSMArtifactBuilder,
     WorkflowArtifactBuilder,
@@ -23,8 +23,7 @@ from fsm_llm.agents.meta_tools import create_builder_tools
 
 class TestTypeAliasMatching:
     def test_longest_match_first(self):
-        aliases = MetaBuilderAgent._build_type_aliases()
-        keys = list(aliases.keys())
+        keys = list(_TYPE_ALIASES)
         assert keys.index("finite state machine") < keys.index("state machine")
         assert keys.index("data pipeline") < keys.index("pipeline")
 

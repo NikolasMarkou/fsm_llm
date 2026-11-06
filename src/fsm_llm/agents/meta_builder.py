@@ -26,9 +26,8 @@ does not use them.
 
 from __future__ import annotations
 
-import json
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from itertools import pairwise
 from typing import Any
 
@@ -39,6 +38,7 @@ from fsm_llm.api import llm_settings_for
 from fsm_llm.definitions import LLMResponseError
 from fsm_llm.handlers import HandlerExecutionError, clear_keys_delta
 from fsm_llm.logging import logger
+from fsm_llm.utilities import extract_json_from_text
 
 from .base import reject_misplaced_kwargs
 from .constants import (
@@ -92,9 +92,14 @@ _TYPE_VALUES = frozenset(t.value for t in ArtifactType)
 _APOSTROPHES = str.maketrans({"‘": "'", "’": "'"})
 
 
-def _normalize_message(text: str) -> str:
-    """``text`` lower-cased, whitespace-collapsed, typographic apostrophes as '."""
-    return " ".join(text.translate(_APOSTROPHES).split()).lower()
+def _normalize_message(
+    text: str, table: Mapping[int, str | int | None] = _APOSTROPHES
+) -> str:
+    """``text`` lower-cased, whitespace-collapsed, characters mapped by ``table``.
+
+    The default table writes typographic apostrophes as '.
+    """
+    return " ".join(text.translate(table).split()).lower()
 
 
 def _words_pattern(words: Iterable[str], *, plural: bool = False) -> re.Pattern[str]:
@@ -115,6 +120,62 @@ _GOVERNING_NEGATION = re.compile(
     rf"(?: {_words_pattern(META_BUILD_NEGATION_FILLERS).pattern})* $"
 )
 _CLAUSE_BREAK = re.compile(r"[.,;:!?\n]+")
+# Closing punctuation a whole-message trigger ignores: "Done." is "done".
+_TRAILING_PUNCTUATION = ".,;:!? "
+
+# The artifact type a keyword names, longest alias first so "finite state
+# machine" wins over "state machine" and "data pipeline" over "pipeline";
+# each alias matches whole words with an optional plural "s". Used when the
+# type classification gives no type (provider failure or no intent).
+_TYPE_ALIASES: dict[str, str] = dict(
+    sorted(
+        {
+            "finite state machine": "fsm",
+            "fsm": "fsm",
+            "state machine": "fsm",
+            "state_machine": "fsm",
+            "conversational": "fsm",
+            "conversation": "fsm",
+            "help desk": "fsm",
+            "onboarding": "fsm",
+            "interview": "fsm",
+            "chat bot": "fsm",
+            "helpdesk": "fsm",
+            "chatbot": "fsm",
+            "dialogue": "fsm",
+            "dialog": "fsm",
+            "survey": "fsm",
+            "quiz": "fsm",
+            "faq": "fsm",
+            "bot": "fsm",
+            "data pipeline": "workflow",
+            "processing": "workflow",
+            "workflow": "workflow",
+            "automation": "workflow",
+            "pipeline": "workflow",
+            "sequence": "workflow",
+            "process": "workflow",
+            "steps": "workflow",
+            "batch": "workflow",
+            "flow": "workflow",
+            "etl": "workflow",
+            "agentic": "agent",
+            "research": "agent",
+            "navigate": "agent",
+            "browse": "agent",
+            "search": "agent",
+            "react": "agent",
+            "agent": "agent",
+            "tools": "agent",
+            "tool": "agent",
+        }.items(),
+        key=lambda kv: -len(kv[0]),
+    )
+)
+_TYPE_ALIAS_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (_words_pattern([alias], plural=True), type_str)
+    for alias, type_str in _TYPE_ALIASES.items()
+)
 
 
 # ---------------------------------------------------------------------------
@@ -130,8 +191,7 @@ _QUOTES = str.maketrans(
 
 def _prompt_text(text: str) -> str:
     """``text`` normalized for finding the build prompt in it."""
-    collapsed = " ".join(text.translate(_QUOTES).split()).casefold()
-    return collapsed.replace("you are", "you're")
+    return _normalize_message(text, _QUOTES).replace("you are", "you're")
 
 
 _BUILD_PROMPT_CORE = _prompt_text(META_BUILD_PROMPT).rstrip(".!")
@@ -267,51 +327,6 @@ class MetaBuilderAgent:
         result = agent.get_result()
     """
 
-    @classmethod
-    def _build_type_aliases(cls) -> dict[str, str]:
-        """Return type alias map sorted longest-first for correct matching."""
-        raw: dict[str, str] = {
-            "finite state machine": "fsm",
-            "fsm": "fsm",
-            "state machine": "fsm",
-            "state_machine": "fsm",
-            "conversational": "fsm",
-            "conversation": "fsm",
-            "help desk": "fsm",
-            "onboarding": "fsm",
-            "interview": "fsm",
-            "chat bot": "fsm",
-            "helpdesk": "fsm",
-            "chatbot": "fsm",
-            "dialogue": "fsm",
-            "dialog": "fsm",
-            "survey": "fsm",
-            "quiz": "fsm",
-            "faq": "fsm",
-            "bot": "fsm",
-            "data pipeline": "workflow",
-            "processing": "workflow",
-            "workflow": "workflow",
-            "automation": "workflow",
-            "pipeline": "workflow",
-            "sequence": "workflow",
-            "process": "workflow",
-            "steps": "workflow",
-            "batch": "workflow",
-            "flow": "workflow",
-            "etl": "workflow",
-            "agentic": "agent",
-            "research": "agent",
-            "navigate": "agent",
-            "browse": "agent",
-            "search": "agent",
-            "react": "agent",
-            "agent": "agent",
-            "tools": "agent",
-            "tool": "agent",
-        }
-        return dict(sorted(raw.items(), key=lambda kv: -len(kv[0])))
-
     def __init__(
         self,
         config: AgentConfig | None = None,
@@ -351,7 +366,7 @@ class MetaBuilderAgent:
         # allowed). Do NOT go back to "any negation earlier in the clause":
         # "don't forget to build it", "not a problem build it" and "it's not
         # perfect but build it" stopped building (they built at e1f63a9).
-        if normalized.strip() in META_BUILD_TRIGGERS:
+        if normalized.strip().rstrip(_TRAILING_PUNCTUATION) in META_BUILD_TRIGGERS:
             return True
         for clause in _CLAUSE_BREAK.split(normalized):
             for match in _BUILD_PHRASE_PATTERN.finditer(clause):
@@ -364,16 +379,16 @@ class MetaBuilderAgent:
         """True when the normalized message may change the type."""
         return _SWITCH_PATTERN.search(normalized) is not None
 
-    @classmethod
-    def _detect_type_fallback(cls, text: str) -> ArtifactType:
+    @staticmethod
+    def _detect_type_fallback(text: str) -> ArtifactType:
         """The artifact type named by a keyword alias in ``text``, else FSM.
 
-        Aliases match whole words (an optional plural ``s``). Used when the
-        type classification gives no type (provider failure or no intent).
+        Used when the type classification gives no type (provider failure or
+        no intent); see ``_TYPE_ALIASES``.
         """
         normalized = _normalize_message(text)
-        for alias, type_str in cls._build_type_aliases().items():
-            if _words_pattern([alias], plural=True).search(normalized):
+        for pattern, type_str in _TYPE_ALIAS_PATTERNS:
+            if pattern.search(normalized):
                 return ArtifactType(type_str)
         return ArtifactType.FSM
 
@@ -579,7 +594,7 @@ class MetaBuilderAgent:
         validation. An empty or unparseable reply assembles nothing and is
         ``invalid`` (the model answered with no artifact).
         """
-        raw = cls._parse_extraction_response(text)
+        raw = extract_json_from_text(text) or {}
         if not raw:
             logger.warning("Build reply has no JSON spec; the build is incomplete")
         elif cls._is_schema_echo(raw):
@@ -735,36 +750,6 @@ class MetaBuilderAgent:
             return False
         return "properties" in keys or "$schema" in keys or {"type", "required"} <= keys
 
-    @staticmethod
-    def _parse_extraction_response(response: str) -> dict[str, Any]:
-        """Parse JSON from the extraction LLM response."""
-        text = response.strip()
-        if not text:
-            return {}
-
-        # Direct parse
-        if text.startswith("{"):
-            try:
-                parsed = json.loads(text)
-                if isinstance(parsed, dict):
-                    return parsed
-            except json.JSONDecodeError:
-                pass
-
-        # Find JSON in response
-        start = text.find("{")
-        end = text.rfind("}")
-        if start >= 0 and end > start:
-            try:
-                parsed = json.loads(text[start : end + 1])
-                if isinstance(parsed, dict):
-                    return parsed
-            except json.JSONDecodeError:
-                pass
-
-        logger.warning(f"Could not parse extraction response: {text[:200]}")
-        return {}
-
     # ------------------------------------------------------------------
     # Single-shot API
     # ------------------------------------------------------------------
@@ -789,10 +774,10 @@ class MetaBuilderAgent:
         """
         logger.info(MetaLogMessages.META_STARTED.format(model=self.meta_config.model))
         api = self._create_api()
-        conversation_id, _ = api.start_conversation(
-            initial_context=self._turn_hints(task, [task], build_requested=True)
-        )
         try:
+            conversation_id, _ = api.start_conversation(
+                initial_context=self._turn_hints(task, [task], build_requested=True)
+            )
             # classify -> build (entry writes the request), then the build call.
             api.converse(task, conversation_id)
             self._advance_build(api, conversation_id)
@@ -841,10 +826,13 @@ class MetaBuilderAgent:
         """
         if self._api is not None:
             raise MetaBuilderError(MetaErrorMessages.CONVERSATION_ALREADY_STARTED)
-        self._api = self._create_api()
-        self._conversation_id, _ = self._api.start_conversation(
+        api = self._create_api()
+        # The session is set only once the conversation exists: a failed
+        # start leaves the object unstarted, so ``start`` can be retried.
+        self._conversation_id, _ = api.start_conversation(
             initial_context=self._turn_hints("", [], build_requested=False)
         )
+        self._api = api
         if not initial_message:
             return build_welcome_message()
         return self._turn(initial_message, build_requested=False)
