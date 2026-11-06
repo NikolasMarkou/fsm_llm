@@ -45,6 +45,9 @@ DEFAULT_EXAMPLES_DIR = "examples"
 EXAMPLE_SCRIPT_NAMES = ("run.py", "run_manual.py")
 #: Trials per conversation case (the repository's N=3 practice).
 DEFAULT_TRIALS = 3
+#: Seconds an interrupted run lets running example subprocesses exit after
+#: SIGTERM before it kills them.
+CHILD_TERMINATE_GRACE_SECONDS = 2.0
 
 # ---------------------------------------------------------------------------
 # Conversation cases (``fsm-llm-eval run``)

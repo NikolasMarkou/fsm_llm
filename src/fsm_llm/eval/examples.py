@@ -29,7 +29,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ._pool import run_interruptible
+from ._pool import run_interruptible, run_tracked
 from .config import EvalConfig
 from .constants import (
     CATEGORY_TIMEOUTS,
@@ -179,7 +179,9 @@ def run_example(
     ``PYTHONDONTWRITEBYTECODE=1`` and ``PYTHONUNBUFFERED=1``, the target's stdin
     script (or none), and ``cwd``. Never raises: a timeout gives
     ``exit_code=None, timed_out=True`` with the partial output; any other
-    failure to run gives ``exit_code=-1``.
+    failure to run gives ``exit_code=-1``. The child runs through
+    ``_pool.run_tracked``: inside ``run_examples`` an interrupt (Ctrl-C,
+    SIGTERM) ends it, and on POSIX a timeout kills its whole process group.
 
     ``PYTHONUNBUFFERED`` matters on a timeout: the child's stdout is a pipe, so
     Python block-buffers it, and a child killed at the timeout loses whatever
@@ -193,14 +195,10 @@ def run_example(
     env["PYTHONUNBUFFERED"] = "1"
     start = time.monotonic()
     try:
-        proc = subprocess.run(
+        proc = run_tracked(
             [python, str(target.path)],
-            cwd=str(cwd),
+            cwd=cwd,
             input=target.stdin_data,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=target.timeout,
             env=env,
         )

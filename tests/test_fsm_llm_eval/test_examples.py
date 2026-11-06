@@ -7,6 +7,7 @@ current interpreter, so no LLM and no repository example is touched.
 from __future__ import annotations
 
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -316,10 +317,10 @@ class TestTimeoutPartialOutput:
         """`subprocess.TimeoutExpired.stdout` is `bytes` even for a text-mode
         run on some Python versions and `str` on others: both are text."""
 
-        def _expire(*args, **kwargs):
+        def _expire(self, *args, **kwargs):
             raise subprocess.TimeoutExpired(cmd="x", timeout=1, output=out, stderr=err)
 
-        monkeypatch.setattr(examples_mod.subprocess, "run", _expire)
+        monkeypatch.setattr(subprocess.Popen, "communicate", _expire)
         target = self._target(tmp_path, "pass\n")
         result = run_example(target, "m", sys.executable, tmp_path)
         assert result.timed_out is True
@@ -566,3 +567,212 @@ class TestSigtermAsInterrupt:
                 assert signal.getsignal(signal.SIGTERM) is signal.SIG_IGN
         finally:
             signal.signal(signal.SIGTERM, previous)
+
+
+def _pid_alive(pid: int) -> bool:
+    """True for a running process; a zombie (waiting to be reaped) is dead."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+    return stat.rsplit(")", 1)[1].split()[0] != "Z"
+
+
+def _pids_script(pids_file: Path) -> str:
+    """An example that starts a grandchild, records both pids, then sleeps."""
+    return (
+        "import os, subprocess, sys, time\n"
+        "kid = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        f"open({str(pids_file)!r}, 'w').write(str(os.getpid()) + ' ' + str(kid.pid))\n"
+        "time.sleep(30)\n"
+    )
+
+
+def _read_pids(pids_file: Path, wait: float = 30.0) -> list[int]:
+    """The ``[example pid, grandchild pid]`` the script wrote (waits for them)."""
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        try:
+            parts = pids_file.read_text(encoding="utf-8").split()
+        except FileNotFoundError:
+            parts = []
+        if len(parts) == 2:
+            return [int(p) for p in parts]
+        time.sleep(0.05)
+    pytest.fail("the example never wrote its pids")
+
+
+def _wait_dead(pids: list[int], wait: float = 5.0) -> list[int]:
+    """The pids still alive after ``wait`` seconds (``[]`` when all are gone)."""
+    deadline = time.monotonic() + wait
+    alive = [p for p in pids if _pid_alive(p)]
+    while alive and time.monotonic() < deadline:
+        time.sleep(0.05)
+        alive = [p for p in alive if _pid_alive(p)]
+    return alive
+
+
+@pytest.mark.skipif(
+    not Path("/proc/self/stat").exists(), reason="reads /proc to see the pids"
+)
+class TestSigtermEndsRunningExamples:
+    """Review pass 3 NOTE 5 (step 12.34): SIGTERM wrote the report at once but
+    the process lived until every running example subprocess finished (up to
+    its 360 s harness timeout). An interrupt now ends the running examples."""
+
+    def test_sigterm_ends_the_running_example_and_its_subprocess_at_once(
+        self, tmp_path: Path
+    ):
+        pids_file = tmp_path / "pids.txt"
+        root = tmp_path / "examples"
+        _write(root / "basic" / "slow" / "run.py", _pids_script(pids_file))
+        config = _config(root, workers=1, timeout=60)
+        run_dir = create_output_dir(config, "m")
+        pids: list[int] = []
+
+        def terminate_when_running() -> None:
+            pids.extend(_read_pids(pids_file))
+            os.kill(os.getpid(), signal.SIGTERM)
+
+        killer = threading.Thread(target=terminate_when_running)
+        killer.start()
+        start = time.monotonic()
+        try:
+            report = run_examples(discover_examples(config), config, "m", run_dir)
+            killer.join(10)
+            assert report.interrupted is True
+            assert pids, "the script never started"
+            assert _wait_dead(pids) == []  # the example and its grandchild
+            # The pool thread, which Python joins at exit, is gone: the process
+            # would exit now, not when the 30 s script ends.
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and any(
+                t.name.startswith("ThreadPoolExecutor") for t in threading.enumerate()
+            ):
+                time.sleep(0.05)
+            assert not [
+                t
+                for t in threading.enumerate()
+                if t.name.startswith("ThreadPoolExecutor")
+            ]
+            assert time.monotonic() - start < 15
+        finally:
+            for pid in pids:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+
+    def test_a_timeout_ends_the_examples_own_subprocess_too(self, tmp_path: Path):
+        pids_file = tmp_path / "pids.txt"
+        script = tmp_path / "run.py"
+        _write(script, _pids_script(pids_file))
+        target = ExampleTarget(
+            name="basic/slow",
+            category="basic",
+            path=script,
+            interactive=False,
+            stdin_data=None,
+            timeout=2,
+        )
+        pids: list[int] = []
+        try:
+            result = run_example(target, "m", sys.executable, tmp_path)
+            pids.extend(_read_pids(pids_file, wait=1))
+            assert result.timed_out is True
+            assert _wait_dead(pids) == []
+        finally:
+            for pid in pids:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+
+    def test_a_child_refused_after_the_interrupt_never_runs(self, tmp_path: Path):
+        """A worker that was mid-spawn at the interrupt is not left running."""
+        from fsm_llm.eval import _pool
+
+        scope = _pool._ChildScope()
+        scope.terminate_all(grace=0)
+        script = tmp_path / "run.py"
+        _write(script, "print('ran')\n")
+        target = ExampleTarget(
+            name="basic/x",
+            category="basic",
+            path=script,
+            interactive=False,
+            stdin_data=None,
+            timeout=30,
+        )
+        _pool._active.scope = scope
+        try:
+            with pytest.raises(_pool.PoolInterrupted):
+                _pool.run_tracked(
+                    [sys.executable, str(script)],
+                    cwd=tmp_path,
+                    env=os.environ,
+                    input=None,
+                    timeout=30,
+                )
+            result = run_example(target, "m", sys.executable, tmp_path)
+        finally:
+            _pool._active.scope = None
+        assert result.exit_code == -1  # never raises: a crashed result
+        assert "interrupted" in (result.error or "")
+
+    def test_the_case_runner_starts_no_subprocess(self):
+        """`run_cases` trials are threads of this process (D-004 of plan
+        581c2634): nothing to terminate, so the registry never sees them."""
+        from fsm_llm.eval import cases
+
+        source = Path(cases.__file__).read_text(encoding="utf-8")
+        assert "import subprocess" not in source
+        assert "Popen" not in source
+        assert "run_tracked" not in source
+
+    def test_the_cli_process_exits_promptly_after_sigterm(self, tmp_path: Path):
+        pids_file = tmp_path / "pids.txt"
+        root = tmp_path / "examples"
+        _write(root / "basic" / "slow" / "run.py", _pids_script(pids_file))
+        out = tmp_path / "run"
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "fsm_llm.eval",
+                "examples",
+                "--examples-dir",
+                str(root),
+                "--output-dir",
+                str(out),
+                "--model",
+                "m",
+                "--workers",
+                "1",
+                "--timeout",
+                "60",
+            ],
+            cwd=tmp_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        pids: list[int] = []
+        try:
+            pids.extend(_read_pids(pids_file))
+            sent = time.monotonic()
+            proc.send_signal(signal.SIGTERM)
+            _, err = proc.communicate(timeout=20)
+            lingered = time.monotonic() - sent
+            assert proc.returncode == 130, err
+            assert lingered < 10, f"the process lingered {lingered:.1f}s"
+            assert _wait_dead(pids) == []
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            for pid in pids:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
