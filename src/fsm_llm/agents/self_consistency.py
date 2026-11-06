@@ -24,12 +24,11 @@ from .base import (
 from .constants import (
     ContextKeys,
     Defaults,
-    ErrorMessages,
     LogMessages,
     StopReason,
 )
 from .definitions import AgentConfig, AgentResult, AgentTrace
-from .exceptions import AgentError
+from .exceptions import AgentError, require_int_limit
 from .fsm_definitions import build_self_consistency_fsm
 
 _ANSWER_LINE = re.compile(
@@ -121,10 +120,8 @@ class SelfConsistencyAgent(BaseAgent):
             is deterministic and identical to serial.
         :param api_kwargs: Additional kwargs passed to fsm_llm.API
         """
-        if num_samples < 1:
-            raise AgentError(ErrorMessages.NO_SAMPLES)
-        if max_workers < 1:
-            raise AgentError("max_workers must be >= 1")
+        num_samples = require_int_limit("num_samples", num_samples, minimum=1)
+        max_workers = require_int_limit("max_workers", max_workers, minimum=1)
 
         super().__init__(config, **api_kwargs)
         self.num_samples = num_samples

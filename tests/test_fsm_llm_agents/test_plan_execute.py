@@ -90,7 +90,9 @@ class TestPlanExecuteAgentCreation:
 
     def test_negative_max_replans_is_refused(self):
         # Parent: -1 silently behaved as 0.
-        with pytest.raises(AgentError, match=r"max_replans must be >= 0.*-1"):
+        with pytest.raises(
+            AgentError, match=r"max_replans must be an int from 0 to \d+, got int -1"
+        ):
             PlanExecuteAgent(tools=_make_registry(), max_replans=-1)
 
     def test_zero_max_replans_still_means_no_replan(self):

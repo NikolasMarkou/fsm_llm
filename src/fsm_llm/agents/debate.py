@@ -25,6 +25,7 @@ from .constants import (
     StopReason,
 )
 from .definitions import AgentConfig, AgentResult, DebateRound
+from .exceptions import require_int_limit
 from .fsm_definitions import build_debate_fsm
 from .handlers import (
     make_fresh_keys_handler,
@@ -111,8 +112,11 @@ class DebateAgent(BaseAgent):
         :param judge_persona: Persona for the judge role
         :param api_kwargs: Additional kwargs passed to fsm_llm.API
         """
+        # DECISION plan-2026-11-06T093029-0068b055/D-008 (12.8): refuse, never
+        # clamp. ``max(1, num_rounds)`` made 0, -3 and every typo a silent 1.
+        num_rounds = require_int_limit("num_rounds", num_rounds, minimum=1)
         super().__init__(config, **api_kwargs)
-        self.num_rounds = max(1, num_rounds)
+        self.num_rounds = num_rounds
         self.proposer_persona = proposer_persona or _DEFAULT_PROPOSER_PERSONA
         self.critic_persona = critic_persona or _DEFAULT_CRITIC_PERSONA
         self.judge_persona = judge_persona or _DEFAULT_JUDGE_PERSONA

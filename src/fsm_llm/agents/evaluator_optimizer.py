@@ -25,6 +25,7 @@ from .constants import (
     StopReason,
 )
 from .definitions import AgentConfig, AgentResult, EvaluationResult
+from .exceptions import require_int_limit
 from .fsm_definitions import build_evalopt_fsm
 from .handlers import (
     make_iteration_limiter,
@@ -87,6 +88,9 @@ class EvaluatorOptimizerAgent(BaseAgent):
         :param max_refinements: Maximum number of refinement iterations
         :param api_kwargs: Additional kwargs passed to fsm_llm.API
         """
+        max_refinements = require_int_limit(
+            "max_refinements", max_refinements, minimum=0
+        )
         super().__init__(config, **api_kwargs)
         self.evaluation_fn = evaluation_fn
         self.max_refinements = max_refinements

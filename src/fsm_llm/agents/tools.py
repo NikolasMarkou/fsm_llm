@@ -27,7 +27,12 @@ from fsm_llm.utilities import redact_context
 
 from .constants import ContextKeys, Defaults, ErrorMessages, LogMessages
 from .definitions import ToolAnnotations, ToolCall, ToolDefinition, ToolResult
-from .exceptions import AgentError, ToolExecutionError, ToolNotFoundError
+from .exceptions import (
+    AgentError,
+    ToolExecutionError,
+    ToolNotFoundError,
+    bounded_repr,
+)
 
 # A string (``from __future__``) dict annotation: dict, dict[...], (typing.)Dict[...]
 _DICT_ANNOTATION_RE = re.compile(r"\s*(dict|(typing\.)?Dict)(\[.*\])?\s*")
@@ -967,7 +972,9 @@ def check_timeout(tool_name: str, timeout_s: Any) -> None:
     ):
         raise ToolExecutionError(
             ErrorMessages.TOOL_BAD_TIMEOUT.format(
-                name=tool_name, timeout=timeout_s, limit=Defaults.MAX_TOOL_TIMEOUT_S
+                name=tool_name,
+                timeout=bounded_repr(timeout_s),
+                limit=Defaults.MAX_TOOL_TIMEOUT_S,
             ),
             tool_name=tool_name,
         )

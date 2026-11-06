@@ -18,7 +18,7 @@ from fsm_llm.memory import WorkingMemory
 from .base import BaseAgent, pattern_run_output_keys, strip_caller_context
 from .constants import StopReason
 from .definitions import AgentConfig, AgentResult, AgentTrace
-from .exceptions import AgentTimeoutError, BudgetExhaustedError
+from .exceptions import AgentTimeoutError, BudgetExhaustedError, require_int_limit
 
 # DECISION plan-2026-09-29T103145-06a5ec0a/D-045: per-hop routing outputs.
 # The swarm reads them from one agent's result and never forwards them: an
@@ -87,7 +87,7 @@ class SwarmAgent(BaseAgent):
             )
         self._agents = agents
         self._entry_agent = entry_agent
-        self._max_handoffs = max_handoffs
+        self._max_handoffs = require_int_limit("max_handoffs", max_handoffs, minimum=0)
         self._memory = memory if memory is not None else WorkingMemory()
 
     def run(

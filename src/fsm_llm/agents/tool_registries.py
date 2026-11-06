@@ -27,6 +27,7 @@ from typing import Any
 from fsm_llm.logging import logger
 
 from .definitions import ToolCall, ToolResult
+from .exceptions import require_int_limit
 from .tools import ToolRegistry
 
 
@@ -59,6 +60,11 @@ class CachingToolRegistry(ToolRegistry):
 
     def __init__(self, max_entries: int | None = 256) -> None:
         super().__init__()
+        # A cap of 0 or less would pop from an empty cache on the first success.
+        if max_entries is not None:
+            max_entries = require_int_limit(
+                "max_entries", max_entries, minimum=1, error=ValueError
+            )
         self._cache: dict[tuple[str, Any], ToolResult] = {}
         self._cache_lock = threading.Lock()
         self._max_entries = max_entries
@@ -131,8 +137,9 @@ class RetryingToolRegistry(ToolRegistry):
 
     def __init__(self, max_retries: int = 2, backoff_seconds: float = 0.0) -> None:
         super().__init__()
-        if max_retries < 0:
-            raise ValueError("max_retries must be >= 0")
+        max_retries = require_int_limit(
+            "max_retries", max_retries, minimum=0, error=ValueError
+        )
         if backoff_seconds < 0:
             raise ValueError("backoff_seconds must be >= 0")
         self._max_retries = max_retries

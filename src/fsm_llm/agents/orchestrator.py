@@ -25,6 +25,7 @@ from .constants import (
     OrchestratorStates,
 )
 from .definitions import AgentConfig, AgentResult
+from .exceptions import require_int_limit
 from .fsm_definitions import build_orchestrator_fsm
 from .handlers import RunEndingErrorHolder, make_iteration_limiter
 from .tools import ToolRegistry
@@ -78,6 +79,7 @@ class OrchestratorAgent(BaseAgent):
         :param max_workers: Maximum number of subtask delegations per round
         :param api_kwargs: Additional kwargs passed to fsm_llm.API
         """
+        max_workers = require_int_limit("max_workers", max_workers, minimum=1)
         super().__init__(config, **api_kwargs)
         self.worker_factory = worker_factory
         self.tools = tools

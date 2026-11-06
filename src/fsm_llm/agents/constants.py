@@ -593,6 +593,10 @@ class Defaults:
     TEMPERATURE = DEFAULT_TEMPERATURE
     MAX_TOKENS = DEFAULT_MAX_TOKENS
     MAX_ITERATIONS = 10
+    # Largest integer an agent limit (``max_*``/``num_*``) or an artifact int
+    # config field may take: 63 bits. A larger int is no real limit, and past
+    # 4300 digits it breaks every f-string, log line and ``json.dumps`` of it.
+    MAX_INT_LIMIT = 2**63 - 1
     TIMEOUT_SECONDS = 300.0
     MCP_TIMEOUT_SECONDS = 30.0
     REMOTE_TOOL_TIMEOUT_SECONDS = 120.0  # RemoteAgentTool's HTTP call
@@ -1029,7 +1033,7 @@ class ErrorMessages:
         "assume it did not run"
     )
     TOOL_BAD_TIMEOUT = (
-        "Tool '{name}' has an invalid timeout_s {timeout!r}: it must be a "
+        "Tool '{name}' has an invalid timeout_s {timeout}: it must be a "
         "finite number above 0 and at most {limit} s; the tool was not run"
     )
     EXECUTE_WITHOUT_GATED = (
@@ -1048,7 +1052,6 @@ class ErrorMessages:
     # The answer when no speaking state replied (base and PromptChain).
     NO_ANSWER = "Agent could not determine an answer."
     EMPTY_CHAIN = "Cannot create prompt chain agent with empty chain"
-    NO_SAMPLES = "num_samples must be at least 1"
     PROMPT_SLOT_OVERFLOW = (
         "Agent prompt too long: {slot} exceeds core's {limit}-character "
         "instruction limit. It holds AgentConfig.instructions ({instructions} "

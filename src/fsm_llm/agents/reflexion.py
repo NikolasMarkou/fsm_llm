@@ -31,7 +31,7 @@ from .definitions import (
     EvaluationResult,
     ReflexionMemory,
 )
-from .exceptions import AgentError
+from .exceptions import require_int_limit
 from .fsm_definitions import build_reflexion_fsm
 from .handlers import AgentHandlers, make_fresh_keys_handler, run_evaluation_fn
 from .hitl import HumanInTheLoop
@@ -98,10 +98,11 @@ class ReflexionAgent(BaseAgent):
         # DECISION plan-2026-11-06T093029-0068b055/D-008
         # Refuse, never clamp: the cap check runs when reflect exits, after one
         # reflection is written, so 0 and -1 used to behave exactly like 1.
-        # Do NOT turn this into `max(1, max_reflections)` (the Debate outlier)
+        # Do NOT turn this into `max(1, max_reflections)` (Debate did, until 12.8)
         # and do NOT "honour" 0 by changing the FSM. See decisions.md D-008.
-        if max_reflections < 1:
-            raise AgentError(f"max_reflections must be >= 1, got {max_reflections}")
+        max_reflections = require_int_limit(
+            "max_reflections", max_reflections, minimum=1
+        )
 
         super().__init__(config, **api_kwargs)
         self.tools = tools

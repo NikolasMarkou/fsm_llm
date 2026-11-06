@@ -40,7 +40,7 @@ from .constants import (
     ToolRunStatus,
 )
 from .definitions import AgentConfig, AgentResult, ToolCall
-from .exceptions import AgentError
+from .exceptions import require_int_limit
 from .fsm_definitions import build_parallel_react_fsm
 from .handlers import (
     ThinkTurnLimiter,
@@ -69,8 +69,7 @@ class ParallelReactAgent(BaseAgent):
         **api_kwargs: Any,
     ) -> None:
         self._require_tools(tools)
-        if max_parallel < 1:
-            raise AgentError("max_parallel must be >= 1")
+        max_parallel = require_int_limit("max_parallel", max_parallel, minimum=1)
         super().__init__(config, **api_kwargs)
         self.tools = tools
         self._refuse_flagged_tools()

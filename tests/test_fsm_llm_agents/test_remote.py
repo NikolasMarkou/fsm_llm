@@ -407,6 +407,38 @@ class TestMaxConcurrent:
         with pytest.raises(ValueError, match="max_concurrent"):
             AgentServer(agent=_StubAgent(), max_concurrent=bad)
 
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            pytest.param(float("nan"), id="nan"),
+            pytest.param("2", id="str"),
+            pytest.param(10**5000, id="5000-digits"),
+            pytest.param(-(10**5000), id="neg-5000-digits"),
+        ],
+    )
+    def test_max_concurrent_message_is_bounded(self, bad):
+        # F-AR-13b: the old ``{max_concurrent!r}`` raised a bare ValueError
+        # from the formatter for an int past 4300 digits.
+        with pytest.raises(ValueError, match="max_concurrent") as info:
+            AgentServer(agent=_StubAgent(), max_concurrent=bad)
+        assert len(str(info.value)) < 300
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            0,
+            -1,
+            True,
+            1.5,
+            float("nan"),
+            "100",
+            pytest.param(10**5000, id="5000-digits"),
+        ],
+    )
+    def test_invalid_max_input_chars_rejected(self, bad):
+        with pytest.raises(ValueError, match="max_input_chars"):
+            AgentServer(agent=_StubAgent(), max_input_chars=bad)
+
     @pytest.mark.parametrize("route", ROUTES)
     def test_request_while_saturated_is_503(self, route):
         agent = _BlockingAgent()

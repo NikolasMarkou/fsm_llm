@@ -41,6 +41,7 @@ from fsm_llm.llm import DEFAULT_EMBEDDING_MODEL
 from fsm_llm.logging import logger
 
 from .definitions import READ_ONLY_ANNOTATIONS, ToolDefinition
+from .exceptions import require_int_limit
 from .semantic_tools import EmbedFn, cosine_similarity, embedding_backend
 from .tools import tool
 
@@ -167,6 +168,10 @@ class SemanticMemoryStore:
             embedding_model = _recorded_model(data) or DEFAULT_EMBEDDING_MODEL
         self._embedding_model = embedding_model
         self._embed_texts = embedding_backend(embedding_model, embed_fn)
+        if max_entries is not None:
+            max_entries = require_int_limit(
+                "max_entries", max_entries, minimum=0, error=ValueError
+            )
         self._max_entries = max_entries
         self._entries: list[MemoryEntry] = []
         self._counter = 0

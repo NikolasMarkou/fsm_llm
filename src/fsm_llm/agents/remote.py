@@ -18,7 +18,7 @@ from fsm_llm.security import api_key_matches, checked_api_key, presented_api_key
 from .base import strip_caller_context
 from .constants import Defaults
 from .definitions import ToolDefinition
-from .exceptions import ToolExecutionError
+from .exceptions import ToolExecutionError, require_int_limit
 
 try:
     import httpx
@@ -141,11 +141,12 @@ class AgentServer:
         max_concurrent: int = Defaults.SERVER_MAX_CONCURRENT,
     ) -> None:
         _require_fastapi()
-        if isinstance(max_concurrent, bool) or not (
-            isinstance(max_concurrent, int) and max_concurrent >= 1
-        ):
-            raise ValueError(
-                f"max_concurrent must be an int >= 1, got {max_concurrent!r}"
+        max_concurrent = require_int_limit(
+            "max_concurrent", max_concurrent, minimum=1, error=ValueError
+        )
+        if max_input_chars is not None:
+            max_input_chars = require_int_limit(
+                "max_input_chars", max_input_chars, minimum=1, error=ValueError
             )
         self._agent = agent
         self._host = host

@@ -28,7 +28,7 @@ from .constants import (
     StopReason,
 )
 from .definitions import AgentConfig, AgentResult
-from .exceptions import AgentError
+from .exceptions import AgentError, require_int_limit
 from .fsm_definitions import build_adapt_fsm
 from .handlers import RunEndingErrorHolder, make_iteration_limiter
 from .tools import ToolRegistry
@@ -70,6 +70,7 @@ class ADaPTAgent(BaseAgent):
         max_depth: int = Defaults.MAX_DECOMPOSITION_DEPTH,
         **api_kwargs: Any,
     ) -> None:
+        max_depth = require_int_limit("max_depth", max_depth, minimum=0)
         super().__init__(config, **api_kwargs)
         # DECISION plan-2026-11-06T093029-0068b055/D-007
         # ADaPT has no tool executor, so `tools` is stored but never advertised

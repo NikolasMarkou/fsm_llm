@@ -25,6 +25,7 @@ from .constants import (
     StopReason,
 )
 from .definitions import AgentConfig, AgentResult
+from .exceptions import require_int_limit
 from .fsm_definitions import build_maker_checker_fsm
 from .handlers import make_iteration_limiter, make_redraft_handlers
 
@@ -88,6 +89,7 @@ class MakerCheckerAgent(BaseAgent):
         :param quality_threshold: Minimum quality score to pass (0.0-1.0)
         :param api_kwargs: Additional kwargs passed to fsm_llm.API
         """
+        max_revisions = require_int_limit("max_revisions", max_revisions, minimum=0)
         super().__init__(config, **api_kwargs)
         self.maker_instructions = maker_instructions
         self.checker_instructions = checker_instructions

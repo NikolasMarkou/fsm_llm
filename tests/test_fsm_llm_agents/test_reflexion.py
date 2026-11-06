@@ -104,7 +104,9 @@ class TestReflexionAgentCreation:
     def test_max_reflections_below_one_is_refused(self, value):
         # Parent: 0 and -1 behaved exactly like 1 (the cap check runs on reflect
         # exit, after one reflection is written).
-        with pytest.raises(AgentError, match=r"max_reflections must be >= 1.*"):
+        with pytest.raises(
+            AgentError, match=r"max_reflections must be an int from 1 to"
+        ):
             ReflexionAgent(tools=_make_registry(), max_reflections=value)
 
     def test_max_reflections_one_is_accepted(self):

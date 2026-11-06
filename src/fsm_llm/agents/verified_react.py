@@ -42,7 +42,7 @@ from fsm_llm.logging import logger
 
 from .constants import ContextKeys, StopReason
 from .definitions import AgentResult
-from .exceptions import AgentError
+from .exceptions import require_int_limit
 from .react import ReactAgent
 
 _REFLECTION_NOTE = (
@@ -63,9 +63,10 @@ class VerifiedReactAgent(ReactAgent):
     """
 
     def __init__(self, *args: Any, max_verify_retries: int = 1, **kwargs: Any) -> None:
+        max_verify_retries = require_int_limit(
+            "max_verify_retries", max_verify_retries, minimum=0
+        )
         super().__init__(*args, **kwargs)
-        if max_verify_retries < 0:
-            raise AgentError("max_verify_retries must be >= 0")
         self.max_verify_retries = max_verify_retries
 
     # --- verification ---------------------------------------------------

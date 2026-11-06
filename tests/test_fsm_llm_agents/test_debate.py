@@ -11,6 +11,7 @@ import pytest
 from fsm_llm.agents.constants import ContextKeys, DebateStates, Defaults, HandlerNames
 from fsm_llm.agents.debate import DebateAgent
 from fsm_llm.agents.definitions import AgentConfig, DebateRound
+from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.fsm_definitions import build_debate_fsm
 from fsm_llm.definitions import (
     DataExtractionResponse,
@@ -57,13 +58,11 @@ class TestDebateAgentCreation:
         assert agent.config.max_iterations == 5
         assert agent.config.model == "gpt-4o"
 
-    def test_num_rounds_clamped_to_minimum_one(self):
-        agent = DebateAgent(num_rounds=0)
-        assert agent.num_rounds == 1
-
-    def test_num_rounds_negative_clamped_to_one(self):
-        agent = DebateAgent(num_rounds=-3)
-        assert agent.num_rounds == 1
+    @pytest.mark.parametrize("value", [0, -3])
+    def test_num_rounds_below_one_is_refused_not_clamped(self, value):
+        # Before step 12.8 ``max(1, num_rounds)`` made 0 and -3 a silent 1.
+        with pytest.raises(AgentError, match="num_rounds must be an int from 1"):
+            DebateAgent(num_rounds=value)
 
     def test_no_tool_registry_needed(self):
         """DebateAgent does not require a ToolRegistry."""

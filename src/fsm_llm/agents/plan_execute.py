@@ -27,7 +27,7 @@ from .constants import (
     ToolRunStatus,
 )
 from .definitions import AgentConfig, AgentResult
-from .exceptions import AgentError
+from .exceptions import require_int_limit
 from .fsm_definitions import build_plan_execute_fsm
 from .handlers import AgentHandlers, make_fresh_keys_handler
 from .tools import ToolRegistry
@@ -108,8 +108,7 @@ class PlanExecuteAgent(BaseAgent):
         # 0 is a real setting (no replans, pinned in test_plan_execute.py) and
         # stays valid; only a negative value, which silently behaved as 0, is
         # refused. Do NOT clamp it. See decisions.md D-008.
-        if max_replans < 0:
-            raise AgentError(f"max_replans must be >= 0, got {max_replans}")
+        max_replans = require_int_limit("max_replans", max_replans, minimum=0)
         super().__init__(config, **api_kwargs)
         self.tools = tools
         self._refuse_flagged_tools()

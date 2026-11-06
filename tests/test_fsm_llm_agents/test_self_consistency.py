@@ -38,11 +38,11 @@ class TestSelfConsistencyCreation:
         assert agent.aggregation_fn is custom_fn
 
     def test_create_with_num_samples_zero_raises(self):
-        with pytest.raises(AgentError, match="at least 1"):
+        with pytest.raises(AgentError, match="num_samples must be an int from 1"):
             SelfConsistencyAgent(num_samples=0)
 
     def test_create_with_num_samples_negative_raises(self):
-        with pytest.raises(AgentError, match="at least 1"):
+        with pytest.raises(AgentError, match="num_samples must be an int from 1"):
             SelfConsistencyAgent(num_samples=-5)
 
     def test_create_with_config_override(self):
