@@ -92,7 +92,7 @@ _CASES: dict[str, tuple[Callable[[], Any], bool]] = {
     "orchestrator": (lambda: fd.build_orchestrator_fsm(), True),
     "orchestrator_keys": (lambda: fd.build_orchestrator_fsm(_TASK, _KEYS), True),
     "adapt": (lambda: fd.build_adapt_fsm(), True),
-    "adapt_depth": (lambda: fd.build_adapt_fsm(None, "", 5), True),
+    "adapt_depth": (lambda: fd.build_adapt_fsm(max_depth=5), True),
     # reflexion
     "reflexion": (lambda: fd.build_reflexion_fsm(_registry(*_TOOLS)), True),
     "reflexion_approval": (

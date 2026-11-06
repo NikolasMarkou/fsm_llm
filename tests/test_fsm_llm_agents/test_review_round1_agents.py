@@ -372,7 +372,7 @@ def _all_builder_fsms() -> list[tuple[str, dict[str, Any]]]:
         ("plan_execute", build_plan_execute_fsm(tools)),
         ("rewoo", build_rewoo_fsm(tools)),
         ("orchestrator", build_orchestrator_fsm()),
-        ("adapt", build_adapt_fsm(tools)),
+        ("adapt", build_adapt_fsm()),
         ("debate", build_debate_fsm()),
         ("evalopt", build_evalopt_fsm()),
         ("maker_checker", build_maker_checker_fsm("make it", "check it")),

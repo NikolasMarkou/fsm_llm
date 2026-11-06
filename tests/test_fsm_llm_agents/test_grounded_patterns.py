@@ -2487,7 +2487,7 @@ class TestNarrowedPlannerFields:
 
         fsm = {
             "orchestrator": lambda: defs.build_orchestrator_fsm("t"),
-            "adapt": lambda: defs.build_adapt_fsm(None, "t"),
+            "adapt": lambda: defs.build_adapt_fsm(task_description="t"),
             "rewoo": lambda: defs.build_rewoo_fsm(_rewoo_registry([]), "t"),
             "debate": lambda: defs.build_debate_fsm("t"),
         }[builder]()

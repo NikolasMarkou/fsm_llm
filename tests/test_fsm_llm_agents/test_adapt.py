@@ -139,11 +139,8 @@ class TestADaPTFSM:
         fsm = build_adapt_fsm()
         assert "adaptive" in fsm["persona"].lower()
 
-    def test_fsm_with_registry(self):
-        """build_adapt_fsm accepts an optional ToolRegistry."""
-        registry = _make_registry()
-        fsm = build_adapt_fsm(registry=registry)
-        fsm_def = FSMDefinition(**fsm)
+    def test_fsm_loads_as_a_definition(self):
+        fsm_def = FSMDefinition(**build_adapt_fsm())
         assert fsm_def.name == "adapt_agent"
 
     def test_assess_success_priority_higher_than_decompose(self):
@@ -672,7 +669,7 @@ class TestShortAnswer:
 
 
 # -------------------------------------------------------------------------
-# F-AP-16 (plan-2026-11-06T093029-0068b055 step 6, D-007 and D-016): ADaPT
+# F-AP-16 (plan-2026-11-06T093029-0068b055 step 6, D-007, D-016 and D-017): ADaPT
 # runs no tool, so it neither advertises nor logs one.
 # -------------------------------------------------------------------------
 
@@ -701,16 +698,44 @@ def _instruction_strings(node: Any) -> list[str]:
 
 
 class TestADaPTRunsNoTool:
-    def test_adapt_prompts_name_no_tool_even_with_a_registry(self):
-        fsm = build_adapt_fsm(_marker_registry([]), "some task")
+    def test_adapt_prompts_name_no_tool_even_with_a_registry(self, monkeypatch):
+        from fsm_llm.agents import adapt as adapt_module
+
+        built: list[tuple[tuple, dict, dict]] = []
+        real = adapt_module.build_adapt_fsm
+
+        def spy(*args, **kwargs):
+            fsm = real(*args, **kwargs)
+            built.append((args, kwargs, fsm))
+            return fsm
+
+        monkeypatch.setattr(adapt_module, "build_adapt_fsm", spy)
+        llm = _SilentKeysLLM(
+            silent=set(),
+            values={
+                ContextKeys.ATTEMPT_RESULT: "Paris",
+                ContextKeys.ATTEMPT_SUCCEEDED: True,
+            },
+        )
+        ADaPTAgent(tools=_marker_registry([]), llm_interface=llm).run("some task")
+        assert built
+        args, kwargs, fsm = built[0]
+        assert not args and "registry" not in kwargs
         text = "\n".join(_instruction_strings(fsm))
         assert "zzz_marker_tool" not in text
         assert "Available tools" not in text
 
-    def test_build_adapt_fsm_registry_changes_nothing(self):
-        assert build_adapt_fsm(_marker_registry([]), "t", 2, ("k",)) == (
-            build_adapt_fsm(None, "t", 2, ("k",))
-        )
+    def test_build_adapt_fsm_has_no_registry_parameter(self):
+        import inspect
+
+        assert "registry" not in inspect.signature(build_adapt_fsm).parameters
+        with pytest.raises(TypeError):
+            build_adapt_fsm(registry=_marker_registry([]))  # type: ignore[call-arg]
+        assert list(inspect.signature(build_adapt_fsm).parameters) == [
+            "task_description",
+            "max_depth",
+            "context_keys",
+        ]
 
     def test_adapt_logs_llm_only_with_tools_given(self):
         from fsm_llm.logging import enable_library_logging, logger

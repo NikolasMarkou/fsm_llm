@@ -334,7 +334,6 @@ def build_orchestrator_fsm(
 
 
 def build_adapt_fsm(
-    registry: ToolRegistry | None = None,
     task_description: str = "",
     max_depth: int = 3,
     context_keys: Sequence[str] = (),
@@ -354,13 +353,12 @@ def build_adapt_fsm(
     state-level bulk call. Raises ``ValueError`` like
     :func:`loop_field_context_keys`.
 
-    ``registry`` is reserved and unused: ADaPT runs no tool, so none is
-    advertised and the FSM built with a registry equals the one built without.
+    ADaPT runs no tool, so the builder takes no registry.
     """
-    # DECISION plan-2026-11-06T093029-0068b055/D-016: ``registry`` is kept only
-    # because four in-repo tests pass it (removal is carried as F-AP-16c). Do
-    # NOT make it affect the FSM again (D-007) and do NOT delete it without
-    # editing those tests.
+    # DECISION plan-2026-11-06T093029-0068b055/D-017: the ``registry``
+    # parameter was removed (D-016 had kept it as a no-effect shim). Do NOT add
+    # it back or any parameter the FSM does not read (D-007): ``ADaPTAgent(
+    # tools=)`` is accepted and stored, never passed here.
     persona = (
         "You are an adaptive AI agent that attempts tasks directly first. "
         "If the direct attempt is insufficient, you decompose the task into "

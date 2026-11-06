@@ -178,7 +178,7 @@ def _definitions() -> list[tuple[str, dict[str, Any]]]:
             ),
         ),
         ("orchestrator", build_orchestrator_fsm()),
-        ("adapt", build_adapt_fsm(_registry())),
+        ("adapt", build_adapt_fsm()),
         ("prompt_chain", build_prompt_chain_fsm(chain)),
         ("debate", build_debate_fsm()),
         ("self_consistency", build_self_consistency_fsm()),

@@ -77,7 +77,7 @@ class ADaPTAgent(BaseAgent):
         # re-advertise tools the agent cannot run (the prompt used to say
         # "Available tools" next to "from your own knowledge"), and do NOT add
         # an executor without a live-model check (carried as F-AP-16b). The
-        # builder keeps a no-effect `registry=` parameter: D-016, F-AP-16c.
+        # builder has no `registry=` parameter either (D-017).
         self.tools = tools
         self.max_depth = max_depth
 
