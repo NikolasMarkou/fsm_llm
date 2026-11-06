@@ -271,7 +271,8 @@ class ManagedWorkflow(_ManagedBase):
         # Every run started on this engine, in order, and its last status.
         self.run_ids: list[str] = []
         self.run_statuses: dict[str, str] = {}
-        # Event loop the engine's timers run on (set at launch).
+        # Event loop the engine's timers run on (set at launch when one is
+        # running, and by start_workflow_instance, which is where it matters).
         self.loop: asyncio.AbstractEventLoop | None = None
 
     def to_info(self) -> InstanceInfo:
@@ -1361,6 +1362,10 @@ class InstanceManager:
         for pure auto/condition presets happens inside ``start_workflow``.
         """
         inst = self._get_workflow(instance_id)
+        # The engine's timers and background runs live on THIS loop. The
+        # launch route builds the instance in a worker thread (no loop there),
+        # so record the owning loop here for ``_teardown``.
+        inst.loop = asyncio.get_running_loop()
         wf_instance_id = str(uuid.uuid4())
         with self._lock:
             inst.run_ids.append(wf_instance_id)

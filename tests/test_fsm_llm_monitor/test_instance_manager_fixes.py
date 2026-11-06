@@ -249,3 +249,63 @@ class TestShutdownTearsDownEveryInstanceType:
 
         asyncio.run(go())
         assert stopped == [1]
+
+
+class TestRouteLaunchedWorkflowIsStopped:
+    """REVIEW-C1: ``POST /api/workflow/launch`` runs ``launch_workflow`` in a
+    worker thread, where no loop is running; the engine still lives on the
+    server loop, so destroy and shutdown must stop it there."""
+
+    @staticmethod
+    def _launch(client, mgr):
+        r = client.post(
+            "/api/workflow/launch",
+            json={"preset_id": mgr.get_workflow_presets()[0]["id"]},
+        )
+        assert r.status_code == 200, r.text
+        inst = mgr._instances[r.json()["instance_id"]]
+        stopped: list[int] = []
+        original = inst.engine.shutdown
+
+        async def _spy() -> None:
+            stopped.append(1)
+            await original()
+
+        inst.engine.shutdown = _spy
+        return inst, stopped
+
+    @staticmethod
+    def _wait(stopped: list[int]) -> None:
+        import time
+
+        deadline = time.monotonic() + 2
+        while not stopped and time.monotonic() < deadline:
+            time.sleep(0.02)
+
+    def test_destroy_stops_the_engine(self):
+        from fastapi.testclient import TestClient
+
+        from fsm_llm.monitor import server
+
+        mgr = _manager()
+        server.configure(manager=mgr)
+        with TestClient(server.app) as client:
+            inst, stopped = self._launch(client, mgr)
+            assert inst.loop is not None
+            r = client.delete(f"/api/instances/{inst.instance_id}")
+            assert r.status_code == 200, r.text
+            self._wait(stopped)
+        assert stopped == [1]
+
+    def test_shutdown_stops_the_engine(self):
+        from fastapi.testclient import TestClient
+
+        from fsm_llm.monitor import server
+
+        mgr = _manager()
+        server.configure(manager=mgr)
+        with TestClient(server.app) as client:
+            _inst, stopped = self._launch(client, mgr)
+            mgr.shutdown()
+            self._wait(stopped)
+        assert stopped == [1]
