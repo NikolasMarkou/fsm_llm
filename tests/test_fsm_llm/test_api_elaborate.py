@@ -1313,6 +1313,25 @@ class TestHistoryWindowFollowsMaxHistorySize:
             manager.field_extraction_prompt_builder
         )
 
+    @pytest.mark.parametrize(
+        ("given", "shown"), [(2.0, 2), ("3", 3), (4.0, 4)], ids=["float", "str", "f4"]
+    )
+    def test_coerced_size_is_validated_before_the_prompt_configs(self, given, shown):
+        """A float or numeric string the Conversation coerces works as before."""
+        from tests.conftest import MockLLM2Interface
+
+        llm = MockLLM2Interface()
+        api = API.from_definition(_LOOP_FSM, llm_interface=llm, max_history_size=given)
+        manager = api.fsm_manager
+        for builder in (
+            manager.data_extraction_prompt_builder,
+            manager.response_generation_prompt_builder,
+            manager.field_extraction_prompt_builder,
+        ):
+            assert builder.config.max_history_messages == shown
+            assert type(builder.config.max_history_messages) is int
+        assert _shown_messages(_converse_twelve_turns(api, llm)) == shown
+
     def test_default_size_prompt_is_byte_identical(self):
         from tests.conftest import MockLLM2Interface
 

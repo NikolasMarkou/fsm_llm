@@ -245,7 +245,7 @@ class FSMManager:
         # fields; validating through them here fails at construction, naming the
         # argument, instead of at every ``start_conversation``.
         try:
-            Conversation(
+            limits = Conversation(
                 max_history_size=max_history_size,
                 max_message_length=max_message_length,
             )
@@ -276,7 +276,8 @@ class FSMManager:
         self._fsm_cache_lock = threading.Lock()
         self.instances: dict[str, FSMInstance] = {}
 
-        # Configuration
+        # Configuration (the validated, coerced values: 2.0 and "5" mean 2 and 5)
+        max_history_size = limits.max_history_size
         self.max_history_size = max_history_size
         self.max_message_length = max_message_length
 
@@ -294,8 +295,10 @@ class FSMManager:
         # messages and moves the eval baselines (carried, needs a live run), and
         # D-038 / test_bugs.py pin the unmultiplied number. Do NOT leave the
         # defaults config-less either: then the knob only sizes storage and the
-        # model never sees a larger window. api.py builds no builders of its own
-        # so this stays the one site.
+        # model never sees a larger window. Pass the VALIDATED value (the one
+        # `Conversation` coerced above), never the raw argument: 2.0 or "5" would
+        # reach the slice or comparison in the prompt builder as a float or str.
+        # api.py builds no builders of its own so this stays the one site.
         self.data_extraction_prompt_builder = (
             data_extraction_prompt_builder
             or DataExtractionPromptBuilder(
