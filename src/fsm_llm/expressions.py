@@ -65,8 +65,8 @@ None / missing rule (one rule, applied by ``evaluate_logic``):
       operand (``{"-": [5]}`` is ``-5``); ``{"-": [5, null]}`` is undefined.
     * ``==`` / ``!=`` keep ``null == null`` True (JsonLogic), a ``None``
       never equals a non-``None`` value (so an unset var never equals the
-      string ``"None"``), and numerically equal operands are equal
-      (``{"==": [1.0, "1"]}`` is True), so ``==``, ``<=`` and ``>=`` agree.
+      string ``"None"``), and a number equals a numeric string
+      (``{"==": [1.0, "1"]}`` is True).
       Only plain ASCII decimal/scientific strings are numeric (``"1"``,
       ``"-2.5"``, ``"1e3"``, ``".5"``); Python-only forms (``"1_000"``,
       ``" 1 "``, ``"inf"``, ``"nan"``) and non-ASCII digits (Arabic-Indic,
@@ -75,6 +75,14 @@ None / missing rule (one rule, applied by ``evaluate_logic``):
       A ``bool`` operand is never numerically coerced by ``==``
       (``true == "1"`` is False; ``true == 1`` stays True via ``bool()``),
       and neither are two strings (``"01" == "1"`` is False, as in JS).
+      ``<=`` and ``>=`` do NOT mirror that: they also accept numerically
+      equal operands that ``==`` refuses, so ``"01" <= "1"`` and
+      ``"01" >= "1"`` are True, and so is ``true <= "1"``, while ``"01" ==
+      "1"`` and ``true == "1"`` are False. ``<`` and ``>`` coerce two numeric
+      strings to numbers (``"10" < "9"`` is False). A gate on a numeric string
+      therefore reads the same through ``<=``/``>=`` however the number is
+      spelled (``>= "50"`` accepts ``"50.0"``); use ``==`` only where the
+      spelling is the identity (zip codes, ids).
     * "Missing" means absent, ``None`` or ``""`` (``is_missing``). It is the
       one predicate behind ``missing``, ``missing_some`` and a transition
       condition's ``requires_context_keys``. ``0``, ``False`` and ``[]`` are
@@ -157,10 +165,13 @@ def soft_equals(a: Any, b: Any) -> bool:
 
         Rules 3-4 also accept numerically equal operands (``_numeric_equal``:
         ``1.0 == "1"``), so ``==`` agrees with ``<=``/``>=`` on mixed
-        number/string operands. Rule 1 (any ``bool``) is never numerically
-        coerced, and rule 2 (two strings) never is either: ``"01" == "1"`` is
-        False, as in JavaScript, because identifiers such as zip codes and
-        account numbers are strings whose leading zeros matter.
+        number/string operands only. ``<=``/``>=`` go further (two strings
+        and a bool against a numeric string, see ``_numeric_equal``), so they
+        accept some pairs that ``==`` refuses. Rule 1 (any ``bool``) is never
+        numerically coerced, and rule 2 (two strings) never is either:
+        ``"01" == "1"`` is False, as in JavaScript, because identifiers such
+        as zip codes and account numbers are strings whose leading zeros
+        matter.
     """
     # Boolean comparison — guard None, handle bool+string ("true"==True)
     if isinstance(a, bool) or isinstance(b, bool):
@@ -178,8 +189,9 @@ def soft_equals(a: Any, b: Any) -> bool:
     # (LLMs often return "Yes"/"yes", "Buy"/"buy" inconsistently)
     # DECISION plan-2026-09-21T203800-8a03483a/D-013 (supersedes
     # plan-2026-07-19T191147-4b664252/D-023 "soft_equals is deliberately
-    # untouched"): rules 3-4 below accept numerically equal operands so `==`,
-    # `<=` and `>=` agree (`1.0 == "1"`). Do NOT move this coercion above the
+    # untouched"): rules 3-4 below accept numerically equal operands so `==`
+    # agrees with `<=`/`>=` on a number against a numeric string
+    # (`1.0 == "1"`). Do NOT move this coercion above the
     # bool branch (`true == "1"` must stay False), do NOT apply it to two
     # strings (`"01" == "1"` must stay False: zip codes, ids), and do NOT let
     # it reach a None operand (`_numeric_equal` is False for None, D-017).
@@ -296,9 +308,13 @@ def _numeric_equal(a: Any, b: Any) -> bool:
 
     Interface contract: ``a``/``b`` any values; never raises (an uncoercible
     side, including ``None``, is simply not numerically equal). Shared by
-    ``soft_equals`` (non-bool rules only) and ``<=``/``>=``, so the three
-    agree on numeric equality (D-013 of plan-2026-09-21T203800-8a03483a,
-    superseding the earlier D-023 that kept ``soft_equals`` out of it). A
+    ``soft_equals`` (rules 3-4 only: never two strings, never a ``bool``) and
+    ``<=``/``>=`` (any pair). The three agree on a number against a numeric
+    string (D-013 of plan-2026-09-21T203800-8a03483a, superseding the earlier
+    D-023 that kept ``soft_equals`` out of it) but NOT everywhere: ``<=``/``>=``
+    also accept two numeric strings spelled differently (``"01" <= "1"``,
+    ``"1" >= "1.0"``) and a ``bool`` against a numeric string (``True <= "1"``),
+    all of which ``==`` rejects. ``<`` and ``>`` never use this helper. A
     ``str`` side must be a plain decimal/scientific literal
     (``_PLAIN_NUMBER_RE``); ``"1_000"``, ``" 1 "``, ``"inf"`` are not numbers.
     """
@@ -353,6 +369,11 @@ def less_or_equal(a: Any, b: Any, *args: Any) -> bool:
         Supports the same type coercion as the less() function.
     """
     # Check if a <= b (either a < b or a == b)
+    # DECISION plan-2026-11-06T093029-0068b055/D-005: the third term is kept on
+    # purpose and is why `"01" <= "1"` is True while `"01" == "1"` is False.
+    # Do NOT drop it as "redundant with soft_equals": a numeric-string gate such
+    # as `>= "50"` on an extracted "50.0" would flip to False, silently. Do NOT
+    # add it to `==` either (ids rule, D-013 of plan-2026-09-21T203800-8a03483a).
     primary_result = less(a, b) or soft_equals(a, b) or _numeric_equal(a, b)
 
     # If no additional args or primary comparison fails, return result
@@ -373,6 +394,8 @@ def greater(a: Any, b: Any, *args: Any) -> bool:
 
 def greater_or_equal(a: Any, b: Any, *args: Any) -> bool:
     """Implement '>=' with chaining support (a >= b >= c)."""
+    # DECISION plan-2026-11-06T093029-0068b055/D-005: same kept third term as
+    # `less_or_equal`; see the anchor there before touching it.
     result = less(b, a) or soft_equals(a, b) or _numeric_equal(a, b)
     if not args or not result:
         return result

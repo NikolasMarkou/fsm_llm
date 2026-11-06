@@ -1887,3 +1887,58 @@ class TestPromptTooLargeError:
         assert "big_notes (35000 characters)" in text
         assert "_hidden_blob" not in text and "api_key" not in text
         assert "x" * 50 not in text and "k" * 50 not in text
+
+
+class TestSeededTimestampFormats:
+    """F-AF-23 (D-006): the formats of the seeded timestamp keys, as the docs
+    state them. A pin: the stored values are kept, not changed."""
+
+    def test_conversation_start_is_naive_local_iso_and_not_persisted(self, tmp_path):
+        import time
+        from datetime import datetime
+
+        from fsm_llm import API, FileSessionStore
+        from tests.conftest import MockLLM2Interface
+
+        store = FileSessionStore(tmp_path)
+        api = API.from_definition(
+            _cap_fsm(), llm_interface=MockLLM2Interface(), session_store=store
+        )
+        wall_before = datetime.now()
+        epoch_before = time.time()
+        conv, _ = api.start_conversation()
+        wall_after = datetime.now()
+        epoch_after = time.time()
+
+        fsm_conv_id = api.conversation_stacks[conv][0].conversation_id
+        data = api.fsm_manager.instances[fsm_conv_id].context.data
+
+        # `_conversation_start`: ISO text, no UTC offset, local wall clock.
+        start = data["_conversation_start"]
+        assert isinstance(start, str)
+        parsed = datetime.fromisoformat(start)
+        assert parsed.tzinfo is None
+        assert wall_before <= parsed <= wall_after
+        # `_timestamp`: epoch seconds (a float), the same instant, never updated.
+        assert isinstance(data["_timestamp"], float)
+        assert epoch_before <= data["_timestamp"] <= epoch_after
+        assert abs(parsed.timestamp() - data["_timestamp"]) < 1.0
+
+        # `_transition_timestamp`: epoch seconds, set when the state changes.
+        assert "_transition_timestamp" not in data
+        api.update_context(conv, {"bye": True})
+        transition_before = time.time()
+        api.converse("bye", conv)
+        transition_after = time.time()
+        assert api.get_current_state(conv) == "done"
+        stamp = data["_transition_timestamp"]
+        assert isinstance(stamp, float)
+        assert transition_before <= stamp <= transition_after
+        assert data["_timestamp"] <= epoch_after <= stamp
+
+        # None of the three is persisted: a saved session carries no `_` key.
+        api.save_session(conv)
+        saved = store.load(conv)
+        assert saved is not None
+        for key in ("_conversation_start", "_timestamp", "_transition_timestamp"):
+            assert key not in saved.context_data

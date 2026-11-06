@@ -722,3 +722,47 @@ class TestFailedArithmeticIsUndefined:
             evaluate_logic({"/": [1, 0]})
         with pytest.raises(TransitionEvaluationError):
             evaluate_logic({"%": [1, 0]})
+
+
+class TestNumericStringOrdering:
+    """F-DV-06 (D-005): ``<=``/``>=`` also accept numerically equal operands
+    that ``==`` refuses. The behaviour is kept; these tests state it."""
+
+    def test_le_ge_accept_equal_numeric_strings_where_eq_does_not(self):
+        """PIN (green on the parent, not a RED): the asymmetry is deliberate.
+
+        Dropping the ``_numeric_equal`` term from ``<=``/``>=`` would flip a
+        numeric-string gate such as ``>= "50"`` on an extracted ``"50.0"``
+        silently; making ``==`` numeric on two strings breaks the ids rule.
+        """
+        # Two differently spelled numeric strings.
+        for a, b in (("01", "1"), ("1", "1.0"), (".5", "0.5")):
+            assert evaluate_logic({"==": [a, b]}) is False, (a, b)
+            assert evaluate_logic({"<=": [a, b]}) is True, (a, b)
+            assert evaluate_logic({">=": [a, b]}) is True, (a, b)
+            # Strict ordering never calls the helper, so it stays False.
+            assert evaluate_logic({"<": [a, b]}) is False, (a, b)
+            assert evaluate_logic({">": [a, b]}) is False, (a, b)
+        # A bool against a numeric string.
+        assert evaluate_logic({"==": [True, "1"]}) is False
+        assert evaluate_logic({"<=": [True, "1"]}) is True
+        assert evaluate_logic({">=": [True, "1"]}) is True
+        # The gate the kept behaviour protects.
+        gate = {">=": [{"var": "score"}, "50"]}
+        assert evaluate_logic(gate, {"score": "50.0"}) is True
+        # A number against a numeric string is the case where all three agree.
+        assert evaluate_logic({"==": [1.0, "1"]}) is True
+        assert evaluate_logic({"<=": [1.0, "1"]}) is True
+        # Non-numbers are never equal through the helper.
+        assert evaluate_logic({"<=": ["1_000", "1000"]}) is False
+
+    def test_module_docstring_does_not_claim_eq_le_ge_agree(self):
+        import fsm_llm.expressions as expressions
+
+        doc = " ".join((expressions.__doc__ or "").split())
+        assert "so ``==``, ``<=`` and ``>=`` agree" not in doc
+        # It says what the operators do differ on instead.
+        assert '``"01" <= "1"``' in doc
+        helper = " ".join((expressions._numeric_equal.__doc__ or "").split())
+        assert "so the three agree on numeric equality" not in helper
+        assert '``"01" <= "1"``' in helper
