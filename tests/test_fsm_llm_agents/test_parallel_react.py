@@ -62,6 +62,21 @@ class TestConstruction:
         with pytest.raises(Exception):
             ParallelReactAgent(tools=_registry(), max_parallel=0)
 
+    def test_construction_logs_agent_started(self):
+        from fsm_llm.logging import enable_library_logging, logger
+
+        enable_library_logging()
+        captured: list[str] = []
+        sink = logger.add(lambda msg: captured.append(str(msg)), level="INFO")
+        try:
+            _agent()
+        finally:
+            logger.remove(sink)
+            logger.disable("fsm_llm")
+        started = [m for m in captured if "Agent started with 2 tools" in m]
+        assert len(started) == 1
+        assert "model=mock/model" in started[0]
+
     def test_fsm_is_valid(self):
         # API.from_definition validates the FSM structure on construction.
         from unittest.mock import MagicMock

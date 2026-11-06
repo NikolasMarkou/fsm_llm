@@ -27,6 +27,7 @@ from .constants import (
     ToolRunStatus,
 )
 from .definitions import AgentConfig, AgentResult
+from .exceptions import AgentError
 from .fsm_definitions import build_plan_execute_fsm
 from .handlers import AgentHandlers, make_fresh_keys_handler
 from .tools import ToolRegistry
@@ -99,9 +100,16 @@ class PlanExecuteAgent(BaseAgent):
 
         :param tools: Optional tool registry (executor may use LLM only)
         :param config: Agent configuration (defaults to AgentConfig())
-        :param max_replans: Maximum number of replan cycles
+        :param max_replans: Maximum number of replan cycles (minimum 0, which
+            means no replans; a negative value raises ``AgentError``)
         :param api_kwargs: Additional kwargs passed to fsm_llm.API
         """
+        # DECISION plan-2026-11-06T093029-0068b055/D-008
+        # 0 is a real setting (no replans, pinned in test_plan_execute.py) and
+        # stays valid; only a negative value, which silently behaved as 0, is
+        # refused. Do NOT clamp it. See decisions.md D-008.
+        if max_replans < 0:
+            raise AgentError(f"max_replans must be >= 0, got {max_replans}")
         super().__init__(config, **api_kwargs)
         self.tools = tools
         self._refuse_flagged_tools()

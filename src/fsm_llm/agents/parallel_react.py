@@ -36,6 +36,7 @@ from .constants import (
     AgentStates,
     ContextKeys,
     Defaults,
+    LogMessages,
     ToolRunStatus,
 )
 from .definitions import AgentConfig, AgentResult, ToolCall
@@ -80,6 +81,12 @@ class ParallelReactAgent(BaseAgent):
         # A per-instance AgentHandlers shared across concurrent run() calls
         # is the D-004/D-014 race; each call builds and uses its own
         # call-LOCAL AgentHandlers (see run() below). See decisions.md D-014.
+
+        logger.info(
+            LogMessages.AGENT_STARTED.format(
+                tool_count=len(tools), model=self.config.model
+            )
+        )
 
     def run(
         self,

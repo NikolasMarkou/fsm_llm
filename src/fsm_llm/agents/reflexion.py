@@ -31,6 +31,7 @@ from .definitions import (
     EvaluationResult,
     ReflexionMemory,
 )
+from .exceptions import AgentError
 from .fsm_definitions import build_reflexion_fsm
 from .handlers import AgentHandlers, make_fresh_keys_handler, run_evaluation_fn
 from .hitl import HumanInTheLoop
@@ -88,11 +89,19 @@ class ReflexionAgent(BaseAgent):
         :param config: Agent configuration (defaults to AgentConfig())
         :param evaluation_fn: Optional external evaluation function.
             If None, the LLM self-evaluates via the FSM evaluate state.
-        :param max_reflections: Maximum reflect->think cycles before forcing conclude
+        :param max_reflections: Maximum reflect->think cycles before forcing
+            conclude (minimum 1; a smaller value raises ``AgentError``)
         :param hitl: Optional HITL manager for approval gates
         :param api_kwargs: Additional kwargs passed to fsm_llm.API
         """
         self._require_tools(tools)
+        # DECISION plan-2026-11-06T093029-0068b055/D-008
+        # Refuse, never clamp: the cap check runs when reflect exits, after one
+        # reflection is written, so 0 and -1 used to behave exactly like 1.
+        # Do NOT turn this into `max(1, max_reflections)` (the Debate outlier)
+        # and do NOT "honour" 0 by changing the FSM. See decisions.md D-008.
+        if max_reflections < 1:
+            raise AgentError(f"max_reflections must be >= 1, got {max_reflections}")
 
         super().__init__(config, **api_kwargs)
         self.tools = tools

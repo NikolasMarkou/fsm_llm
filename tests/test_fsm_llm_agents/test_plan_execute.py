@@ -16,6 +16,7 @@ from fsm_llm.agents.definitions import (
     AgentConfig,
     PlanStep,
 )
+from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.fsm_definitions import build_plan_execute_fsm
 from fsm_llm.agents.plan_execute import PlanExecuteAgent
 from fsm_llm.agents.tools import ToolRegistry
@@ -86,6 +87,15 @@ class TestPlanExecuteAgentCreation:
         registry = _make_registry()
         agent = PlanExecuteAgent(tools=registry, max_replans=5)
         assert agent.max_replans == 5
+
+    def test_negative_max_replans_is_refused(self):
+        # Parent: -1 silently behaved as 0.
+        with pytest.raises(AgentError, match=r"max_replans must be >= 0.*-1"):
+            PlanExecuteAgent(tools=_make_registry(), max_replans=-1)
+
+    def test_zero_max_replans_still_means_no_replan(self):
+        agent = PlanExecuteAgent(tools=_make_registry(), max_replans=0)
+        assert agent.max_replans == 0
 
     def test_create_default_max_replans(self):
         registry = _make_registry()
