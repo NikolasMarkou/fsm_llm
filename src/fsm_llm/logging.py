@@ -80,29 +80,56 @@ def enable_library_logging() -> None:
         logger.enable(name)
 
 
+def _is_level(name: str) -> bool:
+    try:
+        logger.level(name)
+    except ValueError:
+        return False
+    return True
+
+
 def _setting(
-    value: str | None, env_name: str, default: str, *, fold: Callable[[str], str]
+    value: str | None,
+    env_name: str,
+    default: str,
+    *,
+    fold: Callable[[str], str],
+    is_valid: Callable[[str], bool],
 ) -> str:
     """The first non-blank of ``value`` and the env var, case-folded, else ``default``.
 
     One reading of a text setting for ``setup_logging`` and ``setup_cli_logging``
     (a ``.env`` line ``FSM_LLM_LOG_LEVEL=`` is blank, ``info`` is a level).
+    Interface contract: an explicit ``value`` is returned as is (the caller
+    refuses a bad one with ``ValueError``); an env value that ``is_valid``
+    rejects is a host setting, not a call, so it is reported once on stderr and
+    ``default`` is used. Never raises.
     """
-    for candidate in (value, os.environ.get(env_name)):
-        text = (candidate or "").strip()
-        if text:
-            return fold(text)
-    return default
+    text = (value or "").strip()
+    if text:
+        return fold(text)
+    text = fold((os.environ.get(env_name) or "").strip())
+    if not text:
+        return default
+    if not is_valid(text):
+        print(
+            f"fsm_llm: ignoring unknown {env_name}={text!r}; using {default}",
+            file=sys.stderr,
+        )
+        return default
+    return text
 
 
 def setup_cli_logging(default_level: str) -> int:
     """Turn on library log output at a command-line process entry point.
 
-    Interface contract (2 call sites: the eval ``run()`` entry wrapper and
-    the reasoning CLI's ``--verbose``):
+    Interface contract (call sites: the ``fsm-llm`` modes, ``fsm-llm-validate``,
+    ``fsm-llm-visualize``, the eval ``run()`` entry wrapper and the reasoning
+    CLI's ``--verbose``):
         - ``default_level``: loguru level name used when ``FSM_LLM_LOG_LEVEL``
           is unset, blank, or not a loguru level; a valid env value wins
-          (case-insensitive). An invalid one is reported on stderr, not raised.
+          (case-insensitive). An invalid one, and an unknown
+          ``FSM_LLM_LOG_FORMAT``, is reported on stderr, not raised.
         - Removes loguru's pre-installed default handler (id 0: stderr, every
           level) if it is still there, then registers one stderr handler via
           ``setup_logging``. Returns that handler id, or -1 when a matching
@@ -120,16 +147,9 @@ def setup_cli_logging(default_level: str) -> int:
         logger.remove(0)
     except ValueError:
         pass
-    level = _setting(None, ENV_LOG_LEVEL, default_level, fold=str.upper)
-    try:
-        logger.level(level)
-    except ValueError:
-        print(
-            f"fsm_llm: ignoring unknown {ENV_LOG_LEVEL}={level!r}; "
-            f"using {default_level}",
-            file=sys.stderr,
-        )
-        level = default_level
+    level = _setting(
+        None, ENV_LOG_LEVEL, default_level, fold=str.upper, is_valid=_is_level
+    )
     return setup_logging(level=level)
 
 
@@ -310,8 +330,16 @@ def setup_logging(
         # FSM_LLM_LOG_LEVEL=WARNING FSM_LLM_LOG_FORMAT=json
         setup_logging()
     """
-    resolved_level = _setting(level, ENV_LOG_LEVEL, LOG_DEFAULT_LEVEL, fold=str.upper)
-    resolved_format = _setting(format, ENV_LOG_FORMAT, LOG_FORMAT_HUMAN, fold=str.lower)
+    resolved_level = _setting(
+        level, ENV_LOG_LEVEL, LOG_DEFAULT_LEVEL, fold=str.upper, is_valid=_is_level
+    )
+    resolved_format = _setting(
+        format,
+        ENV_LOG_FORMAT,
+        LOG_FORMAT_HUMAN,
+        fold=str.lower,
+        is_valid=_FORMATS.__contains__,
+    )
     if sink not in _SINKS:
         raise ValueError(f"unknown log sink {sink!r}; use one of {', '.join(_SINKS)}")
     if resolved_format not in _FORMATS:

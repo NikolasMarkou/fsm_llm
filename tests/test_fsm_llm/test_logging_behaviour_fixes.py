@@ -207,10 +207,17 @@ class TestFileLoggingHandlerId:
         with pytest.raises(ValueError, match="format"):
             setup_logging(sink=LOG_SINK_STDOUT, format="bogus")
 
-    def test_unknown_env_format_is_refused(self, monkeypatch):
+    def test_unknown_env_format_is_reported_and_ignored(self, monkeypatch, capsys):
+        """REVIEW-C2: an env value is a host setting, not a call: report it,
+        use the human format (an explicit bad argument still raises above)."""
         monkeypatch.setenv(ENV_LOG_FORMAT, "bogus")
-        with pytest.raises(ValueError, match="format"):
-            setup_logging(sink=LOG_SINK_STDOUT)
+        setup_logging(sink=LOG_SINK_STDOUT)
+        logger.info("still-logs")
+        captured = capsys.readouterr()
+        assert f"ignoring unknown {ENV_LOG_FORMAT}='bogus'" in captured.err
+        assert "still-logs" in captured.out
+        with pytest.raises(ValueError):
+            json.loads(captured.out.strip().splitlines()[-1])  # human, not JSON
 
     def test_format_case_is_normalised(self, capsys):
         setup_logging(sink=LOG_SINK_STDOUT, format="JSON")
@@ -327,3 +334,80 @@ class TestEnableDebugLoggingIsOnePath:
         _LIB.debug("dbg-line")
         err = capsys.readouterr().err
         assert "dbg-line" in err and '"message"' not in err
+
+
+# --------------------------------------------------------------
+# REVIEW-C2: an unknown env format never crashes a CLI that ignored it before
+# --------------------------------------------------------------
+
+_BAD_FORMAT = {ENV_LOG_FORMAT: "text"}
+
+
+class TestUnknownEnvFormatDoesNotCrashTheCommands:
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["-m", "fsm_llm", "--mode", "validate", "--fsm", str(_FSM)],
+            ["-m", "fsm_llm", "--mode", "visualize", "--fsm", str(_FSM)],
+            [
+                "-c",
+                "import sys; from fsm_llm.validator import main_cli; "
+                f"sys.argv=['x','--fsm',{str(_FSM)!r}]; main_cli()",
+            ],
+            [
+                "-c",
+                "import sys; from fsm_llm.visualizer import main_cli; "
+                f"sys.argv=['x','--fsm',{str(_FSM)!r}]; main_cli()",
+            ],
+            ["-c", "from fsm_llm.eval.__main__ import run; run(['--help'])"],
+            ["-m", "fsm_llm.reasoning", "--verbose", "--list-types"],
+        ],
+        ids=[
+            "fsm-llm --mode validate",
+            "fsm-llm --mode visualize",
+            "fsm-llm-validate",
+            "fsm-llm-visualize",
+            "fsm-llm-eval",
+            "reasoning --verbose",
+        ],
+    )
+    def test_command_reports_the_setting_and_goes_on(self, args):
+        proc = _stderr_of(args, _BAD_FORMAT)
+        assert proc.returncode == 0, proc.stderr
+        assert "Traceback" not in proc.stderr
+        assert f"ignoring unknown {ENV_LOG_FORMAT}='text'" in proc.stderr
+
+    def test_validate_report_is_still_valid(self):
+        proc = _stderr_of(
+            ["-m", "fsm_llm", "--mode", "validate", "--fsm", str(_FSM)], _BAD_FORMAT
+        )
+        assert json.loads(proc.stdout)["is_valid"] is True
+
+    def test_runner_survives_an_unknown_env_format(self, tmp_path, monkeypatch, capsys):
+        from fsm_llm import runner
+
+        api = MagicMock()
+        api.start_conversation.return_value = ("conv-1", "HELLO")
+        api.has_conversation_ended.side_effect = [True]
+        api.get_data.return_value = {}
+        monkeypatch.chdir(tmp_path)
+        env = {"LLM_MODEL": "test-model", ENV_LOG_FORMAT: "text"}
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch("fsm_llm.runner.dotenv.load_dotenv"),
+            patch("fsm_llm.runner.API.from_file", return_value=api),
+        ):
+            assert runner.main("/tmp/t.json", 5, 1000) == 0
+        captured = capsys.readouterr()
+        assert "System: HELLO" in captured.out
+        assert f"ignoring unknown {ENV_LOG_FORMAT}='text'" in captured.err
+
+    def test_unknown_env_level_is_reported_for_a_direct_call_too(
+        self, monkeypatch, capsys
+    ):
+        monkeypatch.setenv(ENV_LOG_LEVEL, "loud")
+        setup_logging(sink=LOG_SINK_STDOUT)
+        logger.debug("debug-shows")
+        captured = capsys.readouterr()
+        assert f"ignoring unknown {ENV_LOG_LEVEL}='LOUD'" in captured.err
+        assert "debug-shows" in captured.out
