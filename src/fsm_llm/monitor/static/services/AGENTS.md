@@ -22,7 +22,7 @@ sequenceDiagram
     WS->>S: state.ws = new WebSocket(/ws)
     WS->>WS: onopen: send {"type":"auth","api_key": key or ""}
     loop each message
-        WS->>S: state.instances / agentUpdates / workflowUpdates = ...
+        WS->>S: state.instances = ...
         WS->>P: _dispatch.<handler>?.(payload)
         WS->>S: scheduleRefresh(key, fn, ms)
     end
@@ -40,7 +40,7 @@ sequenceDiagram
 | --- | --- | --- |
 | `api.js` | fetch wrapper | Adds `X-API-Key`; on 401 prompts once and retries once; throws `Error(formatted detail)` with `.status` on non-OK |
 | `auth.js` | API key storage and key-entry modal | `sessionStorage['fsmMonitorApiKey']`, in-memory fallback; never localStorage, URLs, or logs |
-| `state.js` | Proxy-backed state + event bus | `EventTarget` bus, event name `statechange` |
+| `state.js` | Shared state object | One plain object; `scheduleRefresh` / `cancelRefresh` timers |
 | `ws.js` | WebSocket lifecycle + dispatch | Imports `hashInstances`, `$` from `../utils/dom.js` |
 
 ## Public interface
@@ -63,8 +63,7 @@ sequenceDiagram
 - `app.js` wires these to `data-action` values `apikey-save`, `apikey-cancel`, `close-apikey-backdrop`, Enter in `#apikey-input`, and Escape.
 
 `state.js`
-- `state` - Proxy over `_target`. The `set` trap dispatches `CustomEvent('statechange', {detail: {prop, value, old}})` when `old !== value`.
-- `onChange(fn: ({prop, value, old}) => void): () => void` - returns unsubscribe.
+- `state` - one plain object; no setter trap, no events.
 - `scheduleRefresh(key: string, fn: () => void, delayMs: number)` - no-op if `state.refreshTimers[key]` is set; clears the key before calling `fn`.
 - `cancelRefresh(...keys)` - clears pending `scheduleRefresh` timers (`pages/control.js` cancels `ctrl-detail`, `ctrl-detail-wf`, `conv-detail`).
 - `WS_MAX_DELAY = 30000`.
@@ -76,7 +75,7 @@ sequenceDiagram
 
 ## Data shapes
 
-Initial `state` fields: `ws` (`null`), `currentPage` (`'dashboard'`), `presets`, `wsRetryDelay` (3000), `capabilities` (`{fsm: true, workflows: false, agents: false}`), `instances` (`[]`), `selectedConvId`, `selectedConvInstanceId`, `selectedDetailId`, `selectedDetailType`, `detailPollTimer`, `agentUpdates` (`{}`), `workflowUpdates` (`{}`), `refreshTimers` (`{}`), `stubToolCount` (0), `autoScrollLogs` (`true`; `pages/settings.js` sets it from the server config's `auto_scroll_logs`), `_lastContextData`. Pages also add fields ad hoc (for example `state.workflowPresets` in `pages/launch.js`).
+Initial `state` fields: `ws` (`null`), `currentPage` (`'dashboard'`), `presets`, `wsRetryDelay` (3000), `capabilities` (`{fsm: true, workflows: false, agents: false}`), `instances` (`[]`), `selectedConvId`, `selectedConvInstanceId`, `selectedDetailId`, `selectedDetailType`, `detailPollTimer`, `refreshTimers` (`{}`), `autoScrollLogs` (`true`; `pages/settings.js` sets it from the server config's `auto_scroll_logs`), `_lastContextData`. Pages also add fields ad hoc (for example `state.workflowPresets` in `pages/launch.js`).
 
 WebSocket auth message sent on open: `{"type": "auth", "api_key": "<stored key or empty string>"}`.
 
@@ -87,10 +86,10 @@ WebSocket message fields consumed (any subset may be present in one message):
 | `type === 'metrics'` + `data` | `updateMetrics(data)` |
 | `events` | `updateEvents(events)`; activity-type events schedule refreshes |
 | `instances` | if `hashInstances` changed: set `state.instances`, `renderInstanceGrid()`, and `renderUnifiedTable()` on the control page |
-| `agent_updates` | set `state.agentUpdates`, `updateRunningAgents(updates)` |
-| `workflow_updates` | set `state.workflowUpdates`; dashboard: `refreshActivityTable` (key `dash-activity-wf`, 3 s); control with a workflow selected: `refreshDetailPanel(id, 'workflow')` (key `ctrl-detail-wf`, 2 s) |
+| `agent_updates` | `updateRunningAgents(updates)` (per agent: progress fields and `log_entries`) |
+| `workflow_updates` (ids of running workflows) | dashboard: `refreshActivityTable` (key `dash-activity-wf`, 3 s); control with a workflow selected: `refreshDetailPanel(id, 'workflow')` (key `ctrl-detail-wf`, 2 s) |
 | `logs` (non-empty) | `appendLogs(logs)` |
-| `dashboard_config` | `dashboardConfigChanged(cfg)` |
+| `dashboard_config_version` | `dashboardConfigChanged()` |
 
 Activity event types (`event_type`) that trigger refreshes: `conversation_start`, `conversation_end`, `state_transition`, `post_processing`, `agent_started`, `agent_completed`, `agent_failed`, `workflow_started`, `workflow_completed`, `workflow_cancelled`. On the dashboard they schedule `refreshActivityTable` (key `dash-activity`, 3 s). On the control page they schedule `showConversationDetail` (key `conv-detail`, 2 s) and `refreshDetailPanel` (key `ctrl-detail`, 2 s) when a selection exists.
 
@@ -100,6 +99,7 @@ Dispatch handler names: `updateMetrics`, `updateEvents`, `renderInstanceGrid`, `
 
 - Only one live socket: `connectWS` nulls `onopen/onmessage/onclose/onerror` on the previous `state.ws` before replacing it, and `onclose` ignores sockets that are no longer `state.ws`.
 - Backoff: `setTimeout(connectWS, wsRetryDelay + Math.random() * 1000)`, then `wsRetryDelay = min(2x, WS_MAX_DELAY)`. `onopen` resets it to 3000. `onerror` calls `close()`, which triggers `onclose`.
+- Close code 4403 (`WS_FORBIDDEN`, the server's `_WS_CLOSE_FORBIDDEN`: Host or Origin refused): no reconnect; status shows "Host or origin refused".
 - Close code 4401 (`WS_AUTH_FAILED`, matching the server's `_WS_CLOSE_UNAUTHORIZED`): no reconnect; status shows "API key required" and `requestApiKey({force: true})` opens the modal. A module-level `onApiKeyChange` listener reconnects once a key is saved.
 - The auth message must be the first frame the client sends; the server expects it before anything else.
 - Scheduled refresh callbacks read `state.selectedDetailId/Type` and `state.selectedConvId` when they fire, never values captured at schedule time.
@@ -107,13 +107,12 @@ Dispatch handler names: `updateMetrics`, `updateEvents`, `renderInstanceGrid`, `
 - The API key never appears in URLs or logs; it is read from storage on each request.
 - One pending key prompt at a time; all concurrent 401s await the same promise.
 - Message parse errors are caught and logged to `console.error`; one bad message does not kill the socket.
-- The Proxy only intercepts top-level assignment. Nested mutation does not emit events.
 
 ## Dependencies
 
 - `../utils/dom.js`: `hashInstances(items)` (hash over `instance_id:status`), `$` (lookup by element id), `openDialog`/`closeDialog` (modal show/hide with focus restore).
 - Server endpoints: `GET /api/auth`, the `/ws` WebSocket, and whatever REST paths callers pass to `fetchJson`/`postJson`. The server accepts the key as `X-API-Key` (or `Authorization: Bearer`) and gates mutating routes.
-- Browser APIs only: `fetch`, `Headers`, `WebSocket`, `EventTarget`, `CustomEvent`, `Proxy`, `sessionStorage`.
+- Browser APIs only: `fetch`, `Headers`, `WebSocket`, `sessionStorage`.
 
 ## Failure modes
 

@@ -2,7 +2,7 @@
 
 import { state, scheduleRefresh } from '../services/state.js';
 import { fetchJson } from '../services/api.js';
-import { $, esc, statusBadge, hashInstances, showToast, levelClass } from '../utils/dom.js';
+import { $, esc, statusBadge, hashInstances, showToast, levelClass, renderPagination } from '../utils/dom.js';
 import { formatTime, relativeTime, formatNumber } from '../utils/format.js';
 
 // --- Instance Grid State ---
@@ -266,17 +266,7 @@ export function renderInstanceGrid() {
     }
     grid.innerHTML = html;
 
-    if (paginationEl) {
-        if (totalPages <= 1) {
-            paginationEl.style.display = 'none';
-        } else {
-            paginationEl.style.display = 'flex';
-            paginationEl.innerHTML =
-                `<button class="btn btn-sm" data-action="inst-page-prev"${_instPage === 0 ? ' disabled' : ''}>&laquo; Prev</button>` +
-                `<span class="pagination-info">Page ${_instPage + 1} of ${totalPages}</span>` +
-                `<button class="btn btn-sm" data-action="inst-page-next"${_instPage >= totalPages - 1 ? ' disabled' : ''}>Next &raquo;</button>`;
-        }
-    }
+    renderPagination(paginationEl, _instPage, totalPages, 'inst-page');
 }
 
 export function instPagePrev() {
@@ -399,17 +389,7 @@ function _renderActivityTable() {
     }
     body.innerHTML = rows;
 
-    if (pagEl) {
-        if (totalPages <= 1) {
-            pagEl.style.display = 'none';
-        } else {
-            pagEl.style.display = 'flex';
-            pagEl.innerHTML =
-                `<button class="btn btn-sm" data-action="activity-page-prev"${_actPage === 0 ? ' disabled' : ''}>&laquo; Prev</button>` +
-                `<span class="pagination-info">Page ${_actPage + 1} of ${totalPages}</span>` +
-                `<button class="btn btn-sm" data-action="activity-page-next"${_actPage >= totalPages - 1 ? ' disabled' : ''}>Next &raquo;</button>`;
-        }
-    }
+    renderPagination(pagEl, _actPage, totalPages, 'activity-page');
 }
 
 export async function refreshActivityTable() {

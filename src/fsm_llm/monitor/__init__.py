@@ -20,7 +20,8 @@ Quick Start::
     manager = InstanceManager()
     manager.attach_api(my_api)  # show an API you created yourself
     configure(manager=manager)
-    # Run with uvicorn: uvicorn fsm_llm.monitor.server:app
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8420)  # same process as configure()
 """
 
 from __future__ import annotations

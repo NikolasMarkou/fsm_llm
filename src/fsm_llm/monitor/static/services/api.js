@@ -17,7 +17,7 @@ function _withKey(opts) {
  * Turn a FastAPI error `detail` into readable text. 422 bodies carry a list
  * of {loc, msg, type, ...}; other errors carry a string.
  */
-export function formatErrorDetail(detail, fallback) {
+function formatErrorDetail(detail, fallback) {
     if (detail == null || detail === '') return fallback || 'Request failed';
     if (typeof detail === 'string') return detail;
     if (Array.isArray(detail)) {

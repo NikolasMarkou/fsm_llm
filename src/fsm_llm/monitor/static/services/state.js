@@ -1,10 +1,10 @@
-// FSM-LLM Monitor — Proxy-Based Reactive State Manager
-// Single source of truth. Emits 'statechange' events on mutation.
+// FSM-LLM Monitor — shared UI state
+// Single source of truth: one plain object every module reads and writes.
 
 export const WS_MAX_DELAY = 30000;
 export const TOOL_BASED_AGENTS = ['ReactAgent', 'ReflexionAgent', 'PlanExecuteAgent', 'REWOOAgent', 'ADaPTAgent'];
 
-const _target = {
+export const state = {
     ws: null,
     currentPage: 'dashboard',
     presets: null,
@@ -16,35 +16,10 @@ const _target = {
     selectedDetailId: null,
     selectedDetailType: null,
     detailPollTimer: null,
-    agentUpdates: {},
-    workflowUpdates: {},
     refreshTimers: {},
-    stubToolCount: 0,
     autoScrollLogs: true,
     _lastContextData: null,
 };
-
-const _bus = new EventTarget();
-
-export const state = new Proxy(_target, {
-    set(target, prop, value) {
-        const old = target[prop];
-        target[prop] = value;
-        if (old !== value) {
-            _bus.dispatchEvent(new CustomEvent('statechange', {
-                detail: { prop, value, old },
-            }));
-        }
-        return true;
-    },
-});
-
-/** Subscribe to state changes. Returns an unsubscribe function. */
-export function onChange(fn) {
-    const handler = (e) => fn(e.detail);
-    _bus.addEventListener('statechange', handler);
-    return () => _bus.removeEventListener('statechange', handler);
-}
 
 /** Debounced refresh: only schedule once per key until it fires. */
 export function scheduleRefresh(key, fn, delayMs) {

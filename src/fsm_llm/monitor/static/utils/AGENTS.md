@@ -44,14 +44,16 @@ Callers build HTML as template strings and assign `innerHTML`; these helpers mak
 - `showError(elementId, msg)` - sets innerHTML to `<span class="error-message">` with escaped msg; no-op if element missing.
 - `showStatus(elementId, msg, color)` - `<span class="status-msg status-<color>">`; empty `msg` clears. `color` is interpolated unescaped into the class.
 - `showToast(msg, type)` - removes any existing `.toast`, appends a new `div.toast.toast-success|toast-error` (success only when `type === 'success'`), adds `toast-visible` next frame, removes it after 4000 ms, then the node 300 ms later. Uses `textContent`. Also clears `#toast-live` and sets its text after 50 ms (polite live region in `templates/index.html`).
-- `safeClass(value, fallback = 'unknown'): string` - lowercases and strips everything outside `[a-z0-9_-]`; empty -> fallback.
+- `safeClass(value, fallback = 'unknown'): string` (module-private, used by `statusBadge`) - lowercases and strips everything outside `[a-z0-9_-]`; empty -> fallback.
 - `levelClass(level): string` - lowercased level if in `trace, debug, info, success, warning, error, critical`, else `'info'`.
 - `statusBadge(status): string` - `<span class="badge badge-<safeClass(status)>">` with escaped upper-case text; null or `''` -> `unknown`.
 - `openDialog(el, display = 'flex', focusTarget = null)` - sets `el.style.display`. Only when the element was hidden: records `document.activeElement` (unless it is `body`) and focuses `focusTarget` or the first visible, enabled focusable descendant.
 - `closeDialog(el)` - no-op if hidden; sets `display: none`, restores and forgets the recorded focus if that element is still in the document.
 - `renderResultBanner(success): string` - `div.result-banner.success|failure` with fixed text `Agent completed successfully` / `Agent failed`.
 - `renderLLMData(obj): string` - `div.llm-kv` rows; skips null values; objects as pretty JSON in `<pre>`; non-object -> `No data`, no rows -> `Empty`.
-- `highlightText(text, query): string` - escapes both, regex-escapes the escaped query, wraps case-insensitive matches in `span.search-highlight`.
+- `highlightText(text, query): string` - regex-escapes the raw query, splits the raw text on case-insensitive matches, escapes every part and wraps the matches in `span.search-highlight` (so `amp` never matches inside `&amp;`).
+- `renderPagination(el, page, totalPages, action): void` - hides `el` for one page, else fills it with Prev/Next buttons whose `data-action` is `<action>-prev` / `<action>-next`.
+- `showDrawerDetailView(): void` - shows the Control drawer's detail view and hides the conversation sub-view.
 - `hashInstances(items): number` - 32-bit rolling hash seeded with `items.length` over `instance_id:status` of each item. Change detection only.
 - `numVal(id, fallback)`, `intVal(id, fallback)` - `parseFloat` / `parseInt(..., 10)` of an input's value; non-finite or missing element -> fallback.
 - `copyToClipboard(text): Promise<true>` - `navigator.clipboard.writeText`, on error falls back to hidden textarea + `document.execCommand('copy')`.

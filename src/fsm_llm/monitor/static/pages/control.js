@@ -4,7 +4,7 @@ import { state, scheduleRefresh, cancelRefresh } from '../services/state.js';
 import { fetchJson, postJson } from '../services/api.js';
 import {
     $, esc, statusBadge, hashInstances, showToast, renderResultBanner,
-    levelClass, openDialog, closeDialog,
+    levelClass, openDialog, closeDialog, renderPagination, showDrawerDetailView,
 } from '../utils/dom.js';
 import { formatTime } from '../utils/format.js';
 import { showConversationInDrawer } from './conversations.js';
@@ -143,17 +143,7 @@ export function renderUnifiedTable() {
     }
     body.innerHTML = rows;
 
-    if (paginationEl) {
-        if (totalPages <= 1) {
-            paginationEl.style.display = 'none';
-        } else {
-            paginationEl.style.display = 'flex';
-            paginationEl.innerHTML =
-                `<button class="btn btn-sm" data-action="ctrl-page-prev"${_ctrlPage === 0 ? ' disabled' : ''}>&laquo; Prev</button>` +
-                `<span class="pagination-info">Page ${_ctrlPage + 1} of ${totalPages}</span>` +
-                `<button class="btn btn-sm" data-action="ctrl-page-next"${_ctrlPage >= totalPages - 1 ? ' disabled' : ''}>Next &raquo;</button>`;
-        }
-    }
+    renderPagination(paginationEl, _ctrlPage, totalPages, 'ctrl-page');
 }
 
 export function ctrlPagePrev() {
@@ -198,17 +188,6 @@ function _resetDetailRequests() {
     cancelRefresh('ctrl-detail', 'ctrl-detail-wf', 'conv-detail');
 }
 
-function _showDetailView() {
-    const backBtn = $('ctrl-drawer-back');
-    const drawerContent = $('ctrl-drawer-content');
-    const convWrapper = $('conv-detail-wrapper');
-    const eventsWrapper = $('ctrl-drawer-events-wrapper');
-    if (backBtn) backBtn.style.display = 'none';
-    if (drawerContent) drawerContent.style.display = 'block';
-    if (convWrapper) convWrapper.style.display = 'none';
-    if (eventsWrapper) eventsWrapper.style.display = 'block';
-}
-
 export function openDrawer(instanceId, type) {
     if (!instanceId) return;
     const switching = state.selectedDetailId !== instanceId || state.selectedDetailType !== type;
@@ -222,7 +201,7 @@ export function openDrawer(instanceId, type) {
     state.selectedConvId = null;
     state._lastContextData = null;
     _resetDetailRequests();
-    _showDetailView();
+    showDrawerDetailView();
 
     if (switching) {
         // Do not show the previous instance's content under the new title.
@@ -261,7 +240,7 @@ export function closeDrawer() {
     if (state.detailPollTimer) { clearInterval(state.detailPollTimer); state.detailPollTimer = null; }
     _resetDetailRequests();
     document.querySelectorAll('tr.clickable-row.selected').forEach(r => r.classList.remove('selected'));
-    _showDetailView();
+    showDrawerDetailView();
 }
 
 export function navigateToInstance(instanceId, instanceType) {

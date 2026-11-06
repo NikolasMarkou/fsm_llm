@@ -14,10 +14,10 @@ import os
 import re
 import time
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, NoReturn, TypeVar
 from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -37,6 +37,7 @@ from fsm_llm.visualizer import build_fsm_graph
 
 from .__version__ import __version__
 from .constants import (
+    DEFAULT_TRUSTED_HOSTS,
     MAX_BUILDER_SESSIONS,
     MAX_REQUEST_BODY_BYTES,
     VIZ_EDGE_LABEL_CHARS,
@@ -68,6 +69,8 @@ from .instance_manager import (
     load_preset_json,
     read_json_file,
 )
+
+_T = TypeVar("_T")
 
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -116,9 +119,7 @@ _CORS_ORIGIN_REGEX: str | None = None
 # Host header allow-list (DNS-rebinding defence). "*" disables the check.
 # "testserver" is the Host Starlette's TestClient sends.
 _TRUSTED_HOSTS: list[str] = _env_list("FSM_LLM_MONITOR_TRUSTED_HOSTS") or [
-    "localhost",
-    "127.0.0.1",
-    "::1",
+    *DEFAULT_TRUSTED_HOSTS,
     "testserver",
 ]
 
@@ -145,6 +146,14 @@ _SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
 }
+
+
+def _refusal(status_code: int, detail: str) -> JSONResponse:
+    """A guard refusal: it never reaches ``call_next``, so it gets the security
+    headers here."""
+    return JSONResponse(
+        {"detail": detail}, status_code=status_code, headers=_SECURITY_HEADERS
+    )
 
 
 def _host_only(host_header: str) -> str:
@@ -194,11 +203,11 @@ async def _security_guard(request: Request, call_next):
     """
     host = request.headers.get("host")
     if not _host_allowed(host):
-        return JSONResponse({"detail": "invalid host header"}, status_code=400)
+        return _refusal(400, "invalid host header")
     if request.method in _UNSAFE_METHODS and not _origin_allowed(
         request.headers.get("origin"), host
     ):
-        return JSONResponse({"detail": "cross-origin request refused"}, status_code=403)
+        return _refusal(403, "cross-origin request refused")
     length = request.headers.get("content-length")
     if length is not None:
         try:
@@ -206,7 +215,7 @@ async def _security_guard(request: Request, call_next):
         except ValueError:
             too_big = True
         if too_big:
-            return JSONResponse({"detail": "request body too large"}, status_code=413)
+            return _refusal(413, "request body too large")
     response = await call_next(request)
     for name, value in _SECURITY_HEADERS.items():
         response.headers.setdefault(name, value)
@@ -358,12 +367,19 @@ def configure(
 
 
 def get_manager() -> InstanceManager:
-    global _manager, _flows
+    global _manager
     if _manager is None:
         _manager = InstanceManager()
+    return _manager
+
+
+def get_flows() -> dict[str, Any]:
+    """The agent and workflow pattern flows, loaded on first use (an embedder
+    running ``uvicorn ...server:app`` never calls ``configure()``)."""
+    global _flows
     if not _flows:
         _flows = _load_flows()
-    return _manager
+    return _flows
 
 
 def _require_api_key(request: Request) -> None:
@@ -424,6 +440,34 @@ def _raise_http(e: Exception, action: str) -> NoReturn:
     raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
+async def _bounded(
+    awaitable: Awaitable[_T],
+    action: str,
+    timeout_detail: str,
+    timeout: float = _LLM_OPERATION_TIMEOUT,
+) -> _T:
+    """Await *awaitable* for at most *timeout* seconds: a timeout is a 504 with
+    *timeout_detail*, any other failure goes through ``_raise_http``.
+
+    A worker thread behind ``asyncio.to_thread`` cannot be stopped on timeout;
+    what it started (a conversation) may still show up afterwards.
+    """
+    try:
+        return await asyncio.wait_for(awaitable, timeout=timeout)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail=timeout_detail) from None
+    except Exception as e:
+        _raise_http(e, action)
+
+
+async def _json_body(request: Request) -> Any:
+    """The request's JSON body, or a 400."""
+    try:
+        return await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="invalid JSON") from e
+
+
 _GATED = [Depends(_require_api_key)]
 
 
@@ -455,7 +499,7 @@ async def api_metrics() -> dict[str, Any]:
     try:
         metrics = mgr.get_metrics()
     except MonitorError as e:
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, "read metrics")
     return metrics.model_dump()
 
 
@@ -475,7 +519,7 @@ async def api_conversations(
             mgr.get_all_conversation_snapshots, include_ended=include_ended
         )
     except MonitorError as e:
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, "list conversations")
     return [s.model_dump() for s in snapshots]
 
 
@@ -499,7 +543,7 @@ async def api_activity(
             mgr.get_all_activity_snapshots, include_ended=include_ended
         )
     except MonitorError as e:
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, "list activity")
     return [item.model_dump() for item in items]
 
 
@@ -509,7 +553,7 @@ async def api_events(limit: int = 50) -> list[dict[str, Any]]:
     try:
         events = mgr.get_events(limit=limit)
     except MonitorError as e:
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, "list events")
     return [e.model_dump() for e in events]
 
 
@@ -519,7 +563,7 @@ async def api_logs(limit: int = 100, level: str = "INFO") -> list[dict[str, Any]
     try:
         logs = mgr.global_collector.get_logs(limit=limit, level=level)
     except MonitorError as e:
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+        _raise_http(e, "list logs")
     return [r.model_dump() for r in logs]
 
 
@@ -556,8 +600,6 @@ def _parse_dashboard_config(req: dict[str, Any]) -> Any:
     {refresh_interval_seconds, retention_hours}}``) or that output wrapped as
     ``{"config": <output>}``. Raises ``ValueError`` on a malformed body.
     """
-    from pydantic import ValidationError
-
     wrapped = req.get("config")
     is_wrapped = (
         isinstance(wrapped, dict)
@@ -577,25 +619,16 @@ def _parse_dashboard_config(req: dict[str, Any]) -> Any:
         raise ValueError("'config' must be an object")
 
     try:
+        # Defaults are the models' own; the id comes from the key.
         panels = [
-            DashboardPanel(
-                panel_id=str(pid),
-                title=pdata.get("title", str(pid)),
-                panel_type=pdata.get("panel_type", "metric"),
-                metric=pdata.get("metric", ""),
-                description=pdata.get("description", ""),
+            DashboardPanel.model_validate(
+                {"title": str(pid), **pdata, "panel_id": str(pid)}
             )
             for pid, pdata in panels_raw.items()
             if isinstance(pdata, dict)
         ]
         alerts = [
-            DashboardAlert(
-                alert_id=str(aid),
-                metric=adata.get("metric", ""),
-                condition=adata.get("condition", ">"),
-                threshold=float(adata.get("threshold", 0)),
-                description=adata.get("description", ""),
-            )
+            DashboardAlert.model_validate({**adata, "alert_id": str(aid)})
             for aid, adata in alerts_raw.items()
             if isinstance(adata, dict)
         ]
@@ -698,8 +731,8 @@ async def api_instance_destroy(instance_id: str) -> dict[str, str]:
         # merely-slow agent, not just a genuinely hung one).
         await asyncio.to_thread(mgr.destroy_instance, instance_id)
         return {"status": "ok"}
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail="instance not found") from e
+    except Exception as e:
+        _raise_http(e, f"destroy instance {instance_id}")
 
 
 # --- REST API: FSM Launch/Control ---
@@ -730,36 +763,25 @@ async def api_fsm_start_conversation(
 ) -> dict[str, Any]:
     """Start a new conversation on a managed FSM."""
     mgr = get_manager()
-    try:
-        conv_id, response = await asyncio.wait_for(
-            asyncio.to_thread(mgr.start_conversation, instance_id, req.initial_context),
-            timeout=_LLM_OPERATION_TIMEOUT,
-        )
-        return {"conversation_id": conv_id, "response": response}
-    except asyncio.TimeoutError:
-        # The worker thread cannot be stopped: the conversation may still be
-        # created and will then appear in the instance's conversation list.
-        raise HTTPException(status_code=504, detail="LLM operation timed out") from None
-    except Exception as e:
-        _raise_http(e, f"start conversation on instance {instance_id}")
+    conv_id, response = await _bounded(
+        asyncio.to_thread(mgr.start_conversation, instance_id, req.initial_context),
+        f"start conversation on instance {instance_id}",
+        "LLM operation timed out",
+    )
+    return {"conversation_id": conv_id, "response": response}
 
 
 @app.post("/api/fsm/{instance_id}/converse", dependencies=_GATED)
 async def api_fsm_converse(instance_id: str, req: SendMessageRequest) -> dict[str, Any]:
     """Send a message to an FSM conversation."""
     mgr = get_manager()
-    try:
-        result = await asyncio.wait_for(
-            asyncio.to_thread(
-                mgr.send_message, instance_id, req.conversation_id, req.message
-            ),
-            timeout=_LLM_OPERATION_TIMEOUT,
-        )
-        return result
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="LLM operation timed out") from None
-    except Exception as e:
-        _raise_http(e, f"send message to instance {instance_id}")
+    return await _bounded(
+        asyncio.to_thread(
+            mgr.send_message, instance_id, req.conversation_id, req.message
+        ),
+        f"send message to instance {instance_id}",
+        "LLM operation timed out",
+    )
 
 
 @app.post("/api/fsm/{instance_id}/end", dependencies=_GATED)
@@ -768,16 +790,12 @@ async def api_fsm_end_conversation(
 ) -> dict[str, str]:
     """End a conversation on a managed FSM."""
     mgr = get_manager()
-    try:
-        await asyncio.wait_for(
-            asyncio.to_thread(mgr.end_conversation, instance_id, req.conversation_id),
-            timeout=_LLM_OPERATION_TIMEOUT,
-        )
-        return {"status": "ok"}
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="LLM operation timed out") from None
-    except Exception as e:
-        _raise_http(e, f"end conversation on instance {instance_id}")
+    await _bounded(
+        asyncio.to_thread(mgr.end_conversation, instance_id, req.conversation_id),
+        f"end conversation on instance {instance_id}",
+        "LLM operation timed out",
+    )
+    return {"status": "ok"}
 
 
 @app.get("/api/fsm/{instance_id}/conversations", dependencies=_GATED)
@@ -806,7 +824,10 @@ async def api_workflow_launch(req: LaunchWorkflowRequest) -> dict[str, Any]:
     """Launch a workflow preset and start an instance."""
     mgr = get_manager()
     try:
-        managed = mgr.launch_workflow(
+        # Making room destroys finished instances (a thread join, API.close):
+        # keep it off the event loop like the other launch routes.
+        managed = await asyncio.to_thread(
+            mgr.launch_workflow,
             preset_id=req.preset_id,
             definition_json=req.definition_json,
             label=req.label,
@@ -846,19 +867,12 @@ async def api_workflow_advance(
 ) -> dict[str, Any]:
     """Advance a workflow instance."""
     mgr = get_manager()
-    try:
-        result = await asyncio.wait_for(
-            mgr.advance_workflow(instance_id, req.workflow_instance_id, req.user_input),
-            timeout=_LLM_OPERATION_TIMEOUT,
-        )
-        return {"advanced": result}
-    except asyncio.TimeoutError:
-        raise HTTPException(
-            status_code=504,
-            detail="Workflow advance timed out",
-        ) from None
-    except Exception as e:
-        _raise_http(e, f"advance workflow on instance {instance_id}")
+    result = await _bounded(
+        mgr.advance_workflow(instance_id, req.workflow_instance_id, req.user_input),
+        f"advance workflow on instance {instance_id}",
+        "Workflow advance timed out",
+    )
+    return {"advanced": result}
 
 
 @app.post("/api/workflow/{instance_id}/cancel", dependencies=_GATED)
@@ -867,19 +881,12 @@ async def api_workflow_cancel(
 ) -> dict[str, Any]:
     """Cancel a workflow instance."""
     mgr = get_manager()
-    try:
-        result = await asyncio.wait_for(
-            mgr.cancel_workflow(instance_id, req.workflow_instance_id, req.reason),
-            timeout=_LLM_OPERATION_TIMEOUT,
-        )
-        return {"cancelled": result}
-    except asyncio.TimeoutError:
-        raise HTTPException(
-            status_code=504,
-            detail="Workflow cancel timed out",
-        ) from None
-    except Exception as e:
-        _raise_http(e, f"cancel workflow on instance {instance_id}")
+    result = await _bounded(
+        mgr.cancel_workflow(instance_id, req.workflow_instance_id, req.reason),
+        f"cancel workflow on instance {instance_id}",
+        "Workflow cancel timed out",
+    )
+    return {"cancelled": result}
 
 
 @app.post("/api/workflow/{instance_id}/event", dependencies=_GATED)
@@ -888,24 +895,14 @@ async def api_workflow_event(
 ) -> dict[str, Any]:
     """Deliver an event to a workflow engine (wakes waiting instances)."""
     mgr = get_manager()
-    try:
-        affected = await asyncio.wait_for(
-            mgr.send_workflow_event(
-                instance_id,
-                req.event_type,
-                req.payload,
-                req.workflow_instance_id or None,
-            ),
-            timeout=_LLM_OPERATION_TIMEOUT,
-        )
-        return {"affected": affected}
-    except asyncio.TimeoutError:
-        raise HTTPException(
-            status_code=504,
-            detail="Workflow event delivery timed out",
-        ) from None
-    except Exception as e:
-        _raise_http(e, f"deliver workflow event on instance {instance_id}")
+    affected = await _bounded(
+        mgr.send_workflow_event(
+            instance_id, req.event_type, req.payload, req.workflow_instance_id or None
+        ),
+        f"deliver workflow event on instance {instance_id}",
+        "Workflow event delivery timed out",
+    )
+    return {"affected": affected}
 
 
 @app.get("/api/workflow/{instance_id}/status", dependencies=_GATED)
@@ -997,11 +994,7 @@ async def api_agent_cancel(instance_id: str) -> dict[str, Any]:
 @app.post("/api/fsm/load")
 async def api_fsm_load(request: Request) -> dict[str, Any]:
     """Load FSM definition from JSON body."""
-    try:
-        data = await request.json()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail="invalid JSON") from e
-    return _snapshot_or_400(data).model_dump()
+    return _snapshot_or_400(await _json_body(request)).model_dump()
 
 
 def _snapshot_or_400(data: Any) -> FSMSnapshot:
@@ -1084,9 +1077,8 @@ def _fsm_viz_or_400(data: Any) -> dict[str, Any]:
     """The visualize payload of an FSM definition dict, or raise 400.
 
     ``nodes`` and ``edges`` are core's ``build_fsm_graph`` output in the key
-    names the page reads (``from``/``to``), plus the two things only the page
-    needs: a grid position per node and the edge label cut to
-    ``VIZ_EDGE_LABEL_CHARS``.
+    names the page reads (``from``/``to``), plus the edge label cut to
+    ``VIZ_EDGE_LABEL_CHARS``. The page lays the nodes out itself.
     """
     # DECISION plan-2026-09-30T062855-07ad3f8c/D-018
     # Nodes and edges come from core's build_fsm_graph. Do NOT derive them from
@@ -1111,10 +1103,8 @@ def _fsm_viz_or_400(data: Any) -> dict[str, Any]:
             "purpose": node.purpose,
             "is_initial": node.is_initial,
             "is_terminal": node.is_terminal,
-            "x": 150 + (i % 4) * 200,
-            "y": 80 + (i // 4) * 140,
         }
-        for i, node in enumerate(graph.nodes)
+        for node in graph.nodes
     ]
     edges = [
         {
@@ -1131,11 +1121,7 @@ def _fsm_viz_or_400(data: Any) -> dict[str, Any]:
 @app.post("/api/fsm/visualize")
 async def api_fsm_visualize(request: Request) -> dict[str, Any]:
     """Accept FSM JSON definition and return visualization data."""
-    try:
-        data = await request.json()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail="invalid JSON") from e
-    return _fsm_viz_or_400(data)
+    return _fsm_viz_or_400(await _json_body(request))
 
 
 def _read_preset_json(preset_id: str) -> dict[str, Any]:
@@ -1243,30 +1229,17 @@ async def api_preset_fsm(preset_id: str) -> dict[str, Any]:
 @app.get("/api/agent/visualize")
 async def api_agent_visualize(agent_type: str = "ReactAgent") -> dict[str, Any]:
     """Return visualization data for an agent pattern flow."""
-    agents = _flows.get("agents", {})
-    flow = agents.get(agent_type)
+    flow = get_flows().get("agents", {}).get(agent_type)
     if flow is None:
         raise HTTPException(status_code=404, detail=f"unknown agent type: {agent_type}")
-
-    nodes = []
-    for i, node in enumerate(flow["nodes"]):
-        nodes.append(
-            {
-                **node,
-                "x": 150 + (i % 4) * 200,
-                "y": 80 + (i // 4) * 140,
-            }
-        )
-
     return {
         "info": {
             "name": agent_type,
             "description": flow["description"],
             "state_count": len(flow["nodes"]),
         },
-        "nodes": nodes,
+        "nodes": flow["nodes"],
         "edges": flow["edges"],
-        "agent_types": list(agents.keys()),
     }
 
 
@@ -1275,30 +1248,17 @@ async def api_workflow_visualize(
     workflow_id: str = "order_processing",
 ) -> dict[str, Any]:
     """Return visualization data for a workflow pattern."""
-    workflows = _flows.get("workflows", {})
-    flow = workflows.get(workflow_id)
+    flow = get_flows().get("workflows", {}).get(workflow_id)
     if flow is None:
         raise HTTPException(status_code=404, detail=f"unknown workflow: {workflow_id}")
-
-    nodes = []
-    for i, node in enumerate(flow["nodes"]):
-        nodes.append(
-            {
-                **node,
-                "x": 150 + (i % 4) * 200,
-                "y": 80 + (i // 4) * 140,
-            }
-        )
-
     return {
         "info": {
             "name": flow["name"],
             "description": flow["description"],
             "step_count": len(flow["nodes"]),
         },
-        "nodes": nodes,
+        "nodes": flow["nodes"],
         "edges": flow["edges"],
-        "workflow_ids": list(workflows.keys()),
     }
 
 
@@ -1332,7 +1292,8 @@ def _get_builder_internal_state(agent: Any) -> dict[str, Any]:
     try:
         result: dict[str, Any] = agent.get_internal_state()
         return result
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Builder internal state unavailable: {e}")
         return {"phase": "unknown", "turn_count": 0}
 
 
@@ -1553,6 +1514,13 @@ async def api_builder_delete(session_id: str) -> dict[str, Any]:
 
 
 _WS_AUTH_TIMEOUT = 5.0
+_AGENT_UPDATE_KEYS = (
+    "status",
+    "current_state",
+    "iteration_count",
+    "last_tool_call",
+    "transition_count",
+)
 _WS_CLOSE_UNAUTHORIZED = 4401
 _WS_CLOSE_FORBIDDEN = 4403
 
@@ -1584,6 +1552,27 @@ async def _ws_authorized(websocket: WebSocket) -> bool:
         await websocket.close(code=_WS_CLOSE_UNAUTHORIZED)
         return False
     return True
+
+
+def _status_or_none(mgr: InstanceManager, instance_id: str) -> dict[str, Any] | None:
+    """An agent's status, or None when it is gone or unreadable (a destroyed
+    instance mid-poll is expected; anything else is logged)."""
+    try:
+        return mgr.get_agent_status(instance_id)
+    except KeyError:
+        return None
+    except Exception as e:
+        logger.debug(f"Failed to get agent status for {instance_id}: {e}")
+        return None
+
+
+def _agent_update(status: dict[str, Any]) -> dict[str, Any]:
+    """What the tick ships of an agent's status: its progress fields and the
+    size of its log, so the page can tell when to refetch."""
+    return {
+        **{k: status[k] for k in _AGENT_UPDATE_KEYS if k in status},
+        "log_entries": len(status.get("conversation_log", ())),
+    }
 
 
 @app.websocket("/ws")
@@ -1633,70 +1622,34 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             logs, log_cursor = mgr.global_collector.logs_after(log_cursor, limit=50)
             if logs:
                 data["logs"] = [r.model_dump() for r in reversed(logs)]
-            data["log_count"] = mgr.global_collector.total_logs
 
             # Always include instance list so status changes propagate
             instances = mgr.list_instances()
             data["instances"] = [i.model_dump() for i in instances]
 
-            # Include real-time status for running agents
-            running_agents = [
-                i
+            # A change signal per running agent (the page refetches the status
+            # of the one it shows) and the ids of running workflows (the page
+            # only needs to know one is running); never the logs or the status.
+            agent_updates = {
+                i.instance_id: _agent_update(status)
                 for i in instances
                 if i.instance_type == "agent" and i.status == "running"
-            ]
-            if running_agents:
-                agent_updates: dict[str, Any] = {}
-                for i in running_agents:
-                    try:
-                        agent_updates[i.instance_id] = mgr.get_agent_status(
-                            i.instance_id
-                        )
-                    except KeyError:
-                        pass  # Instance destroyed mid-poll; skip it
-                    except Exception as e:
-                        logger.debug(
-                            f"Failed to get agent status for {i.instance_id}: {e}"
-                        )
-                if agent_updates:
-                    data["agent_updates"] = agent_updates
-
-            # Include real-time status for running workflows
+                if (status := _status_or_none(mgr, i.instance_id)) is not None
+            }
+            if agent_updates:
+                data["agent_updates"] = agent_updates
             running_workflows = [
-                i
+                i.instance_id
                 for i in instances
                 if i.instance_type == "workflow" and i.status == "running"
             ]
             if running_workflows:
-                workflow_updates: dict[str, Any] = {}
-                for i in running_workflows:
-                    try:
-                        wf_instances = mgr.get_workflow_instances(i.instance_id)
-                        workflow_updates[i.instance_id] = {
-                            "instance_id": i.instance_id,
-                            "label": i.label,
-                            "status": i.status,
-                            "workflow_instances": wf_instances,
-                        }
-                    except KeyError:
-                        pass  # Instance destroyed mid-poll; skip it
-                    except Exception as e:
-                        logger.debug(
-                            f"Failed to get workflow instances for {i.instance_id}: {e}"
-                        )
-                if workflow_updates:
-                    data["workflow_updates"] = workflow_updates
+                data["workflow_updates"] = running_workflows
 
-            # Push dashboard config when it changes
-            current_cfg_version = mgr.dashboard_config_version
-            if current_cfg_version != last_dashboard_config_version:
-                last_dashboard_config_version = current_cfg_version
-                cfg = mgr.dashboard_config
-                data["dashboard_config"] = (
-                    {"active": True, "config": cfg.model_dump()}
-                    if cfg is not None
-                    else {"active": False, "config": None}
-                )
+            # The page refetches /api/dashboard/config when the version moves.
+            if mgr.dashboard_config_version != last_dashboard_config_version:
+                last_dashboard_config_version = mgr.dashboard_config_version
+                data["dashboard_config_version"] = last_dashboard_config_version
 
             # DECISION plan-2026-09-22T080837-8b258a25/D-008
             # `default=str` pushed an arbitrary object's `__str__` (a secret in

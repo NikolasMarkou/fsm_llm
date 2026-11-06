@@ -46,7 +46,7 @@ Control flow in `app.js`:
 | `style.css` | Theme and components | Design tokens on `:root` (`--bg`, `--surface`, `--primary`, `--primary-dim`, `--success`, `--warning`, `--danger`, `--info`, `--text*`, `--space-*`, `--radius-*`, `--shadow-*`, `--font-body`, `--font-mono`); 2,728 lines |
 | `flows.json` | Pattern graphs for the Visualizer | Hand-maintained; schema under Data shapes |
 | `pages/` | 8 screen modules | `dashboard`, `control`, `conversations`, `launch`, `visualizer`, `builder`, `logs`, `settings` |
-| `services/` | `api.js`, `auth.js`, `state.js`, `ws.js` | REST client, API key, Proxy state, WebSocket |
+| `services/` | `api.js`, `auth.js`, `state.js`, `ws.js` | REST client, API key, shared state, WebSocket |
 | `utils/` | `dom.js`, `format.js`, `markdown.js`, `graph.js` | `esc()`, formatting, safe Markdown subset, BFS SVG layout |
 
 ## Public interface
@@ -64,13 +64,13 @@ Control flow in `app.js`:
 - `settings.js`: `loadSettings`. Config form (`/api/config`, client bounds `refresh_interval` 0.5..60, `max_events` and `max_log_lines` 10..100000), API key field, system info (`/api/info`).
 
 `services/`:
-- `api.js`: `fetchJson(url, opts)`, `postJson(url, data)`, `formatErrorDetail(detail, fallback)`. Adds `X-API-Key` when a key is stored; on 401 prompts once and retries once; a non-OK response throws `Error(detail)` with `.status`.
+- `api.js`: `fetchJson(url, opts)`, `postJson(url, data)`, Adds `X-API-Key` when a key is stored; on 401 prompts once and retries once; a non-OK response throws `Error(detail)` with `.status`.
 - `auth.js`: `getApiKey`, `setApiKey`, `clearApiKey`, `onApiKeyChange`, `checkAuthRequired()` (GET `/api/auth`, returns `true|false|null`), `requestApiKey({force, message})` (one shared pending prompt), `submitApiKeyModal`, `cancelApiKeyModal`, `isApiKeyModalOpen`.
-- `state.js`: `state` Proxy firing `statechange` on top-level `!==` assignment, `onChange(fn)`, `scheduleRefresh(key, fn, ms)` (run-once-after-delay guard), `cancelRefresh(...keys)`, `WS_MAX_DELAY = 30000`, `TOOL_BASED_AGENTS` (`ReactAgent`, `ReflexionAgent`, `PlanExecuteAgent`, `REWOOAgent`, `ADaPTAgent`).
+- `state.js`: `state` (a plain shared object), `scheduleRefresh(key, fn, ms)` (run-once-after-delay guard), `cancelRefresh(...keys)`, `WS_MAX_DELAY = 30000`, `TOOL_BASED_AGENTS` (`ReactAgent`, `ReflexionAgent`, `PlanExecuteAgent`, `REWOOAgent`, `ADaPTAgent`).
 - `ws.js`: `connectWS()` (same host `/ws`, `ws:` or `wss:` by page protocol), `registerHandlers(handlers)`. Handler names `app.js` registers: `updateMetrics`, `updateEvents`, `renderInstanceGrid`, `renderUnifiedTable`, `updateRunningAgents`, `appendLogs`, `refreshActivityTable`, `showConversationDetail`, `refreshDetailPanel`, `dashboardConfigChanged`.
 
 `utils/`:
-- `dom.js`: `esc`, `$`, `showError`, `showStatus`, `showToast`, `safeClass`, `levelClass`, `statusBadge`, `openDialog`/`closeDialog` (focus restore), `renderResultBanner`, `renderLLMData`, `highlightText`, `hashInstances` (hash over `instance_id:status`), `numVal`, `intVal`, `copyToClipboard`.
+- `dom.js`: `esc`, `$`, `showError`, `showStatus`, `showToast`, `levelClass`, `statusBadge`, `openDialog`/`closeDialog` (focus restore), `renderResultBanner`, `renderLLMData`, `highlightText`, `renderPagination(el, page, totalPages, action)`, `showDrawerDetailView`, `hashInstances` (hash over `instance_id:status`), `numVal`, `intVal`, `copyToClipboard`.
 - `format.js`: `formatTime`, `relativeTime`, `formatNumber`.
 - `markdown.js`: `renderMarkdown(text)`; escapes first, then a fixed regex sequence (code, headings as bold, bold, italic, lists, rules). No links or tables.
 - `graph.js`: `renderGraph(svgId, {nodes, edges}, opts)`; BFS layers from the first `is_initial` node, rows of at most 5 columns, writes `x`/`y` onto the passed nodes.
@@ -79,17 +79,16 @@ Server endpoints the frontend relies on (defined in `server.py`): `GET /api/auth
 
 ## Data shapes
 
-- DOM events: `state` dispatches `statechange` (`CustomEvent` with `{prop, value, old}`) on top-level assignment; `onChange(fn)` subscribes.
 - API key storage: `sessionStorage['fsmMonitorApiKey']`, with an in-memory fallback when sessionStorage is unavailable.
 - WebSocket auth frame (client to server, always the first frame, empty key when none is stored): `{"type": "auth", "api_key": "<key or empty>"}`.
 - WebSocket push (server to client), fields read by `ws.js` `onmessage`:
   - `type === 'metrics'` -> `updateMetrics(data.data)`.
   - `events` -> `updateEvents(events)`.
   - `instances` -> hashed with `hashInstances`; on change stored in `state.instances`, then `renderInstanceGrid()` and, on the control page, `renderUnifiedTable()`.
-  - `agent_updates` -> `state.agentUpdates`, `updateRunningAgents(...)`.
-  - `workflow_updates` -> `state.workflowUpdates`; schedules `refreshActivityTable` (key `dash-activity-wf`, 3000 ms) on dashboard, or `refreshDetailPanel(id, 'workflow')` (key `ctrl-detail-wf`, 2000 ms) when a workflow is selected on control.
+  - `agent_updates` -> `updateRunningAgents(...)` (per running agent: progress fields and `log_entries`, a change signal).
+  - `workflow_updates` (ids of running workflows) -> schedules `refreshActivityTable` (key `dash-activity-wf`, 3000 ms) on dashboard, or `refreshDetailPanel(id, 'workflow')` (key `ctrl-detail-wf`, 2000 ms) when a workflow is selected on control.
   - `logs` (non-empty) -> `appendLogs(logs)`.
-  - `dashboard_config` -> `dashboardConfigChanged(...)`.
+  - `dashboard_config_version` -> `dashboardConfigChanged()` (refetches `/api/dashboard/config`).
 - Main page-level payloads: instance (`instance_id`, `instance_type` fsm|workflow|agent, `label`, `status`, `source`, `conversation_count`, `agent_type`, `task`, `active_workflows`, `created_at`); activity row (`item_type` fsm_conversation|agent_task|workflow_instance, `item_id`, `instance_id`, `label`, `current_step`, `detail`, `status`, `is_terminal`); config (`refresh_interval`, `max_events`, `max_log_lines`, `log_level`, `show_internal_keys`, `auto_scroll_logs`); log record (`timestamp`, `level`, `module`, `line`, `message`, `conversation_id`).
 - `flows.json`: `{agents: {<AgentClass>: {description, nodes[], edges[]}}, workflows: {<id>: {name, description, nodes[], edges[]}}}`. Node `{id, label, description, is_initial, is_terminal}` (workflow nodes also carry `step_type`). Edge `{from, to, label}`.
   - Agents (12): `ReactAgent`, `ReflexionAgent`, `PlanExecuteAgent`, `DebateAgent`, `SelfConsistencyAgent`, `REWOOAgent`, `PromptChainAgent`, `EvaluatorOptimizerAgent`, `MakerCheckerAgent`, `OrchestratorAgent`, `ADaPTAgent`, `ReasoningReactAgent`.
@@ -110,14 +109,14 @@ Server endpoints the frontend relies on (defined in `server.py`): `GET /api/auth
 
 ## Dependencies
 
-- Browser only: ES modules, `fetch`, `WebSocket`, `Proxy`, `EventTarget`, `CustomEvent`, `sessionStorage`, Clipboard API.
+- Browser only: ES modules, `fetch`, `WebSocket`, `sessionStorage`, Clipboard API.
 - External: Google Fonts (`Inter` 400/500/600/700, `JetBrains Mono` 400) via `@font-face` URLs in `style.css`, `font-display: swap`, system font fallbacks.
 - Server side: `fastapi.staticfiles.StaticFiles`, the Jinja2 template, `flows.json` read by `server.py`. The server accepts the key as `X-API-Key` (or `Authorization: Bearer`) and gates mutating routes; `/api/auth` is never gated.
 
 ## Failure modes
 
 - Server unreachable: WebSocket status shows "Reconnecting..." and retries indefinitely with backoff 3 s doubling to 30 s plus up to 1 s jitter; REST calls show toasts or inline errors and log to `console.error`.
-- 401: one shared key prompt, one retry. After the user cancels, non-forced 401s do not reopen the prompt until a key is saved. WebSocket close 4401 stops reconnecting and forces the key prompt; saving a key resumes reconnecting.
+- 401: one shared key prompt, one retry. After the user cancels, non-forced 401s do not reopen the prompt until a key is saved. WebSocket close 4401 stops reconnecting and forces the key prompt; saving a key resumes reconnecting. Close 4403 (Host/Origin refused) stops reconnecting too and shows "Host or origin refused".
 - Unknown `data-action`: ignored silently. Invalid hash: `navigateFromHash` ignores hashes not in `VALID_PAGES`.
 - Bad WebSocket message: parse error caught and logged; the socket stays up.
 - `renderGraph` with an empty `nodes` array yields bad bounds; callers must not pass empty graphs.

@@ -11,12 +11,17 @@ DEFAULT_MAX_LOG_LINES = 5000
 DEFAULT_LOG_LEVEL = "INFO"
 DEFAULT_MAX_INSTANCES = 200
 DEFAULT_MAX_RUNNING_AGENTS = 8
+DEFAULT_AGENT_MAX_ITERATIONS = 10
+DEFAULT_AGENT_TIMEOUT_SECONDS = 120.0
+DEFAULT_FSM_TEMPERATURE = 0.5
 
 # --- Config bounds (enforced by MonitorConfig) ---
 MIN_REFRESH_INTERVAL = 0.5  # seconds
 MAX_REFRESH_INTERVAL = 60.0
 MIN_BUFFER_SIZE = 10
 MAX_BUFFER_SIZE = 100_000
+MAX_INSTANCES_LIMIT = 10_000
+MAX_RUNNING_AGENTS_LIMIT = 256
 # Minimum-level ranking for log filters (loguru's numeric levels); the one level list.
 LOG_LEVEL_RANK = {
     "TRACE": 5,
@@ -33,10 +38,17 @@ LOG_LEVELS = tuple(LOG_LEVEL_RANK)
 MAX_MESSAGE_LENGTH = 10_000  # matches core ResponseGenerationRequest.user_message
 MAX_TASK_LENGTH = 20_000
 MAX_AGENT_ITERATIONS = 100
+MIN_TEMPERATURE = 0.0
+MAX_TEMPERATURE = 2.0
+MAX_BUILDER_TOKENS = 100_000
 MAX_AGENT_TIMEOUT_SECONDS = 3600.0
 MAX_STUB_TOOLS = 50
 MAX_REQUEST_BODY_BYTES = 1_048_576  # 1 MiB
 MAX_BUILDER_SESSIONS = 50
+
+# Host header values the server answers to by default (DNS-rebinding defence);
+# these are also the loopback names the CLI recognises.
+DEFAULT_TRUSTED_HOSTS = ("localhost", "127.0.0.1", "::1")
 
 # --- OTEL export ---
 MAX_OPEN_CONVERSATION_SPANS = (

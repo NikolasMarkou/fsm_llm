@@ -6,8 +6,10 @@ import { state, scheduleRefresh, WS_MAX_DELAY } from './state.js';
 import { getApiKey, requestApiKey, onApiKeyChange } from './auth.js';
 import { hashInstances, $ } from '../utils/dom.js';
 
-// Close code the server uses when the first-message auth fails.
+// Close codes the server uses (server.py _WS_CLOSE_UNAUTHORIZED / _WS_CLOSE_FORBIDDEN):
+// the first-message auth failed / the Host or Origin header was refused.
 const WS_AUTH_FAILED = 4401;
+const WS_FORBIDDEN = 4403;
 
 let _lastWsInstancesHash = 0;
 let _dispatch = {};
@@ -81,13 +83,9 @@ export function connectWS() {
                 }
             }
 
-            if (data.agent_updates) {
-                state.agentUpdates = data.agent_updates;
-                _dispatch.updateRunningAgents?.(data.agent_updates);
-            }
+            if (data.agent_updates) _dispatch.updateRunningAgents?.(data.agent_updates);
 
             if (data.workflow_updates) {
-                state.workflowUpdates = data.workflow_updates;
                 // Refresh activity table when workflow status changes
                 if (state.currentPage === 'dashboard') {
                     scheduleRefresh('dash-activity-wf', () => _dispatch.refreshActivityTable?.(), 3000);
@@ -106,7 +104,7 @@ export function connectWS() {
 
             if (data.logs?.length > 0) _dispatch.appendLogs?.(data.logs);
 
-            if (data.dashboard_config) _dispatch.dashboardConfigChanged?.(data.dashboard_config);
+            if (data.dashboard_config_version !== undefined) _dispatch.dashboardConfigChanged?.();
 
             if (data.events?.length > 0) {
                 const hasActivityEvent = data.events.some(e => {
@@ -152,6 +150,12 @@ export function connectWS() {
                 force: true,
                 message: 'The live connection was refused: missing or invalid API key.',
             });
+            return;
+        }
+        if (ev?.code === WS_FORBIDDEN) {
+            // The Host or Origin was refused (a proxy, or a host missing from
+            // trusted_hosts); every retry would be refused too.
+            _setStatus('Host or origin refused', 'ws-label', false);
             return;
         }
         _setStatus('Reconnecting...', 'ws-label blink', false);

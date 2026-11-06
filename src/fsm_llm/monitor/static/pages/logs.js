@@ -110,7 +110,7 @@ function _scrollToBottom(el) {
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
 }
 
-export function updateJumpButton() {
+function updateJumpButton() {
     const btn = $('log-jump-btn');
     if (btn) btn.classList.toggle('visible', !_logFollowing);
 }

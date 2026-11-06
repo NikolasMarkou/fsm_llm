@@ -468,7 +468,7 @@ class TestFSMVisualizeReadsTheCoreGraph:
     """`/api/fsm/visualize` nodes and edges are core's `build_fsm_graph` data.
 
     plan-2026-09-30T062855-07ad3f8c D-018: the monitor adds the `from`/`to`
-    names, a grid position and the 30-char label, nothing else.
+    names and the 30-char label, nothing else (the page lays the nodes out).
     """
 
     def setup_method(self):
@@ -502,11 +502,6 @@ class TestFSMVisualizeReadsTheCoreGraph:
                 "priority": 50,
             },
             {"from": "ask", "to": "gave_up", "label": "", "priority": 200},
-        ]
-        assert [(n["x"], n["y"]) for n in data["nodes"]] == [
-            (150, 80),
-            (350, 80),
-            (550, 80),
         ]
         assert set(data) == {"fsm", "nodes", "edges"}
         assert data["fsm"]["state_count"] == 3
@@ -555,8 +550,6 @@ class TestFSMVisualizeReadsTheCoreGraph:
                 "purpose": "p",
                 "is_initial": True,
                 "is_terminal": False,
-                "x": 150,
-                "y": 80,
             }
         ]
         assert data["edges"] == [

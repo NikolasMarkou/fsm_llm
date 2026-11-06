@@ -16,19 +16,18 @@ flowchart LR
     Pages -- fetchJson / postJson --> API[api.js] -- REST /api/... --> Server
     API -- key header, 401 prompt --> Auth[auth.js]
     WS -- first message auth, 4401 prompt --> Auth
-    State -- statechange events --> Subscribers
 ```
 
 - `api.js` wraps `fetch`. It adds an `X-API-Key` header when a key is stored. A non-2xx response throws an `Error` whose message is the server's `detail` field made readable, or the HTTP status text. On a 401 it asks the user for a key once and retries the request once.
 - `auth.js` stores the optional API key in the tab's `sessionStorage` and drives the key-entry modal (`#apikey-modal` in `templates/index.html`).
-- `state.js` exports one object wrapped in a JavaScript `Proxy`. Every top-level assignment that changes a value fires a `statechange` event.
+- `state.js` exports one plain shared object and the `scheduleRefresh` / `cancelRefresh` timer helpers.
 - `ws.js` opens a WebSocket to `/ws` on the same host and sends `{"type": "auth", "api_key": ...}` as the first message (an empty key when none is stored; the server only reads it when a key is configured). Each incoming message is inspected field by field (metrics, events, instances, agent and workflow updates, logs, dashboard config) and forwarded to the page handler registered for it. If the socket closes it reconnects with exponential backoff, except when the server closes with code 4401 (auth failed).
 
 ## Files
 
-- `api.js` - `fetchJson(url, opts)`, `postJson(url, data)`, `formatErrorDetail(detail, fallback)`.
+- `api.js` - `fetchJson(url, opts)`, `postJson(url, data)`, 
 - `auth.js` - API key get/set/clear, change listeners, the `GET /api/auth` check, and the key-entry modal.
-- `state.js` - shared reactive `state`, `onChange(fn)`, `scheduleRefresh(key, fn, delayMs)`, `cancelRefresh(...keys)`, and the constants `WS_MAX_DELAY` and `TOOL_BASED_AGENTS`.
+- `state.js` - shared `state`, `scheduleRefresh(key, fn, delayMs)`, `cancelRefresh(...keys)`, and the constants `WS_MAX_DELAY` and `TOOL_BASED_AGENTS`.
 - `ws.js` - `connectWS()` and `registerHandlers(handlers)`.
 
 ## How to use it
@@ -37,7 +36,7 @@ From a module in `src/fsm_llm/monitor/static/` (as `app.js` does):
 
 ```js
 import { fetchJson, postJson } from './services/api.js';
-import { state, onChange } from './services/state.js';
+import { state } from './services/state.js';
 import { connectWS, registerHandlers } from './services/ws.js';
 import { checkAuthRequired, getApiKey, requestApiKey } from './services/auth.js';
 
@@ -50,13 +49,12 @@ connectWS();
 const instances = await fetchJson('/api/instances');
 await postJson('/api/fsm/launch', { preset_id: 'basic/simple_greeting/fsm.json' });
 
-const stop = onChange(({ prop, value }) => console.log(prop, value));
 ```
 
 ## Things to know
 
 - Reconnect delay starts at 3 s, doubles on every close, is capped at 30 s, and has up to 1 s of random jitter. It resets to 3 s on a successful open.
-- A close with code 4401 stops reconnecting and opens the key modal. Saving a key reconnects.
+- A close with code 4401 stops reconnecting and opens the key modal. Saving a key reconnects. A close with code 4403 (Host or Origin refused) stops reconnecting too.
 - Before opening a new socket, `connectWS` detaches the old socket's handlers so a late `onclose` cannot start a second reconnect loop.
 - The API key lives only in `sessionStorage` (an in-memory variable if storage is unavailable). It is never put in URLs, `localStorage`, or logs.
 - If the user cancels the key modal, later 401s stop reopening it until a key is saved or a forced prompt is made.

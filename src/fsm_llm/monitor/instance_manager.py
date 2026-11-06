@@ -49,6 +49,9 @@ from fsm_llm.workflows import (
 from .collector import EventCollector, redact_context
 from .constants import (
     ACTIVE_AGENT_STATUSES,
+    DEFAULT_AGENT_MAX_ITERATIONS,
+    DEFAULT_AGENT_TIMEOUT_SECONDS,
+    DEFAULT_FSM_TEMPERATURE,
     EVENT_AGENT_CANCELLED,
     EVENT_AGENT_COMPLETED,
     EVENT_AGENT_FAILED,
@@ -295,7 +298,7 @@ class ManagedAgent(_ManagedBase):
         agent_type: str = "ReactAgent",
         task: str = "",
         label: str = "",
-        max_iterations: int = 10,
+        max_iterations: int = DEFAULT_AGENT_MAX_ITERATIONS,
     ) -> None:
         super().__init__(instance_id, label)
         self.agent_type = agent_type
@@ -1053,7 +1056,7 @@ class InstanceManager:
         preset_id: str | None = None,
         fsm_json: dict[str, Any] | None = None,
         model: str = DEFAULT_LLM_MODEL,
-        temperature: float = 0.5,
+        temperature: float = DEFAULT_FSM_TEMPERATURE,
         label: str = "",
     ) -> ManagedFSM:
         """Launch a new FSM instance from preset or raw JSON."""
@@ -1523,8 +1526,8 @@ class InstanceManager:
         task: str = "",
         tools_config: list[StubToolConfig] | None = None,
         model: str = DEFAULT_LLM_MODEL,
-        max_iterations: int = 10,
-        timeout_seconds: float = 120.0,
+        max_iterations: int = DEFAULT_AGENT_MAX_ITERATIONS,
+        timeout_seconds: float = DEFAULT_AGENT_TIMEOUT_SECONDS,
         label: str = "",
     ) -> ManagedAgent:
         """Launch an agent in a background thread."""

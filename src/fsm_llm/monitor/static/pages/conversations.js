@@ -2,7 +2,7 @@
 
 import { state } from '../services/state.js';
 import { fetchJson, postJson } from '../services/api.js';
-import { $, esc, renderLLMData, copyToClipboard, showToast, openDialog } from '../utils/dom.js';
+import { $, esc, renderLLMData, copyToClipboard, showToast, openDialog, showDrawerDetailView } from '../utils/dom.js';
 import { renderMarkdown } from '../utils/markdown.js';
 
 // Forward references (set by app.js)
@@ -57,14 +57,7 @@ export function showConversationInDrawer(instanceId, convId) {
 }
 
 export function drawerBack() {
-    const backBtn = $('ctrl-drawer-back');
-    const drawerContent = $('ctrl-drawer-content');
-    const convWrapper = $('conv-detail-wrapper');
-    const eventsWrapper = $('ctrl-drawer-events-wrapper');
-    if (backBtn) backBtn.style.display = 'none';
-    if (drawerContent) drawerContent.style.display = 'block';
-    if (convWrapper) convWrapper.style.display = 'none';
-    if (eventsWrapper) eventsWrapper.style.display = 'block';
+    showDrawerDetailView();
 
     state.selectedConvId = null;
 

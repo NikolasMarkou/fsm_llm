@@ -87,7 +87,7 @@ async function loadWorkflowPresets() {
     }
 }
 
-export function renderLaunchPresets(presets) {
+function renderLaunchPresets(presets) {
     const items = presets.fsm || [];
     const container = $('launch-preset-list');
     if (!container) return;
@@ -164,8 +164,13 @@ export function selectPreset(card) {
     }
 }
 
+/** A function that re-enables a launch button with its idle *label*. */
+function _resetter(btn, label) {
+    return () => { if (btn) { btn.disabled = false; btn.textContent = label; } };
+}
+
 export async function doLaunchFSM(btn) {
-    const _resetBtn = () => { if (btn) { btn.disabled = false; btn.textContent = 'Launch FSM'; } };
+    const _resetBtn = _resetter(btn, 'Launch FSM');
     if (btn) { btn.disabled = true; btn.textContent = 'Launching...'; }
 
     const source = $('launch-fsm-source').value;
@@ -201,7 +206,7 @@ export async function doLaunchFSM(btn) {
 }
 
 export async function doLaunchWorkflow(btn) {
-    const _resetBtn = () => { if (btn) { btn.disabled = false; btn.textContent = 'Launch Workflow'; } };
+    const _resetBtn = _resetter(btn, 'Launch Workflow');
     if (btn) { btn.disabled = true; btn.textContent = 'Launching...'; }
 
     if (!state.capabilities.workflows) {
@@ -251,7 +256,7 @@ const TOOL_TEMPLATES = [
     { name: 'schedule_task', description: 'Schedule a task for future execution', stub_response: 'Task scheduled for 2025-01-15 at 09:00 UTC' },
 ];
 
-export function populateToolTemplates() {
+function populateToolTemplates() {
     const select = $('launch-tool-template');
     if (!select) return;
     select.innerHTML = '<option value="">-- Add a tool from templates --</option>';
@@ -279,10 +284,8 @@ export function addToolFromTemplate() {
 
 function _addToolRow(name, description, stubResponse) {
     const container = $('launch-agent-tools');
-    const idx = state.stubToolCount++;
     const row = document.createElement('div');
     row.className = 'stub-tool-row';
-    row.id = `stub-tool-${idx}`;
     row.innerHTML =
         `<input type="text" placeholder="Name" class="stub-name" value="${esc(name || '')}">` +
         `<input type="text" placeholder="Description" class="stub-desc" value="${esc(description || '')}">` +
@@ -316,7 +319,7 @@ export function onAgentTypeChange() {
 }
 
 export async function doLaunchAgent(btn) {
-    const _resetBtn = () => { if (btn) { btn.disabled = false; btn.textContent = 'Launch Agent'; } };
+    const _resetBtn = _resetter(btn, 'Launch Agent');
     if (btn) { btn.disabled = true; btn.textContent = 'Launching...'; }
 
     if (!state.capabilities.agents) {

@@ -48,7 +48,7 @@ export function showToast(msg, type) {
 }
 
 /** Reduce a server-provided enum-like value to a safe CSS class token. */
-export function safeClass(value, fallback = 'unknown') {
+function safeClass(value, fallback = 'unknown') {
     const s = String(value ?? '').toLowerCase().replace(/[^a-z0-9_-]/g, '');
     return s || fallback;
 }
@@ -128,13 +128,41 @@ export function renderLLMData(obj) {
     return html || '<span class="text-dim">Empty</span>';
 }
 
-/** Highlight search query matches within text. */
+/** Highlight search query matches within text (matched on the raw text, so a
+ *  query like "amp" never lands inside an escaped "&amp;"). */
 export function highlightText(text, query) {
     if (!query) return esc(text);
-    const escaped = esc(text);
-    const escapedQuery = esc(query);
-    const re = new RegExp(`(${escapedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-    return escaped.replace(re, '<span class="search-highlight">$1</span>');
+    const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    // split() with a capture group puts the matches at the odd indexes.
+    return String(text ?? '').split(re)
+        .map((part, i) => (i % 2 ? `<span class="search-highlight">${esc(part)}</span>` : esc(part)))
+        .join('');
+}
+
+/** Prev/next pager in *el*; the buttons carry data-action `<action>-prev` and `-next`. */
+export function renderPagination(el, page, totalPages, action) {
+    if (!el) return;
+    if (totalPages <= 1) {
+        el.style.display = 'none';
+        return;
+    }
+    el.style.display = 'flex';
+    el.innerHTML =
+        `<button class="btn btn-sm" data-action="${action}-prev"${page === 0 ? ' disabled' : ''}>&laquo; Prev</button>` +
+        `<span class="pagination-info">Page ${page + 1} of ${totalPages}</span>` +
+        `<button class="btn btn-sm" data-action="${action}-next"${page >= totalPages - 1 ? ' disabled' : ''}>Next &raquo;</button>`;
+}
+
+/** Show the instance detail in the Control drawer (hide the conversation sub-view). */
+export function showDrawerDetailView() {
+    const backBtn = $('ctrl-drawer-back');
+    const drawerContent = $('ctrl-drawer-content');
+    const convWrapper = $('conv-detail-wrapper');
+    const eventsWrapper = $('ctrl-drawer-events-wrapper');
+    if (backBtn) backBtn.style.display = 'none';
+    if (drawerContent) drawerContent.style.display = 'block';
+    if (convWrapper) convWrapper.style.display = 'none';
+    if (eventsWrapper) eventsWrapper.style.display = 'block';
 }
 
 /** Quick hash for change detection on instance lists. */

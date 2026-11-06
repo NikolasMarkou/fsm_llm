@@ -16,7 +16,11 @@ import threading
 import time
 import webbrowser
 
-_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+from fsm_llm.constants import CLI_EXIT_FAILURE, CLI_EXIT_INTERRUPTED, CLI_EXIT_OK
+
+from .constants import DEFAULT_TRUSTED_HOSTS
+
+_LOOPBACK_HOSTS = frozenset(DEFAULT_TRUSTED_HOSTS)
 _WILDCARD_HOSTS = {"0.0.0.0", "::", ""}
 
 
@@ -94,7 +98,7 @@ def main_cli() -> None:
         from .__version__ import __version__
 
         print(f"fsm_llm.monitor {__version__}")
-        sys.exit(0)
+        sys.exit(CLI_EXIT_OK)
 
     if args.info:
         from .__version__ import __version__
@@ -110,7 +114,7 @@ def main_cli() -> None:
         print("  - Settings CRUD")
         print()
         print("Requires: fastapi, uvicorn, jinja2")
-        sys.exit(0)
+        sys.exit(CLI_EXIT_OK)
 
     # Launch the web server
     try:
@@ -123,7 +127,7 @@ def main_cli() -> None:
             'Make sure deps are installed: pip install -e ".[monitor]" (from a clone)',
             file=sys.stderr,
         )
-        sys.exit(1)
+        sys.exit(CLI_EXIT_FAILURE)
 
     # DECISION plan-2026-09-29T044048-3a032517/D-008
     # The single library-wide loguru disable of "fsm_llm" also silences this
@@ -143,7 +147,7 @@ def main_cli() -> None:
     if args.host in _WILDCARD_HOSTS:
         trusted_hosts = ["*"]
     elif non_loopback:
-        trusted_hosts = ["localhost", "127.0.0.1", "::1", args.host]
+        trusted_hosts = [*DEFAULT_TRUSTED_HOSTS, args.host]
     configure(api_key=api_key, trusted_hosts=trusted_hosts)
 
     if non_loopback and api_key is None:
@@ -172,7 +176,16 @@ def main_cli() -> None:
             daemon=True,
         ).start()
 
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    # Not uvicorn.run(): it swallows KeyboardInterrupt, so Ctrl-C would exit 0.
+    server = uvicorn.Server(
+        uvicorn.Config(app, host=args.host, port=args.port, log_level="warning")
+    )
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        sys.exit(CLI_EXIT_INTERRUPTED)
+    if not server.started:  # what uvicorn.run reports as a startup failure
+        sys.exit(CLI_EXIT_FAILURE)
 
 
 if __name__ == "__main__":

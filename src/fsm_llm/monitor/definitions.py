@@ -15,6 +15,9 @@ from pydantic import BaseModel, Field, field_validator
 from fsm_llm.constants import DEFAULT_LLM_MODEL
 
 from .constants import (
+    DEFAULT_AGENT_MAX_ITERATIONS,
+    DEFAULT_AGENT_TIMEOUT_SECONDS,
+    DEFAULT_FSM_TEMPERATURE,
     DEFAULT_LOG_LEVEL,
     DEFAULT_MAX_EVENTS,
     DEFAULT_MAX_INSTANCES,
@@ -25,12 +28,17 @@ from .constants import (
     MAX_AGENT_ITERATIONS,
     MAX_AGENT_TIMEOUT_SECONDS,
     MAX_BUFFER_SIZE,
+    MAX_BUILDER_TOKENS,
+    MAX_INSTANCES_LIMIT,
     MAX_MESSAGE_LENGTH,
     MAX_REFRESH_INTERVAL,
+    MAX_RUNNING_AGENTS_LIMIT,
     MAX_STUB_TOOLS,
     MAX_TASK_LENGTH,
+    MAX_TEMPERATURE,
     MIN_BUFFER_SIZE,
     MIN_REFRESH_INTERVAL,
+    MIN_TEMPERATURE,
 )
 
 
@@ -191,8 +199,12 @@ class MonitorConfig(BaseModel):
     log_level: str = DEFAULT_LOG_LEVEL
     show_internal_keys: bool = False
     auto_scroll_logs: bool = True
-    max_instances: int = Field(default=DEFAULT_MAX_INSTANCES, ge=1, le=10_000)
-    max_running_agents: int = Field(default=DEFAULT_MAX_RUNNING_AGENTS, ge=1, le=256)
+    max_instances: int = Field(
+        default=DEFAULT_MAX_INSTANCES, ge=1, le=MAX_INSTANCES_LIMIT
+    )
+    max_running_agents: int = Field(
+        default=DEFAULT_MAX_RUNNING_AGENTS, ge=1, le=MAX_RUNNING_AGENTS_LIMIT
+    )
 
     @field_validator("log_level")
     @classmethod
@@ -227,7 +239,9 @@ class LaunchFSMRequest(BaseModel):
     preset_id: str | None = None
     fsm_json: dict[str, Any] | None = None
     model: str = DEFAULT_LLM_MODEL
-    temperature: float = Field(default=0.5, ge=0.0, le=2.0)
+    temperature: float = Field(
+        default=DEFAULT_FSM_TEMPERATURE, ge=MIN_TEMPERATURE, le=MAX_TEMPERATURE
+    )
     label: str = ""
 
 
@@ -264,9 +278,14 @@ class LaunchAgentRequest(BaseModel):
     agent_type: str = "ReactAgent"
     task: str = Field(..., min_length=1, max_length=MAX_TASK_LENGTH)
     model: str = DEFAULT_LLM_MODEL
-    max_iterations: int = Field(default=10, ge=1, le=MAX_AGENT_ITERATIONS)
+    max_iterations: int = Field(
+        default=DEFAULT_AGENT_MAX_ITERATIONS, ge=1, le=MAX_AGENT_ITERATIONS
+    )
     timeout_seconds: float = Field(
-        default=120.0, gt=0, le=MAX_AGENT_TIMEOUT_SECONDS, allow_inf_nan=False
+        default=DEFAULT_AGENT_TIMEOUT_SECONDS,
+        gt=0,
+        le=MAX_AGENT_TIMEOUT_SECONDS,
+        allow_inf_nan=False,
     )
     tools: list[StubToolConfig] = Field(default_factory=list, max_length=MAX_STUB_TOOLS)
     label: str = ""
@@ -350,8 +369,8 @@ class BuilderStartRequest(BaseModel):
 
     artifact_type: str = ""
     model: str = DEFAULT_LLM_MODEL
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    max_tokens: int = Field(default=2000, ge=1, le=100000)
+    temperature: float = Field(default=0.7, ge=MIN_TEMPERATURE, le=MAX_TEMPERATURE)
+    max_tokens: int = Field(default=2000, ge=1, le=MAX_BUILDER_TOKENS)
 
 
 class BuilderSendRequest(BaseModel):
@@ -371,7 +390,3 @@ def model_to_dict(obj: Any) -> dict[str, Any] | None:
     if isinstance(obj, dict):
         return obj
     return None
-
-
-# Update forward references
-StateInfo.model_rebuild()

@@ -131,7 +131,7 @@ export function switchVizDetail(tab, btn) {
 
 // --- Presets ---
 
-export async function loadFSMPresets() {
+async function loadFSMPresets() {
     if (state.presets) {
         _populatePresetDropdown(state.presets);
         return;
