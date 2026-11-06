@@ -26,9 +26,28 @@ from fsm_llm.eval.constants import CATEGORY_TIMEOUTS, EVALUATOR_NAME, EXAMPLE_TI
 from fsm_llm.eval.examples import ExampleTarget, create_output_dir, run_example
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_HISTORICAL_RESULTS = (
-    _REPO_ROOT / "evaluation" / "2026-04-01_23-35_4025a78_qwen3.5-4b" / "results.json"
-)
+# The key sets of the first committed `examples` run (2026-04-01, commit 4025a78,
+# `evaluation/2026-04-01_23-35_4025a78_qwen3.5-4b/results.json`, since deleted;
+# recoverable with `git show 72388e6^:<that path>`). The format is pinned here so
+# the file itself is not needed.
+_HISTORICAL_TOP_KEYS = {
+    "date",
+    "git_commit",
+    "model",
+    "health_score",
+    "total_examples",
+    "distribution",
+    "results",
+}
+_HISTORICAL_RESULT_KEYS = {
+    "name",
+    "category",
+    "score",
+    "failures",
+    "duration",
+    "exit_code",
+    "timed_out",
+}
 
 _OK_SCRIPT = """\
 import os, sys
@@ -207,9 +226,8 @@ class TestRunExamples:
     def test_results_json_keeps_every_historical_key(self, finished_run):
         report, _ = finished_run
         data = json.loads((report.run_dir / "results.json").read_text())
-        old = json.loads(_HISTORICAL_RESULTS.read_text())
-        assert set(old) <= set(data)
-        assert set(data) - set(old) == {
+        assert _HISTORICAL_TOP_KEYS <= set(data)
+        assert set(data) - _HISTORICAL_TOP_KEYS == {
             "wall_time_s",
             "workers",
             "default_timeout",
@@ -217,7 +235,7 @@ class TestRunExamples:
             "interrupted",
         }
         assert data["interrupted"] is False
-        assert set(old["results"][0]) == set(data["results"][0])
+        assert _HISTORICAL_RESULT_KEYS == set(data["results"][0])
         assert set(data["distribution"]) == {"0", "1", "2", "3", "4"}
         assert data["total_examples"] == 4
         assert data["evaluator"] == EVALUATOR_NAME
