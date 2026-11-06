@@ -669,3 +669,77 @@ class TestShortAnswer:
         )
         result = _adapt(llm).run("Name the capital of France")
         assert result.answer == value
+
+
+# -------------------------------------------------------------------------
+# F-AP-16 (plan-2026-11-06T093029-0068b055 step 6, D-007 and D-016): ADaPT
+# runs no tool, so it neither advertises nor logs one.
+# -------------------------------------------------------------------------
+
+
+def _marker_registry(calls: list[Any]) -> ToolRegistry:
+    def zzz_marker_tool(params):
+        calls.append(params)
+        return "marker result"
+
+    registry = ToolRegistry()
+    registry.register_function(
+        zzz_marker_tool, name="zzz_marker_tool", description="Marker tool"
+    )
+    return registry
+
+
+def _instruction_strings(node: Any) -> list[str]:
+    """Every string in the built FSM dict (instructions, purposes, fields)."""
+    if isinstance(node, str):
+        return [node]
+    if isinstance(node, dict):
+        return [s for v in node.values() for s in _instruction_strings(v)]
+    if isinstance(node, (list, tuple)):
+        return [s for v in node for s in _instruction_strings(v)]
+    return []
+
+
+class TestADaPTRunsNoTool:
+    def test_adapt_prompts_name_no_tool_even_with_a_registry(self):
+        fsm = build_adapt_fsm(_marker_registry([]), "some task")
+        text = "\n".join(_instruction_strings(fsm))
+        assert "zzz_marker_tool" not in text
+        assert "Available tools" not in text
+
+    def test_build_adapt_fsm_registry_changes_nothing(self):
+        assert build_adapt_fsm(_marker_registry([]), "t", 2, ("k",)) == (
+            build_adapt_fsm(None, "t", 2, ("k",))
+        )
+
+    def test_adapt_logs_llm_only_with_tools_given(self):
+        from fsm_llm.logging import enable_library_logging, logger
+
+        enable_library_logging()
+        captured: list[str] = []
+        sink = logger.add(lambda msg: captured.append(str(msg)), level="INFO")
+        try:
+            ADaPTAgent(tools=_marker_registry([]))
+        finally:
+            logger.remove(sink)
+            logger.disable("fsm_llm")
+        started = [m for m in captured if "ADaPTAgent started" in m]
+        assert len(started) == 1
+        assert "LLM-only" in started[0]
+        assert "1 tools" not in started[0]
+
+    def test_tools_argument_is_accepted_and_never_called(self):
+        calls: list[Any] = []
+        registry = _marker_registry(calls)
+        llm = _SilentKeysLLM(
+            silent=set(),
+            values={
+                ContextKeys.ATTEMPT_RESULT: "Paris",
+                ContextKeys.ATTEMPT_SUCCEEDED: True,
+            },
+        )
+        agent = ADaPTAgent(tools=registry, llm_interface=llm)
+        assert agent.tools is registry
+        result = agent.run("Name the capital of France")
+        assert result.tools_used == []
+        assert calls == []

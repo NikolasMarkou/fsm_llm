@@ -38,6 +38,11 @@ class ADaPTAgent(BaseAgent):
     """
     ADaPT agent: attempt first, decompose recursively only on failure.
 
+    ADaPT executes no tool. ``tools`` is accepted and stored (frozen examples
+    pass it) but is reserved, as ``OrchestratorAgent(tools=)`` is: no prompt
+    names a tool, none is run, ``AgentResult.tools_used`` stays empty and the
+    agent always logs as LLM-only.
+
     Usage::
 
         agent = ADaPTAgent(max_depth=3)
@@ -66,19 +71,20 @@ class ADaPTAgent(BaseAgent):
         **api_kwargs: Any,
     ) -> None:
         super().__init__(config, **api_kwargs)
+        # DECISION plan-2026-11-06T093029-0068b055/D-007
+        # ADaPT has no tool executor, so `tools` is stored but never advertised
+        # to the model, never passed to build_adapt_fsm and never run. Do NOT
+        # re-advertise tools the agent cannot run (the prompt used to say
+        # "Available tools" next to "from your own knowledge"), and do NOT add
+        # an executor without a live-model check (carried as F-AP-16b). The
+        # builder keeps a no-effect `registry=` parameter: D-016, F-AP-16c.
         self.tools = tools
         self.max_depth = max_depth
 
-        if tools is None:
-            logger.info(
-                f"ADaPTAgent started in LLM-only mode (no tools), "
-                f"max_depth={max_depth}, model={self.config.model}"
-            )
-        else:
-            logger.info(
-                f"ADaPTAgent started with {len(tools)} tools, "
-                f"max_depth={max_depth}, model={self.config.model}"
-            )
+        logger.info(
+            f"ADaPTAgent started in LLM-only mode (executes no tool), "
+            f"max_depth={max_depth}, model={self.config.model}"
+        )
 
     def run(
         self,
@@ -92,7 +98,6 @@ class ADaPTAgent(BaseAgent):
         logger.debug(LogMessages.DECOMPOSITION.format(depth=_depth))
 
         fsm_def = build_adapt_fsm(
-            registry=self.tools,
             task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
             max_depth=self.max_depth,
             context_keys=caller_prompt_keys(initial_context, self._run_output_keys),

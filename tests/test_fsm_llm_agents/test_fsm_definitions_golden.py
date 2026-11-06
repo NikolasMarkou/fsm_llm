@@ -86,10 +86,6 @@ _CASES: dict[str, tuple[Callable[[], Any], bool]] = {
     "orchestrator": (lambda: fd.build_orchestrator_fsm(), True),
     "orchestrator_keys": (lambda: fd.build_orchestrator_fsm(_TASK, _KEYS), True),
     "adapt": (lambda: fd.build_adapt_fsm(), True),
-    "adapt_tools": (
-        lambda: fd.build_adapt_fsm(_registry(*_TOOLS), _TASK, 1, _KEYS),
-        True,
-    ),
     "adapt_depth": (lambda: fd.build_adapt_fsm(None, "", 5), True),
     # reflexion
     "reflexion": (lambda: fd.build_reflexion_fsm(_registry(*_TOOLS)), True),
@@ -256,10 +252,6 @@ _GOLDEN: dict[str, tuple[str, str]] = {
     "adapt_depth": (
         "38261b6fc9b25444b16cca60eac99feada50a2424fc3f10c650bd78fe476cb69",
         "fsm_adapt_agent_2f0d9497",
-    ),
-    "adapt_tools": (
-        "e18f64f11d3ca76813bcb20ea7a1d387d6f6b1b1a251c7a422399a2017cdb7bd",
-        "fsm_adapt_agent_4a2dced8",
     ),
     "await_approval_state": (
         "393e8623fb20ed25ddea4f976ed2feae6905132dc4606d18ad0ec26c485bd08a",

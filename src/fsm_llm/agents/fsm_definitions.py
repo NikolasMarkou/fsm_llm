@@ -355,14 +355,21 @@ def build_adapt_fsm(
     ``context_keys``, never ``agent_trace``. The three loop states make no
     state-level bulk call. Raises ``ValueError`` like
     :func:`loop_field_context_keys`.
+
+    ``registry`` is reserved and unused: ADaPT runs no tool, so none is
+    advertised and the FSM built with a registry equals the one built without.
     """
+    # DECISION plan-2026-11-06T093029-0068b055/D-016: ``registry`` is kept only
+    # because four in-repo tests pass it (removal is carried as F-AP-16c). Do
+    # NOT make it affect the FSM again (D-007) and do NOT delete it without
+    # editing those tests.
     persona = (
         "You are an adaptive AI agent that attempts tasks directly first. "
         "If the direct attempt is insufficient, you decompose the task into "
         "simpler subtasks and solve them recursively. "
         "Always try the direct approach before decomposing."
     )
-    fields = build_adapt_field_instructions(registry, task_description=task_description)
+    fields = build_adapt_field_instructions()
     # DECISION plan-2026-09-29T103145-06a5ec0a/D-053: explicit narrowed
     # configs replace core's auto-minted `any` ones (whole context). Do NOT
     # type `subtasks` `any`: the subtask executor needs a list, and `list`

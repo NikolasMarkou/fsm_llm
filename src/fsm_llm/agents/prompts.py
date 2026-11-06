@@ -586,24 +586,20 @@ def build_decompose_response_instructions() -> str:
     )
 
 
-def build_adapt_field_instructions(
-    registry: ToolRegistry | None = None,
-    task_description: str | None = None,
-) -> dict[str, str]:
+def build_adapt_field_instructions() -> dict[str, str]:
     """Per-field instructions for the ADaPT states' typed fields.
 
     Returns ``{field_name: instructions}`` for ``attempt_result`` (attempt),
     ``attempt_succeeded`` (assess), ``subtasks`` and ``operator`` (decompose);
     fix 21.1 of plan 06a5ec0a. The generated values open with
     :data:`_COMPOSE`; the ``attempt_succeeded`` wording is permissive (a false
-    costs a whole decomposition). ``registry``/``task_description`` add the
-    tool list to the ``attempt_result`` instructions.
+    costs a whole decomposition). ADaPT runs no tool, so no instruction names
+    one (D-007 of plan 0068b055).
     """
-    tool_section = _tool_section(registry, task_description)
     return {
         ContextKeys.ATTEMPT_RESULT: (
             f"{_COMPOSE}Your direct attempt at the task: a complete answer "
-            "written from your own knowledge." + tool_section
+            "written from your own knowledge."
         ),
         ContextKeys.ATTEMPT_SUCCEEDED: (
             "Weigh the attempt_result value against the task. true when it "
