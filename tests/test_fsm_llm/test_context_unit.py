@@ -794,7 +794,7 @@ MIXED_CASE_INTERNAL_KEYS = ["SYSTEM_foo", "Internal_x", "__Private", "_Hidden"]
 
 
 class TestInternalPrefixCaseInsensitivity:
-    """F-13 / SC-10: verified separately at each of the FIVE call sites."""
+    """F-13 / SC-10: verified separately at each call site (site 3 no longer warns, D-026)."""
 
     def test_site_1_clean_context_keys(self):
         """context.py -- clean_context_keys."""
@@ -825,8 +825,13 @@ class TestInternalPrefixCaseInsensitivity:
 
         assert manager.get_conversation_data("conv-1") == {"name": "Alice"}
 
-    def test_site_3_fsm_context_update_warns(self):
-        """definitions.py:964 -- FSMContext.update warns on internal prefixes."""
+    def test_site_3_fsm_context_update_is_quiet(self):
+        """definitions.py -- FSMContext.update no longer warns on internal prefixes.
+
+        Plan 0068b055 step 12.29 (D-026): every caller that reaches ``update``
+        writes the key by name through a public path (agents seed
+        ``_max_iterations`` on every run), and the accidental paths (extraction,
+        handler delta) never reach it. The site is gone; the keys are stored."""
         from fsm_llm.definitions import FSMContext
         from fsm_llm.logging import logger
 
@@ -835,14 +840,15 @@ class TestInternalPrefixCaseInsensitivity:
             lambda m: records.append(m.record["message"]), level="WARNING"
         )
         logger.enable("fsm_llm")
+        context = FSMContext()
         try:
-            FSMContext().update({"SYSTEM_foo": "v"})
+            context.update({"SYSTEM_foo": "v"})
         finally:
+            logger.disable("fsm_llm")
             logger.remove(sink_id)
 
-        assert any("SYSTEM_foo" in r for r in records), (
-            "FSMContext.update should warn about a mixed-case internal key"
-        )
+        assert not [r for r in records if "SYSTEM_foo" in r]
+        assert context.data["SYSTEM_foo"] == "v"
 
     def test_site_4_get_user_visible_data(self):
         """definitions.py:991 -- FSMContext.get_user_visible_data."""
@@ -1035,11 +1041,13 @@ class TestNestedContextCleaning:
 
         records = []
         sink_id = logger.add(lambda m: records.append(m.record), level="WARNING")
+        logger.enable("fsm_llm")  # alone it ran only after an earlier test enabled it
         try:
             result = clean_context_keys(
                 {b"password": "BYTES-SECRET"}, "test-conv", strip_forbidden_keys=True
             )
         finally:
+            logger.disable("fsm_llm")
             logger.remove(sink_id)
 
         # Behaviour is unchanged (still kept) -- but it is now announced.

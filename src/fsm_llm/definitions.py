@@ -2105,13 +2105,25 @@ class FSMContext(BaseModel):
         super().__init__(**data)
 
     def update(self, new_data: dict[str, Any]) -> None:
-        """Update context with new data."""
+        """Update context with new data.
+
+        Writes exactly the keys of ``new_data``, internal-prefix keys included
+        (no warning: see the DECISION below).
+        """
+        # DECISION plan-2026-11-06T093029-0068b055/D-026
+        # No WARNING for an internal-prefix key here. Every caller that reaches
+        # this method writes the key BY NAME through a public write path
+        # (start_conversation seeding, push_fsm inheritance, API.update_context,
+        # the pop-merge diff): agents seed `_max_iterations` etc. on every run,
+        # so the line was noise on the documented path. The accidental paths
+        # never get here: an extraction result is stripped by
+        # `clean_context_keys` first, and a handler delta is merged straight
+        # into `context.data` by `merge_delta` (reserved keys refused there
+        # with their own WARNING). Do NOT re-add a warning in this method, and
+        # do NOT re-inline a prefix check to bring it back; guard a new
+        # accidental-write path at that path. The debug line below names the
+        # keys.
         if new_data:
-            for key in new_data:
-                if has_internal_prefix(key):
-                    logger.warning(
-                        f"Context update contains internal-prefix key: {key!r}"
-                    )
             logger.debug(f"Updating context with keys: {list(new_data.keys())}")
             self.data.update(new_data)
 
