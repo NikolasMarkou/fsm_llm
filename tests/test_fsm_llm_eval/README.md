@@ -1,6 +1,6 @@
 # test_fsm_llm_eval
 
-The pytest suite for `fsm_llm.eval`, the evaluation package of the FSM-LLM repository, and for its command line `fsm-llm-eval`. It lives at `tests/test_fsm_llm_eval/` and holds 421 tests in 10 files.
+The pytest suite for `fsm_llm.eval`, the evaluation package of the FSM-LLM repository, and for its command line `fsm-llm-eval`. It lives at `tests/test_fsm_llm_eval/` and holds 426 tests in 10 files.
 
 ## What it is for
 
@@ -41,5 +41,5 @@ Run from the repository root with the project virtualenv:
 - Run from the repository root. `test_cases.py` imports `tests.conftest`, and several tests read real repository files: `evaluation/datasets/simple_greeting_cases.json`, `scripts/bench_common.py`, and the `examples/` tree.
 - Git tests compare against `git rev-parse HEAD`, so the checkout must be a git repository.
 - Do not regenerate the golden table in `test_scoring.py` from the current code. It pins the original rubric for every input the 2026-11-06 change (`Error:` and `Success: False` lines, extraction at most 50%) does not touch; `TestReportedFailure` pins the change.
-- `test_examples.py` starts real subprocesses and one of them waits for a 1 second timeout. One slow-marked test starts a real `fsm-llm-eval examples` process, sends it SIGTERM and checks the partial report and exit 130.
+- `test_examples.py` starts real subprocesses and one of them waits for a 1 second timeout. One slow-marked test starts a real `fsm-llm-eval examples` process, sends it SIGTERM and checks the partial report and exit 130. `TestSigtermEndsRunningExamples` runs an example that starts its own subprocess, sends SIGTERM and checks, by pid through `/proc`, that both are gone at once (in-process and with a real CLI process, which must exit promptly), and that a timeout ends the example's subprocess too.
 - The repository root `AGENTS.md` states this suite's test count (420). `tests/test_packaging.py` checks that number against `pytest --collect-only`, so update it when adding or removing tests.

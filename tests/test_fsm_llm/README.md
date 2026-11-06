@@ -1,6 +1,6 @@
 # test_fsm_llm
 
-The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 75 test files (5,690 collected tests) plus a `fixtures/` package of labelled secret-filter data.
+The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 75 test files (5,695 collected tests) plus a `fixtures/` package of labelled secret-filter data.
 
 ## What it is for
 
@@ -51,7 +51,7 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_builders.py` - the core `BuildError` shared by every `build()`, and the `HandlerBuilder`, `API` and `FSMManager` builders.
 - `test_removed_legacy.py` - absence pins for core names removed by the "no legacy" cleanup.
 - `test_llm_parse_fallback_seam.py` - response parsing falls back from JSON to embedded JSON to raw text and never raises.
-- `test_llm_finish_reason.py` - a reply cut by `max_tokens`: `CompletionResponse.finish_reason` and `truncated`, the one WARNING per cut reply, the cut-off note in extraction and classification errors, and the cut-off message that replaces a half JSON envelope.
+- `test_llm_finish_reason.py` - a reply cut by `max_tokens`: `CompletionResponse.finish_reason` and `truncated`, the one WARNING per cut reply, the cut-off note in extraction and classification errors, the cut-off message that replaces a half JSON envelope, and the partial `message` the salvage rungs ship from a cut envelope (still `truncated`).
 - `test_cut_off_record.py` - the per-turn record of a reply cut off at `max_tokens` (`definitions.CONTEXT_KEY_CUT_OFF`): written from a `truncated` response, absent when nothing was cut, cleared each turn, kept out of prompts, `get_data` and saved sessions.
 - `test_internal_key_seeding_log.py` - writing an internal-prefix key through `start_conversation`, `push_fsm` or `update_context` logs no WARNING.
 - `test_llm_provider_banner.py` - `fsm_llm.llm` sets `litellm.suppress_debug_info = True` at import, so a provider error prints no litellm banner to stdout; a host can set it back to False.
