@@ -17,7 +17,17 @@ MIN_REFRESH_INTERVAL = 0.5  # seconds
 MAX_REFRESH_INTERVAL = 60.0
 MIN_BUFFER_SIZE = 10
 MAX_BUFFER_SIZE = 100_000
-LOG_LEVELS = ("TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL")
+# Minimum-level ranking for log filters (loguru's numeric levels); the one level list.
+LOG_LEVEL_RANK = {
+    "TRACE": 5,
+    "DEBUG": 10,
+    "INFO": 20,
+    "SUCCESS": 25,
+    "WARNING": 30,
+    "ERROR": 40,
+    "CRITICAL": 50,
+}
+LOG_LEVELS = tuple(LOG_LEVEL_RANK)
 
 # --- Request bounds ---
 MAX_MESSAGE_LENGTH = 10_000  # matches core ResponseGenerationRequest.user_message
@@ -27,6 +37,16 @@ MAX_AGENT_TIMEOUT_SECONDS = 3600.0
 MAX_STUB_TOOLS = 50
 MAX_REQUEST_BODY_BYTES = 1_048_576  # 1 MiB
 MAX_BUILDER_SESSIONS = 50
+
+# --- OTEL export ---
+MAX_OPEN_CONVERSATION_SPANS = (
+    10_000  # cap on open conversation spans; oldest ended first
+)
+MAX_ERROR_TEXT = 200  # error text exported as a span attribute is cut to this
+
+# --- Instance statuses ---
+TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+ACTIVE_AGENT_STATUSES = frozenset({"running", "cancelling"})
 
 # --- Visualizer page ---
 VIZ_EDGE_LABEL_CHARS = 30  # edge label shown on the graph and in its table

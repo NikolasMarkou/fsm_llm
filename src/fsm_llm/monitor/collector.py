@@ -38,8 +38,7 @@ from .constants import (
     EVENT_PRE_PROCESSING,
     EVENT_STATE_TRANSITION,
     EVENT_WORKFLOW_ADVANCED,
-    MONITOR_HANDLER_NAME,
-    MONITOR_HANDLER_PRIORITY,
+    LOG_LEVEL_RANK,
 )
 from .definitions import LogRecord, MetricSnapshot, MonitorEvent
 from .exceptions import MetricCollectionError
@@ -77,33 +76,6 @@ class EventCollector:
 
         # Loguru sink ID for cleanup
         self._log_sink_id: int | None = None
-
-    @property
-    def handler_name(self) -> str:
-        return MONITOR_HANDLER_NAME
-
-    @property
-    def handler_priority(self) -> int:
-        return MONITOR_HANDLER_PRIORITY
-
-    def get_events_since(self, after_total: int, limit: int = 50) -> list[MonitorEvent]:
-        """Get events added after a given total count, newest first.
-
-        Use with ``total_events`` to stream only new events to clients.
-        Streaming clients should prefer :meth:`events_after`, which returns a
-        consistent cursor.
-        """
-        with self._lock:
-            new_count = self._total_events - after_total
-            if new_count <= 0:
-                return []
-            # Take the min(new_count, limit, deque_size) newest entries
-            take = min(new_count, limit, len(self._events))
-            # Iterate from the right end of the deque — avoids copying the
-            # entire deque to a list when only a few recent entries are needed.
-            events = self._events
-            result = [events[-1 - i] for i in range(take)]
-        return result
 
     @staticmethod
     def _slice_after(
@@ -213,29 +185,14 @@ class EventCollector:
         with self._lock:
             logs = list(self._logs)
         logs.reverse()
-        min_level = _LEVEL_ORDER.get(level.upper()) if level else None
+        min_level = LOG_LEVEL_RANK.get(level.upper()) if level else None
         if min_level is not None:
             logs = [
-                r for r in logs if _LEVEL_ORDER.get(r.level.upper(), 0) >= min_level
+                r for r in logs if LOG_LEVEL_RANK.get(r.level.upper(), 0) >= min_level
             ]
         if limit > 0:
             return logs[:limit]
         return logs
-
-    def get_logs_since(self, after_total: int, limit: int = 50) -> list[LogRecord]:
-        """Get logs added after a given total count, newest first.
-
-        Mirrors :meth:`get_events_since` so the WebSocket loop can stream only
-        new logs without dropping the middle of a burst.
-        """
-        with self._lock:
-            new_count = self._total_logs - after_total
-            if new_count <= 0:
-                return []
-            take = min(new_count, limit, len(self._logs))
-            logs = self._logs
-            result = [logs[-1 - i] for i in range(take)]
-        return result
 
     def get_metrics(self) -> MetricSnapshot:
         """Get current metric snapshot.
@@ -258,17 +215,6 @@ class EventCollector:
                 )
         except Exception as e:
             raise MetricCollectionError(f"Failed to collect metrics: {e}") from e
-
-    def get_events_by_conversation(
-        self, conversation_id: str, limit: int = 0
-    ) -> list[MonitorEvent]:
-        """Get events for a specific conversation."""
-        with self._lock:
-            events = [e for e in self._events if e.conversation_id == conversation_id]
-        events.reverse()
-        if limit > 0:
-            return events[:limit]
-        return events
 
     def clear(self) -> None:
         """Clear all collected data.
@@ -332,15 +278,17 @@ class EventCollector:
         Every callback takes ``(context, current_state=None,
         target_state=None)``: the monitor's handler wrapper passes the states
         the core hands to ``should_execute`` (the core never puts
-        ``_target_state`` into the handler context). Without them the
-        callbacks fall back to the context keys.
+        ``_target_state`` into the handler context). Without
+        ``current_state`` the callbacks read the context's ``_current_state``.
         """
         return {
             "START_CONVERSATION": self._on_start_conversation,
-            "PRE_PROCESSING": self._on_pre_processing,
-            "POST_PROCESSING": self._on_post_processing,
+            "PRE_PROCESSING": self._plain(EVENT_PRE_PROCESSING, "Processing started"),
+            "POST_PROCESSING": self._plain(
+                EVENT_POST_PROCESSING, "Processing completed"
+            ),
             "PRE_TRANSITION": self._on_pre_transition,
-            "CONTEXT_UPDATE": self._on_context_update,
+            "CONTEXT_UPDATE": self._plain(EVENT_CONTEXT_UPDATE, "Context updated"),
             "END_CONVERSATION": self._on_end_conversation,
             "ERROR": self._on_error,
         }
@@ -366,37 +314,24 @@ class EventCollector:
                 self._states_visited[state] = self._states_visited.get(state, 0) + 1
         return {}
 
-    def _on_pre_processing(
-        self,
-        context: dict[str, Any],
-        current_state: str | None = None,
-        target_state: str | None = None,
-    ) -> dict[str, Any]:
-        conv_id = context.get("_conversation_id", "")
-        self.record_event(
-            MonitorEvent(
-                event_type=EVENT_PRE_PROCESSING,
-                conversation_id=conv_id,
-                message="Processing started",
-            )
-        )
-        return {}
+    def _plain(self, event_type: str, message: str) -> Any:
+        """A callback that records one ``event_type`` event for the conversation."""
 
-    def _on_post_processing(
-        self,
-        context: dict[str, Any],
-        current_state: str | None = None,
-        target_state: str | None = None,
-    ) -> dict[str, Any]:
-        conv_id = context.get("_conversation_id", "")
-        self.record_event(
-            MonitorEvent(
-                event_type=EVENT_POST_PROCESSING,
-                conversation_id=conv_id,
-                message="Processing completed",
+        def _callback(
+            context: dict[str, Any],
+            current_state: str | None = None,
+            target_state: str | None = None,
+        ) -> dict[str, Any]:
+            self.record_event(
+                MonitorEvent(
+                    event_type=event_type,
+                    conversation_id=context.get("_conversation_id", ""),
+                    message=message,
+                )
             )
-        )
-        return {}
+            return {}
+
+        return _callback
 
     def _on_pre_transition(
         self,
@@ -406,7 +341,7 @@ class EventCollector:
     ) -> dict[str, Any]:
         conv_id = context.get("_conversation_id", "")
         source = _state_of(context, current_state)
-        target = target_state or context.get("_target_state", "") or ""
+        target = target_state or ""
         self.record_event(
             MonitorEvent(
                 event_type=EVENT_STATE_TRANSITION,
@@ -415,22 +350,6 @@ class EventCollector:
                 target_state=target,
                 message=f"Transition: {source} -> {target}",
                 level="INFO",
-            )
-        )
-        return {}
-
-    def _on_context_update(
-        self,
-        context: dict[str, Any],
-        current_state: str | None = None,
-        target_state: str | None = None,
-    ) -> dict[str, Any]:
-        conv_id = context.get("_conversation_id", "")
-        self.record_event(
-            MonitorEvent(
-                event_type=EVENT_CONTEXT_UPDATE,
-                conversation_id=conv_id,
-                message="Context updated",
             )
         )
         return {}
@@ -544,7 +463,7 @@ class EventCollector:
             )
             return {}
 
-        def _on_post_processing(
+        def _on_context(
             ctx: dict[str, Any],
             current_state: str | None = None,
             target_state: str | None = None,
@@ -568,7 +487,7 @@ class EventCollector:
             target_state: str | None = None,
         ) -> dict[str, Any]:
             source = _state_of(ctx, current_state)
-            target = target_state or ctx.get("_target_state", "") or ""
+            target = target_state or ""
             if not target or target == source:
                 return {}
             _emit(
@@ -576,24 +495,6 @@ class EventCollector:
                     "type": "transition",
                     "source": source,
                     "target": target,
-                    "timestamp": _ts(),
-                }
-            )
-            return {}
-
-        def _on_context_update(
-            ctx: dict[str, Any],
-            current_state: str | None = None,
-            target_state: str | None = None,
-        ) -> dict[str, Any]:
-            data = self.snapshot_context(ctx)
-            if not data:
-                return {}
-            _emit(
-                {
-                    "type": "context",
-                    "state": _state_of(ctx, current_state),
-                    "data": data,
                     "timestamp": _ts(),
                 }
             )
@@ -631,9 +532,9 @@ class EventCollector:
 
         return {
             "START_CONVERSATION": _on_start,
-            "POST_PROCESSING": _on_post_processing,
+            "POST_PROCESSING": _on_context,
             "PRE_TRANSITION": _on_pre_transition,
-            "CONTEXT_UPDATE": _on_context_update,
+            "CONTEXT_UPDATE": _on_context,
             "END_CONVERSATION": _on_end,
             "ERROR": _on_error,
         }
@@ -642,17 +543,6 @@ class EventCollector:
 # ------------------------------------------------------------------
 # Module helpers
 # ------------------------------------------------------------------
-
-# Minimum-level ranking for log filters (loguru's numeric levels).
-_LEVEL_ORDER: dict[str, int] = {
-    "TRACE": 5,
-    "DEBUG": 10,
-    "INFO": 20,
-    "SUCCESS": 25,
-    "WARNING": 30,
-    "ERROR": 40,
-    "CRITICAL": 50,
-}
 
 
 def _state_of(context: dict[str, Any], state: str | None) -> str:

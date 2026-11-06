@@ -81,8 +81,8 @@ Collector (`test_collector.py`, audit file):
 - `get_events`/`get_logs` newest first; bounded deques (`max_events`, `max_log_lines`) while `total_events` keeps counting.
 - Metrics: `total_errors`, `total_transitions`, `states_visited`, `active_conversations`, `total_agent_iterations`, `total_tool_calls`, `total_workflow_steps`; `clear()` resets all; timestamps are UTC.
 - `get_logs(level=...)` is case-insensitive, `SUCCESS` ranks above INFO, unknown level returns all.
-- `get_events_since(after_total, limit)`; `events_after(cursor, limit)` / `logs_after(cursor, limit)` return `(items, cursor)` oldest first, skip dropped items and restart after `clear()`.
-- `create_handler_callbacks()` returns 7 callbacks (no `POST_TRANSITION`), all returning `{}`. `handler_name == "fsm_llm.monitor"`, `handler_priority == 9999`.
+- `events_after(cursor, limit)` / `logs_after(cursor, limit)` return `(items, cursor)` oldest first, skip dropped items and restart after `clear()`.
+- `create_handler_callbacks()` returns 7 callbacks (no `POST_TRANSITION`), all returning `{}`.
 - The loguru sink records `LogRecord`s only (no `"log"` events), with tz-aware timestamps. `cleanup()` is idempotent and sets `_log_sink_id` to `None`.
 - `snapshot_context` and `redact_context(data, drop_internal=True)` drop secret-looking keys (including nested) and replace objects with `"<redacted:ClassName>"` without calling `__str__`.
 

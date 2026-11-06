@@ -106,21 +106,6 @@ class TestEventCollector:
         )
         assert collector.get_metrics().active_conversations == 1
 
-    def test_get_events_by_conversation(self):
-        collector = EventCollector()
-        collector.record_event(
-            MonitorEvent(event_type="test", conversation_id="c1", message="a")
-        )
-        collector.record_event(
-            MonitorEvent(event_type="test", conversation_id="c2", message="b")
-        )
-        collector.record_event(
-            MonitorEvent(event_type="test", conversation_id="c1", message="c")
-        )
-        events = collector.get_events_by_conversation("c1")
-        assert len(events) == 2
-        assert all(e.conversation_id == "c1" for e in events)
-
 
 class TestLogCapture:
     def test_record_log(self):
@@ -183,12 +168,9 @@ class TestHandlerCallbacks:
     def test_pre_transition_callback(self):
         collector = EventCollector()
         callbacks = collector.create_handler_callbacks()
+        # The core passes the target state to the handler, not the context.
         callbacks["PRE_TRANSITION"](
-            {
-                "_conversation_id": "c1",
-                "_current_state": "start",
-                "_target_state": "end",
-            }
+            {"_conversation_id": "c1", "_current_state": "start"}, target_state="end"
         )
         events = collector.get_events()
         assert len(events) == 1
@@ -231,48 +213,6 @@ class TestClear:
         assert metrics.active_conversations == 0
         assert len(collector.get_events()) == 0
         assert len(collector.get_logs()) == 0
-
-
-class TestGetEventsSince:
-    def test_returns_empty_when_no_new_events(self):
-        collector = EventCollector()
-        collector.record_event(MonitorEvent(event_type="test", message="old"))
-        # Claim we've seen 1 event already
-        events = collector.get_events_since(after_total=1)
-        assert events == []
-
-    def test_returns_new_events_only(self):
-        collector = EventCollector()
-        for i in range(5):
-            collector.record_event(MonitorEvent(event_type="test", message=f"msg-{i}"))
-        # Claim we've seen first 3 events
-        events = collector.get_events_since(after_total=3)
-        assert len(events) == 2
-        # Newest first
-        assert events[0].message == "msg-4"
-        assert events[1].message == "msg-3"
-
-    def test_respects_limit(self):
-        collector = EventCollector()
-        for i in range(10):
-            collector.record_event(MonitorEvent(event_type="test", message=f"msg-{i}"))
-        events = collector.get_events_since(after_total=0, limit=3)
-        assert len(events) == 3
-
-    def test_handles_overflow_from_bounded_deque(self):
-        collector = EventCollector(max_events=5)
-        for i in range(10):
-            collector.record_event(MonitorEvent(event_type="test", message=f"msg-{i}"))
-        # Total is 10 but deque only has 5 items. Ask for 7 new events.
-        events = collector.get_events_since(after_total=3, limit=50)
-        # Can only return what's in the deque (5 items), not the full 7
-        assert len(events) == 5
-
-    def test_negative_new_count(self):
-        collector = EventCollector()
-        collector.record_event(MonitorEvent(event_type="test", message="msg"))
-        events = collector.get_events_since(after_total=999)
-        assert events == []
 
 
 class TestCleanup:
@@ -403,11 +343,6 @@ class TestHandlerCallbackBehavior:
         assert result == {}
         events = collector.get_events()
         assert events[0].event_type == "pre_processing"
-
-    def test_handler_name_and_priority(self):
-        collector = EventCollector()
-        assert collector.handler_name == "fsm_llm.monitor"
-        assert collector.handler_priority == 9999
 
 
 class TestLogLevelFiltering:

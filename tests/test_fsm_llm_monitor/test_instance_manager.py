@@ -152,9 +152,9 @@ class TestInstanceManager:
         with pytest.raises(ValueError):
             mgr._resolve_fsm_data("/etc/passwd", None)
 
-    def test_emit_global_event(self):
+    def test_emit_event(self):
         mgr = self._make_manager()
-        mgr._emit_global_event(EVENT_INSTANCE_LAUNCHED, message="test launch")
+        mgr._emit_event(EVENT_INSTANCE_LAUNCHED, message="test launch")
         events = mgr.get_events()
         assert len(events) == 1
         assert events[0].event_type == EVENT_INSTANCE_LAUNCHED
@@ -466,19 +466,6 @@ class TestInstanceManagerListFilter:
 
         all_instances = mgr.list_instances()
         assert len(all_instances) == 2
-
-    def test_find_instance_for_conversation(self):
-        mgr = InstanceManager(config=MonitorConfig())
-        mgr.global_collector.cleanup()
-
-        fsm = ManagedFSM(instance_id="f1", api=MagicMock())
-        fsm.conversation_ids = ["conv-a", "conv-b"]
-        with mgr._lock:
-            mgr._instances["f1"] = fsm
-
-        assert mgr.find_instance_for_conversation("conv-a") == "f1"
-        assert mgr.find_instance_for_conversation("conv-b") == "f1"
-        assert mgr.find_instance_for_conversation("conv-c") is None
 
     def test_get_active_conversations_empty(self):
         mgr = InstanceManager(config=MonitorConfig())
@@ -1096,10 +1083,9 @@ class TestAgentRunEventsOnTheCoreLoop:
             "post_processing",
             "conversation_end",
         ]
-        assert _event_path(mgr._collectors[managed.instance_id]) == path
-        # The global collector has the same handler events between its own
-        # launch and result events.
-        assert _event_path(mgr.global_collector) == [
+        # Lifecycle events and handler events reach the global collector and,
+        # for this instance, its own collector (F-MI-10).
+        full = [
             "instance_launched",
             "agent_started",
             *path,
@@ -1108,6 +1094,8 @@ class TestAgentRunEventsOnTheCoreLoop:
             "agent_tool_call",
             "agent_completed",
         ]
+        assert _event_path(mgr._collectors[managed.instance_id]) == full
+        assert _event_path(mgr.global_collector) == full
         # No step carried a user message.
         assert {request.user_message for _, request in llm.requests} == {None}
 
@@ -1166,6 +1154,7 @@ class TestAgentRunEventsOnTheCoreLoop:
             request.user_message for _, request in llm.call_history
         }
         assert _event_path(mgr._collectors[inst.instance_id]) == [
+            "instance_launched",
             "conversation_start",
             "pre_processing",
             "context_update",
@@ -1210,8 +1199,8 @@ class TestDestroyClosesBeforeUnregister:
         assert collector.get_metrics().active_conversations == 0
         ends = [
             e
-            for e in collector.get_events_by_conversation(conv_id)
-            if e.event_type == "conversation_end"
+            for e in collector.get_events()
+            if e.conversation_id == conv_id and e.event_type == "conversation_end"
         ]
         assert len(ends) == 1
 

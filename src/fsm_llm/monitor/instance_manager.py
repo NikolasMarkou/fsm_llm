@@ -48,6 +48,7 @@ from fsm_llm.workflows import (
 
 from .collector import EventCollector, redact_context
 from .constants import (
+    ACTIVE_AGENT_STATUSES,
     EVENT_AGENT_CANCELLED,
     EVENT_AGENT_COMPLETED,
     EVENT_AGENT_FAILED,
@@ -64,6 +65,7 @@ from .constants import (
     EVENT_WORKFLOW_STARTED,
     MONITOR_HANDLER_NAME,
     MONITOR_HANDLER_PRIORITY,
+    TERMINAL_STATUSES,
 )
 from .definitions import (
     ActivityItem,
@@ -201,8 +203,32 @@ _TOOL_BASED_AGENTS = {
 }
 
 
-class ManagedFSM:
+class _ManagedBase:
+    """The fields every managed instance shares."""
+
+    instance_type = ""
+
+    def __init__(self, instance_id: str, label: str = "") -> None:
+        self.instance_id = instance_id
+        self.label = label
+        self.status = "running"
+        self.created_at = datetime.now(timezone.utc)
+
+    def _info(self, **extra: Any) -> InstanceInfo:
+        return InstanceInfo(
+            instance_id=self.instance_id,
+            instance_type=self.instance_type,
+            label=self.label,
+            status=self.status,
+            created_at=self.created_at,
+            **extra,
+        )
+
+
+class ManagedFSM(_ManagedBase):
     """A managed FSM API instance."""
+
+    instance_type = "fsm"
 
     def __init__(
         self,
@@ -211,30 +237,22 @@ class ManagedFSM:
         label: str = "",
         source: str = "custom",
     ) -> None:
-        self.instance_id = instance_id
-        self.instance_type = "fsm"
+        super().__init__(instance_id, label)
         self.api = api
-        self.label = label
         self.source = source
-        self.status = "running"
-        self.created_at = datetime.now(timezone.utc)
         self.conversation_ids: list[str] = []
         self.ended_conversation_ids: set[str] = set()
 
     def to_info(self) -> InstanceInfo:
-        return InstanceInfo(
-            instance_id=self.instance_id,
-            instance_type=self.instance_type,
-            label=self.label,
-            status=self.status,
-            created_at=self.created_at,
-            source=self.source,
-            conversation_count=len(self.conversation_ids),
+        return self._info(
+            source=self.source, conversation_count=len(self.conversation_ids)
         )
 
 
-class ManagedWorkflow:
+class ManagedWorkflow(_ManagedBase):
     """A managed workflow engine instance."""
+
+    instance_type = "workflow"
 
     def __init__(
         self,
@@ -242,12 +260,8 @@ class ManagedWorkflow:
         label: str = "",
         source: str = "custom",
     ) -> None:
-        self.instance_id = instance_id
-        self.instance_type = "workflow"
-        self.label = label
+        super().__init__(instance_id, label)
         self.source = source
-        self.status = "running"
-        self.created_at = datetime.now(timezone.utc)
         self.engine: Any = None  # WorkflowEngine
         self.workflow_id: str = ""
         self.active_instance_ids: list[str] = []
@@ -258,14 +272,8 @@ class ManagedWorkflow:
         self.loop: asyncio.AbstractEventLoop | None = None
 
     def to_info(self) -> InstanceInfo:
-        return InstanceInfo(
-            instance_id=self.instance_id,
-            instance_type=self.instance_type,
-            label=self.label,
-            status=self.status,
-            created_at=self.created_at,
-            source=self.source,
-            active_workflows=len(self.active_instance_ids),
+        return self._info(
+            source=self.source, active_workflows=len(self.active_instance_ids)
         )
 
     def refresh_status(self) -> None:
@@ -276,8 +284,10 @@ class ManagedWorkflow:
         self.status = self.run_statuses[self.run_ids[-1]]
 
 
-class ManagedAgent:
+class ManagedAgent(_ManagedBase):
     """A managed agent instance running in a background thread."""
+
+    instance_type = "agent"
 
     def __init__(
         self,
@@ -285,17 +295,14 @@ class ManagedAgent:
         agent_type: str = "ReactAgent",
         task: str = "",
         label: str = "",
+        max_iterations: int = 10,
     ) -> None:
-        self.instance_id = instance_id
-        self.instance_type = "agent"
+        super().__init__(instance_id, label)
         self.agent_type = agent_type
         self.task = task
-        self.label = label
-        self.status = "running"
-        self.created_at = datetime.now(timezone.utc)
         self.thread: threading.Thread | None = None
         self.cancel_event = threading.Event()
-        self.max_iterations: int = 10
+        self.max_iterations = max_iterations
         self.result: Any = None  # AgentResult
         self.error: str | None = None
         # Live conversation log — populated by context capture handlers
@@ -303,15 +310,7 @@ class ManagedAgent:
         self._conv_lock = threading.Lock()
 
     def to_info(self) -> InstanceInfo:
-        return InstanceInfo(
-            instance_id=self.instance_id,
-            instance_type=self.instance_type,
-            label=self.label,
-            status=self.status,
-            created_at=self.created_at,
-            agent_type=self.agent_type,
-            task=self.task[:200],
-        )
+        return self._info(agent_type=self.agent_type, task=self.task[:200])
 
 
 ManagedInstance = ManagedFSM | ManagedWorkflow | ManagedAgent
@@ -483,6 +482,43 @@ def _tools_used(tool_calls: Any) -> list[dict[str, Any]]:
     ]
 
 
+def _agent_result_fields(result: Any) -> dict[str, Any]:
+    """Answer and success of an ``AgentResult`` and, when it carries a trace,
+    its iteration count and redacted tool calls."""
+    fields: dict[str, Any] = {
+        "answer": getattr(result, "answer", ""),
+        "success": getattr(result, "success", False),
+    }
+    trace = getattr(result, "trace", None)
+    if trace:
+        fields["total_iterations"] = getattr(trace, "total_iterations", 0)
+        fields["tools_used"] = _tools_used(getattr(trace, "tool_calls", []))
+    return fields
+
+
+def _stub_fn(response: str) -> Any:
+    def stub_fn(**kwargs: Any) -> str:
+        return response
+
+    return stub_fn
+
+
+def _stub_registry(tools_config: list[StubToolConfig]) -> ToolRegistry:
+    """A registry of tools that return their configured ``stub_response``."""
+    registry = ToolRegistry()
+    for tool_cfg in tools_config:
+        registry.register_function(
+            _stub_fn(tool_cfg.stub_response),
+            name=tool_cfg.name,
+            description=tool_cfg.description,
+        )
+    return registry
+
+
+def _new_instance_id() -> str:
+    return str(uuid.uuid4())[:12]
+
+
 def find_examples_dir() -> Path | None:
     """Locate the examples/ directory."""
     # parents[3] is the repo root: src/fsm_llm/monitor/instance_manager.py.
@@ -516,6 +552,26 @@ def validate_preset_id(preset_id: str, base: Path) -> Path:
     if not file_path.exists():
         raise FileNotFoundError(f"Preset not found: {preset_id}")
     return file_path
+
+
+def read_json_file(path: Path) -> Any:
+    """Parse a JSON file as UTF-8, whatever the locale (the one reader of the
+    monitor's presets and ``flows.json``)."""
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_preset_json(preset_id: str) -> dict[str, Any]:
+    """Read an example FSM preset by ID.
+
+    Raises ``FileNotFoundError`` (no examples directory, or no such preset),
+    ``ValueError`` (an ID that escapes the examples directory) or the JSON and
+    OS errors of reading the file.
+    """
+    base = find_examples_dir()
+    if base is None:
+        raise FileNotFoundError("Examples directory not found")
+    result: dict[str, Any] = read_json_file(validate_preset_id(preset_id, base))
+    return result
 
 
 def snapshot_from_api(
@@ -585,10 +641,7 @@ class InstanceManager:
         self._config = config or MonitorConfig()
         self._instances: dict[str, ManagedInstance] = {}
         self._collectors: dict[str, EventCollector] = {}
-        self._global_collector = EventCollector(
-            max_events=self._config.max_events,
-            max_log_lines=self._config.max_log_lines,
-        )
+        self._global_collector = self._new_collector()
         self._lock = threading.RLock()
 
         # Register loguru sink so log records flow into the collector
@@ -687,20 +740,23 @@ class InstanceManager:
             unregister_monitor_handlers(previous, self._global_collector)
 
     def shutdown(self) -> None:
-        """Detach from every API and remove the log sink (the manager can no
-        longer be used afterwards)."""
+        """Detach from every API, tear every instance down like
+        ``destroy_instance`` (agents are signalled, not joined) and remove the
+        log sink (the manager can no longer be used afterwards)."""
         with self._lock:
             attached_api = self._attached_api
-            fsms = [
-                (inst_id, i)
-                for inst_id, i in self._instances.items()
-                if isinstance(i, ManagedFSM)
-            ]
+            instances = list(self._instances.values())
         if attached_api is not None:
             unregister_monitor_handlers(attached_api, self._global_collector)
-        for inst_id, inst in fsms:
-            self._close_fsm_api(inst, inst_id)
+        for inst in instances:
+            self._teardown(inst, join_agent=False)
         self._global_collector.cleanup()
+
+    def _new_collector(self) -> EventCollector:
+        return EventCollector(
+            max_events=self._config.max_events,
+            max_log_lines=self._config.max_log_lines,
+        )
 
     def _close_fsm_api(self, inst: ManagedFSM, instance_id: str) -> None:
         """End every live conversation of a manager-owned FSM API, then detach
@@ -801,17 +857,6 @@ class InstanceManager:
                         )
         return result
 
-    def find_instance_for_conversation(self, conversation_id: str) -> str | None:
-        """Find the instance_id that owns a given conversation."""
-        with self._lock:
-            for inst_id, inst in self._instances.items():
-                if (
-                    isinstance(inst, ManagedFSM)
-                    and conversation_id in inst.conversation_ids
-                ):
-                    return inst_id
-        return None
-
     def get_conversation_snapshot(
         self, conversation_id: str
     ) -> ConversationSnapshot | None:
@@ -836,10 +881,11 @@ class InstanceManager:
                 snap.instance_id = inst_id
                 return snap
         # Fallback to ended conversation cache
+        return self._ended_snapshot(conversation_id)
+
+    def _ended_snapshot(self, conversation_id: str) -> ConversationSnapshot | None:
         with self._lock:
-            if conversation_id in self._ended_conversations:
-                return self._ended_conversations[conversation_id]
-        return None
+            return self._ended_conversations.get(conversation_id)
 
     def get_all_conversation_snapshots(
         self, include_ended: bool = True
@@ -857,7 +903,7 @@ class InstanceManager:
         # All known conversation IDs from managed instances
         with self._lock:
             all_inst_conv_ids = [
-                (inst.instance_id if isinstance(inst, ManagedFSM) else "", conv_id)
+                (inst.instance_id, conv_id)
                 for inst in self._instances.values()
                 if isinstance(inst, ManagedFSM)
                 for conv_id in inst.conversation_ids
@@ -930,7 +976,7 @@ class InstanceManager:
                     detail=inst.agent_type,
                     message_count=iters,
                     created_at=inst.created_at,
-                    is_terminal=inst.status in ("completed", "failed", "cancelled"),
+                    is_terminal=inst.status in TERMINAL_STATUSES,
                 )
             )
 
@@ -963,8 +1009,7 @@ class InstanceManager:
                             detail=f"workflow {wf_id[:8]}",
                             message_count=0,
                             created_at=wf_inst.created_at,
-                            is_terminal=normalized_status
-                            in ("completed", "failed", "cancelled"),
+                            is_terminal=normalized_status in TERMINAL_STATUSES,
                         )
                     )
                 except Exception as e:
@@ -1015,41 +1060,56 @@ class InstanceManager:
         fsm_data = self._resolve_fsm_data(preset_id, fsm_json)
         if fsm_data is None:
             raise ValueError("Must provide either preset_id or fsm_json")
-        self._make_room()
-
-        instance_id = str(uuid.uuid4())[:12]
-        source = preset_id or "custom"
-        if not label:
-            label = fsm_data.get("name", f"FSM-{instance_id[:6]}")
-
+        instance_id = _new_instance_id()
         api = API.from_definition(fsm_data, model=model, temperature=temperature)
 
-        # Create per-instance collector and wire to both per-instance and global
-        collector = EventCollector(
-            max_events=self._config.max_events,
-            max_log_lines=self._config.max_log_lines,
-        )
+        # Per-instance collector, wired next to the global one
+        collector = self._new_collector()
         register_monitor_handlers(api, collector)
         register_monitor_handlers(api, self._global_collector)
 
         managed = ManagedFSM(
             instance_id=instance_id,
             api=api,
-            label=label,
-            source=source,
+            label=label or fsm_data.get("name", f"FSM-{instance_id[:6]}"),
+            source=preset_id or "custom",
         )
+        self._register_instance(managed, collector, "FSM")
+        return managed
 
+    def _register_instance(
+        self,
+        managed: ManagedInstance,
+        collector: EventCollector,
+        noun: str,
+        **launched_data: Any,
+    ) -> None:
+        """Make room for ``managed``, add it with its collector and announce
+        the launch.
+
+        # DECISION plan-2026-11-05T185903-5980fbb7/D-005
+        # Callers build and validate everything that can fail BEFORE this.
+        # Do NOT move ``_make_room`` back to the top of a ``launch_*``: a
+        # request that then failed validation had already destroyed the oldest
+        # finished instance and its history.
+        """
+        self._make_room()
+        instance_id = managed.instance_id
         with self._lock:
             self._instances[instance_id] = managed
             self._collectors[instance_id] = collector
-
-        self._emit_global_event(
+        self._emit_event(
             EVENT_INSTANCE_LAUNCHED,
-            message=f"FSM launched: {label}",
-            data={"instance_type": "fsm", "instance_id": instance_id},
+            message=f"{noun} launched: {managed.label}",
+            data={
+                "instance_type": managed.instance_type,
+                "instance_id": instance_id,
+                **launched_data,
+            },
         )
-        logger.info(f"Launched FSM instance {instance_id}: {label}")
-        return managed
+        logger.info(
+            f"Launched {managed.instance_type} instance {instance_id}: {managed.label}"
+        )
 
     def start_conversation(
         self,
@@ -1081,16 +1141,14 @@ class InstanceManager:
         is_terminal = inst.api.has_conversation_ended(conversation_id)
 
         if is_terminal:
-            # Cache the snapshot, then end the conversation so the core fires
-            # END_CONVERSATION (closing its monitor/OTEL span) and frees it.
-            self._cache_ended_conversation(inst.api, conversation_id, instance_id)
+            # The reply is already produced: a refusal to end is logged, the
+            # conversation stays open and a later end_conversation retries.
             try:
-                inst.api.end_conversation(conversation_id)
+                self._finish_conversation(inst, conversation_id)
             except Exception as e:
                 logger.debug(
                     f"Failed to end terminal conversation {conversation_id}: {e}"
                 )
-            self._mark_conversation_ended(inst, conversation_id)
 
         return {
             "response": response,
@@ -1105,12 +1163,17 @@ class InstanceManager:
             if conversation_id not in inst.conversation_ids:
                 raise KeyError(f"Conversation not found: {conversation_id}")
             already_ended = conversation_id in inst.ended_conversation_ids
-        if already_ended:
-            return
-        # Cache snapshot before the API removes the conversation data
-        self._cache_ended_conversation(inst.api, conversation_id, instance_id)
+        if not already_ended:
+            self._finish_conversation(inst, conversation_id)
+
+    def _finish_conversation(self, inst: ManagedFSM, conversation_id: str) -> None:
+        """Cache the snapshot, end the conversation in the core (it fires
+        END_CONVERSATION, closing the monitor/OTEL span, and frees it), and only
+        then record it as ended: a refusal (``ConversationBusyError``)
+        propagates and leaves it unmarked. The id stays in ``conversation_ids``
+        so the conversation remains visible in the UI."""
+        self._cache_ended_conversation(inst.api, conversation_id, inst.instance_id)
         inst.api.end_conversation(conversation_id)
-        # Keep conversation_id in the list so it remains visible in the UI
         self._mark_conversation_ended(inst, conversation_id)
 
     def _mark_conversation_ended(self, inst: ManagedFSM, conversation_id: str) -> None:
@@ -1131,20 +1194,14 @@ class InstanceManager:
             inst = self._get_fsm(instance_id)
             all_ids = list(inst.conversation_ids)
         snapshots = []
-        seen = set()
         for conv_id in all_ids:
             snap = self._snapshot_from_api(inst.api, conv_id)
             if snap is not None:
                 snap.instance_id = instance_id
-                snapshots.append(snap)
-                seen.add(conv_id)
             else:
-                # Conversation was ended — try cache
-                with self._lock:
-                    cached = self._ended_conversations.get(conv_id)
-                if cached is not None:
-                    snapshots.append(cached)
-                    seen.add(conv_id)
+                snap = self._ended_snapshot(conv_id)  # ended: try the cache
+            if snap is not None:
+                snapshots.append(snap)
         return snapshots
 
     # --- Workflow Operations ---
@@ -1170,7 +1227,6 @@ class InstanceManager:
         self,
         preset_id: str | None = None,
         definition_json: dict[str, Any] | None = None,
-        initial_context: dict[str, Any] | None = None,
         label: str = "",
     ) -> ManagedWorkflow:
         """Launch a workflow engine seeded with a built-in preset definition.
@@ -1199,24 +1255,15 @@ class InstanceManager:
                 f"Available: {', '.join(sorted(_WORKFLOW_PRESETS))}"
             )
 
-        instance_id = str(uuid.uuid4())[:12]
-        if not label:
-            label = f"Workflow-{instance_id[:6]}"
-
-        self._make_room()
+        instance_id = _new_instance_id()
         engine = WorkflowEngine()
         definition = _WORKFLOW_PRESETS[preset_id]()
         engine.register_workflow(definition)
 
-        collector = EventCollector(
-            max_events=self._config.max_events,
-            max_log_lines=self._config.max_log_lines,
-        )
-
         managed = ManagedWorkflow(
             instance_id=instance_id,
-            label=label,
-            source=preset_id or "custom",
+            label=label or f"Workflow-{instance_id[:6]}",
+            source=preset_id,
         )
         managed.engine = engine
         managed.workflow_id = definition.workflow_id
@@ -1224,23 +1271,11 @@ class InstanceManager:
             managed.loop = asyncio.get_running_loop()
         except RuntimeError:
             managed.loop = None
-        engine.add_hook(self._workflow_hook(managed, collector))
-
-        with self._lock:
-            self._instances[instance_id] = managed
-            self._collectors[instance_id] = collector
-
-        self._emit_global_event(
-            EVENT_INSTANCE_LAUNCHED,
-            message=f"Workflow launched: {label}",
-            data={"instance_type": "workflow", "instance_id": instance_id},
-        )
-        logger.info(f"Launched workflow instance {instance_id}: {label}")
+        engine.add_hook(self._workflow_hook(managed))
+        self._register_instance(managed, self._new_collector(), "Workflow")
         return managed
 
-    def _workflow_hook(
-        self, managed: ManagedWorkflow, collector: EventCollector
-    ) -> Any:
+    def _workflow_hook(self, managed: ManagedWorkflow) -> Any:
         """Engine lifecycle hook: one ``workflow_advanced`` event per completed
         step (to the global and the instance collector) and the terminal
         bookkeeping for every run, however it ended (API call, timer, event).
@@ -1254,9 +1289,7 @@ class InstanceManager:
         """
         instance_id = managed.instance_id
 
-        def _record(event: MonitorEvent) -> None:
-            self._global_collector.record_event(event)
-            collector.record_event(event.model_copy())
+        _record = self._record_event
 
         def _hook(event_name: str, wf_instance: Any, data: dict[str, Any]) -> None:
             wf_id = str(getattr(wf_instance, "instance_id", ""))
@@ -1281,7 +1314,7 @@ class InstanceManager:
             with self._lock:
                 if wf_id in managed.run_statuses:
                     managed.run_statuses[wf_id] = status
-                if status in ("completed", "failed", "cancelled"):
+                if status in TERMINAL_STATUSES:
                     if wf_id in managed.active_instance_ids:
                         managed.active_instance_ids.remove(wf_id)
                 managed.refresh_status()
@@ -1331,7 +1364,7 @@ class InstanceManager:
             inst.run_statuses[wf_instance_id] = "running"
             inst.active_instance_ids.append(wf_instance_id)
             inst.refresh_status()
-        self._emit_global_event(
+        self._emit_event(
             EVENT_WORKFLOW_STARTED,
             message=f"Workflow instance started: {wf_instance_id}",
             data={
@@ -1357,13 +1390,10 @@ class InstanceManager:
         return wf_instance_id
 
     def _validate_workflow_instance_id(
-        self, inst: Any, instance_id: str, wf_instance_id: str
+        self, inst: ManagedWorkflow, instance_id: str, wf_instance_id: str
     ) -> None:
         """Validate that a workflow instance ID belongs to the managed instance."""
-        if (
-            hasattr(inst, "active_instance_ids")
-            and wf_instance_id not in inst.active_instance_ids
-        ):
+        if wf_instance_id not in inst.active_instance_ids:
             raise KeyError(
                 f"Workflow instance '{wf_instance_id}' not found in "
                 f"managed instance '{instance_id}'"
@@ -1406,7 +1436,7 @@ class InstanceManager:
         )
         affected = await inst.engine.process_event(event)
 
-        self._emit_global_event(
+        self._emit_event(
             EVENT_WORKFLOW_EVENT_DELIVERED,
             message=f"Workflow event delivered: {event_type}",
             data={
@@ -1509,178 +1539,136 @@ class InstanceManager:
             raise ValueError(
                 f"{agent_type} requires at least one tool to be configured"
             )
+        self._check_agent_capacity()
 
+        instance_id = _new_instance_id()
+        registry = _stub_registry(tools_config or []) if needs_tools else None
+        collector = self._new_collector()
+        config = AgentConfig(
+            model=model,
+            max_iterations=max_iterations,
+            timeout_seconds=timeout_seconds,
+        )
+        managed = ManagedAgent(
+            instance_id=instance_id,
+            agent_type=agent_type,
+            task=task,
+            label=label or f"{agent_type}-{instance_id[:6]}",
+            max_iterations=max_iterations,
+        )
+        # Handlers injected into the agent's internal API: the instance's and
+        # the global collector's events, and the conversation capture.
+        handlers = (
+            _build_monitor_handlers(collector)
+            + _build_monitor_handlers(self._global_collector)
+            + _build_context_capture_handlers(collector, managed)
+        )
+
+        self._register_instance(managed, collector, "Agent", agent_type=agent_type)
+        self._emit_event(
+            EVENT_AGENT_STARTED,
+            message=f"Agent started: {task[:100]}",
+            data={"instance_id": instance_id, "task": task},
+        )
+
+        thread = threading.Thread(
+            target=self._run_agent,
+            args=(managed, config, registry, handlers),
+            name=f"agent-{instance_id}",
+            daemon=True,
+        )
+        managed.thread = thread
+        thread.start()
+        return managed
+
+    def _check_agent_capacity(self) -> None:
         with self._lock:
             running = sum(
                 1
                 for inst in self._instances.values()
                 if isinstance(inst, ManagedAgent)
-                and inst.status in ("running", "cancelling")
+                and inst.status in ACTIVE_AGENT_STATUSES
             )
         if running >= self._config.max_running_agents:
             raise MonitorCapacityError(
                 f"{running} agents are already running "
                 f"(max_running_agents={self._config.max_running_agents})"
             )
-        self._make_room()
 
-        instance_id = str(uuid.uuid4())[:12]
-        if not label:
-            label = f"{agent_type}-{instance_id[:6]}"
+    def _run_agent(
+        self,
+        managed: ManagedAgent,
+        config: AgentConfig,
+        registry: ToolRegistry | None,
+        handlers: list[Any],
+    ) -> None:
+        """Body of the agent's background thread."""
+        try:
+            if managed.cancel_event.is_set():
+                with self._lock:
+                    managed.status = "cancelled"
+                return
 
-        # Build tool registry from stub configs (only for tool-based agents)
-        registry: ToolRegistry | None = None
-        if needs_tools and tools_config:
-            registry = ToolRegistry()
-            for tool_cfg in tools_config:
-                stub_response = tool_cfg.stub_response
+            kwargs: dict[str, Any] = {"config": config, "handlers": handlers}
+            if registry is not None:
+                kwargs["tools"] = registry
+            agent = _AGENT_CLASSES[managed.agent_type](**kwargs)
+            result = agent.run(managed.task)
 
-                def _make_stub(resp: str) -> Any:
-                    def stub_fn(**kwargs: Any) -> str:
-                        return resp
-
-                    return stub_fn
-
-                registry.register_function(
-                    _make_stub(stub_response),
-                    name=tool_cfg.name,
-                    description=tool_cfg.description,
+            with self._lock:
+                # agent.run() cannot be interrupted: keep its result even
+                # when a cancel arrived while it ran.
+                managed.result = result
+                if managed.cancel_event.is_set():
+                    managed.status = "cancelled"
+                    return
+                managed.status = "completed" if result.success else "failed"
+            self._emit_agent_run_events(managed, result)
+        except Exception as e:
+            with self._lock:
+                cancelled = managed.cancel_event.is_set()
+                if cancelled:
+                    managed.status = "cancelled"
+                else:
+                    managed.status = "failed"
+                    managed.error = str(e)[:1000]
+            # cancel_agent already emitted agent_cancelled; do not count
+            # the cancellation twice.
+            if not cancelled:
+                self._emit_event(
+                    EVENT_AGENT_FAILED,
+                    message=f"Agent failed: {managed.label} ({type(e).__name__})",
+                    data={"instance_id": managed.instance_id, "error": str(e)[:500]},
+                    level="ERROR",
                 )
 
-        # Create per-instance collector
-        collector = EventCollector(
-            max_events=self._config.max_events,
-            max_log_lines=self._config.max_log_lines,
-        )
-
-        # Build monitor handlers to inject into the agent's internal API
-        monitor_handlers = _build_monitor_handlers(collector)
-        global_handlers = _build_monitor_handlers(self._global_collector)
-
-        config = AgentConfig(
-            model=model,
-            max_iterations=max_iterations,
-            timeout_seconds=timeout_seconds,
-        )
-
-        managed = ManagedAgent(
-            instance_id=instance_id,
-            agent_type=agent_type,
-            task=task,
-            label=label,
-        )
-        managed.max_iterations = max_iterations
-
-        # Build conversation-capturing handlers (need managed reference)
-        conv_capture_handlers = _build_context_capture_handlers(collector, managed)
-        all_handlers = monitor_handlers + global_handlers + conv_capture_handlers
-
-        with self._lock:
-            self._instances[instance_id] = managed
-            self._collectors[instance_id] = collector
-
-        self._emit_global_event(
-            EVENT_INSTANCE_LAUNCHED,
-            message=f"Agent launched: {label}",
+    def _emit_agent_run_events(self, managed: ManagedAgent, result: Any) -> None:
+        """Iteration, tool-call and completed/failed events of a finished run,
+        read from ``result.trace`` (for metrics)."""
+        fields = _agent_result_fields(result)
+        instance_id, label = managed.instance_id, managed.label
+        for i in range(fields.get("total_iterations", 0)):
+            self._emit_event(
+                EVENT_AGENT_ITERATION,
+                message=f"Agent iteration {i + 1}: {label}",
+                data={"instance_id": instance_id, "iteration": i + 1},
+            )
+        for tool in fields.get("tools_used", []):
+            self._emit_event(
+                EVENT_AGENT_TOOL_CALL,
+                message=f"Tool call: {tool['tool_name']}",
+                data={"instance_id": instance_id, "tool_name": tool["tool_name"]},
+            )
+        success = result.success
+        self._emit_event(
+            EVENT_AGENT_COMPLETED if success else EVENT_AGENT_FAILED,
+            message=f"Agent {'completed' if success else 'failed'}: {label}",
             data={
-                "instance_type": "agent",
                 "instance_id": instance_id,
-                "agent_type": agent_type,
+                "success": success,
+                "answer": fields["answer"][:200] if fields["answer"] else "",
             },
         )
-        self._emit_global_event(
-            EVENT_AGENT_STARTED,
-            message=f"Agent started: {task[:100]}",
-            data={"instance_id": instance_id, "task": task},
-        )
-
-        # Launch in background thread
-        def _run_agent() -> None:
-            try:
-                if managed.cancel_event.is_set():
-                    with self._lock:
-                        managed.status = "cancelled"
-                    return
-
-                agent_cls = _AGENT_CLASSES[agent_type]
-                kwargs: dict[str, Any] = {
-                    "config": config,
-                    "handlers": all_handlers,
-                }
-                if needs_tools and registry is not None:
-                    kwargs["tools"] = registry
-                agent = agent_cls(**kwargs)
-                result = agent.run(task)
-
-                with self._lock:
-                    # agent.run() cannot be interrupted: keep its result even
-                    # when a cancel arrived while it ran.
-                    managed.result = result
-                    if managed.cancel_event.is_set():
-                        managed.status = "cancelled"
-                        return
-                    managed.status = "completed" if result.success else "failed"
-
-                # Emit fine-grained iteration/tool events for metrics
-                if hasattr(result, "trace") and result.trace:
-                    trace = result.trace
-                    total_iters = getattr(trace, "total_iterations", 0)
-                    for i in range(total_iters):
-                        self._emit_global_event(
-                            EVENT_AGENT_ITERATION,
-                            message=f"Agent iteration {i + 1}: {label}",
-                            data={"instance_id": instance_id, "iteration": i + 1},
-                        )
-                    tool_calls = getattr(trace, "tool_calls", [])
-                    for tc in tool_calls:
-                        tool_name = getattr(tc, "tool_name", "")
-                        self._emit_global_event(
-                            EVENT_AGENT_TOOL_CALL,
-                            message=f"Tool call: {tool_name}",
-                            data={
-                                "instance_id": instance_id,
-                                "tool_name": tool_name,
-                            },
-                        )
-
-                event_type = (
-                    EVENT_AGENT_COMPLETED if result.success else EVENT_AGENT_FAILED
-                )
-                self._emit_global_event(
-                    event_type,
-                    message=f"Agent {'completed' if result.success else 'failed'}: {label}",
-                    data={
-                        "instance_id": instance_id,
-                        "success": result.success,
-                        "answer": result.answer[:200] if result.answer else "",
-                    },
-                )
-            except Exception as e:
-                with self._lock:
-                    cancelled = managed.cancel_event.is_set()
-                    if cancelled:
-                        managed.status = "cancelled"
-                    else:
-                        managed.status = "failed"
-                        managed.error = str(e)[:1000]
-                # cancel_agent already emitted agent_cancelled; do not count
-                # the cancellation twice.
-                if not cancelled:
-                    self._emit_global_event(
-                        EVENT_AGENT_FAILED,
-                        message=f"Agent failed: {label} ({type(e).__name__})",
-                        data={"instance_id": instance_id, "error": str(e)[:500]},
-                        level="ERROR",
-                    )
-
-        thread = threading.Thread(
-            target=_run_agent, name=f"agent-{instance_id}", daemon=True
-        )
-        managed.thread = thread
-        thread.start()
-
-        logger.info(f"Launched agent {instance_id}: {label}")
-        return managed
 
     def cancel_agent(self, instance_id: str) -> bool:
         """Signal an agent to cancel.
@@ -1690,14 +1678,14 @@ class InstanceManager:
         """
         inst = self._get_agent(instance_id)
         with self._lock:
-            finished = inst.status in ("completed", "failed", "cancelled") or (
+            finished = inst.status in TERMINAL_STATUSES or (
                 inst.thread is not None and not inst.thread.is_alive()
             )
             if finished or inst.status == "cancelling":
                 return False
             inst.cancel_event.set()
             inst.status = "cancelling"
-        self._emit_global_event(
+        self._emit_event(
             EVENT_AGENT_CANCELLED,
             message=f"Agent cancelled: {inst.label}",
             data={"instance_id": instance_id},
@@ -1716,11 +1704,7 @@ class InstanceManager:
             if (
                 inst.thread
                 and not inst.thread.is_alive()
-                and inst.status
-                in (
-                    "running",
-                    "cancelling",
-                )
+                and inst.status in ACTIVE_AGENT_STATUSES
             ):
                 if inst.cancel_event.is_set():
                     inst.status = "cancelled"
@@ -1771,13 +1755,7 @@ class InstanceManager:
             result["transition_count"] = transition_count
 
         if inst_result is not None:
-            result["answer"] = getattr(inst_result, "answer", "")
-            result["success"] = getattr(inst_result, "success", False)
-            if hasattr(inst_result, "trace") and inst_result.trace:
-                trace = inst_result.trace
-                result["total_iterations"] = getattr(trace, "total_iterations", 0)
-                tool_calls = getattr(trace, "tool_calls", [])
-                result["tools_used"] = _tools_used(tool_calls)
+            result.update(_agent_result_fields(inst_result))
 
         if inst_error:
             result["error"] = inst_error
@@ -1805,19 +1783,14 @@ class InstanceManager:
 
         result: dict[str, Any] = {
             "status": inst_status,
-            "answer": getattr(inst_result, "answer", ""),
-            "success": getattr(inst_result, "success", False),
+            **_agent_result_fields(inst_result),
             "final_context": redact_context(
                 getattr(inst_result, "final_context", None) or {}
             ),
         }
-        if hasattr(inst_result, "trace") and inst_result.trace:
-            trace = inst_result.trace
-            result["total_iterations"] = getattr(trace, "total_iterations", 0)
-            tool_calls = getattr(trace, "tool_calls", [])
-            result["tools_used"] = _tools_used(tool_calls)
+        trace = getattr(inst_result, "trace", None)
+        if trace:
             # Full trace steps for visualization
-            steps = getattr(trace, "steps", [])
             result["trace_steps"] = [
                 {
                     "state": getattr(s, "state", ""),
@@ -1827,7 +1800,7 @@ class InstanceManager:
                     "tool_result": getattr(s, "observation", ""),
                     "timestamp": str(getattr(s, "timestamp", "")),
                 }
-                for s in steps
+                for s in getattr(trace, "steps", [])
             ]
         return result
 
@@ -1841,7 +1814,7 @@ class InstanceManager:
             if inst is not None:
                 if isinstance(inst, ManagedAgent):
                     inst.cancel_event.set()
-                    if inst.status in ("running", "cancelling"):
+                    if inst.status in ACTIVE_AGENT_STATUSES:
                         inst.status = "cancelled"
                 elif inst.status == "running":
                     inst.status = "completed"
@@ -1849,13 +1822,27 @@ class InstanceManager:
         if inst is None:
             raise KeyError(f"Instance not found: {instance_id}")
 
+        self._teardown(inst, join_agent=True)
+        self._emit_event(
+            EVENT_INSTANCE_DESTROYED,
+            message=f"Instance destroyed: {inst.label}",
+            data={
+                "instance_type": inst.instance_type,
+                "instance_id": instance_id,
+            },
+        )
+
+    def _teardown(self, inst: ManagedInstance, *, join_agent: bool) -> None:
+        """Release what an instance holds: end an FSM's conversations, stop a
+        workflow engine, signal an agent. ``destroy_instance`` and
+        ``shutdown`` share it; only ``destroy_instance`` waits for the agent."""
         if isinstance(inst, ManagedFSM):
             # End every conversation while the global handlers are still
             # active, then detach them (see ``_close_fsm_api``).
-            self._close_fsm_api(inst, instance_id)
+            self._close_fsm_api(inst, inst.instance_id)
         elif isinstance(inst, ManagedWorkflow):
             # Stop the engine's timers and background runs on the loop that
-            # owns them (destroy may run in a worker thread).
+            # owns them (this may run in a worker thread).
             engine, loop = inst.engine, inst.loop
             if engine is not None and loop is not None and not loop.is_closed():
                 try:
@@ -1868,7 +1855,8 @@ class InstanceManager:
                     task.add_done_callback(_pending_tasks.discard)
                 else:
                     asyncio.run_coroutine_threadsafe(engine.shutdown(), loop)
-        elif isinstance(inst, ManagedAgent):
+        else:
+            inst.cancel_event.set()
             # DECISION plan-2026-09-12T065608-089d0ec7/D-007
             # `agent.run()` has no cancellation hook (see base.py's `run()`
             # abstract signature) so setting cancel_event cannot interrupt
@@ -1879,22 +1867,13 @@ class InstanceManager:
             # thread is still alive after the timeout so the leak stays
             # observable. True mid-run cancellation remains OUT OF SCOPE —
             # see decisions.md D-007.
-            if inst.thread is not None and inst.thread.is_alive():
+            if join_agent and inst.thread is not None and inst.thread.is_alive():
                 inst.thread.join(timeout=1.5)
                 if inst.thread.is_alive():
                     logger.warning(
-                        f"Agent {instance_id} did not stop within timeout "
+                        f"Agent {inst.instance_id} did not stop within timeout "
                         "after cancellation; background thread still running"
                     )
-
-        self._emit_global_event(
-            EVENT_INSTANCE_DESTROYED,
-            message=f"Instance destroyed: {inst.label}",
-            data={
-                "instance_type": inst.instance_type,
-                "instance_id": instance_id,
-            },
-        )
 
     def _make_room(self) -> None:
         """Keep at most ``max_instances`` instances: evict the oldest
@@ -1907,7 +1886,7 @@ class InstanceManager:
                 (
                     inst
                     for inst in self._instances.values()
-                    if inst.status in ("completed", "failed", "cancelled")
+                    if inst.status in TERMINAL_STATUSES
                 ),
                 key=lambda i: i.created_at,
             )
@@ -1952,26 +1931,18 @@ class InstanceManager:
         """Resolve FSM definition from preset ID or raw JSON."""
         if fsm_json is not None:
             return fsm_json
+        return None if preset_id is None else load_preset_json(preset_id)
 
-        if preset_id is not None:
-            base = find_examples_dir()
-            if base is None:
-                raise FileNotFoundError("Examples directory not found")
-            file_path = validate_preset_id(preset_id, base)
-            result: dict[str, Any] = json.loads(file_path.read_text())
-            return result
-
-        return None
-
-    def _emit_global_event(
+    def _emit_event(
         self,
         event_type: str,
         message: str = "",
         data: dict[str, Any] | None = None,
         level: str = "INFO",
     ) -> None:
-        """Emit an event to the global collector."""
-        self._global_collector.record_event(
+        """Record a lifecycle event on the global collector and on the
+        instance's own collector."""
+        self._record_event(
             MonitorEvent(
                 event_type=event_type,
                 message=message,
@@ -1979,3 +1950,12 @@ class InstanceManager:
                 level=level,
             )
         )
+
+    def _record_event(self, event: MonitorEvent) -> None:
+        """Record on the global collector and, when ``data["instance_id"]``
+        names an instance, on that instance's collector (what
+        ``/api/instances/{id}/events`` shows)."""
+        self._global_collector.record_event(event)
+        collector = self._collectors.get(event.data.get("instance_id", ""))
+        if collector is not None:
+            collector.record_event(event.model_copy())

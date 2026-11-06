@@ -30,8 +30,12 @@ def _build_otel_mocks():
     export_mod.BatchSpanProcessor = MagicMock()
     export_mod.ConsoleSpanExporter = MagicMock()
 
+    context_mod = ModuleType("opentelemetry.context")
+    context_mod.Context = MagicMock
+
     return {
         "opentelemetry": ModuleType("opentelemetry"),
+        "opentelemetry.context": context_mod,
         "opentelemetry.trace": trace_mod,
         "opentelemetry.sdk": ModuleType("opentelemetry.sdk"),
         "opentelemetry.sdk.trace": sdk_trace_mod,
@@ -110,18 +114,6 @@ class TestOTELExporterInit:
         trace_mod.set_tracer_provider.assert_not_called()
         # tracer is sourced from the local provider instead
         assert exporter._tracer is exporter._provider.get_tracer.return_value
-
-    def test_generate_trace_id(self):
-        cls = _import_otel()
-        tid = cls.generate_trace_id()
-        assert isinstance(tid, str)
-        assert len(tid) == 32  # uuid4 hex
-
-    def test_generate_span_id(self):
-        cls = _import_otel()
-        sid = cls.generate_span_id()
-        assert isinstance(sid, str)
-        assert len(sid) == 16  # uuid4 hex[:16]
 
 
 class TestOTELExporterEnable:

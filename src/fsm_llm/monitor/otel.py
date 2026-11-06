@@ -9,7 +9,6 @@ and exports them to OTEL-compatible backends (Jaeger, Datadog, Langfuse, etc.).
 from __future__ import annotations
 
 import threading
-import uuid
 from typing import Any
 
 from fsm_llm.logging import logger
@@ -28,11 +27,14 @@ from .constants import (
     EVENT_WORKFLOW_COMPLETED,
     EVENT_WORKFLOW_FAILED,
     EVENT_WORKFLOW_STARTED,
+    MAX_ERROR_TEXT,
+    MAX_OPEN_CONVERSATION_SPANS,
 )
 from .definitions import MonitorEvent
 
 try:
     from opentelemetry import trace
+    from opentelemetry.context import Context
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import (
         BatchSpanProcessor,
@@ -44,24 +46,8 @@ try:
 except ImportError:
     _HAS_OTEL = False
 
-_OtelContext: Any
-try:
-    from opentelemetry.context import Context
-
-    _OtelContext = Context
-except ImportError:  # pragma: no cover - optional / mocked in tests
-    _OtelContext = None
-
-#: Cap on simultaneously open conversation spans; the oldest is ended first.
-MAX_OPEN_CONVERSATION_SPANS = 10_000
-#: Error text exported as a span attribute is cut to this length.
-MAX_ERROR_TEXT = 200
-
-
-def _root_context() -> Any:
-    """An empty OTEL context, so a span without a conversation parent does not
-    attach to whatever span happens to be current in this thread."""
-    return _OtelContext() if _OtelContext is not None else None
+# ``Context()`` is an empty OTEL context: a span without a conversation parent
+# starts from it instead of attaching to whatever span is current in this thread.
 
 
 def _error_text(message: str) -> str:
@@ -162,7 +148,11 @@ class OTELExporter:
             # event call would invoke a dead method reference.
             def wrapped_record(event: MonitorEvent) -> None:
                 original_record(event)
-                self._export_event(event)
+                # A wrapper that another exporter or a later enable() has
+                # superseded stays a pass-through, else a re-enable exports
+                # every event twice.
+                if self._wrapper is wrapped_record:
+                    self._export_event(event)
 
             self._wrapper = wrapped_record
             collector.record_event = wrapped_record
@@ -199,8 +189,7 @@ class OTELExporter:
     def shutdown(self) -> None:
         """Shutdown the OTEL provider, flushing pending spans."""
         self.disable()
-        if hasattr(self._provider, "shutdown"):
-            self._provider.shutdown()
+        self._provider.shutdown()
 
     def _export_event(self, event: MonitorEvent) -> None:
         """Convert a MonitorEvent to OTEL spans."""
@@ -248,7 +237,7 @@ class OTELExporter:
         conv_id = event.conversation_id or "unknown"
         span = self._tracer.start_span(
             "conversation",
-            context=_root_context(),
+            context=Context(),
             attributes={
                 "fsm_llm.conversation_id": conv_id,
                 "fsm_llm.event_type": event.event_type,
@@ -287,7 +276,7 @@ class OTELExporter:
         # _on_conversation_end cannot end() the parent between read and use.
         with self._spans_lock:
             parent = self._conversation_spans.get(conv_id)
-            ctx = trace.set_span_in_context(parent) if parent else _root_context()
+            ctx = trace.set_span_in_context(parent) if parent else Context()
             with self._tracer.start_as_current_span(
                 "transition",
                 context=ctx,
@@ -325,7 +314,7 @@ class OTELExporter:
         # _on_conversation_end cannot end() the parent between read and use.
         with self._spans_lock:
             parent = self._conversation_spans.get(conv_id)
-            ctx = trace.set_span_in_context(parent) if parent else _root_context()
+            ctx = trace.set_span_in_context(parent) if parent else Context()
             with self._tracer.start_as_current_span(
                 f"processing.{phase}",
                 context=ctx,
@@ -359,20 +348,10 @@ class OTELExporter:
                 attrs[f"fsm_llm.{key}"] = value
         with self._tracer.start_as_current_span(
             f"lifecycle.{event.event_type}",
-            context=_root_context(),
+            context=Context(),
             attributes=attrs,
         ):
             pass
-
-    @staticmethod
-    def generate_trace_id() -> str:
-        """Generate a trace ID for manual correlation."""
-        return uuid.uuid4().hex
-
-    @staticmethod
-    def generate_span_id() -> str:
-        """Generate a span ID for manual correlation."""
-        return uuid.uuid4().hex[:16]
 
     @property
     def is_enabled(self) -> bool:

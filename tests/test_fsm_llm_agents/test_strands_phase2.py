@@ -633,22 +633,6 @@ class TestOTELExporter:
         exporter.disable()
         assert not exporter.is_enabled
 
-    def test_generate_trace_id(self):
-        """generate_trace_id returns a hex string."""
-        from fsm_llm.monitor.otel import OTELExporter
-
-        trace_id = OTELExporter.generate_trace_id()
-        assert isinstance(trace_id, str)
-        assert len(trace_id) == 32
-
-    def test_generate_span_id(self):
-        """generate_span_id returns a hex string."""
-        from fsm_llm.monitor.otel import OTELExporter
-
-        span_id = OTELExporter.generate_span_id()
-        assert isinstance(span_id, str)
-        assert len(span_id) == 16
-
 
 # ============================================================================
 # 5. Dependency Resolver Tests

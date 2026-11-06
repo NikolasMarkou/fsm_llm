@@ -62,7 +62,12 @@ from .definitions import (
     WorkflowEventRequest,
 )
 from .exceptions import MonitorCapacityError, MonitorError
-from .instance_manager import InstanceManager, find_examples_dir, validate_preset_id
+from .instance_manager import (
+    InstanceManager,
+    find_examples_dir,
+    load_preset_json,
+    read_json_file,
+)
 
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -250,7 +255,7 @@ def _load_flows() -> dict[str, Any]:
     """Load agent/workflow flow definitions from the JSON data file."""
     flows_path = STATIC_DIR / "flows.json"
     if flows_path.exists():
-        result: dict[str, Any] = json.loads(flows_path.read_text())
+        result: dict[str, Any] = read_json_file(flows_path)
         return result
     return {"agents": {}, "workflows": {}}
 
@@ -1133,30 +1138,21 @@ async def api_fsm_visualize(request: Request) -> dict[str, Any]:
     return _fsm_viz_or_400(data)
 
 
-def _resolve_preset_path(preset_id: str) -> Path:
-    """Validate and resolve a preset ID to a filesystem path.
-
-    Raises HTTPException on invalid/missing preset.
-    """
-    base = find_examples_dir()
-    if base is None:
-        raise HTTPException(status_code=404, detail="examples directory not found")
-    try:
-        return validate_preset_id(preset_id, base)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail="invalid preset ID") from e
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail="preset not found") from e
-
-
 def _read_preset_json(preset_id: str) -> dict[str, Any]:
     """Load a preset JSON file by ID with path traversal protection."""
-    file_path = _resolve_preset_path(preset_id)
     try:
-        result: dict[str, Any] = json.loads(file_path.read_text())
-        return result
-    except Exception as e:
+        return load_preset_json(preset_id)
+    except FileNotFoundError as e:
+        detail = (
+            "examples directory not found"
+            if find_examples_dir() is None
+            else "preset not found"
+        )
+        raise HTTPException(status_code=404, detail=detail) from e
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
         raise HTTPException(status_code=500, detail="failed to read preset") from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="invalid preset ID") from e
 
 
 @app.get("/api/fsm/visualize/preset/{preset_id:path}")
@@ -1199,7 +1195,7 @@ def _scan_fsm_presets() -> dict[str, list[dict[str, str]]]:
                 preset_id = f"{category}/{example_dir.name}/{f.name}"
                 parse_error = ""
                 try:
-                    data = json.loads(f.read_text())
+                    data = read_json_file(f)
                     desc = data.get("description", "")
                 except Exception as parse_err:
                     logger.debug(f"Failed to parse preset {f}: {parse_err}")
