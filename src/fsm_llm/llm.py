@@ -69,6 +69,7 @@ import time
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
+import litellm
 from litellm import completion, embedding, get_supported_openai_params
 
 from .constants import (
@@ -123,6 +124,17 @@ from .utilities import (
     resolve_reasoning_trace,
     strip_think_and_fences,
 )
+
+# DECISION plan-2026-11-06T093029-0068b055/D-023: litellm prints a red "Give
+# Feedback / Get Help" banner to STDOUT on every mapped provider exception while
+# ``suppress_debug_info`` is False (its default). That is host-visible output from
+# a library whose logging is meant to be off, and in `fsm-llm-eval` logs it hid
+# the real error. Set it here, the one place litellm is configured, once at
+# import. Do NOT set it per call or in another module (one LLM layer), and do NOT
+# try to "respect" a False set earlier: False is litellm's default, so an
+# explicit False cannot be told from no setting. A host that wants the banner
+# sets ``litellm.suppress_debug_info = False`` AFTER importing fsm_llm.
+litellm.suppress_debug_info = True
 
 # Defaults of the provider connection, defined once here (the one LLM layer) and
 # read by the API, the classifier, the CLI runner and the agents.
