@@ -820,7 +820,9 @@ _LIVE_CASES = {
         {
             "a": {"transitions": [_edge("b", "k"), _edge("end", "k", priority=200)]},
             "b": {"transitions": [_edge("c")]},
-            "c": {"transitions": [_edge("b"), _edge("d", "k")]},
+            # "m", not "k": k is proven on every path to c, which would make this
+            # edge unconditional and tie with c -> b (a permanent-tie, not the trap)
+            "c": {"transitions": [_edge("b"), _edge("d", "m")]},
             "d": {"transitions": [_edge("c")]},
             "end": {},
         },
@@ -903,6 +905,86 @@ _LIVE_CASES = {
         },
         [(_BUDGET, "a")],
         {"max_turns": 2},
+    ),
+    # An edge gated only on keys guaranteed on arrival (an input, or a key every
+    # path proved) and with no `logic` always passes: it shadows and ties.
+    "a_loop_gated_on_an_input_shadows_the_exit": (
+        {
+            "ask": {
+                "transitions": [
+                    _edge("ask", "topic", priority=1),
+                    _edge("end", "answer", priority=2),
+                ]
+            },
+            "end": {},
+        },
+        [(_SHADOW, "ask"), (_NO_EXIT, "ask")],
+        {"inputs": ("topic",)},
+    ),
+    "the_same_loop_without_the_input_is_clean": (
+        {
+            "ask": {
+                "transitions": [
+                    _edge("ask", "topic", priority=1),
+                    _edge("end", "answer", priority=2),
+                ]
+            },
+            "end": {},
+        },
+        [],
+        {},
+    ),
+    "a_loop_gated_on_a_key_every_path_proved_shadows_the_exit": (
+        {
+            "a": {"transitions": [_edge("b", "k")]},
+            "b": {
+                "transitions": [
+                    _edge("b", "k", priority=1),
+                    _edge("end", "j", priority=2),
+                ]
+            },
+            "end": {},
+        },
+        [(_SHADOW, "b"), (_NO_EXIT, "b")],
+        {},
+    ),
+    "a_key_proved_on_one_path_only_is_not_guaranteed": (
+        {
+            "a": {"transitions": [_edge("b", "k", priority=1), _edge("c", priority=2)]},
+            "b": {"transitions": [_edge("d")]},
+            "c": {"transitions": [_edge("d")]},
+            "d": {
+                "transitions": [
+                    _edge("d", "k", priority=1),
+                    _edge("end", "j", priority=2),
+                ]
+            },
+            "end": {},
+        },
+        [],
+        {},
+    ),
+    "a_gate_with_logic_stays_conditional_even_on_an_input": (
+        {
+            "ask": {
+                "transitions": [
+                    _edge("ask", "topic", logic=_gate("topic"), priority=1),
+                    _edge("end", "answer", priority=2),
+                ]
+            },
+            "end": {},
+        },
+        [],
+        {"inputs": ("topic",)},
+    ),
+    "two_edges_gated_on_an_input_to_two_targets_tie_forever": (
+        {
+            "a": {"transitions": [_edge("x", "topic"), _edge("end", "topic")]},
+            "x": {"transitions": [_edge("end")]},
+            "end": {},
+        },
+        [(_TIE, "a")],
+        {"inputs": ("topic",)},
     ),
 }
 
@@ -994,11 +1076,25 @@ def _random_live_fsm(rng: random.Random):
     return states, [k for k in _KEYS if rng.random() < 0.25], rng.randint(1, 5)
 
 
-def _liveness_oracle(states, available, max_turns):
+def _liveness_oracle(states, available, max_turns, inputs):
     """The G4 rules by transitive closure over plain dicts (no SCC code, no
-    shared helper): the expected Counter of (code, state)."""
+    shared helper): the expected Counter of (code, state). An edge is
+    unconditional when it has no condition, or no `logic` and every key it
+    requires is guaranteed on arrival (a plain intersection fixpoint here)."""
     order = list(states)
     initial = order[0]
+    guaranteed = {initial: frozenset(inputs)}
+    changed = True
+    while changed:
+        changed = False
+        for s in list(guaranteed):
+            for t in states[s]["transitions"]:
+                cond = (t.get("conditions") or [{}])[0]
+                out = guaranteed[s] | set(cond.get("requires_context_keys", ()))
+                target = t["target_state"]
+                new = frozenset(out & guaranteed.get(target, out))
+                if new != guaranteed.get(target):
+                    guaranteed[target], changed = new, True
 
     def edges(sid):
         for t in states[sid]["transitions"]:
@@ -1006,7 +1102,12 @@ def _liveness_oracle(states, available, max_turns):
             reads = set(cond.get("requires_context_keys", ()))
             if "logic" in cond:
                 reads.add(cond["logic"]["=="][0]["var"])
-            yield t["target_state"], t["priority"], not t.get("conditions"), reads
+            sure = guaranteed.get(sid, frozenset())
+            unconditional = (
+                "logic" not in cond
+                and set(cond.get("requires_context_keys", ())) <= sure
+            )
+            yield t["target_state"], t["priority"], unconditional, reads
 
     def closure(adj):  # nodes reachable in one or more steps
         out = {}
@@ -1027,10 +1128,10 @@ def _liveness_oracle(states, available, max_turns):
     for s in reach:
         floor = min((p for _, p, u, _ in edges(s) if u), default=None)
         live[s] = []
-        for target, prio, _, reads in edges(s):
+        for target, prio, sure, reads in edges(s):
             if floor is not None and prio > floor:
                 expected[(_SHADOW, s)] += 1
-            elif reads <= available[s]:
+            elif sure or reads <= available[s]:
                 live[s].append(target)
         lowest = min((p for _, p, _, _ in edges(s)), default=None)
         if len({t for t, p, u, _ in edges(s) if u and p == lowest}) > 1:
@@ -1072,7 +1173,7 @@ class TestLivenessDifferential:
             states, inputs, max_turns = _random_live_fsm(rng)
             definition = _def(states)
             available = flow_analysis.declared_available(definition, inputs)
-            expected = _liveness_oracle(states, available, max_turns)
+            expected = _liveness_oracle(states, available, max_turns, inputs)
             findings = flow_analysis.analyze_liveness(
                 definition, inputs=inputs, max_turns=max_turns
             )

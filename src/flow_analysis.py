@@ -222,6 +222,15 @@ def _forward_meet(
     return {sid: keys for sid, keys in arrival.items() if keys is not None}
 
 
+def _guaranteed(
+    definition: FSMDefinition, given: frozenset[str]
+) -> dict[str, frozenset[str]]:
+    """Per reachable state, the keys proven present on arrival along EVERY path
+    (`given` at the initial state, then each taken edge's `requires_context_keys`):
+    the guaranteed tier of G3 and the "always passes" test of G4."""
+    return _forward_meet(definition, given, lambda _s, t, here: here | _proven(t))
+
+
 def declared_available(
     definition: FSMDefinition, inputs: Iterable[str] = ()
 ) -> dict[str, frozenset[str]]:
@@ -318,7 +327,7 @@ def analyze_data_flow(
     terminals = [sid for sid in available if not states[sid].transitions]
     if wanted and terminals:
         ever = given.union(*(_produced(states[sid], handler_only) for sid in available))
-        proven = _forward_meet(definition, given, lambda _s, t, here: here | _proven(t))
+        proven = _guaranteed(definition, given)
         for sid in terminals:
             for key in wanted:
                 if key not in ever:
@@ -336,10 +345,12 @@ def analyze_data_flow(
     return findings
 
 
-def _is_unconditional(transition: Transition) -> bool:
-    """True when no condition declares a key or a logic: the edge always passes."""
-    return not any(
-        c.requires_context_keys or c.logic is not None
+def _is_unconditional(transition: Transition, guaranteed: frozenset[str]) -> bool:
+    """True when the edge always passes: no condition carries a `logic`, and every
+    key a condition requires is in `guaranteed` (present on arrival at its state
+    on every path). A value test is satisfiable but never guaranteed."""
+    return all(
+        c.logic is None and set(c.requires_context_keys or ()) <= guaranteed
         for c in transition.conditions or []
     )
 
@@ -363,9 +374,13 @@ def analyze_liveness(
     turn), `path-exceeds-budget` (the longest route from the initial state in
     the component-condensed graph, a component weighing its state count,
     minus one, is more than `max_turns`: a LOWER BOUND, loops are unbounded).
-    An edge is satisfiable when every key its gates read is declared on every
-    path to its state (value tests count as satisfiable; a computed read is
-    G3's finding, here it is satisfiable). Unreachable states are ignored.
+    An edge is unconditional when no gate has a `logic` and every key its gates
+    require is guaranteed on arrival at its state on every path (an input, or a
+    key an earlier edge proved: the guaranteed tier of G3, so a loop gated only
+    on such a key shadows lower-ranked exits like a gate-free one). An edge is
+    satisfiable when it is unconditional or every key its gates read is declared
+    on every path to its state (value tests count as satisfiable; a computed read
+    is G3's finding, here it is satisfiable). Unreachable states are ignored.
 
     Contract: `definition` a loaded `FSMDefinition`, `inputs` key names the
     driver provides, `max_turns` the turn budget. Findings are plain data
@@ -375,7 +390,9 @@ def analyze_liveness(
     """
     states = definition.states
     order = {sid: i for i, sid in enumerate(states)}
-    available = declared_available(definition, inputs)
+    given = frozenset(inputs)
+    available = declared_available(definition, given)
+    guaranteed = _guaranteed(definition, given)
     findings: list[FlowFinding] = []
 
     def add(code: str, sid: str, message: str) -> None:
@@ -387,9 +404,10 @@ def analyze_liveness(
         edges = [t for t in states[sid].transitions or [] if t.target_state in states]
         structural[sid] = [t.target_state for t in edges]
         effective[sid] = []
-        unconditional = [t for t in edges if _is_unconditional(t)]
+        flagged = [(t, _is_unconditional(t, guaranteed[sid])) for t in edges]
+        unconditional = [t for t, sure in flagged if sure]
         floor = min((t.priority for t in unconditional), default=None)
-        for t in edges:
+        for t, sure in flagged:
             if floor is not None and t.priority > floor:
                 add(
                     "shadowed-edge",
@@ -397,7 +415,7 @@ def analyze_liveness(
                     f"edge '{sid}' -> '{t.target_state}' never fires: an unconditional "
                     "edge with a lower priority number always wins",
                 )
-            elif _gate_reads(t)[0] <= have:
+            elif sure or _gate_reads(t)[0] <= have:
                 effective[sid].append(t.target_state)
         lowest = min((t.priority for t in edges), default=None)
         tied = {t.target_state for t in unconditional if t.priority == lowest}
