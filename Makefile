@@ -14,7 +14,7 @@ format: ## Format code with ruff
 	python -m ruff format src/ tests/
 
 type-check: ## Run type checker (mypy)
-	python -m mypy src/fsm_llm/ --ignore-missing-imports
+	python scripts/type_check.py
 
 coverage: ## Run tests with coverage report
 	python -m pytest tests/ --cov=fsm_llm --cov-report=term-missing --cov-report=html
@@ -30,8 +30,7 @@ clean: ## Remove build artifacts and caches
 	rm -rf tests/__pycache__
 	rm -rf tests/test_fsm_llm/__pycache__
 	rm -rf src/logs*
-	rm -rf src/fsm_llm*egg-info
-	rm -rf src/fsm_llm/__pycache__
+	rm -rf src/__pycache__
 	rm -rf htmlcov/ .coverage
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true

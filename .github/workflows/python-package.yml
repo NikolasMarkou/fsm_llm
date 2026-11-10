@@ -43,7 +43,7 @@ jobs:
         ruff format --check src/ tests/
     - name: Type check with mypy
       run: |
-        mypy src/fsm_llm/ --ignore-missing-imports
+        python scripts/type_check.py
     - name: Test with pytest
       # Marker exclusions are deliberate — do NOT "restore" a bare `pytest tests/`:
       #   not slow        -> tests that deliberately time.sleep() to exercise
