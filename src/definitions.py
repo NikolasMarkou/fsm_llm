@@ -1166,6 +1166,31 @@ def _walk_logic_nodes(node: Any, _depth: int = 0) -> Iterator[tuple[str, Any]]:
         yield from _walk_logic_nodes(argument, _depth + 1)
 
 
+def _logic_read_names(logic: Any) -> Iterator[Any]:
+    """Yield the raw name value of every context read in `logic`: the first
+    argument of `var` (None when it has none), every name of `missing` and
+    `missing_some`, and the argument of the one-argument `has_context`.
+
+    The one place that says which positions of a JsonLogic tree name a context
+    key; `logic_referenced_keys` and `logic_has_unresolvable_reads` read it, so
+    the two cannot disagree. A yielded value is whatever the definition holds
+    (a string, a computed `{"cat": ...}` dict, a number); the callers judge it.
+    Raises ValueError exactly when `_walk_logic_nodes` does.
+    """
+    for operator, arguments in _walk_logic_nodes(logic):
+        args = list(arguments) if isinstance(arguments, (list, tuple)) else [arguments]
+        if operator == "var":
+            yield args[0] if args else None
+        elif operator == "missing":
+            for arg in args:
+                yield from arg if isinstance(arg, (list, tuple)) else [arg]
+        elif operator == "missing_some" and len(args) == 2:
+            names = args[1]
+            yield from names if isinstance(names, (list, tuple)) else [names]
+        elif operator == "has_context" and len(args) == 1:
+            yield args[0]
+
+
 def logic_referenced_keys(logic: Any) -> set[str]:
     """Return the top-level context keys a JsonLogic expression reads.
 
@@ -1173,7 +1198,8 @@ def logic_referenced_keys(logic: Any) -> set[str]:
     its first segment: `profile.email` reads `profile`), by `missing` /
     `missing_some`, or by the one-argument `has_context` shorthand. A value
     that only appears as a compared literal is not a reference, and a computed
-    name (`{"var": {"cat": ...}}`) cannot be resolved statically and is skipped.
+    name (`{"var": {"cat": ...}}`) cannot be resolved statically and is skipped
+    (`logic_has_unresolvable_reads` reports it).
 
     Contract:
         logic: a `TransitionCondition.logic` value (dict, or None/falsy).
@@ -1181,29 +1207,37 @@ def logic_referenced_keys(logic: Any) -> set[str]:
     Raises: ValueError exactly when `_walk_logic_nodes` does (malformed logic,
         which the loader already rejects).
     """
-    keys: set[str] = set()
     if not logic:
-        return keys
+        return set()
+    return {
+        name.split(".", 1)[0]
+        for name in _logic_read_names(logic)
+        if isinstance(name, str) and name
+    }
 
-    def _add(name: Any) -> None:
-        if isinstance(name, str) and name:
-            keys.add(name.split(".", 1)[0])
 
-    for operator, arguments in _walk_logic_nodes(logic):
-        args = list(arguments) if isinstance(arguments, (list, tuple)) else [arguments]
-        if operator == "var" and args:
-            _add(args[0])
-        elif operator == "missing":
-            for arg in args:
-                for name in arg if isinstance(arg, (list, tuple)) else [arg]:
-                    _add(name)
-        elif operator == "missing_some" and len(args) == 2:
-            names = args[1]
-            for name in names if isinstance(names, (list, tuple)) else [names]:
-                _add(name)
-        elif operator == "has_context" and len(args) == 1:
-            _add(args[0])
-    return keys
+def logic_has_unresolvable_reads(logic: Any) -> bool:
+    """Say whether `logic` reads a context key whose name cannot be resolved
+    statically: a computed name (`{"var": {"cat": ...}}`), an empty name, a
+    non-string name, a name with a leading dot (`.a`), or a `var` with no
+    argument. Fails closed: such a read may touch any key, so an analysis that
+    needs the exact key set must treat the whole expression as unknown.
+
+    Only the positions `logic_referenced_keys` reads are judged: the raw
+    arguments of `var`, `missing` and `missing_some` (a default value, say) and
+    data lists are not logic, so a dict inside them never counts.
+
+    Contract:
+        logic: a `TransitionCondition.logic` value (dict, or None/falsy).
+    Returns: True when any read name is unresolvable; False for None/falsy.
+    Raises: ValueError exactly when `_walk_logic_nodes` does.
+    """
+    if not logic:
+        return False
+    return any(
+        not isinstance(name, str) or not name or name.startswith(".")
+        for name in _logic_read_names(logic)
+    )
 
 
 class TransitionCondition(BaseModel):

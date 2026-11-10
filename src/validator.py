@@ -31,6 +31,7 @@ from .definitions import (
     reachable_from,
     unknown_initial_state_message,
 )
+from .flow_analysis import strongly_connected_components
 from .logging import enable_library_logging, logger, setup_cli_logging
 from .utilities import read_json_object
 
@@ -871,46 +872,7 @@ class FSMValidator:
         trapped_set = set(trapped)
         successors = {s: [t for t in adjacency[s] if t in trapped_set] for s in trapped}
 
-        # Iterative Tarjan: work frames are (node, index of next successor).
-        index: dict[str, int] = {}
-        low: dict[str, int] = {}
-        stack: list[str] = []
-        on_stack: set[str] = set()
-        components: list[list[str]] = []
-        for root in trapped:
-            if root in index:
-                continue
-            index[root] = low[root] = len(index)
-            stack.append(root)
-            on_stack.add(root)
-            work = [(root, 0)]
-            while work:
-                node, i = work[-1]
-                if i < len(successors[node]):
-                    work[-1] = (node, i + 1)
-                    nxt = successors[node][i]
-                    if nxt not in index:
-                        index[nxt] = low[nxt] = len(index)
-                        stack.append(nxt)
-                        on_stack.add(nxt)
-                        work.append((nxt, 0))
-                    elif nxt in on_stack:
-                        low[node] = min(low[node], index[nxt])
-                    continue
-                work.pop()
-                if work:
-                    parent = work[-1][0]
-                    low[parent] = min(low[parent], low[node])
-                if low[node] == index[node]:
-                    component: list[str] = []
-                    while True:
-                        member = stack.pop()
-                        on_stack.discard(member)
-                        component.append(member)
-                        if member == node:
-                            break
-                    components.append(sorted(component, key=order.__getitem__))
-
+        components = strongly_connected_components(successors, order)
         looping = [c for c in components if len(c) > 1 or c[0] in successors[c[0]]]
         return sorted(looping, key=lambda c: order[c[0]])
 
