@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+import fsm_llm.llm as llm_module
 from fsm_llm.definitions import (
     CompletionRequest,
     CompletionResponse,
@@ -22,6 +23,30 @@ def _offline_network(
 ) -> None:
     """Refuse IPv4/IPv6 connects (``tests.conftest.block_network``)."""
     block_network(monkeypatch, request.node)
+
+
+@pytest.fixture
+def foreign_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record every ``LiteLLMInterface`` built and every provider call made.
+
+    Each one is a foreign interface: the tests inject their own doubles, so a
+    real interface appears only when a compile steers the pipeline to a model
+    of its own. The constructor and ``fsm_llm.llm.completion`` raise as well,
+    but a pipeline may swallow that, so the test asserts the list is empty.
+    """
+    seen: list[str] = []
+
+    def built(self: Any, model: str = "?", *args: Any, **kwargs: Any) -> None:
+        seen.append(f"interface:{model}")
+        raise AssertionError(f"a foreign interface was built for {model!r}")
+
+    def sent(**kwargs: Any) -> None:
+        seen.append(f"completion:{kwargs.get('model')}")
+        raise AssertionError("a provider call was made")
+
+    monkeypatch.setattr(llm_module.LiteLLMInterface, "__init__", built)
+    monkeypatch.setattr(llm_module, "completion", sent)
+    return seen
 
 
 class ScriptedStrongLLM(LLMInterface):

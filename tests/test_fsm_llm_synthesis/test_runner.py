@@ -718,3 +718,68 @@ class TestTraceSink:
         rig = _rig(valid_fsm)
         with pytest.raises(TypeError):
             ProcedureRunner(rig.api, _host(), rig.synth, trace_sink="not callable")  # type: ignore[arg-type]
+
+
+def _classified(valid_fsm: dict[str, Any], **entry: Any) -> dict[str, Any]:
+    """``valid_fsm`` with one classification entry (a model setting in ``entry``)."""
+    out = copy.deepcopy(valid_fsm)
+    out["states"]["ask"]["classification_extractions"] = [
+        {
+            "field_name": "mood",
+            "intents": [
+                {"name": "happy", "description": "glad"},
+                {"name": "sad", "description": "unhappy"},
+            ],
+            "fallback_intent": "happy",
+            **entry,
+        }
+    ]
+    return out
+
+
+class TestNoForeignInterface:
+    """A compile may not move the child to a model of its own: nothing but the
+    host's injected interface is ever built or called (review iter 1, concern 1)."""
+
+    def test_a_compile_that_names_a_model_is_repaired_before_it_runs(
+        self, valid_fsm, foreign_calls
+    ):
+        bad = json.dumps(_classified(valid_fsm, model="openai/gpt-4o"))
+        rig = _rig(valid_fsm, replies=[bad, json.dumps(valid_fsm)])
+
+        rig.runner.run(rig.conv, max_steps=20)
+
+        assert foreign_calls == []
+        assert "model-setting" in str(rig.strong.requests[1].messages)
+        assert (rig.state, rig.result["status"]) == ("booked", "ok")
+
+    def test_a_compile_that_keeps_naming_one_never_runs(self, valid_fsm, foreign_calls):
+        bad = json.dumps(_classified(valid_fsm, model="openai/gpt-4o"))
+        rig = _rig(valid_fsm, replies=[bad] * 4)
+
+        rig.runner.run(rig.conv, max_steps=20)
+
+        assert foreign_calls == []
+        assert rig.result["status"] == "failed"
+        assert (rig.state, rig.depth) == ("apology", 1)
+        assert rig.names == ["failed"]
+
+    def test_a_stored_legacy_procedure_with_a_model_is_refused_at_push(
+        self, valid_fsm, monkeypatch, foreign_calls
+    ):
+        rig = _rig(valid_fsm)
+        data = _procedure(valid_fsm).definition.model_dump(exclude_defaults=True)
+        data["states"]["ask"]["classification_extractions"] = _classified(
+            valid_fsm, model="openai/gpt-4o"
+        )["states"]["ask"]["classification_extractions"]
+        definition = FSMDefinition(**data)
+        _serve(
+            rig, monkeypatch, Procedure(digest_of(definition), definition, None, "x")
+        )
+
+        rig.runner.run(rig.conv, max_steps=10)
+
+        assert foreign_calls == []
+        assert rig.result["reason"] == "library_error"
+        assert (rig.state, rig.depth) == ("apology", 1)
+        assert rig.names == ["obtained", "failed"]

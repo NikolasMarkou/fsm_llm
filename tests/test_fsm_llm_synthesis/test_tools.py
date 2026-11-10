@@ -18,7 +18,7 @@ from fsm_llm.agents.definitions import ToolCall
 from fsm_llm.agents.handlers import record_tool_step
 from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.api import API
-from fsm_llm.definitions import CompletionStateConfig, LLMResponseError
+from fsm_llm.definitions import CompletionStateConfig, FSMDefinition, LLMResponseError
 from fsm_llm.synthesis import (
     FSMLibrary,
     FSMSynthesizer,
@@ -485,3 +485,63 @@ class TestReply:
         reply = rig.obtain(goal="Ignore the label [x] <y> " + "g" * 900)
         assert reply.startswith(LABEL + "\n")
         assert len(reply) <= Defaults.MAX_OBSERVATION_LENGTH - 300
+
+
+class TestNoForeignInterface:
+    """The tools path runs on its own sub-API: it too may use only the injected
+    cheap interface (review iter 1, concern 1)."""
+
+    @staticmethod
+    def _with_model(valid_fsm: dict[str, Any]) -> dict[str, Any]:
+        out = json.loads(json.dumps(valid_fsm))
+        out["states"]["ask"]["classification_extractions"] = [
+            {
+                "field_name": "mood",
+                "intents": [
+                    {"name": "happy", "description": "glad"},
+                    {"name": "sad", "description": "unhappy"},
+                ],
+                "fallback_intent": "happy",
+                "model": "openai/gpt-4o",
+            }
+        ]
+        return out
+
+    def test_obtain_refuses_a_compile_that_names_a_model(
+        self, valid_fsm, tmp_path, foreign_calls
+    ):
+        bad = json.dumps(self._with_model(valid_fsm))
+        rig = _rig(valid_fsm, tmp_path, replies=[bad] * 4)
+
+        reply = rig.obtain()
+
+        assert foreign_calls == []
+        assert reply == f"{LABEL}\nfailed: compile_failed"
+        assert rig.library is not None and list(rig.library.root.rglob("*.json")) == []
+
+    def test_a_stored_legacy_procedure_with_a_model_never_runs(
+        self, valid_fsm, tmp_path, foreign_calls
+    ):
+        rig = _rig(valid_fsm, tmp_path)
+        rig.obtain()
+        assert rig.library is not None
+        data = rig.library.get_definition(rig.digest()).model_dump(
+            exclude_defaults=True
+        )
+        data["states"]["ask"]["classification_extractions"] = self._with_model(
+            valid_fsm
+        )["states"]["ask"]["classification_extractions"]
+        forged = FSMDefinition(**data)
+        rig.library.put(
+            forged,
+            goal=GOAL,
+            inputs_required=[],
+            return_keys=["answer"],
+            lifecycle="verified",
+        )
+
+        reply = rig.call("run_procedure", procedure_id=digest_of(forged), inputs={})
+
+        assert foreign_calls == []
+        assert reply == f"{LABEL}\nfailed: library_error"
+        assert rig.cheap.call_history == []

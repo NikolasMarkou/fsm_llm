@@ -19,6 +19,17 @@ which is only called after the gates passed.
 # as a compiled edge, and do NOT run G3 or G4 on the injected form (they would
 # see the abort edge as a path). The text rules are one generic walk over the
 # whole document on purpose: a per-field list would miss the next field.
+
+# DECISION plan-2026-11-10T194139-2cefeb61/D-032
+# G5 judges the RAW compile, so it must not accept what a lax load coerces and
+# it must not name a setting it forgot. A classification entry is judged by an
+# ALLOW-LIST of keys (`model` and `prompt_config` are refused: a private
+# interface would send the child's calls to any provider the environment has
+# credentials for). A priority must be a real int (a lax load turns 0.0, "0",
+# False into the abort edge's 0). `validation_rules.pattern` is refused (a
+# model-written regex runs on user text: ReDoS). Do NOT turn the allow-list into
+# a deny-list, do NOT accept a "safe subset" of patterns, and do NOT read only
+# the name positions the first review found: `_key_names` is the one table.
 """
 
 from __future__ import annotations
@@ -58,6 +69,22 @@ _INT_LIMITS = {
 _RESERVED_NAMES = frozenset(
     {ABORT_CONTEXT_KEY, RESULT_CONTEXT_KEY, CONTEXT_KEY_AGENT_TRACE}
 ) | frozenset(RESERVED_CONTEXT_KEYS)
+
+#: The keys of a ``classification_extractions`` entry a compile may use.
+_CLASSIFICATION_KEYS = frozenset(
+    {
+        "field_name",
+        "intents",
+        "fallback_intent",
+        "confidence_threshold",
+        "required",
+        "context_keys",
+    }
+)
+#: The entry keys that pick a model or tune its calls: always refused. Together
+#: with ``_CLASSIFICATION_KEYS`` they are every field of the core model (a test).
+_MODEL_SETTING_KEYS = frozenset({"model", "prompt_config"})
+_INTENT_KEYS = frozenset({"name", "description"})
 
 
 @dataclass(frozen=True)
@@ -159,7 +186,8 @@ def _q(value: object) -> str:
 
 
 def _items(value: object) -> list[Any]:
-    return value if isinstance(value, list) else []
+    """A list or tuple (a stored, dumped definition holds tuples) as a list."""
+    return list(value) if isinstance(value, (list, tuple)) else []
 
 
 def _strs(value: object) -> Iterator[str]:
@@ -186,6 +214,7 @@ def _key_names(state: dict[str, Any]) -> Iterator[str]:
     for extraction in _items(state.get("classification_extractions")):
         if isinstance(extraction, dict):
             yield from _strs([extraction.get("field_name")])
+            yield from _strs(extraction.get("context_keys"))
     yield from _strs(state.get("required_context_keys"))
     scope = state.get("context_scope")
     if isinstance(scope, dict):
@@ -194,6 +223,11 @@ def _key_names(state: dict[str, Any]) -> Iterator[str]:
     completion = state.get("completion")
     if isinstance(completion, dict):
         yield from _strs([completion.get("result_key")])
+    nested = state.get("synthesize")
+    if isinstance(nested, dict):  # read at any depth; an absent result_key is fine
+        yield from _strs(nested.get("inputs"))
+        yield from _strs(nested.get("return_keys"))
+        yield from _strs([nested.get("result_key")])
     for edge in _edges(state):
         for cond in _items(edge.get("conditions")):
             if not isinstance(cond, dict):
@@ -203,6 +237,37 @@ def _key_names(state: dict[str, Any]) -> Iterator[str]:
                 yield from logic_referenced_keys(cond.get("logic"))
             except (ValueError, TypeError, RecursionError):
                 pass  # malformed logic is gate G1's finding, not G5's
+
+
+def _setting_problems(state: dict[str, Any]) -> Iterator[tuple[str, str]]:
+    """``(code, text)`` for each model setting, unlisted classification key or
+    regular expression a state carries (``text`` names keys, never values)."""
+    for entry in (
+        e
+        for e in _items(state.get("classification_extractions"))
+        if isinstance(e, dict)
+    ):
+        for key in sorted(str(k) for k in entry if k in _MODEL_SETTING_KEYS):
+            yield "model-setting", f"a classification entry sets {key}"
+        intents = [i for i in _items(entry.get("intents")) if isinstance(i, dict)]
+        unknown = {
+            str(k) for k in entry if k not in _CLASSIFICATION_KEYS | _MODEL_SETTING_KEYS
+        }
+        unknown |= {str(k) for i in intents for k in i if k not in _INTENT_KEYS}
+        if unknown:
+            yield (
+                "unknown-key",
+                f"unknown classification keys {_q(', '.join(sorted(unknown)))}",
+            )
+    for extraction in _items(state.get("field_extractions")):
+        rules = (
+            extraction.get("validation_rules") if isinstance(extraction, dict) else None
+        )
+        if isinstance(rules, dict) and "pattern" in rules:
+            yield (
+                "regex-pattern",
+                "a validation rule has a pattern (a compile may not write a regex)",
+            )
 
 
 def _text_problems(value: object, limit: int) -> set[str]:
@@ -262,9 +327,13 @@ def check_policy(data: object, policy: SynthesisPolicy) -> list[PolicyFinding]:
         ``too-many-states``, ``too-many-transitions``, ``text-too-long``,
         ``unknown-key``, ``persona-set``, ``reserved-state``, ``reserved-key``,
         ``internal-key``, ``secret-key``, ``control-text``,
-        ``priority-reserved``, ``completion-tool-not-allowed``,
-        ``nested-synthesize`` or ``bad-shape`` (a part that is not the object
-        or list it must be); ``[]`` means the compile passes. Never raises,
+        ``priority-reserved``, ``priority-type``, ``model-setting`` (a
+        classification entry's ``model`` or ``prompt_config``), ``regex-pattern``,
+        ``completion-tool-not-allowed``, ``nested-synthesize`` or ``bad-shape``
+        (a part that is not the object or list it must be); ``[]`` means the
+        compile passes. Raw versus loaded: a lax load coerces only the
+        priority, so only that is type-checked; every other rule reads a
+        ``str``, list or dict, which a load never converts. Never raises,
         never mutates ``data``. The injected abort edge adds one transition to
         a state, so a procedure may end up one over ``max_transitions_per_state``.
     """
@@ -276,11 +345,11 @@ def check_policy(data: object, policy: SynthesisPolicy) -> list[PolicyFinding]:
             seen.add((code, state, name))
             out.append(PolicyFinding(code, state, message))
 
-    def judge_names(sid: str, names: Iterator[str]) -> None:
+    def judge_names(sid: str, names: Iterator[str], internal_ok: bool = False) -> None:
         for name in names:
             if name in _RESERVED_NAMES:
                 add("reserved-key", sid, f"key {_q(name)} is reserved", name)
-            elif has_internal_prefix(name):
+            elif has_internal_prefix(name) and not internal_ok:
                 add("internal-key", sid, f"key {_q(name)} is internal", name)
             if is_forbidden_context_entry(name, ""):
                 add("secret-key", sid, f"key {_q(name)} looks like a secret", name)
@@ -333,19 +402,50 @@ def check_policy(data: object, policy: SynthesisPolicy) -> list[PolicyFinding]:
         for edge in _edges(state):
             if edge.get("target_state") == ABORT_STATE_ID:
                 add("reserved-state", sid, f"an edge targets '{ABORT_STATE_ID}'")
-            priority = edge.get("priority")
-            if isinstance(priority, int) and not isinstance(priority, bool):
-                if priority < 1:
+            if "priority" in edge:  # a real int: a lax load coerces 0.0, "0", False
+                priority = edge["priority"]
+                if type(priority) is not int:
+                    add(
+                        "priority-type",
+                        sid,
+                        f"an edge of {_q(sid)} has a non-int priority",
+                    )
+                elif priority < 1:
                     add(
                         "priority-reserved",
                         sid,
                         f"an edge of {_q(sid)} has priority {priority}; "
                         "0 is reserved for the abort edge",
                     )
+        for code, text in _setting_problems(state):
+            add(code, sid, f"state {_q(sid)}: {text}", text)
+        nested = state.get("synthesize")
+        if "synthesize" in state and not isinstance(nested, dict):
+            add("bad-shape", sid, f"synthesize of {_q(sid)} is not an object")
+        elif isinstance(nested, dict):
+            on_failure = nested.get("on_failure")
+            if not isinstance(on_failure, str):
+                add(
+                    "bad-shape",
+                    sid,
+                    f"synthesize on_failure of {_q(sid)} is not a state id",
+                )
+            elif on_failure == ABORT_STATE_ID:
+                add("reserved-state", sid, f"on_failure names '{ABORT_STATE_ID}'")
         completion = state.get("completion")
         if "completion" in state and not isinstance(completion, dict):
             add("bad-shape", sid, f"completion of {_q(sid)} is not an object")
         elif isinstance(completion, dict):
+            judge_names(  # internal by design: only reserved or secret names count
+                sid,
+                _strs(
+                    [
+                        completion.get("messages_key"),
+                        completion.get("response_format_key"),
+                    ]
+                ),
+                internal_ok=True,
+            )
             for tool in _completion_tool_names(completion):
                 if tool is None or tool not in policy.allowed_tools:
                     add(

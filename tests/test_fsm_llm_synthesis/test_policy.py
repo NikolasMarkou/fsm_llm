@@ -10,14 +10,17 @@ injected definition loads, validates and ends in ``abort`` when the driver sets
 import copy
 import dataclasses
 import math
+import typing
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
 from fsm_llm import API
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.definitions import ClassificationExtractionConfig, FSMDefinition
 from fsm_llm.security import is_forbidden_context_entry
-from fsm_llm.synthesis import SynthesisError
+from fsm_llm.synthesis import SynthesisError, run_gates
+from fsm_llm.synthesis import policy as policy_module
 from fsm_llm.synthesis.policy import (
     PolicyFinding,
     SynthesisPolicy,
@@ -169,6 +172,16 @@ class TestSynthesisPolicyLimits:
             dataclasses.replace(p, max_states=True)
 
 
+def _nested(**fields: Any) -> dict[str, Any]:
+    """A nested ``synthesize`` block (judged at any depth, see ``_key_names``)."""
+    block: dict[str, Any] = {
+        "goal": "g",
+        "return_keys": ["answer"],
+        "on_failure": "done",
+    }
+    return block | fields
+
+
 def _put(d: dict[str, Any], where: str, name: str) -> None:
     """Place the key name `name` at one of the positions G5 reads."""
     ask = d["states"]["ask"]
@@ -178,6 +191,10 @@ def _put(d: dict[str, Any], where: str, name: str) -> None:
         ask["field_extractions"][0]["context_keys"] = [name]
     elif where == "classification":
         ask["classification_extractions"] = [{"field_name": name, "intents": []}]
+    elif where == "classification_context_keys":
+        ask["classification_extractions"] = [
+            {"field_name": "mood", "intents": [], "context_keys": [name]}
+        ]
     elif where == "required":
         ask["required_context_keys"] = [name]
     elif where == "requires":
@@ -188,6 +205,11 @@ def _put(d: dict[str, Any], where: str, name: str) -> None:
         ask["context_scope"] = {where: [name]}
     elif where == "handler_only":
         d["handler_only_keys"] = [name]
+    elif where in ("synth_inputs", "synth_return_keys", "synth_result_key"):
+        block = _nested(result_key="synth_out")
+        field = where.removeprefix("synth_")
+        block[field] = name if field == "result_key" else [name]
+        ask["synthesize"] = block
     else:  # pragma: no cover
         raise AssertionError(where)
 
@@ -196,12 +218,16 @@ WHERES = [
     "field",
     "field_context_keys",
     "classification",
+    "classification_context_keys",
     "required",
     "requires",
     "var",
     "read_keys",
     "write_keys",
     "handler_only",
+    "synth_inputs",
+    "synth_return_keys",
+    "synth_result_key",
 ]
 
 
@@ -257,6 +283,25 @@ class TestCheckPolicyOneHostileCasePerCode:
                 "priority-reserved",
                 SynthesisPolicy(),
                 lambda d: d["states"]["ask"]["transitions"][0].update(priority=-5),
+            ),
+            (
+                "priority-type",
+                SynthesisPolicy(),
+                lambda d: d["states"]["ask"]["transitions"][0].update(priority=0.0),
+            ),
+            (
+                "model-setting",
+                SynthesisPolicy(),
+                lambda d: d["states"]["ask"].update(
+                    classification_extractions=[_classification(model="openai/x")]
+                ),
+            ),
+            (
+                "regex-pattern",
+                SynthesisPolicy(),
+                lambda d: d["states"]["ask"]["field_extractions"][0].update(
+                    validation_rules={"pattern": "^(a+)+$"}
+                ),
             ),
             (
                 "nested-synthesize",
@@ -621,3 +666,269 @@ class TestAbortThroughTheRealApi:
         api, conv_id, _ = _scripted_api(inject_abort(_good()), {"answer": "yes"})
         api.run_until_terminal(conv_id, max_steps=5)
         assert api.get_current_state(conv_id) == "done"
+
+
+# --- Step 6.1: model settings, coerced priorities, patterns, positions ------
+
+
+def _classification(**extra: Any) -> dict[str, Any]:
+    return {
+        "field_name": "mood",
+        "intents": [
+            {"name": "happy", "description": "glad"},
+            {"name": "sad", "description": "unhappy"},
+        ],
+        "fallback_intent": "happy",
+        **extra,
+    }
+
+
+def _with_classification(**extra: Any) -> dict[str, Any]:
+    d = _good()
+    d["states"]["ask"]["classification_extractions"] = [_classification(**extra)]
+    return d
+
+
+def _model_reachable(root: type[BaseModel]) -> set[type[BaseModel]]:
+    """Every pydantic model reachable from ``root`` through field annotations."""
+
+    def inside(annotation: Any) -> list[type[BaseModel]]:
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            return [annotation]
+        return [m for arg in typing.get_args(annotation) for m in inside(arg)]
+
+    seen: set[type[BaseModel]] = set()
+    todo = [root]
+    while todo:
+        model = todo.pop()
+        if model not in seen:
+            seen.add(model)
+            for info in model.model_fields.values():
+                todo.extend(inside(info.annotation))
+    return seen
+
+
+class TestModelSettings:
+    """A compile may not pick a model, a provider or any LLM setting: the child
+    classifies on the host's own interface (review iter 1, concern 1)."""
+
+    def test_a_clean_classification_entry_passes(self):
+        d = _with_classification(
+            required=True, confidence_threshold=0.5, context_keys=["answer"]
+        )
+        assert check_policy(d, SynthesisPolicy()) == []
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("model", "openai/gpt-4o"),
+            ("model", None),
+            ("model", ""),
+            ("prompt_config", {"temperature": 2.0, "max_tokens": 9000}),
+            ("prompt_config", {}),
+        ],
+    )
+    def test_model_and_prompt_config_are_refused_whatever_the_value(self, field, value):
+        findings = check_policy(
+            _with_classification(**{field: value}), SynthesisPolicy()
+        )
+        assert [(f.code, f.state) for f in findings] == [("model-setting", "ask")]
+
+    @pytest.mark.parametrize(
+        "key", ["api_key", "api_base", "base_url", "provider", "temperature", "x"]
+    )
+    def test_any_other_classification_key_is_unknown(self, key):
+        assert _codes(_with_classification(**{key: "v"})) == ["unknown-key"]
+
+    def test_an_intent_with_a_stray_key_is_unknown(self):
+        d = _with_classification()
+        d["states"]["ask"]["classification_extractions"][0]["intents"][0]["model"] = (
+            "openai/gpt-4o"
+        )
+        assert _codes(d) == ["unknown-key"]
+
+    def test_the_allow_list_names_every_field_of_the_core_model(self):
+        """A field added to the core model must be judged here, not inherited."""
+        allowed = policy_module._CLASSIFICATION_KEYS
+        refused = policy_module._MODEL_SETTING_KEYS
+        assert not allowed & refused
+        assert allowed | refused == set(ClassificationExtractionConfig.model_fields)
+
+    def test_no_other_model_of_the_definition_carries_an_llm_setting(self):
+        hints = ("model", "api", "url", "provider", "temperature", "token", "llm")
+        found = {
+            (m.__name__, name)
+            for m in _model_reachable(FSMDefinition)
+            for name in m.model_fields
+            if any(h in name for h in hints) or name == "prompt_config"
+        }
+        found.discard(("Transition", "llm_description"))  # prompt text, no setting
+        assert found == {
+            ("ClassificationExtractionConfig", "model"),
+            ("ClassificationExtractionConfig", "prompt_config"),
+        }
+
+    def test_run_gates_refuses_a_compile_that_names_a_model(self):
+        report = run_gates(
+            _with_classification(model="openai/gpt-4o"),
+            SynthesisPolicy(),
+            inputs=(),
+            return_keys=("answer",),
+        )
+        assert not report.passed
+        assert [(f.gate, f.code) for f in report.findings] == [("G5", "model-setting")]
+
+
+_PRIORITY_CODES: list[tuple[Any, str | None]] = [
+    (0, "priority-reserved"),
+    (-5, "priority-reserved"),
+    (0.0, "priority-type"),
+    (-0.0, "priority-type"),
+    ("0", "priority-type"),
+    ("00", "priority-type"),
+    (False, "priority-type"),
+    (True, "priority-type"),
+    (1.0, "priority-type"),
+    ("5", "priority-type"),
+    (None, "priority-type"),
+    (1, None),
+    (2, None),
+    (1000, None),
+]  # a list: 0, 0.0, False (and 1, 1.0, True) are equal dict keys
+
+
+class TestPriorityMustBeARealInt:
+    """G1's lax load coerces 0.0, "0" and False to 0 (the abort edge's
+    priority); G5 reads the raw value, so it must not accept those shapes."""
+
+    @pytest.mark.parametrize(
+        ("value", "code"),
+        _PRIORITY_CODES,
+        ids=[repr(v) for v, _ in _PRIORITY_CODES],
+    )
+    def test_the_table(self, value, code):
+        d = _good()
+        d["states"]["ask"]["transitions"][0]["priority"] = value
+        found = [f.code for f in check_policy(d, SynthesisPolicy())]
+        assert found == ([code] if code else [])
+
+    @pytest.mark.parametrize("value", [[], {}])
+    def test_a_container_is_refused(self, value):
+        d = _good()
+        d["states"]["ask"]["transitions"][0]["priority"] = value
+        assert _codes(d) == ["priority-type"]
+
+    def test_an_absent_priority_is_the_loader_default(self):
+        d = _good()
+        del d["states"]["ask"]["transitions"][0]["priority"]
+        assert check_policy(d, SynthesisPolicy()) == []
+
+    @pytest.mark.parametrize("value", [0.0, -0.0, "0", "00", False])
+    def test_a_coerced_zero_never_passes_the_gates(self, value):
+        d = _good()
+        d["states"]["ask"]["transitions"][0]["priority"] = value
+        report = run_gates(d, SynthesisPolicy(), inputs=(), return_keys=("answer",))
+        assert not report.passed
+        assert "priority-type" in [f.code for f in report.findings if f.gate == "G5"]
+
+
+class TestNoModelAuthoredRegex:
+    """A model-written pattern runs on user text in the child: ReDoS."""
+
+    @pytest.mark.parametrize("pattern", ["^(a+)+$", "^[a-z]+$", "", None, 5])
+    def test_a_pattern_is_refused_whatever_it_says(self, pattern):
+        d = _good()
+        d["states"]["ask"]["field_extractions"][0]["validation_rules"] = {
+            "pattern": pattern
+        }
+        assert _codes(d) == ["regex-pattern"]
+
+    def test_the_other_rules_stay_allowed(self):
+        d = _good()
+        d["states"]["ask"]["field_extractions"][0]["validation_rules"] = {
+            "allowed_values": ["a", "b"],
+            "min_length": 1,
+            "max_length": 9,
+            "min_value": 0,
+            "max_value": 9,
+        }
+        assert check_policy(d, SynthesisPolicy()) == []
+
+    def test_the_gates_refuse_the_redos_compile(self):
+        d = _good()
+        d["states"]["ask"]["field_extractions"][0]["validation_rules"] = {
+            "pattern": "^(a+)+$"
+        }
+        report = run_gates(d, SynthesisPolicy(), inputs=(), return_keys=("answer",))
+        assert not report.passed
+        assert [(f.gate, f.code) for f in report.findings] == [("G5", "regex-pattern")]
+
+
+class TestNestedSynthesizeNames:
+    """At depth 2 a compiled synthesize block is judged like any other state."""
+
+    DEEP = SynthesisPolicy(max_synthesis_depth=2)
+
+    def _d(self, **fields: Any) -> dict[str, Any]:
+        d = _good()
+        d["states"]["ask"]["synthesize"] = _nested(**fields)
+        return d
+
+    def test_a_clean_block_passes(self):
+        assert check_policy(self._d(result_key="synth_out"), self.DEEP) == []
+
+    @pytest.mark.parametrize("name", ["procedure_abort", "_hidden", "db_password"])
+    def test_a_bad_result_key_is_refused(self, name):
+        assert {"reserved-key", "internal-key", "secret-key"} & set(
+            _codes(self._d(result_key=name), self.DEEP)
+        )
+
+    def test_an_absent_result_key_is_the_child_own_default(self):
+        assert check_policy(self._d(), self.DEEP) == []
+
+    def test_a_tuple_of_names_is_read_like_a_list(self):
+        """A stored, dumped definition holds tuples (``verify_stored``)."""
+        d = self._d(result_key="synth_out", inputs=("_hidden",))
+        assert "internal-key" in _codes(d, self.DEEP)
+
+    @pytest.mark.parametrize("bad", [None, 5, ["done"], {"x": 1}])
+    def test_on_failure_must_be_a_state_id_string(self, bad):
+        d = self._d(result_key="synth_out", on_failure=bad)
+        assert "bad-shape" in _codes(d, self.DEEP)
+
+    def test_on_failure_may_not_name_the_abort_state(self):
+        d = self._d(result_key="synth_out", on_failure="abort")
+        assert "reserved-state" in _codes(d, self.DEEP)
+
+    def test_a_non_object_block_is_a_shape_finding(self):
+        d = _good()
+        d["states"]["ask"]["synthesize"] = ["x"]
+        assert "bad-shape" in _codes(d, self.DEEP)
+
+
+class TestCompletionKeyNames:
+    """``messages_key`` and ``response_format_key`` are internal by design, so
+    only a reserved or secret-looking name is refused there."""
+
+    def _with(self, **fields: Any) -> dict[str, Any]:
+        d = _good()
+        ask = d["states"]["ask"]
+        del ask["field_extractions"]
+        ask["completion"] = {"response_format_key": "_fmt", **fields}
+        return d
+
+    def test_the_internal_defaults_pass_the_name_rules(self):
+        d = self._with(messages_key="_completion_messages")
+        assert not {"internal-key", "reserved-key", "secret-key"} & set(_codes(d))
+
+    @pytest.mark.parametrize("field", ["messages_key", "response_format_key"])
+    @pytest.mark.parametrize(
+        ("name", "code"),
+        [
+            ("_conversation_id", "reserved-key"),
+            ("procedure_abort", "reserved-key"),
+            ("_db_password", "secret-key"),
+        ],
+    )
+    def test_a_reserved_or_secret_name_is_refused(self, field, name, code):
+        assert code in _codes(self._with(**{field: name}))
