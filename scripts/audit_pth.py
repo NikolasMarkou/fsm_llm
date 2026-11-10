@@ -33,6 +33,18 @@ SUSPICIOUS_PATTERN = re.compile(
     re.MULTILINE,
 )
 
+# `pip install -e .` of a package whose directory name differs from its import
+# name (here `src` -> `fsm_llm`) makes setuptools write ONE line that installs an
+# import hook: `import __editable___<dist>_finder; __editable___<dist>_finder.install()`.
+# Only a file named `__editable__.*.pth` whose whole content is that line is let
+# through; any other code in such a file is still flagged.
+EDITABLE_FINDER = re.compile(r"import (__editable___\w+_finder); \1\.install\(\)\s*")
+
+
+def is_editable_finder(name: str, content: str) -> bool:
+    """True for the one-line `.pth` that setuptools' editable install writes."""
+    return name.startswith("__editable__.") and bool(EDITABLE_FINDER.fullmatch(content))
+
 
 def audit() -> int:
     """Scan all site-packages directories for suspicious .pth files.
@@ -54,6 +66,8 @@ def audit() -> int:
             try:
                 content = pth.read_text()
             except OSError:
+                continue
+            if is_editable_finder(pth.name, content):
                 continue
             if SUSPICIOUS_PATTERN.search(content):
                 issues.append(f"WARNING: Executable code in {pth}")

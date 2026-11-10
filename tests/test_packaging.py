@@ -31,6 +31,7 @@ _SCRIPTS = str(_REPO_ROOT / "scripts")
 if _SCRIPTS not in sys.path:  # scripts/ is not a package
     sys.path.insert(0, _SCRIPTS)
 
+import audit_pth
 import doc_counts
 
 
@@ -659,3 +660,31 @@ def test_doc_counts_reads_the_slow_live_and_file_shapes(line, bad):
     doc = doc_counts._Doc(m, "tests/test_s/AGENTS.md")
     doc.line(1, line)
     assert len(doc.bad) == bad, doc.bad
+
+
+# ══════════════════════════════════════════════════════════════
+# scripts/audit_pth.py lets the setuptools editable hook through, nothing else
+# ══════════════════════════════════════════════════════════════
+
+
+class TestAuditPthEditableFinder:
+    """`pip install -e .` writes a code-bearing `.pth` for the flat layout
+    (`src` is imported as `fsm_llm`); the audit must not flag exactly that."""
+
+    _HOOK = (
+        "import __editable___fsm_llm_0_12_0_finder; "
+        "__editable___fsm_llm_0_12_0_finder.install()"
+    )
+
+    def test_the_one_line_setuptools_hook_is_let_through(self):
+        assert audit_pth.is_editable_finder(
+            "__editable__.fsm_llm-0.12.0.pth", self._HOOK
+        )
+
+    def test_any_other_code_in_a_pth_is_still_flagged(self):
+        name = "__editable__.fsm_llm-0.12.0.pth"
+        assert not audit_pth.is_editable_finder("evil.pth", self._HOOK)
+        assert not audit_pth.is_editable_finder(
+            name, self._HOOK + "\nimport os; os.system('x')"
+        )
+        assert not audit_pth.is_editable_finder(name, "import os; os.system('x')")
