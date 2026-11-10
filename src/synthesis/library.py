@@ -117,10 +117,17 @@ class LibraryRecord(BaseModel):
 
 
 class LibraryMatch(NamedTuple):
-    """One search hit: the record and its score (cosine, or word overlap)."""
+    """One search hit: the record, its score and the scale of that score.
+
+    ``embedded`` is True for a cosine from the embedder, a similarity claim a
+    threshold may judge. False is the word fallback: 1.0 only for the same
+    goal (case, punctuation and spacing aside), at most 0.5 otherwise, so it
+    ranks near-misses and never passes a reuse threshold above 0.5.
+    """
 
     record: LibraryRecord
     score: float
+    embedded: bool = False
 
 
 def _canonical(definition: FSMDefinition) -> tuple[str, str]:
@@ -134,14 +141,26 @@ def digest_of(definition: FSMDefinition) -> str:
     return _canonical(definition)[0]
 
 
-def _words(text: str) -> set[str]:
-    return set(re.findall(r"[^\W_]+", text.lower()))
+def _words(text: str) -> list[str]:
+    """The lowercase alphanumeric tokens of *text*, in order."""
+    return re.findall(r"[^\W_]+", text.lower())
 
 
-def _scores(goal: str, texts: list[str], embed: EmbedTextsFn | None) -> list[float]:
-    """Score each of *texts* against *goal*: cosine over one batch ``embed``
-    call, else (no embedder, or one that raises or returns a wrong count,
-    uneven or non-finite vectors) Jaccard word overlap, with one WARNING."""
+def _lexical(want: list[str], have: list[str]) -> float:
+    """1.0 for the same token sequence, else half the Jaccard word overlap.
+    Set overlap ignores negation and word order, so it is never a reuse score."""
+    if want == have:
+        return 1.0
+    return len(set(want) & set(have)) / len(set(want) | set(have)) / 2
+
+
+def _scores(
+    goal: str, texts: list[str], embed: EmbedTextsFn | None
+) -> tuple[list[float], bool]:
+    """``(scores, embedded)`` of *texts* against *goal*: cosine over one batch
+    ``embed`` call (``embedded`` True), else (no embedder, or one that raises
+    or returns a wrong count, uneven or non-finite vectors) ``_lexical``, with
+    one WARNING for a failed embedder."""
     if embed is not None:
         try:
             rows = [[float(x) for x in v] for v in embed([goal, *texts])]
@@ -151,17 +170,14 @@ def _scores(goal: str, texts: list[str], embed: EmbedTextsFn | None) -> list[flo
                 raise ValueError("uneven or empty vectors")
             if not all(math.isfinite(x) for r in rows for x in r):
                 raise ValueError("non-finite vector")
-            return [cosine_similarity(rows[0], r) for r in rows[1:]]
+            return [cosine_similarity(rows[0], r) for r in rows[1:]], True
         except Exception as exc:  # the embedder is caller code: any failure
             logger.warning(
                 f"library search: embedder unusable ({type(exc).__name__}: "
                 f"{capped_line(str(exc), 100)}); ranking by word overlap"
             )
     want = _words(goal)
-    return [
-        len(want & have) / len(want | have) if want | have else 0.0
-        for have in map(_words, texts)
-    ]
+    return [_lexical(want, _words(t)) for t in texts], False
 
 
 class FSMLibrary:
@@ -453,6 +469,13 @@ class FSMLibrary:
     ) -> list[LibraryMatch]:
         """Hits for *goal*, best first (ties by digest).
 
+        Scores come in two scales, told apart by ``LibraryMatch.embedded``.
+        An embedder score is a SIMILARITY claim: a cosine does not understand
+        negation, so "do not X" can sit next to "X". Without an embedder the
+        word fallback scores 1.0 only for the same goal and at most 0.5 for
+        anything else (see ``LibraryMatch``). For exact reuse pass
+        ``embed=None``.
+
         The signature filter runs FIRST and is exact: every input the
         procedure requires is in ``inputs_available``, its return keys cover
         ``return_keys``, its tools are within ``tools_allowed``, it is not
@@ -485,10 +508,10 @@ class FSMLibrary:
                 kept.append(record)
         if not kept:
             return []
-        scores = _scores(
+        scores, embedded = _scores(
             goal, [str(r.provenance.get("goal") or "") for r in kept], embed
         )
         ranked = sorted(
             zip(kept, scores, strict=True), key=lambda p: (-p[1], p[0].digest)
         )
-        return [LibraryMatch(r, s) for r, s in ranked[:top_k]]
+        return [LibraryMatch(r, s, embedded) for r, s in ranked[:top_k]]

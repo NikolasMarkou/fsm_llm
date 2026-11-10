@@ -403,6 +403,54 @@ class TestObtainLibrary:
         with pytest.raises(IndexError):  # a strong call was attempted
             synth.obtain(goal, **ask)
 
+    @pytest.mark.parametrize(
+        "goal",
+        [
+            "Collect the user's billing address for the order and confirm it",
+            "Do NOT collect the user's delivery address for the order and confirm it",
+            "Cancel the user's delivery address for the order and confirm it",
+            "Confirm it and collect the user's delivery address for the order",
+            "Collect the user's delivery address for the order and confirm it now",
+        ],
+        ids=["billing", "negated", "cancel", "reordered", "extra-word"],
+    )
+    @pytest.mark.parametrize("min_score", [0.8, 0.0], ids=["default", "zero"])
+    def test_without_an_embedder_only_the_same_goal_is_reused(
+        self, tmp_path, valid_fsm, goal, min_score
+    ):
+        """Word overlap is not a similarity the threshold may judge."""
+        stored = "Collect the user's delivery address for the order and confirm it"
+        policy = SynthesisPolicy(reuse_min_score=min_score)
+        synth, llm = _obtainer(tmp_path, [_text(valid_fsm)], policy=policy)
+        first = synth.obtain(stored, return_keys=RET)
+        with pytest.raises(IndexError):  # a strong call was attempted
+            synth.obtain(goal, return_keys=RET)
+        assert len(llm.requests) == 2
+        same = "collect the USER'S delivery address, for the order; and confirm it!"
+        again = synth.obtain(same, return_keys=RET)
+        assert again.source == "library" and again.digest == first.digest
+
+    @pytest.mark.parametrize(
+        ("vec", "reused"), [([0.95, 0.31], True), ([0.3, 0.95], False)]
+    )
+    def test_with_an_embedder_the_threshold_judges_the_cosine(
+        self, tmp_path, valid_fsm, vec, reused
+    ):
+        vectors = {GOAL: [1.0, 0.0], "a similar goal": vec}
+        synth, llm = _obtainer(
+            tmp_path,
+            [_text(valid_fsm)],
+            embed=lambda texts: [vectors.get(t, [0.0, 1.0]) for t in texts],
+        )
+        first = synth.obtain(GOAL, return_keys=RET)
+        if reused:
+            again = synth.obtain("a similar goal", return_keys=RET)
+            assert again.source == "library" and again.digest == first.digest
+            assert len(llm.requests) == 1
+        else:
+            with pytest.raises(IndexError):
+                synth.obtain("a similar goal", return_keys=RET)
+
     def test_a_stored_procedure_that_fails_the_gates_is_skipped(
         self, tmp_path, valid_fsm, monkeypatch
     ):

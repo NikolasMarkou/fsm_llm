@@ -323,11 +323,18 @@ class FSMSynthesizer:
     ) -> Procedure:
         """A gate-passed procedure for ``goal``: a library hit, else a compile.
 
-        A hit needs a signature match (the library's exact filter), a score at
-        or above ``policy.reuse_min_score``, a stored form that passes
+        A hit needs a signature match (the library's exact filter, which checks
+        key names only, not what the procedure does), a score and a stored form
+        that passes
         ``verify_stored`` (else it is skipped with a WARNING and never run) and,
         where the current policy needs approval, a recorded approver (else it
-        is skipped). A hit makes no strong call. A compile that needs approval
+        is skipped). The score is either an embedder cosine at or above
+        ``policy.reuse_min_score``, or, with no embedder, the same goal after
+        case, punctuation and spacing (``policy.reuse_min_score`` is never
+        applied to word overlap). Embedder reuse is a SIMILARITY claim: a
+        cosine does not understand negation, so a goal that differs by "not"
+        may be served the stored procedure. For exact reuse pass ``embed=None``
+        or set ``reuse_min_score=1.0``. A hit makes no strong call. A compile that needs approval
         (policy, or any ``completion`` tool) goes to ``reviewer`` and is
         stored ``verified`` only when approved.
         """
@@ -344,7 +351,11 @@ class FSMSynthesizer:
                 top_k=3,
             ):
                 record = match.record
-                if match.score < policy.reuse_min_score:
+                # DECISION plan-2026-11-10T194139-2cefeb61/D-033: the threshold
+                # judges embedder cosines only; a word-overlap score reuses on
+                # an exact goal (1.0) alone. Do NOT compare one threshold to
+                # both scales: set overlap ignores negation and word order.
+                if match.score < (policy.reuse_min_score if match.embedded else 1.0):
                     break
                 definition = library.get_definition(record.digest)
                 report = verify_stored(

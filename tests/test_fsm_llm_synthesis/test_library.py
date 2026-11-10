@@ -551,8 +551,35 @@ class TestSearch:
         monkeypatch.setattr(library, "logger", Rec())
         hits = self._q(lib, "book dinner table", embed=embed)
         assert hits[0].record.digest == near.digest
-        assert hits[0].score == pytest.approx(3 / 4)  # Jaccard, not a cosine
+        assert hits[0].score == pytest.approx(3 / 4 / 2)  # half a Jaccard
+        assert not hits[0].embedded
         assert len(seen) == 1 and "word overlap" in seen[0]
+
+    @pytest.mark.parametrize(
+        ("query", "exact"),
+        [
+            ("book a table for dinner", True),
+            ("  Book A TABLE, for dinner!! ", True),  # case and punctuation only
+            ("book a table for dinner tonight", False),  # an extra word
+            ("book a table for dinner now please", False),
+            ("do NOT book a table for dinner", False),  # a negation
+            ("dinner for a table book", False),  # the same words, reordered
+            ("cancel a table for dinner", False),  # one word swapped
+        ],
+    )
+    def test_the_word_fallback_scores_one_only_for_the_same_goal(
+        self, lib: FSMLibrary, query: str, exact: bool
+    ):
+        _put(lib)
+        (hit,) = self._q(lib, query)
+        assert not hit.embedded
+        assert (hit.score == 1.0) is exact
+        assert exact or 0 < hit.score <= 0.5  # it ranks, it can never be reused
+
+    def test_an_embedder_score_is_flagged_as_a_cosine(self, lib: FSMLibrary):
+        _put(lib)
+        (hit,) = self._q(lib, "anything", embed=lambda t: [[1.0, 0.0]] * len(t))
+        assert hit.embedded and hit.score == pytest.approx(1.0)
 
     @pytest.mark.parametrize("kw", [{"min_lifecycle": "deprecated"}, {"top_k": 0}])
     def test_bad_search_arguments(self, lib: FSMLibrary, kw: dict):
