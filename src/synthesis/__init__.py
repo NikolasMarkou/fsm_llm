@@ -8,8 +8,8 @@ model runs it as a pushed child of a host conversation.
 
 So far: the exception hierarchy, the shared constants, the policy (limits, the
 G5 gate and abort injection), the library, the gate composition, the compile
-and repair loop, and ``obtain`` with the approval gate. The runner arrives in a
-later step.
+and repair loop, ``obtain`` with the approval gate, and the ``ProcedureRunner``
+that pushes, runs and pops a procedure under a ``synthesize`` state.
 
 Import it by name, ``from fsm_llm.synthesis import SynthesisError``;
 ``import fsm_llm`` never loads it.
@@ -34,6 +34,7 @@ from .policy import (
     needs_approval,
     strip_abort,
 )
+from .runner import ProcedureRunner
 from .synthesizer import (
     CompileResult,
     FSMSynthesizer,
@@ -54,6 +55,7 @@ __all__ = [
     "PolicyFinding",
     "Procedure",
     "ProcedureApprovalRequest",
+    "ProcedureRunner",
     "SynthesisError",
     "SynthesisPolicy",
     "SynthesisRefusedError",

@@ -1,6 +1,7 @@
 """Shared fixtures of the synthesis suite: no network, a valid compile and a
 scripted strong model."""
 
+import re
 from typing import Any
 
 import pytest
@@ -12,7 +13,7 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
-from tests.conftest import block_network
+from tests.conftest import MockLLM2Interface, block_network
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +49,56 @@ class ScriptedStrongLLM(LLMInterface):
         self, request: ResponseGenerationRequest
     ) -> ResponseGenerationResponse:
         raise NotImplementedError("the strong model only completes")
+
+
+_STATE_TAG = re.compile(r"<current_state>([^<]+)</current_state>")
+
+
+class ScriptedRunnerLLM(MockLLM2Interface):
+    """The cheap model under a pushed procedure.
+
+    ``extraction_data`` answers ``extract_field`` (a name it lacks is not
+    extracted, so a child that needs it stays); ``responses`` maps a state id,
+    read from the reply prompt's ``<current_state>`` tag, to the reply text.
+    ``shown(kind, state=None)`` is the text of every recorded request of that
+    kind (system prompt, user message, extraction context), optionally only
+    the replies written for one state.
+    """
+
+    def __init__(
+        self,
+        extraction_data: dict[str, Any] | None = None,
+        responses: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(extraction_data=extraction_data)
+        self.responses = responses or {}
+
+    def generate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        reply = super().generate_response(request)
+        text = self.responses.get(self._state_of(request))
+        return reply if text is None else reply.model_copy(update={"message": text})
+
+    @staticmethod
+    def _state_of(request: Any) -> str:
+        found = _STATE_TAG.search(request.system_prompt)
+        return found.group(1) if found else ""
+
+    def count(self, kind: str, state: str | None = None) -> int:
+        """How many requests of ``kind`` were made (for ``state``, if given)."""
+        return sum(
+            1
+            for name, r in self.call_history
+            if name == kind and (state is None or self._state_of(r) == state)
+        )
+
+    def shown(self, kind: str, state: str | None = None) -> str:
+        return "\n".join(
+            f"{r.system_prompt}\n{r.user_message}\n{getattr(r, 'context', None)}"
+            for name, r in self.call_history
+            if name == kind and (state is None or self._state_of(r) == state)
+        )
 
 
 @pytest.fixture
