@@ -5,18 +5,12 @@ Global test configuration and fixtures for the entire test suite.
 import json
 import re
 import socket
-import sys
 from pathlib import Path
 from typing import NoReturn
 from unittest.mock import Mock
 
 import pytest
 
-# Add src to path
-src_path = Path(__file__).parent.parent / "src"
-sys.path.insert(0, str(src_path))
-
-# Import after path adjustment
 from fsm_llm.constants import DEFAULT_LLM_MODEL
 from fsm_llm.definitions import (
     BulkExtractionRequest,

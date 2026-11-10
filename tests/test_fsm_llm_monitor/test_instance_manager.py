@@ -660,7 +660,7 @@ class TestActivitySnapshots:
 class TestFindExamplesDir:
     def test_examples_dir_resolves_to_repo_examples(self):
         # instance_manager.py sits one level deeper since the move under
-        # src/fsm_llm/monitor/; a wrong depth silently returns None.
+        # src/monitor/; a wrong depth silently returns None.
         from pathlib import Path
 
         from fsm_llm.monitor.instance_manager import find_examples_dir

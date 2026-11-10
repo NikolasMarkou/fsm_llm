@@ -160,8 +160,8 @@ class _Doc:
         self.m, self.md, self.bad = m, md, []
         self.suite = parts[1] if parts[0] == "tests" and _suite(md) else None
         self.src_suite = self.suite
-        if parts[:2] == ["src", "fsm_llm"] and len(parts) >= 4:
-            self.src_suite = f"test_fsm_llm_{parts[2]}"
+        if parts[0] == "src" and len(parts) >= 3:
+            self.src_suite = f"test_fsm_llm_{parts[1]}"
 
     def file_in(self, base: str) -> str | None:
         """The one repo path a file name means here (same folder, suite, else any)."""

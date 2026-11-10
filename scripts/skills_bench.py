@@ -56,7 +56,14 @@ ARMS = {
     "native_9b": ("native_fc", M9B, True), "native_4b_hint_off": ("native_fc", M4B, False),
 }  # fmt: skip
 BLOCKS = {"B0": ("hint_on", "hint_off"), "B1": ("native_4b", "native_4b_hint_off", "react_9b", "native_9b")}  # fmt: skip
-SRC_PINS = ("src/fsm_llm/agent_skills.py", "src/fsm_llm/agents/agent_skills.py", "src/fsm_llm/constants.py")  # fmt: skip
+#: Pin name -> file now. The names are the keys of the frozen manifests in
+#: scripts/bench_data (written before src/fsm_llm/ moved to src/); the files
+#: moved without a byte changed, so the recorded sha256 values still match.
+SRC_PINS = {
+    "src/fsm_llm/agent_skills.py": "src/agent_skills.py",
+    "src/fsm_llm/agents/agent_skills.py": "src/agents/agent_skills.py",
+    "src/fsm_llm/constants.py": "src/constants.py",
+}
 PINNED_AT_RUN = ("fixture_hash", "trials", "model", "limits", "src_sha256", "arm")
 PRIMARY_N = 10  # read-needed questions per arm
 OUTAGE_ROWS = 3  # consecutive errored rows abort a block
@@ -416,7 +423,7 @@ def build_manifest(bench_id: str, block: str, arm: str) -> dict[str, Any]:
         "bench_id": bench_id, "block": block, "model": model, "trials": TRIALS,
         "arm": {"name": arm, "agent": kind, "hint": hint_on}, "order": "model-major, arms of one model alternate" if block == "B1" else "question-major, arms alternate, first arm flips",
         "n_questions": len(QUESTIONS), "limits": dict(LIMITS), "fixture_hash": fixture_sha256(),
-        "src_sha256": {rel: hashlib.sha256((ROOT / rel).read_bytes()).hexdigest() for rel in SRC_PINS},
+        "src_sha256": {pin: hashlib.sha256((ROOT / path).read_bytes()).hexdigest() for pin, path in SRC_PINS.items()},
         "model_digest": bc._model_digest(model.split("/", 1)[1]),
         "git_commit": bc._git_commit(), "created_at": bc._utc_now(),
     }  # fmt: skip

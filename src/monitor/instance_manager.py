@@ -525,8 +525,8 @@ def _new_instance_id() -> str:
 
 def find_examples_dir() -> Path | None:
     """Locate the examples/ directory."""
-    # parents[3] is the repo root: src/fsm_llm/monitor/instance_manager.py.
-    base = Path(__file__).resolve().parents[3] / "examples"
+    # parents[2] is the repo root: src/monitor/instance_manager.py.
+    base = Path(__file__).resolve().parents[2] / "examples"
     return base if base.exists() else None
 
 
