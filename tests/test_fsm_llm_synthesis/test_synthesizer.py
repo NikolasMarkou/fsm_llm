@@ -264,8 +264,11 @@ class TestPrompt:
         assert report.passed, report.repair_text()
 
     def test_the_system_prompt_states_the_policy_limits_and_the_example(self):
-        text = system_prompt(SynthesisPolicy(max_states=7, max_text_chars=123))
+        text = system_prompt(
+            SynthesisPolicy(max_states=7, max_text_chars=123, max_fields_per_state=4)
+        )
         assert "7 states" in text and "123 characters" in text
+        assert "4 extracted keys per state" in text
         assert '"initial_state"' in text and "BookTable" in text
         assert GOAL_BEGIN not in text and GOAL_END not in text
 

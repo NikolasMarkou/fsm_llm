@@ -102,6 +102,7 @@ class TestSynthesisPolicyLimits:
             6,
             600,
         )
+        assert p.max_fields_per_state == 10
         assert (p.max_synthesis_depth, p.max_repair_rounds, p.max_turns) == (1, 3, 40)
         assert (p.max_compile_tokens, p.max_synthesis_seconds) == (8192, 300)
         assert p.reuse_min_score == 0.8 and p.trust_after_successes is None
@@ -112,6 +113,7 @@ class TestSynthesisPolicyLimits:
         [
             "max_states",
             "max_transitions_per_state",
+            "max_fields_per_state",
             "max_text_chars",
             "max_synthesis_depth",
             "max_turns",
@@ -372,6 +374,91 @@ class TestCheckPolicyOneHostileCasePerCode:
             d = _good()
             _put(d, where, "user_note")
             assert "internal-key" not in _codes(d), where
+
+
+def _fields(extra: int) -> dict[str, Any]:
+    """The clean compile with ``extra`` more required keys on ``ask`` (answer is 1)."""
+    d = _good()
+    d["states"]["ask"]["required_context_keys"] = [f"f{i}" for i in range(extra)]
+    return d
+
+
+class TestFieldsPerStateAreCapped:
+    """Every extracted name is one cheap-model call per child step (review pass 2,
+    concern 3: 60 required fields made 488 calls in two steps)."""
+
+    def test_the_documented_code_and_default(self):
+        assert "too-many-fields" in (check_policy.__doc__ or "")
+        assert "max_fields_per_state" in (SynthesisPolicy.__doc__ or "")
+
+    def test_a_state_with_sixty_required_fields_is_refused(self):
+        findings = check_policy(_fields(60), SynthesisPolicy())
+        assert [(f.code, f.state, f.gate) for f in findings] == [
+            ("too-many-fields", "ask", "G5")
+        ]
+        report = run_gates(
+            _fields(60), SynthesisPolicy(), inputs=(), return_keys=("answer",)
+        )
+        assert "too-many-fields" in [f.code for f in report.findings]
+
+    def test_exactly_at_the_limit_passes_and_one_over_is_refused(self):
+        # `answer` (field_extractions and the edge's requires) is 1 name
+        assert _codes(_fields(9)) == []
+        assert _codes(_fields(10)) == ["too-many-fields"]
+        assert _codes(_fields(1), SynthesisPolicy(max_fields_per_state=2)) == []
+        assert _codes(_fields(2), SynthesisPolicy(max_fields_per_state=2)) == [
+            "too-many-fields"
+        ]
+
+    def test_the_same_name_in_every_position_counts_once(self):
+        d = _good()
+        ask = d["states"]["ask"]
+        ask["required_context_keys"] = ["answer"] * 30
+        ask["classification_extractions"] = [{"field_name": "answer", "intents": []}]
+        assert _codes(d, SynthesisPolicy(max_fields_per_state=1)) == []
+
+    @pytest.mark.parametrize(
+        "place", ["field_extractions", "classification", "required", "requires"]
+    )
+    def test_every_position_that_mints_an_extraction_counts(self, place):
+        d = _good()
+        ask = d["states"]["ask"]
+        names = [f"n{i}" for i in range(11)]
+        if place == "field_extractions":
+            ask["field_extractions"] += [{"field_name": n} for n in names]
+        elif place == "classification":
+            ask["classification_extractions"] = [
+                {"field_name": n, "intents": []} for n in names
+            ]
+        elif place == "required":
+            ask["required_context_keys"] = names
+        else:
+            ask["transitions"][0]["conditions"][0]["requires_context_keys"] = names
+        assert _codes(d) == ["too-many-fields"]
+
+    def test_the_count_is_per_state(self):
+        d = _fields(9)
+        d["states"]["done"]["required_context_keys"] = [f"g{i}" for i in range(9)]
+        assert _codes(d) == []
+
+    @pytest.mark.parametrize(
+        "shape",
+        [
+            "x",
+            3,
+            [1, None, {"a": 1}, ["b"]],
+            {"k": "v"},
+            [{"field_name": ["a"]}, {"field_name": 5}, None],
+        ],
+    )
+    def test_odd_shapes_never_raise_and_count_nothing(self, shape):
+        d = _good()
+        ask = d["states"]["ask"]
+        ask["required_context_keys"] = shape
+        ask["classification_extractions"] = shape
+        assert "too-many-fields" not in _codes(
+            d, SynthesisPolicy(max_fields_per_state=1)
+        )
 
 
 def _completion(*names: str) -> dict[str, Any]:

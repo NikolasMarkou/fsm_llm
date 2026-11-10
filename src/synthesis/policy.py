@@ -57,6 +57,7 @@ from .exceptions import SynthesisError
 _INT_LIMITS = {
     "max_states": 1,
     "max_transitions_per_state": 1,
+    "max_fields_per_state": 1,
     "max_text_chars": 1,
     "max_synthesis_depth": 1,
     "max_repair_rounds": 0,
@@ -94,6 +95,8 @@ class SynthesisPolicy:
     Interface contract (callers: the compiler, G5, the runner, the tools):
         Every integer limit must be an ``int`` (not a ``bool``, ``float`` or
         ``str``) from its minimum (1; ``max_repair_rounds`` 0) to ``2**63 - 1``.
+        ``max_fields_per_state`` caps the distinct key names one state
+        extracts (each is a cheap-model call per child step).
         ``reuse_min_score`` is an ``int`` or ``float`` from 0 to 1.
         ``trust_after_successes`` is ``None`` or an ``int`` from 1.
         ``allowed_tools`` is a collection of non-blank names (a bare string is
@@ -104,6 +107,7 @@ class SynthesisPolicy:
 
     max_states: int = 12
     max_transitions_per_state: int = 6
+    max_fields_per_state: int = 10
     max_text_chars: int = 600
     max_synthesis_depth: int = 1
     max_repair_rounds: int = 3
@@ -239,6 +243,28 @@ def _key_names(state: dict[str, Any]) -> Iterator[str]:
                 pass  # malformed logic is gate G1's finding, not G5's
 
 
+def _extracted_names(state: dict[str, Any]) -> set[str]:
+    """The distinct names a state's extractions cover, read from the raw dict.
+
+    A superset of the keys the pipeline mints an extraction for (a mirror of
+    ``_minted_keys`` in src/flow_analysis.py, plan 2cefeb61 D-017 item 7): the
+    explicit ``field_extractions``, the ``classification_extractions`` fields,
+    ``required_context_keys`` and the keys the state's own edges require.
+    """
+    names: set[str] = set()
+    for extraction in _items(state.get("field_extractions")) + _items(
+        state.get("classification_extractions")
+    ):
+        if isinstance(extraction, dict):
+            names.update(_strs([extraction.get("field_name")]))
+    names.update(_strs(state.get("required_context_keys")))
+    for edge in _edges(state):
+        for cond in _items(edge.get("conditions")):
+            if isinstance(cond, dict):
+                names.update(_strs(cond.get("requires_context_keys")))
+    return names
+
+
 def _setting_problems(state: dict[str, Any]) -> Iterator[tuple[str, str]]:
     """``(code, text)`` for each model setting, unlisted classification key or
     regular expression a state carries (``text`` names keys, never values)."""
@@ -324,7 +350,8 @@ def check_policy(data: object, policy: SynthesisPolicy) -> list[PolicyFinding]:
         data: the compile exactly as parsed, BEFORE any typed load (an earlier
         gate owns typed errors), so any shape is tolerated. Returns the
         findings, in document order, each ``gate="G5"`` with a code from
-        ``too-many-states``, ``too-many-transitions``, ``text-too-long``,
+        ``too-many-states``, ``too-many-transitions``, ``too-many-fields`` (more distinct extracted
+        names in a state than ``max_fields_per_state``), ``text-too-long``,
         ``unknown-key``, ``persona-set``, ``reserved-state``, ``reserved-key``,
         ``internal-key``, ``secret-key``, ``control-text``,
         ``priority-reserved``, ``priority-type``, ``model-setting`` (a
@@ -398,6 +425,13 @@ def check_policy(data: object, policy: SynthesisPolicy) -> list[PolicyFinding]:
                 sid,
                 f"state {_q(sid)} has more than "
                 f"{policy.max_transitions_per_state} transitions",
+            )
+        if len(_extracted_names(state)) > policy.max_fields_per_state:
+            add(
+                "too-many-fields",
+                sid,
+                f"state {_q(sid)} extracts more than "
+                f"{policy.max_fields_per_state} distinct fields",
             )
         for edge in _edges(state):
             if edge.get("target_state") == ABORT_STATE_ID:

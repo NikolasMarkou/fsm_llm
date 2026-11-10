@@ -107,8 +107,10 @@ named abort. Never use the names procedure_abort or synthesis_result, a name \
 starting with an underscore, system_ or internal_, or a name that looks like a \
 secret (password, token, api key).
 - At most {policy.max_states} states, {policy.max_transitions_per_state} \
-transitions per state and {policy.max_text_chars} characters per text field; \
-plain text, no control characters.
+transitions per state, {policy.max_fields_per_state} extracted keys per state \
+(its field_extractions plus the keys its edges require) and \
+{policy.max_text_chars} characters per text field; plain text, no control \
+characters.
 - Every transition priority is 1 or more; the lowest number wins. Two edges of \
 one state at the same priority to different targets are a tie decided by a model \
 call: avoid them.
