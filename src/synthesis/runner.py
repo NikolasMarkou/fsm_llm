@@ -172,8 +172,11 @@ class ProcedureRunner:
         any other ``Exception`` between the ``running`` write and the push) ends
         in ``failed`` / ``unexpected_error`` with one WARNING naming the
         exception type only, and the stack as it was; never ``running``.
-        ``KeyboardInterrupt`` and ``SystemExit`` propagate, as does anything a
-        core call outside that window raises.
+        ``KeyboardInterrupt`` and ``SystemExit`` in that window write the same
+        final ``failed`` result (a host that catches Ctrl-C and keeps the
+        conversation never sees ``running``, and nothing obtains again), unwind
+        the stack, and then propagate unchanged; so does anything a core call
+        outside that window raises.
 
     Bookkeeping: ``_runs`` maps a conversation id to the runs it has pushed,
     outermost first, and holds ``len(runs) == stack_depth - 1``; a longer list
@@ -339,18 +342,36 @@ class ProcedureRunner:
             logger.warning(f"synthesis ended on an unexpected {type(e).__name__}")
             reason, reply = REASON_UNEXPECTED_ERROR, ""
             self._unwind(conv_id, depth)
+        except BaseException:  # Ctrl-C, SystemExit: end the result, then let it go
+            self._unwind(conv_id, depth)
+            try:
+                self._fail(conv_id, config, REASON_UNEXPECTED_ERROR, procedure, step)
+            except Exception as e:  # never mask the interrupt being propagated
+                logger.warning(f"could not end the result: {type(e).__name__}")
+            raise
         if reason:
-            api.update_context(
-                conv_id, {config.result_key: _result(STATUS_FAILED, reason, procedure)}
-            )
-            self._emit(
-                "failed",
-                reason=reason,
-                step=step,
-                digest=procedure.digest if procedure else None,
-            )
+            self._fail(conv_id, config, reason, procedure, step)
             return []
         return [reply]
+
+    def _fail(
+        self,
+        conv_id: str,
+        config: SynthesizeConfig,
+        reason: str,
+        procedure: Procedure | None,
+        step: int | None,
+    ) -> None:
+        """Write the final ``failed`` result (nothing obtains again) and trace it."""
+        self.api.update_context(
+            conv_id, {config.result_key: _result(STATUS_FAILED, reason, procedure)}
+        )
+        self._emit(
+            "failed",
+            reason=reason,
+            step=step,
+            digest=procedure.digest if procedure else None,
+        )
 
     def _unwind(self, conv_id: str, depth: int) -> None:
         """Pop frames a failed push left above ``depth`` (the trim heals ``_runs``)."""

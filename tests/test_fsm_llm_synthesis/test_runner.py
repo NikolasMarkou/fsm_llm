@@ -605,6 +605,86 @@ class TestFailuresAreFixedReasons:
         with pytest.raises(signal):
             rig.runner.run(rig.conv, max_steps=10)
 
+    @pytest.mark.parametrize("signal", [KeyboardInterrupt, SystemExit])
+    def test_an_interrupted_compile_leaves_a_final_failed_result(
+        self, valid_fsm, monkeypatch, signal
+    ):
+        rig = _rig(valid_fsm)
+        interrupted = signal()
+        calls: list[int] = []
+
+        def interrupt(*args: Any, **kwargs: Any) -> Any:
+            calls.append(1)
+            raise interrupted
+
+        monkeypatch.setattr(rig.synth, "obtain", interrupt)
+        with pytest.raises(signal) as caught:
+            rig.runner.run(rig.conv, max_steps=10)
+
+        assert caught.value is interrupted
+        assert rig.result["status"] == "failed"
+        assert rig.result["reason"] == "unexpected_error"
+        assert (rig.state, rig.depth) == ("solve", 1)
+        assert rig.names == ["failed"]
+        # the host catches the signal and keeps the conversation: nothing obtains again
+        rig.runner.run(rig.conv, max_steps=10)
+        assert calls == [1]
+        assert (rig.state, rig.depth) == ("apology", 1)
+
+    @pytest.mark.parametrize("signal", [KeyboardInterrupt, SystemExit])
+    def test_an_interrupt_after_the_push_unwinds_and_ends_failed(
+        self, valid_fsm, monkeypatch, signal
+    ):
+        rig = _rig(valid_fsm)
+        real_push = rig.api.push_fsm
+
+        def push_then_interrupt(*args: Any, **kwargs: Any) -> Any:
+            real_push(*args, **kwargs)
+            raise signal()
+
+        monkeypatch.setattr(rig.api, "push_fsm", push_then_interrupt)
+        with pytest.raises(signal):
+            rig.runner.run(rig.conv, max_steps=10)
+
+        assert (rig.state, rig.depth) == ("solve", 1)
+        assert rig.result["status"] == "failed"
+        assert rig.result["reason"] == "unexpected_error"
+        assert rig.runner._runs[rig.conv] == []
+        calls = len(rig.strong.requests)
+        rig.runner.run(rig.conv, max_steps=10)
+        assert len(rig.strong.requests) == calls
+        assert rig.state == "apology"
+
+    def test_an_interrupted_converse_turn_is_final_too(self, valid_fsm, monkeypatch):
+        rig = _rig(valid_fsm)
+
+        def interrupt(*args: Any, **kwargs: Any) -> Any:
+            raise KeyboardInterrupt()
+
+        monkeypatch.setattr(rig.synth, "obtain", interrupt)
+        with pytest.raises(KeyboardInterrupt):
+            rig.runner.converse(rig.conv, "hi")
+        assert rig.result["status"] == "failed"
+
+    def test_a_failed_result_write_never_masks_the_interrupt(
+        self, valid_fsm, monkeypatch
+    ):
+        rig = _rig(valid_fsm)
+        monkeypatch.setattr(
+            rig.synth, "obtain", lambda *a, **k: (_ for _ in ()).throw(SystemExit(3))
+        )
+        real_update = rig.api.update_context
+
+        def refuse_failed(conv_id: str, data: dict[str, Any]) -> Any:
+            if data.get("synthesis_result", {}).get("status") == "failed":
+                raise RuntimeError(SECRET)
+            return real_update(conv_id, data)
+
+        monkeypatch.setattr(rig.api, "update_context", refuse_failed)
+        with pytest.raises(SystemExit) as caught:
+            rig.runner.run(rig.conv, max_steps=10)
+        assert caught.value.code == 3
+
     def test_a_real_provider_outage(self, valid_fsm):
         rig = _rig(valid_fsm, replies=[LLMResponseError(SECRET)])
         rig.runner.run(rig.conv, max_steps=10)
