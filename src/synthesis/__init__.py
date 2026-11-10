@@ -22,7 +22,7 @@ Install:
 
 from __future__ import annotations
 
-# Version info — imported via __version__.py to stay in sync
+# Version info: imported via __version__.py to stay in sync
 from .__version__ import __version__  # noqa: F401
 from .exceptions import LibraryError, SynthesisError, SynthesisRefusedError
 from .gates import GateFinding, GateReport, run_gates, verify_stored
