@@ -1,5 +1,5 @@
 # this is generated on build time
-src/fsm_llm/_version.py
+src/_version.py
 
 .env
 .idea/*

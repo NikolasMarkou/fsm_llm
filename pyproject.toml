@@ -100,8 +100,19 @@ fsm-llm-eval = "fsm_llm.eval.__main__:run"
 fsm-llm-okf = "fsm_llm.okf_cli:main_cli"
 fsm-llm-skills = "fsm_llm.agent_skills_cli:main_cli"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+# The import package `fsm_llm` lives directly in `src/` (flat layout): `src` is
+# mapped to the name `fsm_llm`. `packages.find` would name the subpackages
+# `agents`, `eval`, ... so the list is explicit; add a new subpackage here.
+[tool.setuptools]
+package-dir = {"fsm_llm" = "src"}
+packages = [
+    "fsm_llm",
+    "fsm_llm.agents",
+    "fsm_llm.eval",
+    "fsm_llm.monitor",
+    "fsm_llm.reasoning",
+    "fsm_llm.workflows",
+]
 
 [tool.setuptools.package-data]
 fsm_llm = ["py.typed"]
@@ -156,7 +167,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B011", "B017"]  # tests may use assert True/False and assertRaises
 "examples/*" = ["E501"]
-"src/fsm_llm/monitor/*" = ["RUF012"]
+"src/monitor/*" = ["RUF012"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["fsm_llm"]
