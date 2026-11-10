@@ -1,4 +1,4 @@
-"""Static analysis over FSM graphs: shared components and data flow.
+"""Static analysis over FSM graphs: shared components, data flow, liveness.
 
 A pure core module (it imports no subpackage and nothing from the pipeline,
 only `definitions`). The validator's trap detection and the data-flow and
@@ -159,6 +159,21 @@ def _proven(transition: Transition) -> set[str]:
     }
 
 
+def _gate_reads(transition: Transition) -> tuple[set[str], bool]:
+    """(key names the gates of `transition` read, whether one is read by a
+    computed, empty or malformed name). The one read rule of G3 and G4."""
+    reads: set[str] = set()
+    unresolvable = False
+    for condition in transition.conditions or []:
+        reads.update(condition.requires_context_keys or [])
+        try:
+            reads |= logic_referenced_keys(condition.logic)
+            unresolvable |= logic_has_unresolvable_reads(condition.logic)
+        except ValueError:
+            unresolvable = True
+    return reads, unresolvable
+
+
 def _forward_meet(
     definition: FSMDefinition,
     entry: frozenset[str],
@@ -283,13 +298,9 @@ def analyze_data_flow(
         reads: set[str] = set()
         unresolvable = False
         for transition in state.transitions or []:
-            for condition in transition.conditions or []:
-                reads.update(condition.requires_context_keys or [])
-                try:
-                    reads |= logic_referenced_keys(condition.logic)
-                    unresolvable |= logic_has_unresolvable_reads(condition.logic)
-                except ValueError:
-                    unresolvable = True
+            names, computed = _gate_reads(transition)
+            reads |= names
+            unresolvable |= computed
         if unresolvable:
             add(
                 "unresolvable-read",
@@ -322,4 +333,131 @@ def analyze_data_flow(
                         sid,
                         f"return key '{key}' is not proven present on every path to terminal '{sid}'",
                     )
+    return findings
+
+
+def _is_unconditional(transition: Transition) -> bool:
+    """True when no condition declares a key or a logic: the edge always passes."""
+    return not any(
+        c.requires_context_keys or c.logic is not None
+        for c in transition.conditions or []
+    )
+
+
+def analyze_liveness(
+    definition: FSMDefinition, *, inputs: Iterable[str] = (), max_turns: int = 40
+) -> list[FlowFinding]:
+    """G4: the liveness defects of `definition`, one pass, no recursion.
+
+    Transition semantics (the evaluator's): among passing edges the lowest
+    `priority` number wins, a tie at the lowest priority between distinct
+    targets is AMBIGUOUS (a classifier call), none passing stays. Codes
+    (analysis "liveness"):
+    `trap` (a looping component of reachable states that cannot reach a
+    terminal; the validator's trap rule), `cycle-no-exit` (a looping component
+    that is not a trap but whose every edge out is unsatisfiable given
+    `declared_available(definition, inputs)` or shadowed), `shadowed-edge` (an
+    edge never chosen: an unconditional edge of strictly lower priority number
+    exists on its state), `permanent-tie` (two or more unconditional edges at
+    the state's lowest priority to distinct targets: a classifier call every
+    turn), `path-exceeds-budget` (the longest route from the initial state in
+    the component-condensed graph, a component weighing its state count,
+    minus one, is more than `max_turns`: a LOWER BOUND, loops are unbounded).
+    An edge is satisfiable when every key its gates read is declared on every
+    path to its state (value tests count as satisfiable; a computed read is
+    G3's finding, here it is satisfiable). Unreachable states are ignored.
+
+    Contract: `definition` a loaded `FSMDefinition`, `inputs` key names the
+    driver provides, `max_turns` the turn budget. Findings are plain data
+    quoting state ids only; the one `trap` or `cycle-no-exit` or
+    `path-exceeds-budget` finding of a component sits at its first state in
+    definition order. Never raises.
+    """
+    states = definition.states
+    order = {sid: i for i, sid in enumerate(states)}
+    available = declared_available(definition, inputs)
+    findings: list[FlowFinding] = []
+
+    def add(code: str, sid: str, message: str) -> None:
+        findings.append(FlowFinding("liveness", code, sid, message))
+
+    structural: dict[str, list[str]] = {}
+    effective: dict[str, list[str]] = {}
+    for sid, have in available.items():
+        edges = [t for t in states[sid].transitions or [] if t.target_state in states]
+        structural[sid] = [t.target_state for t in edges]
+        effective[sid] = []
+        unconditional = [t for t in edges if _is_unconditional(t)]
+        floor = min((t.priority for t in unconditional), default=None)
+        for t in edges:
+            if floor is not None and t.priority > floor:
+                add(
+                    "shadowed-edge",
+                    sid,
+                    f"edge '{sid}' -> '{t.target_state}' never fires: an unconditional "
+                    "edge with a lower priority number always wins",
+                )
+            elif _gate_reads(t)[0] <= have:
+                effective[sid].append(t.target_state)
+        lowest = min((t.priority for t in edges), default=None)
+        tied = {t.target_state for t in unconditional if t.priority == lowest}
+        if len(tied) > 1:
+            add(
+                "permanent-tie",
+                sid,
+                f"state '{sid}' has unconditional edges of equal priority to "
+                "several targets: every turn asks the classifier",
+            )
+
+    def looping(component: list[str], graph: dict[str, list[str]]) -> bool:
+        return len(component) > 1 or component[0] in graph[component[0]]
+
+    # Traps: reachable states that cannot reach a terminal, grouped by component.
+    reverse: dict[str, list[str]] = {sid: [] for sid in structural}
+    for sid, targets in structural.items():
+        for target in targets:
+            reverse[target].append(sid)
+    finishing = reachable_from(
+        reverse, [s for s in structural if not states[s].transitions]
+    )
+    trapped = {sid for sid in structural if sid not in finishing}
+    trap_graph = {
+        s: [t for t in structural[s] if t in trapped]
+        for s in structural
+        if s in trapped
+    }
+    for component in sorted(
+        strongly_connected_components(trap_graph, order), key=lambda c: order[c[0]]
+    ):
+        if looping(component, trap_graph):
+            members = ", ".join(f"'{s}'" for s in component)
+            add(
+                "trap",
+                component[0],
+                f"states {members} loop and can never reach a terminal state",
+            )
+
+    # Over the satisfiable, unshadowed edges: dead loops and the longest route.
+    components = strongly_connected_components(effective, order)
+    home = {sid: i for i, component in enumerate(components) for sid in component}
+    longest: list[int] = []  # components come after every component they reach
+    for i, component in enumerate(components):
+        onward = {home[t] for s in component for t in effective[s]} - {i}
+        if not onward and looping(component, effective) and component[0] not in trapped:
+            members = ", ".join(f"'{s}'" for s in component)
+            add(
+                "cycle-no-exit",
+                component[0],
+                f"states {members} loop and no edge out of them can fire",
+            )
+        longest.append(len(component) + max((longest[j] for j in onward), default=0))
+    initial = definition.initial_state
+    turns = longest[home[initial]] - 1
+    if turns > max_turns:
+        add(
+            "path-exceeds-budget",
+            initial,
+            f"a route from '{initial}' needs at least {turns} turns, "
+            f"over the budget of {max_turns}",
+        )
     return findings

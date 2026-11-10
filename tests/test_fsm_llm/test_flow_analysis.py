@@ -768,3 +768,348 @@ class TestProducedKeysMirrorsThePipeline:
                     drifted.append(f"{path}::{sid}")
         assert checked > 50
         assert drifted == []
+
+
+# --------------------------------------------------------------
+# G4: analyze_liveness
+# --------------------------------------------------------------
+
+
+def _chain(n: int, tail: list | None = None) -> dict:
+    """s0 -> s1 -> ... -> s{n-1}; the last state is terminal or has `tail`."""
+    states = {f"s{i}": {"transitions": [_edge(f"s{i + 1}")]} for i in range(n - 1)}
+    states[f"s{n - 1}"] = {"transitions": tail or []}
+    return states
+
+
+_GHOST = _gate("ghost")  # read by no state: never declared
+_TRAP, _NO_EXIT, _SHADOW = "trap", "cycle-no-exit", "shadowed-edge"
+_TIE, _BUDGET = "permanent-tie", "path-exceeds-budget"
+
+# name -> (states, expected [(code, state)], options). Options: inputs,
+# max_turns. A gated edge's `requires_context_keys` key is minted at its own
+# state, so it is always fireable there; a `logic` read of "ghost" never is.
+_LIVE_CASES = {
+    "loop_with_a_gated_exit": (
+        {
+            "a": {"transitions": [_edge("b")]},
+            "b": {"transitions": [_edge("a"), _edge("end", "k", priority=10)]},
+            "end": {},
+        },
+        [],
+        {},
+    ),
+    "self_loop_with_an_exit": (
+        {
+            "s": {"transitions": [_edge("s"), _edge("end", "k", priority=10)]},
+            "end": {},
+        },
+        [],
+        {},
+    ),
+    "self_loop_without_an_exit": (
+        {
+            "a": {"transitions": [_edge("t", "k"), _edge("end", "k", priority=200)]},
+            "t": {"transitions": [_edge("t")]},
+            "end": {},
+        },
+        [(_TRAP, "t")],
+        {},
+    ),
+    "interlocking_cycles_are_one_trap": (
+        {
+            "a": {"transitions": [_edge("b", "k"), _edge("end", "k", priority=200)]},
+            "b": {"transitions": [_edge("c")]},
+            "c": {"transitions": [_edge("b"), _edge("d", "k")]},
+            "d": {"transitions": [_edge("c")]},
+            "end": {},
+        },
+        [(_TRAP, "b")],
+        {},
+    ),
+    "exit_gated_on_a_key_no_path_produces": (
+        {
+            "a": {"transitions": [_edge("b")]},
+            "b": {"transitions": [_edge("c")]},
+            "c": {"transitions": [_edge("b"), _edge("end", logic=_GHOST)]},
+            "end": {},
+        },
+        [(_NO_EXIT, "b")],
+        {},
+    ),
+    "the_same_exit_with_the_key_as_an_input": (
+        {
+            "a": {"transitions": [_edge("b")]},
+            "b": {"transitions": [_edge("c")]},
+            "c": {"transitions": [_edge("b"), _edge("end", logic=_GHOST)]},
+            "end": {},
+        },
+        [],
+        {"inputs": ("ghost",)},
+    ),
+    "exit_shadowed_by_an_unconditional_loop": (
+        {
+            "a": {"transitions": [_edge("b")]},
+            "b": {
+                "transitions": [_edge("b", priority=1), _edge("end", "k", priority=5)]
+            },
+            "end": {},
+        },
+        [(_SHADOW, "b"), (_NO_EXIT, "b")],
+        {},
+    ),
+    "shadowed_edge_alone": (
+        {
+            "a": {"transitions": [_edge("x", priority=1), _edge("end", priority=2)]},
+            "x": {"transitions": [_edge("end")]},
+            "end": {},
+        },
+        [(_SHADOW, "a")],
+        {},
+    ),
+    "equal_priority_edges_to_one_target_are_not_a_tie": (
+        {"a": {"transitions": [_edge("end"), _edge("end")]}, "end": {}},
+        [],
+        {},
+    ),
+    "unconditional_edges_to_two_targets_tie_forever": (
+        {
+            "a": {"transitions": [_edge("x"), _edge("end")]},
+            "x": {"transitions": [_edge("end")]},
+            "end": {},
+        },
+        [(_TIE, "a")],
+        {},
+    ),
+    "a_lower_ranked_gated_edge_means_no_permanent_tie": (
+        {
+            "a": {
+                "transitions": [_edge("x", "k", priority=1), _edge("x"), _edge("end")]
+            },
+            "x": {"transitions": [_edge("end")]},
+            "end": {},
+        },
+        [],
+        {},
+    ),
+    "chain_one_over_the_budget": (_chain(6), [(_BUDGET, "s0")], {"max_turns": 4}),
+    "chain_exactly_at_the_budget": (_chain(6), [], {"max_turns": 5}),
+    "a_loop_weighs_its_state_count": (
+        {
+            "a": {"transitions": [_edge("b")]},
+            "b": {"transitions": [_edge("c"), _edge("end", "k", priority=10)]},
+            "c": {"transitions": [_edge("b")]},
+            "end": {},
+        },
+        [(_BUDGET, "a")],
+        {"max_turns": 2},
+    ),
+}
+
+
+def _liveness(states, options):
+    return flow_analysis.analyze_liveness(
+        _def(states),
+        inputs=options.get("inputs", ()),
+        max_turns=options.get("max_turns", 40),
+    )
+
+
+class TestAnalyzeLivenessTable:
+    @pytest.mark.parametrize("name", sorted(_LIVE_CASES))
+    def test_exact_codes(self, name):
+        states, expected, options = _LIVE_CASES[name]
+        findings = _liveness(states, options)
+        assert sorted((f.code, f.state) for f in findings) == sorted(expected)
+
+    def test_every_code_has_a_case(self):
+        codes = {c for _, expected, _ in _LIVE_CASES.values() for c, _ in expected}
+        assert codes == {_TRAP, _NO_EXIT, _SHADOW, _TIE, _BUDGET}
+
+    def test_a_finding_is_plain_data_that_quotes_state_ids(self):
+        (finding,) = _liveness(*_LIVE_CASES["interlocking_cycles_are_one_trap"][::2])
+        assert finding.analysis == "liveness"
+        assert all(f"'{sid}'" in finding.message for sid in "bcd")
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            finding.code = "x"  # type: ignore[misc]
+
+    def test_an_unreachable_loop_is_ignored(self):
+        definition = _def({"a": {"transitions": [_edge("end")]}, "end": {}})
+        stray = State(**_state("dead", transitions=[_edge("dead")]))
+        definition = definition.model_copy(
+            update={"states": {**definition.states, "dead": stray}}
+        )
+        assert flow_analysis.analyze_liveness(definition) == []
+
+    def test_a_5000_state_chain_is_judged_without_recursion(self):
+        findings = flow_analysis.analyze_liveness(_def(_chain(5000)))
+        assert [(f.code, f.state) for f in findings] == [(_BUDGET, "s0")]
+
+    def test_a_5000_state_chain_into_a_loop_is_a_trap(self):
+        loop = {
+            "s0": {"transitions": [_edge("s1", "k"), _edge("end", "k", priority=2)]}
+        }
+        states = {**loop, **{k: v for k, v in _chain(5000).items() if k != "s0"}}
+        states["s4999"] = {"transitions": [_edge("s4999")]}
+        states["end"] = {}
+        findings = flow_analysis.analyze_liveness(_def(states), max_turns=10**6)
+        assert [(f.code, f.state) for f in findings] == [(_TRAP, "s4999")]
+
+
+def _random_live_fsm(rng: random.Random):
+    """(states spec, inputs, max_turns); every state is reachable, the last has
+    no edge (so the definition loads), other leaves may be terminal too."""
+    n = rng.randint(2, 7)
+    ids = [f"s{i}" for i in range(n)]
+    targets: dict[str, list[str]] = {sid: [] for sid in ids}
+    for i in range(1, n):
+        targets[ids[rng.randrange(i)]].append(ids[i])
+    for _ in range(rng.randint(0, 4)):
+        targets[rng.choice(ids[:-1])].append(rng.choice(ids))
+    states: dict = {}
+    for sid in ids:
+        edges = []
+        for target in targets[sid]:
+            kind = rng.random()
+            gate = (
+                {"keys": (rng.choice(_KEYS),)}
+                if kind < 0.2
+                else {"logic": _gate(rng.choice(_KEYS))}
+                if kind < 0.5
+                else {}
+            )
+            edges.append(
+                _edge(
+                    target,
+                    *gate.get("keys", ()),
+                    logic=gate.get("logic"),
+                    priority=rng.choice([1, 2, 100]),
+                )
+            )
+        spec: dict = {"transitions": edges}
+        required = [k for k in _KEYS if rng.random() < 0.3]
+        if required:
+            spec["required_context_keys"] = required
+        states[sid] = spec
+    return states, [k for k in _KEYS if rng.random() < 0.25], rng.randint(1, 5)
+
+
+def _liveness_oracle(states, available, max_turns):
+    """The G4 rules by transitive closure over plain dicts (no SCC code, no
+    shared helper): the expected Counter of (code, state)."""
+    order = list(states)
+    initial = order[0]
+
+    def edges(sid):
+        for t in states[sid]["transitions"]:
+            cond = (t.get("conditions") or [{}])[0]
+            reads = set(cond.get("requires_context_keys", ()))
+            if "logic" in cond:
+                reads.add(cond["logic"]["=="][0]["var"])
+            yield t["target_state"], t["priority"], not t.get("conditions"), reads
+
+    def closure(adj):  # nodes reachable in one or more steps
+        out = {}
+        for s in adj:
+            seen, todo = set(), list(adj[s])
+            while todo:
+                x = todo.pop()
+                if x not in seen:
+                    seen.add(x)
+                    todo.extend(adj[x])
+            out[s] = seen
+        return out
+
+    full = {s: [t for t, *_ in edges(s)] for s in order}
+    reach = {initial} | closure(full)[initial]
+    live: dict[str, list[str]] = {}
+    expected: Counter = Counter()
+    for s in reach:
+        floor = min((p for _, p, u, _ in edges(s) if u), default=None)
+        live[s] = []
+        for target, prio, _, reads in edges(s):
+            if floor is not None and prio > floor:
+                expected[(_SHADOW, s)] += 1
+            elif reads <= available[s]:
+                live[s].append(target)
+        lowest = min((p for _, p, _, _ in edges(s)), default=None)
+        if len({t for t, p, u, _ in edges(s) if u and p == lowest}) > 1:
+            expected[(_TIE, s)] += 1
+    g_reach, e_reach = closure({s: full[s] for s in reach}), closure(live)
+    finishing = {
+        s
+        for s in reach
+        if not states[s]["transitions"]
+        or any(not states[t]["transitions"] for t in g_reach[s])
+    }
+
+    def klass(s, closed):
+        return frozenset({s} | {x for x in closed[s] if s in closed[x]})
+
+    traps = {klass(s, g_reach) for s in reach if s in g_reach[s] and s not in finishing}
+    expected.update((_TRAP, min(c, key=order.index)) for c in traps)
+    classes = {klass(s, e_reach) for s in reach}
+    for comp in classes:
+        s = next(iter(comp))
+        exits = {x for m in comp for x in live[m]} - comp
+        if s in e_reach[s] and s not in {m for c in traps for m in c} and not exits:
+            expected[(_NO_EXIT, min(comp, key=order.index))] += 1
+
+    def longest(comp):
+        onward = {klass(x, e_reach) for m in comp for x in live[m]} - {comp}
+        return len(comp) + max((longest(c) for c in onward), default=0)
+
+    if longest(klass(initial, e_reach)) - 1 > max_turns:
+        expected[(_BUDGET, initial)] += 1
+    return expected
+
+
+class TestLivenessDifferential:
+    def test_300_random_fsms_agree_with_closure_reachability(self):
+        rng = random.Random(20261111)
+        seen: Counter = Counter()
+        for _ in range(300):
+            states, inputs, max_turns = _random_live_fsm(rng)
+            definition = _def(states)
+            available = flow_analysis.declared_available(definition, inputs)
+            expected = _liveness_oracle(states, available, max_turns)
+            findings = flow_analysis.analyze_liveness(
+                definition, inputs=inputs, max_turns=max_turns
+            )
+            assert Counter((f.code, f.state) for f in findings) == expected
+            seen.update(code for code, _ in expected)
+        # not vacuous: every liveness code the generator can reach was met
+        assert {_TRAP, _NO_EXIT, _SHADOW, _TIE, _BUDGET} <= set(seen)
+
+
+# --------------------------------------------------------------
+# Examples probe (read-only): G3 and G4 over every loadable example
+# --------------------------------------------------------------
+
+
+def _clean_examples():
+    for path in sorted(glob.glob(str(_REPO / "examples/**/*.json"), recursive=True)):
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        try:
+            definition = FSMDefinition(**data)
+        except Exception:
+            continue
+        if FSMValidator(data).validate().is_valid:
+            yield str(Path(path).relative_to(_REPO)), definition
+
+
+class TestExamplesProbe:
+    def test_both_analyses_run_over_every_clean_example(self, capsys):
+        rows = []
+        for name, definition in _clean_examples():
+            findings = flow_analysis.analyze_data_flow(definition) + (
+                flow_analysis.analyze_liveness(definition, max_turns=200)
+            )
+            codes = Counter(f"{f.analysis}:{f.code}" for f in findings)
+            rows.append((name, len(definition.states), dict(codes)))
+        flagged = [r for r in rows if r[2]]
+        with capsys.disabled():
+            for name, states, codes in rows:
+                print(f"PROBE {name} states={states} findings={codes}")
+            print(f"PROBE flagged {len(flagged)} of {len(rows)}")
+        assert len(rows) >= 10
