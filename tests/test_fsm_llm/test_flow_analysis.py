@@ -1200,7 +1200,7 @@ def _clean_examples():
 
 
 class TestExamplesProbe:
-    def test_both_analyses_run_over_every_clean_example(self, capsys):
+    def test_both_analyses_run_over_every_clean_example(self):
         rows = []
         for name, definition in _clean_examples():
             findings = flow_analysis.analyze_data_flow(definition) + (
@@ -1208,9 +1208,4 @@ class TestExamplesProbe:
             )
             codes = Counter(f"{f.analysis}:{f.code}" for f in findings)
             rows.append((name, len(definition.states), dict(codes)))
-        flagged = [r for r in rows if r[2]]
-        with capsys.disabled():
-            for name, states, codes in rows:
-                print(f"PROBE {name} states={states} findings={codes}")
-            print(f"PROBE flagged {len(flagged)} of {len(rows)}")
         assert len(rows) >= 10
