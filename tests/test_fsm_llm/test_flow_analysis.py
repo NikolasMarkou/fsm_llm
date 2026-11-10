@@ -7,14 +7,18 @@ out of the validator, green on the parent commit and still green after.
 
 from __future__ import annotations
 
+import dataclasses
 import glob
 import json
 import random
+from collections import Counter
 from pathlib import Path
 
 import pytest
 
 from fsm_llm import definitions, flow_analysis
+from fsm_llm.definitions import FSMDefinition, State
+from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.validator import FSMValidator
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -283,3 +287,484 @@ class TestLogicHasUnresolvableReads:
         logic = {"and": [{"var": "a.b"}, {"missing": ["c"]}]}
         assert definitions.logic_has_unresolvable_reads(logic) is False
         assert definitions.logic_referenced_keys(logic) == {"a", "c"}
+
+
+# --------------------------------------------------------------
+# G3 data flow (plan 2cefeb61 step 3)
+# --------------------------------------------------------------
+
+
+def _gate(key: str) -> dict:
+    return {"==": [{"var": key}, 1]}
+
+
+def _edge(target: str, *keys: str, logic: dict | None = None, priority: int = 100):
+    """A transition dict; `keys` go to `requires_context_keys`."""
+    condition: dict = {"description": "gate"}
+    if keys:
+        condition["requires_context_keys"] = list(keys)
+    if logic is not None:
+        condition["logic"] = logic
+    edge: dict = {"target_state": target, "description": "e", "priority": priority}
+    if len(condition) > 1:
+        edge["conditions"] = [condition]
+    return edge
+
+
+def _state(sid: str, **spec) -> dict:
+    return {"id": sid, "description": "d", "purpose": "p", **spec}
+
+
+def _def(states: dict, handler_only=()) -> FSMDefinition:
+    """An FSMDefinition from `{id: spec}`; the first key is the initial state."""
+    return FSMDefinition(
+        name="G",
+        description="d",
+        initial_state=next(iter(states)),
+        handler_only_keys=list(handler_only),
+        states={sid: _state(sid, **spec) for sid, spec in states.items()},
+    )
+
+
+def _field(name: str) -> dict:
+    return {"field_name": name, "field_type": "str", "extraction_instructions": "x"}
+
+
+_INTENTS = {
+    "field_name": "intent",
+    "intents": [{"name": "x", "description": "d"}, {"name": "y", "description": "d"}],
+    "fallback_intent": "y",
+}
+_FINAL = {"==": [{"var": "completion_result.kind"}, "final"]}
+_NOT_GUARANTEED = "return-key-not-guaranteed"
+_UNDECLARED = "return-key-undeclared"
+
+# name -> (states, expected [(code, state)], options). Options: handler_only,
+# inputs, return_keys, guaranteed (the require_guaranteed_return_keys flag).
+_FLOW_CASES = {
+    "clean_linear": (
+        {
+            "a": {"required_context_keys": ["x"], "transitions": [_edge("b", "x")]},
+            "b": {},
+        },
+        [],
+        {"return_keys": ("x",)},
+    ),
+    "undeclared_logic_read": (
+        {"a": {"transitions": [_edge("b", logic=_gate("ghost"))]}, "b": {}},
+        [("undeclared-read", "a")],
+        {},
+    ),
+    "handler_only_unproduced": (
+        {"a": {"transitions": [_edge("b", "flag")]}, "b": {}},
+        [("undeclared-read", "a")],
+        {"handler_only": ("flag",)},
+    ),
+    "completion_result_is_produced": (
+        {
+            "a": {
+                "completion": {"response_format_key": "_rf"},
+                "transitions": [_edge("b", logic=_FINAL)],
+            },
+            "b": {"transitions": [_edge("c", logic=_gate("completion_result"))]},
+            "c": {},
+        },
+        [],
+        {},
+    ),
+    "unresolvable_read": (
+        {
+            "a": {"transitions": [_edge("b", logic={"var": {"cat": ["a", "b"]}})]},
+            "b": {},
+        },
+        [("unresolvable-read", "a")],
+        {},
+    ),
+    "bulk_extraction": (
+        {
+            "a": {"extraction_instructions": "collect", "transitions": [_edge("b")]},
+            "b": {},
+        },
+        [("bulk-extraction", "a")],
+        {},
+    ),
+    "bulk_with_a_declared_field": (
+        {
+            "a": {
+                "extraction_instructions": "collect",
+                "field_extractions": [_field("x")],
+                "transitions": [_edge("b")],
+            },
+            "b": {},
+        },
+        [],
+        {},
+    ),
+    "bulk_when_the_required_key_is_handler_only": (
+        {
+            "a": {
+                "extraction_instructions": "collect",
+                "required_context_keys": ["x"],
+                "transitions": [_edge("b")],
+            },
+            "b": {},
+        },
+        [("bulk-extraction", "a")],
+        {"handler_only": ("x",)},
+    ),
+    "input_provided_read": (
+        {"a": {"transitions": [_edge("b", logic=_gate("uid"))]}, "b": {}},
+        [],
+        {"inputs": ("uid",)},
+    ),
+    "input_missing_read": (
+        {"a": {"transitions": [_edge("b", logic=_gate("uid"))]}, "b": {}},
+        [("undeclared-read", "a")],
+        {},
+    ),
+    "diamond_one_branch_produces": (
+        {
+            "a": {"transitions": [_edge("b"), _edge("c")]},
+            "b": {"required_context_keys": ["k"], "transitions": [_edge("d")]},
+            "c": {"transitions": [_edge("d")]},
+            "d": {"transitions": [_edge("e", logic=_gate("k"))]},
+            "e": {},
+        },
+        [("undeclared-read", "d")],
+        {},
+    ),
+    "diamond_both_branches_produce": (
+        {
+            "a": {"transitions": [_edge("b"), _edge("c")]},
+            "b": {"required_context_keys": ["k"], "transitions": [_edge("d")]},
+            "c": {"required_context_keys": ["k"], "transitions": [_edge("d")]},
+            "d": {"transitions": [_edge("e", logic=_gate("k"))]},
+            "e": {},
+        },
+        [],
+        {},
+    ),
+    "cycle_reads_a_key_made_before_it": (
+        {
+            "a": {"required_context_keys": ["k"], "transitions": [_edge("b")]},
+            "b": {"transitions": [_edge("a"), _edge("c", logic=_gate("k"))]},
+            "c": {},
+        },
+        [],
+        {},
+    ),
+    "cycle_key_made_only_inside_the_loop": (
+        {
+            "a": {"transitions": [_edge("b", logic=_gate("k"))]},
+            "b": {
+                "required_context_keys": ["k"],
+                "transitions": [_edge("a"), _edge("c")],
+            },
+            "c": {},
+        },
+        [("undeclared-read", "a")],
+        {},
+    ),
+    "classification_owned_gate_key": (
+        {
+            "a": {
+                "classification_extractions": [_INTENTS],
+                "transitions": [_edge("b", "intent")],
+            },
+            "b": {},
+        },
+        [],
+        {"return_keys": ("intent",)},
+    ),
+    "return_key_produced_not_gated": (
+        {"a": {"required_context_keys": ["k"], "transitions": [_edge("b")]}, "b": {}},
+        [(_NOT_GUARANTEED, "b")],
+        {"return_keys": ("k",)},
+    ),
+    "return_key_not_gated_but_flag_off": (
+        {"a": {"required_context_keys": ["k"], "transitions": [_edge("b")]}, "b": {}},
+        [],
+        {"return_keys": ("k",), "guaranteed": False},
+    ),
+    "return_key_never_produced": (
+        {"a": {"transitions": [_edge("b")]}, "b": {}},
+        [(_UNDECLARED, "b")],
+        {"return_keys": ("zzz",)},
+    ),
+    "return_key_never_produced_flag_off": (
+        {"a": {"transitions": [_edge("b")]}, "b": {}},
+        [(_UNDECLARED, "b")],
+        {"return_keys": ("zzz",), "guaranteed": False},
+    ),
+    "return_key_gated_by_the_incoming_edge": (
+        {"a": {"transitions": [_edge("b", "k")]}, "b": {}},
+        [],
+        {"return_keys": ("k",)},
+    ),
+    "return_key_from_inputs": (
+        {"a": {"transitions": [_edge("b")]}, "b": {}},
+        [],
+        {"inputs": ("k",), "return_keys": ("k",)},
+    ),
+    "return_key_gated_on_one_branch_only": (
+        {
+            "a": {"transitions": [_edge("b", "k"), _edge("c", priority=200)]},
+            "b": {},
+            "c": {},
+        },
+        [(_NOT_GUARANTEED, "c")],
+        {"return_keys": ("k",)},
+    ),
+    "return_key_proven_by_an_earlier_edge": (
+        {
+            "a": {"transitions": [_edge("b", "k")]},
+            "b": {"transitions": [_edge("c")]},
+            "c": {},
+        },
+        [],
+        {"return_keys": ("k",)},
+    ),
+}
+
+
+def _run_case(states, options):
+    definition = _def(states, options.get("handler_only", ()))
+    return flow_analysis.analyze_data_flow(
+        definition,
+        inputs=options.get("inputs", ()),
+        return_keys=options.get("return_keys", ()),
+        require_guaranteed_return_keys=options.get("guaranteed", True),
+    )
+
+
+class TestAnalyzeDataFlowTable:
+    @pytest.mark.parametrize("name", sorted(_FLOW_CASES))
+    def test_exact_codes(self, name):
+        states, expected, options = _FLOW_CASES[name]
+        findings = _run_case(states, options)
+        assert sorted((f.code, f.state) for f in findings) == sorted(expected)
+
+    def test_every_code_has_a_case(self):
+        codes = {
+            code for _, expected, _ in _FLOW_CASES.values() for code, _ in expected
+        }
+        assert codes == {
+            "undeclared-read",
+            "unresolvable-read",
+            "bulk-extraction",
+            _NOT_GUARANTEED,
+            _UNDECLARED,
+        }
+
+    def test_a_finding_is_frozen_plain_data_naming_state_and_key(self):
+        states, _, options = _FLOW_CASES["undeclared_logic_read"]
+        (finding,) = _run_case(states, options)
+        assert finding.analysis == "data-flow"
+        assert "'a'" in finding.message and "'ghost'" in finding.message
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            finding.code = "other"  # type: ignore[misc]
+
+    def test_an_unreachable_state_poisons_neither_the_meet_nor_the_findings(self):
+        definition = _def(
+            {
+                "a": {"required_context_keys": ["k"], "transitions": [_edge("b")]},
+                "b": {"transitions": [_edge("c", logic=_gate("k"))]},
+                "c": {},
+            }
+        )
+        stray = State(**_state("z", transitions=[_edge("b", logic=_gate("ghost"))]))
+        definition = definition.model_copy(
+            update={"states": {**definition.states, "z": stray}}
+        )
+        assert flow_analysis.analyze_data_flow(definition) == []
+        assert "z" not in flow_analysis.declared_available(definition, ())
+
+    def test_declared_available_lists_what_every_path_made_by_the_gate(self):
+        states, _, _ = _FLOW_CASES["diamond_one_branch_produces"]
+        got = flow_analysis.declared_available(_def(states), ("i",))
+        assert got["a"] == {"i"}
+        assert got["b"] == {"i", "k"}
+        assert got["c"] == {"i"}
+        assert got["d"] == {"i"}
+
+
+# --------------------------------------------------------------
+# Seeded differential: worklist vs. brute-force path enumeration
+# --------------------------------------------------------------
+
+_KEYS = ("k0", "k1", "k2")
+
+
+def _random_edge(rng: random.Random, target: str) -> dict:
+    keys = [k for k in _KEYS if rng.random() < 0.3]
+    logic = _gate(rng.choice(_KEYS)) if rng.random() < 0.25 else None
+    return _edge(target, *keys, logic=logic)
+
+
+def _random_fsm(rng: random.Random):
+    """(states spec, handler_only, inputs, return_keys); every state is
+    reachable and the last has no edge, so the definition always loads."""
+    n = rng.randint(2, 6)
+    ids = [f"s{i}" for i in range(n)]
+    targets: dict[str, list[str]] = {sid: [] for sid in ids}
+    for i in range(1, n):
+        targets[ids[rng.randrange(i)]].append(ids[i])
+    for _ in range(rng.randint(0, 3)):
+        targets[rng.choice(ids[:-1])].append(rng.choice(ids))
+    states: dict = {}
+    for sid in ids:
+        spec: dict = {"transitions": [_random_edge(rng, t) for t in targets[sid]]}
+        required = [k for k in _KEYS if rng.random() < 0.3]
+        fields = [_field(k) for k in _KEYS if rng.random() < 0.2]
+        if required:
+            spec["required_context_keys"] = required
+        if fields:
+            spec["field_extractions"] = fields
+        states[sid] = spec
+
+    def pick(p: float) -> list[str]:
+        return [k for k in _KEYS if rng.random() < p]
+
+    return states, pick(0.2), pick(0.25), pick(0.4)
+
+
+def _brute_force(states, handler_only, inputs, return_keys):
+    """The abstract rules by enumeration: a key is available at a state when
+    EVERY simple path from the initial state makes it (a walk with a cycle only
+    adds keys, so simple paths carry the intersection)."""
+
+    def condition(t):
+        return (t.get("conditions") or [{}])[0]
+
+    def reads(spec):
+        out = set()
+        for t in spec["transitions"]:
+            out |= set(condition(t).get("requires_context_keys", ()))
+            if "logic" in condition(t):
+                out.add(condition(t)["logic"]["=="][0]["var"])
+        return out
+
+    def produced(spec):
+        keys = set(spec.get("required_context_keys", ()))
+        keys |= {f["field_name"] for f in spec.get("field_extractions", ())}
+        for t in spec["transitions"]:
+            keys |= set(condition(t).get("requires_context_keys", ()))
+        return keys - set(handler_only)
+
+    declared: dict[str, set] = {}
+    guaranteed: dict[str, set] = {}
+
+    def walk(sid, visited, made, proven):
+        out = made | produced(states[sid])
+        declared[sid] = declared[sid] & out if sid in declared else set(out)
+        guaranteed[sid] = guaranteed[sid] & proven if sid in guaranteed else set(proven)
+        for t in states[sid]["transitions"]:
+            if t["target_state"] not in visited | {sid}:
+                walk(
+                    t["target_state"],
+                    visited | {sid},
+                    out,
+                    proven | set(condition(t).get("requires_context_keys", ())),
+                )
+
+    walk(next(iter(states)), set(), set(inputs), set(inputs))
+    expected: Counter = Counter()
+    for sid in declared:
+        for _ in reads(states[sid]) - declared[sid]:
+            expected[("undeclared-read", sid)] += 1
+    ever = set(inputs).union(*(produced(states[sid]) for sid in declared))
+    for sid in declared:
+        if states[sid]["transitions"]:
+            continue
+        for key in dict.fromkeys(return_keys):
+            if key not in ever:
+                expected[(_UNDECLARED, sid)] += 1
+            elif key not in guaranteed[sid]:
+                expected[(_NOT_GUARANTEED, sid)] += 1
+    return declared, expected
+
+
+class TestDifferentialAgainstPathEnumeration:
+    def test_300_random_fsms_agree_with_brute_force(self):
+        rng = random.Random(20261110)
+        seen: Counter = Counter()
+        for _ in range(300):
+            states, handler_only, inputs, return_keys = _random_fsm(rng)
+            definition = _def(states, handler_only)
+            declared, expected = _brute_force(states, handler_only, inputs, return_keys)
+            got = flow_analysis.declared_available(definition, inputs)
+            assert {k: set(v) for k, v in got.items()} == declared
+            findings = flow_analysis.analyze_data_flow(
+                definition, inputs=inputs, return_keys=return_keys
+            )
+            assert Counter((f.code, f.state) for f in findings) == expected
+            seen.update(code for code, _ in expected)
+        # not vacuous: every data-flow code the generator can reach was met
+        assert {"undeclared-read", _UNDECLARED, _NOT_GUARANTEED} <= set(seen)
+
+
+# --------------------------------------------------------------
+# The produced-keys mirror, pinned to the pipeline (D-017 item 7)
+# --------------------------------------------------------------
+
+_HAND_STATES = {
+    "required_and_edge_keys": {
+        "required_context_keys": ["a"],
+        "transitions": [_edge("t", "b"), _edge("t", "a", "c")],
+    },
+    "classification_owned_key_is_not_minted": {
+        "required_context_keys": ["intent", "z"],
+        "classification_extractions": [_INTENTS],
+        "transitions": [_edge("t", "intent")],
+    },
+    "explicit_field_wins_over_the_owned_filter": {
+        "classification_extractions": [_INTENTS],
+        "field_extractions": [_field("intent")],
+        "transitions": [_edge("t", "intent")],
+    },
+    "explicit_field_overrides_a_required_key": {
+        "required_context_keys": ["a"],
+        "field_extractions": [_field("a"), _field("b")],
+    },
+    "no_edges_no_keys": {},
+    "completion_state_mints_nothing": {
+        "completion": {"response_format_key": "_rf"},
+        "transitions": [_edge("t", "x")],
+    },
+    "synthesize_state_mints_nothing": {
+        "synthesize": {"goal": "g", "return_keys": ["r"], "on_failure": "t"},
+        "transitions": [_edge("t", "x")],
+    },
+    "unconditional_and_logic_edges": {
+        "transitions": [_edge("t"), _edge("t", logic=_gate("v"))],
+    },
+}
+
+
+def _pipeline_keys(state: State) -> set[str]:
+    return {
+        c.field_name for c in MessagePipeline._build_field_configs_from_state(state)
+    }
+
+
+class TestProducedKeysMirrorsThePipeline:
+    @pytest.mark.parametrize("name", sorted(_HAND_STATES))
+    def test_hand_state(self, name):
+        state = State(**_state("s", **_HAND_STATES[name]))
+        assert flow_analysis._minted_keys(state) == _pipeline_keys(state)
+
+    def test_every_example_state(self):
+        checked, drifted = 0, []
+        for path in sorted(
+            glob.glob(str(_REPO / "examples/**/*.json"), recursive=True)
+        ):
+            try:
+                definition = FSMDefinition(**json.loads(Path(path).read_text("utf-8")))
+            except Exception:
+                continue
+            for sid, state in definition.states.items():
+                checked += 1
+                if flow_analysis._minted_keys(state) != _pipeline_keys(state):
+                    drifted.append(f"{path}::{sid}")
+        assert checked > 50
+        assert drifted == []
