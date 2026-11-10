@@ -7,8 +7,8 @@ into a finite state machine, gates check it, a library stores it, and a cheap
 model runs it as a pushed child of a host conversation.
 
 So far: the exception hierarchy, the shared constants, the policy (limits, the
-G5 gate and abort injection). The compiler, library and runner arrive in later
-steps.
+G5 gate and abort injection) and the library. The compiler and runner arrive in
+later steps.
 
 Import it by name, ``from fsm_llm.synthesis import SynthesisError``;
 ``import fsm_llm`` never loads it.
@@ -23,6 +23,7 @@ from __future__ import annotations
 # Version info — imported via __version__.py to stay in sync
 from .__version__ import __version__  # noqa: F401
 from .exceptions import LibraryError, SynthesisError, SynthesisRefusedError
+from .library import FSMLibrary, LibraryMatch, LibraryRecord, digest_of
 from .policy import (
     PolicyFinding,
     SynthesisPolicy,
@@ -33,12 +34,16 @@ from .policy import (
 )
 
 __all__ = [
+    "FSMLibrary",
     "LibraryError",
+    "LibraryMatch",
+    "LibraryRecord",
     "PolicyFinding",
     "SynthesisError",
     "SynthesisPolicy",
     "SynthesisRefusedError",
     "check_policy",
+    "digest_of",
     "inject_abort",
     "needs_approval",
     "strip_abort",
