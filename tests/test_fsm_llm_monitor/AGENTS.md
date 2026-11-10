@@ -1,13 +1,13 @@
 # test_fsm_llm_monitor
 
 Path: `tests/test_fsm_llm_monitor`
-Purpose: pytest suite (457 collected tests) for `fsm_llm.monitor`, the FastAPI dashboard package in `src/fsm_llm/monitor/`.
+Purpose: pytest suite (457 collected tests) for `fsm_llm.monitor`, the FastAPI dashboard package in `src/monitor/`.
 
 ## Scope
 
 - Unit and HTTP-level tests for `server.py`, `instance_manager.py`, `collector.py`, `definitions.py`, `otel.py`, `__main__.py` (`_browser_url` only) and the package `__init__.py` exports.
 - No real LLM calls, no network, no browser. The FSM `API` is a `MagicMock` or a small fake; HTTP goes through `fastapi.testclient.TestClient`.
-- Not here: the monitor source itself (`src/fsm_llm/monitor/`) and the JS SPA logic (only static file presence, HTTP 200, and the HTML/CSS limits in `TestUiMatchesServerLimits` are checked).
+- Not here: the monitor source itself (`src/monitor/`) and the JS SPA logic (only static file presence, HTTP 200, and the HTML/CSS limits in `TestUiMatchesServerLimits` are checked).
 
 ## Architecture
 
@@ -55,7 +55,7 @@ Suite entry points (what a new test uses):
 Monitor surface the tests pin:
 
 HTTP routes and statuses (`test_app.py`, `test_server_security.py`):
-- `GET /` 200 containing "FSM-LLM Monitor"; `/static/style.css`, `/static/app.js`, `/static/flows.json` and 15 JS modules under `services/`, `utils/`, `pages/` serve 200. Files must exist in `src/fsm_llm/monitor/static/` and `templates/index.html`.
+- `GET /` 200 containing "FSM-LLM Monitor"; `/static/style.css`, `/static/app.js`, `/static/flows.json` and 15 JS modules under `services/`, `utils/`, `pages/` serve 200. Files must exist in `src/monitor/static/` and `templates/index.html`.
 - `GET /health` returns `{"status": "ok"}`.
 - `POST /api/fsm/load` and `POST /api/fsm/visualize` with non-JSON body: 400. Unknown conversation, instance, agent, builder session: 404. `GET /api/workflow/{id}/status` without the `workflow_instance_id` query parameter: 400. `DELETE /api/builder/{id}` for an unknown id: 200 with `deleted: false`.
 - Preset traversal (`/api/preset/fsm/../../etc/passwd`): 400 or 404. `validate_preset_id` raises `ValueError` for `../`, absolute and escaping ids, `FileNotFoundError` for a missing file.
@@ -140,7 +140,7 @@ Payloads and records pinned elsewhere in the suite:
 
 - 401s across `test_app.py`: an API key leaked in (env var or a test that did not reset `configure`).
 - Version assertion failures in `test_app.py` after a release: update the two `"0.12.0"` literals.
-- Static file tests fail if a JS module under `src/fsm_llm/monitor/static/` is renamed or removed.
+- Static file tests fail if a JS module under `src/monitor/static/` is renamed or removed.
 - `test_examples_dir_resolves_to_repo_examples` fails if `instance_manager.py` moves to another depth.
 - Preset tests only assert when `/api/presets` finds FSM presets; they pass vacuously if none exist.
 

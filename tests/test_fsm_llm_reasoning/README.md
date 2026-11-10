@@ -1,6 +1,6 @@
 # test_fsm_llm_reasoning
 
-Unit tests for the reasoning engine in the FSM-LLM repository. The engine lives in `src/fsm_llm/reasoning/` and solves a problem by picking one of 9 reasoning strategies (each a finite state machine, or FSM) and running it through an orchestrator FSM.
+Unit tests for the reasoning engine in the FSM-LLM repository. The engine lives in `src/reasoning/` and solves a problem by picking one of 9 reasoning strategies (each a finite state machine, or FSM) and running it through an orchestrator FSM.
 
 ## What it is for
 

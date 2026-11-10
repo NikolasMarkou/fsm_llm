@@ -1,6 +1,6 @@
 # fsm_llm.reasoning
 
-`src/fsm_llm/reasoning` is the reasoning subpackage of FSM-LLM. It takes a problem in plain text, picks a reasoning style for it (arithmetic, deduction, analogy, and so on), walks an LLM through that style step by step, checks the answer, and returns the answer together with a trace of the steps.
+`src/reasoning` is the reasoning subpackage of FSM-LLM. It takes a problem in plain text, picks a reasoning style for it (arithmetic, deduction, analogy, and so on), walks an LLM through that style step by step, checks the answer, and returns the answer together with a trace of the steps.
 
 ## What it is for
 
@@ -80,8 +80,8 @@ The command line also takes `--context '{"audience": "child"}'` (extra context a
 ## Where to go next
 
 - `examples/reasoning/math_tutor/`: a runnable example that uses the engine.
-- `src/fsm_llm/agents/README.md`: `ReasoningReactAgent`, a ReAct agent with a built-in `reason` tool that calls this engine.
-- `src/fsm_llm/README.md`: the core engine that runs the orchestrator and strategy FSMs.
+- `src/agents/README.md`: `ReasoningReactAgent`, a ReAct agent with a built-in `reason` tool that calls this engine.
+- `src/README.md`: the core engine that runs the orchestrator and strategy FSMs.
 
 ## Things to know
 

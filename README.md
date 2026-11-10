@@ -93,7 +93,7 @@ The library is organized into five pillars. Each one is a collapsible section.
 <summary><b>5. One LLM Layer, Security and Reliability</b></summary>
 <p>
 
-- **One LLM layer**: `src/fsm_llm/llm.py` is the only module that imports litellm. `LLMInterface.complete(CompletionRequest)` is the single primitive for tool calling, plain and structured completion, with per-interface call and token counters (`usage()`) and an embedder (`LiteLLMEmbedder`). Any litellm model string works.
+- **One LLM layer**: `src/llm.py` is the only module that imports litellm. `LLMInterface.complete(CompletionRequest)` is the single primitive for tool calling, plain and structured completion, with per-interface call and token counters (`usage()`) and an embedder (`LiteLLMEmbedder`). Any litellm model string works.
 - **Cut-off replies are visible**: a reply that stops at `max_tokens` is flagged (`truncated`, a WARNING, a named cause in extraction errors) and never shown as an unreadable half envelope.
 - **Context security**: internal keys (prefixes `_`, `system_`, `internal_`, `__`) and secret-looking entries are kept out of prompts. The compromised litellm 1.82.7 and 1.82.8 are below the required version, and `make audit` scans for malicious `.pth` files.
 - **Assured reliability**: an offline-by-default suite (a fake model, no network) covering the core, every subpackage, packaging, regressions, and the 100 examples.
@@ -440,11 +440,11 @@ flowchart TD
 
 | Subpackage | What it adds | Maturity |
 |------------|--------------|----------|
-| [`fsm_llm.reasoning`](src/fsm_llm/reasoning/README.md) | 9 reasoning strategies as stacked FSMs, validation, up to 3 retries | Tested offline; live behavior depends on the model |
-| [`fsm_llm.workflows`](src/fsm_llm/workflows/README.md) | Async in-memory workflow engine, 11 step types, a Python DSL | Runs without an LLM unless you add LLM steps |
-| [`fsm_llm.agents`](src/fsm_llm/agents/README.md) | 18 agent patterns, tools, human approval, memory, MCP, A2A, meta-builder | Documented known limits, see [docs/agents_roadmap.md](docs/agents_roadmap.md) |
-| [`fsm_llm.monitor`](src/fsm_llm/monitor/README.md) | FastAPI dashboard, optional OpenTelemetry export | Needs the `monitor` extra |
-| [`fsm_llm.eval`](src/fsm_llm/eval/README.md) | Examples scorer (0 to 4), conversation cases with Wilson intervals | Scores are a heuristic that overstates quality; read the logs too |
+| [`fsm_llm.reasoning`](src/reasoning/README.md) | 9 reasoning strategies as stacked FSMs, validation, up to 3 retries | Tested offline; live behavior depends on the model |
+| [`fsm_llm.workflows`](src/workflows/README.md) | Async in-memory workflow engine, 11 step types, a Python DSL | Runs without an LLM unless you add LLM steps |
+| [`fsm_llm.agents`](src/agents/README.md) | 18 agent patterns, tools, human approval, memory, MCP, A2A, meta-builder | Documented known limits, see [docs/agents_roadmap.md](docs/agents_roadmap.md) |
+| [`fsm_llm.monitor`](src/monitor/README.md) | FastAPI dashboard, optional OpenTelemetry export | Needs the `monitor` extra |
+| [`fsm_llm.eval`](src/eval/README.md) | Examples scorer (0 to 4), conversation cases with Wilson intervals | Scores are a heuristic that overstates quality; read the logs too |
 
 **Evaluation honesty.** The examples scorer reads each run's output with simple rules and gives 0 to 4. It overstates quality, and runs from before and after the 2026-09-29 restructure are not comparable. The method and the run log are in [EVALUATE.md](EVALUATE.md). Offline tests (the default) replace the model with a fake, so they say nothing about model quality.
 
@@ -465,7 +465,7 @@ The index of the guides. For a first read, go in this order:
 
 ### Per-Package READMEs
 
-[`src/fsm_llm/`](src/fsm_llm/README.md) documents the core, and one README sits inside each subpackage folder (linked in the table above). [`tests/README.md`](tests/README.md) explains how the test suite is laid out.
+[`src/`](src/README.md) documents the core, and one README sits inside each subpackage folder (linked in the table above). [`tests/README.md`](tests/README.md) explains how the test suite is laid out.
 
 ### Project Records
 
@@ -517,11 +517,11 @@ The examples are evaluation baselines: `fsm-llm-eval examples` runs them in para
 
 ## Project Structure
 
-The repository is one distribution (`fsm-llm`, setuptools, src layout). `src/fsm_llm/` is the import root, and a subpackage is imported by name, for example `from fsm_llm.agents import create_agent`.
+The repository is one distribution (`fsm-llm`, setuptools, flat src layout). The directory `src/` is the import package `fsm_llm` (`package-dir` in `pyproject.toml`), so `src/api.py` is `fsm_llm.api`, and a subpackage is imported by name, for example `from fsm_llm.agents import create_agent`.
 
 ```
 fsm_llm/
-├── src/fsm_llm/               # THE LIBRARY
+├── src/               # THE LIBRARY
 │   ├── api.py, fsm.py,        # API, FSMManager, MessagePipeline (the 2-pass turn)
 │   │   pipeline.py
 │   ├── definitions.py         # Pydantic FSM models and core exceptions
@@ -560,7 +560,7 @@ make install-dev    # editable install with every extra, plus pre-commit hooks
 make test           # Run full test suite (11,409 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
-make type-check     # mypy on src/fsm_llm/
+make type-check     # mypy on the fsm_llm package (src/)
 make audit          # scan site-packages for malicious .pth files
 make counts         # fail when a test count written in a .md file differs from a collection
 make build          # wheel and sdist
@@ -573,9 +573,9 @@ The default test run needs no network and no model. `pytest -m "not slow"` skips
 - A behavior change needs a test that fails on the code before your change.
 - Add an entry under `Unreleased` in `CHANGELOG.md` for any public removal or rename.
 - Do not edit `examples/` unless asked: they are evaluation baselines.
-- litellm is imported only in `src/fsm_llm/llm.py`. Do not add a second request builder or provider call elsewhere.
+- litellm is imported only in `src/llm.py`. Do not add a second request builder or provider call elsewhere.
 - Internal-key and secret-key checks go through `fsm_llm.constants.has_internal_prefix` and `is_forbidden_context_entry`. Do not re-inline them.
-- Anything new that is configured with many settings gets a step-by-step builder that follows the convention in [src/fsm_llm/AGENTS.md](src/fsm_llm/AGENTS.md): setters only record, `build()` is the only validator.
+- Anything new that is configured with many settings gets a step-by-step builder that follows the convention in [src/AGENTS.md](src/AGENTS.md): setters only record, `build()` is the only validator.
 - Read `# DECISION plan-<id>/D-NNN` comments before editing nearby code: they say what not to do and why.
 - Test counts in this file and in `AGENTS.md` are pinned by `tests/test_packaging.py`. After adding tests, re-measure with `pytest --collect-only -q | tail -1` and update them. Every FSM JSON block in this file is loaded by `tests/test_fsm_llm/test_docs_snippets.py`, so keep it valid.
 - Commit messages follow `<type>(<scope>): <summary>`. Plan-step commits start with `[plan-YYYY-MM-DD-<8 hex>/iter-N/step-M]`.
@@ -601,7 +601,7 @@ Things to know:
 - The `fsm-llm` command needs `LLM_MODEL`. The Python `API` falls back to `LLM_MODEL`, then to `ollama_chat/bonsai-2:27b`. A `.env` file (loaded when `fsm_llm` is imported, and by `fsm-llm`) sets `LLM_MODEL` before that built-in default, so a stale `.env` silently beats it.
 - The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`; both also replace loguru's default handler, so a library record prints once.
 - One conversation handles one message at a time: a second `converse` on a conversation that is mid-turn raises `FSMError`.
-- Upgrading a clone from before the 2026-09-29 restructure: delete the old `src/fsm_llm_<sub>/` folders by hand (`make clean` does not remove them), then `pip install -e .`. A leftover folder breaks imports.
+- Upgrading a clone from before the 2026-09-29 restructure: delete the old `src/fsm_llm_<sub>/` folders by hand (`make clean` does not remove them), then `pip install -e .`. A leftover folder breaks imports. After the later move of `src/fsm_llm/` to `src/`, run `pip install -e .` again.
 - `constraints.txt` pins litellm and the dev tools to exact versions so CI and local runs match.
 
 ---

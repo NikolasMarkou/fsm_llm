@@ -1,6 +1,10 @@
 # fsm_llm
 
-The `fsm_llm` package at `src/fsm_llm` is the whole FSM-LLM framework. Its top level is the core engine: it runs chatbots defined as finite state machines, where a large language model (LLM) reads each user message, pulls out data, and writes the reply. Five subpackages built on that core add reasoning, workflows, agents, a web dashboard, and evaluation tools.
+The `fsm_llm` package at `src` is the whole FSM-LLM framework. Its top level is the core engine: it runs chatbots defined as finite state machines, where a large language model (LLM) reads each user message, pulls out data, and writes the reply. Five subpackages built on that core add reasoning, workflows, agents, a web dashboard, and evaluation tools.
+
+## Where it lives
+
+This directory is the Python package `fsm_llm` (the "flat src layout"). `pyproject.toml` maps the import name `fsm_llm` to the directory `src/` with `package-dir = {"fsm_llm" = "src"}`, so the file `src/api.py` is imported as `fsm_llm.api`. Install with `pip install -e .` (re-run it after pulling the change that flattened `src/fsm_llm/` into `src/`). The generated `fsm_llm.egg-info/` sits at the repository root, is ignored by git and is removed by `make clean`. Do not add `src/` to `sys.path` by hand: it holds modules named like standard-library ones, such as `logging.py`.
 
 ## What it is for
 

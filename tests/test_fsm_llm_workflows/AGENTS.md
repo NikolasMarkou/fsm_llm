@@ -1,7 +1,7 @@
 # test_fsm_llm_workflows
 
 Path: `tests/test_fsm_llm_workflows`
-Purpose: pytest suite (319 tests, 8 files) for `fsm_llm.workflows`, the in-memory async workflow engine in `src/fsm_llm/workflows/`.
+Purpose: pytest suite (319 tests, 8 files) for `fsm_llm.workflows`, the in-memory async workflow engine in `src/workflows/`.
 
 ## Scope
 
@@ -69,7 +69,7 @@ Assertions read `WorkflowStepResult` fields `success`, `next_state`, `data`, `er
 
 ## Invariants and constraints
 
-- Internal context keys (prefixes `_`, `system_`, `internal_`, `__`, case-insensitive) are stripped from step results; `_waiting_info` survives via `STEP_INTERNAL_WHITELIST` in `src/fsm_llm/workflows/constants.py`. `TestStepDataInternalKeyFilter` asserts both directions.
+- Internal context keys (prefixes `_`, `system_`, `internal_`, `__`, case-insensitive) are stripped from step results; `_waiting_info` survives via `STEP_INTERNAL_WHITELIST` in `src/workflows/constants.py`. `TestStepDataInternalKeyFilter` asserts both directions.
 - `next_state == ""` on any successful result means terminal (D-013, D-020), including when a `RetryStep` returns an inner `SwitchStep` result. `TimerStep`/`WaitForEventStep` return `next_state=None` and go `WAITING`.
 - Concurrency tests loop 5 or 20 times and accept either race winner but require: step body ran at most once, no call raised, final status consistent (`COMPLETED` implies `cancel_workflow` returned `False`).
 - Cancelling an already `COMPLETED`, `CANCELLED` or `FAILED` instance returns `False` without raising.
@@ -111,5 +111,5 @@ Behaviour pinned by `test_audit_2026_09_27.py` (2026-09-27 audit findings in the
 - New audit regressions: add a class per finding in the matching audit file, or a new `test_audit_<date>.py`; put helpers at module top with a `_` prefix (`_wait_then_done`, `_settle`, `_CoreLikeLLM`, `_RecordingAgent`).
 - Mark any test that sleeps near a second or more with `@pytest.mark.slow`.
 - Custom steps subclass `WorkflowStep` and implement `async def execute(self, context)`; extra pydantic fields are declared as class attributes (see `_SlowStep`).
-- Docstrings and comments cite `# DECISION` ids (D-003, D-005, D-010, D-011, D-013, D-015, D-018, D-020). D-018 is cited only as history: it narrowed the terminal check to `isinstance(step, SwitchStep)` and D-020 reverted it (`TestWideTerminalPredicateAfterD020Revert`). Read the matching anchors in `src/fsm_llm/workflows/` before changing a pinned behaviour.
+- Docstrings and comments cite `# DECISION` ids (D-003, D-005, D-010, D-011, D-013, D-015, D-018, D-020). D-018 is cited only as history: it narrowed the terminal check to `isinstance(step, SwitchStep)` and D-020 reverted it (`TestWideTerminalPredicateAfterD020Revert`). Read the matching anchors in `src/workflows/` before changing a pinned behaviour.
 - After adding or removing tests, re-measure with `.venv/bin/python -m pytest --collect-only -q | tail -1`. `tests/test_packaging.py` measures the full collection and checks count literals written in repository docs, so update the per-suite count for this directory (currently 231) wherever it is stated.

@@ -1,6 +1,6 @@
 # services
 
-Browser-side plumbing for the FSM-LLM Monitor web dashboard (`src/fsm_llm/monitor/static/services`): the HTTP client, the API key handling, the shared page state, and the WebSocket connection to the monitor server.
+Browser-side plumbing for the FSM-LLM Monitor web dashboard (`src/monitor/static/services`): the HTTP client, the API key handling, the shared page state, and the WebSocket connection to the monitor server.
 
 ## What it is for
 
@@ -32,7 +32,7 @@ flowchart LR
 
 ## How to use it
 
-From a module in `src/fsm_llm/monitor/static/` (as `app.js` does):
+From a module in `src/monitor/static/` (as `app.js` does):
 
 ```js
 import { fetchJson, postJson } from './services/api.js';

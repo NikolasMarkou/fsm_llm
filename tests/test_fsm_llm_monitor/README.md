@@ -1,6 +1,6 @@
 # test_fsm_llm_monitor
 
-The pytest suite for `fsm_llm.monitor`, the web dashboard package of FSM-LLM (source in `src/fsm_llm/monitor/`). It lives at `tests/test_fsm_llm_monitor/` and collects 457 tests in 9 files.
+The pytest suite for `fsm_llm.monitor`, the web dashboard package of FSM-LLM (source in `src/monitor/`). It lives at `tests/test_fsm_llm_monitor/` and collects 457 tests in 9 files.
 
 ## What it is for
 
@@ -8,7 +8,7 @@ The monitor is a FastAPI server (a Python web framework) with a browser dashboar
 
 ## How it works
 
-Each test file targets one source module in `src/fsm_llm/monitor/`. Server tests call `configure(...)` to install a fresh `InstanceManager`, then drive the FastAPI `app` through `fastapi.testclient.TestClient`. The other tests build objects directly and replace the FSM `API` with `unittest.mock.MagicMock` or small fake classes.
+Each test file targets one source module in `src/monitor/`. Server tests call `configure(...)` to install a fresh `InstanceManager`, then drive the FastAPI `app` through `fastapi.testclient.TestClient`. The other tests build objects directly and replace the FSM `API` with `unittest.mock.MagicMock` or small fake classes.
 
 ```mermaid
 flowchart LR

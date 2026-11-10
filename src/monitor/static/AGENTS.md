@@ -1,11 +1,11 @@
 # static
 
-Path: `src/fsm_llm/monitor/static`
+Path: `src/monitor/static`
 Purpose: Framework-free browser frontend of the FSM-LLM Monitor dashboard (JS ES modules, one CSS file, pattern graph data).
 
 ## Scope
 
-Everything served under `/static/` by `src/fsm_llm/monitor/server.py` (`STATIC_DIR = Path(__file__).parent / "static"`, `app.mount("/static", StaticFiles(directory=str(STATIC_DIR)))`). The monitor is the `fsm_llm.monitor` subpackage of the `fsm-llm` distribution (FastAPI dashboard, command `fsm-llm-monitor`). The HTML shell is `src/fsm_llm/monitor/templates/index.html` (served at `/`, not in this folder); it loads `/static/style.css` and `<script type="module" src="/static/app.js">`. No bundler, no npm, no transpile. Shipped in the wheel via `pyproject.toml` package-data `"fsm_llm.monitor" = ["static/**/*", "templates/*"]` (recursive, so `pages/`, `services/`, `utils/` ship too). REST routes and WebSocket broadcast live in `server.py`, not here.
+Everything served under `/static/` by `src/monitor/server.py` (`STATIC_DIR = Path(__file__).parent / "static"`, `app.mount("/static", StaticFiles(directory=str(STATIC_DIR)))`). The monitor is the `fsm_llm.monitor` subpackage of the `fsm-llm` distribution (FastAPI dashboard, command `fsm-llm-monitor`). The HTML shell is `src/monitor/templates/index.html` (served at `/`, not in this folder); it loads `/static/style.css` and `<script type="module" src="/static/app.js">`. No bundler, no npm, no transpile. Shipped in the wheel via `pyproject.toml` package-data `"fsm_llm.monitor" = ["static/**/*", "templates/*"]` (recursive, so `pages/`, `services/`, `utils/` ship too). REST routes and WebSocket broadcast live in `server.py`, not here.
 
 ## Architecture
 
@@ -105,7 +105,7 @@ Server endpoints the frontend relies on (defined in `server.py`): `GET /api/auth
 - `state` fires events only on top-level assignment; nested mutation is silent.
 - `closeDrawer` must clear `state.detailPollTimer`; `openDrawer` replaces any existing timer.
 - `hashInstances` covers only `instance_id:status`, so a change to only `label` or `conversation_count` does not re-render the grid or table until a filter, search, or page change.
-- `flows.json` is hand-maintained, not derived from `src/fsm_llm/agents` or `src/fsm_llm/workflows`; update it by hand when an agent's state graph changes.
+- `flows.json` is hand-maintained, not derived from `src/agents` or `src/workflows`; update it by hand when an agent's state graph changes.
 
 ## Dependencies
 

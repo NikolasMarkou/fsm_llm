@@ -1,10 +1,10 @@
 # fixtures
 
-Hand-written test data for the core `fsm_llm` test suite, at `tests/test_fsm_llm/fixtures/`. It holds three corpora of context key names and values that the tests use to measure the secret filter in `src/fsm_llm/constants.py`.
+Hand-written test data for the core `fsm_llm` test suite, at `tests/test_fsm_llm/fixtures/`. It holds three corpora of context key names and values that the tests use to measure the secret filter in `src/constants.py`.
 
 ## What it is for
 
-FSM-LLM keeps a context dictionary per conversation and puts parts of it into LLM prompts. Before that happens, a filter (`is_forbidden_context_entry` in `src/fsm_llm/constants.py`) removes entries that look like secrets, such as passwords, API keys and bearer tokens. The filter judges an entry first by its name and, for `*_key` and `*_token` names, also by the shape of its value.
+FSM-LLM keeps a context dictionary per conversation and puts parts of it into LLM prompts. Before that happens, a filter (`is_forbidden_context_entry` in `src/constants.py`) removes entries that look like secrets, such as passwords, API keys and bearer tokens. The filter judges an entry first by its name and, for `*_key` and `*_token` names, also by the shape of its value.
 
 A filter like this can fail in two ways. It can "fail open": a real credential reaches the prompt. Or it can "over-strip": an ordinary value, such as a cache key or a token count, is removed and the model loses useful context. These corpora are lists of realistic names and values, each labelled with the correct answer, so the tests can count both kinds of failure.
 

@@ -34,7 +34,7 @@ flowchart TD
 ```
 
 - `conftest.py` puts `src/` on `sys.path`, registers the four markers (`pyproject.toml` declares them too), and provides the fake LLMs most suites use. The main one is `MockLLM2Interface`, a fake of the 2-pass pipeline (Pass 1 extracts data from the user message, Pass 2 writes the reply): it returns fixed field values and a fixed reply and records every call.
-- Each suite folder tests one area and sits next to its source in `src/fsm_llm/`.
+- Each suite folder tests one area and sits next to its source in `src/`.
 - The five test files at this level check things that span the repo: packaging and doc counts, the bench scripts and their shared helpers, and live end-to-end runs.
 
 ## Suites
@@ -88,4 +88,4 @@ make coverage    # same run with --cov=fsm_llm
 - `tests/test_packaging.py` (slow class `TestDocumentedTestCountsMatchCollection`) fails if the test counts in the root `AGENTS.md` (`make test` line, `Run all tests` line, per-suite lines, the "suites above sum to" sentence, root-file list), the root `README.md` (`Run full test suite` line) drift from the real collection. After adding or removing tests, re-measure with `.venv/bin/python -m pytest --collect-only -q | tail -1` and update those numbers. `make counts` (`scripts/doc_counts.py`, also the slow class `TestEveryDocumentedCountMatchesCollection`) checks the other count tokens of the shapes it knows (`N tests`, marker, `N slow`, `N live`/`N gated`, `tests in N files`, rows) in the tracked `.md` files, the READMEs of `tests/` included; it prints each stale token, and prose numbers with no token shape (such as the 7 count-pinning tests above, `1 test`, or `2,011 passed`) are not read and are updated by hand.
 - Version literals `"0.12.0"` are pinned in `test_fsm_llm_monitor/test_app.py` and `test_fsm_llm_regression/test_regression_review.py`; update them on a release.
 - Do not edit files under `examples/`: `test_examples/`, the eval suite and monitor preset tests read them.
-- `test_docs_snippets.py` (core suite) loads every fenced `json` or `python` block containing `"initial_state"` in the root `AGENTS.md`, `README.md`, `docs/quickstart.md`, `src/fsm_llm/README.md` and four `docs/` guides, so keep those FSM examples valid.
+- `test_docs_snippets.py` (core suite) loads every fenced `json` or `python` block containing `"initial_state"` in the root `AGENTS.md`, `README.md`, `docs/quickstart.md`, `src/README.md` and four `docs/` guides, so keep those FSM examples valid.

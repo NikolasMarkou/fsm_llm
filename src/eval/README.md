@@ -1,6 +1,6 @@
 # fsm_llm.eval
 
-Evaluation tools for FSM-LLM, living at `src/fsm_llm/eval` inside the core `fsm_llm` package. It runs the repository examples and scores them, and it runs scripted conversations against any FSM (finite state machine definition) and checks the results, reporting pass rates with confidence intervals.
+Evaluation tools for FSM-LLM, living at `src/eval` inside the core `fsm_llm` package. It runs the repository examples and scores them, and it runs scripted conversations against any FSM (finite state machine definition) and checks the results, reporting pass rates with confidence intervals.
 
 ## What it is for
 

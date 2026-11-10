@@ -1,6 +1,6 @@
 # fsm_llm.workflows
 
-An async workflow engine that ships inside the `fsm-llm` package as the subpackage `fsm_llm.workflows` (folder `src/fsm_llm/workflows`). It runs multi-step processes where each step can be plain Python, an API call, an LLM prompt, a full FSM-LLM conversation, an agent, a timer, or a wait for an outside event.
+An async workflow engine that ships inside the `fsm-llm` package as the subpackage `fsm_llm.workflows` (folder `src/workflows`). It runs multi-step processes where each step can be plain Python, an API call, an LLM prompt, a full FSM-LLM conversation, an agent, a timer, or a wait for an outside event.
 
 ## What it is for
 
@@ -98,8 +98,8 @@ Installing the `workflows` extra (`pip install -e ".[workflows]"` from a clone) 
 ## Where to go next
 
 - `examples/workflows/`: runnable workflows (order processing, onboarding, agent chains).
-- `src/fsm_llm/README.md`: the core engine behind `conversation_step`.
-- `src/fsm_llm/agents/README.md`: agents you can run inside an `agent_step`.
+- `src/README.md`: the core engine behind `conversation_step`.
+- `src/agents/README.md`: agents you can run inside an `agent_step`.
 
 ## Things to know
 

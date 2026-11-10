@@ -1,11 +1,11 @@
 # utils
 
-Path: `src/fsm_llm/monitor/static/utils`
+Path: `src/monitor/static/utils`
 Purpose: Browser helpers for the FSM-LLM Monitor frontend: escaping and DOM helpers, formatting, Markdown-to-HTML, SVG graph layout.
 
 ## Scope
 
-Four ES modules used by the monitor dashboard (`fsm-llm-monitor`, a FastAPI app in `src/fsm_llm/monitor/server.py`). The frontend has no build step or framework; `server.py` mounts `static/` at `/static` and a middleware sets `Cache-Control: no-cache, no-store, must-revalidate` on `/static/` paths. No network calls here; server access lives in `static/services/api.js`.
+Four ES modules used by the monitor dashboard (`fsm-llm-monitor`, a FastAPI app in `src/monitor/server.py`). The frontend has no build step or framework; `server.py` mounts `static/` at `/static` and a middleware sets `Cache-Control: no-cache, no-store, must-revalidate` on `/static/` paths. No network calls here; server access lives in `static/services/api.js`.
 
 Consumers (import sites): `static/app.js`, `static/services/auth.js`, `static/services/ws.js`, and `static/pages/` `builder.js`, `control.js`, `conversations.js`, `dashboard.js`, `launch.js`, `logs.js`, `settings.js`, `visualizer.js`. `graph.js` is used by `builder.js` and `visualizer.js`; `markdown.js` by `builder.js` and `conversations.js`; `format.js` by `control.js`, `dashboard.js`, `logs.js`.
 

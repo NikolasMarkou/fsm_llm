@@ -1,11 +1,11 @@
 # fsm_llm.reasoning
 
-Path: `src/fsm_llm/reasoning`
+Path: `src/reasoning`
 Purpose: Multi-strategy reasoning engine on top of core `fsm_llm`: an orchestrator FSM analyses a problem, a classifier FSM recommends a strategy, one of 9 strategy FSMs is pushed and driven, the solution is validated with up to 3 retries, and `solve_problem` returns `(solution, trace_info)`.
 
 ## Scope
 
-Subpackage of the `fsm-llm` distribution (core package `src/fsm_llm`, which runs JSON-style FSM definitions through a 2-pass LLM pipeline: Pass 1 extracts data and evaluates transitions, Pass 2 writes the reply). Here: the `ReasoningEngine`, the 11 FSM definitions (as Python dicts in `reasoning_modes.py`, not JSON files), its handlers, Pydantic models, and the `python -m fsm_llm.reasoning` CLI. No third-party deps beyond core; the pyproject `reasoning` extra is empty. Version is `fsm_llm.__version__` (0.12.0), re-exported via `__version__.py`.
+Subpackage of the `fsm-llm` distribution (core package `src`, which runs JSON-style FSM definitions through a 2-pass LLM pipeline: Pass 1 extracts data and evaluates transitions, Pass 2 writes the reply). Here: the `ReasoningEngine`, the 11 FSM definitions (as Python dicts in `reasoning_modes.py`, not JSON files), its handlers, Pydantic models, and the `python -m fsm_llm.reasoning` CLI. No third-party deps beyond core; the pyproject `reasoning` extra is empty. Version is `fsm_llm.__version__` (0.12.0), re-exported via `__version__.py`.
 
 Not here: the FSM runtime (`API`, handlers, stacking) lives in core `fsm_llm`. Consumers: `fsm_llm.agents.reasoning_react` (`ReasoningReactAgent`, imported conditionally), `fsm_llm.has_reasoning`/`get_reasoning`, and `examples/reasoning/math_tutor`.
 
@@ -120,7 +120,7 @@ Pushed strategy FSMs run through the same orchestrator `API` (same `FSMManager` 
 - Reasoning types in the trace come from `reasoning_type_selected` in the final context and in trace snapshots; empty -> `["unknown"]`. `final_confidence` is `solution_confidence` (default 0.0).
 - Writers that emit context outside the process (CLI `--output json`, `--save` JSON) use `fsm_llm.utilities.redacting_json_default`. The three `default=str` uses in `handlers.py` only measure size with `len()` and never emit. `ReasoningTrace` serializes `reasoning_types_used` (a `set[str]`) as a sorted list through a `field_serializer`, so `model_dump()`, CLI JSON output and JSON save files carry a list; do not teach `redacting_json_default` about sets (D-002 of plan 0051e159).
 - The orchestrator conversation is ended in a `finally` after a successful solve; a failed solve goes through one `_failed_solve`, which reads `partial_context` from the top frame first (after `end_conversation` core answers only from its bounded ended-conversation cache), then ends the conversation and raises. The classifier conversation is ended in a `finally` as well.
-- The engine sends no user message and owns no loop over steps: no `converse(` and no "Continue reasoning" anywhere in `src/fsm_llm/reasoning` (pinned by `test_audit_fixes.py`). It never imports `fsm_llm.agents`.
+- The engine sends no user message and owns no loop over steps: no `converse(` and no "Continue reasoning" anywhere in `src/reasoning` (pinned by `test_audit_fixes.py`). It never imports `fsm_llm.agents`.
 - State-name constants and `reasoning_modes.py` dict keys must stay in sync.
 
 ## Dependencies

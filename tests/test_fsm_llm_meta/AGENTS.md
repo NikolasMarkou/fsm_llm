@@ -5,7 +5,7 @@ Purpose: Pytest suite (515 tests) for the meta-builder in `fsm_llm.agents`: buil
 
 ## Scope
 
-Covers these source modules (all under `src/fsm_llm/agents/`):
+Covers these source modules (all under `src/agents/`):
 
 - `meta_builder.py` (`MetaBuilderAgent`, the driver: keyword hints, handlers, result)
 - `fsm_definitions.py` (`build_meta_builder_fsm`: `classify`, `collect`, `build`, `build_failed`, `done`)

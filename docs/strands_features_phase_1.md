@@ -25,10 +25,10 @@ Phase 1 delivers 4 core infrastructure features adapted from the Strands Agents 
 - Falls back gracefully to the existing 3-tier validation (context keys -> JSON parsing -> observation scan) for providers that don't support constrained output
 
 **Files changed**:
-- `src/fsm_llm/definitions.py` -- `response_format` field on `ResponseGenerationRequest`
-- `src/fsm_llm/llm.py` -- `response_format` param on `_make_llm_call()`, applied in `generate_response()`
-- `src/fsm_llm/pipeline.py` -- Reads `_output_response_format` from context
-- `src/fsm_llm/agents/base.py` -- Sets `_output_response_format` from `output_schema`
+- `src/definitions.py` -- `response_format` field on `ResponseGenerationRequest`
+- `src/llm.py` -- `response_format` param on `_make_llm_call()`, applied in `generate_response()`
+- `src/pipeline.py` -- Reads `_output_response_format` from context
+- `src/agents/base.py` -- Sets `_output_response_format` from `output_schema`
 
 **Usage**:
 ```python
@@ -65,8 +65,8 @@ result.structured_output  # Analysis instance (enforced by LLM, not just parsed)
 - `from_dict()` accepts `hidden_buffers` parameter
 
 **Files changed**:
-- `src/fsm_llm/memory.py` -- Hidden buffer concept, `BUFFER_METADATA`, `DEFAULT_HIDDEN_BUFFERS`
-- `src/fsm_llm/__init__.py` -- Export `BUFFER_METADATA`
+- `src/memory.py` -- Hidden buffer concept, `BUFFER_METADATA`, `DEFAULT_HIDDEN_BUFFERS`
+- `src/__init__.py` -- Export `BUFFER_METADATA`
 
 **Usage**:
 ```python
@@ -103,10 +103,10 @@ tier = memory.get("metadata", "user_tier")  # "premium"
 - `API.converse_stream()` is the user-facing entry point
 
 **Files changed**:
-- `src/fsm_llm/llm.py` -- `generate_response_stream()` on both `LLMInterface` and `LiteLLMInterface`
-- `src/fsm_llm/pipeline.py` -- `process_stream()` and `_stream_response_generation_pass()`
-- `src/fsm_llm/fsm.py` -- `process_message_stream()`
-- `src/fsm_llm/api.py` -- `converse_stream()`
+- `src/llm.py` -- `generate_response_stream()` on both `LLMInterface` and `LiteLLMInterface`
+- `src/pipeline.py` -- `process_stream()` and `_stream_response_generation_pass()`
+- `src/fsm.py` -- `process_message_stream()`
+- `src/api.py` -- `converse_stream()`
 
 **Usage**:
 ```python
@@ -136,9 +136,9 @@ print()  # newline after stream completes
 - `save_session()` / `load_session()` / `restore_session()` for explicit control
 
 **Files changed**:
-- `src/fsm_llm/session.py` -- NEW: `SessionStore`, `FileSessionStore`, `SessionState`
-- `src/fsm_llm/api.py` -- `session_store` param, auto-save, save/load/restore methods
-- `src/fsm_llm/__init__.py` -- Export `SessionStore`, `FileSessionStore`, `SessionState`
+- `src/session.py` -- NEW: `SessionStore`, `FileSessionStore`, `SessionState`
+- `src/api.py` -- `session_store` param, auto-save, save/load/restore methods
+- `src/__init__.py` -- Export `SessionStore`, `FileSessionStore`, `SessionState`
 
 **Usage**:
 ```python

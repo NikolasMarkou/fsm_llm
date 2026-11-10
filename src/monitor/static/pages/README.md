@@ -1,6 +1,6 @@
 # pages
 
-The screens of the FSM-LLM Monitor web dashboard, in `src/fsm_llm/monitor/static/pages`. Each JavaScript file renders one page (or modal) of the dashboard and handles the buttons on it.
+The screens of the FSM-LLM Monitor web dashboard, in `src/monitor/static/pages`. Each JavaScript file renders one page (or modal) of the dashboard and handles the buttons on it.
 
 ## What it is for
 
@@ -8,7 +8,7 @@ The FSM-LLM Monitor is a browser dashboard for the FSM-LLM framework. FSM-LLM ru
 
 ## How it works
 
-`src/fsm_llm/monitor/static/app.js` imports every page module, wires them together, and routes clicks to them. Pages do not import `app.js`. Instead `app.js` hands the pages that need other pages' functions (such as `showPage`) a `setDeps(...)` call (the dashboard has `setNavigateToInstance(...)`). Buttons in the generated HTML carry a `data-action="..."` attribute, and `app.js` maps each action name to a page function. Live data arrives through the WebSocket manager in `static/services/ws.js`, which calls page functions such as `updateMetrics` or `appendLogs`. `app.js` also runs a 10 second timer: on the Dashboard it refreshes instances and the activity table, on the Control Center it refreshes instances and the table, and on the Logs page it calls `syncLogs`.
+`src/monitor/static/app.js` imports every page module, wires them together, and routes clicks to them. Pages do not import `app.js`. Instead `app.js` hands the pages that need other pages' functions (such as `showPage`) a `setDeps(...)` call (the dashboard has `setNavigateToInstance(...)`). Buttons in the generated HTML carry a `data-action="..."` attribute, and `app.js` maps each action name to a page function. Live data arrives through the WebSocket manager in `static/services/ws.js`, which calls page functions such as `updateMetrics` or `appendLogs`. `app.js` also runs a 10 second timer: on the Dashboard it refreshes instances and the activity table, on the Control Center it refreshes instances and the table, and on the Logs page it calls `syncLogs`.
 
 ```mermaid
 flowchart LR

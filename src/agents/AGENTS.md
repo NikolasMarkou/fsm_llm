@@ -1,6 +1,6 @@
 # fsm_llm.agents
 
-Path: `src/fsm_llm/agents`
+Path: `src/agents`
 Purpose: Agent patterns for FSM-LLM (ReAct and 17 others), most built as generated FSM definitions driven by one shared loop, plus tools, HITL approval, memory, multi-agent coordination, MCP/A2A integration and the meta-builder.
 
 ## Scope
@@ -183,7 +183,7 @@ Other patterns (FSM states in `constants.py`):
 
 ## Working here
 
-- New FSM pattern: add `build_<x>_fsm` in `fsm_definitions.py` (with an unconditional lowest-priority fallback on every loop state), prompt builders in `prompts.py`, a states class and keys in `constants.py`, the `BaseAgent` subclass using `_standard_run`, an entry in `create_agent._PATTERNS` and the static `__all__` in `__init__.py`, and a graph in `src/fsm_llm/monitor/static/flows.json` if the monitor should draw it.
+- New FSM pattern: add `build_<x>_fsm` in `fsm_definitions.py` (with an unconditional lowest-priority fallback on every loop state), prompt builders in `prompts.py`, a states class and keys in `constants.py`, the `BaseAgent` subclass using `_standard_run`, an entry in `create_agent._PATTERNS` and the static `__all__` in `__init__.py`, and a graph in `src/monitor/static/flows.json` if the monitor should draw it.
 - Keep intermediate states' `response_instructions` empty so Pass 2 is skipped; only final states produce prose.
 - Read the `# DECISION plan-.../D-NNN` comments before editing nearby code and do not undo what they forbid (fallback edges, skip-if-set clearing, call-local handlers, the approval grant).
 - Tests: `pytest tests/test_fsm_llm_agents/` (77 `test_*.py` files, offline: an autouse fixture refuses IPv4/IPv6 connects; for example `test_react.py`, `test_think_fallback.py`, `test_native_fc.py`, `test_python_tools.py`, `test_cli_entrypoints.py`; pattern loops through the real `API` with `tests.conftest.PromptGroundedLLM` in `test_grounded_patterns.py`) and `pytest tests/test_fsm_llm_meta/` (12 files). Lint and types: `make lint`, `make type-check`.

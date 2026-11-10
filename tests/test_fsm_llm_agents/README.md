@@ -1,6 +1,6 @@
 # test_fsm_llm_agents
 
-The pytest suite for the agents package of FSM-LLM (`src/fsm_llm/agents`, imported as `fsm_llm.agents`). It lives at `tests/test_fsm_llm_agents/` and checks every agent pattern, the tool registry, human approval (HITL), memory, MCP, remote serving and the meta CLI, without calling a real LLM.
+The pytest suite for the agents package of FSM-LLM (`src/agents`, imported as `fsm_llm.agents`). It lives at `tests/test_fsm_llm_agents/` and checks every agent pattern, the tool registry, human approval (HITL), memory, MCP, remote serving and the meta CLI, without calling a real LLM.
 
 ## What it is for
 

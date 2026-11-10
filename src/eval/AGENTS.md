@@ -1,6 +1,6 @@
 # fsm_llm.eval
 
-Path: `src/fsm_llm/eval`
+Path: `src/eval`
 Purpose: Evaluation tooling inside the core `fsm_llm` package: the examples evaluator (run every example script, score it 0-4, write a scorecard), conversation cases (scripted multi-turn conversations against any FSM, checked against declared expectations over repeated trials), a layered `EvalConfig`, binomial statistics, append-only result rows, and collision-safe run directories. CLI `fsm-llm-eval` (`pyproject.toml`: `fsm_llm.eval.__main__:run`).
 
 ## Scope

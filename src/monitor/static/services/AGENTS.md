@@ -1,6 +1,6 @@
 # services
 
-Path: `src/fsm_llm/monitor/static/services`
+Path: `src/monitor/static/services`
 Purpose: Frontend infrastructure for the FSM-LLM Monitor dashboard: REST client, API key handling, shared reactive state, WebSocket manager.
 
 ## Scope

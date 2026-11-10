@@ -9,7 +9,7 @@ The package READMEs say what each part is. These guides go further: they teach y
 - Three come from the "Strands" initiative, which adapted features from the Strands Agents SDK. All of it shipped in v0.4.0, and their counts and paths are from the time of writing.
 - `agents_roadmap.md` is the audit record and roadmap for `fsm_llm.agents` (dated 2026-09-29, with measured baselines added later). It has no `Covers` header, and it describes work that shipped in 0.12.0, on top of 0.11.0.
 
-If you only want to use the library, read the five guides. Per-package READMEs under `src/fsm_llm/` and the repo root `README.md` hold the rest.
+If you only want to use the library, read the five guides. Per-package READMEs under `src/` and the repo root `README.md` hold the rest.
 
 ## How it works
 
@@ -28,7 +28,7 @@ flowchart LR
 - `architecture.md` explains how a message moves through the system.
 - `api_reference.md` is the lookup table for classes, methods, CLIs and exceptions.
 
-Some tests read these files. `tests/test_fsm_llm/test_docs_snippets.py` finds every fenced `json` or `python` block that contains `"initial_state"` in `quickstart.md`, `api_reference.md`, `architecture.md`, `fsm_design.md` and `handlers.md` (and in the root `README.md`, root `AGENTS.md` and `src/fsm_llm/README.md`), and loads it through `FSMDefinition`. A broken full FSM example fails the test suite. `tests/test_fsm_llm_regression/test_regression_cli_and_exports.py` checks that `quickstart.md` does not mention `examples/basic/quiz`, `examples/intermediate/customer_service` or `python main.py`.
+Some tests read these files. `tests/test_fsm_llm/test_docs_snippets.py` finds every fenced `json` or `python` block that contains `"initial_state"` in `quickstart.md`, `api_reference.md`, `architecture.md`, `fsm_design.md` and `handlers.md` (and in the root `README.md`, root `AGENTS.md` and `src/README.md`), and loads it through `FSMDefinition`. A broken full FSM example fails the test suite. `tests/test_fsm_llm_regression/test_regression_cli_and_exports.py` checks that `quickstart.md` does not mention `examples/basic/quiz`, `examples/intermediate/customer_service` or `python main.py`.
 
 ## Files
 
@@ -40,7 +40,7 @@ Some tests read these files. `tests/test_fsm_llm/test_docs_snippets.py` finds ev
 - `strands_features.md` - historical: the report that picked 12 Strands features to adapt, plus the features it rejected.
 - `strands_features_phase_1.md` - historical: delivery note for schema-enforced output, the hidden `metadata` memory buffer, response streaming and session persistence (commit `a7e3d88`).
 - `strands_features_phase_2.md` - historical: plan for the other 8 features (OTEL, swarm, agent graph, MCP, semantic tool retrieval, dependency-based workflow parallelism, SOPs, A2A).
-- `agents_roadmap.md` - design record, not a guide: the `fsm_llm.agents` audit (verdict per audit id, commits, known open items, deferred Track B) and recorded baselines (G3 examples run, agent bench blocks B0 to B2). Current agents contracts live in `src/fsm_llm/agents/README.md` and the Agents section of `api_reference.md`. Source code and `scripts/agents_bench.py` point to it by name.
+- `agents_roadmap.md` - design record, not a guide: the `fsm_llm.agents` audit (verdict per audit id, commits, known open items, deferred Track B) and recorded baselines (G3 examples run, agent bench blocks B0 to B2). Current agents contracts live in `src/agents/README.md` and the Agents section of `api_reference.md`. Source code and `scripts/agents_bench.py` point to it by name.
 - `AGENTS.md` - maintainer notes for coding agents; not part of the user guides.
 
 ## How to use it
@@ -61,9 +61,9 @@ After editing a guide, run the snippet tests:
 
 ## Things to know
 
-- Extensions are documented as subpackages of `fsm_llm`: `fsm_llm.reasoning`, `fsm_llm.workflows`, `fsm_llm.agents`, `fsm_llm.monitor`, `fsm_llm.eval`. This matches the code under `src/fsm_llm/`.
+- Extensions are documented as subpackages of `fsm_llm`: `fsm_llm.reasoning`, `fsm_llm.workflows`, `fsm_llm.agents`, `fsm_llm.monitor`, `fsm_llm.eval`. This matches the code under `src/`.
 - The Strands files quote counts, file paths and "not yet implemented" lists as they were when written. Some of those paths use the subpackage layout. Their counts are not current. `agents_roadmap.md` is likewise a dated record: its status lines and baselines are as recorded on their dates.
 - Monitor documentation belongs in `api_reference.md` (the Monitor section). Do not create a separate `docs/monitor.md`.
 - Pre-registered benchmark data is not documented here; see `scripts/bench_data/README.md`.
 - `required_context_keys` never blocks a transition. The guides gate transitions with a condition (`requires_context_keys` plus `logic`). Keep new examples consistent with this.
-- Source code points to these files by name: `src/fsm_llm/fsm.py` mentions `docs/architecture.md` and `docs/handlers.md`. Renaming a file breaks those pointers and the tests above.
+- Source code points to these files by name: `src/fsm.py` mentions `docs/architecture.md` and `docs/handlers.md`. Renaming a file breaks those pointers and the tests above.

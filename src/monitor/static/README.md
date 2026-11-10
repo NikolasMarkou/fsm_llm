@@ -1,6 +1,6 @@
 # static
 
-The browser half of the FSM-LLM Monitor, in `src/fsm_llm/monitor/static`: all JavaScript, the stylesheet, and the graph data the dashboard shows. There is no build step; the monitor server hands these files to the browser as they are.
+The browser half of the FSM-LLM Monitor, in `src/monitor/static`: all JavaScript, the stylesheet, and the graph data the dashboard shows. There is no build step; the monitor server hands these files to the browser as they are.
 
 ## What it is for
 
@@ -20,7 +20,7 @@ flowchart LR
     Server -- reads --> Flows[flows.json]
 ```
 
-1. The server returns one HTML page (`src/fsm_llm/monitor/templates/index.html`). It loads `style.css` and `app.js` as a module.
+1. The server returns one HTML page (`src/monitor/templates/index.html`). It loads `style.css` and `app.js` as a module.
 2. `app.js` asks the server whether an API key is needed, opens the WebSocket, loads settings and instances, and wires the page modules together. Pages never import `app.js`; it passes them the functions they need (such as `showPage`) at start-up.
 3. Every click on an element with a `data-action` attribute goes to one central handler in `app.js`, which calls the right page function. Typing in search boxes and changing dropdowns are routed the same way by element id.
 4. Pages fetch data from the REST API and write HTML into the page. Live pushes (metrics, events, logs, instance changes) arrive over the WebSocket and are forwarded to page functions.

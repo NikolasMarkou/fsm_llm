@@ -1,13 +1,13 @@
 # pages
 
-Path: `src/fsm_llm/monitor/static/pages`
+Path: `src/monitor/static/pages`
 Purpose: Page-level ES modules of the FSM-LLM Monitor frontend (vanilla JS, no build step); each renders one screen as HTML strings and calls the monitor REST API.
 
 ## Scope
 
 Rendering and user actions for Dashboard, Control Center (with detail drawer), Conversations (drawer sub-view), Launch modal, Visualizer, Builder, Logs, Settings.
 
-Not here: routing, click and keyboard delegation, dependency wiring, and the 10 s refresh timer (`src/fsm_llm/monitor/static/app.js`); HTTP, shared state, auth, WebSocket (`static/services/api.js`, `state.js`, `auth.js`, `ws.js`); escaping, formatting, markdown, graph drawing (`static/utils/dom.js`, `format.js`, `markdown.js`, `graph.js`); markup and element ids (`src/fsm_llm/monitor/templates/index.html`); styles (`static/style.css`); REST routes (`src/fsm_llm/monitor/server.py`).
+Not here: routing, click and keyboard delegation, dependency wiring, and the 10 s refresh timer (`src/monitor/static/app.js`); HTTP, shared state, auth, WebSocket (`static/services/api.js`, `state.js`, `auth.js`, `ws.js`); escaping, formatting, markdown, graph drawing (`static/utils/dom.js`, `format.js`, `markdown.js`, `graph.js`); markup and element ids (`src/monitor/templates/index.html`); styles (`static/style.css`); REST routes (`src/monitor/server.py`).
 
 ## Architecture
 
@@ -107,7 +107,7 @@ Exports called by `app.js` or `ws.js`, grouped by file:
 - `../services/auth.js`: `getApiKey`, `setApiKey`, `clearApiKey`, `checkAuthRequired` (settings only).
 - `../utils/dom.js`: `$`, `esc`, `statusBadge`, `hashInstances`, `showToast`, `showError`, `showStatus`, `levelClass`, `highlightText`, `renderPagination`, `showDrawerDetailView`, `renderLLMData`, `renderResultBanner`, `copyToClipboard`, `openDialog`, `closeDialog`, `numVal`, `intVal`.
 - `../utils/format.js` (`formatTime`, `relativeTime`, `formatNumber`), `../utils/markdown.js` (`renderMarkdown`), `../utils/graph.js` (`renderGraph`).
-- Element ids from `src/fsm_llm/monitor/templates/index.html` (for example `ctrl-drawer`, `conv-detail`, `builder-chat`, `log-stream`, `viz-svg`). Renaming an id there breaks the page silently because most lookups are null-guarded.
+- Element ids from `src/monitor/templates/index.html` (for example `ctrl-drawer`, `conv-detail`, `builder-chat`, `log-stream`, `viz-svg`). Renaming an id there breaks the page silently because most lookups are null-guarded.
 
 ## Failure modes
 
@@ -122,6 +122,6 @@ Exports called by `app.js` or `ws.js`, grouped by file:
 
 - New page: create `<name>.js` here, export render and action functions, add markup in `templates/index.html`, register routing and `data-action` handlers in `static/app.js`, and add WebSocket handlers in the `registerHandlers({...})` call in `app.js` if it needs pushes.
 - New action button: emit `data-action="<name>"` plus `data-*` args in the HTML and add the entry to the `ACTIONS` map in `app.js`.
-- New REST call: add the route in `src/fsm_llm/monitor/server.py` first; keep `detail` in error bodies so `fetchJson` can show it.
+- New REST call: add the route in `src/monitor/server.py` first; keep `detail` in error bodies so `fetchJson` can show it.
 - Keep every new interpolation behind `esc()`, and add new server-supplied class names to a whitelist.
 - Tests: `tests/test_fsm_llm_monitor/` covers the Python server; there are no JS unit tests. Verify manually with `fsm-llm-monitor` (http://127.0.0.1:8420).

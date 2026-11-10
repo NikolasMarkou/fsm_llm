@@ -1,6 +1,6 @@
 # fsm_llm.monitor
 
-A web dashboard for FSM-LLM, in `src/fsm_llm/monitor`. It lets you launch, watch, and talk to FSM chatbots, agents, and workflows from a browser, and it can also export events to OpenTelemetry.
+A web dashboard for FSM-LLM, in `src/monitor`. It lets you launch, watch, and talk to FSM chatbots, agents, and workflows from a browser, and it can also export events to OpenTelemetry.
 
 ## What it is for
 

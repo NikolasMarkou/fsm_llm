@@ -1,6 +1,6 @@
 # fsm_llm.workflows
 
-Path: `src/fsm_llm/workflows`
+Path: `src/workflows`
 Purpose: Async, in-memory workflow engine inside the `fsm-llm` distribution: step graphs (11 step types) over a shared context dict, events, timers, deadlines, lifecycle hooks, and a Python DSL.
 
 ## Scope

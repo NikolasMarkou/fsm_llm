@@ -5,7 +5,7 @@ Status: design record for the `fsm_llm.agents` audit, 2026-09-29.
 - Code range: `c632893..HEAD` (plan `plan-2026-09-29T103145-06a5ec0a`, 27 steps plus eight completion fixes: 15.1, 20.1, 13.1, 3.1, 21.1, 21.2, 24.1, 20.2).
 - Version: released in `0.12.0`, on top of `0.11.0`. See `CHANGELOG.md` `## [0.12.0]`.
 - Scope: Track A of the audit (test infrastructure E3/E4, Phase 0 hotfixes, Phase 1 pattern correctness). Track B (Phases 2-6), the live agent bench (E1/E2), E5 and the D5 deprecations are deferred.
-- Current contracts: `src/fsm_llm/agents/README.md` (user guide), `src/fsm_llm/agents/AGENTS.md` (maintainer contracts), `docs/api_reference.md` (Agents section).
+- Current contracts: `src/agents/README.md` (user guide), `src/agents/AGENTS.md` (maintainer contracts), `docs/api_reference.md` (Agents section).
 
 The audit was written against `4a5af49` without running tests. Every claim was re-checked at `c632893` before any fix. Verdicts: TRUE (holds as stated), PARTIAL (part holds), GHOST (does not hold or was already fixed), NOT VERIFIED (outside Track A, not traced).
 
@@ -384,7 +384,7 @@ Fisher two-sided on every metric: p = 1.000. Rule: >= 38/40 verified writes PASS
 
 ### Full examples evaluation, `0f0789c` against `d4b1626` (same day)
 
-`fsm-llm-eval examples`, all 101 examples, 4 workers, default timeout 120 s with the built-in per-example and per-category overrides (`src/fsm_llm/eval/` is unchanged since `d4b1626`, and so is `examples/`). The `d4b1626` run used an isolated worktree with `PYTHONPATH=<worktree>/src`; the example subprocesses inherited it (checked in a live subprocess environment), and its `results.json` records `git_commit` `d4b1626`. N=1 heuristic score each.
+`fsm-llm-eval examples`, all 101 examples, 4 workers, default timeout 120 s with the built-in per-example and per-category overrides (`src/eval/` is unchanged since `d4b1626`, and so is `examples/`). The `d4b1626` run used an isolated worktree with `PYTHONPATH=<worktree>/src`; the example subprocesses inherited it (checked in a live subprocess environment), and its `results.json` records `git_commit` `d4b1626`. N=1 heuristic score each.
 
 ```bash
 LLM_MODEL=ollama_chat/qwen3.5:4b .venv/bin/fsm-llm-eval examples --workers 4 --model ollama_chat/qwen3.5:4b

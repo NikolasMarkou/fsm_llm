@@ -1,6 +1,6 @@
 # fsm_llm.monitor
 
-Path: `src/fsm_llm/monitor`
+Path: `src/monitor`
 Purpose: FastAPI web dashboard (REST + WebSocket + vanilla-JS SPA) that launches, observes, and drives FSM-LLM FSMs, agents, and workflows; optional OpenTelemetry span export.
 
 ## Scope

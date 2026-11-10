@@ -1,6 +1,6 @@
 # utils
 
-Small browser helpers for the FSM-LLM Monitor web dashboard, in `src/fsm_llm/monitor/static/utils`. They cover safe HTML building, time and number formatting, a tiny Markdown renderer, and an SVG graph drawer.
+Small browser helpers for the FSM-LLM Monitor web dashboard, in `src/monitor/static/utils`. They cover safe HTML building, time and number formatting, a tiny Markdown renderer, and an SVG graph drawer.
 
 ## What it is for
 

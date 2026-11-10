@@ -1,7 +1,7 @@
 # test_fsm_llm_agents
 
 Path: `tests/test_fsm_llm_agents`
-Purpose: Pytest suite for the FSM-LLM agents package (`src/fsm_llm/agents`, imported as `fsm_llm.agents`); pins agent patterns, tools, HITL security, memory, MCP, remote serving and CLI behaviour with scripted fake LLMs.
+Purpose: Pytest suite for the FSM-LLM agents package (`src/agents`, imported as `fsm_llm.agents`); pins agent patterns, tools, HITL security, memory, MCP, remote serving and CLI behaviour with scripted fake LLMs.
 
 ## Scope
 

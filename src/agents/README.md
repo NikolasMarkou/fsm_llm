@@ -1,6 +1,6 @@
 # fsm_llm.agents
 
-Ready-made AI agent patterns for FSM-LLM, found at `src/fsm_llm/agents`: agents that call tools, plan, reflect, debate, vote, or hand work to other agents. It also includes a "meta-builder" that turns a plain description into an FSM, workflow, or agent definition.
+Ready-made AI agent patterns for FSM-LLM, found at `src/agents`: agents that call tools, plan, reflect, debate, vote, or hand work to other agents. It also includes a "meta-builder" that turns a plain description into an FSM, workflow, or agent definition.
 
 ## What it is for
 
@@ -142,7 +142,7 @@ fsm-llm-meta --model ollama_chat/qwen3.5:4b --output my_bot.json
 
 - `examples/agents/` and `examples/meta/`: runnable programs for the patterns and the meta-builder.
 - `docs/agents_roadmap.md`: the audit record and the work that is still open.
-- `src/fsm_llm/README.md`: the core engine these agents run on (message-free steps, handlers, the LLM layer).
+- `src/README.md`: the core engine these agents run on (message-free steps, handlers, the LLM layer).
 
 ## Things to know
 

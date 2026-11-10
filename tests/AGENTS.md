@@ -6,7 +6,7 @@ Purpose: The full pytest tree of FSM-LLM (11,409 collected tests): nine suite fo
 ## Scope
 
 - In: `conftest.py`, `__init__.py` (empty), `test_packaging.py`, `test_bench_common.py`, `test_agents_bench.py`, `test_skills_bench.py`, `test_integration_ollama.py`, `fixtures/test_fsm_definitions/minimal_fsm.json`, `test_examples/`, and the eight `test_fsm_llm*` suite folders.
-- Package under test: one top-level package `fsm_llm` (`src/fsm_llm/`) with subpackages `agents`, `reasoning`, `workflows`, `monitor`, `eval`. The old top-level names (`fsm_llm_agents`, ...) no longer exist (no test checks for a leftover directory any more).
+- Package under test: one top-level package `fsm_llm` (`src/`) with subpackages `agents`, `reasoning`, `workflows`, `monitor`, `eval`. The old top-level names (`fsm_llm_agents`, ...) no longer exist (no test checks for a leftover directory any more).
 - Out: the bench data under `scripts/bench_data/`, the examples themselves (`examples/`, evaluation baselines, never edit unless asked).
 
 ## Architecture
@@ -48,13 +48,13 @@ Suite folders (test counts from full collection) and root files at this level.
 
 `test_packaging.py` classes:
 
-- `TestEveryPackageIsWired`: `src/*/__init__.py` must be exactly `{"fsm_llm"}`; `src/fsm_llm/*/__init__.py` exactly the five subpackages; each of 8 slots names `fsm_llm` (`pyproject:package-data`, `pyproject:ruff-isort-known-first-party`, `makefile:type-check`, `makefile:coverage`, `tox:testenv-coverage`, `tox:testenv-type`, `ci:mypy`, `manifest.in:recursive-include`); `src/fsm_llm/py.typed` exists; `[tool.setuptools.packages.find]` has no `include`/`exclude`.
+- `TestEveryPackageIsWired`: the package named by `package-dir` in `pyproject.toml` must be exactly `{"fsm_llm"}` (directory `src/`); `src/*/__init__.py` exactly the five subpackages; each of 8 slots names `fsm_llm` (the three type-check slots by calling `scripts/type_check.py`, the manifest slot by `recursive-include src *.py`) (`pyproject:package-data`, `pyproject:ruff-isort-known-first-party`, `makefile:type-check`, `makefile:coverage`, `tox:testenv-coverage`, `tox:testenv-type`, `ci:mypy`, `manifest.in:recursive-include`); `src/py.typed` exists; the explicit `packages` list in `[tool.setuptools]` equals `fsm_llm` plus `fsm_llm.<sub>` for every subpackage on disk.
 - `TestSubpackagesImport`: `fsm_llm.<sub>` importable (monitor needs `fastapi`).
 - `TestMonitorPackageData`: `"fsm_llm.monitor"` package-data globs cover every file under `static/` and `templates/`.
 - `TestPackageBackedExtrasAreInstalled`: each subpackage name is an extra, requested by `pyproject` `all`, `make install-dev`, tox `extras = dev,...` and the CI install line.
 - `TestModuleDocstringsAreReal`: no module under `src/` puts its docstring after `from __future__ import annotations`; at least 50 modules scanned.
 - `TestDocumentedTestCountsMatchCollection` (`slow`): one `pytest --collect-only -q -o addopts= -p no:cacheprovider tests/` subprocess (env drops `PYTEST_ADDOPTS`, `SKIP_SLOW_TESTS`, `TEST_REAL_LLM`), then pins: root `AGENTS.md` `pytest -v (N tests)` and `Run all tests (N collected)`; root `README.md` `Run full test suite (N tests)`; the root `AGENTS.md` per-suite lines `pytest tests/<suite>/  # ... (N tests)` (dict equality both ways); the sentence `The N suites above sum to S. The remaining R ...`; the `tests/<file>.py (N)` root-file list. `CHANGELOG.md` is deliberately not pinned (D-015).
-- `TestNoTopLevelNameIsBoundTwice` (1 test): over every `src/fsm_llm/**/*.py`, no top-level assignment, annotated assignment, def or class binds a name twice (`if`/`try` branches and `@overload` stubs are exempt); it replaced the constants-only test of `test_agent_skills.py`.
+- `TestNoTopLevelNameIsBoundTwice` (1 test): over every `src/**/*.py`, no top-level assignment, annotated assignment, def or class binds a name twice (`if`/`try` branches and `@overload` stubs are exempt); it replaced the constants-only test of `test_agent_skills.py`.
 - `TestNoPypiInstallHint` (1 test): no `pip install fsm-llm` hint in `src/` (that name on PyPI is another project).
 - `TestEveryDocumentedCountMatchesCollection` (`slow`, 1 test): `scripts/doc_counts.py` (`make counts`) makes one more `--collect-only` child with a plugin that reads markers, then compares the count tokens of the shapes it knows in the tracked `.md` files (suite and folder docs, marker, `slow`, live and file counts, per-file rows) with it; a token of such a shape that no rule names fails too, a number in prose with no token shape (`1 test`, `2,011 passed`) is not read, and it skips when `mcp` is importable (the documented counts are the no-`mcp` counts).
 - `test_doc_counts_reads_the_slow_live_and_file_shapes` (11 parametrized cases, not `slow`): a fake measurement and one line each, offline, pinning that `scripts/doc_counts.py` reads the `N slow` / `(N slow)` cell, `N marked slow`, `N live` / `N gated`, `N offline tests` and `tests in N files` shapes.
@@ -99,7 +99,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 
 ## Dependencies
 
-- Internal: every module of `src/fsm_llm/`; `scripts/bench_common.py`; repo files `pyproject.toml`, `Makefile`, `tox.ini`, `MANIFEST.in`, `.github/workflows/python-package.yml`, root docs, `docs/*.md`, `examples/`, `evaluation/`, `scripts/bench_data/`.
+- Internal: every module of `src/`; `scripts/bench_common.py`; repo files `pyproject.toml`, `Makefile`, `tox.ini`, `MANIFEST.in`, `.github/workflows/python-package.yml`, root docs, `docs/*.md`, `examples/`, `evaluation/`, `scripts/bench_data/`.
 - External: pytest, pytest-asyncio, `unittest.mock`, loguru, pydantic, litellm (patched, never called in offline tests). Optional: httpx (Ollama probe, remote tests), fastapi, mcp, opentelemetry, a local Ollama.
 
 ## Failure modes
@@ -117,7 +117,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 - Use `MockLLM2Interface` or `configure_mock_extract_field` instead of a real model; patch `fsm_llm.llm.completion` (core's one send binding; nothing else calls litellm) for seam tests, or inject a scripted `LLMInterface` with `llm_interface=` (implement `complete` when the FSM classifies or has a completion state).
 - Mark anything sleeping about a second or more, or needing a model, `slow`; live tests also get `integration` and `real_llm`.
 - A new suite folder or root test file must be added to the root `AGENTS.md` Testing block (per-suite line or root-file list) or `test_per_suite_table` / `test_root_file_breakdown` fail.
-- A new subpackage under `src/fsm_llm/` must be added to `_EXPECTED_SUBPACKAGES` in `test_packaging.py`, given an extra, and requested by every install list.
+- A new subpackage under `src/` must be added to `_EXPECTED_SUBPACKAGES` in `test_packaging.py`, given an extra, and requested by every install list.
 - Commands:
 
 ```bash

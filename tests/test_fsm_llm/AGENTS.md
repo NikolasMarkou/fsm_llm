@@ -5,7 +5,7 @@ Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass 
 
 ## Scope
 
-In: tests of the core modules in `src/fsm_llm/` (`api.py`, `fsm.py`, `pipeline.py`, `transition_evaluator.py`, `expressions.py`, `classification.py`, `context.py`, `prompts.py`, `llm.py`, `ollama.py`, `handlers.py`, `memory.py`, `session.py`, `validator.py`, `visualizer.py`, `runner.py`, `utilities.py`, `logging.py`, `constants.py`), plus `fixtures/` (labelled secret-filter corpora).
+In: tests of the core modules in `src/` (`api.py`, `fsm.py`, `pipeline.py`, `transition_evaluator.py`, `expressions.py`, `classification.py`, `context.py`, `prompts.py`, `llm.py`, `ollama.py`, `handlers.py`, `memory.py`, `session.py`, `validator.py`, `visualizer.py`, `runner.py`, `utilities.py`, `logging.py`, `constants.py`), plus `fixtures/` (labelled secret-filter corpora).
 
 Out: the subpackages `fsm_llm.agents`, `.reasoning`, `.workflows`, `.monitor`, `.eval` have their own suites under `tests/test_fsm_llm_<name>/`. A few tests here still import from them (see Dependencies).
 
@@ -142,7 +142,7 @@ iter3 re-exports iter1's `_correction_fsm` and `_stream_chunk`. iter4 imports `_
 
 Seam files fake the backend with `patch("fsm_llm.llm.completion", ...)` returning `MagicMock` responses built by `_fake_response`.
 
-`test_docs_snippets.py` scans ```` ```json ```` and ```` ```python ```` fences naming `"initial_state"` in `README.md`, `docs/quickstart.md`, `src/fsm_llm/README.md`, `AGENTS.md` (repo root; must each contribute a snippet) and `docs/api_reference.md`, `docs/architecture.md`, `docs/fsm_design.md`, `docs/handlers.md` (must exist). Python blocks are parsed with `ast`, never executed. Test ids look like `test_doc_fsm_snippet_loads[<file>#block<n>]`.
+`test_docs_snippets.py` scans ```` ```json ```` and ```` ```python ```` fences naming `"initial_state"` in `README.md`, `docs/quickstart.md`, `src/README.md`, `AGENTS.md` (repo root; must each contribute a snippet) and `docs/api_reference.md`, `docs/architecture.md`, `docs/fsm_design.md`, `docs/handlers.md` (must exist). Python blocks are parsed with `ast`, never executed. Test ids look like `test_doc_fsm_snippet_loads[<file>#block<n>]`.
 
 ## Data shapes
 
@@ -171,7 +171,7 @@ Seam files fake the backend with `patch("fsm_llm.llm.completion", ...)` returnin
 
 - `ModuleNotFoundError: tests...` when pytest runs from another directory.
 - A docs edit that breaks an FSM example fails `test_doc_fsm_snippet_loads[<file>#block<n>]`; moving a fence style makes `test_the_extractor_found_the_first_touch_snippets` fail instead of passing vacuously.
-- A secret-filter change in `src/fsm_llm/constants.py` that fixes or breaks a corpus entry fails the matching two-sided pin.
+- A secret-filter change in `src/constants.py` that fixes or breaks a corpus entry fails the matching two-sided pin.
 - Live tests failing on timeouts under GPU load is a known pattern, not necessarily a code bug.
 
 ## Working here

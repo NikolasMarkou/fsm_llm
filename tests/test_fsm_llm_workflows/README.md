@@ -1,6 +1,6 @@
 # test_fsm_llm_workflows
 
-The pytest suite for `fsm_llm.workflows`, the async workflow engine that lives in `src/fsm_llm/workflows/` of the FSM-LLM repository. It holds 319 tests in 8 files, and none of them call a real LLM or the network.
+The pytest suite for `fsm_llm.workflows`, the async workflow engine that lives in `src/workflows/` of the FSM-LLM repository. It holds 319 tests in 8 files, and none of them call a real LLM or the network.
 
 ## What it is for
 

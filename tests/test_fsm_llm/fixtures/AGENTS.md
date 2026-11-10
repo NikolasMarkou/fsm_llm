@@ -1,7 +1,7 @@
 # fixtures
 
 Path: `tests/test_fsm_llm/fixtures`
-Purpose: Hand-authored labelled corpora of context key names and values used to measure the prompt-path secret filter in `src/fsm_llm/constants.py`.
+Purpose: Hand-authored labelled corpora of context key names and values used to measure the prompt-path secret filter in `src/constants.py`.
 
 ## Scope
 
@@ -108,7 +108,7 @@ Enforced by tests in `test_context_unit.py`:
 ## Dependencies
 
 - `census_key_corpus.py` imports `arm_of` from `tests.test_fsm_llm.fixtures.holdout_key_corpus`. No other imports in any file.
-- Measured against `src/fsm_llm/constants.py` symbols named in comments: `is_forbidden_context_entry`, `_generic_shape_is_credential`, `_CREDENTIAL_VALUE_PREFIXES`, `_AUTH_SCHEME_WORDS`, `_IDENTIFIER_NOUN_VOCABULARY`, `_SAFE_TOKEN_QUALIFIERS`, `_BEARER_TOKEN_QUALIFIERS`, `_CREDENTIAL_VALUE_CHARSET_RE`.
+- Measured against `src/constants.py` symbols named in comments: `is_forbidden_context_entry`, `_generic_shape_is_credential`, `_CREDENTIAL_VALUE_PREFIXES`, `_AUTH_SCHEME_WORDS`, `_IDENTIFIER_NOUN_VOCABULARY`, `_SAFE_TOKEN_QUALIFIERS`, `_BEARER_TOKEN_QUALIFIERS`, `_CREDENTIAL_VALUE_CHARSET_RE`.
 
 ## Failure modes
 
