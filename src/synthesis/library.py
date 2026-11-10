@@ -299,13 +299,15 @@ class FSMLibrary:
         return_keys: Sequence[str],
         synthesizing_model: str = "",
         gates_passed: Sequence[str] = (),
+        approved_by: str | None = None,
         lifecycle: str = LIFECYCLE_DRAFT,
         parent: str | None = None,
         parent_run: str | None = None,
     ) -> LibraryRecord:
         """Store *definition* and return its record.
 
-        Idempotent: the same digest returns the existing record unchanged. A
+        Idempotent: the same digest returns the existing record unchanged
+        (``approved_by`` is only added when the record has no approver). A
         different digest is a new entry; with ``parent`` (the digest of the
         definition it repairs, which must exist) the minor version is parent's
         plus one, else ``1.0``. ``lifecycle`` is ``draft`` or ``verified``.
@@ -326,7 +328,16 @@ class FSMLibrary:
             old = self._read_record(digest)
             if self._read_definition(digest) is None:
                 self._write(self._path("definitions", digest), text)
+            who = approved_by and capped_line(approved_by, _LABEL_CHARS)
             if old is not None:
+                if who and not old.provenance["approved_by"]:
+                    return self._save(
+                        old.model_copy(
+                            update={
+                                "provenance": {**old.provenance, "approved_by": who}
+                            }
+                        )
+                    )
                 return old
             version = "1.0"
             if parent is not None:
@@ -353,7 +364,7 @@ class FSMLibrary:
                         "parent_run": parent_run
                         and capped_line(parent_run, _LABEL_CHARS),
                         "gates_passed": list(gates_passed),
-                        "approved_by": None,
+                        "approved_by": who or None,
                         "parent": parent,
                         "created_at": iso_utc(datetime.now(timezone.utc)),
                     },

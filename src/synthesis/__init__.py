@@ -7,8 +7,9 @@ into a finite state machine, gates check it, a library stores it, and a cheap
 model runs it as a pushed child of a host conversation.
 
 So far: the exception hierarchy, the shared constants, the policy (limits, the
-G5 gate and abort injection), the library, the gate composition and the compile
-and repair loop. The approval gate and runner arrive in later steps.
+G5 gate and abort injection), the library, the gate composition, the compile
+and repair loop, and ``obtain`` with the approval gate. The runner arrives in a
+later step.
 
 Import it by name, ``from fsm_llm.synthesis import SynthesisError``;
 ``import fsm_llm`` never loads it.
@@ -33,7 +34,13 @@ from .policy import (
     needs_approval,
     strip_abort,
 )
-from .synthesizer import CompileResult, FSMSynthesizer
+from .synthesizer import (
+    CompileResult,
+    FSMSynthesizer,
+    Procedure,
+    ProcedureApprovalRequest,
+    reviewer_from_hitl,
+)
 
 __all__ = [
     "CompileResult",
@@ -45,6 +52,8 @@ __all__ = [
     "LibraryMatch",
     "LibraryRecord",
     "PolicyFinding",
+    "Procedure",
+    "ProcedureApprovalRequest",
     "SynthesisError",
     "SynthesisPolicy",
     "SynthesisRefusedError",
@@ -52,6 +61,7 @@ __all__ = [
     "digest_of",
     "inject_abort",
     "needs_approval",
+    "reviewer_from_hitl",
     "run_gates",
     "strip_abort",
     "verify_stored",

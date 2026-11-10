@@ -106,6 +106,20 @@ class TestPut:
         other = _put(lib, "Other")
         assert other.digest != first.digest and len(_files(lib)) == 4
 
+    def test_approved_by_is_recorded_and_added_once_to_an_existing_record(
+        self, lib: FSMLibrary
+    ):
+        first = _put(lib, lifecycle="verified")
+        assert first.provenance["approved_by"] is None
+        added = _put(lib, lifecycle="verified", approved_by="reviewer")
+        assert added.provenance["approved_by"] == "reviewer"
+        assert added.lifecycle == "verified" and added.stats == first.stats
+        kept = _put(lib, approved_by="someone else")  # never overwritten
+        assert kept.provenance["approved_by"] == "reviewer"
+        assert lib.get_record(first.digest) == added
+        fresh = _put(lib, "Other", approved_by="  x\x00y  ")
+        assert fresh.provenance["approved_by"] == "xy" and fresh.lifecycle == "draft"
+
     def test_parent_bumps_minor_and_must_exist(self, lib: FSMLibrary):
         parent = _put(lib)
         child = _put(lib, "Fixed", parent=parent.digest)
