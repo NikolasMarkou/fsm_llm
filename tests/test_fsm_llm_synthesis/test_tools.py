@@ -29,6 +29,7 @@ from fsm_llm.synthesis import (
 )
 from fsm_llm.synthesis import tools as tools_module
 from fsm_llm.synthesis.constants import PROCEDURE_UNTRUSTED_LABEL as LABEL
+from fsm_llm.synthesis.exceptions import SynthesisError
 from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, ScriptedStrongLLM
 
 GOAL = "Collect the answer"
@@ -160,6 +161,7 @@ OBTAIN_BAD = (
         for value in [None, "answer", 5, [], [""], [1], {"a": 1}, ["a b"], ["_hidden"]]
     ]
     + [("inputs", value) for value in ["topic", 5, {"a": 1}, [1], ["a b"], ["_hidden"]]]
+    + [(name, ["a" * 101]) for name in ("return_keys", "inputs")]  # one name too long
 )
 RUN_BAD = [
     ("procedure_id", value)
@@ -545,3 +547,86 @@ class TestNoForeignInterface:
         assert foreign_calls == []
         assert reply == f"{LABEL}\nfailed: library_error"
         assert rig.cheap.call_history == []
+
+
+class TestSubApiIsClosed:
+    @pytest.mark.parametrize(
+        ("extraction", "boom", "outcome"),
+        [
+            ({"answer": "42"}, None, "status: ok"),
+            ({}, None, "failed: needs_user_input"),  # RunBudgetExceededError
+            ({"answer": "42"}, RuntimeError("bug"), None),  # a bug propagates
+        ],
+        ids=["success", "budget_spent", "exception"],
+    )
+    def test_the_run_closes_its_api_on_every_path(
+        self, valid_fsm, tmp_path, monkeypatch, extraction, boom, outcome
+    ):
+        closed: list[API] = []
+        real = API.close
+        monkeypatch.setattr(API, "close", lambda s: (closed.append(s), real(s))[1])
+        rig = _rig(
+            valid_fsm,
+            tmp_path,
+            extraction=extraction,
+            policy=SynthesisPolicy(max_turns=3),
+        )
+        rig.obtain()
+        if boom is not None:
+
+            def explode(*args: Any, **kwargs: Any) -> Any:
+                raise boom
+
+            monkeypatch.setattr(API, "run_until_terminal", explode)
+            call = ToolCall(
+                tool_name="run_procedure", parameters={"procedure_id": rig.digest()}
+            )
+            assert not rig.registry.execute(call).success
+        else:
+            assert outcome in _run(rig)
+        assert len(closed) == 1
+        assert closed[0].list_active_conversations() == []
+
+
+class TestBounds:
+    @pytest.mark.parametrize("name", ["return_keys", "inputs"])
+    def test_a_list_over_the_name_cap_is_refused_before_any_strong_call(
+        self, valid_fsm, tmp_path, name
+    ):
+        rig = _rig(valid_fsm, tmp_path)
+        cap = tools_module.MAX_TOOL_NAMES
+        names = [f"k{i}" for i in range(cap + 1)]
+        assert rig.obtain(**{name: names}) == f"{LABEL}\nfailed: bad_arguments"
+        assert rig.strong.requests == []
+        within = rig.registry.execute(  # exactly the cap reaches the strong model
+            ToolCall(
+                tool_name="obtain_procedure",
+                parameters={
+                    "goal": GOAL,
+                    "return_keys": ["answer"],
+                    "inputs": names[:cap],
+                },
+            )
+        )
+        assert within.success and len(rig.strong.requests) == 1
+
+    def test_the_compile_budget_counts_each_call_that_reaches_obtain(
+        self, valid_fsm, tmp_path
+    ):
+        rig = _rig(valid_fsm, tmp_path)
+        rig.registry = create_procedure_tools(
+            rig.synth, runner_llm=rig.cheap, max_obtains=2
+        )
+        assert rig.obtain(goal=None) == f"{LABEL}\nfailed: bad_arguments"  # not counted
+        assert rig.obtain(return_keys=["a b"]).endswith("failed: bad_arguments")
+        assert _fields(rig.obtain())["source"] == "compiled"
+        assert _fields(rig.obtain())["source"] == "library"  # a hit counts too
+        assert rig.obtain() == f"{LABEL}\nfailed: budget_spent"
+        assert len(rig.strong.requests) == 1
+        assert _fields(_run(rig))["status"] == "ok"  # running is not budgeted
+
+    @pytest.mark.parametrize("bad", [True, 1.0, "3", 10**30, 0, -1, None], ids=repr)
+    def test_a_bad_max_obtains_is_refused(self, valid_fsm, tmp_path, bad):
+        rig = _rig(valid_fsm, tmp_path)
+        with pytest.raises(SynthesisError, match="max_obtains"):
+            create_procedure_tools(rig.synth, runner_llm=rig.cheap, max_obtains=bad)

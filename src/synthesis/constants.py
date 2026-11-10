@@ -54,6 +54,9 @@ REASONS = (
     REASON_UNEXPECTED_ERROR,
 )
 
+# --- Tool bounds: the most names one tool call may list (inputs or return_keys) ---
+MAX_TOOL_NAMES = 20
+
 # --- Library lifecycle, in order: draft -> verified -> trusted -> deprecated ---
 LIFECYCLE_DRAFT = "draft"
 LIFECYCLE_VERIFIED = "verified"

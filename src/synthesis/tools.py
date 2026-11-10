@@ -17,10 +17,12 @@ hands back only its return values. Approval stays inside the synthesizer (G7).
 
 from __future__ import annotations
 
+from threading import Lock
 from typing import Any
 
 from fsm_llm.agents.constants import OBSERVATION_ENTRY, Defaults
 from fsm_llm.agents.definitions import ToolAnnotations
+from fsm_llm.agents.exceptions import require_int_limit
 from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.api import API
 from fsm_llm.constants import SKILL_DEFANG
@@ -36,7 +38,9 @@ from fsm_llm.okf import capped_line
 
 from .constants import (
     LIFECYCLE_VERIFIED,
+    MAX_TOOL_NAMES,
     PROCEDURE_UNTRUSTED_LABEL,
+    REASON_BUDGET_SPENT,
     REASON_INPUTS_MISSING,
     REASON_LIBRARY_ERROR,
     REASON_PROVIDER_ERROR,
@@ -135,6 +139,7 @@ def create_procedure_tools(
     *,
     runner_llm: LLMInterface | None = None,
     registry: ToolRegistry | None = None,
+    max_obtains: int = 20,
 ) -> ToolRegistry:
     """Register ``obtain_procedure`` and ``run_procedure``; return the registry.
 
@@ -158,13 +163,25 @@ def create_procedure_tools(
           (``bad_arguments`` or ``constants.REASONS``), never an echoed argument
           or exception text. A bug propagates to ``registry.execute``, which
           returns it as a failed ``ToolResult``.
+        - Bounds, refused with ``bad_arguments`` and never clamped: at most
+          ``MAX_TOOL_NAMES`` entries in ``inputs`` or ``return_keys`` (each name
+          is already capped by the synthesize field's key rule). Per registry,
+          ``max_obtains`` (an int from 1, else ``SynthesisError``) calls of
+          ``obtain_procedure`` that reach ``synthesizer.obtain``, library hits
+          included and argument refusals not, then ``failed: budget_spent``;
+          ``run_procedure`` is not counted. ``run_procedure`` closes its
+          sub-``API`` on every path.
         - ``runner_llm`` is required (``ValueError``); *registry* is a new one
           when ``None`` and a name already in it is replaced.
     """
     if runner_llm is None:
         raise ValueError("runner_llm is required: run_procedure runs on it")
+    max_obtains = require_int_limit(
+        "max_obtains", max_obtains, minimum=1, error=SynthesisError
+    )
     tools = registry if registry is not None else ToolRegistry()
     policy, library = synthesizer.policy, synthesizer.library
+    lock, obtains = Lock(), 0
 
     def failed(code: str, room: int) -> str:
         return _reply([f"failed: {code}"], room)
@@ -175,12 +192,26 @@ def create_procedure_tools(
         room = _room(
             "obtain_procedure", goal=goal, return_keys=return_keys, inputs=inputs
         )
+        nonlocal obtains
         names = () if inputs is None else inputs
-        if not isinstance(goal, str) or len(goal) > SYNTHESIZE_GOAL_MAX_LENGTH:
+        if (
+            not isinstance(goal, str)
+            or len(goal) > SYNTHESIZE_GOAL_MAX_LENGTH
+            or any(
+                isinstance(v, (list, tuple)) and len(v) > MAX_TOOL_NAMES
+                for v in (names, return_keys)
+            )
+        ):
             return failed(_BAD_ARGUMENTS, room)
+        with lock:
+            if obtains >= max_obtains:
+                return failed(REASON_BUDGET_SPENT, room)
+            obtains += 1
         try:
             procedure = synthesizer.obtain(goal, inputs=names, return_keys=return_keys)
         except ValueError:
+            with lock:  # a refused argument costs nothing
+                obtains -= 1
             return failed(_BAD_ARGUMENTS, room)
         except SynthesisError as e:
             return failed(reason_of(e), room)
@@ -231,20 +262,18 @@ def create_procedure_tools(
                 f"{REASON_INPUTS_MISSING} ({_safe(', '.join(missing), 100)})", room
             )
         ok, values, reason = False, {}, _NEEDS_USER_INPUT
-        api = API.from_definition(definition, llm_interface=runner_llm)
         try:
-            conv, _ = api.start_conversation({n: given[n] for n in needs})
-            try:
+            with API.from_definition(definition, llm_interface=runner_llm) as api:
+                # close() ends the sub-conversation on every path
+                conv, _ = api.start_conversation({n: given[n] for n in needs})
                 api.run_until_terminal(conv, max_steps=policy.max_turns)
                 data = api.get_data(conv)
                 if any(is_missing(data, k) for k in keys):
                     reason = REASON_RETURN_KEYS_MISSING
                 else:
                     ok, values = True, {k: data[k] for k in keys}
-            finally:
-                api.end_conversation(conv)
         except RunBudgetExceededError:
-            pass  # the budget is spent: the sub-conversation was ended above
+            pass  # the budget is spent: close() ended the sub-conversation
         except LLMResponseError:
             return failed(REASON_PROVIDER_ERROR, room)  # not the procedure's fault
         try:
