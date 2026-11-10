@@ -25,7 +25,7 @@ flowchart LR
 
 ## Files
 
-- `api.js` - `fetchJson(url, opts)`, `postJson(url, data)`, 
+- `api.js` - `fetchJson(url, opts)`, `postJson(url, data)`,
 - `auth.js` - API key get/set/clear, change listeners, the `GET /api/auth` check, and the key-entry modal.
 - `state.js` - shared `state`, `scheduleRefresh(key, fn, delayMs)`, `cancelRefresh(...keys)`, and the constants `WS_MAX_DELAY` and `TOOL_BASED_AGENTS`.
 - `ws.js` - `connectWS()` and `registerHandlers(handlers)`.
