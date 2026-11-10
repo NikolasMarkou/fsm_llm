@@ -330,8 +330,8 @@ class FSMSynthesizer:
         where the current policy needs approval, a recorded approver (else it
         is skipped). The score is either an embedder cosine at or above
         ``policy.reuse_min_score``, or, with no embedder, the same goal after
-        case, punctuation and spacing (``policy.reuse_min_score`` is never
-        applied to word overlap). Embedder reuse is a SIMILARITY claim: a
+        case and spacing (a symbol such as ``>`` or ``#`` is part of the goal;
+        ``policy.reuse_min_score`` is never applied to word overlap). Embedder reuse is a SIMILARITY claim: a
         cosine does not understand negation, so a goal that differs by "not"
         may be served the stored procedure. For exact reuse pass ``embed=None``
         or set ``reuse_min_score=1.0``. A hit makes no strong call. A compile that needs approval

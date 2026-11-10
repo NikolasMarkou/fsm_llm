@@ -121,8 +121,9 @@ class LibraryMatch(NamedTuple):
 
     ``embedded`` is True for a cosine from the embedder, a similarity claim a
     threshold may judge. False is the word fallback: 1.0 only for the same
-    goal (case, punctuation and spacing aside), at most 0.5 otherwise, so it
-    ranks near-misses and never passes a reuse threshold above 0.5.
+    goal (case and spacing aside; a symbol is part of the goal), at most 0.5
+    otherwise, so it ranks near-misses and never passes a reuse threshold
+    above 0.5. A goal with no tokens (blank) scores 0.0 against everything.
     """
 
     record: LibraryRecord
@@ -142,13 +143,18 @@ def digest_of(definition: FSMDefinition) -> str:
 
 
 def _words(text: str) -> list[str]:
-    """The lowercase alphanumeric tokens of *text*, in order."""
-    return re.findall(r"[^\W_]+", text.lower())
+    """The lowercase tokens of *text*, in order: each run of letters and digits
+    and each single non-space symbol character, so ``> 10`` and ``< 10`` or
+    ``C++`` and ``C#`` differ; whitespace and ``_`` separate and are dropped."""
+    return re.findall(r"[^\W_]+|[^\w\s]", text.lower())
 
 
 def _lexical(want: list[str], have: list[str]) -> float:
-    """1.0 for the same token sequence, else half the Jaccard word overlap.
-    Set overlap ignores negation and word order, so it is never a reuse score."""
+    """1.0 for the same non-empty token sequence, else half the Jaccard overlap.
+    Set overlap ignores negation and word order, so it is never a reuse score;
+    an empty side (a goal of only whitespace) matches nothing, itself included."""
+    if not want or not have:
+        return 0.0
     if want == have:
         return 1.0
     return len(set(want) & set(have)) / len(set(want) | set(have)) / 2

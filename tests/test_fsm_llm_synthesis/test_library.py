@@ -559,7 +559,8 @@ class TestSearch:
         ("query", "exact"),
         [
             ("book a table for dinner", True),
-            ("  Book A TABLE, for dinner!! ", True),  # case and punctuation only
+            ("  Book   A\tTABLE \n for  dinner ", True),  # case and whitespace only
+            ("book a table, for dinner!!", False),  # punctuation is part of the goal
             ("book a table for dinner tonight", False),  # an extra word
             ("book a table for dinner now please", False),
             ("do NOT book a table for dinner", False),  # a negation
@@ -575,6 +576,37 @@ class TestSearch:
         assert not hit.embedded
         assert (hit.score == 1.0) is exact
         assert exact or 0 < hit.score <= 0.5  # it ranks, it can never be reused
+
+    @pytest.mark.parametrize(
+        ("stored", "query"),
+        [
+            ("count answers > 10", "count answers < 10"),
+            ("count answers > 10", "count answers >= 10"),
+            ("learn C++", "learn C#"),
+            ("balance of -5", "balance of 5"),
+            ("pay 1.5 euro", "pay 1 5 euro"),
+            ("?", "!!!"),
+            ("?", "?!"),
+        ],
+    )
+    def test_goals_that_differ_in_a_symbol_are_not_the_same_goal(
+        self, lib: FSMLibrary, stored: str, query: str
+    ):
+        _put(lib, "Sym", goal=stored)
+        (hit,) = self._q(lib, query)
+        assert not hit.embedded and hit.score < 1.0
+        (same,) = self._q(lib, stored.upper() + "  ")
+        assert same.score == 1.0  # case and trailing whitespace only
+
+    @pytest.mark.parametrize("empty", ["", " ", " \t\n "])
+    def test_an_empty_goal_never_matches_exactly(self, lib: FSMLibrary, empty: str):
+        _put(lib, "Blank", goal="x")
+        (hit,) = self._q(lib, empty)
+        assert hit.score == 0.0
+        # the stored side may be empty too (a hand-written record): still no match
+        _put(lib, "Empty", goal="  ")
+        assert all(h.score == 0.0 for h in self._q(lib, empty))
+        assert all(h.score < 1.0 for h in self._q(lib, "  "))
 
     def test_an_embedder_score_is_flagged_as_a_cosine(self, lib: FSMLibrary):
         _put(lib)

@@ -414,8 +414,9 @@ class TestObtainLibrary:
             "Cancel the user's delivery address for the order and confirm it",
             "Confirm it and collect the user's delivery address for the order",
             "Collect the user's delivery address for the order and confirm it now",
+            "Collect the user's delivery address, for the order and confirm it!",
         ],
-        ids=["billing", "negated", "cancel", "reordered", "extra-word"],
+        ids=["billing", "negated", "cancel", "reordered", "extra-word", "punctuation"],
     )
     @pytest.mark.parametrize("min_score", [0.8, 0.0], ids=["default", "zero"])
     def test_without_an_embedder_only_the_same_goal_is_reused(
@@ -429,9 +430,22 @@ class TestObtainLibrary:
         with pytest.raises(IndexError):  # a strong call was attempted
             synth.obtain(goal, return_keys=RET)
         assert len(llm.requests) == 2
-        same = "collect the USER'S delivery address, for the order; and confirm it!"
+        same = "collect the USER'S  delivery address\tfor the order and confirm  it"
         again = synth.obtain(same, return_keys=RET)
         assert again.source == "library" and again.digest == first.digest
+
+    @pytest.mark.parametrize(
+        ("stored", "asked"),
+        [("Collect an answer > 10", "Collect an answer < 10"), ("?", "!!!")],
+    )
+    def test_without_an_embedder_a_changed_symbol_compiles_again(
+        self, tmp_path, valid_fsm, stored, asked
+    ):
+        synth, llm = _obtainer(tmp_path, [_text(valid_fsm)])
+        synth.obtain(stored, return_keys=RET)
+        with pytest.raises(IndexError):  # a strong call was attempted
+            synth.obtain(asked, return_keys=RET)
+        assert len(llm.requests) == 2
 
     @pytest.mark.parametrize(
         ("vec", "reused"), [([0.95, 0.31], True), ([0.3, 0.95], False)]
