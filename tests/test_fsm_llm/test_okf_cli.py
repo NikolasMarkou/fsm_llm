@@ -750,7 +750,7 @@ class TestWiring:
         assert result.stdout.strip() == "ok"
 
     def test_the_cli_source_imports_no_subpackage(self) -> None:
-        source = (_REPO / "src" / "fsm_llm" / "okf_cli.py").read_text(encoding="utf-8")
+        source = (_REPO / "src" / "okf_cli.py").read_text(encoding="utf-8")
 
         assert not re.search(
             r"(?m)^\s*(from|import)\s+(fsm_llm\.|\.)(agents|reasoning|"

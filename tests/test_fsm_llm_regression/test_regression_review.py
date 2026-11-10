@@ -333,9 +333,7 @@ class TestConsolidatedAll:
     def test_no_dynamic_all_extension(self):
         import pathlib
 
-        init_path = (
-            pathlib.Path(__file__).parents[2] / "src" / "fsm_llm" / "__init__.py"
-        )
+        init_path = pathlib.Path(__file__).parents[2] / "src" / "__init__.py"
         source = init_path.read_text()
         assert source.count("__all__.extend") == 0, (
             "__all__ should not be extended dynamically"

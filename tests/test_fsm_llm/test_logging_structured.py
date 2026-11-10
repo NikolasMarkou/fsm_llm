@@ -8,7 +8,6 @@ import os
 import re
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 from loguru import logger
@@ -370,13 +369,12 @@ class TestJsonFormatter:
 # every ``fsm_llm`` record a second time. The helper replaces it with an
 # equivalent sink that skips library records and resolves ``sys.stderr`` at
 # write time, so the host's own records keep printing exactly once. Capturing
-# needs a child process (process-global handlers), and the child must see the
-# tree under test, so its ``sys.path`` comes from ``fsm_llm.__file__``
-# (``python -I`` would import the editable install, not a copy of the tree).
+# needs a child process (process-global handlers). The child imports the
+# editable install, which is the tree under test; it needs no ``sys.path`` entry
+# (``src/`` holds ``logging.py`` and must never be put on ``sys.path``).
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _CHILD = """
 import sys
-sys.path.insert(0, {root!r})
 import fsm_llm
 from loguru import logger
 {body}
@@ -393,14 +391,13 @@ named("__main__").info("QUIETREC")
 
 def _child(body: str, **env: str) -> list[str]:
     """Run ``body`` in a fresh interpreter; return its stderr lines, no ANSI."""
-    root = str(Path(sys.modules["fsm_llm"].__file__).parent.parent)
     clean = {
         k: v
         for k, v in os.environ.items()
         if not k.startswith(("LOGURU_", "FSM_LLM_LOG"))
     }
     result = subprocess.run(
-        [sys.executable, "-c", _CHILD.format(root=root, body=body)],
+        [sys.executable, "-c", _CHILD.format(body=body)],
         capture_output=True,
         text=True,
         timeout=60,

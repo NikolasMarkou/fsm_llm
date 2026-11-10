@@ -25,7 +25,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 _FULL_FSM_DOCS = [
     "README.md",
     "docs/quickstart.md",
-    "src/fsm_llm/README.md",
+    "src/README.md",
     "AGENTS.md",
 ]
 # Reference docs scanned too (plan-2026-09-19T175721-21cd7f8e D-052 (5)). At the

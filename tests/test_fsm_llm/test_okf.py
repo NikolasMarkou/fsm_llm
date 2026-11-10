@@ -796,7 +796,7 @@ class TestModelsAndErrors:
         assert OKFError("x", details={"k": 1}).details == {"k": 1}
 
     def test_the_module_does_not_import_litellm(self) -> None:
-        source = (Path(__file__).parents[2] / "src" / "fsm_llm" / "okf.py").read_text()
+        source = (Path(__file__).parents[2] / "src" / "okf.py").read_text()
 
         assert "litellm" not in source
 
@@ -2028,7 +2028,7 @@ class TestLayering:
         assert result.stdout.strip() == "ok"
 
 
-_SRC_ROOT = Path(__file__).parents[2] / "src" / "fsm_llm"
+_SRC_ROOT = Path(__file__).parents[2] / "src"
 _MOVED = frozenset({"bundle_from_memory_entries", "create_okf_handler"})
 
 

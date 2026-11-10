@@ -310,13 +310,7 @@ class TestMonitorImports:
         assert callable(configure)
 
     def test_static_files_exist(self):
-        static = (
-            Path(__file__).parent.parent.parent
-            / "src"
-            / "fsm_llm"
-            / "monitor"
-            / "static"
-        )
+        static = Path(__file__).parent.parent.parent / "src" / "monitor" / "static"
         assert (static / "style.css").exists()
         assert (static / "app.js").exists()
         assert (static / "flows.json").exists()
@@ -341,11 +335,7 @@ class TestMonitorImports:
 
     def test_template_exists(self):
         templates = (
-            Path(__file__).parent.parent.parent
-            / "src"
-            / "fsm_llm"
-            / "monitor"
-            / "templates"
+            Path(__file__).parent.parent.parent / "src" / "monitor" / "templates"
         )
         assert (templates / "index.html").exists()
 
@@ -353,7 +343,7 @@ class TestMonitorImports:
 class TestUiMatchesServerLimits:
     """The static UI mirrors the server constants by hand; pin them together."""
 
-    _MONITOR_DIR = Path(__file__).parent.parent.parent / "src" / "fsm_llm" / "monitor"
+    _MONITOR_DIR = Path(__file__).parent.parent.parent / "src" / "monitor"
 
     def _html(self) -> str:
         return (self._MONITOR_DIR / "templates" / "index.html").read_text(

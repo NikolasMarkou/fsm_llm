@@ -24,7 +24,7 @@ HOW THIS CORPUS WAS DERIVED -- the property that made it worth anything
 ----------------------------------------------------------------------
 
 AUTHORING ORDER (H-8, `LESSONS [I:5]`). Every name and every value below
-was written BEFORE `src/fsm_llm/constants.py` and BEFORE
+was written BEFORE `src/constants.py` and BEFORE
 `tests/test_fsm_llm/fixtures/context_key_corpus.py` were opened in the
 authoring context. Neither file had been read in that context for any
 other reason. Vocabulary was drawn from external SaaS-vendor, cloud/infra,

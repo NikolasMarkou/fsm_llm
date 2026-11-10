@@ -27,7 +27,7 @@ from fsm_llm.agents.definitions import (
 from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.logging import enable_library_logging, logger
 
-SRC = Path(__file__).resolve().parents[2] / "src" / "fsm_llm"
+SRC = Path(__file__).resolve().parents[2] / "src"
 
 
 @pytest.fixture

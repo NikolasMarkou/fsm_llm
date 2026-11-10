@@ -592,7 +592,7 @@ class TestWiring:
         assert result.returncode == 0, result.stderr
 
     def test_the_program_name_is_its_own_and_the_source_is_ascii(self) -> None:
-        source = (_REPO / "src" / "fsm_llm" / "agent_skills_cli.py").read_text("utf-8")
+        source = (_REPO / "src" / "agent_skills_cli.py").read_text("utf-8")
 
         assert skills_cli._PROG == "fsm-llm-skills"
         assert source.isascii() and source.index('"""') < source.index(

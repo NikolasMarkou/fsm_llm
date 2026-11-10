@@ -142,7 +142,7 @@ class TestPyTypedFiles:
     @pytest.mark.parametrize("package", ["fsm_llm"])
     def test_py_typed_exists(self, package):
         """M-3: py.typed must exist in the top-level package."""
-        src_dir = os.path.join(os.path.dirname(__file__), "..", "..", "src", package)
+        src_dir = os.path.join(os.path.dirname(__file__), "..", "..", "src")
         py_typed = os.path.join(src_dir, "py.typed")
         assert os.path.exists(py_typed), f"Missing py.typed in {package}"
 

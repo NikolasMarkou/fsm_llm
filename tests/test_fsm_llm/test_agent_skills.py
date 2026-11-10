@@ -51,7 +51,7 @@ from fsm_llm.definitions import FSMError, SkillError
 from fsm_llm.okf import body_page, parse_concept_text, strip_unsafe_text, text_page
 from fsm_llm.prompts import sanitize_text_for_prompt
 
-_SRC = Path(__file__).resolve().parents[2] / "src" / "fsm_llm"
+_SRC = Path(__file__).resolve().parents[2] / "src"
 _ESC, _BIDI, _ZWSP = chr(0x1B), chr(0x202E), chr(0x200B)
 _BOM, _LONE = chr(0xFEFF), chr(0xD800)
 _ANSI = _ESC + "[31m"

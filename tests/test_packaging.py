@@ -1,4 +1,4 @@
-"""Repo-wide packaging invariants: one `src/` package, wired into every slot.
+"""Repo-wide packaging invariants: one package in `src/`, wired into every slot.
 
 Five hand-maintained files name the package: `pyproject.toml`, `Makefile`,
 `tox.ini`, `.github/workflows/python-package.yml` and `MANIFEST.in`. A miss is
@@ -6,10 +6,11 @@ SILENT -- the package just quietly stops being type-checked, stops being counted
 in coverage, or stops shipping in the sdist. Nothing errors.
 
 This file is that missing check. The package list is derived from the
-filesystem (`src/*/__init__.py`), never hardcoded, so it cannot go stale. Since
-plan-2026-09-29T044048-3a032517 the layout is ONE top-level package, `fsm_llm`,
-with five subpackages (`src/fsm_llm/*/__init__.py`); both sets are derived and
-pinned exactly, so a stray second top-level package fails here.
+filesystem and `pyproject.toml`, never hardcoded, so it cannot go stale. The
+layout is ONE top-level package, `fsm_llm`, whose directory is `src/` itself
+(`package-dir = {"fsm_llm" = "src"}`), with five subpackages
+(`src/*/__init__.py`); both sets are derived and pinned exactly, so a stray
+second top-level package fails here.
 """
 
 from __future__ import annotations
@@ -33,33 +34,6 @@ if _SCRIPTS not in sys.path:  # scripts/ is not a package
 import doc_counts
 
 
-def _packages_under(root: pathlib.Path) -> frozenset[str]:
-    """Names of the directories under `root` that have an `__init__.py`."""
-    return frozenset(
-        p.name
-        for p in sorted(root.iterdir())
-        if p.is_dir() and (p / "__init__.py").is_file()
-    )
-
-
-#: Every importable top-level package under `src/`, derived from disk.
-#: `src/*.egg-info/` and any stray directory without an `__init__.py` are
-#: excluded by construction.
-SRC_PACKAGES: frozenset[str] = _packages_under(_REPO_ROOT / "src")
-
-#: Every subpackage of `fsm_llm`, derived from disk.
-SUBPACKAGES: frozenset[str] = _packages_under(_REPO_ROOT / "src" / "fsm_llm")
-
-#: The four former sibling packages that now live under `fsm_llm`, plus `eval`
-#: (added in plan-2026-09-29T061903-581c2634).
-_EXPECTED_SUBPACKAGES = frozenset(
-    {"agents", "reasoning", "workflows", "monitor", "eval"}
-)
-
-#: Matches a package name wherever one is spelled out in a build file.
-_PKG = r"(fsm_llm[a-z_]*)"
-
-
 def _read(rel: str) -> str:
     return (_REPO_ROOT / rel).read_text(encoding="utf-8")
 
@@ -78,6 +52,50 @@ def _section(rel: str, header: str) -> str:
             body.append(line)
     assert inside, f"section {header!r} not found in {rel}"
     return "\n".join(body)
+
+
+def _packages_under(root: pathlib.Path) -> frozenset[str]:
+    """Names of the directories under `root` that have an `__init__.py`."""
+    return frozenset(
+        p.name
+        for p in sorted(root.iterdir())
+        if p.is_dir() and (p / "__init__.py").is_file()
+    )
+
+
+def _package_dirs() -> dict[str, pathlib.Path]:
+    """Import name -> source directory, from `package-dir` in pyproject.toml."""
+    body = _section("pyproject.toml", "[tool.setuptools]")
+    line = re.search(r"^package-dir = \{(.*)\}$", body, re.MULTILINE)
+    assert line is not None, "package-dir not found in [tool.setuptools]"
+    pairs = re.findall(r'"([a-z_]+)" = "([^"]+)"', line.group(1))
+    assert pairs, "package-dir maps no package"
+    return {name: _REPO_ROOT / directory for name, directory in pairs}
+
+
+#: Import name -> directory of every top-level package, from pyproject.toml.
+#: A mapped directory without an `__init__.py` is not a package; the stale
+#: `*.egg-info/` and any stray directory are excluded by construction.
+PACKAGE_DIRS: dict[str, pathlib.Path] = {
+    name: path
+    for name, path in _package_dirs().items()
+    if (path / "__init__.py").is_file()
+}
+
+#: Every importable top-level package name.
+SRC_PACKAGES: frozenset[str] = frozenset(PACKAGE_DIRS)
+
+#: Every subpackage of `fsm_llm`, derived from disk (they sit directly in `src/`).
+SUBPACKAGES: frozenset[str] = _packages_under(PACKAGE_DIRS["fsm_llm"])
+
+#: The four former sibling packages that now live under `fsm_llm`, plus `eval`
+#: (added in plan-2026-09-29T061903-581c2634).
+_EXPECTED_SUBPACKAGES = frozenset(
+    {"agents", "reasoning", "workflows", "monitor", "eval"}
+)
+
+#: Matches a package name wherever one is spelled out in a build file.
+_PKG = r"(fsm_llm[a-z_]*)"
 
 
 def _one_line(rel: str, needle: str) -> str:
@@ -104,8 +122,20 @@ def _slot_pyproject_isort() -> set[str]:
     return set(re.findall(rf'"{_PKG}"', line))
 
 
+def _type_check_packages() -> set[str]:
+    """Packages `scripts/type_check.py` exposes to mypy (the symlink names)."""
+    return set(re.findall(rf'Path\(tmp\) / "{_PKG}"', _read("scripts/type_check.py")))
+
+
+def _slot_type_check(rel: str, needle: str) -> set[str]:
+    """Packages type-checked by a build file: it must call the shared runner."""
+    if "scripts/type_check.py" not in _one_line(rel, needle):
+        return set()
+    return _type_check_packages()
+
+
 def _slot_makefile_type_check() -> set[str]:
-    return set(re.findall(rf"src/{_PKG}/", _one_line("Makefile", "-m mypy")))
+    return _slot_type_check("Makefile", "type_check.py")
 
 
 def _slot_makefile_coverage() -> set[str]:
@@ -117,18 +147,18 @@ def _slot_tox_coverage() -> set[str]:
 
 
 def _slot_tox_type() -> set[str]:
-    return set(re.findall(rf"src/{_PKG}/", _one_line("tox.ini", "mypy src/")))
+    return _slot_type_check("tox.ini", "type_check.py")
 
 
 def _slot_ci_mypy() -> set[str]:
-    line = _one_line(".github/workflows/python-package.yml", "mypy src/")
-    return set(re.findall(rf"src/{_PKG}/", line))
+    return _slot_type_check(".github/workflows/python-package.yml", "type_check.py")
 
 
 def _slot_manifest() -> set[str]:
-    return set(
-        re.findall(rf"recursive-include src/{_PKG} \*\.py", _read("MANIFEST.in"))
-    )
+    # `src` is the one package directory; the line names it, not the package.
+    if re.search(r"^recursive-include src \*\.py$", _read("MANIFEST.in"), re.M):
+        return set(SRC_PACKAGES)
+    return set()
 
 
 #: slot id -> extractor
@@ -172,19 +202,22 @@ class TestEveryPackageIsWired:
         missing = [
             pkg
             for pkg in sorted(SRC_PACKAGES)
-            if not (_REPO_ROOT / "src" / pkg / "py.typed").is_file()
+            if not (PACKAGE_DIRS[pkg] / "py.typed").is_file()
         ]
         assert not missing, f"packages without a py.typed marker: {missing}"
 
-    def test_packages_find_stays_on_auto_discovery(self):
-        # Slot 5 of the wiring checklist is deliberately a no-op: setuptools
-        # auto-discovers everything under `where = ["src"]`, subpackages
-        # included. If anyone ever adds an explicit include/exclude here it
-        # becomes a NINTH enumerating slot, and this file must grow an entry
-        # for it -- so pin the assumption.
-        body = _section("pyproject.toml", "[tool.setuptools.packages.find]")
-        assert "include" not in body and "exclude" not in body, (
-            "packages.find is no longer bare auto-discovery; add it to _SLOTS"
+    def test_packages_list_matches_disk(self):
+        # `packages` in pyproject.toml is an explicit list (the flat layout
+        # cannot use `packages.find`, which would name the subpackages
+        # `agents`, `eval`, ...). A subpackage missing from it silently
+        # ships nothing, so pin it to the directories on disk.
+        body = _section("pyproject.toml", "[tool.setuptools]")
+        match = re.search(r"^packages = \[(.*?)\]", body, re.MULTILINE | re.DOTALL)
+        assert match is not None, "explicit `packages` list not found"
+        listed = set(re.findall(r'"([a-z_.]+)"', match.group(1)))
+        expected = set(SRC_PACKAGES) | {f"fsm_llm.{sub}" for sub in SUBPACKAGES}
+        assert listed == expected, (
+            f"missing {sorted(expected - listed)}, stale {sorted(listed - expected)}"
         )
 
 
@@ -212,7 +245,7 @@ class TestMonitorPackageData:
     `pages/`, `services/` and `utils/` subdirectories)."""
 
     def test_monitor_package_data_covers_every_static_file(self):
-        monitor = _REPO_ROOT / "src" / "fsm_llm" / "monitor"
+        monitor = _REPO_ROOT / "src" / "monitor"
         covered = {
             path
             for pattern in _monitor_package_data_globs()
@@ -276,7 +309,7 @@ class TestPackageBackedExtrasAreInstalled:
 
 #: Every module under `src/`, derived from disk.
 SRC_MODULES: tuple[pathlib.Path, ...] = tuple(
-    sorted((_REPO_ROOT / "src").glob("*/**/*.py"))
+    sorted((_REPO_ROOT / "src").rglob("*.py"))
 )
 
 

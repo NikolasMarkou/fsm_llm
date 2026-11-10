@@ -32,7 +32,7 @@ from fsm_llm.frontmatter import (
 )
 
 _REPO = Path(__file__).resolve().parents[2]
-_SRC = _REPO / "src" / "fsm_llm"
+_SRC = _REPO / "src"
 _BIG = 1_000_000  # a limit that never trips
 
 

@@ -17,7 +17,7 @@ import litellm
 
 import fsm_llm.llm  # noqa: F401  (the import is the behaviour under test)
 
-_SRC = Path(__file__).resolve().parents[2] / "src" / "fsm_llm"
+_SRC = Path(__file__).resolve().parents[2] / "src"
 
 # A provider call that fails fast and offline: nothing listens on 127.0.0.1:1.
 _FAILING_CALL = """

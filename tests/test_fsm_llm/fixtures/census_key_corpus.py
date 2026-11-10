@@ -13,7 +13,7 @@ the other two. Do not merge it into either of them.
     and that single measurement spent its independence. Re-measuring it yields no
     new information about the classes it has already scored.
   * `census_key_corpus.py`   -- role: INDEPENDENCE (this file). Authored WITHOUT
-    opening `src/fsm_llm/constants.py`, `context_key_corpus.py`,
+    opening `src/constants.py`, `context_key_corpus.py`,
     `holdout_key_corpus.py`, or any prior plan content about this seam.
 
 DERIVATION
