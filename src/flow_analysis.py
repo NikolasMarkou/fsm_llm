@@ -107,6 +107,12 @@ class FlowFinding:
     message: str
 
 
+# DECISION plan-2026-11-10T194139-2cefeb61/D-017 (item 7)
+# `_minted_keys` is a deliberate mirror of the pipeline's
+# `MessagePipeline._build_field_configs_from_state`. Do NOT import the pipeline
+# here (it couples a pure analysis to the largest module) and do NOT change this
+# rule without the mirror in src/pipeline.py: the parity test in
+# tests/test_fsm_llm/test_flow_analysis.py pins the two over every example state.
 def _minted_keys(state: State) -> set[str]:
     """The keys the pipeline mints a plain extraction for in `state`.
 
@@ -277,6 +283,16 @@ def analyze_data_flow(
     satisfiable, so the analysis is coarse and may reject what a human would
     accept (the repair loop absorbs that). Keys the runtime seeds or a handler
     writes must be listed in `inputs`.
+
+    Known blind spot: besides the per-field extractions it models, the pipeline
+    runs an additive bulk extraction pass when a state has extraction
+    instructions AND declared fields (src/pipeline.py, `_execute_data_extraction`),
+    and that pass can write any key that is not handler-only or internal. Only
+    the no-declaration shape is flagged (`bulk-extraction`). The with-fields
+    shape is not: flagging it would reject nearly every valid compile. The
+    analysis never counts a key only that pass could write as produced, so such
+    a gate read is reported as `undeclared-read` (a conservative reject that the
+    repair loop absorbs), never accepted.
 
     Contract: `definition` a loaded `FSMDefinition`; findings are plain data
     (messages quote state ids and key names only). Never raises.

@@ -1620,6 +1620,13 @@ class MessagePipeline:
         ``result_key`` among them) are never minted into extractions. A
         synthesize state gets none either: a runner writes its result key.
         """
+        # DECISION plan-2026-11-10T194139-2cefeb61/D-017 (item 7)
+        # This minting rule has a deliberate mirror, `_minted_keys` in
+        # src/flow_analysis.py (a pure analysis must not import this module).
+        # Do NOT change the rule here (the completion/synthesize exclusion, the
+        # classification-owned filter, explicit field_extractions winning)
+        # without the mirror there: the parity test in
+        # tests/test_fsm_llm/test_flow_analysis.py pins them over every example state.
         if state.completion is not None or state.synthesize is not None:
             return []
         configs: list[FieldExtractionConfig] = []
