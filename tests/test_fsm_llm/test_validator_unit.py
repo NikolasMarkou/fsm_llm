@@ -1063,6 +1063,12 @@ def _maximal_fsm_data():
                             {
                                 "description": "A result exists.",
                                 "requires_context_keys": ["synth_result"],
+                                "logic": {
+                                    "in": [
+                                        {"var": "synth_result.status"},
+                                        ["ok", "failed", "aborted"],
+                                    ]
+                                },
                             }
                         ],
                     }

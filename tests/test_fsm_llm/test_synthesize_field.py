@@ -9,6 +9,7 @@ local hook and a hand-written child).
 """
 
 import copy
+import json
 from typing import Any
 
 import pytest
@@ -81,9 +82,14 @@ def _synth_state(
                 "priority": 2,
                 "conditions": [
                     {
-                        "description": "status failed",
+                        "description": "status failed or aborted",
                         "requires_context_keys": ["synthesis_result"],
-                        "logic": {"==": [{"var": "synthesis_result.status"}, "failed"]},
+                        "logic": {
+                            "in": [
+                                {"var": "synthesis_result.status"},
+                                ["failed", "aborted"],
+                            ]
+                        },
                     }
                 ],
             },
@@ -256,7 +262,11 @@ class TestSynthesizeStateRules:
             FSMDefinition(**_parent(_synth(on_failure="done_elsewhere")))
 
     def test_on_failure_may_be_any_transition_target(self):
-        definition = FSMDefinition(**_parent(_synth(on_failure="done")))
+        edge = _edge("done", 1, {"in": [_STATUS, ["ok", "failed", "aborted"]]})
+        transitions = [edge, _edge("apology", 2, {"==": [_STATUS, "failed"]})]
+        definition = FSMDefinition(
+            **_parent(_synth(on_failure="done"), transitions=transitions)
+        )
         assert definition.states["solve"].synthesize.on_failure == "done"
 
     def test_existing_fsm_id_is_byte_identical(self):
@@ -310,11 +320,14 @@ class TestEveryEdgeReadsTheResult:
     @pytest.mark.parametrize(
         "edge",
         [
-            _gate(requires=["synthesis_result"]),
             _gate(logic={"==": [{"var": "synthesis_result.status"}, "ok"]}),
-            _gate(logic={"missing": ["synthesis_result"]}),
+            _gate(logic={"in": [{"var": "synthesis_result.status"}, ["ok"]]}),
+            _gate(
+                requires=["synthesis_result"],
+                logic={"==": [{"var": "synthesis_result.status"}, "ok"]},
+            ),
         ],
-        ids=["requires", "dotted-var", "missing"],
+        ids=["dotted-var", "in-list", "requires-and-var"],
     )
     def test_an_edge_that_reads_the_result_loads(self, edge):
         transitions = [edge, _synth_state()["transitions"][1]]
@@ -344,6 +357,109 @@ class TestEveryEdgeReadsTheResult:
         ]
         with pytest.raises(ValidationError, match="apology"):
             FSMDefinition(**_parent(transitions=transitions))
+
+
+_STATUS = {"var": "synthesis_result.status"}
+
+
+def _edge(target: str, priority: int, logic: Any, requires: Any = None):
+    condition: dict[str, Any] = {"description": "gate"}
+    if logic is not None:
+        condition["logic"] = logic
+    if requires is not None:
+        condition["requires_context_keys"] = requires
+    return {
+        "target_state": target,
+        "description": "go",
+        "priority": priority,
+        "conditions": [condition],
+    }
+
+
+_OK_EDGE = _edge("done", 1, {"==": [_STATUS, "ok"]})
+_FAILURE_EDGE = _edge("apology", 2, {"in": [_STATUS, ["failed", "aborted"]]})
+
+
+class TestEdgesAreCheckedWithTheRealEvaluator:
+    """D-035: every edge is run against four sample results by the real evaluator."""
+
+    @pytest.mark.parametrize(
+        "failure_edge",
+        [
+            _edge("apology", 2, {"==": [_STATUS, "failed"]}),
+            _edge("apology", 2, {"==": [_STATUS, "aborted"]}),
+        ],
+        ids=["failed-only", "aborted-only"],
+    )
+    def test_a_failure_edge_must_fire_for_failed_and_aborted(self, failure_edge):
+        with pytest.raises(ValidationError, match=r"solve.*apology.*failed or aborted"):
+            FSMDefinition(**_parent(transitions=[_OK_EDGE, failure_edge]))
+
+    def test_two_failure_edges_that_cover_both_statuses_load(self):
+        edges = [
+            _OK_EDGE,
+            _edge("apology", 2, {"==": [_STATUS, "failed"]}),
+            _edge("apology", 3, {"==": [_STATUS, "aborted"]}),
+        ]
+        FSMDefinition(**_parent(transitions=edges))
+
+    @pytest.mark.parametrize(
+        "edge",
+        [
+            _edge("done", 1, {"!": [{"var": "synthesis_result"}]}),
+            _edge("done", 1, {"!": [{"var": "synthesis_result"}]}, ["topic"]),
+            _edge("done", 1, None, ["synthesis_result"]),
+            _edge("done", 1, {"!=": [_STATUS, "failed"]}),
+            _edge("done", 1, {"!=": [_STATUS, "aborted"]}, ["synthesis_result"]),
+            _edge("done", 1, {"!=": [_STATUS, "ok"]}),
+        ],
+        ids=[
+            "negated-read",
+            "negated-read-with-topic",
+            "requires-only",
+            "not-failed",
+            "not-aborted-with-requires",
+            "not-ok",
+        ],
+    )
+    def test_an_edge_that_fires_before_a_result_is_refused(self, edge):
+        transitions = [edge, _FAILURE_EDGE]
+        with pytest.raises(ValidationError, match=r"solve.*done.*before the runner"):
+            FSMDefinition(**_parent(transitions=transitions))
+
+    def test_a_correct_pair_loads(self):
+        FSMDefinition(**_parent(transitions=[_OK_EDGE, _FAILURE_EDGE]))
+
+    def test_an_ok_edge_by_a_not_failed_or_aborted_test_loads(self):
+        ok = _edge(
+            "done",
+            1,
+            {"!": [{"in": [_STATUS, ["failed", "aborted", "running"]]}]},
+            ["synthesis_result"],
+        )
+        FSMDefinition(**_parent(transitions=[ok, _FAILURE_EDGE]))
+
+    def test_an_extra_edge_gated_on_a_handler_only_key_loads(self):
+        definition = _parent(transitions=[_OK_EDGE, _FAILURE_EDGE])
+        definition["handler_only_keys"] = ["procedure_abort"]
+        definition["states"]["solve"]["transitions"].append(
+            _edge("done", 3, None, ["procedure_abort"])
+        )
+        FSMDefinition(**definition)
+
+    def test_a_failure_edge_gated_only_on_a_handler_only_key_is_refused(self):
+        definition = _parent(
+            transitions=[_OK_EDGE, _edge("apology", 2, None, ["procedure_abort"])]
+        )
+        definition["handler_only_keys"] = ["procedure_abort"]
+        with pytest.raises(ValidationError, match=r"apology.*failed or aborted"):
+            FSMDefinition(**definition)
+
+    def test_the_validator_agrees_with_the_loader(self):
+        definition = _parent(
+            transitions=[_OK_EDGE, _edge("apology", 2, {"==": [_STATUS, "failed"]})]
+        )
+        assert not FSMValidator(definition).validate().is_valid
 
 
 class TestHostKeysMayNotCollideWithRunnerKeys:
@@ -417,7 +533,9 @@ class TestPipelineMintsNothing:
         for transition in definition["states"]["solve"]["transitions"]:
             condition = transition["conditions"][0]
             condition["requires_context_keys"] = [result_key]
-            condition["logic"]["=="][0]["var"] = f"{result_key}.status"
+            condition["logic"] = json.loads(
+                json.dumps(condition["logic"]).replace("synthesis_result", result_key)
+            )
         llm = MockLLM2Interface(
             extraction_data={result_key: {"status": "ok"}, "answer": "forged"}
         )

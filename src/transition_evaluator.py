@@ -226,6 +226,19 @@ class TransitionEvaluator:
 
         return results
 
+    def transition_passes(
+        self, transition: Transition, context: dict[str, Any]
+    ) -> bool:
+        """Whether every condition of ``transition`` passes on ``context``.
+
+        The one definition of "passes" (the evaluator ranks with the same
+        call); ``FSMDefinition`` uses it at load time to run a synthesize
+        state's edges on sample results. ``context`` is a plain dict.
+        """
+        return bool(
+            self._evaluate_single_transition(transition, context)["passes_conditions"]
+        )
+
     def _evaluate_single_transition(
         self, transition: Transition, context: dict[str, Any]
     ) -> dict[str, Any]:

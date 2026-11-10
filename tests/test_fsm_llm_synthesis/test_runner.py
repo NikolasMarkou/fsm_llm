@@ -740,6 +740,12 @@ def _nesting() -> dict[str, Any]:
                             {
                                 "description": "a result exists",
                                 "requires_context_keys": ["nested_result"],
+                                "logic": {
+                                    "in": [
+                                        {"var": "nested_result.status"},
+                                        ["ok", "failed", "aborted"],
+                                    ]
+                                },
                             }
                         ],
                     }
