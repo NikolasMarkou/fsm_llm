@@ -65,6 +65,9 @@ a2a = ["httpx>=0.24.0"]
 # Evaluation tooling (fsm_llm.eval) is stdlib plus core deps only; listed as an
 # extra so it appears in the `all` set and in the dev/CI install lists.
 eval = []
+# Runtime FSM synthesis (fsm_llm.synthesis) is stdlib plus core deps and the agents
+# package only; listed as an extra so it appears in `all` and the install lists.
+synthesis = []
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
@@ -80,6 +83,7 @@ all = [
     "fsm-llm[agents]",
     "fsm-llm[monitor]",
     "fsm-llm[eval]",
+    "fsm-llm[synthesis]",
     "fsm-llm[mcp]",
     "fsm-llm[otel]",
     "fsm-llm[a2a]",
@@ -111,6 +115,7 @@ packages = [
     "fsm_llm.eval",
     "fsm_llm.monitor",
     "fsm_llm.reasoning",
+    "fsm_llm.synthesis",
     "fsm_llm.workflows",
 ]
 
