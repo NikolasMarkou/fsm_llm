@@ -89,6 +89,12 @@ MAX_CLASSIFICATION_INTENTS = 15
 #: characters; lives here, not in ``constants.py`` (pinned).
 CONVERSATION_SUMMARY_MAX_CHARS = 2000
 
+#: ``SynthesizeConfig`` default result key and caps (goal text, key names);
+#: here, not in ``constants.py`` (pinned).
+DEFAULT_SYNTHESIS_RESULT_KEY = "synthesis_result"
+SYNTHESIZE_GOAL_MAX_LENGTH = 2000
+SYNTHESIZE_KEY_MAX_LENGTH = 100
+
 #: The field-type vocabulary of a per-field extraction (config and request).
 FieldType = Literal["str", "int", "float", "bool", "list", "dict", "any"]
 
@@ -1337,6 +1343,19 @@ class ContextScope(BaseModel):
     )
 
 
+def is_public_result_key(key: str) -> bool:
+    """Whether ``key`` is a non-blank, public, non-reserved, non-``agent_trace`` name.
+
+    Shared by the ``CompletionStateConfig`` and ``SynthesizeConfig`` validators.
+    """
+    return bool(
+        key.strip()
+        and not has_internal_prefix(key)
+        and key not in RESERVED_CONTEXT_KEYS
+        and key != CONTEXT_KEY_AGENT_TRACE
+    )
+
+
 class CompletionStateConfig(BaseModel):
     """The Pass-1 work of a completion state (``State.completion``).
 
@@ -1461,16 +1480,76 @@ class CompletionStateConfig(BaseModel):
                     f"completion {field} {key!r} must be internal-prefixed so no "
                     "prompt, extraction or get_data reaches it"
                 )
-        if (
-            not self.result_key.strip()
-            or has_internal_prefix(self.result_key)
-            or self.result_key in RESERVED_CONTEXT_KEYS
-            or self.result_key == CONTEXT_KEY_AGENT_TRACE
-        ):
+        if not is_public_result_key(self.result_key):
             raise ValueError(
                 f"completion result_key {self.result_key!r} must be a public, "
                 "non-reserved context key (transitions read it)"
             )
+        return self
+
+
+class SynthesizeConfig(BaseModel):
+    """The work of a synthesize state (``State.synthesize``).
+
+    A fixed ``goal`` (the author's text, not blank) a runner turns into a
+    procedure (a child FSM), runs on the host conversation's model and merges
+    back. Core only loads it: a bare ``API.converse`` finds no extraction and
+    no passing transition, so it stays (BLOCKED). The runner writes
+    ``context[result_key]`` (a dict with a ``status``), which the pipeline
+    makes handler-only. ``inputs`` and ``return_keys`` (at least one) hold
+    public names only, never ``result_key``; ``on_failure`` is a state id the
+    transitions reach; ``min_lifecycle`` is the least trusted stored procedure
+    to run. Frozen, extras refused.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    goal: str = Field(min_length=1, max_length=SYNTHESIZE_GOAL_MAX_LENGTH)
+    inputs: tuple[str, ...] = ()
+    return_keys: tuple[str, ...] = Field(min_length=1)
+    on_failure: str = Field(
+        min_length=1, max_length=100, pattern=ASCII_IDENTIFIER_PATTERN
+    )
+    result_key: str = Field(
+        default=DEFAULT_SYNTHESIS_RESULT_KEY,
+        min_length=1,
+        max_length=SYNTHESIZE_KEY_MAX_LENGTH,
+    )
+    # A pattern, not a Literal: the validator sweep test reads Literal values as
+    # annotation names (test_validator_unit.py `_nested_models`).
+    min_lifecycle: str = Field(default="verified", pattern=r"^(verified|trusted)$")
+
+    @field_validator("inputs", "return_keys", mode="before")
+    @classmethod
+    def _validate_key_names(cls, value: object, info: Any) -> tuple[str, ...]:
+        argument = f"synthesize {info.field_name}"
+        if not isinstance(value, (list, tuple)):
+            raise ValueError(f"{argument} must be a list, not {type(value).__name__}")
+        names = checked_key_names(value, argument=argument)
+        if not all(
+            len(name) <= SYNTHESIZE_KEY_MAX_LENGTH
+            and is_public_result_key(name)
+            and not is_forbidden_context_entry(name, "")
+            for name in names
+        ):
+            raise ValueError(
+                f"{argument} may hold only public key names (no blank, internal, "
+                f"reserved or secret-looking name, at most {SYNTHESIZE_KEY_MAX_LENGTH} "
+                "characters)"
+            )
+        return names
+
+    @model_validator(mode="after")
+    def _validate_config(self) -> SynthesizeConfig:
+        if not self.goal.strip():
+            raise ValueError("synthesize goal must not be blank")
+        if not is_public_result_key(self.result_key):
+            raise ValueError(
+                f"synthesize result_key {self.result_key!r} must be a public, "
+                "non-reserved context key"
+            )
+        if self.result_key in self.inputs + self.return_keys:
+            raise ValueError("synthesize result_key cannot be an input or return key")
         return self
 
 
@@ -1600,6 +1679,21 @@ class State(BaseModel):
         ),
     )
 
+    # DECISION plan-2026-11-10T194139-2cefeb61/D-002: one optional, additive
+    # field (v4.1 unchanged, no existing `fsm_id` moves). Core only LOADS it; a
+    # runner outside core pushes the procedure. Do NOT add a push seam to the
+    # pipeline or `FSMManager` (a bare `converse` stays BLOCKED, by design), and
+    # do NOT make `FSMValidator.validate()` stricter than this loader (the
+    # never-stricter tests pin it; the flow gates live in `flow_analysis.py`).
+    synthesize: SynthesizeConfig | None = Field(
+        default=None,
+        description=(
+            "Synthesize state: a runner pushes a procedure for the goal and "
+            "writes the outcome to result_key. Excludes completion and every "
+            "extraction field."
+        ),
+    )
+
     @field_validator("transition_classification")
     @classmethod
     def _validate_transition_classification(
@@ -1708,6 +1802,31 @@ class State(BaseModel):
                 raise ValueError(
                     f"State '{self.id}': a completion state needs a transition "
                     "(a terminal state runs no turn)"
+                )
+        if self.synthesize is not None:
+            conflicts = [
+                name
+                for name, value in (
+                    ("completion", self.completion),
+                    ("field_extractions", self.field_extractions),
+                    ("classification_extractions", self.classification_extractions),
+                    ("required_context_keys", self.required_context_keys),
+                    ("extraction_instructions", self.extraction_instructions),
+                )
+                if value
+            ]
+            if conflicts:
+                raise ValueError(
+                    f"State '{self.id}': a synthesize state cannot also declare "
+                    f"{conflicts}"
+                )
+            if self.synthesize.on_failure not in {
+                transition.target_state for transition in self.transitions
+            }:
+                raise ValueError(
+                    f"State '{self.id}': synthesize on_failure "
+                    f"{self.synthesize.on_failure!r} must be one of the state's "
+                    "transition targets (a terminal state has none)"
                 )
         return self
 

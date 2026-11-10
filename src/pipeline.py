@@ -1586,17 +1586,26 @@ class MessagePipeline:
     def _handler_only_keys(self, instance: FSMInstance) -> frozenset[str]:
         """Keys no extraction may write (D-033): the FSM author's
         ``handler_only_keys`` plus the ``result_key`` of every completion state
-        (only that state's own completion call writes it, D-021).
+        (only that state's own completion call writes it, D-021) and of every
+        synthesize state (only the runner writes it, D-002 of plan 2cefeb61).
 
         Resolved per instance through ``fsm_resolver`` so a stacked child uses
         its own list, not the root's. Returns an empty set for the default.
         """
         fsm_def = self.fsm_resolver(instance.fsm_id)
-        return frozenset(fsm_def.handler_only_keys) | {
-            state.completion.result_key
-            for state in fsm_def.states.values()
-            if state.completion is not None
-        }
+        return (
+            frozenset(fsm_def.handler_only_keys)
+            | {
+                state.completion.result_key
+                for state in fsm_def.states.values()
+                if state.completion is not None
+            }
+            | {
+                state.synthesize.result_key
+                for state in fsm_def.states.values()
+                if state.synthesize is not None
+            }
+        )
 
     @staticmethod
     def _build_field_configs_from_state(state: State) -> list[FieldExtractionConfig]:
@@ -1608,9 +1617,10 @@ class MessagePipeline:
         ``field_extractions`` on the state are appended after the
         auto-generated ones. A completion state gets none: its Pass 1 is its
         completion call, and the keys its transitions read (its own
-        ``result_key`` among them) are never minted into extractions.
+        ``result_key`` among them) are never minted into extractions. A
+        synthesize state gets none either: a runner writes its result key.
         """
-        if state.completion is not None:
+        if state.completion is not None or state.synthesize is not None:
             return []
         configs: list[FieldExtractionConfig] = []
 

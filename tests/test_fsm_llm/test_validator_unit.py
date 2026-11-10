@@ -980,6 +980,11 @@ def _maximal_fsm_data():
                         "description": "Fallback to the tool turn.",
                         "priority": 900,
                     },
+                    {
+                        "target_state": "synth_turn",
+                        "description": "Fallback to the synthesize turn.",
+                        "priority": 950,
+                    },
                 ],
                 "field_extractions": [
                     {
@@ -1035,6 +1040,25 @@ def _maximal_fsm_data():
                     {"target_state": "done", "description": "Always finish."}
                 ],
             },
+            # A synthesize state (plan 2cefeb61 step 1): anchors
+            # SynthesizeConfig; reached from `start` on a third edge.
+            "synth_turn": {
+                "id": "synth_turn",
+                "description": "One synthesized procedure.",
+                "purpose": "Run a procedure compiled for a goal.",
+                "response_instructions": "",
+                "synthesize": {
+                    "goal": "Greet the user by name.",
+                    "inputs": ["name"],
+                    "return_keys": ["greeting"],
+                    "on_failure": "done",
+                    "result_key": "synth_result",
+                    "min_lifecycle": "trusted",
+                },
+                "transitions": [
+                    {"target_state": "done", "description": "Always finish."}
+                ],
+            },
             "done": {
                 "id": "done",
                 "description": "The terminal state.",
@@ -1072,6 +1096,7 @@ _MODEL_ANCHORS = {
         0,
     ),
     "CompletionStateConfig": ("states", "tool_turn", "completion"),
+    "SynthesizeConfig": ("states", "synth_turn", "synthesize"),
 }
 
 # One violating mutation per `model_validator`/`field_validator`. These cannot be
@@ -1120,6 +1145,17 @@ _VALIDATOR_VIOLATIONS = {
     ("CompletionStateConfig", "_validate_completion"): (
         ("states", "tool_turn", "completion", "tool_choice"),
         "undeclared_tool",
+    ),
+    # Plan 2cefeb61 step 1: `SynthesizeConfig` refuses a non-public key name
+    # (`_validate_key_names`) and a blank goal (`_validate_config`), both
+    # ValueError -> value_error.
+    ("SynthesizeConfig", "_validate_key_names"): (
+        ("states", "synth_turn", "synthesize", "inputs"),
+        ["_internal_only"],
+    ),
+    ("SynthesizeConfig", "_validate_config"): (
+        ("states", "synth_turn", "synthesize", "goal"),
+        "   ",
     ),
     ("TransitionCondition", "_validate_logic"): (
         ("states", "start", "transitions", 0, "conditions", 0, "logic"),
