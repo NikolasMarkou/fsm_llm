@@ -20,7 +20,7 @@ seam.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -58,6 +58,7 @@ from .constants import (
 )
 from .exceptions import LibraryError, SynthesisError, SynthesisRefusedError
 from .gates import verify_stored
+from .policy import SynthesisPolicy
 from .synthesizer import FSMSynthesizer, Procedure
 
 _ALLOWED_LIFECYCLES = {
@@ -92,7 +93,7 @@ def _result(
     }
 
 
-def _reason_of(error: Exception) -> str:
+def reason_of(error: Exception) -> str:
     """The fixed reason for an ``obtain`` failure; the message is never read."""
     if isinstance(error, SynthesisRefusedError) and error.code in REASONS:
         return error.code
@@ -103,6 +104,27 @@ def _reason_of(error: Exception) -> str:
     ):
         return REASON_PROVIDER_ERROR
     return REASON_COMPILE_FAILED
+
+
+def runnable_reason(
+    definition: FSMDefinition,
+    lifecycle: str,
+    *,
+    min_lifecycle: str,
+    policy: SynthesisPolicy,
+    inputs: Iterable[str],
+    return_keys: Iterable[str],
+) -> str | None:
+    """The reason code a stored procedure may not run, else ``None``: a
+    ``completion`` state, a lifecycle below ``min_lifecycle`` (``verified`` or
+    ``trusted``) or a failed ``verify_stored``, checked in that order. Shared by
+    the runner and the agent tools; never raises."""
+    if any(s.completion for s in definition.states.values()):
+        return REASON_COMPLETION_UNSUPPORTED
+    if lifecycle not in _ALLOWED_LIFECYCLES[min_lifecycle]:
+        return REASON_LIFECYCLE_TOO_LOW
+    report = verify_stored(definition, policy, inputs=inputs, return_keys=return_keys)
+    return None if report.passed else REASON_LIBRARY_ERROR
 
 
 class ProcedureRunner:
@@ -281,7 +303,7 @@ class ProcedureRunner:
                     min_lifecycle=config.min_lifecycle,
                 )
             except (SynthesisError, ValueError) as e:
-                reason = _reason_of(e)
+                reason = reason_of(e)
             else:
                 self._emit(
                     "obtained",
@@ -317,17 +339,15 @@ class ProcedureRunner:
         definition = procedure.definition
         record = procedure.record
         lifecycle = record.lifecycle if record else LIFECYCLE_VERIFIED
-        if any(s.completion for s in definition.states.values()):
-            return REASON_COMPLETION_UNSUPPORTED, ""
-        if lifecycle not in _ALLOWED_LIFECYCLES[config.min_lifecycle]:
-            return REASON_LIFECYCLE_TOO_LOW, ""
-        if not verify_stored(
+        if reason := runnable_reason(
             definition,
-            self.synthesizer.policy,
+            lifecycle,
+            min_lifecycle=config.min_lifecycle,
+            policy=self.synthesizer.policy,
             inputs=config.inputs,
             return_keys=config.return_keys,
-        ).passed:
-            return REASON_LIBRARY_ERROR, ""
+        ):
+            return reason, ""
         try:
             reply = self.api.push_fsm(
                 conv_id,

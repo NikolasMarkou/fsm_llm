@@ -8,8 +8,9 @@ model runs it as a pushed child of a host conversation.
 
 So far: the exception hierarchy, the shared constants, the policy (limits, the
 G5 gate and abort injection), the library, the gate composition, the compile
-and repair loop, ``obtain`` with the approval gate, and the ``ProcedureRunner``
-that pushes, runs and pops a procedure under a ``synthesize`` state.
+and repair loop, ``obtain`` with the approval gate, the ``ProcedureRunner``
+that pushes, runs and pops a procedure under a ``synthesize`` state, and the
+agent tools ``obtain_procedure`` and ``run_procedure``.
 
 Import it by name, ``from fsm_llm.synthesis import SynthesisError``;
 ``import fsm_llm`` never loads it.
@@ -42,6 +43,7 @@ from .synthesizer import (
     ProcedureApprovalRequest,
     reviewer_from_hitl,
 )
+from .tools import create_procedure_tools
 
 __all__ = [
     "CompileResult",
@@ -60,6 +62,7 @@ __all__ = [
     "SynthesisPolicy",
     "SynthesisRefusedError",
     "check_policy",
+    "create_procedure_tools",
     "digest_of",
     "inject_abort",
     "needs_approval",
