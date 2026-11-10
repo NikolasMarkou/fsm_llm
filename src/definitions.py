@@ -1531,8 +1531,12 @@ class SynthesizeConfig(BaseModel):
     no passing transition, so it stays (BLOCKED). The runner writes
     ``context[result_key]`` (a dict with a ``status``), which the pipeline
     makes handler-only. ``inputs`` and ``return_keys`` (at least one) hold
-    public names only, never ``result_key``; ``on_failure`` is a state id the
-    transitions reach; ``min_lifecycle`` is the least trusted stored procedure
+    public names only, never ``result_key``; ``on_failure`` is a state id one
+    transition reaches, and every transition of the state must read
+    ``result_key`` (checked on the whole FSM: a condition that requires it or
+    reads it in its logic, or one that reads a handler-only key), so the
+    failure edge is gated on the result too and nothing fires before the runner
+    wrote one; ``min_lifecycle`` is the least trusted stored procedure
     to run. Frozen, extras refused.
     """
 
@@ -2013,8 +2017,77 @@ class FSMDefinition(BaseModel):
         if not reachable_terminals:
             raise ValueError("No terminal states are reachable from initial state")
 
+        self._check_synthesize_states()
         logger.debug(f"FSM '{self.name}' validation successful")
         return self
+
+    # DECISION plan-2026-11-10T194139-2cefeb61/D-034: an edge of a synthesize
+    # state may read the result key OR a handler-only key. Do NOT require the
+    # result key alone: the runner's injected abort edge (handler-only
+    # `procedure_abort`) sits on every state of a compiled procedure, nested
+    # synthesize states included. Do NOT move this to validator.py (it may
+    # never be stricter than the loader).
+    def _check_synthesize_states(self) -> None:
+        """Cross-state rules for synthesize states (they need the whole FSM).
+
+        1. Every transition must read the state's ``result_key`` (a condition
+           that requires it or reads it in its logic) or a ``handler_only_keys``
+           entry (only a handler or the runner writes one, so such an edge cannot
+           pass before they act; the runner's injected abort edge is of this
+           kind). Any other edge passes on the first advance, before the runner
+           has produced a result.
+        2. Host keys a synthesize state returns or takes may not be runner-owned:
+           a return key merged by ``pop_fsm`` would write a value the child's
+           model extracted over a handler-only key, a synthesize result or a
+           completion result; an input named like a result would be overwritten
+           by the runner. (A completion ``messages_key`` is internal-prefixed and
+           so can never be a public return key.)
+        """
+        owned = {
+            state.completion.result_key: "result_key of a completion state"
+            for state in self.states.values()
+            if state.completion is not None
+        }
+        owned.update(
+            {
+                state.synthesize.result_key: "result_key of a synthesize state"
+                for state in self.states.values()
+                if state.synthesize is not None
+            }
+        )
+        for state in self.states.values():
+            config = state.synthesize
+            if config is None:
+                continue
+            reads = {config.result_key, *self.handler_only_keys}
+            for transition in state.transitions:
+                if not any(
+                    reads.intersection(condition.requires_context_keys or ())
+                    or reads.intersection(logic_referenced_keys(condition.logic))
+                    for condition in transition.conditions or ()
+                ):
+                    raise ValueError(
+                        f"State '{state.id}': the transition to "
+                        f"{transition.target_state!r} must read the synthesize "
+                        f"result key {config.result_key!r} (a condition that "
+                        "requires it or reads it in its logic), or it fires "
+                        "before the runner has produced a result"
+                    )
+            for entry, names in (
+                ("return_keys", config.return_keys),
+                ("inputs", config.inputs),
+            ):
+                for name in names:
+                    if entry == "return_keys" and name in self.handler_only_keys:
+                        reason = "a handler_only_keys entry"
+                    elif name in owned:
+                        reason = owned[name]
+                    else:
+                        continue
+                    raise ValueError(
+                        f"State '{state.id}': synthesize {entry} entry {name!r} "
+                        f"collides with {reason}"
+                    )
 
 
 # --------------------------------------------------------------

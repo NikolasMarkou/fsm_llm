@@ -269,6 +269,132 @@ class TestSynthesizeStateRules:
         assert with_field != API.process_fsm_definition(without)[1]
 
 
+def _completion_state(state_id: str, **completion: Any) -> dict[str, Any]:
+    return {
+        "id": state_id,
+        "description": "a completion turn",
+        "purpose": "p",
+        "completion": {"response_format_key": "_fmt", **completion},
+        "transitions": [{"target_state": "done", "description": "go"}],
+    }
+
+
+def _gate(*, requires: list[str] | None = None, logic: Any = None) -> dict[str, Any]:
+    condition: dict[str, Any] = {"description": "gate"}
+    if requires is not None:
+        condition["requires_context_keys"] = requires
+    if logic is not None:
+        condition["logic"] = logic
+    return {"target_state": "done", "description": "go", "conditions": [condition]}
+
+
+class TestEveryEdgeReadsTheResult:
+    """An edge that does not read the result key fires before the runner ran."""
+
+    @pytest.mark.parametrize(
+        "edge",
+        [
+            {"target_state": "done", "description": "no conditions"},
+            {"target_state": "done", "description": "empty", "conditions": []},
+            _gate(requires=["topic"]),
+            _gate(logic={"==": [{"var": "topic"}, 1]}),
+            _gate(logic={"==": [{"var": "synthesis_result_x"}, 1]}),
+        ],
+        ids=["bare", "empty-conditions", "other-key", "other-var", "prefix-lookalike"],
+    )
+    def test_an_edge_that_ignores_the_result_is_refused(self, edge):
+        transitions = [edge, _synth_state()["transitions"][1]]
+        with pytest.raises(ValidationError, match=r"solve.*done.*synthesis_result"):
+            FSMDefinition(**_parent(transitions=transitions))
+
+    @pytest.mark.parametrize(
+        "edge",
+        [
+            _gate(requires=["synthesis_result"]),
+            _gate(logic={"==": [{"var": "synthesis_result.status"}, "ok"]}),
+            _gate(logic={"missing": ["synthesis_result"]}),
+        ],
+        ids=["requires", "dotted-var", "missing"],
+    )
+    def test_an_edge_that_reads_the_result_loads(self, edge):
+        transitions = [edge, _synth_state()["transitions"][1]]
+        FSMDefinition(**_parent(transitions=transitions))
+
+    def test_an_edge_gated_on_a_handler_only_key_loads(self):
+        # the runner's injected abort edge is of this kind
+        definition = _parent()
+        definition["handler_only_keys"] = ["procedure_abort"]
+        definition["states"]["solve"]["transitions"].append(
+            _gate(requires=["procedure_abort"])
+        )
+        FSMDefinition(**definition)
+        definition["handler_only_keys"] = []
+        with pytest.raises(ValidationError, match="must read"):
+            FSMDefinition(**definition)
+
+    def test_a_custom_result_key_is_the_one_read(self):
+        config = _synth(result_key="my_result")
+        with pytest.raises(ValidationError, match="my_result"):
+            FSMDefinition(**_parent(config))  # the default gates read synthesis_result
+
+    def test_the_failure_edge_is_also_gated_on_the_result(self):
+        transitions = [
+            _gate(requires=["synthesis_result"]),
+            {"target_state": "apology", "description": "failed"},
+        ]
+        with pytest.raises(ValidationError, match="apology"):
+            FSMDefinition(**_parent(transitions=transitions))
+
+
+class TestHostKeysMayNotCollideWithRunnerKeys:
+    @pytest.mark.parametrize(
+        "mutate, key, name",
+        [
+            ("handler_only", "answer", "handler_only_keys"),
+            ("other_result", "second_result", "result_key"),
+            ("completion_result", "tool_out", "completion"),
+        ],
+    )
+    def test_a_return_key_collision_is_refused(self, mutate, key, name):
+        definition = _parent(_synth(return_keys=["answer"]))
+        if mutate == "handler_only":
+            definition["handler_only_keys"] = ["answer"]
+        elif mutate == "other_result":
+            second = _synth_state(_synth(result_key=key, return_keys=["z"]))
+            for t in second["transitions"]:
+                t["conditions"][0]["requires_context_keys"] = [key]
+            second.update(id="second")
+            second["transitions"][0]["target_state"] = "done"
+            second["transitions"][1]["target_state"] = "apology"
+            definition["states"]["second"] = second
+            definition["states"]["solve"]["transitions"][0]["target_state"] = "second"
+            definition["states"]["solve"]["synthesize"]["return_keys"] = [key]
+        else:  # completion_result (a completion messages_key is internal-only)
+            definition["states"]["c"] = _completion_state("c", result_key=key)
+            definition["states"]["start"]["transitions"].append(
+                {"target_state": "c", "description": "c"}
+            )
+            definition["states"]["solve"]["synthesize"]["return_keys"] = [key]
+        with pytest.raises(ValidationError, match=rf"solve.*{key}.*{name}"):
+            FSMDefinition(**definition)
+
+    def test_an_input_may_not_name_another_states_result_key(self):
+        definition = _parent(_synth(inputs=["second_result"]))
+        second = _synth_state(_synth(result_key="second_result", return_keys=["z"]))
+        for t in second["transitions"]:
+            t["conditions"][0]["requires_context_keys"] = ["second_result"]
+        second.update(id="second")
+        definition["states"]["second"] = second
+        definition["states"]["solve"]["transitions"][0]["target_state"] = "second"
+        with pytest.raises(ValidationError, match=r"solve.*second_result.*input"):
+            FSMDefinition(**definition)
+
+    def test_unrelated_handler_only_keys_and_results_load(self):
+        definition = _parent()
+        definition["handler_only_keys"] = ["other_secret"]
+        FSMDefinition(**definition)
+
+
 class TestValidatorKnowsTheField:
     def test_no_unknown_key_warning(self):
         result = FSMValidator(_parent()).validate()

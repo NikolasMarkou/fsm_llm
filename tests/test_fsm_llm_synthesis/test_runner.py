@@ -727,12 +727,21 @@ def _nesting() -> dict[str, Any]:
                     "inputs": ["topic"],
                     "return_keys": ["topic"],
                     "on_failure": "nest_end",
+                    # not the reserved default: a compiled procedure may not
+                    # read `synthesis_result` (G5), and its edge must read one
+                    "result_key": "nested_result",
                 },
                 "transitions": [
                     {
                         "target_state": "nest_end",
                         "description": "the nested run settled",
                         "priority": 1,
+                        "conditions": [
+                            {
+                                "description": "a result exists",
+                                "requires_context_keys": ["nested_result"],
+                            }
+                        ],
                     }
                 ],
             },

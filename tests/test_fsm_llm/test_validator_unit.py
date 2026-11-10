@@ -1056,7 +1056,16 @@ def _maximal_fsm_data():
                     "min_lifecycle": "trusted",
                 },
                 "transitions": [
-                    {"target_state": "done", "description": "Always finish."}
+                    {
+                        "target_state": "done",
+                        "description": "Finish once the procedure settled.",
+                        "conditions": [
+                            {
+                                "description": "A result exists.",
+                                "requires_context_keys": ["synth_result"],
+                            }
+                        ],
+                    }
                 ],
             },
             "done": {
