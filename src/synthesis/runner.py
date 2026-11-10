@@ -15,7 +15,9 @@ seam.
 # ``shared_context_keys`` at push (D-017): a failed or aborted child would then
 # merge partial data into the parent. Read the child's data BEFORE the pop
 # (after it the top of the stack is the parent). The child's steps are counted
-# by arithmetic on core's step number, not by a loop of the runner's own.
+# by the runner's own ``_Run.child_steps``. Do NOT derive them from core's step
+# number: it restarts at 1 on every ``run_until_terminal`` call, so a host that
+# resumes after ``RunBudgetExceededError`` would never reach ``max_turns``.
 """
 
 from __future__ import annotations
@@ -50,6 +52,7 @@ from .constants import (
     REASON_PROVIDER_ERROR,
     REASON_PUSH_FAILED,
     REASON_RETURN_KEYS_MISSING,
+    REASON_UNEXPECTED_ERROR,
     REASONS,
     STATUS_ABORTED,
     STATUS_FAILED,
@@ -69,13 +72,14 @@ _ALLOWED_LIFECYCLES = {
 
 @dataclass
 class _Run:
-    """One procedure pushed by the runner. ``pushed_at`` is core's step number at
-    the push (run mode); ``child_steps`` the steps it has had (run mode: set from
-    the step number, converse mode: counted); ``aborting`` once the abort is set."""
+    """One procedure pushed by the runner. ``child_steps`` is the one count of the
+    steps it has had, kept by the runner and never read off core: a run-mode hook
+    call that finds the child on top and not ended counts the step before it (the
+    call that pushed it counts none), ``converse`` counts each user turn.
+    ``aborting`` once the abort is set."""
 
     procedure: Procedure
     config: SynthesizeConfig
-    pushed_at: int
     child_steps: int = 0
     aborting: bool = False
 
@@ -130,6 +134,12 @@ def runnable_reason(
 class ProcedureRunner:
     """Runs the ``synthesize`` states of a host FSM on one ``API``.
 
+    One instance serves one thread at a time per conversation, like
+    ``API.converse`` (which raises on a concurrent turn): the runner holds no
+    lock. Two threads on one conversation can see the other's ``running`` result
+    and spend their step budget on it; a lock around the hook would not make that
+    safe, since core's own turn guard still refuses the second driver.
+
     Interface contract:
         ``ProcedureRunner(api, definition, synthesizer, *, trace_sink=None)``:
         ``definition`` is the host FSM (a dict or ``FSMDefinition``; the root of
@@ -155,11 +165,15 @@ class ProcedureRunner:
         When the child ends it is popped and the final
         ``{status, procedure_id, version, reason}`` is written: ``ok`` (every
         return key merged), ``aborted`` (the child spent ``policy.max_turns``
-        steps; nothing merged) or ``failed`` with a reason from ``constants``
+        steps in total, across resumed ``run`` calls; nothing merged) or ``failed`` with a reason from ``constants``
         (nothing merged). The result key is skip-if-set: to run a state again on
         re-entry clear its result key on entry (``clear_keys_on_entry``). What
-        ``obtain`` raises other than ``SynthesisError`` and ``ValueError`` is a
-        bug and propagates, as does anything a core call raises.
+        ``obtain`` raises other than ``SynthesisError`` and ``ValueError`` (or
+        any other ``Exception`` between the ``running`` write and the push) ends
+        in ``failed`` / ``unexpected_error`` with one WARNING naming the
+        exception type only, and the stack as it was; never ``running``.
+        ``KeyboardInterrupt`` and ``SystemExit`` propagate, as does anything a
+        core call outside that window raises.
 
     Bookkeeping: ``_runs`` maps a conversation id to the runs it has pushed,
     outermost first, and holds ``len(runs) == stack_depth - 1``; a longer list
@@ -190,6 +204,7 @@ class ProcedureRunner:
         """The ``before_step`` callable of ``conv_id`` for ``run_until_terminal``."""
 
         def before_step(step: int) -> None:
+            self._count_child_step(conv_id)
             self._tick(conv_id, step)
 
         return before_step
@@ -230,17 +245,21 @@ class ProcedureRunner:
         del runs[depth - 1 :]
         return runs if len(runs) == depth - 1 else None
 
+    def _count_child_step(self, conv_id: str) -> None:
+        """Run mode: a hook call with a live child on top means it just had a step."""
+        runs = self._runs_of(conv_id)
+        if runs and not self.api.has_conversation_ended(conv_id):
+            runs[-1].child_steps += 1
+
     def _tick(self, conv_id: str, step: int | None) -> list[str]:
         """Pop an ended child, abort one over budget, else start a pending
         synthesize state. ``step`` is core's next step number (run mode) or
-        ``None`` (converse mode: ``child_steps`` is counted by ``converse``)."""
+        ``None`` (converse mode); it only labels trace events."""
         runs = self._runs_of(conv_id)
         if runs is None:
             return []
         if runs:
             run = runs[-1]
-            if step is not None:
-                run.child_steps = step - run.pushed_at
             if self.api.has_conversation_ended(conv_id):
                 self._finish(conv_id, run, step)
                 return []
@@ -290,28 +309,36 @@ class ProcedureRunner:
         api.update_context(conv_id, {config.result_key: _result(STATUS_RUNNING)})
         procedure: Procedure | None = None
         reply = ""
-        if len(runs) >= policy.max_synthesis_depth:
-            reason = REASON_DEPTH_REFUSED
-        elif any(is_missing(data, key) for key in config.inputs):
-            reason = REASON_INPUTS_MISSING
-        else:
-            try:
-                procedure = self.synthesizer.obtain(
-                    config.goal,
-                    inputs=config.inputs,
-                    return_keys=config.return_keys,
-                    min_lifecycle=config.min_lifecycle,
-                )
-            except (SynthesisError, ValueError) as e:
-                reason = reason_of(e)
+        depth = api.get_stack_depth(conv_id)
+        try:
+            if len(runs) >= policy.max_synthesis_depth:
+                reason = REASON_DEPTH_REFUSED
+            elif any(is_missing(data, key) for key in config.inputs):
+                reason = REASON_INPUTS_MISSING
             else:
-                self._emit(
-                    "obtained",
-                    digest=procedure.digest,
-                    version=procedure.record.version if procedure.record else None,
-                    source=procedure.source,
-                )
-                reason, reply = self._push(conv_id, config, procedure, data, step, runs)
+                try:
+                    procedure = self.synthesizer.obtain(
+                        config.goal,
+                        inputs=config.inputs,
+                        return_keys=config.return_keys,
+                        min_lifecycle=config.min_lifecycle,
+                    )
+                except (SynthesisError, ValueError) as e:
+                    reason = reason_of(e)
+                else:
+                    self._emit(
+                        "obtained",
+                        digest=procedure.digest,
+                        version=procedure.record.version if procedure.record else None,
+                        source=procedure.source,
+                    )
+                    reason, reply = self._push(
+                        conv_id, config, procedure, data, step, runs
+                    )
+        except Exception as e:  # fail closed: the result must never stay `running`
+            logger.warning(f"synthesis ended on an unexpected {type(e).__name__}")
+            reason, reply = REASON_UNEXPECTED_ERROR, ""
+            self._unwind(conv_id, depth)
         if reason:
             api.update_context(
                 conv_id, {config.result_key: _result(STATUS_FAILED, reason, procedure)}
@@ -324,6 +351,14 @@ class ProcedureRunner:
             )
             return []
         return [reply]
+
+    def _unwind(self, conv_id: str, depth: int) -> None:
+        """Pop frames a failed push left above ``depth`` (the trim heals ``_runs``)."""
+        try:
+            while self.api.get_stack_depth(conv_id) > depth:
+                self.api.pop_fsm(conv_id)
+        except Exception as e:
+            logger.warning(f"could not unwind a failed push: {type(e).__name__}")
 
     def _push(
         self,
@@ -358,7 +393,7 @@ class ProcedureRunner:
             )
         except (FSMError, ValueError):
             return REASON_PUSH_FAILED, ""
-        runs.append(_Run(procedure, config, step or 0))
+        runs.append(_Run(procedure, config))
         self._emit("pushed", digest=procedure.digest, step=step)
         return "", reply
 

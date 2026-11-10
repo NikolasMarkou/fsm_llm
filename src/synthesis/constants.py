@@ -36,6 +36,7 @@ REASON_DEPTH_REFUSED = "depth_refused"
 REASON_COMPLETION_UNSUPPORTED = "completion_unsupported"
 REASON_LIFECYCLE_TOO_LOW = "lifecycle_too_low"
 REASON_BUDGET_SPENT = "budget_spent"
+REASON_UNEXPECTED_ERROR = "unexpected_error"  # a fault outside the mapped ones
 REASONS = (
     REASON_INPUTS_MISSING,
     REASON_RETURN_KEYS_MISSING,
@@ -50,6 +51,7 @@ REASONS = (
     REASON_COMPLETION_UNSUPPORTED,
     REASON_LIFECYCLE_TOO_LOW,
     REASON_BUDGET_SPENT,
+    REASON_UNEXPECTED_ERROR,
 )
 
 # --- Library lifecycle, in order: draft -> verified -> trusted -> deprecated ---

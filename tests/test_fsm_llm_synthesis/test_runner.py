@@ -374,6 +374,26 @@ class TestAbort:
         assert rig.library is not None
         assert rig.library.get_record(rig.digest).stats["runs"] == 0
 
+    def test_a_resumed_run_still_aborts_the_child_after_max_turns_in_total(
+        self, valid_fsm
+    ):
+        """Core restarts its step number at 1 on every ``run`` call; the runner's
+        own count of child steps must not restart with it (review concern 5)."""
+        rig = _rig(valid_fsm, extraction={}, policy=SynthesisPolicy(max_turns=5))
+
+        for _ in range(10):
+            try:
+                rig.runner.run(rig.conv, max_steps=3)
+            except RunBudgetExceededError:
+                continue
+            break
+
+        assert (rig.state, rig.depth) == ("apology", 1)
+        assert rig.result["status"] == "aborted"
+        assert rig.names == ["obtained", "pushed", "aborted", "popped"]
+        # the greeting plus exactly max_turns child steps, however the run was cut
+        assert rig.cheap.count("generate_response", "ask") == 1 + 5
+
     def test_ending_the_conversation_with_a_child_on_top_counts_no_run(
         self, valid_fsm, tmp_path
     ):
@@ -496,6 +516,94 @@ class TestFailuresAreFixedReasons:
         }
         assert SECRET not in repr(rig.data) and SECRET not in repr(rig.events)
         assert rig.names == ["failed"]
+
+    @pytest.mark.parametrize(
+        "error", [TimeoutError(SECRET), IndexError(SECRET), RuntimeError(SECRET)]
+    )
+    def test_an_unexpected_obtain_error_is_a_final_failure_not_running(
+        self, valid_fsm, monkeypatch, error
+    ):
+        rig = _rig(valid_fsm)
+        calls: list[int] = []
+
+        def blow_up(*args: Any, **kwargs: Any) -> Any:
+            calls.append(1)
+            raise error
+
+        monkeypatch.setattr(rig.synth, "obtain", blow_up)
+        seen: list[str] = []
+        logger.enable("fsm_llm")
+        handler = logger.add(lambda m: seen.append(str(m)), level="WARNING")
+        try:
+            rig.runner.run(rig.conv, max_steps=10)
+        finally:
+            logger.remove(handler)
+            logger.disable("fsm_llm")
+
+        assert (rig.state, rig.depth) == ("apology", 1)
+        assert rig.result == {
+            "status": "failed",
+            "procedure_id": None,
+            "version": None,
+            "reason": "unexpected_error",
+        }
+        assert rig.names == ["failed"] and calls == [1]
+        assert SECRET not in repr(rig.data) and SECRET not in repr(rig.events)
+        warnings = [m for m in seen if type(error).__name__ in m]
+        assert len(warnings) == 1 and SECRET not in warnings[0]
+
+    def test_the_failure_is_final_a_second_run_obtains_nothing_more(self, valid_fsm):
+        """The r7 shape: the real strong double raises a client timeout."""
+        rig = _rig(valid_fsm, replies=[TimeoutError(SECRET)])
+        rig.runner.converse(rig.conv, "hello")
+        assert (rig.state, rig.result["reason"]) == ("solve", "unexpected_error")
+        rig.runner.converse(rig.conv, "again")
+
+        assert (rig.state, rig.depth) == ("apology", 1)
+        assert len(rig.strong.requests) == 1
+        assert rig.names == ["failed"]
+
+    def test_a_failed_pre_push_check_is_a_final_failure(self, valid_fsm, monkeypatch):
+        rig = _rig(valid_fsm)
+
+        def blow_up(*args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError(SECRET)
+
+        monkeypatch.setattr("fsm_llm.synthesis.runner.verify_stored", blow_up)
+        rig.runner.run(rig.conv, max_steps=10)
+
+        assert (rig.state, rig.depth) == ("apology", 1)
+        assert rig.result["reason"] == "unexpected_error"
+        assert rig.result["procedure_id"] == rig.digest
+        assert rig.names == ["obtained", "failed"]
+
+    def test_a_push_that_raises_after_pushing_leaves_the_stack_as_it_was(
+        self, valid_fsm, monkeypatch
+    ):
+        rig = _rig(valid_fsm)
+        real_push = rig.api.push_fsm
+
+        def push_then_fail(*args: Any, **kwargs: Any) -> Any:
+            real_push(*args, **kwargs)
+            raise RuntimeError(SECRET)
+
+        monkeypatch.setattr(rig.api, "push_fsm", push_then_fail)
+        rig.runner.run(rig.conv, max_steps=10)
+
+        assert (rig.state, rig.depth) == ("apology", 1)
+        assert rig.result["reason"] == "unexpected_error"
+        assert rig.runner._runs[rig.conv] == []
+
+    @pytest.mark.parametrize("signal", [KeyboardInterrupt, SystemExit])
+    def test_ctrl_c_and_exit_are_never_swallowed(self, valid_fsm, monkeypatch, signal):
+        rig = _rig(valid_fsm)
+
+        def interrupt(*args: Any, **kwargs: Any) -> Any:
+            raise signal()
+
+        monkeypatch.setattr(rig.synth, "obtain", interrupt)
+        with pytest.raises(signal):
+            rig.runner.run(rig.conv, max_steps=10)
 
     def test_a_real_provider_outage(self, valid_fsm):
         rig = _rig(valid_fsm, replies=[LLMResponseError(SECRET)])
