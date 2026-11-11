@@ -53,7 +53,6 @@ from fsm_llm.security import has_internal_prefix, is_forbidden_context_entry
 from .constants import (
     ABORT_CONTEXT_KEY,
     ABORT_STATE_ID,
-    DEFAULT_MAX_TRACES,
     RESULT_CONTEXT_KEY,
 )
 from .exceptions import SynthesisError
@@ -69,7 +68,6 @@ _INT_LIMITS = {
     "max_turns": 1,
     "max_compile_tokens": 1,
     "max_synthesis_seconds": 1,
-    "max_traces_per_digest": 1,
     "max_sim_turns": 1,
     "sim_trials": 1,
     "max_simulation_seconds": 1,
@@ -125,8 +123,6 @@ class SynthesisPolicy:
     Interface contract (callers: the compiler, G5, the runner, the tools):
         Every integer limit must be an ``int`` (not a ``bool``, ``float`` or
         ``str``) from its minimum (1; ``max_repair_rounds`` 0) to ``2**63 - 1``.
-        ``max_traces_per_digest`` is how many run traces the library keeps
-        per procedure (the callers of ``FSMLibrary.add_trace`` pass it).
         ``max_fields_per_state`` caps the distinct key names one state
         extracts (each is a cheap-model call per child step).
         ``reuse_min_score`` is an ``int`` or ``float`` from 0 to 1.
@@ -162,7 +158,6 @@ class SynthesisPolicy:
     max_turns: int = 40
     max_compile_tokens: int = 8192
     max_synthesis_seconds: int = 300
-    max_traces_per_digest: int = DEFAULT_MAX_TRACES
     max_sim_turns: int = 12
     sim_trials: int = 2
     max_simulation_seconds: int = 300

@@ -32,7 +32,7 @@ from .constants import (
 )
 
 TRACE_VERSION = 1
-_MODES = ("run", "converse", "sim")
+_MODES = ("run", "converse")
 _STATUSES = (STATUS_OK, STATUS_ABORTED, STATUS_FAILED)
 _OUTCOMES = (None, *(r.value for r in TransitionEvaluationResult))
 _KIND_TYPES = (*TRACE_KINDS.values(), TRACE_KIND_OTHER)
@@ -66,9 +66,9 @@ def _strs(value: object) -> tuple[str, ...]:
 class RunTrace:
     """One run of one procedure, value-free.
 
-    ``mode``: ``run`` or ``converse`` (the runner's drivers) or ``sim`` (a G6b
-    trial of ``scenario`` kind); ``states``: the state after each counted step
-    (the last 100); ``keys``: declared names present at the end; ``kinds``:
+    ``mode``: ``run`` or ``converse`` (the runner's drivers); ``states``: the
+    state after each counted step (the last 100); ``keys``: declared names
+    present at the end; ``kinds``:
     ``(key, type name)`` for gate-read keys (``TRACE_KINDS`` names or
     ``other``); ``status``, ``reason``: the runner's result; ``stuck``: the
     state an unfinished run was in; ``outcome``: ``blocked``, ``ambiguous`` or
@@ -83,7 +83,6 @@ class RunTrace:
     digest: str
     version: str | None = None
     mode: str = "run"
-    scenario: str | None = None
     states: tuple[str, ...] = ()
     steps: int = 0
     keys: tuple[str, ...] = ()
@@ -105,7 +104,7 @@ class RunTrace:
             raise ValueError("unknown trace outcome")
         if type(self.steps) is not int or self.steps < 0:
             raise ValueError("steps is a count")
-        for name in ("version", "scenario", "reason", "stuck"):
+        for name in ("version", "reason", "stuck"):
             text = getattr(self, name)
             if text is not None and not isinstance(text, str):
                 raise TypeError(f"{name} is a string or None")

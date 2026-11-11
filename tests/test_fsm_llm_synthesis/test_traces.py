@@ -29,7 +29,6 @@ class TestRunTrace:
         t = _trace(
             version="1.2",
             mode="converse",
-            scenario="happy",
             states=("a", "b"),
             steps=2,
             keys=("k",),
@@ -42,6 +41,15 @@ class TestRunTrace:
         row = t.to_row()
         assert row["v"] == 1 and row["states"] == ["a", "b"]
         assert RunTrace.from_row(row) == t
+
+    def test_there_is_no_sim_mode_and_no_scenario_field(self):
+        """D-069: nothing in ``src`` writes either, so a trace cannot hold one."""
+        assert "scenario" not in {f.name for f in dataclasses.fields(RunTrace)}
+        with pytest.raises(ValueError):
+            _trace(mode="sim")
+        row = {**_trace().to_row(), "scenario": "happy"}
+        with pytest.raises(TypeError):
+            RunTrace.from_row(row)
 
     def test_it_is_frozen(self):
         with pytest.raises(dataclasses.FrozenInstanceError):

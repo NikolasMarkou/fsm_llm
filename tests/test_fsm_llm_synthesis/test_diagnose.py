@@ -399,9 +399,9 @@ class TestShape:
 
     def test_a_canary_in_a_trace_never_reaches_a_finding(self):
         canary = "CANARY-7f3a"
-        t = _t(keys=("anything",), scenario=canary, version=canary)
-        sim = _t(mode="sim", scenario=canary, reason="check_failed")
-        got = diagnose([t, sim], DEFINITION, POLICY)
+        t = _t(keys=("anything",), version=canary)
+        other = _t(reason=canary)
+        got = diagnose([t, other], DEFINITION, POLICY)
         assert got and canary not in repr(got)
 
     def test_diagnose_is_pure_over_its_arguments(self):

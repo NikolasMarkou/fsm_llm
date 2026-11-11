@@ -53,6 +53,15 @@ class TestCharacterizeNameOnlySecretCall:
 
 
 class TestSynthesisPolicyLimits:
+    def test_the_policy_has_no_field_nothing_reads(self):
+        """D-069: ``max_traces_per_digest`` had no reader (the ring cap is the
+        ``max_traces`` argument of ``FSMLibrary.add_trace``)."""
+        assert "max_traces_per_digest" not in {
+            f.name for f in dataclasses.fields(SynthesisPolicy)
+        }
+        with pytest.raises(TypeError):
+            SynthesisPolicy(max_traces_per_digest=5)  # type: ignore[call-arg]
+
     def test_defaults(self):
         p = SynthesisPolicy()
         assert (p.max_states, p.max_transitions_per_state, p.max_text_chars) == (
@@ -65,7 +74,6 @@ class TestSynthesisPolicyLimits:
         assert (p.max_compile_tokens, p.max_synthesis_seconds) == (8192, 300)
         assert p.reuse_min_score == 0.8 and p.trust_after_successes is None
         assert p.allowed_tools == frozenset() and p.require_approval is False
-        assert p.max_traces_per_digest == 200
         assert (p.max_sim_turns, p.sim_trials) == (12, 2)
         assert (p.max_simulation_seconds, p.max_simulation_calls) == (300, 400)
         assert p.min_pass_rate == 0.5 and isinstance(p.min_pass_rate, float)
@@ -82,7 +90,6 @@ class TestSynthesisPolicyLimits:
             "max_turns",
             "max_compile_tokens",
             "max_synthesis_seconds",
-            "max_traces_per_digest",
             "max_sim_turns",
             "sim_trials",
             "max_simulation_seconds",
