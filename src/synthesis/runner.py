@@ -22,7 +22,7 @@ seam.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -120,7 +120,10 @@ def _round_codes(error: BaseException | None) -> str | None:
     comma-joined, rounds semicolon-joined, cut at 200 characters), else ``None``."""
     if not isinstance(error, SynthesisError):
         return None
-    rounds = error.details.get("rounds") or ()
+    return _round_string(error.details.get("rounds") or ())
+
+
+def _round_string(rounds: Sequence[Sequence[Any]]) -> str:
     return ";".join(",".join(map(str, codes)) for codes in rounds)[:200]
 
 
@@ -160,7 +163,8 @@ class ProcedureRunner:
         every conversation the runner serves), ``synthesizer`` obtains the
         procedures, ``trace_sink(event, fields)`` an optional plain callable
         (``TypeError`` if not callable). Events: ``obtained`` (digest, version,
-        source), ``pushed`` (digest, step), ``stepped`` (digest, step: the
+        source, rounds: failed compile rounds, seconds, calls and token counts
+        spent: D-049), ``pushed`` (digest, step), ``stepped`` (digest, step: the
         child's count, state, keys, kinds: one per counted child step),
         ``aborted`` (digest, step, state, outcome: the runner set the abort;
         ``blocked``, ``ambiguous`` or ``deterministic`` in the child's state),
@@ -419,6 +423,11 @@ class ProcedureRunner:
                         digest=procedure.digest,
                         version=procedure.record.version if procedure.record else None,
                         source=procedure.source,
+                        rounds=_round_string(procedure.rounds),
+                        seconds=procedure.seconds,
+                        calls=procedure.usage.calls,
+                        prompt_tokens=procedure.usage.prompt_tokens,
+                        completion_tokens=procedure.usage.completion_tokens,
                     )
                     reason, reply = self._push(
                         conv_id, config, procedure, data, step, runs

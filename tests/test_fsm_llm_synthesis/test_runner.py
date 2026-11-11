@@ -9,6 +9,7 @@ supports: ``run`` (core ``run_until_terminal`` with the runner's hook) and
 """
 
 import copy
+import dataclasses
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -21,6 +22,7 @@ from fsm_llm.definitions import (
     FSMDefinition,
     FSMError,
     LLMResponseError,
+    LLMUsage,
     RunBudgetExceededError,
 )
 from fsm_llm.logging import logger
@@ -866,7 +868,7 @@ class TestTraceSink:
         rig.runner.run(rig.conv, max_steps=20)
         for _, fields in rig.events:
             assert all(
-                isinstance(v, (str, int, type(None))) for v in fields.values()
+                isinstance(v, (str, int, float, type(None))) for v in fields.values()
             ), fields
 
     def test_a_raising_sink_is_swallowed_with_one_warning_per_event(self, valid_fsm):
@@ -892,6 +894,58 @@ class TestTraceSink:
         rig = _rig(valid_fsm)
         with pytest.raises(TypeError):
             ProcedureRunner(rig.api, _host(), rig.synth, trace_sink="not callable")  # type: ignore[arg-type]
+
+
+class TestObtainedEvent:
+    def _obtained(self, rig: _Rig) -> dict[str, Any]:
+        rig.runner.run(rig.conv, max_steps=20)
+        return next(f for name, f in rig.events if name == "obtained")
+
+    def test_it_carries_round_codes_seconds_and_token_counts(
+        self, valid_fsm, monkeypatch
+    ):
+        rig = _rig(valid_fsm)
+        procedure = dataclasses.replace(
+            _procedure(valid_fsm),
+            rounds=(("G5", "G4"), ("G6b",)),
+            seconds=1.25,
+            usage=LLMUsage(calls=3, prompt_tokens=40, completion_tokens=9),
+        )
+        _serve(rig, monkeypatch, procedure)
+        fields = self._obtained(rig)
+        assert fields["rounds"] == "G5,G4;G6b" and fields["seconds"] == 1.25
+        assert (fields["calls"], fields["prompt_tokens"]) == (3, 40)
+        assert fields["completion_tokens"] == 9
+
+    def test_a_first_pass_compile_has_empty_rounds_and_zero_usage(self, valid_fsm):
+        fields = self._obtained(_rig(valid_fsm))
+        assert fields["rounds"] == "" and fields["calls"] == 0
+        assert isinstance(fields["seconds"], float) and fields["seconds"] >= 0
+
+    def test_two_repair_rounds_arrive_as_codes_only(self, valid_fsm):
+        bad = copy.deepcopy(valid_fsm)
+        bad["persona"] = SECRET
+        bad["states"]["ask"]["transitions"][0]["priority"] = 0
+        rig = _rig(valid_fsm, replies=[SECRET, json.dumps(bad), json.dumps(valid_fsm)])
+        fields = self._obtained(rig)
+        assert (
+            fields["rounds"].count(";") == 1
+            and "reply-not-json-object" in fields["rounds"]
+        )
+        assert SECRET not in repr(fields)
+
+    def test_a_library_hit_is_source_library_with_empty_rounds(
+        self, valid_fsm, tmp_path
+    ):
+        first = _rig(valid_fsm, tmp_path)
+        first.runner.run(first.conv, max_steps=20)
+        fields = self._obtained(_rig(valid_fsm, tmp_path, replies=[]))
+        assert (fields["source"], fields["rounds"], fields["calls"]) == (
+            "library",
+            "",
+            0,
+        )
+        assert 0 <= fields["seconds"] < 5.0
 
 
 def _classified(valid_fsm: dict[str, Any], **entry: Any) -> dict[str, Any]:

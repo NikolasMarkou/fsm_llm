@@ -25,7 +25,7 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from fsm_llm.agents.definitions import ToolCall
@@ -37,6 +37,7 @@ from fsm_llm.definitions import (
     CompletionRequest,
     CompletionResponse,
     FSMDefinition,
+    LLMCallCounts,
     LLMResponseError,
     LLMUsage,
     SynthesizeConfig,
@@ -92,6 +93,7 @@ class CompileResult:
     rounds: int
     usage: LLMUsage | None
     simulation: SimulationReport | None = None
+    failures: tuple[tuple[str, ...], ...] = ()  # the codes of each failed round
 
 
 @dataclass(frozen=True)
@@ -129,16 +131,45 @@ class Procedure:
     """A procedure ``obtain`` hands back: ``source`` is ``"library"`` (a stored,
     re-verified hit) or ``"compiled"``; ``definition`` is the abort-injected
     form, ``data`` the same as the canonical dict the library stores, and
-    ``record`` its library record (``None`` without a library)."""
+    ``record`` its library record (``None`` without a library).
+
+    Telemetry, codes and numbers only (D-049): ``rounds`` the failure codes of
+    each failed compile round (``()`` for a first-pass compile or a hit),
+    ``seconds`` the ``obtain`` wall time on the injected clock, ``usage`` a
+    frozen snapshot of the strong interface's calls and tokens SPENT by this
+    obtain (zeros without a usable ``usage()``)."""
 
     digest: str
     definition: FSMDefinition
     record: LibraryRecord | None
     source: str
+    rounds: tuple[tuple[str, ...], ...] = ()
+    seconds: float = 0.0
+    usage: LLMUsage = field(default_factory=LLMUsage)
 
     @property
     def data(self) -> dict[str, Any]:
         return self.definition.model_dump(exclude_defaults=True)
+
+
+def _meter(llm: Any) -> LLMUsage:
+    """The interface's usage totals, or zeros when it keeps none (never raises
+    for a missing or foreign meter)."""
+    usage = getattr(llm, "usage", None)
+    totals = usage() if callable(usage) else None
+    return totals if isinstance(totals, LLMUsage) else LLMUsage()
+
+
+def _spent(after: LLMUsage | None, before: LLMUsage) -> LLMUsage:
+    """``after - before`` over the counters, clamped at zero (no ``by_kind``)."""
+    if not isinstance(after, LLMUsage):
+        return LLMUsage()
+    return LLMUsage(
+        **{
+            name: max(0, getattr(after, name) - getattr(before, name))
+            for name in LLMCallCounts.model_fields
+        }
+    )
 
 
 def _approval_request(
@@ -332,6 +363,7 @@ class FSMSynthesizer:
                         attempt + 1,
                         usage() if callable(usage) else None,
                         simulation,
+                        tuple(failed),
                     )
                 report = GateReport(simulation.findings)  # the G6b failure
             failed.append(tuple(dict.fromkeys(f.code for f in report.findings)))
@@ -383,6 +415,7 @@ class FSMSynthesizer:
         """
         ins, keys = _checked(goal, inputs, return_keys)
         policy, library = self.policy, self.library
+        started, before = self._clock(), _meter(self.llm)
         if library is not None:
             for match in library.search(
                 goal,
@@ -420,7 +453,13 @@ class FSMSynthesizer:
                 elif record.provenance["approved_by"] or not needs_approval(
                     report.injected, policy
                 ):
-                    return Procedure(record.digest, definition, record, "library")
+                    return Procedure(
+                        record.digest,
+                        definition,
+                        record,
+                        "library",
+                        seconds=self._since(started),
+                    )
         result = self.compile(goal, inputs=ins, return_keys=keys)
         digest = digest_of(result.definition)
         approver = None
@@ -443,7 +482,18 @@ class FSMSynthesizer:
             )
             if result.simulation is not None and result.simulation.scenarios:
                 library.add_scenarios(digest, result.simulation.scenarios)
-        return Procedure(digest, result.definition, saved, "compiled")
+        return Procedure(
+            digest,
+            result.definition,
+            saved,
+            "compiled",
+            result.failures,
+            self._since(started),
+            _spent(result.usage, before),
+        )
+
+    def _since(self, started: float) -> float:
+        return round(self._clock() - started, 3)
 
     def _review(self, request: ProcedureApprovalRequest) -> None:
         """G7: return only when the reviewer says exactly ``True``."""

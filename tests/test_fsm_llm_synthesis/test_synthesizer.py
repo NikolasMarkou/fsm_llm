@@ -17,7 +17,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from fsm_llm.agents import HumanInTheLoop
-from fsm_llm.definitions import CompletionResponse, FSMDefinition, LLMResponseError
+from fsm_llm.definitions import (
+    CompletionResponse,
+    FSMDefinition,
+    LLMResponseError,
+    LLMUsage,
+)
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.synthesis import (
     FSMLibrary,
@@ -897,3 +902,80 @@ class TestSimulation:
         )
         synth.obtain(GOAL, return_keys=RET)
         assert seen[0].endswith("G6a pass, G6b pass")
+
+
+class _MeteredStrong(ScriptedStrongLLM):
+    """A strong model with a usage meter that already holds earlier calls."""
+
+    def __init__(self, replies: list[Any]) -> None:
+        super().__init__(replies)
+        self.calls, self.tokens = 7, 100  # spent before this compile
+
+    def usage(self) -> LLMUsage:
+        return LLMUsage(
+            calls=self.calls, prompt_tokens=self.tokens, completion_tokens=self.tokens
+        )
+
+    def complete(self, request: Any) -> CompletionResponse:
+        self.calls, self.tokens = self.calls + 1, self.tokens + 10
+        return super().complete(request)
+
+
+class TestProcedureTelemetry:
+    def test_a_compile_with_two_repair_rounds_carries_codes_time_and_usage(
+        self, tmp_path, valid_fsm
+    ):
+        ticks: list[float] = []
+
+        def clock() -> float:
+            ticks.append(float(len(ticks)) * 2.0)
+            return ticks[-1]
+
+        llm = _MeteredStrong(
+            [
+                "I cannot help with that.",
+                _text(_two_defects(valid_fsm)),
+                _text(valid_fsm),
+            ]
+        )
+        synth = FSMSynthesizer(llm, library=FSMLibrary(tmp_path / "lib"), clock=clock)
+        proc = synth.obtain(GOAL, return_keys=RET)
+        assert len(proc.rounds) == 2
+        assert proc.rounds[0] == ("reply-not-json-object",)
+        assert proc.rounds[1] and all(isinstance(c, str) for c in proc.rounds[1])
+        assert proc.seconds == ticks[-1] - ticks[0] > 0
+        assert isinstance(proc.usage, LLMUsage)
+        # the delta of the compile, not the meter's totals; and a snapshot
+        assert (proc.usage.calls, proc.usage.prompt_tokens) == (3, 30)
+        assert llm.usage().calls == 10
+
+    def test_a_library_hit_has_no_rounds_no_usage_and_near_zero_time(
+        self, tmp_path, valid_fsm
+    ):
+        synth, _ = _obtainer(tmp_path, [_text(valid_fsm)])
+        synth.obtain(GOAL, return_keys=RET)
+        hit = synth.obtain(GOAL, return_keys=RET)
+        assert (hit.source, hit.rounds) == ("library", ())
+        assert hit.usage.calls == 0 and 0 <= hit.seconds < 5.0
+
+    def test_a_first_pass_compile_has_empty_rounds(self, valid_fsm):
+        synth, _ = _synth([_text(valid_fsm)])
+        assert synth.obtain(GOAL, return_keys=RET).rounds == ()
+
+    @pytest.mark.parametrize("meter", [None, "not a usage", MagicMock()])
+    def test_an_interface_without_a_usable_meter_gives_zeros(self, valid_fsm, meter):
+        llm = ScriptedStrongLLM([_text(valid_fsm)])
+        if meter is not None:
+            llm.usage = lambda: meter  # type: ignore[attr-defined]
+        proc = FSMSynthesizer(llm).obtain(GOAL, return_keys=RET)
+        assert proc.usage == LLMUsage()
+
+    def test_a_hostile_reply_never_reaches_a_field(self, valid_fsm):
+        canary = "CANARY-reply-text"
+        bad = copy.deepcopy(valid_fsm)
+        bad["persona"] = canary
+        bad["states"]["ask"]["transitions"][0]["priority"] = 0
+        synth, _ = _synth([canary, json.dumps(bad), _text(valid_fsm)])
+        proc = synth.obtain(GOAL, return_keys=RET)
+        assert proc.rounds
+        assert canary not in repr((proc.rounds, proc.seconds, proc.usage))
