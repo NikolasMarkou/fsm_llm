@@ -33,7 +33,7 @@ from fsm_llm.synthesis.gates import GATES
 from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, ScriptedStrongLLM
 
 BAD = sb.bc.BenchDataError
-FIXTURE_SHA = "55d79610cb5bed3a9920adc1e24746d3fe1e498af57a624e3651ffd5f4c39acf"
+FIXTURE_SHA = "0e1f41ff46670533764c61e5e515f58efbad8afdf835af67078667c42b938489"
 TASKS = {t.id: t for t in sb.TASKS}
 FAMILIES = ("collect", "route", "branch", "retry")
 
@@ -331,6 +331,44 @@ class TestUserAndGrader:
         assert not sb.grade(y, y.gold, [], 1)["correct"]  # never re-asked
 
 
+# (task, R answer, graded right): the 26 shapes of the review's graders2.py plus quoted ones (D-076).
+# fmt: off
+R_SHAPES = [
+    ('r1', 'I could not tell. Options: billing, technical, sales, other.', False),
+    ('r1', 'department: billing, technical, sales, other', False),
+    ('r1', 'department: billing or technical', False),
+    ('r4', 'I think it is best to send them to it.', False),
+    ('r4', 'team: it, hr', False),
+    ('r1', 'Department: billing (or maybe sales)', False),
+    ('b3', 'method: delivery; detail: unknown', False),
+    ('b3', '"method": "delivery", "detail": "unknown"', False),
+    ('b3', '"method": "pickup", "detail": "12 Elm Street"', False),
+    ('c1', 'passport_no: X1234567, ----- travel_dates: 2026-05-01; purpose: tourism', False),
+    ('y1', 'party_size: 6 guests', False),
+    ('r1', '{"department": "billing"}', True),
+    ('r1', '{"department": "billing", "department_alt": "sales"}', True),
+    ('r1', 'department: billing', True),
+    ('r1', '**department**: billing', True),
+    ('r1', 'Department = Billing.', True),
+    ('r1', 'The department is billing.', True),
+    ('r1', "Based on the user's reply, department: billing", True),
+    ('b3', '{"method": "delivery", "detail": "12 Elm Street"', True),
+    ('b3', '```json\n{"method": "delivery", "detail": "12 Elm Street"}\n```', True),
+    ('b3', 'method: delivery, detail: 12 Elm Street', True),
+    ('b3', '"method": "delivery", "detail": "12 Elm Street"', True),
+    ('b3', '{method: delivery, detail: 12 Elm Street}', True),
+    ('c1', 'passport_no: X1234567\ntravel_dates: 2026-05-01\npurpose: tourism', True),
+    ('c1', 'passport_no: X1234567, travel_dates: 2026-05-01, purpose: tourism', True),
+    ('c1', 'passport_no: X1234567, **travel_dates**: 2026-05-01, **purpose**: tourism', True),
+    ('c1', "'passport_no': 'X1234567', 'travel_dates': '2026-05-01', 'purpose': 'tourism'", True),
+    ('y1', '{"party_size": 6}', True),
+    ('c2', 'guest_name: Ada Lovelace, checkin_date: 2026-07-14, room_type: double', True),
+    ('c3', 'order_id: ORD-5521, contact_email: ada@example.com, product: router', True),
+    ('c3', 'order_id: ORD-5521; contact_email: ada@example.com; product: router.', True),
+]
+# fmt: on
+
+
 def _right_react_answers(task):
     gold = task.gold
     return [
@@ -377,6 +415,16 @@ class TestEveryArmFacesTheSameGrader:
         for text in _wrong_react_answers(task):
             rig.update(asks=[ask, ask], answer=text)
             assert not sb.run_trial("react", task, 1, tmp_path)["correct"], text
+
+    @pytest.mark.parametrize(("tid", "answer", "right"), R_SHAPES)
+    def test_the_answer_shapes_of_the_review_grade_as_the_rule_says(
+        self, tid, answer, right
+    ):
+        """Guards (D-076): a right answer with quoted keys after a comma graded wrong
+        (it only lowers r), and the wrong shapes that must keep failing."""
+        task = TASKS[tid]
+        values = sb.react_values(answer, task.gold)
+        assert sb.grade(task, values, [], 2)["correct"] is right, (answer, values)
 
     @pytest.mark.parametrize("task", sb.TASKS, ids=lambda t: t.id)
     def test_fsm_context_values_right_pass_and_wrong_fail(self, task):

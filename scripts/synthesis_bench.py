@@ -266,9 +266,9 @@ def squash(value: Any) -> str:
 # names both options fails a right run).
 def pairs(answer: str, keys: Any) -> dict[str, str]:
     """R's fallback: ``key: value``, ``key = value`` or ``key is value``, key a whole word; the
-    value runs to a ``;`` or newline, a ``,`` or ``;`` before another key, or the end."""
+    value runs to a ``;`` or newline, a ``,`` or ``;`` before another key (quotes allowed), or the end."""
     names = "|".join(map(re.escape, keys))
-    found = {k: re.search(rf"\b{re.escape(k)}\b\W{{0,3}}(?::|=|\bis\b)\s*(.*?)\s*(?=[,;]\s*(?:{names})\b|[;\n]|$)", answer, re.I) for k in keys}  # fmt: skip
+    found = {k: re.search(rf"\b{re.escape(k)}\b\W{{0,3}}(?::|=|\bis\b)\s*(.*?)\s*(?=[,;]\s*\W{{0,3}}(?:{names})\b|[;\n]|$)", answer, re.I) for k in keys}  # fmt: skip
     return {k: m[1] for k, m in found.items() if m}
 
 
