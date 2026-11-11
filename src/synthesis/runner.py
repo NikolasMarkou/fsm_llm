@@ -51,6 +51,7 @@ from .constants import (
     REASON_INPUTS_MISSING,
     REASON_LIBRARY_ERROR,
     REASON_LIFECYCLE_TOO_LOW,
+    REASON_NOT_SIMULATED,
     REASON_PROVIDER_ERROR,
     REASON_PUSH_FAILED,
     REASON_RETURN_KEYS_MISSING,
@@ -64,7 +65,7 @@ from .constants import (
     TRACE_KINDS,
 )
 from .exceptions import LibraryError, SynthesisError, SynthesisRefusedError
-from .gates import verify_stored
+from .gates import simulated, verify_stored
 from .policy import SynthesisPolicy
 from .synthesizer import FSMSynthesizer, Procedure
 from .traces import gate_reads
@@ -136,15 +137,25 @@ def runnable_reason(
     policy: SynthesisPolicy,
     inputs: Iterable[str],
     return_keys: Iterable[str],
+    gates_passed: object = None,
 ) -> str | None:
     """The reason code a stored procedure may not run, else ``None``: a
     ``completion`` state, a lifecycle below ``min_lifecycle`` (``verified`` or
-    ``trusted``) or a failed ``verify_stored``, checked in that order. Shared by
-    the runner and the agent tools; never raises."""
+    ``trusted``), a record that never passed G6b when ``policy.require_simulation``
+    (``gates_passed`` is the record's list; ``None`` means no record, which a
+    compile with that policy already simulated) or a failed ``verify_stored``,
+    checked in that order. Shared by the runner and the agent tools; never
+    raises."""
     if any(s.completion for s in definition.states.values()):
         return REASON_COMPLETION_UNSUPPORTED
     if lifecycle not in _ALLOWED_LIFECYCLES[min_lifecycle]:
         return REASON_LIFECYCLE_TOO_LOW
+    # DECISION plan-2026-11-10T194139-2cefeb61/D-062
+    # `require_simulation` binds every path that runs a stored procedure, not
+    # only `obtain`. Do NOT copy the G6b test inline; use `gates.simulated`.
+    if policy.require_simulation and gates_passed is not None:
+        if not simulated(gates_passed):
+            return REASON_NOT_SIMULATED
     report = verify_stored(definition, policy, inputs=inputs, return_keys=return_keys)
     return None if report.passed else REASON_LIBRARY_ERROR
 
@@ -493,6 +504,7 @@ class ProcedureRunner:
             policy=self.synthesizer.policy,
             inputs=config.inputs,
             return_keys=config.return_keys,
+            gates_passed=record.provenance["gates_passed"] if record else None,
         ):
             return reason, ""
         try:

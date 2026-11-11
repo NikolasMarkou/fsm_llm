@@ -31,11 +31,20 @@ from fsm_llm.flow_analysis import analyze_data_flow, analyze_liveness
 from fsm_llm.okf import capped_line
 from fsm_llm.validator import FSMValidator
 
+from .constants import GATE_SIMULATION
 from .dryrun import analyze_dryrun
 from .exceptions import SynthesisError
 from .policy import SynthesisPolicy, check_policy, inject_abort, strip_abort
 
 GATES = ("G1", "G2", "G3", "G4", "G5", "G6a")
+
+
+def simulated(gates_passed: object) -> bool:
+    """Whether a record's ``gates_passed`` lists G6b: the one rule ``obtain`` and
+    ``runnable_reason`` share for ``require_simulation`` (D-062). Never raises."""
+    return isinstance(gates_passed, list) and GATE_SIMULATION in gates_passed
+
+
 #: Schema findings kept per compile, and characters kept of each.
 _MAX_SCHEMA_FINDINGS = 20
 _MESSAGE_CHARS = 300

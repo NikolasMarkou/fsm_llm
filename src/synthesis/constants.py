@@ -34,6 +34,7 @@ REASON_REVIEWER_ERROR = "reviewer_error"
 REASON_DEPTH_REFUSED = "depth_refused"
 REASON_COMPLETION_UNSUPPORTED = "completion_unsupported"
 REASON_LIFECYCLE_TOO_LOW = "lifecycle_too_low"
+REASON_NOT_SIMULATED = "not_simulated"
 REASON_BUDGET_SPENT = "budget_spent"
 REASON_UNEXPECTED_ERROR = "unexpected_error"  # a fault outside the mapped ones
 REASONS = (
@@ -49,6 +50,7 @@ REASONS = (
     REASON_DEPTH_REFUSED,
     REASON_COMPLETION_UNSUPPORTED,
     REASON_LIFECYCLE_TOO_LOW,
+    REASON_NOT_SIMULATED,
     REASON_BUDGET_SPENT,
     REASON_UNEXPECTED_ERROR,
 )

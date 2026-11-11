@@ -200,6 +200,31 @@ class TestLifecycle:
             lib.record_run(d.digest, True, trust_after_successes=1).lifecycle == "draft"
         )
 
+    def test_a_repaired_child_is_never_trusted_by_count_only_approve_does(
+        self, lib: FSMLibrary
+    ):
+        """D-038 item 4, D-062: a record with `repair` provenance."""
+        parent = _put(lib, lifecycle="verified")
+        child = lib.put(
+            _fsm("Child"),
+            goal=GOAL,
+            inputs_required=["party"],
+            return_keys=["slot"],
+            lifecycle="verified",
+            parent=parent.digest,
+            repair="ab" * 32,
+        )
+        for _ in range(4):
+            out = lib.record_run(child.digest, True, trust_after_successes=1)
+        assert (out.lifecycle, out.stats["successes"]) == ("verified", 4)
+        assert out.provenance["approved_by"] is None
+        assert lib.approve(child.digest, "alice").lifecycle == "trusted"
+        # the control: the parent, with no repair provenance, still earns it
+        assert (
+            lib.record_run(parent.digest, True, trust_after_successes=1).lifecycle
+            == "trusted"
+        )
+
     def test_record_run_without_a_threshold_never_trusts(self, lib: FSMLibrary):
         rec = _put(lib, lifecycle="verified")
         for _ in range(5):

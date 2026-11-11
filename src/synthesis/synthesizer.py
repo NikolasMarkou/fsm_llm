@@ -63,7 +63,14 @@ from .constants import (
     REASON_REVIEWER_ERROR,
 )
 from .exceptions import SynthesisError, SynthesisRefusedError
-from .gates import GATES, GateFinding, GateReport, run_gates, verify_stored
+from .gates import (
+    GATES,
+    GateFinding,
+    GateReport,
+    run_gates,
+    simulated,
+    verify_stored,
+)
 from .library import FSMLibrary, LibraryRecord, digest_of
 from .policy import SynthesisPolicy, needs_approval
 from .prompts import REPLY_FAILURES, compile_messages, repair_message
@@ -433,9 +440,8 @@ class FSMSynthesizer:
                 # both scales: set overlap ignores negation and word order.
                 if match.score < (policy.reuse_min_score if match.embedded else 1.0):
                     break
-                gates = record.provenance["gates_passed"]
-                if policy.require_simulation and not (
-                    isinstance(gates, list) and GATE_SIMULATION in gates
+                if policy.require_simulation and not simulated(
+                    record.provenance["gates_passed"]
                 ):
                     continue  # never served as verified without a G6b record
                 definition = library.get_definition(record.digest)

@@ -254,6 +254,7 @@ def create_procedure_tools(
             policy=policy,
             inputs=needs,
             return_keys=keys,
+            gates_passed=record.provenance["gates_passed"],
         )
         if refusal:
             return failed(refusal, room)

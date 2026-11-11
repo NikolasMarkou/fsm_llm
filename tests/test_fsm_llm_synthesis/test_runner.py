@@ -43,6 +43,7 @@ from fsm_llm.synthesis import (
     strip_abort,
 )
 from fsm_llm.synthesis import runner as runner_module
+from fsm_llm.synthesis.gates import GATES
 from tests.test_fsm_llm_synthesis.conftest import (
     ScriptedRunnerLLM,
     ScriptedStrongLLM,
@@ -787,6 +788,67 @@ class TestFailuresAreFixedReasons:
         assert rig.names == ["obtained", "failed"]
         assert rig.library is not None
         assert rig.library.get_record(rig.digest).stats["runs"] == 0
+
+    @pytest.mark.parametrize(
+        ("gates", "require", "reason"),
+        [
+            (GATES, True, "not_simulated"),
+            ((*GATES, "G6b"), True, None),
+            (GATES, False, None),
+        ],
+        ids=["unsimulated_refused", "simulated_runs", "policy_off_runs"],
+    )
+    def test_require_simulation_is_a_rule_of_every_run_not_only_of_obtain(
+        self, valid_fsm, tmp_path, monkeypatch, gates, require, reason
+    ):
+        rig = _rig(
+            valid_fsm, tmp_path, policy=SynthesisPolicy(require_simulation=require)
+        )
+        procedure = _procedure(valid_fsm)
+        assert rig.library is not None
+        record = rig.library.put(
+            procedure.definition,
+            goal=GOAL,
+            inputs_required=("topic",),
+            return_keys=("answer",),
+            gates_passed=gates,
+            lifecycle="verified",
+        )
+        _serve(
+            rig,
+            monkeypatch,
+            Procedure(procedure.digest, procedure.definition, record, "library"),
+        )
+
+        rig.runner.run(rig.conv, max_steps=20)
+
+        assert rig.result["reason"] == reason
+        assert rig.result["status"] == ("failed" if reason else "ok")
+        assert bool(reason) == (rig.cheap.count("extract_field") == 0)
+
+    @pytest.mark.parametrize(
+        ("gates", "reason"),
+        [
+            (None, None),  # no record: a compile under this policy simulated it
+            ([*GATES, "G6b"], None),
+            ([*GATES], "not_simulated"),
+            ([], "not_simulated"),
+            ("G6b", "not_simulated"),  # not a list of gates
+        ],
+    )
+    def test_runnable_reason_reads_the_gates_list_under_require_simulation(
+        self, valid_fsm, gates, reason
+    ):
+        got = runner_module.runnable_reason(
+            _procedure(valid_fsm).definition,
+            "verified",
+            min_lifecycle="verified",
+            policy=SynthesisPolicy(require_simulation=True),
+            inputs=("topic",),
+            return_keys=("answer",),
+            gates_passed=gates,
+        )
+        assert got == reason
 
     def test_a_procedure_with_a_completion_state_is_refused(
         self, valid_fsm, monkeypatch

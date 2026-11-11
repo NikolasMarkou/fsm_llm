@@ -466,7 +466,9 @@ class FSMLibrary:
         trust_after_successes: int | None = None,
     ) -> LibraryRecord:
         """Count one run. A ``verified`` entry becomes ``trusted`` once its
-        successes reach ``trust_after_successes`` (``None``: never by count)."""
+        successes reach ``trust_after_successes`` (``None``: never by count),
+        unless it is a repaired child (``repair`` provenance): only ``approve``
+        trusts that one (D-062)."""
         if not isinstance(success, bool):
             raise SynthesisError("success must be a bool")
         if trust_after_successes is not None:
@@ -483,9 +485,13 @@ class FSMLibrary:
                 "successes": record.stats["successes"] + success,
             }
             record = record.model_copy(update={"stats": stats})
+            # DECISION plan-2026-11-10T194139-2cefeb61/D-062
+            # A repaired child is never trusted by a run count: only `approve`
+            # (a human) moves it. Do NOT test the parent field or the lifecycle.
             if (
                 trust_after_successes is not None
                 and record.lifecycle == LIFECYCLE_VERIFIED
+                and record.provenance.get("repair") is None
                 and stats["successes"] >= trust_after_successes
             ):
                 record = self._moved(record, LIFECYCLE_TRUSTED)

@@ -22,6 +22,7 @@ from fsm_llm.definitions import CompletionStateConfig, FSMDefinition, LLMRespons
 from fsm_llm.synthesis import (
     FSMLibrary,
     FSMSynthesizer,
+    Simulator,
     SynthesisPolicy,
     create_procedure_tools,
     digest_of,
@@ -30,6 +31,7 @@ from fsm_llm.synthesis import (
 from fsm_llm.synthesis import tools as tools_module
 from fsm_llm.synthesis.constants import PROCEDURE_UNTRUSTED_LABEL as LABEL
 from fsm_llm.synthesis.exceptions import SynthesisError
+from fsm_llm.synthesis.gates import GATES
 from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, ScriptedStrongLLM
 
 GOAL = "Collect the answer"
@@ -260,6 +262,43 @@ class TestObtain:
 
 def _run(rig: _Rig, **inputs: Any) -> str:
     return rig.call("run_procedure", procedure_id=rig.digest(), inputs=inputs)
+
+
+class TestRequireSimulation:
+    """``require_simulation`` binds the run tool as it binds ``obtain`` (D-062)."""
+
+    def _rig(self, valid_fsm: dict[str, Any], tmp_path: Any, gates: Any) -> _Rig:
+        policy = SynthesisPolicy(require_simulation=True)
+        lib = FSMLibrary(tmp_path / "lib")
+        report = run_gates(valid_fsm, policy, inputs=(), return_keys=["answer"])
+        assert report.definition is not None, report.findings
+        lib.put(
+            report.definition,
+            goal=GOAL,
+            inputs_required=[],
+            return_keys=["answer"],
+            gates_passed=gates,
+            lifecycle="verified",
+        )
+        strong, cheap = ScriptedStrongLLM([]), ScriptedRunnerLLM({"answer": "42"})
+        synth = FSMSynthesizer(
+            strong, policy=policy, library=lib, simulator=Simulator(cheap, strong)
+        )
+        registry = create_procedure_tools(synth, runner_llm=cheap)
+        return _Rig(registry, lib, strong, cheap, synth)
+
+    def test_a_record_that_never_passed_g6b_is_refused_with_a_stable_code(
+        self, valid_fsm, tmp_path
+    ):
+        rig = self._rig(valid_fsm, tmp_path, GATES)
+        assert _run(rig) == f"{LABEL}\nfailed: not_simulated"
+        assert rig.cheap.call_history == []
+        assert rig.library is not None
+        assert rig.library.get_record(rig.digest()).stats["runs"] == 0
+
+    def test_a_record_that_passed_g6b_runs(self, valid_fsm, tmp_path):
+        rig = self._rig(valid_fsm, tmp_path, (*GATES, "G6b"))
+        assert _fields(_run(rig))["status"] == "ok"
 
 
 class TestRun:
