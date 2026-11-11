@@ -33,7 +33,7 @@ from fsm_llm.synthesis import (
     digest_of,
     run_gates,
 )
-from fsm_llm.synthesis.simulation import happy_turns
+from fsm_llm.synthesis.simulation import happy_path
 from tests.test_fsm_llm_synthesis.conftest import (
     ScriptedRunnerLLM,
     ScriptedStrongLLM,
@@ -121,11 +121,11 @@ class TestVerdict:
 
     def test_a_low_overall_rate_is_its_own_code(self):
         class Picky(ScriptedRunnerLLM):
-            """Extracts only from the happy path's facts turn."""
+            """Extracts everywhere but in the generated scenarios."""
 
             def extract_field(self, request: Any) -> FieldExtractionResponse:
                 self.extraction_data = (
-                    {"answer": "42"} if "is sample" in request.user_message else {}
+                    {} if "a turn for" in request.user_message else {"answer": "42"}
                 )
                 return super().extract_field(request)
 
@@ -313,16 +313,22 @@ class TestHappyTurns:
     def test_each_declared_name_gets_a_fixed_sample_by_type(self):
         fields = [("s", "str"), ("i", "int"), ("f", "float"), ("b", "bool")]
         fields += [("l", "list"), ("d", "dict"), ("x", "any")]
-        (turn, *_) = happy_turns(self._definition(fields), 12)
+        self._definition_edge(fields)
+        (turn, *_), _ = happy_path(self._definition_edge(fields), 12)
 
         for fact in ("s is sample", "i is 3", "f is 2.5", "b is yes", "l is a, b"):
             assert fact in turn
         assert "d is a: 1" in turn and "x is sample" in turn
 
-    def test_the_turn_repeats_once_per_non_terminal_state_plus_one(self):
-        turns = happy_turns(self._definition([("s", "str")]), 12)
-        assert len(turns) == 2 and len(set(turns)) == 1
-        assert len(happy_turns(self._definition([("s", "str")]), 1)) == 1
+    def _definition_edge(self, fields: list[tuple[str, str]]) -> FSMDefinition:
+        """``_definition`` whose edge requires every field (so each is said)."""
+        names = [n for n, _ in fields]
+        edge = {
+            "target_state": "z",
+            "description": "go",
+            "conditions": [{"description": "all", "requires_context_keys": names}],
+        }
+        return self._definition(fields, transitions=[edge])
 
     def test_a_classification_key_names_its_first_intent(self):
         classes = [
@@ -335,19 +341,32 @@ class TestHappyTurns:
                 "fallback_intent": "browse",
             }
         ]
-        (turn, *_) = happy_turns(
-            self._definition([], classification_extractions=classes), 12
+        edge = {
+            "target_state": "z",
+            "description": "go",
+            "conditions": [
+                {"description": "known", "requires_context_keys": ["user_intent"]}
+            ],
+        }
+        (turn, *_), _ = happy_path(
+            self._definition(
+                [], classification_extractions=classes, transitions=[edge]
+            ),
+            12,
         )
         assert "user_intent is buy" in turn
 
     def test_a_procedure_with_nothing_to_extract_still_has_a_turn(self):
-        (turn, *_) = happy_turns(self._definition([]), 12)
+        (turn, *_), _ = happy_path(self._definition([]), 12)
         assert turn and len(turn) <= 300
 
-    def test_a_long_fact_list_is_capped_and_defanged(self):
+    def test_a_long_fact_list_is_packed_into_turns_not_cut(self):
         fields = [(f"field_{i}_" + "n" * 60, "str") for i in range(20)]
-        (turn, *_) = happy_turns(self._definition(fields), 12)
-        assert len(turn) <= 300 and not set(turn) & set("[]<>")
+        turns, _ = happy_path(self._definition_edge(fields), 12)
+        assert len(turns) > 1 and all(len(t) <= 300 for t in turns)
+        assert not set("".join(turns)) & set("[]<>")
+        said = "; ".join(turns)
+        assert all(f"{n} is sample" in said for n, _ in fields[:7])
 
 
 class TestClassificationDrivenHappyPath:
@@ -465,7 +484,7 @@ class TestBounds:
         assert llm.count("generate_response") == 0
 
     def test_the_turn_bound_caps_the_happy_script(self):
-        turns = happy_turns(_injected(), 1)
+        turns, _ = happy_path(_injected(), 1)
         assert len(turns) == 1
 
 

@@ -3,8 +3,9 @@ Gate G6b: a bounded simulation of a compiled procedure.
 
 ``Simulator.run`` plays scripted users against the procedure on the one
 interface it was given and returns a ``SimulationReport``. The main script is
-deterministic (no model): one facts turn built from the declared names and
-fixed samples. One writer call adds scenarios of four other kinds. Every
+deterministic (no model): turns built from the definition, one per state on a
+path to a terminal, saying the values that open each edge of the path. One
+writer call adds scenarios of four other kinds. Every
 verdict rule is code here: a scenario carries a kind and turns, nothing else.
 
 # DECISION plan-2026-11-10T194139-2cefeb61/D-047
@@ -21,12 +22,17 @@ verdict rule is code here: a scenario carries a kind and turns, nothing else.
 from __future__ import annotations
 
 import time
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from fsm_llm.definitions import CompletionRequest, FSMDefinition, LLMResponseError
+from fsm_llm.definitions import (
+    CompletionRequest,
+    FSMDefinition,
+    LLMResponseError,
+    State,
+)
 from fsm_llm.eval.cases import (
     ConversationCase,
     Expectations,
@@ -50,6 +56,7 @@ from .constants import (
     MAX_SCENARIO_TURNS,
     MAX_SCENARIOS,
 )
+from .dryrun import FILLER, edge_witnesses
 from .exceptions import SynthesisError
 from .gates import GateFinding, GateReport, safe_text
 from .policy import SynthesisPolicy
@@ -101,24 +108,116 @@ class SimulationReport:
         return GateReport(self.findings).repair_text(cap)
 
 
-def happy_turns(definition: FSMDefinition, max_turns: int) -> list[str]:
-    """The deterministic happy path: one facts turn, repeated.
+def _route(
+    definition: FSMDefinition, fire: dict[str, dict[int, dict[str, Any] | None]]
+) -> list[tuple[str, int]] | None:
+    """A shortest path of ``(state id, edge index)`` from the initial state to a
+    terminal over the edges that can fire, lowest priority number first, never
+    into the abort state. ``None`` when there is none."""
+    paths: dict[str, list[tuple[str, int]]] = {definition.initial_state: []}
+    queue = deque(paths)
+    while queue:
+        sid = queue.popleft()
+        edges = definition.states[sid].transitions or []
+        if not edges:
+            return paths[sid]
+        for i in sorted(fire.get(sid, {}), key=lambda n: edges[n].priority):
+            target = edges[i].target_state
+            if target not in paths and target != ABORT_STATE_ID:
+                paths[target] = [*paths[sid], (sid, i)]
+                queue.append(target)
+    return None
 
-    The turn states every declared extraction name once with a fixed sample by
-    ``field_type`` (a classification key says its first intent), cut at
-    ``MAX_SCENARIO_TURN_CHARS``; it is sent ``min(max_turns, non-terminal
-    states + 1)`` times, which is idempotent (extraction fills unset keys) and
-    lets each state find its key. No model is involved.
+
+def _declared(state: State) -> dict[str, str]:
+    """The keys ``state`` extracts, each with the fixed sample of its type (a
+    classification key says its first intent)."""
+    names = {
+        c.field_name: c.intents[0].name for c in state.classification_extractions or []
+    }
+    for f in state.field_extractions or []:
+        names[f.field_name] = _SAMPLES.get(f.field_type, FILLER)
+    return names
+
+
+def _say(value: Any, sample: str) -> str:
+    """``value`` as a user says it: the pool filler is the key's sample."""
+    if value == FILLER:
+        return sample
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _pack(facts: list[str]) -> list[str]:
+    """``facts`` joined with ``"; "`` into turns of at most
+    ``MAX_SCENARIO_TURN_CHARS`` (a single fact is cut there), in order."""
+    turns: list[str] = []
+    for fact in (safe_text(f, MAX_SCENARIO_TURN_CHARS) for f in facts):
+        joined = f"{turns[-1]}; {fact}" if turns else ""
+        if turns and len(joined) <= MAX_SCENARIO_TURN_CHARS:
+            turns[-1] = joined
+        else:
+            turns.append(fact)
+    return turns
+
+
+# DECISION plan-2026-11-10T194139-2cefeb61/D-057
+# The happy path is built FROM THE DEFINITION: the values are the assignments
+# the G6a search found under which the evaluator takes each edge of a path to
+# a terminal (``dryrun.edge_witnesses``). Do NOT go back to the fixed string
+# "sample" for every key (an edge on a label, a string or a number never
+# fires, so every honest route or branch compile failed G6b), do NOT copy the
+# search here, and do NOT cut a long script into a wrong one: a state's facts
+# are packed into several turns.
+def happy_path(
+    definition: FSMDefinition, max_turns: int, inputs: Sequence[str] = ()
+) -> tuple[list[str], dict[str, Any]]:
+    """The deterministic happy path: ``(turns, given)``.
+
+    ``turns`` has one turn per state on a shortest path to a terminal (several
+    when a state's facts pass ``MAX_SCENARIO_TURN_CHARS``), each ``key is
+    value`` joined with ``"; "``: the witness values of the path edges, each
+    said at the first path state that declares the key, the keys its edge reads
+    last. ``given`` holds the witness value of an input the path reads (the
+    others get ``"sample"`` from ``_case``). Cut at ``max_turns``; no model. With
+    no path (a stuck procedure) every declared name says its fixed sample,
+    ``min(max_turns, non-terminal states + 1)`` times.
     """
-    facts: dict[str, str] = {}
-    for state in definition.states.values():
-        for field in state.field_extractions or []:
-            facts.setdefault(field.field_name, _SAMPLES.get(field.field_type, "sample"))
-        for entry in state.classification_extractions or []:
-            facts.setdefault(entry.field_name, entry.intents[0].name)
-    text = "; ".join(f"{k} is {v}" for k, v in facts.items()) or "Please go ahead"
-    open_states = sum(1 for s in definition.states.values() if s.transitions)
-    return [safe_text(text, MAX_SCENARIO_TURN_CHARS)] * min(max_turns, open_states + 1)
+    fire = edge_witnesses(definition, inputs=inputs)
+    route = _route(definition, fire)
+    if route is None:
+        names = {
+            k: v for s in definition.states.values() for k, v in _declared(s).items()
+        }
+        text = "; ".join(f"{k} is {v}" for k, v in names.items()) or "Please go ahead"
+        open_states = sum(1 for s in definition.states.values() if s.transitions)
+        return [safe_text(text, MAX_SCENARIO_TURN_CHARS)] * min(
+            max_turns, open_states + 1
+        ), {}
+    values: dict[str, Any] = {}
+    for sid, i in route:
+        edge = fire[sid][i]
+        if edge is None:  # outside the fragment: say the state's samples
+            edge = {k: FILLER for k in _declared(definition.states[sid])}
+        for key, value in edge.items():
+            values.setdefault(key, value)
+    turns: list[str] = []
+    said: set[str] = set()
+    for sid, i in route:
+        state = definition.states[sid]
+        reads = set(fire[sid][i] or {})
+        mine = [k for k in _declared(state) if k in values and k not in said]
+        mine.sort(key=lambda k: k in reads)  # what the edge reads comes last
+        said.update(mine)
+        samples = _declared(state)
+        facts = [f"{k} is {_say(values[k], samples[k])}" for k in mine]
+        turns += _pack(facts) or ["Please go ahead"]
+    given = {k: v for k, v in values.items() if k in inputs}
+    given = {k: ("sample" if v == FILLER else v) for k, v in given.items()}
+    return turns[:max_turns] or ["Please go ahead"], given
 
 
 def _passes(kind: str, trial: TrialResult, return_keys: Sequence[str]) -> bool:
@@ -140,13 +239,18 @@ def _passes(kind: str, trial: TrialResult, return_keys: Sequence[str]) -> bool:
 
 
 def _case(
-    kind: str, model: FSMDefinition, inputs: Sequence[str], turns: Sequence[str]
+    kind: str,
+    model: FSMDefinition,
+    inputs: Sequence[str],
+    turns: Sequence[str],
+    given: dict[str, Any] | None = None,
 ) -> ConversationCase:
-    """One scripted conversation on ``model`` (inputs get ``"sample"``)."""
+    """One scripted conversation on ``model`` (inputs get ``"sample"`` unless
+    ``given`` says another value)."""
     return ConversationCase(
         id=kind,
         fsm=model.model_dump(exclude_defaults=True),
-        initial_context={name: "sample" for name in inputs},
+        initial_context={name: "sample" for name in inputs} | (given or {}),
         turns=list(turns),
         # a real check the case model needs; the verdict is `_passes`
         expect=Expectations(visited_states=[model.initial_state]),
@@ -165,12 +269,15 @@ class Simulator:
         replaced. ``run(definition, *, goal, inputs, return_keys, policy)``:
         ``definition`` is the abort-injected procedure, a dict or an
         ``FSMDefinition`` (``ValidationError`` if it does not load), never
-        mutated. ``inputs`` get the string ``"sample"``. The goal and key names
+        mutated. ``inputs`` get the string ``"sample"`` (the happy path gives an
+        input its own value when an edge reads it). The goal and key names
         go to the writer, never the compiled FSM. Order: the writer call, then
         the happy trials, then the generated ones, serial, ``policy.sim_trials``
-        each; before EVERY trial the ``max_simulation_seconds`` and
-        ``max_simulation_calls`` bounds are checked (calls are the meter's delta
-        since ``run`` began), and a spent bound stops the run. Returns a
+        each; before EVERY trial and before every turn after its first the
+        ``max_simulation_seconds`` and ``max_simulation_calls`` bounds are
+        checked (calls are the meter's delta since ``run`` began), so a trial
+        spends at most one turn past a bound; a stopped trial is dropped and a
+        spent bound stops the run. Returns a
         ``SimulationReport`` judged by ``policy.min_pass_rate``: ``happy-path-failing``,
         ``pass-rate-low``, ``simulation-incomplete`` (no happy trial finished),
         ``no-progress``. A writer outage or an unusable reply means no generated
@@ -195,12 +302,44 @@ class Simulator:
     def _calls(self) -> int:
         return int(self.llm.usage().calls)  # type: ignore[attr-defined]
 
-    def _over(self, start: float, calls0: int, policy: SynthesisPolicy) -> bool:
-        """Whether the time or call bound is spent (checked before EVERY trial)."""
-        return (
-            self._clock() - start >= policy.max_simulation_seconds
-            or self._calls() - calls0 >= policy.max_simulation_calls
-        )
+    # DECISION plan-2026-11-10T194139-2cefeb61/D-060
+    # The bound is read between turns through ``run_case_trial(stop=...)`` and a
+    # stopped trial is dropped. Do NOT wrap the interface to refuse calls (the
+    # pipeline swallows an extraction error, so a turn would run on) and do NOT
+    # count a stopped trial as a failed procedure.
+    def _trial(
+        self,
+        case: ConversationCase,
+        n: int,
+        start: float,
+        calls0: int,
+        policy: SynthesisPolicy,
+    ) -> TrialResult | None:
+        """One trial, or ``None`` when the time or call bound stopped it. The
+        bound is read before the trial and before every turn after the first, so
+        a trial spends at most one turn past it; a stopped trial is dropped, it
+        says nothing about the procedure."""
+
+        def spent() -> bool:
+            return (
+                self._clock() - start >= policy.max_simulation_seconds
+                or self._calls() - calls0 >= policy.max_simulation_calls
+            )
+
+        if spent():
+            return None
+        cut, first = False, True
+
+        def stop() -> bool:
+            nonlocal cut, first
+            if first:  # the check above stands for the first turn
+                first = False
+                return False
+            cut = cut or spent()
+            return cut
+
+        trial = run_case_trial(case, _CONFIG, n, lambda: self.llm, stop=stop)
+        return None if cut else trial
 
     def replay(
         self,
@@ -232,9 +371,9 @@ class Simulator:
             case = _case(kind, model, inputs, scenario["turns"])
             passes = 0
             for n in range(trials):
-                if self._over(start, calls0, policy):
+                trial = self._trial(case, n, start, calls0, policy)
+                if trial is None:
                     return None
-                trial = run_case_trial(case, _CONFIG, n, lambda: self.llm)
                 passes += _passes(kind, trial, return_keys)
             counts.append(passes)
         return counts
@@ -255,15 +394,17 @@ class Simulator:
         )
         start, calls0 = self._clock(), self._calls()
         generated = self._write(goal, inputs, return_keys, policy)
-        plan = [(HAPPY_KIND, tuple(happy_turns(model, policy.max_sim_turns)))]
-        plan += [(s["kind"], tuple(s["turns"])) for s in generated]
+        turns, given = happy_path(model, policy.max_sim_turns, inputs)
+        plan: list[tuple[str, Sequence[str], dict[str, Any] | None]]
+        plan = [(HAPPY_KIND, turns, given)]
+        plan += [(s["kind"], s["turns"], None) for s in generated]
         ran: list[tuple[int, str, TrialResult]] = []
-        for index, (kind, turns) in enumerate(plan):
-            case = _case(kind, model, inputs, turns)
+        for index, (kind, script, said) in enumerate(plan):
+            case = _case(kind, model, inputs, script, said)
             for n in range(policy.sim_trials):
-                if self._over(start, calls0, policy):
+                trial = self._trial(case, n, start, calls0, policy)
+                if trial is None:
                     break
-                trial = run_case_trial(case, _CONFIG, n, lambda: self.llm)
                 ran.append((index, kind, trial))
             else:
                 continue

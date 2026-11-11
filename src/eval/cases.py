@@ -292,6 +292,7 @@ def run_case_trial(
     llm_interface_factory: LLMInterfaceFactory | None = None,
     *,
     checks: Sequence[TrialCheck] = (),
+    stop: Callable[[], bool] | None = None,
 ) -> TrialResult:
     """Run one trial of ``case`` and check its expectations. Never raises.
 
@@ -302,7 +303,9 @@ def run_case_trial(
         - Sends the turns in order and stops early once the conversation has
           ended (a terminal state accepts no more turns); ``turns_sent``
           records how many were sent. Unsent turns are a failure unless the
-          case declares ``expect.ended``.
+          case declares ``expect.ended``. ``stop`` (default none) is called
+          before every turn: a true result ends the trial there, like an
+          ended conversation.
         - ``failures`` = the ``expect`` checks, then each of ``checks`` called
           with the finished trial.
         - Any exception (bad FSM, LLM down, a raising factory or check) gives a
@@ -321,7 +324,7 @@ def run_case_trial(
         result.responses.append(greeting)
         result.visited_states.append(api.get_current_state(conv_id))
         for turn in case.turns:
-            if api.has_conversation_ended(conv_id):
+            if api.has_conversation_ended(conv_id) or (stop is not None and stop()):
                 break
             result.responses.append(api.converse(turn, conv_id))
             result.turns_sent += 1
