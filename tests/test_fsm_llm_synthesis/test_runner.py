@@ -36,6 +36,7 @@ from fsm_llm.synthesis import (
     digest_of,
     run_gates,
 )
+from fsm_llm.synthesis import runner as runner_module
 from tests.test_fsm_llm_synthesis.conftest import (
     ScriptedRunnerLLM,
     ScriptedStrongLLM,
@@ -84,7 +85,16 @@ class _Rig:
     strong: ScriptedStrongLLM
     synth: FSMSynthesizer
     library: FSMLibrary | None
-    events: list[tuple[str, dict[str, Any]]]
+    stream: list[tuple[str, dict[str, Any]]]
+
+    @property
+    def events(self) -> list[tuple[str, dict[str, Any]]]:
+        """The lifecycle events; the per-step ``stepped`` ones are ``steps``."""
+        return [e for e in self.stream if e[0] != "stepped"]
+
+    @property
+    def steps(self) -> list[dict[str, Any]]:
+        return [f for name, f in self.stream if name == "stepped"]
 
     @property
     def names(self) -> list[str]:
@@ -138,12 +148,12 @@ def _rig(
     synth = FSMSynthesizer(strong, policy=policy, library=library)
     host = _host(**(config or {}))
     api = API.from_definition(definition=host, llm_interface=cheap)
-    events: list[tuple[str, dict[str, Any]]] = []
+    stream: list[tuple[str, dict[str, Any]]] = []
     runner = ProcedureRunner(
-        api, host, synth, trace_sink=sink or (lambda e, f: events.append((e, dict(f))))
+        api, host, synth, trace_sink=sink or (lambda e, f: stream.append((e, dict(f))))
     )
     conv, _ = api.start_conversation(CONTEXT if context is None else context)
-    return _Rig(api, runner, conv, cheap, strong, synth, library, events)
+    return _Rig(api, runner, conv, cheap, strong, synth, library, stream)
 
 
 def _procedure(data: dict[str, Any], **kw: Any) -> Procedure:
@@ -947,3 +957,292 @@ class TestNoForeignInterface:
         assert rig.result["reason"] == "library_error"
         assert (rig.state, rig.depth) == ("apology", 1)
         assert rig.names == ["obtained", "failed"]
+
+
+CANARIES = ("CANARY-CONTEXT", "CANARY-USER", "CANARY-MODEL")
+
+
+def _tied(valid_fsm: dict[str, Any]) -> dict[str, Any]:
+    """``ask`` has two edges at one priority: ``answer`` alone reaches ``done``,
+    ``answer`` plus ``extra`` also reaches ``done2`` (a tie only when both are set)."""
+    data = copy.deepcopy(valid_fsm)
+    ask = data["states"]["ask"]
+    ask["field_extractions"].append(
+        {"field_name": "extra", "field_type": "str", "extraction_instructions": "x"}
+    )
+    second = copy.deepcopy(ask["transitions"][0])
+    second["target_state"] = "done2"
+    second["conditions"][0]["requires_context_keys"] = ["answer", "extra"]
+    ask["transitions"].append(second)
+    data["states"]["done2"] = copy.deepcopy(data["states"]["done"])
+    data["states"]["done2"]["id"] = "done2"
+    return data
+
+
+def _abort_at_once(rig: _Rig, monkeypatch: pytest.MonkeyPatch, fsm: dict[str, Any]):
+    """Push ``fsm`` and return a ``step -> None`` hook; ``max_turns`` is 1, so
+    the second hook call counts the child's first step and sets the abort."""
+    _serve(rig, monkeypatch, _procedure(fsm))
+    rig.to_solve()
+    hook = rig.runner.hook(rig.conv)
+    hook(2)
+    assert rig.depth == 2
+    return hook
+
+
+class TestTraceEvents:
+    """The events a ``TraceRecorder`` reads: the conversation on every one, a
+    ``stepped`` event per counted child step, the stuck state and live outcome
+    at an abort, the error class and round codes at a failure. Names, type
+    names, state ids, counts and codes only (D-038, D-044)."""
+
+    def test_a_canary_never_reaches_an_event_of_an_ok_run(self, valid_fsm):
+        rig = _rig(
+            valid_fsm,
+            extraction={"answer": CANARIES[0]},
+            context={**CONTEXT, "topic": CANARIES[0]},
+        )
+        rig.cheap.responses["ask"] = CANARIES[2]
+
+        rig.runner.converse(rig.conv, "hello")
+        rig.runner.converse(rig.conv, CANARIES[1])
+
+        assert rig.result["status"] == "ok" and rig.data["answer"] == CANARIES[0]
+        assert len(rig.steps) == 1  # the scan below is not vacuous
+        blob = json.dumps(rig.stream)
+        assert not [c for c in CANARIES if c in blob]
+
+    def test_a_canary_never_reaches_an_event_of_an_aborted_run(self, valid_fsm):
+        rig = _rig(
+            valid_fsm,
+            extraction={},
+            policy=SynthesisPolicy(max_turns=2),
+            context={**CONTEXT, "topic": CANARIES[0]},
+        )
+        rig.cheap.responses["ask"] = CANARIES[2]
+
+        for text in ("hello", CANARIES[1], CANARIES[1]):
+            rig.runner.converse(rig.conv, text)
+
+        assert "aborted" in rig.names and len(rig.steps) == 2
+        assert not [c for c in CANARIES if c in json.dumps(rig.stream)]
+
+    @pytest.mark.parametrize(
+        ("error", "name", "rounds"),
+        [
+            (RuntimeError(CANARIES[2]), "RuntimeError", None),
+            (TimeoutError(CANARIES[2]), "TimeoutError", None),
+            (ValueError(CANARIES[2]), "ValueError", None),
+            (LibraryError(CANARIES[2]), "LibraryError", ""),
+            (SynthesisError(CANARIES[2]), "SynthesisError", ""),
+            (
+                SynthesisError(CANARIES[2], {"rounds": [("a-b", "c"), ("d",)]}),
+                "SynthesisError",
+                "a-b,c;d",
+            ),
+            (
+                SynthesisError("x", {"rounds": [("z" * 90,)] * 12}),
+                "SynthesisError",
+                ";".join(["z" * 90] * 12)[:200],
+            ),
+        ],
+    )
+    def test_a_failure_carries_the_error_class_and_only_codes(
+        self, valid_fsm, monkeypatch, error, name, rounds
+    ):
+        rig = _rig(valid_fsm)
+
+        def refuse(*args: Any, **kwargs: Any) -> Any:
+            raise error
+
+        monkeypatch.setattr(rig.synth, "obtain", refuse)
+        rig.runner.run(rig.conv, max_steps=10)
+
+        (failed,) = [f for n, f in rig.events if n == "failed"]
+        assert failed["error"] == name and failed["rounds"] == rounds
+        assert failed["conv"] == rig.conv
+        assert CANARIES[2] not in json.dumps(rig.stream)
+
+    def test_an_interrupt_names_its_class(self, valid_fsm, monkeypatch):
+        rig = _rig(valid_fsm)
+
+        def interrupt(*args: Any, **kwargs: Any) -> Any:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(rig.synth, "obtain", interrupt)
+        with pytest.raises(KeyboardInterrupt):
+            rig.runner.run(rig.conv, max_steps=10)
+
+        (failed,) = [f for n, f in rig.events if n == "failed"]
+        assert failed["error"] == "KeyboardInterrupt"
+
+    def test_a_real_compile_that_never_passes_reports_its_round_codes(self, valid_fsm):
+        rig = _rig(valid_fsm, replies=[CANARIES[2]] * 8)
+
+        rig.runner.run(rig.conv, max_steps=10)
+
+        (failed,) = [f for n, f in rig.events if n == "failed"]
+        assert (
+            failed["error"] == "SynthesisError" and failed["reason"] == "compile_failed"
+        )
+        rounds = failed["rounds"].split(";")
+        assert len(rounds) == len(rig.strong.requests) > 1
+        assert all(rounds) and len(set(rounds)) == 1
+        assert CANARIES[2] not in json.dumps(rig.stream)
+
+    def test_a_failure_without_an_exception_has_no_error(self, valid_fsm):
+        rig = _rig(valid_fsm, context={"unrelated": 1})
+        rig.runner.run(rig.conv, max_steps=10)
+        (failed,) = [f for n, f in rig.events if n == "failed"]
+        assert failed["reason"] == "inputs_missing"
+        assert failed["error"] is None and failed["rounds"] is None
+
+    def test_two_conversations_on_one_runner_give_separable_streams(self, valid_fsm):
+        rig = _rig(valid_fsm, replies=[json.dumps(valid_fsm)] * 2)
+        other, _ = rig.api.start_conversation(CONTEXT)
+
+        rig.runner.converse(rig.conv, "hello")
+        rig.runner.converse(other, "hello")
+        rig.runner.converse(other, "forty-two")
+        rig.runner.converse(rig.conv, "forty-two")
+
+        assert all("conv" in f for _, f in rig.stream)
+        for conv in (rig.conv, other):
+            mine = [(n, f) for n, f in rig.stream if f["conv"] == conv]
+            # the first turn is the parent's own; the second is the child's
+            assert [n for n, _ in mine] == ["obtained", "pushed", "stepped", "popped"]
+            assert [f["step"] for n, f in mine if n == "stepped"] == [1]
+            assert len({f["digest"] for _, f in mine}) == 1
+        assert {f["conv"] for _, f in rig.stream} == {rig.conv, other}
+
+    def test_every_event_kind_carries_conv(self, valid_fsm, monkeypatch):
+        ok = _rig(valid_fsm)
+        ok.runner.run(ok.conv, max_steps=20)
+        aborted = _rig(valid_fsm, extraction={}, policy=SynthesisPolicy(max_turns=2))
+        aborted.runner.run(aborted.conv, max_steps=20)
+        failed = _rig(valid_fsm, context={"unrelated": 1})
+        failed.runner.run(failed.conv, max_steps=20)
+        seen = {n for r in (ok, aborted, failed) for n, _ in r.stream}
+        assert seen == {"obtained", "pushed", "stepped", "aborted", "popped", "failed"}
+        for rig in (ok, aborted, failed):
+            assert all(f["conv"] == rig.conv for _, f in rig.stream)
+
+    @pytest.mark.parametrize("mode", ["run", "converse"])
+    def test_stepped_fires_once_per_counted_step_in_both_modes(self, valid_fsm, mode):
+        rig = _rig(valid_fsm, extraction={}, policy=SynthesisPolicy(max_turns=3))
+
+        if mode == "run":
+            rig.runner.run(rig.conv, max_steps=30)
+        else:
+            for text in ("a", "b", "c", "d"):
+                rig.runner.converse(rig.conv, text)
+
+        names = [n for n, _ in rig.stream]
+        assert names.count("aborted") == 1
+        # the abort comes right after the max_turns-th counted step, no later
+        before = [n for n, _ in rig.stream[: names.index("aborted")]]
+        assert before.count("stepped") == 3
+        assert [f["step"] for f in rig.steps] == [1, 2, 3]
+        for f in rig.steps:
+            assert f["state"] == "ask" and f["keys"] == "topic" and f["kinds"] == ""
+            assert f["digest"] == rig.digest
+
+    def test_stepped_names_declared_keys_and_gate_read_types(self, valid_fsm):
+        rig = _rig(valid_fsm, extraction={"answer": "42", "stray": "q"})
+
+        rig.runner.converse(rig.conv, "hello")
+        rig.runner.converse(rig.conv, "forty-two")
+
+        last = rig.steps[-1]
+        assert last["state"] == "done"
+        assert last["keys"] == "answer,topic"  # the input and the return key
+        assert last["kinds"] == "answer:str"  # only what a gate reads
+        assert "stray" not in json.dumps(rig.stream)
+
+    def test_an_undeclared_name_in_the_child_is_never_listed(
+        self, valid_fsm, monkeypatch
+    ):
+        rig = _rig(valid_fsm, extraction={})
+        hook = _abort_at_once(rig, monkeypatch, valid_fsm)
+        rig.api.update_context(rig.conv, {"answer": "x", "minted": CANARIES[2]})
+
+        hook(3)
+
+        assert rig.steps[-1]["keys"] == "answer,topic"
+        assert "minted" not in json.dumps(rig.stream)
+
+    @pytest.mark.parametrize(
+        ("value", "kind"),
+        [
+            (True, "bool"),
+            (3, "int"),
+            (1.5, "float"),
+            ("s", "str"),
+            ([1], "list"),
+            ({"a": 1}, "dict"),
+            (type("S", (str,), {})("sub"), "other"),
+            (object(), "other"),
+        ],
+    )
+    def test_a_type_is_named_from_a_closed_table(
+        self, valid_fsm, monkeypatch, value, kind
+    ):
+        rig = _rig(valid_fsm, extraction={})
+        hook = _abort_at_once(rig, monkeypatch, valid_fsm)
+        rig.api.update_context(rig.conv, {"answer": value})
+
+        hook(3)
+
+        assert rig.steps[-1]["kinds"] == f"answer:{kind}"
+        assert "SubclassOfStr" not in json.dumps(rig.stream)
+
+    @pytest.mark.parametrize(
+        ("context", "outcome"),
+        [
+            ({}, "blocked"),
+            ({"answer": "a"}, "deterministic"),
+            ({"answer": "a", "extra": "b"}, "ambiguous"),
+        ],
+    )
+    def test_an_abort_names_the_stuck_state_and_the_live_outcome(
+        self, valid_fsm, monkeypatch, context, outcome
+    ):
+        rig = _rig(valid_fsm, extraction={}, policy=SynthesisPolicy(max_turns=1))
+        hook = _abort_at_once(rig, monkeypatch, _tied(valid_fsm))
+        rig.api.update_context(rig.conv, context)
+
+        hook(3)
+
+        (aborted,) = [f for n, f in rig.events if n == "aborted"]
+        assert aborted["state"] == "ask" and aborted["outcome"] == outcome
+        assert aborted["conv"] == rig.conv and aborted["step"] == 3
+        # the abort key was written after the outcome was read, not before
+        assert rig.api.get_data(rig.conv).get("procedure_abort") is True
+
+    def test_an_event_that_cannot_be_read_never_changes_the_run(
+        self, valid_fsm, monkeypatch
+    ):
+        class Broken:
+            def evaluate_transitions(self, *args: Any, **kwargs: Any) -> Any:
+                raise RuntimeError(CANARIES[2])
+
+        monkeypatch.setattr(runner_module, "TransitionEvaluator", Broken)
+        rig = _rig(valid_fsm, extraction={}, policy=SynthesisPolicy(max_turns=2))
+
+        rig.runner.run(rig.conv, max_steps=20)
+
+        assert (rig.state, rig.result["reason"]) == ("apology", "budget_spent")
+        (aborted,) = [f for n, f in rig.events if n == "aborted"]
+        assert "outcome" not in aborted and aborted["conv"] == rig.conv
+        assert CANARIES[2] not in json.dumps(rig.stream)
+
+    def test_without_a_sink_nothing_is_read(self, valid_fsm, monkeypatch):
+        rig = _rig(valid_fsm, extraction={}, policy=SynthesisPolicy(max_turns=2))
+        quiet = ProcedureRunner(rig.api, _host(), rig.synth)
+
+        def boom(*args: Any, **kwargs: Any) -> Any:
+            raise AssertionError("read without a sink")
+
+        monkeypatch.setattr(runner_module, "TransitionEvaluator", boom)
+        quiet.run(rig.conv, max_steps=20)
+        assert rig.result["status"] == "aborted"

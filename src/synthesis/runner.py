@@ -29,13 +29,16 @@ from typing import Any
 from fsm_llm.api import API, ContextMergeStrategy
 from fsm_llm.definitions import (
     AdvanceResult,
+    FSMContext,
     FSMDefinition,
     FSMError,
     LLMResponseError,
     SynthesizeConfig,
+    logic_referenced_keys,
 )
 from fsm_llm.expressions import is_missing
 from fsm_llm.logging import logger
+from fsm_llm.transition_evaluator import TransitionEvaluator
 
 from .constants import (
     ABORT_CONTEXT_KEY,
@@ -63,6 +66,9 @@ from .exceptions import LibraryError, SynthesisError, SynthesisRefusedError
 from .gates import verify_stored
 from .policy import SynthesisPolicy
 from .synthesizer import FSMSynthesizer, Procedure
+
+# the only type names a trace may carry (never ``type(value).__name__``)
+_KINDS = {t: t.__name__ for t in (bool, int, float, str, list, dict)}
 
 _ALLOWED_LIFECYCLES = {
     LIFECYCLE_VERIFIED: (LIFECYCLE_VERIFIED, LIFECYCLE_TRUSTED),
@@ -110,6 +116,15 @@ def reason_of(error: Exception) -> str:
     return REASON_COMPILE_FAILED
 
 
+def _round_codes(error: BaseException | None) -> str | None:
+    """The failure codes of each compile round of a ``SynthesisError`` (codes
+    comma-joined, rounds semicolon-joined, cut at 200 characters), else ``None``."""
+    if not isinstance(error, SynthesisError):
+        return None
+    rounds = error.details.get("rounds") or ()
+    return ";".join(",".join(map(str, codes)) for codes in rounds)[:200]
+
+
 def runnable_reason(
     definition: FSMDefinition,
     lifecycle: str,
@@ -146,10 +161,17 @@ class ProcedureRunner:
         every conversation the runner serves), ``synthesizer`` obtains the
         procedures, ``trace_sink(event, fields)`` an optional plain callable
         (``TypeError`` if not callable). Events: ``obtained`` (digest, version,
-        source), ``pushed`` (digest, step), ``aborted`` (digest, step: the
-        runner set the abort), ``popped`` (digest, status, reason, step: every
-        pop) and ``failed`` (reason, step, digest when a procedure was obtained:
-        no child was pushed). Fields are plain codes, ids and ints; a sink that
+        source), ``pushed`` (digest, step), ``stepped`` (digest, step: the
+        child's count, state, keys, kinds: one per counted child step),
+        ``aborted`` (digest, step, state, outcome: the runner set the abort;
+        ``blocked``, ``ambiguous`` or ``deterministic`` in the child's state),
+        ``popped`` (digest, status, reason, step: every pop) and ``failed``
+        (reason, step, digest when a procedure was obtained, error: the
+        exception class, rounds: compile failure codes; no child was pushed).
+        Every event carries ``conv``. Fields are plain strings, ids and ints,
+        never a value, user text or reply (D-044): ``keys`` and ``kinds`` are
+        comma-joined (declared names present; ``name:type`` for gate-read ones),
+        ``rounds`` is codes comma-joined, rounds semicolon-joined. A sink that
         raises is swallowed with a WARNING naming the event.
 
         ``run(conv_id, *, max_steps, max_seconds=None)`` is
@@ -229,7 +251,7 @@ class ProcedureRunner:
         runs = self._runs_of(conv_id)
         replies.append(self.api.converse(message, conv_id))
         if runs:
-            runs[-1].child_steps += 1  # a user turn is one step of the child
+            self._count(conv_id, runs[-1])  # a user turn is one step of the child
         replies += self._settle(conv_id)
         return "\n".join(r for r in replies if r)
 
@@ -252,7 +274,61 @@ class ProcedureRunner:
         """Run mode: a hook call with a live child on top means it just had a step."""
         runs = self._runs_of(conv_id)
         if runs and not self.api.has_conversation_ended(conv_id):
-            runs[-1].child_steps += 1
+            self._count(conv_id, runs[-1])
+
+    def _count(self, conv_id: str, run: _Run) -> None:
+        """Count one child step and trace it."""
+        run.child_steps += 1
+        self._emit(
+            "stepped",
+            conv_id,
+            digest=run.procedure.digest,
+            step=run.child_steps,
+            **self._view(conv_id, run),
+        )
+
+    def _view(
+        self, conv_id: str, run: _Run, *, outcome: bool = False
+    ) -> dict[str, Any]:
+        """Value-free facts about the child on top for a trace event: its
+        ``state``, the declared names present (``keys``), ``name:type`` for those
+        an edge gate reads (``kinds``, types from ``_KINDS``) and, with
+        ``outcome``, what the evaluator makes of its edges now. ``{}`` without a
+        sink, and on any failure (one WARNING): a trace never changes a run."""
+        if self._sink is None:
+            return {}
+        try:
+            definition, config = run.procedure.definition, run.config
+            data = self.api.get_data(conv_id)
+            gated = {
+                key
+                for s in definition.states.values()
+                for t in s.transitions or []
+                for c in t.conditions or []
+                for key in (
+                    *(c.requires_context_keys or []),
+                    *logic_referenced_keys(c.logic),
+                )
+            }
+            seen = sorted(
+                k
+                for k in gated | {*config.inputs, *config.return_keys}
+                if not is_missing(data, k)
+            )
+            kinds = (
+                f"{k}:{_KINDS.get(type(data[k]), 'other')}" for k in seen if k in gated
+            )
+            state = self.api.get_current_state(conv_id)
+            view = {"state": state, "keys": ",".join(seen), "kinds": ",".join(kinds)}
+            if outcome:
+                found = TransitionEvaluator().evaluate_transitions(
+                    definition.states[state], FSMContext(data=data)
+                )
+                view["outcome"] = found.result_type.value
+            return view
+        except Exception as e:
+            logger.warning(f"could not read the child for a trace: {type(e).__name__}")
+            return {}
 
     def _tick(self, conv_id: str, step: int | None) -> list[str]:
         """Pop an ended child, abort one over budget, else start a pending
@@ -270,8 +346,14 @@ class ProcedureRunner:
                 return []
             if run.child_steps >= self.synthesizer.policy.max_turns:
                 run.aborting = True
+                # DECISION plan-2026-11-10T194139-2cefeb61/D-044
+                # Read the outcome BEFORE the abort key is written: after it the
+                # abort edge passes and every outcome reads "deterministic".
+                view = self._view(conv_id, run, outcome=True)
                 self.api.update_context(conv_id, {ABORT_CONTEXT_KEY: True})
-                self._emit("aborted", digest=run.procedure.digest, step=step)
+                self._emit(
+                    "aborted", conv_id, digest=run.procedure.digest, step=step, **view
+                )
                 return []
         definition = runs[-1].procedure.definition if runs else self._definition
         state = definition.states.get(self.api.get_current_state(conv_id))
@@ -311,6 +393,7 @@ class ProcedureRunner:
         data = api.get_data(conv_id)
         api.update_context(conv_id, {config.result_key: _result(STATUS_RUNNING)})
         procedure: Procedure | None = None
+        error: BaseException | None = None
         reply = ""
         depth = api.get_stack_depth(conv_id)
         try:
@@ -327,10 +410,11 @@ class ProcedureRunner:
                         min_lifecycle=config.min_lifecycle,
                     )
                 except (SynthesisError, ValueError) as e:
-                    reason = reason_of(e)
+                    reason, error = reason_of(e), e
                 else:
                     self._emit(
                         "obtained",
+                        conv_id,
                         digest=procedure.digest,
                         version=procedure.record.version if procedure.record else None,
                         source=procedure.source,
@@ -340,17 +424,17 @@ class ProcedureRunner:
                     )
         except Exception as e:  # fail closed: the result must never stay `running`
             logger.warning(f"synthesis ended on an unexpected {type(e).__name__}")
-            reason, reply = REASON_UNEXPECTED_ERROR, ""
+            reason, reply, error = REASON_UNEXPECTED_ERROR, "", e
             self._unwind(conv_id, depth)
-        except BaseException:  # Ctrl-C, SystemExit: end the result, then let it go
+        except BaseException as e:  # Ctrl-C, SystemExit: end the result, then let go
             self._unwind(conv_id, depth)
             try:
-                self._fail(conv_id, config, REASON_UNEXPECTED_ERROR, procedure, step)
+                self._fail(conv_id, config, REASON_UNEXPECTED_ERROR, procedure, step, e)
             except Exception as e:  # never mask the interrupt being propagated
                 logger.warning(f"could not end the result: {type(e).__name__}")
             raise
         if reason:
-            self._fail(conv_id, config, reason, procedure, step)
+            self._fail(conv_id, config, reason, procedure, step, error)
             return []
         return [reply]
 
@@ -361,16 +445,21 @@ class ProcedureRunner:
         reason: str,
         procedure: Procedure | None,
         step: int | None,
+        error: BaseException | None = None,
     ) -> None:
-        """Write the final ``failed`` result (nothing obtains again) and trace it."""
+        """Write the final ``failed`` result (nothing obtains again) and trace it
+        (``error``: the exception class name; ``rounds``: the compile's codes)."""
         self.api.update_context(
             conv_id, {config.result_key: _result(STATUS_FAILED, reason, procedure)}
         )
         self._emit(
             "failed",
+            conv_id,
             reason=reason,
             step=step,
             digest=procedure.digest if procedure else None,
+            error=type(error).__name__ if error else None,
+            rounds=_round_codes(error),
         )
 
     def _unwind(self, conv_id: str, depth: int) -> None:
@@ -415,7 +504,7 @@ class ProcedureRunner:
         except (FSMError, ValueError):
             return REASON_PUSH_FAILED, ""
         runs.append(_Run(procedure, config))
-        self._emit("pushed", digest=procedure.digest, step=step)
+        self._emit("pushed", conv_id, digest=procedure.digest, step=step)
         return "", reply
 
     def _finish(self, conv_id: str, run: _Run, step: int | None) -> None:
@@ -454,16 +543,17 @@ class ProcedureRunner:
                 logger.warning(f"could not count the run of {procedure.digest[:12]}")
         self._emit(
             "popped",
+            conv_id,
             digest=procedure.digest,
             status=status,
             reason=reason,
             step=step,
         )
 
-    def _emit(self, event: str, **fields: Any) -> None:
+    def _emit(self, event: str, conv: str, **fields: Any) -> None:
         if self._sink is None:
             return
         try:
-            self._sink(event, fields)
+            self._sink(event, {"conv": conv, **fields})
         except Exception as e:
             logger.warning(f"trace_sink raised {type(e).__name__} on {event!r}")
