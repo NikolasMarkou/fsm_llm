@@ -11,15 +11,24 @@ import dataclasses
 import itertools
 import json
 import re
+import sys
 import types
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+
+import synthesis_bench as sb  # read only: the 16 reference hand-written children
+
+from fsm_llm import API
 from fsm_llm.agents import HumanInTheLoop
 from fsm_llm.definitions import (
     CompletionResponse,
+    DataExtractionResponse,
     FSMDefinition,
     LLMResponseError,
     LLMUsage,
@@ -44,6 +53,7 @@ from fsm_llm.synthesis.prompts import (
     EXAMPLE_RETURN_KEYS,
     GOAL_BEGIN,
     GOAL_END,
+    KEY_NAMING,
     compile_messages,
     system_prompt,
 )
@@ -52,9 +62,11 @@ from fsm_llm.synthesis.synthesizer import (
     FSMSynthesizer,
     _approval_request,
     _judge,
+    normalise_extraction,
     reviewer_from_hitl,
 )
 from tests.test_fsm_llm_synthesis.conftest import (
+    ByTurn,
     ScriptedRunnerLLM,
     ScriptedStrongLLM,
     stuck_fsm,
@@ -1078,3 +1090,366 @@ class TestProcedureTelemetry:
         proc = synth.obtain(GOAL, return_keys=RET)
         assert proc.rounds
         assert canary not in repr((proc.rounds, proc.seconds, proc.usage))
+
+
+# --- D-091 / D-096: the key-naming extraction instruction ----------------------
+
+KEY = "party_size"
+CAP = SynthesisPolicy().max_text_chars
+FREE = "Take the user's latest stated number, even when it is out of range."
+
+
+def _retry(text: str | None = None, *, key: str = KEY, loop: bool = False) -> dict:
+    """The shape of the logged retry compiles (s0 y1, y2; operators made valid):
+    the instruction only at FIELD level, a value gate on the same key, and with
+    ``loop`` the self-loop refusal edge. ``text`` is the state-level text."""
+    var = {"var": key}
+    edge = {
+        "target_state": "done",
+        "priority": 1,
+        "description": "the value is in range",
+        "conditions": [
+            {
+                "description": "in range",
+                "requires_context_keys": [key],
+                "logic": {"and": [{">=": [var, 1]}, {"<=": [var, 8]}]},
+            }
+        ],
+    }
+    again = {
+        "target_state": "ask",
+        "priority": 2,
+        "description": "the value is out of range",
+        "conditions": [
+            {
+                "description": "out of range",
+                "requires_context_keys": [key],
+                "logic": {"or": [{"<": [var, 1]}, {">": [var, 8]}]},
+            }
+        ],
+    }
+    ask: dict[str, Any] = {
+        "id": "ask",
+        "description": "Ask for the number",
+        "purpose": "Get a number from 1 to 8",
+        "response_instructions": "Ask for the number, from 1 to 8.",
+        "field_extractions": [
+            {
+                "field_name": key,
+                "field_type": "int",
+                "extraction_instructions": "The whole number the user gives",
+            }
+        ],
+        "transitions": [edge, again] if loop else [edge],
+    }
+    if text is not None:
+        ask["extraction_instructions"] = text
+    done = {"id": "done", "description": "Finished", "purpose": "End"}
+    done["response_instructions"] = ""  # silent: no reply call at the end
+    return {
+        "name": "AskNumber",
+        "description": "Collect one number in range",
+        "initial_state": "ask",
+        "states": {"ask": ask, "done": done},
+    }
+
+
+def _normal(data: Any) -> Any:
+    return normalise_extraction(data, CAP)
+
+
+def _text_of(data: dict[str, Any], state: str = "ask") -> Any:
+    return data["states"][state].get("extraction_instructions")
+
+
+def _with_seats(text: str) -> dict[str, Any]:
+    """The retry shape with a second extracted key, ``seats``, read by the same gate."""
+    data = _retry(text)
+    ask = data["states"]["ask"]
+    ask["field_extractions"].append(
+        {"field_name": "seats", "field_type": "int", "extraction_instructions": "n"}
+    )
+    gate = ask["transitions"][0]["conditions"][0]
+    gate["logic"] = {"and": [{">": [{"var": "seats"}, 0]}, gate["logic"]]}
+    return data
+
+
+class Literal(ByTurn):
+    """``ByTurn`` whose bulk pass reads its instructions literally: a key the user
+    said comes back under its own name only when the instructions name it, else
+    under an invented one (the logged ``group_size`` for ``party_size``)."""
+
+    def extract_bulk_data(self, request: Any) -> DataExtractionResponse:
+        self.call_history.append(("extract_bulk_data", request))
+        named = request.system_prompt.partition("Instructions:")[2]
+        named = named.partition("User message:")[0]
+        said = re.findall(r"(\w+) is ([^;]+)", request.user_message or "")
+        return DataExtractionResponse(
+            extracted_data={
+                (k if re.search(rf"\b{k}\b", named) else f"invented_{k}"): v.strip()
+                for k, v in said
+            }
+        )
+
+
+def _ran(data: dict[str, Any], turns: list[str]) -> tuple[dict[str, Any], str]:
+    """The compiled child through the REAL pipeline, ``Literal`` as the cheap model."""
+    api = API.from_definition(definition=data, llm_interface=Literal())
+    conv, _ = api.start_conversation()
+    for turn in turns:
+        api.converse(turn, conv)
+    return api.get_data(conv), api.get_current_state(conv)
+
+
+def _compiled(fsm: dict[str, Any], normalise: bool = True, mp: Any = None) -> Any:
+    if not normalise:
+        mp.setattr(synthesizer_module, "normalise_extraction", lambda data, _: data)
+    return _synth([_text(fsm)])[0].compile("g", return_keys=(KEY,))
+
+
+class TestNormaliseExtraction:
+    @pytest.mark.parametrize(
+        "fsm",
+        [_retry(), _retry(FREE), _retry(loop=True), _retry(FREE, loop=True)],
+        ids=["y1-absent", "smoke-not-naming", "y2-absent-loop", "y2-not-naming-loop"],
+    )
+    def test_the_correction_lands_only_with_the_normaliser(self, fsm, monkeypatch):
+        """Guards: a later-turn correction lost because the bulk pass invented a
+        key (or never ran). Turn 1 states an out-of-range value, turn 2 a right one."""
+        turns = [f"{KEY} is 12", f"{KEY} is 6"]
+        fixed = _compiled(fsm).data
+        data, state = _ran(fixed, turns)
+        assert data[KEY] == 6 and state == "done"
+        assert KEY_NAMING.format(key=KEY) in _text_of(fixed)
+        bare = _compiled(fsm, False, monkeypatch).data
+        data, state = _ran(bare, turns)
+        assert data[KEY] == 12 and state == "ask"  # blocked: the correction never lands
+
+    def test_the_sentence_is_fixed_and_follows_the_models_own_text(self):
+        fixed = _normal(_retry(FREE))
+        assert _text_of(fixed) == FREE + " " + KEY_NAMING.format(key=KEY)
+        assert KEY_NAMING.format(key=KEY) == (
+            "Extract party_size: the latest value the user states for it, even "
+            "when an earlier value was refused."
+        )
+        assert _text_of(_normal(_retry())) == KEY_NAMING.format(key=KEY)
+        assert _text_of(_normal(_retry("   "))) == KEY_NAMING.format(key=KEY)
+
+    def test_every_gated_extracted_key_is_named_once_in_declared_order(self):
+        text = _text_of(_normal(_with_seats(FREE)))
+        want = " ".join(KEY_NAMING.format(key=k) for k in (KEY, "seats"))
+        assert text == FREE + " " + want
+        named = _text_of(_normal(_with_seats(f"Seats: how many. {FREE}")))
+        assert named == f"Seats: how many. {FREE} " + KEY_NAMING.format(key=KEY)
+
+    @pytest.mark.parametrize(
+        "make",
+        [
+            lambda: _retry(FREE.replace("number", KEY)),
+            lambda: _retry(f"Read {KEY.upper()} from the message."),
+            lambda: _retry(f"{KEY}: whole number"),
+        ],
+        ids=["lower", "upper", "leading"],
+    )
+    def test_a_state_text_that_names_the_key_is_left_alone(self, make):
+        """Guards: rewriting a text that already names the key (the digest of
+        such a reply must not move)."""
+        data = make()
+        assert _normal(data) is data
+
+    def test_a_longer_name_does_not_count_as_naming_the_key(self):
+        """Guards: a substring test (``party_size`` inside ``party_size_total``)."""
+        fixed = _normal(_retry("Extract party_size_total and my_party_size_x."))
+        assert KEY_NAMING.format(key=KEY) in _text_of(fixed)
+
+    def test_a_key_named_only_in_the_field_instruction_is_still_named_at_state_level(
+        self,
+    ):
+        data = _retry(FREE)
+        data["states"]["ask"]["field_extractions"][0]["extraction_instructions"] = (
+            f"Extract {KEY}: the whole number"
+        )
+        assert KEY_NAMING.format(key=KEY) in _text_of(_normal(data))
+
+    def _ungated(self) -> dict[str, Any]:
+        data = _retry(FREE)
+        data["states"]["ask"]["transitions"][0]["conditions"][0]["logic"] = {
+            ">": [{"var": "other"}, 0]
+        }
+        return data
+
+    def _keys_only(self) -> dict[str, Any]:
+        data = _retry(FREE)
+        del data["states"]["ask"]["transitions"][0]["conditions"][0]["logic"]
+        return data
+
+    def _classified(self) -> dict[str, Any]:
+        data = _retry(FREE)
+        ask = data["states"]["ask"]
+        del ask["field_extractions"]
+        ask["classification_extractions"] = [
+            {
+                "field_name": KEY,
+                "intents": [
+                    {"name": "a", "description": "a"},
+                    {"name": "b", "description": "b"},
+                ],
+                "fallback_intent": "b",
+            }
+        ]
+        return data
+
+    def _terminal(self) -> dict[str, Any]:
+        data = _retry(f"Extract {KEY}: the number")  # only `done` is a candidate
+        data["states"]["done"]["field_extractions"] = data["states"]["ask"][
+            "field_extractions"
+        ]
+        return data
+
+    def _at_the_cap(self) -> dict[str, Any]:
+        return _retry("x" * (CAP - 10))
+
+    @pytest.mark.parametrize(
+        "case",
+        ["_ungated", "_keys_only", "_classified", "_terminal", "_at_the_cap"],
+    )
+    def test_a_state_without_a_value_gate_on_its_key_is_byte_identical(self, case):
+        """Guards: touching a state whose gate reads no extracted key, a key-present
+        gate, a classification key, a terminal state or a text at the length cap."""
+        data = getattr(self, case)()
+        before = copy.deepcopy(data)
+        assert _normal(data) is data and data == before
+
+    def test_the_cap_is_the_policy_text_limit_and_the_states_own(self):
+        """Guards: a G5 ``text-too-long`` caused by the sentence alone."""
+        sentence = KEY_NAMING.format(key=KEY)
+        fits = _retry("x" * (CAP - len(sentence) - 1))
+        assert len(_text_of(_normal(fits))) == CAP
+        over = _retry("x" * (CAP - len(sentence)))
+        assert _normal(over) is over
+        wide = _retry("x" * 4990)  # the state's own 5000 limit binds past the policy's
+        assert normalise_extraction(wide, 10_000) is wide
+
+    def test_logic_edges_keys_and_every_other_field_are_unchanged(self):
+        data = _retry(FREE, loop=True)
+        before = copy.deepcopy(data)
+        fixed = _normal(data)
+        assert data == before  # the input is never mutated
+        assert fixed["states"]["ask"] != data["states"]["ask"]
+        fixed["states"]["ask"]["extraction_instructions"] = FREE
+        assert fixed == data
+
+    def test_a_second_pass_changes_nothing(self):
+        once = _normal(_retry(loop=True))
+        assert _normal(once) is once
+
+    @pytest.mark.parametrize(
+        "junk",
+        [
+            None,
+            [],
+            "states",
+            {"states": []},
+            {"states": {"a": "text", "b": None}},
+            {"states": {"a": {"transitions": "x"}}},
+            {"states": {"a": {"transitions": [None, {"conditions": "x"}]}}},
+            {"states": {"a": {"transitions": [{"conditions": [{"logic": {}}]}]}}},
+            {"states": {"a": {"transitions": [{"conditions": [{"logic": "no"}]}]}}},
+            {"states": {"a": {"field_extractions": "k", "extraction_instructions": 5}}},
+        ],
+    )
+    def test_any_other_shape_is_returned_as_it_is(self, junk):
+        """Guards: a raise on a shape the gates must report."""
+        assert _normal(junk) is junk
+
+    def test_a_malformed_logic_in_one_state_does_not_stop_another(self):
+        data = _retry(FREE)
+        data["states"]["bad"] = {
+            "field_extractions": [{"field_name": KEY}],
+            "transitions": [{"conditions": [{"logic": {}}]}],
+        }
+        fixed = _normal(data)
+        assert KEY_NAMING.format(key=KEY) in _text_of(fixed)
+        assert fixed["states"]["bad"] is data["states"]["bad"]
+
+    @pytest.mark.parametrize("kind", ["completion", "synthesize"])
+    def test_a_completion_or_synthesize_state_is_never_touched(self, kind):
+        data = _retry(FREE)
+        data["states"]["ask"][kind] = {"x": 1}
+        assert _normal(data) is data
+
+    def test_a_reply_that_already_names_the_key_has_the_pre_fix_digest(
+        self, monkeypatch
+    ):
+        """Guards: a stored digest that moves for a reply the normaliser leaves be."""
+        naming = _retry(f"Extract {KEY}: the number.", loop=True)
+        fixed = digest_of(_compiled(naming).definition)
+        bare = digest_of(_compiled(naming, False, monkeypatch).definition)
+        assert fixed == bare
+        monkeypatch.undo()
+        absent = _retry(loop=True)
+        assert digest_of(_compiled(absent).definition) != bare  # the text is stored
+
+    def test_the_stored_definition_is_the_normalised_one(self):
+        result = _compiled(_retry())
+        assert KEY_NAMING.format(key=KEY) in _text_of(result.data)
+        assert result.definition.states["ask"].extraction_instructions == _text_of(
+            result.data
+        )
+        assert digest_of(result.definition) == digest_of(
+            run_gates(
+                _normal(_retry()), SynthesisPolicy(), return_keys=(KEY,)
+            ).definition
+        )
+
+    def test_it_runs_before_the_gates_not_after(self, monkeypatch):
+        """Guards: a digest of a definition the gates never saw."""
+        seen: list[str] = []
+        real = synthesizer_module.run_gates
+
+        def spy(data: Any, *a: Any, **kw: Any) -> Any:
+            seen.append(_text_of(data) or "")
+            return real(data, *a, **kw)
+
+        monkeypatch.setattr(synthesizer_module, "run_gates", spy)
+        _compiled(_retry())
+        assert seen == [KEY_NAMING.format(key=KEY)]
+
+    @pytest.mark.parametrize("loop", [False, True], ids=["y1", "y2"])
+    @pytest.mark.parametrize("text", [None, FREE], ids=["absent", "not-naming"])
+    def test_the_normalised_logged_shapes_pass_every_gate_and_the_happy_path(
+        self, loop, text
+    ):
+        """Guards: a normalised definition any gate (G1 to G6a, G6b happy path) refuses."""
+        fsm = _retry(text, loop=loop)
+        policy = SynthesisPolicy()
+        assert run_gates(fsm, policy, return_keys=(KEY,)).passed
+        fixed = _normal(fsm)
+        assert run_gates(fixed, policy, return_keys=(KEY,)).passed
+        report = _happy(fixed, (KEY,))
+        assert report.passed, report.repair_text()
+
+    @pytest.mark.parametrize("task", sb.TASKS, ids=lambda t: t.id)
+    def test_the_reference_children_pass_every_gate_normalised(self, task):
+        """Guards: a gate result that moves on a previously passing definition
+        (the 16 reference hand-written children of the bench, read only)."""
+        policy = SynthesisPolicy(**sb.POLICY)
+        child = sb.hand_fsm(task)
+        assert run_gates(child, policy, return_keys=tuple(task.gold)).passed
+        fixed = _normal(child)
+        assert run_gates(fixed, policy, return_keys=tuple(task.gold)).passed
+        report = _happy(fixed, tuple(task.gold), policy)
+        assert report.passed, (task.id, report.repair_text())
+
+
+class _NoWriter(ScriptedStrongLLM):
+    def __init__(self) -> None:
+        super().__init__([json.dumps({"scenarios": []})] * 4)
+
+
+def _happy(data: dict[str, Any], keys: tuple[str, ...], policy: Any = None) -> Any:
+    policy = policy or SynthesisPolicy()
+    definition = run_gates(data, policy, return_keys=keys).definition
+    return Simulator(ByTurn(), _NoWriter()).run(
+        definition, goal="g", inputs=(), return_keys=keys, policy=policy
+    )

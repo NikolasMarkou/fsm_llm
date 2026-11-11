@@ -29,6 +29,7 @@ from fsm_llm.definitions import (
 )
 from fsm_llm.synthesis import FSMLibrary, SynthesisPolicy, digest_of, run_gates
 from fsm_llm.synthesis.gates import GATES
+from fsm_llm.synthesis.synthesizer import normalise_extraction
 from tests.test_fsm_llm_synthesis.conftest import (
     ByTurn,
     ScriptedRunnerLLM,
@@ -205,10 +206,11 @@ class TestFixture:
     @staticmethod
     def _provenance(sub, tid, tmp_path):
         """The provenance the library recorded for task *tid*'s child."""
-        task = TASKS[tid]
-        report = run_gates(
-            sb.hand_fsm(task), SynthesisPolicy(**sb.POLICY), return_keys=task.gold
-        )
+        task, policy = TASKS[tid], SynthesisPolicy(**sb.POLICY)
+        child = sb.hand_fsm(task)
+        if sub.startswith("synth"):  # a compile stores the normalised child (D-096)
+            child = normalise_extraction(child, policy.max_text_chars)
+        report = run_gates(child, policy, return_keys=task.gold)
         library = FSMLibrary(tmp_path / tid / sub)
         return library.get_record(digest_of(report.definition)).provenance
 

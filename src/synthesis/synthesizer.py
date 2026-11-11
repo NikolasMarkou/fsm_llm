@@ -41,7 +41,9 @@ from fsm_llm.definitions import (
     LLMCallCounts,
     LLMResponseError,
     LLMUsage,
+    State,
     SynthesizeConfig,
+    logic_referenced_keys,
 )
 from fsm_llm.llm import (
     LiteLLMInterface,
@@ -75,7 +77,7 @@ from .gates import (
 )
 from .library import FSMLibrary, LibraryRecord, digest_of
 from .policy import SynthesisPolicy, needs_approval
-from .prompts import REPLY_FAILURES, compile_messages, repair_message
+from .prompts import KEY_NAMING, REPLY_FAILURES, compile_messages, repair_message
 from .simulation import SimulationReport, Simulator
 
 _NO_REPLY = "(no reply)"  # the assistant turn echoed for a reply with no text
@@ -557,6 +559,91 @@ def _parser_detail(text: str) -> str:
     return ""
 
 
+# DECISION plan-2026-11-10T194139-2cefeb61/D-096
+# The bulk pass is the only channel for a later-turn correction (per-field
+# extraction is skip-if-set) and answers under the name its instructions give:
+# a compile that gates on a key it extracts, without naming that key at state
+# level, can never correct a refused value (live: `group_size` for `party_size`).
+# So the sentence is added HERE, on the parsed reply before `run_gates`, and the
+# stored definition is the normalised one. Do NOT change `logic`, do NOT add a
+# field extraction, do NOT run this after the gates, do NOT replace the model's
+# text, do NOT test "mentions" as a substring, and do NOT exceed the policy's text
+# cap (G5 `text-too-long` would reject a compile that passed before).
+_INSTRUCTION_CAP = next(
+    m.max_length
+    for m in State.model_fields["extraction_instructions"].metadata
+    if hasattr(m, "max_length")
+)
+
+
+def _naming_text(state: Any, limit: int) -> str | None:
+    """The state-level extraction text ``state`` should have, ``None`` to leave it."""
+    if (
+        not isinstance(state, dict)
+        or state.get("completion")
+        or state.get("synthesize")
+    ):
+        return None
+    text = state.get("extraction_instructions") or ""
+    fields, edges = state.get("field_extractions"), state.get("transitions")
+    if not (
+        isinstance(text, str) and isinstance(fields, list) and isinstance(edges, list)
+    ):
+        return None
+    read: set[str] = set()
+    for edge in edges:
+        conds = edge.get("conditions") if isinstance(edge, dict) else None
+        for cond in conds if isinstance(conds, list) else ():
+            try:
+                read |= logic_referenced_keys(
+                    cond.get("logic") if isinstance(cond, dict) else None
+                )
+            except ValueError:
+                pass  # malformed logic: G1 reports it
+    names = dict.fromkeys(
+        f["field_name"]
+        for f in fields
+        if isinstance(f, dict) and f.get("field_name") in read
+    )
+    missing = [
+        k
+        for k in names
+        if not re.search(rf"(?<!\w){re.escape(k)}(?!\w)", text, re.IGNORECASE)
+    ]
+    if not missing:
+        return None
+    added = " ".join(KEY_NAMING.format(key=k) for k in missing)
+    out = f"{text} {added}" if text.strip() else added
+    return out if len(out) <= limit else None
+
+
+def normalise_extraction(data: Any, max_chars: int) -> Any:
+    """Name, in the state-level ``extraction_instructions``, every key a state
+    extracts and gates on (D-096).
+
+    Interface contract (caller: ``_judge``, once per compile reply):
+        data: the parsed reply, any shape (never mutated). ``max_chars`` is the
+        policy's text cap. A state with ``field_extractions`` and an edge whose
+        ``logic`` reads such a key gets one ``KEY_NAMING`` sentence per key its
+        text does not already name (whole identifier, any case), appended after
+        the model's own text; a state with no such gate, a terminal,
+        ``completion`` or ``synthesize`` state, a classification key, a result
+        over the cap or any malformed part is left as it is. Returns ``data``
+        itself when nothing changes (so its digest is the same), else a shallow
+        copy with only the changed states replaced. Pure, idempotent, never raises.
+    """
+    states = data.get("states") if isinstance(data, dict) else None
+    if not isinstance(states, dict):
+        return data
+    limit = min(max_chars, _INSTRUCTION_CAP)
+    fixed = {
+        sid: {**state, "extraction_instructions": text}
+        for sid, state in states.items()
+        if (text := _naming_text(state, limit)) is not None
+    }
+    return {**data, "states": {**states, **fixed}} if fixed else data
+
+
 def _judge(
     reply: CompletionResponse,
     policy: SynthesisPolicy,
@@ -577,4 +664,5 @@ def _judge(
         detail = "" if code else _parser_detail(reply.text or "")
         code = code or "reply-not-json-object"
         return GateReport((GateFinding("G1", code, "", REPLY_FAILURES[code] + detail),))
+    data = normalise_extraction(data, policy.max_text_chars)
     return run_gates(data, policy, inputs=inputs, return_keys=return_keys)

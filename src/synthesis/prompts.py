@@ -39,6 +39,14 @@ REPLY_FAILURES = {
     "one JSON object and no other text",
 }
 
+#: The sentence ``normalise_extraction`` adds, per key, to a state whose edge gates
+#: on a key the state extracts: the bulk pass is the only channel for a later-turn
+#: correction and answers under the name the instructions give (D-091, D-096).
+KEY_NAMING = (
+    "Extract {key}: the latest value the user states for it, even when an "
+    "earlier value was refused."
+)
+
 #: One complete valid compile, for the prompt; it passes ``run_gates`` with
 #: ``EXAMPLE_INPUTS`` and ``EXAMPLE_RETURN_KEYS`` (pinned by a test).
 EXAMPLE_INPUTS = ("venue",)
