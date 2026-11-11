@@ -4,7 +4,7 @@
 
 Some conversations cannot be written ahead of time. "Collect what this visa form needs" depends on a goal that only shows up at run time. `fsm_llm.synthesis` lets a host conversation ask for a procedure by goal: a model writes a finite state machine (FSM) for it, a stack of checks decides whether that FSM may run, a library stores it, and a runner executes it as a child of the host conversation.
 
-**Status of the evidence.** The code is tested offline with scripted models. The pre-registered live comparison, `scripts/synthesis_bench.py` (compiled FSM against an in-context ReAct agent, with a hand-written FSM as a harness check), is NOT registered and NOT run yet: the shared model server was busy with another job and the bench's own preflight refused the live smoke. When it runs, every role and every arm uses the same model, `ollama_chat/bonsai-2:27b`, so it tests no split between a strong compiler and a cheap executor. No result is claimed anywhere in these docs. Treat "a compiled procedure beats an in-context agent" as an open question, not a finding.
+**Status of the evidence.** The code is tested offline with scripted models. The pre-registered live comparison, `scripts/synthesis_bench.py` (compiled FSM against an in-context ReAct agent, with a hand-written FSM as a harness check), ran three blocks, `s0`, `s1` and `s2`, and every verdict is INCONCLUSIVE. Every role and every arm used the same model, `ollama_chat/bonsai-2:27b` (Q2_0, 2-bit): there is NO strong/cheap split, so no strong-compile/cheap-run cost asymmetry was tested. No result in these docs says a compiled procedure helps; see "Live results" below.
 
 ## When to use it
 
@@ -259,6 +259,39 @@ Procedures that fail in use can be improved, and the loop is built so that a use
 - Simulation: `max_sim_turns` 12, `sim_trials` 2, `min_pass_rate` 0.5, `max_simulation_calls` 400.
 - Repair: `repair_min_failures` 3, `max_repairs_per_lineage` 3 (counted over the whole tree from the root).
 
+## Live results
+
+Three blocks of the comparison in `scripts/synthesis_bench.py` ran against `ollama_chat/bonsai-2:27b` on a local Ollama server (bench id `synthesis`; rows, summaries, reports and pre-registrations in `scripts/bench_data/synthesis/`). The compiler, scenario writer, executor, ReAct agent and hand-written arm are ONE model: there is no strong/cheap split, a G6b pass is partly the model agreeing with itself, and no cost saving from a cheaper runner could appear. 16 judge-free tasks in four families (collect, route, branch, retry), 3 trials each; the primary unit is the first trial of each task. The verdict rule (SUPPORTED needs S above R with Fisher p under 0.05) is byte-identical in all three blocks.
+
+| Block | S first trial (Wilson 95%) | H first trial | R first trial | All trials S / H / R of 48 | pass^3 S / H / R | S first-trial failures | Verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| s0 | 6 of 16 (0.18 to 0.61) | 8 of 16 | 14 of 16 | 27 / 26 / 40 | 6 / 8 / 12 | 10 (8 compile) | INCONCLUSIVE (h = 8 of 16, below 10) |
+| s1 | 15 of 16 (0.72 to 0.99) | 15 of 16 | 16 of 16 | 45 / 45 / 45 | 14 / 15 / 14 | 1 (compile) | INCONCLUSIVE (ceiling: s = 15 and r = 16) |
+| s2 | 15 of 16 (0.72 to 0.99) | 16 of 16 | 16 of 16 | 47 / 47 / 46 | 15 / 15 / 15 | 1 (compile) | INCONCLUSIVE (ceiling: s = 15 and r = 16) |
+
+Cost per block (prompt plus completion tokens over all 144 rows, wall time of the arm):
+
+| Block | S tokens | S wall | H tokens | H wall | R tokens | R wall |
+| --- | --- | --- | --- | --- | --- | --- |
+| s0 | 826,182 + 186,111 | 5,433 s | 183,186 + 27,663 | 945 s | 536,759 + 92,680 | 2,869 s |
+| s1 | 616,130 + 133,987 | 3,923 s | 175,211 + 26,435 | 869 s | 536,759 + 93,411 | 2,848 s |
+| s2 | 613,642 + 130,506 | 3,991 s | 157,326 + 23,863 | 822 s | 536,759 + 92,601 | 2,902 s |
+
+How to read this:
+
+- No block shows a compiled procedure beating the ReAct agent. In s1 and s2 the three arms are within one task of each other on 16 tasks that this model has saturated, so the ceiling clause fires and the data cannot separate them. S is also the most expensive arm here: it pays a compile call and a bounded simulation (over 1,000 simulation calls per block), and with one model a reused procedure saves no cheaper-model cost. Reuse itself worked: 31 of 48 S rows in s1 and s2 made no compile call.
+- s0 to s1 to s2 are NOT independent tests. After each block the failures were read in the raw calls and fixed, and the next block ran on the same 16 tasks. The gain of S from 6 to 15 of 16 shows the diagnosed defects were real and fixed on those tasks; it does not show the approach generalises.
+- The hand-written arm and the ReAct arm are not comparable across blocks: the grader (s1) and two hand-written hints (s1, s2) changed between blocks, each disclosed in the pre-registration of the block that first used it.
+- Single trials of this model are noisy: S r2 passed trial 1 and failed trials 2 and 3 of s1 on the same stored procedure; the ReAct arm (r1, two trials) and the hand-written arm (y2, one trial) ran out of turns re-asking in s2.
+
+What each round changed (generic changes under `src/synthesis/`, no task text there; a hygiene test checks it):
+
+- s0 to s1 (D-091 to D-105): a compile-time instruction that names the key a gated state extracts; deterministic repair of a mismatched closing bracket in a compile reply; the loader's allowed JsonLogic operators in the compile prompt and in plain ASCII in the repair text; a note on what a key name is when a gate reads a computed one. Harness v2 (one grader for all arms, hand-written branch detail from the state's own question).
+- s1 to s2 (D-106, D-107): a compile prompt rule that a key the goal says to decide needs a value gate over the allowed values; the hand-written route hint says to pick the label that fits the need.
+- After s2 (D-108, D-109), NOT covered by any registered block: the compile prompt says `missing` is true only when a key is absent; a dead-edge repair line says the same once, and a failing happy-path repair line says that a key chosen from a list needs an `in` gate. They were checked by short smokes only (y2 passed without a repair; y3 passed after one round; S r4 failed twice before the second note existed; the smoke meant to check that second note was stopped at close before it ran a trial, so D-109 has no live check at all). No fourth block was run, so their effect is unmeasured.
+
+Which rows predate which fix: every s0 row predates all of the above; s1 rows predate D-106 to D-109; s2 rows predate D-108 and D-109. The manifests of a block pin the source it ran against, so after later source edits `report <block>` refuses by design and the committed `REPORT_<block>.txt` is the record.
+
 ## Safety model
 
 1. The goal is untrusted caller text. It reaches the strong model only inside a fenced block, cut to 2,000 characters, control characters stripped and the characters `[ ] < >` replaced, so it cannot spell a marker. It is never a setting or an instruction. System prompts are built from the policy alone.
@@ -269,7 +302,8 @@ Procedures that fail in use can be improved, and the loop is built so that a use
 
 ## Known limits
 
-- The live comparison is NOT registered and NOT run. There is no measured claim that a compiled procedure beats a ReAct agent, or that it saves anything: the bench, when it runs, uses one model for every role.
+- The live comparison is inconclusive: three blocks, one model for every role and arm, 16 tasks the model has saturated, the later two in-sample after fixes made from earlier failures, and no fourth block. There is no measured claim that a compiled procedure beats a ReAct agent or saves anything; see "Live results".
+- Open defects seen live: a G6b false rejection when a label-restricted extraction instruction meets an edge with no value gate (the gate feeds the filler "sample"; D-106 and D-109 push the model toward an `in` gate, unmeasured); G6b passes some compiles that fail at run time; the 2-bit compiler repeats a dead edge when a repair line gives no reason; the ReAct and hand-written arms sometimes re-ask past `max_iterations`; G6a has an over-cap residual and the outage detection has blind spots (see above).
 - `verified` is not proof of correctness (see above). G6a is coarse and G6b is only as good as the scenarios a model wrote.
 - Procedures cannot call tools. A compile may list `completion` tools (and then needs approval), but the runner and `run_procedure` refuse to run one.
 - A corrupt library file blocks retrieval for the whole library until a human fixes it.

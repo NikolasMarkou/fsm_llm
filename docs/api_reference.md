@@ -864,7 +864,7 @@ result = agent(catalog.render_catalog() + "\n\nFill in the form.")
 
 ## Synthesis (`fsm_llm.synthesis`)
 
-Runtime FSM synthesis: a model compiles a goal into an FSM, gates decide whether it may run, a file-backed library stores it, and a runner executes it as a pushed child of a host conversation. The narrative, the concierge pattern and the safety discussion are in [`synthesis.md`](./synthesis.md); this section is the reference. `fsm_llm.synthesis` ships in every install (the `synthesis` extra adds no dependency), has no console script and is not imported by `import fsm_llm`. Importing it loads `fsm_llm.agents` (and so `fsm_llm.reasoning`) and `fsm_llm.eval`; nothing in core imports it. G3 and G4 live in the core module `fsm_llm.flow_analysis`, beside and never inside `FSMValidator`, so `fsm-llm-validate` is unchanged. The live bench `scripts/synthesis_bench.py` is NOT registered and NOT run yet; no result is claimed.
+Runtime FSM synthesis: a model compiles a goal into an FSM, gates decide whether it may run, a file-backed library stores it, and a runner executes it as a pushed child of a host conversation. The narrative, the concierge pattern and the safety discussion are in [`synthesis.md`](./synthesis.md); this section is the reference. `fsm_llm.synthesis` ships in every install (the `synthesis` extra adds no dependency), has no console script and is not imported by `import fsm_llm`. Importing it loads `fsm_llm.agents` (and so `fsm_llm.reasoning`) and `fsm_llm.eval`; nothing in core imports it. G3 and G4 live in the core module `fsm_llm.flow_analysis`, beside and never inside `FSMValidator`, so `fsm-llm-validate` is unchanged. The live bench `scripts/synthesis_bench.py` ran three blocks, all INCONCLUSIVE; no result favours synthesis (see `docs/synthesis.md`).
 
 ### Compile and reuse
 
@@ -925,7 +925,7 @@ runner.end_conversation(conv_id)
 
 - `verified` means the gates passed (G6b only if a simulator was given), over scenarios a model wrote; it is not a proof of correctness, and a simulation on the model that wrote the procedure is a weak signal.
 - A procedure cannot use tools: the runner and `run_procedure` refuse a `completion` state.
-- The live bench `scripts/synthesis_bench.py` is NOT registered and NOT run yet (the shared model server was busy and its preflight refused); when it runs every role and arm uses `ollama_chat/bonsai-2:27b`. No result is claimed.
+- The live bench `scripts/synthesis_bench.py` ran three blocks (`s0` to `s2`), every role and arm on `ollama_chat/bonsai-2:27b`: all three verdicts are INCONCLUSIVE (s0: the hand-written arm passed under 10 of 16; s1 and s2: the ceiling clause). No result favours synthesis; see `docs/synthesis.md`.
 - A host that resets its interface's usage meter during a run, or an interface with no meter, gets a provider outage recorded as `budget_spent`.
 - A corrupt library file blocks retrieval for the whole library until a human fixes it. Two processes on one directory are last writer wins on the run counters.
 

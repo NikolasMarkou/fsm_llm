@@ -64,7 +64,7 @@ One LLM layer (`src/llm.py`, the only module that imports litellm): `LLMInterfac
 | `scripts/audit_pth.py` | Flags known malicious and code-bearing `.pth` files in site-packages; exit 1 on issues | `make audit`, CI |
 | `scripts/bench_common.py` | Shared stdlib bench helpers (statistics, row files, manifest and drift checks, wire capture); no CLI | Held equal to `fsm_llm.eval` by `test_bench_parity.py`; `agents_bench.py` and `skills_bench.py` load it |
 | `scripts/agents_bench.py` | Pre-registered agent bench: `register`, `run`, `report` | Rows in tracked `scripts/bench_data/` |
-| `scripts/synthesis_bench.py` | Pre-registered synthesis comparison (bench id `synthesis`, block `s0`; arms `synth-fsm`, `hand-fsm`, `react`; 16 judge-free tasks): `register`, `smoke`, `run`, `report` | Bench status: not registered, not run. See `scripts/bench_data/README.md`; one model, `ollama_chat/bonsai-2:27b`, for every role and arm; `smoke` and `run` refuse (exit 3) while the shared model server is busy |
+| `scripts/synthesis_bench.py` | Pre-registered synthesis comparison (bench id `synthesis`, blocks `s0` to `s2`; arms `synth-fsm`, `hand-fsm`, `react`; 16 judge-free tasks): `register`, `smoke`, `run`, `report` | Bench status: blocks `s0`, `s1` and `s2` are registered, run and recorded (one model, `ollama_chat/bonsai-2:27b`, for every role and arm, no strong/cheap split); all three verdicts are INCONCLUSIVE and no registered block shows a compiled procedure beating a ReAct agent. See `docs/synthesis.md`. See `scripts/bench_data/README.md`; one model, `ollama_chat/bonsai-2:27b`, for every role and arm; `smoke` and `run` refuse (exit 3) while the shared model server is busy |
 | `scripts/skills_bench.py` | Pre-registered Agent Skills read-hint ablation (bench id `skills-disclosure`, blocks B0 and B1): `register`, `run`, `report` | Registered, NOT RUN (live runs declined); the read hint is a recorded default, not a measurement |
 | `scripts/type_check.py` | Runs mypy on the package `fsm_llm` by exposing `src/` under that name through a temporary symlink and `MYPYPATH` (`mypy src/` would name modules `src.*` and turn every `fsm_llm.*` import into `Any`); `make type-check`, tox, CI | Linux and macOS (symlink); `src/` must never be put on `sys.path` (it holds `logging.py`) |
 | `scripts/doc_counts.py` | Compares the count tokens of the shapes it knows (`N tests`, marker, `N slow`, `N live`/`N gated`, `tests in N files`, rows) in the tracked `.md` files with one `pytest --collect-only`; exit 1 on drift or on such a token no rule names; prose numbers with no token shape are not read | `make counts`; skips when `mcp` is importable |
@@ -156,7 +156,7 @@ FSM definition (JSON, v4.1):
 - Agents HITL is a security boundary in `ReactAgent`, `ReflexionAgent`, `ReasoningReactAgent` when an approval policy is set, or a callback with `requires_approval=True` tools (the flag is then the policy): a gated tool runs only with the driver-only grant `_approval_granted` (`ContextKeys.DRIVER_APPROVAL`) bound to that exact call. Caller `initial_context` can never set that grant, run-output keys (`RUN_OUTPUT_KEYS`) or the pattern's own outputs (`_run_output_keys`). A `requires_approval` tool with no callback and no policy raises `AgentError`; ParallelReact, REWOO, native_fc, PlanExecute have no HITL and refuse registries holding one.
 - Agents `AgentResult.success` means the run reached its goal; forced stops ship their answer with `success=False` and a `stop_reason`; a final reply cut by `max_tokens` is one (`truncated`, from the core cut-off record, D-025). A run closed from outside ends `ReactAgent.run_stream` without an error, and nothing flags a cut meta-builder artifact, `SelfConsistencyAgent` sample, `native_fc` tool call, streamed reply or earlier-turn cut; all deferred work.
 - Do NOT modify `examples/` unless explicitly asked: baselines for `fsm-llm-eval examples`, loaded by `tests/test_examples/`.
-- `scripts/bench_data/` is tracked on purpose. Blocks are pre-registered, run once at fixed n, never edited or re-run. The harness-only blocks (`l4-execute-write`, `l6-e2e`, `l7-explore-coldstart`, `l8-explore-loop`, `seed-probe`) are frozen history: the code that produced them was removed, and they are kept as the record. `skills-disclosure` B0 and B1 are registered but not run; its manifests pin the sha256 of `agent_skills.py`, `agents/agent_skills.py` and `constants.py`, so a run refuses after any edit to them. `synthesis` (block `s0`) pins the sha256 of its script, `bench_common.py`, `src/flow_analysis.py` and the synthesis, agents and eval modules it names (`SRC_PINS`) at `register`, so any later edit to one voids the block. Bench status: not registered, not run. See `scripts/bench_data/README.md`.
+- `scripts/bench_data/` is tracked on purpose. Blocks are pre-registered, run once at fixed n, never edited or re-run. The harness-only blocks (`l4-execute-write`, `l6-e2e`, `l7-explore-coldstart`, `l8-explore-loop`, `seed-probe`) are frozen history: the code that produced them was removed, and they are kept as the record. `skills-disclosure` B0 and B1 are registered but not run; its manifests pin the sha256 of `agent_skills.py`, `agents/agent_skills.py` and `constants.py`, so a run refuses after any edit to them. `synthesis` (blocks `s0`, `s1`, `s2`, each registered once and run once) pins the sha256 of its script, `bench_common.py`, `src/flow_analysis.py` and the synthesis, agents and eval modules it names (`SRC_PINS`) at `register`, so any later edit to one voids the block (the s2 manifests predate two later source edits, D-108 and D-109, so `report s2` now refuses by design; `s2/REPORT_s2.txt` is the record). Bench status: `s0`, `s1` and `s2` run, all INCONCLUSIVE; no fourth block was run. See `scripts/bench_data/README.md` and `docs/synthesis.md`.
 
 ## Dependencies
 
@@ -177,7 +177,7 @@ FSM definition (JSON, v4.1):
 ## Working here
 
 ```bash
-make test           # pytest -v (13,532 tests)
+make test           # pytest -v (13,742 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # python scripts/type_check.py (mypy -p fsm_llm)
@@ -190,7 +190,7 @@ make counts         # python scripts/doc_counts.py (fails when a documented test
 ```
 
 ```bash
-pytest                                 # Run all tests (13,532 collected)
+pytest                                 # Run all tests (13,742 collected)
 pytest tests/test_fsm_llm/            # Core package tests (5,982 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (232 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (319 tests)
@@ -200,8 +200,8 @@ pytest tests/test_fsm_llm_meta/       # Meta-builder tests (515 tests)
 pytest tests/test_fsm_llm_regression/ # Regression tests (264 tests)
 pytest tests/test_examples/           # Example validation tests (67 tests)
 pytest tests/test_fsm_llm_eval/       # Eval tests (430 tests)
-pytest tests/test_fsm_llm_synthesis/  # Synthesis tests (1,827 tests)
-# The 10 suites above sum to 13,281. The remaining 251 are five root-level files:
+pytest tests/test_fsm_llm_synthesis/  # Synthesis tests (2,037 tests)
+# The 10 suites above sum to 13,491. The remaining 251 are five root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (50),
 #   tests/test_bench_common.py (19), tests/test_agents_bench.py (132)
 #   and tests/test_skills_bench.py (38)

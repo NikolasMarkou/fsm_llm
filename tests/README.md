@@ -1,6 +1,6 @@
 # tests
 
-The whole pytest test tree of the FSM-LLM repository, at `tests/`. It holds 13,532 collected tests: ten suite folders, one per part of the `fsm_llm` package, plus five test files at this level and the shared `conftest.py`.
+The whole pytest test tree of the FSM-LLM repository, at `tests/`. It holds 13,742 collected tests: ten suite folders, one per part of the `fsm_llm` package, plus five test files at this level and the shared `conftest.py`.
 
 ## What it is for
 
@@ -48,7 +48,7 @@ flowchart TD
 | `test_fsm_llm_workflows/` | 319 | Async workflow engine: step types, DSL and `WorkflowBuilder`, engine lifecycle, timeouts, audit fixes |
 | `test_fsm_llm_monitor/` | 457 | FastAPI dashboard: routes, security checks, instance manager, event collector, data models, OpenTelemetry exporter |
 | `test_fsm_llm_eval/` | 430 | `fsm_llm.eval` and the `fsm-llm-eval` CLI: example scoring, case datasets, config, statistics, result files |
-| `test_fsm_llm_synthesis/` | 1,827 | `fsm_llm.synthesis`: the gates, the library, the runner, the agent tools, traces, diagnosis and repair, the concierge end to end, and the offline checks of `scripts/synthesis_bench.py`. Bench status: not registered, not run. |
+| `test_fsm_llm_synthesis/` | 2,037 | `fsm_llm.synthesis`: the gates, the library, the runner, the agent tools, traces, diagnosis and repair, the concierge end to end, and the offline checks of `scripts/synthesis_bench.py`. Bench status: three blocks run and recorded, all INCONCLUSIVE (see `docs/synthesis.md`). |
 | `test_fsm_llm_regression/` | 264 | One class per fixed bug across core, reasoning, workflows, CLI and packaging text |
 | `test_examples/` | 67 | Every JSON file under `examples/` (14 today) loads, parses as an `FSMDefinition` and passes `FSMValidator` (43 tests), and every call into `fsm_llm` in the `examples/**/*.py` scripts still binds to the live signature, checked with `ast` and `inspect.signature` without running an example (24 tests) |
 
@@ -81,7 +81,7 @@ make coverage    # same run with --cov=fsm_llm
 ## Things to know
 
 - Always run from the repository root. Many files import `tests.conftest` or each other as `tests.<folder>.<file>`.
-- Markers: `slow` (42 tests), `integration` 20 and `real_llm` 19 (the 19 are the same live tests; the 20th `integration` test is the opt-in real-home-directory skills test, armed by `FSM_LLM_REAL_SKILLS=1`), `examples` (67). `-m "not slow"` runs 13,490 tests. The 42 slow tests are the live files (`test_integration_ollama.py` 12, `test_live_classification_memory.py` 7, marked as whole modules), `test_handler_timeout.py` 7, `test_step_timeouts.py` 8 and the 7 count-pinning tests in `test_packaging.py`.
+- Markers: `slow` (42 tests), `integration` 20 and `real_llm` 19 (the 19 are the same live tests; the 20th `integration` test is the opt-in real-home-directory skills test, armed by `FSM_LLM_REAL_SKILLS=1`), `examples` (67). `-m "not slow"` runs 13,700 tests. The 42 slow tests are the live files (`test_integration_ollama.py` 12, `test_live_classification_memory.py` 7, marked as whole modules), `test_handler_timeout.py` 7, `test_step_timeouts.py` 8 and the 7 count-pinning tests in `test_packaging.py`.
 - `pyproject.toml` sets `asyncio_mode = "auto"`, so async tests need no decorator, and `addopts = "-v --tb=short"`.
 - Library logging is off by default. Tests that check a log line enable `fsm_llm` logging with a temporary loguru sink; pytest's `caplog` cannot see loguru output.
 - Some tests skip when an optional package is missing: `mcp` (all of `test_mcp_stdio.py`), `fastapi` and `httpx` in the agents suite, the OpenTelemetry SDK, or a subpackage that fails to import. The monitor suite imports `fastapi.testclient` at module level, so without the monitor extra it errors at collection instead of skipping.

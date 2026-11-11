@@ -66,7 +66,7 @@ The library is organized into five pillars. Each one is a collapsible section.
 - **Tools done properly**: the `@tool` decorator, annotations, enforced timeouts, MCP and A2A support, tools loaded from folders of Python files, and standard operating procedures.
 - **Human approval as a security boundary**: a gated tool runs only with a driver-only grant bound to that exact call, which a caller's initial context can never set.
 - **A meta-builder** that designs FSMs, workflows and agents by chat (`fsm-llm-meta`).
-- **`fsm_llm.synthesis`**: a host FSM names a goal in a `synthesize` state, a model writes a child FSM for it, static checks, a bounded simulation and an optional approval decide whether it may run, a file-backed library stores it and a runner pushes it as a child of the host conversation (`FSMSynthesizer`, `ProcedureRunner`, `FSMLibrary`, `create_procedure_tools`). `verified` means those checks passed over a model-written spec, not that the procedure is correct. The tests are offline. Bench status: not registered, not run. See [docs/synthesis.md](docs/synthesis.md).
+- **`fsm_llm.synthesis`**: a host FSM names a goal in a `synthesize` state, a model writes a child FSM for it, static checks, a bounded simulation and an optional approval decide whether it may run, a file-backed library stores it and a runner pushes it as a child of the host conversation (`FSMSynthesizer`, `ProcedureRunner`, `FSMLibrary`, `create_procedure_tools`). `verified` means those checks passed over a model-written spec, not that the procedure is correct. The tests are offline. Bench status: blocks `s0`, `s1` and `s2` are registered, run and recorded (one model, `ollama_chat/bonsai-2:27b`, for every role and arm, no strong/cheap split); all three verdicts are INCONCLUSIVE and no registered block shows a compiled procedure beating a ReAct agent. See `docs/synthesis.md`. See [docs/synthesis.md](docs/synthesis.md).
 </p>
 </details>
 
@@ -449,7 +449,7 @@ flowchart TD
 | [`fsm_llm.agents`](src/agents/README.md) | 18 agent patterns, tools, human approval, memory, MCP, A2A, meta-builder | Documented known limits, see [docs/agents_roadmap.md](docs/agents_roadmap.md) |
 | [`fsm_llm.monitor`](src/monitor/README.md) | FastAPI dashboard, optional OpenTelemetry export | Needs the `monitor` extra |
 | [`fsm_llm.eval`](src/eval/README.md) | Examples scorer (0 to 4), conversation cases with Wilson intervals | Scores are a heuristic that overstates quality; read the logs too |
-| [`fsm_llm.synthesis`](src/synthesis/README.md) | A model compiles a goal into an FSM, gates judge it, a library stores it, a runner executes it; agent tools | Tested offline with scripted models. Bench status: not registered, not run. |
+| [`fsm_llm.synthesis`](src/synthesis/README.md) | A model compiles a goal into an FSM, gates judge it, a library stores it, a runner executes it; agent tools | Tested offline with scripted models. Bench status: three blocks run on one model, all INCONCLUSIVE; no result favours synthesis. |
 
 **Evaluation honesty.** The examples scorer reads each run's output with simple rules and gives 0 to 4. It overstates quality, and runs from before and after the 2026-09-29 restructure are not comparable. The method and the run log are in [EVALUATE.md](EVALUATE.md). Offline tests (the default) replace the model with a fake, so they say nothing about model quality.
 
@@ -564,7 +564,7 @@ Contributions are welcome, from a typo fix to a new agent pattern. Full rules ar
 
 ```bash
 make install-dev    # editable install with every extra, plus pre-commit hooks
-make test           # Run full test suite (13,532 tests)
+make test           # Run full test suite (13,742 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy on the fsm_llm package (src/)

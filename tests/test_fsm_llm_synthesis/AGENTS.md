@@ -7,7 +7,7 @@ Purpose: Offline pytest suite for `fsm_llm.synthesis` (gates G1 to G7, library, 
 
 Covers `fsm_llm.synthesis` (`policy`, `gates`, `dryrun`, `simulation`, `synthesizer`, `prompts`, `library`, `runner`, `tools`, `traces`, `diagnose`, `patch`, `repair`, `constants`, `exceptions`) and the bench script. Core pieces it relies on are tested elsewhere: `State.synthesize` and `SynthesizeConfig` in `tests/test_fsm_llm/test_synthesize_field.py`, `fsm_llm.flow_analysis` in `tests/test_fsm_llm/test_flow_analysis.py`, the `stop` hook of `eval.cases.run_case_trial` in `tests/test_fsm_llm_eval/test_cases.py`.
 
-No test calls a real LLM, a model server or the network. Not covered here: a live run of the bench (it is NOT registered and NOT run yet), the rest of `fsm_llm`.
+No test calls a real LLM, a model server or the network. Not covered here: a live run of the bench (blocks s0 to s2 were run by hand, all INCONCLUSIVE), the rest of `fsm_llm`.
 
 ## Architecture
 

@@ -59,7 +59,7 @@ recounts them. `agents-react` is recounted by `scripts/agents_bench.py report`.
 | `l8-explore-loop` (frozen record) | The EXPLORE redispatch loop, per tool call. n=10 runs | B0, B1 | Runs reaching PLAN: B0 0/10, B1 9/10 |
 | `agents-react` | 38 deterministic tool-loop tasks x 3 trials | B0, B1, B2 | First-trial pass@1: `legacy` 28/38, `native_fc` 37/38 (B0); `fsm_advance` 32/38 (B1); `fsm_toolcall` 37/38 (B2) |
 | `seed-probe` (frozen record) | Does Ollama honour `seed`? | one record | Same seed is identical at temperature 0.7, a different seed diverges (temperature 0 hides any seed effect) |
-| `synthesis` | Does a procedure a model compiled into an FSM beat the same model as an in-context ReAct agent on 16 conversational tasks, with a hand-written FSM as the harness check? Block `s0`, arms `synth-fsm`, `hand-fsm`, `react` | `s0`: NOT REGISTERED, NOT RUN | Bench status: not registered, not run. No manifest and no rows exist under `synthesis/`; see the `synthesis` section below. |
+| `synthesis` | Does a procedure a model compiled into an FSM beat the same model as an in-context ReAct agent on 16 conversational tasks, with a hand-written FSM as the harness check? Blocks `s0` to `s2`, arms `synth-fsm`, `hand-fsm`, `react` | `s0`, `s1`, `s2`: registered, run, recorded; all INCONCLUSIVE | Bench status: three blocks of 144 rows each; see the `synthesis` section below. |
 | `skills-disclosure` | Do small models complete the two-step Agent Skills disclosure (`skill_load`, then `skill_read`) on 16 skills and 12 questions, and does the read hint matter? | B0 (48 rows), B1 (96 rows): REGISTERED, NOT RUN | No rows. The manifests and `PRE_REGISTRATION_B0.md` (with amendments A1, A2) and `PRE_REGISTRATION_B1.md` are committed; the live runs were declined at step 6 of plan 93d78536, so the hint decision is a recorded default (keep), not a measurement. `run` refuses to start if `agent_skills.py`, `agents/agent_skills.py` or `constants.py` changed since registration |
 
 History of the removed harness: the last graded end-to-end block was
@@ -134,10 +134,11 @@ bench_data/
 ├── skills-disclosure/        # skills_bench.py: registered, not run
 │   ├── <block>/              #   manifests only (B0, B1)
 │   └── PRE_REGISTRATION_B0.md, PRE_REGISTRATION_B1.md
-├── synthesis/                # synthesis_bench.py: NOT registered, not run; after
-│   └── <block>/              #   `register s0`: manifest_<arm>.json for the arms
-│                             #   synth-fsm, hand-fsm, react; after `run`:
-│                             #   rows_<arm>.jsonl + summary_<arm>.json
+├── synthesis/                # synthesis_bench.py: blocks s0, s1, s2 run
+│   └── <block>/              #   manifest_<arm>.json for the arms synth-fsm,
+│                             #   hand-fsm, react; rows_<arm>.jsonl,
+│                             #   summary_<arm>.json, REPORT_<block>.txt;
+│                             #   PRE_REGISTRATION_<block>.md beside them
 └── seed-probe/               # frozen record: probe-seed result (probe.json)
 ```
 
@@ -363,12 +364,11 @@ not record. Rules and the full list: decisions.md D-049 of plan 944e2692.
 
 ## synthesis (scripts/synthesis_bench.py)
 
-Bench status: not registered, not run. The script, its fixture and its offline
-tests (`tests/test_fsm_llm_synthesis/test_synthesis_bench.py`) exist and
-`scripts/bench_data/synthesis/` does not. The shared model server was busy with
-another job when the live smoke was first tried, and the bench's own preflight
-refused it; registration is held until the server is free. Nothing below is a
-result.
+Bench status: blocks `s0`, `s1` and `s2` are registered, run and recorded
+(144 rows each; manifests, rows, summaries, `REPORT_<block>.txt` and
+`PRE_REGISTRATION_<block>.md`). A fourth block was planned and NOT run (the
+session was wrapped up). All three verdicts are INCONCLUSIVE; see the results
+table in `docs/synthesis.md`. The rows of one block are never edited or re-run.
 
 Question: does a procedure a model COMPILED into an FSM (`synth-fsm`) beat the
 same model as an in-context ReAct agent (`react`) on a conversational
