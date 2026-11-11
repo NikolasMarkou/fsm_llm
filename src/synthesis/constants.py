@@ -56,6 +56,9 @@ REASONS = (
 # --- Tool bounds: the most names one tool call may list (inputs or return_keys) ---
 MAX_TOOL_NAMES = 20
 
+# --- G6a: the most value assignments one state's dead-edge search tries ---
+MAX_ASSIGNMENTS = 2048
+
 # --- Library lifecycle, in order: draft -> verified -> trusted -> deprecated ---
 LIFECYCLE_DRAFT = "draft"
 LIFECYCLE_VERIFIED = "verified"

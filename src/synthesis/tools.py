@@ -147,7 +147,7 @@ def create_procedure_tools(
         - ``obtain_procedure(goal, return_keys, inputs=())`` calls
           ``synthesizer.obtain`` and replies with a receipt: ``procedure_id``,
           ``version`` and ``lifecycle`` (``-`` without a library), ``source``,
-          ``states`` (abort terminal included) and the ``G1`` to ``G5``
+          ``states`` (abort terminal included) and the ``G1`` to ``G6a``
           verdicts. No generated text.
         - ``run_procedure(procedure_id, inputs={})`` needs the synthesizer's
           library. It loads by id (64 lowercase hex), applies

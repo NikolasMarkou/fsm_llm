@@ -199,7 +199,14 @@ class TestRepairThenRun:
         digest = rig.finished(conv)[2]["synthesis_result"]["procedure_id"]
         record = rig.library.get_record(digest)
         assert record.lifecycle == "verified"
-        assert record.provenance["gates_passed"] == ["G1", "G2", "G3", "G4", "G5"]
+        assert record.provenance["gates_passed"] == [
+            "G1",
+            "G2",
+            "G3",
+            "G4",
+            "G5",
+            "G6a",
+        ]
         assert record.stats == {"runs": 1, "successes": 1}
 
     def test_a_second_conversation_hits_the_library_with_no_strong_call(
@@ -292,7 +299,7 @@ class TestTools:
         assert len(strong.requests) == 2  # the repair ran inside obtain
         assert receipt["lifecycle"] == "verified"
         digest = receipt["procedure_id"]
-        assert library.get_record(digest).provenance["gates_passed"][-1] == "G5"
+        assert library.get_record(digest).provenance["gates_passed"][-1] == "G6a"
 
         reply = call("run_procedure", procedure_id=digest, inputs={"applicant": "Ada"})
         assert reply == {"procedure_id": digest, "status": "ok", **ANSWERS}

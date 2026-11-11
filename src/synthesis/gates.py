@@ -1,14 +1,15 @@
 """
-Synthesis gates: G1 to G5 composed into one report, and stored-form checks.
+Synthesis gates: G1 to G5 and G6a composed into one report, and stored-form checks.
 
 G1 loads the compile as an ``FSMDefinition``, G2 is ``FSMValidator``, G3 and G4
-are ``fsm_llm.flow_analysis`` and G5 is ``policy.check_policy``. Every finding
+are ``fsm_llm.flow_analysis``, G5 is ``policy.check_policy`` and G6a is the
+dead-edge dry run of ``dryrun``. Every finding
 becomes one ``GateFinding`` (converted, no shared base class). Nothing here
 raises on a hostile compile, logs or does I/O.
 
 # DECISION plan-2026-11-10T194139-2cefeb61/D-027
 # Order is fixed. G1 and G2 first (G2 only when G1 loaded: its stage 0 repeats
-# the loader's errors), then G3, G4 and G5 together on the RAW compile, so one
+# the loader's errors), then G3, G4, G6a and G5 together on the RAW compile, so one
 # repair message lists everything and a G1 failure runs no typed analysis. Only
 # after all pass is the abort injected, and then only G1 and G2 re-run on it.
 # Do NOT run G3 or G4 on the injected form (the abort edge would read as a
@@ -30,10 +31,11 @@ from fsm_llm.flow_analysis import analyze_data_flow, analyze_liveness
 from fsm_llm.okf import capped_line
 from fsm_llm.validator import FSMValidator
 
+from .dryrun import analyze_dryrun
 from .exceptions import SynthesisError
 from .policy import SynthesisPolicy, check_policy, inject_abort, strip_abort
 
-GATES = ("G1", "G2", "G3", "G4", "G5")
+GATES = ("G1", "G2", "G3", "G4", "G5", "G6a")
 #: Schema findings kept per compile, and characters kept of each.
 _MAX_SCHEMA_FINDINGS = 20
 _MESSAGE_CHARS = 300
@@ -41,7 +43,7 @@ _MESSAGE_CHARS = 300
 
 @dataclass(frozen=True)
 class GateFinding:
-    """One defect of one gate: ``gate`` is G1 to G5, ``code`` the defect,
+    """One defect of one gate: ``gate`` is G1 to G5 or G6a, ``code`` the defect,
     ``state`` the state id it sits at (``""`` for the document). ``state`` and
     ``message`` may quote model-authored text: ``repair_text`` is the only way
     they reach a prompt."""
@@ -86,17 +88,20 @@ class GateReport:
         then ``and K more``. Control-stripped, one line each, and ``[ ] < >``
         defanged, so a quoted model-authored name cannot spell a fence or tag.
         A G4 ``cycle-no-exit`` at a state G3 already reported as
-        ``undeclared-read`` is left out (the same cause); ``findings`` keeps it.
+        ``undeclared-read`` and a G6a ``edge-unfireable`` at a state G4 already
+        reported as ``shadowed-edge`` are left out (the same cause);
+        ``findings`` keeps both.
         """
-        reads = {
-            f.state
-            for f in self.findings
-            if (f.gate, f.code) == ("G3", "undeclared-read")
+
+        def at(gate: str, code: str) -> set[str]:
+            return {f.state for f in self.findings if (f.gate, f.code) == (gate, code)}
+
+        covered = {
+            ("G4", "cycle-no-exit"): at("G3", "undeclared-read"),
+            ("G6a", "edge-unfireable"): at("G4", "shadowed-edge"),
         }
         shown = [
-            f
-            for f in self.findings
-            if not ((f.gate, f.code) == ("G4", "cycle-no-exit") and f.state in reads)
+            f for f in self.findings if f.state not in covered.get((f.gate, f.code), ())
         ]
 
         def safe(text: str) -> str:
@@ -155,15 +160,15 @@ def run_gates(
     inputs: Iterable[str] = (),
     return_keys: Iterable[str] = (),
 ) -> GateReport:
-    """Run G1 to G5 on a raw compile and, on a pass, inject the abort path.
+    """Run G1 to G5 and G6a on a raw compile and, on a pass, inject the abort path.
 
     Interface contract (callers: the compiler's repair loop, the library path,
     the runner via ``verify_stored``):
         data: the compile as parsed, any shape (never mutated). ``inputs`` are
         the key names the driver provides, ``return_keys`` the keys the
         procedure must hand back (G3 requires each guaranteed). Returns a
-        ``GateReport``: every failure of G1 to G5 together (G2 to G4 are
-        skipped when G1 fails), or, when all pass, the injected definition
+        ``GateReport``: every failure of G1 to G6a together (G2 to G4 and
+        G6a are skipped when G1 fails), or, when all pass, the injected definition
         re-checked by G1 and G2. Never raises.
     """
     inputs, return_keys = tuple(inputs), tuple(return_keys)
@@ -172,7 +177,7 @@ def run_gates(
     definition, found = _load(data)
     findings += found
     if definition is None:
-        skipped = ("G2", "G3", "G4")
+        skipped = ("G2", "G3", "G4", "G6a")
     else:
         findings += _structure(data)
         findings += [
@@ -186,6 +191,10 @@ def run_gates(
             for f in analyze_liveness(
                 definition, inputs=inputs, max_turns=policy.max_turns
             )
+        ]
+        findings += [
+            GateFinding("G6a", f.code, f.state, f.message)
+            for f in analyze_dryrun(definition, inputs=inputs)
         ]
     findings += [
         GateFinding("G5", f.code, f.state, f.message)
@@ -221,8 +230,9 @@ def verify_stored(
         other value is not canonical.
         ``inputs`` are the signature's required inputs. The abort path is
         stripped (``G5 stored-not-canonical`` when it is not exactly the
-        canonical one), G1 to G5 run on the stripped form, and its re-injection
-        must equal the stored dict (``G5 stored-abort-mismatch``). Returns the
+        canonical one), G1 to G6a run on the stripped form (a stored dead edge
+        is refused), and its re-injection must equal the stored dict
+        (``G5 stored-abort-mismatch``). Returns the
         report of ``run_gates`` on a pass; never raises.
     """
     stored = (
@@ -235,7 +245,7 @@ def verify_stored(
         text = "the stored procedure is not the canonical abort-injected form"
         return GateReport(
             (GateFinding("G5", "stored-not-canonical", "", text),),
-            skipped=("G1", "G2", "G3", "G4"),
+            skipped=("G1", "G2", "G3", "G4", "G6a"),
         )
     report = run_gates(stripped, policy, inputs=inputs, return_keys=return_keys)
     if report.passed and report.injected != stored:

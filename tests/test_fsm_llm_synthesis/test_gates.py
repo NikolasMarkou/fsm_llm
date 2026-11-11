@@ -32,6 +32,14 @@ def _run(data: Any, **kw: Any) -> GateReport:
     return run_gates(data, POLICY, return_keys=kw.pop("return_keys", RET), **kw)
 
 
+def _dead_bool_edge(data: dict[str, Any]) -> None:
+    """The one answer is a bool and its gate wants the text "yes": G3 and G4
+    accept it (a value test is satisfiable to them), the evaluator never does."""
+    ask = data["states"]["ask"]
+    ask["field_extractions"][0]["field_type"] = "bool"
+    ask["transitions"][0]["conditions"][0]["logic"] = {"==": [{"var": "answer"}, "yes"]}
+
+
 def _ghost_loop(valid_fsm: dict[str, Any]) -> dict[str, Any]:
     """A loop whose only exit reads a key nothing produces (G3 and G4 both fire)."""
     valid_fsm["states"]["ask"]["transitions"] = [
@@ -77,6 +85,7 @@ def events(monkeypatch):
     for name, attr in (
         ("G3", "analyze_data_flow"),
         ("G4", "analyze_liveness"),
+        ("G6a", "analyze_dryrun"),
         ("G5", "check_policy"),
         ("inject", "inject_abort"),
     ):
@@ -85,20 +94,20 @@ def events(monkeypatch):
 
 
 class TestOrder:
-    def test_a_pass_runs_g1_to_g5_then_injects_then_rechecks_g1_and_g2(
+    def test_a_pass_runs_g1_to_g6a_then_injects_then_rechecks_g1_and_g2(
         self, valid_fsm, events
     ):
         assert _run(valid_fsm).passed
         assert [e[0] for e in events] == [
-            *("G1", "G2", "G3", "G4", "G5", "inject"),
+            *("G1", "G2", "G3", "G4", "G6a", "G5", "inject"),
             *("G1", "G2"),
         ]
 
     def test_g3_and_g4_never_see_the_abort_edge(self, valid_fsm, events):
         _run(valid_fsm)
-        assert [seen for name, seen in events if name in ("G3", "G4", "G5")] == [
+        assert [seen for name, seen in events if name in ("G3", "G4", "G6a", "G5")] == [
             False
-        ] * 3
+        ] * 4
         assert [seen for name, seen in events if name in ("G1", "G2")] == [
             False,
             False,
@@ -118,9 +127,10 @@ class TestOrder:
             "G3": "skipped",
             "G4": "skipped",
             "G5": "pass",
+            "G6a": "skipped",
         }
 
-    @pytest.mark.parametrize("gate", ["G3", "G4", "G5"])
+    @pytest.mark.parametrize("gate", ["G3", "G4", "G5", "G6a"])
     def test_any_failing_gate_blocks_the_injection(self, valid_fsm, events, gate):
         bad = {
             "G3": lambda d: d["states"]["ask"]["transitions"][0]["conditions"][
@@ -133,6 +143,7 @@ class TestOrder:
                 ]
             ),
             "G5": lambda d: d.update(persona="p"),
+            "G6a": _dead_bool_edge,
         }[gate]
         bad(valid_fsm)
         report = _run(valid_fsm)
@@ -140,13 +151,27 @@ class TestOrder:
         assert "inject" not in [e[0] for e in events]
         assert report.definition is None and report.injected is None
 
-    def test_g1_to_g5_failures_are_listed_together(self, valid_fsm):
+    def test_g1_to_g6a_failures_are_listed_together(self, valid_fsm):
         valid_fsm["persona"] = "p"  # G5
+        _dead_bool_edge(valid_fsm)  # G6a
         valid_fsm["states"]["ask"]["transitions"][0]["conditions"][0][
             "requires_context_keys"
         ] = ["ghost"]  # G3
         gates_hit = {f.gate for f in _run(valid_fsm).findings}
-        assert {"G3", "G5"} <= gates_hit
+        assert {"G3", "G5", "G6a"} <= gates_hit
+
+    def test_the_gate_list_ends_with_g6a(self):
+        assert gates.GATES == ("G1", "G2", "G3", "G4", "G5", "G6a")
+
+    def test_a_dead_edge_is_a_converted_g6a_finding(self, valid_fsm):
+        _dead_bool_edge(valid_fsm)
+        report = _run(valid_fsm)
+        assert [(f.gate, f.code, f.state) for f in report.findings] == [
+            ("G6a", "edge-unfireable", "ask"),
+            ("G6a", "terminal-unreachable", "done"),
+        ]
+        assert report.verdicts["G6a"] == "fail" and report.verdicts["G4"] == "pass"
+        assert "G6a edge-unfireable [ask]:" in report.repair_text()
 
     @staticmethod
     def _stub_validator(monkeypatch, outcomes):
@@ -232,7 +257,7 @@ class TestRepairText:
     def test_lines_have_the_documented_shape(self, valid_fsm):
         text = _run(_ghost_loop(valid_fsm), inputs=()).repair_text()
         assert text and all(
-            re.fullmatch(r"G\d [\w-]+ \[[^\[\]<>\n]*\]: [^\[\]<>\n]*", ln)
+            re.fullmatch(r"G\d\w* [\w-]+ \[[^\[\]<>\n]*\]: [^\[\]<>\n]*", ln)
             for ln in text.splitlines()
         )
         assert "G3 undeclared-read [ask]:" in text
@@ -246,6 +271,43 @@ class TestRepairText:
         } <= codes
         text = report.repair_text()
         assert "undeclared-read" in text and "cycle-no-exit" not in text
+
+    def test_a_dead_edge_at_a_shadowed_state_is_left_out_of_the_text_only(
+        self, valid_fsm
+    ):
+        ask = valid_fsm["states"]["ask"]
+        ask["transitions"] = [
+            {"target_state": "done", "description": "always", "priority": 1},
+            {
+                "target_state": "alt",
+                "description": "never",
+                "priority": 2,
+                "conditions": [{"description": "g", "logic": {">": [{"var": "n"}, 1]}}],
+            },
+        ]
+        valid_fsm["states"]["alt"] = {"id": "alt", "description": "a", "purpose": "a"}
+        report = _run(valid_fsm)
+        codes = {(f.gate, f.code, f.state) for f in report.findings}
+        assert {
+            ("G4", "shadowed-edge", "ask"),
+            ("G6a", "edge-unfireable", "ask"),
+            ("G6a", "terminal-unreachable", "alt"),
+        } <= codes
+        text = report.repair_text()
+        assert "shadowed-edge" in text and "edge-unfireable" not in text
+        assert "terminal-unreachable" in text
+
+    def test_a_dead_edge_at_another_state_is_kept(self):
+        report = GateReport(
+            (
+                GateFinding("G4", "shadowed-edge", "a", "m"),
+                GateFinding("G6a", "edge-unfireable", "a", "same cause"),
+                GateFinding("G6a", "edge-unfireable", "b", "other cause"),
+            )
+        )
+        text = report.repair_text()
+        assert "same cause" not in text and "other cause" in text
+        assert len(report.findings) == 3
 
     def test_a_g4_finding_at_another_state_is_kept(self):
         report = GateReport(
@@ -281,7 +343,7 @@ class TestRepairText:
         lines = report.repair_text(cap=3000).splitlines()
         assert lines and len(lines) <= len(report.findings)
         for line in lines:
-            assert re.fullmatch(r"G\d [\w-]+ \[[^\[\]<>]*\]: [^\[\]<>]*", line)
+            assert re.fullmatch(r"G\d\w* [\w-]+ \[[^\[\]<>]*\]: [^\[\]<>]*", line)
 
     def test_the_cap_bounds_the_text_and_counts_the_rest(self):
         report = GateReport(
@@ -345,6 +407,10 @@ TAMPER = {
         "stored-abort-mismatch",
     ),
     "persona-added": (lambda s: s.update(persona="p"), "persona-set"),
+    "dead-edge": (
+        lambda s: _dead_bool_edge({"states": s["states"]}),
+        "edge-unfireable",
+    ),
     "return-gate-removed": (
         lambda s: s["states"]["ask"]["transitions"][0].pop("conditions"),
         "return-key-not-guaranteed",
@@ -379,3 +445,4 @@ class TestVerifyStored:
         report = verify_stored(data, POLICY)
         assert [f.code for f in report.findings] == ["stored-not-canonical"]
         assert report.verdicts["G1"] == "skipped"
+        assert report.verdicts["G6a"] == "skipped"

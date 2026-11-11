@@ -523,7 +523,7 @@ def _injectable(state: object) -> bool:
 def inject_abort(data: dict[str, Any]) -> dict[str, Any]:
     """Return a deep copy of the compile with the abort path added.
 
-    Interface contract (callers: the synthesizer after G1 to G5 passed, the
+    Interface contract (callers: the synthesizer after G1 to G6a passed, the
     library when it re-checks a stored definition):
         data: a compile that passed G5, so ``states`` is an object of objects,
         each ``transitions`` is a list or absent, ``handler_only_keys`` is a

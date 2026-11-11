@@ -365,7 +365,7 @@ class TestObtainLibrary:
         assert proc.source == "compiled" and proc.record is not None
         rec = synth.library.get_record(proc.digest)
         assert rec == proc.record and rec.lifecycle == "verified"
-        assert rec.provenance["gates_passed"] == ["G1", "G2", "G3", "G4", "G5"]
+        assert rec.provenance["gates_passed"] == ["G1", "G2", "G3", "G4", "G5", "G6a"]
         assert rec.provenance["synthesizing_model"] == "strong-x"
         assert rec.provenance["approved_by"] is None
         assert rec.signature == {

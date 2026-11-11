@@ -217,7 +217,7 @@ class TestObtain:
             "lifecycle": "verified",
             "source": "compiled",
             "states": "3",  # ask, done and the injected abort terminal
-            "gates": "G1=pass G2=pass G3=pass G4=pass G5=pass",
+            "gates": "G1=pass G2=pass G3=pass G4=pass G5=pass G6a=pass",
         }
         assert len(rig.strong.requests) == 1
         assert not any(
@@ -239,7 +239,7 @@ class TestObtain:
         self, valid_fsm, tmp_path
     ):
         fields = _fields(_rig(valid_fsm, tmp_path, library=False).obtain())
-        assert fields["gates"] == "G1=pass G2=pass G3=pass G4=pass G5=pass"
+        assert fields["gates"] == "G1=pass G2=pass G3=pass G4=pass G5=pass G6a=pass"
         assert fields["version"] == "-"
 
     @pytest.mark.parametrize(
