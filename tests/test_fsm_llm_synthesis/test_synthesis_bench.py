@@ -95,13 +95,34 @@ class _Run(ScriptedRunnerLLM):
 
 
 class _Sim(ScriptedRunnerLLM):
-    """The G6b model: answers every extraction with the gold value."""
+    """The G6b model, honest (D-066): it extracts what the turn SAYS, read as
+    ``<field> is <value>`` (the happy path's own shape), and nothing else; it
+    never holds the gold, so a simulator turn that does not say the value a gate
+    needs fails the trial, as it does with a real model."""
 
     model = sb.MODEL
 
     def __init__(self, task):
-        gold = {k: int(v) if v.isdigit() else v for k, v in task.gold.items()}
-        super().__init__(gold, _texts(task))
+        super().__init__({}, _texts(task))
+
+    @staticmethod
+    def _said(request):
+        found = re.search(rf"\b{re.escape(request.field_name)} is ([^;]+)", request.user_message or "")  # fmt: skip
+        value = found[1].strip() if found else None
+        if request.field_type == "int":
+            value = int(value) if value and value.isdigit() else None
+        return value
+
+    def extract_field(self, request):
+        self.call_history.append(("extract_field", request))
+        value = self._said(request)
+        return FieldExtractionResponse(
+            field_name=request.field_name,
+            value=value,
+            confidence=float(value is not None),
+            reasoning="",
+            is_valid=value is not None,
+        )
 
 
 class _Agent:
@@ -252,6 +273,16 @@ class TestFixture:
             assert rows[0]["compile_calls"] == 2 and rows[1]["compile_calls"] == 0
             assert rows[0]["sim_calls"] > 0 and rows[2]["rounds"] == []
             assert self._gates("synth", tid, tmp_path) == [*GATES, "G6b"]
+
+    @pytest.mark.parametrize("task", sb.TASKS, ids=lambda t: t.id)
+    def test_every_task_compiles_and_passes_g6b_with_an_honest_executor(
+        self, task, rig, tmp_path
+    ):
+        """Guards (D-066): a G6b that rejects an honest procedure, which a double
+        answering the gold never sees (route and branch failed `compile` once)."""
+        row = sb.run_trial("synth-fsm", task, 1, tmp_path)
+        assert row["correct"] and row["phase"] == "pass" and row["rounds"] == [], row
+        assert row["sim_calls"] > 0 and row["source"] == "compiled"
 
     def test_react_reads_its_answer_and_the_user_through_ask_user(self, rig, tmp_path):
         """Guards: R graded on prose it cannot give, or never talking to the user."""
