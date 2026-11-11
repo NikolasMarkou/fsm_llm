@@ -20,7 +20,6 @@ STATUS_OK = "ok"
 STATUS_FAILED = "failed"
 STATUS_ABORTED = "aborted"
 STATUS_RUNNING = "running"
-STATUSES = (STATUS_OK, STATUS_FAILED, STATUS_ABORTED, STATUS_RUNNING)
 
 # --- Reason codes: the ``reason`` field; fixed so edges and tests can branch ---
 REASON_INPUTS_MISSING = "inputs_missing"
