@@ -540,6 +540,44 @@ class TestFlakiness:
         assert passed == []
 
 
+class TestReplay:
+    """``Simulator.replay``: a fixed script set, passes per scenario, no writer."""
+
+    SCRIPTS = (
+        {"kind": "happy", "turns": ["my answer is 42"]},
+        {"kind": "off_topic", "turns": ["what is the weather"]},
+    )
+
+    def _replay(self, llm: Any = None, clock: Any = None, **limits: Any):
+        llm = llm or ScriptedRunnerLLM({"answer": "42"})
+        writer = ScriptedStrongLLM([])  # a replay never calls the writer
+        kw = {} if clock is None else {"clock": clock}
+        sim = Simulator(llm, writer, **kw)
+        out = sim.replay(
+            _injected(),
+            self.SCRIPTS,
+            inputs=("topic",),
+            return_keys=("answer",),
+            trials=3,
+            policy=SynthesisPolicy(**limits),
+        )
+        return out, llm, writer
+
+    def test_it_counts_passes_per_scenario_over_the_trials(self):
+        out, llm, writer = self._replay()
+        assert out == [3, 3] and writer.requests == []
+        assert llm.count("extract_field") >= 6
+
+    def test_a_script_kind_picks_the_pass_rule(self):
+        out, _, _ = self._replay(llm=ScriptedRunnerLLM({}))
+        # nothing is extracted: the strict happy script fails, the stay-alive passes
+        assert out == [0, 3]
+
+    def test_a_spent_bound_is_none_never_a_partial_count(self):
+        assert self._replay(clock=TestBounds.Clock(0, 1000))[0] is None
+        assert self._replay(max_simulation_calls=1)[0] is None
+
+
 class TestParityWithTheRunner:
     def test_the_same_model_and_turns_end_in_the_same_state_with_the_same_keys(self):
         data = _injected().model_dump(exclude_defaults=True)

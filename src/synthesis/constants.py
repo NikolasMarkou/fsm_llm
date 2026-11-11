@@ -119,6 +119,25 @@ PATCH_CODES = (
     "test-failed",
 )
 
+# --- Promotion (D-053): every way ``repair_procedure`` ends, in order of check ---
+PROMOTION_CODES = (
+    "parent-not-live",
+    "parent-not-canonical",
+    "lineage-limit",
+    "too-few-failures",
+    "patch-refused",
+    "gates-failed",
+    "no-op",
+    "child-exists",
+    "approval-refused",
+    "simulation-failed",
+    "no-replay-set",
+    "replay-incomplete",
+    "regressed",
+    "no-improvement",
+    "promote",
+)
+
 # --- Tool bounds: the most names one tool call may list (inputs or return_keys) ---
 MAX_TOOL_NAMES = 20
 

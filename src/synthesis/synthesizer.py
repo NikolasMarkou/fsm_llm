@@ -462,10 +462,7 @@ class FSMSynthesizer:
                     )
         result = self.compile(goal, inputs=ins, return_keys=keys)
         digest = digest_of(result.definition)
-        approver = None
-        if needs_approval(result.data, policy):
-            self._review(_approval_request(goal, keys, result, digest))
-            approver = _APPROVER
+        approver = self.approval(goal, keys, result)
         saved: LibraryRecord | None = None
         if library is not None:
             saved = library.put(
@@ -491,6 +488,20 @@ class FSMSynthesizer:
             self._since(started),
             _spent(result.usage, before),
         )
+
+    def approval(
+        self, goal: str, return_keys: tuple[str, ...], result: CompileResult
+    ) -> str | None:
+        """G7 for a gate-passed ``result``: ``None`` when neither the policy nor
+        a ``completion`` tool needs approval, the approver label when the
+        reviewer said exactly ``True``, else ``SynthesisRefusedError``."""
+        if not needs_approval(result.data, self.policy):
+            return None
+        request = _approval_request(
+            goal, return_keys, result, digest_of(result.definition)
+        )
+        self._review(request)
+        return _APPROVER
 
     def _since(self, started: float) -> float:
         return round(self._clock() - started, 3)

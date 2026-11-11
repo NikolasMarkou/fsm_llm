@@ -127,6 +127,15 @@ class TestSynthesisPolicyLimits:
         with pytest.raises(SynthesisError):
             SynthesisPolicy(**{name: bad})
 
+    def test_promotion_limits_default_and_minimum(self):
+        p = SynthesisPolicy()
+        assert (p.replay_trials, p.max_repairs_per_lineage) == (2, 3)
+        for name in ("replay_trials", "max_repairs_per_lineage"):
+            assert SynthesisPolicy(**{name: 1}).__dict__[name] == 1
+            for bad in (0, True, 3.0, "5", None, -1, 10**30, float("nan")):
+                with pytest.raises(SynthesisError, match=name):
+                    SynthesisPolicy(**{name: bad})
+
     def test_repair_rounds_accept_zero_and_refuse_below(self):
         assert SynthesisPolicy(max_repair_rounds=0).max_repair_rounds == 0
         for bad in (-1, True, 1.0, "1", 10**30):

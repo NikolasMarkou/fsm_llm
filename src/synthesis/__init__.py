@@ -44,7 +44,7 @@ from .policy import (
     needs_approval,
     strip_abort,
 )
-from .repair import propose_patch
+from .repair import PromotionResult, propose_patch, repair_procedure
 from .runner import ProcedureRunner
 from .simulation import SimulationReport, Simulator
 from .synthesizer import (
@@ -72,6 +72,7 @@ __all__ = [
     "Procedure",
     "ProcedureApprovalRequest",
     "ProcedureRunner",
+    "PromotionResult",
     "RunTrace",
     "SimulationReport",
     "Simulator",
@@ -88,6 +89,7 @@ __all__ = [
     "inject_abort",
     "needs_approval",
     "propose_patch",
+    "repair_procedure",
     "reviewer_from_hitl",
     "run_gates",
     "strip_abort",

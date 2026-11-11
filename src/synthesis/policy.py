@@ -74,6 +74,8 @@ _INT_LIMITS = {
     "repair_min_failures": 1,
     "max_patch_ops": 1,
     "max_patch_chars": 1,
+    "replay_trials": 1,
+    "max_repairs_per_lineage": 1,
 }
 
 #: Names a compile may never declare or read: the framework keys and ours.
@@ -136,6 +138,9 @@ class SynthesisPolicy:
         failing runs a diagnosis or a repair needs.
         ``max_patch_ops`` and ``max_patch_chars`` bound one patch: its ops and
         the characters of all its strings and keys (``apply_patch``).
+        ``replay_trials`` is the trials per replayed scenario on each side;
+        ``max_repairs_per_lineage`` the repairs a lineage may hold (the
+        parent's minor version).
         ``trust_after_successes`` is ``None`` or an ``int`` from 1.
         ``allowed_tools`` is a collection of non-blank names (a bare string is
         refused); it is stored as a ``frozenset``. ``require_approval`` is a
@@ -162,6 +167,8 @@ class SynthesisPolicy:
     repair_min_failures: int = 3
     max_patch_ops: int = 12
     max_patch_chars: int = 8000
+    replay_trials: int = 2
+    max_repairs_per_lineage: int = 3
     min_pass_rate: float = 0.5
     reuse_min_score: float = 0.8
     trust_after_successes: int | None = None

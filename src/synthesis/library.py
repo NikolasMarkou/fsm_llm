@@ -7,6 +7,7 @@ Layout under the library root::
     records/<sha256>.json       its ``LibraryRecord`` (lifecycle, stats, provenance)
     traces/<sha256>.jsonl       its run traces, one value-free ``RunTrace`` row a line
     scenarios/<sha256>.json     its stored G6b scripts (synthetic text, capped)
+    patches/<sha256>.json       the ops that repaired its parent into it
 
 The digest is the full sha256 of the same canonical dump ``API`` hashes
 (``model_dump(exclude_defaults=True)``, sorted keys); its first 8 hex digits
@@ -74,6 +75,8 @@ _PROVENANCE_KEYS = frozenset(
         "approved_by",
         "parent",
         "created_at",
+        "repair",
+        "replay",
     }
 )
 _SIGNATURE_KEYS = frozenset({"inputs_required", "return_keys", "tools_used"})
@@ -333,6 +336,8 @@ class FSMLibrary:
         lifecycle: str = LIFECYCLE_DRAFT,
         parent: str | None = None,
         parent_run: str | None = None,
+        repair: str | None = None,
+        replay: str | None = None,
     ) -> LibraryRecord:
         """Store *definition* and return its record.
 
@@ -341,7 +346,9 @@ class FSMLibrary:
         ``gates_passed`` only gains gates it lacks). A
         different digest is a new entry; with ``parent`` (the digest of the
         definition it repairs, which must exist) the minor version is parent's
-        plus one, else ``1.0``. ``lifecycle`` is ``draft`` or ``verified``.
+        plus one, else ``1.0``. ``repair`` (a patch digest) and ``replay``
+        (counts) are provenance strings of a repaired child.
+        ``lifecycle`` is ``draft`` or ``verified``.
         ``tools_used`` is read from the definition, not from the caller.
         """
         if lifecycle not in (LIFECYCLE_DRAFT, LIFECYCLE_VERIFIED):
@@ -403,6 +410,8 @@ class FSMLibrary:
                         "gates_passed": list(gates_passed),
                         "approved_by": who or None,
                         "parent": parent,
+                        "repair": repair,
+                        "replay": replay,
                         "created_at": iso_utc(datetime.now(timezone.utc)),
                     },
                     stats={"runs": 0, "successes": 0},
@@ -436,9 +445,18 @@ class FSMLibrary:
             digest, lambda r: self._moved(r, LIFECYCLE_TRUSTED, approved_by=who)
         )
 
-    def deprecate(self, digest: str) -> LibraryRecord:
-        """Any non-deprecated lifecycle to ``deprecated``; nothing leaves it."""
-        return self._update(digest, lambda r: self._moved(r, LIFECYCLE_DEPRECATED))
+    def deprecate(self, digest: str, *, keep_trusted: bool = False) -> LibraryRecord:
+        """Any non-deprecated lifecycle to ``deprecated``; nothing leaves it.
+        With ``keep_trusted`` a ``trusted`` record is returned unchanged; the
+        check is inside the lock, so a concurrent ``approve`` cannot be undone."""
+        return self._update(
+            digest,
+            lambda r: (
+                r
+                if keep_trusted and r.lifecycle == LIFECYCLE_TRUSTED
+                else self._moved(r, LIFECYCLE_DEPRECATED)
+            ),
+        )
 
     def record_run(
         self,
@@ -534,7 +552,7 @@ class FSMLibrary:
             )
 
     @staticmethod
-    def _scenarios(value: object) -> list[dict[str, Any]]:
+    def clean_scenarios(value: object) -> list[dict[str, Any]]:
         """The stored shape of *value*: at most ``MAX_SCENARIOS`` of
         ``{kind, turns}``, text stripped and capped; ``ValueError`` otherwise."""
         if not isinstance(value, (list, tuple)):
@@ -566,11 +584,18 @@ class FSMLibrary:
         characters, control-stripped. ``SynthesisError`` for another shape."""
         path = self._path("scenarios", digest)
         try:
-            clean = self._scenarios(scenarios)
+            clean = self.clean_scenarios(scenarios)
         except ValueError as exc:
             raise SynthesisError(str(exc)) from exc
         with self._lock:
             self._write(path, json.dumps(clean, indent=2))
+
+    def add_patch(self, digest: str, ops: Sequence[dict[str, Any]]) -> None:
+        """Store the ops that produced *digest* from its parent (atomic, the
+        canonical JSON of the ops: the text a reviewer may read later)."""
+        path = self._path("patches", digest)
+        with self._lock:
+            self._write(path, json.dumps(list(ops), sort_keys=True, indent=2))
 
     def read_scenarios(self, digest: str) -> list[dict[str, Any]]:
         """The stored scripts of *digest* (``[]`` when none); a corrupt file is
@@ -579,7 +604,7 @@ class FSMLibrary:
         if raw is None:
             return []
         try:
-            return self._scenarios(json.loads(raw))
+            return self.clean_scenarios(json.loads(raw))
         except (ValueError, RecursionError) as exc:
             raise LibraryError(f"corrupt scenarios {digest[:12]}: {exc}") from exc
 
@@ -640,7 +665,13 @@ class FSMLibrary:
         scores, embedded = _scores(
             goal, [str(r.provenance.get("goal") or "") for r in kept], embed
         )
+
+        def order(pair: tuple[LibraryRecord, float]) -> tuple[Any, ...]:
+            record = pair[0]  # a tie: lifecycle rank, then version, then digest
+            version = _VERSION_RE.fullmatch(record.version).groups()  # type: ignore[union-attr]
+            return (-pair[1], -_RANK[record.lifecycle], *(-int(v) for v in version))
+
         ranked = sorted(
-            zip(kept, scores, strict=True), key=lambda p: (-p[1], p[0].digest)
+            zip(kept, scores, strict=True), key=lambda p: (*order(p), p[0].digest)
         )
         return [LibraryMatch(r, s, embedded) for r, s in ranked[:top_k]]

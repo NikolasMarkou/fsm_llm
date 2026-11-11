@@ -836,3 +836,101 @@ class TestScenarios:
         with pytest.raises(LibraryError):
             lib.read_scenarios(D)
         assert path.read_text() == text
+
+
+def _child(lib: FSMLibrary, parent: library.LibraryRecord, **kw: Any):
+    """A second definition stored as a repair of ``parent`` (same goal)."""
+    kw.setdefault("goal", GOAL)
+    return lib.put(
+        _fsm("Collect2"),
+        inputs_required=["party"],
+        return_keys=["slot"],
+        lifecycle="verified",
+        parent=parent.digest,
+        **kw,
+    )
+
+
+class TestRepairLineage:
+    def test_a_tie_returns_the_child_of_a_crash_between_the_two_writes(self, lib):
+        parent = _put(lib, lifecycle="verified")
+        child = _child(lib, parent)
+        assert (parent.version, child.version) == ("1.0", "1.1")
+        hits = TestSearch._q(lib, min_lifecycle="verified")
+        assert [h.record.digest for h in hits] == [child.digest, parent.digest]
+        assert hits[0].score == hits[1].score
+
+    def test_lifecycle_rank_outranks_the_minor_version_in_a_tie(self, lib):
+        parent = _put(lib, lifecycle="verified")
+        child = _child(lib, parent)
+        lib.approve(parent.digest, "boss")
+        hits = TestSearch._q(lib, min_lifecycle="verified")
+        assert [h.record.digest for h in hits] == [parent.digest, child.digest]
+
+    def test_the_version_is_compared_as_numbers(self, lib):
+        rec = _put(lib, "V0", lifecycle="verified")
+        for i in range(1, 11):
+            rec = lib.put(
+                _fsm(f"V{i}"),
+                goal=GOAL,
+                inputs_required=["party"],
+                return_keys=["slot"],
+                lifecycle="verified",
+                parent=rec.digest,
+            )
+        assert rec.version == "1.10"
+        hits = TestSearch._q(lib, min_lifecycle="verified")
+        assert hits[0].record.version == "1.10"  # "1.9" > "1.10" as text
+
+    def test_a_better_score_still_beats_rank_and_version(self, lib):
+        far = _put(lib, "Far", goal="reset a password", lifecycle="verified")
+        _child(lib, far, goal="reset a password")
+        near = _put(lib, "Near", goal=GOAL)
+        hits = TestSearch._q(lib, min_lifecycle="draft")
+        assert hits[0].record.digest == near.digest
+
+    def test_provenance_holds_the_repair_and_replay_strings(self, lib):
+        parent = _put(lib, lifecycle="verified")
+        child = _child(lib, parent, repair="a" * 64, replay="3/4 vs 1/4")
+        assert child.provenance["repair"] == "a" * 64
+        assert child.provenance["replay"] == "3/4 vs 1/4"
+        assert lib.get_record(child.digest) == child
+        assert _put(lib, "Collect").provenance.get("repair") is None
+
+    def test_add_patch_is_atomic_json_under_patches(self, lib, monkeypatch):
+        rec = _put(lib, lifecycle="verified")
+        ops = [{"op": "replace", "path": "/states/a/purpose", "value": "x"}]
+        seen: list[str] = []
+        real = FSMLibrary._write
+
+        def spy(self, path, text):
+            seen.append(path.parent.name)
+            real(self, path, text)
+
+        monkeypatch.setattr(FSMLibrary, "_write", spy)
+        lib.add_patch(rec.digest, ops)
+        assert seen == ["patches"]
+        stored = json.loads((lib.root / "patches" / f"{rec.digest}.json").read_text())
+        assert stored == ops
+        assert not [f for f in _files(lib) if f.endswith(".tmp")]
+        with pytest.raises(LibraryError):
+            lib.add_patch("../x", ops)
+        assert [h.record.digest for h in TestSearch._q(lib)] == [rec.digest]
+
+    def test_deprecate_can_leave_a_trusted_record_alone(self, lib):
+        rec = _put(lib, lifecycle="verified")
+        lib.approve(rec.digest, "boss")
+        assert lib.deprecate(rec.digest, keep_trusted=True).lifecycle == "trusted"
+        assert lib.get_record(rec.digest).lifecycle == "trusted"
+        other = _put(lib, "Other", lifecycle="verified")
+        assert lib.deprecate(other.digest, keep_trusted=True).lifecycle == "deprecated"
+        assert lib.deprecate(rec.digest).lifecycle == "deprecated"  # explicit call
+
+    def test_clean_scenarios_is_the_public_cleaner(self):
+        out = FSMLibrary.clean_scenarios(
+            [{"kind": "happy", "turns": ["a\x00b" + "x" * 400]}] * 9
+        )
+        assert len(out) == 6 and len(out[0]["turns"][0]) <= 300
+        assert "\x00" not in out[0]["turns"][0]
+        with pytest.raises(ValueError):
+            FSMLibrary.clean_scenarios("nope")

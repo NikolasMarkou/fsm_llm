@@ -139,6 +139,20 @@ def _passes(kind: str, trial: TrialResult, return_keys: Sequence[str]) -> bool:
     return (trial.ended and done) if kind in _STRICT else (not trial.ended or done)
 
 
+def _case(
+    kind: str, model: FSMDefinition, inputs: Sequence[str], turns: Sequence[str]
+) -> ConversationCase:
+    """One scripted conversation on ``model`` (inputs get ``"sample"``)."""
+    return ConversationCase(
+        id=kind,
+        fsm=model.model_dump(exclude_defaults=True),
+        initial_context={name: "sample" for name in inputs},
+        turns=list(turns),
+        # a real check the case model needs; the verdict is `_passes`
+        expect=Expectations(visited_states=[model.initial_state]),
+    )
+
+
 class Simulator:
     """Plays scripted users against a procedure (gate G6b).
 
@@ -181,6 +195,50 @@ class Simulator:
     def _calls(self) -> int:
         return int(self.llm.usage().calls)  # type: ignore[attr-defined]
 
+    def _over(self, start: float, calls0: int, policy: SynthesisPolicy) -> bool:
+        """Whether the time or call bound is spent (checked before EVERY trial)."""
+        return (
+            self._clock() - start >= policy.max_simulation_seconds
+            or self._calls() - calls0 >= policy.max_simulation_calls
+        )
+
+    def replay(
+        self,
+        definition: FSMDefinition | dict[str, Any],
+        scenarios: Sequence[dict[str, Any]],
+        *,
+        inputs: Sequence[str],
+        return_keys: Sequence[str],
+        trials: int,
+        policy: SynthesisPolicy,
+    ) -> list[int] | None:
+        """Passes per scenario over ``trials`` trials each, on the interface of
+        ``run`` and by the same ``_passes`` rule (a scenario's ``kind`` picks it).
+
+        Interface contract (caller: ``repair_procedure``): ``scenarios`` are
+        ``{"kind", "turns"}`` dicts, already cleaned; no writer call is made.
+        The same two bounds as ``run`` (``policy``) are checked before every
+        trial; a spent bound returns ``None``, never a partial count.
+        """
+        model = (
+            definition
+            if isinstance(definition, FSMDefinition)
+            else FSMDefinition(**definition)
+        )
+        start, calls0 = self._clock(), self._calls()
+        counts: list[int] = []
+        for scenario in scenarios:
+            kind = scenario["kind"]
+            case = _case(kind, model, inputs, scenario["turns"])
+            passes = 0
+            for n in range(trials):
+                if self._over(start, calls0, policy):
+                    return None
+                trial = run_case_trial(case, _CONFIG, n, lambda: self.llm)
+                passes += _passes(kind, trial, return_keys)
+            counts.append(passes)
+        return counts
+
     def run(
         self,
         definition: FSMDefinition | dict[str, Any],
@@ -195,27 +253,15 @@ class Simulator:
             if isinstance(definition, FSMDefinition)
             else FSMDefinition(**definition)
         )
-        data = model.model_dump(exclude_defaults=True)
         start, calls0 = self._clock(), self._calls()
         generated = self._write(goal, inputs, return_keys, policy)
         plan = [(HAPPY_KIND, tuple(happy_turns(model, policy.max_sim_turns)))]
         plan += [(s["kind"], tuple(s["turns"])) for s in generated]
-        context = {name: "sample" for name in inputs}
         ran: list[tuple[int, str, TrialResult]] = []
         for index, (kind, turns) in enumerate(plan):
-            case = ConversationCase(
-                id=kind,
-                fsm=data,
-                initial_context=context,
-                turns=list(turns),
-                # a real check the case model needs; the verdict is `_passes`
-                expect=Expectations(visited_states=[model.initial_state]),
-            )
+            case = _case(kind, model, inputs, turns)
             for n in range(policy.sim_trials):
-                if (
-                    self._clock() - start >= policy.max_simulation_seconds
-                    or self._calls() - calls0 >= policy.max_simulation_calls
-                ):
+                if self._over(start, calls0, policy):
                     break
                 trial = run_case_trial(case, _CONFIG, n, lambda: self.llm)
                 ran.append((index, kind, trial))
