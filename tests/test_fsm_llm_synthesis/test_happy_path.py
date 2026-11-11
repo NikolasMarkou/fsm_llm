@@ -11,12 +11,15 @@ import json
 import re
 from typing import Any
 
+import pytest
+
 from fsm_llm.definitions import (
     DataExtractionResponse,
     FieldExtractionResponse,
     FSMDefinition,
 )
 from fsm_llm.synthesis import Simulator, SynthesisPolicy, run_gates, simulation
+from fsm_llm.synthesis.dryrun import edge_witnesses
 from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, ScriptedStrongLLM
 
 _SAID = r"\b{name} is ([^;]+)"
@@ -225,6 +228,57 @@ class TestAnHonestExtractorPasses:
 
         report, _ = _simulate(_branch(), ("detail",), Silent())
         assert report.happy["k"] == 0 and not report.passed
+
+
+class TestAStateThatValidatesSeveralValuesPasses:
+    """One state that tests three keys passes the dead-edge search's cap, so the
+    witnesses come from the bounded per-edge search (plan D-071): an honest
+    procedure must still pass G6b (review-iter-2 pass 2, WARNING 1)."""
+
+    @staticmethod
+    def _three(fields, gate, keys, stay=True):
+        edges = [_go("done", keys, gate, 1)] + (
+            [_go("ask", keys, None, 2)] if stay else []
+        )
+        return _fsm("ask", ask=_step("ask", fields, edges), done=_step("done"))
+
+    @pytest.mark.parametrize("year", ["int", "str"])
+    def test_a_name_a_birth_year_and_a_symptom(self, year):
+        keys = ["patient_name", "birth_year", "symptom"]
+        gate = {
+            "and": [
+                {"!=": [{"var": "patient_name"}, ""]},
+                {">=": [{"var": "birth_year"}, 1900]},
+                {"!=": [{"var": "symptom"}, ""]},
+            ]
+        }
+        fields = [("patient_name", "str"), ("birth_year", year), ("symptom", "str")]
+        fsm = self._three(fields, gate, keys)
+        witnesses = edge_witnesses(_compiled(fsm, tuple(keys)))["ask"]
+        assert witnesses[0] is not None and set(witnesses[0]) == set(keys)
+        report, _ = _simulate(fsm, tuple(keys))
+        assert report.passed, report.repair_text()
+        assert report.happy["k"] == 2
+
+    def test_a_plan_a_seat_count_and_an_agreement(self):
+        keys = ["plan", "seats", "agree"]
+        gate = {
+            "and": [
+                {"in": [{"var": "plan"}, ["basic", "pro", "team"]]},
+                {">=": [{"var": "seats"}, 1]},
+                {"==": [{"var": "agree"}, "yes"]},
+            ]
+        }
+        fields = [("plan", "str"), ("seats", "int"), ("agree", "str")]
+        report, _ = _simulate(self._three(fields, gate, keys), tuple(keys))
+        assert report.passed, report.repair_text()
+
+    def test_a_wide_state_still_fails_when_the_value_is_never_said(self):
+        keys = ["plan", "seats", "agree"]
+        gate = {"and": [{"==": [{"var": k}, "yes"]} for k in keys]}
+        fields = [(k, "str") for k in keys]
+        report, _ = _simulate(self._three(fields, gate, keys), tuple(keys), Mute())
+        assert not report.passed and report.happy["k"] == 0
 
 
 class TestTheScriptedTurns:

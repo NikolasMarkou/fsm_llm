@@ -10,17 +10,19 @@ the search against a brute-force oracle over a wider value grid that calls
 import glob
 import itertools
 import json
+import math
 import random
 import time
 from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
 from fsm_llm.definitions import FSMContext, FSMDefinition
 from fsm_llm.expressions import evaluate_logic, is_missing
 from fsm_llm.flow_analysis import FlowFinding, analyze_liveness
+from fsm_llm.logging import logger
 from fsm_llm.synthesis import dryrun
 from fsm_llm.synthesis.dryrun import analyze_dryrun
 from fsm_llm.transition_evaluator import TransitionEvaluator
@@ -712,6 +714,89 @@ class TestEdgeWitnesses:
         assert found["ask"] == {0: {"tier": "gold"}}
 
 
+class TestOverTheCapWitnesses:
+    """A state whose pool product passes the cap proves nothing dead (D-042), but
+    its edges still get the witnesses G6b speaks (plan D-071)."""
+
+    GATE: ClassVar[dict[str, Any]] = {
+        "and": [
+            {"!=": [_var("a"), ""]},
+            {">=": [_var("b"), 1900]},
+            {"!=": [_var("c"), ""]},
+        ]
+    }
+
+    def _ask(self, *edges, **extra):
+        return _fsm(_state("ask", list(edges), **extra), _state("done"))
+
+    def _wide(self):
+        return self._ask(
+            _edge("done", self.GATE, requires=("a", "b", "c")),
+            _edge("ask", None, priority=2),
+        )
+
+    def _product(self, definition) -> int:
+        state = definition.states["ask"]
+        lits, _, tested = dryrun._scan(state.transitions[0])
+        pools = [dryrun._pool(None, lits) for _ in sorted(tested)]
+        return math.prod(len(p) for p in pools)
+
+    def test_the_premise_the_state_is_over_the_cap(self):
+        assert self._product(self._wide()) > dryrun.MAX_ASSIGNMENTS
+
+    def test_an_edge_over_the_cap_gets_a_witness_the_evaluator_accepts(self):
+        definition = self._wide()
+        found = dryrun.edge_witnesses(definition)["ask"]
+        edge = definition.states["ask"].transitions[0]
+        assert found[0] is not None and set(found[0]) == {"a", "b", "c"}
+        assert TransitionEvaluator().transition_passes(edge, found[0])
+        assert found[1] == {}  # the stay edge needs nothing: the empty context
+
+    def test_over_the_cap_a_dead_edge_is_still_silent(self):
+        dead = {"and": [{">": [X, 5]}, {"<": [X, 3]}, *self.GATE["and"]]}
+        definition = self._ask(_edge("done", dead, requires=("a", "b", "c", "x")))
+        assert self._product(definition) > dryrun.MAX_ASSIGNMENTS
+        assert _found(definition) == set()
+        assert dryrun.edge_witnesses(definition)["ask"] == {0: None}
+
+    def test_a_witness_is_judged_against_the_whole_state(self):
+        # an edge outside the fragment (a dotted read) that fires first pre-empts
+        # the wide edge: no witness for it, never a value that would not route
+        early = _edge("ask", {"==": [{"var": "a.b"}, None]}, priority=0)
+        definition = self._ask(
+            early, _edge("done", self.GATE, requires=("a", "b", "c"), priority=1)
+        )
+        assert dryrun.edge_witnesses(definition)["ask"] == {0: None, 1: None}
+
+    def test_the_search_stops_at_the_cap_per_edge(self, monkeypatch):
+        calls = []
+        real = TransitionEvaluator.evaluate_transitions
+
+        def spy(self, state, context):
+            calls.append(1)
+            return real(self, state, context)
+
+        monkeypatch.setattr(TransitionEvaluator, "evaluate_transitions", spy)
+        dead = {"and": [{">": [X, 5]}, {"<": [X, 3]}, *self.GATE["and"]]}
+        definition = self._ask(_edge("done", dead, requires=("a", "b", "c", "x")))
+        dryrun.edge_witnesses(definition)
+        assert len(calls) <= dryrun.MAX_ASSIGNMENTS
+
+    def test_an_abort_edge_beside_the_wide_edge_never_enters_its_witness(self):
+        abort = _edge("fail", {"==": [_var("procedure_abort"), "x"]}, priority=0)
+        abort["conditions"][0]["requires_context_keys"] = ["procedure_abort"]
+        definition = _fsm(
+            _state(
+                "ask",
+                [abort, _edge("done", self.GATE, requires=("a", "b", "c"))],
+            ),
+            _state("done"),
+            _state("fail"),
+        )
+        found = dryrun.edge_witnesses(definition)["ask"]
+        assert found[1] is not None and "procedure_abort" not in found[1]
+
+
 class TestSpeed:
     def test_twelve_states_of_six_edges_in_under_two_seconds(self):
         ids = [f"s{i}" for i in range(12)]
@@ -734,9 +819,18 @@ class TestSpeed:
             states.append(_state(sid, edges))
         states.append(_state(ids[-1]))
         definition = _fsm(*states)
-        start = time.perf_counter()
-        analyze_dryrun(definition)
-        assert time.perf_counter() - start < 2.0
+        # a suite that ran the monitor tests first may have left library logging
+        # on (leaked loguru state): every evaluator call would then write a record
+        # (plan D-073); the library default is off, so measure the search with it off
+        was_on = dict(logger._core.activation_list).get("fsm_llm.", False)  # type: ignore[attr-defined]
+        logger.disable("fsm_llm")
+        try:
+            start = time.perf_counter()
+            analyze_dryrun(definition)
+            took = time.perf_counter() - start
+        finally:
+            (logger.enable if was_on else logger.disable)("fsm_llm")
+        assert took < 2.0
 
 
 # ------------------------------------------------------------- examples probe

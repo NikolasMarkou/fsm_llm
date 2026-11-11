@@ -240,6 +240,42 @@ def _mentions(definition: FSMDefinition) -> dict[str, set[str]]:
     return mentions
 
 
+def _first_fires(
+    state: State,
+    edges: list[Transition],
+    wanted: list[int],
+    keys: list[str],
+    pools: list[list[Any]],
+    evaluator: TransitionEvaluator,
+    limit: int | None = None,
+) -> dict[int, dict[str, Any]] | None:
+    """Edge index -> the context (present keys only) of the FIRST assignment of
+    ``pools`` (at most ``limit`` of them, in product order) under which the
+    evaluator, run on ``state``, takes that edge's target and the edge passes,
+    for the ``wanted`` edges that have one; ``None`` on an evaluator error."""
+    found: dict[int, dict[str, Any]] = {}
+    for values in itertools.islice(itertools.product(*pools), limit):
+        data = {k: v for k, v in zip(keys, values, strict=True) if v is not _ABSENT}
+        try:
+            result = evaluator.evaluate_transitions(state, FSMContext(data=data))
+        except TransitionEvaluationError:
+            return None
+        if result.result_type is TransitionEvaluationResult.DETERMINISTIC:
+            wins = {result.deterministic_transition}
+        else:
+            wins = {o.target_state for o in result.available_options or ()}
+        for i in wanted:
+            if (
+                i not in found
+                and edges[i].target_state in wins
+                and evaluator.transition_passes(edges[i], data)
+            ):
+                found[i] = data
+        if len(found) == len(wanted):
+            break
+    return found
+
+
 def _search(
     state: State,
     narrow: dict[str, tuple[str, tuple[str, ...]]],
@@ -250,9 +286,10 @@ def _search(
     evaluator take. ``witness``: edge index -> the context (present keys only)
     of the FIRST assignment under which the evaluator takes that edge's target.
     An unknown edge is in neither. Only judged edges go to the search (an
-    unknown competitor left out can only make an edge easier to fire); a state
-    whose pool product is over the cap, or that is a completion or synthesize
-    state, yields nothing."""
+    unknown competitor left out can only make an edge easier to fire); a
+    completion or synthesize state yields nothing. A state whose pool product is
+    over the cap has no ``dead`` (nothing is proven) and a ``witness`` only for
+    the edges a bounded search over their own keys opens (D-071)."""
     edges = state.transitions or []
     scans = {i: _scan(t) for i, t in enumerate(edges)}
     judged = {i: s for i, s in scans.items() if s is not None}
@@ -266,28 +303,32 @@ def _search(
         _pool(narrow.get(k), lits) if k in tested else [_ABSENT, FILLER] for k in keys
     ]
     if math.prod(len(p) for p in pools) > MAX_ASSIGNMENTS:
-        return {}, {}
+        # DECISION plan-2026-11-10T194139-2cefeb61/D-071
+        # Over the cap nothing is PROVEN dead (the verdict stays silent), but each
+        # judged edge still gets a witness: searched over only the keys it reads,
+        # the first MAX_ASSIGNMENTS assignments of its own product, and judged by
+        # the whole state, unknown edges included. Do NOT return no witnesses here
+        # (G6b then says the fixed samples and an honest three-key state fails),
+        # do NOT report a dead edge from a prefix, and do NOT judge against the
+        # probe that drops unknown competitors.
+        found: dict[int, dict[str, Any]] = {}
+        for i, (own, reads, names) in judged.items():
+            own_keys = sorted(reads)
+            own_pools = [
+                _pool(narrow.get(k), own) if k in names else [_ABSENT, FILLER]
+                for k in own_keys
+            ]
+            found |= (
+                _first_fires(
+                    state, edges, [i], own_keys, own_pools, evaluator, MAX_ASSIGNMENTS
+                )
+                or {}
+            )
+        return {}, found
     probe = state.model_copy(update={"transitions": [edges[i] for i in judged]})
-    witness: dict[int, dict[str, Any]] = {}
-    for values in itertools.product(*pools):
-        data = {k: v for k, v in zip(keys, values, strict=True) if v is not _ABSENT}
-        try:
-            result = evaluator.evaluate_transitions(probe, FSMContext(data=data))
-        except TransitionEvaluationError:
-            return {}, {}
-        if result.result_type is TransitionEvaluationResult.DETERMINISTIC:
-            wins = {result.deterministic_transition}
-        else:
-            wins = {o.target_state for o in result.available_options or ()}
-        for i in judged:
-            if (
-                i not in witness
-                and edges[i].target_state in wins
-                and evaluator.transition_passes(edges[i], data)
-            ):
-                witness[i] = data
-        if len(witness) == len(judged):
-            return {}, witness
+    witness = _first_fires(probe, edges, list(judged), keys, pools, evaluator)
+    if witness is None:
+        return {}, {}
     kinds = {k: narrow.get(k, ("any",))[0] for k in keys}
     return {
         i: ", ".join(f"{k} ({kinds[k]})" for k in sorted(judged[i][1])) or "any key"
