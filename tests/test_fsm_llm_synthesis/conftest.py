@@ -10,6 +10,7 @@ import fsm_llm.llm as llm_module
 from fsm_llm.definitions import (
     CompletionRequest,
     CompletionResponse,
+    DataExtractionResponse,
     LLMUsage,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
@@ -129,6 +130,40 @@ class ScriptedRunnerLLM(MockLLM2Interface):
             for name, r in self.call_history
             if name == kind and (state is None or self._state_of(r) == state)
         )
+
+
+def _typed(value: str | None, kind: str) -> Any:
+    """``value``, the text a turn said, as a ``kind`` (``None`` when it is not one)."""
+    if value is None:
+        return None
+    if kind == "int":
+        return int(value) if re.fullmatch(r"-?\d+", value) else None
+    if kind == "float":
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    if kind == "bool":
+        return {"yes": True, "true": True, "no": False, "false": False}.get(value)
+    return value
+
+
+class ByTurn(ScriptedRunnerLLM):
+    """The cheap model, honest: a key is extracted only if the turn states it,
+    read as ``<key> is <value>`` up to a ``;`` and typed by the field's type."""
+
+    def extract_field(self, request: Any) -> Any:
+        found = re.search(
+            rf"\b{re.escape(request.field_name)} is ([^;]+)", request.user_message or ""
+        )
+        value = _typed(found[1].strip() if found else None, request.field_type)
+        self.extraction_data = {} if value is None else {request.field_name: value}
+        return super().extract_field(request)
+
+    def extract_bulk_data(self, request: Any) -> DataExtractionResponse:
+        self.call_history.append(("extract_bulk_data", request))
+        said = re.findall(r"(\w+) is ([^;]+)", request.user_message or "")
+        return DataExtractionResponse(extracted_data={k: v.strip() for k, v in said})
 
 
 def good_fsm() -> dict[str, Any]:

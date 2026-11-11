@@ -24,13 +24,16 @@ import fsm_llm.agents as agents_pkg
 from fsm_llm.agents import ToolCall
 from fsm_llm.definitions import (
     DataExtractionResponse,
-    FieldExtractionResponse,
     FSMDefinition,
     LLMUsage,
 )
 from fsm_llm.synthesis import FSMLibrary, SynthesisPolicy, digest_of, run_gates
 from fsm_llm.synthesis.gates import GATES
-from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, ScriptedStrongLLM
+from tests.test_fsm_llm_synthesis.conftest import (
+    ByTurn,
+    ScriptedRunnerLLM,
+    ScriptedStrongLLM,
+)
 
 BAD = sb.bc.BenchDataError
 FIXTURE_SHA = "bff1cbd152d73fbbdfbc77c68fff14688b3240e0996dbd47a176c68911a30349"
@@ -75,15 +78,9 @@ class _Run(ScriptedRunnerLLM):
         self.task = task
 
     def extract_field(self, request):
-        self.call_history.append(("extract_field", request))
         value = _truth(self.task, request.field_name, request.user_message or "")
-        return FieldExtractionResponse(
-            field_name=request.field_name,
-            value=value,
-            confidence=float(value is not None),
-            reasoning="",
-            is_valid=value is not None,
-        )
+        self.extraction_data = {} if value is None else {request.field_name: value}
+        return super().extract_field(request)
 
     def extract_bulk_data(self, request):
         """The bulk pass, the only channel for a later-turn correction."""
@@ -96,7 +93,7 @@ class _Run(ScriptedRunnerLLM):
         )
 
 
-class _Sim(ScriptedRunnerLLM):
+class _Sim(ByTurn):
     """The G6b model, honest (D-066): it extracts what the turn SAYS, read as
     ``<field> is <value>`` (the happy path's own shape), and nothing else; it
     never holds the gold, so a simulator turn that does not say the value a gate
@@ -106,25 +103,6 @@ class _Sim(ScriptedRunnerLLM):
 
     def __init__(self, task):
         super().__init__({}, _texts(task))
-
-    @staticmethod
-    def _said(request):
-        found = re.search(rf"\b{re.escape(request.field_name)} is ([^;]+)", request.user_message or "")  # fmt: skip
-        value = found[1].strip() if found else None
-        if request.field_type == "int":
-            value = int(value) if value and value.isdigit() else None
-        return value
-
-    def extract_field(self, request):
-        self.call_history.append(("extract_field", request))
-        value = self._said(request)
-        return FieldExtractionResponse(
-            field_name=request.field_name,
-            value=value,
-            confidence=float(value is not None),
-            reasoning="",
-            is_valid=value is not None,
-        )
 
 
 class _Agent:
@@ -753,8 +731,8 @@ def _request():
 
 
 class TestWireSpy:
-    def test_it_stamps_role_seconds_and_tokens_and_restores(self, monkeypatch):
-        """Guards: a latency meter that loses the role, or a binding left replaced."""
+    def test_it_stamps_timeout_seconds_and_tokens_and_restores(self, monkeypatch):
+        """Guards: a latency meter that loses the timeout, or a binding left replaced."""
         import fsm_llm.llm as core_llm
 
         reply = SimpleNamespace(
@@ -766,7 +744,7 @@ class TestWireSpy:
             core_llm.completion(timeout=600.0, messages=[])
             core_llm.completion(timeout=300.0, messages=[])
         assert core_llm.completion is before
-        assert [w["role"] for w in wire] == ["compile", "run"]
+        assert [w["timeout"] for w in wire] == [600.0, 300.0]
         assert wire[0]["prompt_tokens"] == 11 and wire[0]["completion_tokens"] == 3
         assert all(w["seconds"] >= 0 for w in wire)
 
@@ -928,8 +906,9 @@ class TestBlocks:
         )
 
     @staticmethod
-    def _block(bench, monkeypatch, status="complete", trials=(1, 2)):
-        """A block of 16 tasks with rows and summaries: s 12, h 14, r 4 first-trial passes."""
+    def _block(bench, monkeypatch, status="complete", trials=(1, 2), infra=()):
+        """A block of 16 tasks with rows and summaries: s 12, h 14, r 4 first-trial passes.
+        ``infra`` are the phases of the first S failures (the others are wrong_value)."""
         monkeypatch.undo()  # the whole fixture of 16 tasks, not the two of this class
         monkeypatch.setattr(sb, "BENCH_DATA", bench.parent)
         (bench / "s0").mkdir(parents=True)
@@ -937,7 +916,8 @@ class TestBlocks:
             for i, task in enumerate(sb.TASKS):
                 for trial in trials:
                     ok = trial == 1 and i < k
-                    row = dict(task_id=task.id, family=task.family, arm=arm, trial=trial, correct=ok, phase="pass" if ok else "wrong_value", source="compiled", error=None)  # fmt: skip
+                    late = infra[i - k] if arm == "synth-fsm" and trial == 1 and 0 <= i - k < len(infra) else "wrong_value"  # fmt: skip
+                    row = dict(task_id=task.id, family=task.family, arm=arm, trial=trial, correct=ok, phase="pass" if ok else late, source="compiled", error=None)  # fmt: skip
                     sb.bc.append_row(bench / "s0" / f"rows_{arm}.jsonl", row)
             sb.write_summary(bench / "s0", arm, status, "t", {})
 
@@ -959,6 +939,42 @@ class TestBlocks:
         assert sb.metrics(rows)["pass_all"] == 0 and sb.metrics(rows)["k"] == 12
         three = [{**r, "trial": t} for r in rows for t in (1, 2, 3)]
         assert sb.metrics(three)["pass_all"] == 12
+
+    def test_metrics_count_provider_and_host_first_trial_failures_as_infrastructure(
+        self, bench, monkeypatch
+    ):
+        """Guards: the INCONCLUSIVE input read as 0, or a compile failure counted in it."""
+        phases = ("provider", "host", "compile", "run_budget")
+        self._block(bench, monkeypatch, infra=phases)
+        m = sb.metrics(sb.bc.read_rows(bench / "s0" / "rows_synth-fsm.jsonl"))
+        assert m["infra_first"] == 2
+        assert m["phases_first"] == {p: 1 for p in sorted(phases)}
+        plain = sb.metrics(sb.bc.read_rows(bench / "s0" / "rows_hand-fsm.jsonl"))
+        assert plain["infra_first"] == 0
+        rows = sb.bc.read_rows(bench / "s0" / "rows_synth-fsm.jsonl")  # a later trial
+        later = [{**r, "phase": "host"} if r["trial"] == 2 else r for r in rows]
+        assert sb.metrics(later)["infra_first"] == 2
+
+    @pytest.mark.parametrize(
+        ("infra", "verdict"),
+        [
+            (("provider", "host"), "SUPPORTED"),  # two are the allowed MAX_INFRA
+            (("provider", "host", "compile", "wrong_route"), "SUPPORTED"),
+            (("provider", "host", "provider"), "INCONCLUSIVE"),
+            (("host", "host", "host", "compile"), "INCONCLUSIVE"),
+        ],
+    )
+    def test_the_report_turns_infrastructure_failures_into_inconclusive(
+        self, bench, capsys, monkeypatch, infra, verdict
+    ):
+        """Guards: a verdict that ignores S failures caused by the provider or the host."""
+        self._block(bench, monkeypatch, infra=infra)
+        assert sb.report("s0") == 0
+        out = capsys.readouterr().out
+        assert f"verdict: {verdict}" in out
+        counted = sum(p in ("provider", "host") for p in infra)
+        said = f"{counted} S first-trial failures are provider or host"
+        assert (said in out) == (verdict == "INCONCLUSIVE")
 
     def test_the_report_decides_from_first_trial_rows_of_a_complete_block(
         self, bench, capsys, monkeypatch

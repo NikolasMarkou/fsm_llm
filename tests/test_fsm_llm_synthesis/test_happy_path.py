@@ -8,59 +8,47 @@ the scripted user speaks the value that opens the edge.
 """
 
 import json
-import re
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from fsm_llm.definitions import (
-    DataExtractionResponse,
     FieldExtractionResponse,
     FSMDefinition,
 )
 from fsm_llm.synthesis import Simulator, SynthesisPolicy, run_gates, simulation
 from fsm_llm.synthesis.dryrun import edge_witnesses
-from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, ScriptedStrongLLM
-
-_SAID = r"\b{name} is ([^;]+)"
-
-
-def _typed(value: str | None, kind: str) -> Any:
-    if value is None:
-        return None
-    if kind == "int":
-        return int(value) if re.fullmatch(r"-?\d+", value) else None
-    if kind == "float":
-        try:
-            return float(value)
-        except ValueError:
-            return None
-    if kind == "bool":
-        return {"yes": True, "true": True, "no": False, "false": False}.get(value)
-    return value
+from tests.test_fsm_llm_synthesis.conftest import (
+    ByTurn,
+    ScriptedRunnerLLM,
+    ScriptedStrongLLM,
+)
 
 
-class ByTurn(ScriptedRunnerLLM):
-    """The cheap model, honest: a key is extracted only if the turn states it."""
+class TestTheHonestDouble:
+    """``ByTurn`` is the executor of this file: it reads the turn, nothing else."""
 
-    def extract_field(self, request: Any) -> FieldExtractionResponse:
-        self.call_history.append(("extract_field", request))
-        found = re.search(
-            _SAID.format(name=re.escape(request.field_name)), request.user_message or ""
+    @pytest.mark.parametrize(
+        ("kind", "turn", "want"),
+        [
+            ("int", "seats is 6", 6),
+            ("int", "seats is six", None),
+            ("int", "seats is 6; seats is 7", 6),
+            ("float", "seats is 2.5", 2.5),
+            ("bool", "seats is yes", True),
+            ("bool", "seats is maybe", None),
+            ("str", "seats is a window ; x", "a window"),
+            ("str", "the seats are fine", None),
+            ("str", "", None),
+        ],
+    )
+    def test_it_extracts_only_what_the_turn_says_typed(self, kind, turn, want):
+        request = SimpleNamespace(
+            field_name="seats", field_type=kind, user_message=turn
         )
-        value = _typed(found.group(1).strip() if found else None, request.field_type)
-        return FieldExtractionResponse(
-            field_name=request.field_name,
-            value=value,
-            confidence=1.0 if value is not None else 0.0,
-            reasoning="read from the turn",
-            is_valid=value is not None,
-        )
-
-    def extract_bulk_data(self, request: Any) -> DataExtractionResponse:
-        self.call_history.append(("extract_bulk_data", request))
-        said = re.findall(r"(\w+) is ([^;]+)", request.user_message or "")
-        return DataExtractionResponse(extracted_data={k: v.strip() for k, v in said})
+        reply = ByTurn().extract_field(request)
+        assert reply.value == want and reply.is_valid == (want is not None)
 
 
 class Mute(ScriptedRunnerLLM):
@@ -217,13 +205,8 @@ class TestAnHonestExtractorPasses:
         class Silent(ByTurn):
             def extract_field(self, request: Any) -> FieldExtractionResponse:
                 if request.field_name == "detail":
-                    return FieldExtractionResponse(
-                        field_name="detail",
-                        value=None,
-                        confidence=0.0,
-                        reasoning="",
-                        is_valid=False,
-                    )
+                    self.extraction_data = {}
+                    return ScriptedRunnerLLM.extract_field(self, request)
                 return super().extract_field(request)
 
         report, _ = _simulate(_branch(), ("detail",), Silent())

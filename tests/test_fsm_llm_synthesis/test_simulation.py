@@ -549,18 +549,10 @@ class _Noisy(ScriptedRunnerLLM):
 
     def __init__(self, data: dict[str, Any], seed: int) -> None:
         super().__init__(data)
-        self.rng = random.Random(seed)
+        self.data, self.rng = data, random.Random(seed)
 
     def extract_field(self, request: Any) -> FieldExtractionResponse:
-        if self.rng.random() < 0.1:
-            self.call_history.append(("extract_field", request))
-            return FieldExtractionResponse(
-                field_name=request.field_name,
-                value=None,
-                confidence=0.0,
-                reasoning="miss",
-                is_valid=False,
-            )
+        self.extraction_data = {} if self.rng.random() < 0.1 else self.data
         return super().extract_field(request)
 
 

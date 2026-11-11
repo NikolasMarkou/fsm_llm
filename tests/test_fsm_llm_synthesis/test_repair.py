@@ -261,6 +261,20 @@ class Cheap(ScriptedRunnerLLM):
         return super().extract_field(request)
 
 
+def _stuck_runs(lib: FSMLibrary, parent: str, n: int, **fields: Any) -> None:
+    """``n`` stuck runs of ``parent``, recorded now: aborted on a spent budget
+    at ``ask`` unless ``fields`` (``RunTrace`` arguments) say otherwise."""
+    kw: dict[str, Any] = dict(
+        status="aborted",
+        reason="budget_spent",
+        outcome="blocked",
+        stuck="ask",
+        states=("ask",) * 3,
+    )
+    for _ in range(n):
+        lib.add_trace(RunTrace(parent, **{**kw, **fields}), max_traces=200)
+
+
 class Rig:
     """A library with one stored parent, its traces and scenarios, and the
     synthesizer and simulator that repair it (one cheap model, one writer)."""
@@ -307,10 +321,7 @@ class Rig:
         self.parent = parent.digest
         if stored:
             self.lib.add_scenarios(self.parent, [{"kind": "happy", "turns": ["go"]}])
-        stuck = dict(status="aborted", reason="budget_spent", outcome="blocked")
-        for _ in range(failures):
-            trace = RunTrace(self.parent, stuck="ask", states=("ask",) * 3, **stuck)
-            self.lib.add_trace(trace, max_traces=200)
+        _stuck_runs(self.lib, self.parent, failures)
         self.llm = Cheap()
         self.writer = ScriptedStrongLLM([NO_SCENARIOS] * writes)
         self.sim = Simulator(self.llm, self.writer)
@@ -354,10 +365,7 @@ class Rig:
 
 def _fail(rig: Rig, n: int) -> None:
     """``n`` more stuck runs of the parent, recorded now."""
-    stuck = dict(status="aborted", reason="budget_spent", outcome="blocked")
-    for _ in range(n):
-        trace = RunTrace(rig.parent, stuck="ask", states=("ask",) * 3, **stuck)
-        rig.lib.add_trace(trace, max_traces=200)
+    _stuck_runs(rig.lib, rig.parent, n)
 
 
 class TestDecide:
@@ -612,11 +620,7 @@ class TestRateLimits:
 
     def test_infrastructure_failures_do_not_count(self, tmp_path):
         rig = Rig(tmp_path, failures=0)
-        for _ in range(5):
-            outage = RunTrace(
-                rig.parent, status="failed", reason="provider_error", stuck="ask"
-            )
-            rig.lib.add_trace(outage, max_traces=200)
+        _stuck_runs(rig.lib, rig.parent, 5, status="failed", reason="provider_error")
         assert rig.repair().code == "too-few-failures"
 
     def test_the_failure_bar_is_the_policy_field(self, tmp_path):
@@ -766,16 +770,7 @@ class TestApproval:
         def make(root: Path, reviewer: Any) -> Rig:
             rig = Rig(root, fsm=copy.deepcopy(fsm), policy=policy, reviewer=reviewer)
             # traces stuck at `ask` do not scope `mid`: add some that do
-            for _ in range(3):
-                t = RunTrace(
-                    rig.parent,
-                    status="aborted",
-                    reason="budget_spent",
-                    outcome="blocked",
-                    stuck="mid",
-                    states=("mid",) * 3,
-                )
-                rig.lib.add_trace(t, max_traces=200)
+            _stuck_runs(rig.lib, rig.parent, 3, stuck="mid", states=("mid",) * 3)
             return rig
 
         rig = make(tmp_path / "a", None)

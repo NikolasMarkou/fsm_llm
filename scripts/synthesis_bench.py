@@ -60,7 +60,6 @@ SYNTH, HAND, REACT = "synth-fsm", "hand-fsm", "react"
 BLOCKS = {"s0": (SYNTH, HAND, REACT)}
 TRIALS = 3  # per task; fixed at registration from the smoke
 TIMEOUTS = {"compile": 600.0, "sim": 300.0, "run": 300.0}
-ROLE_BY_TIMEOUT = {TIMEOUTS["compile"]: "compile", TIMEOUTS["run"]: "run"}
 POLICY = {"max_turns": 10, "max_repair_rounds": 3, "sim_trials": 2, "max_sim_turns": 8, "max_simulation_seconds": 300, "max_simulation_calls": 400, "max_simulation_rounds": 2, "min_pass_rate": 0.5}  # fmt: skip
 LIMITS = {"temperature": 0.5, "run_max_tokens": 1000, "max_user_turns": 14, "react_max_iterations": 12, "react_timeout_seconds": 900.0, "timeouts": TIMEOUTS, "policy": POLICY}  # fmt: skip
 # DECISION plan-2026-11-10T194139-2cefeb61/D-067
@@ -68,7 +67,8 @@ LIMITS = {"temperature": 0.5, "run_max_tokens": 1000, "max_user_turns": 14, "rea
 # the compile, simulate and run code, the judges: validator, G6b's eval driver and its stats,
 # the JSON reader, the exception classes, the modules react.py imports): hashed at register,
 # checked at run AND report. The engine is NOT pinned (a test names every file left out, D-075).
-# Do NOT hash only the fixture region and do NOT keep a second list in the tests.
+# Do NOT hash only the fixture region and do NOT keep a second source of what is hashed in the
+# tests: REQUIRED_PINS is the floor SRC_PINS may not drop below, UNPINNED_CORE the declared exclusions (D-075).
 _SYNTH = "dryrun simulation traces gates policy synthesizer runner library prompts repair constants exceptions"  # fmt: skip
 _AGENTS = "__init__ react base constants definitions exceptions fsm_definitions handlers hitl meta_builders meta_prompts prompts summarization tools truncation"  # fmt: skip
 _CORE = "flow_analysis utilities validator eval/cases eval/config eval/stats"
@@ -396,16 +396,15 @@ def wire_disclosure() -> dict[str, Any]:
 
 @contextmanager
 def wire_spy() -> Iterator[list[dict[str, Any]]]:
-    """Record every request at core's one send binding while still sending: role (by the
-    request's timeout), seconds, tokens, raw params and response."""
+    """Record every request at core's one send binding while still sending: the
+    request's timeout, seconds, tokens, raw params and response."""
     import fsm_llm.llm as core_llm
 
     seen: list[dict[str, Any]] = []
     original = core_llm.completion
 
     def spy(**params: Any) -> Any:
-        role = ROLE_BY_TIMEOUT.get(params.get("timeout"), "other")
-        seen.append(rec := {"role": role, "seconds": 0.0, "prompt_tokens": 0, "completion_tokens": 0, "params": copy.deepcopy(params)})  # fmt: skip
+        seen.append(rec := {"timeout": params.get("timeout"), "seconds": 0.0, "prompt_tokens": 0, "completion_tokens": 0, "params": copy.deepcopy(params)})  # fmt: skip
         started = time.perf_counter()
         try:
             response = original(**params)
@@ -644,7 +643,7 @@ def run_trial(arm: str, task: Task, trial: int, workdir: Path, raw: Path | None 
     row.update(meter(llms), latency_s=round(time.perf_counter() - started, 3))
     if arm == HAND and row["compile_calls"]:
         row.update(correct=False, error="hand-fsm made a strong call")
-    row["wire"] = [{k: w[k] for k in ("role", "seconds", "prompt_tokens", "completion_tokens")} for w in wire]  # fmt: skip
+    row["wire"] = [{k: w[k] for k in ("timeout", "seconds", "prompt_tokens", "completion_tokens")} for w in wire]  # fmt: skip
     row["max_prompt_tokens"] = max((w["prompt_tokens"] for w in wire), default=0)
     row["phase"] = phase(row)
     if raw is not None:
