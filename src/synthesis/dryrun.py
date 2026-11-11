@@ -218,11 +218,10 @@ def _narrowing(
 
 
 def _mentions(definition: FSMDefinition) -> dict[str, set[str]]:
-    """key -> the states that declare, require or own it (a gate that only
-    reads it in logic is not a producer)."""
+    """key -> the states that declare or require it (a gate that only reads it
+    in logic is not a producer; a ``result_key`` is ``handler_only_names``)."""
     mentions: dict[str, set[str]] = {}
     for sid, state in definition.states.items():
-        config = state.completion or state.synthesize
         names = [
             *(state.required_context_keys or []),
             *(f.field_name for f in state.field_extractions or []),
@@ -233,7 +232,6 @@ def _mentions(definition: FSMDefinition) -> dict[str, set[str]]:
                 for c in t.conditions or []
                 for key in c.requires_context_keys or []
             ),
-            *([config.result_key] if config else []),
         ]
         for name in names:
             mentions.setdefault(name, set()).add(sid)

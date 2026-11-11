@@ -329,6 +329,49 @@ class TestNarrowing:
         )
         assert _found(definition) == set()
 
+    @pytest.mark.parametrize("producer", ["completion", "synthesize"])
+    def test_a_result_key_is_a_producer_so_the_key_is_not_narrowed(self, producer):
+        """``ok`` is written by a completion or synthesize state elsewhere, so it
+        may hold any value: gating it on ``"yes"`` is not a dead edge (D-059,
+        review pass 2 N36)."""
+        read = {"==": [{"var": "ok.status"}, "ok"]}
+        gate = {"description": "g", "logic": read}  # no requires: only result_key
+        edge = {"target_state": "done", "description": "go", "conditions": [gate]}
+        failed = {
+            **gate,
+            "logic": {"in": [{"var": "ok.status"}, ["failed", "aborted"]]},
+        }
+        config = {
+            "completion": {"response_format_key": "_fmt", "result_key": "ok"},
+            "synthesize": {
+                "goal": "Book a table",
+                "inputs": ["topic"],
+                "return_keys": ["answer"],
+                "on_failure": "done",
+                "result_key": "ok",
+            },
+        }
+        work = {
+            "id": "work",
+            "description": "w",
+            "purpose": "w",
+            producer: config[producer],
+            "transitions": [edge, {**edge, "priority": 2, "conditions": [failed]}],
+        }
+        ask = _state(
+            "ask",
+            [_edge("work", {"==": [_var("ok"), "yes"]}, requires=("ok",))],
+            field_extractions=[_field("ok", "bool")],
+        )[1]
+        done = {"id": "done", "description": "d", "purpose": "d"}
+        definition = FSMDefinition(
+            name="T",
+            description="t",
+            initial_state="ask",
+            states={"ask": ask, "work": work, "done": done},
+        )
+        assert ("edge-unfireable", "ask") not in _found(definition)
+
 
 class TestEvaluatorIsTheOracle:
     def test_the_search_goes_through_the_real_evaluator(self, monkeypatch):

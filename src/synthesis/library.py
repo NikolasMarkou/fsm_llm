@@ -659,7 +659,9 @@ class FSMLibrary:
         ``parent`` whose parent is not stored; a cycle in corrupt data stops at
         the first repeat). The same number whichever node asks."""
         self._path("records", digest)  # validates the id
-        parents = {r.digest: r.provenance["parent"] for r in self._records()}
+        parents: dict[str, Any] = {
+            r.digest: r.provenance["parent"] for r in self._records()
+        }
 
         def root(node: str) -> str:
             seen = {node}
