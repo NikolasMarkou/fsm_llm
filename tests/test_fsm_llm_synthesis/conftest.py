@@ -174,3 +174,88 @@ def good_fsm() -> dict[str, Any]:
 def valid_fsm() -> dict[str, Any]:
     """A fresh compile that passes G1 to G5 with ``return_keys=("answer",)``."""
     return good_fsm()
+
+
+def host_fsm(
+    *,
+    name: str,
+    description: str,
+    persona: str,
+    states: tuple[str, str, str, str],
+    goal: str,
+    inputs: list[str],
+    return_keys: list[str],
+    greet_text: str,
+    work_description: str,
+    ok_text: str,
+    fail_text: str,
+    edge_prefix: str = "",
+    synthesize: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """A host FSM: greet -> work (``synthesize``) -> ok on ``status == ok``,
+    fail on ``status in [failed, aborted]``.
+
+    ``states`` is ``(greet, work, ok, fail)`` (state ids); ``edge_prefix`` leads
+    each edge description; ``synthesize`` overrides or adds keys of the state's
+    ``synthesize`` config (``on_failure`` defaults to the ``fail`` state). Every
+    call builds a fresh dict.
+    """
+    greet, work, ok, fail = states
+    status = {"var": "synthesis_result.status"}
+
+    def edge(target: str, priority: int, logic: dict[str, Any]) -> dict[str, Any]:
+        label = f"{edge_prefix}{target}"
+        condition = {
+            "description": label,
+            "requires_context_keys": ["synthesis_result"],
+            "logic": logic,
+        }
+        return {
+            "target_state": target,
+            "description": label,
+            "priority": priority,
+            "conditions": [condition],
+        }
+
+    def end(state: str, text: str) -> dict[str, Any]:
+        return {
+            "id": state,
+            "description": state,
+            "purpose": state,
+            "response_instructions": text,
+        }
+
+    return {
+        "name": name,
+        "description": description,
+        "persona": persona,
+        "initial_state": greet,
+        "states": {
+            greet: {
+                "id": greet,
+                "description": "greet",
+                "purpose": "greet",
+                "response_instructions": greet_text,
+                "transitions": [{"target_state": work, "description": "go"}],
+            },
+            work: {
+                "id": work,
+                "description": work_description,
+                "purpose": work_description,
+                "response_instructions": "",
+                "synthesize": {
+                    "goal": goal,
+                    "inputs": inputs,
+                    "return_keys": return_keys,
+                    "on_failure": fail,
+                    **(synthesize or {}),
+                },
+                "transitions": [
+                    edge(ok, 1, {"==": [status, "ok"]}),
+                    edge(fail, 2, {"in": [status, ["failed", "aborted"]]}),
+                ],
+            },
+            ok: end(ok, ok_text),
+            fail: end(fail, fail_text),
+        },
+    }

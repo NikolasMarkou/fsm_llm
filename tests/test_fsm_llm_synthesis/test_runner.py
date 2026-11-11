@@ -36,7 +36,11 @@ from fsm_llm.synthesis import (
     digest_of,
     run_gates,
 )
-from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, ScriptedStrongLLM
+from tests.test_fsm_llm_synthesis.conftest import (
+    ScriptedRunnerLLM,
+    ScriptedStrongLLM,
+    host_fsm,
+)
 
 GOAL = "Book a table for two"
 PERSONA = "A calm hotel concierge"
@@ -54,64 +58,21 @@ REPLIES = {
 
 def _host(**synthesize: Any) -> dict[str, Any]:
     """greet -> solve (synthesize) -> booked on ok, apology on failed/aborted."""
-    status = {"var": "synthesis_result.status"}
-
-    def edge(target: str, priority: int, logic: dict[str, Any]) -> dict[str, Any]:
-        condition = {
-            "description": f"go to {target}",
-            "requires_context_keys": ["synthesis_result"],
-            "logic": logic,
-        }
-        return {
-            "target_state": target,
-            "description": f"go to {target}",
-            "priority": priority,
-            "conditions": [condition],
-        }
-
-    def end(name: str, text: str) -> dict[str, Any]:
-        return {
-            "id": name,
-            "description": name,
-            "purpose": name,
-            "response_instructions": text,
-        }
-
-    config = {
-        "goal": GOAL,
-        "inputs": ["topic"],
-        "return_keys": ["answer"],
-        "on_failure": "apology",
-        **synthesize,
-    }
-    return {
-        "name": "Concierge",
-        "description": "Host conversation",
-        "persona": PERSONA,
-        "initial_state": "start",
-        "states": {
-            "start": {
-                "id": "start",
-                "description": "greet",
-                "purpose": "greet",
-                "response_instructions": "Say hello",
-                "transitions": [{"target_state": "solve", "description": "go"}],
-            },
-            "solve": {
-                "id": "solve",
-                "description": "run the procedure",
-                "purpose": "run the procedure",
-                "response_instructions": "",
-                "synthesize": config,
-                "transitions": [
-                    edge("booked", 1, {"==": [status, "ok"]}),
-                    edge("apology", 2, {"in": [status, ["failed", "aborted"]]}),
-                ],
-            },
-            "booked": end("booked", "Say booked"),
-            "apology": end("apology", "Apologise"),
-        },
-    }
+    return host_fsm(
+        name="Concierge",
+        description="Host conversation",
+        persona=PERSONA,
+        states=("start", "solve", "booked", "apology"),
+        goal=GOAL,
+        inputs=["topic"],
+        return_keys=["answer"],
+        greet_text="Say hello",
+        work_description="run the procedure",
+        ok_text="Say booked",
+        fail_text="Apologise",
+        edge_prefix="go to ",
+        synthesize=synthesize,
+    )
 
 
 @dataclass

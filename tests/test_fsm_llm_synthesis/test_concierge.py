@@ -26,7 +26,11 @@ from fsm_llm.synthesis import (
     create_procedure_tools,
 )
 from fsm_llm.synthesis.constants import PROCEDURE_UNTRUSTED_LABEL as LABEL
-from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, ScriptedStrongLLM
+from tests.test_fsm_llm_synthesis.conftest import (
+    ScriptedRunnerLLM,
+    ScriptedStrongLLM,
+    host_fsm,
+)
 
 GOAL = "collect visa application data"
 KEYS = ["passport_no", "travel_dates", "purpose"]
@@ -86,59 +90,19 @@ def _text(data: dict[str, Any]) -> str:
 
 def _host() -> dict[str, Any]:
     """greet -> gather (synthesize) -> done on ok, apology on failed or aborted."""
-    status = {"var": "synthesis_result.status"}
-
-    def edge(target: str, priority: int, logic: dict[str, Any]) -> dict[str, Any]:
-        cond = {"description": target, "requires_context_keys": ["synthesis_result"]}
-        return {
-            "target_state": target,
-            "description": target,
-            "priority": priority,
-            "conditions": [{**cond, "logic": logic}],
-        }
-
-    def end(name: str) -> dict[str, Any]:
-        return {
-            "id": name,
-            "description": name,
-            "purpose": name,
-            "response_instructions": name,
-        }
-
-    states = {
-        "greet": {
-            "id": "greet",
-            "description": "greet",
-            "purpose": "greet",
-            "response_instructions": "Welcome the traveller",
-            "transitions": [{"target_state": "gather", "description": "go"}],
-        },
-        "gather": {
-            "id": "gather",
-            "description": "collect the visa data",
-            "purpose": "collect the visa data",
-            "response_instructions": "",
-            "synthesize": {
-                "goal": GOAL,
-                "inputs": ["applicant"],
-                "return_keys": KEYS,
-                "on_failure": "apology",
-            },
-            "transitions": [
-                edge("done", 1, {"==": [status, "ok"]}),
-                edge("apology", 2, {"in": [status, ["failed", "aborted"]]}),
-            ],
-        },
-        "done": end("done"),
-        "apology": end("apology"),
-    }
-    return {
-        "name": "concierge",
-        "description": "Visa concierge",
-        "persona": "A calm travel concierge",
-        "initial_state": "greet",
-        "states": states,
-    }
+    return host_fsm(
+        name="concierge",
+        description="Visa concierge",
+        persona="A calm travel concierge",
+        states=("greet", "gather", "done", "apology"),
+        goal=GOAL,
+        inputs=["applicant"],
+        return_keys=KEYS,
+        greet_text="Welcome the traveller",
+        work_description="collect the visa data",
+        ok_text="done",
+        fail_text="apology",
+    )
 
 
 @dataclass
