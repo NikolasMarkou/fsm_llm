@@ -1,0 +1,60 @@
+{
+  "arm": "synth-fsm",
+  "finished_at": "2026-11-11T19:07:37Z",
+  "metrics": {
+    "confused_turns": 0,
+    "errored_rows": 0,
+    "families": {
+      "branch": [
+        4,
+        4
+      ],
+      "collect": [
+        4,
+        4
+      ],
+      "retry": [
+        4,
+        4
+      ],
+      "route": [
+        3,
+        4
+      ]
+    },
+    "foreign_model_rows": 0,
+    "infra_first": 0,
+    "k": 15,
+    "meters": {
+      "compile_calls": 41,
+      "compile_completion_tokens": 22265,
+      "compile_prompt_tokens": 46293,
+      "run_calls": 432,
+      "run_completion_tokens": 30106,
+      "run_prompt_tokens": 177821,
+      "sim_calls": 1032,
+      "sim_completion_tokens": 81616,
+      "sim_prompt_tokens": 392016
+    },
+    "n_rows": 48,
+    "n_units": 16,
+    "pass_all": 14,
+    "phases_first": {
+      "compile": 1
+    },
+    "reuse_rows": 31,
+    "reuse_strong_calls": 0,
+    "wall_s": 3922.5,
+    "wilson": [
+      0.7167,
+      0.9889
+    ]
+  },
+  "run": {
+    "git_commit": "5a2ea08c48c2018aa53372a684d47fb1a57dba29",
+    "git_dirty": true,
+    "preflight": "passed"
+  },
+  "started_at": "2026-11-11T17:00:16Z",
+  "status": "complete"
+}

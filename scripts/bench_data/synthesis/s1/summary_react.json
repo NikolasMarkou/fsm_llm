@@ -1,0 +1,58 @@
+{
+  "arm": "react",
+  "finished_at": "2026-11-11T19:07:37Z",
+  "metrics": {
+    "confused_turns": 0,
+    "errored_rows": 0,
+    "families": {
+      "branch": [
+        4,
+        4
+      ],
+      "collect": [
+        4,
+        4
+      ],
+      "retry": [
+        4,
+        4
+      ],
+      "route": [
+        4,
+        4
+      ]
+    },
+    "foreign_model_rows": 0,
+    "infra_first": 0,
+    "k": 16,
+    "meters": {
+      "compile_calls": 0,
+      "compile_completion_tokens": 0,
+      "compile_prompt_tokens": 0,
+      "run_calls": 660,
+      "run_completion_tokens": 93411,
+      "run_prompt_tokens": 536759,
+      "sim_calls": 0,
+      "sim_completion_tokens": 0,
+      "sim_prompt_tokens": 0
+    },
+    "n_rows": 48,
+    "n_units": 16,
+    "pass_all": 14,
+    "phases_first": {},
+    "reuse_rows": 0,
+    "reuse_strong_calls": 0,
+    "wall_s": 2848.1,
+    "wilson": [
+      0.8064,
+      1.0
+    ]
+  },
+  "run": {
+    "git_commit": "5a2ea08c48c2018aa53372a684d47fb1a57dba29",
+    "git_dirty": true,
+    "preflight": "passed"
+  },
+  "started_at": "2026-11-11T17:00:16Z",
+  "status": "complete"
+}
