@@ -844,9 +844,62 @@ REQUIRED_PINS = (
     "scripts/synthesis_bench.py",
     "scripts/bench_common.py",
     "src/synthesis/constants.py",
+    "src/synthesis/exceptions.py",  # reason_of maps its classes to a phase (D-075)
     "src/eval/cases.py",
+    "src/eval/config.py",  # the EvalConfig of every G6b trial
+    "src/eval/stats.py",  # pass_rate judges G6b against min_pass_rate
+    "src/utilities.py",  # extract_json_from_text: the R grader's first step
+    "src/validator.py",  # FSMValidator is gate G2
+    "src/agents/__init__.py",  # create_agent, the R arm's factory
     "src/agents/react.py",
 )
+# What the pinned files import and the pins leave out, each with the reason (D-075, D-067
+# item 3): the engine every arm shares, or code the bench never calls. Anything else a pinned
+# file imports must be pinned; an entry nothing imports any more is stale and fails too.
+UNPINNED_CORE = {
+    "src/__init__.py": "re-export facade of the core",
+    "src/synthesis/__init__.py": "re-export facade of the subpackage",
+    "src/api.py": "the engine all three arms run on (git_commit shows an edit)",
+    "src/constants.py": "the engine's defaults",
+    "src/context.py": "the engine's context",
+    "src/definitions.py": "the engine's models",
+    "src/expressions.py": "the engine's JsonLogic (is_missing)",
+    "src/handlers.py": "the engine's handlers",
+    "src/llm.py": "the one LLM layer",
+    "src/logging.py": "library logging",
+    "src/transition_evaluator.py": "the engine's transition rules",
+    "src/okf.py": "text caps shared with every package",
+    "src/security.py": "key filters shared with every package",
+    "src/visualizer.py": "the mermaid of the approval summary (G7 never runs here)",
+    "src/agents/semantic_tools.py": "embedding lookup, the bench library has no embedder",
+    "src/synthesis/diagnose.py": "repair, never called by the bench",
+    "src/synthesis/patch.py": "repair, never called by the bench",
+    "src/eval/_pool.py": "run-directory plumbing, run_case_trial calls none",
+    "src/eval/constants.py": "run-directory plumbing, run_case_trial calls none",
+    "src/eval/exceptions.py": "run-directory plumbing, run_case_trial calls none",
+    "src/eval/records.py": "run-directory plumbing, run_case_trial calls none",
+}
+
+
+def _fsm_llm_imports(path):
+    """The src files *path* imports from ``fsm_llm``, at module level or in a function."""
+    rel = path.relative_to(ROOT).with_suffix("")
+    package = ["fsm_llm", *rel.parts[1:-1]] if rel.parts[0] == "src" else []
+    found = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.ImportFrom):
+            up = package[: len(package) - node.level + 1] if node.level else []
+            base = up + (node.module.split(".") if node.module else [])
+            mods = [base, *([*base, a.name] for a in node.names)]
+        elif isinstance(node, ast.Import):
+            mods = [a.name.split(".") for a in node.names]
+        else:
+            continue
+        for mod in (m for m in mods if m[:1] == ["fsm_llm"]):
+            stem = ROOT.joinpath("src", *mod[1:])
+            hit = next((c for c in (stem.with_suffix(".py"), stem / "__init__.py") if c.is_file()), None)  # fmt: skip
+            found |= {hit.relative_to(ROOT).as_posix()} if hit else set()
+    return found
 
 
 def _module_imports(path):
@@ -876,6 +929,16 @@ class TestPins:
         assert set(REQUIRED_PINS) <= set(sb.SRC_PINS)
         assert all((sb.ROOT / p).is_file() for p in sb.SRC_PINS)
         assert len(sb.SRC_PINS) == len(set(sb.SRC_PINS))
+
+    def test_every_module_a_pinned_file_imports_is_pinned_or_declared_core(self):
+        """Guards (D-075): a file the verdict reads that nobody pinned or decided about.
+        The facades (``__init__``) are read through what they name, not for their re-exports."""
+        reads = ["scripts/synthesis_bench.py", *sb.SRC_PINS]
+        reached = set().union(*(_fsm_llm_imports(ROOT / p) for p in reads if not p.endswith("__init__.py")))  # fmt: skip
+        reached -= set(sb.SRC_PINS)
+        assert not reached - set(UNPINNED_CORE), reached - set(UNPINNED_CORE)
+        assert not set(UNPINNED_CORE) - reached, "stale: " + str(set(UNPINNED_CORE) - reached)  # fmt: skip
+        assert not set(UNPINNED_CORE) & set(sb.SRC_PINS)
 
     def test_every_module_the_react_loop_imports_is_pinned(self):
         """Guards: the R arm's agent code changing under a registered block."""

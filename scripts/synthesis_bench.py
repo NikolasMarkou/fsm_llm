@@ -65,16 +65,17 @@ POLICY = {"max_turns": 10, "max_repair_rounds": 3, "sim_trials": 2, "max_sim_tur
 LIMITS = {"temperature": 0.5, "run_max_tokens": 1000, "max_user_turns": 14, "react_max_iterations": 12, "react_timeout_seconds": 900.0, "timeouts": TIMEOUTS, "policy": POLICY}  # fmt: skip
 # DECISION plan-2026-11-10T194139-2cefeb61/D-067
 # SRC_PINS is the ONE list of what the verdict depends on (this whole script, bench_common,
-# the compile, simulate and run code, G6b's eval driver, the modules react.py imports): hashed
-# at register, checked at run AND report. Do NOT hash only the fixture region and do NOT keep a
-# second list in the tests.
-_SYNTH = "dryrun simulation traces gates policy synthesizer runner library prompts repair constants"  # fmt: skip
-_AGENTS = "react base constants definitions exceptions fsm_definitions handlers hitl meta_builders meta_prompts prompts summarization tools truncation"  # fmt: skip
+# the compile, simulate and run code, the judges: validator, G6b's eval driver and its stats,
+# the JSON reader, the exception classes, the modules react.py imports): hashed at register,
+# checked at run AND report. The engine is NOT pinned (a test names every file left out, D-075).
+# Do NOT hash only the fixture region and do NOT keep a second list in the tests.
+_SYNTH = "dryrun simulation traces gates policy synthesizer runner library prompts repair constants exceptions"  # fmt: skip
+_AGENTS = "__init__ react base constants definitions exceptions fsm_definitions handlers hitl meta_builders meta_prompts prompts summarization tools truncation"  # fmt: skip
+_CORE = "flow_analysis utilities validator eval/cases eval/config eval/stats"
 SRC_PINS = (
     "scripts/synthesis_bench.py",
     "scripts/bench_common.py",
-    "src/flow_analysis.py",
-    "src/eval/cases.py",
+    *(f"src/{m}.py" for m in _CORE.split()),
     *(f"src/synthesis/{m}.py" for m in _SYNTH.split()),
     *(f"src/agents/{m}.py" for m in _AGENTS.split()),
 )
