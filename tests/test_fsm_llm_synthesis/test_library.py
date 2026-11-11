@@ -5,6 +5,7 @@ signature-first retrieval.
 """
 
 import contextlib
+import inspect
 import json
 import os
 import threading
@@ -16,7 +17,8 @@ import pytest
 
 from fsm_llm import API
 from fsm_llm.definitions import FSMDefinition
-from fsm_llm.synthesis import RunTrace, SynthesisError, library
+from fsm_llm.synthesis import RunTrace, SynthesisError, SynthesisPolicy, library
+from fsm_llm.synthesis.constants import DEFAULT_MAX_TRACES
 from fsm_llm.synthesis.exceptions import LibraryError
 from fsm_llm.synthesis.library import FSMLibrary, digest_of
 
@@ -687,6 +689,14 @@ class TestTraces:
         lib.add_trace(_tr(1, "d" * 64), max_traces=3)
         lib.add_trace(_tr(2), max_traces=3)
         assert [t.steps for t in lib.read_traces(D)[0]] == [2]
+
+    def test_the_ring_cap_defaults_to_the_policy_default(self, lib: FSMLibrary):
+        """``TraceRecorder(lib.add_trace)`` is the one wiring line (D-064)."""
+        default = inspect.signature(FSMLibrary.add_trace).parameters["max_traces"]
+        assert default.default == DEFAULT_MAX_TRACES == 200
+        assert SynthesisPolicy().max_traces_per_digest == DEFAULT_MAX_TRACES
+        lib.add_trace(_tr(1))
+        assert [t.steps for t in lib.read_traces(D)[0]] == [1]
 
     def test_retire_traces_moves_the_file_aside_and_keeps_it(self, lib: FSMLibrary):
         for i in range(3):

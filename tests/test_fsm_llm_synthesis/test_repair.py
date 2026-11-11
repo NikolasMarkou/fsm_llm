@@ -15,17 +15,20 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.definitions import CompletionResponse, LLMResponseError
+from fsm_llm.definitions import CompletionResponse, FSMDefinition, LLMResponseError
 from fsm_llm.synthesis import (
     Diagnosis,
     FSMLibrary,
     FSMSynthesizer,
+    ProcedureRunner,
     PromotionResult,
     RunTrace,
     Simulator,
     SynthesisError,
     SynthesisPolicy,
+    TraceRecorder,
     apply_patch,
+    diagnose,
     repair_procedure,
     run_gates,
     strip_abort,
@@ -44,6 +47,8 @@ from tests.test_fsm_llm_synthesis.conftest import (
     ScriptedStrongLLM,
     good_fsm,
 )
+from tests.test_fsm_llm_synthesis.test_runner import CONTEXT, _host, _rig
+from tests.test_fsm_llm_synthesis.test_runner import GOAL as HOST_GOAL
 
 POLICY = SynthesisPolicy()
 NPF = "not-procedure-fault"
@@ -776,3 +781,88 @@ class TestReplayScripts:
         rig.repair(replay_scripts=[SCRIPT])
         # 2 scenarios x 2 trials x 2 sides, one extraction per turn at least
         assert rig.llm.count("extract_field") >= 8
+
+
+# ---- the whole loop on doubles (D-064) --------------------------------------
+
+
+class TestTheLoopEndToEnd:
+    """Runs of a defective procedure leave traces through ``TraceRecorder`` into
+    the library; ``diagnose`` reads them; a scripted strong model proposes the
+    patch; ``repair_procedure`` judges, then writes; the next run uses the child."""
+
+    def test_runs_to_traces_to_a_written_repair_the_next_run_uses(
+        self, valid_fsm, tmp_path
+    ):
+        policy = SynthesisPolicy(max_turns=3)
+        defective = copy.deepcopy(valid_fsm)
+        defective["states"]["ask"]["field_extractions"][0][
+            "extraction_instructions"
+        ] = "The answer"  # the cheap model never extracts from this one
+        cheap = Cheap()
+        rig = _rig(
+            valid_fsm,
+            tmp_path,
+            cheap=cheap,
+            policy=policy,
+            replies=[json.dumps(defective)],
+        )
+        library = rig.library
+        assert library is not None
+        recorder = TraceRecorder(library.add_trace)  # the one wiring line
+        runner = ProcedureRunner(rig.api, _host(), rig.synth, trace_sink=recorder)
+
+        # 1. real runs, one conversation each (the first compiles, the rest reuse)
+        for _ in range(3):
+            conv, _ = rig.api.start_conversation(CONTEXT)
+            runner.run(conv, max_steps=30)
+            assert (
+                rig.api.get_data(conv)["synthesis_result"]["reason"] == "budget_spent"
+            )
+        (digest,) = [p.stem for p in (library.root / "records").glob("*.json")]
+
+        # 2. the library holds the traces, and they name the defect
+        traces, skipped = library.read_traces(digest)
+        assert (len(traces), skipped) == (3, 0)
+        stripped = strip_abort(
+            library.get_definition(digest).model_dump(exclude_defaults=True)
+        )
+        assert stripped is not None
+        found = diagnose(
+            traces, FSMDefinition(**stripped), policy, return_keys=("answer",)
+        )
+        assert [(d.code, d.state) for d in found] == [("extraction-miss", "ask")]
+
+        # 3. a scripted strong model proposes the fix, restricted to that state
+        patcher = ScriptedStrongLLM([json.dumps({"patch": FIX})])
+        ops = propose_patch(found, stripped, policy, patcher)
+        assert ops == FIX and len(patcher.requests) == 1
+
+        # 4. judged without writing, then written
+        sim = Simulator(cheap, ScriptedStrongLLM([NO_SCENARIOS] * 4))
+        args: dict[str, Any] = dict(
+            library=library,
+            synthesizer=rig.synth,
+            simulator=sim,
+            replay_scripts=[SCRIPT],
+        )
+        before = sorted(p for p in library.root.rglob("*") if p.is_file())
+        dry = repair_procedure(digest, ops, **args)
+        assert dry.code == "promote" and not dry.written
+        assert sorted(p for p in library.root.rglob("*") if p.is_file()) == before
+        done = repair_procedure(digest, ops, write=True, **args)
+        assert done.written and done.deprecated and done.child
+
+        # 5. search returns the child, and the next run takes it and finishes
+        hits = library.search(
+            HOST_GOAL,
+            inputs_available=["topic"],
+            return_keys=["answer"],
+            tools_allowed=[],
+            min_lifecycle="verified",
+        )
+        assert [h.record.digest for h in hits] == [done.child]
+        conv, _ = rig.api.start_conversation(CONTEXT)
+        runner.run(conv, max_steps=30)
+        result = rig.api.get_data(conv)["synthesis_result"]
+        assert (result["status"], result["procedure_id"]) == ("ok", done.child)

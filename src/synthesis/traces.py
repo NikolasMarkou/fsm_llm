@@ -3,8 +3,7 @@ Run traces: what a procedure run left behind, with no value in it.
 
 A ``RunTrace`` holds names, type names, state ids, codes and counts and nothing
 else (D-038): never a context value, user text or reply. ``TraceRecorder`` is
-the runner's ``trace_sink``; ``trace_from_trial`` builds one from a G6b trial;
-the library stores them (``FSMLibrary.add_trace``).
+the runner's ``trace_sink``; the library stores them (``FSMLibrary.add_trace``).
 
 # DECISION plan-2026-11-10T194139-2cefeb61/D-046
 # ``RunTrace.__post_init__`` is the ONE place that keeps a trace value-free (the
@@ -16,27 +15,21 @@ the library stores them (``FSMLibrary.add_trace``).
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Collection, Iterable
+import threading
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fsm_llm.definitions import State, TransitionEvaluationResult, logic_referenced_keys
-from fsm_llm.expressions import is_missing
 from fsm_llm.okf import capped_line
 
 from .constants import (
-    ABORT_CONTEXT_KEY,
-    ABORT_STATE_ID,
-    REASON_BUDGET_SPENT,
     STATUS_ABORTED,
     STATUS_FAILED,
     STATUS_OK,
     TRACE_KIND_OTHER,
     TRACE_KINDS,
 )
-
-if TYPE_CHECKING:
-    from fsm_llm.eval import TrialResult
 
 TRACE_VERSION = 1
 _MODES = ("run", "converse", "sim")
@@ -156,7 +149,8 @@ class TraceRecorder:
     ``failed`` event with no digest yields nothing; an event it does not
     understand is ignored. What ``on_trace`` raises, or an invalid run,
     propagates (the runner swallows a sink's error) after the run is dropped.
-    Not thread safe: one recorder per runner.
+    Thread safe: one runner serves many conversations, so the open runs are
+    guarded by a lock, which is NOT held while ``on_trace`` runs (D-064).
     """
 
     def __init__(self, on_trace: Callable[[RunTrace], None]) -> None:
@@ -164,15 +158,28 @@ class TraceRecorder:
             raise TypeError("on_trace must be callable")
         self._on_trace = on_trace
         self._open: dict[tuple[str, str], dict[str, Any]] = {}
+        self._lock = threading.Lock()
 
+    # DECISION plan-2026-11-10T194139-2cefeb61/D-064
+    # The lock covers the open-run dict only; `on_trace` runs after it is
+    # released. Do NOT call the sink under the lock (a slow disk write would
+    # block every conversation) and do NOT add a second sink signature.
     def __call__(self, event: str, fields: dict[str, Any]) -> None:
+        with self._lock:
+            trace = self._fold(event, fields)
+        if trace is not None:  # outside the lock: a slow sink blocks no one
+            self._on_trace(trace)
+
+    def _fold(self, event: str, fields: dict[str, Any]) -> RunTrace | None:
+        """One event into the open run; the finished trace, else ``None``.
+        Caller holds the lock."""
         conv, digest = fields.get("conv"), fields.get("digest")
         if (
             event not in _EVENTS
             or not isinstance(conv, str)
             or not isinstance(digest, str)
         ):
-            return
+            return None
         run = self._open.setdefault((conv, digest), {"states": []})
         if len(self._open) > _MAX_OPEN:
             self._open.pop(next(iter(self._open)))
@@ -200,56 +207,19 @@ class TraceRecorder:
             run["stuck"], run["outcome"] = state, fields.get("outcome")
         elif event in ("popped", "failed"):
             del self._open[(conv, digest)]
-            self._on_trace(
-                RunTrace(
-                    digest=digest,
-                    version=run.get("version"),
-                    mode=run.get("mode") or ("converse" if step is None else "run"),
-                    states=tuple(run["states"]),
-                    steps=run.get("steps", 0),
-                    keys=run.get("keys", ()),
-                    kinds=run.get("kinds", ()),
-                    status=STATUS_FAILED
-                    if event == "failed"
-                    else str(fields.get("status")),
-                    reason=fields.get("reason"),
-                    stuck=run.get("stuck"),
-                    outcome=run.get("outcome"),
-                )
+            return RunTrace(
+                digest=digest,
+                version=run.get("version"),
+                mode=run.get("mode") or ("converse" if step is None else "run"),
+                states=tuple(run["states"]),
+                steps=run.get("steps", 0),
+                keys=run.get("keys", ()),
+                kinds=run.get("kinds", ()),
+                status=STATUS_FAILED
+                if event == "failed"
+                else str(fields.get("status")),
+                reason=fields.get("reason"),
+                stuck=run.get("stuck"),
+                outcome=run.get("outcome"),
             )
-
-
-def trace_from_trial(
-    trial: TrialResult, digest: str, *, scenario: str, declared: Collection[str]
-) -> RunTrace:
-    """The ``sim`` trace of one G6b trial of the procedure *digest*.
-
-    Only ``declared`` names (the procedure's inputs and return keys) that the
-    trial's context holds are kept: a bulk extraction mints model-chosen names,
-    so listing every key would let model text into a trace. ``kinds`` is empty
-    (the trial knows no gates), the error text is never copied.
-    """
-    context = trial.context or {}
-    aborted = trial.final_state == ABORT_STATE_ID or bool(
-        context.get(ABORT_CONTEXT_KEY)
-    )
-    status, reason = (
-        (STATUS_OK, None)
-        if trial.passed
-        else (STATUS_FAILED, "error")
-        if trial.error
-        else (STATUS_ABORTED, REASON_BUDGET_SPENT)
-        if aborted
-        else (STATUS_FAILED, "check_failed")
-    )
-    return RunTrace(
-        digest=digest,
-        mode="sim",
-        scenario=scenario,
-        states=tuple(trial.visited_states or ()),
-        steps=trial.turns_sent,
-        keys=tuple(sorted(k for k in declared if not is_missing(context, k))),
-        status=status,
-        reason=reason,
-        stuck=None if trial.ended else trial.final_state,
-    )
+        return None

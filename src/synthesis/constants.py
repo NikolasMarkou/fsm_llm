@@ -86,6 +86,9 @@ PROCEDURE_FAULT_REASONS = (REASON_BUDGET_SPENT, REASON_RETURN_KEYS_MISSING)
 TRACE_KINDS = {t: t.__name__ for t in (bool, int, float, str, list, dict)}
 TRACE_KIND_OTHER = "other"
 
+#: Traces the library keeps per digest when a caller names no cap (the policy default).
+DEFAULT_MAX_TRACES = 200
+
 # --- Scenarios (stored G6b scripts): the most, turns each and characters a turn ---
 MAX_SCENARIOS = 6
 MAX_SCENARIO_TURNS = 12

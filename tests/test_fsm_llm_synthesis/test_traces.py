@@ -1,18 +1,17 @@
 """
 Tests for ``fsm_llm.synthesis.traces``: the value-free ``RunTrace``, the
 ``TraceRecorder`` that turns runner events into one, and the converter for a
-simulation trial. The library's trace store is tested in ``test_library.py``.
+run. The library's trace store is tested in ``test_library.py``.
 """
 
 import dataclasses
-from types import SimpleNamespace
+import threading
 from typing import Any
 
 import pytest
 
 from fsm_llm.synthesis import RunTrace, TraceRecorder
 from fsm_llm.synthesis.constants import TRACE_KINDS
-from fsm_llm.synthesis.traces import trace_from_trial
 from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM
 from tests.test_fsm_llm_synthesis.test_runner import _rig
 
@@ -338,6 +337,84 @@ class TestRecorder:
             TraceRecorder("not callable")  # type: ignore[arg-type]
 
 
+class _Guarded(dict):
+    """The recorder's open-run dict, counting every access made without its lock."""
+
+    def __init__(self, lock: Any) -> None:
+        super().__init__()
+        self.lock, self.bare = lock, 0
+
+    def _check(self) -> None:
+        self.bare += not self.lock.locked()
+
+    def setdefault(self, *a: Any) -> Any:
+        self._check()
+        return super().setdefault(*a)
+
+    def __len__(self) -> int:
+        self._check()
+        return super().__len__()
+
+    def __iter__(self) -> Any:
+        self._check()
+        return super().__iter__()
+
+    def pop(self, *a: Any) -> Any:
+        self._check()
+        return super().pop(*a)
+
+    def __delitem__(self, key: Any) -> None:
+        self._check()
+        super().__delitem__(key)
+
+
+class TestRecorderThreads:
+    """One runner serves many conversations, one thread each (D-064)."""
+
+    RUN = (
+        ("pushed", {"digest": D1, "step": 1}),
+        ("stepped", {"digest": D1, "step": 1, "state": "x", "keys": "", "kinds": ""}),
+        ("popped", {"digest": D1, "status": "ok", "reason": None, "step": 1}),
+    )
+
+    def test_every_touch_of_the_open_runs_holds_the_lock(self):
+        got: list[RunTrace] = []
+        rec = TraceRecorder(got.append)
+        guard = _Guarded(rec._lock)
+        rec._open = guard  # type: ignore[assignment]
+        for i in range(300):  # past the open-run cap too
+            _events(rec, self.RUN[0], conv=f"x{i}")
+        _events(rec, *self.RUN, conv="done")
+
+        assert len(got) == 1 and guard.bare == 0
+
+    def test_the_sink_runs_outside_the_lock(self):
+        held: list[bool] = []
+        rec: TraceRecorder
+
+        def sink(trace: RunTrace) -> None:
+            held.append(rec._lock.locked())
+
+        rec = TraceRecorder(sink)
+        _events(rec, *self.RUN)
+        assert held == [False]
+
+    def test_threads_on_their_own_conversations_lose_no_trace(self):
+        got: list[RunTrace] = []
+        rec = TraceRecorder(got.append)
+
+        def work(n: int) -> None:
+            for i in range(60):
+                _events(rec, *self.RUN, conv=f"t{n}-{i}")
+
+        threads = [threading.Thread(target=work, args=(n,)) for n in range(8)]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+        assert len(got) == 480 and all(t.states == ("x",) for t in got)
+
+
 CANARIES = ("CANARY-CONTEXT", "CANARY-USER", "CANARY-MODEL")
 
 
@@ -387,53 +464,3 @@ class TestOnARealRunner:
         (t,) = got
         assert (t.status, t.reason, t.stuck) == ("aborted", "budget_spent", "ask")
         assert t.outcome == "blocked" and isinstance(rig.cheap, ScriptedRunnerLLM)
-
-
-def _trial(**kw: Any) -> Any:
-    base: dict[str, Any] = {
-        "passed": True,
-        "error": None,
-        "final_state": "done",
-        "visited_states": ["ask", "done"],
-        "context": {"answer": "CANARY-CONTEXT", "invented one": 1, "_x": 2},
-        "ended": True,
-        "turns_sent": 2,
-    }
-    return SimpleNamespace(**{**base, **kw})
-
-
-class TestFromTrial:
-    def _make(self, trial: Any) -> RunTrace:
-        return trace_from_trial(
-            trial, D1, scenario="correction", declared=("answer", "topic")
-        )
-
-    def test_a_passing_trial(self):
-        t = self._make(_trial())
-        assert (t.mode, t.scenario, t.status, t.reason) == (
-            "sim",
-            "correction",
-            "ok",
-            None,
-        )
-        assert (t.states, t.steps, t.stuck, t.digest) == (("ask", "done"), 2, None, D1)
-
-    def test_only_declared_names_are_kept_never_a_value(self):
-        t = self._make(_trial())
-        assert t.keys == ("answer",) and t.kinds == ()
-        assert "CANARY" not in repr(t)
-
-    def test_not_ended_is_stuck_in_the_final_state(self):
-        t = self._make(_trial(passed=False, ended=False, final_state="ask"))
-        assert (t.status, t.stuck, t.reason) == ("failed", "ask", "check_failed")
-
-    def test_an_error_and_an_abort(self):
-        err = self._make(_trial(passed=False, error="boom CANARY", ended=False))
-        assert (err.status, err.reason) == ("failed", "error")
-        assert "CANARY" not in repr(err)
-        abort = self._make(_trial(passed=False, final_state="abort"))
-        assert (abort.status, abort.reason) == ("aborted", "budget_spent")
-        flagged = self._make(
-            _trial(passed=False, context={"procedure_abort": True}, ended=False)
-        )
-        assert flagged.status == "aborted"

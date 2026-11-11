@@ -48,6 +48,7 @@ from fsm_llm.okf import capped_line, iso_utc
 from fsm_llm.security import resolve_within
 
 from .constants import (
+    DEFAULT_MAX_TRACES,
     LIFECYCLE_DEPRECATED,
     LIFECYCLE_DRAFT,
     LIFECYCLE_TRUSTED,
@@ -548,8 +549,12 @@ class FSMLibrary:
     # Read the valid rows, add one, rewrite the whole file atomically under the
     # lock. Do NOT append in place: a torn last line would fuse with the new
     # row, and a trim needs the rewrite anyway.
-    def add_trace(self, trace: RunTrace, *, max_traces: int) -> None:
-        """File *trace* under its digest, keeping the newest ``max_traces``."""
+    def add_trace(
+        self, trace: RunTrace, *, max_traces: int = DEFAULT_MAX_TRACES
+    ) -> None:
+        """File *trace* under its digest, keeping the newest ``max_traces``
+        (default 200, the policy's), so ``TraceRecorder(library.add_trace)`` is
+        the whole wiring of a host."""
         require_int_limit("max_traces", max_traces, minimum=1, error=SynthesisError)
         with self._lock:
             found, _ = self._trace_rows(trace.digest)

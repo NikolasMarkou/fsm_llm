@@ -50,7 +50,12 @@ from fsm_llm.definitions import (
 from fsm_llm.okf import capped_line, has_lone_surrogate, strip_unsafe_text
 from fsm_llm.security import has_internal_prefix, is_forbidden_context_entry
 
-from .constants import ABORT_CONTEXT_KEY, ABORT_STATE_ID, RESULT_CONTEXT_KEY
+from .constants import (
+    ABORT_CONTEXT_KEY,
+    ABORT_STATE_ID,
+    DEFAULT_MAX_TRACES,
+    RESULT_CONTEXT_KEY,
+)
 from .exceptions import SynthesisError
 
 #: Integer limits and their minimum. ``max_repair_rounds`` may be 0 (no repair).
@@ -157,7 +162,7 @@ class SynthesisPolicy:
     max_turns: int = 40
     max_compile_tokens: int = 8192
     max_synthesis_seconds: int = 300
-    max_traces_per_digest: int = 200
+    max_traces_per_digest: int = DEFAULT_MAX_TRACES
     max_sim_turns: int = 12
     sim_trials: int = 2
     max_simulation_seconds: int = 300
