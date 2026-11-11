@@ -46,6 +46,7 @@ from .synthesizer import (
     reviewer_from_hitl,
 )
 from .tools import create_procedure_tools
+from .traces import RunTrace, TraceRecorder
 
 __all__ = [
     "CompileResult",
@@ -60,9 +61,11 @@ __all__ = [
     "Procedure",
     "ProcedureApprovalRequest",
     "ProcedureRunner",
+    "RunTrace",
     "SynthesisError",
     "SynthesisPolicy",
     "SynthesisRefusedError",
+    "TraceRecorder",
     "analyze_dryrun",
     "check_policy",
     "create_procedure_tools",

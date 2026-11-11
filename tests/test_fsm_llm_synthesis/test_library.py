@@ -5,6 +5,8 @@ signature-first retrieval.
 """
 
 import contextlib
+import json
+import os
 import threading
 import time
 from pathlib import Path
@@ -14,7 +16,7 @@ import pytest
 
 from fsm_llm import API
 from fsm_llm.definitions import FSMDefinition
-from fsm_llm.synthesis import SynthesisError, library
+from fsm_llm.synthesis import RunTrace, SynthesisError, library
 from fsm_llm.synthesis.exceptions import LibraryError
 from fsm_llm.synthesis.library import FSMLibrary, digest_of
 
@@ -617,3 +619,213 @@ class TestSearch:
     def test_bad_search_arguments(self, lib: FSMLibrary, kw: dict):
         with pytest.raises(SynthesisError):
             self._q(lib, **kw)
+
+
+D = "c" * 64
+
+
+def _tr(i: int = 0, digest: str = D, **kw: Any) -> RunTrace:
+    return RunTrace(digest=digest, steps=i, states=("a", "b"), **kw)
+
+
+def _trace_file(lib: FSMLibrary, digest: str = D) -> Path:
+    return lib.root / "traces" / f"{digest}.jsonl"
+
+
+class TestTraces:
+    def test_add_and_read_oldest_first(self, lib: FSMLibrary):
+        for i in range(4):
+            lib.add_trace(_tr(i), max_traces=10)
+        found, skipped = lib.read_traces(D)
+        assert [t.steps for t in found] == [0, 1, 2, 3] and skipped == 0
+        assert [t.steps for t in lib.read_traces(D, limit=2)[0]] == [2, 3]
+        assert lib.read_traces("d" * 64) == ((), 0)
+
+    def test_every_row_carries_the_version(self, lib: FSMLibrary):
+        lib.add_trace(_tr(), max_traces=10)
+        assert json.loads(_trace_file(lib).read_text())["v"] == 1
+
+    def test_the_ring_cap_trims_the_oldest(self, lib: FSMLibrary):
+        for i in range(7):
+            lib.add_trace(_tr(i), max_traces=3)
+        assert [t.steps for t in lib.read_traces(D)[0]] == [4, 5, 6]
+        assert len(_trace_file(lib).read_text().splitlines()) == 3
+
+    def test_a_trace_is_filed_under_its_own_digest(self, lib: FSMLibrary):
+        lib.add_trace(_tr(1, "d" * 64), max_traces=3)
+        lib.add_trace(_tr(2), max_traces=3)
+        assert [t.steps for t in lib.read_traces(D)[0]] == [2]
+
+    @pytest.mark.parametrize("bad", ["../x", "A" * 64, "a" * 63, "", None, 5])
+    def test_a_bad_id_is_refused_before_a_path_is_built(self, lib: FSMLibrary, bad):
+        with pytest.raises(LibraryError, match="invalid digest"):
+            lib.read_traces(bad)
+        if isinstance(bad, str):
+            with pytest.raises(LibraryError, match="invalid digest"):
+                lib.add_trace(RunTrace(digest=bad), max_traces=3)
+        assert not lib.root.exists()
+
+    @pytest.mark.parametrize("bad", [0, -1, True, 2.0, "3", None, 10**30])
+    def test_a_bad_cap_or_limit_is_refused(self, lib: FSMLibrary, bad):
+        with pytest.raises(SynthesisError):
+            lib.add_trace(_tr(), max_traces=bad)
+        if bad is not None:  # no limit means every kept trace
+            with pytest.raises(SynthesisError):
+                lib.read_traces(D, limit=bad)
+
+    def test_a_torn_last_line_is_skipped_counted_and_healed(self, lib: FSMLibrary):
+        lib.add_trace(_tr(1), max_traces=10)
+        with _trace_file(lib).open("a") as f:
+            f.write('{"v": 1, "digest": "' + D + '", "states": ["a"')  # no newline
+        found, skipped = lib.read_traces(D)
+        assert [t.steps for t in found] == [1] and skipped == 1
+
+        lib.add_trace(_tr(2), max_traces=10)  # the next add keeps only whole rows
+        found, skipped = lib.read_traces(D)
+        assert [t.steps for t in found] == [1, 2] and skipped == 0
+
+    def test_a_hostile_file_never_crashes_a_reader(self, lib: FSMLibrary):
+        good = json.dumps(_tr(9).to_row())
+        wrong_digest = json.dumps(_tr(1, "d" * 64).to_row())
+        lines = [
+            b"\xff\xfe not utf-8",
+            b"[" * 5000,  # deep nesting, under the row size
+            json.dumps(
+                {**_tr(7).to_row(), "reason": "x" * 20000}
+            ).encode(),  # valid, long
+            b"[]",
+            b"null",
+            b'"text"',
+            b"{}",
+            b'{"v": 2}',
+            wrong_digest.encode(),
+            json.dumps({**_tr().to_row(), "status": "running"}).encode(),
+            json.dumps({**_tr().to_row(), "states": [{"a": 1}]}).encode(),
+            good.encode(),
+        ]
+        path = _trace_file(lib)
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"\n".join(lines) + b"\n")
+        found, skipped = lib.read_traces(D)
+        assert [t.steps for t in found] == [9] and skipped == len(lines) - 1
+
+    def test_a_huge_file_is_read_by_its_tail_only(self, lib: FSMLibrary):
+        row = (json.dumps(_tr(5).to_row()) + "\n").encode()
+        path = _trace_file(lib)
+        path.parent.mkdir(parents=True)
+        path.write_bytes(row * (6 * 2**20 // len(row)))
+        found, skipped = lib.read_traces(D)
+        assert found and skipped == 0 and len(found) < 6 * 2**20 // len(row)
+
+    def test_a_symlinked_or_unreadable_trace_file_is_a_library_error(
+        self, lib: FSMLibrary, tmp_path: Path
+    ):
+        path = _trace_file(lib)
+        path.parent.mkdir(parents=True)
+        (tmp_path / "x").write_text("")
+        os.symlink(tmp_path / "x", path)
+        with pytest.raises(LibraryError):
+            lib.read_traces(D)
+        with pytest.raises(LibraryError):
+            lib.add_trace(_tr(), max_traces=3)
+        path.unlink()
+        path.mkdir()  # a directory where the file should be
+        with pytest.raises(LibraryError):
+            lib.read_traces(D)
+
+    def test_search_lists_only_records(self, lib: FSMLibrary):
+        rec = _put(lib)
+        lib.add_trace(_tr(1, rec.digest), max_traces=3)
+        lib.add_scenarios(rec.digest, [{"kind": "happy", "turns": ["hi"]}])
+        hits = TestSearch._q(lib)
+        assert [h.record.digest for h in hits] == [rec.digest]
+
+    @staticmethod
+    def _hammer(lib: FSMLibrary, monkeypatch) -> int:
+        real = FSMLibrary._write
+
+        def slow(self, path, text):  # widen the read-modify-write window
+            time.sleep(0.002)
+            real(self, path, text)
+
+        monkeypatch.setattr(FSMLibrary, "_write", slow)
+        threads = [
+            threading.Thread(
+                target=lambda: [lib.add_trace(_tr(), max_traces=1000) for _ in range(5)]
+            )
+            for _ in range(8)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        monkeypatch.undo()
+        return len(lib.read_traces(D)[0])
+
+    def test_eight_writers_lose_no_trace(self, lib: FSMLibrary, monkeypatch):
+        assert self._hammer(lib, monkeypatch) == 40
+
+    def test_negative_control_without_the_lock_traces_are_lost(
+        self, lib: FSMLibrary, monkeypatch
+    ):
+        lib._lock = contextlib.nullcontext()  # type: ignore[assignment]
+        assert self._hammer(lib, monkeypatch) < 40
+
+
+class TestScenarios:
+    def test_round_trip_and_replace(self, lib: FSMLibrary):
+        assert lib.read_scenarios(D) == []
+        lib.add_scenarios(D, [{"kind": "happy", "turns": ["hi", "yes"]}])
+        assert lib.read_scenarios(D) == [{"kind": "happy", "turns": ["hi", "yes"]}]
+        lib.add_scenarios(D, [{"kind": "off_topic", "turns": ["x"]}])
+        assert [s["kind"] for s in lib.read_scenarios(D)] == ["off_topic"]
+
+    def test_text_is_stripped_and_capped(self, lib: FSMLibrary):
+        lib.add_scenarios(
+            D,
+            [
+                {"kind": "k" * 200, "turns": ["a\x1b[31m\x00b\nc"] + ["t" * 1000] * 20}
+                for _ in range(10)
+            ],
+        )
+        got = lib.read_scenarios(D)
+        assert len(got) == 6 and all(len(s["turns"]) == 12 for s in got)
+        assert got[0]["kind"] == "k" * 120
+        assert got[0]["turns"][0] == "ab c" and got[0]["turns"][1] == "t" * 300
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "turns",
+            None,
+            [None],
+            [{"kind": "x"}],
+            [{"turns": ["a"]}],
+            [{"kind": 5, "turns": ["a"]}],
+            [{"kind": "x", "turns": "abc"}],
+            [{"kind": "x", "turns": [1]}],
+            [{"kind": "x", "turns": [True]}],
+        ],
+    )
+    def test_a_bad_shape_is_refused_and_nothing_is_written(self, lib: FSMLibrary, bad):
+        with pytest.raises(SynthesisError):
+            lib.add_scenarios(D, bad)
+        assert not lib.root.exists()
+
+    def test_a_bad_id_is_refused(self, lib: FSMLibrary):
+        with pytest.raises(LibraryError, match="invalid digest"):
+            lib.add_scenarios("x", [])
+        with pytest.raises(LibraryError, match="invalid digest"):
+            lib.read_scenarios("x")
+
+    @pytest.mark.parametrize(
+        "text",
+        ["{", "[1]", '{"a": 1}', '[{"kind": "x"}]', '[{"kind": 1, "turns": []}]'],
+    )
+    def test_a_corrupt_file_is_refused_never_overwritten(self, lib: FSMLibrary, text):
+        path = lib.root / "scenarios" / f"{D}.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(text)
+        with pytest.raises(LibraryError):
+            lib.read_scenarios(D)
+        assert path.read_text() == text

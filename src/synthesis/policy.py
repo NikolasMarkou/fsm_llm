@@ -64,6 +64,7 @@ _INT_LIMITS = {
     "max_turns": 1,
     "max_compile_tokens": 1,
     "max_synthesis_seconds": 1,
+    "max_traces_per_digest": 1,
 }
 
 #: Names a compile may never declare or read: the framework keys and ours.
@@ -95,6 +96,8 @@ class SynthesisPolicy:
     Interface contract (callers: the compiler, G5, the runner, the tools):
         Every integer limit must be an ``int`` (not a ``bool``, ``float`` or
         ``str``) from its minimum (1; ``max_repair_rounds`` 0) to ``2**63 - 1``.
+        ``max_traces_per_digest`` is how many run traces the library keeps
+        per procedure (the callers of ``FSMLibrary.add_trace`` pass it).
         ``max_fields_per_state`` caps the distinct key names one state
         extracts (each is a cheap-model call per child step).
         ``reuse_min_score`` is an ``int`` or ``float`` from 0 to 1.
@@ -114,6 +117,7 @@ class SynthesisPolicy:
     max_turns: int = 40
     max_compile_tokens: int = 8192
     max_synthesis_seconds: int = 300
+    max_traces_per_digest: int = 200
     reuse_min_score: float = 0.8
     trust_after_successes: int | None = None
     allowed_tools: frozenset[str] = frozenset()

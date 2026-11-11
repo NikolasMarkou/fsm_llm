@@ -61,14 +61,13 @@ from .constants import (
     STATUS_FAILED,
     STATUS_OK,
     STATUS_RUNNING,
+    TRACE_KIND_OTHER,
+    TRACE_KINDS,
 )
 from .exceptions import LibraryError, SynthesisError, SynthesisRefusedError
 from .gates import verify_stored
 from .policy import SynthesisPolicy
 from .synthesizer import FSMSynthesizer, Procedure
-
-# the only type names a trace may carry (never ``type(value).__name__``)
-_KINDS = {t: t.__name__ for t in (bool, int, float, str, list, dict)}
 
 _ALLOWED_LIFECYCLES = {
     LIFECYCLE_VERIFIED: (LIFECYCLE_VERIFIED, LIFECYCLE_TRUSTED),
@@ -292,7 +291,7 @@ class ProcedureRunner:
     ) -> dict[str, Any]:
         """Value-free facts about the child on top for a trace event: its
         ``state``, the declared names present (``keys``), ``name:type`` for those
-        an edge gate reads (``kinds``, types from ``_KINDS``) and, with
+        an edge gate reads (``kinds``, types from ``TRACE_KINDS``) and, with
         ``outcome``, what the evaluator makes of its edges now. ``{}`` without a
         sink, and on any failure (one WARNING): a trace never changes a run."""
         if self._sink is None:
@@ -316,7 +315,9 @@ class ProcedureRunner:
                 if not is_missing(data, k)
             )
             kinds = (
-                f"{k}:{_KINDS.get(type(data[k]), 'other')}" for k in seen if k in gated
+                f"{k}:{TRACE_KINDS.get(type(data[k]), TRACE_KIND_OTHER)}"
+                for k in seen
+                if k in gated
             )
             state = self.api.get_current_state(conv_id)
             view = {"state": state, "keys": ",".join(seen), "kinds": ",".join(kinds)}

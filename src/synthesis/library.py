@@ -5,6 +5,8 @@ Layout under the library root::
 
     definitions/<sha256>.json   the definition, immutable, named by its digest
     records/<sha256>.json       its ``LibraryRecord`` (lifecycle, stats, provenance)
+    traces/<sha256>.jsonl       its run traces, one value-free ``RunTrace`` row a line
+    scenarios/<sha256>.json     its stored G6b scripts (synthetic text, capped)
 
 The digest is the full sha256 of the same canonical dump ``API`` hashes
 (``model_dump(exclude_defaults=True)``, sorted keys); its first 8 hex digits
@@ -33,7 +35,7 @@ import threading
 from collections.abc import Callable, Collection, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -50,13 +52,19 @@ from .constants import (
     LIFECYCLE_TRUSTED,
     LIFECYCLE_VERIFIED,
     LIFECYCLES,
+    MAX_SCENARIO_TURN_CHARS,
+    MAX_SCENARIO_TURNS,
+    MAX_SCENARIOS,
 )
 from .exceptions import LibraryError, SynthesisError
+from .traces import RunTrace
 
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}")
 _VERSION_RE = re.compile(r"(\d+)\.(\d+)")
 _GOAL_CHARS = 500  # stored goal text; longer goals are cut
 _LABEL_CHARS = 120  # stored model name, run id and approver
+_TRACE_ROW_BYTES = 8192  # a longer trace line is not one of ours
+_TRACE_READ_BYTES = 4 * 2**20  # a reader looks at the tail of a trace file only
 _PROVENANCE_KEYS = frozenset(
     {
         "synthesizing_model",
@@ -218,10 +226,10 @@ class FSMLibrary:
             raise LibraryError(f"library path escapes the root: {rel}")
         return found
 
-    def _path(self, kind: str, digest: str) -> Path:
+    def _path(self, kind: str, digest: str, suffix: str = ".json") -> Path:
         if not (isinstance(digest, str) and _DIGEST_RE.fullmatch(digest)):
             raise LibraryError(f"invalid digest: {capped_line(repr(digest), 70)}")
-        return self._confined(f"{kind}/{digest}.json")
+        return self._confined(f"{kind}/{digest}{suffix}")
 
     @staticmethod
     def _read(path: Path) -> bytes | None:
@@ -459,6 +467,114 @@ class FSMLibrary:
             return record
 
         return self._update(digest, count)
+
+    # -- traces and scenarios: evidence beside a record, not trust data ---------
+
+    def _trace_rows(self, digest: str) -> tuple[list[RunTrace], int]:
+        """``(traces, skipped)``: the valid rows of the tail of the file, oldest
+        first, and how many lines were skipped (torn, oversize, not JSON, not a
+        ``RunTrace`` row, another digest). Never raises for content."""
+        path = self._path("traces", digest, ".jsonl")
+        try:
+            with path.open("rb") as f:
+                size = f.seek(0, os.SEEK_END)
+                f.seek(max(0, size - _TRACE_READ_BYTES))
+                lines = f.read().split(b"\n")
+        except FileNotFoundError:
+            return [], 0
+        except OSError as exc:
+            raise LibraryError(f"cannot read {path.name}: {exc}") from exc
+        found, skipped = [], 0
+        for line in lines[1 if size > _TRACE_READ_BYTES else 0 :]:
+            if not line.strip():
+                continue
+            try:
+                if len(line) > _TRACE_ROW_BYTES:
+                    raise ValueError("oversize row")
+                trace = RunTrace.from_row(json.loads(line))
+                if trace.digest != digest:
+                    raise ValueError("another digest")
+            except (TypeError, ValueError, RecursionError):
+                skipped += 1
+            else:
+                found.append(trace)
+        return found, skipped
+
+    def read_traces(
+        self, digest: str, limit: int | None = None
+    ) -> tuple[tuple[RunTrace, ...], int]:
+        """``(traces, skipped)`` of *digest*, oldest first; ``limit`` keeps the
+        newest. A torn or hostile line is skipped and counted, never raised; an
+        unreadable file or a symlink is a ``LibraryError``."""
+        if limit is not None:
+            require_int_limit("limit", limit, minimum=1, error=SynthesisError)
+        found, skipped = self._trace_rows(digest)
+        return tuple(found[-limit:] if limit else found), skipped
+
+    # DECISION plan-2026-11-10T194139-2cefeb61/D-046
+    # Read the valid rows, add one, rewrite the whole file atomically under the
+    # lock. Do NOT append in place: a torn last line would fuse with the new
+    # row, and a trim needs the rewrite anyway.
+    def add_trace(self, trace: RunTrace, *, max_traces: int) -> None:
+        """File *trace* under its digest, keeping the newest ``max_traces``."""
+        require_int_limit("max_traces", max_traces, minimum=1, error=SynthesisError)
+        with self._lock:
+            found, _ = self._trace_rows(trace.digest)
+            rows = [*found, trace][-max_traces:]
+            self._write(
+                self._path("traces", trace.digest, ".jsonl"),
+                "".join(json.dumps(t.to_row()) + "\n" for t in rows),
+            )
+
+    @staticmethod
+    def _scenarios(value: object) -> list[dict[str, Any]]:
+        """The stored shape of *value*: at most ``MAX_SCENARIOS`` of
+        ``{kind, turns}``, text stripped and capped; ``ValueError`` otherwise."""
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("scenarios are a list")
+        out = []
+        for item in value:
+            kind = item.get("kind") if isinstance(item, dict) else None
+            turns = item.get("turns") if isinstance(item, dict) else None
+            if (
+                not isinstance(kind, str)
+                or not isinstance(turns, (list, tuple))
+                or not all(isinstance(t, str) for t in turns)
+            ):
+                raise ValueError("a scenario is {kind: str, turns: [str]}")
+            out.append(
+                {
+                    "kind": capped_line(kind, _LABEL_CHARS),
+                    "turns": [
+                        capped_line(t, MAX_SCENARIO_TURN_CHARS)
+                        for t in turns[:MAX_SCENARIO_TURNS]
+                    ],
+                }
+            )
+        return out[:MAX_SCENARIOS]
+
+    def add_scenarios(self, digest: str, scenarios: Sequence[dict[str, Any]]) -> None:
+        """Replace the stored scripts of *digest* (``{kind, turns}`` objects:
+        synthetic G6b text, never user text); at most 6 of 12 turns of 300
+        characters, control-stripped. ``SynthesisError`` for another shape."""
+        path = self._path("scenarios", digest)
+        try:
+            clean = self._scenarios(scenarios)
+        except ValueError as exc:
+            raise SynthesisError(str(exc)) from exc
+        with self._lock:
+            self._write(path, json.dumps(clean, indent=2))
+
+    def read_scenarios(self, digest: str) -> list[dict[str, Any]]:
+        """The stored scripts of *digest* (``[]`` when none); a corrupt file is
+        a ``LibraryError`` (they are replay input beside a trust record)."""
+        raw = self._read(self._path("scenarios", digest))
+        if raw is None:
+            return []
+        try:
+            return self._scenarios(json.loads(raw))
+        except (ValueError, RecursionError) as exc:
+            raise LibraryError(f"corrupt scenarios {digest[:12]}: {exc}") from exc
 
     # -- retrieval --------------------------------------------------------
 

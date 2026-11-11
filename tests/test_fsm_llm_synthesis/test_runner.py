@@ -141,7 +141,7 @@ def _rig(
     sink: Any = None,
 ) -> _Rig:
     cheap = ScriptedRunnerLLM(
-        {"answer": "42"} if extraction is None else extraction, REPLIES
+        {"answer": "42"} if extraction is None else extraction, dict(REPLIES)
     )
     strong = ScriptedStrongLLM([json.dumps(valid_fsm)] if replies is None else replies)
     library = FSMLibrary(tmp_path / "lib") if tmp_path is not None else None

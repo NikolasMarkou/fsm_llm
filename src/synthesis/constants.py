@@ -53,6 +53,15 @@ REASONS = (
     REASON_UNEXPECTED_ERROR,
 )
 
+# --- Traces: the only type names a trace may carry (never ``type(v).__name__``) ---
+TRACE_KINDS = {t: t.__name__ for t in (bool, int, float, str, list, dict)}
+TRACE_KIND_OTHER = "other"
+
+# --- Scenarios (stored G6b scripts): the most, turns each and characters a turn ---
+MAX_SCENARIOS = 6
+MAX_SCENARIO_TURNS = 12
+MAX_SCENARIO_TURN_CHARS = 300
+
 # --- Tool bounds: the most names one tool call may list (inputs or return_keys) ---
 MAX_TOOL_NAMES = 20
 

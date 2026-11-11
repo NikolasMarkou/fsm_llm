@@ -65,6 +65,7 @@ class TestSynthesisPolicyLimits:
         assert (p.max_compile_tokens, p.max_synthesis_seconds) == (8192, 300)
         assert p.reuse_min_score == 0.8 and p.trust_after_successes is None
         assert p.allowed_tools == frozenset() and p.require_approval is False
+        assert p.max_traces_per_digest == 200
 
     @pytest.mark.parametrize(
         "name",
@@ -77,6 +78,7 @@ class TestSynthesisPolicyLimits:
             "max_turns",
             "max_compile_tokens",
             "max_synthesis_seconds",
+            "max_traces_per_digest",
         ],
     )
     @pytest.mark.parametrize(
