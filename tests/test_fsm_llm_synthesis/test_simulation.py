@@ -337,7 +337,6 @@ class TestHappyTurns:
     def test_each_declared_name_gets_a_fixed_sample_by_type(self):
         fields = [("s", "str"), ("i", "int"), ("f", "float"), ("b", "bool")]
         fields += [("l", "list"), ("d", "dict"), ("x", "any")]
-        self._definition_edge(fields)
         (turn, *_), _ = happy_path(self._definition_edge(fields), 12)
 
         for fact in ("s is sample", "i is 3", "f is 2.5", "b is yes", "l is a, b"):

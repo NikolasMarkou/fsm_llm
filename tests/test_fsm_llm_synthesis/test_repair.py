@@ -623,13 +623,13 @@ class TestRateLimits:
         rig = Rig(tmp_path, failures=2, policy=SynthesisPolicy(repair_min_failures=2))
         assert rig.repair(replay_scripts=[SCRIPT]).code == "promote"
 
-    def test_the_lineage_limit_counts_repairs_by_version(self, tmp_path):
+    def test_the_lineage_limit_counts_the_chain_of_repairs(self, tmp_path):
         limit = SynthesisPolicy(max_repairs_per_lineage=2)
-        rig = Rig(tmp_path, ancestors=2, policy=limit)  # parent is 1.2
+        rig = Rig(tmp_path, ancestors=2, policy=limit)
         assert rig.lib.get_record(rig.parent).version == "1.2"
         assert rig.repair(write=True).code == "lineage-limit"
         assert rig.untouched()
-        fresh = Rig(tmp_path / "b", ancestors=1, policy=limit)  # parent is 1.1
+        fresh = Rig(tmp_path / "b", ancestors=1, policy=limit)
         assert fresh.repair(replay_scripts=[SCRIPT]).code == "promote"
 
     def test_the_lineage_limit_counts_every_child_of_a_trusted_parent(self, tmp_path):

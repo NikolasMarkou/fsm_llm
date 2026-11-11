@@ -553,7 +553,7 @@ class FSMLibrary:
         self, trace: RunTrace, *, max_traces: int = DEFAULT_MAX_TRACES
     ) -> None:
         """File *trace* under its digest, keeping the newest ``max_traces``
-        (default 200, the policy's), so ``TraceRecorder(library.add_trace)`` is
+        (default ``DEFAULT_MAX_TRACES``, 200), so ``TraceRecorder(library.add_trace)`` is
         the whole wiring of a host."""
         require_int_limit("max_traces", max_traces, minimum=1, error=SynthesisError)
         with self._lock:

@@ -68,6 +68,7 @@ from .gates import (
     GateFinding,
     GateReport,
     run_gates,
+    safe_text,
     simulated,
     verify_stored,
 )
@@ -182,9 +183,6 @@ def _spent(after: LLMUsage | None, before: LLMUsage) -> LLMUsage:
 def _approval_request(
     goal: str, keys: tuple[str, ...], result: CompileResult, digest: str
 ) -> ProcedureApprovalRequest:
-    def safe(text: str, cap: int) -> str:
-        return capped_line(text, cap).translate(SKILL_DEFANG)
-
     states = result.definition.states.values()
     tools = sorted(
         {
@@ -209,8 +207,8 @@ def _approval_request(
         digest,
         diagram.translate(SKILL_DEFANG)[:_MERMAID_CHARS],
         ", ".join(f"{g} {v}" for g, v in verdicts.items()),
-        safe(goal, _GOAL_CHARS),
-        safe(summary, 400),
+        safe_text(goal, _GOAL_CHARS),
+        safe_text(summary, 400),
     )
 
 

@@ -26,6 +26,7 @@ from fsm_llm.definitions import (
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.synthesis import (
     FSMLibrary,
+    GateReport,
     LibraryError,
     Simulator,
     SynthesisError,
@@ -47,6 +48,7 @@ from fsm_llm.synthesis.prompts import (
 from fsm_llm.synthesis.synthesizer import (
     CompileResult,
     FSMSynthesizer,
+    _approval_request,
     reviewer_from_hitl,
 )
 from tests.test_fsm_llm_synthesis.conftest import (
@@ -680,6 +682,14 @@ class TestApprovalRequest:
         assert len(req.mermaid) <= 4000
         for field in (req.goal, req.summary, req.report):
             assert "\n" not in field and not set(field) & set("[]<>")
+
+    def test_the_summary_is_defanged_and_capped_like_the_goal(self, valid_fsm):
+        keys = ("a[b]<c>\nd", "k" * 600)
+        definition = FSMDefinition(**valid_fsm)
+        result = CompileResult(definition, valid_fsm, GateReport(), 1, None)
+        req = _approval_request(GOAL, keys, result, "0" * 64)
+        assert "\n" not in req.summary and not set(req.summary) & set("[]<>")
+        assert len(req.summary) == 400
 
     def test_a_long_diagram_is_capped(self, tmp_path, valid_fsm):
         fsm = copy.deepcopy(valid_fsm)

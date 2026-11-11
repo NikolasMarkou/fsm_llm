@@ -20,10 +20,7 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
-from fsm_llm.constants import SKILL_DEFANG
-from fsm_llm.okf import capped_line
-
-from .gates import GateReport
+from .gates import GateReport, safe_text
 from .policy import SynthesisPolicy
 
 GOAL_CHARS = 2000  # characters of the goal the strong model sees
@@ -145,7 +142,7 @@ def _fence(begin: str, end: str, text: str, cap: int) -> str:
     """``text`` as one control-stripped line capped at ``cap`` characters,
     ``[ ] < >`` defanged (so it can never spell a marker line), between the
     fixed ``begin`` and ``end`` lines. The one fence of this package."""
-    return f"{begin}\n{capped_line(text, cap).translate(SKILL_DEFANG)}\n{end}"
+    return f"{begin}\n{safe_text(text, cap)}\n{end}"
 
 
 def goal_block(goal: str) -> str:

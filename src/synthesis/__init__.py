@@ -7,11 +7,14 @@ into a finite state machine, gates check it, a library stores it, and a cheap
 model runs it as a pushed child of a host conversation.
 
 So far: the exception hierarchy, the shared constants, the policy (limits, the
-G5 gate and abort injection), the library, the gate composition (G1 to G5 and
-the G6a dead-edge gate), the compile
-and repair loop, ``diagnose`` over run traces, ``apply_patch`` (an RFC 6902 subset), ``propose_patch``, ``obtain`` with the approval gate, the ``ProcedureRunner``
-that pushes, runs and pops a procedure under a ``synthesize`` state, and the
-agent tools ``obtain_procedure`` and ``run_procedure``.
+G5 gate and abort injection), the library, the gate composition (G1 to G5, the
+G6a dead-edge gate and the G6b ``Simulator``), the compile and repair loop,
+``RunTrace`` and ``TraceRecorder``, ``diagnose`` over run traces,
+``apply_patch`` (an RFC 6902 subset), ``propose_patch`` and
+``repair_procedure``, ``obtain`` with the approval gate, the
+``ProcedureRunner`` that pushes, runs and pops a procedure under a
+``synthesize`` state, and the agent tools ``obtain_procedure`` and
+``run_procedure``.
 
 Import it by name, ``from fsm_llm.synthesis import SynthesisError``;
 ``import fsm_llm`` never loads it.

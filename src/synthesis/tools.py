@@ -25,7 +25,6 @@ from fsm_llm.agents.definitions import ToolAnnotations
 from fsm_llm.agents.exceptions import require_int_limit
 from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.api import API
-from fsm_llm.constants import SKILL_DEFANG
 from fsm_llm.definitions import (
     SYNTHESIZE_GOAL_MAX_LENGTH,
     LLMResponseError,
@@ -34,7 +33,6 @@ from fsm_llm.definitions import (
 from fsm_llm.expressions import is_missing
 from fsm_llm.llm import LLMInterface
 from fsm_llm.logging import logger
-from fsm_llm.okf import capped_line
 
 from .constants import (
     LIFECYCLE_VERIFIED,
@@ -47,7 +45,7 @@ from .constants import (
     REASON_RETURN_KEYS_MISSING,
 )
 from .exceptions import LibraryError, SynthesisError
-from .gates import verify_stored
+from .gates import safe_text, verify_stored
 from .runner import reason_of, runnable_reason
 from .synthesizer import FSMSynthesizer
 
@@ -118,8 +116,7 @@ def _room(tool: str, **params: Any) -> int:
 
 def _safe(value: object, cap: int) -> str:
     """One control-stripped line of at most *cap* characters, ``[ ] < >`` defanged."""
-    text = value if isinstance(value, str) else str(value)
-    return capped_line(text, cap).translate(SKILL_DEFANG)
+    return safe_text(str(value), cap)
 
 
 def _reply(lines: list[str], room: int) -> str:

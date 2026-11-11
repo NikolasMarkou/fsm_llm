@@ -52,8 +52,8 @@ _MESSAGE_CHARS = 300
 
 @dataclass(frozen=True)
 class GateFinding:
-    """One defect of one gate: ``gate`` is G1 to G5 or G6a, ``code`` the defect,
-    ``state`` the state id it sits at (``""`` for the document). ``state`` and
+    """One defect of one gate: ``gate`` is G1 to G5, G6a or G6b, ``code`` the
+    defect, ``state`` the state id it sits at (``""`` for the document). ``state`` and
     ``message`` may quote model-authored text: ``repair_text`` is the only way
     they reach a prompt."""
 
