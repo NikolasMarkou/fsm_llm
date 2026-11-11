@@ -538,6 +538,57 @@ class TestUnsentTurns:
         assert run_case_trial(case, EvalConfig(), 1, _passing()).passed is True
 
 
+class TestStopHook:
+    """``run_case_trial(stop=...)`` (plan D-060, D-073): a caller-owned bound read
+    before every turn."""
+
+    @staticmethod
+    def _stuck(turns: int = 3) -> ConversationCase:
+        return _case(
+            turns=[f"turn {i}" for i in range(turns)],
+            expect={"final_state": "start"},
+        )
+
+    def test_stop_is_called_before_each_turn_and_a_true_result_ends_the_trial(self):
+        calls: list[int] = []
+
+        def stop() -> bool:
+            calls.append(1)
+            return len(calls) == 3
+
+        result = run_case_trial(self._stuck(), EvalConfig(), 1, _failing(), stop=stop)
+        assert calls == [1, 1, 1]  # before turn 1, turn 2 and turn 3
+        assert result.turns_sent == 2
+        assert len(result.responses) == 1 + 2  # the greeting and two replies
+        assert any("1 of 3 turns unsent" in f for f in result.failures)
+
+    def test_a_stop_true_before_the_first_turn_sends_nothing(self):
+        result = run_case_trial(
+            self._stuck(), EvalConfig(), 1, _failing(), stop=lambda: True
+        )
+        assert result.turns_sent == 0 and result.error is None
+
+    def test_stop_is_not_asked_once_the_conversation_has_ended(self):
+        calls: list[int] = []
+        case = _case(turns=["I am Ada", "one more"], expect={"ended": True})
+        result = run_case_trial(
+            case, EvalConfig(), 1, _passing(), stop=lambda: calls.append(1) or False
+        )
+        assert result.passed is True and result.turns_sent == 1
+        assert calls == [1]  # before the first turn only
+
+    def test_the_default_changes_nothing(self):
+        stuck = run_case_trial(self._stuck(), EvalConfig(), 1, _failing())
+        never = run_case_trial(
+            self._stuck(), EvalConfig(), 1, _failing(), stop=lambda: False
+        )
+        assert stuck.turns_sent == 3 == never.turns_sent
+        assert stuck.responses == never.responses
+        assert stuck.failures == never.failures
+        ended = run_case_trial(_case(), EvalConfig(), 1, _passing(), stop=None)
+        assert ended.passed is True and ended.visited_states == ["start", "done"]
+
+
 class TestChecksHook:
     def test_custom_check_failures_are_recorded(self, tmp_path: Path):
         def short_greeting(trial: TrialResult) -> list[str]:

@@ -304,6 +304,55 @@ class TestTheScriptedTurns:
         turns, given = self._path(fsm, ("name",), inputs=("seats",))
         assert turns == ["name is sample"] and given == {"seats": 2}
 
+    def test_the_lowest_priority_number_is_walked_first(self):
+        """Two edges to two terminals are equally short: the route takes the one
+        the evaluator prefers (priority 1), whatever order they are listed in."""
+        var = {"var": "mode"}
+        edges = [
+            _go("slow", ["mode"], {"==": [var, "slow"]}, priority=2),
+            _go("fast", ["mode"], {"==": [var, "fast"]}, priority=1),
+        ]
+        fsm = _fsm(
+            "ask",
+            ask=_step("ask", [("mode", "str")], edges),
+            slow=_step("slow"),
+            fast=_step("fast"),
+        )
+        turns, _ = self._path(fsm, ("mode",))
+        assert turns == ["mode is fast"]
+
+    def test_a_key_two_edges_want_differently_keeps_the_first_value(self):
+        """The first witness wins per key (D-057): it is said where the key is
+        declared, and a later edge's own witness is not said over it."""
+        first = {"in": [{"var": "mode"}, ["x", "y"]]}
+        later = {"==": [{"var": "mode"}, "y"]}
+        fsm = _fsm(
+            "ask",
+            ask=_step("ask", [("mode", "str")], [_go("more", ["mode"], first)]),
+            more=_step(
+                "more", [("note", "str")], [_go("done", ["mode", "note"], later)]
+            ),
+            done=_step("done"),
+        )
+        turns, _ = self._path(fsm, ("note",))
+        assert turns[0] == "mode is x"
+
+    @pytest.mark.parametrize(
+        ("logic", "said"),
+        [
+            ({"==": [{"var": "ok"}, True]}, "ok is yes"),
+            ({"!": [{"var": "ok"}]}, "ok is no"),
+        ],
+    )
+    def test_a_bool_is_said_as_yes_or_no(self, logic, said):
+        fsm = _fsm(
+            "ask",
+            ask=_step("ask", [("ok", "bool")], [_go("done", ["ok"], logic)]),
+            done=_step("done"),
+        )
+        turns, _ = self._path(fsm, ("ok",))
+        assert turns == [said]
+
     def test_the_other_branch_is_never_walked(self):
         turns, _ = self._path(_branch(), ("detail",))
         assert "pickup" not in " ".join(turns)
