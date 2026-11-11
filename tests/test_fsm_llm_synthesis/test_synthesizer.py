@@ -554,6 +554,21 @@ class TestPrompt:
         names = operator_line().partition(": ")[2].removesuffix(".").split(", ")
         assert "cat" not in names and "max" in names
 
+    def test_the_prompt_asks_for_a_value_gate_on_a_key_the_goal_says_to_decide(self):
+        """Guards (D-106): s1 r2 ("the priority the user gives", null at run time) and
+        r3 (an edge with no value gate, the happy path says the filler)."""
+        text = system_prompt(SynthesisPolicy())
+        rule = text[text.index("- LABELS:") : text.index("- Every return key")]
+        assert "will not say the label" in rule
+        assert "choose the allowed value that best fits what the user described" in rule
+        assert '{"in": [{"var": "key"}, ["a", "b"]]}' in rule
+        assert (
+            "in" in ALLOWED_JSONLOGIC_OPERATIONS
+        )  # the loader accepts what it asks for
+        assert not re.search(
+            r"urgent|billing|refund|shipping|priority", rule
+        )  # no task text
+
     def test_the_prompt_says_a_key_presence_gate_has_no_logic(self):
         text = system_prompt(SynthesisPolicy())
         assert "only needs a key present has no logic" in text

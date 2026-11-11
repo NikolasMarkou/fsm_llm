@@ -101,6 +101,11 @@ def operator_line() -> str:
     return f"Operators in logic (any other name is rejected): {names}."
 
 
+# DECISION plan-2026-11-10T194139-2cefeb61/D-106
+# The LABELS rule exists because a compiled "the X the user gives" for a key the goal
+# says to decide read null at run time and, with no value gate on the edge, the
+# gate-owned happy path said the filler. Do NOT make the gates accept the filler,
+# do NOT name a task or a label here.
 def system_prompt(policy: SynthesisPolicy) -> str:
     """The compile system prompt for ``policy``: format, gate rules, example.
 
@@ -152,6 +157,11 @@ so the edge's condition can refuse it, as in "Extract party_size: the whole \
 number the user gives, even when out of range". Without the key name the bulk \
 pass invents a key name and the correction is lost; field_extractions alone is \
 read once and kept.
+- LABELS: when the goal asks you to decide a key from what the user describes \
+(a category, rating or routing target), the user will not say the \
+label. The key's extraction_instructions must say to choose the allowed value \
+that best fits what the user described, and list the values; the edge that needs \
+the key has logic {{"in": [{{"var": "key"}}, ["a", "b"]]}} over the same values.
 - Every return key must be extracted in some state, and the edge into each \
 terminal state must list every return key in requires_context_keys.
 - Liveness: every state reaches a terminal state; every loop has an exit edge \
