@@ -126,9 +126,9 @@ class ScriptedRunnerLLM(MockLLM2Interface):
         )
 
 
-@pytest.fixture
-def valid_fsm() -> dict[str, Any]:
-    """A fresh compile that passes G1 to G5 with ``return_keys=("answer",)``."""
+def good_fsm() -> dict[str, Any]:
+    """A fresh compile (new dict per call) that passes G1 to G5 with
+    ``return_keys=("answer",)`` under the default policy."""
     return {
         "name": "Collect",
         "description": "Collect one answer",
@@ -168,3 +168,9 @@ def valid_fsm() -> dict[str, Any]:
             },
         },
     }
+
+
+@pytest.fixture
+def valid_fsm() -> dict[str, Any]:
+    """A fresh compile that passes G1 to G5 with ``return_keys=("answer",)``."""
+    return good_fsm()
