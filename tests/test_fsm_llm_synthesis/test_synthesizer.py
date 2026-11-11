@@ -283,6 +283,15 @@ class TestPrompt:
         assert '"initial_state"' in text and "BookTable" in text
         assert GOAL_BEGIN not in text and GOAL_END not in text
 
+    def test_the_system_prompt_teaches_the_correction_channel(self):
+        # D-058: a key set through field_extractions is never overwritten; a
+        # state that must take a NEW value on a later turn needs its own
+        # extraction_instructions, which the prompt used to forbid
+        text = system_prompt(SynthesisPolicy())
+        assert "state its own extraction_instructions" in text
+        assert "latest value" in text and "later turn" in text
+        assert "never give extraction instructions" not in text
+
     def test_the_inputs_and_return_keys_reach_the_user_turn(self):
         user = compile_messages("g", ("venue",), RET, SynthesisPolicy())[1]
         assert "venue" in user["content"] and "answer" in user["content"]

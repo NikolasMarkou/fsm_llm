@@ -97,7 +97,8 @@ FORMAT. Top level keys: name, description, initial_state, states (an object \
 keyed by state id). Each state has: id (the same as its key; letters, digits and \
 underscores, starting with a letter), description, purpose, response_instructions \
 (what to say or ask in this state), optional field_extractions, optional \
-transitions. field_extractions is a list of objects with field_name, field_type \
+extraction_instructions (one text, see CORRECTIONS), optional transitions. \
+field_extractions is a list of objects with field_name, field_type \
 (str, int, float, bool, list, dict or any) and extraction_instructions. A \
 transition has target_state, description, priority and optional conditions; a \
 condition has description, requires_context_keys (a list of keys that must be \
@@ -118,8 +119,15 @@ characters.
 one state at the same priority to different targets are a tie decided by a model \
 call: avoid them.
 - Data: a key an edge reads (requires_context_keys or a var in logic) must be \
-extracted in an earlier state on every path, or be an input. Extract a key only \
-through field_extractions; never give extraction instructions without them.
+extracted in an earlier state on every path, or be an input. Declare every key a \
+state extracts in its field_extractions.
+- CORRECTIONS: a key extracted through field_extractions keeps its first value; \
+a later turn never replaces it. When a state must take a NEW value on a later \
+turn (the user corrects an answer, or a value outside its allowed range was \
+refused and the user answers again), give that state its own \
+extraction_instructions beside its field_extractions: name the key and say to \
+take the user's latest value even when it is out of range, so the edge's \
+condition can refuse it.
 - Every return key must be extracted in some state, and the edge into each \
 terminal state must list every return key in requires_context_keys.
 - Liveness: every state reaches a terminal state; every loop has an exit edge \
