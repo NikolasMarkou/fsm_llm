@@ -1,6 +1,6 @@
 # test_fsm_llm_eval
 
-The pytest suite for `fsm_llm.eval`, the evaluation package of the FSM-LLM repository, and for its command line `fsm-llm-eval`. It lives at `tests/test_fsm_llm_eval/` and holds 426 tests in 10 files.
+The pytest suite for `fsm_llm.eval`, the evaluation package of the FSM-LLM repository, and for its command line `fsm-llm-eval`. It lives at `tests/test_fsm_llm_eval/` and holds 430 tests in 10 files.
 
 ## What it is for
 

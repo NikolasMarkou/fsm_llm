@@ -663,6 +663,22 @@ def test_doc_counts_reads_the_slow_live_and_file_shapes(line, bad):
     assert len(doc.bad) == bad, doc.bad
 
 
+@pytest.mark.parametrize(
+    ("line", "bad"),
+    [
+        ("- **Offline test depth.** 13,000 tests run without a model.", 0),
+        ("- **Offline test depth.** 12,999 tests run without a model.", 1),
+    ],
+)
+def test_doc_counts_reads_the_offline_test_depth_total(line, bad):
+    """Guards: the roadmap's whole-suite claim is a total-collection token, not unnamed."""
+    m = {k: collections.Counter() for k in ("files", "classes", "markers", "suites")}
+    m["total"] = 13000
+    doc = doc_counts._Doc(m, "docs/2026_roadmap.md")
+    doc.line(1, line)
+    assert len(doc.bad) == bad, doc.bad
+
+
 # ══════════════════════════════════════════════════════════════
 # scripts/audit_pth.py lets the setuptools editable hook through, nothing else
 # ══════════════════════════════════════════════════════════════

@@ -51,7 +51,7 @@ LEAD_FILE = re.compile(r"^\s*[|-]\s*`((?:test_[a-z0-9_]+|conftest)\.py)`")
 LEAD_SUITE = re.compile(r"^\s*\|\s*`(test_[a-z_]+)/`")
 TOTAL_LINE = re.compile(
     "make test|Run all tests|Run full test suite|full test tree"
-    "|whole pytest test tree|The full pytest tree"
+    "|whole pytest test tree|The full pytest tree|Offline test depth"
 )
 CLASS = re.compile(r"`(Test\w+)`")
 #: (kind, pattern with group n): a token that carries its own context.
