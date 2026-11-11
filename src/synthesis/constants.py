@@ -62,7 +62,10 @@ MAX_SCENARIOS = 6
 MAX_SCENARIO_TURNS = 12
 MAX_SCENARIO_TURN_CHARS = 300
 
-# --- G6b: the deterministic script's kind, and the kinds a writer may add ---
+# --- G6b: its name, the code of a run that could not judge, the happy kind and
+# the kinds a writer may add ---
+GATE_SIMULATION = "G6b"
+CODE_SIMULATION_INCOMPLETE = "simulation-incomplete"
 HAPPY_KIND = "happy"
 GENERATED_KINDS = ("missing_info", "correction", "off_topic", "adversarial")
 

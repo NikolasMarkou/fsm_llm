@@ -39,6 +39,7 @@ from tests.test_fsm_llm_synthesis.conftest import (
     ScriptedStrongLLM,
     good_fsm,
     host_fsm,
+    stuck_fsm,
 )
 
 GOAL = "Collect one answer"
@@ -59,36 +60,6 @@ def _injected() -> FSMDefinition:
     )
     assert report.definition is not None, report.findings
     return report.definition
-
-
-def _stuck() -> dict[str, Any]:
-    """ask -> mid -> done, where mid's edge needs a value the extraction never
-    gives: stuck at ``mid`` with the return key present (so only ``ended``
-    tells it from a pass)."""
-    fsm = good_fsm()
-    fsm["states"]["ask"]["transitions"][0]["target_state"] = "mid"
-    never = {"==": [{"var": "answer"}, "never"]}
-    fsm["states"]["mid"] = {
-        "id": "mid",
-        "description": "confirm",
-        "purpose": "confirm",
-        "response_instructions": "Confirm the answer",
-        "transitions": [
-            {
-                "target_state": "done",
-                "description": "confirmed",
-                "priority": 1,
-                "conditions": [
-                    {
-                        "description": "confirmed",
-                        "requires_context_keys": ["answer"],
-                        "logic": never,
-                    }
-                ],
-            }
-        ],
-    }
-    return fsm
 
 
 def _run(
@@ -132,7 +103,7 @@ class TestVerdict:
         assert report.calls == llm.usage().calls > 0
 
     def test_a_stuck_procedure_fails_on_its_happy_path_alone(self):
-        report, _ = _run(_stuck())
+        report, _ = _run(stuck_fsm())
 
         assert not report.passed and _codes(report) == {"happy-path-failing"}
         (finding,) = report.findings
@@ -144,7 +115,8 @@ class TestVerdict:
     def test_a_procedure_that_never_leaves_its_first_state_is_no_progress(self):
         report, _ = _run(extraction={})
 
-        assert _codes(report) == {"happy-path-failing", "no-progress"}
+        # one finding: no-progress implies a failing happy path
+        assert _codes(report) == {"no-progress"}
         assert {f.state for f in report.findings} == {"ask"}
 
     def test_a_low_overall_rate_is_its_own_code(self):
@@ -196,7 +168,7 @@ class TestVerdict:
         writer = ScriptedStrongLLM(
             [_reply({"kind": "off_topic", "turns": [canary], "title": canary})]
         )
-        report, _ = _run(_stuck(), writer=writer)
+        report, _ = _run(stuck_fsm(), writer=writer)
 
         assert canary in repr(report.scenarios)  # it ran, and stays out of the text
         assert canary not in report.repair_text()
@@ -449,7 +421,7 @@ class TestClassificationDrivenHappyPath:
         llm = self._llm(lambda said: "browse")
         report, _ = _run(self._fsm(), llm=llm, writer=llm, return_keys=("user_intent",))
 
-        assert "happy-path-failing" in _codes(report)
+        assert report.happy["k"] == 0 and "no-progress" in _codes(report)
 
 
 class TestBounds:
@@ -563,7 +535,7 @@ class TestFlakiness:
         passed = [
             s
             for s in self.SEEDS
-            if _run(_stuck(), llm=_Noisy({"answer": "42"}, s))[0].passed
+            if _run(stuck_fsm(), llm=_Noisy({"answer": "42"}, s))[0].passed
         ]
         assert passed == []
 

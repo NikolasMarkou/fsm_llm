@@ -42,6 +42,8 @@ from fsm_llm.utilities import extract_json_from_text
 from .constants import (
     ABORT_CONTEXT_KEY,
     ABORT_STATE_ID,
+    CODE_SIMULATION_INCOMPLETE,
+    GATE_SIMULATION,
     GENERATED_KINDS,
     HAPPY_KIND,
     MAX_SCENARIO_TURN_CHARS,
@@ -236,17 +238,21 @@ class Simulator:
         found: list[GateFinding] = []
 
         def add(code: str, state: str, message: str) -> None:
-            found.append(GateFinding("G6b", code, state, message))
+            found.append(GateFinding(GATE_SIMULATION, code, state, message))
 
         if not happy_trials:
             add(
-                "simulation-incomplete",
+                CODE_SIMULATION_INCOMPLETE,
                 "",
                 "no happy-path trial finished within the bounds",
             )
         else:
             failed = Counter(t.final_state or "" for t, ok in happy_trials if not ok)
-            if happy["rate"] < need:
+            stuck = all(
+                not t.ended and t.final_state == model.initial_state
+                for t, _ in happy_trials
+            )
+            if happy["rate"] < need and not stuck:
                 where = failed.most_common(1)[0][0] if failed else ""
                 add(
                     "happy-path-failing",
@@ -260,10 +266,7 @@ class Simulator:
                     "",
                     f"{overall['k']} of {overall['n']} trials passed, {need:g} needed",
                 )
-            if all(
-                not t.ended and t.final_state == model.initial_state
-                for t, _ in happy_trials
-            ):
+            if stuck:  # implies a failing happy path: reported once
                 add(
                     "no-progress",
                     model.initial_state,

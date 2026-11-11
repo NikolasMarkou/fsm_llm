@@ -69,6 +69,7 @@ _INT_LIMITS = {
     "sim_trials": 1,
     "max_simulation_seconds": 1,
     "max_simulation_calls": 1,
+    "max_simulation_rounds": 1,
 }
 
 #: Names a compile may never declare or read: the framework keys and ours.
@@ -121,6 +122,9 @@ class SynthesisPolicy:
         ``max_sim_turns``, ``sim_trials``, ``max_simulation_seconds`` and
         ``max_simulation_calls`` bound the G6b simulation (turns per scenario,
         trials per scenario, wall seconds and model calls for one run);
+        ``max_simulation_rounds`` is how many runs one compile may spend;
+        ``require_simulation`` (a ``bool``) makes a compile without a
+        simulator an error and skips a stored record that lacks ``G6b``;
         ``min_pass_rate`` is its bar, an ``int`` or ``float`` above 0 up to 1
         (0 would pass every simulation).
         ``trust_after_successes`` is ``None`` or an ``int`` from 1.
@@ -144,11 +148,13 @@ class SynthesisPolicy:
     sim_trials: int = 2
     max_simulation_seconds: int = 300
     max_simulation_calls: int = 400
+    max_simulation_rounds: int = 2
     min_pass_rate: float = 0.5
     reuse_min_score: float = 0.8
     trust_after_successes: int | None = None
     allowed_tools: frozenset[str] = frozenset()
     require_approval: bool = False
+    require_simulation: bool = False
 
     def __post_init__(self) -> None:
         def put(name: str, value: Any) -> None:
@@ -189,8 +195,9 @@ class SynthesisPolicy:
         if not all(name.strip() for name in tools):
             raise refuse("allowed_tools", "a collection of non-blank names")
         put("allowed_tools", tools)
-        if not isinstance(self.require_approval, bool):
-            raise refuse("require_approval", "a bool")
+        for flag in ("require_approval", "require_simulation"):
+            if not isinstance(getattr(self, flag), bool):
+                raise refuse(flag, "a bool")
 
 
 @dataclass(frozen=True)

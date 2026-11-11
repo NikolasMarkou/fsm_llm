@@ -69,6 +69,7 @@ class TestSynthesisPolicyLimits:
         assert (p.max_sim_turns, p.sim_trials) == (12, 2)
         assert (p.max_simulation_seconds, p.max_simulation_calls) == (300, 400)
         assert p.min_pass_rate == 0.5 and isinstance(p.min_pass_rate, float)
+        assert p.max_simulation_rounds == 2 and p.require_simulation is False
 
     @pytest.mark.parametrize(
         "name",
@@ -86,6 +87,7 @@ class TestSynthesisPolicyLimits:
             "sim_trials",
             "max_simulation_seconds",
             "max_simulation_calls",
+            "max_simulation_rounds",
         ],
     )
     @pytest.mark.parametrize(
@@ -140,10 +142,11 @@ class TestSynthesisPolicyLimits:
             with pytest.raises(SynthesisError):
                 SynthesisPolicy(allowed_tools=bad)
 
+    @pytest.mark.parametrize("name", ["require_approval", "require_simulation"])
     @pytest.mark.parametrize("bad", [1, 0, "yes", None])
-    def test_require_approval_is_a_bool(self, bad):
+    def test_a_require_flag_is_a_bool(self, name, bad):
         with pytest.raises(SynthesisError):
-            SynthesisPolicy(require_approval=bad)
+            SynthesisPolicy(**{name: bad})
 
     def test_frozen_and_replace_revalidates(self):
         p = SynthesisPolicy()

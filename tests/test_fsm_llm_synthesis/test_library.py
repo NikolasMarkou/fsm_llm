@@ -122,6 +122,13 @@ class TestPut:
         fresh = _put(lib, "Other", approved_by="  x\x00y  ")
         assert fresh.provenance["approved_by"] == "xy" and fresh.lifecycle == "draft"
 
+    def test_gates_passed_gains_only_the_gates_the_record_lacks(self, lib: FSMLibrary):
+        first = _put(lib, gates_passed=["G1", "G2"])
+        more = _put(lib, gates_passed=["G1", "G2", "G6b"])
+        assert more.provenance["gates_passed"] == ["G1", "G2", "G6b"]
+        assert lib.get_record(first.digest) == more
+        assert _put(lib, gates_passed=["G1"]) == more  # nothing to add, unchanged
+
     def test_parent_bumps_minor_and_must_exist(self, lib: FSMLibrary):
         parent = _put(lib)
         child = _put(lib, "Fixed", parent=parent.digest)

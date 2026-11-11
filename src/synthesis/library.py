@@ -337,7 +337,8 @@ class FSMLibrary:
         """Store *definition* and return its record.
 
         Idempotent: the same digest returns the existing record unchanged
-        (``approved_by`` is only added when the record has no approver). A
+        (``approved_by`` is only added when the record has no approver, and
+        ``gates_passed`` only gains gates it lacks). A
         different digest is a new entry; with ``parent`` (the digest of the
         definition it repairs, which must exist) the minor version is parent's
         plus one, else ``1.0``. ``lifecycle`` is ``draft`` or ``verified``.
@@ -360,12 +361,18 @@ class FSMLibrary:
                 self._write(self._path("definitions", digest), text)
             who = approved_by and capped_line(approved_by, _LABEL_CHARS)
             if old is not None:
+                added: dict[str, str | list[str] | None] = {}
                 if who and not old.provenance["approved_by"]:
+                    added["approved_by"] = who
+                have = old.provenance["gates_passed"]
+                if isinstance(have, list) and (
+                    more := [g for g in gates_passed if g not in have]
+                ):
+                    added["gates_passed"] = [*have, *more]
+                if added:
                     return self._save(
                         old.model_copy(
-                            update={
-                                "provenance": {**old.provenance, "approved_by": who}
-                            }
+                            update={"provenance": {**old.provenance, **added}}
                         )
                     )
                 return old

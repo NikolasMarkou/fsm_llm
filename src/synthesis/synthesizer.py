@@ -54,6 +54,8 @@ from fsm_llm.visualizer import build_fsm_graph, to_mermaid
 
 from .constants import (
     APPROVAL_UNTRUSTED_LABEL,
+    CODE_SIMULATION_INCOMPLETE,
+    GATE_SIMULATION,
     LIFECYCLE_VERIFIED,
     REASON_APPROVAL_DENIED,
     REASON_APPROVAL_REQUIRED,
@@ -64,6 +66,7 @@ from .gates import GATES, GateFinding, GateReport, run_gates, verify_stored
 from .library import FSMLibrary, LibraryRecord, digest_of
 from .policy import SynthesisPolicy, needs_approval
 from .prompts import REPLY_FAILURES, compile_messages, repair_message
+from .simulation import SimulationReport, Simulator
 
 _NO_REPLY = "(no reply)"  # the assistant turn echoed for a reply with no text
 _MERMAID_CHARS = 4000  # the diagram shown to a reviewer
@@ -79,7 +82,8 @@ class CompileResult:
     as a plain dict (what the library stores); ``report`` is the gate verdict,
     ``rounds`` the strong-model calls made, ``usage`` a snapshot of the
     interface's call counters (its totals so far, not only this compile) or
-    ``None`` when the interface keeps none.
+    ``None`` when the interface keeps none. ``simulation`` is the G6b report
+    when a simulator ran and passed, else ``None`` (never a failed one).
     """
 
     definition: FSMDefinition
@@ -87,6 +91,7 @@ class CompileResult:
     report: GateReport
     rounds: int
     usage: LLMUsage | None
+    simulation: SimulationReport | None = None
 
 
 @dataclass(frozen=True)
@@ -159,10 +164,13 @@ def _approval_request(
         f"{sum(len(s.transitions) for s in states)} transitions, "
         f"returns: {', '.join(keys)}, tools: {', '.join(tools) or 'none'}"
     )
+    verdicts = dict(result.report.verdicts)
+    if result.simulation is not None:
+        verdicts[GATE_SIMULATION] = "pass"
     return ProcedureApprovalRequest(
         digest,
         diagram.translate(SKILL_DEFANG)[:_MERMAID_CHARS],
-        ", ".join(f"{g} {v}" for g, v in result.report.verdicts.items()),
+        ", ".join(f"{g} {v}" for g, v in verdicts.items()),
         safe(goal, _GOAL_CHARS),
         safe(summary, 400),
     )
@@ -220,7 +228,11 @@ class FSMSynthesizer:
         ``policy`` (default ``SynthesisPolicy()``) bounds the compile; ``clock``
         is the deadline's time source. ``library`` (optional) stores and serves
         procedures, ``embed`` ranks its hits, ``reviewer(request) -> bool``
-        decides approval (G7); a reviewer is called with a
+        decides approval (G7); ``simulator`` (optional, a ``Simulator``) runs
+        G6b on every compile that passed G1 to G6a (a failure is a
+        repair round, bounded by ``max_repair_rounds`` and
+        ``max_simulation_rounds``; a ``require_simulation`` policy without one
+        refuses to compile); a reviewer is called with a
         ``ProcedureApprovalRequest`` and approves only by returning ``True``.
         ``obtain`` returns a ``Procedure`` or raises ``SynthesisRefusedError``
         (``approval_required``, ``approval_denied``, ``reviewer_error``),
@@ -242,6 +254,7 @@ class FSMSynthesizer:
         library: FSMLibrary | None = None,
         reviewer: Callable[[ProcedureApprovalRequest], bool] | None = None,
         embed: EmbedTextsFn | None = None,
+        simulator: Simulator | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if llm is not None and model is None:
@@ -257,6 +270,7 @@ class FSMSynthesizer:
         self.library = library
         self.reviewer = reviewer
         self._embed = embed
+        self.simulator = simulator
         self._clock = clock
 
     def compile(
@@ -274,9 +288,15 @@ class FSMSynthesizer:
         """
         ins, keys = _checked(goal, inputs, return_keys)
         policy = self.policy
+        if policy.require_simulation and self.simulator is None:
+            raise SynthesisError(
+                "a simulation is required and no simulator is set",
+                {"rounds": [(CODE_SIMULATION_INCOMPLETE,)]},
+            )
         messages = compile_messages(goal, ins, keys, policy)
         deadline = self._clock() + policy.max_synthesis_seconds
         failed: list[tuple[str, ...]] = []
+        runs = 0
         reason = "no round passed the gates"
         for attempt in range(1 + policy.max_repair_rounds):
             if attempt and self._clock() >= deadline:
@@ -292,16 +312,39 @@ class FSMSynthesizer:
                     "the strong model call failed", {"rounds": failed}
                 ) from e
             report = _judge(reply, policy, ins, keys)
+            simulation = None
             if report.definition is not None and report.injected is not None:
-                usage = getattr(self.llm, "usage", None)
-                return CompileResult(
-                    report.definition,
-                    report.injected,
-                    report,
-                    attempt + 1,
-                    usage() if callable(usage) else None,
-                )
+                if self.simulator is not None:
+                    runs += 1
+                    simulation = self.simulator.run(
+                        report.definition,
+                        goal=goal,
+                        inputs=ins,
+                        return_keys=keys,
+                        policy=policy,
+                    )
+                if simulation is None or simulation.passed:
+                    usage = getattr(self.llm, "usage", None)
+                    return CompileResult(
+                        report.definition,
+                        report.injected,
+                        report,
+                        attempt + 1,
+                        usage() if callable(usage) else None,
+                        simulation,
+                    )
+                report = GateReport(simulation.findings)  # the G6b failure
             failed.append(tuple(dict.fromkeys(f.code for f in report.findings)))
+            # DECISION plan-2026-11-10T194139-2cefeb61/D-048: a spent simulation
+            # bound is not repairable and the run count caps the G6b rounds.
+            # Do NOT re-ask the strong model about either, and do NOT apply
+            # only one of the two round bounds.
+            if simulation is not None and (
+                runs >= policy.max_simulation_rounds
+                or CODE_SIMULATION_INCOMPLETE in failed[-1]
+            ):
+                reason = "the simulation rounds or bounds are spent"
+                break
             messages = [
                 *messages,
                 {"role": "assistant", "content": reply.text or _NO_REPLY},
@@ -357,6 +400,11 @@ class FSMSynthesizer:
                 # both scales: set overlap ignores negation and word order.
                 if match.score < (policy.reuse_min_score if match.embedded else 1.0):
                     break
+                gates = record.provenance["gates_passed"]
+                if policy.require_simulation and not (
+                    isinstance(gates, list) and GATE_SIMULATION in gates
+                ):
+                    continue  # never served as verified without a G6b record
                 definition = library.get_definition(record.digest)
                 report = verify_stored(
                     definition,
@@ -387,10 +435,14 @@ class FSMSynthesizer:
                 inputs_required=ins,
                 return_keys=keys,
                 synthesizing_model=self.model or "",
-                gates_passed=GATES,
+                gates_passed=GATES
+                if result.simulation is None
+                else (*GATES, GATE_SIMULATION),
                 approved_by=approver,
                 lifecycle=LIFECYCLE_VERIFIED,
             )
+            if result.simulation is not None and result.simulation.scenarios:
+                library.add_scenarios(digest, result.simulation.scenarios)
         return Procedure(digest, result.definition, saved, "compiled")
 
     def _review(self, request: ProcedureApprovalRequest) -> None:

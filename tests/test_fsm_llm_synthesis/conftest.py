@@ -175,6 +175,36 @@ def good_fsm() -> dict[str, Any]:
     }
 
 
+def stuck_fsm() -> dict[str, Any]:
+    """ask -> mid -> done, where mid's edge needs a value the extraction never
+    gives: stuck at ``mid`` with the return key present (so only ``ended``
+    tells it from a pass)."""
+    fsm = good_fsm()
+    fsm["states"]["ask"]["transitions"][0]["target_state"] = "mid"
+    never = {"==": [{"var": "answer"}, "never"]}
+    fsm["states"]["mid"] = {
+        "id": "mid",
+        "description": "confirm",
+        "purpose": "confirm",
+        "response_instructions": "Confirm the answer",
+        "transitions": [
+            {
+                "target_state": "done",
+                "description": "confirmed",
+                "priority": 1,
+                "conditions": [
+                    {
+                        "description": "confirmed",
+                        "requires_context_keys": ["answer"],
+                        "logic": never,
+                    }
+                ],
+            }
+        ],
+    }
+    return fsm
+
+
 @pytest.fixture
 def valid_fsm() -> dict[str, Any]:
     """A fresh compile that passes G1 to G5 with ``return_keys=("answer",)``."""

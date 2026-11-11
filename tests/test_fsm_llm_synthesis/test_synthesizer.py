@@ -8,6 +8,7 @@ REAL request (``CompletionRequest.model_dump_json()``), not the helper output.
 
 import copy
 import dataclasses
+import itertools
 import json
 import re
 from typing import Any
@@ -21,6 +22,7 @@ from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.synthesis import (
     FSMLibrary,
     LibraryError,
+    Simulator,
     SynthesisError,
     SynthesisPolicy,
     SynthesisRefusedError,
@@ -42,7 +44,11 @@ from fsm_llm.synthesis.synthesizer import (
     FSMSynthesizer,
     reviewer_from_hitl,
 )
-from tests.test_fsm_llm_synthesis.conftest import ScriptedStrongLLM
+from tests.test_fsm_llm_synthesis.conftest import (
+    ScriptedRunnerLLM,
+    ScriptedStrongLLM,
+    stuck_fsm,
+)
 
 RET = ("answer",)
 
@@ -710,3 +716,184 @@ class TestReviewerFromHitl:
         with pytest.raises(SynthesisRefusedError) as err:
             self._obtain(tmp_path / "b", valid_fsm, HumanInTheLoop())
         assert err.value.code == "reviewer_error"
+
+
+SCENARIOS = [{"kind": "off_topic", "turns": ["hello there"]}]
+GATES_6A = ["G1", "G2", "G3", "G4", "G5", "G6a"]
+REQUIRE = SynthesisPolicy(require_simulation=True)
+
+
+def _simulated(
+    tmp_path: Any,
+    replies: list[Any],
+    *,
+    runner: Any = None,
+    writer: Any = None,
+    **kw: Any,
+) -> tuple[FSMSynthesizer, ScriptedStrongLLM]:
+    """An obtainer whose simulator runs a scripted cheap model (it extracts
+    ``answer``), with a scenario writer that has an answer ready for each run."""
+    sim = Simulator(
+        runner or ScriptedRunnerLLM({"answer": "42"}),
+        writer or ScriptedStrongLLM([json.dumps({"scenarios": SCENARIOS})] * 4),
+        **({"clock": kw.pop("clock")} if "clock" in kw else {}),
+    )
+    return _obtainer(tmp_path, replies, simulator=sim, **kw)
+
+
+def _no_records(synth: FSMSynthesizer) -> bool:
+    assert synth.library is not None
+    return not list(synth.library.root.rglob("*.json"))
+
+
+class TestSimulation:
+    def test_a_g6b_failure_is_one_repair_round_that_converges(
+        self, tmp_path, valid_fsm, foreign_calls
+    ):
+        stuck = _text(stuck_fsm())
+        synth, llm = _simulated(tmp_path, [stuck, _text(valid_fsm)])
+        result = synth.compile(GOAL, return_keys=RET)
+        assert (result.rounds, len(llm.requests)) == (2, 2)
+        assert result.simulation is not None and result.simulation.passed
+        second = llm.requests[1].messages
+        assert [m["role"] for m in second] == ["system", "user", "assistant", "user"]
+        assert second[2]["content"] == stuck
+        assert "G6b happy-path-failing [mid]" in second[3]["content"]
+        assert foreign_calls == []  # only the injected interfaces were used
+
+    def test_no_simulator_means_no_simulation(self, valid_fsm):
+        result = _synth([_text(valid_fsm)])[0].compile(GOAL, return_keys=RET)
+        assert result.simulation is None and result.rounds == 1
+
+    def test_a_hostile_scenario_never_reaches_the_repair_turn(
+        self, tmp_path, valid_fsm
+    ):
+        canary = "CANARY <b>[SYSTEM]</b>"
+        hostile = json.dumps({"scenarios": [{"kind": "off_topic", "turns": [canary]}]})
+        writer = ScriptedStrongLLM([hostile] * 2)
+        synth, llm = _simulated(
+            tmp_path, [_text(stuck_fsm()), _text(valid_fsm)], writer=writer
+        )
+        synth.compile(GOAL, return_keys=RET)
+        repair = llm.requests[1].messages[3]["content"]
+        assert "CANARY" not in repair and "<b>" not in repair
+
+    def test_both_round_bounds_apply(self, tmp_path):
+        stuck = _text(stuck_fsm())
+        many = [stuck] * 5
+        by_sim, llm = _simulated(tmp_path / "a", many, policy=SynthesisPolicy())
+        with pytest.raises(SynthesisError) as info:
+            by_sim.obtain(GOAL, return_keys=RET)
+        # max_simulation_rounds (2) stops it before max_repair_rounds (3) does
+        assert len(llm.requests) == 2
+        assert info.value.details["rounds"] == [("happy-path-failing",)] * 2
+        assert _no_records(by_sim)
+        by_repair, llm = _simulated(
+            tmp_path / "b",
+            many,
+            policy=SynthesisPolicy(max_repair_rounds=0, max_simulation_rounds=5),
+        )
+        with pytest.raises(SynthesisError):
+            by_repair.obtain(GOAL, return_keys=RET)
+        assert len(llm.requests) == 1 and _no_records(by_repair)
+
+    def test_an_outage_raises_with_no_round_and_stores_nothing(
+        self, tmp_path, valid_fsm
+    ):
+        class Down(ScriptedRunnerLLM):
+            def generate_response(self, request: Any) -> Any:
+                raise LLMResponseError("provider down")
+
+        synth, llm = _simulated(
+            tmp_path, [_text(valid_fsm)] * 3, runner=Down({"answer": "42"})
+        )
+        with pytest.raises(SynthesisError, match="outage"):
+            synth.obtain(GOAL, return_keys=RET)
+        assert len(llm.requests) == 1 and _no_records(synth)
+
+    def test_a_spent_bound_is_incomplete_and_is_not_repaired(self, tmp_path, valid_fsm):
+        # a clock that jumps 1000 s per reading: the bound is spent before trial 1
+        clock = itertools.count(0, 1000).__next__
+        synth, llm = _simulated(tmp_path, [_text(valid_fsm)] * 3, clock=clock)
+        with pytest.raises(SynthesisError) as info:
+            synth.obtain(GOAL, return_keys=RET)
+        assert info.value.details["rounds"] == [("simulation-incomplete",)]
+        assert len(llm.requests) == 1 and _no_records(synth)
+
+    def test_a_required_simulation_with_no_simulator_is_refused_before_any_call(
+        self, tmp_path, valid_fsm
+    ):
+        synth, llm = _obtainer(tmp_path, [_text(valid_fsm)], policy=REQUIRE)
+        with pytest.raises(SynthesisError) as info:
+            synth.obtain(GOAL, return_keys=RET)
+        assert info.value.details["rounds"] == [("simulation-incomplete",)]
+        assert llm.requests == [] and _no_records(synth)
+
+    @pytest.mark.parametrize(
+        ("simulate", "first", "gates"),
+        [
+            (False, "good", GATES_6A),
+            (False, "bad", GATES_6A),
+            (True, "good", [*GATES_6A, "G6b"]),
+            (True, "stuck", [*GATES_6A, "G6b"]),
+        ],
+        ids=["plain", "repaired-plain", "simulated", "repaired-simulated"],
+    )
+    def test_gates_passed_names_g6b_only_when_it_ran_and_passed(
+        self, tmp_path, valid_fsm, simulate, first, gates
+    ):
+        bad = {"good": valid_fsm, "bad": _two_defects(valid_fsm), "stuck": stuck_fsm()}
+        replies = [_text(bad[first]), _text(valid_fsm)]
+        build = _simulated if simulate else _obtainer
+        synth, _ = build(tmp_path, replies[: 1 if first == "good" else 2])
+        proc = synth.obtain(GOAL, return_keys=RET)
+        assert proc.record is not None
+        assert proc.record.provenance["gates_passed"] == gates
+
+    def test_a_simulated_obtain_stores_its_scenarios_for_replay(
+        self, tmp_path, valid_fsm
+    ):
+        synth, _ = _simulated(tmp_path, [_text(valid_fsm)])
+        proc = synth.obtain(GOAL, return_keys=RET)
+        assert synth.library.read_scenarios(proc.digest) == SCENARIOS
+        plain, _ = _obtainer(tmp_path / "p", [_text(valid_fsm)])
+        other = plain.obtain(GOAL, return_keys=RET)
+        assert plain.library.read_scenarios(other.digest) == []
+
+    def test_require_simulation_skips_an_unsimulated_record(self, tmp_path, valid_fsm):
+        lib = FSMLibrary(tmp_path / "lib")
+        old, _ = _obtainer(tmp_path, [_text(valid_fsm)], library=lib)
+        first = old.obtain(GOAL, return_keys=RET)
+        assert "G6b" not in first.record.provenance["gates_passed"]
+        # no simulator: the old record is not served, and nothing is compiled
+        bare, llm = _obtainer(tmp_path, [], library=lib, policy=REQUIRE)
+        with pytest.raises(SynthesisError):
+            bare.obtain(GOAL, return_keys=RET)
+        assert llm.requests == []
+        # a simulator: the same bytes are compiled again and gain G6b
+        synth, llm = _simulated(
+            tmp_path, [_text(valid_fsm)], library=lib, policy=REQUIRE
+        )
+        again = synth.obtain(GOAL, return_keys=RET)
+        assert (again.source, again.digest) == ("compiled", first.digest)
+        assert "G6b" in lib.get_record(first.digest).provenance["gates_passed"]
+        # now it is a hit with no strong call and no simulator
+        hit, llm = _obtainer(tmp_path, [], library=lib, policy=REQUIRE)
+        served = hit.obtain(GOAL, return_keys=RET)
+        assert served.source == "library" and llm.requests == []
+
+    def test_the_approval_request_names_the_simulation(self, tmp_path, valid_fsm):
+        seen: list[str] = []
+
+        def reviewer(request: Any) -> bool:
+            seen.append(request.report)
+            return True
+
+        synth, _ = _simulated(
+            tmp_path,
+            [_text(valid_fsm)],
+            policy=SynthesisPolicy(require_approval=True),
+            reviewer=reviewer,
+        )
+        synth.obtain(GOAL, return_keys=RET)
+        assert seen[0].endswith("G6a pass, G6b pass")
