@@ -1,0 +1,93 @@
+{
+  "arm": {
+    "name": "synth-fsm"
+  },
+  "bench_id": "synthesis",
+  "block": "s2",
+  "created_at": "2026-11-11T19:45:23Z",
+  "fixture_hash": "60fb0b7a847fade49ab1baa6794bafb76fb04b897d6a39a3b4ac3d402f23a198",
+  "git_commit": "3c110785228bbbd334dcca9cf38e5851300e4a77",
+  "limits": {
+    "max_user_turns": 14,
+    "policy": {
+      "max_repair_rounds": 3,
+      "max_sim_turns": 8,
+      "max_simulation_calls": 400,
+      "max_simulation_rounds": 2,
+      "max_simulation_seconds": 300,
+      "max_turns": 10,
+      "min_pass_rate": 0.5,
+      "sim_trials": 2
+    },
+    "react_max_iterations": 12,
+    "react_timeout_seconds": 900.0,
+    "run_max_tokens": 1000,
+    "temperature": 0.5,
+    "timeouts": {
+      "compile": 600.0,
+      "run": 300.0,
+      "sim": 300.0
+    }
+  },
+  "model": "ollama_chat/bonsai-2:27b",
+  "model_digest": {
+    "digest": "f3c4f42086593225d8be9bb4270658d0e05f5232fb2b5e8faa49ef74d2cc843a",
+    "tag": "bonsai-2:27b"
+  },
+  "n_tasks": 16,
+  "order": "task-major, arms alternate, first arm flips per task",
+  "src_sha256": {
+    "scripts/bench_common.py": "e29decfa36753040b4e96f7d7bae89914c28baa4ee012b753d1e8bf8c107f61f",
+    "scripts/synthesis_bench.py": "3909f2b744088a63f21a193523365afc0ef3dc114bae70900a3b5326fc8377e3",
+    "src/agents/__init__.py": "16dd7c2b05066ccf55a3770bf6e7bb29b5f006828b0887aeeda32c0cbaf7ae3b",
+    "src/agents/base.py": "0f07dc46b81c858a1b7f1b221345b03bc7a5622347d995ff429567fb569f3701",
+    "src/agents/constants.py": "5f0a92a55c35119dbde3dbb867d1ba8a624b2d658ba68acbdabc729691f09b9a",
+    "src/agents/definitions.py": "79978141f2c9a8bd771be0e3cee3ffe4d1e0140843fce6e34c6236729e4bfddf",
+    "src/agents/exceptions.py": "bbe1191cefea669e09cd1d3de65e9d3e695f0aafeb9b35f263967734c6b6ab65",
+    "src/agents/fsm_definitions.py": "a7476e0d4185212518c5cde31b64153b93b96628b4388c40bed57a1ed4ca8798",
+    "src/agents/handlers.py": "bfb938cb4e7cb7a7c8494f4c99397dcc1d77b2844c57c0abde93ee0d45a8f942",
+    "src/agents/hitl.py": "c9d15c75f42b5c2215980dd28a2e1e74d2fad965f4cc3ea03b498185d24d3a91",
+    "src/agents/meta_builders.py": "3ecf4991221e5ea74a9798ca3b69afd78859c67db937a92cfeed338219397f7d",
+    "src/agents/meta_prompts.py": "7e79efe1a6d100d7e14ab88487b00a97ade3c5aed6515dc870c27a4551467406",
+    "src/agents/prompts.py": "c454ccdb120491928753fa09cd3746ea8d60fc36932fa3f22a91b21b1f53905f",
+    "src/agents/react.py": "05bf02abaf388e5cdb3af8ac79203100ecd3d35af85e3c5205113f61f6d57937",
+    "src/agents/summarization.py": "e39395b657129c9b55962780eb72f0fefb543f9b637ae62940a33d9673367393",
+    "src/agents/tools.py": "dd088a2e106c74e002bd78969e2641cae146cdf1918dcd86a20350931580e196",
+    "src/agents/truncation.py": "fe44101d88cc0eeee61e82207378fb2be034cac45fd24a02ee00abf05680b33f",
+    "src/eval/cases.py": "e3e9d61478b9716e3fd4db38d5674dc91166ad0f651432012bc1e23886db6af7",
+    "src/eval/config.py": "5311089aaa925cfa0e7b34c0c7dd894cb5709cbef94eb9f8a4f500d0b1f57713",
+    "src/eval/stats.py": "feb50d42dce1c5b0812df1d994caff715d6932f3bedaac8b5c7ede1098b2d4b5",
+    "src/flow_analysis.py": "5462b9d17bb601ac188fef01a91666502400ea58ff97bd15d773ca8469ed36a5",
+    "src/synthesis/constants.py": "678a6db5d20c6733f9de208fc2db6262b17b1aa9b30237aa97a21bb15e3c7572",
+    "src/synthesis/dryrun.py": "510f025b5f44a40f4f73a252aa37b0a720ab47759011163bbb5f5594ae6d74ec",
+    "src/synthesis/exceptions.py": "f3a61d05f039442e44bffb271e24dbedcad2319f9f23d090c121f7842e25955b",
+    "src/synthesis/gates.py": "d1ba45f27c499faec08e9673083e810f14dcd1d3f8156f812993b2a3cbf85b11",
+    "src/synthesis/library.py": "b959e286af92b14a1b1e8e7a0e6fda68bbcc4b41c5733877faed2503010b3301",
+    "src/synthesis/policy.py": "4b95ddffc85af2b59ba81c8f503a52e9e8a9f768ebde8d708f5c37d406daebe3",
+    "src/synthesis/prompts.py": "3a198175e4abeaf7e317b558b26586690bec5442564fd642108618459981f2f8",
+    "src/synthesis/repair.py": "9b4395012c1cf0dfb1b2b94754e532bb0ef39cc049504474e318c0302cf9067c",
+    "src/synthesis/runner.py": "1a587b04fdf146c6521376fffe565de142ae74dfd93b843483a7525ca7c9dca2",
+    "src/synthesis/simulation.py": "f14a0303cbec0be89ee0ff78f43ac2691c87ec2c0991fb0b08afe7fadb3881ae",
+    "src/synthesis/synthesizer.py": "83c6f33c760924178181f4b9840c785c8ebb3ac48da8fc7b3f503455fe0a2d03",
+    "src/synthesis/traces.py": "ea958684cab68e5b2ce1a90367b7ef22ed65a9cc19488dd7e4f94b486114ef3c",
+    "src/utilities.py": "9493532bc6be1f4fcd3f38b67386c7ed253dd69977667d8f8aabd28b6aac61e7",
+    "src/validator.py": "5cd2b1e9990096c55d8415b6b173be05e94fca463528c253becaaa97167bfb05"
+  },
+  "trials": 3,
+  "wire": {
+    "compile": {
+      "max_tokens": 1000,
+      "model": "ollama_chat/bonsai-2:27b",
+      "reasoning_effort": "none",
+      "temperature": 0.5,
+      "timeout": 600.0
+    },
+    "run": {
+      "max_tokens": 1000,
+      "model": "ollama_chat/bonsai-2:27b",
+      "reasoning_effort": "none",
+      "temperature": 0.5,
+      "timeout": 300.0
+    }
+  }
+}
