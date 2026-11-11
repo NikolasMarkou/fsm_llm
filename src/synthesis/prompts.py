@@ -20,6 +20,8 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
+from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS
+
 from .gates import GateReport, safe_text
 from .policy import SynthesisPolicy
 
@@ -88,6 +90,17 @@ _EXAMPLE_JSON = """{
 EXAMPLE_FSM: dict[str, Any] = json.loads(_EXAMPLE_JSON)
 
 
+def operator_line() -> str:
+    """The one sentence that lists the operators the loader accepts in ``logic``.
+
+    Interface contract (caller: ``system_prompt``): no arguments; read at CALL
+    time from ``fsm_llm.constants.ALLOWED_JSONLOGIC_OPERATIONS`` (the loader's
+    own allow-list, D-098), sorted, joined by ``", "``. Never raises.
+    """
+    names = ", ".join(sorted(ALLOWED_JSONLOGIC_OPERATIONS))
+    return f"Operators in logic (any other name is rejected): {names}."
+
+
 def system_prompt(policy: SynthesisPolicy) -> str:
     """The compile system prompt for ``policy``: format, gate rules, example.
 
@@ -107,8 +120,10 @@ field_extractions is a list of objects with field_name, field_type \
 (str, int, float, bool, list, dict or any) and extraction_instructions. A \
 transition has target_state, description, priority and optional conditions; a \
 condition has description, requires_context_keys (a list of keys that must be \
-present) and optional logic (JsonLogic such as {{">": [{{"var": "key"}}, 0]}}). A \
-state with no transitions is terminal. Use no other fields.
+present) and optional logic (JsonLogic such as {{">": [{{"var": "key"}}, 0]}}). \
+{operator_line()} A condition that only needs a key present has no logic: give \
+requires_context_keys alone. A state with no transitions is terminal. Use no \
+other fields.
 
 RULES (a checker rejects the FSM and sends you the failures):
 - Never set persona, handler_only_keys, completion or synthesize. No state is \

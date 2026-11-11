@@ -27,6 +27,7 @@ import synthesis_bench as sb  # read only: the 16 reference hand-written childre
 
 from fsm_llm import API
 from fsm_llm.agents import HumanInTheLoop
+from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS
 from fsm_llm.definitions import (
     CompletionResponse,
     DataExtractionResponse,
@@ -46,6 +47,7 @@ from fsm_llm.synthesis import (
     digest_of,
     run_gates,
 )
+from fsm_llm.synthesis import prompts as prompts_module
 from fsm_llm.synthesis import synthesizer as synthesizer_module
 from fsm_llm.synthesis.constants import APPROVAL_UNTRUSTED_LABEL
 from fsm_llm.synthesis.prompts import (
@@ -56,6 +58,7 @@ from fsm_llm.synthesis.prompts import (
     GOAL_END,
     KEY_NAMING,
     compile_messages,
+    operator_line,
     system_prompt,
 )
 from fsm_llm.synthesis.synthesizer import (
@@ -515,6 +518,46 @@ class TestPrompt:
         assert "Extract party_size: the whole number the user gives" in text
         assert "invents a key name" in text
         assert "field_extractions alone is read once and kept" in text
+
+    def test_the_operator_line_lists_the_loaders_operators_and_nothing_else(self):
+        # D-098: read from the loader's own constant, never typed here
+        line = operator_line()
+        assert line in system_prompt(SynthesisPolicy())
+        head, _, tail = line.partition(": ")
+        assert "any other name is rejected" in head
+        names = tail.removesuffix(".").split(", ")
+        assert names == sorted(ALLOWED_JSONLOGIC_OPERATIONS)
+        assert {"<", "<=", ">", ">=", "=="} <= set(names)
+
+    def test_the_operator_line_follows_the_loaders_set(self, monkeypatch):
+        grown = {*ALLOWED_JSONLOGIC_OPERATIONS, "zz_new_op"}
+        monkeypatch.setattr(prompts_module, "ALLOWED_JSONLOGIC_OPERATIONS", grown)
+        assert "zz_new_op" in system_prompt(SynthesisPolicy())
+        shrunk = ALLOWED_JSONLOGIC_OPERATIONS - {"cat"}
+        monkeypatch.setattr(prompts_module, "ALLOWED_JSONLOGIC_OPERATIONS", shrunk)
+        names = operator_line().partition(": ")[2].removesuffix(".").split(", ")
+        assert "cat" not in names and "max" in names
+
+    def test_the_prompt_says_a_key_presence_gate_has_no_logic(self):
+        text = system_prompt(SynthesisPolicy())
+        assert "only needs a key present has no logic" in text
+        assert "requires_context_keys alone" in text
+
+    def test_a_fsm_whose_conditions_only_need_keys_loads_and_passes(self):
+        fsm = copy.deepcopy(EXAMPLE_FSM)
+        for state in fsm["states"].values():
+            for edge in state.get("transitions", []):
+                for cond in edge["conditions"]:
+                    cond.pop("logic", None)
+                    assert cond["requires_context_keys"]
+        FSMDefinition.model_validate(fsm)
+        report = run_gates(
+            fsm,
+            SynthesisPolicy(),
+            inputs=EXAMPLE_INPUTS,
+            return_keys=EXAMPLE_RETURN_KEYS,
+        )
+        assert report.passed, report.repair_text()
 
     def test_the_inputs_and_return_keys_reach_the_user_turn(self):
         user = compile_messages("g", ("venue",), RET, SynthesisPolicy())[1]
