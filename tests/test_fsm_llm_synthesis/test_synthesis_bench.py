@@ -5,6 +5,8 @@ it guards against. No network, no ``fsm_llm`` import by the script itself."""
 from __future__ import annotations
 
 import ast
+import hashlib
+import inspect
 import json
 import re
 import shutil
@@ -37,7 +39,9 @@ from tests.test_fsm_llm_synthesis.conftest import (
 )
 
 BAD = sb.bc.BenchDataError
-FIXTURE_SHA = "bff1cbd152d73fbbdfbc77c68fff14688b3240e0996dbd47a176c68911a30349"
+# Block s1 (plan 2cefeb61 step 9, D-093, D-100, D-101): the hand-written branch `detail` hint and the
+# whole-word grader changed the fixture region. s0 was registered at bff1cbd1...a30349 (its manifests).
+FIXTURE_SHA = "086be3e58259cfd1b93874c4166923d3e95fdeee2403527ec32cfb1e5aa9652d"
 TASKS = {t.id: t for t in sb.TASKS}
 FAMILIES = ("collect", "route", "branch", "retry")
 
@@ -339,7 +343,6 @@ R_SHAPES = [
     ('b3', '"method": "delivery", "detail": "unknown"', False),
     ('b3', '"method": "pickup", "detail": "12 Elm Street"', False),
     ('c1', 'passport_no: X1234567, ----- travel_dates: 2026-05-01; purpose: tourism', False),
-    ('y1', 'party_size: 6 guests', False),
     ('r1', '{"department": "billing"}', True),
     ('r1', '{"department": "billing", "department_alt": "sales"}', True),
     ('r1', 'department: billing', True),
@@ -357,6 +360,7 @@ R_SHAPES = [
     ('c1', 'passport_no: X1234567, **travel_dates**: 2026-05-01, **purpose**: tourism', True),
     ('c1', "'passport_no': 'X1234567', 'travel_dates': '2026-05-01', 'purpose': 'tourism'", True),
     ('y1', '{"party_size": 6}', True),
+    ('y1', 'party_size: 6 guests', True),
     ('c2', 'guest_name: Ada Lovelace, checkin_date: 2026-07-14, room_type: double', True),
     ('c3', 'order_id: ORD-5521, contact_email: ada@example.com, product: router', True),
     ('c3', 'order_id: ORD-5521; contact_email: ada@example.com; product: router.', True),
@@ -384,7 +388,7 @@ def _wrong_react_answers(task):
     return [
         "I could not tell.",
         f"Options: {options}.",
-        f"{key}: {options}, something else",
+        f"{key}: {options}, something else entirely",
         f"{key}: {gold[key]} and some more",
         f"It is it, I think it is fine: {words}",
         f"The {key.replace('_', ' ')} is probably one of {options}",
@@ -527,6 +531,167 @@ class TestEveryArmFacesTheSameGrader:
 
 
 _BASE = dict(correct=False, arm="hand-fsm", family="collect", error=None, status=None, runner_reason=None, stop_reason=None)  # fmt: skip
+
+
+# (task, key, value, graded right): the wrong and right values of D-093 and D-100, graded alike for every arm.
+# fmt: off
+WORDS = [
+    ("c2", "room_type", "not double", False),
+    ("c2", "room_type", "double or single", False),
+    ("c2", "room_type", "single, not double", False),
+    ("c2", "room_type", "doubles", False),
+    ("c2", "room_type", "single", False),
+    ("c2", "room_type", "double and single", False),
+    ("c2", "guest_name", "Lovelace Ada", False),
+    ("c2", "guest_name", "Ada the Lovelace", False),
+    ("y1", "party_size", "16", False),
+    ("y1", "party_size", "60 guests", False),
+    ("y1", "party_size", "never 6", False),
+    ("r2", "priority", "urgent, normal, low", False),
+    ("r2", "priority", "low normal urgent", False),
+    ("r1", "department", "billing, technical, sales, other", False),
+    ("r4", "team", "it, hr", False),
+    ("b1", "trip_type", "business, leisure", False),
+    ("b3", "method", "delivery pickup", False),
+    ("b3", "detail", "no 12 Elm Street", False),
+    ("b4", "detail", "Harbor, not the airport", False),
+    ("b4", "detail", "Harbor instead", False),
+    ("b4", "detail", "neither Harbor", False),
+    ("c1", "purpose", "purely for tourism with family", False),
+    ("c1", "purpose", "just tourism please thanks", False),
+    ("c2", "room_type", "double room", True),
+    ("c2", "room_type", "A double room.", True),
+    ("c3", "product", "the router", True),
+    ("b4", "detail", "The Harbor store", True),
+    ("b3", "detail", "12 Elm Street, please", True),
+    ("y1", "party_size", "6 guests", True),
+    ("y1", "party_size", 6, True),
+    ("y1", "party_size", 6.0, True),
+    ("c1", "purpose", "just tourism please", True),
+    ("c1", "passport_no", "X-1234 567", True),
+    ("c1", "travel_dates", "2026/05/01", True),
+    ("r2", "priority", "urgent", True),
+    ("b1", "trip_type", "business trip", True),
+]
+# fmt: on
+
+
+class TestHarnessV2:
+    """Block s1 (D-093, D-100 to D-102): one whole-word grader for every arm, rows keep
+    their values, the hand-written branch hint, the newest block is the default."""
+
+    @pytest.mark.parametrize(("tid", "key", "value", "right"), WORDS)
+    def test_fsm_arms_grade_the_table(self, tid, key, value, right):
+        """Guards: `not double`, a choice list, `16` for `6` passing; `double room`,
+        `The Harbor store`, `6 guests` failing (s0: the hand and ReAct arms alike)."""
+        task = TASKS[tid]
+        got = sb.grade(task, {**task.gold, key: value}, [], 2)
+        assert got["per_key"][key] is right and got["correct"] is right, (value, got)
+
+    @pytest.mark.parametrize(("tid", "key", "value", "right"), WORDS)
+    def test_react_grades_the_same_table(self, tid, key, value, right, rig, tmp_path):
+        """Guards: R graded by a rule of its own (D-065)."""
+        task = TASKS[tid]
+        ask = sb.hand_fsm(task)["states"]["ask"]["response_instructions"]
+        rig.update(asks=[ask, ask], answer=json.dumps({**task.gold, key: value}))
+        assert sb.run_trial("react", task, 1, tmp_path)["correct"] is right
+
+    def test_every_arm_goes_through_the_one_grader(self, rig, tmp_path, monkeypatch):
+        """Guards: an arm graded by a copy of the rule (the fsm arms call it from
+        `drive_fsm`, R from `drive_react`)."""
+        seen, real = [], sb.grade
+        monkeypatch.setattr(sb, "grade", lambda *a, **k: seen.append(a[0].id) or real(*a, **k))  # fmt: skip
+        for arm in ("synth-fsm", "hand-fsm", "react"):
+            sb.run_trial(arm, TASKS["c2"], 1, tmp_path / arm)
+        assert seen == ["c2"] * 3
+
+    def test_the_extras_are_counted_outside_the_gold_run(self):
+        """Guards: an off-by-one at two extra words, or the gold's own words counted."""
+        task = TASKS["c1"]
+        for value, right in (("tourism", True), ("a tourism", True), ("a tourism trip", True), ("a tourism trip now", False)):  # fmt: skip
+            assert sb.grade(task, {**task.gold, "purpose": value}, [], 2)["correct"] is right, value  # fmt: skip
+        name = TASKS["c2"]  # a two-word gold with one extra before and one after
+        assert sb.grade(name, {**name.gold, "guest_name": "Ms Ada Lovelace Jr"}, [], 2)["correct"]  # fmt: skip
+
+    @pytest.mark.parametrize("arm", ["synth-fsm", "hand-fsm", "react"])
+    def test_a_row_keeps_the_values_the_arm_returned(self, arm, rig, tmp_path):
+        """Guards: a row a later offline re-grade cannot read without the raw log."""
+        row = sb.run_trial(arm, TASKS["c2"], 1, tmp_path)
+        assert row["values"] == TASKS["c2"].gold, row
+
+    def test_values_are_cut_at_80_and_a_missing_one_is_none(self):
+        """Guards: a row that grows with a runaway reply, or invents a value."""
+        task = TASKS["c2"]
+        got = sb.grade(task, {**task.gold, "room_type": "x" * 200, "guest_name": None}, [], 2)  # fmt: skip
+        assert got["values"] == {"guest_name": None, "checkin_date": task.gold["checkin_date"], "room_type": "x" * 80}  # fmt: skip
+        assert sb.grade(task, None, [], 0)["values"] == dict.fromkeys(task.gold)
+
+    def test_the_branch_children_share_one_detail_hint_that_waits_for_the_answer(self):
+        """Guards (D-101): the hand arm's `detail` filled from the message that chose the
+        branch (s0: every branch task failed), and a hint that names a task."""
+        hints = {
+            s["field_extractions"][0]["extraction_instructions"]
+            for t in sb.TASKS
+            if t.family == "branch"
+            for sid, s in sb.hand_fsm(t)["states"].items()
+            if sid in ("first", "second")
+        }
+        assert len(hints) == 1
+        hint = hints.pop()
+        assert "answer to the question just asked" in hint and "leave it empty" in hint
+        golds = {v.lower() for t in sb.TASKS if t.family == "branch" for v in t.gold.values()}  # fmt: skip
+        assert not {g for g in golds if g in hint.lower()}
+        for t in sb.TASKS:
+            if t.family != "branch":  # the other families keep their own hints
+                states = sb.hand_fsm(t)["states"]
+                hints = [f["extraction_instructions"] for s in states.values() for f in s.get("field_extractions", [])]  # fmt: skip
+                assert not any("just asked" in h for h in hints), t.id
+
+    def test_the_newest_block_is_the_default_of_plan_smoke_and_the_parser(
+        self, bench, rig, monkeypatch
+    ):
+        """Guards: a new block that `smoke` or the argument default still reads as s0."""
+        assert list(sb.BLOCKS) == ["s0", "s1"] and sb.CURRENT_BLOCK == "s1"
+        assert sb.BLOCKS["s1"] == sb.BLOCKS["s0"] == (sb.SYNTH, sb.HAND, sb.REACT)
+        monkeypatch.setattr(sb, "BLOCKS", {**sb.BLOCKS, "s9": (sb.HAND,)})
+        monkeypatch.setattr(sb, "CURRENT_BLOCK", "s9")
+        assert {arm for arm, _, _ in sb.plan()} == {"hand-fsm"}
+        assert len(sb.plan("s0")) == 16 * sb.TRIALS * 3
+        rows = sb.smoke(["c1"], client=_Client(), sleep=lambda s: None)
+        assert [r["arm"] for r in rows] == ["hand-fsm"]
+        seen = []
+        monkeypatch.setattr(sb, "report", lambda block: seen.append(block) or 0)
+        assert sb.main(["report"]) == 0 and sb.main(["report", "s0"]) == 0
+        assert seen == ["s9", "s0"]
+
+    def test_s1_registers_once_and_reports_itself(self, bench, capsys):
+        """Guards: a block id that is listed but cannot be registered or read."""
+        paths = sb.register_block("s1")
+        assert [p.parent.name for p in paths] == ["s1"] * 3
+        assert sb.report("s1") == 0 and "registered" in capsys.readouterr().out
+        with pytest.raises(BAD, match="ONCE"):
+            sb.register_block("s1")
+
+
+# The verdict rule of block s0, taken from `git show b08fc429:scripts/synthesis_bench.py`: the
+# sha256 of json.dumps([RULE, the source of `decide`, [PRIMARY_N, ALPHA, H_FLOOR, CEILING, MAX_INFRA]]).
+RULE_SHA = "693ace887c19b520c8ee77fb8ab8a64487b96bf2cd5aecbfadbe55f0a638abbe"
+
+
+class TestTheRuleIsTheRegisteredOne:
+    def test_the_rule_the_decision_and_its_constants_are_byte_identical(self):
+        """Guards (D-087 item 2): a block whose verdict is not comparable to s0's."""
+        constants = [sb.PRIMARY_N, sb.ALPHA, sb.H_FLOOR, sb.CEILING, sb.MAX_INFRA]
+        parts = [sb.RULE, inspect.getsource(sb.decide), constants]
+        got = hashlib.sha256(json.dumps(parts).encode()).hexdigest()
+        assert got == RULE_SHA
+
+    def test_every_committed_report_states_its_verdict_by_the_current_rule(self):
+        """Guards: a committed REPORT text that was decided by another rule text."""
+        reports = sorted((ROOT / "scripts" / "bench_data" / sb.BENCH_ID).glob("s*/REPORT_s*.txt"))  # fmt: skip
+        assert reports
+        for path in reports:
+            assert f"rule: {sb.RULE}" in path.read_text(encoding="utf-8"), path
 
 
 class TestPhase:
@@ -1174,6 +1339,24 @@ class TestHygiene:
             "import agents_bench" not in source and "import skills_bench" not in source
         )
         assert source.count("LiteLLMInterface(") == 1  # the one construction site
+
+    def test_no_task_goal_or_distinctive_gold_literal_is_in_the_synthesis_source(self):
+        """Guards (D-089 item 4): a fix tuned to a bench task, in code, a prompt or a doc."""
+        labels = {
+            w.lower()
+            for t in sb.TASKS
+            if t.family in ("route", "branch")
+            for w in (t.spec if t.family == "route" else t.spec[0])
+        }
+        golds = {v for t in sb.TASKS for v in t.gold.values()}
+        # a label is the spec, "double" is an English word the repair code uses, a short number is not a literal
+        distinctive = {g for g in golds if g.lower() not in labels | {"double"} and not (g.isdigit() and len(g) < 4)}  # fmt: skip
+        assert len(distinctive) >= 14, distinctive
+        files = [p for p in (ROOT / "src" / "synthesis").rglob("*") if p.is_file() and p.suffix in (".py", ".md")]  # fmt: skip
+        assert len(files) > 10
+        text = "\n".join(p.read_text(encoding="utf-8").lower() for p in files)
+        found = {g for g in distinctive | {t.goal for t in sb.TASKS} if g.lower() in text}  # fmt: skip
+        assert not found, found
 
     def test_register_and_report_never_build_a_client(self, bench, monkeypatch):
         """Guards: an offline command reaching the server (register reads tags only)."""

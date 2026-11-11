@@ -7,7 +7,7 @@ hand-written FSM (``hand-fsm``) as the check that the harness can pass at all?
 Every role of every arm is ``ollama_chat/bonsai-2:27b``: NO strong/cheap split
 (plan 2cefeb61, D-039, D-040, D-054).
 
-    .venv/bin/python scripts/synthesis_bench.py register|run|report s0
+    .venv/bin/python scripts/synthesis_bench.py register|run|report s1
     .venv/bin/python scripts/synthesis_bench.py smoke [--tasks c1 ...]
 
 ``register`` (reads ``/api/tags``) and ``report`` touch no model; ``smoke`` and
@@ -57,7 +57,9 @@ RAW_DIR = ROOT / "logs" / "synthesis-bench"  # logs/ is gitignored
 BENCH_ID, MODEL_TAG = "synthesis", "bonsai-2:27b"
 MODEL = f"ollama_chat/{MODEL_TAG}"
 SYNTH, HAND, REACT = "synth-fsm", "hand-fsm", "react"
-BLOCKS = {"s0": (SYNTH, HAND, REACT)}
+ARMS = (SYNTH, HAND, REACT)
+BLOCKS = dict.fromkeys(("s0", "s1"), ARMS)  # a new loop adds a name, the newest last  # fmt: skip
+CURRENT_BLOCK = list(BLOCKS)[-1]  # what smoke, plan and the parser read (D-102)
 TRIALS = 3  # per task; fixed at registration from the smoke
 TIMEOUTS = {"compile": 600.0, "sim": 300.0, "run": 300.0}
 POLICY = {"max_turns": 10, "max_repair_rounds": 3, "sim_trials": 2, "max_sim_turns": 8, "max_simulation_seconds": 300, "max_simulation_calls": 400, "max_simulation_rounds": 2, "min_pass_rate": 0.5}  # fmt: skip
@@ -220,7 +222,7 @@ def hand_fsm(task: Task) -> dict[str, Any]:
     elif task.family == "branch":
         (one, two), ask_one, ask_two = task.spec
         edges = [_edge("first", [key], {"==": [var, one]}), _edge("second", [key], {"==": [var, two]})]
-        detail, done = [("detail", "str", "the detail the user gave")], [_edge("done", ["detail"])]
+        detail, done = [("detail", "str", "the detail the user gave, only when they state it as the answer to the question just asked; leave it empty otherwise")], [_edge("done", ["detail"])]
         states = {"ask": _state("ask", f"Ask whether it is {one} or {two}.", [(key, "str", f"exactly one of: {one}, {two}")], edges),
                   "first": _state("first", ask_one, detail, done), "second": _state("second", ask_two, detail, done)}
     else:
@@ -277,14 +279,34 @@ def react_values(answer: str, keys: Any) -> dict[str, Any]:
     return extract_json_from_text(answer) or pairs(answer, keys)
 
 
+# DECISION plan-2026-11-10T194139-2cefeb61/D-100
+# One grader for every arm: whole word tokens, the gold as ONE contiguous run, at most two other
+# tokens, none a negator or a word of the task's own labels (s0: "double room" and "the router" failed).
+# Do NOT use substring containment ("doubles", "16" for "6"), do NOT drop the label words (r2 has three
+# labels, so "urgent, normal, low" has only two extras) and do NOT give R a rule of its own (D-065).
+NEGATORS = frozenset("not no never nor neither without except instead rather or and but".split())
+
+
+def holds(gold: str, value: Any, banned: frozenset[str]) -> bool:
+    """D-093, D-100: *value* equals *gold* after ``squash``, or its word tokens hold the gold's
+    as ONE contiguous run with at most two other tokens, none of them in *banned*."""
+    have, want = (re.findall(r"\w+", str(s).lower()) for s in (value, gold))
+    spans = [(have[:i], have[i + len(want) :]) for i in range(len(have) - len(want) + 1) if have[i : i + len(want)] == want]  # fmt: skip
+    return squash(value) == squash(gold) or any(len(a + b) <= 2 and not banned & {*a, *b} for a, b in spans)  # fmt: skip
+
+
 def grade(task: Task, values: dict[str, Any] | None, late: list[str], used: int) -> dict[str, Any]:
-    """Correct = every key equals its gold after ``squash`` AND the family check: branch, no
-    question about the other branch after the branch value; retry, the rule answered twice."""
+    """Correct = every key is its gold (``holds``, the grader of every arm) AND the family check: branch,
+    no question about the other branch after the branch value; retry, the rule answered twice. ``values``
+    is what each key came back as, cut at 80 characters, for a later offline re-grade."""
     values = values or {}
-    per_key = {k: values.get(k) is not None and squash(values[k]) == squash(g) for k, g in task.gold.items()}
+    labels = task.spec if task.family == "route" else task.spec[0] if task.family == "branch" else ()
+    banned = NEGATORS | {w for lab in labels for w in re.findall(r"\w+", lab.lower())}  # a list of the task's labels fails
+    per_key = {k: values.get(k) is not None and holds(g, values[k], banned) for k, g in task.gold.items()}
     other = bool(task.other) and any(re.search(task.other, a, re.I) for a in late)
     checks = {"other_branch": not other, "reask": task.family != "retry" or used >= 2}
-    return {"correct": all(per_key.values()) and all(checks.values()), "per_key": per_key, "checks": checks}
+    kept = {k: None if values.get(k) is None else str(values[k])[:80] for k in task.gold}
+    return {"correct": all(per_key.values()) and all(checks.values()), "per_key": per_key, "checks": checks, "values": kept}
 
 
 def decide(arms: dict[str, dict[str, Any]], complete: bool) -> tuple[str, list[str]]:
@@ -625,7 +647,7 @@ def run_trial(arm: str, task: Task, trial: int, workdir: Path, raw: Path | None 
     meters per role, one entry per request, ``models`` and ``models_ok`` (a role
     on another model is an errored row and nothing runs).
     """
-    row: dict[str, Any] = {"task_id": task.id, "family": task.family, "arm": arm, "trial": trial, "correct": False, "per_key": {}, "error": None, "status": None, "runner_reason": None, "stop_reason": None, "source": None, "rounds": [], "compile_seconds": 0.0, "turns": 0, "confused_turns": 0, "child_states": [], "transcript": [], "answer": "", "models": {}, "models_ok": True}  # fmt: skip
+    row: dict[str, Any] = {"task_id": task.id, "family": task.family, "arm": arm, "trial": trial, "correct": False, "per_key": {}, "error": None, "status": None, "runner_reason": None, "stop_reason": None, "source": None, "rounds": [], "compile_seconds": 0.0, "turns": 0, "confused_turns": 0, "child_states": [], "transcript": [], "answer": "", "values": {}, "models": {}, "models_ok": True}  # fmt: skip
     llms: dict[str, Any] = {}
     started = time.perf_counter()
     with wire_spy() as wire:
@@ -659,10 +681,10 @@ def _paths(bdir: Path, arm: str) -> tuple[Path, Path, Path]:
     return bdir / f"manifest_{arm}.json", bdir / f"rows_{arm}.jsonl", bdir / f"summary_{arm}.json"  # fmt: skip
 
 
-def plan(block: str = "s0") -> list[tuple[str, Task, int]]:
+def plan(block: str | None = None) -> list[tuple[str, Task, int]]:
     """The fixed run order: task-major (S reuses its library across a task's
     trials), arms alternate and the first arm flips from task to task."""
-    arms = BLOCKS[block]
+    arms = BLOCKS[block or CURRENT_BLOCK]
     return [(a, t, n) for i, t in enumerate(TASKS) for n in range(1, TRIALS + 1) for a in arms[:: 1 - i % 2 * 2]]  # fmt: skip
 
 
@@ -777,7 +799,7 @@ def smoke(ids: list[str], *, client: Any = None, confirm_exclusive: bool = False
     client, rows = _gate(client, confirm_exclusive, sleep), []
     with tempfile.TemporaryDirectory(prefix="synthesis-smoke-") as tmp:
         for task in wanted:
-            for arm in BLOCKS["s0"]:
+            for arm in BLOCKS[CURRENT_BLOCK]:
                 row = run_trial(arm, task, 1, Path(tmp) / task.id, RAW_DIR / "smoke" / f"{arm}__{task.id}.json")  # fmt: skip
                 rows.append(row | {"ps": guard(client)})
                 print(f"  smoke {arm} {task.id}: {row['phase']} correct={row['correct']} rounds={row['rounds']} calls={row['compile_calls']}/{row['sim_calls']}/{row['run_calls']} max_prompt={row['max_prompt_tokens']} {row['latency_s']}s ps={rows[-1]['ps']}", flush=True)  # fmt: skip
@@ -823,7 +845,7 @@ def report(block: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)  # fmt: skip
     parser.add_argument("command", choices=("register", "run", "report", "smoke"))  # fmt: skip
-    parser.add_argument("block", nargs="?", default="s0", choices=sorted(BLOCKS))
+    parser.add_argument("block", nargs="?", default=CURRENT_BLOCK, choices=sorted(BLOCKS))  # fmt: skip
     parser.add_argument("--tasks", nargs="+", default=["c1"], help="smoke: task ids")
     parser.add_argument("--confirm-exclusive", action="store_true", help="ONLY after the user says the server is free")  # fmt: skip
     args = parser.parse_args(argv)
