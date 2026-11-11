@@ -33,7 +33,7 @@ from fsm_llm.synthesis.gates import GATES
 from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, ScriptedStrongLLM
 
 BAD = sb.bc.BenchDataError
-FIXTURE_SHA = "0e1f41ff46670533764c61e5e515f58efbad8afdf835af67078667c42b938489"
+FIXTURE_SHA = "bff1cbd152d73fbbdfbc77c68fff14688b3240e0996dbd47a176c68911a30349"
 TASKS = {t.id: t for t in sb.TASKS}
 FAMILIES = ("collect", "route", "branch", "retry")
 
@@ -225,16 +225,17 @@ CHAT = '[GIN] 2026/11/11 | 200 | 1m5s | POST "/api/chat"'
 
 class TestFixture:
     @staticmethod
-    def _gates(sub, tid, tmp_path):
-        """The ``gates_passed`` the library recorded for task *tid*'s child."""
+    def _provenance(sub, tid, tmp_path):
+        """The provenance the library recorded for task *tid*'s child."""
         task = TASKS[tid]
         report = run_gates(
             sb.hand_fsm(task), SynthesisPolicy(**sb.POLICY), return_keys=task.gold
         )
         library = FSMLibrary(tmp_path / tid / sub)
-        return library.get_record(digest_of(report.definition)).provenance[
-            "gates_passed"
-        ]
+        return library.get_record(digest_of(report.definition)).provenance
+
+    def _gates(self, sub, tid, tmp_path):
+        return self._provenance(sub, tid, tmp_path)["gates_passed"]
 
     def test_the_shape_and_the_pin(self):
         """Guards: a fixture that is not 4 x 4, repeats an id or moved without a new block."""
@@ -260,6 +261,20 @@ class TestFixture:
             assert row["confused_turns"] == 0 and row["compile_calls"] == 0
             assert row["status"] == "ok" and row["source"] == "library"
         assert self._gates("hand1", "c1", tmp_path) == list(GATES)  # G6b never claimed
+        # the seed says who wrote it
+        assert self._provenance("hand1", "c1", tmp_path)["synthesizing_model"] == "hand-written"  # fmt: skip
+
+    def test_s_needs_a_simulated_record_and_h_does_not(
+        self, rig, tmp_path, monkeypatch
+    ):
+        """Guards: S reusing a procedure that never passed G6b (D-054: H is seeded without)."""
+        import fsm_llm.synthesis as syn
+
+        seen, real = [], syn.SynthesisPolicy
+        monkeypatch.setattr(syn, "SynthesisPolicy", lambda **kw: seen.append(kw["require_simulation"]) or real(**kw))  # fmt: skip
+        sb.run_trial("synth-fsm", TASKS["c1"], 1, tmp_path / "s")
+        sb.run_trial("hand-fsm", TASKS["c1"], 1, tmp_path / "h")
+        assert seen == [True, False]
 
     def test_the_synthesized_arm_passes_through_the_simulator_and_reuses(
         self, rig, tmp_path
@@ -444,13 +459,59 @@ class TestEveryArmFacesTheSameGrader:
         right = next(q for q in task.spec[1:] if not re.search(task.other, q, re.I))
         wrong = next(q for q in task.spec[1:] if q != right)
         user = sb.User(task.users)
-        user.note(first)
-        user.reply(first)  # the branch value is given
-        user.note(right)
+        user.reply(first)  # the branch value is given by this reply, which is not kept
+        assert user.late == []
+        user.reply(right)
         assert user.late == [right]
         assert sb.grade(task, task.gold, user.late, 2)["correct"]
-        user.note(wrong)  # a question about the other branch, after the value
+        user.reply(wrong)  # a question about the other branch, after the value
         assert not sb.grade(task, task.gold, user.late, 2)["correct"]
+
+    @staticmethod
+    def _branch_run(arm, task, follow, wrap, rig, tmp_path, monkeypatch):
+        """One run where the question after the branch value is *follow* and the closing
+        text (the child's last reply, the host's wrap-up, R's answer) is *wrap*."""
+        if arm == "react":
+            first = sb.hand_fsm(task)["states"]["ask"]["response_instructions"]
+            rig.update(asks=[first, follow], answer=f"{wrap}\n{json.dumps(task.gold)}")
+            return sb.run_trial(arm, task, 1, tmp_path)
+        hand, host = sb.hand_fsm, sb.host_definition
+
+        def child(t):
+            d = hand(t)
+            for sid in ("first", "second"):
+                d["states"][sid]["response_instructions"] = follow
+            d["states"]["done"]["response_instructions"] = wrap
+            return d
+
+        def wrapped(t):
+            d = host(t)
+            d["states"]["wrapup"]["response_instructions"] = wrap
+            return d
+
+        monkeypatch.setattr(sb, "hand_fsm", child)
+        monkeypatch.setattr(sb, "host_definition", wrapped)
+        return sb.run_trial(arm, task, 1, tmp_path)
+
+    @pytest.mark.parametrize("arm", ["synth-fsm", "hand-fsm", "react"])
+    @pytest.mark.parametrize("tid", ["b1", "b2", "b3", "b4"])
+    @pytest.mark.parametrize("situation", ["plain", "other_after", "wrap_restates"])
+    def test_the_same_texts_are_read_for_react_synth_and_hand(
+        self, situation, tid, arm, rig, tmp_path, monkeypatch
+    ):
+        """Guards (D-077): S and H graded on a wrap-up that R is never graded on, and a
+        branch check that goes dead in one arm (review NOTE 8, mutation N32)."""
+        task = TASKS[tid]
+        right = next(q for q in task.spec[1:] if not re.search(task.other, q, re.I))
+        other = next(q for q in task.spec[1:] if q != right)
+        follow, wrap, ok = {
+            "plain": (right, "All done.", True),
+            "other_after": (f"{right} {other}", "All done.", False),
+            "wrap_restates": (right, f"All done. {other}", True),
+        }[situation]
+        row = self._branch_run(arm, task, follow, wrap, rig, tmp_path, monkeypatch)
+        assert all(row["per_key"].values()), row
+        assert (row["correct"], row["checks"]["other_branch"]) == (ok, ok), row
 
     @pytest.mark.parametrize("arm", ["synth-fsm", "hand-fsm"])
     @pytest.mark.parametrize("tid", ["b1", "b2", "b3", "b4"])
@@ -828,15 +889,17 @@ class TestBlocks:
         out = capsys.readouterr().out
         assert "registered" in out and "NOT RUN" in out and sb.ONE_MODEL in out
 
-    def test_three_errored_rows_abort_and_keep_the_rows(self, bench, rig):
-        """Guards: an outage burning a block that cannot be re-run."""
+    @pytest.mark.parametrize("error", ["LLMResponseError: down", None])
+    def test_three_errored_rows_abort_and_keep_the_rows(self, error, bench, rig):
+        """Guards: an outage burning a block that cannot be re-run, also when the runner
+        reported it (phase `provider`) and no exception reached the row."""
         sb.register_block("s0")
         rig.update(compile_replies=[])  # every compile call raises
         real = sb.run_trial
 
         def crash(arm, task, *a, **k):
             row = real(arm, task, *a, **k)
-            return {**row, "error": "LLMResponseError: down", "phase": "provider"}
+            return {**row, "error": error, "phase": "provider"}
 
         sb.run_trial = crash
         try:
@@ -864,20 +927,44 @@ class TestBlocks:
             < 12
         )
 
-    def test_the_report_decides_from_first_trial_rows_of_a_complete_block(
-        self, bench, capsys, monkeypatch
-    ):
-        """Guards: a verdict not read from rows, or from trials after the first."""
+    @staticmethod
+    def _block(bench, monkeypatch, status="complete", trials=(1, 2)):
+        """A block of 16 tasks with rows and summaries: s 12, h 14, r 4 first-trial passes."""
         monkeypatch.undo()  # the whole fixture of 16 tasks, not the two of this class
         monkeypatch.setattr(sb, "BENCH_DATA", bench.parent)
         (bench / "s0").mkdir(parents=True)
         for arm, k in (("synth-fsm", 12), ("hand-fsm", 14), ("react", 4)):
             for i, task in enumerate(sb.TASKS):
-                for trial in (1, 2):
+                for trial in trials:
                     ok = trial == 1 and i < k
                     row = dict(task_id=task.id, family=task.family, arm=arm, trial=trial, correct=ok, phase="pass" if ok else "wrong_value", source="compiled", error=None)  # fmt: skip
                     sb.bc.append_row(bench / "s0" / f"rows_{arm}.jsonl", row)
-            sb.write_summary(bench / "s0", arm, "complete", "t", {})
+            sb.write_summary(bench / "s0", arm, status, "t", {})
+
+    def test_a_summary_that_is_not_complete_keeps_the_verdict_inconclusive(
+        self, bench, capsys, monkeypatch
+    ):
+        """Guards: a verdict printed from an aborted block (it cannot be re-run)."""
+        self._block(bench, monkeypatch, status="aborted: foreign-load")
+        assert sb.report("s0") == 0
+        out = capsys.readouterr().out
+        assert "verdict: INCONCLUSIVE" in out and "aborted or incomplete" in out
+
+    def test_pass_all_counts_a_task_only_when_every_trial_of_the_plan_ran(
+        self, bench, capsys, monkeypatch
+    ):
+        """Guards: pass^3 read off a task that ran twice."""
+        self._block(bench, monkeypatch, trials=(1,))
+        rows = sb.bc.read_rows(bench / "s0" / "rows_synth-fsm.jsonl")
+        assert sb.metrics(rows)["pass_all"] == 0 and sb.metrics(rows)["k"] == 12
+        three = [{**r, "trial": t} for r in rows for t in (1, 2, 3)]
+        assert sb.metrics(three)["pass_all"] == 12
+
+    def test_the_report_decides_from_first_trial_rows_of_a_complete_block(
+        self, bench, capsys, monkeypatch
+    ):
+        """Guards: a verdict not read from rows, or from trials after the first."""
+        self._block(bench, monkeypatch)
         assert sb.report("s0") == 0
         out = capsys.readouterr().out
         assert (

@@ -170,8 +170,8 @@ TASKS = tuple(Task(*row) for row in (
 
 class User:
     """The scripted user, no model: ``reply`` is the next utterance of EVERY rule whose regex
-    matches the assistant text (the last repeats), else ``FALLBACK`` (``confused``).
-    ``note`` keeps the assistant texts produced after rule 0 (the branch value) answered."""
+    matches the assistant text (the last repeats), else ``FALLBACK`` (``confused``). ``late`` keeps
+    the texts answered AFTER rule 0 (the branch value) had been given: the one branch-check input."""
 
     def __init__(self, rules: tuple[tuple[str, Any], ...]) -> None:
         self.rules = [
@@ -181,10 +181,8 @@ class User:
         self.used, self.confused = [0] * len(rules), 0  # used[i]: answers rule i gave
         self.late: list[str] = []
 
-    def note(self, text: str) -> None:
-        self.late += [text] * bool(self.used[0])
-
     def reply(self, text: str) -> str:
+        self.late += [text] * bool(self.used[0])
         said = []
         for i, (pattern, lines) in enumerate(self.rules):
             if pattern.search(text):
@@ -259,11 +257,11 @@ def squash(value: Any) -> str:
 
 
 # DECISION plan-2026-11-10T194139-2cefeb61/D-065
-# One grader for every arm. R's fallback reads only whole ``key: value`` pairs and
-# the branch check only the texts AFTER the branch value was given (``User.late``).
-# Do NOT match a gold token inside the answer (a label list or the word "it"
-# passes) and do NOT read every reply for the branch check (a first question that
-# names both options fails a right run).
+# One grader for every arm. R's fallback reads only whole ``key: value`` pairs and the branch
+# check only the texts the user answered AFTER the branch value was given (``User.reply``, D-077:
+# no wrap-up, no final answer). Do NOT match a gold token inside the answer (a label list or the
+# word "it" passes), do NOT read every reply (a first question naming both options fails a right
+# run) and do NOT note texts anywhere but ``reply`` (a second call site can go dead).
 def pairs(answer: str, keys: Any) -> dict[str, str]:
     """R's fallback: ``key: value``, ``key = value`` or ``key is value``, key a whole word; the
     value runs to a ``;`` or newline, a ``,`` or ``;`` before another key (quotes allowed), or the end."""
@@ -580,7 +578,6 @@ def drive_fsm(arm: str, task: Task, lib_dir: Path, llms: dict[str, Any]) -> dict
     try:
         for _ in range(LIMITS["max_user_turns"]):
             reply = runner.converse(conv, said)
-            user.note(reply)
             turns.append([said[:300], reply[:300]])
             if api.has_conversation_ended(conv):
                 break
@@ -610,7 +607,6 @@ def drive_react(task: Task, llm: Any) -> dict[str, Any]:
     def ask_user(question: str) -> str:
         """Ask the user one question and return the user's reply."""
         asked.append(question)
-        user.note(question)
         return user.reply(question) if len(asked) <= LIMITS["max_user_turns"] else "The user has left."  # fmt: skip
 
     registry = ToolRegistry().register_function(ask_user, name="ask_user")
