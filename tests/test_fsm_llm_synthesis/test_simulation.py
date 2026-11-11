@@ -33,6 +33,7 @@ from fsm_llm.synthesis import (
     digest_of,
     run_gates,
 )
+from fsm_llm.synthesis.runner import reason_of
 from fsm_llm.synthesis.simulation import happy_path
 from tests.test_fsm_llm_synthesis.conftest import (
     ScriptedRunnerLLM,
@@ -162,6 +163,29 @@ class TestVerdict:
             _run(llm=Down())
 
         assert "SECRET-PROVIDER-TEXT" not in repr(seen.value) + str(seen.value.details)
+
+    def test_a_provider_outage_is_chained_so_the_runner_says_provider_error(self):
+        class Down(ScriptedRunnerLLM):
+            def generate_response(self, request: Any) -> Any:
+                raise LLMResponseError("SECRET-PROVIDER-TEXT")
+
+        with pytest.raises(SynthesisError) as seen:
+            _run(llm=Down())
+
+        assert isinstance(seen.value.__cause__, LLMResponseError)
+        assert "SECRET-PROVIDER-TEXT" not in str(seen.value.__cause__)
+        assert reason_of(seen.value) == "provider_error"
+
+    def test_every_trial_failing_for_another_reason_is_not_called_an_outage(self):
+        class Broken(ScriptedRunnerLLM):
+            def generate_response(self, request: Any) -> Any:
+                raise RuntimeError("a bug, not a provider")
+
+        with pytest.raises(SynthesisError) as seen:
+            _run(llm=Broken())
+
+        assert seen.value.__cause__ is None
+        assert reason_of(seen.value) == "compile_failed"
 
     def test_the_findings_are_ids_and_counts_never_scenario_text(self):
         canary = "CANARY-SCENARIO"

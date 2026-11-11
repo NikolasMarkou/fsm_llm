@@ -282,7 +282,8 @@ class Simulator:
         ``pass-rate-low``, ``simulation-incomplete`` (no happy trial finished),
         ``no-progress``. A writer outage or an unusable reply means no generated
         scenarios. Raises ``SynthesisError`` when every trial that ran errored (an
-        outage, nothing to repair; no provider text in it).
+        outage, nothing to repair; no provider text in it), chained from an
+        ``LLMResponseError`` when every error was a provider failure.
     """
 
     def __init__(
@@ -410,10 +411,20 @@ class Simulator:
                 continue
             break
         if ran and all(t.error is not None for _, _, t in ran):
+            # DECISION plan-2026-11-10T194139-2cefeb61/D-061
+            # An outage is chained from a fixed LLMResponseError so the runner
+            # reads `provider_error`; the provider's text is never copied. Do NOT
+            # chain any other trial error (a bug is a compile failure).
+            outage = all(
+                str(t.error).startswith(f"{LLMResponseError.__name__}:")
+                for _, _, t in ran
+            )
             raise SynthesisError(
                 "every simulation trial failed to run: an outage, not a defect "
                 "of the procedure",
                 {"trials": len(ran)},
+            ) from (
+                LLMResponseError("the provider failed every trial") if outage else None
             )
         happy_trials = [
             (t, _passes(k, t, return_keys)) for _, k, t in ran if k == HAPPY_KIND

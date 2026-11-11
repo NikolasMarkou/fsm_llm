@@ -87,6 +87,7 @@ class _Run:
     config: SynthesizeConfig
     child_steps: int = 0
     aborting: bool = False
+    errors0: int = 0  # the interface's error meter when the child was pushed
 
 
 def _result(
@@ -504,9 +505,16 @@ class ProcedureRunner:
             )
         except (FSMError, ValueError):
             return REASON_PUSH_FAILED, ""
-        runs.append(_Run(procedure, config))
+        runs.append(_Run(procedure, config, errors0=self._errors()))
         self._emit("pushed", conv_id, digest=procedure.digest, step=step)
         return "", reply
+
+    def _errors(self) -> int:
+        """The conversation interface's count of failed calls (0 without a meter)."""
+        try:
+            return int(self.api.get_llm_interface().usage().errors)  # type: ignore[attr-defined]
+        except Exception:
+            return 0
 
     def _finish(self, conv_id: str, run: _Run, step: int | None) -> None:
         """Pop the ended child on top, merge its return keys on success only,
@@ -522,12 +530,21 @@ class ProcedureRunner:
             merge_strategy=ContextMergeStrategy.UPDATE,
         )
         self._runs[conv_id].pop()
-        status, reason = (
-            (STATUS_OK, None)
+        # DECISION plan-2026-11-10T194139-2cefeb61/D-061
+        # Core swallows an extraction error, so an outage looks like a stuck
+        # child; a run whose interface errored is `provider_error`, which
+        # `diagnose` never patches. Do NOT call it `budget_spent`, and do NOT
+        # let an ok run (a retried call) become a fault.
+        outage = self._errors() > run.errors0
+        status = STATUS_OK if ok else STATUS_ABORTED if aborted else STATUS_FAILED
+        reason = (
+            None
             if ok
-            else (STATUS_ABORTED, REASON_BUDGET_SPENT)
+            else REASON_PROVIDER_ERROR
+            if outage
+            else REASON_BUDGET_SPENT
             if aborted
-            else (STATUS_FAILED, REASON_RETURN_KEYS_MISSING)
+            else REASON_RETURN_KEYS_MISSING
         )
         api.update_context(
             conv_id, {config.result_key: _result(status, reason, procedure)}

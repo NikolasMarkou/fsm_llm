@@ -162,6 +162,46 @@ class TestNotProcedureFault:
         assert by_code["extraction-miss"].runs == 1
 
 
+class TestAnOutageNeverRewritesAProcedure:
+    """D-038, D-050: one trace set mixing outage and fault runs, every shape."""
+
+    OUTAGE_REASONS = tuple(
+        r for r in REASONS if r not in (REASON_BUDGET_SPENT, REASON_RETURN_KEYS_MISSING)
+    )
+
+    def _outages(self) -> list[RunTrace]:
+        """Every outage trace has the shape of ``extraction-miss``."""
+        return [
+            _t(status=status, reason=reason)
+            for reason in self.OUTAGE_REASONS
+            for status in (STATUS_ABORTED, STATUS_FAILED)
+        ]
+
+    def test_outage_runs_alone_give_no_patch_basis(self):
+        got = diagnose(self._outages() * 3, DEFINITION, POLICY)
+        assert [d.code for d in got] == [NPF]
+
+    def test_a_mixed_set_counts_only_the_fault_runs_toward_the_repair_bar(self):
+        faults = [_t(), _t()]  # two real extraction misses: below the bar of 3
+        outages = self._outages()
+        got = diagnose(outages + faults, DEFINITION, POLICY)
+
+        patchable = sum(d.runs for d in got if d.code != NPF)
+        assert patchable == 2 < POLICY.repair_min_failures
+        assert {d.code: d.runs for d in got}[NPF] == len(outages)
+
+    def test_the_order_of_the_mixed_set_never_matters(self):
+        mixed = [*self._outages(), _t(), _t(), _t()]
+        shuffled = random.Random(7).sample(mixed, len(mixed))
+        assert diagnose(mixed, DEFINITION, POLICY) == diagnose(
+            shuffled, DEFINITION, POLICY
+        )
+        assert (
+            sum(d.runs for d in diagnose(mixed, DEFINITION, POLICY) if d.code != NPF)
+            == 3
+        )
+
+
 class TestRules:
     def test_extraction_miss_names_the_absent_gate_keys(self):
         got = diagnose([_t(keys=("anything",))], DEFINITION, POLICY)

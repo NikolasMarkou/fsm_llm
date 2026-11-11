@@ -32,11 +32,15 @@ from fsm_llm.synthesis import (
     LibraryError,
     Procedure,
     ProcedureRunner,
+    RunTrace,
     SynthesisError,
     SynthesisPolicy,
     SynthesisRefusedError,
+    TraceRecorder,
+    diagnose,
     digest_of,
     run_gates,
+    strip_abort,
 )
 from fsm_llm.synthesis import runner as runner_module
 from tests.test_fsm_llm_synthesis.conftest import (
@@ -141,8 +145,9 @@ def _rig(
     config: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
     sink: Any = None,
+    cheap: ScriptedRunnerLLM | None = None,
 ) -> _Rig:
-    cheap = ScriptedRunnerLLM(
+    cheap = cheap or ScriptedRunnerLLM(
         {"answer": "42"} if extraction is None else extraction, dict(REPLIES)
     )
     strong = ScriptedStrongLLM([json.dumps(valid_fsm)] if replies is None else replies)
@@ -156,6 +161,24 @@ def _rig(
     )
     conv, _ = api.start_conversation(CONTEXT if context is None else context)
     return _Rig(api, runner, conv, cheap, strong, synth, library, stream)
+
+
+class _Metered(ScriptedRunnerLLM):
+    """A cheap model whose extraction calls fail ``outages`` times (Pass 2 still
+    answers) and whose meter counts the failures, as a real interface's does."""
+
+    def __init__(self, outages: int, **kw: Any) -> None:
+        super().__init__(**kw)
+        self.outages, self.errors = outages, 0
+
+    def usage(self) -> LLMUsage:
+        return LLMUsage(calls=len(self.call_history), errors=self.errors)
+
+    def extract_field(self, request: Any) -> Any:
+        if self.errors < self.outages:
+            self.errors += 1
+            raise LLMResponseError("provider timed out")
+        return super().extract_field(request)
 
 
 def _procedure(data: dict[str, Any], **kw: Any) -> Procedure:
@@ -394,6 +417,80 @@ class TestAbort:
         assert rig.runner._runs[rig.conv] == []
         assert len(rig.strong.requests) == 1
         assert rig.result["status"] == "running"
+
+
+class TestAnOutageIsNoFault:
+    """A run that spent an outage never ends on a reason ``diagnose`` can patch
+    (D-061): core swallows an extraction error, so the child just stays blocked."""
+
+    def _run(
+        self, valid_fsm: dict[str, Any], tmp_path: Any, cheap: ScriptedRunnerLLM
+    ) -> _Rig:
+        self.traces: list[RunTrace] = []
+        recorder = TraceRecorder(self.traces.append)
+        rig = _rig(
+            valid_fsm,
+            tmp_path,
+            cheap=cheap,
+            policy=SynthesisPolicy(max_turns=3),
+            sink=recorder,
+        )
+        rig.runner.run(rig.conv, max_steps=30)
+        return rig
+
+    def test_a_stuck_child_with_an_outage_is_provider_error_not_budget_spent(
+        self, valid_fsm, tmp_path
+    ):
+        cheap = _Metered(10_000, extraction_data={"answer": "42"}, responses=REPLIES)
+        rig = self._run(valid_fsm, tmp_path, cheap)
+
+        assert rig.result["status"] == "aborted"
+        assert rig.result["reason"] == "provider_error"
+        (trace,) = self.traces
+        assert (trace.status, trace.reason) == ("aborted", "provider_error")
+        assert (trace.stuck, trace.outcome) == ("ask", "blocked")  # a fault's shape
+
+    def test_the_same_run_without_an_outage_stays_budget_spent(
+        self, valid_fsm, tmp_path
+    ):
+        rig = self._run(
+            valid_fsm, tmp_path, _Metered(0, extraction_data={}, responses=REPLIES)
+        )
+
+        assert rig.result["reason"] == "budget_spent"
+        assert self.traces[0].reason == "budget_spent"
+
+    def test_errors_from_before_the_push_are_not_the_childs_outage(
+        self, valid_fsm, tmp_path
+    ):
+        cheap = _Metered(0, extraction_data={}, responses=REPLIES)
+        cheap.errors = 5  # the meter already counts failures of earlier work
+        rig = self._run(valid_fsm, tmp_path, cheap)
+
+        assert rig.result["reason"] == "budget_spent"
+
+    def test_a_retried_call_that_then_succeeds_is_not_a_fault_of_the_run(
+        self, valid_fsm, tmp_path
+    ):
+        cheap = _Metered(1, extraction_data={"answer": "42"}, responses=REPLIES)
+        rig = self._run(valid_fsm, tmp_path, cheap)
+
+        assert cheap.errors == 1
+        assert rig.result["status"] == "ok" and rig.result["reason"] is None
+
+    def test_diagnose_never_patches_from_the_outage_runs(self, valid_fsm, tmp_path):
+        cheap = _Metered(10_000, extraction_data={"answer": "42"}, responses=REPLIES)
+        rig = self._run(valid_fsm, tmp_path, cheap)
+        stripped = strip_abort(
+            rig.library.get_definition(self.traces[0].digest).model_dump(  # type: ignore[union-attr]
+                exclude_defaults=True
+            )
+        )
+        assert stripped is not None
+
+        got = diagnose(self.traces * 3, FSMDefinition(**stripped), SynthesisPolicy())
+
+        assert [d.code for d in got] == ["not-procedure-fault"]
 
 
 def _two_key(valid_fsm: dict[str, Any]) -> dict[str, Any]:
