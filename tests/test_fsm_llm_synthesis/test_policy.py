@@ -113,6 +113,20 @@ class TestSynthesisPolicyLimits:
         with pytest.raises(SynthesisError):
             SynthesisPolicy(**{name: bad})
 
+    def test_patch_limits_default_and_minimum(self):
+        p = SynthesisPolicy()
+        assert (p.max_patch_ops, p.max_patch_chars) == (12, 8000)
+        assert SynthesisPolicy(max_patch_ops=1).max_patch_ops == 1
+        for name in ("max_patch_ops", "max_patch_chars"):
+            with pytest.raises(SynthesisError, match=name):
+                SynthesisPolicy(**{name: 0})
+
+    @pytest.mark.parametrize("name", ["max_patch_ops", "max_patch_chars"])
+    @pytest.mark.parametrize("bad", [True, 3.0, "5", None, -1, 10**30, float("nan")])
+    def test_a_bad_patch_limit_is_refused(self, name, bad):
+        with pytest.raises(SynthesisError):
+            SynthesisPolicy(**{name: bad})
+
     def test_repair_rounds_accept_zero_and_refuse_below(self):
         assert SynthesisPolicy(max_repair_rounds=0).max_repair_rounds == 0
         for bad in (-1, True, 1.0, "1", 10**30):

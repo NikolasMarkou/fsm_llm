@@ -34,6 +34,22 @@ class SynthesisRefusedError(SynthesisError):
         self.code = code
 
 
+class PatchError(SynthesisError):
+    """A patch was refused whole (nothing was applied).
+
+    ``code`` is one of ``constants.PATCH_CODES`` and ``op`` the index of the op
+    at fault (``None`` for a refusal of the whole patch). The message holds the
+    code and the index only, never any text of the patch.
+    """
+
+    def __init__(self, code: str, op: int | None = None):
+        super().__init__(
+            f"patch refused: {code}" + ("" if op is None else f" (op {op})")
+        )
+        self.code = code
+        self.op = op
+
+
 class LibraryError(SynthesisError):
     """The procedure library is unreadable, corrupt, unwritable or inconsistent.
 

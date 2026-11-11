@@ -96,6 +96,28 @@ CODE_SIMULATION_INCOMPLETE = "simulation-incomplete"
 HAPPY_KIND = "happy"
 GENERATED_KINDS = ("missing_info", "correction", "off_topic", "adversarial")
 
+# --- Patches (D-051): the four ops, the fixed limits, and every refusal code ---
+PATCH_OPS = ("add", "remove", "replace", "test")
+MAX_PATCH_DEPTH = 16  # nesting of a value below its op object
+MAX_POINTER_TOKENS = 12
+MAX_POINTER_TOKEN_CHARS = 100
+MAX_INDEX_DIGITS = 9
+PATCH_CODES = (
+    "too-many-ops",
+    "too-large",
+    "too-deep",
+    "bad-value",
+    "bad-document",
+    "bad-scope",
+    "op-shape",
+    "op-not-allowed",
+    "bad-pointer",
+    "bad-index",
+    "out-of-scope",
+    "no-target",
+    "test-failed",
+)
+
 # --- Tool bounds: the most names one tool call may list (inputs or return_keys) ---
 MAX_TOOL_NAMES = 20
 
