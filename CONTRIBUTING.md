@@ -7,7 +7,7 @@ Work inside the project virtualenv. Every command below assumes `.venv/bin` is o
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval]" + pre-commit install
+make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis]" + pre-commit install
 ```
 
 Upgrading a clone from before the 2026-09-29 restructure (extensions moved under `fsm_llm/`): delete the old `src/fsm_llm_<sub>/` directories by hand (`make clean` no longer removes them), then reinstall with `pip install -e .`. After `src/fsm_llm/` was flattened into `src/`, reinstall with `pip install -e .` again. A leftover directory imports as a namespace package.

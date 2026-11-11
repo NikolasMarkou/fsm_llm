@@ -29,14 +29,15 @@ _FULL_FSM_DOCS = [
     "AGENTS.md",
 ]
 # Reference docs scanned too (plan-2026-09-19T175721-21cd7f8e D-052 (5)). At the
-# time of writing none carries a block naming "initial_state" (docs/fsm_design.md
-# has state-level JSON fragments only), so they contribute no case today; a full
-# FSM added to one of them is picked up and must load.
+# time of writing only docs/synthesis.md carries a block naming "initial_state"
+# (its concierge host FSM; docs/fsm_design.md has state-level JSON fragments
+# only); a full FSM added to one of them is picked up and must load.
 _REFERENCE_DOCS = [
     "docs/api_reference.md",
     "docs/architecture.md",
     "docs/fsm_design.md",
     "docs/handlers.md",
+    "docs/synthesis.md",
 ]
 _DOCS = [*_FULL_FSM_DOCS, *_REFERENCE_DOCS]
 _FENCE = re.compile(r"```(json|python)\n(.*?)```", re.DOTALL)

@@ -215,6 +215,38 @@ Design rules:
 - A completion state has no other extraction (`field_extractions`, `classification_extractions`, `required_context_keys`, `extraction_instructions`) and cannot be terminal. Leave its `response_instructions` empty unless it should also speak.
 - Core runs no tool. Run tools in a handler on the next state (the `native_fc` agent does exactly this).
 
+## Procedures Written on Demand (`synthesize`)
+
+A state may declare the optional `synthesize` field when a sub-conversation cannot be written ahead of time. The state carries a goal; `fsm_llm.synthesis.ProcedureRunner` has a model write a child FSM for it, checks it, runs it on the host's model as a pushed child and merges back only the declared `return_keys`. The state itself is silent and routes on the result the runner writes to `synthesis_result`:
+
+```json
+"gather": {
+  "id": "gather", "description": "Run a procedure written on demand", "purpose": "Collect the booking",
+  "response_instructions": "",
+  "synthesize": {"goal": "Book a table: ask the party size and the date.",
+                 "inputs": ["venue"], "return_keys": ["party_size", "visit_date"], "on_failure": "sorry"},
+  "transitions": [
+    {"target_state": "done", "description": "It finished", "priority": 1,
+     "conditions": [{"description": "ok", "requires_context_keys": ["synthesis_result"],
+                     "logic": {"==": [{"var": "synthesis_result.status"}, "ok"]}}]},
+    {"target_state": "sorry", "description": "It failed or was stopped", "priority": 2,
+     "conditions": [{"description": "not ok", "requires_context_keys": ["synthesis_result"],
+                     "logic": {"in": [{"var": "synthesis_result.status"}, ["failed", "aborted"]]}}]}
+  ]
+}
+```
+
+Design rules:
+
+- Route on `synthesis_result.status` (`ok`, `failed`, `aborted`; `running` while it works). Every edge must read the result key, or it would fire before the runner has produced a result.
+- Write the failure edge as `status in [failed, aborted]`. A procedure that spends its turn budget ends `aborted`, so a bare `== "failed"` would strand the host: the loader runs the edges on sample results and refuses it.
+- `on_failure` names the state the failure edge reaches, one of the state's own transition targets. Give that state a reply that apologises or offers an alternative, because a failure is a normal outcome, not an exception.
+- Name what the procedure may use (`inputs`) and what it must return (`return_keys`) with plain key names. Do not use a handler-only key as a return key.
+- The state declares no extraction and no `completion`. Core only loads the field: a bare `API.converse` stays in the state, so drive the host through `ProcedureRunner`.
+- The result is skip-if-set. A state that runs again on re-entry must clear `synthesis_result` first (`clear_keys_on_entry`).
+
+The guide is [synthesis.md](./synthesis.md); the reference is the Synthesis section of [api_reference.md](./api_reference.md).
+
 ## Designing for Agents
 
 Agent patterns (`fsm_llm.agents`) auto-generate FSMs from tool registries. The core ReAct loop is a 3-4 state FSM: **Think -> Act -> Observe -> Conclude**. Tool execution happens via handlers, not state instructions.

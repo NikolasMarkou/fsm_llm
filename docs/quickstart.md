@@ -21,7 +21,7 @@ pip install -e ".[monitor]"      # Real-time monitoring dashboard (fastapi, uvic
 pip install -e ".[all]"          # Every optional dependency
 ```
 
-The name `fsm-llm` on PyPI belongs to a different project, so install from a clone. The reasoning, workflows, agents and eval extras add no packages (that code ships in every install); extras only add third-party dependencies.
+The name `fsm-llm` on PyPI belongs to a different project, so install from a clone. The reasoning, workflows, agents, eval and synthesis extras add no packages (that code ships in every install); extras only add third-party dependencies.
 
 Classification is built into the core package -- no extra install needed.
 
