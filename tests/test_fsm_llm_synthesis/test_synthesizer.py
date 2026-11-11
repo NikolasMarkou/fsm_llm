@@ -324,6 +324,22 @@ _SWAPS = [  # (a reply with mismatched closers, the object it means)
 ]
 
 
+class TestUnknownOperatorRepair:
+    """D-099 end to end: the turn after an unknown operator names every operator."""
+
+    def test_the_repair_turn_lists_the_allowed_operators_in_ascii(self, valid_fsm):
+        bad = copy.deepcopy(valid_fsm)
+        bad["states"]["ask"]["transitions"][0]["conditions"][0]["logic"] = {
+            "truthy": [{"var": "answer"}]
+        }
+        synth, llm = _synth([_text(bad), _text(valid_fsm)])
+        synth.compile("g", return_keys=RET)
+        turn = llm.requests[1].messages[-1]["content"]
+        names = ", ".join(sorted(ALLOWED_JSONLOGIC_OPERATIONS))
+        assert f"Allowed: {names}." in turn
+        assert "\u2039" not in turn and "\u203a" not in turn
+
+
 class TestBracketRepair:
     """D-097: a closer of the wrong kind is replaced; nothing else is invented."""
 

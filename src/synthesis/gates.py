@@ -25,7 +25,7 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from fsm_llm.constants import SKILL_DEFANG
+from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS, SKILL_DEFANG
 from fsm_llm.definitions import FSMDefinition
 from fsm_llm.flow_analysis import analyze_data_flow, analyze_liveness
 from fsm_llm.okf import capped_line
@@ -116,7 +116,7 @@ class GateReport:
         lines: list[str] = []
         used = 0
         for i, f in enumerate(shown):
-            line = f"{f.gate} {safe_text(f.code)} [{safe_text(f.state)}]: {safe_text(f.message)}"
+            line = f"{f.gate} {safe_text(f.code)} [{safe_text(f.state)}]: {_message(f)}"
             if used + len(line) + 1 > cap - 30:  # room for the "and K more" line
                 lines.append(f"and {len(shown) - i} more")
                 break
@@ -130,6 +130,33 @@ def safe_text(text: str, cap: int = _MESSAGE_CHARS) -> str:
     ``cap`` characters and ``[ ] < >`` defanged (so it can spell no fence or
     tag). ``""`` for a non-string. Used by ``repair_text`` and the G6b turns."""
     return capped_line(text, cap).translate(SKILL_DEFANG)
+
+
+# DECISION plan-2026-11-10T194139-2cefeb61/D-099
+# The loader's unknown-operator message ends with the allow-list, and `safe_text`
+# turned its `<` and `>` into look-alike characters that the model then wrote
+# (live: `{"\u2039": ...}`). The list is the loader's own constant, not model text,
+# so it is cut from the message BEFORE the defang and re-added AFTER it as plain
+# ASCII. Do NOT defang the note, do NOT keep the loader's tail (cut mid-list by the
+# 300 character cap anyway), do NOT hand-copy the list, and do NOT key on the
+# `Allowed: [` tail alone (another loader message ends the same way).
+#: The loader's own phrase (definitions.py); a test over a real message pins it.
+_OPERATOR_FINDING = "Unsupported JsonLogic operator"
+_ALLOWED_TAIL = "Allowed: ["
+
+
+def _message(f: GateFinding) -> str:
+    """The text of ``f.message`` in a repair line: ``safe_text``, except that a
+    G1 unknown-operator finding is cut before its ``Allowed: [...]`` tail and
+    ends with a fixed ASCII note naming every operator of the loader's
+    ``ALLOWED_JSONLOGIC_OPERATIONS`` (sorted, comma and space joined, so ``<``
+    never touches a letter). The model-authored operator names stay defanged
+    and capped. Never raises."""
+    if f.gate != "G1" or _OPERATOR_FINDING not in f.message:
+        return safe_text(f.message)
+    head = f.message.rsplit(_ALLOWED_TAIL, 1)[0]
+    names = ", ".join(sorted(ALLOWED_JSONLOGIC_OPERATIONS))
+    return f"{safe_text(head.rstrip())} Allowed: {names}."
 
 
 def _load(data: Any) -> tuple[FSMDefinition | None, list[GateFinding]]:

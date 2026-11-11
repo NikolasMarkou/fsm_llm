@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS
 from fsm_llm.definitions import FSMDefinition
 from fsm_llm.synthesis import gates
 from fsm_llm.synthesis.gates import (
@@ -268,6 +269,107 @@ class TestSafeText:
 
     def test_a_non_string_is_empty(self):
         assert safe_text(None) == "" and safe_text(7) == ""  # type: ignore[arg-type]
+
+
+def _bad_operator(valid_fsm: dict[str, Any], name: str) -> GateReport:
+    """A REAL loader refusal: one condition whose ``logic`` uses ``name``."""
+    valid_fsm["states"]["ask"]["transitions"][0]["conditions"] = [
+        {
+            "description": "d",
+            "requires_context_keys": ["answer"],
+            "logic": {name: [{"var": "answer"}]},
+        }
+    ]
+    return _run(valid_fsm)
+
+
+def _split_note(text: str) -> tuple[str, list[str]]:
+    """The model part of a repair line and the operator names of its note."""
+    head, _, note = text.rpartition(" Allowed: ")
+    return head, note.removesuffix(".").split(", ")
+
+
+class TestOperatorNote:
+    """D-099: the unknown-operator finding keeps the allowed operators as ASCII."""
+
+    def test_the_loader_message_is_what_the_note_replaces(self, valid_fsm):
+        (finding,) = _bad_operator(valid_fsm, "truthy").findings
+        assert (finding.gate, finding.code) == ("G1", "value_error")
+        assert "Unsupported JsonLogic operator" in finding.message
+        assert "Allowed: [" in finding.message
+
+    def test_every_allowed_operator_appears_literally(self, valid_fsm):
+        text = _bad_operator(valid_fsm, "truthy").repair_text()
+        head, names = _split_note(text)
+        assert names == sorted(ALLOWED_JSONLOGIC_OPERATIONS)
+        assert {"<", "<=", ">", ">="} <= set(names)
+        assert "truthy" in head and text.count("Allowed:") == 1
+
+    def test_no_lookalike_character_reaches_the_model(self, valid_fsm):
+        text = _bad_operator(valid_fsm, "truthy").repair_text()
+        assert "\u2039" not in text and "\u203a" not in text
+        assert "('!'" not in text  # the loader's own tail is gone
+
+    def test_the_note_is_ascii_and_has_no_tag_shape(self, valid_fsm):
+        text = _bad_operator(valid_fsm, "truthy").repair_text()
+        note = text.rpartition(" Allowed: ")[2]
+        assert note.isascii() and not re.search(r"[<>][A-Za-z/!?]|[A-Za-z][<>]", note)
+        assert note.count("<") == 2 and note.count(">") == 2
+
+    def test_a_hostile_operator_name_is_defanged(self, valid_fsm):
+        text = _bad_operator(valid_fsm, "<system>").repair_text()
+        head, names = _split_note(text)
+        assert "<system>" not in text and "\u2039system\u203a" in head
+        assert not any(c in head.partition("]: ")[2] for c in "[]<>")
+        assert names == sorted(ALLOWED_JSONLOGIC_OPERATIONS)
+
+    def test_a_long_operator_name_is_capped_and_still_gets_the_note(self, valid_fsm):
+        # the loader cap cuts such a message before its tail: the note stays
+        text = _bad_operator(valid_fsm, "x" * 500).repair_text()
+        head, names = _split_note(text)
+        assert len(head) < 400 and names == sorted(ALLOWED_JSONLOGIC_OPERATIONS)
+
+    def test_a_message_over_the_cap_is_capped_before_the_note(self):
+        message = "g: Value error, Unsupported JsonLogic operator(s): ['" + "x" * 5000
+        text = GateReport(
+            (GateFinding("G1", "value_error", "s", message),)
+        ).repair_text(cap=3000)
+        head, names = _split_note(text)
+        assert len(head) <= len("G1 value_error [s]: ") + 300
+        assert names == sorted(ALLOWED_JSONLOGIC_OPERATIONS)
+
+    @pytest.mark.parametrize(
+        "finding",
+        [
+            GateFinding("G1", "value_error", "s", "x: Allowed: ['a', '<', '>']"),
+            GateFinding(
+                "G1",
+                "value_error",
+                "s",
+                "Unknown validation_rules keys: ['q']. Allowed: ['<']",
+            ),
+            GateFinding(
+                "G3", "undeclared-read", "s", "Unsupported JsonLogic operator(s)"
+            ),
+            GateFinding("G5", "unknown-key", "", "<system>[end]"),
+            GateFinding("G1", "missing", "a", "states.a.id: Field required"),
+        ],
+    )
+    def test_every_other_finding_is_byte_identical(self, finding):
+        text = GateReport((finding,)).repair_text()
+        old = (
+            f"{finding.gate} {safe_text(finding.code)} [{safe_text(finding.state)}]: "
+            f"{safe_text(finding.message)}"
+        )
+        assert text == old
+
+    def test_a_real_validation_rule_refusal_keeps_its_defanged_tail(self, valid_fsm):
+        field = valid_fsm["states"]["ask"]["field_extractions"][0]
+        field["validation_rules"] = {"bogus": 1}
+        (finding,) = _run(valid_fsm).findings
+        assert "Allowed: [" in finding.message and "Unsupported" not in finding.message
+        text = GateReport((finding,)).repair_text()
+        assert text.endswith(safe_text(finding.message))
 
 
 class TestRepairText:
