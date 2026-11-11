@@ -63,10 +63,21 @@ TIMEOUTS = {"compile": 600.0, "sim": 300.0, "run": 300.0}
 ROLE_BY_TIMEOUT = {TIMEOUTS["compile"]: "compile", TIMEOUTS["run"]: "run"}
 POLICY = {"max_turns": 10, "max_repair_rounds": 3, "sim_trials": 2, "max_sim_turns": 8, "max_simulation_seconds": 300, "max_simulation_calls": 400, "max_simulation_rounds": 2, "min_pass_rate": 0.5}  # fmt: skip
 LIMITS = {"temperature": 0.5, "run_max_tokens": 1000, "max_user_turns": 14, "react_max_iterations": 12, "react_timeout_seconds": 900.0, "timeouts": TIMEOUTS, "policy": POLICY}  # fmt: skip
-_PINNED = (
-    "dryrun simulation traces gates policy synthesizer runner library prompts repair"
+# DECISION plan-2026-11-10T194139-2cefeb61/D-067
+# SRC_PINS is the ONE list of what the verdict depends on (this whole script, bench_common,
+# the compile, simulate and run code, G6b's eval driver, the modules react.py imports): hashed
+# at register, checked at run AND report. Do NOT hash only the fixture region and do NOT keep a
+# second list in the tests.
+_SYNTH = "dryrun simulation traces gates policy synthesizer runner library prompts repair constants"  # fmt: skip
+_AGENTS = "react base constants definitions exceptions fsm_definitions handlers hitl meta_builders meta_prompts prompts summarization tools truncation"  # fmt: skip
+SRC_PINS = (
+    "scripts/synthesis_bench.py",
+    "scripts/bench_common.py",
+    "src/flow_analysis.py",
+    "src/eval/cases.py",
+    *(f"src/synthesis/{m}.py" for m in _SYNTH.split()),
+    *(f"src/agents/{m}.py" for m in _AGENTS.split()),
 )
-SRC_PINS = (*(f"src/synthesis/{m}.py" for m in _PINNED.split()), "src/flow_analysis.py")
 PINNED_AT_RUN = (
     "fixture_hash",
     "trials",
@@ -318,6 +329,17 @@ def fixture_sha256() -> str:
     text = Path(__file__).read_text(encoding="utf-8")
     start, end = text.index("# --- BEGIN FIXTURE"), text.index("# --- END FIXTURE")
     return hashlib.sha256(text[start:end].encode("utf-8")).hexdigest()
+
+
+def code_pins() -> dict[str, Any]:
+    """The hashes of what the verdict depends on: the fixture region and each ``SRC_PINS`` file."""
+    return {"fixture_hash": fixture_sha256(), "src_sha256": {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in SRC_PINS}}  # fmt: skip
+
+
+def edited_pins(recorded: dict[str, Any]) -> list[str]:
+    """The pinned files (and the fixture region) that differ from a registered manifest."""
+    now, was = code_pins(), recorded.get("src_sha256") or {}
+    return [p for p, h in now["src_sha256"].items() if was.get(p) != h] + ["the fixture region"] * (recorded.get("fixture_hash") != now["fixture_hash"])  # fmt: skip
 
 
 def min_gaps(n: int = PRIMARY_N) -> dict[int, int]:
@@ -641,8 +663,7 @@ def build_manifest(block: str, arm: str) -> dict[str, Any]:
     return {
         "bench_id": BENCH_ID, "block": block, "model": require_model(MODEL), "trials": TRIALS,
         "arm": {"name": arm}, "order": "task-major, arms alternate, first arm flips per task",
-        "n_tasks": len(TASKS), "limits": copy.deepcopy(LIMITS), "fixture_hash": fixture_sha256(),
-        "src_sha256": {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in SRC_PINS},
+        "n_tasks": len(TASKS), "limits": copy.deepcopy(LIMITS), **code_pins(),
         "model_digest": bc._model_digest(MODEL_TAG), "wire": wire_disclosure(),
         "git_commit": bc._git_commit(), "created_at": bc._utc_now(),
     }  # fmt: skip
@@ -717,7 +738,7 @@ def run_block(block: str, *, client: Any = None, confirm_exclusive: bool = False
     for arm in arms:
         recorded = json.loads(_paths(bdir, arm)[0].read_text(encoding="utf-8"))
         if drift := bc.pinned_drift(recorded, build_manifest(block, arm), PINNED_AT_RUN):  # fmt: skip
-            raise bc.BenchDataError(f"{arm} was registered with different {drift}")
+            raise bc.BenchDataError(f"{arm} was registered with different {drift}; edited after register: {', '.join(edited_pins(recorded)) or 'no pinned file'}")  # fmt: skip
     started, ran, status, streak, todo = bc._utc_now(), bc.run_commit(), "aborted: not finished", 0, plan(block)  # fmt: skip
     try:
         with tempfile.TemporaryDirectory(prefix="synthesis-bench-") as tmp:
@@ -767,7 +788,11 @@ def report(block: str) -> int:
     if not bdir.is_dir():
         raise bc.BenchDataError(f"no such block: {bdir}")
     for arm in BLOCKS[block]:
-        _, rows_path, summary_path = _paths(bdir, arm)
+        manifest_path, rows_path, summary_path = _paths(bdir, arm)
+        if manifest_path.is_file() and (edited := edited_pins(json.loads(manifest_path.read_text(encoding="utf-8")))):  # fmt: skip
+            raise bc.BenchDataError(
+                f"{arm}: edited after register: {', '.join(edited)}"
+            )
         if not rows_path.is_file():
             continue
         recount[arm] = m = json.loads(json.dumps(metrics(bc.read_rows(rows_path))))

@@ -4,8 +4,10 @@ it guards against. No network, no ``fsm_llm`` import by the script itself."""
 
 from __future__ import annotations
 
+import ast
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -656,9 +658,7 @@ class TestBlocks:
         manifest = json.loads(paths[0].read_text())
         assert manifest["model"] == sb.MODEL and manifest["trials"] == 2
         assert manifest["fixture_hash"] == sb.fixture_sha256()
-        assert (
-            set(manifest["src_sha256"]) == set(sb.SRC_PINS) and len(sb.SRC_PINS) == 11
-        )
+        assert set(manifest["src_sha256"]) == set(sb.SRC_PINS)
         assert set(manifest["wire"]) == {"compile", "run"} and "num_ctx" not in json.dumps(manifest)  # fmt: skip
         with pytest.raises(BAD, match="ONCE"):
             sb.register_block("s0")
@@ -767,6 +767,80 @@ class TestBlocks:
             and "Fisher p = 0.0121" in out
             and sb.RULE in out
         )
+
+
+# What the verdict depends on beyond the fixture region (D-067).
+REQUIRED_PINS = (
+    "scripts/synthesis_bench.py",
+    "scripts/bench_common.py",
+    "src/synthesis/constants.py",
+    "src/eval/cases.py",
+    "src/agents/react.py",
+)
+
+
+def _module_imports(path):
+    """The sibling modules a file of src/agents imports at module level."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return {
+        f"src/agents/{alias.name if node.module is None else node.module.split('.')[0]}.py"
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.level == 1
+        for alias in (node.names if node.module is None else node.names[:1])
+    }
+
+
+class TestPins:
+    @pytest.fixture
+    def tree(self, bench, monkeypatch, tmp_path):
+        """Every pinned file copied under a tmp ROOT: tampering never touches the repo."""
+        root = tmp_path / "tree"
+        for pin in {*sb.SRC_PINS, *REQUIRED_PINS}:
+            (root / pin).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(sb.ROOT / pin, root / pin)
+        monkeypatch.setattr(sb, "ROOT", root)
+        return root
+
+    def test_the_pins_name_the_script_the_constants_the_eval_driver_and_react(self):
+        """Guards: a verdict input outside the registration (review concern 5)."""
+        assert set(REQUIRED_PINS) <= set(sb.SRC_PINS)
+        assert all((sb.ROOT / p).is_file() for p in sb.SRC_PINS)
+        assert len(sb.SRC_PINS) == len(set(sb.SRC_PINS))
+
+    def test_every_module_the_react_loop_imports_is_pinned(self):
+        """Guards: the R arm's agent code changing under a registered block."""
+        todo, seen = ["src/agents/react.py"], set()
+        while todo:
+            name = todo.pop()
+            if name not in seen:
+                seen.add(name)
+                todo += _module_imports(sb.ROOT / name)
+        assert len(seen) > 5 and seen <= set(sb.SRC_PINS), seen - set(sb.SRC_PINS)
+
+    @pytest.mark.parametrize("pin", sorted({*sb.SRC_PINS, *REQUIRED_PINS}))
+    def test_editing_a_pinned_file_after_register_refuses_run_and_report(
+        self, pin, bench, tree
+    ):
+        """Guards: a verdict computed by code that is not the registered code."""
+        sb.register_block("s0")
+        assert sb.report("s0") == 0
+        (tree / pin).write_text((tree / pin).read_text() + "\n# edited\n")
+        with pytest.raises(BAD, match=re.escape(pin)):
+            sb.run_block("s0", client=_Client(), sleep=lambda s: None)
+        with pytest.raises(BAD, match=re.escape(pin)):
+            sb.report("s0")
+        assert not list((bench / "s0").glob("rows_*"))
+
+    def test_report_refuses_a_recount_of_rows_read_against_edited_code(
+        self, bench, tree, capsys
+    ):
+        """Guards: a report that prints numbers (or a verdict) from edited code."""
+        sb.register_block("s0")
+        (bench / "s0" / "rows_react.jsonl").write_text("{}\n")
+        (tree / "scripts/synthesis_bench.py").write_text("# edited\n")
+        with pytest.raises(BAD, match="edited after register"):
+            sb.report("s0")
+        assert capsys.readouterr().out == ""
 
 
 class TestSmoke:
