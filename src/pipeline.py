@@ -71,6 +71,7 @@ from .definitions import (
     TransitionEvaluation,
     TransitionEvaluationResult,
     TransitionOption,
+    handler_only_names,
 )
 from .handlers import HandlerExecutionError, HandlerSystem, HandlerTiming
 from .llm import LLMInterface, check_tool_transcript, implements_complete
@@ -1592,20 +1593,7 @@ class MessagePipeline:
         Resolved per instance through ``fsm_resolver`` so a stacked child uses
         its own list, not the root's. Returns an empty set for the default.
         """
-        fsm_def = self.fsm_resolver(instance.fsm_id)
-        return (
-            frozenset(fsm_def.handler_only_keys)
-            | {
-                state.completion.result_key
-                for state in fsm_def.states.values()
-                if state.completion is not None
-            }
-            | {
-                state.synthesize.result_key
-                for state in fsm_def.states.values()
-                if state.synthesize is not None
-            }
-        )
+        return handler_only_names(self.fsm_resolver(instance.fsm_id))
 
     @staticmethod
     def _build_field_configs_from_state(state: State) -> list[FieldExtractionConfig]:

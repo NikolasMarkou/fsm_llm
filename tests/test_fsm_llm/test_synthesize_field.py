@@ -17,7 +17,12 @@ from pydantic import ValidationError
 
 from fsm_llm import API
 from fsm_llm.api import ContextMergeStrategy
-from fsm_llm.definitions import FSMDefinition, State, SynthesizeConfig
+from fsm_llm.definitions import (
+    FSMDefinition,
+    State,
+    SynthesizeConfig,
+    handler_only_names,
+)
 from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.validator import FSMValidator
 from tests.conftest import MockLLM2Interface
@@ -549,6 +554,26 @@ class TestPipelineMintsNothing:
         data = api.get_data(conv_id)
         assert result_key not in data and "answer" not in data
         assert [call for call, _ in llm.call_history if call == "extract_field"] == []
+
+
+class TestHandlerOnlyNames:
+    """``handler_only_names``: the one answer the pipeline and the flow analysis
+    share to "which keys may no extraction write"."""
+
+    def test_names_every_handler_only_source_and_no_plain_key(self):
+        raw = _parent()
+        raw["handler_only_keys"] = ["audit_note"]
+        raw["states"]["turn"] = _completion_state("turn", result_key="turn_reply")
+        raw["states"]["start"]["transitions"].append(
+            {"target_state": "turn", "description": "chat"}
+        )
+        definition = FSMDefinition(**raw)
+        names = handler_only_names(definition)
+        assert names == frozenset({"audit_note", "synthesis_result", "turn_reply"})
+        assert "answer" not in names and "topic" not in names
+
+    def test_the_default_definition_names_nothing(self):
+        assert handler_only_names(FSMDefinition(**_golden())) == frozenset()
 
 
 _CHILD: dict[str, Any] = {

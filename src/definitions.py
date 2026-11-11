@@ -1390,6 +1390,24 @@ def is_public_result_key(key: str) -> bool:
     )
 
 
+def handler_only_names(definition: FSMDefinition) -> frozenset[str]:
+    """Keys no extraction may write (D-033): the FSM author's
+    ``handler_only_keys`` plus the ``result_key`` of every completion state (only
+    its own completion call writes it, D-021) and of every synthesize state (only
+    the runner writes it, D-002 of plan 2cefeb61).
+
+    The one answer shared by ``MessagePipeline._handler_only_keys`` and
+    ``flow_analysis``. Takes a loaded definition, returns a new frozenset (empty
+    for a definition with none of the three), never raises.
+    """
+    results = {
+        config.result_key
+        for state in definition.states.values()
+        if (config := state.completion or state.synthesize) is not None
+    }
+    return frozenset(definition.handler_only_keys) | results
+
+
 class CompletionStateConfig(BaseModel):
     """The Pass-1 work of a completion state (``State.completion``).
 

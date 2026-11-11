@@ -18,6 +18,7 @@ from .definitions import (
     FSMDefinition,
     State,
     Transition,
+    handler_only_names,
     logic_has_unresolvable_reads,
     logic_referenced_keys,
     reachable_from,
@@ -139,12 +140,6 @@ def _result_key(state: State) -> str | None:
     return config.result_key if config is not None else None
 
 
-def _handler_only(definition: FSMDefinition) -> frozenset[str]:
-    """Keys no extraction may write: the pipeline's `_handler_only_keys`."""
-    keys = {k for s in definition.states.values() if (k := _result_key(s))}
-    return frozenset(definition.handler_only_keys) | keys
-
-
 def _produced(state: State, handler_only: frozenset[str]) -> set[str]:
     """Keys `state` can write on arrival or while the conversation sits in it:
     its minted and classification keys minus the handler-only set, plus its own
@@ -249,7 +244,7 @@ def declared_available(
     Returns: state id -> frozenset of key names, in definition order; states
         unreachable from the initial state are absent. Never raises.
     """
-    handler_only = _handler_only(definition)
+    handler_only = handler_only_names(definition)
     arrival = _forward_meet(
         definition,
         frozenset(inputs),
@@ -299,7 +294,7 @@ def analyze_data_flow(
     """
     states = definition.states
     given = frozenset(inputs)
-    handler_only = _handler_only(definition)
+    handler_only = handler_only_names(definition)
     available = declared_available(definition, given)
     findings: list[FlowFinding] = []
 
