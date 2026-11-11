@@ -115,11 +115,13 @@ class GateReport:
 
         lines: list[str] = []
         used = 0
-        noted = False
+        noted: set[tuple[str, str]] = set()
         for i, f in enumerate(shown):
             line = f"{f.gate} {safe_text(f.code)} [{safe_text(f.state)}]: {_message(f)}"
-            if (f.gate, f.code) == ("G6a", "edge-unfireable") and not noted:
-                line, noted = f"{line} {_MISSING_NOTE}", True
+            key = (f.gate, f.code)
+            if key in _NOTES and key not in noted:
+                line = f"{line} {_NOTES[key]}"
+                noted.add(key)
             if used + len(line) + 1 > cap - 30:  # room for the "and K more" line
                 lines.append(f"and {len(shown) - i} more")
                 break
@@ -169,6 +171,21 @@ _MISSING_NOTE = (
     "present and an and of it with a test of k cannot pass. To need a key present "
     "use requires_context_keys."
 )
+
+# DECISION plan-2026-11-10T194139-2cefeb61/D-109
+# A G6b `happy-path-failing` on a key whose extraction text lists allowed values and
+# whose edge has no value gate means the check can only feed the filler, which the text
+# refuses (live, s2 smoke r4, two rounds running). The note says what to add. Same
+# rules as D-108: fixed ASCII, first such line only, no task word, gates unchanged.
+_VALUE_GATE_NOTE = (
+    "A key that is chosen from a list of allowed values is only simulated with a "
+    'real value when its edge has logic {"in": [{"var": "k"}, ["a", "b"]]} over '
+    "those values; add that logic to the edge that needs the key."
+)
+_NOTES = {
+    ("G6a", "edge-unfireable"): _MISSING_NOTE,
+    ("G6b", "happy-path-failing"): _VALUE_GATE_NOTE,
+}
 
 
 def _message(f: GateFinding) -> str:

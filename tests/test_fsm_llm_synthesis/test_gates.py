@@ -701,3 +701,54 @@ class TestMissingNote:
             f"{safe_text(finding.message)}"
         )
         assert GateReport((finding,)).repair_text() == old
+
+
+_VALUE_GATE_NOTE = (
+    "A key that is chosen from a list of allowed values is only simulated with a "
+    'real value when its edge has logic {"in": [{"var": "k"}, ["a", "b"]]} over '
+    "those values; add that logic to the edge that needs the key."
+)
+
+
+class TestValueGateNote:
+    """D-109: a failing happy path says how a listed-value key gets a real value."""
+
+    def _report(self, n: int = 2) -> GateReport:
+        found = tuple(
+            GateFinding("G6b", "happy-path-failing", "route", f"0 of {i} passed")
+            for i in range(n)
+        )
+        return GateReport(found)
+
+    def test_the_note_follows_the_first_happy_path_line_only(self):
+        text = self._report().repair_text()
+        assert text.count(_VALUE_GATE_NOTE) == 1
+        assert text.splitlines()[0].endswith(_VALUE_GATE_NOTE)
+        assert _VALUE_GATE_NOTE.isascii()
+
+    def test_each_note_is_added_once_and_they_do_not_share_a_slot(self):
+        both = GateReport(
+            (
+                GateFinding("G6a", "edge-unfireable", "a", "dead"),
+                GateFinding("G6b", "happy-path-failing", "a", "bad"),
+                GateFinding("G6b", "happy-path-failing", "a", "bad"),
+                GateFinding("G6a", "edge-unfireable", "a", "dead"),
+            )
+        ).repair_text()
+        assert both.count(_VALUE_GATE_NOTE) == 1
+        assert both.count(_MISSING_NOTE) == 1
+
+    @pytest.mark.parametrize(
+        "finding",
+        [
+            GateFinding("G6b", "pass-rate-low", "", "0 of 2 trials passed"),
+            GateFinding("G6a", "happy-path-failing", "s", "x"),
+            GateFinding("G4", "happy-path-failing", "s", "x"),
+        ],
+    )
+    def test_every_other_finding_is_byte_identical(self, finding):
+        old = (
+            f"{finding.gate} {safe_text(finding.code)} [{safe_text(finding.state)}]: "
+            f"{safe_text(finding.message)}"
+        )
+        assert GateReport((finding,)).repair_text() == old
