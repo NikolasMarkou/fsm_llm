@@ -645,7 +645,32 @@ class TestRateLimits:
             codes.append(rig.repair(ops, replay_scripts=[SCRIPT], write=True).code)
 
         assert codes == ["promote", "promote", "lineage-limit", "lineage-limit"]
-        assert rig.lib.count_children(rig.parent) == 2
+        assert rig.lib.count_lineage(rig.parent) == 2
+
+    def test_the_lineage_limit_binds_the_whole_tree_not_each_record(self, tmp_path):
+        """Under a trusted root every child is a record of its own with a count of
+        1; the bound is on the tree (D-072)."""
+        limit = SynthesisPolicy(max_repairs_per_lineage=2)
+        rig = Rig(tmp_path, writes=40, policy=limit)
+        root = rig.parent
+        rig.lib.approve(root, "owner")
+        children = []
+        for i in range(2):
+            if i:
+                _fail(rig, 3)
+            ops = [{"op": "replace", "path": PATH, "value": f"The answer FIXED v{i}"}]
+            res = rig.repair(ops, replay_scripts=[SCRIPT], write=True)
+            assert res.code == "promote"
+            children.append(res.child)
+        assert rig.lib.count_lineage(root) == 2
+
+        rig.parent = children[0]  # a child: its own minor is 1, below the limit
+        rig.lib.add_scenarios(rig.parent, [{"kind": "happy", "turns": ["go"]}])
+        _fail(rig, 3)
+        ops = [{"op": "replace", "path": PATH, "value": "The answer FIXED grand"}]
+        res = rig.repair(ops, replay_scripts=[SCRIPT], write=True)
+        assert res.code == "lineage-limit" and not res.written
+        assert rig.lib.count_lineage(root) == 2
 
     def test_a_repair_consumes_its_evidence_so_old_traces_buy_no_second_one(
         self, tmp_path

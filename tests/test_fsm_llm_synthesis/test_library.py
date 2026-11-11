@@ -990,27 +990,45 @@ class TestRepairLineage:
         with pytest.raises(LibraryError):  # the plain call still refuses the edge
             lib.deprecate(rec.digest)
 
-    def test_count_children_counts_every_child_of_a_digest(self, lib):
-        parent = _put(lib, lifecycle="verified")
-        assert lib.count_children(parent.digest) == 0
-        kids = [
-            lib.put(
-                _fsm(f"Kid{i}"),
-                goal=GOAL,
-                inputs_required=["party"],
-                return_keys=["slot"],
-                lifecycle="verified",
-                parent=parent.digest,
-                repair=f"{i}" * 64,
-            )
-            for i in range(3)
-        ]
+    def _kid(self, lib, name, parent, i):
+        return lib.put(
+            _fsm(name),
+            goal=GOAL,
+            inputs_required=["party"],
+            return_keys=["slot"],
+            lifecycle="verified",
+            parent=parent.digest,
+            repair=f"{i}" * 64,
+        )
+
+    def test_count_lineage_counts_every_repair_of_the_tree_from_the_root(self, lib):
+        root = _put(lib, lifecycle="verified")
+        assert lib.count_lineage(root.digest) == 0
+        kids = [self._kid(lib, f"Kid{i}", root, i) for i in range(3)]
+        grand = self._kid(lib, "Grand", kids[1], 4)
         lib.deprecate(kids[0].digest)  # a retired child still counts
         _put(lib, "Stranger", lifecycle="verified")
-        assert lib.count_children(parent.digest) == 3
-        assert lib.count_children(kids[0].digest) == 0
+        # the same tree whichever node asks: 3 children and 1 grandchild
+        for node in (root, *kids, grand):
+            assert lib.count_lineage(node.digest) == 4
         with pytest.raises(LibraryError, match="invalid digest"):
-            lib.count_children("../x")
+            lib.count_lineage("../x")
+
+    def test_count_lineage_stops_at_a_parent_that_is_not_stored(self, lib):
+        root = _put(lib, lifecycle="verified")
+        kid = self._kid(lib, "Kid", root, 1)
+        self._kid(lib, "Grand", kid, 2)
+        (lib.root / "records" / f"{root.digest}.json").unlink()
+        assert lib.count_lineage(kid.digest) == 1  # the kid is the root now
+
+    def test_count_lineage_survives_a_cycle_in_a_corrupt_store(self, lib):
+        root = _put(lib, lifecycle="verified")
+        kid = self._kid(lib, "Kid", root, 1)
+        path = lib.root / "records" / f"{root.digest}.json"
+        data = json.loads(path.read_text())
+        data["provenance"]["parent"] = kid.digest
+        path.write_text(json.dumps(data))
+        assert lib.count_lineage(kid.digest) == 1
 
     def test_clean_scenarios_is_the_public_cleaner(self):
         out = FSMLibrary.clean_scenarios(

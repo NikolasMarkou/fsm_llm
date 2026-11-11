@@ -140,8 +140,9 @@ class SynthesisPolicy:
         ``max_patch_ops`` and ``max_patch_chars`` bound one patch: its ops and
         the characters of all its strings and keys (``apply_patch``).
         ``replay_trials`` is the trials per replayed scenario on each side;
-        ``max_repairs_per_lineage`` the repairs a lineage may hold (the
-        parent's minor version plus its stored children).
+        ``max_repairs_per_lineage`` the repairs a lineage may hold: every
+        stored record below the root of the tree, children and deeper
+        descendants, deprecated ones included (``count_lineage``).
         ``trust_after_successes`` is ``None`` or an ``int`` from 1.
         ``allowed_tools`` is a collection of non-blank names (a bare string is
         refused); it is stored as a ``frozenset``. ``require_approval`` is a

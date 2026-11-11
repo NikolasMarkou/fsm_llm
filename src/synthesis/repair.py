@@ -188,8 +188,8 @@ def repair_procedure(
     Interface contract: pure until the last step; every refusal is a
     ``PromotionResult`` whose ``code`` is in ``constants.PROMOTION_CODES`` and
     writes nothing. In order: the parent must be ``verified`` or ``trusted`` and
-    canonical; the lineage limit (the parent's minor version plus its stored
-    children) and ``repair_min_failures`` (runs of its stored traces that
+    canonical; the lineage limit (the repairs in the whole tree from the root,
+    ``FSMLibrary.count_lineage``) and ``repair_min_failures`` (runs of its stored traces that
     ``diagnose`` calls a procedure fault; a written repair consumes the traces it
     used, so only newer runs count next time) are checked; ``apply_patch`` is scoped to the diagnosed
     states; the child must pass G1 to G6a, differ from the parent and from every
@@ -222,12 +222,12 @@ def repair_procedure(
     if stripped is None:
         return stop("parent-not-canonical")
     inputs, keys = record.signature["inputs_required"], record.signature["return_keys"]
-    # DECISION plan-2026-11-10T194139-2cefeb61/D-063
-    # The lineage count is the ancestors (the minor version) PLUS every child of
-    # this parent: a trusted parent is never deprecated and keeps minor 0. Do NOT
-    # count the version alone.
-    repairs = int(record.version.split(".")[1]) + library.count_children(parent_digest)
-    if repairs >= policy.max_repairs_per_lineage:
+    # DECISION plan-2026-11-10T194139-2cefeb61/D-072
+    # The lineage is the whole tree from the root: its repairs (every stored
+    # record below the root, deprecated ones too) are bounded together, whichever
+    # node is repaired. Do NOT count per record (a trusted root fans out and each
+    # child starts its own chain) and do NOT add the minor version (double count).
+    if library.count_lineage(parent_digest) >= policy.max_repairs_per_lineage:
         return stop("lineage-limit")
     traces, _ = library.read_traces(parent_digest)
     # the stripped form: the abort edge reads a key no trace holds

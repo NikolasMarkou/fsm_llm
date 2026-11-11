@@ -653,10 +653,23 @@ class FSMLibrary:
             for name in sorted(n for n in names if n.endswith(".json"))
         ]
 
-    def count_children(self, digest: str) -> int:
-        """How many records (any lifecycle) name *digest* as their ``parent``."""
+    def count_lineage(self, digest: str) -> int:
+        """The repairs in the tree *digest* belongs to: every stored record, of
+        any lifecycle, except the root (the first ancestor over ``provenance``
+        ``parent`` whose parent is not stored; a cycle in corrupt data stops at
+        the first repeat). The same number whichever node asks."""
         self._path("records", digest)  # validates the id
-        return sum(r.provenance["parent"] == digest for r in self._records())
+        parents = {r.digest: r.provenance["parent"] for r in self._records()}
+
+        def root(node: str) -> str:
+            seen = {node}
+            while parents.get(node) in parents and parents[node] not in seen:
+                node = parents[node]
+                seen.add(node)
+            return node
+
+        top = root(digest)
+        return sum(node != top and root(node) == top for node in parents)
 
     def search(
         self,
