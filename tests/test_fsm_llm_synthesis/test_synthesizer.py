@@ -569,6 +569,13 @@ class TestPrompt:
             r"urgent|billing|refund|shipping|priority", rule
         )  # no task text
 
+    def test_the_prompt_says_missing_means_absent(self):
+        """Guards (D-108): s2 y2 wrote an and of missing and a range test on one key."""
+        text = system_prompt(SynthesisPolicy())
+        assert "missing is true only when the key is ABSENT" in text
+        assert "never use it to mean present" in text
+        assert "never put it in an and beside a test of the same key" in text
+
     def test_the_prompt_says_a_key_presence_gate_has_no_logic(self):
         text = system_prompt(SynthesisPolicy())
         assert "only needs a key present has no logic" in text

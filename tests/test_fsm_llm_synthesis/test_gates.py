@@ -644,3 +644,60 @@ class TestVerifyStored:
         assert [f.code for f in report.findings] == ["stored-not-canonical"]
         assert report.verdicts["G1"] == "skipped"
         assert report.verdicts["G6a"] == "skipped"
+
+
+_MISSING_NOTE = (
+    'In logic, {"missing": ["k"]} is true only when k is ABSENT, so it never means '
+    "present and an and of it with a test of k cannot pass. To need a key present "
+    "use requires_context_keys."
+)
+
+
+def _missing_and_test(valid_fsm: dict[str, Any]) -> GateReport:
+    """A REAL G6a refusal: the live shape, `missing` meant as "present" and an
+    and of it with a range test on the same key (s2 y2)."""
+    cond = valid_fsm["states"]["ask"]["transitions"][0]["conditions"][0]
+    cond["requires_context_keys"] = ["answer"]
+    cond["logic"] = {"and": [{"missing": ["answer"]}, {">=": [{"var": "answer"}, 1]}]}
+    valid_fsm["states"]["ask"]["field_extractions"][0]["field_type"] = "int"
+    return _run(valid_fsm)
+
+
+class TestMissingNote:
+    """D-108: a dead edge says what `missing` means."""
+
+    def test_the_finding_is_the_real_g6a_one(self, valid_fsm):
+        report = _missing_and_test(valid_fsm)
+        assert ("G6a", "edge-unfireable") in {(f.gate, f.code) for f in report.findings}
+
+    def test_the_note_follows_the_first_dead_edge_line_only(self, valid_fsm):
+        report = _missing_and_test(valid_fsm)
+        dead = [f for f in report.findings if f.code == "edge-unfireable"]
+        text = report.repair_text()
+        assert text.count(_MISSING_NOTE) == 1
+        assert f"{safe_text(dead[0].message)} {_MISSING_NOTE}" in text
+        assert _MISSING_NOTE.isascii()
+
+    def test_two_dead_edges_get_one_note(self):
+        report = GateReport(
+            (
+                GateFinding("G6a", "edge-unfireable", "a", "edge 'a' -> 'b' dead"),
+                GateFinding("G6a", "edge-unfireable", "a", "edge 'a' -> 'a' dead"),
+            )
+        )
+        assert report.repair_text().count(_MISSING_NOTE) == 1
+
+    @pytest.mark.parametrize(
+        "finding",
+        [
+            GateFinding("G6a", "terminal-unreachable", "s", "x"),
+            GateFinding("G4", "edge-unfireable", "s", "x"),
+            GateFinding("G3", "edge-unfireable", "s", "x"),
+        ],
+    )
+    def test_every_other_finding_is_byte_identical(self, finding):
+        old = (
+            f"{finding.gate} {safe_text(finding.code)} [{safe_text(finding.state)}]: "
+            f"{safe_text(finding.message)}"
+        )
+        assert GateReport((finding,)).repair_text() == old

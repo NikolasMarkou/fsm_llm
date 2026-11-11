@@ -115,8 +115,11 @@ class GateReport:
 
         lines: list[str] = []
         used = 0
+        noted = False
         for i, f in enumerate(shown):
             line = f"{f.gate} {safe_text(f.code)} [{safe_text(f.state)}]: {_message(f)}"
+            if (f.gate, f.code) == ("G6a", "edge-unfireable") and not noted:
+                line, noted = f"{line} {_MISSING_NOTE}", True
             if used + len(line) + 1 > cap - 30:  # room for the "and K more" line
                 lines.append(f"and {len(shown) - i} more")
                 break
@@ -153,6 +156,18 @@ _ALLOWED_TAIL = "Allowed: ["
 _KEY_NAME_NOTE = (
     'Write {"var": "k"} and {"missing": ["k"]} with plain key-name strings, '
     'never a nested expression such as {"missing": [{"var": "k"}]}.'
+)
+
+
+# DECISION plan-2026-11-10T194139-2cefeb61/D-108
+# The G6a `edge-unfireable` finding says no value lets an edge fire and not why, so a
+# model that read `missing` as "present" rewrote the same dead edge four rounds running
+# (live, s2 y2). One fixed ASCII note, added to the FIRST such finding only (the cap is
+# shared). Do NOT defang it, do NOT repeat it per finding, do NOT put a task word in it.
+_MISSING_NOTE = (
+    'In logic, {"missing": ["k"]} is true only when k is ABSENT, so it never means '
+    "present and an and of it with a test of k cannot pass. To need a key present "
+    "use requires_context_keys."
 )
 
 

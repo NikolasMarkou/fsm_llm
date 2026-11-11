@@ -101,6 +101,10 @@ def operator_line() -> str:
     return f"Operators in logic (any other name is rejected): {names}."
 
 
+# DECISION plan-2026-11-10T194139-2cefeb61/D-108
+# The `missing` sentence exists because a compile wrote {"and": [{"missing": ["k"]},
+# {">=": [{"var": "k"}, 1]}]} to mean "k is present and in range" (live, s2 y2): that
+# edge can never fire. Do NOT make G6a accept it and do NOT name a task here.
 # DECISION plan-2026-11-10T194139-2cefeb61/D-106
 # The LABELS rule exists because a compiled "the X the user gives" for a key the goal
 # says to decide read null at run time and, with no value gate on the edge, the
@@ -128,7 +132,9 @@ condition has description, requires_context_keys (a list of keys that must be \
 present) and optional logic (JsonLogic such as {{">": [{{"var": "key"}}, 0]}}). \
 {operator_line()} A condition that only needs a key present has no logic: give \
 requires_context_keys alone. var and missing name a key as a plain string, \
-e.g. {{"missing": ["key"]}}, never as a nested expression. A state with no \
+e.g. {{"missing": ["key"]}}, never as a nested expression. missing is true \
+only when the key is ABSENT: never use it to mean present, and never put it in \
+an and beside a test of the same key. A state with no \
 transitions is terminal. Use no other fields.
 
 RULES (a checker rejects the FSM and sends you the failures):
