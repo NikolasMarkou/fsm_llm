@@ -371,6 +371,7 @@ _LITS = (1, 2, 3, "a", "b", "buy", True)
 _GRID = [-1, 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4]
 _ABSENT = object()
 _WIDE = [_ABSENT, True, False, "x", "a", "b", "buy", "browse", "1", "2", "3", *_GRID]
+_WIDE += ["", "0", "true", "false", "A", "BUY"]  # the oracle's own list, not the gate's
 
 
 def _leaf(rng: random.Random) -> Any:
@@ -506,6 +507,209 @@ class TestDifferential:
             reported += bool(got)
             silent += not got
         assert reported >= 30 and silent >= 30  # the generator exercises both
+
+
+# The fuzz oracle owns its pool: it never imports the gate's ``POOL_STRINGS``
+# (it would agree with itself). A test below pins that constant by value.
+_FUZZ_LITS = ["yes", "No", "3", "3.0", "01", 3, 2.5, 0, -1, True, False, None, "x", ""]
+_FUZZ_LITS += ["true", "1", 10]
+_FUZZ_WIDE = [
+    *[None, True, False, 0, 1, -1, 2, 3, 4, 10, 11, 2.5, 3.0, 0.5, -0.5],
+    *["3", "3.0", " 3", "03", "yes", "YES", "no", "No", "true", "TRUE", "false"],
+    *["x", "X", "", "1", "0", "01", "10", "2.5", "sample", "abc", 1e9, -1e9],
+    *[[1], ["yes"], {"a": 1}],
+]
+_FUZZ_OPS = ["==", "===", "!=", "!==", ">", ">=", "<", "<=", "in", "!", "!!", "and"]
+_FUZZ_OPS += ["or", "missing", "if"]
+_FUZZ_ABSENT = object()
+
+
+def _fuzz_logic(rng: random.Random, keys: list[str], depth: int = 0) -> Any:
+    op = rng.choice(_FUZZ_OPS if depth < 2 else _FUZZ_OPS[:9])
+    var = {"var": rng.choice(keys)}
+    if op in ("==", "===", "!=", "!=="):
+        args = [var, rng.choice([rng.choice(_FUZZ_LITS), {"var": rng.choice(keys)}])]
+        rng.shuffle(args)
+        return {op: args}
+    if op in (">", ">=", "<", "<="):
+        args = [var, rng.choice([3, 2.5, 0, 10, -1])]
+        rng.shuffle(args)
+        return {op: args}
+    if op == "in":
+        return {"in": [var, rng.sample(_FUZZ_LITS, 3)]}
+    if op in ("!", "!!"):
+        return {op: [rng.choice([var, _fuzz_logic(rng, keys, depth + 1)])]}
+    if op == "missing":
+        return {"missing": [rng.choice(keys)]}
+    if op == "if":
+        branches = [_fuzz_logic(rng, keys, depth + 1) for _ in range(2)]
+        return {"if": [*branches, rng.choice([True, False])]}
+    return {op: [_fuzz_logic(rng, keys, depth + 1) for _ in range(2)]}
+
+
+def _fuzz_case(seed: int) -> tuple[FSMDefinition, list[str]]:
+    rng = random.Random(seed)
+    keys = rng.sample(["a", "b", "c"], rng.randint(1, 2))
+    edges = []
+    for _ in range(rng.randint(1, 3)):
+        cond: dict[str, Any] = {"description": "c", "logic": _fuzz_logic(rng, keys)}
+        if rng.random() < 0.4:
+            cond["requires_context_keys"] = [rng.choice(keys)]
+        edges.append(
+            {
+                "target_state": rng.choice(["t1", "t2"]),
+                "description": "e",
+                "priority": rng.choice([1, 2, 3]),
+                "conditions": [cond],
+            }
+        )
+    return (
+        _fsm(_state("s0", edges), _state("t1"), _state("t2")),
+        keys,
+    )
+
+
+def _fuzz_false_rejects(seed: int) -> list[Any]:
+    """Edges G6a calls dead although some wide-pool context makes the REAL
+    evaluator take their target (only edges alone on their target are judged:
+    a shared target message cannot name one edge)."""
+    try:
+        definition, keys = _fuzz_case(seed)
+    except Exception:
+        return []
+    dead = {
+        f.message for f in analyze_dryrun(definition) if f.code == "edge-unfireable"
+    }
+    state, evaluator, bad = definition.states["s0"], TransitionEvaluator(), []
+    for edge in state.transitions or []:
+        alone = [t for t in state.transitions if t.target_state == edge.target_state]
+        if len(alone) != 1 or not any(f"-> '{edge.target_state}'" in m for m in dead):
+            continue
+        for values in itertools.product(*[[_FUZZ_ABSENT, *_FUZZ_WIDE]] * len(keys)):
+            data = {
+                k: v for k, v in zip(keys, values, strict=True) if v is not _FUZZ_ABSENT
+            }
+            try:
+                result = evaluator.evaluate_transitions(state, FSMContext(data=data))
+            except Exception:
+                continue
+            wins = (
+                {result.deterministic_transition}
+                if result.deterministic_transition
+                else {o.target_state for o in result.available_options or ()}
+            )
+            if edge.target_state in wins and evaluator.transition_passes(edge, data):
+                bad.append((seed, edge.conditions[0].logic, data))
+                break
+    return bad
+
+
+class TestAWiderPoolNeverFalselyRejects:
+    def test_the_pool_strings_are_pinned_by_value(self):
+        assert dryrun.POOL_STRINGS == ("", "true", "false")
+
+    def test_a_string_literal_is_tried_in_upper_case_too(self):
+        # `==` ignores case: the low-priority edge wins where `===` fails
+        low = {"==": [_var("a"), "yes"]}
+        strict = {"===": [_var("a"), "yes"]}
+        definition = _fsm(
+            _state(
+                "s0",
+                [_edge("t1", strict, priority=1), _edge("t2", low, priority=2)],
+            ),
+            _state("t1"),
+            _state("t2"),
+        )
+        assert ("edge-unfireable", "s0") not in _found(definition)
+
+    def test_the_empty_string_opens_a_not_null_edge(self):
+        not_null = {"!": [{"==": [_var("c"), None]}]}
+        same = {"===": [_var("a"), _var("a")]}
+        definition = _fsm(
+            _state(
+                "s0",
+                [
+                    _edge("t1", not_null, priority=3),
+                    _edge("t2", same, requires=("c",), priority=1),
+                ],
+            ),
+            _state("t1"),
+            _state("t2"),
+        )
+        assert ("edge-unfireable", "s0") not in _found(definition)
+
+    def test_a_numeric_string_opens_a_not_true_and_positive_edge(self):
+        logic = {"and": [{"!": [{"==": [_var("b"), True]}]}, {">": [_var("b"), 0]}]}
+        definition = _fsm(
+            _state(
+                "s0",
+                [
+                    _edge("t1", logic, requires=("b",), priority=1),
+                    _edge("t2", {"!!": [_var("b")]}, priority=2),
+                ],
+            ),
+            _state("t1"),
+            _state("t2"),
+        )
+        assert ("edge-unfireable", "s0") not in _found(definition)
+
+    def test_the_found_seeds_and_a_fixed_block_have_no_false_reject(self):
+        # seeds a 12,000-FSM scan found (the gate's pool lacked "", numeric and
+        # bool strings and the upper-case form of a string literal), then 250 more
+        found = [1941, 2280, 2291, 4519, 5809, 5892, 6362, 10368, 11338]
+        seeds = [*found, *range(0, 250)]
+        assert [bad for seed in seeds for bad in _fuzz_false_rejects(seed)] == []
+
+
+class TestEdgeWitnesses:
+    def test_a_witness_is_the_context_under_which_the_edge_wins(self):
+        gate = {"in": [_var("k"), ["billing", "sales"]]}
+        definition = _fsm(
+            _state("ask", [_edge("done", gate, requires=("k",))]), _state("done")
+        )
+        found = dryrun.edge_witnesses(definition)
+        assert found == {"ask": {0: {"k": "billing"}}, "done": {}}
+
+    def test_the_witness_is_the_first_assignment_that_opens_the_edge(self):
+        one = {"in": [_var("k"), ["billing", "sales"]]}
+        two = {"==": [_var("k"), "other"]}
+        definition = _fsm(
+            _state(
+                "ask",
+                [
+                    _edge("t1", one, requires=("k",)),
+                    _edge("t2", two, requires=("k",), priority=2),
+                ],
+            ),
+            _state("t1"),
+            _state("t2"),
+        )
+        found = dryrun.edge_witnesses(definition)["ask"]
+        assert found == {0: {"k": "billing"}, 1: {"k": "other"}}
+
+    def test_a_dead_edge_is_absent_and_an_unknown_edge_is_none(self):
+        dead = {"==": [_var("ok"), "yes"]}  # a bool key can never equal "yes"
+        unknown = {"==": [{"var": "a.b"}, 1]}  # a dotted read is outside the fragment
+        definition = _fsm(
+            _state(
+                "ask",
+                [
+                    _edge("done", dead, requires=("ok",)),
+                    _edge("done", unknown, priority=2),
+                ],
+                field_extractions=BOOL,
+            ),
+            _state("done"),
+        )
+        assert dryrun.edge_witnesses(definition)["ask"] == {1: None}
+
+    def test_the_inputs_are_never_narrowed_so_they_get_a_witness(self):
+        gate = {"==": [_var("tier"), "gold"]}
+        definition = _fsm(
+            _state("ask", [_edge("done", gate, requires=("tier",))]), _state("done")
+        )
+        found = dryrun.edge_witnesses(definition, inputs=("tier",))
+        assert found["ask"] == {0: {"tier": "gold"}}
 
 
 class TestSpeed:

@@ -48,6 +48,20 @@ _EQUAL = frozenset({"==", "===", "!=", "!=="})
 _LOGICAL = frozenset({"!", "!!", "and", "or", "if"})
 _KINDS = {"bool": "bool", "int": "number", "float": "number"}
 
+# DECISION plan-2026-11-10T194139-2cefeb61/D-059
+# The pool of an untyped key holds every kind of value a model can extract:
+# the filler, each literal (also upper-cased), numbers and their string forms,
+# ``""``, ``"true"``, ``"false"``. A key no logic tests gets absent or the filler
+# only (presence is all that matters), which keeps three-key states under the
+# cap. Do NOT trim these kinds to shrink the search (a missing kind is a false
+# reject), and do NOT test the gate against a pool it shares with the oracle.
+#: What an untyped key gets first: a value that equals no literal of any gate.
+FILLER = "sample"
+#: Strings a model can extract that no other pool value spells (D-059): the
+#: empty string is "missing" but not null, and the evaluator reads "true" and
+#: "false" apart from the booleans.
+POOL_STRINGS = ("", "true", "false")
+
 
 def _plain(name: Any) -> bool:
     return isinstance(name, str) and bool(name) and "." not in name
@@ -110,18 +124,21 @@ def _judge(node: Any, lits: list[Any], reads: set[str]) -> bool:
     return True
 
 
-def _scan(edge: Transition) -> tuple[list[Any], set[str]] | None:
-    """(literals, key names read) of ``edge``; None when a gate is unknown."""
+def _scan(edge: Transition) -> tuple[list[Any], set[str], set[str]] | None:
+    """(literals, key names read, key names the logic tests) of ``edge``; None
+    when a gate is unknown. A key only ``requires_context_keys`` names is read
+    for its presence alone."""
     lits: list[Any] = []
-    reads: set[str] = set()
+    tested: set[str] = set()
+    required: set[str] = set()
     for condition in edge.conditions or []:
         names = condition.requires_context_keys or []
         if not all(_plain(n) for n in names) or not _judge(
-            condition.logic, lits, reads
+            condition.logic, lits, tested
         ):
             return None
-        reads.update(names)
-    return lits, reads
+        required.update(names)
+    return lits, tested | required, tested
 
 
 def _numbers(lits: list[Any]) -> list[float]:
@@ -142,16 +159,35 @@ def _numbers(lits: list[Any]) -> list[float]:
     return sorted([*points, *mids, points[0] - 1, points[-1] + 1])
 
 
+def _strings(lits: list[Any]) -> list[str]:
+    """``"0"``, ``"1"`` and each numeric literal as a model writes it (``3``
+    for 3.0, else the repr); a non-finite literal has none."""
+    found = ["0", "1"]
+    for value in lits:
+        if _number(value) and math.isfinite(value):
+            found.append(str(int(value)) if value == int(value) else repr(float(value)))
+    return found
+
+
 def _pool(narrow: tuple[str, tuple[str, ...]] | None, lits: list[Any]) -> list[Any]:
-    """The values tried for one key: absent first, then by kind (a key that
-    is not narrowed gets every literal, ``True``, ``False``, 0, 1 and ``"x"``)."""
+    """The values tried for one key: absent first, then by kind. A key that is
+    not narrowed gets the filler, every literal (a string also upper-cased:
+    ``==`` ignores case), the numeric partition, 0, 1 and each numeric literal
+    also as a string (a numeric string orders and equals like its number), then
+    ``True``, ``False``, 0, 1 and ``POOL_STRINGS``. The order picks the witness:
+    a natural value before a coerced one."""
     kind, intents = narrow or ("any", ())
     exact = [v for v in lits if v is not None]
+    points = _numbers(lits)
+    upper = [v.upper() for v in exact if isinstance(v, str)]
     values: dict[str, list[Any]] = {
         "bool": [True, False],
         "intent": list(intents),
-        "number": [v for v in exact if _number(v)] + _numbers(lits),
-        "any": [True, False, 0, 1, "x", *exact, *_numbers(lits)],
+        "number": [v for v in exact if _number(v)] + points,
+        "any": [
+            *[FILLER, *exact, *upper, *points, *_strings(exact)],
+            *[True, False, 0, 1, *POOL_STRINGS],
+        ],
     }
     seen: set[Any] = set()
     pool = []
@@ -204,13 +240,16 @@ def _mentions(definition: FSMDefinition) -> dict[str, set[str]]:
     return mentions
 
 
-def _dead_edges(
+def _search(
     state: State,
     narrow: dict[str, tuple[str, tuple[str, ...]]],
     evaluator: TransitionEvaluator,
-) -> dict[int, str]:
-    """Edges of ``state`` no assignment lets the evaluator take: edge index ->
-    the keys it reads with their kinds. Only judged edges go to the search (an
+) -> tuple[dict[int, str], dict[int, dict[str, Any]]]:
+    """``(dead, witness)`` for the edges of ``state``. ``dead``: edge index ->
+    the keys it reads with their kinds, for each edge no assignment lets the
+    evaluator take. ``witness``: edge index -> the context (present keys only)
+    of the FIRST assignment under which the evaluator takes that edge's target.
+    An unknown edge is in neither. Only judged edges go to the search (an
     unknown competitor left out can only make an edge easier to fire); a state
     whose pool product is over the cap, or that is a completion or synthesize
     state, yields nothing."""
@@ -218,38 +257,89 @@ def _dead_edges(
     scans = {i: _scan(t) for i, t in enumerate(edges)}
     judged = {i: s for i, s in scans.items() if s is not None}
     if not judged or state.completion is not None or state.synthesize is not None:
-        return {}
-    lits = [v for found, _ in judged.values() for v in found]
-    keys = sorted({k for _, reads in judged.values() for k in reads})
-    pools = [_pool(narrow.get(k), lits) for k in keys]
+        return {}, {}
+    lits = [v for found, _, _ in judged.values() for v in found]
+    keys = sorted({k for _, reads, _ in judged.values() for k in reads})
+    tested = {k for _, _, names in judged.values() for k in names}
+    # a key no logic tests matters by presence alone: absent or any value
+    pools = [
+        _pool(narrow.get(k), lits) if k in tested else [_ABSENT, FILLER] for k in keys
+    ]
     if math.prod(len(p) for p in pools) > MAX_ASSIGNMENTS:
-        return {}
+        return {}, {}
     probe = state.model_copy(update={"transitions": [edges[i] for i in judged]})
-    fired: set[int] = set()
+    witness: dict[int, dict[str, Any]] = {}
     for values in itertools.product(*pools):
         data = {k: v for k, v in zip(keys, values, strict=True) if v is not _ABSENT}
         try:
             result = evaluator.evaluate_transitions(probe, FSMContext(data=data))
         except TransitionEvaluationError:
-            return {}
+            return {}, {}
         if result.result_type is TransitionEvaluationResult.DETERMINISTIC:
             wins = {result.deterministic_transition}
         else:
             wins = {o.target_state for o in result.available_options or ()}
-        fired |= {
-            i
-            for i in judged
-            if i not in fired
-            and edges[i].target_state in wins
-            and evaluator.transition_passes(edges[i], data)
-        }
-        if len(fired) == len(judged):
-            return {}
+        for i in judged:
+            if (
+                i not in witness
+                and edges[i].target_state in wins
+                and evaluator.transition_passes(edges[i], data)
+            ):
+                witness[i] = data
+        if len(witness) == len(judged):
+            return {}, witness
     kinds = {k: narrow.get(k, ("any",))[0] for k in keys}
     return {
         i: ", ".join(f"{k} ({kinds[k]})" for k in sorted(judged[i][1])) or "any key"
         for i in judged
-        if i not in fired
+        if i not in witness
+    }, witness
+
+
+def _states(
+    definition: FSMDefinition, inputs: Iterable[str]
+) -> dict[str, tuple[dict[int, str], dict[int, dict[str, Any]]]]:
+    """The search of every state reachable over the edges, in definition order:
+    state id -> ``_search`` result. The one pass ``analyze_dryrun`` and
+    ``edge_witnesses`` both read."""
+    states = definition.states
+    graph = {
+        sid: [t.target_state for t in s.transitions or []] for sid, s in states.items()
+    }
+    reach = reachable_from(graph, [definition.initial_state]) & states.keys()
+    outside = frozenset(inputs) | handler_only_names(definition)
+    mentions = _mentions(definition)
+    evaluator = TransitionEvaluator()
+    return {
+        sid: _search(
+            states[sid], _narrowing(states[sid], sid, mentions, outside), evaluator
+        )
+        for sid in states
+        if sid in reach
+    }
+
+
+def edge_witnesses(
+    definition: FSMDefinition, *, inputs: Iterable[str] = ()
+) -> dict[str, dict[int, dict[str, Any] | None]]:
+    """For each state reachable over the edges: edge index -> the context under
+    which the evaluator takes that edge's target.
+
+    Interface contract (caller: ``simulation.happy_path``; the same search as
+    ``analyze_dryrun``, run once more): ``definition`` a loaded
+    ``FSMDefinition``, ``inputs`` as there. A dead edge is absent; an edge
+    outside the fragment (unknown, it counts as firing) maps to ``None``; every
+    other edge maps to the present keys of the first assignment that opens it
+    (pool values, ``FILLER`` among them, are plain Python scalars). Never
+    raises.
+    """
+    return {
+        sid: {
+            i: found.get(i)
+            for i in range(len(definition.states[sid].transitions or []))
+            if i not in dead
+        }
+        for sid, (dead, found) in _states(definition, inputs).items()
     }
 
 
@@ -269,21 +359,10 @@ def analyze_dryrun(
     """
     states = definition.states
     initial = definition.initial_state
-    graph = {
-        sid: [t.target_state for t in s.transitions or []] for sid, s in states.items()
-    }
-    reach = reachable_from(graph, [initial]) & states.keys()
-    outside = frozenset(inputs) | handler_only_names(definition)
-    mentions = _mentions(definition)
-    evaluator = TransitionEvaluator()
     findings: list[FlowFinding] = []
     live: dict[str, list[str]] = {}
-    for sid in states:
-        if sid not in reach:
-            continue
+    for sid, (dead, _) in _states(definition, inputs).items():
         edges = states[sid].transitions or []
-        narrow = _narrowing(states[sid], sid, mentions, outside)
-        dead = _dead_edges(states[sid], narrow, evaluator)
         live[sid] = [t.target_state for i, t in enumerate(edges) if i not in dead]
         for i, keys in dead.items():
             findings.append(
