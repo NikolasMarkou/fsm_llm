@@ -222,9 +222,10 @@ def hand_fsm(task: Task) -> dict[str, Any]:
     elif task.family == "branch":
         (one, two), ask_one, ask_two = task.spec
         edges = [_edge("first", [key], {"==": [var, one]}), _edge("second", [key], {"==": [var, two]})]
-        detail, done = [("detail", "str", "the detail the user gave, only when they state it as the answer to the question just asked; leave it empty otherwise")], [_edge("done", ["detail"])]
+        own = "Take only the user's answer to that question; if the user has not answered it yet, leave it empty."  # the state's own question, then this
+        done = [_edge("done", ["detail"])]
         states = {"ask": _state("ask", f"Ask whether it is {one} or {two}.", [(key, "str", f"exactly one of: {one}, {two}")], edges),
-                  "first": _state("first", ask_one, detail, done), "second": _state("second", ask_two, detail, done)}
+                  "first": _state("first", ask_one, [("detail", "str", f"{ask_one} {own}")], done), "second": _state("second", ask_two, [("detail", "str", f"{ask_two} {own}")], done)}
     else:
         lo, hi = task.spec
         ask = f"Ask the user for the {key.replace('_', ' ')} (from {lo} to {hi}). If it is outside that range, say it is not allowed and ask again."

@@ -39,9 +39,10 @@ from tests.test_fsm_llm_synthesis.conftest import (
 )
 
 BAD = sb.bc.BenchDataError
-# Block s1 (plan 2cefeb61 step 9, D-093, D-100, D-101): the hand-written branch `detail` hint and the
-# whole-word grader changed the fixture region. s0 was registered at bff1cbd1...a30349 (its manifests).
-FIXTURE_SHA = "086be3e58259cfd1b93874c4166923d3e95fdeee2403527ec32cfb1e5aa9652d"
+# Block s1 (plan 2cefeb61 step 9, D-093, D-100, D-101; step 10.2, D-105): the whole-word grader and the
+# hand-written branch `detail` instruction (the state's own question) changed the fixture region.
+# s0 was registered at bff1cbd1...a30349 (its manifests). Before 10.2 the s1 fixture was 086be3e5...9652d.
+FIXTURE_SHA = "f66a35b47ab3faf8bd374e71c43be19ad5b7eb2009786246145e5f4a96929d1b"
 TASKS = {t.id: t for t in sb.TASKS}
 FAMILIES = ("collect", "route", "branch", "retry")
 
@@ -626,26 +627,26 @@ class TestHarnessV2:
         assert got["values"] == {"guest_name": None, "checkin_date": task.gold["checkin_date"], "room_type": "x" * 80}  # fmt: skip
         assert sb.grade(task, None, [], 0)["values"] == dict.fromkeys(task.gold)
 
-    def test_the_branch_children_share_one_detail_hint_that_waits_for_the_answer(self):
-        """Guards (D-101): the hand arm's `detail` filled from the message that chose the
-        branch (s0: every branch task failed), and a hint that names a task."""
-        hints = {
-            s["field_extractions"][0]["extraction_instructions"]
-            for t in sb.TASKS
-            if t.family == "branch"
-            for sid, s in sb.hand_fsm(t)["states"].items()
-            if sid in ("first", "second")
-        }
-        assert len(hints) == 1
-        hint = hints.pop()
-        assert "answer to the question just asked" in hint and "leave it empty" in hint
+    def test_each_branch_child_detail_instruction_is_its_own_question(self):
+        """Guards (D-105): the field name `detail` alone (loop 1 smoke: `detail: null` for
+        "My company is Acme."), the other branch's question, a gold word in the text."""
+        template = "Take only the user's answer to that question; if the user has not answered it yet, leave it empty."  # fmt: skip
         golds = {v.lower() for t in sb.TASKS if t.family == "branch" for v in t.gold.values()}  # fmt: skip
-        assert not {g for g in golds if g in hint.lower()}
+        branches = [t for t in sb.TASKS if t.family == "branch"]
+        assert len(branches) == 4
+        for t in branches:
+            _, ask_one, ask_two = t.spec
+            states = sb.hand_fsm(t)["states"]
+            got = {sid: states[sid]["field_extractions"][0]["extraction_instructions"] for sid in ("first", "second")}  # fmt: skip
+            assert got["first"] == f"{ask_one} {template}", t.id
+            assert got["second"] == f"{ask_two} {template}", t.id
+            assert ask_two not in got["first"] and ask_one not in got["second"], t.id
+            assert not {g for g in golds if g in " ".join(got.values()).lower()}, t.id
         for t in sb.TASKS:
             if t.family != "branch":  # the other families keep their own hints
                 states = sb.hand_fsm(t)["states"]
                 hints = [f["extraction_instructions"] for s in states.values() for f in s.get("field_extractions", [])]  # fmt: skip
-                assert not any("just asked" in h for h in hints), t.id
+                assert not any("Take only" in h for h in hints), t.id
 
     def test_the_newest_block_is_the_default_of_plan_smoke_and_the_parser(
         self, bench, rig, monkeypatch
