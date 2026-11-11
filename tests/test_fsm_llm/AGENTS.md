@@ -5,9 +5,9 @@ Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass 
 
 ## Scope
 
-In: tests of the core modules in `src/` (`api.py`, `fsm.py`, `pipeline.py`, `transition_evaluator.py`, `expressions.py`, `classification.py`, `context.py`, `prompts.py`, `llm.py`, `ollama.py`, `handlers.py`, `memory.py`, `session.py`, `validator.py`, `visualizer.py`, `runner.py`, `utilities.py`, `logging.py`, `constants.py`), plus `fixtures/` (labelled secret-filter corpora).
+In: tests of the core modules in `src/` (`api.py`, `fsm.py`, `pipeline.py`, `transition_evaluator.py`, `expressions.py`, `classification.py`, `context.py`, `prompts.py`, `llm.py`, `ollama.py`, `handlers.py`, `memory.py`, `session.py`, `validator.py`, `flow_analysis.py`, `visualizer.py`, `runner.py`, `utilities.py`, `logging.py`, `constants.py`), plus `fixtures/` (labelled secret-filter corpora).
 
-Out: the subpackages `fsm_llm.agents`, `.reasoning`, `.workflows`, `.monitor`, `.eval` have their own suites under `tests/test_fsm_llm_<name>/`. A few tests here still import from them (see Dependencies).
+Out: the subpackages `fsm_llm.agents`, `.reasoning`, `.workflows`, `.monitor`, `.eval`, `.synthesis` have their own suites under `tests/test_fsm_llm_<name>/`. A few tests here still import from them (see Dependencies).
 
 Core flow under test, for reference:
 
@@ -94,6 +94,8 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_audit_sweeps.py` | operator table, context-filter, config, sanitizer agreement | |
 | `test_core_behaviour_fixes.py`, `test_definitions_behaviour_fixes.py`, `test_llm_layer_behaviour_fixes.py`, `test_logging_behaviour_fixes.py`, `test_handlers_visualizer_fixes.py`, `test_visualizer_golden.py`, `test_okf_cli_frontmatter_fixes.py`, `test_resolve_model.py`, `test_api_key_compare_sites.py` | 2026-11-05 source pass (plan 5980fbb7 steps 2 to 9): one class per fixed finding | each fails on the parent commit (`test_visualizer_golden.py` is a golden pin of the renderers instead) |
 | `test_validator_unit.py` | `FSMValidator`, agrees with the loader, `fsm-llm-validate` output | |
+| `test_flow_analysis.py` | `fsm_llm.flow_analysis`: the component primitive (a golden table written before the validator's Tarjan moved there, a very long chain), G3 data flow and G4 liveness findings, the `_minted_keys` parity with the pipeline over every example state | Refactor proof; pins the D-017 mirror |
+| `test_synthesize_field.py` | The optional `State.synthesize` field: load and refusal rules, the pipeline mint change (no extraction, handler-only result key), `fsm_id` of existing FSMs unchanged, a spike of the push-from-`before_step` seam on the real `API` | No synthesis package code |
 | `test_visualizer_unit.py` | ASCII visualizer, box alignment, truncation, CLI output | |
 | `test_runner_unit.py`, `test_utilities_unit.py` | runner redaction, `extract_json_from_text`, FSM loading | |
 | `test_logging_unit.py`, `test_logging_structured.py` | logging helpers, `setup_logging`, JSON formatter, `replace_default_handler` | `TestDefaultHandlerIsReplacedNotDoubled` runs child processes (`sys.path` from `fsm_llm.__file__`, no `-I`) |
@@ -142,7 +144,7 @@ iter3 re-exports iter1's `_correction_fsm` and `_stream_chunk`. iter4 imports `_
 
 Seam files fake the backend with `patch("fsm_llm.llm.completion", ...)` returning `MagicMock` responses built by `_fake_response`.
 
-`test_docs_snippets.py` scans ```` ```json ```` and ```` ```python ```` fences naming `"initial_state"` in `README.md`, `docs/quickstart.md`, `src/README.md`, `AGENTS.md` (repo root; must each contribute a snippet) and `docs/api_reference.md`, `docs/architecture.md`, `docs/fsm_design.md`, `docs/handlers.md` (must exist). Python blocks are parsed with `ast`, never executed. Test ids look like `test_doc_fsm_snippet_loads[<file>#block<n>]`.
+`test_docs_snippets.py` scans ```` ```json ```` and ```` ```python ```` fences naming `"initial_state"` in `README.md`, `docs/quickstart.md`, `src/README.md`, `AGENTS.md` (repo root; must each contribute a snippet) and `docs/api_reference.md`, `docs/architecture.md`, `docs/fsm_design.md`, `docs/handlers.md` and `docs/synthesis.md` (must exist). Python blocks are parsed with `ast`, never executed. Test ids look like `test_doc_fsm_snippet_loads[<file>#block<n>]`.
 
 ## Data shapes
 

@@ -1,6 +1,6 @@
 # fsm_llm
 
-The `fsm_llm` package at `src` is the whole FSM-LLM framework. Its top level is the core engine: it runs chatbots defined as finite state machines, where a large language model (LLM) reads each user message, pulls out data, and writes the reply. Five subpackages built on that core add reasoning, workflows, agents, a web dashboard, and evaluation tools.
+The `fsm_llm` package at `src` is the whole FSM-LLM framework. Its top level is the core engine: it runs chatbots defined as finite state machines, where a large language model (LLM) reads each user message, pulls out data, and writes the reply. Six subpackages built on that core add reasoning, workflows, agents, a web dashboard, evaluation tools, and runtime FSM synthesis.
 
 ## Where it lives
 
@@ -37,6 +37,7 @@ flowchart TD
 - **Handlers** are your own Python functions that run at 8 fixed points in this flow (start, before and after processing, before and after a transition, on context update, at the end, on error).
 - **FSM stacking** lets one conversation temporarily hand control to a second FSM (for example an address form) and come back with its results.
 - **Tool calling and structured output**: a state with the optional `completion` field makes its Pass 1 a single native tool-calling or JSON-schema call over a message list your handlers keep in the context. The reply (`{kind, text, calls}`) is stored under a key the transitions read; your handler runs the tools and appends the results with `tool_exchange`. The core never runs a tool itself. The `native_fc` agent and the meta-builder are built this way.
+- **Synthesize states**: a state with the optional `synthesize` field (`goal`, `return_keys`, `on_failure`) names work a runner from `fsm_llm.synthesis` turns into a child FSM. Core only loads the field and checks that the state's edges read the result key (`synthesis_result`); a bare `API.converse` on such a state stays where it is. See `synthesis/README.md`.
 
 How the subpackages sit on the core:
 
@@ -51,6 +52,9 @@ flowchart TD
     monitor -. launches .-> agents
     monitor -. demo workflows .-> workflows
     eval[fsm_llm.eval] --> core
+    synthesis[fsm_llm.synthesis] --> core
+    synthesis --> agents
+    synthesis --> eval
 ```
 
 `import fsm_llm` loads only the core. Each subpackage is imported on its own, for example `from fsm_llm.agents import ReactAgent`.
@@ -64,6 +68,7 @@ flowchart TD
 | `agents/` | 18 agent patterns (ReAct, ReWOO, Reflexion, plan and execute, debate, swarm, agent graph, ...), mostly built as generated FSMs; tools, human approval, memory, MCP and HTTP integration, OKF knowledge-bundle tools, a memory backend and exporters, Agent Skills read tools, and a meta-builder that designs an FSM, workflow or agent from a chat | `create_agent`, `ConfiguredAgentBuilder`, `ReactAgent`, `ToolRegistry`, `@tool`, `create_okf_tools`, `create_skill_tools`, `fsm-llm-meta` |
 | `monitor/` | FastAPI web dashboard to launch, watch and talk to FSMs, agents and workflows; optional OpenTelemetry export | `fsm-llm-monitor` (http://127.0.0.1:8420), `InstanceManager.attach_api`, `OTELExporter` |
 | `eval/` | Runs the repository examples and scores them 0 to 4, or runs scripted conversations against any FSM over several trials and reports pass rates with confidence intervals | `fsm-llm-eval examples`, `fsm-llm-eval run cases.json`, `run_dataset` |
+| `synthesis/` | Runtime FSM synthesis: a state names a goal, a model writes a child FSM for it, static checks and a bounded simulation judge it, a file-backed library stores it and a runner executes it as a child of the host conversation; two agent tools | `FSMSynthesizer`, `ProcedureRunner`, `FSMLibrary`, `SynthesisPolicy`, `create_procedure_tools` |
 
 ## Files
 
@@ -83,6 +88,7 @@ flowchart TD
 - `memory.py` - `WorkingMemory`: named buffers for agent-style scratch data.
 - `session.py` - save and restore conversations to JSON files.
 - `validator.py`, `visualizer.py` - check an FSM file for problems; draw it as ASCII art, or as Mermaid or DOT through the graph data of `build_fsm_graph`.
+- `flow_analysis.py` - static analysis of an FSM graph: `strongly_connected_components` (shared with `validator.py`), and the data-flow and liveness checks `analyze_data_flow` and `analyze_liveness` that runtime synthesis uses as gates. It imports only `definitions`, never logs, and the validator does not call the two analyses.
 - `runner.py`, `__main__.py` - the interactive command-line chat.
 - `utilities.py` - JSON extraction from LLM text, FSM file loading, shared context walkers.
 - `security.py` - the two key checks every context filter uses: internal keys (`has_internal_prefix`) and secret-looking keys (`is_forbidden_context_entry`), and `resolve_within`, the shared check that a path stays inside a directory (used by the OKF loader and writer and the Agent Skills reads).
@@ -212,17 +218,17 @@ fsm-llm-skills validate ./skills         # check Agent Skills folders (also list
 - Any provider litellm supports works. The default model is `ollama_chat/bonsai-2:27b`, or whatever `LLM_MODEL` is set to. A `.env` file counts as setting it (it is loaded when `fsm_llm` is imported, via litellm, and by the `fsm-llm` command), so a stale `.env` silently beats the default; the `.env` is found by searching upward from the installed package, not from your working directory. API keys come from the usual provider environment variables.
 - To use your own LLM client, pass `llm_interface=` to `API`. Do not pass `model`, `temperature`, `max_tokens` or other LLM settings beside it: `API` refuses them, because the interface owns them.
 - Core installs need loguru, litellm, pydantic, python-dotenv and pyyaml (>=6.0, for OKF and Agent Skills frontmatter).
-- Extras: `reasoning`, `workflows`, `agents` and `eval` add no packages; `monitor` adds fastapi, uvicorn and jinja2; `mcp`, `otel` and `a2a` add optional integrations for agents and the monitor.
+- Extras: `reasoning`, `workflows`, `agents`, `eval` and `synthesis` add no packages; `monitor` adds fastapi, uvicorn and jinja2; `mcp`, `otel` and `a2a` add optional integrations for agents and the monitor.
 - A state with no transitions is terminal: once reached, `converse` and `advance` raise an error.
 - `required_context_keys` only says what to extract. To block a transition until data exists, add a condition with `logic`.
 - Context keys starting with `_`, `system_`, `internal_`, or `__` are internal and hidden from `get_data()`. Keys that look like passwords, tokens, or API keys are filtered out of prompts.
 - The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`. This covers the subpackages too.
 - `FileSessionStore` saves state to JSON, so values like `datetime` come back as strings.
 - One conversation can only process one message at a time. A second concurrent call for the same conversation raises an error instead of waiting.
-- Errors from the core, reasoning, workflows, agents and eval all derive from `FSMError`, and so does `BuildError`. The monitor's `MonitorError` does not.
+- Errors from the core, reasoning, workflows, agents, eval and synthesis all derive from `FSMError`, and so does `BuildError`. The monitor's `MonitorError` does not.
 
 ## Where to go next
 
-- Each subpackage has its own README: `reasoning/README.md`, `workflows/README.md`, `agents/README.md` (next to this file).
+- Each subpackage has its own README: `reasoning/README.md`, `workflows/README.md`, `agents/README.md`, `synthesis/README.md` (next to this file).
 - `examples/` at the repository root: 100 runnable examples in 8 categories (`basic`, `intermediate`, `advanced`, `classification`, `agents`, `meta`, `reasoning`, `workflows`).
 - `docs/quickstart.md`, `docs/fsm_design.md`, `docs/handlers.md` and `docs/api_reference.md`: guides and the full reference.

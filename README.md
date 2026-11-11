@@ -15,7 +15,7 @@
 
 A language model call starts from nothing. A multi-turn conversation that must collect data, follow a set flow and decide the same way every time needs structure around the model. **FSM-LLM** is a Python framework for chatbots and agents that follow a fixed structure: you describe the conversation as a finite state machine in JSON, and the language model does the language work inside each state.
 
-It is one package, `fsm_llm`, with a small core and five subpackages on top: reasoning strategies, a workflow engine, 18 agent patterns, a monitoring dashboard and an evaluation harness. Every subpackage is built from the same parts as the core (stacked FSMs, message-free steps, one LLM layer), so there is one way to run a model, not five.
+It is one package, `fsm_llm`, with a small core and six subpackages on top: reasoning strategies, a workflow engine, 18 agent patterns, a monitoring dashboard, an evaluation harness and runtime FSM synthesis. Every subpackage is built from the same parts as the core (stacked FSMs, message-free steps, one LLM layer), so there is one way to run a model, not five.
 
 ---
 
@@ -66,6 +66,7 @@ The library is organized into five pillars. Each one is a collapsible section.
 - **Tools done properly**: the `@tool` decorator, annotations, enforced timeouts, MCP and A2A support, tools loaded from folders of Python files, and standard operating procedures.
 - **Human approval as a security boundary**: a gated tool runs only with a driver-only grant bound to that exact call, which a caller's initial context can never set.
 - **A meta-builder** that designs FSMs, workflows and agents by chat (`fsm-llm-meta`).
+- **`fsm_llm.synthesis`**: a host FSM names a goal in a `synthesize` state, a model writes a child FSM for it, static checks, a bounded simulation and an optional approval decide whether it may run, a file-backed library stores it and a runner pushes it as a child of the host conversation (`FSMSynthesizer`, `ProcedureRunner`, `FSMLibrary`, `create_procedure_tools`). `verified` means those checks passed over a model-written spec, not that the procedure is correct. The tests are offline. Bench status: not registered, not run. See [docs/synthesis.md](docs/synthesis.md).
 </p>
 </details>
 
@@ -85,7 +86,7 @@ The library is organized into five pillars. Each one is a collapsible section.
 
 - **`fsm_llm.monitor`**: a FastAPI dashboard (REST, WebSocket, vanilla-JS single-page app) to launch, watch and chat with FSMs, agents and workflows, with optional OpenTelemetry export.
 - **`fsm_llm.eval`**: scores the examples 0 to 4, or runs scripted conversations N times and reports pass rates with Wilson confidence intervals (`EvalConfig`, `run_examples`, `run_cases`, `run_dataset`, `wilson_ci`).
-- **Pre-registered benches**: `scripts/agents_bench.py` and `scripts/skills_bench.py` record blocks that are run once at a fixed n and never edited, so a number in the repository can be recounted from its rows.
+- **Pre-registered benches**: `scripts/agents_bench.py`, `scripts/skills_bench.py` and `scripts/synthesis_bench.py` record blocks that are run once at a fixed n and never edited, so a number in the repository can be recounted from its rows.
 </p>
 </details>
 
@@ -138,7 +139,7 @@ Do not use it for open-ended chat with no structure (a plain LLM call is simpler
 
     | Extra | Adds |
     |-------|------|
-    | `reasoning`, `agents`, `workflows`, `eval` | No third-party packages (the code ships in every install) |
+    | `reasoning`, `agents`, `workflows`, `eval`, `synthesis` | No third-party packages (the code ships in every install) |
     | `monitor` | fastapi, uvicorn, jinja2 |
     | `mcp` | mcp (>=1.0.0) |
     | `otel` | opentelemetry-api, opentelemetry-sdk (>=1.20.0) |
@@ -436,6 +437,9 @@ flowchart TD
     monitor -- launch, builder --> agents
     monitor -- demo workflows --> workflows
     eval[fsm_llm.eval] --> core
+    synthesis[fsm_llm.synthesis] --> core
+    synthesis --> agents
+    synthesis --> eval
 ```
 
 | Subpackage | What it adds | Maturity |
@@ -445,6 +449,7 @@ flowchart TD
 | [`fsm_llm.agents`](src/agents/README.md) | 18 agent patterns, tools, human approval, memory, MCP, A2A, meta-builder | Documented known limits, see [docs/agents_roadmap.md](docs/agents_roadmap.md) |
 | [`fsm_llm.monitor`](src/monitor/README.md) | FastAPI dashboard, optional OpenTelemetry export | Needs the `monitor` extra |
 | [`fsm_llm.eval`](src/eval/README.md) | Examples scorer (0 to 4), conversation cases with Wilson intervals | Scores are a heuristic that overstates quality; read the logs too |
+| [`fsm_llm.synthesis`](src/synthesis/README.md) | A model compiles a goal into an FSM, gates judge it, a library stores it, a runner executes it; agent tools | Tested offline with scripted models. Bench status: not registered, not run. |
 
 **Evaluation honesty.** The examples scorer reads each run's output with simple rules and gives 0 to 4. It overstates quality, and runs from before and after the 2026-09-29 restructure are not comparable. The method and the run log are in [EVALUATE.md](EVALUATE.md). Offline tests (the default) replace the model with a fake, so they say nothing about model quality.
 
@@ -526,6 +531,7 @@ fsm_llm/
 │   │   pipeline.py
 │   ├── definitions.py         # Pydantic FSM models and core exceptions
 │   ├── transition_evaluator.py, expressions.py   # JsonLogic evaluation, no LLM
+│   ├── flow_analysis.py       # Data-flow and liveness analysis of an FSM
 │   ├── llm.py                 # The only module that imports litellm
 │   ├── classification.py      # Classifier, intent routing
 │   ├── security.py, constants.py   # Key filtering, path confinement, limits
@@ -536,7 +542,8 @@ fsm_llm/
 │   ├── workflows/             # Async workflow engine, 11 step types, DSL
 │   ├── agents/                # 18 agent patterns, tools, HITL, MCP, A2A, meta-builder
 │   ├── monitor/               # FastAPI dashboard, OTEL exporter
-│   └── eval/                  # Examples scorer, conversation cases
+│   ├── eval/                  # Examples scorer, conversation cases
+│   └── synthesis/             # Runtime FSM synthesis: compile, gates, library, runner
 ├── tests/                     # One folder per subpackage plus root-level files
 ├── examples/                  # 100 runnable examples in 8 categories (evaluation baselines)
 ├── docs/                      # Guides and API reference
