@@ -70,6 +70,8 @@ _INT_LIMITS = {
     "max_simulation_seconds": 1,
     "max_simulation_calls": 1,
     "max_simulation_rounds": 1,
+    "dwell_threshold": 2,
+    "repair_min_failures": 1,
 }
 
 #: Names a compile may never declare or read: the framework keys and ours.
@@ -127,6 +129,9 @@ class SynthesisPolicy:
         simulator an error and skips a stored record that lacks ``G6b``;
         ``min_pass_rate`` is its bar, an ``int`` or ``float`` above 0 up to 1
         (0 would pass every simulation).
+        ``dwell_threshold`` (from 2) is how many consecutive stays or cycle
+        repeats ``diagnose`` calls a loop; ``repair_min_failures`` is how many
+        failing runs a diagnosis or a repair needs.
         ``trust_after_successes`` is ``None`` or an ``int`` from 1.
         ``allowed_tools`` is a collection of non-blank names (a bare string is
         refused); it is stored as a ``frozenset``. ``require_approval`` is a
@@ -149,6 +154,8 @@ class SynthesisPolicy:
     max_simulation_seconds: int = 300
     max_simulation_calls: int = 400
     max_simulation_rounds: int = 2
+    dwell_threshold: int = 3
+    repair_min_failures: int = 3
     min_pass_rate: float = 0.5
     reuse_min_score: float = 0.8
     trust_after_successes: int | None = None

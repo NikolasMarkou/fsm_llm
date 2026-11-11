@@ -97,6 +97,22 @@ class TestSynthesisPolicyLimits:
         with pytest.raises(SynthesisError):
             SynthesisPolicy(**{name: bad})
 
+    def test_diagnose_limits_default_and_minimum(self):
+        p = SynthesisPolicy()
+        assert (p.dwell_threshold, p.repair_min_failures) == (3, 3)
+        assert SynthesisPolicy(dwell_threshold=2).dwell_threshold == 2
+        assert SynthesisPolicy(repair_min_failures=1).repair_min_failures == 1
+        with pytest.raises(SynthesisError, match="dwell_threshold"):
+            SynthesisPolicy(dwell_threshold=1)  # one stay is no loop
+        with pytest.raises(SynthesisError, match="repair_min_failures"):
+            SynthesisPolicy(repair_min_failures=0)
+
+    @pytest.mark.parametrize("name", ["dwell_threshold", "repair_min_failures"])
+    @pytest.mark.parametrize("bad", [True, 3.0, "5", None, -1, 10**30, float("nan")])
+    def test_a_bad_diagnose_limit_is_refused(self, name, bad):
+        with pytest.raises(SynthesisError):
+            SynthesisPolicy(**{name: bad})
+
     def test_repair_rounds_accept_zero_and_refuse_below(self):
         assert SynthesisPolicy(max_repair_rounds=0).max_repair_rounds == 0
         for bad in (-1, True, 1.0, "1", 10**30):

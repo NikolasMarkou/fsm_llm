@@ -16,11 +16,11 @@ the library stores them (``FSMLibrary.add_trace``).
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
-from fsm_llm.definitions import TransitionEvaluationResult
+from fsm_llm.definitions import State, TransitionEvaluationResult, logic_referenced_keys
 from fsm_llm.expressions import is_missing
 from fsm_llm.okf import capped_line
 
@@ -47,6 +47,18 @@ _TEXT = 80  # characters of any stored string
 _MAX_STATES, _MAX_NAMES = 100, 64
 _MAX_OPEN = 256  # runs the recorder follows at once
 _EVENTS = ("obtained", "pushed", "stepped", "aborted", "popped", "failed")
+
+
+def gate_reads(states: Iterable[State]) -> set[str]:
+    """The key names any edge gate of *states* reads: ``requires_context_keys``
+    plus every ``var`` of the ``logic`` (the names a trace's ``kinds`` covers)."""
+    return {
+        key
+        for s in states
+        for t in s.transitions or []
+        for c in t.conditions or []
+        for key in (*(c.requires_context_keys or []), *logic_referenced_keys(c.logic))
+    }
 
 
 def _strs(value: object) -> tuple[str, ...]:

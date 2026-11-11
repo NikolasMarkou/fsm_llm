@@ -53,6 +53,33 @@ REASONS = (
     REASON_UNEXPECTED_ERROR,
 )
 
+# --- Diagnosis (D-050): the fixed vocabulary of ``diagnose``, in rule order ---
+(
+    CODE_NOT_PROCEDURE_FAULT,
+    CODE_EXTRACTION_MISS,
+    CODE_TYPE_MISMATCH,
+    CODE_VALUE_GATE_UNMET,
+    CODE_TIE_LOOP,
+    CODE_CYCLE,
+    CODE_PATH_TOO_LONG,
+    CODE_RETURN_KEYS_MISSING,
+    CODE_ABANDONMENT,
+) = DIAGNOSIS_CODES = (
+    "not-procedure-fault",
+    "extraction-miss",
+    "type-mismatch",
+    "value-gate-unmet",
+    "tie-loop",
+    "cycle",
+    "path-too-long",
+    "return-keys-missing",
+    "abandonment-concentration",
+)
+#: The only reasons a patch may ever be based on: the procedure's own turn
+#: budget and a child that ended without its return keys. Every other reason,
+#: and any unknown one, is infrastructure and fails closed.
+PROCEDURE_FAULT_REASONS = (REASON_BUDGET_SPENT, REASON_RETURN_KEYS_MISSING)
+
 # --- Traces: the only type names a trace may carry (never ``type(v).__name__``) ---
 TRACE_KINDS = {t: t.__name__ for t in (bool, int, float, str, list, dict)}
 TRACE_KIND_OTHER = "other"

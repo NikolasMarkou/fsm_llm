@@ -9,7 +9,7 @@ model runs it as a pushed child of a host conversation.
 So far: the exception hierarchy, the shared constants, the policy (limits, the
 G5 gate and abort injection), the library, the gate composition (G1 to G5 and
 the G6a dead-edge gate), the compile
-and repair loop, ``obtain`` with the approval gate, the ``ProcedureRunner``
+and repair loop, ``diagnose`` over run traces, ``obtain`` with the approval gate, the ``ProcedureRunner``
 that pushes, runs and pops a procedure under a ``synthesize`` state, and the
 agent tools ``obtain_procedure`` and ``run_procedure``.
 
@@ -25,6 +25,7 @@ from __future__ import annotations
 
 # Version info: imported via __version__.py to stay in sync
 from .__version__ import __version__  # noqa: F401
+from .diagnose import Diagnosis, diagnose
 from .dryrun import analyze_dryrun
 from .exceptions import LibraryError, SynthesisError, SynthesisRefusedError
 from .gates import GateFinding, GateReport, run_gates, verify_stored
@@ -51,6 +52,7 @@ from .traces import RunTrace, TraceRecorder
 
 __all__ = [
     "CompileResult",
+    "Diagnosis",
     "FSMLibrary",
     "FSMSynthesizer",
     "GateFinding",
@@ -72,6 +74,7 @@ __all__ = [
     "analyze_dryrun",
     "check_policy",
     "create_procedure_tools",
+    "diagnose",
     "digest_of",
     "inject_abort",
     "needs_approval",

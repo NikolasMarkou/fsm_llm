@@ -34,7 +34,6 @@ from fsm_llm.definitions import (
     FSMError,
     LLMResponseError,
     SynthesizeConfig,
-    logic_referenced_keys,
 )
 from fsm_llm.expressions import is_missing
 from fsm_llm.logging import logger
@@ -68,6 +67,7 @@ from .exceptions import LibraryError, SynthesisError, SynthesisRefusedError
 from .gates import verify_stored
 from .policy import SynthesisPolicy
 from .synthesizer import FSMSynthesizer, Procedure
+from .traces import gate_reads
 
 _ALLOWED_LIFECYCLES = {
     LIFECYCLE_VERIFIED: (LIFECYCLE_VERIFIED, LIFECYCLE_TRUSTED),
@@ -303,16 +303,7 @@ class ProcedureRunner:
         try:
             definition, config = run.procedure.definition, run.config
             data = self.api.get_data(conv_id)
-            gated = {
-                key
-                for s in definition.states.values()
-                for t in s.transitions or []
-                for c in t.conditions or []
-                for key in (
-                    *(c.requires_context_keys or []),
-                    *logic_referenced_keys(c.logic),
-                )
-            }
+            gated = gate_reads(definition.states.values())
             seen = sorted(
                 k
                 for k in gated | {*config.inputs, *config.return_keys}
