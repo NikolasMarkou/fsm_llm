@@ -41,8 +41,9 @@ from tests.test_fsm_llm_synthesis.conftest import (
 BAD = sb.bc.BenchDataError
 # Block s1 (plan 2cefeb61 step 9, D-093, D-100, D-101; step 10.2, D-105): the whole-word grader and the
 # hand-written branch `detail` instruction (the state's own question) changed the fixture region.
-# s0 was registered at bff1cbd1...a30349 (its manifests). Before 10.2 the s1 fixture was 086be3e5...9652d.
-FIXTURE_SHA = "f66a35b47ab3faf8bd374e71c43be19ad5b7eb2009786246145e5f4a96929d1b"
+# s0 was registered at bff1cbd1...a30349 (its manifests), s1 at f66a35b4...9d1b. Block s2 (step 14.2,
+# D-107): the hand-written route hint says to pick the value that fits what the user needs.
+FIXTURE_SHA = "60fb0b7a847fade49ab1baa6794bafb76fb04b897d6a39a3b4ac3d402f23a198"
 TASKS = {t.id: t for t in sb.TASKS}
 FAMILIES = ("collect", "route", "branch", "retry")
 
@@ -648,12 +649,32 @@ class TestHarnessV2:
                 hints = [f["extraction_instructions"] for s in states.values() for f in s.get("field_extractions", [])]  # fmt: skip
                 assert not any("Take only" in h for h in hints), t.id
 
+    def test_each_route_hand_child_says_to_pick_the_label_that_fits_the_need(self):
+        """Guards (D-107): "exactly one of: hr, legal, it, finance" gave `value: null` for a request that
+        names no label word (s0 and s1 r4, 3 of 3 failed), and a gold word added to the hint."""
+        routes = [t for t in sb.TASKS if t.family == "route"]
+        assert len(routes) == 4
+        for t in routes:
+            hint = sb.hand_fsm(t)["states"]["ask"]["field_extractions"][0]["extraction_instructions"]  # fmt: skip
+            assert hint == "the one of these that fits what the user needs: " + ", ".join(t.spec), t.id  # fmt: skip
+            assert "exactly one of" not in hint, t.id
+        for t in sb.TASKS:
+            if t.family != "route":  # the other families keep their own hints
+                states = sb.hand_fsm(t)["states"]
+                hints = [f["extraction_instructions"] for s in states.values() for f in s.get("field_extractions", [])]  # fmt: skip
+                assert not any("fits what the user needs" in h for h in hints), t.id
+
     def test_the_newest_block_is_the_default_of_plan_smoke_and_the_parser(
         self, bench, rig, monkeypatch
     ):
         """Guards: a new block that `smoke` or the argument default still reads as s0."""
-        assert list(sb.BLOCKS) == ["s0", "s1"] and sb.CURRENT_BLOCK == "s1"
-        assert sb.BLOCKS["s1"] == sb.BLOCKS["s0"] == (sb.SYNTH, sb.HAND, sb.REACT)
+        assert list(sb.BLOCKS) == ["s0", "s1", "s2"] and sb.CURRENT_BLOCK == "s2"
+        assert (
+            sb.BLOCKS["s2"]
+            == sb.BLOCKS["s1"]
+            == sb.BLOCKS["s0"]
+            == (sb.SYNTH, sb.HAND, sb.REACT)
+        )
         monkeypatch.setattr(sb, "BLOCKS", {**sb.BLOCKS, "s9": (sb.HAND,)})
         monkeypatch.setattr(sb, "CURRENT_BLOCK", "s9")
         assert {arm for arm, _, _ in sb.plan()} == {"hand-fsm"}
@@ -665,13 +686,14 @@ class TestHarnessV2:
         assert sb.main(["report"]) == 0 and sb.main(["report", "s0"]) == 0
         assert seen == ["s9", "s0"]
 
-    def test_s1_registers_once_and_reports_itself(self, bench, capsys):
+    @pytest.mark.parametrize("block", ["s1", "s2"])
+    def test_a_new_block_registers_once_and_reports_itself(self, bench, capsys, block):
         """Guards: a block id that is listed but cannot be registered or read."""
-        paths = sb.register_block("s1")
-        assert [p.parent.name for p in paths] == ["s1"] * 3
-        assert sb.report("s1") == 0 and "registered" in capsys.readouterr().out
+        paths = sb.register_block(block)
+        assert [p.parent.name for p in paths] == [block] * 3
+        assert sb.report(block) == 0 and "registered" in capsys.readouterr().out
         with pytest.raises(BAD, match="ONCE"):
-            sb.register_block("s1")
+            sb.register_block(block)
 
 
 # The verdict rule of block s0, taken from `git show b08fc429:scripts/synthesis_bench.py`: the

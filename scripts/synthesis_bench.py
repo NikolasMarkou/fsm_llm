@@ -58,7 +58,7 @@ BENCH_ID, MODEL_TAG = "synthesis", "bonsai-2:27b"
 MODEL = f"ollama_chat/{MODEL_TAG}"
 SYNTH, HAND, REACT = "synth-fsm", "hand-fsm", "react"
 ARMS = (SYNTH, HAND, REACT)
-BLOCKS = dict.fromkeys(("s0", "s1"), ARMS)  # a new loop adds a name, the newest last  # fmt: skip
+BLOCKS = dict.fromkeys(("s0", "s1", "s2"), ARMS)  # a new loop adds a name, the newest last  # fmt: skip
 CURRENT_BLOCK = list(BLOCKS)[-1]  # what smoke, plan and the parser read (D-102)
 TRIALS = 3  # per task; fixed at registration from the smoke
 TIMEOUTS = {"compile": 600.0, "sim": 300.0, "run": 300.0}
@@ -217,7 +217,7 @@ def hand_fsm(task: Task) -> dict[str, Any]:
         fields = [(k, "str", f"the {w}") for k, w in zip(keys, words, strict=True)]
         states = {"ask": _state("ask", "Ask the user for: " + ", ".join(words) + ".", fields, [_edge("done", keys)])}
     elif task.family == "route":
-        hint = "exactly one of: " + ", ".join(task.spec)
+        hint = "the one of these that fits what the user needs: " + ", ".join(task.spec)
         states = {"ask": _state("ask", "Ask the user what they need.", [(key, "str", hint)], [_edge("done", keys, {"in": [var, list(task.spec)]})])}
     elif task.family == "branch":
         (one, two), ask_one, ask_two = task.spec
