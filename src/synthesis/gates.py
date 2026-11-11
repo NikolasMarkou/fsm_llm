@@ -144,14 +144,28 @@ def safe_text(text: str, cap: int = _MESSAGE_CHARS) -> str:
 _OPERATOR_FINDING = "Unsupported JsonLogic operator"
 _ALLOWED_TAIL = "Allowed: ["
 
+# DECISION plan-2026-11-10T194139-2cefeb61/D-104
+# The G3 `unresolvable-read` finding says a key is read by a computed name and not
+# what to write, so a model that nests `{"var": ...}` inside `missing` repeated it
+# four rounds running (live). The fixed note below names the plain-string shape.
+# Do NOT defang it (the defang turns its `[ ]` into `( )`), do NOT edit
+# `flow_analysis.py` for it, and do NOT put a task word in it.
+_KEY_NAME_NOTE = (
+    'Write {"var": "k"} and {"missing": ["k"]} with plain key-name strings, '
+    'never a nested expression such as {"missing": [{"var": "k"}]}.'
+)
+
 
 def _message(f: GateFinding) -> str:
     """The text of ``f.message`` in a repair line: ``safe_text``, except that a
     G1 unknown-operator finding is cut before its ``Allowed: [...]`` tail and
     ends with a fixed ASCII note naming every operator of the loader's
     ``ALLOWED_JSONLOGIC_OPERATIONS`` (sorted, comma and space joined, so ``<``
-    never touches a letter). The model-authored operator names stay defanged
-    and capped. Never raises."""
+    never touches a letter), and a G3 ``unresolvable-read`` finding ends with
+    ``_KEY_NAME_NOTE``. The model-authored parts stay defanged and capped; a
+    note is never defanged. Never raises."""
+    if (f.gate, f.code) == ("G3", "unresolvable-read"):
+        return f"{safe_text(f.message)} {_KEY_NAME_NOTE}"
     if f.gate != "G1" or _OPERATOR_FINDING not in f.message:
         return safe_text(f.message)
     head = f.message.rsplit(_ALLOWED_TAIL, 1)[0]

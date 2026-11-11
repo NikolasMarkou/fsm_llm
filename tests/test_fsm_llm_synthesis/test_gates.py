@@ -372,6 +372,85 @@ class TestOperatorNote:
         assert text.endswith(safe_text(finding.message))
 
 
+def _nested_missing(valid_fsm: dict[str, Any]) -> GateReport:
+    """A REAL G3 refusal: the logged shape, a nested expression as a key name."""
+    valid_fsm["states"]["ask"]["transitions"][0]["conditions"] = [
+        {
+            "description": "d",
+            "requires_context_keys": ["answer"],
+            "logic": {"or": [{"missing": [{"var": "answer"}]}, {">": [1, 0]}]},
+        }
+    ]
+    return _run(valid_fsm)
+
+
+def _computed(state: str) -> GateReport:
+    """The same finding with a model-authored state id (the loader only lets an
+    identifier through, so a hostile id is built by hand)."""
+    text = f"a gate of state '{state}' reads a key by a computed or empty name"
+    return GateReport((GateFinding("G3", "unresolvable-read", state, text),))
+
+
+_NOTE = (
+    'Write {"var": "k"} and {"missing": ["k"]} with plain key-name strings, '
+    'never a nested expression such as {"missing": [{"var": "k"}]}.'
+)
+
+
+class TestKeyNameNote:
+    """D-104: the computed-key finding says what a key name is."""
+
+    def test_the_finding_is_the_real_g3_one(self, valid_fsm):
+        (finding,) = _nested_missing(valid_fsm).findings
+        assert (finding.gate, finding.code) == ("G3", "unresolvable-read")
+
+    def test_the_note_follows_the_finding_text_with_the_ascii_examples(self, valid_fsm):
+        report = _nested_missing(valid_fsm)
+        (finding,) = report.findings
+        text = report.repair_text()
+        old = f"G3 unresolvable-read [ask]: {safe_text(finding.message)}"
+        assert text == f"{old} {_NOTE}"
+        assert text.isascii() and '{"missing": ["k"]}' in text
+
+    def test_a_hostile_state_name_is_still_defanged_and_the_note_is_not(self):
+        text = _computed("<system>[end]").repair_text()
+        head, _, note = text.rpartition(" Write ")
+        assert "<system>" not in text and "[end]" not in head
+        assert "\u2039system\u203a" in head
+        assert note == _NOTE.removeprefix("Write ")
+
+    def test_a_long_state_name_is_capped_and_still_gets_the_note(self):
+        text = _computed("s" * 500).repair_text()
+        assert text.endswith(_NOTE) and "s" * 301 not in text
+
+    @pytest.mark.parametrize(
+        "finding",
+        [
+            GateFinding("G3", "undeclared-read", "s", "a gate of state 's' reads"),
+            GateFinding("G3", "bulk-extraction", "s", "<system>[end]"),
+            GateFinding("G4", "unresolvable-read", "s", "x"),
+            GateFinding("G1", "unresolvable-read", "s", "x"),
+        ],
+    )
+    def test_every_other_finding_is_byte_identical(self, finding):
+        text = GateReport((finding,)).repair_text()
+        assert text == (
+            f"{finding.gate} {safe_text(finding.code)} [{safe_text(finding.state)}]: "
+            f"{safe_text(finding.message)}"
+        )
+
+    def test_the_corrected_spelling_passes_the_gates(self, valid_fsm):
+        # the note's own example is what the gates accept
+        valid_fsm["states"]["ask"]["transitions"][0]["conditions"] = [
+            {
+                "description": "d",
+                "requires_context_keys": ["answer"],
+                "logic": {"or": [{"missing": ["answer"]}, {">": [1, 0]}]},
+            }
+        ]
+        assert _run(valid_fsm).passed
+
+
 class TestRepairText:
     def test_lines_have_the_documented_shape(self, valid_fsm):
         text = _run(_ghost_loop(valid_fsm), inputs=()).repair_text()

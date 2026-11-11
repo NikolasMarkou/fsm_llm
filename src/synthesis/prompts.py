@@ -122,8 +122,9 @@ transition has target_state, description, priority and optional conditions; a \
 condition has description, requires_context_keys (a list of keys that must be \
 present) and optional logic (JsonLogic such as {{">": [{{"var": "key"}}, 0]}}). \
 {operator_line()} A condition that only needs a key present has no logic: give \
-requires_context_keys alone. A state with no transitions is terminal. Use no \
-other fields.
+requires_context_keys alone. var and missing name a key as a plain string, \
+e.g. {{"missing": ["key"]}}, never as a nested expression. A state with no \
+transitions is terminal. Use no other fields.
 
 RULES (a checker rejects the FSM and sends you the failures):
 - Never set persona, handler_only_keys, completion or synthesize. No state is \

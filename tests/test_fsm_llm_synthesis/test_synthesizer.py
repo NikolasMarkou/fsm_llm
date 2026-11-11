@@ -559,6 +559,15 @@ class TestPrompt:
         assert "only needs a key present has no logic" in text
         assert "requires_context_keys alone" in text
 
+    def test_the_prompt_says_missing_lists_plain_key_names(self):
+        # D-104: the model nested {"var": ...} inside missing in every round
+        text = system_prompt(SynthesisPolicy())
+        assert (
+            'var and missing name a key as a plain string, e.g. {"missing": ["key"]}'
+            in text
+        )
+        assert "never as a nested expression" in text
+
     def test_a_fsm_whose_conditions_only_need_keys_loads_and_passes(self):
         fsm = copy.deepcopy(EXAMPLE_FSM)
         for state in fsm["states"].values():
