@@ -83,6 +83,31 @@ def _entities_of(raw: Any) -> dict:
     return raw if isinstance(raw, dict) else {}
 
 
+# DECISION plan-2026-11-11T233234-401d0471/D-003: the parameter is
+# `llm_interface` and the old keyword `llm` is refused by name. Both
+# classifiers take `**llm_kwargs` (connection settings for a private
+# interface), so without this guard a caller still writing `llm=x` would be
+# swallowed as a connection kwarg and a private provider interface built that
+# ignores `x` (a mocked-looking test or a host app then calls a real provider).
+# Do NOT add `llm` back as an alias or forward it, and do NOT replace this by a
+# generic unknown-kwarg check: litellm connection options are legitimate here.
+def _refuse_old_llm_keyword(owner: str, llm_kwargs: dict[str, Any]) -> None:
+    """Raise ``TypeError`` when ``llm_kwargs`` holds the removed keyword ``llm``.
+
+    Interface contract (callers: ``Classifier.__init__`` and
+    ``HierarchicalClassifier.__init__``):
+        - ``owner``: the class name used in the message.
+        - ``llm_kwargs``: the constructor's ``**llm_kwargs`` (not modified).
+        - Returns ``None``; raises ``TypeError`` naming ``llm_interface`` when
+          the key ``llm`` is present.
+    """
+    if "llm" in llm_kwargs:
+        raise TypeError(
+            f"{owner}() got an unexpected keyword argument 'llm': "
+            "the parameter is now 'llm_interface'"
+        )
+
+
 # --------------------------------------------------------------
 # Classifier
 # --------------------------------------------------------------
@@ -97,18 +122,18 @@ class Classifier:
     ``complete`` call (a ``json_schema`` response format, the prompt config's
     ``temperature`` and ``max_tokens``) on one ``LLMInterface``:
 
-    - ``llm`` given: that interface (its model, connection settings, timeout
-      and usage meter). ``model`` defaults to the interface's ``model``
-      attribute; a ``model`` that is not that ``str`` attribute (an
-      interface without one included), an ``api_key``, any ``llm_kwargs``,
-      or an ``llm`` that is not an ``LLMInterface`` implementing
-      ``complete`` are refused (``ValueError``): the interface owns the
-      model and the connection.
+    - ``llm_interface`` given: that interface (its model, connection
+      settings, timeout and usage meter). ``model`` defaults to the
+      interface's ``model`` attribute; a ``model`` that is not that ``str``
+      attribute (an interface without one included), an ``api_key``, any
+      ``llm_kwargs``, or an ``llm_interface`` that is not an ``LLMInterface``
+      implementing ``complete`` are refused (``ValueError``): the interface
+      owns the model and the connection.
 
     A call fails with ``ClassificationError`` when ``complete`` raises
     ``LLMResponseError`` (an outage, an unreadable reply) or the reply is not
     a classification; any other exception from the interface propagates.
-    - ``llm`` omitted: a ``fsm_llm.LiteLLMInterface`` constructed here from
+    - ``llm_interface`` omitted: a ``fsm_llm.LiteLLMInterface`` constructed here from
       ``model`` (default ``DEFAULT_LLM_MODEL``), ``api_key`` and
       ``llm_kwargs`` (``timeout`` defaults to 120 seconds; ``retries`` has
       that interface's meaning; names in ``RESERVED_LLM_CALL_KWARGS`` are
@@ -120,13 +145,14 @@ class Classifier:
         schema: ClassificationSchema,
         model: str | None = None,
         *,
-        llm: LLMInterface | None = None,
+        llm_interface: LLMInterface | None = None,
         api_key: str | None = None,
         config: ClassificationPromptConfig | None = None,
         **llm_kwargs,
     ) -> None:
         if model is not None and not model.strip():
             raise ValueError("model must be a non-empty string")
+        _refuse_old_llm_keyword("Classifier", llm_kwargs)
 
         self.schema = schema
         self.config = config or ClassificationPromptConfig()
@@ -139,37 +165,40 @@ class Classifier:
         # reader. The 120s default bounds a stalled provider so it cannot hold
         # the conversation thread and its conv_lock (CA3-003). See decisions.md
         # D-002.
-        # DECISION plan-2026-10-01T093600-944e2692/D-020: an injected `llm` is
-        # used as is. Do NOT merge `api_key`/`llm_kwargs` into it or build a
-        # second interface beside it (two LLM paths for one classifier), and
-        # do NOT fall back to a private LiteLLMInterface when the injected one
-        # lacks `complete`: that is the bypass D-006 closes. See D-020.
-        # DECISION plan-2026-10-01T093600-944e2692/D-029: an injected `llm`
-        # that is not an LLMInterface overriding `complete` is refused here,
-        # and `model` beside it must equal the interface's own `str` model.
+        # DECISION plan-2026-10-01T093600-944e2692/D-020: an injected
+        # `llm_interface` is used as is. Do NOT merge `api_key`/`llm_kwargs`
+        # into it or build a second interface beside it (two LLM paths for one
+        # classifier), and do NOT fall back to a private LiteLLMInterface when
+        # the injected one lacks `complete`: that is the bypass D-006 closes.
+        # See D-020.
+        # DECISION plan-2026-10-01T093600-944e2692/D-029: an injected
+        # `llm_interface` that is not an LLMInterface overriding `complete` is
+        # refused here, and `model` beside it must equal the interface's own
+        # `str` model.
         # Do NOT accept either and fail per call (every tie became a silent
         # "stay"), and do NOT accept a `model` when the interface has none
         # (the label lied about the model that answers). See D-029.
         self._llm: LLMInterface
-        if llm is not None:
+        if llm_interface is not None:
             if api_key is not None or llm_kwargs:
                 raise ValueError(
-                    "Classifier(llm=...) takes no api_key or connection kwargs: "
-                    "the injected interface owns its connection settings"
+                    "Classifier(llm_interface=...) takes no api_key or connection "
+                    "kwargs: the injected interface owns its connection settings"
                 )
-            if not implements_complete(llm):
+            if not implements_complete(llm_interface):
                 raise ValueError(
-                    f"Classifier(llm=...) needs an LLMInterface that implements "
-                    f"complete; got {type(llm).__name__}"
+                    f"Classifier(llm_interface=...) needs an LLMInterface that "
+                    f"implements complete; got {type(llm_interface).__name__}"
                 )
-            injected_model = interface_model(llm)
+            injected_model = interface_model(llm_interface)
             if model is not None and model != injected_model:
                 raise ValueError(
-                    f"Classifier(model={model!r}, llm=...) names a different "
-                    f"model than the injected interface ({injected_model!r}); "
-                    "omit llm to classify with another model"
+                    f"Classifier(model={model!r}, llm_interface=...) names a "
+                    f"different model than the injected interface "
+                    f"({injected_model!r}); omit llm_interface to classify with "
+                    "another model"
                 )
-            self._llm = llm
+            self._llm = llm_interface
             self.model: str | None = model if model is not None else injected_model
         else:
             self.model = model if model is not None else DEFAULT_LLM_MODEL
@@ -488,10 +517,10 @@ class HierarchicalClassifier:
 
     Stage 1 classifies the domain, stage 2 classifies the intent within
     that domain using a domain-specific schema. Every stage is a
-    ``Classifier`` with the same ``model``, ``llm``, ``api_key``, ``config``
-    and ``llm_kwargs`` (same rules and errors as ``Classifier``) and all of
-    them send through ONE interface: the injected ``llm``, or the one built
-    for ``model`` (default ``DEFAULT_LLM_MODEL``).
+    ``Classifier`` with the same ``model``, ``llm_interface``, ``api_key``,
+    ``config`` and ``llm_kwargs`` (same rules and errors as ``Classifier``) and
+    all of them send through ONE interface: the injected ``llm_interface``, or
+    the one built for ``model`` (default ``DEFAULT_LLM_MODEL``).
     """
 
     def __init__(
@@ -499,27 +528,28 @@ class HierarchicalClassifier:
         schema: HierarchicalSchema,
         model: str | None = None,
         *,
-        llm: LLMInterface | None = None,
+        llm_interface: LLMInterface | None = None,
         api_key: str | None = None,
         config: ClassificationPromptConfig | None = None,
         **llm_kwargs,
     ) -> None:
+        _refuse_old_llm_keyword("HierarchicalClassifier", llm_kwargs)
         self.schema = schema
         self._domain_classifier = Classifier(
             schema=schema.domain_schema,
             model=model,
-            llm=llm,
+            llm_interface=llm_interface,
             api_key=api_key,
             config=config,
             **llm_kwargs,
         )
         # One interface (one connection, one usage meter) for every stage: the
         # domain stage built it from `model`/`api_key`/`llm_kwargs` or took the
-        # injected `llm`, the intent stages send through the same one.
+        # injected `llm_interface`, the intent stages send through the same one.
         self._intent_classifiers: dict[str, Classifier] = {
             domain: Classifier(
                 schema=intent_schema,
-                llm=self._domain_classifier._llm,
+                llm_interface=self._domain_classifier._llm,
                 config=self._domain_classifier.config,
             )
             for domain, intent_schema in schema.intent_schemas.items()

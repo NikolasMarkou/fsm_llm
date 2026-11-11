@@ -2546,7 +2546,7 @@ class MessagePipeline:
             else:
                 try:
                     classifier = Classifier(
-                        schema=schema, llm=llm, config=prompt_config
+                        schema=schema, llm_interface=llm, config=prompt_config
                     )
                 except ValueError as e:
                     if implements_complete(llm):

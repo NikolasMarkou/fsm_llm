@@ -169,7 +169,7 @@ class TestClassifierSoftFailsOnlyOnItsOwnErrors:
             return CompletionResponse(kind="final", text="not json at all")
 
         with pytest.raises(ClassificationResponseError):
-            Classifier(_INTENTS, llm=_Custom(unreadable)).classify("buy")
+            Classifier(_INTENTS, llm_interface=_Custom(unreadable)).classify("buy")
 
 
 class _Garbled:
@@ -209,7 +209,7 @@ class TestCompleteIsTotal:
                 SimpleNamespace(message=SimpleNamespace(content="x", tool_calls=5))
             ]
         )
-        classifier = Classifier(_INTENTS, llm=LiteLLMInterface("gpt-4o"))
+        classifier = Classifier(_INTENTS, llm_interface=LiteLLMInterface("gpt-4o"))
         with _Provider(reply), pytest.raises(FSMError) as caught:
             classifier.classify("I want to buy it")
         assert type(caught.value).__name__ == "ClassificationError"

@@ -476,7 +476,7 @@ def tool_exchange(
 def implements_complete(llm: Any) -> bool:
     """Whether ``llm`` is an ``LLMInterface`` whose class overrides ``complete``.
 
-    Interface contract (callers: ``Classifier(llm=...)`` and ``API``, which
+    Interface contract (callers: ``Classifier(llm_interface=...)`` and ``API``, which
     refuse an interface the classifier cannot send through):
         - ``llm``: any object.
         - Returns ``False`` for a non-``LLMInterface`` and for an interface
@@ -515,7 +515,7 @@ def resolve_model(model: str | None = None) -> str:
 def interface_model(llm: Any) -> str | None:
     """The model name an injected interface states, if it states one.
 
-    Interface contract (callers: ``Classifier(llm=...)`` and ``API``, which
+    Interface contract (callers: ``Classifier(llm_interface=...)`` and ``API``, which
     refuse a ``model`` beside an injected interface unless it equals this):
         - ``llm``: any object.
         - Returns ``llm.model`` when it is a ``str``; ``None`` otherwise

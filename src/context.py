@@ -23,6 +23,7 @@ from .definitions import (
     exchange_preview_lines,
 )
 from .handlers import clear_keys_delta
+from .llm import LLMInterface
 from .logging import logger
 from .utilities import filter_context_tree, redact_non_json_leaf
 
@@ -112,7 +113,7 @@ class ContextCompactor:
     def summarize(
         self,
         conversation: Any,
-        llm_interface: Any | None = None,
+        llm_interface: LLMInterface | None = None,
     ) -> str | None:
         """Summarize older conversation exchanges into a compact representation.
 

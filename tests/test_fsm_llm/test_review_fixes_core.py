@@ -759,7 +759,7 @@ class TestClassifierErrorContract:
         assert AttributeError in _chain(caught.value)
 
     def test_a_provider_error_is_a_classification_error(self):
-        classifier = Classifier(_INTENTS, llm=_Custom(_outage))
+        classifier = Classifier(_INTENTS, llm_interface=_Custom(_outage))
         with pytest.raises(FSMError, match="provider down") as caught:
             classifier.classify("I want to buy it")
         assert type(caught.value).__name__ == "ClassificationError"
@@ -779,7 +779,7 @@ class TestClassifierNeedsAnInterfaceWithComplete:
     @pytest.mark.parametrize("llm", ["garbage", MockLLM2Interface()])
     def test_classifier_refuses(self, llm: Any):
         with pytest.raises(ValueError, match="implements complete"):
-            Classifier(_INTENTS, llm=llm)
+            Classifier(_INTENTS, llm_interface=llm)
 
     def test_api_refuses_a_classifying_definition(self):
         with pytest.raises(ValueError, match="does not implement complete"):
@@ -805,8 +805,8 @@ class TestClassifierNeedsAnInterfaceWithComplete:
             model = None  # type: ignore[assignment]
 
         with pytest.raises(ValueError, match="different model"):
-            Classifier(_INTENTS, model="openai/gpt-4o", llm=_NoModel(_outage))
-        assert Classifier(_INTENTS, llm=_NoModel(_outage)).model is None
+            Classifier(_INTENTS, model="openai/gpt-4o", llm_interface=_NoModel(_outage))
+        assert Classifier(_INTENTS, llm_interface=_NoModel(_outage)).model is None
 
 
 def _gated_tie_fsm() -> dict[str, Any]:
@@ -855,7 +855,7 @@ class TestTieWithAnInterfaceWithoutCompleteStays:
 
 
 class TestHierarchicalClassifierTakesAnInterface:
-    """Review area 3, concern 5: ``HierarchicalClassifier`` had no ``llm=``
+    """Review area 3, concern 5: ``HierarchicalClassifier`` had no ``llm_interface=``
     and built one private interface per stage."""
 
     def _schema(self) -> HierarchicalSchema:
@@ -872,7 +872,7 @@ class TestHierarchicalClassifierTakesAnInterface:
 
     def test_every_stage_sends_through_the_one_interface(self):
         llm = _Custom(_outage)
-        hierarchical = HierarchicalClassifier(self._schema(), llm=llm)
+        hierarchical = HierarchicalClassifier(self._schema(), llm_interface=llm)
         stages = [
             hierarchical._domain_classifier,
             *hierarchical._intent_classifiers.values(),
@@ -882,7 +882,9 @@ class TestHierarchicalClassifierTakesAnInterface:
 
     def test_settings_beside_the_interface_are_refused(self):
         with pytest.raises(ValueError, match="no api_key"):
-            HierarchicalClassifier(self._schema(), llm=_Custom(_outage), api_key="k")
+            HierarchicalClassifier(
+                self._schema(), llm_interface=_Custom(_outage), api_key="k"
+            )
 
 
 class TestApiRefusesSettingsBesideAnInjectedInterface:

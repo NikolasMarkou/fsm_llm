@@ -38,7 +38,7 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 
 
 from fsm_llm.api import API
-from fsm_llm.classification import Classifier
+from fsm_llm.classification import Classifier, HierarchicalClassifier
 from fsm_llm.constants import (
     DEFAULT_LLM_MODEL,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
@@ -60,6 +60,7 @@ from fsm_llm.definitions import (
     FSMDefinition,
     FSMError,
     FSMInstance,
+    HierarchicalSchema,
     IntentDefinition,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
@@ -810,7 +811,7 @@ class TestClassifierCache:
         # The entry without an override sends through the conversation's
         # interface; the other model gets its own, built from the name only.
         assert [
-            (c.kwargs.get("model"), c.kwargs.get("llm"))
+            (c.kwargs.get("model"), c.kwargs.get("llm_interface"))
             for c in mock_cls.call_args_list
         ] == [(None, mock_llm), ("gpt-4o", None)]
         assert mock_cls.return_value.classify.call_count == 4
@@ -926,7 +927,7 @@ class TestClassifierCache:
 
         assert mock_cls.call_count == 1
         assert first is second
-        assert mock_cls.call_args.kwargs["llm"] is mock_llm
+        assert mock_cls.call_args.kwargs["llm_interface"] is mock_llm
         assert len(pipeline._classifier_cache) == 1
 
     def test_prompt_config_change_constructs_again(self):
@@ -981,7 +982,7 @@ class TestClassifierCache:
 
         assert first is not second
         assert other_first is other_second
-        assert [c.kwargs.get("llm") for c in mock_cls.call_args_list] == [
+        assert [c.kwargs.get("llm_interface") for c in mock_cls.call_args_list] == [
             old_llm,
             None,
             new_llm,
@@ -1005,7 +1006,7 @@ class TestClassifierCache:
         assert mock_cls.call_count == 1
         assert mock_cls.call_args.kwargs == {
             "schema": schema,
-            "llm": mock_llm,
+            "llm_interface": mock_llm,
             "config": None,
         }
 
@@ -1454,16 +1455,16 @@ class TestClassifierUsesConversationInterface:
         assert usage.by_kind["classify"].calls == len(classifier_calls)
         assert usage.calls == len(provider_calls)
 
-    def test_direct_classifier_with_llm_refuses_connection_settings(self):
+    def test_direct_classifier_with_llm_interface_refuses_connection_settings(self):
         llm = _RecordingInterface()
         schema = _schema("a", "b")
         with pytest.raises(ValueError, match="connection"):
-            Classifier(schema, llm=llm, api_key="k")
+            Classifier(schema, llm_interface=llm, api_key="k")
         with pytest.raises(ValueError, match="connection"):
-            Classifier(schema, llm=llm, timeout=5)
+            Classifier(schema, llm_interface=llm, timeout=5)
         with pytest.raises(ValueError, match="different model"):
-            Classifier(schema, model="gpt-4o", llm=llm)
-        classifier = Classifier(schema, llm=llm)
+            Classifier(schema, model="gpt-4o", llm_interface=llm)
+        classifier = Classifier(schema, llm_interface=llm)
         assert classifier.model == "custom/model"
         assert classifier.classify("hi").intent == "a"  # "billing" is unknown
         (request,) = llm.requests
@@ -1474,6 +1475,48 @@ class TestClassifierUsesConversationInterface:
         assert classifier.model == DEFAULT_LLM_MODEL
         assert isinstance(classifier._llm, LiteLLMInterface)
         assert classifier._llm.timeout == 120.0
+
+
+class TestClassifierParameterIsLlmInterface:
+    """``Classifier`` and ``HierarchicalClassifier`` take the conversation's
+    interface as ``llm_interface=``, the spelling of every other core entry
+    point. The old ``llm=`` is refused by name: ``**llm_kwargs`` would
+    otherwise swallow it as a connection setting and build a private
+    provider interface instead of using the one passed."""
+
+    def test_classifier_takes_llm_interface(self):
+        llm = _RecordingInterface()
+        classifier = Classifier(_schema("a", "b"), llm_interface=llm)
+        assert classifier._llm is llm
+        assert classifier.model == "custom/model"
+
+    def test_classifier_refuses_the_old_llm_keyword(self):
+        with pytest.raises(TypeError, match="llm_interface"):
+            Classifier(_schema("a", "b"), llm=_RecordingInterface())
+
+    def test_hierarchical_classifier_takes_llm_interface(self):
+        llm = _RecordingInterface()
+        hierarchical = HierarchicalClassifier(_hierarchical_schema(), llm_interface=llm)
+        stages = [
+            hierarchical._domain_classifier,
+            *hierarchical._intent_classifiers.values(),
+        ]
+        assert len(stages) == 3
+        assert all(stage._llm is llm for stage in stages)
+
+    def test_hierarchical_classifier_refuses_the_old_llm_keyword(self):
+        with pytest.raises(TypeError, match="llm_interface"):
+            HierarchicalClassifier(_hierarchical_schema(), llm=_RecordingInterface())
+
+
+def _hierarchical_schema() -> HierarchicalSchema:
+    return HierarchicalSchema(
+        domain_schema=_schema("shop", "other"),
+        intent_schemas={
+            "shop": _schema("buy", "browse"),
+            "other": _schema("misc", "chat"),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------

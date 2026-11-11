@@ -657,7 +657,7 @@ class API:
             # D-038): every LLM setting beside an injected interface is
             # refused: connection kwargs, `api_key`, `temperature`,
             # `max_tokens`, and a `model` other than the interface's own `str`
-            # model (the rule `Classifier(llm=...)` applies). Do NOT accept
+            # model (the rule `Classifier(llm_interface=...)` applies). Do NOT accept
             # and ignore any of them: a `seed` (or `caching`, `timeout`, a
             # per-sample `temperature`, ...) was dropped silently while the
             # caller believed it applied. Subpackages omit their own config
