@@ -22,6 +22,7 @@ stored, re-verified procedure, else compile) and the approval gate G7.
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections.abc import Callable, Sequence
@@ -528,6 +529,34 @@ class FSMSynthesizer:
             )
 
 
+#: The stdlib json messages that carry no input text; any other is dropped.
+_PARSER_MESSAGES = frozenset(
+    (
+        "Expecting value|Expecting ',' delimiter|Expecting ':' delimiter|"
+        "Expecting property name enclosed in double quotes|Extra data|"
+        "Unterminated string starting at|Invalid control character at|"
+        "Invalid \\escape|Invalid \\uXXXX escape"
+    ).split("|")
+)
+
+
+def _parser_detail(text: str) -> str:
+    """`` (parser: <msg> at line L column C); fix that syntax`` when the reply's
+    first-``{``-to-last-``}`` span fails ``json.loads``, else ``""``: a
+    ``_PARSER_MESSAGES`` phrase and two integers, never reply text."""
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end < start:
+        return ""
+    try:
+        json.loads(text[start : end + 1])
+    except json.JSONDecodeError as e:
+        if e.msg in _PARSER_MESSAGES:
+            return f" (parser: {e.msg} at line {e.lineno} column {e.colno}); fix that syntax"
+    except RecursionError:
+        pass
+    return ""
+
+
 def _judge(
     reply: CompletionResponse,
     policy: SynthesisPolicy,
@@ -545,6 +574,7 @@ def _judge(
     )
     data = None if code else extract_json_from_text(reply.text or "")
     if data is None:
+        detail = "" if code else _parser_detail(reply.text or "")
         code = code or "reply-not-json-object"
-        return GateReport((GateFinding("G1", code, "", REPLY_FAILURES[code]),))
+        return GateReport((GateFinding("G1", code, "", REPLY_FAILURES[code] + detail),))
     return run_gates(data, policy, inputs=inputs, return_keys=return_keys)
