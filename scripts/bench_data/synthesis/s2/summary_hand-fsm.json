@@ -1,0 +1,58 @@
+{
+  "arm": "hand-fsm",
+  "finished_at": "2026-11-11T22:06:35Z",
+  "metrics": {
+    "confused_turns": 13,
+    "errored_rows": 0,
+    "families": {
+      "branch": [
+        4,
+        4
+      ],
+      "collect": [
+        4,
+        4
+      ],
+      "retry": [
+        4,
+        4
+      ],
+      "route": [
+        4,
+        4
+      ]
+    },
+    "foreign_model_rows": 0,
+    "infra_first": 0,
+    "k": 16,
+    "meters": {
+      "compile_calls": 0,
+      "compile_completion_tokens": 0,
+      "compile_prompt_tokens": 0,
+      "run_calls": 361,
+      "run_completion_tokens": 23863,
+      "run_prompt_tokens": 157326,
+      "sim_calls": 0,
+      "sim_completion_tokens": 0,
+      "sim_prompt_tokens": 0
+    },
+    "n_rows": 48,
+    "n_units": 16,
+    "pass_all": 15,
+    "phases_first": {},
+    "reuse_rows": 48,
+    "reuse_strong_calls": 0,
+    "wall_s": 821.8,
+    "wilson": [
+      0.8064,
+      1.0
+    ]
+  },
+  "run": {
+    "git_commit": "b90b1856e1a908e2916aaa391beac1b7f6c87a13",
+    "git_dirty": true,
+    "preflight": "passed"
+  },
+  "started_at": "2026-11-11T19:58:00Z",
+  "status": "complete"
+}
