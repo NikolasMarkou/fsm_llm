@@ -158,7 +158,8 @@ TASKS = tuple(Task(*row) for row in (
 
 class User:
     """The scripted user, no model: ``reply`` is the next utterance of EVERY rule whose regex
-    matches the assistant text (the last repeats), else ``FALLBACK`` (``confused``)."""
+    matches the assistant text (the last repeats), else ``FALLBACK`` (``confused``).
+    ``note`` keeps the assistant texts produced after rule 0 (the branch value) answered."""
 
     def __init__(self, rules: tuple[tuple[str, Any], ...]) -> None:
         self.rules = [
@@ -166,6 +167,10 @@ class User:
             for p, s in rules
         ]
         self.used, self.confused = [0] * len(rules), 0  # used[i]: answers rule i gave
+        self.late: list[str] = []
+
+    def note(self, text: str) -> None:
+        self.late += [text] * bool(self.used[0])
 
     def reply(self, text: str) -> str:
         said = []
@@ -241,12 +246,33 @@ def squash(value: Any) -> str:
     return re.sub(r"[\W_]+", "", str(value)).lower()
 
 
-def grade(task: Task, values: dict[str, Any] | None, asked: list[str], used: int) -> dict[str, Any]:
+# DECISION plan-2026-11-10T194139-2cefeb61/D-065
+# One grader for every arm. R's fallback reads only whole ``key: value`` pairs and
+# the branch check only the texts AFTER the branch value was given (``User.late``).
+# Do NOT match a gold token inside the answer (a label list or the word "it"
+# passes) and do NOT read every reply for the branch check (a first question that
+# names both options fails a right run).
+def pairs(answer: str, keys: Any) -> dict[str, str]:
+    """R's fallback: ``key: value``, ``key = value`` or ``key is value``, key a whole word; the
+    value runs to a ``;`` or newline, a ``,`` or ``;`` before another key, or the end."""
+    names = "|".join(map(re.escape, keys))
+    found = {k: re.search(rf"\b{re.escape(k)}\b\W{{0,3}}(?::|=|\bis\b)\s*(.*?)\s*(?=[,;]\s*(?:{names})\b|[;\n]|$)", answer, re.I) for k in keys}  # fmt: skip
+    return {k: m[1] for k, m in found.items() if m}
+
+
+def react_values(answer: str, keys: Any) -> dict[str, Any]:
+    """R's return values: the JSON object of its answer, else its ``pairs`` (never prose)."""
+    from fsm_llm.utilities import extract_json_from_text
+
+    return extract_json_from_text(answer) or pairs(answer, keys)
+
+
+def grade(task: Task, values: dict[str, Any] | None, late: list[str], used: int) -> dict[str, Any]:
     """Correct = every key equals its gold after ``squash`` AND the family check: branch, no
-    question about the other branch; retry, the rule answered twice (``used``: a re-ask)."""
+    question about the other branch after the branch value; retry, the rule answered twice."""
     values = values or {}
     per_key = {k: values.get(k) is not None and squash(values[k]) == squash(g) for k, g in task.gold.items()}
-    other = bool(task.other) and any(re.search(task.other, a, re.I) for a in asked)
+    other = bool(task.other) and any(re.search(task.other, a, re.I) for a in late)
     checks = {"other_branch": not other, "reask": task.family != "retry" or used >= 2}
     return {"correct": all(per_key.values()) and all(checks.values()), "per_key": per_key, "checks": checks}
 
@@ -516,10 +542,11 @@ def drive_fsm(arm: str, task: Task, lib_dir: Path, llms: dict[str, Any]) -> dict
     api = API.from_definition(definition=host, llm_interface=llms["run"])
     runner = syn.ProcedureRunner(api, host, synth, trace_sink=lambda e, f: events.append((e, f)))  # fmt: skip
     conv, _ = api.start_conversation()
-    user, asked, said, turns = User(task.users), [], OPENER, []
+    user, said, turns = User(task.users), OPENER, []
     try:
         for _ in range(LIMITS["max_user_turns"]):
-            asked.append(reply := runner.converse(conv, said))
+            reply = runner.converse(conv, said)
+            user.note(reply)
             turns.append([said[:300], reply[:300]])
             if api.has_conversation_ended(conv):
                 break
@@ -530,7 +557,7 @@ def drive_fsm(arm: str, task: Task, lib_dir: Path, llms: dict[str, Any]) -> dict
             runner.end_conversation(conv)
     result = data.get("synthesis_result") or {}
     got = next((f for e, f in events if e in ("obtained", "failed")), {})
-    grades = grade(task, {k: data.get(k) for k in keys}, asked, user.used[0])
+    grades = grade(task, {k: data.get(k) for k in keys}, user.late, user.used[0])
     # fmt: off
     return {**grades, "status": result.get("status"), "runner_reason": result.get("reason"), "source": got.get("source"),
             "rounds": [c.split(",") for c in (got.get("rounds") or "").split(";") if c], "compile_seconds": got.get("seconds", 0.0),
@@ -541,15 +568,15 @@ def drive_fsm(arm: str, task: Task, lib_dir: Path, llms: dict[str, Any]) -> dict
 
 def drive_react(task: Task, llm: Any) -> dict[str, Any]:
     """Arm R: ``create_agent("react")`` with ``ask_user`` backed by the same user rules; the
-    answer is a JSON object (lenient fallback: a whitespace token equal to a gold value)."""
+    answer is a JSON object (else ``key: value`` pairs, D-065)."""
     from fsm_llm.agents import AgentConfig, ToolRegistry, create_agent
-    from fsm_llm.utilities import extract_json_from_text
 
     user, asked = User(task.users), []
 
     def ask_user(question: str) -> str:
         """Ask the user one question and return the user's reply."""
         asked.append(question)
+        user.note(question)
         return user.reply(question) if len(asked) <= LIMITS["max_user_turns"] else "The user has left."  # fmt: skip
 
     registry = ToolRegistry().register_function(ask_user, name="ask_user")
@@ -557,9 +584,7 @@ def drive_react(task: Task, llm: Any) -> dict[str, Any]:
     prompt = f"{task.goal}\nTalk to the user only with the ask_user tool. When you have everything, answer with ONLY a JSON object with the keys {', '.join(task.gold)}."  # fmt: skip
     result = create_agent("react", registry, config=config, llm_interface=llm).run(prompt)  # fmt: skip
     answer = str(result.answer or "")
-    words = {squash(w) for w in answer.split()}
-    values = extract_json_from_text(answer) or {k: g if squash(g) in words else None for k, g in task.gold.items()}  # fmt: skip
-    return {**grade(task, values, asked, user.used[0]), "stop_reason": result.stop_reason, "turns": len(asked), "confused_turns": user.confused, "answer": answer[:500]}  # fmt: skip
+    return {**grade(task, react_values(answer, task.gold), user.late, user.used[0]), "stop_reason": result.stop_reason, "turns": len(asked), "confused_turns": user.confused, "answer": answer[:500]}  # fmt: skip
 
 
 def run_trial(arm: str, task: Task, trial: int, workdir: Path, raw: Path | None = None) -> dict[str, Any]:  # fmt: skip

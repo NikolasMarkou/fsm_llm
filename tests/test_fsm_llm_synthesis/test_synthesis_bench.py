@@ -31,7 +31,7 @@ from fsm_llm.synthesis.gates import GATES
 from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, ScriptedStrongLLM
 
 BAD = sb.bc.BenchDataError
-FIXTURE_SHA = "2f48c7469cf78549dcca25a36a7648d89bf583ee03c6de2918e6f679f4f8b0db"
+FIXTURE_SHA = "55d79610cb5bed3a9920adc1e24746d3fe1e498af57a624e3651ffd5f4c39acf"
 TASKS = {t.id: t for t in sb.TASKS}
 FAMILIES = ("collect", "route", "branch", "retry")
 
@@ -258,11 +258,12 @@ class TestFixture:
         rig.update(asks=["Please share the passport and dates and purpose"])
         row = sb.run_trial("react", TASKS["c1"], 1, tmp_path)
         assert row["correct"] and row["turns"] == 1 and row["compile_calls"] == 0
+        pairs = "passport_no: X1234567, travel_dates = 2026-05-01\npurpose is tourism"
+        rig.update(answer=pairs)
+        assert sb.run_trial("react", TASKS["c1"], 1, tmp_path)["correct"]  # D-065
         prose = "The passport is X1234567, dates 2026-05-01, purpose tourism."
-        rig.update(answer=prose)
-        assert sb.run_trial("react", TASKS["c1"], 1, tmp_path)[
-            "correct"
-        ]  # lenient tokens
+        rig.update(answer=prose)  # no key is named: prose is never graded
+        assert not sb.run_trial("react", TASKS["c1"], 1, tmp_path)["correct"]
         rig.update(answer="all collected")
         assert sb.run_trial("react", TASKS["c1"], 1, tmp_path)["phase"] == "wrong_value"
 
@@ -295,6 +296,112 @@ class TestUserAndGrader:
         assert not sb.grade(b, b.gold, ["Where is your destination?"], 0)["correct"]
         assert sb.grade(b, b.gold, ["What is your company?"], 0)["correct"]
         assert not sb.grade(y, y.gold, [], 1)["correct"]  # never re-asked
+
+
+def _right_react_answers(task):
+    gold = task.gold
+    return [
+        json.dumps(gold),
+        "All done.\n```json\n" + json.dumps(gold, indent=2) + "\n```",
+        "\n".join(f"{k}: {v}" for k, v in gold.items()),
+        ", ".join(f"{k} = {v}" for k, v in gold.items()),
+        "; ".join(f"**{k}**: {v}" for k, v in gold.items()),
+    ]
+
+
+def _wrong_react_answers(task):
+    """Answers no arm may pass: listing the options, a gold word inside prose,
+    a value with extra words, a missing answer, one wrong value."""
+    gold, key = task.gold, next(iter(task.gold))
+    words = " ".join(map(str, gold.values()))
+    options = ", ".join(task.spec) if task.family == "route" else words
+    return [
+        "I could not tell.",
+        f"Options: {options}.",
+        f"{key}: {options}, something else",
+        f"{key}: {gold[key]} and some more",
+        f"It is it, I think it is fine: {words}",
+        f"The {key.replace('_', ' ')} is probably one of {options}",
+        "\n".join(
+            f"{'x_' * (i == 0)}{k}: {v}" for i, (k, v) in enumerate(gold.items())
+        ),
+        *(json.dumps({**gold, k: "nope"}) for k in gold),
+    ]
+
+
+class TestEveryArmFacesTheSameGrader:
+    """D-065: one rule per answer shape, for S, H and R alike."""
+
+    @pytest.mark.parametrize("task", sb.TASKS, ids=lambda t: t.id)
+    def test_react_answers_right_pass_and_wrong_fail(self, task, rig, tmp_path):
+        """Guards: R passing a list of labels or a common word (r4 gold `it`),
+        or failing a JSON object, key lines or fenced JSON."""
+        ask = sb.hand_fsm(task)["states"]["ask"]["response_instructions"]
+        for text in _right_react_answers(task):
+            rig.update(asks=[ask, ask], answer=text)
+            row = sb.run_trial("react", task, 1, tmp_path)
+            assert row["correct"], (task.id, text, row["per_key"])
+        for text in _wrong_react_answers(task):
+            rig.update(asks=[ask, ask], answer=text)
+            assert not sb.run_trial("react", task, 1, tmp_path)["correct"], text
+
+    @pytest.mark.parametrize("task", sb.TASKS, ids=lambda t: t.id)
+    def test_fsm_context_values_right_pass_and_wrong_fail(self, task):
+        """Guards: S and H graded by a different rule from R for the same values."""
+        assert sb.grade(task, dict(task.gold), [], 2)["correct"]
+        for key in task.gold:
+            assert not sb.grade(task, {**task.gold, key: "nope"}, [], 2)["correct"]
+            assert not sb.grade(task, {**task.gold, key: None}, [], 2)["correct"]
+        assert not sb.grade(task, {}, [], 2)["correct"]
+
+    @pytest.mark.parametrize(
+        "task", [t for t in sb.TASKS if t.other], ids=lambda t: t.id
+    )
+    def test_the_branch_check_reads_only_what_came_after_the_branch_value(self, task):
+        """Guards: a correct run failed because its FIRST question named both options."""
+        first = f"Is it {task.spec[0][0]} or {task.spec[0][1]}? {task.spec[1]} {task.spec[2]}"  # fmt: skip
+        right = next(q for q in task.spec[1:] if not re.search(task.other, q, re.I))
+        wrong = next(q for q in task.spec[1:] if q != right)
+        user = sb.User(task.users)
+        user.note(first)
+        user.reply(first)  # the branch value is given
+        user.note(right)
+        assert user.late == [right]
+        assert sb.grade(task, task.gold, user.late, 2)["correct"]
+        user.note(wrong)  # a question about the other branch, after the value
+        assert not sb.grade(task, task.gold, user.late, 2)["correct"]
+
+    @pytest.mark.parametrize("arm", ["synth-fsm", "hand-fsm"])
+    @pytest.mark.parametrize("tid", ["b1", "b2", "b3", "b4"])
+    def test_an_fsm_run_whose_first_question_names_both_options_is_right(
+        self, arm, tid, rig, tmp_path, monkeypatch
+    ):
+        """Guards: the b3 false fail of the review (S and H graded on every reply)."""
+        real, task = sb.hand_fsm, TASKS[tid]
+
+        def both(t):
+            d = real(t)
+            (one, two), a1, a2 = t.spec
+            ask = f"Ask whether it is {one} or {two}. {a1} {a2}"
+            d["states"]["ask"]["response_instructions"] = ask
+            return d
+
+        monkeypatch.setattr(sb, "hand_fsm", both)
+        row = sb.run_trial(arm, task, 1, tmp_path)
+        assert row["correct"] and row["checks"]["other_branch"], row
+
+    @pytest.mark.parametrize("tid", ["b1", "b2", "b3", "b4"])
+    def test_a_react_run_whose_first_question_names_both_options_is_right(
+        self, tid, rig, tmp_path
+    ):
+        """Guards: the same question graded differently for R."""
+        task = TASKS[tid]
+        right = next(q for q in task.spec[1:] if not re.search(task.other, q, re.I))
+        first = f"Is it {task.spec[0][0]} or {task.spec[0][1]}? {task.spec[1]} {task.spec[2]}"  # fmt: skip
+        rig.update(asks=[first, right])
+        assert sb.run_trial("react", task, 1, tmp_path)["correct"]
+        rig.update(asks=[first, next(q for q in task.spec[1:] if q != right)])
+        assert not sb.run_trial("react", task, 1, tmp_path)["correct"]
 
 
 _BASE = dict(correct=False, arm="hand-fsm", family="collect", error=None, status=None, runner_reason=None, stop_reason=None)  # fmt: skip
