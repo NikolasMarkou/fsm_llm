@@ -122,9 +122,12 @@ state extracts in its field_extractions.
 a later turn never replaces it. When a state must take a NEW value on a later \
 turn (the user corrects an answer, or a value outside its allowed range was \
 refused and the user answers again), give that state its own \
-extraction_instructions beside its field_extractions: name the key and say to \
-take the user's latest value even when it is out of range, so the edge's \
-condition can refuse it.
+extraction_instructions beside its field_extractions. That text MUST name the \
+exact key and say to take the user's latest value even when it is out of range, \
+so the edge's condition can refuse it, as in "Extract party_size: the whole \
+number the user gives, even when out of range". Without the key name the bulk \
+pass invents a key name and the correction is lost; field_extractions alone is \
+read once and kept.
 - Every return key must be extracted in some state, and the edge into each \
 terminal state must list every return key in requires_context_keys.
 - Liveness: every state reaches a terminal state; every loop has an exit edge \

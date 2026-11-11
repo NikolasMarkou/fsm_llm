@@ -235,6 +235,18 @@ class TestTheGateOwnsTheExpectations:
         assert report.overall["k"] == report.overall["n"]
 
 
+class TestTheWriterPrompt:
+    def test_every_turn_is_a_user_message_and_the_system_text_holds_no_goal(self):
+        # D-083: a 27B writer wrote both sides of the dialogue as "user turns"
+        writer = ScriptedStrongLLM([_reply(*_four())])
+        _run(writer=writer)
+        system = writer.requests[0].messages[0]["content"]
+
+        assert "Each turn is a message the USER types" in system
+        assert "never a question, a reply or a line of the procedure" in system
+        assert GOAL not in system
+
+
 class TestGeneratedScenarios:
     @pytest.mark.parametrize(
         "reply",

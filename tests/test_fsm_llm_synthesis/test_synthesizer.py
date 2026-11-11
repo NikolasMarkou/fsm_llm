@@ -294,6 +294,14 @@ class TestPrompt:
         assert "latest value" in text and "later turn" in text
         assert "never give extraction instructions" not in text
 
+    def test_the_correction_rule_names_the_exact_key(self):
+        # D-083: the bulk pass invents a key name (live: group_size for
+        # party_size) when the state-level text does not name the key
+        text = system_prompt(SynthesisPolicy())
+        assert "Extract party_size: the whole number the user gives" in text
+        assert "invents a key name" in text
+        assert "field_extractions alone is read once and kept" in text
+
     def test_the_inputs_and_return_keys_reach_the_user_turn(self):
         user = compile_messages("g", ("venue",), RET, SynthesisPolicy())[1]
         assert "venue" in user["content"] and "answer" in user["content"]
