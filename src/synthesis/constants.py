@@ -102,6 +102,7 @@ MAX_PATCH_DEPTH = 16  # nesting of a value below its op object
 MAX_POINTER_TOKENS = 12
 MAX_POINTER_TOKEN_CHARS = 100
 MAX_INDEX_DIGITS = 9
+PATCH_MAX_TOKENS = 2048  # the reply cap of one patch request (D-052)
 PATCH_CODES = (
     "too-many-ops",
     "too-large",

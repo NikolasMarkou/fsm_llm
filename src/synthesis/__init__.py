@@ -9,7 +9,7 @@ model runs it as a pushed child of a host conversation.
 So far: the exception hierarchy, the shared constants, the policy (limits, the
 G5 gate and abort injection), the library, the gate composition (G1 to G5 and
 the G6a dead-edge gate), the compile
-and repair loop, ``diagnose`` over run traces, ``apply_patch`` (an RFC 6902 subset), ``obtain`` with the approval gate, the ``ProcedureRunner``
+and repair loop, ``diagnose`` over run traces, ``apply_patch`` (an RFC 6902 subset), ``propose_patch``, ``obtain`` with the approval gate, the ``ProcedureRunner``
 that pushes, runs and pops a procedure under a ``synthesize`` state, and the
 agent tools ``obtain_procedure`` and ``run_procedure``.
 
@@ -44,6 +44,7 @@ from .policy import (
     needs_approval,
     strip_abort,
 )
+from .repair import propose_patch
 from .runner import ProcedureRunner
 from .simulation import SimulationReport, Simulator
 from .synthesizer import (
@@ -86,6 +87,7 @@ __all__ = [
     "digest_of",
     "inject_abort",
     "needs_approval",
+    "propose_patch",
     "reviewer_from_hitl",
     "run_gates",
     "strip_abort",
