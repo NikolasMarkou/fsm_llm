@@ -66,6 +66,9 @@ class TestSynthesisPolicyLimits:
         assert p.reuse_min_score == 0.8 and p.trust_after_successes is None
         assert p.allowed_tools == frozenset() and p.require_approval is False
         assert p.max_traces_per_digest == 200
+        assert (p.max_sim_turns, p.sim_trials) == (12, 2)
+        assert (p.max_simulation_seconds, p.max_simulation_calls) == (300, 400)
+        assert p.min_pass_rate == 0.5 and isinstance(p.min_pass_rate, float)
 
     @pytest.mark.parametrize(
         "name",
@@ -79,6 +82,10 @@ class TestSynthesisPolicyLimits:
             "max_compile_tokens",
             "max_synthesis_seconds",
             "max_traces_per_digest",
+            "max_sim_turns",
+            "sim_trials",
+            "max_simulation_seconds",
+            "max_simulation_calls",
         ],
     )
     @pytest.mark.parametrize(
@@ -104,6 +111,19 @@ class TestSynthesisPolicyLimits:
     def test_reuse_min_score_refuses_the_rest(self, bad):
         with pytest.raises(SynthesisError):
             SynthesisPolicy(reuse_min_score=bad)
+
+    @pytest.mark.parametrize("good", [0.01, 0.5, 1, 1.0])
+    def test_min_pass_rate_accepts_above_zero_up_to_one(self, good):
+        assert SynthesisPolicy(min_pass_rate=good).min_pass_rate == float(good)
+
+    @pytest.mark.parametrize(
+        "bad",
+        [True, False, "0.5", None, 0, 0.0, -0.1, 1.5, 2**63, math.nan, math.inf],
+    )
+    def test_min_pass_rate_refuses_zero_and_the_rest(self, bad):
+        """0 would pass every simulation: refused, unlike ``reuse_min_score``."""
+        with pytest.raises(SynthesisError, match="min_pass_rate"):
+            SynthesisPolicy(min_pass_rate=bad)
 
     def test_trust_after_successes(self):
         assert SynthesisPolicy(trust_after_successes=3).trust_after_successes == 3

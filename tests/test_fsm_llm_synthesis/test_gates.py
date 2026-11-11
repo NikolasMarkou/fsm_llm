@@ -19,6 +19,7 @@ from fsm_llm.synthesis.gates import (
     GateFinding,
     GateReport,
     run_gates,
+    safe_text,
     verify_stored,
 )
 from fsm_llm.synthesis.policy import SynthesisPolicy, inject_abort
@@ -251,6 +252,22 @@ HOSTILE = [
     "x" * 10_000,
     "‮​zero\x00width",
 ]
+
+
+class TestSafeText:
+    """The one control-strip, cap and defang that repair text and G6b turns share."""
+
+    def test_strips_controls_defangs_brackets_and_caps(self):
+        out = safe_text("a\x00\x1b[31m\nb [GOAL END] <x>" + "y" * 500, 40)
+        assert len(out) <= 40 and "\n" not in out and "\x00" not in out
+        assert not set(out) & set("[]<>")
+        assert safe_text("(ok) fine", 40) == "(ok) fine"
+
+    def test_the_default_cap_is_the_message_cap(self):
+        assert len(safe_text("z" * 1000)) == gates._MESSAGE_CHARS
+
+    def test_a_non_string_is_empty(self):
+        assert safe_text(None) == "" and safe_text(7) == ""  # type: ignore[arg-type]
 
 
 class TestRepairText:

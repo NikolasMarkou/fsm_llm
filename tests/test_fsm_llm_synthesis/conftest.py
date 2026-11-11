@@ -10,6 +10,7 @@ import fsm_llm.llm as llm_module
 from fsm_llm.definitions import (
     CompletionRequest,
     CompletionResponse,
+    LLMUsage,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
@@ -87,7 +88,8 @@ class ScriptedRunnerLLM(MockLLM2Interface):
     read from the reply prompt's ``<current_state>`` tag, to the reply text.
     ``shown(kind, state=None)`` is the text of every recorded request of that
     kind (system prompt, user message, extraction context), optionally only
-    the replies written for one state.
+    the replies written for one state. ``usage()`` is the meter a simulator
+    reads: one call per recorded request.
     """
 
     def __init__(
@@ -97,6 +99,9 @@ class ScriptedRunnerLLM(MockLLM2Interface):
     ) -> None:
         super().__init__(extraction_data=extraction_data)
         self.responses = responses or {}
+
+    def usage(self) -> LLMUsage:
+        return LLMUsage(calls=len(self.call_history))
 
     def generate_response(
         self, request: ResponseGenerationRequest

@@ -62,6 +62,10 @@ MAX_SCENARIOS = 6
 MAX_SCENARIO_TURNS = 12
 MAX_SCENARIO_TURN_CHARS = 300
 
+# --- G6b: the deterministic script's kind, and the kinds a writer may add ---
+HAPPY_KIND = "happy"
+GENERATED_KINDS = ("missing_info", "correction", "off_topic", "adversarial")
+
 # --- Tool bounds: the most names one tool call may list (inputs or return_keys) ---
 MAX_TOOL_NAMES = 20
 

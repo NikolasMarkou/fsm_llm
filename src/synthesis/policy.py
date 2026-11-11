@@ -65,6 +65,10 @@ _INT_LIMITS = {
     "max_compile_tokens": 1,
     "max_synthesis_seconds": 1,
     "max_traces_per_digest": 1,
+    "max_sim_turns": 1,
+    "sim_trials": 1,
+    "max_simulation_seconds": 1,
+    "max_simulation_calls": 1,
 }
 
 #: Names a compile may never declare or read: the framework keys and ours.
@@ -89,6 +93,19 @@ _MODEL_SETTING_KEYS = frozenset({"model", "prompt_config"})
 _INTENT_KEYS = frozenset({"name", "description"})
 
 
+def _rate(name: str, value: Any, *, open_low: bool = False) -> float:
+    """A policy fraction as a float: an ``int`` or ``float`` (not a ``bool``) from
+    0, or above 0 when ``open_low``, up to 1. ``SynthesisError`` otherwise (NaN,
+    infinity and out-of-range included); never clamped."""
+    number = isinstance(value, (int, float)) and not isinstance(value, bool)
+    # the comparisons are False for NaN; an int is compared exactly
+    if not (number and (0 < value if open_low else 0 <= value) and value <= 1):
+        shown = capped_line(repr(value), 60)
+        low = "above 0" if open_low else "from 0"
+        raise SynthesisError(f"policy.{name} must be a number {low} to 1, got {shown}")
+    return float(value)
+
+
 @dataclass(frozen=True)
 class SynthesisPolicy:
     """The closed rules for one synthesizer.
@@ -101,6 +118,11 @@ class SynthesisPolicy:
         ``max_fields_per_state`` caps the distinct key names one state
         extracts (each is a cheap-model call per child step).
         ``reuse_min_score`` is an ``int`` or ``float`` from 0 to 1.
+        ``max_sim_turns``, ``sim_trials``, ``max_simulation_seconds`` and
+        ``max_simulation_calls`` bound the G6b simulation (turns per scenario,
+        trials per scenario, wall seconds and model calls for one run);
+        ``min_pass_rate`` is its bar, an ``int`` or ``float`` above 0 up to 1
+        (0 would pass every simulation).
         ``trust_after_successes`` is ``None`` or an ``int`` from 1.
         ``allowed_tools`` is a collection of non-blank names (a bare string is
         refused); it is stored as a ``frozenset``. ``require_approval`` is a
@@ -118,6 +140,11 @@ class SynthesisPolicy:
     max_compile_tokens: int = 8192
     max_synthesis_seconds: int = 300
     max_traces_per_digest: int = 200
+    max_sim_turns: int = 12
+    sim_trials: int = 2
+    max_simulation_seconds: int = 300
+    max_simulation_calls: int = 400
+    min_pass_rate: float = 0.5
     reuse_min_score: float = 0.8
     trust_after_successes: int | None = None
     allowed_tools: frozenset[str] = frozenset()
@@ -141,14 +168,8 @@ class SynthesisPolicy:
                     error=SynthesisError,
                 ),
             )
-        score = self.reuse_min_score
-        if (
-            isinstance(score, bool)
-            or not isinstance(score, (int, float))
-            or not 0 <= score <= 1  # False for NaN; an int is compared exactly
-        ):
-            raise refuse("reuse_min_score", "a number from 0 to 1")
-        put("reuse_min_score", float(score))
+        put("reuse_min_score", _rate("reuse_min_score", self.reuse_min_score))
+        put("min_pass_rate", _rate("min_pass_rate", self.min_pass_rate, open_low=True))
         if self.trust_after_successes is not None:
             put(
                 "trust_after_successes",

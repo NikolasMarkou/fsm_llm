@@ -104,19 +104,23 @@ class GateReport:
             f for f in self.findings if f.state not in covered.get((f.gate, f.code), ())
         ]
 
-        def safe(text: str) -> str:
-            return capped_line(text, _MESSAGE_CHARS).translate(SKILL_DEFANG)
-
         lines: list[str] = []
         used = 0
         for i, f in enumerate(shown):
-            line = f"{f.gate} {safe(f.code)} [{safe(f.state)}]: {safe(f.message)}"
+            line = f"{f.gate} {safe_text(f.code)} [{safe_text(f.state)}]: {safe_text(f.message)}"
             if used + len(line) + 1 > cap - 30:  # room for the "and K more" line
                 lines.append(f"and {len(shown) - i} more")
                 break
             lines.append(line)
             used += len(line) + 1
         return "\n".join(lines)[:cap]
+
+
+def safe_text(text: str, cap: int = _MESSAGE_CHARS) -> str:
+    """Model-authored ``text`` as one safe line: control-stripped, cut at
+    ``cap`` characters and ``[ ] < >`` defanged (so it can spell no fence or
+    tag). ``""`` for a non-string. Used by ``repair_text`` and the G6b turns."""
+    return capped_line(text, cap).translate(SKILL_DEFANG)
 
 
 def _load(data: Any) -> tuple[FSMDefinition | None, list[GateFinding]]:

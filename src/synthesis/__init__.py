@@ -38,6 +38,7 @@ from .policy import (
     strip_abort,
 )
 from .runner import ProcedureRunner
+from .simulation import SimulationReport, Simulator
 from .synthesizer import (
     CompileResult,
     FSMSynthesizer,
@@ -62,6 +63,8 @@ __all__ = [
     "ProcedureApprovalRequest",
     "ProcedureRunner",
     "RunTrace",
+    "SimulationReport",
+    "Simulator",
     "SynthesisError",
     "SynthesisPolicy",
     "SynthesisRefusedError",
