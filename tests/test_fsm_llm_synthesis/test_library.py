@@ -688,6 +688,29 @@ class TestTraces:
         lib.add_trace(_tr(2), max_traces=3)
         assert [t.steps for t in lib.read_traces(D)[0]] == [2]
 
+    def test_retire_traces_moves_the_file_aside_and_keeps_it(self, lib: FSMLibrary):
+        for i in range(3):
+            lib.add_trace(_tr(i), max_traces=10)
+        child = "e" * 64
+        lib.retire_traces(D, child)
+
+        assert lib.read_traces(D) == ((), 0)  # a later read sees only newer ones
+        kept = lib.root / "traces" / f"{D}.{child}.jsonl"
+        assert len(kept.read_text().splitlines()) == 3
+        lib.add_trace(_tr(9), max_traces=10)
+        assert [t.steps for t in lib.read_traces(D)[0]] == [9]
+        assert len(kept.read_text().splitlines()) == 3  # never touched again
+        lib.retire_traces("d" * 64, child)  # no file: nothing to move, no error
+
+    @pytest.mark.parametrize("bad", ["../x", "A" * 64, "", None, 5])
+    def test_retire_traces_refuses_a_bad_digest(self, lib: FSMLibrary, bad):
+        lib.add_trace(_tr(), max_traces=3)
+        with pytest.raises(LibraryError, match="invalid digest"):
+            lib.retire_traces(D, bad)
+        with pytest.raises(LibraryError, match="invalid digest"):
+            lib.retire_traces(bad, "e" * 64)
+        assert len(lib.read_traces(D)[0]) == 1
+
     @pytest.mark.parametrize("bad", ["../x", "A" * 64, "a" * 63, "", None, 5])
     def test_a_bad_id_is_refused_before_a_path_is_built(self, lib: FSMLibrary, bad):
         with pytest.raises(LibraryError, match="invalid digest"):
@@ -950,6 +973,35 @@ class TestRepairLineage:
         other = _put(lib, "Other", lifecycle="verified")
         assert lib.deprecate(other.digest, keep_trusted=True).lifecycle == "deprecated"
         assert lib.deprecate(rec.digest).lifecycle == "deprecated"  # explicit call
+
+    def test_deprecate_keep_trusted_is_idempotent_on_a_deprecated_record(self, lib):
+        rec = _put(lib, lifecycle="verified")
+        lib.deprecate(rec.digest)
+        assert lib.deprecate(rec.digest, keep_trusted=True).lifecycle == "deprecated"
+        with pytest.raises(LibraryError):  # the plain call still refuses the edge
+            lib.deprecate(rec.digest)
+
+    def test_count_children_counts_every_child_of_a_digest(self, lib):
+        parent = _put(lib, lifecycle="verified")
+        assert lib.count_children(parent.digest) == 0
+        kids = [
+            lib.put(
+                _fsm(f"Kid{i}"),
+                goal=GOAL,
+                inputs_required=["party"],
+                return_keys=["slot"],
+                lifecycle="verified",
+                parent=parent.digest,
+                repair=f"{i}" * 64,
+            )
+            for i in range(3)
+        ]
+        lib.deprecate(kids[0].digest)  # a retired child still counts
+        _put(lib, "Stranger", lifecycle="verified")
+        assert lib.count_children(parent.digest) == 3
+        assert lib.count_children(kids[0].digest) == 0
+        with pytest.raises(LibraryError, match="invalid digest"):
+            lib.count_children("../x")
 
     def test_clean_scenarios_is_the_public_cleaner(self):
         out = FSMLibrary.clean_scenarios(

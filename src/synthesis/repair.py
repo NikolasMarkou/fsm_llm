@@ -188,9 +188,10 @@ def repair_procedure(
     Interface contract: pure until the last step; every refusal is a
     ``PromotionResult`` whose ``code`` is in ``constants.PROMOTION_CODES`` and
     writes nothing. In order: the parent must be ``verified`` or ``trusted`` and
-    canonical; the lineage limit (the parent's minor version) and
-    ``repair_min_failures`` (runs of its stored traces that ``diagnose`` calls a
-    procedure fault) are checked; ``apply_patch`` is scoped to the diagnosed
+    canonical; the lineage limit (the parent's minor version plus its stored
+    children) and ``repair_min_failures`` (runs of its stored traces that
+    ``diagnose`` calls a procedure fault; a written repair consumes the traces it
+    used, so only newer runs count next time) are checked; ``apply_patch`` is scoped to the diagnosed
     states; the child must pass G1 to G6a, differ from the parent and from every
     stored record, be approved when ``needs_approval`` says so, and pass G6b; the
     replay set (the parent's stored scenarios plus ``replay_scripts``, each
@@ -198,8 +199,9 @@ def repair_procedure(
     with the return keys) runs ``policy.replay_trials`` times on parent and
     child with ``simulator``'s interface, and ``decide`` judges the counts. Only
     ``write=True`` with ``promote`` stores the child (``verified``, never
-    ``trusted``; its record, scenarios and ``patches/<child>.json``), then
-    deprecates a non-``trusted`` parent. Raises ``LibraryError`` for an unknown
+    ``trusted``; its record, scenarios and ``patches/<child>.json``), retires the
+    parent's traces, then deprecates a non-``trusted`` parent (one already
+    deprecated by another writer is a result, not an error). Raises ``LibraryError`` for an unknown
     parent or a corrupt file, ``SynthesisError`` for malformed
     ``replay_scripts``; a provider outage inside G6b is ``simulation-failed``.
     """
@@ -220,7 +222,12 @@ def repair_procedure(
     if stripped is None:
         return stop("parent-not-canonical")
     inputs, keys = record.signature["inputs_required"], record.signature["return_keys"]
-    if int(record.version.split(".")[1]) >= policy.max_repairs_per_lineage:
+    # DECISION plan-2026-11-10T194139-2cefeb61/D-063
+    # The lineage count is the ancestors (the minor version) PLUS every child of
+    # this parent: a trusted parent is never deprecated and keeps minor 0. Do NOT
+    # count the version alone.
+    repairs = int(record.version.split(".")[1]) + library.count_children(parent_digest)
+    if repairs >= policy.max_repairs_per_lineage:
         return stop("lineage-limit")
     traces, _ = library.read_traces(parent_digest)
     # the stripped form: the abort edge reads a key no trace holds
@@ -304,6 +311,10 @@ def repair_procedure(
     if sim.scenarios:
         library.add_scenarios(child, sim.scenarios)
     library.add_patch(child, ops)
+    # DECISION plan-2026-11-10T194139-2cefeb61/D-063
+    # The evidence of a written repair is consumed (moved, never deleted), so
+    # old runs buy no second repair. Do NOT stamp traces with a clock.
+    library.retire_traces(parent_digest, child)
     kept = library.deprecate(parent_digest, keep_trusted=True)
     return replace(
         result, written=True, deprecated=kept.lifecycle == LIFECYCLE_DEPRECATED

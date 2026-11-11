@@ -447,13 +447,15 @@ class FSMLibrary:
 
     def deprecate(self, digest: str, *, keep_trusted: bool = False) -> LibraryRecord:
         """Any non-deprecated lifecycle to ``deprecated``; nothing leaves it.
-        With ``keep_trusted`` a ``trusted`` record is returned unchanged; the
-        check is inside the lock, so a concurrent ``approve`` cannot be undone."""
+        With ``keep_trusted`` a ``trusted`` record, or one already ``deprecated``
+        (another writer retired it first), is returned unchanged; the check is
+        inside the lock, so a concurrent ``approve`` cannot be undone."""
+        keep = (LIFECYCLE_TRUSTED, LIFECYCLE_DEPRECATED)
         return self._update(
             digest,
             lambda r: (
                 r
-                if keep_trusted and r.lifecycle == LIFECYCLE_TRUSTED
+                if keep_trusted and r.lifecycle in keep
                 else self._moved(r, LIFECYCLE_DEPRECATED)
             ),
         )
@@ -557,6 +559,23 @@ class FSMLibrary:
                 "".join(json.dumps(t.to_row()) + "\n" for t in rows),
             )
 
+    def retire_traces(self, digest: str, child: str) -> None:
+        """Consume the traces of *digest* that justified repairing it into
+        *child*: its file becomes ``traces/<digest>.<child>.jsonl`` (kept for
+        audit, never read), so the next ``read_traces`` holds only newer runs
+        (D-063). No file is no error."""
+        if not _DIGEST_RE.fullmatch(child if isinstance(child, str) else ""):
+            raise LibraryError(f"invalid digest: {capped_line(repr(child), 70)}")
+        src = self._path("traces", digest, ".jsonl")
+        dst = self._path("traces", digest, f".{child}.jsonl")
+        with self._lock:
+            try:
+                os.replace(src, dst)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise LibraryError(f"cannot retire {src.name}: {exc}") from exc
+
     @staticmethod
     def clean_scenarios(value: object) -> list[dict[str, Any]]:
         """The stored shape of *value*: at most ``MAX_SCENARIOS`` of
@@ -616,6 +635,24 @@ class FSMLibrary:
 
     # -- retrieval --------------------------------------------------------
 
+    def _records(self) -> list[LibraryRecord]:
+        """Every stored record, by file name; a corrupt one is a ``LibraryError``."""
+        try:
+            names = os.listdir(self._confined("records"))
+        except FileNotFoundError:
+            return []
+        except OSError as exc:
+            raise LibraryError(f"cannot list the library: {exc}") from exc
+        return [
+            self.get_record(name[: -len(".json")])
+            for name in sorted(n for n in names if n.endswith(".json"))
+        ]
+
+    def count_children(self, digest: str) -> int:
+        """How many records (any lifecycle) name *digest* as their ``parent``."""
+        self._path("records", digest)  # validates the id
+        return sum(r.provenance["parent"] == digest for r in self._records())
+
     def search(
         self,
         goal: str,
@@ -648,15 +685,8 @@ class FSMLibrary:
             raise SynthesisError(f"min_lifecycle must be one of {sorted(_RANK)}")
         require_int_limit("top_k", top_k, minimum=1, error=SynthesisError)
         have, want, tools = set(inputs_available), set(return_keys), set(tools_allowed)
-        try:
-            names = os.listdir(self._confined("records"))
-        except FileNotFoundError:
-            return []
-        except OSError as exc:
-            raise LibraryError(f"cannot list the library: {exc}") from exc
         kept = []
-        for name in sorted(n for n in names if n.endswith(".json")):
-            record = self.get_record(name[: -len(".json")])
+        for record in self._records():
             sig = record.signature
             if (
                 record.lifecycle in _RANK

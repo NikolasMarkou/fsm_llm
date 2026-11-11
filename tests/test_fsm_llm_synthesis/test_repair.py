@@ -347,6 +347,14 @@ class Rig:
         return [h.record.digest for h in hits]
 
 
+def _fail(rig: Rig, n: int) -> None:
+    """``n`` more stuck runs of the parent, recorded now."""
+    stuck = dict(status="aborted", reason="budget_spent", outcome="blocked")
+    for _ in range(n):
+        trace = RunTrace(rig.parent, stuck="ask", states=("ask",) * 3, **stuck)
+        rig.lib.add_trace(trace, max_traces=200)
+
+
 class TestDecide:
     @pytest.mark.parametrize(
         ("parent", "child", "code"),
@@ -443,6 +451,25 @@ class TestSeededDefect:
         assert rig.lib.get_record(child).lifecycle == "verified"
         assert rig.lib.get_record(rig.parent).lifecycle == "verified"
         assert rig.search()[0] == child
+
+    def test_a_parent_deprecated_by_another_writer_is_a_result_not_an_exception(
+        self, tmp_path
+    ):
+        """The child is already on disk when the retire finds the parent gone."""
+        rig = Rig(tmp_path)
+        real = rig.sim.replay
+
+        def replay(*a: Any, **k: Any) -> Any:
+            out = real(*a, **k)
+            if rig.lib.get_record(rig.parent).lifecycle == "verified":
+                rig.lib.deprecate(rig.parent)  # a concurrent promotion of a sibling
+            return out
+
+        rig.sim.replay = replay  # type: ignore[method-assign]
+        res = rig.repair(replay_scripts=[SCRIPT], write=True)
+
+        assert res.code == "promote" and res.written and res.deprecated
+        assert rig.lib.get_record(res.child).lifecycle == "verified"
 
     def test_the_result_holds_codes_digests_and_counts_only(self, tmp_path):
         rig = Rig(tmp_path)
@@ -599,6 +626,43 @@ class TestRateLimits:
         assert rig.untouched()
         fresh = Rig(tmp_path / "b", ancestors=1, policy=limit)  # parent is 1.1
         assert fresh.repair(replay_scripts=[SCRIPT]).code == "promote"
+
+    def test_the_lineage_limit_counts_every_child_of_a_trusted_parent(self, tmp_path):
+        """A trusted parent is never deprecated and keeps minor 0 (D-063)."""
+        limit = SynthesisPolicy(max_repairs_per_lineage=2)
+        rig = Rig(tmp_path, writes=40, policy=limit)
+        rig.lib.approve(rig.parent, "owner")
+        codes = []
+        for i in range(4):
+            if i:
+                _fail(rig, 3)  # fresh evidence each time: only the limit speaks
+            ops = [{"op": "replace", "path": PATH, "value": f"The answer FIXED v{i}"}]
+            codes.append(rig.repair(ops, replay_scripts=[SCRIPT], write=True).code)
+
+        assert codes == ["promote", "promote", "lineage-limit", "lineage-limit"]
+        assert rig.lib.count_children(rig.parent) == 2
+
+    def test_a_repair_consumes_its_evidence_so_old_traces_buy_no_second_one(
+        self, tmp_path
+    ):
+        rig = Rig(tmp_path, writes=40)
+        rig.lib.approve(rig.parent, "owner")
+        other = [{"op": "replace", "path": PATH, "value": "The answer FIXED two"}]
+        assert rig.repair(replay_scripts=[SCRIPT], write=True).code == "promote"
+
+        again = rig.repair(other, replay_scripts=[SCRIPT], write=True)
+        assert again.code == "too-few-failures" and not again.written
+        assert rig.lib.read_traces(rig.parent) == ((), 0)
+        assert len(list((rig.lib.root / "traces").glob(f"{rig.parent}.*.jsonl"))) == 1
+
+        _fail(rig, 3)  # three runs recorded AFTER the repair do count
+        assert rig.repair(other, replay_scripts=[SCRIPT]).code == "promote"
+
+    def test_a_repair_that_is_not_written_consumes_nothing(self, tmp_path):
+        rig = Rig(tmp_path, writes=40)
+        for _ in range(3):
+            assert rig.repair(replay_scripts=[SCRIPT]).code == "promote"
+        assert len(rig.lib.read_traces(rig.parent)[0]) == 3
 
     @pytest.mark.parametrize("lifecycle", ["draft", "deprecated"])
     def test_only_a_live_parent_is_repaired(self, tmp_path, lifecycle):
