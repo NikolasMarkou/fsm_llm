@@ -12,6 +12,7 @@ import itertools
 import json
 import re
 import sys
+import time
 import types
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,7 @@ from fsm_llm.synthesis.synthesizer import (
     FSMSynthesizer,
     _approval_request,
     _judge,
+    _repair_brackets,
     normalise_extraction,
     reviewer_from_hitl,
 )
@@ -231,9 +233,11 @@ class TestFailedRounds:
 
 def _slipped_reply() -> str:
     """The shape of the logged smoke reply (synth-fsm c1): an object whose
-    ``states`` object is closed with ``]``; the parser breaks at line 90 column 3."""
+    ``states`` object is closed with ``]``; the parser breaks at line 90 column 3.
+    It also holds a trailing comma, so ``_repair_brackets`` cannot read it."""
     rows = ",\n".join(f'    "s{i}": {{"id": "s{i}"}}' for i in range(87))
-    return '{\n  "states": {\n' + rows + "\n  ]\n}"
+    # the trailing comma is a second error the bracket repair cannot fix (D-097)
+    return '{\n  "states": {\n' + rows + "\n  ]\n, }"
 
 
 def _finding_text(reply: Any) -> str:
@@ -296,6 +300,132 @@ class TestUnparseableReplyDetail:
     def test_a_valid_object_still_runs_the_gates(self, valid_fsm):
         report = _judge(_final(_text(valid_fsm)), SynthesisPolicy(), (), RET)
         assert report.passed
+
+
+def _slipped(fsm: dict[str, Any]) -> str:
+    """``fsm`` as JSON whose ``states`` object (the last key) is closed by ``]``:
+    the logged slip (D-097), trimmed to a small compile."""
+    last = {**{k: v for k, v in fsm.items() if k != "states"}, "states": fsm["states"]}
+    text = json.dumps(last, indent=2)
+    assert text.endswith("\n  }\n}")
+    return text[: -len("\n  }\n}")] + "\n  ]\n}"
+
+
+_SWAPS = [  # (a reply with mismatched closers, the object it means)
+    ('{"a": {"b": 1]}', {"a": {"b": 1}}),
+    ('{"a": [1, 2}, "b": 3}', {"a": [1, 2], "b": 3}),
+    ('{"a": [{"b": 1], {"c": [2}]]}', {"a": [{"b": 1}, {"c": [2]}]}),
+    ('{"s": "x]}[{", "t": {"u": 1]}', {"s": "x]}[{", "t": {"u": 1}}),
+    ('{"s": "say \\"hi]\\" ]", "t": {"u": 1]}', {"s": 'say "hi]" ]', "t": {"u": 1}}),
+    ('Here:\n```json\n{"a": {"b": 1]}\n```\nDone', {"a": {"b": 1}}),
+]
+
+
+class TestBracketRepair:
+    """D-097: a closer of the wrong kind is replaced; nothing else is invented."""
+
+    @pytest.mark.parametrize(("broken", "meant"), _SWAPS)
+    def test_a_mismatched_closer_is_replaced(self, broken, meant):
+        fixed = _repair_brackets(broken)
+        assert fixed is not None and json.loads(fixed) == meant
+
+    def test_a_valid_object_comes_back_unchanged(self):
+        assert json.loads(_repair_brackets('{"a": [1, {"b": 2}]}') or "") == {
+            "a": [1, {"b": 2}]
+        }
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "no braces",
+            "} {",
+            '{"a": [1, 2}',  # a missing closer is never invented
+            '{"a": {"b": 1}',
+            '{"a": 1}}',  # a stray closer
+            '{"a": "open]}',  # an unterminated string
+            '{"a": 1} and {"b": [2}',  # several objects are never merged
+            '{"a": [1, 2}, "b" 3}',  # still not JSON after the swap
+            '{"a": 1, ]}',
+        ],
+    )
+    def test_what_the_swap_cannot_fix_gives_none(self, text):
+        assert _repair_brackets(text) is None
+
+    def test_nothing_is_added_or_dropped(self):
+        broken = '{"a": [{"b": 1], {"c": [2}]]}'
+        fixed = _repair_brackets(broken)
+        assert fixed is not None and len(fixed) == len(broken)
+        assert sum(a != b for a, b in zip(fixed, broken, strict=True)) == 3
+
+    def test_the_nesting_bound_is_one_hundred(self):
+        def nested(depth: int) -> str:  # one mismatched closer at the innermost
+            return '{"a":' * (depth - 1) + "[1}" + "}" * (depth - 1)
+
+        assert _repair_brackets(nested(100)) is not None
+        assert _repair_brackets(nested(101)) is None
+
+    @pytest.mark.parametrize(
+        "bomb",
+        [
+            "{" * 100_000 + "}",
+            '{"a":[' * 100_000 + "1" + "}" * 100_000,
+            "{" + "[" * 10**6,
+        ],
+    )
+    def test_a_bomb_gives_none_fast(self, bomb):
+        started = time.monotonic()
+        assert _repair_brackets(bomb) is None
+        assert time.monotonic() - started < 2
+
+    def test_a_logged_slip_is_one_compile_call(self, valid_fsm):
+        synth, llm = _synth([_slipped(valid_fsm)])
+        result = synth.compile("g", return_keys=RET)
+        assert len(llm.requests) == 1
+        clean, _ = _synth([_text(valid_fsm)])
+        assert result.data == clean.compile("g", return_keys=RET).data
+        assert result.rounds == 1
+
+    def test_a_repaired_reply_with_an_unknown_key_still_fails_g5(self, valid_fsm):
+        bad = copy.deepcopy(valid_fsm)
+        bad["bogus_key"] = 1
+        report = _judge(_final(_slipped(bad)), SynthesisPolicy(), (), RET)
+        assert {(f.gate, f.code) for f in report.findings} == {("G5", "unknown-key")}
+
+    def test_a_repaired_reply_that_the_loader_refuses_fails_g1(self, valid_fsm):
+        bad = copy.deepcopy(valid_fsm)
+        bad["initial_state"] = "nowhere"
+        report = _judge(_final(_slipped(bad)), SynthesisPolicy(), (), RET)
+        assert not report.passed
+        assert {f.gate for f in report.findings} == {"G1"}
+
+    def test_every_gate_judges_a_repaired_reply(self, valid_fsm):
+        bad = _two_defects(valid_fsm)
+        report = _judge(_final(_slipped(bad)), SynthesisPolicy(), (), RET)
+        assert {f.gate for f in report.findings} == {"G5"}
+
+    def test_a_truncated_reply_is_never_repaired(self, valid_fsm, monkeypatch):
+        calls: list[str] = []
+        monkeypatch.setattr(
+            synthesizer_module, "_repair_brackets", lambda t: calls.append(t)
+        )
+        cut = CompletionResponse(
+            kind="final", text=_slipped(valid_fsm), finish_reason="length"
+        )
+        assert "cut off" in _finding_text(cut)
+        assert calls == []
+
+    def test_a_valid_document_never_reaches_the_repair(self, valid_fsm, monkeypatch):
+        calls: list[str] = []
+        monkeypatch.setattr(
+            synthesizer_module, "_repair_brackets", lambda t: calls.append(t)
+        )
+        for text in (_text(valid_fsm), "```json\n" + _text(valid_fsm) + "\n```"):
+            assert _judge(_final(text), SynthesisPolicy(), (), RET).passed
+        assert calls == []
+
+    def test_an_unreadable_reply_keeps_the_parser_position(self):
+        text = _finding_text(_slipped_reply())
+        assert "line 90 column 3" in text
 
 
 class TestConstruction:

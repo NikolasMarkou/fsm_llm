@@ -559,6 +559,60 @@ def _parser_detail(text: str) -> str:
     return ""
 
 
+# DECISION plan-2026-11-10T194139-2cefeb61/D-097
+# The strong model's habit (live: 8 first-trial compiles) is to close the
+# `states` object with `]`. The slip is named exactly, so it is repaired here,
+# once, instead of asked again at about 70 s a round. ONLY the kind of a wrong
+# closer changes: a missing closer is NOT appended and a stray one is not
+# dropped (no invented content), and the repaired text goes through every gate
+# like any reply. Do NOT repair a reply that already parses or one that was cut
+# off, do NOT skip G1 for a repaired reply, and do NOT make the scan ignore
+# strings (a `]` inside a string would flip the stack).
+_CLOSERS = {"{": "}", "[": "]"}
+_MAX_NESTING = 100
+
+
+def _repair_brackets(text: str) -> str | None:
+    """The first-``{``-to-last-``}`` span of ``text`` with every closer of the
+    wrong kind replaced, or ``None``.
+
+    Interface contract (caller: ``_judge``, after ``extract_json_from_text``
+    found nothing): ``text`` is a reply, any shape. Returns the span only when
+    it parses with ``json.loads`` after the swaps; ``None`` for a span that is
+    missing, has a stray closer, an unclosed container or string, nests deeper
+    than ``_MAX_NESTING``, or still is not JSON. Pure; one linear scan, never
+    raises.
+    """
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end < start:
+        return None
+    chars = list(text[start : end + 1])
+    expected: list[str] = []
+    quoted = escaped = False
+    for i, ch in enumerate(chars):
+        if quoted:
+            quoted = ch != '"' or escaped
+            escaped = ch == "\\" and not escaped
+        elif ch == '"':
+            quoted = True
+        elif ch in _CLOSERS:
+            if len(expected) >= _MAX_NESTING:
+                return None
+            expected.append(_CLOSERS[ch])
+        elif ch in "}]":
+            if not expected:
+                return None
+            chars[i] = expected.pop()
+    if expected or quoted:
+        return None
+    fixed = "".join(chars)
+    try:
+        json.loads(fixed)
+    except (json.JSONDecodeError, RecursionError):
+        return None
+    return fixed
+
+
 # DECISION plan-2026-11-10T194139-2cefeb61/D-096
 # The bulk pass is the only channel for a later-turn correction (per-field
 # extraction is skip-if-set) and answers under the name its instructions give:
@@ -660,6 +714,9 @@ def _judge(
         else ""
     )
     data = None if code else extract_json_from_text(reply.text or "")
+    if data is None and not code:
+        fixed = _repair_brackets(reply.text or "")
+        data = json.loads(fixed) if fixed else None
     if data is None:
         detail = "" if code else _parser_detail(reply.text or "")
         code = code or "reply-not-json-object"
