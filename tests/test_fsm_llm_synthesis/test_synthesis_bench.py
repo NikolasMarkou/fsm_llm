@@ -537,6 +537,76 @@ class TestPreflight:
         if not want:
             assert client.calls.count("probe") == 3 and waits == [sb.PROBE_SPACING] * 2
 
+    @staticmethod
+    def _runner(monkeypatch, recent, ever=(0, "", ""), error=None):
+        """A fake ``subprocess.run``: ``recent`` answers the ``--since`` query, ``ever``
+        the ``-n 1`` one; each is ``(returncode, stdout, stderr)``; ``error`` is raised."""
+        cmds = []
+
+        def run(cmd, **kwargs):
+            cmds.append(cmd)
+            if error:
+                raise error
+            code, out, err = recent if "--since" in cmd else ever
+            return SimpleNamespace(returncode=code, stdout=out, stderr=err)
+
+        monkeypatch.setattr(sb.subprocess, "run", run)
+        return cmds
+
+    @pytest.mark.parametrize(
+        ("name", "recent", "ever", "error", "want"),
+        [
+            ("a unit with entries, quiet now", (0, "", ""), (0, "old line\n", ""), None, []),
+            ("a busy unit", (0, f"x\n{CHAT}\n", ""), (0, "", ""), None, ["x", CHAT]),
+            ("a missing unit (exit 0, no output)", (0, "", ""), (0, "", ""), None, None),
+            ("an unreadable system journal", (0, "", "Hint: not seeing messages"), (0, "", "Hint"), None, None),
+            ("no journal files", (0, "", "No journal files were found."), (0, "", ""), None, None),
+            ("a failing journalctl", (1, "", "boom"), (1, "", "boom"), None, None),
+            ("no journalctl (Docker, not systemd)", None, None, FileNotFoundError("journalctl"), None),
+            ("a hung journalctl", None, None, subprocess.TimeoutExpired("journalctl", 20), None),
+            ("an ever-query that fails", (0, "", ""), (1, "", "boom"), None, None),
+        ],
+    )  # fmt: skip
+    def test_the_journal_is_quiet_only_with_an_entry_behind_the_silence(
+        self, monkeypatch, name, recent, ever, error, want
+    ):
+        """Guards (D-068): `journalctl -u <missing unit>` exits 0 with no output and
+        was counted as a quiet window."""
+        self._runner(monkeypatch, recent, ever, error)
+        assert sb.OllamaClient().journal(10) == want, name
+
+    def test_the_window_query_names_the_unit_and_the_proof_query_has_no_window(
+        self, monkeypatch
+    ):
+        """Guards: a proof that is itself limited to the quiet window."""
+        cmds = self._runner(monkeypatch, (0, "", ""), (0, "old\n", ""))
+        sb.OllamaClient().journal(10)
+        assert [c for c in cmds if "--since" in c] and len(cmds) == 2
+        assert all(c[:3] == ["journalctl", "-u", "ollama"] for c in cmds)
+        assert "--since" not in cmds[1] and cmds[1][-2:] == ["-n", "1"]
+
+    @pytest.mark.parametrize(
+        ("recent", "ever", "confirm", "want"),
+        [
+            ((0, "", ""), (0, "", ""), False, "journal"),  # a missing unit refuses
+            ((0, "", ""), (0, "", ""), True, ""),  # only the explicit flag passes it
+            ((0, "", ""), (0, "old\n", ""), False, ""),
+            ((0, CHAT, ""), (0, "", ""), True, "request line"),  # the flag never hides load
+        ],
+    )  # fmt: skip
+    def test_the_preflight_refuses_a_missing_unit_unless_confirmed(
+        self, monkeypatch, recent, ever, confirm, want
+    ):
+        """Guards: a preflight that passes on a journal that cannot show the load."""
+        self._runner(monkeypatch, recent, ever)
+
+        class Server(sb.OllamaClient):
+            ps = lambda self: {"models": OURS}  # noqa: E731
+            probe = lambda self: (0.3, 0.2)  # noqa: E731
+
+        found = sb.preflight(Server(), confirm_exclusive=confirm, sleep=lambda s: None)
+        assert (want in " ".join(found)) if want else found == []
+
     @pytest.mark.parametrize("client", [_Client([[OTHER]]), _Client(lines=["x", CHAT])])
     def test_a_refusal_sends_no_probe(self, client):
         """Guards: a probe that forces the other job's model to reload."""

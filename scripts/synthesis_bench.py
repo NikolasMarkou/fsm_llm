@@ -455,15 +455,26 @@ class OllamaClient:
         """``/api/ps``: the loaded models and their contexts."""
         return self._call("/api/ps", None, 10)  # type: ignore[no-any-return]
 
-    def journal(self, minutes: int) -> list[str] | None:
-        """The ollama unit's journal lines of the last *minutes*, ``None`` if unreadable."""  # fmt: skip
-        cmd = ["journalctl", "-u", "ollama", "--since", f"{minutes} minutes ago", "--no-pager", "-o", "cat"]  # fmt: skip
+    @staticmethod
+    def _lines(cmd: list[str]) -> list[str] | None:
+        """The stdout lines of a ``journalctl`` query, ``None`` if it could not be read."""
         try:
             out = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
         except (OSError, subprocess.SubprocessError):
             return None
         bad = out.returncode or "No journal files" in out.stderr or "permission" in out.stderr  # fmt: skip
         return None if bad else out.stdout.splitlines()
+
+    # DECISION plan-2026-11-10T194139-2cefeb61/D-068
+    # An empty window is quiet ONLY if the unit has an entry at all. `journalctl -u
+    # <missing unit>` exits 0 with no output, so silence alone passed on a missing
+    # unit, an unreadable journal or a Docker server. Do NOT read empty as quiet.
+    def journal(self, minutes: int) -> list[str] | None:
+        """The ollama unit's journal lines of the last *minutes*; ``None`` (unreadable, the
+        preflight refuses) unless an empty window is backed by an entry the unit ever wrote."""
+        cmd = ["journalctl", "-u", "ollama", "--no-pager", "-o", "cat"]
+        lines = self._lines([*cmd, "--since", f"{minutes} minutes ago"])
+        return None if lines == [] and not self._lines([*cmd, "-n", "1"]) else lines
 
     def probe(self) -> tuple[float, float]:
         """One one-token chat, no ``num_ctx``: ``(client wall seconds, server
