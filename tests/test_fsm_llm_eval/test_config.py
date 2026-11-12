@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from fsm_llm.constants import DEFAULT_LLM_MODEL, ENV_LLM_MODEL
+from fsm_llm import ModelNotConfiguredError
+from fsm_llm.constants import ENV_LLM_MODEL
 from fsm_llm.eval import (
     EvalConfig,
     EvalConfigError,
@@ -119,11 +120,13 @@ class TestResolveModel:
         assert resolve_model(EvalConfig()) == "env-model"
         assert resolve_model(EvalConfig(model="  ")) == "env-model"
 
-    def test_default_when_nothing_set(self, monkeypatch):
+    def test_raises_when_nothing_set(self, monkeypatch):
         monkeypatch.setenv(ENV_LLM_MODEL, "")
-        assert resolve_model(EvalConfig()) == DEFAULT_LLM_MODEL
+        with pytest.raises(ModelNotConfiguredError):
+            resolve_model(EvalConfig())
         monkeypatch.delenv(ENV_LLM_MODEL)
-        assert resolve_model(EvalConfig()) == DEFAULT_LLM_MODEL
+        with pytest.raises(ModelNotConfiguredError):
+            resolve_model(EvalConfig())
 
 
 class TestLLMSettings:

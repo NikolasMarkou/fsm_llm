@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm import API
-from fsm_llm.constants import DEFAULT_LLM_MODEL, ENV_LLM_MODEL
+from fsm_llm import API, ModelNotConfiguredError
+from fsm_llm.constants import ENV_LLM_MODEL
 from fsm_llm.llm import (
     DEFAULT_EMBEDDING_MODEL,
     DEFAULT_LLM_TIMEOUT_SECONDS,
@@ -48,15 +48,16 @@ class TestResolveModel:
             monkeypatch.delenv(ENV_LLM_MODEL, raising=False)
         else:
             monkeypatch.setenv(ENV_LLM_MODEL, env)
-        assert resolve_model(explicit) == DEFAULT_LLM_MODEL
+        with pytest.raises(ModelNotConfiguredError):
+            resolve_model(explicit)
 
 
 class TestApiBlankEnvModel:
     @pytest.mark.parametrize("value", ["", "   "])
-    def test_blank_env_falls_back_to_the_default(self, monkeypatch, value):
+    def test_blank_env_is_unset_and_raises(self, monkeypatch, value):
         monkeypatch.setenv(ENV_LLM_MODEL, value)
-        api = API.from_definition(_FSM)
-        assert api.llm_interface.model == DEFAULT_LLM_MODEL
+        with pytest.raises(ModelNotConfiguredError):
+            API.from_definition(_FSM)
 
     def test_env_model_is_used(self, monkeypatch):
         monkeypatch.setenv(ENV_LLM_MODEL, "env/model")
@@ -78,9 +79,8 @@ class TestDefaultNumbersHaveOneHome:
         embed = inspect.signature(LiteLLMEmbedder.__init__).parameters
         assert embed["timeout"].default == DEFAULT_LLM_TIMEOUT_SECONDS
 
-    def test_api_default_max_tokens(self, monkeypatch):
-        monkeypatch.delenv(ENV_LLM_MODEL, raising=False)
-        api = API.from_definition(_FSM)
+    def test_api_default_max_tokens(self):
+        api = API.from_definition(_FSM, model="given/model")
         assert api.llm_interface.max_tokens == DEFAULT_MAX_TOKENS
 
     def test_values_are_unchanged(self):

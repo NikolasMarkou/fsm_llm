@@ -73,7 +73,6 @@ import litellm
 from litellm import completion, embedding, get_supported_openai_params
 
 from .constants import (
-    DEFAULT_LLM_MODEL,
     DEFAULT_TEMPERATURE,
     EMPTY_USER_MESSAGE_TURN,
     ENV_LLM_MODEL,
@@ -99,6 +98,7 @@ from .definitions import (
     LLMCallCounts,
     LLMResponseError,
     LLMUsage,
+    ModelNotConfiguredError,
     ModelToolCall,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
@@ -493,23 +493,29 @@ def implements_complete(llm: Any) -> bool:
 
 
 def resolve_model(model: str | None = None) -> str:
-    """The model name to use: *model*, else env ``LLM_MODEL``, else the default.
+    """The model name to use: *model*, else env ``LLM_MODEL``; never a default.
 
     Interface contract (callers: ``API``, ``agents.resolve_agent_model`` and
     ``eval.resolve_model``):
         - *model*: an explicit name or ``None``.
         - Returns the first non-blank candidate, stripped: *model*, then
-          ``$LLM_MODEL`` (read now, never at import), then
-          ``constants.DEFAULT_LLM_MODEL``. A blank value (``""`` or only
-          whitespace, e.g. an empty ``LLM_MODEL=`` line in a ``.env``) counts as
-          unset at either tier. Always a non-empty ``str``.
-        - Never raises. ``Classifier`` does not call it: it ignores the
-          environment on purpose (it uses the conversation's own interface).
+          ``$LLM_MODEL`` (read now, never at import). A blank value (``""`` or
+          only whitespace, e.g. an empty ``LLM_MODEL=`` line in a ``.env``)
+          counts as unset at either tier. Always a non-empty ``str``.
+        - Raises ``ModelNotConfiguredError`` (an ``FSMError`` and a
+          ``ValueError``) when both are unset: the library has no built-in
+          model, so a fresh install fails with a message that says how to set
+          one. A caller that holds an injected interface does not call this.
+        - ``Classifier`` does not call it yet: it ignores the environment (it
+          uses the conversation's own interface).
     """
+    # DECISION plan-2026-11-12T073150-d454fd62/D-005
+    # Do NOT fall back to a built-in model here (the old DEFAULT_LLM_MODEL): a
+    # silent default sent a fresh install to a 27B local model it never chose.
     for candidate in (model, os.environ.get(ENV_LLM_MODEL)):
         if candidate is not None and candidate.strip():
             return candidate.strip()
-    return DEFAULT_LLM_MODEL
+    raise ModelNotConfiguredError()
 
 
 def interface_model(llm: Any) -> str | None:

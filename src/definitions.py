@@ -2860,6 +2860,35 @@ class BuildError(FSMError, ValueError):
         self.errors = list(errors) if errors is not None else [message]
 
 
+class ModelNotConfiguredError(FSMError, ValueError):
+    """No LLM model was named anywhere: not by argument, not by ``LLM_MODEL``.
+
+    Interface contract: ``ModelNotConfiguredError(message=None, details=None)``.
+    ``message`` defaults to ``ModelNotConfiguredError.DEFAULT_MESSAGE`` (one
+    line, names the three ways to set a model, names no concrete model), so
+    every raiser shares one text. Raised by ``llm.resolve_model`` and so by every constructor that
+    builds a real interface (``API``, ``AgentConfig``, ...); an injected
+    ``llm_interface`` needs no model and never raises it. It is a
+    ``ValueError`` too, so a REST layer that maps ``ValueError`` to a 400 shows
+    the message as is.
+    """
+
+    # DECISION plan-2026-11-12T073150-d454fd62/D-005
+    # Do NOT replace this error with a built-in default model: a fresh install
+    # must fail with a clear message, never download or call a model nobody
+    # chose. Do NOT drop the ValueError base (the monitor maps it to a 400).
+    DEFAULT_MESSAGE: ClassVar[str] = (
+        'No LLM model is set. Pass model="provider/name", or set the LLM_MODEL '
+        "environment variable, or call fsm_llm.load_env() (CLI: --env-file PATH) "
+        "to read LLM_MODEL from a .env file."
+    )
+
+    def __init__(
+        self, message: str | None = None, details: dict[str, Any] | None = None
+    ):
+        super().__init__(self.DEFAULT_MESSAGE if message is None else message, details)
+
+
 class OKFError(FSMError):
     """An Open Knowledge Format operation was refused (``fsm_llm.okf``).
 

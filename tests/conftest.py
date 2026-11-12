@@ -13,7 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from fsm_llm.constants import DEFAULT_LLM_MODEL
+from fsm_llm.constants import DEFAULT_LLM_MODEL, ENV_LLM_MODEL
 from fsm_llm.definitions import (
     BulkExtractionRequest,
     CompletionRequest,
@@ -159,6 +159,43 @@ def block_network(monkeypatch: pytest.MonkeyPatch, node: pytest.Item) -> None:
 
     monkeypatch.setattr(socket.socket, "connect", _connect)
     monkeypatch.setattr(socket.socket, "connect_ex", _connect_ex)
+
+
+#: The model name every offline test sees in ``LLM_MODEL``. Nothing resolves it
+#: to a real provider: the network is blocked and the interfaces are doubles.
+TEST_LLM_MODEL = "test/model"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _session_llm_model():
+    """``LLM_MODEL`` for session and module fixtures, and a stray ``.env``.
+
+    Interface contract: sets ``LLM_MODEL`` to ``TEST_LLM_MODEL`` for the whole
+    session through a ``MonkeyPatch`` context and restores the previous value
+    at the end. A fixture wider than a function (built before the per-test
+    fixture below) therefore resolves a model too, and the repo-root ``.env``
+    (git-ignored, loaded by litellm at import until row 0.8 finishes) cannot
+    decide a result. Nothing here reads or writes the file.
+    """
+    with pytest.MonkeyPatch.context() as session_patch:
+        session_patch.setenv(ENV_LLM_MODEL, TEST_LLM_MODEL)
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _llm_model_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``LLM_MODEL`` is set for every test (plan d454fd62 D-005, row 0.8).
+
+    The library has no default model: ``resolve_model`` raises
+    ``ModelNotConfiguredError`` when nothing names one. The 159 offline
+    ``AgentConfig()`` sites and every model-less ``API`` read it from here. A
+    test that needs the unset state deletes it itself with
+    ``monkeypatch.delenv(ENV_LLM_MODEL, raising=False)``; ``monkeypatch`` undoes
+    that at teardown, so the next test starts set again. Tests that clear the
+    whole environment (``patch.dict(os.environ, ..., clear=True)``) are
+    unaffected: they state their own.
+    """
+    monkeypatch.setenv(ENV_LLM_MODEL, TEST_LLM_MODEL)
 
 
 @pytest.fixture(scope="session")

@@ -386,6 +386,8 @@ fsm_llm.LiteLLMInterface class(LLMInterface, _Metered)
   def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse
   def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse
   def generate_response_stream(self, request: ResponseGenerationRequest) -> Iterator[str]
+fsm_llm.ModelNotConfiguredError class(FSMError, ValueError)
+  def __init__(self, message: str | None = None, details: dict[str, Any] | None = None)
 fsm_llm.ModelToolCall class(BaseModel)
   field id: str required
   field name: str required

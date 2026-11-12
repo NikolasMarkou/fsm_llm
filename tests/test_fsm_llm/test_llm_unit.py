@@ -936,11 +936,13 @@ class TestFieldExtractionNaNConfidence:
 
 
 class TestDefaultModel:
-    """Plan 0068b055 step 0 (D-014, D-015): the framework defaults are the
-    user's chat model and embedder, and every model-less consumer reads the
-    constant, not a copy."""
+    """Plan 0068b055 step 0 (D-014, D-015): the framework default embedder is
+    one constant. Plan d454fd62 D-005: there is no default chat model; a
+    model-less ``API`` raises ``ModelNotConfiguredError``. The classifier still
+    reads ``DEFAULT_LLM_MODEL`` until the callers step (plan d454fd62 step 14)."""
 
     def test_default_llm_model_is_bonsai_27b(self):
+        # Removed with the constant in plan d454fd62 step 15.
         from fsm_llm.constants import DEFAULT_LLM_MODEL
 
         assert DEFAULT_LLM_MODEL == "ollama_chat/bonsai-2:27b"
@@ -950,8 +952,10 @@ class TestDefaultModel:
 
         assert DEFAULT_EMBEDDING_MODEL == "ollama/embeddinggemma-2:740m"
 
-    def test_model_less_api_resolves_to_the_default(self, monkeypatch):
-        from fsm_llm import API
+    def test_model_less_api_raises_and_the_classifier_still_has_its_default(
+        self, monkeypatch
+    ):
+        from fsm_llm import API, ModelNotConfiguredError
         from fsm_llm.classification import Classifier
         from fsm_llm.constants import DEFAULT_LLM_MODEL, ENV_LLM_MODEL
         from fsm_llm.definitions import ClassificationSchema, IntentDefinition
@@ -973,7 +977,8 @@ class TestDefaultModel:
                 "b": {"id": "b", "description": "end", "purpose": "p"},
             },
         }
-        assert API.from_definition(fsm).llm_interface.model == DEFAULT_LLM_MODEL
+        with pytest.raises(ModelNotConfiguredError):
+            API.from_definition(fsm)
         assert DEFAULT_LLM_MODEL == "ollama_chat/bonsai-2:27b"
         schema = ClassificationSchema(
             intents=[

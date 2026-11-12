@@ -15,6 +15,7 @@ from typing import ClassVar
 import pytest
 from pydantic import ValidationError
 
+from fsm_llm import ModelNotConfiguredError
 from fsm_llm.agents import (
     AgentConfig,
     AgentError,
@@ -28,7 +29,6 @@ from fsm_llm.agents import (
 from fsm_llm.agents.base import _with_instructions
 from fsm_llm.agents.definitions import MetaBuilderConfig
 from fsm_llm.agents.sop import SOPDefinition, SOPRegistry
-from fsm_llm.constants import DEFAULT_LLM_MODEL
 from tests.conftest import PromptGroundedLLM
 
 
@@ -161,13 +161,14 @@ class TestModelResolution:
         assert AgentConfig(model="bar").model == "bar"
 
     @pytest.mark.parametrize("value", [None, "", "   "])
-    def test_unset_or_blank_env_uses_the_core_default(self, monkeypatch, value):
+    def test_unset_or_blank_env_raises_the_core_error(self, monkeypatch, value):
         if value is None:
             monkeypatch.delenv("LLM_MODEL", raising=False)
         else:
             monkeypatch.setenv("LLM_MODEL", value)
 
-        assert AgentConfig().model == DEFAULT_LLM_MODEL
+        with pytest.raises(ModelNotConfiguredError):
+            AgentConfig()
 
     def test_default_llm_judge_resolves_model_the_same_way(self, monkeypatch):
         monkeypatch.setenv("LLM_MODEL", "judge-env")
