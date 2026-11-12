@@ -308,7 +308,7 @@ class TestLoadFsmFromFile:
     def test_valid_json_file(self, tmp_path):
         fsm_dict = _minimal_fsm_dict()
         path = tmp_path / "valid.json"
-        path.write_text(json.dumps(fsm_dict))
+        path.write_text(json.dumps(fsm_dict), encoding="utf-8")
 
         result = load_fsm_from_file(str(path))
         assert isinstance(result, FSMDefinition)
@@ -320,14 +320,14 @@ class TestLoadFsmFromFile:
 
     def test_invalid_json(self, tmp_path):
         path = tmp_path / "bad.json"
-        path.write_text("not valid json {{{")
+        path.write_text("not valid json {{{", encoding="utf-8")
 
         with pytest.raises(ValueError, match="Invalid JSON"):
             load_fsm_from_file(str(path))
 
     def test_non_dict_json(self, tmp_path):
         path = tmp_path / "array.json"
-        path.write_text(json.dumps([1, 2, 3]))
+        path.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
 
         with pytest.raises(ValueError, match="must be a JSON object"):
             load_fsm_from_file(str(path))
@@ -337,7 +337,7 @@ class TestLoadFsmFromFile:
         fsm_dict = _minimal_fsm_dict()
         del fsm_dict["version"]
         path = tmp_path / "no_version.json"
-        path.write_text(json.dumps(fsm_dict))
+        path.write_text(json.dumps(fsm_dict), encoding="utf-8")
 
         result = load_fsm_from_file(str(path))
         assert result.version == SCHEMA_VERSION_DEFAULT
@@ -352,7 +352,7 @@ class TestLoadFsmDefinition:
     def test_load_by_file_path(self, tmp_path):
         fsm_dict = _minimal_fsm_dict()
         path = tmp_path / "def.json"
-        path.write_text(json.dumps(fsm_dict))
+        path.write_text(json.dumps(fsm_dict), encoding="utf-8")
 
         result = load_fsm_definition(str(path))
         assert isinstance(result, FSMDefinition)

@@ -115,7 +115,7 @@ class TestStructure:
 
     def test_fsm_llm_validate_cli_exits_ok(self, fsm_dict, tmp_path, capsys):
         path = tmp_path / "meta_builder.json"
-        path.write_text(json.dumps(fsm_dict))
+        path.write_text(json.dumps(fsm_dict), encoding="utf-8")
         assert validate_main(str(path)) == 0
         report = json.loads(capsys.readouterr().out)
         assert report["is_valid"] is True

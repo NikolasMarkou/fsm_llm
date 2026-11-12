@@ -229,7 +229,7 @@ class TestRunExamples:
 
     def test_results_json_keeps_every_historical_key(self, finished_run):
         report, _ = finished_run
-        data = json.loads((report.run_dir / "results.json").read_text())
+        data = json.loads((report.run_dir / "results.json").read_text(encoding="utf-8"))
         assert _HISTORICAL_TOP_KEYS <= set(data)
         assert set(data) - _HISTORICAL_TOP_KEYS == {
             "wall_time_s",
@@ -371,10 +371,10 @@ class TestOutputDir:
     def test_second_run_never_reuses_the_first_dir(self, examples_dir: Path):
         config = _config(examples_dir)
         first = create_output_dir(config, "ollama_chat/test:1b")
-        (first / "marker").write_text("keep")
+        (first / "marker").write_text("keep", encoding="utf-8")
         second = create_output_dir(config, "ollama_chat/test:1b")
         assert first != second
-        assert (first / "marker").read_text() == "keep"
+        assert (first / "marker").read_text(encoding="utf-8") == "keep"
         assert first.name.endswith("_test-1b")
 
     def test_explicit_dir_created_when_missing(self, tmp_path: Path):
@@ -383,7 +383,7 @@ class TestOutputDir:
         assert out.is_dir()
 
     def test_explicit_nonempty_dir_is_refused(self, tmp_path: Path):
-        (tmp_path / "old.txt").write_text("x")
+        (tmp_path / "old.txt").write_text("x", encoding="utf-8")
         with pytest.raises(EvalError, match="not empty"):
             create_output_dir(EvalConfig(output_dir=str(tmp_path)), "m")
 
@@ -427,7 +427,7 @@ class TestInterrupt:
         assert report.interrupted is True
         assert len(report.results) == 1
         assert len(started) < len(targets)  # the queue was cancelled
-        data = json.loads((run_dir / "results.json").read_text())
+        data = json.loads((run_dir / "results.json").read_text(encoding="utf-8"))
         assert data["interrupted"] is True
         assert data["total_examples"] == 1
         scorecard = (run_dir / "scorecard.md").read_text(encoding="utf-8")
@@ -460,7 +460,12 @@ class TestInterrupt:
         assert report.interrupted is True
         assert report.results == []
         assert (run_dir / "logs").is_dir()  # the banner's Logs: path exists
-        assert json.loads((run_dir / "results.json").read_text())["interrupted"] is True
+        assert (
+            json.loads((run_dir / "results.json").read_text(encoding="utf-8"))[
+                "interrupted"
+            ]
+            is True
+        )
 
     @pytest.mark.slow  # about 6 s: a real CLI process (imports litellm) and 1 s timeouts
     def test_sigterm_to_the_cli_writes_the_partial_report_and_exits_130(

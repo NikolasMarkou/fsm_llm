@@ -621,10 +621,10 @@ class TestWorkingMemoryFromDictValidation:
         api.end_conversation(conv_id)
 
         session_file = tmp_path / f"{conv_id}.json"
-        raw = json.loads(session_file.read_text())
+        raw = json.loads(session_file.read_text(encoding="utf-8"))
         assert isinstance(raw["working_memory"]["buffers"]["core"], dict)
         raw["working_memory"]["buffers"]["core"] = "corrupted"
-        session_file.write_text(json.dumps(raw))
+        session_file.write_text(json.dumps(raw), encoding="utf-8")
 
         before = set(api.list_active_conversations())
         with pytest.raises(ValueError) as excinfo:
@@ -678,9 +678,9 @@ class TestRestoreSessionBuffersNoneVsEmpty:
         api.end_conversation(conv_id)
 
         session_file = tmp_path / f"{conv_id}.json"
-        raw = json.loads(session_file.read_text())
+        raw = json.loads(session_file.read_text(encoding="utf-8"))
         raw["working_memory"] = working_memory
-        session_file.write_text(json.dumps(raw))
+        session_file.write_text(json.dumps(raw), encoding="utf-8")
         return api, conv_id
 
     def _restored_memory(self, api, conv_id):

@@ -605,7 +605,7 @@ class TestFsmIdIgnoresDefaults:
 
     @pytest.mark.parametrize("path", sorted(_E1F63A9_IDS))
     def test_example_ids_did_not_move_with_the_new_fields(self, path: str):
-        raw = json.loads((_REPO / path).read_text())
+        raw = json.loads((_REPO / path).read_text(encoding="utf-8"))
         _, fsm_id = API.process_fsm_definition(raw)
         assert fsm_id == _E1F63A9_IDS[path]
 
@@ -656,7 +656,7 @@ class TestFsmIdIgnoresDefaults:
     def test_construction_paths_agree(self, tmp_path: Path):
         raw = _tool_fsm()
         path = tmp_path / "fsm.json"
-        path.write_text(json.dumps(raw))
+        path.write_text(json.dumps(raw), encoding="utf-8")
         ids = {
             API.process_fsm_definition(raw)[1],
             API.process_fsm_definition(FSMDefinition(**raw))[1],

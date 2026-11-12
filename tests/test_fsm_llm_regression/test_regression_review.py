@@ -237,7 +237,7 @@ class TestRequirementsAlignment:
         import pathlib
 
         req_path = pathlib.Path(__file__).parents[2] / "requirements.txt"
-        content = req_path.read_text()
+        content = req_path.read_text(encoding="utf-8")
         assert "python-dotenv>=1.0.0" in content
         # Should not have dev deps
         assert "pytest" not in content
@@ -250,7 +250,7 @@ class TestRequirementsAlignment:
         import pathlib
 
         req_path = pathlib.Path(__file__).parents[2] / "requirements.txt"
-        content = req_path.read_text()
+        content = req_path.read_text(encoding="utf-8")
         assert "<2.0" in content
 
     def test_litellm_excludes_compromised_versions(self):
@@ -326,7 +326,7 @@ class TestConsolidatedAll:
         import pathlib
 
         init_path = pathlib.Path(__file__).parents[2] / "src" / "__init__.py"
-        source = init_path.read_text()
+        source = init_path.read_text(encoding="utf-8")
         assert source.count("__all__.extend") == 0, (
             "__all__ should not be extended dynamically"
         )
@@ -362,6 +362,6 @@ class TestNoDeadToxDocs:
         import pathlib
 
         tox_path = pathlib.Path(__file__).parents[2] / "tox.ini"
-        content = tox_path.read_text()
+        content = tox_path.read_text(encoding="utf-8")
         assert "sphinx" not in content.lower()
         assert "[testenv:docs]" not in content

@@ -246,7 +246,7 @@ class TestReplyBudget:
         text += "\n" + _ZWJ_RUN + "x" + _ZWJ_RUN + chr(0x1F600)  # both parities
         _make(tmp_path, "big", "Big.", text + "\n", {"references/r.md": text})
         registry = _registry(tmp_path)
-        raw = (tmp_path / "big/SKILL.md").read_text()
+        raw = (tmp_path / "big/SKILL.md").read_text(encoding="utf-8")
         body = strip_unsafe_text(split_frontmatter(raw)[1], multiline=True)
         want = strip_unsafe_text(text, multiline=True)
         for params, expected in (
@@ -360,7 +360,9 @@ class TestReplyBudget:
         _make(tmp_path, big, "c" * 2000, _LONG, files, extra=huge)
         _make(tmp_path, "zz")  # past max_skills: the catalog is incomplete
         registry = _registry(tmp_path, max_skills=31)
-        body = split_frontmatter((tmp_path / big / "SKILL.md").read_text())[1]
+        body = split_frontmatter(
+            (tmp_path / big / "SKILL.md").read_text(encoding="utf-8")
+        )[1]
         for pad in (0, 3000):  # 3,000 zeros echoed: only the floor budget is left
             pages = self._walk(registry, "skill_load", pad=pad, name=big)
             assert "".join(pages) == body and len(pages) > 3
@@ -385,7 +387,9 @@ class TestReplyBudget:
         assert "skipped" not in _run(_registry(gateway), "skill_list")
         for name in ("bad", "worse"):  # a colon in an unquoted description
             _make(gateway, name, extra="")
-            (gateway / name / "SKILL.md").write_text("---\ndescription: A: b\n---\n")
+            (gateway / name / "SKILL.md").write_text(
+                "---\ndescription: A: b\n---\n", encoding="utf-8"
+            )
         lines = _run(_registry(gateway), "skill_list").split("\n")
         assert lines[:2] == [SKILL_UNTRUSTED_LABEL, SKILL_SKIPPED_NOTE.format(count=2)]
         assert lines[2] == "2 skill(s), from 0:"

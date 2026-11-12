@@ -251,7 +251,9 @@ def mock_llm_interface():
 @pytest.fixture
 def temp_fsm_file(complete_simple_fsm_dict):
     """Fixture for a temporary FSM file with complete definition."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+    with tempfile.NamedTemporaryFile(
+        encoding="utf-8", mode="w", suffix=".json", delete=False
+    ) as f:
         json.dump(complete_simple_fsm_dict, f, indent=2)
         temp_path = f.name
 

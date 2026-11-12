@@ -767,7 +767,7 @@ class TestLoader:
     def test_a_file_as_root_and_a_missing_second_root_raise(
         self, tmp_path: Path
     ) -> None:
-        (tmp_path / "f.txt").write_text("x")
+        (tmp_path / "f.txt").write_text("x", encoding="utf-8")
         _mk(tmp_path, "ok")
         with pytest.raises(SkillError):
             load_skills(tmp_path / "f.txt")
@@ -781,7 +781,7 @@ class TestLoader:
         _mk(tmp_path, ".trash")
         (tmp_path / "synced" / "uuid").mkdir(parents=True)
         (tmp_path / "plain").mkdir()
-        (tmp_path / "file.txt").write_text("x")
+        (tmp_path / "file.txt").write_text("x", encoding="utf-8")
         catalog = load_skills(tmp_path)
         assert catalog.names == ("real",) and catalog.issues == []
 
@@ -992,7 +992,7 @@ class TestSymlinks:
     def _secret(self, tmp_path: Path) -> Path:
         outside = tmp_path / "outside"
         outside.mkdir()
-        (outside / "secret.txt").write_text("TOPSECRET")
+        (outside / "secret.txt").write_text("TOPSECRET", encoding="utf-8")
         return outside
 
     def test_a_symlinked_file_or_directory_inside_a_skill_is_skipped_and_never_read(
@@ -1075,7 +1075,9 @@ class TestSymlinks:
         self, tmp_path: Path
     ) -> None:
         outside = self._secret(tmp_path)  # a valid skill: it would load if followed
-        (outside / "SKILL.md").write_text("---\nname: x\ndescription: d\n---\nb\n")
+        (outside / "SKILL.md").write_text(
+            "---\nname: x\ndescription: d\n---\nb\n", encoding="utf-8"
+        )
         root = tmp_path / "skills"
         (root / "s").mkdir(parents=True)
         (root / "s" / "SKILL.md").symlink_to(outside / "SKILL.md")
@@ -1277,7 +1279,7 @@ def _guarded(tmp_path: Path, **limit_args: int) -> tuple[SkillCatalog, Path, Pat
     """A skill with files, plus a secret OUTSIDE it and a dot file inside it."""
     outside = tmp_path / "outside"
     outside.mkdir()
-    (outside / "secret.txt").write_text(_SECRET)
+    (outside / "secret.txt").write_text(_SECRET, encoding="utf-8")
     root = tmp_path / "skills"
     folder = _mk(
         root,
@@ -1473,8 +1475,8 @@ class TestResourceConfinement:
         self, tmp_path: Path
     ) -> None:
         catalog, folder, _ = _guarded(tmp_path, max_file_bytes=1_000)
-        (folder / "edge.txt").write_text("e" * 1_000)
-        (folder / "over.txt").write_text("o" * 1_001)
+        (folder / "edge.txt").write_text("e" * 1_000, encoding="utf-8")
+        (folder / "over.txt").write_text("o" * 1_001, encoding="utf-8")
         assert catalog.read_resource("guard", "edge.txt", size=5_000)[2] == 1_000
         with pytest.raises(SkillError) as info:
             catalog.read_resource("guard", "over.txt")

@@ -31,7 +31,7 @@ class TestExampleFSMDefinitions:
 
     def test_example_fsm_loads_as_valid_json(self, example_fsm_path):
         """Example FSM file must be valid JSON."""
-        with open(example_fsm_path) as f:
+        with open(example_fsm_path, encoding="utf-8") as f:
             data = json.load(f)
         assert isinstance(data, dict)
         assert "name" in data
@@ -40,7 +40,7 @@ class TestExampleFSMDefinitions:
 
     def test_example_fsm_parses_as_definition(self, example_fsm_path):
         """Example FSM file must parse into a valid FSMDefinition."""
-        with open(example_fsm_path) as f:
+        with open(example_fsm_path, encoding="utf-8") as f:
             data = json.load(f)
         definition = FSMDefinition(**data)
         assert definition.name
@@ -48,7 +48,7 @@ class TestExampleFSMDefinitions:
 
     def test_example_fsm_passes_validation(self, example_fsm_path):
         """Example FSM file must pass structural validation."""
-        with open(example_fsm_path) as f:
+        with open(example_fsm_path, encoding="utf-8") as f:
             data = json.load(f)
         validator = FSMValidator(data)
         result = validator.validate()

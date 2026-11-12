@@ -246,7 +246,7 @@ class TestKeyStaysInternal:
 
         api.save_session(cid)
 
-        saved = "".join(p.read_text() for p in tmp_path.iterdir())
+        saved = "".join(p.read_text(encoding="utf-8") for p in tmp_path.iterdir())
         assert "_cut_off" not in saved
         assert "mood" in saved  # the file does carry the turn's data
 

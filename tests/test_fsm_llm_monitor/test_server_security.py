@@ -256,7 +256,7 @@ class TestBuilderGuards:
 
 class TestPresetValidation:
     def test_traversal_and_absolute_ids_rejected(self, tmp_path):
-        (tmp_path / "ok.json").write_text("{}")
+        (tmp_path / "ok.json").write_text("{}", encoding="utf-8")
         assert validate_preset_id("ok.json", tmp_path) == tmp_path / "ok.json"
         for bad in ("../etc/passwd", "/etc/passwd", "a/../../x.json"):
             with pytest.raises(ValueError):

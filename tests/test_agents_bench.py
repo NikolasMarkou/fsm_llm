@@ -934,7 +934,7 @@ class TestRunEndToEnd:
         assert good["total_tokens"] == 12 and good["tool_calls"] == 1
         for key in ("iterations", "latency_s", "answer", "success", "category"):
             assert key in good
-        manifest = json.loads((bdir / "manifest_mock.json").read_text())
+        manifest = json.loads((bdir / "manifest_mock.json").read_text(encoding="utf-8"))
         assert manifest["git_commit"] == "cafebabe" and manifest["trials"] == 2
         assert summary["status"] == "complete"
         assert summary["run"] == {"git_commit": "cafebabe", "git_dirty": False}
@@ -959,13 +959,13 @@ class TestRunEndToEnd:
         pre-registration, or running against a changed task set."""
         monkeypatch.setitem(ab.ARMS, "mock", self._arm())
         path = ab.register_block("agents-react", "B0", "mock", trials=1)
-        created = json.loads(path.read_text())["created_at"]
+        created = json.loads(path.read_text(encoding="utf-8"))["created_at"]
         with pytest.raises(ab.BenchDataError, match="registered ONCE"):
             ab.register_block("agents-react", "B0", "mock", trials=1)
         with pytest.raises(ab.BenchDataError, match="trials"):
             ab.run_block("agents-react", "B0", "mock", trials=2)
         ab.run_block("agents-react", "B0", "mock", trials=1)
-        assert json.loads(path.read_text())["created_at"] == created
+        assert json.loads(path.read_text(encoding="utf-8"))["created_at"] == created
 
     def test_unknown_arm_is_refused(self, offline):
         """Defect guarded: a typo'd --arm minting an unregistered arm."""

@@ -111,7 +111,7 @@ class TestV5PythonVersion:
         from pathlib import Path
 
         pyproject = Path(__file__).parent.parent.parent / "pyproject.toml"
-        content = pyproject.read_text()
+        content = pyproject.read_text(encoding="utf-8")
         assert 'requires-python = ">=3.11"' in content
 
 

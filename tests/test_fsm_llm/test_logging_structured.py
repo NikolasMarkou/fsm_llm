@@ -447,7 +447,7 @@ class TestDefaultHandlerIsReplacedNotDoubled:
         lines = _child(f"fsm_llm.setup_logging(sink='file', log_dir={str(tmp_path)!r})")
 
         (log_file,) = tmp_path.glob("fsm-llm_*.log")
-        text = log_file.read_text()
+        text = log_file.read_text(encoding="utf-8")
         assert "LIBREC" in text
         assert "HOSTREC" in text
         assert _count(lines, "LIBREC", "-") == 0

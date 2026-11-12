@@ -269,7 +269,7 @@ class TestStaticAll:
     _INIT = Path(__file__).resolve().parents[2] / "src" / "agents" / "__init__.py"
 
     def _all_bindings(self) -> list[ast.stmt]:
-        tree = ast.parse(self._INIT.read_text())
+        tree = ast.parse(self._INIT.read_text(encoding="utf-8"))
         bindings: list[ast.stmt] = []
         for node in ast.walk(tree):
             targets: list[ast.expr] = []
@@ -348,7 +348,7 @@ class TestCoreOwnsTypedFieldsAndKeyClearing:
         # with core clear_keys_delta (D-051); no agents module re-implements it.
         src = Path(__file__).resolve().parents[2] / "src" / "agents"
         for path in ("handlers.py", "meta_builder.py"):
-            assert "clear_keys_delta(" in (src / path).read_text(), path
+            assert "clear_keys_delta(" in (src / path).read_text(encoding="utf-8"), path
 
 
 class TestConfiguredAgentBuilder:

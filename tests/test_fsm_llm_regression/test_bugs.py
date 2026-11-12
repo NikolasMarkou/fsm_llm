@@ -140,7 +140,7 @@ class TestMd5Usage:
         """process_fsm_definition should not use md5 for hashing."""
         import fsm_llm.api as api_mod
 
-        source = open(api_mod.__file__).read()
+        source = open(api_mod.__file__, encoding="utf-8").read()
         # After the fix, md5 should not appear in the source
         assert "md5" not in source, "api.py should not use md5 — use sha256 instead"
 
@@ -320,7 +320,7 @@ class TestApiInitOrder:
             "src",
             "api.py",
         )
-        with open(api_path) as f:
+        with open(api_path, encoding="utf-8") as f:
             source = f.read()
 
         tree = ast.parse(source)
@@ -396,7 +396,7 @@ class TestPythonVersionCheck:
             "src",
             "__init__.py",
         )
-        with open(init_path) as f:
+        with open(init_path, encoding="utf-8") as f:
             source = f.read()
 
         tree = ast.parse(source)
@@ -572,7 +572,7 @@ class TestDisableWarningsModule:
             "src",
             "__init__.py",
         )
-        with open(source_path) as f:
+        with open(source_path, encoding="utf-8") as f:
             source = f.read()
 
         # Find the disable_warnings function and check it uses the right module

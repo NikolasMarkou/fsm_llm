@@ -362,10 +362,10 @@ def sample_fsm_definition(test_fixtures_root):
 
     minimal_fsm_path = fixtures_fsm_dir / "minimal_fsm.json"
     if not minimal_fsm_path.exists():
-        with open(minimal_fsm_path, "w") as f:
+        with open(minimal_fsm_path, "w", encoding="utf-8") as f:
             json.dump(minimal_fsm, f, indent=2)
 
-    with open(minimal_fsm_path) as f:
+    with open(minimal_fsm_path, encoding="utf-8") as f:
         fsm_data = json.load(f)
 
     return FSMDefinition.model_validate(fsm_data)

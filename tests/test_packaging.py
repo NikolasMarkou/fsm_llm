@@ -626,11 +626,11 @@ def _unencoded_text_calls(tree: ast.AST) -> list[int]:
 
 
 class TestExplicitEncodings:
-    """No text-mode file call in `src/` or `scripts/` relies on the locale."""
+    """No text-mode file call in `src/`, `scripts/` or `tests/` relies on the locale."""
 
     def test_no_text_file_call_without_an_encoding(self):
         offenders: list[str] = []
-        roots = [_REPO_ROOT / "src", _REPO_ROOT / "scripts"]
+        roots = [_REPO_ROOT / "src", _REPO_ROOT / "scripts", _REPO_ROOT / "tests"]
         for root in roots:
             for path in sorted(root.rglob("*.py")):
                 rel = path.relative_to(_REPO_ROOT)

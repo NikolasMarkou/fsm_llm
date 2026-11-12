@@ -342,7 +342,7 @@ class TestRunnerContextLoggingRedaction:
         finally:
             logger.remove(sink_id)
             logger.disable("fsm_llm")
-        return log_file.read_text()
+        return log_file.read_text(encoding="utf-8")
 
     def test_secret_shaped_context_values_never_reach_the_log_file(self, tmp_path):
         contents = self._run_cli_and_read_log(

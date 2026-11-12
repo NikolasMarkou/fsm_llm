@@ -974,7 +974,7 @@ class TestRunTrial:
         row = sb.run_trial("react", TASKS["c1"], 1, tmp_path, raw)
         assert row["error"].startswith("RuntimeError") and row["correct"] is False
         assert row["phase"] == "provider"  # any error of an agent row is the model call
-        assert json.loads(raw.read_text())["row"]["task_id"] == "c1"
+        assert json.loads(raw.read_text(encoding="utf-8"))["row"]["task_id"] == "c1"
 
 
 class TestBlocks:
@@ -1002,28 +1002,28 @@ class TestBlocks:
             sb.run_block("s0", client=client, sleep=lambda s: None)
         paths = sb.register_block("s0")
         assert [p.stem[9:] for p in paths] == list(sb.BLOCKS["s0"])
-        manifest = json.loads(paths[0].read_text())
+        manifest = json.loads(paths[0].read_text(encoding="utf-8"))
         assert manifest["model"] == sb.MODEL and manifest["trials"] == 2
         assert manifest["fixture_hash"] == sb.fixture_sha256()
         assert set(manifest["src_sha256"]) == set(sb.SRC_PINS)
         assert set(manifest["wire"]) == {"compile", "run"} and "num_ctx" not in json.dumps(manifest)  # fmt: skip
         with pytest.raises(BAD, match="ONCE"):
             sb.register_block("s0")
-        (bench / "s0" / "rows_react.jsonl").write_text("{}\n")
+        (bench / "s0" / "rows_react.jsonl").write_text("{}\n", encoding="utf-8")
         with pytest.raises(BAD, match="ONCE"):
             sb.run_block("s0", client=client, sleep=lambda s: None)
         (bench / "s0" / "rows_react.jsonl").unlink()
         for key, value in (("src_sha256", {"src/flow_analysis.py": "0" * 64}), ("fixture_hash", "0")):  # fmt: skip
             path = bench / "s0" / "manifest_synth-fsm.json"
-            saved = path.read_text()
+            saved = path.read_text(encoding="utf-8")
             manifest = json.loads(saved)
             manifest[key] = (
                 {**manifest.get(key, {}), **value} if isinstance(value, dict) else value
             )
-            path.write_text(json.dumps(manifest))
+            path.write_text(json.dumps(manifest), encoding="utf-8")
             with pytest.raises(BAD, match=key):
                 sb.run_block("s0", client=client, sleep=lambda s: None)
-            path.write_text(saved)
+            path.write_text(saved, encoding="utf-8")
 
     def test_run_refuses_a_busy_server_before_any_row(self, bench, rig, monkeypatch):
         """Guards: a run whose preflight was dropped (a queued run measures the queue)."""
@@ -1045,9 +1045,9 @@ class TestBlocks:
         text = capsys.readouterr().out
         assert "INCONCLUSIVE" in text and sb.ONE_MODEL in text  # n is 2 here, not 16
         path = bench / "s0" / "summary_hand-fsm.json"
-        summary = json.loads(path.read_text())
+        summary = json.loads(path.read_text(encoding="utf-8"))
         summary["metrics"]["k"] = 0
-        path.write_text(json.dumps(summary))
+        path.write_text(json.dumps(summary), encoding="utf-8")
         assert sb.report("s0") == 1 and "MISMATCH k" in capsys.readouterr().out
 
     def test_report_of_a_registered_block_says_so(self, bench, capsys):
@@ -1075,7 +1075,9 @@ class TestBlocks:
                 sb.run_block("s0", client=_Client(), sleep=lambda s: None)
         finally:
             sb.run_trial = real
-        summary = json.loads((bench / "s0" / "summary_synth-fsm.json").read_text())
+        summary = json.loads(
+            (bench / "s0" / "summary_synth-fsm.json").read_text(encoding="utf-8")
+        )
         rows = sum(len(sb.bc.read_rows(p)) for p in (bench / "s0").glob("rows_*"))
         assert summary["status"].startswith("aborted") and rows == 3
 
@@ -1087,7 +1089,9 @@ class TestBlocks:
         )  # preflight, then 3 trials, then ours, then foreign
         with pytest.raises(sb.ForeignLoad):
             sb.run_block("s0", client=client, sleep=lambda s: None)
-        summary = json.loads((bench / "s0" / "summary_synth-fsm.json").read_text())
+        summary = json.loads(
+            (bench / "s0" / "summary_synth-fsm.json").read_text(encoding="utf-8")
+        )
         assert summary["status"] == "aborted: foreign-load"
         assert (
             1
@@ -1299,7 +1303,9 @@ class TestPins:
         """Guards: a verdict computed by code that is not the registered code."""
         sb.register_block("s0")
         assert sb.report("s0") == 0
-        (tree / pin).write_text((tree / pin).read_text() + "\n# edited\n")
+        (tree / pin).write_text(
+            (tree / pin).read_text(encoding="utf-8") + "\n# edited\n", encoding="utf-8"
+        )
         with pytest.raises(BAD, match=re.escape(pin)):
             sb.run_block("s0", client=_Client(), sleep=lambda s: None)
         with pytest.raises(BAD, match=re.escape(pin)):
@@ -1311,8 +1317,8 @@ class TestPins:
     ):
         """Guards: a report that prints numbers (or a verdict) from edited code."""
         sb.register_block("s0")
-        (bench / "s0" / "rows_react.jsonl").write_text("{}\n")
-        (tree / "scripts/synthesis_bench.py").write_text("# edited\n")
+        (bench / "s0" / "rows_react.jsonl").write_text("{}\n", encoding="utf-8")
+        (tree / "scripts/synthesis_bench.py").write_text("# edited\n", encoding="utf-8")
         with pytest.raises(BAD, match="edited after register"):
             sb.report("s0")
         assert capsys.readouterr().out == ""

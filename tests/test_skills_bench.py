@@ -189,7 +189,9 @@ class TestRunTrial:
         assert flags("hint_off") == [False, False, True]
         assert flags("native_4b") == [True, True, True]
         assert flags("native_4b_hint_off") == [False, False, True]  # native too
-        assert json.loads(raw.read_text())["wire"], "raw requests are kept"
+        assert json.loads(raw.read_text(encoding="utf-8"))["wire"], (
+            "raw requests are kept"
+        )
         monkeypatch.setattr(sb, "hint_ablation", lambda on: contextlib.nullcontext())
         assert flags("hint_off") == [True, True, False]  # kept, flagged invalid
 
@@ -202,18 +204,18 @@ class TestBlocks:
         sb.register_block(BID, "B0")
         paths = sb.register_block(BID, "B1")
         assert [p.stem[9:] for p in paths] == list(sb.BLOCKS["B1"])
-        manifest = json.loads(paths[2].read_text())
+        manifest = json.loads(paths[2].read_text(encoding="utf-8"))
         assert manifest["model"] == sb.M9B and manifest["fixture_hash"] == FIXTURE_SHA
         assert set(manifest["src_sha256"]) == set(sb.SRC_PINS)
         with pytest.raises(BAD, match="ONCE"):  # registered once
             sb.register_block(BID, "B1")
         path = bench / "B0" / "manifest_hint_on.json"
-        manifest = json.loads(path.read_text())
+        manifest = json.loads(path.read_text(encoding="utf-8"))
         manifest["src_sha256"]["src/fsm_llm/constants.py"] = "0" * 64
-        path.write_text(json.dumps(manifest))
+        path.write_text(json.dumps(manifest), encoding="utf-8")
         with pytest.raises(BAD, match="src_sha256"):
             sb.run_block(BID, "B0")
-        (bench / "B1" / "rows_react_9b.jsonl").write_text("{}\n")
+        (bench / "B1" / "rows_react_9b.jsonl").write_text("{}\n", encoding="utf-8")
         with pytest.raises(BAD, match="ONCE"):
             sb.run_block(BID, "B1")
 
@@ -226,9 +228,9 @@ class TestBlocks:
         assert sb.report(BID) == 0
         assert "no effect shown (diff 0, p=1.0000) -> REMOVE" in capsys.readouterr().out
         path = bench / "B0" / "summary_hint_off.json"
-        summary = json.loads(path.read_text())
+        summary = json.loads(path.read_text(encoding="utf-8"))
         summary["metrics"]["k_g1"] = 3
-        path.write_text(json.dumps(summary))
+        path.write_text(json.dumps(summary), encoding="utf-8")
         assert sb.report(BID) == 1 and "MISMATCH k_g1" in capsys.readouterr().out
 
     def test_three_errored_rows_abort_and_keep_the_rows(self, bench, scripted):
@@ -237,7 +239,9 @@ class TestBlocks:
         sb.register_block(BID, "B1")
         with pytest.raises(BAD, match="consecutive errored"):
             sb.run_block(BID, "B1")
-        summary = json.loads((bench / "B1" / "summary_native_4b.json").read_text())
+        summary = json.loads(
+            (bench / "B1" / "summary_native_4b.json").read_text(encoding="utf-8")
+        )
         assert summary["status"].startswith("aborted")
         metrics = summary["metrics"]
         assert (metrics["n_rows"], metrics["shapes"]) == (2, {"budget": 2})

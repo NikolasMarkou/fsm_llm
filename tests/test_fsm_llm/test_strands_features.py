@@ -762,7 +762,9 @@ class TestSessionRestoreRoundTrip:
                 "conversation_history": [],
                 "stack_depth": 1,
             }
-            (Path(tmpdir) / "legacy-1.json").write_text(json.dumps(legacy))
+            (Path(tmpdir) / "legacy-1.json").write_text(
+                json.dumps(legacy), encoding="utf-8"
+            )
 
             result = api.restore_session("legacy-1")
             assert result is not None
@@ -913,7 +915,9 @@ class TestRestoreSessionFsmIdMismatch:
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             fsm_path = Path(tmpdir) / "fsm.json"
-            fsm_path.write_text(json.dumps(_minimal_fsm_dict("Alpha")))
+            fsm_path.write_text(
+                json.dumps(_minimal_fsm_dict("Alpha")), encoding="utf-8"
+            )
 
             store = FileSessionStore(tmpdir)
             api_alpha = API.from_file(
@@ -927,7 +931,9 @@ class TestRestoreSessionFsmIdMismatch:
             # Overwrite the SAME path in place with a semantically
             # different FSM -- same "start"/"end" state names, different
             # content -- exactly the reviewer's live-probe scenario.
-            fsm_path.write_text(json.dumps(_minimal_fsm_dict("Omega")))
+            fsm_path.write_text(
+                json.dumps(_minimal_fsm_dict("Omega")), encoding="utf-8"
+            )
             api_omega = API.from_file(
                 str(fsm_path), llm_interface=MockLLM(), session_store=store
             )
@@ -970,7 +976,7 @@ class TestRestoreSessionFsmIdMismatch:
             api_dict, conv_id = self._advance_and_save(store, "same-content")
 
             fsm_path = Path(tmpdir) / "fsm.json"
-            fsm_path.write_text(json.dumps(fsm_dict))
+            fsm_path.write_text(json.dumps(fsm_dict), encoding="utf-8")
             api_file = API.from_file(
                 str(fsm_path), llm_interface=MockLLM(), session_store=store
             )

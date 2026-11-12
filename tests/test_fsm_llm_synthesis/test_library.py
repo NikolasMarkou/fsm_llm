@@ -264,7 +264,7 @@ class TestSafety:
         assert (tmp_path / "procs" / "records").is_dir()
 
     def test_root_that_is_a_file_is_refused(self, tmp_path: Path):
-        (tmp_path / "f").write_text("x")
+        (tmp_path / "f").write_text("x", encoding="utf-8")
         with pytest.raises(LibraryError):
             FSMLibrary(tmp_path / "f")
 
@@ -298,7 +298,7 @@ class TestSafety:
     def test_a_corrupt_record_is_never_overwritten(self, lib: FSMLibrary):
         rec = _put(lib)
         path = lib.root / "records" / f"{rec.digest}.json"
-        path.write_text('{"digest": "torn')
+        path.write_text('{"digest": "torn', encoding="utf-8")
         for act in (
             lambda: _put(lib),
             lambda: lib.record_run(rec.digest, True),
@@ -314,7 +314,7 @@ class TestSafety:
         ):
             with pytest.raises(LibraryError):
                 act()
-        assert path.read_text() == '{"digest": "torn'
+        assert path.read_text(encoding="utf-8") == '{"digest": "torn'
 
     @pytest.mark.parametrize(
         "damage",
@@ -329,14 +329,14 @@ class TestSafety:
     def test_an_invalid_record_shape_is_refused(self, lib: FSMLibrary, damage):
         rec = _put(lib)
         path = lib.root / "records" / f"{rec.digest}.json"
-        path.write_text(damage(path.read_text()))
+        path.write_text(damage(path.read_text(encoding="utf-8")), encoding="utf-8")
         with pytest.raises(LibraryError):
             lib.get_record(rec.digest)
 
     def test_a_record_filed_under_another_digest_is_refused(self, lib: FSMLibrary):
         a, b = _put(lib), _put(lib, "Other")
-        text = (lib.root / "records" / f"{a.digest}.json").read_text()
-        (lib.root / "records" / f"{b.digest}.json").write_text(text)
+        text = (lib.root / "records" / f"{a.digest}.json").read_text(encoding="utf-8")
+        (lib.root / "records" / f"{b.digest}.json").write_text(text, encoding="utf-8")
         with pytest.raises(LibraryError, match="another digest"):
             lib.get_record(b.digest)
 
@@ -345,12 +345,15 @@ class TestSafety:
     ):
         rec = _put(lib)
         path = lib.root / "definitions" / f"{rec.digest}.json"
-        path.write_text(path.read_text().replace('"Collect"', '"Hacked"'))
+        path.write_text(
+            path.read_text(encoding="utf-8").replace('"Collect"', '"Hacked"'),
+            encoding="utf-8",
+        )
         with pytest.raises(LibraryError, match="does not match"):
             lib.get_definition(rec.digest)
         with pytest.raises(LibraryError):
             _put(lib)  # same digest again: the bad file is not repaired by a put
-        assert '"Hacked"' in path.read_text()
+        assert '"Hacked"' in path.read_text(encoding="utf-8")
 
     def test_a_definition_that_is_not_a_definition_is_refused(self, lib: FSMLibrary):
         import hashlib
@@ -390,7 +393,7 @@ class TestSafety:
 
     def test_an_unreadable_records_dir_is_a_library_error(self, lib: FSMLibrary):
         lib.root.mkdir()
-        (lib.root / "records").write_text("not a dir")
+        (lib.root / "records").write_text("not a dir", encoding="utf-8")
         with pytest.raises(LibraryError):
             lib.search(
                 GOAL,
@@ -402,7 +405,7 @@ class TestSafety:
 
     def test_a_stray_json_that_is_no_digest_fails_loud(self, lib: FSMLibrary):
         _put(lib)
-        (lib.root / "records" / "notes.json").write_text("{}")
+        (lib.root / "records" / "notes.json").write_text("{}", encoding="utf-8")
         with pytest.raises(LibraryError, match="invalid digest"):
             lib.search(
                 GOAL,
@@ -677,13 +680,13 @@ class TestTraces:
 
     def test_every_row_carries_the_version(self, lib: FSMLibrary):
         lib.add_trace(_tr(), max_traces=10)
-        assert json.loads(_trace_file(lib).read_text())["v"] == 1
+        assert json.loads(_trace_file(lib).read_text(encoding="utf-8"))["v"] == 1
 
     def test_the_ring_cap_trims_the_oldest(self, lib: FSMLibrary):
         for i in range(7):
             lib.add_trace(_tr(i), max_traces=3)
         assert [t.steps for t in lib.read_traces(D)[0]] == [4, 5, 6]
-        assert len(_trace_file(lib).read_text().splitlines()) == 3
+        assert len(_trace_file(lib).read_text(encoding="utf-8").splitlines()) == 3
 
     def test_a_trace_is_filed_under_its_own_digest(self, lib: FSMLibrary):
         lib.add_trace(_tr(1, "d" * 64), max_traces=3)
@@ -705,10 +708,12 @@ class TestTraces:
 
         assert lib.read_traces(D) == ((), 0)  # a later read sees only newer ones
         kept = lib.root / "traces" / f"{D}.{child}.jsonl"
-        assert len(kept.read_text().splitlines()) == 3
+        assert len(kept.read_text(encoding="utf-8").splitlines()) == 3
         lib.add_trace(_tr(9), max_traces=10)
         assert [t.steps for t in lib.read_traces(D)[0]] == [9]
-        assert len(kept.read_text().splitlines()) == 3  # never touched again
+        assert (
+            len(kept.read_text(encoding="utf-8").splitlines()) == 3
+        )  # never touched again
         lib.retire_traces("d" * 64, child)  # no file: nothing to move, no error
 
     @pytest.mark.parametrize("bad", ["../x", "A" * 64, "", None, 5])
@@ -739,7 +744,7 @@ class TestTraces:
 
     def test_a_torn_last_line_is_skipped_counted_and_healed(self, lib: FSMLibrary):
         lib.add_trace(_tr(1), max_traces=10)
-        with _trace_file(lib).open("a") as f:
+        with _trace_file(lib).open("a", encoding="utf-8") as f:
             f.write('{"v": 1, "digest": "' + D + '", "states": ["a"')  # no newline
         found, skipped = lib.read_traces(D)
         assert [t.steps for t in found] == [1] and skipped == 1
@@ -786,7 +791,7 @@ class TestTraces:
     ):
         path = _trace_file(lib)
         path.parent.mkdir(parents=True)
-        (tmp_path / "x").write_text("")
+        (tmp_path / "x").write_text("", encoding="utf-8")
         os.symlink(tmp_path / "x", path)
         with pytest.raises(LibraryError):
             lib.read_traces(D)
@@ -889,10 +894,10 @@ class TestScenarios:
     def test_a_corrupt_file_is_refused_never_overwritten(self, lib: FSMLibrary, text):
         path = lib.root / "scenarios" / f"{D}.json"
         path.parent.mkdir(parents=True)
-        path.write_text(text)
+        path.write_text(text, encoding="utf-8")
         with pytest.raises(LibraryError):
             lib.read_scenarios(D)
-        assert path.read_text() == text
+        assert path.read_text(encoding="utf-8") == text
 
 
 def _child(lib: FSMLibrary, parent: library.LibraryRecord, **kw: Any):
@@ -967,7 +972,9 @@ class TestRepairLineage:
         monkeypatch.setattr(FSMLibrary, "_write", spy)
         lib.add_patch(rec.digest, ops)
         assert seen == ["patches"]
-        stored = json.loads((lib.root / "patches" / f"{rec.digest}.json").read_text())
+        stored = json.loads(
+            (lib.root / "patches" / f"{rec.digest}.json").read_text(encoding="utf-8")
+        )
         assert stored == ops
         assert not [f for f in _files(lib) if f.endswith(".tmp")]
         with pytest.raises(LibraryError):
@@ -1025,9 +1032,9 @@ class TestRepairLineage:
         root = _put(lib, lifecycle="verified")
         kid = self._kid(lib, "Kid", root, 1)
         path = lib.root / "records" / f"{root.digest}.json"
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         data["provenance"]["parent"] = kid.digest
-        path.write_text(json.dumps(data))
+        path.write_text(json.dumps(data), encoding="utf-8")
         assert lib.count_lineage(kid.digest) == 1
 
     def test_clean_scenarios_is_the_public_cleaner(self):

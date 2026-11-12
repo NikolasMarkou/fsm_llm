@@ -66,7 +66,10 @@ class TestJsonFileSink:
         files = list(tmp_path.iterdir())
         assert files
         lines = [
-            line for f in files for line in f.read_text().splitlines() if line.strip()
+            line
+            for f in files
+            for line in f.read_text(encoding="utf-8").splitlines()
+            if line.strip()
         ]
         entries = [json.loads(line) for line in lines]
         messages = [e["message"] for e in entries]

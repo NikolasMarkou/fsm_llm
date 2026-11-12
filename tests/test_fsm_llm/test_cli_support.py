@@ -173,7 +173,7 @@ class TestExitMain:
 
         read_fd, write_fd = os.pipe()
         os.close(read_fd)  # the reader is gone: the first flush gets EPIPE
-        stream = open(write_fd, "w", closefd=True)
+        stream = open(write_fd, "w", encoding="utf-8", closefd=True)
         monkeypatch.setattr(sys, "stdout", stream)
         monkeypatch.setattr(mod, "_cmd_list", talk)
         monkeypatch.setattr(sys, "argv", [mod._PROG, "list", "somewhere"])

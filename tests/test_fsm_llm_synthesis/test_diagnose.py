@@ -411,6 +411,6 @@ class TestShape:
         assert t.to_row() == before
 
     def test_the_module_takes_no_clock_no_random_no_file(self):
-        text = Path(diagnose_module.__file__).read_text()
+        text = Path(diagnose_module.__file__).read_text(encoding="utf-8")
         for banned in ("import time", "import random", "open(", "import os", "logger"):
             assert banned not in text

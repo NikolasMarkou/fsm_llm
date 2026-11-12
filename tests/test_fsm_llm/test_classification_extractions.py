@@ -282,7 +282,7 @@ class TestIntentsCapMatchesRuntimeSibling:
             },
         }
         path = tmp_path / "capped.json"
-        path.write_text(json.dumps(fsm))
+        path.write_text(json.dumps(fsm), encoding="utf-8")
 
         with pytest.raises(ValueError, match="at most 15"):
             API.from_file(str(path))

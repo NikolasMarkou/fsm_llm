@@ -1035,7 +1035,7 @@ class TestHandlerOnlyKeys:
         # the model dump (which now carries the field) validates too
         assert FSMValidator(FSMDefinition(**listed).model_dump()).validate().is_valid
         path = tmp_path / "fsm.json"
-        path.write_text(json.dumps(listed))
+        path.write_text(json.dumps(listed), encoding="utf-8")
         result = validate_fsm_from_file(str(path))
         assert result.is_valid
         assert not result.errors

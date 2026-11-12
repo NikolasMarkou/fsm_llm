@@ -119,7 +119,7 @@ class TestResolveWithin:
         """``ws-evil`` startswith ``ws``; the comparison is on components."""
         evil = tmp_path / "ws-evil"
         evil.mkdir()
-        (evil / "loot.txt").write_text("loot\n")
+        (evil / "loot.txt").write_text("loot\n", encoding="utf-8")
         _symlink(root / "link", evil)
 
         assert resolve_within(root, "link/loot.txt") is None
@@ -130,7 +130,7 @@ class TestResolveWithin:
     ) -> None:
         outside = tmp_path / "outside"
         outside.mkdir()
-        (outside / "secret.txt").write_text("secret\n")
+        (outside / "secret.txt").write_text("secret\n", encoding="utf-8")
         _symlink(root / "escape", outside)
 
         assert resolve_within(root, "escape") is None
@@ -140,7 +140,7 @@ class TestResolveWithin:
 
     def test_a_symlink_staying_inside_is_allowed(self, root: Path) -> None:
         (root / "real").mkdir()
-        (root / "real" / "f.txt").write_text("x\n")
+        (root / "real" / "f.txt").write_text("x\n", encoding="utf-8")
         _symlink(root / "alias", root / "real")
 
         assert resolve_within(root, "alias/f.txt") == root / "real" / "f.txt"
@@ -793,7 +793,9 @@ class TestModelsAndErrors:
         assert OKFError("x", details={"k": 1}).details == {"k": 1}
 
     def test_the_module_does_not_import_litellm(self) -> None:
-        source = (Path(__file__).parents[2] / "src" / "okf.py").read_text()
+        source = (Path(__file__).parents[2] / "src" / "okf.py").read_text(
+            encoding="utf-8"
+        )
 
         assert "litellm" not in source
 
@@ -969,7 +971,7 @@ class TestLoader:
         assert not missing.exists()
 
     def test_a_file_as_root_is_an_error(self, tmp_path: Path) -> None:
-        (tmp_path / "f.md").write_text("x")
+        (tmp_path / "f.md").write_text("x", encoding="utf-8")
 
         with pytest.raises(OKFError):
             load_bundle(tmp_path / "f.md")
@@ -1077,7 +1079,7 @@ class TestLoader:
     ) -> None:
         for name in ("evil\x1b[2Jname.md", "bidi\u202ename.md"):
             try:
-                (tmp_path / name).write_text(_doc())
+                (tmp_path / name).write_text(_doc(), encoding="utf-8")
             except OSError:  # pragma: no cover - filesystem refuses the name
                 pytest.skip("file system refuses control characters in names")
         _write(tmp_path, {"fine name.md": _doc()})
@@ -2045,7 +2047,9 @@ class TestBridgeLayering:
     """``okf_bridge`` sits on top of ``okf`` and obeys the same core-module rules."""
 
     def test_the_bridge_does_not_import_litellm(self) -> None:
-        assert "litellm" not in (_SRC_ROOT / "okf_bridge.py").read_text()
+        assert "litellm" not in (_SRC_ROOT / "okf_bridge.py").read_text(
+            encoding="utf-8"
+        )
 
     def test_the_bridge_loads_no_subpackage_and_is_loaded_by_nothing_eager(
         self, tmp_path: Path
@@ -2083,14 +2087,16 @@ class TestBridgeLayering:
         stale = {
             f"{path.relative_to(_SRC_ROOT)}:{line}"
             for path in _SRC_ROOT.rglob("*.py")
-            for name, line in _imported_from_okf(ast.parse(path.read_text()))
+            for name, line in _imported_from_okf(
+                ast.parse(path.read_text(encoding="utf-8"))
+            )
             if name in _MOVED
         }
 
         assert stale == set()
 
     def test_no_private_name_crosses_the_bridge_boundary(self) -> None:
-        tree = ast.parse((_SRC_ROOT / "okf_bridge.py").read_text())
+        tree = ast.parse((_SRC_ROOT / "okf_bridge.py").read_text(encoding="utf-8"))
 
         assert [n for n, _ in _imported_from_okf(tree) if n.startswith("_")] == []
 
@@ -2255,7 +2261,9 @@ class TestWriteRoundTrip:
             write_index=False,
         )
 
-        data = yaml.safe_load((out / "n.md").read_text().split("---\n")[1])
+        data = yaml.safe_load(
+            (out / "n.md").read_text(encoding="utf-8").split("---\n")[1]
+        )
         assert data["stale_after"] == "2026-12-31"
         assert data["generated"]["at"] == "2026-01-01 10:00:00"
 
@@ -2326,10 +2334,10 @@ class TestWriteRoundTrip:
         assert (tmp_path / "deep" / "new" / "a.md").is_file()
 
         blocker = tmp_path / "blocker"
-        blocker.write_text("x")
+        blocker.write_text("x", encoding="utf-8")
         with pytest.raises(OKFError, match="not a directory"):
             write_bundle(_bundle_of(_note()), blocker)
-        assert blocker.read_text() == "x"
+        assert blocker.read_text(encoding="utf-8") == "x"
 
     def test_an_empty_bundle_writes_only_the_index(self, tmp_path: Path) -> None:
         written = write_bundle(OKFBundle(), tmp_path / "out")
@@ -2490,7 +2498,7 @@ class TestWriteRefusals:
         assert _tree(out) == before
 
         write_bundle(bundle, out, overwrite=True)
-        assert (out / "a.md").read_text().endswith("new\n")
+        assert (out / "a.md").read_text(encoding="utf-8").endswith("new\n")
         assert (out / "h.md").is_file()
 
     def test_an_existing_directory_target_is_refused(self, tmp_path: Path) -> None:
@@ -2505,7 +2513,7 @@ class TestWriteRefusals:
     ) -> None:
         out = tmp_path / "out"
         out.mkdir()
-        (out / "memory").write_text("file")
+        (out / "memory").write_text("file", encoding="utf-8")
 
         with pytest.raises(OKFError, match="file where a directory"):
             write_bundle(_bundle_of(_note("memory/x"), _note("zzz")), out)
@@ -4182,7 +4190,9 @@ class TestWriteRoundTripOfCoercibleStrings:
         assert first is not None and first.type == value
 
         write_bundle(load_bundle(src), tmp_path / "out", write_index=False)
-        raw = yaml.safe_load((tmp_path / "out" / "c.md").read_text().split("---\n")[1])
+        raw = yaml.safe_load(
+            (tmp_path / "out" / "c.md").read_text(encoding="utf-8").split("---\n")[1]
+        )
         second = load_bundle(tmp_path / "out").get("c")
 
         assert second is not None

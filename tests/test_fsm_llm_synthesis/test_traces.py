@@ -452,7 +452,9 @@ class TestOnARealRunner:
         assert t.states and t.steps >= 1 and "answer" in t.keys
         found, skipped = rig.library.read_traces(t.digest)
         assert found == (t,) and skipped == 0
-        blob = "".join(p.read_text() for p in rig.library.root.rglob("*.jsonl"))
+        blob = "".join(
+            p.read_text(encoding="utf-8") for p in rig.library.root.rglob("*.jsonl")
+        )
         assert blob and not any(c in blob for c in CANARIES)
 
     def test_an_aborted_run_names_its_stuck_state(self, valid_fsm):

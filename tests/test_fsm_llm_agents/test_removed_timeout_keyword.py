@@ -48,7 +48,8 @@ class TestRemovedTimeoutKeyword:
             "@tool(timeout_s=1)\n"
             "def slow(query: str) -> str:\n"
             '    """Look up."""\n'
-            "    return query\n"
+            "    return query\n",
+            encoding="utf-8",
         )
 
         report = PythonToolLoader.load_directory(tmp_path)

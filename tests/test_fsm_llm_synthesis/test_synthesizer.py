@@ -821,10 +821,10 @@ class TestObtainLibrary:
         synth, llm = _obtainer(tmp_path, [_text(valid_fsm)])
         proc = synth.obtain(GOAL, return_keys=RET)
         rec = tmp_path / "lib" / "records" / f"{proc.digest}.json"
-        rec.write_text("{not json")
+        rec.write_text("{not json", encoding="utf-8")
         with pytest.raises(LibraryError):
             synth.obtain(GOAL, return_keys=RET)
-        assert rec.read_text() == "{not json" and len(llm.requests) == 1
+        assert rec.read_text(encoding="utf-8") == "{not json" and len(llm.requests) == 1
 
     def test_an_unwritable_library_raises_library_error(
         self, tmp_path, valid_fsm, monkeypatch

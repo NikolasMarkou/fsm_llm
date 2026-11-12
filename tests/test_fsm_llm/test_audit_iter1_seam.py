@@ -1641,7 +1641,7 @@ class TestNullSafeValidatorAndVisualizer:
         from fsm_llm.validator import validate_fsm_from_file
 
         path = tmp_path / "dumped.json"
-        path.write_text(json.dumps(_dumped_fsm_with_required_keys()))
+        path.write_text(json.dumps(_dumped_fsm_with_required_keys()), encoding="utf-8")
         result = validate_fsm_from_file(str(path))
         assert result.is_valid, result.errors
 
@@ -1654,7 +1654,7 @@ class TestNullSafeValidatorAndVisualizer:
             for t in state["transitions"]:
                 t["conditions"] = None
         path = tmp_path / "nulls.json"
-        path.write_text(json.dumps(data))
+        path.write_text(json.dumps(data), encoding="utf-8")
         result = validate_fsm_from_file(str(path))
         assert result.is_valid, result.errors
 
@@ -1666,7 +1666,7 @@ class TestNullSafeValidatorAndVisualizer:
             "requires_context_keys"
         ] = None
         path = tmp_path / "condnull.json"
-        path.write_text(json.dumps(data))
+        path.write_text(json.dumps(data), encoding="utf-8")
         result = validate_fsm_from_file(str(path))
         assert result.is_valid, result.errors
 
@@ -1675,7 +1675,7 @@ class TestNullSafeValidatorAndVisualizer:
         from fsm_llm.visualizer import visualize_fsm_from_file
 
         path = tmp_path / "dumped.json"
-        path.write_text(json.dumps(_dumped_fsm_with_required_keys()))
+        path.write_text(json.dumps(_dumped_fsm_with_required_keys()), encoding="utf-8")
         out = visualize_fsm_from_file(str(path), style)
         assert "Could not generate diagram" not in out
         assert "start" in out
@@ -1693,6 +1693,6 @@ class TestNullSafeValidatorAndVisualizer:
             {"description": "c", "requires_context_keys": None, "logic": {}}
         ]
         path = tmp_path / "nulls.json"
-        path.write_text(json.dumps(data))
+        path.write_text(json.dumps(data), encoding="utf-8")
         out = visualize_fsm_from_file(str(path), style)
         assert "Could not generate diagram" not in out

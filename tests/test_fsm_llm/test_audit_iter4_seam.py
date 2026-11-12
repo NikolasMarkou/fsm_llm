@@ -623,7 +623,7 @@ class TestHandlerOnlyKeysValidatorWarnings:
         checked = 0
         for path in sorted((root / "examples").rglob("*.json")):
             try:
-                data = json.loads(path.read_text())
+                data = json.loads(path.read_text(encoding="utf-8"))
             except ValueError:
                 continue
             if not (isinstance(data, dict) and "states" in data):

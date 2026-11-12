@@ -476,7 +476,7 @@ class TestExport:
         bundle = load_bundle(out_dir)
         assert sorted(c.id for c in bundle) == ["memory/mem_1", "memory/mem_2"]
         assert not [i for i in bundle.issues if i.severity == "error"]
-        on_disk = "".join(p.read_text() for p in out_dir.rglob("*.md"))
+        on_disk = "".join(p.read_text(encoding="utf-8") for p in out_dir.rglob("*.md"))
         assert "sk-secret-value-123456" not in on_disk
         assert "embedding" not in on_disk
 

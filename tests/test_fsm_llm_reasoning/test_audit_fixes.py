@@ -322,6 +322,6 @@ class TestJsonDumpsSafety:
 
         target = tmp_path / "results.json"
         _save_as_json(target, "problem", "solution", {"leak": Leaky()})
-        written = target.read_text()
+        written = target.read_text(encoding="utf-8")
         assert "hunter2" not in written
         assert "<redacted:Leaky>" in written

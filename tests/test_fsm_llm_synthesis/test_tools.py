@@ -420,7 +420,10 @@ class TestRun:
         rig = _rig(valid_fsm, tmp_path)
         rig.obtain()
         path = tmp_path / "lib" / "definitions" / f"{rig.digest()}.json"
-        path.write_text(path.read_text().replace("Collect", "Hijack"))
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("Collect", "Hijack"),
+            encoding="utf-8",
+        )
         assert _run(rig) == f"{LABEL}\nfailed: library_error"
         assert rig.cheap.call_history == []
 

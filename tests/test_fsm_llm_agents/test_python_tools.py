@@ -40,7 +40,7 @@ class TestPythonToolLoaderDedupe:
 
     def test_python_tools_list_and_decorator_yield_one_tool(self, tmp_path: Path):
         path = tmp_path / "dup_tool.py"
-        path.write_text(_MODULE_BOTH_SOURCES)
+        path.write_text(_MODULE_BOTH_SOURCES, encoding="utf-8")
 
         tools = PythonToolLoader.from_directory(tmp_path)
 
@@ -62,7 +62,8 @@ class TestPythonToolLoaderDedupe:
                     \"\"\"Echo.\"\"\"
                     return value
                 """
-            )
+            ),
+            encoding="utf-8",
         )
 
         tools = PythonToolLoader.from_directory(tmp_path)
@@ -124,7 +125,7 @@ class TestPythonToolLoaderToolAliasDedupe:
     the tool name against PYTHON_TOOLS and against @tool tools it already loaded."""
 
     def test_one_tool_under_three_names_loads_once(self, tmp_path: Path):
-        (tmp_path / "aliased.py").write_text(_MODULE_ALIASED_TOOL)
+        (tmp_path / "aliased.py").write_text(_MODULE_ALIASED_TOOL, encoding="utf-8")
 
         tools, warnings = _capture_warnings(
             lambda: PythonToolLoader.from_directory(tmp_path)
@@ -138,7 +139,7 @@ class TestPythonToolLoaderToolAliasDedupe:
     def test_two_functions_with_one_tool_name_first_wins_and_warns(
         self, tmp_path: Path
     ):
-        (tmp_path / "collision.py").write_text(_MODULE_NAME_COLLISION)
+        (tmp_path / "collision.py").write_text(_MODULE_NAME_COLLISION, encoding="utf-8")
 
         tools, warnings = _capture_warnings(
             lambda: PythonToolLoader.from_directory(tmp_path)
@@ -163,7 +164,9 @@ class TestPythonToolLoaderRemovedNames:
         self, tmp_path: Path, capsys
     ):
         removed = "Skill" + "Definition"
-        (tmp_path / "old.py").write_text(f"from fsm_llm.agents import {removed}\n")
+        (tmp_path / "old.py").write_text(
+            f"from fsm_llm.agents import {removed}\n", encoding="utf-8"
+        )
 
         with pytest.warns(UserWarning, match=removed) as caught:
             assert PythonToolLoader.from_directory(tmp_path) == []
@@ -180,10 +183,11 @@ def _write_broken_and_good(tmp_path: Path) -> Path:
     (tmp_path / "a_good.py").write_text(
         "from fsm_llm.agents.tools import tool\n\n\n"
         "@tool\ndef ping(value: str) -> str:\n"
-        '    """Echo."""\n    return value\n'
+        '    """Echo."""\n    return value\n',
+        encoding="utf-8",
     )
     broken = tmp_path / "b_broken.py"
-    broken.write_text("raise RuntimeError('boom')\n")
+    broken.write_text("raise RuntimeError('boom')\n", encoding="utf-8")
     return broken
 
 
@@ -192,7 +196,7 @@ class TestPythonToolLoadReport:
     for every file it could not load; nothing is swallowed into a log line."""
 
     def test_a_clean_directory_has_tools_and_no_errors(self, tmp_path: Path):
-        (tmp_path / "a_good.py").write_text(_MODULE_BOTH_SOURCES)
+        (tmp_path / "a_good.py").write_text(_MODULE_BOTH_SOURCES, encoding="utf-8")
 
         report = PythonToolLoader.load_directory(tmp_path)
 
@@ -218,7 +222,9 @@ class TestPythonToolLoadReport:
 
     def test_an_oversize_file_is_an_error_and_is_never_executed(self, tmp_path: Path):
         big = tmp_path / "big.py"
-        big.write_text("raise RuntimeError('executed')\n" + "#" * 1_000_001)
+        big.write_text(
+            "raise RuntimeError('executed')\n" + "#" * 1_000_001, encoding="utf-8"
+        )
 
         report = PythonToolLoader.load_directory(tmp_path)
 
@@ -229,7 +235,7 @@ class TestPythonToolLoadReport:
 
     def test_an_unloadable_spec_is_an_error(self, tmp_path: Path, monkeypatch):
         odd = tmp_path / "odd.py"
-        odd.write_text("X = 1\n")
+        odd.write_text("X = 1\n", encoding="utf-8")
         monkeypatch.setattr(importlib.util, "spec_from_file_location", lambda *a: None)
 
         report = PythonToolLoader.load_directory(tmp_path)
@@ -240,7 +246,7 @@ class TestPythonToolLoadReport:
 
     def test_an_unreadable_stat_is_an_error(self, tmp_path: Path, monkeypatch):
         locked = tmp_path / "locked.py"
-        locked.write_text("X = 1\n")
+        locked.write_text("X = 1\n", encoding="utf-8")
         real_stat = Path.stat
 
         def stat(self, *args, **kwargs):
@@ -265,8 +271,10 @@ class TestPythonToolLoadReport:
         assert report.errors == ((str(missing), "directory not found"),)
 
     def test_private_and_non_python_files_are_ignored_not_errors(self, tmp_path: Path):
-        (tmp_path / "_private.py").write_text("raise RuntimeError('never run')\n")
-        (tmp_path / "notes.txt").write_text("not python\n")
+        (tmp_path / "_private.py").write_text(
+            "raise RuntimeError('never run')\n", encoding="utf-8"
+        )
+        (tmp_path / "notes.txt").write_text("not python\n", encoding="utf-8")
 
         report = PythonToolLoader.load_directory(tmp_path, pattern="*")
 
@@ -276,7 +284,9 @@ class TestPythonToolLoadReport:
     def test_exit_and_interrupt_from_a_tool_file_still_propagate(
         self, tmp_path: Path, exit_type
     ):
-        (tmp_path / "quits.py").write_text(f"raise {exit_type.__name__}()\n")
+        (tmp_path / "quits.py").write_text(
+            f"raise {exit_type.__name__}()\n", encoding="utf-8"
+        )
 
         with pytest.raises(exit_type):
             PythonToolLoader.load_directory(tmp_path)
@@ -292,7 +302,7 @@ class TestFromDirectoryWarns:
     def test_the_result_is_the_report_tools_as_a_list(
         self, tmp_path: Path, monkeypatch
     ):
-        (tmp_path / "a_good.py").write_text(_MODULE_BOTH_SOURCES)
+        (tmp_path / "a_good.py").write_text(_MODULE_BOTH_SOURCES, encoding="utf-8")
         report = PythonToolLoader.load_directory(tmp_path)
         monkeypatch.setattr(PythonToolLoader, "load_directory", lambda *a: report)
 
@@ -303,7 +313,7 @@ class TestFromDirectoryWarns:
 
     def test_one_warning_per_failed_file_attributed_to_the_caller(self, tmp_path: Path):
         broken = _write_broken_and_good(tmp_path)
-        (tmp_path / "c_syntax.py").write_text("def (:\n")
+        (tmp_path / "c_syntax.py").write_text("def (:\n", encoding="utf-8")
 
         with pytest.warns(UserWarning) as caught:
             PythonToolLoader.from_directory(tmp_path)
@@ -343,7 +353,7 @@ class TestFromDirectoryWarns:
         assert len(logged) == 1 and "boom" in logged[0]
 
     def test_a_clean_directory_warns_nothing(self, tmp_path: Path):
-        (tmp_path / "a_good.py").write_text(_MODULE_BOTH_SOURCES)
+        (tmp_path / "a_good.py").write_text(_MODULE_BOTH_SOURCES, encoding="utf-8")
 
         with warnings.catch_warnings():
             warnings.simplefilter("error")

@@ -248,7 +248,9 @@ def mock_llm_interface():
 @pytest.fixture
 def temp_fsm_file(complete_simple_fsm_dict):
     """Fixture for a temporary FSM file with complete definition."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+    with tempfile.NamedTemporaryFile(
+        encoding="utf-8", mode="w", suffix=".json", delete=False
+    ) as f:
         json.dump(complete_simple_fsm_dict, f, indent=2)
         temp_path = f.name
 
@@ -380,7 +382,9 @@ class TestRobustFSMDefinitionProcessing:
         NOT keep the old fsm_id -- the id has to track the file's CONTENT,
         not its path.
         """
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            encoding="utf-8", mode="w", suffix=".json", delete=False
+        ) as f:
             json.dump(complete_simple_fsm_dict, f, indent=2)
             temp_path = f.name
 
@@ -389,7 +393,7 @@ class TestRobustFSMDefinitionProcessing:
 
             omega_dict = dict(complete_simple_fsm_dict)
             omega_dict["name"] = "Omega Public Chatbot"
-            with open(temp_path, "w") as f:
+            with open(temp_path, "w", encoding="utf-8") as f:
                 json.dump(omega_dict, f, indent=2)
 
             _, fsm_id_omega = API.process_fsm_definition(temp_path)
@@ -414,7 +418,9 @@ class TestRobustFSMDefinitionProcessing:
         fsm_def_from_dict = FSMDefinition(**complete_simple_fsm_dict)
         _, fsm_id_from_object = API.process_fsm_definition(fsm_def_from_dict)
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            encoding="utf-8", mode="w", suffix=".json", delete=False
+        ) as f:
             json.dump(complete_simple_fsm_dict, f, indent=2)
             temp_path = f.name
         try:

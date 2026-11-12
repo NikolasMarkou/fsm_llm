@@ -148,7 +148,9 @@ class TestLoadCases:
 
     def test_jsonl_bad_line_names_its_number(self, tmp_path: Path):
         path = tmp_path / "d.jsonl"
-        path.write_text(json.dumps(_case().model_dump()) + "\n\n{oops\n")
+        path.write_text(
+            json.dumps(_case().model_dump()) + "\n\n{oops\n", encoding="utf-8"
+        )
         with pytest.raises(EvalDatasetError, match="line 3"):
             load_cases(path)
 
@@ -344,7 +346,7 @@ class TestRunCases:
             (c.id, n) for c in cases for n in (1, 2, 3)
         )
 
-        data = json.loads((tmp_path / "results.json").read_text())
+        data = json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))
         by_id = {c["id"]: c for c in data["cases"]}
         assert (by_id["passes"]["k"], by_id["passes"]["n"]) == (3, 3)
         assert (by_id["fails"]["k"], by_id["fails"]["n"]) == (0, 3)
@@ -356,7 +358,7 @@ class TestRunCases:
         assert data["config"]["trials"] == 3
         assert report.overall == data["overall"]
 
-        summary = (tmp_path / "summary.md").read_text()
+        summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
         assert "| passes | 3/3 | 100.0% |" in summary
         assert "| fails | 0/3 | 0.0% |" in summary
         assert "Overall pass rate" in summary
@@ -629,7 +631,9 @@ class TestRunDataset:
         )
         assert report.run_dir == out
         assert (report.overall["k"], report.overall["n"]) == (2, 2)
-        assert json.loads((out / "results.json").read_text())["dataset"] == str(dataset)
+        assert json.loads((out / "results.json").read_text(encoding="utf-8"))[
+            "dataset"
+        ] == str(dataset)
 
     def test_config_file_and_model_layers(self, tmp_path: Path):
         dataset = _write(tmp_path / "d.json", [_case().model_dump()])
@@ -702,7 +706,7 @@ class TestLLMSettingsReachTheAPI:
     def test_llm_kwargs_values_are_not_written(self, tmp_path: Path):
         config = EvalConfig(trials=1, llm_kwargs={"api_key": "sk-secret-value"})
         run_cases([_case()], config, tmp_path, llm_interface_factory=_passing())
-        text = (tmp_path / "results.json").read_text()
+        text = (tmp_path / "results.json").read_text(encoding="utf-8")
         assert "sk-secret-value" not in text
         assert json.loads(text)["config"]["llm_kwargs"] == {"api_key": "<not recorded>"}
 
@@ -712,7 +716,9 @@ class TestLLMSettingsReachTheAPI:
         out = tmp_path / "o"
         argv = ["run", str(path), "--output-dir", str(out), "--trials", "1"]
         assert cli.main_cli([*argv, "--temperature", "0.3", "--max-tokens", "50"]) == 0
-        recorded = json.loads((out / "results.json").read_text())["config"]
+        recorded = json.loads((out / "results.json").read_text(encoding="utf-8"))[
+            "config"
+        ]
         assert (recorded["temperature"], recorded["max_tokens"]) == (0.3, 50)
 
 
@@ -767,8 +773,12 @@ class TestInterrupt:
         assert report.interrupted is True
         assert report.overall["n"] == 1
         assert len(read_rows(tmp_path / "rows.jsonl")) == 1
-        assert json.loads((tmp_path / "results.json").read_text())["interrupted"]
-        assert "**Interrupted**: yes" in (tmp_path / "summary.md").read_text()
+        assert json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))[
+            "interrupted"
+        ]
+        assert "**Interrupted**: yes" in (tmp_path / "summary.md").read_text(
+            encoding="utf-8"
+        )
 
     def test_cli_exits_130(self, tmp_path, offline_cli, monkeypatch, capsys):
         def ctrl_c(*_args):

@@ -1083,7 +1083,7 @@ class TestIndependentVocabularyKeyCorpus:
 
         from tests.test_fsm_llm.fixtures import context_key_corpus
 
-        source = pathlib.Path(context_key_corpus.__file__).read_text()
+        source = pathlib.Path(context_key_corpus.__file__).read_text(encoding="utf-8")
         offending = [
             line
             for line in source.splitlines()
@@ -1421,7 +1421,7 @@ class TestCryptoKeyAndTokenTriggers:
         from fsm_llm import security as c
         from tests.test_fsm_llm.fixtures import context_key_corpus
 
-        source = pathlib.Path(context_key_corpus.__file__).read_text()
+        source = pathlib.Path(context_key_corpus.__file__).read_text(encoding="utf-8")
         pasted = [
             name
             for name in (
@@ -3528,11 +3528,13 @@ class TestBurnedHoldoutCorpus:
 
         from tests.test_fsm_llm.fixtures import context_key_corpus, holdout_key_corpus
 
-        regression = pathlib.Path(context_key_corpus.__file__).read_text()
+        regression = pathlib.Path(context_key_corpus.__file__).read_text(
+            encoding="utf-8"
+        )
         assert "REGRESSION-PROBE + SHAPE-COVERAGE" in regression
         assert "NOT** AN INDEPENDENCE STATISTIC" in regression
 
-        burned = pathlib.Path(holdout_key_corpus.__file__).read_text()
+        burned = pathlib.Path(holdout_key_corpus.__file__).read_text(encoding="utf-8")
         assert "**BURNED**" in burned
         assert "MUST **NOT** BE USED AS AN INDEPENDENCE STATISTIC AGAIN" in burned
         assert "MUST derive a FRESH corpus" in burned
@@ -4092,7 +4094,7 @@ class TestCensusCorpusAdequacy:
 
         from tests.test_fsm_llm.fixtures import census_key_corpus
 
-        source = pathlib.Path(census_key_corpus.__file__).read_text()
+        source = pathlib.Path(census_key_corpus.__file__).read_text(encoding="utf-8")
         offenders = [
             line
             for line in source.splitlines()
@@ -4111,7 +4113,7 @@ class TestCensusCorpusAdequacy:
 
         from tests.test_fsm_llm.fixtures import census_key_corpus
 
-        source = pathlib.Path(census_key_corpus.__file__).read_text()
+        source = pathlib.Path(census_key_corpus.__file__).read_text(encoding="utf-8")
         assert "ROLE: **INDEPENDENCE**" in source
         assert "REGRESSION-PROBE + SHAPE-COVERAGE" in source
         assert "role: BURNED" in source

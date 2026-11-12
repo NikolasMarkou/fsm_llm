@@ -413,7 +413,7 @@ class TestExampleCallsBind:
         checked = 0
         problems: list[str] = []
         for path in files:
-            count, found = check_source(path.read_text())
+            count, found = check_source(path.read_text(encoding="utf-8"))
             checked += count
             problems += [f"{path.relative_to(EXAMPLES_DIR)} {line}" for line in found]
 

@@ -174,7 +174,7 @@ def test_load_valid_fsm_definition(valid_fsm_data, tmp_path):
     """Test loading a valid FSM definition from a file."""
     # Write the valid FSM data to a temporary file
     fsm_file = tmp_path / "valid_fsm.json"
-    with open(fsm_file, "w") as f:
+    with open(fsm_file, "w", encoding="utf-8") as f:
         json.dump(valid_fsm_data, f)
 
     # Load the FSM definition

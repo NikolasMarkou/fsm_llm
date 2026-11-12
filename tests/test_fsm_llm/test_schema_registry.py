@@ -841,7 +841,9 @@ class TestUpgradeFsmFile:
         path = tmp_path / "fsm.json"
         _write_definition(path, "4.1")
         text = path.read_text(encoding="utf-8")
-        path.write_text(text.replace('"name"', '"name": "z", "name"', 1))
+        path.write_text(
+            text.replace('"name"', '"name": "z", "name"', 1), encoding="utf-8"
+        )
         before = path.read_bytes()
         assert "duplicate" in (upgrade_fsm_file(str(path)).refusal or "")
         assert path.read_bytes() == before
@@ -978,7 +980,10 @@ class TestUpgradeFsmFile:
         link.symlink_to(target)
         assert upgrade_fsm_file(str(link)).rewritten is True
         assert link.is_symlink()
-        assert json.loads(target.read_text())["version"] == SCHEMA_VERSION_DEFAULT
+        assert (
+            json.loads(target.read_text(encoding="utf-8"))["version"]
+            == SCHEMA_VERSION_DEFAULT
+        )
         assert sorted(p.name for p in tmp_path.iterdir()) == ["link.json", "real"]
 
     def test_invalid_json_is_left_byte_identical(self, tmp_path):
@@ -1067,7 +1072,10 @@ class TestValidateMainUpgrade:
         assert main(str(path), upgrade=True) == 0
         report = json.loads(capsys.readouterr().out)
         assert report["is_valid"] is True
-        assert json.loads(path.read_text())["version"] == SCHEMA_VERSION_DEFAULT
+        assert (
+            json.loads(path.read_text(encoding="utf-8"))["version"]
+            == SCHEMA_VERSION_DEFAULT
+        )
 
     def test_the_report_describes_the_upgraded_file(self, tmp_path, capsys):
         from fsm_llm.validator import main
@@ -1102,7 +1110,7 @@ class TestValidateMainUpgrade:
         original = _write_definition(path, version)
         assert main(str(path), upgrade=True) == 0
         json.loads(capsys.readouterr().out)
-        after = json.loads(path.read_text())
+        after = json.loads(path.read_text(encoding="utf-8"))
         assert after["version"] == SCHEMA_VERSION_DEFAULT
         assert _without_version(after) == _without_version(original)
 
@@ -1231,7 +1239,10 @@ class TestValidateMainUpgrade:
             main_cli()
         assert exit_info.value.code == 0
         json.loads(capsys.readouterr().out)
-        assert json.loads(path.read_text())["version"] == SCHEMA_VERSION_DEFAULT
+        assert (
+            json.loads(path.read_text(encoding="utf-8"))["version"]
+            == SCHEMA_VERSION_DEFAULT
+        )
 
     def test_main_cli_exits_one_for_a_refused_upgrade(
         self, tmp_path, capsys, monkeypatch

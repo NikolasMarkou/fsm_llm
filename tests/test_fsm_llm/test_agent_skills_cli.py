@@ -99,7 +99,9 @@ class TestValidate:
         self, clean: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         (clean / "broken").mkdir()
-        (clean / "broken" / "SKILL.md").write_text("---\nname: broken\n---\nx\n")
+        (clean / "broken" / "SKILL.md").write_text(
+            "---\nname: broken\n---\nx\n", encoding="utf-8"
+        )
 
         code, out, err = _run(capsys, "validate", clean)
 
@@ -207,7 +209,9 @@ class TestListShow:
         assert (code, out) == (0, "")
         assert err == "no skills found\n"
         _skill(tmp_path, "bad", extra="")  # a skill that is skipped (name differs)
-        (tmp_path / "bad" / "SKILL.md").write_text("---\nname: BAD\n---\n")
+        (tmp_path / "bad" / "SKILL.md").write_text(
+            "---\nname: BAD\n---\n", encoding="utf-8"
+        )
         assert _run(capsys, "list", tmp_path) == (0, "", "no skills found\n")
 
     def test_show_prints_a_header_the_file_list_and_the_body(
@@ -323,9 +327,9 @@ class TestListShow:
         capsys: pytest.CaptureFixture[str],
         target: str,
     ) -> None:
-        (clean / "alpha" / ".env").write_text("SECRET=1")
+        (clean / "alpha" / ".env").write_text("SECRET=1", encoding="utf-8")
         outside = clean.parent / "outside.txt"
-        outside.write_text("SECRET=outside")
+        outside.write_text("SECRET=outside", encoding="utf-8")
         (clean / "alpha" / "link.txt").symlink_to(outside)
 
         code, out, err = _run(capsys, "show", "alpha", clean, "--file", target)
@@ -525,7 +529,7 @@ class TestExitCodes:
     ) -> None:
         read_fd, write_fd = os.pipe()
         os.close(read_fd)  # the reader is gone: the first flush gets EPIPE
-        stream = open(write_fd, "w", closefd=True)
+        stream = open(write_fd, "w", encoding="utf-8", closefd=True)
         monkeypatch.setattr(sys, "stdout", stream)
         monkeypatch.setattr(sys, "argv", [skills_cli._PROG, "list", str(clean)])
 

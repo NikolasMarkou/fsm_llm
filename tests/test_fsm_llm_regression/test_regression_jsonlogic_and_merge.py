@@ -159,7 +159,7 @@ class TestTransitionDecisionExcludedFromJsonMode:
         callers = [
             f"{path.name}:{i}"
             for path in sorted(src.glob("*.py"))
-            for i, line in enumerate(path.read_text().splitlines(), 1)
+            for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
             if '"transition_decision"' in line and path.name != "ollama.py"
         ]
         assert callers == [], f"transition_decision now reaches llm.py via {callers}"

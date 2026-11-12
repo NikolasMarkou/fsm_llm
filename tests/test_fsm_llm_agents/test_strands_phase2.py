@@ -851,7 +851,8 @@ class TestSOPRegistry:
                     "description": "From JSON",
                     "agent_pattern": "react",
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         registry = SOPRegistry()
@@ -867,11 +868,15 @@ class TestSOPRegistry:
 
         for name in ("alpha", "gamma"):
             (tmp_path / f"{name}.json").write_text(
-                json.dumps({"name": name, "agent_pattern": "react"})
+                json.dumps({"name": name, "agent_pattern": "react"}), encoding="utf-8"
             )
-        (tmp_path / "beta.json").write_text("{not json")
-        (tmp_path / "delta.yaml").write_text("description: no name here\n")
-        (tmp_path / "notes.txt").write_text("ignored, not an SOP file\n")
+        (tmp_path / "beta.json").write_text("{not json", encoding="utf-8")
+        (tmp_path / "delta.yaml").write_text(
+            "description: no name here\n", encoding="utf-8"
+        )
+        (tmp_path / "notes.txt").write_text(
+            "ignored, not an SOP file\n", encoding="utf-8"
+        )
 
         registry = SOPRegistry()
         with pytest.warns(UserWarning) as caught:
@@ -889,7 +894,9 @@ class TestSOPRegistry:
 
         from fsm_llm.agents.sop import SOPRegistry
 
-        (tmp_path / "alpha.json").write_text(json.dumps({"name": "alpha"}))
+        (tmp_path / "alpha.json").write_text(
+            json.dumps({"name": "alpha"}), encoding="utf-8"
+        )
 
         with warnings.catch_warnings():
             warnings.simplefilter("error")

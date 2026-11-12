@@ -62,7 +62,7 @@ class TestEvaluationFnNeverRaises:
         offenders = [
             f"{path.relative_to(SRC)}:{n}"
             for path in SRC.rglob("*.py")
-            for n, line in enumerate(path.read_text().splitlines(), 1)
+            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
             if re.search(r"\bexc_info\s*=", line)
         ]
         assert offenders == []

@@ -224,7 +224,7 @@ class TestMetaAgentOutput:
         artifact = {"name": "test", "states": {}}
         path = save_artifact(artifact, tmp_path / "test.json")
         assert path.exists()
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert '"name": "test"' in content
 
     def test_save_artifact_resolves_dotdot_segments(self, tmp_path):
@@ -238,7 +238,7 @@ class TestMetaAgentOutput:
         assert path == expected
         assert ".." not in path.parts
         assert expected.exists()
-        assert '"name": "test"' in expected.read_text()
+        assert '"name": "test"' in expected.read_text(encoding="utf-8")
 
 
 class TestMetaAgentImports:

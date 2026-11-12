@@ -428,7 +428,7 @@ class TestSeededDefect:
         assert prov["replay"] == "4/4 vs 0/4"
         assert rig.lib.get_record(rig.parent).lifecycle == "deprecated"
         stored = json.loads(
-            (rig.lib.root / "patches" / f"{res.child}.json").read_text()
+            (rig.lib.root / "patches" / f"{res.child}.json").read_text(encoding="utf-8")
         )
         assert stored == FIX
         assert rig.search() == [res.child]

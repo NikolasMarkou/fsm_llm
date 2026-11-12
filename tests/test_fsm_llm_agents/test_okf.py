@@ -168,7 +168,7 @@ class TestRegistration:
             "export_semantic_memory",
         ):
             assert name in agents_all
-        source = Path(create_okf_tools.__code__.co_filename).read_text()
+        source = Path(create_okf_tools.__code__.co_filename).read_text(encoding="utf-8")
         assert not re.search(r"^\s*(import|from)\s+litellm", source, re.MULTILINE)
 
 
@@ -744,7 +744,7 @@ def _tree(root: Path) -> dict[str, str]:
     files = sorted(p for p in root.rglob("*") if p.is_file())
     return {
         str(p.relative_to(root)): re.sub(
-            r"(?m)^(\s*)at: .*$", r"\1at: T", p.read_text()
+            r"(?m)^(\s*)at: .*$", r"\1at: T", p.read_text(encoding="utf-8")
         )
         for p in files
     }
@@ -786,7 +786,9 @@ class TestExportSemanticMemory:
             metadata={"api_key": secret, "nested": {"password": secret}, "ok": "fine"},
         )
         export_semantic_memory(store, tmp_path / "kb")
-        text = "".join(p.read_text() for p in (tmp_path / "kb").rglob("*.md"))
+        text = "".join(
+            p.read_text(encoding="utf-8") for p in (tmp_path / "kb").rglob("*.md")
+        )
         assert secret not in text and "fine" in text
 
     def test_empty_store_and_clashes_raise_okf_error(self, tmp_path: Path):
@@ -801,7 +803,9 @@ class TestExportSemanticMemory:
 
     def test_embeddings_are_never_exported(self, tmp_path: Path):
         export_semantic_memory(_store_with_entries(), tmp_path / "kb")
-        text = "".join(p.read_text() for p in (tmp_path / "kb").rglob("*.md"))
+        text = "".join(
+            p.read_text(encoding="utf-8") for p in (tmp_path / "kb").rglob("*.md")
+        )
         assert "embedding" not in text
 
 
@@ -853,7 +857,7 @@ class TestExportAgentResult:
     def test_failed_run_is_a_draft_and_never_leaks_final_context(self, tmp_path: Path):
         result = _result(success=False, stop_reason="max_iterations")
         path = export_agent_result(result, tmp_path / "kb")
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         assert "status: draft" in text
         assert "FCSECRET" not in text and "FCLEAK" not in text
         assert "sk-LEAK0123456789abcdef" not in text and "<redacted>" in text
@@ -876,9 +880,9 @@ class TestExportAgentResult:
     def test_an_existing_index_is_left_alone_even_with_overwrite(self, tmp_path: Path):
         root = tmp_path / "kb"
         root.mkdir()
-        (root / "index.md").write_text("# mine\n")
+        (root / "index.md").write_text("# mine\n", encoding="utf-8")
         export_agent_result(_result(), root, overwrite=True)
-        assert (root / "index.md").read_text() == "# mine\n"
+        assert (root / "index.md").read_text(encoding="utf-8") == "# mine\n"
 
     def test_long_trace_and_text_stay_loadable(self, tmp_path: Path):
         calls = [
@@ -890,7 +894,7 @@ class TestExportAgentResult:
         )
         path = export_agent_result(result, tmp_path / "kb", task="q" * 100_000)
         assert path.stat().st_size < 120_000
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         assert "... 30 more call(s) not listed" in text
         bundle = load_bundle(tmp_path / "kb")
         assert len(bundle) == 1

@@ -99,7 +99,7 @@ class TestReadmeBadge:
     def test_no_python_38_39_in_badge(self):
         """M-1: Badge should not reference Python 3.8 or 3.9."""
         readme_path = os.path.join(os.path.dirname(__file__), "..", "..", "README.md")
-        with open(readme_path) as f:
+        with open(readme_path, encoding="utf-8") as f:
             content = f.read()
         # Check badge line specifically
         for line in content.split("\n"):
@@ -124,7 +124,7 @@ class TestQuickstartReferences:
         qs_path = os.path.join(
             os.path.dirname(__file__), "..", "..", "docs", "quickstart.md"
         )
-        with open(qs_path) as f:
+        with open(qs_path, encoding="utf-8") as f:
             content = f.read()
         assert "examples/basic/quiz" not in content
         assert "examples/intermediate/customer_service" not in content
@@ -159,7 +159,7 @@ class TestReadmeNoEmoji:
     def test_no_emoji_in_headings(self):
         """M-5: Section headings should not contain emoji."""
         readme_path = os.path.join(os.path.dirname(__file__), "..", "..", "README.md")
-        with open(readme_path) as f:
+        with open(readme_path, encoding="utf-8") as f:
             content = f.read()
         for line in content.split("\n"):
             if line.startswith("#"):

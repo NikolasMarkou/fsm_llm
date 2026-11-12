@@ -1142,9 +1142,9 @@ class TestStep06A6:
         api.save_session(conv_id)
 
         path = tmp_path / f"{conv_id}.json"
-        raw = json.loads(path.read_text())
+        raw = json.loads(path.read_text(encoding="utf-8"))
         raw.pop("conversation_summary", None)
-        path.write_text(json.dumps(raw))
+        path.write_text(json.dumps(raw), encoding="utf-8")
 
         restored = api.restore_session(conv_id)
         assert restored is not None
@@ -3322,8 +3322,8 @@ class TestStep13C4C5:
 
         store = FileSessionStore(tmp_path)
         store.save("good", _c4_state("good"))
-        (tmp_path / "bad.id.json").write_text("{}")
-        (tmp_path / "has space.json").write_text("{}")
+        (tmp_path / "bad.id.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "has space.json").write_text("{}", encoding="utf-8")
         listed = store.list_sessions()
         assert listed == ["good"]
         for sid in listed:  # list and load agree
@@ -3414,7 +3414,7 @@ class TestStep13C4C5:
         file_lines = [
             line
             for f in tmp_path.iterdir()
-            for line in f.read_text().splitlines()
+            for line in f.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
         file_entry = json.loads(file_lines[-1])
@@ -3662,7 +3662,7 @@ class TestStep14C6C12:
         from fsm_llm.validator import main
 
         path = tmp_path / "c8.json"
-        path.write_text(json.dumps(_c9_fsm_data(end_transitions=[])))
+        path.write_text(json.dumps(_c9_fsm_data(end_transitions=[])), encoding="utf-8")
         code = main(str(path))
         report = json.loads(capsys.readouterr().out)
         assert report["is_valid"] is (code == 0)
@@ -3672,7 +3672,9 @@ class TestStep14C6C12:
         from fsm_llm.visualizer import main
 
         path = tmp_path / "c8.json"
-        path.write_text(json.dumps(_c9_fsm_data(name="C8Viz", end_transitions=[])))
+        path.write_text(
+            json.dumps(_c9_fsm_data(name="C8Viz", end_transitions=[])), encoding="utf-8"
+        )
         assert main(str(path)) == 0
         out = capsys.readouterr().out
         assert "C8Viz" in out and "─" in out

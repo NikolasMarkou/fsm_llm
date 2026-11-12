@@ -900,7 +900,7 @@ def _save_with(tmp_path: Any, values: dict[str, Any]) -> tuple[API, str, str]:
     conv_id, _ = api.start_conversation()
     api.fsm_manager.instances[conv_id].context.data.update(values)
     api.save_session(conv_id)
-    text = (tmp_path / f"{conv_id}.json").read_text()
+    text = (tmp_path / f"{conv_id}.json").read_text(encoding="utf-8")
     return api, conv_id, text
 
 

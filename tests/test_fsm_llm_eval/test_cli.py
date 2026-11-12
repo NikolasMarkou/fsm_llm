@@ -146,7 +146,7 @@ class TestRun:
         out = tmp_path / "run"
         assert main_cli(self._argv(examples_dir, out)) == 0
         assert (out / "scorecard.md").is_file()
-        data = json.loads((out / "results.json").read_text())
+        data = json.loads((out / "results.json").read_text(encoding="utf-8"))
         assert data["model"] == "ollama_chat/test:1b"
         assert data["total_examples"] == 2
         stdout = capsys.readouterr().out
@@ -165,7 +165,7 @@ class TestRun:
     def test_nonempty_output_dir_exits_1(self, examples_dir, tmp_path, capsys):
         out = tmp_path / "run"
         out.mkdir()
-        (out / "results.json").write_text("{}")
+        (out / "results.json").write_text("{}", encoding="utf-8")
         assert main_cli(self._argv(examples_dir, out)) == 1
         assert "not empty" in capsys.readouterr().err
 
@@ -239,5 +239,10 @@ class TestInterruptExit:
         out = tmp_path / "run"
         argv = ["examples", "--examples-dir", str(examples_dir), "--workers", "1"]
         assert main_cli([*argv, "--output-dir", str(out)]) == 130
-        assert json.loads((out / "results.json").read_text())["interrupted"] is True
+        assert (
+            json.loads((out / "results.json").read_text(encoding="utf-8"))[
+                "interrupted"
+            ]
+            is True
+        )
         assert "Interrupted" in capsys.readouterr().err

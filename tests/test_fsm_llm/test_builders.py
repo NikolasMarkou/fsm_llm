@@ -347,7 +347,7 @@ class TestAPIBuilder:
 
         import fsm_llm.builders as mod
 
-        with open(mod.__file__) as fh:
+        with open(mod.__file__, encoding="utf-8") as fh:
             assert not re.search(r"import litellm|from litellm", fh.read())
 
 
