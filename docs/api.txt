@@ -1700,6 +1700,21 @@ fsm_llm.testing.PromptGroundedLLM class(LLMInterface)
   def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse
   def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse
   def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse
+fsm_llm.testing.ScriptedLLM class(_Metered, LLMInterface)
+  def __init__(self, replies: Iterable[ScriptedReply] = (), *, extraction_data: dict[str, object] | None = None, responses: dict[str, str] | None = None, default_response: str | None = None, stream_chunks: Iterable[str] = (), model: str | None = None) -> None
+  def assert_exhausted(self) -> None
+  def calls(self, method_name: str) -> list
+  def complete(self, request: CompletionRequest) -> CompletionResponse
+  def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse
+  def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse
+  def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse
+  def generate_response_stream(self, request: ResponseGenerationRequest) -> Iterator[str]
+fsm_llm.testing.UnscriptedCallError class(AssertionError)
+fsm_llm.testing.final_reply def(text: str | None, finish_reason: str | None = None) -> CompletionResponse
+fsm_llm.testing.hash_embed def(dim: int = 8) -> Callable[[str], list[float]]
+fsm_llm.testing.malformed_reply def(text: str | None = None) -> CompletionResponse
+fsm_llm.testing.state_in_prompt def(prompt: str) -> str | None
+fsm_llm.testing.tool_call_reply def(*calls: tuple[str, dict[str, Any]], text: str | None = None, finish_reason: str | None = None) -> CompletionResponse
 # fsm_llm.workflows
 fsm_llm.workflows.APIStep class(WorkflowStep)
   field step_id: str required

@@ -4,16 +4,28 @@ Public test helpers for code built on FSM-LLM, living at `src/testing` inside th
 
 ## What it is for
 
-A test of a bot, an agent or a workflow should not call a real model: it is slow, costs money and gives a different answer each run. This package will hold the doubles and assertions the FSM-LLM repository uses for its own tests, so your project can use the same ones instead of copying them from `tests/conftest.py`.
+A test of a bot, an agent or a workflow should not call a real model: it is slow, costs money and gives a different answer each run. This package holds the doubles and assertions the FSM-LLM repository uses for its own tests, so your project can use the same ones instead of copying them from `tests/conftest.py`.
 
 ## Status
 
-Two names are public today, both fake `LLMInterface` implementations promoted from the repository's own `tests/conftest.py` and moved unchanged (one dead argument aside):
+Public today (import by name from `fsm_llm.testing`):
 
 - `MockLLM2Interface(extraction_data=None, response_text=..., cut_reply=False, cut_fields=())`: answers every field from a dict and every reply with one text; `call_history` records `(method, request)`; `cut_reply` and `cut_fields` simulate a reply cut at `max_tokens`. It implements neither `extract_bulk_data` nor `complete`.
-- `PromptGroundedLLM(facts=None, responses=None, default_response="ok")`: a fact `{field: (value, evidence)}` is returned only when the evidence text is in the request, like a real model reading its prompt; replies follow the prompt's `<current_state>` tag; `complete` raises `LLMResponseError`; `requests` and `calls(kind)` record the rest.
+- `PromptGroundedLLM(facts=None, responses=None, default_response="ok")`: a fact `{field: (value, evidence)}` is returned only when the evidence text is in the request, like a real model reading its prompt; replies follow the prompt's state tag; `complete` raises `LLMResponseError`; `requests` and `calls(kind)` record the rest.
+- `ScriptedLLM(replies=(), *, extraction_data=None, responses=None, default_response=None, stream_chunks=(), model=None)`: script a test. `replies` is the `complete` queue (a text, a `CompletionResponse` or an exception instance to raise); `extraction_data` answers field and bulk extraction; `responses` maps a state id to the Pass-2 reply; `stream_chunks` is what a streamed reply yields. It keeps `requests` (the `complete` ones) and `call_history` (every call), and `usage()` / `reset_usage()` count calls and errors like the real interface. A call nothing scripted is recorded in `unexpected` and raises `UnscriptedCallError`; because the pipeline swallows a raised extraction error, end the test with `llm.assert_exhausted()`, which fails on an unscripted call and on a reply never used.
+- `final_reply(text, finish_reason=None)`, `tool_call_reply(*(name, arguments), text=None)`, `malformed_reply(text=None)`: build the three kinds of `CompletionResponse`.
+- `state_in_prompt(prompt)`: the state id a response prompt was written for, the one reader of its tag.
+- `hash_embed(dim=8)`: a pure embedder (`Callable[[str], list[float]]`), same text same vector, shared words mean a closer vector.
 
-Both are plain classes: their attributes are public and may change between turns, and a test may subclass them. They are not `unittest.mock` objects. The rest (`ScriptedLLM`, reply builders, `ScriptedUser`, the assertions and `PathRecorder`) arrives in later steps of the plan that added the package; do not rely on it before that lands.
+```python
+from fsm_llm.testing import ScriptedLLM, final_reply, tool_call_reply
+
+llm = ScriptedLLM([tool_call_reply(("lookup", {"q": "rome"})), "It is sunny."])
+# pass it as `llm_interface=`, run the code under test, then:
+llm.assert_exhausted()
+```
+
+The doubles are plain classes: their attributes are public and may change between turns, and a test may subclass them. They are not `unittest.mock` objects. The rest (`ScriptedUser`, the assertions and `PathRecorder`) arrives in later steps of the plan that added the package; do not rely on it before that lands.
 
 ## How it fits
 
@@ -30,7 +42,8 @@ flowchart TD
 ## Files
 
 - `__init__.py` - module docstring and the static `__all__`.
-- `doubles.py` - `MockLLM2Interface` and `PromptGroundedLLM`.
+- `doubles.py` - `MockLLM2Interface`, `PromptGroundedLLM`, `ScriptedLLM`, `UnscriptedCallError`, `state_in_prompt`, `hash_embed`.
+- `builders.py` - `final_reply`, `tool_call_reply`, `malformed_reply`.
 - `__version__.py` - re-exports the package version.
 
 ## Tests
