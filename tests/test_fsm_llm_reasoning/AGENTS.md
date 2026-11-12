@@ -77,7 +77,7 @@ Model behaviour pinned in `test_definitions.py`:
 - Source-level pins: the `engine` module contains no `converse(` and no `"Continue reasoning"` (the engine sends no user message); `_classify_problem` has `except ReasoningClassificationError:` before `except Exception as e:`, uses `ContextKeys.PROBLEM_DOMAIN` and `ContextKeys.ALTERNATIVE_APPROACHES`, and has no `problem_domain_classified`; `_solve_problem_locked` uses `default=redacting_json_default` and no `default=str`; the `engine` module has no `default=str` and at least 2 `default=redacting_json_default`; the `handlers` module contains the phrase `never emitted`.
 - `reasoning_modes` must not define `get_fsm_by_name`, `list_available_fsms`, `get_reasoning_fsms_only`.
 - CLI JSON output and saved results replace an object's `__str__` with `<redacted:ClassName>`.
-- Exceptions: `ReasoningEngineError(msg, details=None)` has `details == {}` by default; `ReasoningExecutionError(msg, reasoning_type=None)`; both subclasses catchable as `ReasoningEngineError`.
+- Exceptions: `ReasoningError(msg, details=None)` has `details == {}` by default; `ReasoningExecutionError(msg, reasoning_type=None)`; both subclasses catchable as `ReasoningError`.
 
 ## Dependencies
 

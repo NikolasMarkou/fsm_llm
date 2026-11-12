@@ -38,7 +38,7 @@ from .definitions import (
 from .engine import ReasoningEngine
 from .exceptions import (
     ReasoningClassificationError,
-    ReasoningEngineError,
+    ReasoningError,
     ReasoningExecutionError,
 )
 from .utilities import get_available_reasoning_types
@@ -55,7 +55,7 @@ __all__ = [
     "ProblemContext",
     "SolutionResult",
     # Exceptions
-    "ReasoningEngineError",
+    "ReasoningError",
     "ReasoningExecutionError",
     "ReasoningClassificationError",
     # Utilities

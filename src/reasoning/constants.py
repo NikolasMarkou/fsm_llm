@@ -445,14 +445,14 @@ class Defaults:
     MIN_SOLUTION_LENGTH = 20  # Minimum chars for a substantive solution
     PRUNE_LIST_MAX_LENGTH = 10  # Keep last N items when pruning lists
     PRUNE_STRING_MAX_LENGTH = 1000  # Truncate strings beyond this length
-    MAX_SUB_FSM_ITERATIONS = 30  # Steps of a strategy FSM before a forced pop
-    MAX_CLASSIFICATION_ITERATIONS = 10  # Steps budget of the classifier FSM run
-    MAX_TOTAL_ITERATIONS = 50  # Orchestrator steps of one solve
+    MAX_SUB_FSM_STEPS = 30  # Steps of a strategy FSM before a forced pop
+    MAX_CLASSIFICATION_STEPS = 10  # Steps budget of the classifier FSM run
+    MAX_TOTAL_STEPS = 50  # Orchestrator steps of one solve
     MAX_HYBRID_LOOPS = 2  # Times the hybrid critical_evaluation back edge runs
     # Steps budget of the one orchestrator run of a solve (D-013): the
     # orchestrator's own steps plus a full strategy run for the first attempt
     # and each retry. A pop of an ended strategy FSM is not a step (D-052).
-    MAX_SOLVE_STEPS = MAX_TOTAL_ITERATIONS + (MAX_RETRIES + 1) * MAX_SUB_FSM_ITERATIONS
+    MAX_SOLVE_STEPS = MAX_TOTAL_STEPS + (MAX_RETRIES + 1) * MAX_SUB_FSM_STEPS
 
 
 class ErrorMessages:

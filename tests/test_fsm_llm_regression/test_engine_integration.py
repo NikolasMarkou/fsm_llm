@@ -135,12 +135,12 @@ class TestReasoningEngineIntegration:
                 )
 
     def test_max_total_iterations_constant_exists(self):
-        """Defaults.MAX_TOTAL_ITERATIONS must exist to prevent infinite loops."""
+        """Defaults.MAX_TOTAL_STEPS must exist to prevent infinite loops."""
         from fsm_llm.reasoning.constants import Defaults
 
-        assert hasattr(Defaults, "MAX_TOTAL_ITERATIONS")
-        assert isinstance(Defaults.MAX_TOTAL_ITERATIONS, int)
-        assert Defaults.MAX_TOTAL_ITERATIONS > 0
+        assert hasattr(Defaults, "MAX_TOTAL_STEPS")
+        assert isinstance(Defaults.MAX_TOTAL_STEPS, int)
+        assert Defaults.MAX_TOTAL_STEPS > 0
 
 
 # ============================================================================

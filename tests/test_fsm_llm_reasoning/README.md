@@ -21,7 +21,7 @@ Each test imports from `fsm_llm.reasoning.*` and calls classes or static methods
 - `test_definitions.py` - 28 tests for the Pydantic models (`ReasoningStep`, `ValidationResult`, `ReasoningTrace`, `ProblemContext`, `SolutionResult`, and others).
 - `test_engine.py` - 10 tests for models, handlers, `map_reasoning_type`, and the rule that a missing reasoning FSM may only fall back to analytical.
 - `test_engine_scripted.py` - 51 tests that run whole solves offline through the core engine with a scripted `LLMInterface`: orchestrator, classifier FSM, pushed and popped strategy FSM, validation retry loop, forced pop, spent step budget, failures that keep `partial_context`, caller context that cannot drive the push.
-- `test_exceptions.py` - 8 tests for `ReasoningEngineError`, `ReasoningExecutionError`, `ReasoningClassificationError`.
+- `test_exceptions.py` - 8 tests for `ReasoningError`, `ReasoningExecutionError`, `ReasoningClassificationError`.
 - `test_golden_tables.py` - 21 tests that pin the 11 FSM definitions and the strategy tables by sha256.
 - `test_handlers.py` - 39 tests for `ReasoningHandlers`, `ContextManager`, and `OutputFormatter`.
 

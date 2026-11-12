@@ -289,7 +289,7 @@ _STUCK_FSM: dict[str, Any] = {
 
 
 class TestForcedPop:
-    """A strategy FSM that never ends is popped after MAX_SUB_FSM_ITERATIONS."""
+    """A strategy FSM that never ends is popped after MAX_SUB_FSM_STEPS."""
 
     def test_sub_fsm_is_force_popped_and_the_solve_finishes(self):
         llm = _ScriptedLLM(_VALID_SCRIPT)
@@ -307,7 +307,7 @@ class TestForcedPop:
             if isinstance(r, ResponseGenerationRequest)
             and "WAIT-MARKER" in r.system_prompt
         ]
-        assert len(wait_replies) == Defaults.MAX_SUB_FSM_ITERATIONS
+        assert len(wait_replies) == Defaults.MAX_SUB_FSM_STEPS
         assert context["deductive_reasoning_completed"] is True
         assert _visited(trace_info)[-1] == OrchestratorStates.FINAL_ANSWER
 
@@ -589,7 +589,7 @@ class TestHandlerFailuresStopTheSolve:
     the step instead of being logged and skipped by core's "continue" mode."""
 
     def test_a_spent_classifier_budget_fails_the_solve(self, monkeypatch):
-        monkeypatch.setattr(Defaults, "MAX_CLASSIFICATION_ITERATIONS", 1)
+        monkeypatch.setattr(Defaults, "MAX_CLASSIFICATION_STEPS", 1)
         engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
 
         with pytest.raises(ReasoningExecutionError) as info:

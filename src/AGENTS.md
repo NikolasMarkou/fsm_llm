@@ -93,7 +93,7 @@ flowchart LR
 | `eval/` | Examples evaluator (subprocess per example, heuristic score 0-4, scorecard) and conversation cases (scripted turns, expectations, trials, Wilson CI) | `fsm-llm-eval examples`, `fsm-llm-eval run DATASET`, `run_dataset`, `EvalConfig`, `pass_rate`, `wilson_ci` | Fresh `API` per trial, `LLMInterface` factory for offline tests, `setup_cli_logging` |
 | `synthesis/` | A host FSM's `synthesize` state names a goal; a model compiles it into an FSM, gates G1 to G7 judge it, a file-backed library with a lifecycle stores it, a runner pushes it as a child of the host conversation under a budget; traces, `diagnose`, an RFC 6902 subset and a propose-only repair; agent tools `obtain_procedure` and `run_procedure` | `FSMSynthesizer`, `ProcedureRunner`, `FSMLibrary`, `SynthesisPolicy`, `run_gates`, `create_procedure_tools`; no console script | The `synthesize` state field, `push_fsm`/`pop_fsm(context_to_return=)`, `run_until_terminal(before_step=)`, `LLMInterface.complete` and `LiteLLMInterface.usage`, `TransitionEvaluator` and `FSMValidator` (the gates run the real ones), `flow_analysis`, `eval.cases.run_case_trial(stop=)`, `security.resolve_within`; agents `ToolRegistry`, `HumanInTheLoop`, `semantic_tools` |
 
-Exception roots: core `FSMError`; `ReasoningEngineError`, `WorkflowError`, `AgentError`, `EvalError`, `SynthesisError` and `MonitorError` all subclass `FSMError`.
+Exception roots: core `FSMError`; `ReasoningError`, `WorkflowError`, `AgentError`, `EvalError`, `SynthesisError` and `MonitorError` all subclass `FSMError`.
 
 ## Public interface
 

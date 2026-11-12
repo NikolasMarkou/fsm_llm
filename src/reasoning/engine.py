@@ -234,27 +234,27 @@ class ReasoningEngine:
             )
         )
 
-        conv_id = None
+        conversation_id = None
         try:
             # Run classification
-            conv_id, _ = self.classifier.start_conversation(
+            conversation_id, _ = self.classifier.start_conversation(
                 initial_context=classification_context
             )
 
             # Message-free steps: the problem reaches the model through the
             # conversation context, never through a synthetic user message.
             self.classifier.run_until_terminal(
-                conv_id, max_steps=Defaults.MAX_CLASSIFICATION_ITERATIONS
+                conversation_id, max_steps=Defaults.MAX_CLASSIFICATION_STEPS
             )
 
             # Get results
-            result = self.classifier.get_data(conv_id)
-            self.classifier.end_conversation(conv_id)
-            conv_id = None  # Mark as cleaned up
+            result = self.classifier.get_data(conversation_id)
+            self.classifier.end_conversation(conversation_id)
+            conversation_id = None  # Mark as cleaned up
         except RunBudgetExceededError as e:
             raise ReasoningClassificationError(
                 "Classification did not converge after "
-                f"{Defaults.MAX_CLASSIFICATION_ITERATIONS} steps",
+                f"{Defaults.MAX_CLASSIFICATION_STEPS} steps",
                 details={"context_keys": list(classification_context.keys())},
             ) from e
         except Exception as e:
@@ -264,8 +264,8 @@ class ReasoningEngine:
             ) from e
         finally:
             # Clean up classifier conversation on any error path
-            if conv_id is not None:
-                _end_quietly(self.classifier, conv_id)
+            if conversation_id is not None:
+                _end_quietly(self.classifier, conversation_id)
 
         classification = _classification_from(result)
 
@@ -436,34 +436,38 @@ class ReasoningEngine:
 
         started = time.monotonic()
         # Start orchestrator
-        conv_id, initial_response = self.orchestrator.start_conversation(context)
-        log = _solve_log(conv_id)
-        log.info(f"Started reasoning process: {conv_id}")
+        conversation_id, initial_response = self.orchestrator.start_conversation(
+            context
+        )
+        log = _solve_log(conversation_id)
+        log.info(f"Started reasoning process: {conversation_id}")
 
-        stack = _StrategyStack(self, conv_id)
+        stack = _StrategyStack(self, conversation_id)
         try:
             # One message-free run drives the orchestrator, every pushed
             # strategy FSM and every retry; the hook pushes and pops.
             results = self.orchestrator.run_until_terminal(
-                conv_id, max_steps=Defaults.MAX_SOLVE_STEPS, before_step=stack
+                conversation_id, max_steps=Defaults.MAX_SOLVE_STEPS, before_step=stack
             )
         except RunBudgetExceededError as e:
             # DECISION plan-2026-10-01T093600-944e2692/D-054 (D-014): an
             # unfinished solve raises, never returns a fallback string as the
             # solution.
             raise self._failed_solve(
-                conv_id, stack, f"Reasoning did not finish within {e.limit} {e.budget}"
+                conversation_id,
+                stack,
+                f"Reasoning did not finish within {e.limit} {e.budget}",
             ) from e
         except Exception as e:
             raise self._failed_solve(
-                conv_id, stack, f"Reasoning execution failed: {e}"
+                conversation_id, stack, f"Reasoning execution failed: {e}"
             ) from e
         responses = _ordered_responses(initial_response, stack.responses, results)
 
         # Get final context BEFORE ending the conversation (end_conversation
         # removes the instance, making get_data fail).
         try:
-            final_context = self.orchestrator.get_data(conv_id)
+            final_context = self.orchestrator.get_data(conversation_id)
             solution = self.output_formatter.extract_final_solution(final_context)
 
             # Build trace info
@@ -490,10 +494,10 @@ class ReasoningEngine:
             }
         finally:
             # Always clean up the conversation, even if post-processing raises
-            _end_quietly(self.orchestrator, conv_id)
+            _end_quietly(self.orchestrator, conversation_id)
 
     def _failed_solve(
-        self, conv_id: str, stack: _StrategyStack, message: str
+        self, conversation_id: str, stack: _StrategyStack, message: str
     ) -> ReasoningExecutionError:
         """End a solve whose run raised; return the error to raise.
 
@@ -509,18 +513,18 @@ class ReasoningEngine:
         # reading it: the live read is the documented one, while after
         # end_conversation core answers get_data only from its bounded
         # ended-conversation cache, which may already have evicted it.
-        partial_context = self._read_partial_context(conv_id)
-        _end_quietly(self.orchestrator, conv_id)
+        partial_context = self._read_partial_context(conversation_id)
+        _end_quietly(self.orchestrator, conversation_id)
         return ReasoningExecutionError(
             message,
             details={
-                "conversation_id": conv_id,
+                "conversation_id": conversation_id,
                 "responses_so_far": 1 + len(stack.responses),
                 "partial_context": partial_context,
             },
         )
 
-    def _read_partial_context(self, conv_id: str) -> dict[str, Any] | None:
+    def _read_partial_context(self, conversation_id: str) -> dict[str, Any] | None:
         """The context of the frame on top of a solve that did not finish.
 
         Must run before the conversation is ended. Returns ``None`` (with a
@@ -528,13 +532,13 @@ class ReasoningEngine:
         reports the unfinished solve and the conversation is still ended.
         """
         try:
-            data: dict[str, Any] = self.orchestrator.get_data(conv_id)
+            data: dict[str, Any] = self.orchestrator.get_data(conversation_id)
             return data
         except (FSMError, ValueError) as read_err:
             # get_data raises FSMError, or ValueError for a conversation
             # whose stack is gone (core's `api.handle_conversation_errors`).
-            _solve_log(conv_id).warning(
-                f"Could not read the partial context of {conv_id}: {read_err}"
+            _solve_log(conversation_id).warning(
+                f"Could not read the partial context of {conversation_id}: {read_err}"
             )
             return None
 
@@ -608,14 +612,14 @@ def _solve_log(conversation_id: str) -> Any:
     return logger.bind(conversation_id=conversation_id, package="fsm_llm.reasoning")
 
 
-def _end_quietly(api: API, conv_id: str) -> None:
-    """End ``conv_id`` on ``api``; a failure is logged, not raised (it runs on
+def _end_quietly(api: API, conversation_id: str) -> None:
+    """End ``conversation_id`` on ``api``; a failure is logged, not raised (it runs on
     paths that already return or raise a result)."""
     try:
-        api.end_conversation(conv_id)
+        api.end_conversation(conversation_id)
     except Exception as cleanup_err:
-        _solve_log(conv_id).warning(
-            f"Failed to clean up conversation {conv_id}: {cleanup_err}"
+        _solve_log(conversation_id).warning(
+            f"Failed to clean up conversation {conversation_id}: {cleanup_err}"
         )
 
 
@@ -629,7 +633,7 @@ class _StrategyStack:
 
     - a pushed strategy FSM that has ended is popped, its results merged into
       the orchestrator with ``ContextManager.merge_reasoning_results``;
-    - a pushed strategy FSM still running after ``MAX_SUB_FSM_ITERATIONS``
+    - a pushed strategy FSM still running after ``MAX_SUB_FSM_STEPS``
       steps is force-popped the same way;
     - with only the orchestrator on the stack and ``reasoning_push_pending``
       set, the flag is cleared and the strategy FSM of
@@ -650,30 +654,32 @@ class _StrategyStack:
         self._orchestrator_context: dict[str, Any] = {}
 
     def __call__(self, step: int) -> None:
-        conv_id = self._conversation_id
-        if self._api.get_stack_depth(conv_id) > 1:
-            if self._api.has_conversation_ended(conv_id):
+        conversation_id = self._conversation_id
+        if self._api.get_stack_depth(conversation_id) > 1:
+            if self._api.has_conversation_ended(conversation_id):
                 self._pop(step)
             # DECISION plan-2026-10-01T093600-944e2692/D-053: the sub-FSM
             # step count is arithmetic on core's step number (pushed before
             # step `_pushed_at`, so `step - _pushed_at` sub steps have run).
             # Do NOT count steps in a loop of the engine's own (D-013).
-            elif step - self._pushed_at >= Defaults.MAX_SUB_FSM_ITERATIONS:
+            elif step - self._pushed_at >= Defaults.MAX_SUB_FSM_STEPS:
                 self._log.error(
-                    f"Sub-FSM exceeded {Defaults.MAX_SUB_FSM_ITERATIONS} steps; "
+                    f"Sub-FSM exceeded {Defaults.MAX_SUB_FSM_STEPS} steps; "
                     "forcing completion"
                 )
                 self._pop(step)
             return
-        context = self._api.get_data(conv_id)
+        context = self._api.get_data(conversation_id)
         if context.get(ContextKeys.REASONING_PUSH_PENDING):
             self._push(step, context)
 
     def _push(self, step: int, context: dict[str, Any]) -> None:
-        conv_id = self._conversation_id
+        conversation_id = self._conversation_id
         reasoning_type = ReasoningType(context[ContextKeys.REASONING_TYPE_SELECTED])
         fsm_def = self._engine.reasoning_fsms[reasoning_type]
-        self._api.update_context(conv_id, {ContextKeys.REASONING_PUSH_PENDING: None})
+        self._api.update_context(
+            conversation_id, {ContextKeys.REASONING_PUSH_PENDING: None}
+        )
         sub_context = self._engine.context_manager.extract_relevant_context(
             context,
             [
@@ -686,11 +692,11 @@ class _StrategyStack:
         self._log.info(
             LogMessages.FSM_PUSHED.format(
                 name=fsm_def.get("name"),
-                depth=self._api.get_stack_depth(conv_id) + 1,
+                depth=self._api.get_stack_depth(conversation_id) + 1,
             )
         )
         response = self._api.push_fsm(
-            conv_id, fsm_def, inherit_context=False, context_to_pass=sub_context
+            conversation_id, fsm_def, inherit_context=False, context_to_pass=sub_context
         )
         self.responses.append((step, response))
         self._pushed_at = step
@@ -698,14 +704,14 @@ class _StrategyStack:
         self._orchestrator_context = context
 
     def _pop(self, step: int) -> None:
-        conv_id = self._conversation_id
+        conversation_id = self._conversation_id
         # Read the strategy FSM's context while it is still on top.
-        sub_context = self._api.get_data(conv_id)
+        sub_context = self._api.get_data(conversation_id)
         results = self._engine.context_manager.merge_reasoning_results(
             self._orchestrator_context, sub_context, self._reasoning_type
         )
         response = self._api.pop_fsm(
-            conv_id,
+            conversation_id,
             context_to_return=results,
             merge_strategy=ContextMergeStrategy.UPDATE,
         )
@@ -713,7 +719,7 @@ class _StrategyStack:
         self._log.info(
             LogMessages.FSM_POPPED.format(
                 name=self._reasoning_type,
-                depth=self._api.get_stack_depth(conv_id),
+                depth=self._api.get_stack_depth(conversation_id),
             )
         )
 

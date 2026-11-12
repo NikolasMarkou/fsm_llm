@@ -141,8 +141,8 @@ class TestDefaults:
     def test_solve_steps_budget_is_cumulative(self):
         """D-013: orchestrator steps plus one full strategy run per attempt."""
         assert Defaults.MAX_SOLVE_STEPS == (
-            Defaults.MAX_TOTAL_ITERATIONS
-            + (Defaults.MAX_RETRIES + 1) * Defaults.MAX_SUB_FSM_ITERATIONS
+            Defaults.MAX_TOTAL_STEPS
+            + (Defaults.MAX_RETRIES + 1) * Defaults.MAX_SUB_FSM_STEPS
         )
         assert Defaults.MAX_SOLVE_STEPS == 170
 

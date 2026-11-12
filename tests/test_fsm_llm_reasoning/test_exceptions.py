@@ -6,25 +6,25 @@ import pytest
 
 from fsm_llm.reasoning.exceptions import (
     ReasoningClassificationError,
-    ReasoningEngineError,
+    ReasoningError,
     ReasoningExecutionError,
 )
 
 
-class TestReasoningEngineError:
+class TestReasoningError:
     """Test base exception."""
 
     def test_basic(self):
-        err = ReasoningEngineError("test error")
+        err = ReasoningError("test error")
         assert str(err) == "test error"
         assert err.details == {}
 
     def test_with_details(self):
-        err = ReasoningEngineError("error", details={"key": "value"})
+        err = ReasoningError("error", details={"key": "value"})
         assert err.details == {"key": "value"}
 
     def test_is_exception(self):
-        assert issubclass(ReasoningEngineError, Exception)
+        assert issubclass(ReasoningError, Exception)
 
 
 class TestReasoningExecutionError:
@@ -41,7 +41,7 @@ class TestReasoningExecutionError:
 
     def test_inherits_from_base(self):
         err = ReasoningExecutionError("test")
-        assert isinstance(err, ReasoningEngineError)
+        assert isinstance(err, ReasoningError)
 
 
 class TestReasoningClassificationError:
@@ -49,11 +49,11 @@ class TestReasoningClassificationError:
 
     def test_basic(self):
         err = ReasoningClassificationError("classification failed")
-        assert isinstance(err, ReasoningEngineError)
+        assert isinstance(err, ReasoningError)
 
     def test_catch_as_base(self):
-        """Should be catchable as ReasoningEngineError."""
-        with pytest.raises(ReasoningEngineError):
+        """Should be catchable as ReasoningError."""
+        with pytest.raises(ReasoningError):
             raise ReasoningClassificationError("test")
 
 

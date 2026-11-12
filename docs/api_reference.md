@@ -950,7 +950,7 @@ FSMError
 ├── SkillError (exported from fsm_llm; raised by fsm_llm.agent_skills: caller misuse (no path, a root that is missing or not a directory) or a refused skill read (unknown name, unsafe path, symlink, directory, binary or oversize file); skill content never raises it)
 ├── SynthesisError (fsm_llm.synthesis: a compile that never passed its gates, a provider outage during a compile, a bad limit; -> SynthesisRefusedError (a refusal with a reason code), PatchError (a patch refused whole), LibraryError (a corrupt, unreadable or unwritable library file))
 ├── HandlerSystemError (-> HandlerExecutionError)
-├── ReasoningEngineError (-> ReasoningExecutionError, ReasoningClassificationError)
+├── ReasoningError (-> ReasoningExecutionError, ReasoningClassificationError)
 ├── WorkflowError (-> Definition, Step, Instance, Timeout, Validation, State, Event, Resource)
 ├── EvalError (-> EvalConfigError, EvalDatasetError)
 ├── AgentError (-> ToolExecution, ToolNotFound, BudgetExhausted, ApprovalDenied, AgentTimeout, Evaluation)
