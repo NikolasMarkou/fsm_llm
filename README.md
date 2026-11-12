@@ -606,7 +606,7 @@ All taken from recorded open items:
 
 Things to know:
 
-- The `fsm-llm` command needs `LLM_MODEL`. The Python `API` takes `model=`, then `LLM_MODEL`, and raises `ModelNotConfiguredError` when neither is set (there is no built-in default model). A `.env` file (loaded when `fsm_llm` is imported, and by `fsm-llm`) can set `LLM_MODEL`.
+- The `fsm-llm` command needs `LLM_MODEL`. The Python `API` takes `model=`, then `LLM_MODEL`, and raises `ModelNotConfiguredError` when neither is set (there is no built-in default model). Importing `fsm_llm` loads no `.env` file; `fsm-llm` still reads one itself for now.
 - The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`; both also replace loguru's default handler, so a library record prints once.
 - One conversation handles one message at a time: a second `converse` on a conversation that is mid-turn raises `FSMError`.
 - Upgrading a clone from before the 2026-09-29 restructure: delete the old `src/fsm_llm_<sub>/` folders by hand (`make clean` does not remove them), then `pip install -e .`. A leftover folder breaks imports. After the later move of `src/fsm_llm/` to `src/`, run `pip install -e .` again.

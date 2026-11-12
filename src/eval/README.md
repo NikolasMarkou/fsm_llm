@@ -104,7 +104,7 @@ print(report.overall)   # {"k": ..., "n": ..., "rate": ..., "wilson_ci": [lo, hi
 ## Things to know
 
 - Settings come in layers, later ones winning: built-in defaults, the `config` object inside a dataset, a `--config FILE` (JSON), then flags. An unknown key or a bad value is an error (exit 1), not a silently ignored setting.
-- A `.env` file is loaded when `fsm_llm` is imported (litellm does it) and can set `LLM_MODEL`; check the model named in the scorecard. python-dotenv searches upward from the loading module's own directory, not the current directory, and `LITELLM_MODE=PRODUCTION` stops litellm's load.
+- Importing `fsm_llm` loads no `.env` file (it sets `LITELLM_MODE=PRODUCTION` around its `import litellm`), so a stale `.env` cannot change `LLM_MODEL`; check the model named in the scorecard.
 - The model is the first set of: `--model`, `model` in the `--config` file, `model` in the dataset's `config`, `$LLM_MODEL`; with none of them set the run exits 1 with `ModelNotConfiguredError`'s message (there is no framework default). A dataset that sets `model` therefore beats an exported `LLM_MODEL`. Example scripts get the chosen model as `LLM_MODEL` in their environment.
 - An `fsm` path in a case is relative to the dataset file; `output_root`, `output_dir` and `examples_dir` are relative to the current directory, wherever they are set.
 - Exit codes: `0` finished (even with low scores), `1` usage or input error (including a file that is not UTF-8 or not JSON, a missing examples directory, and no example matching the filters), `2` only when `--fail-under PCT` is given and the score is below it, `130` interrupted (Ctrl-C or SIGTERM). Use `--fail-under` in CI; the comparison is exact, so 57 of 100 passes `--fail-under 57`.

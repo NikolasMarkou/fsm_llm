@@ -69,8 +69,28 @@ import time
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, TypeVar
 
-import litellm
-from litellm import completion, embedding, get_supported_openai_params
+# DECISION plan-2026-11-12T073150-d454fd62/D-005: litellm loads a ``.env`` file
+# when it is imported (``load_dotenv()``) unless ``LITELLM_MODE`` is
+# ``PRODUCTION``; a stale ``.env`` then fills ``LLM_MODEL`` and keys behind the
+# host's back. ``fsm_llm`` reads a ``.env`` only on request
+# (``fsm_llm.load_env``, ``--env-file``). So the import below runs with the
+# mode set to ``PRODUCTION`` when the caller has not set one, and the
+# environment is restored right after. Do NOT move this handling out of the
+# single ``import litellm`` site of this module, and do NOT leave
+# ``LITELLM_MODE`` in ``os.environ`` afterwards (child processes such as eval
+# examples would inherit it). An explicit ``LITELLM_MODE`` of the caller is
+# respected (``DEV`` opts back in). If the host imports litellm before
+# ``fsm_llm`` the file was already loaded and that cannot be undone.
+_LITELLM_MODE_PREVIOUS = os.environ.get("LITELLM_MODE")
+if _LITELLM_MODE_PREVIOUS is None:
+    os.environ["LITELLM_MODE"] = "PRODUCTION"
+try:
+    import litellm
+    from litellm import completion, embedding, get_supported_openai_params
+finally:
+    if _LITELLM_MODE_PREVIOUS is None:
+        os.environ.pop("LITELLM_MODE", None)
+del _LITELLM_MODE_PREVIOUS
 
 from .constants import (
     DEFAULT_TEMPERATURE,

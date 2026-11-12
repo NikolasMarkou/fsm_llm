@@ -468,7 +468,7 @@ class TestConfiguredAgentBuilder:
     @pytest.mark.parametrize(
         ("name", "value", "method"),
         [
-            ("config", AgentConfig(), "set_config"),
+            ("config", AgentConfig(model="test/model"), "set_config"),
             ("pattern", "react", "set_pattern"),
             ("tools", [_search], "add_tool"),
             ("system_prompt", "x", "set_system_prompt"),

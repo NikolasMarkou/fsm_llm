@@ -120,7 +120,7 @@ ollama list  # for Ollama models
 # or set OPENAI_API_KEY for cloud models
 ```
 
-**Which model runs.** The model is `--model`, then the process environment `LLM_MODEL`; with neither set the run exits 1 with `ModelNotConfiguredError`'s message (there is no built-in default). A `.env` file is loaded when `fsm_llm` is imported (litellm does it) and by the `fsm-llm` CLI, and it fills `LLM_MODEL` when the process environment leaves it unset. python-dotenv searches upward from the loading module's own directory, not from the current directory: in a checkout with `.venv` inside it, that is the repository root. The scorecard and `results.json` name the model that really ran, so read them. `LITELLM_MODE=PRODUCTION` stops litellm's load; `env -u LLM_MODEL` alone does not.
+**Which model runs.** The model is `--model`, then the process environment `LLM_MODEL`; with neither set the run exits 1 with `ModelNotConfiguredError`'s message (there is no built-in default). Importing `fsm_llm` loads no `.env` file (`fsm_llm.llm` sets `LITELLM_MODE=PRODUCTION` around its `import litellm`), so only the process environment fills `LLM_MODEL`. The scorecard and `results.json` name the model that really ran, so read them.
 
 ### Manual (single example)
 
