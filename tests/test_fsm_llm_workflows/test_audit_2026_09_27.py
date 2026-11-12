@@ -45,11 +45,11 @@ from fsm_llm.workflows.models import (
 )
 from fsm_llm.workflows.steps import (
     AgentStep,
-    APICallStep,
-    AutoTransitionStep,
+    APIStep,
+    AutoStep,
     ConditionStep,
     ConversationStep,
-    LLMProcessingStep,
+    LLMStep,
     ParallelStep,
     RetryStep,
     TimerStep,
@@ -239,14 +239,14 @@ class TestWaitTimeoutsAndTerminalWaits:
 
 
 # ---------------------------------------------------------------
-# H4: LLMProcessingStep works with a core LLMInterface
+# H4: LLMStep works with a core LLMInterface
 # ---------------------------------------------------------------
 
 
-class TestLLMProcessingStepInterfaces:
+class TestLLMStepInterfaces:
     async def test_core_llm_interface_generate_response(self):
         llm = _CoreLikeLLM("ANSWER: 42")
-        step = LLMProcessingStep(
+        step = LLMStep(
             step_id="llm",
             name="LLM",
             llm_interface=llm,
@@ -267,7 +267,7 @@ class TestLLMProcessingStepInterfaces:
             def generate(self, prompt):
                 return f"echo {prompt}"
 
-        step = LLMProcessingStep(
+        step = LLMStep(
             step_id="llm",
             name="LLM",
             llm_interface=_SyncLLM(),
@@ -280,7 +280,7 @@ class TestLLMProcessingStepInterfaces:
         assert result.data["out"] == "echo hi"
 
     async def test_regex_miss_leaves_key_unset(self):
-        step = LLMProcessingStep(
+        step = LLMStep(
             step_id="llm",
             name="LLM",
             llm_interface=_CoreLikeLLM("no number here"),
@@ -294,7 +294,7 @@ class TestLLMProcessingStepInterfaces:
 
     def test_invalid_regex_rejected_at_construction(self):
         with pytest.raises(ValueError, match="valid regex"):
-            LLMProcessingStep(
+            LLMStep(
                 step_id="llm",
                 name="LLM",
                 llm_interface=_CoreLikeLLM(""),
@@ -317,7 +317,7 @@ class TestFailClosedRouting:
 
         wf = create_workflow("wf", "wf")
         wf.with_initial_step(
-            LLMProcessingStep(
+            LLMStep(
                 step_id="llm",
                 name="LLM",
                 llm_interface=_Broken(),
@@ -336,7 +336,7 @@ class TestFailClosedRouting:
         assert "provider down" in (inst.error or "")
 
     async def test_parallel_failure_without_error_state_has_no_route(self):
-        bad = AutoTransitionStep(
+        bad = AutoStep(
             step_id="bad",
             name="Bad",
             next_state="x",
@@ -429,7 +429,7 @@ class TestAwaitableReturningCallables:
         async def fetch(**kwargs):
             return {"value": 7}
 
-        step = APICallStep(
+        step = APIStep(
             step_id="api",
             name="API",
             api_function=lambda **kw: fetch(**kw),
@@ -446,9 +446,7 @@ class TestAwaitableReturningCallables:
             async def __call__(self, ctx):
                 return {"done": True}
 
-        step = AutoTransitionStep(
-            step_id="a", name="A", next_state="n", action=_AsyncAction()
-        )
+        step = AutoStep(step_id="a", name="A", next_state="n", action=_AsyncAction())
         assert (await step.execute({})).data == {"done": True}
 
 
@@ -679,7 +677,7 @@ class TestSwitchDefaults:
 
 class TestParallelChildren:
     async def test_internal_keys_do_not_leak_through_prefix(self):
-        child = AutoTransitionStep(
+        child = AutoStep(
             step_id="c",
             name="C",
             next_state="x",
@@ -701,12 +699,10 @@ class TestParallelChildren:
             )
 
     async def test_partial_data_kept_on_failure(self):
-        good = AutoTransitionStep(
+        good = AutoStep(
             step_id="g", name="G", next_state="x", action=lambda ctx: {"v": 1}
         )
-        bad = AutoTransitionStep(
-            step_id="b", name="B", next_state="x", action=lambda ctx: 1 / 0
-        )
+        bad = AutoStep(step_id="b", name="B", next_state="x", action=lambda ctx: 1 / 0)
         step = ParallelStep(
             step_id="p", name="P", steps=[good, bad], next_state="n", error_state="e"
         )
@@ -717,7 +713,7 @@ class TestParallelChildren:
     async def test_uncopyable_context_falls_back_to_shallow_copy(self):
         import threading
 
-        child = AutoTransitionStep(step_id="c", name="C", next_state="x")
+        child = AutoStep(step_id="c", name="C", next_state="x")
         step = ParallelStep(step_id="p", name="P", steps=[child], next_state="n")
         result = await step.execute({"lock": threading.Lock()})
         assert result.success is True
@@ -1055,7 +1051,7 @@ class TestLoggingOffByDefault:
 
 class TestSmallerFixes:
     async def test_auto_and_condition_error_state(self):
-        auto = AutoTransitionStep(
+        auto = AutoStep(
             step_id="a",
             name="A",
             next_state="n",
@@ -1076,9 +1072,7 @@ class TestSmallerFixes:
             assert result.next_state == "e"
 
     def test_non_dict_action_result_is_a_clear_error(self):
-        step = AutoTransitionStep(
-            step_id="a", name="A", next_state="n", action=lambda c: ["x"]
-        )
+        step = AutoStep(step_id="a", name="A", next_state="n", action=lambda c: ["x"])
         result = asyncio.run(step.execute({}))
         assert result.success is False
         assert "must return a dict" in (result.error or "")
@@ -1127,7 +1121,7 @@ class TestSmallerFixes:
             wf.with_step(auto_step("a", "Other", next_state=""))
 
     async def test_api_output_paths(self):
-        step = APICallStep(
+        step = APIStep(
             step_id="api",
             name="API",
             api_function=lambda: {"user": {"name": "Ada"}, "items": [1, 2]},
@@ -1139,7 +1133,7 @@ class TestSmallerFixes:
         assert result.data["name"] == "Ada"
         assert result.data["all"]["items"] == [1, 2]
 
-        list_step = APICallStep(
+        list_step = APIStep(
             step_id="api2",
             name="API2",
             api_function=lambda: [1, 2, 3],
@@ -1307,7 +1301,7 @@ class TestReviewFollowUp:
 
     async def test_long_prompt_fits_core_request_limits(self):
         llm = _CoreLikeLLM("ok")
-        step = LLMProcessingStep(
+        step = LLMStep(
             step_id="llm",
             name="LLM",
             llm_interface=llm,

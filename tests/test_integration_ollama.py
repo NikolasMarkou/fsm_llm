@@ -420,7 +420,7 @@ class TestParallelStepIsolation:
 
     @pytest.mark.asyncio
     async def test_parallel_steps_get_isolated_context(self):
-        from fsm_llm.workflows.steps import AutoTransitionStep, ParallelStep
+        from fsm_llm.workflows.steps import AutoStep, ParallelStep
 
         mutations = []
 
@@ -438,13 +438,13 @@ class TestParallelStepIsolation:
             ctx["_step_marker"] = "s2"
             return await mutating_action(ctx)
 
-        step1 = AutoTransitionStep(
+        step1 = AutoStep(
             step_id="s1",
             name="Step 1",
             next_state="done",
             action=action_s1,
         )
-        step2 = AutoTransitionStep(
+        step2 = AutoStep(
             step_id="s2",
             name="Step 2",
             next_state="done",

@@ -252,7 +252,7 @@ class TestInitialRunningIsAnnouncedBehaviour:
 
 
 # ---------------------------------------------------------------
-# F-WE-15: LLMProcessingStep validates llm_interface at construction
+# F-WE-15: LLMStep validates llm_interface at construction
 # ---------------------------------------------------------------
 
 

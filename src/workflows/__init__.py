@@ -76,16 +76,16 @@ from .models import (
 # Step implementations
 from .steps import (
     AgentStep,
-    APICallStep,
-    AutoTransitionStep,
+    APIStep,
+    AutoStep,
     ConditionStep,
     ConversationStep,
-    LLMProcessingStep,
+    LLMStep,
     ParallelStep,
     RetryStep,
     SwitchStep,
     TimerStep,
-    WaitForEventStep,
+    WaitEventStep,
     WorkflowStep,
 )
 
@@ -114,11 +114,11 @@ __all__ = [
     # Steps
     "WorkflowStep",
     "AgentStep",
-    "AutoTransitionStep",
-    "APICallStep",
+    "AutoStep",
+    "APIStep",
     "ConditionStep",
-    "LLMProcessingStep",
-    "WaitForEventStep",
+    "LLMStep",
+    "WaitEventStep",
     "TimerStep",
     "ParallelStep",
     "RetryStep",

@@ -9,7 +9,7 @@ F-002: solve_problem() mutates caller's dict (covered by
        test_engine_integration.py::TestReasoningEngineIntegration::
        test_solve_problem_does_not_mutate_initial_context)
 F-003: Forbidden context pattern misses api_key
-F-004: WaitForEventStep states not validated at definition time
+F-004: WaitEventStep states not validated at definition time
 F-005: FSM cache claims LRU but was FIFO
 F-006: less() docstring claimed wrong result (code was correct)
 """
@@ -79,20 +79,20 @@ class TestForbiddenContextPatterns:
 
 
 # ══════════════════════════════════════════════════════════════
-# F-004: WaitForEventStep states validated at definition time
+# F-004: WaitEventStep states validated at definition time
 # ══════════════════════════════════════════════════════════════
 
 
-class TestWaitForEventStepValidation:
-    """F-004: WaitForEventStep success/timeout states must be validated."""
+class TestWaitEventStepValidation:
+    """F-004: WaitEventStep success/timeout states must be validated."""
 
     def test_wait_event_step_states_are_validated(self):
-        """The referenced states of a WaitForEventStep include both states."""
+        """The referenced states of a WaitEventStep include both states."""
         try:
             from fsm_llm.workflows.models import WaitEventConfig
-            from fsm_llm.workflows.steps import WaitForEventStep
+            from fsm_llm.workflows.steps import WaitEventStep
 
-            step = WaitForEventStep(
+            step = WaitEventStep(
                 step_id="wait_payment",
                 name="Wait for Payment",
                 config=WaitEventConfig(

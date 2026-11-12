@@ -1,7 +1,7 @@
 """
 Tests verifying fixes for audit findings in fsm_llm.workflows.
 Covers: F-001 (ParallelStep), F-002 (event race), F-004 (ConversationStep),
-        F-007 (LLMProcessingStep template), F-010 (dead code removal).
+        F-007 (LLMStep template), F-010 (dead code removal).
 """
 
 from __future__ import annotations
@@ -15,9 +15,9 @@ from fsm_llm.workflows.engine import WorkflowEngine
 from fsm_llm.workflows.exceptions import WorkflowTimeoutError
 from fsm_llm.workflows.models import WorkflowEvent
 from fsm_llm.workflows.steps import (
-    AutoTransitionStep,
+    AutoStep,
     ConversationStep,
-    LLMProcessingStep,
+    LLMStep,
     ParallelStep,
 )
 
@@ -31,13 +31,13 @@ class TestParallelStepErrorHandling:
 
     async def test_parallel_step_fails_when_substeps_fail_no_error_state(self):
         """ParallelStep with no error_state must still return failure if substeps fail."""
-        failing_step = AutoTransitionStep(
+        failing_step = AutoStep(
             step_id="fail",
             name="Failing",
             next_state="done",
             action=lambda ctx: (_ for _ in ()).throw(ValueError("boom")),
         )
-        ok_step = AutoTransitionStep(
+        ok_step = AutoStep(
             step_id="ok",
             name="OK",
             next_state="done",
@@ -61,7 +61,7 @@ class TestParallelStepErrorHandling:
 
     async def test_parallel_step_fails_with_error_state(self):
         """ParallelStep with error_state transitions to it on failure."""
-        failing_step = AutoTransitionStep(
+        failing_step = AutoStep(
             step_id="fail",
             name="Failing",
             next_state="done",
@@ -83,8 +83,8 @@ class TestParallelStepErrorHandling:
 
     async def test_parallel_step_succeeds_when_all_ok(self):
         """ParallelStep returns success when all substeps succeed."""
-        step_a = AutoTransitionStep(step_id="a", name="A", next_state="done")
-        step_b = AutoTransitionStep(step_id="b", name="B", next_state="done")
+        step_a = AutoStep(step_id="a", name="A", next_state="done")
+        step_b = AutoStep(step_id="b", name="B", next_state="done")
 
         parallel = ParallelStep(
             step_id="par",
@@ -173,18 +173,18 @@ class TestConversationStepResourceCleanup:
 
 
 # ---------------------------------------------------------------------------
-# F-007: LLMProcessingStep template KeyError
+# F-007: LLMStep template KeyError
 # ---------------------------------------------------------------------------
 
 
-class TestLLMProcessingStepTemplateError:
+class TestLLMStepTemplateError:
     """F-007: Missing template variables should raise WorkflowStepError, not KeyError."""
 
     async def test_missing_template_variable_raises_step_error(self):
         """Template with {missing_var} should raise WorkflowStepError."""
         mock_llm = MagicMock()
 
-        step = LLMProcessingStep(
+        step = LLMStep(
             step_id="llm",
             name="LLM Step",
             llm_interface=mock_llm,
@@ -629,14 +629,14 @@ class TestFloatTimeoutSecondsEndToEnd:
 
         from fsm_llm.workflows.definitions import WorkflowDefinition
         from fsm_llm.workflows.models import WorkflowInstance, WorkflowStatus
-        from fsm_llm.workflows.steps import AutoTransitionStep, WorkflowStep
+        from fsm_llm.workflows.steps import AutoStep, WorkflowStep
 
         class _TerminalStep(WorkflowStep):
             async def execute(self, context):
                 return None
 
         engine = WorkflowEngine()
-        step = AutoTransitionStep(step_id="only", name="Only", next_state="term")
+        step = AutoStep(step_id="only", name="Only", next_state="term")
         term_step = _TerminalStep(step_id="term", name="Term")
         definition = WorkflowDefinition(
             workflow_id="wf-float-timeout",

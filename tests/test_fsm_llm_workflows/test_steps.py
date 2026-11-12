@@ -9,26 +9,26 @@ import pytest
 
 from fsm_llm.workflows.models import WaitEventConfig
 from fsm_llm.workflows.steps import (
-    APICallStep,
-    AutoTransitionStep,
+    APIStep,
+    AutoStep,
     ConditionStep,
     ConversationStep,
     ParallelStep,
     TimerStep,
-    WaitForEventStep,
+    WaitEventStep,
 )
 
 # ---------------------------------------------------------------------------
-# AutoTransitionStep
+# AutoStep
 # ---------------------------------------------------------------------------
 
 
-class TestAutoTransitionStep:
-    """Test AutoTransitionStep execution."""
+class TestAutoStep:
+    """Test AutoStep execution."""
 
     @pytest.mark.asyncio
     async def test_execute_no_action(self):
-        step = AutoTransitionStep(step_id="s1", name="Test", next_state="done")
+        step = AutoStep(step_id="s1", name="Test", next_state="done")
         result = await step.execute({})
 
         assert result.success is True
@@ -39,9 +39,7 @@ class TestAutoTransitionStep:
         def my_action(ctx):
             return {"computed": ctx.get("x", 0) * 2}
 
-        step = AutoTransitionStep(
-            step_id="s1", name="Test", next_state="done", action=my_action
-        )
+        step = AutoStep(step_id="s1", name="Test", next_state="done", action=my_action)
         result = await step.execute({"x": 5})
 
         assert result.success is True
@@ -52,9 +50,7 @@ class TestAutoTransitionStep:
         async def my_action(ctx):
             return {"async_result": True}
 
-        step = AutoTransitionStep(
-            step_id="s1", name="Test", next_state="done", action=my_action
-        )
+        step = AutoStep(step_id="s1", name="Test", next_state="done", action=my_action)
         result = await step.execute({})
 
         assert result.success is True
@@ -65,9 +61,7 @@ class TestAutoTransitionStep:
         def bad_action(ctx):
             raise ValueError("boom")
 
-        step = AutoTransitionStep(
-            step_id="s1", name="Test", next_state="done", action=bad_action
-        )
+        step = AutoStep(step_id="s1", name="Test", next_state="done", action=bad_action)
         result = await step.execute({})
         assert result.success is False
         assert result.next_state is None
@@ -145,19 +139,19 @@ class TestConditionStep:
 
 
 # ---------------------------------------------------------------------------
-# APICallStep
+# APIStep
 # ---------------------------------------------------------------------------
 
 
-class TestAPICallStep:
-    """Test APICallStep execution."""
+class TestAPIStep:
+    """Test APIStep execution."""
 
     @pytest.mark.asyncio
     async def test_success(self):
         def my_api(**params):
             return {"status": "ok", "result": params.get("query", "")}
 
-        step = APICallStep(
+        step = APIStep(
             step_id="s1",
             name="API",
             api_function=my_api,
@@ -177,7 +171,7 @@ class TestAPICallStep:
         def failing_api(**params):
             raise ConnectionError("timeout")
 
-        step = APICallStep(
+        step = APIStep(
             step_id="s1",
             name="API",
             api_function=failing_api,
@@ -194,7 +188,7 @@ class TestAPICallStep:
         async def my_api(**params):
             return {"data": "async result"}
 
-        step = APICallStep(
+        step = APIStep(
             step_id="s1",
             name="API",
             api_function=my_api,
@@ -209,16 +203,16 @@ class TestAPICallStep:
 
 
 # ---------------------------------------------------------------------------
-# WaitForEventStep
+# WaitEventStep
 # ---------------------------------------------------------------------------
 
 
-class TestWaitForEventStep:
-    """Test WaitForEventStep execution."""
+class TestWaitEventStep:
+    """Test WaitEventStep execution."""
 
     @pytest.mark.asyncio
     async def test_execute(self):
-        step = WaitForEventStep(
+        step = WaitEventStep(
             step_id="s1",
             name="Wait",
             config=WaitEventConfig(
@@ -270,10 +264,10 @@ class TestParallelStep:
 
     @pytest.mark.asyncio
     async def test_all_succeed(self):
-        s1 = AutoTransitionStep(
+        s1 = AutoStep(
             step_id="a", name="A", next_state="done", action=lambda ctx: {"val": 1}
         )
-        s2 = AutoTransitionStep(
+        s2 = AutoStep(
             step_id="b", name="B", next_state="done", action=lambda ctx: {"val": 2}
         )
 
@@ -293,10 +287,8 @@ class TestParallelStep:
         def bad_action(ctx):
             raise ValueError("fail")
 
-        s1 = AutoTransitionStep(
-            step_id="a", name="A", next_state="done", action=bad_action
-        )
-        s2 = AutoTransitionStep(step_id="b", name="B", next_state="done")
+        s1 = AutoStep(step_id="a", name="A", next_state="done", action=bad_action)
+        s2 = AutoStep(step_id="b", name="B", next_state="done")
 
         step = ParallelStep(
             step_id="p1",
@@ -312,10 +304,10 @@ class TestParallelStep:
 
     @pytest.mark.asyncio
     async def test_custom_aggregation(self):
-        s1 = AutoTransitionStep(
+        s1 = AutoStep(
             step_id="a", name="A", next_state="done", action=lambda ctx: {"count": 1}
         )
-        s2 = AutoTransitionStep(
+        s2 = AutoStep(
             step_id="b", name="B", next_state="done", action=lambda ctx: {"count": 2}
         )
 
@@ -342,8 +334,8 @@ class TestParallelStep:
             ctx["mutated"] = True
             return {}
 
-        s1 = AutoTransitionStep(step_id="a", name="A", next_state="done", action=mutate)
-        s2 = AutoTransitionStep(
+        s1 = AutoStep(step_id="a", name="A", next_state="done", action=mutate)
+        s2 = AutoStep(
             step_id="b",
             name="B",
             next_state="done",
@@ -369,13 +361,13 @@ class TestWorkflowStepBase:
     """Test base WorkflowStep properties."""
 
     def test_step_model_fields(self):
-        step = AutoTransitionStep(step_id="s1", name="Test", next_state="next")
+        step = AutoStep(step_id="s1", name="Test", next_state="next")
         assert step.step_id == "s1"
         assert step.name == "Test"
         assert step.description == ""
 
     def test_step_with_description(self):
-        step = AutoTransitionStep(
+        step = AutoStep(
             step_id="s1", name="Test", next_state="next", description="desc"
         )
         assert step.description == "desc"

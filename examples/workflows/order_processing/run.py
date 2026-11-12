@@ -4,7 +4,7 @@ Order Processing Workflow Example — Workflows + Core FSM
 
 Demonstrates the workflows DSL to orchestrate a multi-step order processing
 pipeline. A ConversationStep runs an FSM to collect order details, then
-ConditionStep and APICallStep handle validation and payment processing.
+ConditionStep and APIStep handle validation and payment processing.
 
 Combines:
     - fsm_llm.workflows: Workflow DSL (create_workflow, conversation_step,
@@ -15,7 +15,7 @@ Key Concepts:
     - WorkflowEngine with async execution
     - ConversationStep: embed an FSM conversation inside a workflow
     - ConditionStep: branch based on context values
-    - APICallStep: mock external API integration
+    - APIStep: mock external API integration
     - auto_messages: drive an FSM conversation automatically
 
 Usage:
@@ -70,7 +70,7 @@ async def validate_inventory(
 ) -> dict:
     """Mock inventory check — always succeeds for demo.
 
-    APICallStep unpacks input_mapping as keyword arguments, so parameters
+    APIStep unpacks input_mapping as keyword arguments, so parameters
     must match the keys defined in input_mapping.
     """
     try:

@@ -40,7 +40,7 @@ from .models import WaitEventConfig, WorkflowStepResult
 #: Executor used for synchronous user callables. The engine sets it for the
 #: duration of a step when it was constructed with ``executor=...``; ``None``
 #: means the event loop's default executor.
-STEP_EXECUTOR: contextvars.ContextVar[Executor | None] = contextvars.ContextVar(
+_STEP_EXECUTOR: contextvars.ContextVar[Executor | None] = contextvars.ContextVar(
     "fsm_llm_workflows_step_executor", default=None
 )
 
@@ -66,7 +66,7 @@ async def _call_user_callable(fn: Callable[..., Any], *args: Any, **kwargs: Any)
     # Do NOT go back to `inspect.iscoroutinefunction(fn)` alone: a lambda that
     # returns a coroutine was run in the executor and its (truthy, never
     # awaited) coroutine object was used as the result, so a ConditionStep
-    # always took `true_state` and an APICallStep silently mapped nothing.
+    # always took `true_state` and an APIStep silently mapped nothing.
 
     Note: a synchronous callable that is still running when a timeout fires
     cannot be stopped (Python threads are not cancellable); it keeps running
@@ -77,7 +77,7 @@ async def _call_user_callable(fn: Callable[..., Any], *args: Any, **kwargs: Any)
     else:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
-            STEP_EXECUTOR.get(), functools.partial(fn, *args, **kwargs)
+            _STEP_EXECUTOR.get(), functools.partial(fn, *args, **kwargs)
         )
     if inspect.isawaitable(result):
         result = await result
@@ -146,7 +146,7 @@ class WorkflowStep(BaseModel, ABC):
             ) from e
 
 
-class AutoTransitionStep(WorkflowStep):
+class AutoStep(WorkflowStep):
     """A step that automatically transitions to the next state.
 
     ``action`` may return a dict (merged into the context) or ``None``. When
@@ -188,7 +188,7 @@ class AutoTransitionStep(WorkflowStep):
             )
 
 
-class APICallStep(WorkflowStep):
+class APIStep(WorkflowStep):
     """A step that calls an external API.
 
     ``input_mapping`` is ``{api_param: context_key}``. ``output_mapping`` is
@@ -236,7 +236,7 @@ class APICallStep(WorkflowStep):
                 params[api_param] = context[context_key]
             else:
                 logger.debug(
-                    f"APICallStep [{self.step_id}]: input_mapping key "
+                    f"APIStep [{self.step_id}]: input_mapping key "
                     f"'{context_key}' not in context; '{api_param}' omitted"
                 )
         return params
@@ -256,7 +256,7 @@ class APICallStep(WorkflowStep):
                 output_data[context_key] = value
             else:
                 logger.debug(
-                    f"APICallStep [{self.step_id}]: output_mapping key "
+                    f"APIStep [{self.step_id}]: output_mapping key "
                     f"'{result_key}' not in API result; '{context_key}' not set"
                 )
         return output_data
@@ -298,7 +298,7 @@ class ConditionStep(WorkflowStep):
             )
 
 
-class LLMProcessingStep(WorkflowStep):
+class LLMStep(WorkflowStep):
     """A step that processes data using an LLM.
 
     ``llm_interface`` may be a core ``fsm_llm.LLMInterface`` (its
@@ -445,7 +445,7 @@ class LLMProcessingStep(WorkflowStep):
                     )
                 else:
                     logger.warning(
-                        f"LLMProcessingStep [{self.step_id}]: pattern for "
+                        f"LLMStep [{self.step_id}]: pattern for "
                         f"'{context_key}' did not match the response; key not set"
                     )
             else:
@@ -453,7 +453,7 @@ class LLMProcessingStep(WorkflowStep):
         return output_data
 
 
-class WaitForEventStep(WorkflowStep):
+class WaitEventStep(WorkflowStep):
     """A step that waits for an external event (see ``WaitEventConfig``)."""
 
     config: WaitEventConfig
@@ -595,7 +595,7 @@ class ConversationStep(WorkflowStep):
             # loop is not frozen and the time limit can actually fire.
             loop = asyncio.get_running_loop()
             fut = loop.run_in_executor(
-                STEP_EXECUTOR.get(), self._run_conversation, dict(context)
+                _STEP_EXECUTOR.get(), self._run_conversation, dict(context)
             )
             if limit is None:
                 return await fut
@@ -744,7 +744,7 @@ class ParallelStep(WorkflowStep):
             inner = child
             while isinstance(inner, RetryStep):
                 inner = inner.step
-            if isinstance(inner, (WaitForEventStep, TimerStep)):
+            if isinstance(inner, (WaitEventStep, TimerStep)):
                 raise ValueError(
                     f"ParallelStep child '{child.step_id}' is a "
                     f"{type(inner).__name__}; event and timer steps cannot run "
@@ -1085,12 +1085,12 @@ class RetryStep(WorkflowStep):
             # non-conforming inner WorkflowStep can raise any exception type,
             # and this must be retried the same way, matching the bare
             # `except Exception` idiom already used by 6+ other step types
-            # (AutoTransitionStep, APICallStep, ConditionStep,
-            # LLMProcessingStep, ConversationStep, ParallelStep, AgentStep).
+            # (AutoStep, APIStep, ConditionStep,
+            # LLMStep, ConversationStep, ParallelStep, AgentStep).
             # See decisions.md D-010.
             except Exception:
                 # Steps that signal failure by RAISING (ConditionStep,
-                # AutoTransitionStep, LLMProcessingStep, _with_timeout) must
+                # AutoStep, LLMStep, _with_timeout) must
                 # also be retried, not propagated on the first attempt.
                 if attempt < self.max_retries:
                     delay = self.backoff_factor * (attempt + 1)

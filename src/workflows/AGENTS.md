@@ -5,7 +5,7 @@ Purpose: Async, in-memory workflow engine inside the `fsm-llm` distribution: ste
 
 ## Scope
 
-Workflow definition, validation, execution, and DSL. No persistence, no JSON loader (steps carry Python callables). The `workflows` extra in `pyproject.toml` is empty (no deps beyond core). Version re-exported from `fsm_llm.__version__` (`__version__.py` imports it; `__init__.py` imports it once from `.__version__` and lists it in `__all__`). Not wired into `fsm_llm.API`: an independent state machine that reuses `fsm_llm.constants.has_internal_prefix`, `fsm_llm.logging.logger`, `fsm_llm.definitions.FSMError`, and `fsm_llm.API` (in `ConversationStep`), `fsm_llm.definitions.ResponseGenerationRequest` (in `LLMProcessingStep`) and `fsm_llm.definitions.reachable_from` (in `WorkflowDefinition`). Engine hooks are `add_hook`; the engine holds no `HandlerSystem`. `DependencyResolver` is standalone; neither the engine nor `ParallelStep` uses it.
+Workflow definition, validation, execution, and DSL. No persistence, no JSON loader (steps carry Python callables). The `workflows` extra in `pyproject.toml` is empty (no deps beyond core). Version re-exported from `fsm_llm.__version__` (`__version__.py` imports it; `__init__.py` imports it once from `.__version__` and lists it in `__all__`). Not wired into `fsm_llm.API`: an independent state machine that reuses `fsm_llm.constants.has_internal_prefix`, `fsm_llm.logging.logger`, `fsm_llm.definitions.FSMError`, and `fsm_llm.API` (in `ConversationStep`), `fsm_llm.definitions.ResponseGenerationRequest` (in `LLMStep`) and `fsm_llm.definitions.reachable_from` (in `WorkflowDefinition`). Engine hooks are `add_hook`; the engine holds no `HandlerSystem`. `DependencyResolver` is standalone; neither the engine nor `ParallelStep` uses it.
 
 ## Architecture
 
@@ -36,7 +36,7 @@ Step driver (`engine.py`): every entry point takes the instance lock, then calls
 
 `_run_current_step`:
 1. Deadline check (past deadline: FAILED, `WorkflowTimeoutError` raised).
-2. `step.execute(instance.context)` with `steps.STEP_EXECUTOR` bound to the engine executor; wrapped in `asyncio.wait_for(remaining)` when a deadline is set.
+2. `step.execute(instance.context)` with `steps._STEP_EXECUTOR` bound to the engine executor; wrapped in `asyncio.wait_for(remaining)` when a deadline is set.
 3. Non-`WorkflowStepResult` return raises `WorkflowStepError`.
 4. Merge `result.data` minus internal-prefix keys (except `STEP_INTERNAL_WHITELIST`), add a history entry (with `result.error`), emit `step_completed`.
 5. Success: truthy `next_state` is returned and the loop calls `_prepare_transition` (validate target, drop wait listeners/timers, pop `_waiting_info`/`_timer_info`, RUNNING). `next_state == ""` completes. Other falsy values go to `_handle_step_without_transition`: event wait consumes a matching buffered targeted event and continues (or completes if `success_state` is empty), else WAITING + `register_event_listener`; timer marker gives WAITING + `schedule_timer`; a step in `get_terminal_states()` completes; otherwise a WARNING and the instance stays RUNNING.
@@ -51,12 +51,12 @@ Wake-ups after WAITING: `process_event` -> `_deliver_event` -> `_transition_to_s
 
 | File | Role | Notes |
 | --- | --- | --- |
-| `engine.py` | `WorkflowEngine`, `Timer`, `LifecycleHook` alias | per-instance `asyncio.Lock`, event buffers, timers dict, background tasks; module `__all__` |
-| `steps.py` | `WorkflowStep` ABC (`referenced_states()`, `_with_timeout`) + 11 subclasses, `_call_user_callable`, `STEP_EXECUTOR` ContextVar, `_lookup_path`, `_error_text` | Pydantic models, `arbitrary_types_allowed` |
+| `engine.py` | `WorkflowEngine`, `Timer`, `LifecycleHook` alias | per-instance `asyncio.Lock`, event buffers, timers dict, background tasks; no `__all__` (module attributes such as `DEFAULT_MAX_STEPS` stay importable) |
+| `steps.py` | `WorkflowStep` ABC (`referenced_states()`, `_with_timeout`) + 11 subclasses, `_call_user_callable`, `_STEP_EXECUTOR` ContextVar, `_lookup_path`, `_error_text` | Pydantic models, `arbitrary_types_allowed` |
 | `definitions.py` | `WorkflowDefinition`, `_serialize_step` | `validate()` raises `WorkflowValidationError` with all errors |
 | `dsl.py` | step factories, `WorkflowBuilder`, `workflow_builder`, pattern helpers | pattern helpers register steps, they do not wire them |
 | `models.py` | `WorkflowStatus`, `WorkflowEvent`, `WorkflowStepResult`, `WorkflowHistoryEntry`, `WorkflowInstance`, `EventListener`, `WaitEventConfig` | `_VALID_STATUS_TRANSITIONS` |
-| `constants.py` | context keys, limits, `PAUSING_STEP_TYPES` | see Data shapes |
+| `constants.py` | context keys, limits | see Data shapes |
 | `dependency_resolver.py` | `DependencyResolver` | Kahn's algorithm, sorted waves |
 | `exceptions.py` | `WorkflowError` tree | base is core `FSMError` |
 | `__init__.py` | one static `__all__` | exports `DEFAULT_MAX_STEPS` |
@@ -79,19 +79,19 @@ Wake-ups after WAITING: `process_event` -> `_deliver_event` -> `_transition_to_s
 `WorkflowDefinition{workflow_id, name, description="", steps: dict[str, WorkflowStep], initial_step_id=None, metadata}`:
 - `with_step(step, is_initial=False)` (a different object with the same id raises `WorkflowDefinitionError`; same object is a no-op), `with_initial_step(step)`.
 - `validate()`: id, name, at least one step, initial step exists, key matches `step.step_id`, step has a name, no duplicate child ids in a `ParallelStep`, every referenced state exists, every step reachable from the initial step, no synchronous cycle. Logs a WARNING (not an error) for a step with no path to a terminal step.
-- `get_terminal_states()` (steps whose referenced-state set is empty), `has_cycles()` (any cycle), `has_synchronous_cycles()` (edges out of a `WaitForEventStep`/`TimerStep`, or a `RetryStep` wrapping one, are ignored; D-002). Both return False when `initial_step_id` is unset. Iterative DFS (no recursion).
+- `get_terminal_states()` (steps whose referenced-state set is empty), `has_cycles()` (any cycle), `has_synchronous_cycles()` (edges out of a `WaitEventStep`/`TimerStep`, or a `RetryStep` wrapping one, are ignored; D-002). Both return False when `initial_step_id` is unset. Iterative DFS (no recursion).
 - `serialize() -> dict`: steps carry `"type"` = class name; `action`, `api_function`, `condition`, `aggregation_function`, `llm_interface` and any other callable field are dropped; nested `RetryStep.step` and `ParallelStep.steps` are serialized recursively. `AgentStep.agent` and `RetryStep.step` are `Field(exclude=True)`.
 
-`WorkflowStep{step_id, name, description="", timeout_seconds: float | None = None}`; `async execute(context) -> WorkflowStepResult`; `referenced_states() -> set[str]` (non-empty string values of the `*_state` fields; `WaitForEventStep`, `SwitchStep` and `RetryStep` override it; the one source of truth for validation, reachability and terminal detection); `_with_timeout(coro)` raises `WorkflowStepError` on the step's own time limit (a `TimeoutError` raised by the awaited code propagates unchanged).
+`WorkflowStep{step_id, name, description="", timeout_seconds: float | None = None}`; `async execute(context) -> WorkflowStepResult`; `referenced_states() -> set[str]` (non-empty string values of the `*_state` fields; `WaitEventStep`, `SwitchStep` and `RetryStep` override it; the one source of truth for validation, reachability and terminal detection); `_with_timeout(coro)` raises `WorkflowStepError` on the step's own time limit (a `TimeoutError` raised by the awaited code propagates unchanged).
 
 Steps (every failure without an error route FAILS the instance):
-- `AutoTransitionStep(next_state, action=None, error_state=None)`: `action(context)` returns dict or None (else `TypeError`). Failure: a failure result routed to `error_state`, or with no route (the instance FAILS; the cause text is in `instance.error`).
+- `AutoStep(next_state, action=None, error_state=None)`: `action(context)` returns dict or None (else `TypeError`). Failure: a failure result routed to `error_state`, or with no route (the instance FAILS; the cause text is in `instance.error`).
 - `ConditionStep(condition, true_state, false_state, error_state=None)`: truthiness picks the branch; outputs `condition_result`. Failure as above.
-- `APICallStep(api_function, success_state, failure_state, input_mapping{api_param: ctx_key}, output_mapping{ctx_key: result_key})`: calls `api_function(**params)`; missing input keys are omitted; `result_key` is an exact key, a dotted path, or `""` (whole result, even non-dict). Any exception routes to `failure_state`.
+- `APIStep(api_function, success_state, failure_state, input_mapping{api_param: ctx_key}, output_mapping{ctx_key: result_key})`: calls `api_function(**params)`; missing input keys are omitted; `result_key` is an exact key, a dotted path, or `""` (whole result, even non-dict). Any exception routes to `failure_state`.
 - `SwitchStep(key, cases{value: state}, default_state=None)`: compares `str(value)`, missing key is `""`. No match with `default_state=None` returns a failure (instance FAILS); `""` completes. Outputs `switch_<id>_matched`, `switch_<id>_target`.
-- `LLMProcessingStep(llm_interface, prompt_template, context_mapping{prompt_var: ctx_key}, output_mapping{ctx_key: regex}, next_state, error_state=None, system_prompt=<default>)`: `llm_interface` must have a callable `generate` or `generate_response` (checked at construction). `prompt_template.format(...)` (literal braces `{{ }}`). Prefers `llm.generate(prompt)` (sync or async); else `llm.generate_response(ResponseGenerationRequest)` (prompts over 10,000 chars go into the system prompt). Reply must be `str` or have a str `.message`. Regex: group 1 or whole match, `re.DOTALL`; miss leaves the key unset (WARNING); `""` stores the whole reply. Regexes are validated at construction.
-- `WaitForEventStep(config: WaitEventConfig)`: returns `_waiting_info`, no `next_state`.
-- `TimerStep(delay_seconds >= 0, next_state)`: returns `_timer_info`. `next_state=""` completes the workflow on expiry (like `wait_event_step(success_state="")`); `APICallStep(failure_state="")` still FAILS the instance on error.
+- `LLMStep(llm_interface, prompt_template, context_mapping{prompt_var: ctx_key}, output_mapping{ctx_key: regex}, next_state, error_state=None, system_prompt=<default>)`: `llm_interface` must have a callable `generate` or `generate_response` (checked at construction). `prompt_template.format(...)` (literal braces `{{ }}`). Prefers `llm.generate(prompt)` (sync or async); else `llm.generate_response(ResponseGenerationRequest)` (prompts over 10,000 chars go into the system prompt). Reply must be `str` or have a str `.message`. Regex: group 1 or whole match, `re.DOTALL`; miss leaves the key unset (WARNING); `""` stores the whole reply. Regexes are validated at construction.
+- `WaitEventStep(config: WaitEventConfig)`: returns `_waiting_info`, no `next_state`.
+- `TimerStep(delay_seconds >= 0, next_state)`: returns `_timer_info`. `next_state=""` completes the workflow on expiry (like `wait_event_step(success_state="")`); `APIStep(failure_state="")` still FAILS the instance on error.
 - `ConversationStep(fsm_file | fsm_definition (dict or object with `model_dump`; exactly one), model=None, initial_context{conv_key: wf_key}, context_mapping{wf_key: conv_key}, success_state="", error_state=None, max_turns=20 (>=1), conversation_timeout=None, require_completion=False, use_user_input=False, auto_messages=[])`: whole conversation runs in the executor via `API.from_definition`/`API.from_file`; limit is min(`timeout_seconds`, `conversation_timeout`), enforced with `asyncio.wait`. Collected data gets `last_response`/`final_answer` = the last non-empty reply (opening reply or any turn) if absent; when nothing was spoken (all silent states) neither key is added. Outputs `conversation_<id>_data`, `conversation_<id>_ended`. `require_completion` and not ended is a failure. The conversation is always ended in `finally`.
 - `AgentStep(agent, task_template="{task}", success_state="", context_mapping{wf_key: agent_key}, input_mapping{agent_ctx_key: wf_key}, error_state=None)`: `agent` needs callable `run`. Task is `task_template.format(**context)`; `agent.run(task, initial_context=...)` (kwarg only when `input_mapping` is non-empty). Result: a `str`, or an object with `answer`, `success`, optional `final_context`, `structured_output`. `context_mapping` reads `final_context` first, then `answer`/`success`/`structured_output`. `success=False` is a failure. Outputs `agent_answer`, `agent_success`, `agent_<id>_answer`, `agent_<id>_success`.
 - `ParallelStep(steps, next_state, error_state=None, aggregation_function=None)`: children cannot be (or `RetryStep`-wrap) wait/timer steps. Each child gets a deepcopy of the context (shallow on failure); `timeout_seconds` bounds the whole `gather`. Child `next_state` ignored. Default aggregate: `step_<i>_<key>`, internal keys dropped BEFORE prefixing. `aggregation_function(results)` (sync, run in the step executor, or async) is called on success only. Any child failure: failure result with the successful children's default aggregate and `next_state=error_state`.
@@ -110,7 +110,7 @@ DSL (`dsl.py`): `create_workflow(workflow_id, name, description="")`, `workflow_
 - `EventListener{instance_id, success_state, event_mapping, registered_at, timeout_at, correlation_key, correlation_value, timeout_state, step_id}`; `is_expired()`.
 - `Timer(instance_id, next_state, expires_at, task)`; keys in `engine.timers`: `{id}_timer`, `{id}_{event_type}_timeout`, `{id}_deadline`.
 - Engine context keys (`constants.py`, constants `CONTEXT_KEY_WAITING_INFO`, `_TIMER_INFO`, `_WORKFLOW_INFO`, `_EVENT_TIMEOUT`, `_TIMER_EXPIRED`, `_LAST_EVENT`, `_USER_INPUT`, `_CANCELLATION_REASON`; values unchanged): `_waiting_info`, `_timer_info` (both in `STEP_INTERNAL_WHITELIST`, cleared on every transition), `_workflow_info {workflow_id, instance_id}`, `_timeout {event_type, timeout_at}`, `_timer_expired {expired_at}`, `_last_event` (event dump), `_user_input` (only during an `advance` run), `_cancellation_reason`.
-- Limits: `DEFAULT_MAX_STEPS = 1000`, `DEFAULT_MAX_COMPLETED_INSTANCES = 1000`, `DEFAULT_MAX_HISTORY_ENTRIES = 1000`, `MAX_BUFFERED_EVENTS_PER_INSTANCE = 100` (deque, oldest dropped), `PARALLEL_DEEPCOPY_WARNING_THRESHOLD = 10`, `PAUSING_STEP_TYPES = {"WaitForEventStep", "TimerStep"}`.
+- Limits: `DEFAULT_MAX_STEPS = 1000`, `DEFAULT_MAX_COMPLETED_INSTANCES = 1000`, `DEFAULT_MAX_HISTORY_ENTRIES = 1000`, `MAX_BUFFERED_EVENTS_PER_INSTANCE = 100` (deque, oldest dropped), `PARALLEL_DEEPCOPY_WARNING_THRESHOLD = 10`.
 
 ## Invariants and constraints
 
@@ -122,7 +122,7 @@ DSL (`dsl.py`): `create_workflow(workflow_id, name, description="")`, `workflow_
 - Internal-prefix result keys are dropped via `has_internal_prefix` (never re-inline `startswith("_")`), except the whitelist; do not remove the whitelist.
 - `next_state == ""` on ANY successful result means terminal for that route; no isinstance narrowing (D-013, D-020).
 - A failure result with no `next_state` FAILS the instance; no step falls back to its success route (D-003).
-- User callables go through `steps._call_user_callable`: async callables awaited, sync ones in `STEP_EXECUTOR` (engine executor or loop default), a returned awaitable awaited (D-004).
+- User callables go through `steps._call_user_callable`: async callables awaited, sync ones in `_STEP_EXECUTOR` (engine executor or loop default), a returned awaitable awaited (D-004).
 - `_fail` (every step exception) and `cancel` never overwrite a terminal status (D-005, D-015). A cancel of a running chain goes through `_cancel_requests` (registered before the lock wait, checked at the top of each `_execute_workflow_step` iteration, removed in `cancel`'s `finally` and with the instance); never cancel the running task or take a second lock to do it (5ed71cf2/D-017).
 - Reported workflow timeout is the configured float, not truncated (D-011).
 - `Timer.cancel()` never cancels the task running it. Re-scheduling a timer or event timeout cancels the old task first.
@@ -130,8 +130,8 @@ DSL (`dsl.py`): `create_workflow(workflow_id, name, description="")`, `workflow_
 
 ## Dependencies
 
-- `fsm_llm`: `constants.has_internal_prefix`, `logging.logger`, `definitions.FSMError`, `API` (`ConversationStep`), `definitions.ResponseGenerationRequest` (`LLMProcessingStep`), `definitions.reachable_from` (`WorkflowDefinition`).
-- Runtime duck types: any object with `run(task)` for `AgentStep` (typically `fsm_llm.agents`), `generate`/`generate_response` for `LLMProcessingStep`.
+- `fsm_llm`: `constants.has_internal_prefix`, `logging.logger`, `definitions.FSMError`, `API` (`ConversationStep`), `definitions.ResponseGenerationRequest` (`LLMStep`), `definitions.reachable_from` (`WorkflowDefinition`).
+- Runtime duck types: any object with `run(task)` for `AgentStep` (typically `fsm_llm.agents`), `generate`/`generate_response` for `LLMStep`.
 - pydantic v2, asyncio, stdlib only otherwise.
 
 ## Failure modes
@@ -144,7 +144,7 @@ DSL (`dsl.py`): `create_workflow(workflow_id, name, description="")`, `workflow_
 
 ## Working here
 
-- New step type: subclass `WorkflowStep` in `steps.py`, implement async `execute` returning `WorkflowStepResult`; call user code through `_call_user_callable`; route failures to an `error_state`, never the success state; add a factory in `dsl.py`; override `WorkflowStep.referenced_states` when a target is not a plain `*_state` string field (a nested model, a mapping, a wrapped step); if it pauses, add it to `PAUSING_STEP_TYPES` and `_is_pausing_step`; export in `__init__.__all__` (one static list).
+- New step type: subclass `WorkflowStep` in `steps.py`, implement async `execute` returning `WorkflowStepResult`; call user code through `_call_user_callable`; route failures to an `error_state`, never the success state; add a factory in `dsl.py`; override `WorkflowStep.referenced_states` when a target is not a plain `*_state` string field (a nested model, a mapping, a wrapped step); if it pauses, add its class to the `isinstance` check in `WorkflowDefinition._is_pausing_step`; export in `__init__.__all__` (one static list).
 - Read the `# DECISION plan-.../D-NNN` comments in `engine.py`, `steps.py`, `definitions.py` before editing nearby; do not undo what they forbid.
 - Tests: `pytest tests/test_fsm_llm_workflows/` (`test_audit_2026_09_27.py`, `test_audit_fixes.py`, `test_dsl.py`, `test_new_steps.py`, `test_steps.py`, `test_step_timeouts.py`, `test_workflows.py`). Examples in `examples/workflows/` are eval baselines; do not modify them unless asked.
 - Use `.venv/bin/python`. Lint `ruff check src/ tests/`, types `make type-check`.

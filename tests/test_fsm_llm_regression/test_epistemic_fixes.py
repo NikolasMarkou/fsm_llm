@@ -2,7 +2,7 @@
 Regression tests for issues found during epistemic deconstruction analysis.
 Covers:
   ED-001: OutputFormatter falsy check loses CALCULATION_RESULT=0
-  ED-002: WaitForEventStep / TimerStep auto-registration in engine
+  ED-002: WaitEventStep / TimerStep auto-registration in engine
   ED-003: Type mapping aliases incomplete
 """
 
@@ -81,7 +81,7 @@ class TestFalsySolutionExtraction:
 
 
 # ---------------------------------------------------------------------------
-# ED-002: WaitForEventStep / TimerStep auto-registration
+# ED-002: WaitEventStep / TimerStep auto-registration
 # ---------------------------------------------------------------------------
 
 
@@ -89,7 +89,7 @@ class TestEventAutoRegistration:
     """ED-002: Engine must auto-register event listeners from _waiting_info."""
 
     async def test_wait_event_step_auto_registers_listener(self):
-        """After WaitForEventStep, engine should auto-register event listener."""
+        """After WaitEventStep, engine should auto-register event listener."""
         engine = WorkflowEngine()
 
         wf = create_workflow("evt_auto", "Event Auto")

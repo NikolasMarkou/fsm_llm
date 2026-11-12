@@ -29,13 +29,13 @@ from fsm_llm.workflows.exceptions import (
     WorkflowValidationError,
 )
 from fsm_llm.workflows.steps import (
-    APICallStep,
-    AutoTransitionStep,
+    APIStep,
+    AutoStep,
     ConditionStep,
-    LLMProcessingStep,
+    LLMStep,
     ParallelStep,
     TimerStep,
-    WaitForEventStep,
+    WaitEventStep,
 )
 
 
@@ -59,7 +59,7 @@ class TestAutoStep:
 
     def test_basic(self):
         step = auto_step("s1", "Step 1", "next_state")
-        assert isinstance(step, AutoTransitionStep)
+        assert isinstance(step, AutoStep)
         assert step.step_id == "s1"
         assert step.name == "Step 1"
         assert step.next_state == "next_state"
@@ -85,7 +85,7 @@ class TestApiStep:
             return {"ok": True}
 
         step = api_step("s1", "API Call", fn, "success", "failure")
-        assert isinstance(step, APICallStep)
+        assert isinstance(step, APIStep)
         assert step.success_state == "success"
         assert step.failure_state == "failure"
         assert step.input_mapping == {}
@@ -135,7 +135,7 @@ class TestLlmStep:
             output_mapping={"response": "(.*)"},
             next_state="done",
         )
-        assert isinstance(step, LLMProcessingStep)
+        assert isinstance(step, LLMStep)
         assert step.prompt_template == "Hello {name}"
         assert step.next_state == "done"
         assert step.error_state is None
@@ -160,7 +160,7 @@ class TestWaitEventStep:
 
     def test_basic(self):
         step = wait_event_step("s1", "Wait", "payment_received", "paid")
-        assert isinstance(step, WaitForEventStep)
+        assert isinstance(step, WaitEventStep)
         assert step.config.event_type == "payment_received"
         assert step.config.success_state == "paid"
         assert step.config.timeout_seconds is None

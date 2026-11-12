@@ -13,7 +13,7 @@ from fsm_llm.workflows.engine import WorkflowEngine
 from fsm_llm.workflows.models import WorkflowStepResult
 from fsm_llm.workflows.steps import (
     AgentStep,
-    AutoTransitionStep,
+    AutoStep,
     RetryStep,
     SwitchStep,
 )
@@ -82,7 +82,7 @@ class TestRetryStep:
     """Test retry logic with backoff."""
 
     async def test_succeeds_on_first_try(self):
-        inner = AutoTransitionStep(
+        inner = AutoStep(
             step_id="inner",
             name="Inner",
             next_state="done",
@@ -609,7 +609,7 @@ class TestNewDSLFunctions:
     def test_retry_step_factory(self):
         from fsm_llm.workflows.dsl import retry_step
 
-        inner = AutoTransitionStep(step_id="inner", name="Inner", next_state="done")
+        inner = AutoStep(step_id="inner", name="Inner", next_state="done")
         step = retry_step("retry", "Retry", inner, max_retries=5)
         assert isinstance(step, RetryStep)
         assert step.max_retries == 5

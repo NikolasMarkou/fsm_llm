@@ -14,13 +14,12 @@ from fsm_llm.logging import logger
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-from .constants import PAUSING_STEP_TYPES
 from .exceptions import WorkflowDefinitionError, WorkflowValidationError
 from .steps import (
     ParallelStep,
     RetryStep,
     TimerStep,
-    WaitForEventStep,
+    WaitEventStep,
     WorkflowStep,
 )
 
@@ -156,7 +155,7 @@ class WorkflowDefinition(BaseModel):
         if self.has_synchronous_cycles():
             errors.append(
                 "Workflow contains a synchronous cycle (a loop with no event or "
-                "timer step in it would run forever). Put a WaitForEventStep or "
+                "timer step in it would run forever). Put a WaitEventStep or "
                 "TimerStep on the loop, or give the chain a terminal state."
             )
 
@@ -259,7 +258,7 @@ class WorkflowDefinition(BaseModel):
     def has_synchronous_cycles(self) -> bool:
         """Check for a cycle whose steps all run back to back without pausing.
 
-        Edges leaving a pausing step (``WaitForEventStep``/``TimerStep``, or a
+        Edges leaving a pausing step (``WaitEventStep``/``TimerStep``, or a
         ``RetryStep`` wrapping one) are ignored: the engine returns control at
         such a step, so a loop through it cannot spin inside one engine call.
 
@@ -277,9 +276,7 @@ class WorkflowDefinition(BaseModel):
         inner: object = step
         while isinstance(inner, RetryStep):
             inner = inner.step
-        return type(inner).__name__ in PAUSING_STEP_TYPES or isinstance(
-            inner, (WaitForEventStep, TimerStep)
-        )
+        return isinstance(inner, (WaitEventStep, TimerStep))
 
     def _has_cycle(self, pausing_breaks_cycle: bool) -> bool:
         if not self.initial_step_id:

@@ -263,10 +263,10 @@ class TestWorkflowDefinition:
 
     def test_add_step(self):
         from fsm_llm.workflows.definitions import WorkflowDefinition
-        from fsm_llm.workflows.steps import AutoTransitionStep
+        from fsm_llm.workflows.steps import AutoStep
 
         wf = WorkflowDefinition(workflow_id="wf-1", name="Test")
-        step = AutoTransitionStep(step_id="s1", name="Step 1", next_state="s2")
+        step = AutoStep(step_id="s1", name="Step 1", next_state="s2")
         wf.with_step(step, is_initial=True)
         assert "s1" in wf.steps
         assert wf.initial_step_id == "s1"
@@ -282,10 +282,10 @@ class TestWorkflowDefinition:
     def test_validate_missing_initial_step(self):
         from fsm_llm.workflows.definitions import WorkflowDefinition
         from fsm_llm.workflows.exceptions import WorkflowValidationError
-        from fsm_llm.workflows.steps import AutoTransitionStep
+        from fsm_llm.workflows.steps import AutoStep
 
         wf = WorkflowDefinition(workflow_id="wf-1", name="Test")
-        step = AutoTransitionStep(step_id="s1", name="S1", next_state="end")
+        step = AutoStep(step_id="s1", name="S1", next_state="end")
         wf.with_step(step)
         with pytest.raises(WorkflowValidationError):
             wf.validate()
@@ -441,11 +441,9 @@ class TestSwitchStepTerminalRoute:
         from fsm_llm.workflows.definitions import WorkflowDefinition
         from fsm_llm.workflows.engine import WorkflowEngine
         from fsm_llm.workflows.models import WorkflowStatus
-        from fsm_llm.workflows.steps import AutoTransitionStep, SwitchStep
+        from fsm_llm.workflows.steps import AutoStep, SwitchStep
 
-        checkout = AutoTransitionStep(
-            step_id="checkout", name="Checkout", next_state=""
-        )
+        checkout = AutoStep(step_id="checkout", name="Checkout", next_state="")
         switch = SwitchStep(
             step_id="route",
             name="Route",
@@ -474,7 +472,7 @@ class TestSwitchStepTerminalRoute:
         from fsm_llm.workflows.definitions import WorkflowDefinition
         from fsm_llm.workflows.engine import WorkflowEngine
         from fsm_llm.workflows.models import WorkflowStatus
-        from fsm_llm.workflows.steps import AutoTransitionStep, SwitchStep
+        from fsm_llm.workflows.steps import AutoStep, SwitchStep
 
         switch = SwitchStep(
             step_id="route",
@@ -483,9 +481,7 @@ class TestSwitchStepTerminalRoute:
             cases={"buy": "checkout"},
             default_state="",
         )
-        checkout = AutoTransitionStep(
-            step_id="checkout", name="Checkout", next_state=""
-        )
+        checkout = AutoStep(step_id="checkout", name="Checkout", next_state="")
         definition = WorkflowDefinition(
             workflow_id="wf-switch-matched",
             name="SwitchMatched",
@@ -505,7 +501,7 @@ class TestSwitchStepTerminalRoute:
 
 
 # ----------------------------------------------------------------
-# D-013/D-020: TimerStep/WaitForEventStep are unaffected by the
+# D-013/D-020: TimerStep/WaitEventStep are unaffected by the
 # explicitly_terminal predicate regardless of its width (completion-fix
 # iter-1/step-7.1, reconfirmed by the D-020 revert in step-7.2).
 # ----------------------------------------------------------------
@@ -514,7 +510,7 @@ class TestSwitchStepTerminalRoute:
 class TestTerminalNarrowingUnaffectedSteps:
     """`_handle_successful_step`'s ``explicitly_terminal`` signal is
     ``result.next_state == ""`` for ANY step type (D-013, restored by D-020
-    after a since-reverted D-018 narrowing). ``TimerStep``/``WaitForEventStep``
+    after a since-reverted D-018 narrowing). ``TimerStep``/``WaitEventStep``
     never set ``next_state`` on their success result at all (falsy ``None``,
     not ``""``), so they must keep reaching ``WorkflowStatus.WAITING`` exactly
     as before D-013 touched the terminal-detection logic. Regression test for
@@ -547,9 +543,9 @@ class TestTerminalNarrowingUnaffectedSteps:
         from fsm_llm.workflows.definitions import WorkflowDefinition
         from fsm_llm.workflows.engine import WorkflowEngine
         from fsm_llm.workflows.models import WaitEventConfig, WorkflowStatus
-        from fsm_llm.workflows.steps import WaitForEventStep
+        from fsm_llm.workflows.steps import WaitEventStep
 
-        wait_step = WaitForEventStep(
+        wait_step = WaitEventStep(
             step_id="wait",
             name="Wait",
             config=WaitEventConfig(event_type="approved", success_state=""),
@@ -595,11 +591,9 @@ class TestWideTerminalPredicateAfterD020Revert:
         from fsm_llm.workflows.definitions import WorkflowDefinition
         from fsm_llm.workflows.engine import WorkflowEngine
         from fsm_llm.workflows.models import WorkflowStatus
-        from fsm_llm.workflows.steps import AutoTransitionStep, RetryStep, SwitchStep
+        from fsm_llm.workflows.steps import AutoStep, RetryStep, SwitchStep
 
-        checkout = AutoTransitionStep(
-            step_id="checkout", name="Checkout", next_state=""
-        )
+        checkout = AutoStep(step_id="checkout", name="Checkout", next_state="")
         inner_switch = SwitchStep(
             step_id="inner-route",
             name="Inner Route",
@@ -637,9 +631,9 @@ class TestWideTerminalPredicateAfterD020Revert:
         from fsm_llm.workflows.definitions import WorkflowDefinition
         from fsm_llm.workflows.engine import WorkflowEngine
         from fsm_llm.workflows.models import WorkflowStatus
-        from fsm_llm.workflows.steps import AutoTransitionStep, ConditionStep
+        from fsm_llm.workflows.steps import AutoStep, ConditionStep
 
-        review = AutoTransitionStep(step_id="review", name="Review", next_state="")
+        review = AutoStep(step_id="review", name="Review", next_state="")
         condition = ConditionStep(
             step_id="cond",
             name="Condition",
@@ -674,9 +668,9 @@ class TestSerializeNestedSteps:
 
     def test_retry_step_wrapped_step_survives(self):
         from fsm_llm.workflows.definitions import WorkflowDefinition
-        from fsm_llm.workflows.steps import AutoTransitionStep, RetryStep
+        from fsm_llm.workflows.steps import AutoStep, RetryStep
 
-        inner = AutoTransitionStep(step_id="inner", name="Inner", next_state="done")
+        inner = AutoStep(step_id="inner", name="Inner", next_state="done")
         retry = RetryStep(step_id="retry", name="Retry", step=inner, max_retries=2)
         definition = WorkflowDefinition(
             workflow_id="wf-retry-serialize",
@@ -690,15 +684,15 @@ class TestSerializeNestedSteps:
 
         assert retry_dict["type"] == "RetryStep"
         assert "step" in retry_dict
-        assert retry_dict["step"]["type"] == "AutoTransitionStep"
+        assert retry_dict["step"]["type"] == "AutoStep"
         assert retry_dict["step"]["next_state"] == "done"
 
     def test_parallel_step_nested_steps_survive(self):
         from fsm_llm.workflows.definitions import WorkflowDefinition
-        from fsm_llm.workflows.steps import AutoTransitionStep, ParallelStep
+        from fsm_llm.workflows.steps import AutoStep, ParallelStep
 
-        nested_a = AutoTransitionStep(step_id="a", name="A", next_state="done")
-        nested_b = AutoTransitionStep(step_id="b", name="B", next_state="done")
+        nested_a = AutoStep(step_id="a", name="A", next_state="done")
+        nested_b = AutoStep(step_id="b", name="B", next_state="done")
         parallel = ParallelStep(
             step_id="parallel",
             name="Parallel",
@@ -719,7 +713,7 @@ class TestSerializeNestedSteps:
         nested_dicts = parallel_dict["steps"]
         assert len(nested_dicts) == 2
         for nested_dict, step_id in zip(nested_dicts, ("a", "b"), strict=True):
-            assert nested_dict["type"] == "AutoTransitionStep"
+            assert nested_dict["type"] == "AutoStep"
             assert nested_dict["step_id"] == step_id
             assert nested_dict["next_state"] == "done"
 

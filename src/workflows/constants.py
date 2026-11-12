@@ -11,7 +11,7 @@ from __future__ import annotations
 # Engine-owned context keys
 # --------------------------------------------------------------
 
-#: Set by ``WaitForEventStep``; tells the engine to park the instance and
+#: Set by ``WaitEventStep``; tells the engine to park the instance and
 #: register an event listener. Cleared on every transition.
 CONTEXT_KEY_WAITING_INFO = "_waiting_info"
 #: Set by ``TimerStep``; tells the engine to park the instance and schedule a
@@ -58,7 +58,3 @@ MAX_BUFFERED_EVENTS_PER_INSTANCE = 100
 
 #: ParallelStep logs a memory warning above this many children.
 PARALLEL_DEEPCOPY_WARNING_THRESHOLD = 10
-
-#: Step type names whose execution parks the instance (WAITING). A cycle that
-#: passes through one of them is not a synchronous loop.
-PAUSING_STEP_TYPES = frozenset({"WaitForEventStep", "TimerStep"})

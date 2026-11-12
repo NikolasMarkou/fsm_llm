@@ -50,9 +50,7 @@ from .models import (
     WorkflowStatus,
     WorkflowStepResult,
 )
-from .steps import STEP_EXECUTOR
-
-__all__ = ["DEFAULT_MAX_STEPS", "Timer", "WorkflowEngine"]
+from .steps import _STEP_EXECUTOR
 
 #: Signature of a lifecycle hook: ``hook(event_name, instance, data)``.
 LifecycleHook = Callable[[str, WorkflowInstance, dict[str, Any]], Any]
@@ -590,7 +588,7 @@ class WorkflowEngine:
             # Execute the step. When a workflow-level deadline is set, bound the
             # step itself by the remaining budget so a single long step cannot
             # run unbounded past the deadline.
-            token = STEP_EXECUTOR.set(self.executor)
+            token = _STEP_EXECUTOR.set(self.executor)
             try:
                 if instance.deadline is not None:
                     remaining = (
@@ -607,7 +605,7 @@ class WorkflowEngine:
                 else:
                     result = await current_step.execute(instance.context)
             finally:
-                STEP_EXECUTOR.reset(token)
+                _STEP_EXECUTOR.reset(token)
 
             if not isinstance(result, WorkflowStepResult):
                 raise WorkflowStepError(
@@ -700,8 +698,8 @@ class WorkflowEngine:
         # reachability warnings) and cannot see that only ONE of a
         # SwitchStep's cases routes to "terminal". This applies to ANY
         # step type whose result carries next_state == "" -- not just
-        # SwitchStep -- since ConditionStep, APICallStep,
-        # LLMProcessingStep, ParallelStep and RetryStep-wrapped steps all
+        # SwitchStep -- since ConditionStep, APIStep,
+        # LLMStep, ParallelStep and RetryStep-wrapped steps all
         # share the same per-route "" == terminal semantics, and
         # definitions.py's own get_terminal_states() already treats ""
         # as a plan-wide terminal-step marker (see
@@ -1303,7 +1301,7 @@ class WorkflowEngine:
                     # see _deliver_event). Do NOT send it to
                     # _transition_to_state: it would raise "Invalid next
                     # state" and FAIL the instance after the full delay. Do
-                    # NOT apply this to APICallStep(failure_state=""): a
+                    # NOT apply this to APIStep(failure_state=""): a
                     # failure with an empty route still fails (workflows
                     # D-003; completing would hide the error).
                     self._leave_wait(instance, WorkflowStatus.COMPLETED)

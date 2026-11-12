@@ -17,16 +17,16 @@ from .exceptions import WorkflowDefinitionError, WorkflowValidationError
 from .models import WaitEventConfig
 from .steps import (
     AgentStep,
-    APICallStep,
-    AutoTransitionStep,
+    APIStep,
+    AutoStep,
     ConditionStep,
     ConversationStep,
-    LLMProcessingStep,
+    LLMStep,
     ParallelStep,
     RetryStep,
     SwitchStep,
     TimerStep,
-    WaitForEventStep,
+    WaitEventStep,
     WorkflowStep,
 )
 
@@ -63,7 +63,7 @@ def auto_step(
     description: str = "",
     error_state: str | None = None,
     timeout_seconds: float | None = None,
-) -> AutoTransitionStep:
+) -> AutoStep:
     """
     Create an auto transition step.
 
@@ -81,7 +81,7 @@ def auto_step(
     Returns:
         A new auto transition step
     """
-    return AutoTransitionStep(
+    return AutoStep(
         step_id=step_id,
         name=name,
         next_state=next_state,
@@ -105,7 +105,7 @@ def api_step(
     output_mapping: dict[str, str] | None = None,
     description: str = "",
     timeout_seconds: float | None = None,
-) -> APICallStep:
+) -> APIStep:
     """
     Create an API call step.
 
@@ -124,7 +124,7 @@ def api_step(
     Returns:
         A new API call step
     """
-    return APICallStep(
+    return APIStep(
         step_id=step_id,
         name=name,
         api_function=api_function,
@@ -194,7 +194,7 @@ def llm_step(
     description: str = "",
     timeout_seconds: float | None = None,
     system_prompt: str | None = None,
-) -> LLMProcessingStep:
+) -> LLMStep:
     """
     Create an LLM processing step.
 
@@ -220,7 +220,7 @@ def llm_step(
     extra: dict[str, Any] = {}
     if system_prompt is not None:
         extra["system_prompt"] = system_prompt
-    return LLMProcessingStep(
+    return LLMStep(
         step_id=step_id,
         name=name,
         llm_interface=llm_interface,
@@ -248,7 +248,7 @@ def wait_event_step(
     event_mapping: dict[str, str] | None = None,
     description: str = "",
     correlation_key: str | None = None,
-) -> WaitForEventStep:
+) -> WaitEventStep:
     """
     Create a wait for event step.
 
@@ -269,7 +269,7 @@ def wait_event_step(
     Returns:
         A new wait for event step
     """
-    return WaitForEventStep(
+    return WaitEventStep(
         step_id=step_id,
         name=name,
         description=description,
@@ -624,7 +624,7 @@ def event_driven_workflow(
     workflow_id: str,
     name: str,
     setup_steps: list[WorkflowStep],
-    event_step: WaitForEventStep,
+    event_step: WaitEventStep,
     processing_steps: list[WorkflowStep],
     description: str = "",
 ) -> WorkflowDefinition:

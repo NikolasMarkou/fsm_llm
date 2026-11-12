@@ -731,7 +731,7 @@ class WorkflowArtifactBuilder(ArtifactBuilder):
         """Return structural errors; an empty list means a complete *spec*.
 
         A workflow artifact is not directly loadable by ``fsm_llm.workflows``:
-        its steps need Python callables (``APICallStep.api_function``,
+        its steps need Python callables (``APIStep.api_function``,
         ``ConditionStep.condition``, ...) that a JSON spec cannot carry, so a
         caller still wires them by hand. This checks required metadata, the
         initial step, transition targets and that every ``step_type`` is in
