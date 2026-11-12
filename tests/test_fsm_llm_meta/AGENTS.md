@@ -92,7 +92,7 @@ Builders:
 - `remove_state` clears `initial_state` if it was removed and strips transitions pointing at it; returns `False` for unknown ids. `remove_step` also strips transitions.
 - `add_transition` raises `BuilderError` "not found" if source or target is missing; default priority is `MetaDefaults.DEFAULT_PRIORITY` (100). Self-transitions allowed.
 - `update_state`: unknown fields give an "Ignoring" warning; `None` is rejected with a warning and the old value kept; non-strings are converted with a warning (`42` becomes `"42"`); unknown state raises "not found".
-- `FSMArtifactBuilder.to_dict()` sets `version == "4.1"` and must load as `FSMDefinition(**d)`.
+- `FSMArtifactBuilder.to_dict()` sets `version == "4.2"` (the default, `SCHEMA_VERSION_DEFAULT`) and must load as `FSMDefinition(**d)`.
 - `validate_complete()` reports missing name, unreachable (orphan) states, and transitions to nonexistent states.
 - `get_summary(level)` levels: `minimal` < `standard` <= `full`; default equals `full`; only `full` includes `extraction:`; `minimal` on an empty FSM builder contains "none yet". Headers: "FSM Builder Status", "Workflow Builder Status", "Agent Builder Status".
 - `WorkflowArtifactBuilder.VALID_STEP_TYPES` is a class-level set of exactly 8: `auto_transition`, `api_call`, `condition`, `llm_processing`, `wait_for_event`, `timer`, `parallel`, `conversation`. Unknown type warns on `add_step` ("Unknown step type") and is an error in `validate_complete()`.

@@ -39,6 +39,7 @@ from fsm_llm.definitions import (
 from fsm_llm.handlers import create_handler
 from fsm_llm.llm import LiteLLMInterface, LLMInterface, check_tool_transcript
 from fsm_llm.pipeline import MessagePipeline
+from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT
 from fsm_llm.validator import FSMValidator
 from fsm_llm.visualizer import build_fsm_graph, visualize_fsm_ascii
 from tests.conftest import MockLLM2Interface
@@ -278,9 +279,11 @@ class TestCompletionStateDefinition:
         assert state.completion.tool_choice is None
         assert state.completion.response_format_key is None
 
-    def test_v41_unchanged_for_definitions_without_it(self):
+    def test_default_version_unchanged_for_definitions_without_it(self):
+        # `completion` was introduced in 4.1 and adds no version of its own:
+        # a definition without it keeps the default definition version.
         fsm = FSMDefinition(**_tool_fsm())
-        assert fsm.version == "4.1"
+        assert fsm.version == SCHEMA_VERSION_DEFAULT
         assert fsm.states["intake"].completion is None
         plain = State(id="s", description="d", purpose="p")
         assert plain.completion is None

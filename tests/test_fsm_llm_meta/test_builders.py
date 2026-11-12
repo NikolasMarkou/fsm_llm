@@ -11,6 +11,7 @@ from fsm_llm.agents.meta_builders import (
     FSMArtifactBuilder,
     WorkflowArtifactBuilder,
 )
+from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT
 
 # ===================================================================
 # FSMArtifactBuilder Tests
@@ -181,7 +182,7 @@ class TestFSMBuilderSerialization:
         assert d["name"] == "Bot"
         assert d["description"] == "Desc"
         assert d["initial_state"] == "s1"
-        assert d["version"] == "4.1"
+        assert d["version"] == SCHEMA_VERSION_DEFAULT
         assert "s1" in d["states"]
 
     def test_to_dict_with_persona(self, fsm_builder: FSMArtifactBuilder):

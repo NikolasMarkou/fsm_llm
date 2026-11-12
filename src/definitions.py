@@ -56,6 +56,7 @@ from .constants import (
 # local imports
 # --------------------------------------------------------------
 from .logging import logger
+from .schema_registry import SCHEMA_VERSION_DEFAULT
 
 # --------------------------------------------------------------
 # Identifier charset policy
@@ -1725,6 +1726,10 @@ class State(BaseModel):
     # do NOT make an LLM call inside a handler instead (a second call path
     # beside Pass 1, outside rollback and the meter), and do NOT add a
     # required companion field (STOP IF 9 of plan 944e2692). See D-003.
+    # Plan 9013b0e3 D-004 (appended): "v4.1 unchanged" was true for the 4.1
+    # default; the definition default is now 4.2, so an explicit "version":
+    # "4.1" is hashed into `fsm_id` and the library digest and differs from an
+    # omitted one (omitted-version ids did not move).
     completion: CompletionStateConfig | None = Field(
         default=None,
         description=(
@@ -1742,6 +1747,9 @@ class State(BaseModel):
     # pipeline or `FSMManager` (a bare `converse` stays BLOCKED, by design), and
     # do NOT make `FSMValidator.validate()` stricter than this loader (the
     # never-stricter tests pin it; the flow gates live in `flow_analysis.py`).
+    # Plan 9013b0e3 D-004 (appended): "no existing `fsm_id` moves" holds for
+    # definitions that omit `version`; the default is now 4.2, so an explicit
+    # "version": "4.1" definition has a new `fsm_id`.
     synthesize: SynthesizeConfig | None = Field(
         default=None,
         description=(
@@ -1973,8 +1981,18 @@ class FSMDefinition(BaseModel):
         ..., description="Starting state identifier", min_length=1
     )
 
+    # DECISION plan-2026-11-12T023759-9013b0e3/D-004: the default is the
+    # registry constant (4.2). `fsm_id` and the library digest hash
+    # `model_dump(exclude_defaults=True)`, so the default is not hashed and an
+    # omitted version keeps its id; an explicit older version ("4.1") is hashed
+    # and moves the id, by design. Do NOT special-case `version` in the hash
+    # (exclude it, or treat "4.1" as the default): that moves the ids of
+    # explicit "3.0" and "4.0" definitions or adds a rule beside D-030.
     version: str = Field(
-        default="4.1", description="FSM definition version", min_length=1, max_length=20
+        default=SCHEMA_VERSION_DEFAULT,
+        description="FSM definition version",
+        min_length=1,
+        max_length=20,
     )
 
     persona: str | None = Field(

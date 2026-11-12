@@ -41,6 +41,7 @@ from fsm_llm.llm import (
     LLMInterface,
     check_tool_transcript,
 )
+from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT
 from fsm_llm.validator import FSMValidator
 from tests.conftest import MockLLM2Interface
 from tests.test_fsm_llm.test_completion_state import (
@@ -553,6 +554,12 @@ class TestValidatorWarnsOnCompletionStates:
 # The ids of the 14 example FSMs, computed with this rule over the models
 # of e1f63a9 (the iteration-1 close, before `completion` existed): the
 # same ids as at HEAD, so the fields this plan added changed none.
+#
+# Plan 9013b0e3 D-004 re-pinned seven of them (the examples that declare
+# `"version": "4.1"` explicitly: classified_transitions x2, smart_helpdesk x2,
+# adaptive_quiz, math_tutor, order_processing): the default moved to 4.2, so
+# an explicit "4.1" is no longer a default and `version` is now hashed. The
+# other seven (six declare "3.0", one omits `version`) kept their ids.
 _E1F63A9_IDS: dict[str, str] = {
     "examples/advanced/yoga_instructions/fsm.json": (
         "fsm_Adaptive Yoga Instruction_bb1015b5"
@@ -566,27 +573,27 @@ _E1F63A9_IDS: dict[str, str] = {
         "fsm_Three Little Pigs Interactive Story_aae22383"
     ),
     "examples/classification/classified_transitions/fsm.json": (
-        "fsm_Classified Transitions Demo_81032c47"
+        "fsm_Classified Transitions Demo_1eea499b"
     ),
     "examples/classification/classified_transitions/fsm_manual.json": (
-        "fsm_Classified Transitions Manual Mode_20183191"
+        "fsm_Classified Transitions Manual Mode_6f84fe4f"
     ),
     "examples/classification/smart_helpdesk/fsm_account.json": (
-        "fsm_account_management_flow_2e543fe9"
+        "fsm_account_management_flow_95ee2191"
     ),
     "examples/classification/smart_helpdesk/fsm_troubleshooting.json": (
-        "fsm_troubleshooting_flow_400616f4"
+        "fsm_troubleshooting_flow_60018c91"
     ),
-    "examples/intermediate/adaptive_quiz/fsm.json": "fsm_adaptive_quiz_576b9b07",
+    "examples/intermediate/adaptive_quiz/fsm.json": "fsm_adaptive_quiz_cb228ef9",
     "examples/intermediate/book_recommendation/fsm.json": (
         "fsm_Book Recommendation System_1bd2d04b"
     ),
     "examples/intermediate/product_recommendation/fsm.json": (
         "fsm_Product Recommendation System_5f2f95d5"
     ),
-    "examples/reasoning/math_tutor/fsm.json": "fsm_math_tutor_51465ff2",
+    "examples/reasoning/math_tutor/fsm.json": "fsm_math_tutor_09bfbec2",
     "examples/workflows/order_processing/fsm_order_form.json": (
-        "fsm_order_form_04ab22cd"
+        "fsm_order_form_24b14bf2"
     ),
 }
 
@@ -605,13 +612,37 @@ class TestFsmIdIgnoresDefaults:
     def test_an_explicit_default_and_an_omitted_field_hash_the_same(self):
         omitted = _tool_fsm()
         explicit = copy.deepcopy(omitted)
-        explicit["version"] = "4.1"
+        explicit["version"] = SCHEMA_VERSION_DEFAULT
         explicit["states"]["intake"]["completion"] = None
         explicit["states"]["intake"]["extraction_retries"] = 1
         explicit["states"]["call_model"]["completion"]["result_key"] = _RESULT
         assert (
             API.process_fsm_definition(explicit)[1]
             == API.process_fsm_definition(omitted)[1]
+        )
+
+    def test_an_omitted_version_keeps_its_id_across_the_default_bump(self):
+        # Plan 9013b0e3 D-004: the default moved 4.1 -> 4.2. The id of a
+        # definition that omits `version` is the one computed under 4.1
+        # (pinned below), and an explicit default hashes the same as omitted.
+        omitted = _tool_fsm()
+        explicit = copy.deepcopy(omitted)
+        explicit["version"] = SCHEMA_VERSION_DEFAULT
+        assert API.process_fsm_definition(omitted)[1] == "fsm_ToolTurns_4913b97e"
+        assert (
+            API.process_fsm_definition(explicit)[1]
+            == API.process_fsm_definition(omitted)[1]
+        )
+
+    def test_an_explicit_older_version_has_its_own_id(self):
+        # The documented cost of the bump (plan 9013b0e3 D-004): "4.1" is no
+        # longer the default, so it is hashed and moves the id.
+        omitted = _tool_fsm()
+        older = copy.deepcopy(omitted)
+        older["version"] = "4.1"
+        assert (
+            API.process_fsm_definition(older)[1]
+            != API.process_fsm_definition(omitted)[1]
         )
 
     def test_different_content_still_gets_a_different_id(self):

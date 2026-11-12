@@ -21,6 +21,7 @@ from fsm_llm.definitions import (
     TransitionCondition,
 )
 from fsm_llm.llm import LLMInterface
+from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT
 
 # ======================================================================
 # ROBUST FIXTURES WITH COMPLETE FSM DEFINITIONS
@@ -320,7 +321,7 @@ class TestRobustFSMDefinitionProcessing:
         assert fsm_def.initial_state == "only_state"
 
         # Verify Pydantic filled in defaults
-        assert fsm_def.version == "4.1"  # Default version
+        assert fsm_def.version == SCHEMA_VERSION_DEFAULT  # Default version
         assert fsm_def.persona is None  # Default None
 
         # Verify state defaults
@@ -500,7 +501,7 @@ class TestRobustInitialization:
         # Verify FSMDefinition was created with defaults
         assert isinstance(api.fsm_definition, FSMDefinition)
         assert api.fsm_definition.name == "Minimal FSM"
-        assert api.fsm_definition.version == "4.1"  # Pydantic default
+        assert api.fsm_definition.version == SCHEMA_VERSION_DEFAULT  # Pydantic default
         assert api.fsm_definition.persona is None  # Pydantic default
 
     def test_fsm_validation_during_init(self):

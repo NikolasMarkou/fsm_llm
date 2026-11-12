@@ -238,7 +238,7 @@ Usage counters count every provider call of that instance once, per kind (`gener
 
 ### Completion state
 
-A state may declare one optional `completion` field (`CompletionStateConfig`; the definition stays v4.1):
+A state may declare one optional `completion` field (`CompletionStateConfig`; additive, introduced in definition version 4.1, the default version is now 4.2):
 
 ```json
 "call_model": {
@@ -272,7 +272,7 @@ A state with empty `response_instructions` is never sent to the interface: no `g
 
 ### Synthesize state
 
-A state may declare one optional `synthesize` field (`SynthesizeConfig`, frozen, extras refused; the definition stays v4.1). Core only loads and checks it; `fsm_llm.synthesis.ProcedureRunner` gives it meaning (see Synthesis below):
+A state may declare one optional `synthesize` field (`SynthesizeConfig`, frozen, extras refused; introduced in definition version 4.2, the default version). Core only loads and checks it; `fsm_llm.synthesis.ProcedureRunner` gives it meaning (see Synthesis below):
 
 ```json
 "gather": {

@@ -17,6 +17,7 @@ from fsm_llm.agents.meta_builders import (
 )
 from fsm_llm.agents.meta_tools import create_fsm_tools
 from fsm_llm.definitions import FSMDefinition
+from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT
 
 # ---- FSMArtifactBuilder Edge Cases -------------------------------------------
 
@@ -59,7 +60,7 @@ class TestFSMBuilderToDict:
         assert d["description"] == "A simple greeting bot"
         assert d["persona"] == "Friendly assistant"
         assert d["initial_state"] == "greeting"
-        assert d["version"] == "4.1"
+        assert d["version"] == SCHEMA_VERSION_DEFAULT
         assert set(d["states"].keys()) == {"greeting", "ask_name", "farewell"}
 
     def test_to_dict_produces_valid_fsm_with_values(

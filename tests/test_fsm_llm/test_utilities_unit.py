@@ -15,6 +15,7 @@ import time
 import pytest
 
 from fsm_llm.definitions import FSMDefinition
+from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT
 from fsm_llm.utilities import (
     extract_json_from_text,
     get_fsm_summary,
@@ -332,14 +333,14 @@ class TestLoadFsmFromFile:
             load_fsm_from_file(str(path))
 
     def test_version_default_added(self, tmp_path):
-        """If version is missing it should default to '4.1'."""
+        """If version is missing it should default to the registry default (4.2)."""
         fsm_dict = _minimal_fsm_dict()
         del fsm_dict["version"]
         path = tmp_path / "no_version.json"
         path.write_text(json.dumps(fsm_dict))
 
         result = load_fsm_from_file(str(path))
-        assert result.version == "4.1"
+        assert result.version == SCHEMA_VERSION_DEFAULT
 
 
 # ==================================================================

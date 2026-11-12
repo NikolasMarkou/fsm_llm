@@ -422,3 +422,20 @@ class TestNewerFields:
         before = definition.model_dump()
         newer_fields(definition)
         assert definition.model_dump() == before
+
+
+class TestDefaultVersion:
+    def test_the_model_default_is_the_registry_constant(self):
+        assert FSMDefinition.model_fields["version"].default == SCHEMA_VERSION_DEFAULT
+        assert SCHEMA_VERSION_DEFAULT == "4.2"
+
+    def test_an_omitted_version_loads_as_the_default(self):
+        definition = FSMDefinition(
+            name="d",
+            description="d",
+            initial_state="a",
+            states={
+                "a": {"id": "a", "description": "a", "purpose": "a"},
+            },
+        )
+        assert definition.version == SCHEMA_VERSION_DEFAULT
