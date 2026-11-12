@@ -392,9 +392,11 @@ print(visualize_fsm_ascii(fsm_dict, style="compact"))
 
 ```python
 from fsm_llm.schema_registry import (
-    FIELD_VERSIONS, SCHEMA_VERSION_DEFAULT, newer_fields, parse_version)
+    FIELD_VERSIONS, SCHEMA_VERSION_DEFAULT, SCHEMA_VERSION_OLDEST, newer_fields,
+    parse_version)
 
 SCHEMA_VERSION_DEFAULT              # "4.2": the version a definition without `version` takes
+SCHEMA_VERSION_OLDEST               # "4.0": the oldest version whose shape the registry knows
 FIELD_VERSIONS["State.synthesize"]  # "4.2"; keys are "Model.field", values the version that added it
 parse_version("4.1")                # (4, 1); None for a text that is not N.M ("v4.1", "4", "4.1.1")
 newer_fields(definition)            # tuple[SchemaFinding, ...]; each has .model, .field, .introduced,
@@ -409,7 +411,7 @@ The loader logs one warning per definition object for such a field (not again fo
 fsm-llm-validate --fsm path.json [--upgrade]
 ```
 
-`--upgrade` first rewrites the file in place to `SCHEMA_VERSION_DEFAULT`, then validates it. Only a string `version` that does not parse as `N.M` or is older than the default is rewritten (`"3.0"`, `"4.1"`, `"v4.1"`); an omitted, non-string, current or newer (`"5.0"`) version is left alone, so it never downgrades and a second run changes nothing (no write, mtime kept). The write is atomic (a same-directory temp file, fsync, `os.replace`), keeps the file mode and follows a symlink to its target; a rewritten file is reformatted to indent 2 with its key order kept. An unreadable file, invalid JSON, a non-object top level or a failed write leaves the file as it was and the normal validation reports on it. stdout stays the JSON report only. `fsm-llm --mode validate` does not take `--upgrade`.
+`--upgrade` validates the file first and rewrites it in place to `SCHEMA_VERSION_DEFAULT` only when it loads as an FSM definition and declares a `version` of the form `N.M` from `SCHEMA_VERSION_OLDEST` (`"4.0"`) up to, but not including, the default (`"4.0"`, `"4.1"`). Everything else is left byte-identical: a file that is not valid UTF-8 JSON, not a JSON object (a `package.json`, say), not an FSM definition, with duplicate keys (a rewrite would drop one), with a missing or non-string `version`, with a version below 4.0 or not of the form `N.M` (`"3.0"`, `"1.3.0"`, `"v4.1"`, which may be the author's own revision string), or with a current or newer (`"5.0"`) version, so it never downgrades. A refused or failed upgrade (every case above except the current or newer version, plus an I/O failure) is logged and the command exits 1 although the JSON report is still printed; a current or newer version is nothing to do and the exit code is the validation's. A second run changes nothing (no write, mtime kept). The write is atomic (a same-directory temp file, fsync, `os.replace`), keeps the file mode and follows a symlink to its target. Rewriting normalises the file: indent 2, LF line endings, numbers re-serialised (`1e2` becomes `100.0`), key order and non-ASCII text kept. The new version is the default, so the file's `fsm_id` and library digest change. stdout stays the JSON report only. `fsm-llm --mode validate` does not take `--upgrade`.
 
 ## Status, reason and completion-kind vocabulary (`fsm_llm.codes`)
 

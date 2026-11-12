@@ -28,6 +28,7 @@ from pydantic import BaseModel
 __all__ = [
     "FIELD_VERSIONS",
     "SCHEMA_VERSION_DEFAULT",
+    "SCHEMA_VERSION_OLDEST",
     "SchemaFinding",
     "newer_fields",
     "parse_version",
@@ -35,6 +36,11 @@ __all__ = [
 
 # The version an omitted `FSMDefinition.version` takes.
 SCHEMA_VERSION_DEFAULT = "4.2"
+
+# The oldest version this registry knows the shape of. A declared version
+# below it (or not of the form N.M) is "unknown": no finding, and
+# `fsm-llm-validate --upgrade` never rewrites it.
+SCHEMA_VERSION_OLDEST = "4.0"
 
 # model -> {introduced version -> its field names, space separated}
 _TABLE: dict[str, dict[str, str]] = {
@@ -143,7 +149,8 @@ def newer_fields(definition: BaseModel) -> tuple[SchemaFinding, ...]:
     """
     declared_text = getattr(definition, "version", None)
     declared = parse_version(declared_text)
-    if declared is None or declared < (4, 0):
+    oldest = parse_version(SCHEMA_VERSION_OLDEST)
+    if declared is None or oldest is None or declared < oldest:
         return ()
     findings: dict[tuple[str, str, str | None], SchemaFinding] = {}
     _walk(definition, str(declared_text), declared, None, findings)

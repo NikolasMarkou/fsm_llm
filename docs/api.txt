@@ -682,6 +682,7 @@ fsm_llm.okf_bridge.create_okf_handler def(bundle: OKFBundle, *, context_key: str
 # fsm_llm.schema_registry
 fsm_llm.schema_registry.FIELD_VERSIONS dict
 fsm_llm.schema_registry.SCHEMA_VERSION_DEFAULT = '4.2'
+fsm_llm.schema_registry.SCHEMA_VERSION_OLDEST = '4.0'
 fsm_llm.schema_registry.SchemaFinding class
   def __init__(self, model: str, field: str, introduced: str, declared: str, state_id: str | None = None) -> None
   property message

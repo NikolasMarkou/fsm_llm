@@ -745,7 +745,7 @@ class TestShippedDefinitionsUseNoNewerField:
 
 
 # --------------------------------------------------------------
-# fsm-llm-validate --upgrade (plan 9013b0e3 D-012)
+# fsm-llm-validate --upgrade (plan 9013b0e3 D-012, D-016)
 # --------------------------------------------------------------
 
 
@@ -759,20 +759,26 @@ def _write_definition(path, version: Any = "4.1", **extra: Any):
     return body
 
 
+def _write_definition_text(path, version: Any) -> str:
+    _write_definition(path, version)
+    return path.read_text(encoding="utf-8")
+
+
 def _without_version(data: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in data.items() if k != "version"}
 
 
 class TestUpgradeFsmFile:
-    """`upgrade_fsm_file` stamps the current version and nothing else."""
+    """`upgrade_fsm_file` validates first and stamps only a 4.0 to 4.1 FSM file."""
 
-    @pytest.mark.parametrize("version", ["3.0", "4.0", "4.1"])
+    @pytest.mark.parametrize("version", ["4.0", "4.1"])
     def test_an_older_version_is_rewritten_and_loads_clean(self, tmp_path, version):
         from fsm_llm.validator import upgrade_fsm_file
 
         path = tmp_path / "fsm.json"
         original = _write_definition(path, version)
-        assert upgrade_fsm_file(str(path)) is True
+        result = upgrade_fsm_file(str(path))
+        assert result.rewritten is True and result.refusal is None
         after = json.loads(path.read_text(encoding="utf-8"))
         assert after["version"] == SCHEMA_VERSION_DEFAULT
         assert _without_version(after) == _without_version(original)
@@ -780,13 +786,84 @@ class TestUpgradeFsmFile:
         assert _loader_warnings(after) == []
         assert FSMDefinition(**after).version == SCHEMA_VERSION_DEFAULT
 
-    def test_an_unparseable_string_version_is_rewritten(self, tmp_path):
+    @pytest.mark.parametrize(
+        "version", ["1.3.0", "2.3", "3.0", "3.1.0", "3.9", "v4.1", "4.1.0", "", "x"]
+    )
+    def test_a_valid_fsm_with_a_foreign_or_pre_4_0_version_is_left_alone(
+        self, tmp_path, version
+    ):
+        # The version may be the author's own revision string (D-016).
         from fsm_llm.validator import upgrade_fsm_file
 
         path = tmp_path / "fsm.json"
-        _write_definition(path, "v4.1")
-        assert upgrade_fsm_file(str(path)) is True
-        assert json.loads(path.read_text())["version"] == SCHEMA_VERSION_DEFAULT
+        _write_definition(path, version)
+        before = path.read_bytes()
+        result = upgrade_fsm_file(str(path))
+        assert result.rewritten is False
+        assert result.refusal is not None and repr(version) in result.refusal
+        assert path.read_bytes() == before
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            b'{"name": "my-app", "version": "1.3.0", "scripts": {"test": "x"}}',
+            b'{"name": "my-app", "version": "4.1"}',
+            b'{"version": "4.0"}',
+            b'{"version": "4.1", "states": []}',
+        ],
+    )
+    def test_a_json_object_that_is_not_an_fsm_is_left_byte_identical(
+        self, tmp_path, text
+    ):
+        from fsm_llm.validator import upgrade_fsm_file
+
+        path = tmp_path / "package.json"
+        path.write_bytes(text)
+        result = upgrade_fsm_file(str(path))
+        assert result.rewritten is False
+        assert result.refusal is not None and "FSM definition" in result.refusal
+        assert path.read_bytes() == text
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            b'{"name": "a", "name": "b", "version": "4.1"}',
+            b'{"version": "4.1", "x": {"k": 1, "k": 2}}',
+        ],
+    )
+    def test_duplicate_keys_are_refused_not_silently_dropped(self, tmp_path, text):
+        from fsm_llm.validator import upgrade_fsm_file
+
+        path = tmp_path / "fsm.json"
+        path.write_bytes(text)
+        result = upgrade_fsm_file(str(path))
+        assert result.rewritten is False
+        assert result.refusal is not None and "duplicate" in result.refusal
+        assert path.read_bytes() == text
+
+    def test_a_valid_file_with_a_duplicate_key_is_refused(self, tmp_path):
+        from fsm_llm.validator import upgrade_fsm_file
+
+        path = tmp_path / "fsm.json"
+        _write_definition(path, "4.1")
+        text = path.read_text(encoding="utf-8")
+        path.write_text(text.replace('"name"', '"name": "z", "name"', 1))
+        before = path.read_bytes()
+        assert "duplicate" in (upgrade_fsm_file(str(path)).refusal or "")
+        assert path.read_bytes() == before
+
+    def test_rewriting_normalises_line_endings_and_numbers(self, tmp_path):
+        from fsm_llm.validator import upgrade_fsm_file
+
+        path = tmp_path / "fsm.json"
+        body = json.loads(_write_definition_text(path, "4.1"))
+        body["extra_number"] = 1
+        crlf = json.dumps(body, indent=4).replace("\n", "\r\n")
+        crlf = crlf.replace('"extra_number": 1', '"extra_number": 1e2')
+        path.write_bytes(crlf.encode("utf-8"))
+        assert upgrade_fsm_file(str(path)).rewritten is True
+        raw = path.read_bytes()
+        assert b"\r" not in raw and b'"extra_number": 100.0' in raw
 
     @pytest.mark.parametrize("version", [SCHEMA_VERSION_DEFAULT, "5.0", "4.10"])
     def test_a_current_or_newer_version_is_never_touched(self, tmp_path, version):
@@ -795,7 +872,10 @@ class TestUpgradeFsmFile:
         path = tmp_path / "fsm.json"
         _write_definition(path, version)
         before = path.read_bytes()
-        assert upgrade_fsm_file(str(path)) is False
+        result = upgrade_fsm_file(str(path))
+        # Nothing to do is not a failure: no refusal, so `main` keeps the
+        # validation exit code.
+        assert result.rewritten is False and result.refusal is None
         assert path.read_bytes() == before
 
     def test_an_omitted_version_is_left_omitted(self, tmp_path):
@@ -804,7 +884,8 @@ class TestUpgradeFsmFile:
         path = tmp_path / "fsm.json"
         _write_definition(path, None)
         before = path.read_bytes()
-        assert upgrade_fsm_file(str(path)) is False
+        result = upgrade_fsm_file(str(path))
+        assert result.rewritten is False and result.refusal is not None
         assert path.read_bytes() == before
 
     @pytest.mark.parametrize("version", [4.1, 4, None, ["4.1"]])
@@ -816,7 +897,8 @@ class TestUpgradeFsmFile:
         body["version"] = version
         path.write_text(json.dumps(body), encoding="utf-8")
         before = path.read_bytes()
-        assert upgrade_fsm_file(str(path)) is False
+        result = upgrade_fsm_file(str(path))
+        assert result.rewritten is False and result.refusal is not None
         assert path.read_bytes() == before
 
     def test_the_second_run_writes_nothing(self, tmp_path):
@@ -824,12 +906,13 @@ class TestUpgradeFsmFile:
 
         path = tmp_path / "fsm.json"
         _write_definition(path, "4.0")
-        assert upgrade_fsm_file(str(path)) is True
+        assert upgrade_fsm_file(str(path)).rewritten is True
         stamp = path.stat().st_mtime_ns
         data = path.read_bytes()
         os.utime(path, ns=(stamp - 10**10, stamp - 10**10))
         old = path.stat().st_mtime_ns
-        assert upgrade_fsm_file(str(path)) is False
+        result = upgrade_fsm_file(str(path))
+        assert result.rewritten is False and result.refusal is None
         assert path.read_bytes() == data
         assert path.stat().st_mtime_ns == old
 
@@ -876,7 +959,7 @@ class TestUpgradeFsmFile:
         _write_definition(target, "4.1")
         link = tmp_path / "link.json"
         link.symlink_to(target)
-        assert upgrade_fsm_file(str(link)) is True
+        assert upgrade_fsm_file(str(link)).rewritten is True
         assert link.is_symlink()
         assert json.loads(target.read_text())["version"] == SCHEMA_VERSION_DEFAULT
         assert sorted(p.name for p in tmp_path.iterdir()) == ["link.json", "real"]
@@ -886,7 +969,7 @@ class TestUpgradeFsmFile:
 
         path = tmp_path / "fsm.json"
         path.write_bytes(b'{"version": "4.1", ')
-        assert upgrade_fsm_file(str(path)) is False
+        assert upgrade_fsm_file(str(path)).refusal is not None
         assert path.read_bytes() == b'{"version": "4.1", '
 
     def test_a_non_object_json_is_left_byte_identical(self, tmp_path):
@@ -894,16 +977,16 @@ class TestUpgradeFsmFile:
 
         path = tmp_path / "fsm.json"
         path.write_bytes(b'["4.1"]')
-        assert upgrade_fsm_file(str(path)) is False
+        assert upgrade_fsm_file(str(path)).refusal is not None
         assert path.read_bytes() == b'["4.1"]'
 
     def test_a_missing_file_and_non_utf8_do_not_raise(self, tmp_path):
         from fsm_llm.validator import upgrade_fsm_file
 
-        assert upgrade_fsm_file(str(tmp_path / "nope.json")) is False
+        assert upgrade_fsm_file(str(tmp_path / "nope.json")).refusal is not None
         bad = tmp_path / "bad.json"
         bad.write_bytes(b"\xff\xfe\x00")
-        assert upgrade_fsm_file(str(bad)) is False
+        assert upgrade_fsm_file(str(bad)).refusal is not None
         assert bad.read_bytes() == b"\xff\xfe\x00"
 
     @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory modes")
@@ -915,7 +998,8 @@ class TestUpgradeFsmFile:
         before = path.read_bytes()
         tmp_path.chmod(0o555)
         try:
-            assert upgrade_fsm_file(str(path)) is False
+            result = upgrade_fsm_file(str(path))
+            assert result.rewritten is False and result.refusal is not None
         finally:
             tmp_path.chmod(0o755)
         assert path.read_bytes() == before
@@ -934,7 +1018,8 @@ class TestUpgradeFsmFile:
             raise OSError("disk on fire")
 
         monkeypatch.setattr(os, "replace", boom)
-        assert upgrade_fsm_file(str(path)) is False
+        result = upgrade_fsm_file(str(path))
+        assert result.rewritten is False and "disk on fire" in (result.refusal or "")
         assert path.read_bytes() == before
         assert [p.name for p in tmp_path.iterdir()] == ["fsm.json"]
 
@@ -990,6 +1075,108 @@ class TestValidateMainUpgrade:
         json.loads(capsys.readouterr().out)
         assert path.read_bytes() == before
 
+    @pytest.mark.parametrize("version", ["4.0", "4.1"])
+    def test_a_4_0_or_4_1_fsm_is_upgraded_and_exits_zero(
+        self, tmp_path, capsys, version
+    ):
+        from fsm_llm.validator import main
+
+        path = tmp_path / "fsm.json"
+        original = _write_definition(path, version)
+        assert main(str(path), upgrade=True) == 0
+        json.loads(capsys.readouterr().out)
+        after = json.loads(path.read_text())
+        assert after["version"] == SCHEMA_VERSION_DEFAULT
+        assert _without_version(after) == _without_version(original)
+
+    @pytest.mark.parametrize("version", [SCHEMA_VERSION_DEFAULT, "4.10", "5.0"])
+    def test_a_current_or_newer_fsm_is_a_no_op_with_the_validation_exit(
+        self, tmp_path, capsys, version
+    ):
+        from fsm_llm.validator import main
+
+        path = tmp_path / "fsm.json"
+        _write_definition(path, version)
+        before = path.read_bytes()
+        stamp = path.stat().st_mtime_ns
+        assert main(str(path), upgrade=True) == 0
+        assert json.loads(capsys.readouterr().out)["is_valid"] is True
+        assert path.read_bytes() == before
+        assert path.stat().st_mtime_ns == stamp
+
+    def test_a_json_object_that_is_not_an_fsm_is_not_rewritten_and_exits_one(
+        self, tmp_path, capsys
+    ):
+        from fsm_llm.validator import main
+
+        path = tmp_path / "package.json"
+        text = b'{"name":"my-app","version":"1.3.0"}'
+        path.write_bytes(text)
+        assert main(str(path), upgrade=True) == 1
+        report = json.loads(capsys.readouterr().out)
+        assert report["is_valid"] is False
+        assert path.read_bytes() == text
+
+    @pytest.mark.parametrize("version", ["1.3.0", "3.0", "v4.1"])
+    def test_a_valid_fsm_with_a_foreign_version_exits_one_untouched(
+        self, tmp_path, capsys, version
+    ):
+        # Validation passes, but the asked upgrade did not happen: exit 1.
+        from fsm_llm.validator import main
+
+        path = tmp_path / "fsm.json"
+        _write_definition(path, version)
+        before = path.read_bytes()
+        assert main(str(path), upgrade=True) == 1
+        assert json.loads(capsys.readouterr().out)["is_valid"] is True
+        assert path.read_bytes() == before
+        # Without the flag the same file is just validated.
+        assert main(str(path)) == 0
+        capsys.readouterr()
+
+    def test_duplicate_keys_exit_one_untouched(self, tmp_path, capsys):
+        from fsm_llm.validator import main
+
+        path = tmp_path / "fsm.json"
+        text = b'{"name": "a", "name": "b", "version": "4.1"}'
+        path.write_bytes(text)
+        assert main(str(path), upgrade=True) == 1
+        json.loads(capsys.readouterr().out)
+        assert path.read_bytes() == text
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory modes")
+    def test_a_failed_write_exits_one_and_stdout_is_still_the_report(
+        self, tmp_path, capsys
+    ):
+        from fsm_llm.validator import main
+
+        path = tmp_path / "fsm.json"
+        _write_definition(path, "4.1")
+        before = path.read_bytes()
+        tmp_path.chmod(0o555)
+        try:
+            code = main(str(path), upgrade=True)
+        finally:
+            tmp_path.chmod(0o755)
+        assert code == 1
+        assert json.loads(capsys.readouterr().out)["is_valid"] is True
+        assert path.read_bytes() == before
+
+    def test_a_failed_replace_exits_one(self, tmp_path, capsys, monkeypatch):
+        from fsm_llm.validator import main
+
+        path = tmp_path / "fsm.json"
+        _write_definition(path, "4.1")
+        before = path.read_bytes()
+
+        def boom(src, dst):
+            raise OSError("disk on fire")
+
+        monkeypatch.setattr(os, "replace", boom)
+        assert main(str(path), upgrade=True) == 1
+        json.loads(capsys.readouterr().out)
+        assert path.read_bytes() == before
+
     @pytest.mark.parametrize("content", [b'{"version": "4.1", ', b"[1]"])
     def test_a_bad_file_is_reported_not_crashed_on(self, tmp_path, capsys, content):
         from fsm_llm.validator import main
@@ -1014,6 +1201,23 @@ class TestValidateMainUpgrade:
         assert exit_info.value.code == 0
         json.loads(capsys.readouterr().out)
         assert json.loads(path.read_text())["version"] == SCHEMA_VERSION_DEFAULT
+
+    def test_main_cli_exits_one_for_a_refused_upgrade(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        from fsm_llm.validator import main_cli
+
+        path = tmp_path / "fsm.json"
+        _write_definition(path, "1.3.0")
+        before = path.read_bytes()
+        monkeypatch.setattr(
+            sys, "argv", ["fsm-llm-validate", "--fsm", str(path), "--upgrade"]
+        )
+        with pytest.raises(SystemExit) as exit_info:
+            main_cli()
+        assert exit_info.value.code == 1
+        json.loads(capsys.readouterr().out)
+        assert path.read_bytes() == before
 
     def test_main_cli_without_the_flag_writes_nothing(
         self, tmp_path, capsys, monkeypatch

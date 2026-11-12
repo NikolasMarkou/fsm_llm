@@ -1,4 +1,8 @@
-"""FSM definition validation: ``fsm-llm-validate`` and the structural checks behind it."""
+"""FSM definition validation: ``fsm-llm-validate`` and the structural checks behind it.
+
+``--upgrade`` is the one place a user's file is rewritten: it validates first and
+rewrites only a 4.0 to 4.1 FSM file (see ``upgrade_fsm_file``).
+"""
 
 from __future__ import annotations
 
@@ -7,6 +11,7 @@ import os
 import stat
 import tempfile
 from collections import deque
+from dataclasses import dataclass
 from typing import Any, get_args
 
 from pydantic import BaseModel, ValidationError
@@ -36,7 +41,12 @@ from .definitions import (
 )
 from .flow_analysis import strongly_connected_components
 from .logging import enable_library_logging, logger, setup_cli_logging
-from .schema_registry import SCHEMA_VERSION_DEFAULT, newer_fields, parse_version
+from .schema_registry import (
+    SCHEMA_VERSION_DEFAULT,
+    SCHEMA_VERSION_OLDEST,
+    newer_fields,
+    parse_version,
+)
 from .utilities import read_json_object
 
 # The result kinds a completion state can produce, read off the one model
@@ -1114,44 +1124,91 @@ def validate_fsm_from_file(json_file: str) -> FSMValidationResult:
 # --------------------------------------------------------------
 
 
-def upgrade_fsm_file(path: str) -> bool:
+@dataclass(frozen=True)
+class UpgradeResult:
+    """What `upgrade_fsm_file` did.
+
+    rewritten: the file now declares ``SCHEMA_VERSION_DEFAULT``.
+    refusal: why an asked upgrade was NOT done (a sentence for the log), or
+        None when it was done or there was nothing to do (a current or newer
+        version). ``refusal is not None`` is the failure `main` exits 1 on.
+    """
+
+    rewritten: bool
+    refusal: str | None = None
+
+
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """`json` object hook: a repeated key would be dropped by a rewrite."""
+    keys = [k for k, _ in pairs]
+    repeated = sorted({k for k in keys if keys.count(k) > 1})
+    if repeated:
+        raise ValueError(f"duplicate key(s) {repeated}")
+    return dict(pairs)
+
+
+def upgrade_fsm_file(path: str) -> UpgradeResult:
     """Stamp the current definition version on an older FSM file, in place.
 
     Contract:
         path: an FSM definition JSON file (a symlink is followed; the link is
             kept and its target rewritten).
-        Returns: True when the file was rewritten, False when nothing changed
-            or the file could not be upgraded. Never raises for an unreadable
-            file, invalid JSON, a non-object top level or a failed write: the
-            reason is logged and the file is left as it was (the normal
-            validation then reports on it).
-        Rewrites only a string ``version`` that does not parse as ``N.M`` or is
-        older than ``SCHEMA_VERSION_DEFAULT``. An omitted, non-string, current
-        or newer version is left alone.
+        Returns: an `UpgradeResult`. ``rewritten`` is True after a rewrite.
+            ``refusal`` names the reason when the file was NOT upgraded for a
+            cause other than "already current or newer": an I/O failure,
+            invalid JSON, a non-object top level, duplicate keys, a file that
+            does not load as an FSM definition, a missing or non-string
+            ``version``, or one outside ``[4.0, SCHEMA_VERSION_DEFAULT)``.
+        Never raises for any of these: the reason is logged and the file is
+        left byte-identical.
+        Rewriting normalises the file: indent 2, LF line endings, numbers
+        re-serialised, key order and non-ASCII text kept; the new version is
+        the default, so the file's ``fsm_id`` and library digest change.
     """
     # DECISION plan-2026-11-12T023759-9013b0e3/D-012
+    # DECISION plan-2026-11-12T023759-9013b0e3/D-016 (supersedes the rewrite
+    # rule of D-012: validate first, [4.0, default) only)
+    # Do NOT stamp the version before the file is known to be an FSM: a
+    # package.json-like object, or an FSM whose `version` is its own revision
+    # ("1.3.0", "3.0"), must stay byte-identical. Load it through
+    # `FSMDefinition` first and rewrite only a declared N.M with
+    # 4.0 <= v < default (the range the registry knows; below 4.0 is
+    # "unknown", D-002). Refuse duplicate keys (a rewrite would drop one).
     # Do NOT downgrade (a "5.0" file is never touched), do NOT rewrite or
     # reformat a file when nothing changes (no write, mtime kept), do NOT write
     # to stdout (it holds the JSON report only; the upgrade is a logger.info),
     # and do NOT open the target for writing directly: the write is a
     # same-directory temp file + os.replace (the `session.py` pattern) so a
-    # failure leaves the original intact. The schema is additive, so stamping
-    # the current version is always safe; the cost is that a rewritten file
-    # is reformatted to indent 2 (JSON has no comments to lose).
+    # failure leaves the original intact. The cost is that a rewritten file
+    # is normalised (indent 2; JSON has no comments to lose).
     target = os.path.realpath(path)
     try:
-        data = read_json_object(target)
+        with open(target, encoding="utf-8") as f:
+            data = json.load(f, object_pairs_hook=_no_duplicate_keys)
+        if not isinstance(data, dict):
+            raise ValueError("FSM definition must be a JSON object")
     except (OSError, ValueError) as e:  # JSONDecodeError, UnicodeDecodeError too
-        logger.warning(f"Not upgrading '{path}': {e}")
-        return False
+        return _refuse(path, str(e))
+    try:
+        FSMDefinition(**data)
+    except (ValueError, TypeError) as e:  # pydantic ValidationError is a ValueError
+        detail = " ".join(str(e).split())[:200]  # pydantic's text is multi-line
+        return _refuse(path, f"it does not load as an FSM definition ({detail})")
 
     version = data.get("version")
     if not isinstance(version, str):
-        return False
-    current = parse_version(SCHEMA_VERSION_DEFAULT)
+        return _refuse(path, "it declares no string 'version'")
     parsed = parse_version(version)
-    if parsed is not None and current is not None and parsed >= current:
-        return False
+    oldest = parse_version(SCHEMA_VERSION_OLDEST)
+    current = parse_version(SCHEMA_VERSION_DEFAULT)
+    if parsed is None or oldest is None or current is None or parsed < oldest:
+        return _refuse(
+            path,
+            f"version {version!r} is not an N.M version from {SCHEMA_VERSION_OLDEST} "
+            "up, so it may be the file's own revision",
+        )
+    if parsed >= current:
+        return UpgradeResult(rewritten=False)  # nothing to do, not a failure
     data["version"] = SCHEMA_VERSION_DEFAULT
     text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
@@ -1159,8 +1216,7 @@ def upgrade_fsm_file(path: str) -> bool:
         mode = stat.S_IMODE(os.stat(target).st_mode)
         fd, tmp_name = tempfile.mkstemp(dir=os.path.dirname(target), suffix=".tmp")
     except OSError as e:
-        logger.warning(f"Not upgrading '{path}': {e}")
-        return False
+        return _refuse(path, str(e))
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
@@ -1169,8 +1225,7 @@ def upgrade_fsm_file(path: str) -> bool:
         os.chmod(tmp_name, mode)
         os.replace(tmp_name, target)
     except (OSError, ValueError) as e:  # ValueError: a lone surrogate in a string
-        logger.warning(f"Not upgrading '{path}': {e}")
-        return False
+        return _refuse(path, str(e))
     finally:
         # No-op after a successful os.replace, which consumed tmp_name.
         if os.path.exists(tmp_name):
@@ -1179,7 +1234,12 @@ def upgrade_fsm_file(path: str) -> bool:
             except OSError:
                 pass
     logger.info(f"Upgraded '{path}' to definition version {SCHEMA_VERSION_DEFAULT}")
-    return True
+    return UpgradeResult(rewritten=True)
+
+
+def _refuse(path: str, reason: str) -> UpgradeResult:
+    logger.warning(f"Not upgrading '{path}': {reason}")
+    return UpgradeResult(rewritten=False, refusal=reason)
 
 
 def main(fsm_path, upgrade: bool = False):
@@ -1196,8 +1256,7 @@ def main(fsm_path, upgrade: bool = False):
     # `setup_cli_logging("INFO")` before this, so no DEBUG record is printed.
     enable_library_logging()
 
-    if upgrade:
-        upgrade_fsm_file(fsm_path)
+    upgrade_refused = upgrade and upgrade_fsm_file(fsm_path).refusal is not None
 
     # Run validation
     validation_result = validate_fsm_from_file(fsm_path)
@@ -1215,8 +1274,9 @@ def main(fsm_path, upgrade: bool = False):
     verdict = "valid" if validation_result.is_valid else "invalid"
     logger.info(f"Validation result: {verdict}")
 
-    # Return exit code based on validation result
-    if validation_result.is_valid:
+    # D-016: an asked upgrade that did not happen is a failure, whatever the
+    # validation said, so a script sees that nothing was written.
+    if validation_result.is_valid and not upgrade_refused:
         return CLI_EXIT_OK
     return CLI_EXIT_FAILURE
 
@@ -1234,9 +1294,11 @@ def main_cli():
         "--upgrade",
         action="store_true",
         help=(
-            "Rewrite the file in place to the current definition version "
-            f"({SCHEMA_VERSION_DEFAULT}) when it declares an older one, then "
-            "validate it. Never downgrades; writes nothing when nothing changes"
+            "Validate the file, then rewrite it in place to the current "
+            f"definition version ({SCHEMA_VERSION_DEFAULT}) when it is an FSM "
+            f"declaring {SCHEMA_VERSION_OLDEST} up to the current one. "
+            "Never downgrades or touches another version; exits 1 when the "
+            "upgrade was refused or failed"
         ),
     )
     args = parser.parse_args()
