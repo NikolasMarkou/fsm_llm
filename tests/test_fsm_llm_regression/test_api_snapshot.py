@@ -1,7 +1,7 @@
 """The public API snapshot `docs/api.txt` equals what the code declares now.
 
 `scripts/api_snapshot.py` prints every public name (the static `__all__` of
-the seven packages and four core modules, plus `schema_registry`, `codes` and
+the eight packages and four core modules, plus `schema_registry`, `codes` and
 `flow_analysis`) with its signature. A removed, renamed or retyped public
 parameter changes that output, so this test fails until the snapshot is
 regenerated (`make api-snapshot`) and reviewed in the same commit.

@@ -1,6 +1,6 @@
 # fsm_llm
 
-The `fsm_llm` package at `src` is the whole FSM-LLM framework. Its top level is the core engine: it runs chatbots defined as finite state machines, where a large language model (LLM) reads each user message, pulls out data, and writes the reply. Six subpackages built on that core add reasoning, workflows, agents, a web dashboard, evaluation tools, and runtime FSM synthesis.
+The `fsm_llm` package at `src` is the whole FSM-LLM framework. Its top level is the core engine: it runs chatbots defined as finite state machines, where a large language model (LLM) reads each user message, pulls out data, and writes the reply. Seven subpackages built on that core add reasoning, workflows, agents, a web dashboard, evaluation tools, runtime FSM synthesis, and public test doubles.
 
 ## Where it lives
 
@@ -55,6 +55,7 @@ flowchart TD
     synthesis[fsm_llm.synthesis] --> core
     synthesis --> agents
     synthesis --> eval
+    testing[fsm_llm.testing] --> core
 ```
 
 `import fsm_llm` loads only the core. Each subpackage is imported on its own, for example `from fsm_llm.agents import ReactAgent`.
@@ -69,6 +70,7 @@ flowchart TD
 | `monitor/` | FastAPI web dashboard to launch, watch and talk to FSMs, agents and workflows; optional OpenTelemetry export | `fsm-llm-monitor` (http://127.0.0.1:8420), `InstanceManager.attach_api`, `OTELExporter` |
 | `eval/` | Runs the repository examples and scores them 0 to 4, or runs scripted conversations against any FSM over several trials and reports pass rates with confidence intervals | `fsm-llm-eval examples`, `fsm-llm-eval run cases.json`, `run_dataset` |
 | `synthesis/` | Runtime FSM synthesis: a state names a goal, a model writes a child FSM for it, static checks and a bounded simulation judge it, a file-backed library stores it and a runner executes it as a child of the host conversation; two agent tools | `FSMSynthesizer`, `ProcedureRunner`, `FSMLibrary`, `SynthesisPolicy`, `create_procedure_tools` |
+| `testing/` | Public test helpers for code built on FSM-LLM: fake LLM interfaces, a scripted user and assertions (skeleton so far, no public name yet); imports the core only, never pytest | `fsm_llm.testing` (import by name) |
 
 ## Files
 
@@ -218,7 +220,7 @@ fsm-llm-skills validate ./skills         # check Agent Skills folders (also list
 - Any provider litellm supports works. There is no default model: pass `model=` or set `LLM_MODEL` (without either, `ModelNotConfiguredError`). Importing `fsm_llm` loads no `.env` file (call `fsm_llm.load_env()`, or pass `--env-file PATH` to `fsm-llm`, `fsm-llm-eval`, `fsm-llm-meta`, `python -m fsm_llm.reasoning` or `fsm-llm-monitor`, to read one on purpose). API keys come from the usual provider environment variables.
 - To use your own LLM client, pass `llm_interface=` to `API`. Do not pass `model`, `temperature`, `max_tokens` or other LLM settings beside it: `API` refuses them, because the interface owns them.
 - Core installs need loguru, litellm, pydantic, python-dotenv and pyyaml (>=6.0, for OKF and Agent Skills frontmatter).
-- Extras: `reasoning`, `workflows`, `agents`, `eval` and `synthesis` add no packages; `monitor` adds fastapi, uvicorn and jinja2; `mcp`, `otel` and `a2a` add optional integrations for agents and the monitor.
+- Extras: `reasoning`, `workflows`, `agents`, `eval`, `synthesis` and `testing` add no packages; `monitor` adds fastapi, uvicorn and jinja2; `mcp`, `otel` and `a2a` add optional integrations for agents and the monitor.
 - A state with no transitions is terminal: once reached, `converse` and `advance` raise an error.
 - `required_context_keys` only says what to extract. To block a transition until data exists, add a condition with `logic`.
 - Context keys starting with `_`, `system_`, `internal_`, or `__` are internal and hidden from `get_data()`. Keys that look like passwords, tokens, or API keys are filtered out of prompts.
@@ -229,6 +231,6 @@ fsm-llm-skills validate ./skills         # check Agent Skills folders (also list
 
 ## Where to go next
 
-- Each subpackage has its own README: `reasoning/README.md`, `workflows/README.md`, `agents/README.md`, `synthesis/README.md` (next to this file).
+- Each subpackage has its own README: `reasoning/README.md`, `workflows/README.md`, `agents/README.md`, `synthesis/README.md`, `testing/README.md` (next to this file).
 - `examples/` at the repository root: 100 runnable examples in 8 categories (`basic`, `intermediate`, `advanced`, `classification`, `agents`, `meta`, `reasoning`, `workflows`).
 - `docs/quickstart.md`, `docs/fsm_design.md`, `docs/handlers.md` and `docs/api_reference.md`: guides and the full reference.

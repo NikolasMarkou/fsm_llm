@@ -232,13 +232,14 @@ fsm_llm (core, includes classification)
 ├── fsm_llm.monitor    -- Uses API + handlers (observer callbacks at priority 9999)
 ├── fsm_llm.eval       -- Runs example scripts as subprocesses; drives scripted conversations
 │                          through API (one instance per trial) and checks the outcome
-└── fsm_llm.synthesis  -- Uses API (push_fsm/pop_fsm, run_until_terminal's before_step hook), agents
-                           (tools, human approval) and eval (scripted trials for simulation); core
-                           loads its `synthesize` state field and runs the data-flow and liveness
-                           analyses (`flow_analysis`)
+├── fsm_llm.synthesis  -- Uses API (push_fsm/pop_fsm, run_until_terminal's before_step hook), agents
+│                          (tools, human approval) and eval (scripted trials for simulation); core
+│                          loads its `synthesize` state field and runs the data-flow and liveness
+│                          analyses (`flow_analysis`)
+└── fsm_llm.testing    -- Public test doubles, scripted user and assertions; imports core only
 ```
 
-The six extensions are subpackages of `fsm_llm`. Core never imports them at package
+The seven extensions are subpackages of `fsm_llm`. Core never imports them at package
 import time; each one imports core (`from fsm_llm import API`).
 
 | Package | Integration | Key Mechanism |

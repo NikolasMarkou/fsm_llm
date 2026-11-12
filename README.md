@@ -15,7 +15,7 @@
 
 A language model call starts from nothing. A multi-turn conversation that must collect data, follow a set flow and decide the same way every time needs structure around the model. **FSM-LLM** is a Python framework for chatbots and agents that follow a fixed structure: you describe the conversation as a finite state machine in JSON, and the language model does the language work inside each state.
 
-It is one package, `fsm_llm`, with a small core and six subpackages on top: reasoning strategies, a workflow engine, 18 agent patterns, a monitoring dashboard, an evaluation harness and runtime FSM synthesis. Every subpackage is built from the same parts as the core (stacked FSMs, message-free steps, one LLM layer), so there is one way to run a model, not five.
+It is one package, `fsm_llm`, with a small core and seven subpackages on top: reasoning strategies, a workflow engine, 18 agent patterns, a monitoring dashboard, an evaluation harness, runtime FSM synthesis and public test doubles. Every subpackage is built from the same parts as the core (stacked FSMs, message-free steps, one LLM layer), so there is one way to run a model, not five.
 
 ---
 
@@ -139,7 +139,7 @@ Do not use it for open-ended chat with no structure (a plain LLM call is simpler
 
     | Extra | Adds |
     |-------|------|
-    | `reasoning`, `agents`, `workflows`, `eval`, `synthesis` | No third-party packages (the code ships in every install) |
+    | `reasoning`, `agents`, `workflows`, `eval`, `synthesis`, `testing` | No third-party packages (the code ships in every install) |
     | `monitor` | fastapi, uvicorn, jinja2 |
     | `mcp` | mcp (>=1.0.0) |
     | `otel` | opentelemetry-api, opentelemetry-sdk (>=1.20.0) |
@@ -440,6 +440,7 @@ flowchart TD
     synthesis[fsm_llm.synthesis] --> core
     synthesis --> agents
     synthesis --> eval
+    testing[fsm_llm.testing] --> core
 ```
 
 | Subpackage | What it adds | Maturity |
@@ -450,6 +451,7 @@ flowchart TD
 | [`fsm_llm.monitor`](src/monitor/README.md) | FastAPI dashboard, optional OpenTelemetry export | Needs the `monitor` extra |
 | [`fsm_llm.eval`](src/eval/README.md) | Examples scorer (0 to 4), conversation cases with Wilson intervals | Scores are a heuristic that overstates quality; read the logs too |
 | [`fsm_llm.synthesis`](src/synthesis/README.md) | A model compiles a goal into an FSM, gates judge it, a library stores it, a runner executes it; agent tools | Tested offline with scripted models. Bench status: three blocks run on one model, all INCONCLUSIVE; no result favours synthesis. |
+| [`fsm_llm.testing`](src/testing/README.md) | Public test doubles, a scripted user and assertions for code built on `fsm_llm` (skeleton: names arrive in later steps of the plan) | Offline; imports core only, never pytest |
 
 **Evaluation honesty.** The examples scorer reads each run's output with simple rules and gives 0 to 4. It overstates quality, and runs from before and after the 2026-09-29 restructure are not comparable. The method and the run log are in [EVALUATE.md](EVALUATE.md). Offline tests (the default) replace the model with a fake, so they say nothing about model quality.
 
@@ -543,7 +545,8 @@ fsm_llm/
 │   ├── agents/                # 18 agent patterns, tools, HITL, MCP, A2A, meta-builder
 │   ├── monitor/               # FastAPI dashboard, OTEL exporter
 │   ├── eval/                  # Examples scorer, conversation cases
-│   └── synthesis/             # Runtime FSM synthesis: compile, gates, library, runner
+│   ├── synthesis/             # Runtime FSM synthesis: compile, gates, library, runner
+│   └── testing/               # Public test doubles, scripted user, assertions
 ├── tests/                     # One folder per subpackage plus root-level files
 ├── examples/                  # 100 runnable examples in 8 categories (evaluation baselines)
 ├── docs/                      # Guides and API reference

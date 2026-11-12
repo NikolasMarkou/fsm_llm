@@ -1688,6 +1688,7 @@ fsm_llm.synthesis.reviewer_from_hitl def(hitl: HumanInTheLoop) -> Callable[[Proc
 fsm_llm.synthesis.run_gates def(data: Any, policy: SynthesisPolicy, *, inputs: Iterable[str] = (), return_keys: Iterable[str] = ()) -> GateReport
 fsm_llm.synthesis.strip_abort def(data: object) -> dict[str, Any] | None
 fsm_llm.synthesis.verify_stored def(definition: FSMDefinition | dict[str, Any], policy: SynthesisPolicy, *, inputs: Iterable[str] = (), return_keys: Iterable[str] = ()) -> GateReport
+# fsm_llm.testing
 # fsm_llm.workflows
 fsm_llm.workflows.APIStep class(WorkflowStep)
   field step_id: str required

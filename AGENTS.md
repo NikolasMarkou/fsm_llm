@@ -1,7 +1,7 @@
 # FSM-LLM
 
 Path: repository root (`.`)
-Purpose: Python framework (v0.12.0, Apache-2.0, Python 3.11-3.12) for stateful conversational AI: JSON-defined finite state machines (FSMs) driven by an LLM through a 2-pass pipeline, shipped as one package `fsm_llm` with six subpackages.
+Purpose: Python framework (v0.12.0, Apache-2.0, Python 3.11-3.12) for stateful conversational AI: JSON-defined finite state machines (FSMs) driven by an LLM through a 2-pass pipeline, shipped as one package `fsm_llm` with seven subpackages.
 
 ## Scope
 
@@ -26,6 +26,7 @@ flowchart TD
     synthesis[fsm_llm.synthesis] --> core
     synthesis --> agents
     synthesis --> eval
+    testing[fsm_llm.testing] --> core
 ```
 
 2-pass flow per `converse` (`src/pipeline.py`): Pass 1 extracts data (LLM), context update, classification extractions, rule-based transition evaluation (an LLM classifier only on AMBIGUOUS), state transition, then Pass 2 writes the reply (LLM) from the post-transition state. Pass 2 is skipped when `response_instructions` is empty: a silent state makes no LLM call, returns `""` and adds nothing to history. Transition outcomes: one winner is DETERMINISTIC, a tie at the lowest priority is AMBIGUOUS, none passing is BLOCKED (stay).
@@ -62,6 +63,7 @@ One LLM layer (`src/llm.py`, the only module that imports litellm): `LLMInterfac
 | `src/monitor/` | FastAPI dashboard (REST, WebSocket, vanilla-JS SPA), OTEL exporter | `configure`, `InstanceManager`, `OTELExporter` |
 | `src/eval/` | Examples scorer (0-4) and conversation cases (N trials, Wilson CIs) | `EvalConfig`, `run_examples`, `load_cases`, `run_cases`, `run_dataset`, `wilson_ci` |
 | `src/synthesis/` | Runtime FSM synthesis: a model compiles a goal into an FSM, gates G1 to G7 judge it, a file-backed library with a lifecycle stores it, a runner pushes it as a child of a host conversation, traces, `diagnose` and a propose-only repair; agent tools `obtain_procedure` and `run_procedure` | `FSMSynthesizer`, `ProcedureRunner`, `FSMLibrary`, `SynthesisPolicy`, `run_gates`, `create_procedure_tools` |
+| `src/testing/` | Public test doubles, scripted user and assertions for code built on `fsm_llm` (seventh subpackage; wired, `__all__` still empty: the names arrive step by step) | Imports core and `fsm_llm.codes` only, never `pytest`, `litellm` or another subpackage; no library module imports it; `fsm_llm/__init__.py` never loads it (`tests/test_fsm_llm_testing/`) |
 | `tests/conftest.py` | `MockLLM2Interface`, `configure_mock_extract_field`, fixtures, `ollama_available()` | Default runs make no network or LLM call |
 | `tests/test_packaging.py` | Pins package wiring and every test count in this file and `README.md` | See Working here |
 | `scripts/audit_pth.py` | Flags known malicious and code-bearing `.pth` files in site-packages; exit 1 on issues | `make audit`, CI |
@@ -71,7 +73,7 @@ One LLM layer (`src/llm.py`, the only module that imports litellm): `LLMInterfac
 | `scripts/skills_bench.py` | Pre-registered Agent Skills read-hint ablation (bench id `skills-disclosure`, blocks B0 and B1): `register`, `run`, `report` | Registered, NOT RUN (live runs declined); the read hint is a recorded default, not a measurement |
 | `scripts/type_check.py` | Runs mypy on the package `fsm_llm` by exposing `src/` under that name through a temporary symlink and `MYPYPATH` (`mypy src/` would name modules `src.*` and turn every `fsm_llm.*` import into `Any`); `make type-check`, tox, CI | Linux and macOS (symlink); `src/` must never be put on `sys.path` (it holds `logging.py`) |
 | `scripts/doc_counts.py` | Compares the count tokens of the shapes it knows (`N tests`, marker, `N slow`, `N live`/`N gated`, `tests in N files`, rows) in the tracked `.md` files with one `pytest --collect-only`; exit 1 on drift or on such a token no rule names; prose numbers with no token shape are not read | `make counts`; skips when `mcp` is importable |
-| `scripts/api_snapshot.py` | Prints the public API (static `__all__` of the seven packages and the named core modules, with signatures) for `docs/api.txt`; `--write PATH`; `make api-snapshot` | `tests/test_fsm_llm_regression/test_api_snapshot.py` fails when `docs/api.txt` differs; regenerate and review the diff in the same commit; never edit `docs/api.txt` by hand |
+| `scripts/api_snapshot.py` | Prints the public API (static `__all__` of the eight packages and the named core modules, with signatures) for `docs/api.txt`; `--write PATH`; `make api-snapshot` | `tests/test_fsm_llm_regression/test_api_snapshot.py` fails when `docs/api.txt` differs; regenerate and review the diff in the same commit; never edit `docs/api.txt` by hand |
 | `evaluation/datasets/` | `simple_greeting_cases.json`, `name_capture_fsm.json` | Samples for `fsm-llm-eval run` |
 | `examples/<category>/<name>/` | `run.py` plus FSM JSON; 8 categories | Evaluation baselines |
 | `pyproject.toml`, `Makefile`, `tox.ini`, `constraints.txt`, `MANIFEST.in`, `.pre-commit-config.yaml` | Build, tasks, envs, exact pins, sdist, hooks | All checked by `test_packaging.py` |
@@ -182,7 +184,7 @@ Rules for NEW code, so the vocabulary stays one across core and the subpackages.
 ## Dependencies
 
 - Core: loguru>=0.7.3,<1, litellm>=1.109.0,<2.0 (compromised 1.82.7/1.82.8 are below the floor; `constraints.txt` pins 1.109.1), pydantic>=2.0,<3, python-dotenv>=1.0.0,<2, pyyaml>=6.0,<7 (parses OKF and Agent Skills YAML frontmatter, in `frontmatter.py` only; declared explicitly because it was only a transitive dependency), tenacity>=8.0,<10 (unimported, needed by litellm's sync retry path; do not remove).
-- Extras: `reasoning`, `agents`, `workflows`, `eval`, `synthesis` (no deps), `monitor` (fastapi, uvicorn, jinja2), `mcp` (mcp>=2.2,<3), `otel` (opentelemetry-api/sdk>=1.20.0,<2), `a2a` (httpx>=0.24.0,<1), `all`, `dev`.
+- Extras: `reasoning`, `agents`, `workflows`, `eval`, `synthesis`, `testing` (no deps), `monitor` (fastapi, uvicorn, jinja2), `mcp` (mcp>=2.2,<3), `otel` (opentelemetry-api/sdk>=1.20.0,<2), `a2a` (httpx>=0.24.0,<1), `all`, `dev`.
 - `constraints.txt` pins every direct dependency (core, extras, dev tools) and the build backend exactly, one line each, and every declared range has an upper bound containing its pin (`TestDeclaredRangesMatchPins`).
 
 ## Failure modes
@@ -205,7 +207,7 @@ make type-check     # python scripts/type_check.py (mypy -p fsm_llm)
 make build          # python -m build (wheel + sdist)
 make clean          # remove build artifacts, caches, logs/
 make coverage       # pytest with --cov=fsm_llm
-make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis]" + pre-commit install
+make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis,testing]" + pre-commit install
 make audit          # python scripts/audit_pth.py
 make counts         # python scripts/doc_counts.py (fails when a documented test count drifts)
 make api-snapshot   # python scripts/api_snapshot.py --write docs/api.txt (regenerate the public API snapshot)

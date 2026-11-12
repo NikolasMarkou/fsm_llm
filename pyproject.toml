@@ -67,6 +67,9 @@ eval = []
 # Runtime FSM synthesis (fsm_llm.synthesis) is stdlib plus core deps and the agents
 # package only; listed as an extra so it appears in `all` and the install lists.
 synthesis = []
+# Public test doubles and assertions (fsm_llm.testing) are stdlib plus core deps only
+# and never import pytest; listed as an extra so it appears in `all` and the install lists.
+testing = []
 dev = [
     "pytest>=7.4.0,<10",
     "pytest-asyncio>=0.21.0,<2",
@@ -83,6 +86,7 @@ all = [
     "fsm-llm[monitor]",
     "fsm-llm[eval]",
     "fsm-llm[synthesis]",
+    "fsm-llm[testing]",
     "fsm-llm[mcp]",
     "fsm-llm[otel]",
     "fsm-llm[a2a]",
@@ -115,6 +119,7 @@ packages = [
     "fsm_llm.monitor",
     "fsm_llm.reasoning",
     "fsm_llm.synthesis",
+    "fsm_llm.testing",
     "fsm_llm.workflows",
 ]
 

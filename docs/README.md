@@ -65,7 +65,7 @@ After editing a guide, run the snippet tests:
 
 ## Things to know
 
-- Extensions are documented as subpackages of `fsm_llm`: `fsm_llm.reasoning`, `fsm_llm.workflows`, `fsm_llm.agents`, `fsm_llm.monitor`, `fsm_llm.eval`, `fsm_llm.synthesis`. This matches the code under `src/`.
+- Extensions are documented as subpackages of `fsm_llm`: `fsm_llm.reasoning`, `fsm_llm.workflows`, `fsm_llm.agents`, `fsm_llm.monitor`, `fsm_llm.eval`, `fsm_llm.synthesis`, `fsm_llm.testing`. This matches the code under `src/`.
 - The Strands files quote counts, file paths and "not yet implemented" lists as they were when written. Some of those paths use the subpackage layout. Their counts are not current. `agents_roadmap.md` is likewise a dated record: its status lines and baselines are as recorded on their dates.
 - Monitor documentation belongs in `api_reference.md` (the Monitor section). Do not create a separate `docs/monitor.md`.
 - Pre-registered benchmark data is not documented here; see `scripts/bench_data/README.md`.
