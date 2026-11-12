@@ -50,6 +50,7 @@ from fsm_llm.constants import (
 from fsm_llm.definitions import FSMError, SkillError
 from fsm_llm.okf import body_page, parse_concept_text, strip_unsafe_text, text_page
 from fsm_llm.prompts import sanitize_text_for_prompt
+from tests.conftest import posix_only, skip_if_root, symlink_or_skip
 
 _SRC = Path(__file__).resolve().parents[2] / "src"
 _ESC, _BIDI, _ZWSP = chr(0x1B), chr(0x202E), chr(0x200B)
@@ -914,12 +915,11 @@ class TestLoader:
             tmp_path, limits=SkillLimits(max_file_bytes=size - 1)
         ).names
 
-    @pytest.mark.skipif(
-        not hasattr(os, "geteuid") or os.geteuid() == 0, reason="root reads anything"
-    )
+    @posix_only("a mode 0 file is unreadable only under POSIX permission bits")
     def test_an_unreadable_skill_md_is_skipped_with_an_error(
         self, tmp_path: Path
     ) -> None:
+        skip_if_root()
         folder = _mk(tmp_path, "locked")
         _mk(tmp_path, "open")
         (folder / "SKILL.md").chmod(0)
@@ -1001,8 +1001,8 @@ class TestSymlinks:
         outside = self._secret(tmp_path)
         root = tmp_path / "skills"
         folder = _mk(root, "s", files={"real.txt": "real"})
-        (folder / "link.txt").symlink_to(outside / "secret.txt")
-        (folder / "linkdir").symlink_to(outside, target_is_directory=True)
+        symlink_or_skip(folder / "link.txt", outside / "secret.txt")
+        symlink_or_skip(folder / "linkdir", outside, target_is_directory=True)
         catalog = load_skills(root)
         skill = catalog.get("s")
         assert skill is not None and skill.resources == ("real.txt",)
@@ -1018,8 +1018,8 @@ class TestSymlinks:
     ) -> None:
         """Plain `resolve_within` containment would pass this one (D-023)."""
         folder = _mk(tmp_path, "s", files={"real.txt": "real", ".env": "DOTSECRET"})
-        (folder / "alias.txt").symlink_to(folder / "real.txt")
-        (folder / "sneaky.txt").symlink_to(folder / ".env")
+        symlink_or_skip(folder / "alias.txt", folder / "real.txt")
+        symlink_or_skip(folder / "sneaky.txt", folder / ".env")
         catalog = load_skills(tmp_path)
         assert catalog.read_resource("s", "real.txt")[0] == "real"
         for rel in ("alias.txt", "sneaky.txt"):
@@ -1031,8 +1031,8 @@ class TestSymlinks:
         self, tmp_path: Path
     ) -> None:
         folder = _mk(tmp_path, "s", files={"a.txt": "a"})
-        (folder / "loop").symlink_to(folder, target_is_directory=True)
-        (folder / "self").symlink_to(folder / "self")
+        symlink_or_skip(folder / "loop", folder, target_is_directory=True)
+        symlink_or_skip(folder / "self", folder / "self")
         skill = load_skills(tmp_path).get("s")
         assert skill is not None and skill.resources == ("a.txt",)
 
@@ -1040,9 +1040,9 @@ class TestSymlinks:
         self, tmp_path: Path
     ) -> None:
         _mk(tmp_path, "ok")
-        (tmp_path / "a").symlink_to(tmp_path / "b", target_is_directory=True)
-        (tmp_path / "b").symlink_to(tmp_path / "a", target_is_directory=True)
-        (tmp_path / "self").symlink_to(tmp_path, target_is_directory=True)
+        symlink_or_skip(tmp_path / "a", tmp_path / "b", target_is_directory=True)
+        symlink_or_skip(tmp_path / "b", tmp_path / "a", target_is_directory=True)
+        symlink_or_skip(tmp_path / "self", tmp_path, target_is_directory=True)
         assert load_skills(tmp_path).names == ("ok",)
 
     def test_a_symlinked_skill_directory_under_a_root_is_followed_once(
@@ -1052,8 +1052,8 @@ class TestSymlinks:
         _mk(store, "managed", files={"references/r.md": "r"})
         root = tmp_path / "skills"
         root.mkdir()
-        (root / "managed").symlink_to(store / "managed", target_is_directory=True)
-        (root / "alias").symlink_to(store / "managed", target_is_directory=True)
+        symlink_or_skip(root / "managed", store / "managed", target_is_directory=True)
+        symlink_or_skip(root / "alias", store / "managed", target_is_directory=True)
         catalog = load_skills(root)
         assert catalog.names == ("managed",)
         # "alias" sorts first, so the skill is seen under that folder name once
@@ -1067,7 +1067,7 @@ class TestSymlinks:
         self, tmp_path: Path
     ) -> None:
         _mk(tmp_path / "real", "one")
-        (tmp_path / "view").symlink_to(tmp_path / "real", target_is_directory=True)
+        symlink_or_skip(tmp_path / "view", tmp_path / "real", target_is_directory=True)
         catalog = load_skills([tmp_path / "real", tmp_path / "view"])
         assert catalog.names == ("one",) and catalog.issues == []
 
@@ -1080,7 +1080,7 @@ class TestSymlinks:
         )
         root = tmp_path / "skills"
         (root / "s").mkdir(parents=True)
-        (root / "s" / "SKILL.md").symlink_to(outside / "SKILL.md")
+        symlink_or_skip(root / "s" / "SKILL.md", outside / "SKILL.md")
         catalog = load_skills(root)
         assert len(catalog) == 0 and "x" not in catalog
         assert _load_codes(catalog) == {
@@ -1094,7 +1094,7 @@ class TestSymlinks:
     ) -> None:
         outside = self._secret(tmp_path)
         folder = _mk(tmp_path / "skills", "s")
-        (folder / "docs").symlink_to(outside, target_is_directory=True)
+        symlink_or_skip(folder / "docs", outside, target_is_directory=True)
         catalog = load_skills(tmp_path / "skills")
         with pytest.raises(SkillError):
             catalog.read_resource("s", "docs/secret.txt")
@@ -1404,10 +1404,10 @@ class TestResourceConfinement:
         self, tmp_path: Path
     ) -> None:
         catalog, folder, outside = _guarded(tmp_path)
-        (folder / "l-file").symlink_to(outside / "secret.txt")
-        (folder / "l-dir").symlink_to(outside, target_is_directory=True)
-        (folder / "l-dot").symlink_to(folder / ".env")
-        (folder / "sub" / "l-in-sub").symlink_to(outside / "secret.txt")
+        symlink_or_skip(folder / "l-file", outside / "secret.txt")
+        symlink_or_skip(folder / "l-dir", outside, target_is_directory=True)
+        symlink_or_skip(folder / "l-dot", folder / ".env")
+        symlink_or_skip(folder / "sub" / "l-in-sub", outside / "secret.txt")
         for rel in ("l-file", "l-dir", "l-dir/secret.txt", "l-dot", "sub/l-in-sub"):
             with pytest.raises(SkillError) as info:
                 catalog.read_resource("guard", rel)
@@ -1437,7 +1437,7 @@ class TestResourceConfinement:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         catalog, folder, outside = _guarded(tmp_path)
-        (folder / "swap.txt").symlink_to(outside / "secret.txt")
+        symlink_or_skip(folder / "swap.txt", outside / "secret.txt")
         # Simulate the race: both path checks were passed before the swap.
         monkeypatch.setattr(
             skills_module, "_confined", lambda directory, parts: directory / parts[0]
@@ -1505,7 +1505,7 @@ class TestResourceConfinement:
     ) -> None:
         catalog, folder, outside = _guarded(tmp_path)
         (folder / "ok.txt").unlink()
-        (folder / "ok.txt").symlink_to(outside / "secret.txt")
+        symlink_or_skip(folder / "ok.txt", outside / "secret.txt")
         with pytest.raises(SkillError):
             catalog.read_resource("guard", "ok.txt")
 
@@ -1798,12 +1798,11 @@ class TestIssueBoundPerSkill:
         assert seen[0] <= 160 * (self.CAP + 1)  # 4,160, not 16,000
         assert peak < 6_000_000  # 3 MB measured; 10+ MB without the cap
 
-    @pytest.mark.skipif(
-        not hasattr(os, "geteuid") or os.geteuid() == 0, reason="root lists anything"
-    )
+    @posix_only("a mode 0 directory is unlistable only under POSIX permission bits")
     def test_unreadable_subdirectories_add_one_issue_per_skill(
         self, tmp_path: Path
     ) -> None:
+        skip_if_root()
         folder = _mk(tmp_path, "locked")
         dirs = [folder / f"d{i}" for i in range(30)]
         for d in dirs:
@@ -2071,7 +2070,7 @@ class TestRealWorldLayouts:
         store = _mk(tmp_path / "dotfiles", "tool", files={"scripts/x.sh": "echo"})
         root = tmp_path / "home" / "skills"
         root.mkdir(parents=True)
-        (root / "tool").symlink_to(store, target_is_directory=True)
+        symlink_or_skip(root / "tool", store, target_is_directory=True)
         catalog = load_skills(root)
         assert catalog.names == ("tool",) and catalog.issues == []
         assert catalog.read_resource("tool", "scripts/x.sh")[0] == "echo"
@@ -2093,6 +2092,7 @@ class TestRealWorldLayouts:
         catalog = load_skills(tmp_path)
         assert catalog.names == ("real",) and catalog.issues == []
 
+    @posix_only("chmod 0o777 and the confinement it probes are POSIX mode bits")
     def test_a_world_writable_skill_still_confines_reads(self, tmp_path: Path) -> None:
         folder = _mk(tmp_path, "open", files={"a.txt": "a"})
         for path in (folder, folder / "SKILL.md", folder / "a.txt"):

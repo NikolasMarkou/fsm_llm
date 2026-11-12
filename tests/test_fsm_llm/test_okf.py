@@ -61,14 +61,7 @@ from fsm_llm.okf_bridge import bundle_from_memory_entries, create_okf_handler
 from fsm_llm.okf_cli import main as okf_cli_main
 from fsm_llm.prompts import ResponseGenerationPromptBuilder
 from fsm_llm.security import resolve_within
-from tests.conftest import MockLLM2Interface
-
-
-def _symlink(link: Path, target: Path) -> None:
-    try:
-        link.symlink_to(target)
-    except OSError:  # pragma: no cover - platform without symlink support
-        pytest.skip("symlinks are not supported here")
+from tests.conftest import MockLLM2Interface, symlink_or_skip
 
 
 class TestResolveWithin:
@@ -120,7 +113,7 @@ class TestResolveWithin:
         evil = tmp_path / "ws-evil"
         evil.mkdir()
         (evil / "loot.txt").write_text("loot\n", encoding="utf-8")
-        _symlink(root / "link", evil)
+        symlink_or_skip(root / "link", evil)
 
         assert resolve_within(root, "link/loot.txt") is None
         assert resolve_within(root, "../ws-evil/loot.txt") is None
@@ -131,7 +124,7 @@ class TestResolveWithin:
         outside = tmp_path / "outside"
         outside.mkdir()
         (outside / "secret.txt").write_text("secret\n", encoding="utf-8")
-        _symlink(root / "escape", outside)
+        symlink_or_skip(root / "escape", outside)
 
         assert resolve_within(root, "escape") is None
         assert resolve_within(root, "escape/secret.txt") is None
@@ -141,7 +134,7 @@ class TestResolveWithin:
     def test_a_symlink_staying_inside_is_allowed(self, root: Path) -> None:
         (root / "real").mkdir()
         (root / "real" / "f.txt").write_text("x\n", encoding="utf-8")
-        _symlink(root / "alias", root / "real")
+        symlink_or_skip(root / "alias", root / "real")
 
         assert resolve_within(root, "alias/f.txt") == root / "real" / "f.txt"
 
@@ -150,8 +143,8 @@ class TestResolveWithin:
             resolve_within(root, "a\x00b")
 
     def test_a_symlink_loop_raises(self, root: Path) -> None:
-        _symlink(root / "a", root / "b")
-        _symlink(root / "b", root / "a")
+        symlink_or_skip(root / "a", root / "b")
+        symlink_or_skip(root / "b", root / "a")
 
         with pytest.raises((RuntimeError, OSError)):
             resolve_within(root, "a")
@@ -160,7 +153,7 @@ class TestResolveWithin:
         real = tmp_path / "real"
         real.mkdir()
         alias = tmp_path / "alias"
-        _symlink(alias, real)
+        symlink_or_skip(alias, real)
 
         # The root is reached through a symlink, so it is not resolved: the
         # resolved candidate never equals it nor has it as a parent.
@@ -1113,7 +1106,7 @@ class TestLoader:
         self, tmp_path: Path
     ) -> None:
         _write(tmp_path / "real", {"a.md": _doc()})
-        _symlink(tmp_path / "alias", tmp_path / "real")
+        symlink_or_skip(tmp_path / "alias", tmp_path / "real")
 
         bundle = load_bundle(str(tmp_path / "alias"))
 
@@ -1256,7 +1249,7 @@ class TestSymlink:
         _write(outside, {"secret.md": _doc(body="TOP-SECRET-MARKER\n")})
         bundle_dir = tmp_path / "bundle"
         _write(bundle_dir, {"ok.md": _doc()})
-        _symlink(bundle_dir / "leak.md", outside / "secret.md")
+        symlink_or_skip(bundle_dir / "leak.md", outside / "secret.md")
 
         bundle = load_bundle(bundle_dir)
 
@@ -1268,7 +1261,7 @@ class TestSymlink:
         self, tmp_path: Path
     ) -> None:
         _write(tmp_path, {"a.md": _doc()})
-        _symlink(tmp_path / "alias.md", tmp_path / "a.md")
+        symlink_or_skip(tmp_path / "alias.md", tmp_path / "a.md")
 
         bundle = load_bundle(tmp_path)
 
@@ -1280,7 +1273,7 @@ class TestSymlink:
         _write(outside, {"x.md": _doc(body="OUTSIDE\n")})
         bundle_dir = tmp_path / "bundle"
         _write(bundle_dir, {"ok.md": _doc()})
-        _symlink(bundle_dir / "linked", outside)
+        symlink_or_skip(bundle_dir / "linked", outside)
 
         bundle = load_bundle(bundle_dir)
 
@@ -1289,8 +1282,8 @@ class TestSymlink:
 
     def test_a_symlink_loop_terminates(self, tmp_path: Path) -> None:
         _write(tmp_path, {"d/a.md": _doc()})
-        _symlink(tmp_path / "d" / "loop", tmp_path / "d")
-        _symlink(tmp_path / "up", tmp_path)
+        symlink_or_skip(tmp_path / "d" / "loop", tmp_path / "d")
+        symlink_or_skip(tmp_path / "up", tmp_path)
 
         started = time.perf_counter()
         bundle = load_bundle(tmp_path)
@@ -1301,7 +1294,7 @@ class TestSymlink:
         assert _codes(bundle).count("symlink-skipped") == 2
 
     def test_a_dangling_symlink_is_skipped_without_error(self, tmp_path: Path) -> None:
-        _symlink(tmp_path / "gone.md", tmp_path / "nowhere")
+        symlink_or_skip(tmp_path / "gone.md", tmp_path / "nowhere")
 
         bundle = load_bundle(tmp_path)
 
@@ -2420,7 +2413,7 @@ class TestWriteIndex:
         outside.write_text("keep", encoding="utf-8")
         out = tmp_path / "out"
         out.mkdir()
-        _symlink(out / "index.md", outside)
+        symlink_or_skip(out / "index.md", outside)
 
         with pytest.raises(OKFError, match=r"index\.md"):
             write_bundle(_bundle_of(_note()), out, overwrite=True)
@@ -2527,7 +2520,7 @@ class TestWriteRefusals:
         outside.write_text("keep", encoding="utf-8")
         out = tmp_path / "out"
         out.mkdir()
-        _symlink(out / "a.md", outside)
+        symlink_or_skip(out / "a.md", outside)
 
         with pytest.raises(OKFError, match=r"symbolic link|outside"):
             write_bundle(_bundle_of(_note("a"), _note("b")), out, overwrite=True)
@@ -2541,7 +2534,7 @@ class TestWriteRefusals:
         out = tmp_path / "out"
         out.mkdir()
         (out / "real.md").write_text("real", encoding="utf-8")
-        _symlink(out / "a.md", out / "real.md")
+        symlink_or_skip(out / "a.md", out / "real.md")
 
         with pytest.raises(OKFError, match="symbolic link"):
             write_bundle(_bundle_of(_note("a")), out, overwrite=True)
@@ -2551,7 +2544,7 @@ class TestWriteRefusals:
     def test_a_dangling_symlink_target_is_refused(self, tmp_path: Path) -> None:
         out = tmp_path / "out"
         out.mkdir()
-        _symlink(out / "a.md", tmp_path / "does-not-exist.md")
+        symlink_or_skip(out / "a.md", tmp_path / "does-not-exist.md")
 
         with pytest.raises(OKFError):
             write_bundle(_bundle_of(_note("a")), out, overwrite=True)
@@ -2565,7 +2558,7 @@ class TestWriteRefusals:
         outside.mkdir()
         out = tmp_path / "out"
         out.mkdir()
-        _symlink(out / "memory", outside)
+        symlink_or_skip(out / "memory", outside)
 
         with pytest.raises(OKFError, match=r"outside|symbolic link"):
             write_bundle(

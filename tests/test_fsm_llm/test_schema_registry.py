@@ -38,6 +38,7 @@ from fsm_llm.schema_registry import (
     newer_fields,
     parse_version,
 )
+from tests.conftest import posix_only, skip_if_root, symlink_or_skip
 
 REGISTERED_MODELS = {
     FSMDefinition,
@@ -955,6 +956,7 @@ class TestUpgradeFsmFile:
         assert "Zoë, 北京 — ok" in text
         assert "\\u" not in text
 
+    @posix_only("file mode bits 0o644 and 0o600 are not kept by Windows")
     def test_the_file_mode_is_kept(self, tmp_path):
         from fsm_llm.validator import upgrade_fsm_file
 
@@ -977,7 +979,7 @@ class TestUpgradeFsmFile:
         target = real_dir / "fsm.json"
         _write_definition(target, "4.1")
         link = tmp_path / "link.json"
-        link.symlink_to(target)
+        symlink_or_skip(link, target)
         assert upgrade_fsm_file(str(link)).rewritten is True
         assert link.is_symlink()
         assert (
@@ -1011,8 +1013,9 @@ class TestUpgradeFsmFile:
         assert upgrade_fsm_file(str(bad)).refusal is not None
         assert bad.read_bytes() == b"\xff\xfe\x00"
 
-    @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory modes")
+    @posix_only("a 0o555 directory refuses writes only under POSIX permission bits")
     def test_a_read_only_directory_leaves_the_file_untouched(self, tmp_path):
+        skip_if_root()
         from fsm_llm.validator import upgrade_fsm_file
 
         path = tmp_path / "fsm.json"
@@ -1183,10 +1186,11 @@ class TestValidateMainUpgrade:
         json.loads(capsys.readouterr().out)
         assert path.read_bytes() == text
 
-    @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory modes")
+    @posix_only("a 0o555 directory refuses writes only under POSIX permission bits")
     def test_a_failed_write_exits_one_and_stdout_is_still_the_report(
         self, tmp_path, capsys
     ):
+        skip_if_root()
         from fsm_llm.validator import main
 
         path = tmp_path / "fsm.json"

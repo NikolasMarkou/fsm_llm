@@ -1,0 +1,25 @@
+# Line endings are pinned so a Windows checkout (actions/checkout converts
+# them) stays byte-equal to the committed files: docs/api.txt, golden JSON and
+# the bench manifests are compared as bytes. See D-018 of plan d454fd62.
+* text=auto eol=lf
+
+*.py text eol=lf
+*.json text eol=lf
+*.jsonl text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+
+# Binary files are never converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.whl binary
+*.gz binary
+*.tar binary

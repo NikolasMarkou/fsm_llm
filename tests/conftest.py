@@ -3,8 +3,10 @@ Global test configuration and fixtures for the entire test suite.
 """
 
 import json
+import os
 import re
 import socket
+import sys
 from pathlib import Path
 from typing import NoReturn
 from unittest.mock import Mock
@@ -57,6 +59,55 @@ def ollama_available(model_tag: str = OLLAMA_MODEL_TAG) -> bool:
         return any(model_tag in name for name in models)
     except Exception:
         return False
+
+
+def posix_only(reason: str) -> pytest.MarkDecorator:
+    """A ``skipif`` mark for a test that needs POSIX file modes, signals or pids.
+
+    Interface contract (many call sites; the AST rule in
+    ``tests/test_packaging.py::TestPortabilityRules`` lists every use):
+        - Parameter: *reason*, a non-blank string literal saying what the test
+          needs that Windows does not give (a mode bit, a signal, a pid probe).
+        - Returns a ``pytest.mark.skipif`` for ``sys.platform == "win32"``;
+          macOS and Linux run the test.  This is a capability skip, never a
+          place to hide a failure: the reason names the missing capability.
+    """
+    return pytest.mark.skipif(sys.platform == "win32", reason=reason)
+
+
+def skip_if_root() -> None:
+    """Skip the running test when the process is root (modes are not enforced).
+
+    Interface contract: call it in the test BODY, never at import or decorator
+    time (``os.geteuid`` does not exist on Windows).  No return value; raises
+    ``pytest.skip.Exception`` for root, does nothing otherwise.
+    """
+    geteuid = getattr(os, "geteuid", None)
+    if geteuid is not None and geteuid() == 0:
+        pytest.skip("root ignores file and directory modes")
+
+
+def symlink_or_skip(
+    link: Path, target: Path | str, *, target_is_directory: bool = False
+) -> None:
+    """Create ``link`` pointing at ``target``; skip the test where that is refused.
+
+    Interface contract (the one way a test makes a symlink; the rule in
+    ``TestPortabilityRules`` bans a bare ``symlink_to``/``os.symlink``):
+        - Parameters: the link path, what it points at (may not exist: a
+          dangling link is valid), and ``target_is_directory`` for Windows
+          (an existing directory target sets it on its own).
+        - Returns ``None``.  ``OSError`` or ``NotImplementedError`` (Windows
+          without the symlink privilege, a filesystem without links) skips the
+          calling test; no other error is caught.
+    """
+    # Windows needs the flag for a directory; an existing directory is detected
+    # here so a call site cannot forget it (a dangling link stays a file link).
+    is_dir = target_is_directory or (link.parent / target).is_dir()
+    try:
+        link.symlink_to(target, target_is_directory=is_dir)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not supported here")
 
 
 #: Markers whose tests may open real TCP connections under ``block_network``.

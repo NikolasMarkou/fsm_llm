@@ -24,6 +24,7 @@ from fsm_llm.constants import (
     SKILL_LIST_MAX_ITEMS,
     SKILL_READ_PAGE_CHARS,
 )
+from tests.conftest import symlink_or_skip
 
 _REPO = Path(__file__).resolve().parents[2]
 _ESC, _BIDI, _ZWSP, _CJK = chr(0x1B), chr(0x202E), chr(0x200B), chr(0x7F51)
@@ -119,7 +120,7 @@ class TestValidate:
         self, clean: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         (clean / "linked").mkdir()
-        (clean / "linked" / "SKILL.md").symlink_to(clean / "alpha" / "SKILL.md")
+        symlink_or_skip(clean / "linked" / "SKILL.md", clean / "alpha" / "SKILL.md")
 
         code, out, _ = _run(capsys, "validate", clean)
 
@@ -330,7 +331,7 @@ class TestListShow:
         (clean / "alpha" / ".env").write_text("SECRET=1", encoding="utf-8")
         outside = clean.parent / "outside.txt"
         outside.write_text("SECRET=outside", encoding="utf-8")
-        (clean / "alpha" / "link.txt").symlink_to(outside)
+        symlink_or_skip(clean / "alpha" / "link.txt", outside)
 
         code, out, err = _run(capsys, "show", "alpha", clean, "--file", target)
 

@@ -28,6 +28,7 @@ from fsm_llm.eval import (
 from fsm_llm.eval import examples as examples_mod
 from fsm_llm.eval.constants import CATEGORY_TIMEOUTS, EVALUATOR_NAME, EXAMPLE_TIMEOUTS
 from fsm_llm.eval.examples import ExampleTarget, create_output_dir, run_example
+from tests.conftest import posix_only
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 # The key sets of the first committed `examples` run (2026-04-01, commit 4025a78,
@@ -468,6 +469,7 @@ class TestInterrupt:
         )
 
     @pytest.mark.slow  # about 6 s: a real CLI process (imports litellm) and 1 s timeouts
+    @posix_only("Popen.send_signal(SIGTERM) terminates the process outright on Windows")
     def test_sigterm_to_the_cli_writes_the_partial_report_and_exits_130(
         self, tmp_path: Path
     ):

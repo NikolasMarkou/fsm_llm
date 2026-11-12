@@ -1,7 +1,7 @@
 # tests
 
 Path: `tests`
-Purpose: The full pytest tree of FSM-LLM (14,027 collected tests): ten suite folders for the `fsm_llm` package and its six subpackages, five repo-wide root test files, and the shared `conftest.py`.
+Purpose: The full pytest tree of FSM-LLM (14,036 collected tests): ten suite folders for the `fsm_llm` package and its six subpackages, five repo-wide root test files, and the shared `conftest.py`.
 
 ## Scope
 
@@ -31,7 +31,7 @@ Suite folders (test counts from full collection) and root files at this level.
 | File | Role | Notes |
 | --- | --- | --- |
 | `conftest.py` | Shared fixtures, fakes and marker registration (see Public interface) | 0 tests |
-| `test_packaging.py` | Repo-wide wiring and doc-count pins | 61 tests; classes listed below |
+| `test_packaging.py` | Repo-wide wiring and doc-count pins | 70 tests; classes listed below |
 | `test_bench_common.py` | Offline checks of `scripts/bench_common.py`, the stdlib helpers shared by the agents, skills and synthesis benches | 19 tests |
 | `test_agents_bench.py` | Offline checks of `scripts/agents_bench.py` | 132 tests |
 | `test_skills_bench.py` | Offline checks of `scripts/skills_bench.py` (Agent Skills read-hint ablation: fixture, grader, hint ablation, one trial, blocks, hygiene); scripted agents drive the REAL skill tools | 38 tests; never calls a model |
@@ -83,6 +83,9 @@ From `tests/conftest.py` (import as `from tests.conftest import ...` or use as f
 | `sample_fsm_definition` | fixture | v3.0 one-state FSM from `fixtures/test_fsm_definitions/minimal_fsm.json` (written if missing) |
 | `sample_fsm_definition_v2` | fixture | v4.1 `greeting -> farewell`, gated on `requires_context_keys: ["user_name"]` |
 | `ollama_available(model_tag=OLLAMA_MODEL_TAG) -> bool` | function | One bounded GET to `http://localhost:11434/api/tags`; True only if a pulled model name contains the tag; never raises. `OLLAMA_MODEL_TAG` is `DEFAULT_LLM_MODEL` minus its `ollama_chat/` prefix |
+| `posix_only(reason) -> MarkDecorator` | function | `skipif(sys.platform == "win32")` for a test that needs POSIX mode bits, signals or a pid probe; `reason` is a required non-blank literal (checked by `TestPortabilityRules`) |
+| `skip_if_root()` | function | Call in the test body (never at decorator time): skips when the process is root, where modes are not enforced |
+| `symlink_or_skip(link, target, *, target_is_directory=False)` | function | The one way a test makes a symlink; skips where links are refused; a bare `symlink_to` or `os.symlink` fails `TestPortabilityRules` |
 | `test_fixtures_root` | fixture (session) | `tests/fixtures/`, created if missing; requested by `sample_fsm_definition` |
 
 Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `real_llm` (also declared in `pyproject.toml`). There is no collection hook: `fsm_llm.workflows` has no extra dependencies, so nothing is skipped for it.
@@ -91,7 +94,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 
 - Env knobs: `FSM_LLM_REAL_SKILLS` (arms the Agent Skills home-directory test in `test_agent_skills.py`), `FSM_LLM_MONITOR_API_KEY` (cleared for monitor tests). No test reads `SKIP_SLOW_TESTS`, `TEST_REAL_LLM` or `TEST_LLM_MODEL`; `test_packaging.py` drops the first two from its collection child env.
 - pytest config in `pyproject.toml`: `testpaths = ["tests"]`, `addopts = "-v --tb=short"`, `asyncio_mode = "auto"`, `asyncio_default_fixture_loop_scope = "function"`.
-- Marker counts (full collection): `slow` 42, `integration` 20, `real_llm` 19, `examples` 67; `-m "not slow"` collects 13,985.
+- Marker counts (full collection): `slow` 42, `integration` 20, `real_llm` 19, `examples` 67; `-m "not slow"` collects 13,994.
 
 ## Invariants and constraints
 

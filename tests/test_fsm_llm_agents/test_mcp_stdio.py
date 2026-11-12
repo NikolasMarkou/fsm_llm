@@ -21,6 +21,7 @@ from fsm_llm.agents.definitions import ToolCall
 from fsm_llm.agents.exceptions import AgentTimeoutError
 from fsm_llm.agents.mcp import MCPToolProvider
 from fsm_llm.agents.tools import ToolRegistry
+from tests.conftest import posix_only
 
 _FIXTURE = Path(__file__).with_name("mcp_fixture_server.py")
 # Discovery spawns a Python child that imports mcp; keep it well clear of that.
@@ -89,6 +90,7 @@ class TestMCPStdio:
         # message (1.x appends it), so only the common prefix is asserted.
         assert "error executing tool fail" in (result.error or "").lower()
 
+    @posix_only("os.kill(pid, 0) is a liveness probe on POSIX and a kill on Windows")
     def test_slow_call_times_out_and_child_exits(self, tmp_path: Path) -> None:
         pid_file = tmp_path / "pid"
         # Each call spawns its own server, so the timeout covers server start;
@@ -106,6 +108,7 @@ class TestMCPStdio:
         pid = _read_pid(pid_file)
         assert _gone_within(pid, _EXIT_GRACE_SECONDS), f"MCP child {pid} still alive"
 
+    @posix_only("os.kill(pid, 0) is a liveness probe on POSIX and a kill on Windows")
     def test_hung_server_discovery_raises_agent_timeout(self, tmp_path: Path) -> None:
         pid_file = tmp_path / "pid"
         provider = _provider(pid_file, 5.0, "--hang")

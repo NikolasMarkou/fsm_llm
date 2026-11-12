@@ -30,6 +30,7 @@ from fsm_llm.frontmatter import (
     read_bytes,
     split_frontmatter,
 )
+from tests.conftest import symlink_or_skip
 
 _REPO = Path(__file__).resolve().parents[2]
 _SRC = _REPO / "src"
@@ -344,7 +345,7 @@ class TestReadBytes:
         target = tmp_path / "secret.txt"
         target.write_bytes(b"top secret")
         link = tmp_path / "link.md"
-        link.symlink_to(target)
+        symlink_or_skip(link, target)
 
         with pytest.raises(OSError):
             read_bytes(link, 100)
@@ -354,7 +355,7 @@ class TestReadBytes:
     @pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="no O_NOFOLLOW")
     def test_a_dangling_symlink_raises_oserror(self, tmp_path: Path) -> None:
         link = tmp_path / "dangling.md"
-        link.symlink_to(tmp_path / "gone")
+        symlink_or_skip(link, tmp_path / "gone")
         with pytest.raises(OSError):
             read_bytes(link, 100)
 

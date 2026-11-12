@@ -7,7 +7,6 @@ signature-first retrieval.
 import contextlib
 import inspect
 import json
-import os
 import threading
 import time
 from pathlib import Path
@@ -21,6 +20,7 @@ from fsm_llm.synthesis import RunTrace, SynthesisError, library
 from fsm_llm.synthesis.constants import DEFAULT_MAX_TRACES
 from fsm_llm.synthesis.exceptions import LibraryError
 from fsm_llm.synthesis.library import FSMLibrary, digest_of
+from tests.conftest import symlink_or_skip
 
 GOAL = "book a table for dinner"
 
@@ -376,7 +376,7 @@ class TestSafety:
         elsewhere = tmp_path / "copy.json"
         elsewhere.write_bytes(path.read_bytes())
         path.unlink()
-        path.symlink_to(elsewhere)
+        symlink_or_skip(path, elsewhere)
         with pytest.raises(LibraryError, match="symlink"):
             lib.get_record(rec.digest)
 
@@ -386,7 +386,7 @@ class TestSafety:
         outside = tmp_path / "outside"
         outside.mkdir()
         lib.root.mkdir()
-        (lib.root / "records").symlink_to(outside)
+        symlink_or_skip(lib.root / "records", outside)
         with pytest.raises(LibraryError):
             _put(lib)
         assert list(outside.iterdir()) == []
@@ -792,7 +792,7 @@ class TestTraces:
         path = _trace_file(lib)
         path.parent.mkdir(parents=True)
         (tmp_path / "x").write_text("", encoding="utf-8")
-        os.symlink(tmp_path / "x", path)
+        symlink_or_skip(path, tmp_path / "x")
         with pytest.raises(LibraryError):
             lib.read_traces(D)
         with pytest.raises(LibraryError):

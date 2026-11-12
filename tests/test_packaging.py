@@ -22,6 +22,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -707,6 +708,224 @@ class TestExplicitEncodings:
         encoding, loaded = proc.stdout.splitlines()
         assert encoding.lower() in ("ansi_x3.4-1968", "ascii", "us-ascii"), encoding
         assert loaded == ascii(session["context_data"])
+
+
+# ══════════════════════════════════════════════════════════════
+# Portability: no import-time POSIX call, reasoned POSIX-only marks, LF checkout
+# ══════════════════════════════════════════════════════════════
+
+#: Calls that do not exist on Windows (or fork the interpreter): never at import
+#: or decorator time, because that breaks collection of the whole module there.
+_POSIX_CALLS = frozenset({"geteuid", "getuid", "getgid", "fork", "forkpty"})
+
+
+def _call_name(call: ast.Call) -> str:
+    func = call.func
+    return func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+
+
+def _import_time_calls(tree: ast.AST, names: frozenset[str]) -> list[tuple[int, str]]:
+    """``(line, name)`` of every call of ``names`` that runs at import time.
+
+    Module level, class bodies, decorators and default values run at import; a
+    function or lambda BODY does not.
+    """
+    found: list[tuple[int, str]] = []
+
+    class _Visitor(ast.NodeVisitor):
+        def visit_Call(self, node: ast.Call) -> None:
+            if _call_name(node) in names:
+                found.append((node.lineno, _call_name(node)))
+            self.generic_visit(node)
+
+        def _function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+            for expr in node.decorator_list:
+                self.visit(expr)
+            self.visit(node.args)
+            if node.returns is not None:
+                self.visit(node.returns)  # the body is skipped on purpose
+
+        visit_FunctionDef = visit_AsyncFunctionDef = _function
+
+        def visit_Lambda(self, node: ast.Lambda) -> None:
+            self.visit(node.args)  # a lambda body runs later
+
+    _Visitor().visit(tree)
+    return found
+
+
+def _posix_only_without_reason(tree: ast.AST) -> list[int]:
+    """Lines of ``posix_only(...)`` calls with no non-blank string-literal reason."""
+    bad: list[int] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and _call_name(node) == "posix_only":
+            first = node.args[0] if node.args else None
+            if not (
+                isinstance(first, ast.Constant)
+                and isinstance(first.value, str)
+                and first.value.strip()
+            ):
+                bad.append(node.lineno)
+    return bad
+
+
+def _bare_symlink_calls(tree: ast.AST) -> list[int]:
+    """Lines of ``x.symlink_to(...)`` and ``os.symlink(...)`` calls."""
+    return [
+        n.lineno
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and _call_name(n) in {"symlink_to", "symlink"}
+    ]
+
+
+def _test_trees() -> list[tuple[pathlib.Path, ast.AST]]:
+    out = []
+    for path in sorted((_REPO_ROOT / "tests").rglob("*.py")):
+        rel = path.relative_to(_REPO_ROOT)
+        out.append(
+            (rel, ast.parse(path.read_text(encoding="utf-8"), filename=str(rel)))
+        )
+    return out
+
+
+def _gitattributes() -> dict[str, set[str]]:
+    rules: dict[str, set[str]] = {}
+    text = (_REPO_ROOT / ".gitattributes").read_text(encoding="utf-8")
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if line:
+            pattern, *attrs = line.split()
+            rules.setdefault(pattern, set()).update(attrs)
+    return rules
+
+
+class TestPortabilityRules:
+    """Windows and macOS legs: the test tree never trips on a POSIX-only call."""
+
+    def test_no_test_calls_a_posix_only_function_at_import_time(self):
+        offenders = [
+            f"{rel}:{line} {name}()"
+            for rel, tree in _test_trees()
+            for line, name in _import_time_calls(tree, _POSIX_CALLS)
+        ]
+        assert not offenders, (
+            "POSIX-only call at import or decorator time (move it into the test "
+            "body, `tests.conftest.skip_if_root` does the root check): "
+            + ", ".join(offenders)
+        )
+
+    def test_every_posix_only_mark_carries_a_reason(self):
+        offenders = [
+            f"{rel}:{line}"
+            for rel, tree in _test_trees()
+            for line in _posix_only_without_reason(tree)
+        ]
+        assert not offenders, "posix_only() without a reason: " + ", ".join(offenders)
+
+    def test_symlinks_go_through_the_shared_helper(self):
+        offenders = [
+            f"{rel}:{line}"
+            for rel, tree in _test_trees()
+            if rel.as_posix() != "tests/conftest.py"
+            for line in _bare_symlink_calls(tree)
+        ]
+        assert not offenders, (
+            "bare symlink_to or os.symlink (use tests.conftest.symlink_or_skip, "
+            "which skips where symlinks are refused): " + ", ".join(offenders)
+        )
+
+    def test_the_scanners_flag_and_accept_the_known_shapes(self):
+        bad = ast.parse(
+            "import os, pytest\n"
+            "X = os.geteuid()\n"
+            "@pytest.mark.skipif(os.getuid() == 0, reason='r')\n"
+            "def f(a=os.fork()):\n"
+            "    os.geteuid()\n"
+            "class C:\n"
+            "    y = os.getgid()\n"
+        )
+        hits = _import_time_calls(bad, _POSIX_CALLS)
+        assert [name for _, name in hits] == ["geteuid", "getuid", "fork", "getgid"]
+        ok = ast.parse(
+            "def f():\n"
+            "    os.geteuid()\n"
+            "    return lambda: os.fork()\n"
+            "g = lambda: os.getuid()\n"
+        )
+        assert _import_time_calls(ok, _POSIX_CALLS) == []
+        assert _posix_only_without_reason(
+            ast.parse("posix_only()\nposix_only('')\nposix_only(r)\nposix_only('why')")
+        ) == [1, 2, 3]
+        assert _bare_symlink_calls(
+            ast.parse("a.symlink_to(b)\nos.symlink(a, b)\nsymlink_or_skip(a, b)")
+        ) == [1, 2]
+
+    def test_the_posix_only_mark_skips_on_windows_only(self, monkeypatch):
+        from tests.conftest import posix_only
+
+        mark = posix_only("needs a mode bit").mark
+        assert mark.name == "skipif"
+        assert mark.kwargs["reason"] == "needs a mode bit"
+        assert mark.args == (sys.platform == "win32",)
+
+    def test_a_dangling_link_is_skipped_not_failed_when_links_are_refused(
+        self, tmp_path, monkeypatch
+    ):
+        from tests.conftest import symlink_or_skip
+
+        def refuse(self, target, target_is_directory=False):
+            raise OSError("no privilege")
+
+        monkeypatch.setattr(pathlib.Path, "symlink_to", refuse)
+        with pytest.raises(pytest.skip.Exception):
+            symlink_or_skip(tmp_path / "l", tmp_path / "t")
+
+
+class TestGitattributesPinLineEndings:
+    """`actions/checkout` on Windows must not turn LF into CRLF (D-018)."""
+
+    _LF_PATTERNS = (
+        "*.py",
+        "*.json",
+        "*.md",
+        "*.txt",
+        "*.toml",
+        "*.yml",
+        "*.yaml",
+        "*.sh",
+    )
+
+    def test_text_types_are_checked_out_with_lf(self):
+        rules = _gitattributes()
+        assert {"text=auto", "eol=lf"} <= rules.get("*", set())
+        for pattern in self._LF_PATTERNS:
+            assert {"text", "eol=lf"} <= rules.get(pattern, set()), pattern
+
+    def test_images_and_archives_are_binary(self):
+        rules = _gitattributes()
+        for pattern in ("*.png", "*.jpg", "*.gif", "*.zip", "*.whl"):
+            assert "binary" in rules.get(pattern, set()), pattern
+
+    @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+    def test_git_resolves_the_attributes_for_real_paths(self):
+        def attrs(path: str) -> dict[str, str]:
+            out = subprocess.run(
+                ["git", "check-attr", "text", "eol", "--", path],
+                cwd=_REPO_ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            ).stdout
+            return {
+                line.split(": ")[1]: line.split(": ")[2]
+                for line in out.splitlines()
+                if line.count(": ") == 2
+            }
+
+        for path in ("docs/api.txt", "pyproject.toml", "tests/conftest.py"):
+            assert attrs(path).get("eol") == "lf", path
+        assert attrs("images/fsm-llm-logo-1.png").get("text") == "unset"
 
 
 # ══════════════════════════════════════════════════════════════
