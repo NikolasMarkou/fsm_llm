@@ -25,6 +25,7 @@ import subprocess
 import sys
 
 import pytest
+import tomllib
 
 _REPO_ROOT = pathlib.Path(__file__).parents[1]
 _SCRIPTS = str(_REPO_ROOT / "scripts")
@@ -405,6 +406,59 @@ class TestNoPypiInstallHint:
             if needle in line
         ]
         assert not hits, f"stale PyPI install hint (clone install instead): {hits}"
+
+
+#: Newest Python minor that has a classifier. Raised (with evidence from the
+#: uv runs) when 3.13 to 3.15 are classified; it is a constant so that adding a
+#: classifier without the evidence step fails here.
+_NEWEST_CLASSIFIED_MINOR = 12
+
+
+def _pyproject() -> dict:
+    return tomllib.loads(_read("pyproject.toml"))
+
+
+def _python_floor_minor() -> int:
+    spec = _pyproject()["project"]["requires-python"]
+    m = re.fullmatch(r">=\s*3\.(\d+)", spec)
+    assert m, f"requires-python must be a plain '>=3.N' floor, got {spec!r}"
+    return int(m.group(1))
+
+
+def _classified_minors() -> list[int]:
+    prefix = "Programming Language :: Python :: 3."
+    return sorted(
+        int(c[len(prefix) :])
+        for c in _pyproject()["project"]["classifiers"]
+        if c.startswith(prefix)
+    )
+
+
+class TestClassifiersMatchFloor:
+    """`requires-python` and the version classifiers are one fact, stated twice."""
+
+    def test_the_floor_is_python_3_11(self):
+        assert _python_floor_minor() == 11
+
+    def test_classifiers_run_contiguously_from_the_floor(self):
+        floor = _python_floor_minor()
+        minors = _classified_minors()
+        assert minors, "no Python version classifier"
+        assert minors[0] == floor, f"oldest classifier 3.{minors[0]}, floor 3.{floor}"
+        assert minors == list(range(floor, minors[-1] + 1)), minors
+
+    def test_the_newest_classifier_is_the_evidenced_version(self):
+        assert _classified_minors()[-1] == _NEWEST_CLASSIFIED_MINOR
+
+    def test_setuptools_floor_reads_the_license_expression(self):
+        """`license = "Apache-2.0"` (PEP 639) needs setuptools 77 or later."""
+        requires = _pyproject()["build-system"]["requires"]
+        floors = [
+            int(m.group(1))
+            for r in requires
+            if (m := re.fullmatch(r"setuptools\s*>=\s*(\d+)(?:\.\d+)*", r.strip()))
+        ]
+        assert floors and floors[0] >= 77, requires
 
 
 # ══════════════════════════════════════════════════════════════

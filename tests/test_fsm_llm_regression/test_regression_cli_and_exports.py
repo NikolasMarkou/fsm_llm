@@ -106,7 +106,8 @@ class TestReadmeBadge:
             if "img.shields.io/badge/python" in line:
                 assert "3.8" not in line, "Badge still references Python 3.8"
                 assert "3.9" not in line, "Badge still references Python 3.9"
-                assert "3.10" in line, "Badge missing Python 3.10"
+                assert "3.10" not in line, "Badge still references Python 3.10"
+                assert "3.11" in line, "Badge missing Python 3.11"
                 break
 
 

@@ -2,7 +2,7 @@
   <a href="https://www.apache.org/licenses/LICENSE-2.0">
     <img alt="License: Apache-2.0" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg">
   </a>
-  <img alt="Python Version" src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue">
+  <img alt="Python Version" src="https://img.shields.io/badge/python-3.11%20%7C%203.12-blue">
   <img alt="Version" src="https://img.shields.io/badge/version-0.12.0-green">
   <a href="https://github.com/NikolasMarkou/fsm_llm/actions/workflows/python-package.yml">
     <img alt="Tests" src="https://github.com/NikolasMarkou/fsm_llm/actions/workflows/python-package.yml/badge.svg">
@@ -120,7 +120,7 @@ Do not use it for open-ended chat with no structure (a plain LLM call is simpler
 
 ## Installation
 
-> **Note:** This library requires Python 3.10 to 3.12. `fsm-llm` on PyPI is a different, unrelated project, so install from a clone.
+> **Note:** This library requires Python 3.11 or newer (tested on 3.11 and 3.12). `fsm-llm` on PyPI is a different, unrelated project, so install from a clone.
 
 1.  **Clone the repository:**
     ```bash
@@ -550,7 +550,7 @@ fsm_llm/
 ├── evaluation/                # Datasets and recorded eval runs
 ├── scripts/                   # Supply-chain audit, benches, doc-count check
 ├── images/                    # Logo and diagrams
-├── .github/workflows/         # CI: Python 3.10, 3.11, 3.12
+├── .github/workflows/         # CI: Python 3.11, 3.12
 └── CHANGELOG.md, EVALUATE.md, CONTRIBUTING.md, SECURITY.md
 ```
 
@@ -564,7 +564,7 @@ Contributions are welcome, from a typo fix to a new agent pattern. Full rules ar
 
 ```bash
 make install-dev    # editable install with every extra, plus pre-commit hooks
-make test           # Run full test suite (14,016 tests)
+make test           # Run full test suite (14,020 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy on the fsm_llm package (src/)
@@ -573,7 +573,7 @@ make counts         # fail when a test count written in a .md file differs from 
 make build          # wheel and sdist
 ```
 
-The default test run needs no network and no model. `pytest -m "not slow"` skips the slow tests. Live tests skip without a local Ollama. CI runs Python 3.10, 3.11 and 3.12: `.pth` audit, ruff lint and format check, mypy, and pytest without the `slow`, `real_llm` and `integration` markers.
+The default test run needs no network and no model. `pytest -m "not slow"` skips the slow tests. Live tests skip without a local Ollama. CI runs Python 3.11 and 3.12: `.pth` audit, ruff lint and format check, mypy, and pytest without the `slow`, `real_llm` and `integration` markers.
 
 ### Development Standards
 
