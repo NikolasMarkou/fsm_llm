@@ -1,7 +1,8 @@
 """Static analysis over FSM graphs: shared components, data flow, liveness.
 
 A pure core module (it imports no subpackage and nothing from the pipeline,
-only `definitions`). The validator's trap detection and the data-flow and
+only `definitions` and the leaf `state_kinds`, the kind registry the result-key
+rule is read from). The validator's trap detection and the data-flow and
 liveness analyses of runtime FSM synthesis (plan 2cefeb61) share one graph
 primitive here, so a graph rule lives once. The analyses take a typed
 `FSMDefinition` and return plain findings; they never log and never raise on a
@@ -23,6 +24,7 @@ from .definitions import (
     logic_referenced_keys,
     reachable_from,
 )
+from .state_kinds import kind_of
 
 
 def strongly_connected_components(
@@ -136,8 +138,7 @@ def _minted_keys(state: State) -> set[str]:
 
 
 def _result_key(state: State) -> str | None:
-    config = state.completion or state.synthesize
-    return config.result_key if config is not None else None
+    return kind_of(state).result_key(state)
 
 
 def _produced(state: State, handler_only: frozenset[str]) -> set[str]:

@@ -58,7 +58,7 @@ from .constants import (
 )
 from .logging import logger
 from .schema_registry import SCHEMA_VERSION_DEFAULT, newer_fields
-from .state_kinds import kind_of
+from .state_kinds import KINDS, kind_of
 
 # --------------------------------------------------------------
 # Identifier charset policy
@@ -1400,13 +1400,15 @@ def handler_only_names(definition: FSMDefinition) -> frozenset[str]:
     the runner writes it, D-002 of plan 2cefeb61).
 
     The one answer shared by ``MessagePipeline._handler_only_keys`` and
-    ``flow_analysis``. Takes a loaded definition, returns a new frozenset (empty
-    for a definition with none of the three), never raises.
+    ``flow_analysis``. The result keys come from the kind registry
+    (``KindSpec.result_key``), never from a branch on the kind configs. Takes a
+    loaded definition, returns a new frozenset (empty for a definition with none
+    of the three), never raises.
     """
     results = {
-        config.result_key
+        key
         for state in definition.states.values()
-        if (config := state.completion or state.synthesize) is not None
+        if (key := kind_of(state).result_key(state)) is not None
     }
     return frozenset(definition.handler_only_keys) | results
 
@@ -2170,18 +2172,13 @@ class FSMDefinition(BaseModel):
            by the runner. (A completion ``messages_key`` is internal-prefixed and
            so can never be a public return key.)
         """
+        # kinds in registry order: when two kinds share a key the later label wins
         owned = {
-            state.completion.result_key: "result_key of a completion state"
+            key: f"result_key of a {spec.name} state"
+            for spec in KINDS
             for state in self.states.values()
-            if state.completion is not None
+            if kind_of(state) is spec and (key := spec.result_key(state)) is not None
         }
-        owned.update(
-            {
-                state.synthesize.result_key: "result_key of a synthesize state"
-                for state in self.states.values()
-                if state.synthesize is not None
-            }
-        )
         from .transition_evaluator import TransitionEvaluator  # circular at import
 
         evaluator = TransitionEvaluator()

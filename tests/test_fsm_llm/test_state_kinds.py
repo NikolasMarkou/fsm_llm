@@ -312,6 +312,198 @@ class TestHooks:
         assert sk.SYNTHESIZE.dryrun_judged is False
 
 
+def _function_node(path: Path, name: str, owner: str | None = None) -> ast.AST:
+    """The `def` named *name* (inside class *owner* when given) of a source file."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    scope: ast.AST = tree
+    if owner is not None:
+        scope = next(
+            n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == owner
+        )
+    return next(
+        n for n in ast.walk(scope) if isinstance(n, ast.FunctionDef) and n.name == name
+    )
+
+
+def _config_attributes(node: ast.AST) -> set[str]:
+    """The kind-config attributes (`.completion`, `.synthesize`) a function reads."""
+    return {
+        n.attr
+        for n in ast.walk(node)
+        if isinstance(n, ast.Attribute) and n.attr in {"completion", "synthesize"}
+    }
+
+
+class TestResultKeyReaders:
+    """Plan d454fd62 step 47: the readers of a kind's result key go through the
+    registry, so a new kind with a result key needs no edit in them."""
+
+    def _loaded(self):
+        for name, (raw, _options) in _CORPUS.items():
+            try:
+                yield name, FSMDefinition(**copy.deepcopy(raw))
+            except Exception:
+                continue
+
+    def test_the_readers_equal_the_old_inline_rule_over_the_corpus(self):
+        """Guards: the hook output is the rule the readers applied before the
+        registry (`state.completion or state.synthesize`), for every corpus state."""
+        from fsm_llm.definitions import handler_only_names
+        from fsm_llm.flow_analysis import _result_key
+
+        checked = 0
+        for name, loaded in self._loaded():
+            old = set()
+            for state in loaded.states.values():
+                config = state.completion or state.synthesize
+                expected = config.result_key if config is not None else None
+                assert _result_key(state) == expected, (name, state.id)
+                if expected is not None:
+                    old.add(expected)
+                    checked += 1
+            assert handler_only_names(loaded) == (
+                frozenset(loaded.handler_only_keys) | old
+            ), name
+        assert checked > 20  # the corpus holds completion and synthesize states
+
+    @pytest.mark.parametrize(
+        ("path", "name", "owner"),
+        [
+            ("definitions.py", "handler_only_names", None),
+            ("flow_analysis.py", "_result_key", None),
+            ("api.py", "_build_push_context", "API"),
+        ],
+    )
+    def test_no_reader_branches_on_a_kind_config(self, path, name, owner):
+        """Guards (D-015): these readers ask the kind registry, never
+        `.completion` or `.synthesize` (a new kind would need an edit in each)."""
+        node = _function_node(_MODULE.parent / path, name, owner)
+        assert _config_attributes(node) == set(), (path, name)
+
+    def test_the_result_key_collision_check_asks_the_registry_for_completion(self):
+        """Guards: `FSMDefinition._check_synthesize_states` builds `owned` from the
+        registry; only the synthesize edge rules (step 50) still read `.synthesize`."""
+        node = _function_node(
+            _MODULE.parent / "definitions.py",
+            "_check_synthesize_states",
+            "FSMDefinition",
+        )
+        assert "completion" not in _config_attributes(node)
+
+    def test_a_result_key_collision_names_the_owning_kind(self):
+        """The refusal text is unchanged: the label is built from the kind name."""
+        done = {
+            "id": "ask",
+            "description": "d",
+            "purpose": "p",
+            "completion": {**_completion(), "result_key": "answer_slot"},
+            "transitions": [{"target_state": "work", "description": "go"}],
+        }
+        work = {
+            "id": "work",
+            "description": "d",
+            "purpose": "p",
+            "synthesize": {
+                **_synthesize(),
+                "return_keys": ["answer_slot"],
+                "on_failure": "end",
+            },
+            "transitions": [
+                {
+                    "target_state": "end",
+                    "description": "x",
+                    "conditions": [
+                        {
+                            "description": "failed",
+                            "requires_context_keys": ["synthesis_result"],
+                            "logic": {
+                                "in": [
+                                    {"var": "synthesis_result.status"},
+                                    ["failed", "aborted"],
+                                ]
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+        end = {"id": "end", "description": "d", "purpose": "p"}
+        with pytest.raises(ValueError, match="result_key of a completion state"):
+            FSMDefinition(
+                name="n",
+                description="d",
+                initial_state="ask",
+                persona="p",
+                states={"ask": done, "work": work, "end": end},
+            )
+
+    def test_push_drops_only_the_kinds_that_do_not_inherit_their_result(self):
+        """Behaviour kept (the asymmetry is fixed at step 55): the parent's
+        completion result key is dropped from a pushed child's inherited context,
+        the synthesize one is not, and the registry flag decides."""
+        calls = {
+            "completion": {"kind": "final", "text": "parent", "calls": []},
+            "synthesis": {"status": "ok"},
+        }
+        fsm = {
+            "name": "child",
+            "description": "d",
+            "initial_state": "a",
+            "persona": "p",
+            "states": {
+                "a": {
+                    "id": "a",
+                    "description": "d",
+                    "purpose": "p",
+                    "completion": {**_completion(), "result_key": "completion_result"},
+                    "transitions": [{"target_state": "b", "description": "go"}],
+                },
+                "b": {
+                    "id": "b",
+                    "description": "d",
+                    "purpose": "p",
+                    "synthesize": {**_synthesize(), "on_failure": "c"},
+                    "transitions": [
+                        {
+                            "target_state": "c",
+                            "description": "x",
+                            "conditions": [
+                                {
+                                    "description": "failed",
+                                    "requires_context_keys": ["synthesis_result"],
+                                    "logic": {
+                                        "in": [
+                                            {"var": "synthesis_result.status"},
+                                            ["failed", "aborted"],
+                                        ]
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                },
+                "c": {"id": "c", "description": "d", "purpose": "p"},
+            },
+        }
+        child = FSMDefinition(**fsm)
+        api = API.__new__(API)
+
+        class _Manager:
+            @staticmethod
+            def get_conversation_data(_conversation_id: str) -> dict[str, Any]:
+                return {
+                    "completion_result": calls["completion"],
+                    "synthesis_result": calls["synthesis"],
+                    "other": 1,
+                }
+
+        api.fsm_manager = _Manager()  # type: ignore[assignment]
+        context = api._build_push_context(
+            "conv", None, False, True, child_definition=child
+        )
+        assert context == {"synthesis_result": {"status": "ok"}, "other": 1}
+
+
 class TestLeafModule:
     def _imports(self) -> list[str]:
         tree = ast.parse(_MODULE.read_text(encoding="utf-8"))

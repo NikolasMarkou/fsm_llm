@@ -1590,6 +1590,7 @@ class MessagePipeline:
         (only that state's own completion call writes it, D-021) and of every
         synthesize state (only the runner writes it, D-002 of plan 2cefeb61).
 
+        The result keys come from the kind registry through ``handler_only_names``.
         Resolved per instance through ``fsm_resolver`` so a stacked child uses
         its own list, not the root's. Returns an empty set for the default.
         """

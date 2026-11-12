@@ -1213,6 +1213,7 @@ UNPINNED_CORE = {
     "src/transition_evaluator.py": "the engine's transition rules",
     "src/okf.py": "text caps shared with every package",
     "src/schema_registry.py": "leaf core module read by the pinned validator.py",
+    "src/state_kinds.py": "the engine's kind registry (leaf, read by the pinned flow_analysis.py)",
     "src/security.py": "key filters shared with every package",
     "src/visualizer.py": "the mermaid of the approval summary (G7 never runs here)",
     "src/agents/semantic_tools.py": "embedding lookup, the bench library has no embedder",

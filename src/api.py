@@ -141,6 +141,7 @@ from .llm import (
 from .logging import logger
 from .memory import WorkingMemory
 from .session import SessionState, SessionStore
+from .state_kinds import kind_of
 from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 from .utilities import load_fsm_definition, load_fsm_from_file
 
@@ -1413,8 +1414,11 @@ class API:
             # inherit a key a child completion state owns (D-021), and do NOT
             # drop it from an explicit `context_to_pass`. See D-029.
             for state in child_definition.states.values():
-                if state.completion is not None:
-                    initial_context.pop(state.completion.result_key, None)
+                spec = kind_of(state)
+                if not spec.inherits_result_on_push:
+                    key = spec.result_key(state)
+                    if key is not None:
+                        initial_context.pop(key, None)
 
         if context_to_pass:
             initial_context.update(context_to_pass)
