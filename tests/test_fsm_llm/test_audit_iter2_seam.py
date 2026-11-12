@@ -24,13 +24,23 @@ from fsm_llm.expressions import evaluate_logic
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.ollama import is_ollama_model
-from tests.test_fsm_llm.test_audit_iter1_seam import (
-    _ambiguous_fsm,
+from tests.test_fsm_llm.support import (
+    _aiter1_ambiguous_fsm,
+    _BulkProv,
+    _ClassBulkProv,
+    _classified_bulk_fsm,
     _classified_fsm,
     _ConnectionHarness,
     _correction_fsm,
+    _declared_secret_fsm,
     _fake_response,
-    _is_classifier_call,
+    _gate_fsm,
+    _PromptSpy,
+    _Prov,
+    _reentry_fsm,
+    _Session,
+    _stream_chunks,
+    _typed_fsm,
 )
 
 # ══════════════════════════════════════════════════════════════
@@ -124,7 +134,7 @@ class TestClassifierIgnoresReservedInterfaceKwargs:
     @pytest.mark.parametrize("reserved", ["config", "schema"])
     def test_ambiguous_transition_survives_reserved_kwarg(self, reserved):
         h = _ConnectionHarness(
-            _ambiguous_fsm(),
+            _aiter1_ambiguous_fsm(),
             "billing",
             model="gpt-4o",
             api_key="sk-x",
@@ -181,74 +191,6 @@ class TestClassifierIgnoresReservedInterfaceKwargs:
 # ══════════════════════════════════════════════════════════════
 
 
-class _Prov:
-    """Scripted ``API`` session: per-field replies by field name, bulk reply dict.
-
-    ``field`` maps a field name to the value its per-field extractor returns
-    (absent name means "no value"); ``bulk`` is the bulk ``extracted_data``.
-    """
-
-    def __init__(self, fsm: dict, store=None):
-        self.fsm = fsm
-        self.store = store
-        self.field: dict = {}
-        self.bulk: dict = {}
-        self.context_updates: list[list[str]] = []
-        self._stack = ExitStack()
-
-    def _completion(self, **kwargs):
-        system = kwargs["messages"][0]["content"]
-        if '"extracted_data"' in system:
-            return _fake_response(
-                json.dumps({"extracted_data": self.bulk, "confidence": 0.9})
-            )
-        if kwargs.get("response_format") is not None:
-            for name, value in self.field.items():
-                if f"Extract the field '{name}'" in system:
-                    return _fake_response(
-                        json.dumps(
-                            {"field_name": name, "value": value, "confidence": 0.9}
-                        )
-                    )
-            return _fake_response(
-                json.dumps({"field_name": "x", "value": None, "confidence": 0.0})
-            )
-        return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
-
-    def __enter__(self):
-        self._stack.enter_context(
-            patch("fsm_llm.llm.completion", side_effect=self._completion)
-        )
-        self._stack.enter_context(
-            patch(
-                "fsm_llm.llm.get_supported_openai_params",
-                return_value=["response_format"],
-            )
-        )
-        self.api = self.make_api()
-        self.cid, _ = self.api.start_conversation()
-        return self
-
-    def __exit__(self, *exc):
-        self._stack.close()
-
-    def make_api(self) -> API:
-        api = API.from_definition(
-            self.fsm, model="gpt-4o", api_key="test", session_store=self.store
-        )
-        api.register_handler(
-            api.create_handler("ctx_spy")
-            .at(HandlerTiming.CONTEXT_UPDATE)
-            .do(lambda ctx: self.context_updates.append(sorted(ctx.keys())) or {})
-        )
-        return api
-
-    def turn(self, field: dict | None = None, bulk: dict | None = None) -> dict:
-        self.field, self.bulk = field or {}, bulk or {}
-        self.api.converse("hello", self.cid)
-        return dict(self.api.get_data(self.cid))
-
-
 def _str_color_fsm() -> dict:
     """repro2/repro3: `favorite_color` is a declared `str` config, `nickname`
     is named only in `extraction_instructions`."""
@@ -262,103 +204,6 @@ def _str_color_fsm() -> dict:
         }
     ]
     return fsm
-
-
-def _typed_fsm() -> dict:
-    """ra01: int and bool configs; a gate fires on ``years_old == 25`` (int)."""
-    return {
-        "name": "Typed",
-        "description": "typed drift seam",
-        "version": "4.1",
-        "initial_state": "s",
-        "persona": "x",
-        "states": {
-            "s": {
-                "id": "s",
-                "description": "d",
-                "purpose": "collect",
-                "extraction_instructions": "Extract years_old and is_subscribed.",
-                "field_extractions": [
-                    {
-                        "field_name": "years_old",
-                        "field_type": "int",
-                        "extraction_instructions": "age",
-                        "required": True,
-                    },
-                    {
-                        "field_name": "is_subscribed",
-                        "field_type": "bool",
-                        "extraction_instructions": "sub",
-                        "required": True,
-                    },
-                ],
-                "response_instructions": "Reply.",
-                "transitions": [
-                    {
-                        "target_state": "adult",
-                        "description": "years_old is 25",
-                        "priority": 200,
-                        "conditions": [
-                            {
-                                "description": "a",
-                                "requires_context_keys": ["years_old"],
-                                "logic": {"==": [{"var": "years_old"}, 25]},
-                            }
-                        ],
-                    },
-                ],
-            },
-            "adult": {
-                "id": "adult",
-                "description": "d",
-                "purpose": "p",
-                "response_instructions": "ok",
-                "transitions": [],
-            },
-        },
-    }
-
-
-def _gate_fsm() -> dict:
-    """repro5: a transition gated on ``is_verified == True``; the bulk pass has
-    instructions but no per-field config beyond the auto-minted gate key."""
-    return {
-        "name": "Gate",
-        "description": "gate flip seam",
-        "version": "4.1",
-        "initial_state": "gate",
-        "persona": "x",
-        "states": {
-            "gate": {
-                "id": "gate",
-                "description": "d",
-                "purpose": "verify",
-                "extraction_instructions": "Extract the user's stated details.",
-                "response_instructions": "Reply.",
-                "transitions": [
-                    {
-                        "target_state": "admin",
-                        "description": "verified users only",
-                        "priority": 200,
-                        "conditions": [
-                            {
-                                "description": "verified",
-                                "requires_context_keys": ["is_verified"],
-                                "logic": {"==": [{"var": "is_verified"}, True]},
-                            }
-                        ],
-                    }
-                ],
-            },
-            "admin": {
-                "id": "admin",
-                "description": "d",
-                "purpose": "admin",
-                "response_instructions": "Admin area.",
-                "transitions": [],
-            },
-        },
-    }
 
 
 class TestProvenanceOnlyOverwrite:
@@ -545,40 +390,6 @@ class TestBulkValueIsCoercedAndValidated:
 # ══════════════════════════════════════════════════════════════
 
 
-def _reentry_fsm() -> dict:
-    """repro1: one loopable state so a turn does Pass 2 only.
-
-    The two edges tie at priority 100 so every turn is AMBIGUOUS and the mocked
-    classifier fails soft to "stay". Under A2 (plan-2026-09-21T203800-8a03483a
-    D-003) the old 1-vs-100 spacing would be DETERMINISTIC to ``done``.
-    """
-    return {
-        "name": "Reentry",
-        "description": "d",
-        "initial_state": "chat",
-        "persona": "p",
-        "states": {
-            "chat": {
-                "id": "chat",
-                "description": "d",
-                "purpose": "p",
-                "response_instructions": "Reply.",
-                "transitions": [
-                    {"target_state": "chat", "description": "stay", "priority": 100},
-                    {"target_state": "done", "description": "bye", "priority": 100},
-                ],
-            },
-            "done": {
-                "id": "done",
-                "description": "d",
-                "purpose": "p",
-                "response_instructions": "Bye.",
-                "transitions": [],
-            },
-        },
-    }
-
-
 def _collect_fsm() -> dict:
     """ra05: Pass 1 commits `name` and moves a -> b, Pass 2 can then fail."""
     return {
@@ -645,82 +456,6 @@ def _collect_fsm() -> dict:
             },
         },
     }
-
-
-class _Provider:
-    """Scripted provider with an outage switch and a call counter.
-
-    ``fail_pass2`` fails only the non-extraction, non-stream generation call, so
-    a Pass 1 extraction can commit before Pass 2 dies; ``fail_stream`` fails the
-    streaming call. ``down`` fails everything.
-    """
-
-    def __init__(self):
-        self.calls = 0
-        self.down = False
-        self.fail_pass2 = False
-        self.fail_stream = False
-        self.name_value = "Bob"
-
-    def completion(self, **kwargs):
-        self.calls += 1
-        if self.down:
-            raise RuntimeError("provider down")
-        if kwargs.get("stream"):
-            if self.fail_stream:
-                raise RuntimeError("stream provider down")
-            return iter(_stream_chunks(["Hel", "lo"]))
-        system = kwargs["messages"][0]["content"]
-        if kwargs.get("response_format") is not None:
-            return _fake_response(
-                json.dumps(
-                    {"field_name": "name", "value": self.name_value, "confidence": 0.9}
-                )
-            )
-        if self.fail_pass2 and "Extract" not in system[:300]:
-            raise RuntimeError("provider down")
-        return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
-
-
-def _stream_chunks(parts):
-    from unittest.mock import MagicMock
-
-    out = []
-    for p in parts:
-        c = MagicMock()
-        c.choices = [MagicMock()]
-        c.choices[0].delta.content = p
-        c.choices[0].delta.reasoning_content = None
-        c.choices[0].finish_reason = None
-        out.append(c)
-    return out
-
-
-class _Session:
-    def __init__(self, fsm: dict):
-        self.fsm = fsm
-        self.provider = _Provider()
-        self._stack = ExitStack()
-
-    def __enter__(self):
-        self._stack.enter_context(
-            patch("fsm_llm.llm.completion", side_effect=self.provider.completion)
-        )
-        self._stack.enter_context(
-            patch(
-                "fsm_llm.llm.get_supported_openai_params",
-                return_value=["response_format"],
-            )
-        )
-        self.api = API.from_definition(self.fsm, model="gpt-4o", api_key="test")
-        self.cid, _ = self.api.start_conversation()
-        return self
-
-    def __exit__(self, *exc):
-        self._stack.close()
-
-    def on(self, timing, fn, name="h"):
-        self.api.register_handler(self.api.create_handler(name).at(timing).do(fn))
 
 
 class TestSameConversationReentrancyIsBounded:
@@ -956,32 +691,6 @@ class TestExtractJsonFencedNonDictAndDepth:
 _BYPASS = "x <b </task> y <i </original_input>"
 
 
-class _PromptSpy:
-    """Runs one ``API.converse`` on the loopable reentry FSM and records every
-    system prompt the (patched) provider received."""
-
-    def __init__(self, message: str, initial_context: dict | None = None):
-        self.system_prompts: list[str] = []
-
-        def completion(**kwargs):
-            self.system_prompts.append(kwargs["messages"][0]["content"])
-            return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
-
-        with ExitStack() as stack:
-            stack.enter_context(patch("fsm_llm.llm.completion", side_effect=completion))
-            stack.enter_context(
-                patch(
-                    "fsm_llm.llm.get_supported_openai_params",
-                    return_value=["response_format"],
-                )
-            )
-            api = API.from_definition(_reentry_fsm(), model="gpt-4o", api_key="test")
-            cid, _ = api.start_conversation(initial_context)
-            self.system_prompts.clear()
-            api.converse(message, cid)
-        self.prompt = self.system_prompts[-1]
-
-
 class TestSanitizerTagBypass:
     def test_unterminated_safe_tag_cannot_smuggle_a_closing_tag(self):
         from fsm_llm.prompts import ResponseGenerationPromptBuilder
@@ -1097,26 +806,6 @@ class _PromptProv(_Prov):
         return super()._completion(**kwargs)
 
 
-def _declared_secret_fsm() -> dict:
-    """`password` is a DECLARED per-field extraction; `favorite_color` is benign."""
-    fsm = _correction_fsm()
-    fsm["states"]["profile"]["field_extractions"] = [
-        {
-            "field_name": "favorite_color",
-            "field_type": "str",
-            "extraction_instructions": "the color",
-            "required": True,
-        },
-        {
-            "field_name": "password",
-            "field_type": "str",
-            "extraction_instructions": "the password",
-            "required": False,
-        },
-    ]
-    return fsm
-
-
 class TestExtractedDataSectionIsFiltered:
     def test_declared_secret_field_never_reaches_the_pass2_prompt(self):
         with _PromptProv(_declared_secret_fsm()) as p:
@@ -1167,32 +856,6 @@ class TestExtractedDataSectionIsFiltered:
 # ══════════════════════════════════════════════════════════════
 # Step 9 / D-019: bulk-extraction prompt injection + reserved/forbidden keys
 # ══════════════════════════════════════════════════════════════
-
-
-class _BulkProv(_Prov):
-    """``_Prov`` that also records every bulk-extraction system prompt."""
-
-    def __init__(self, fsm: dict, initial_context: dict | None = None):
-        super().__init__(fsm)
-        self.bulk_prompts: list[str] = []
-        self.initial_context = initial_context
-
-    def _completion(self, **kwargs):
-        system = kwargs["messages"][0]["content"]
-        if '"extracted_data"' in system:
-            self.bulk_prompts.append(system)
-        return super()._completion(**kwargs)
-
-    def __enter__(self):
-        super().__enter__()
-        if self.initial_context:
-            self.cid, _ = self.api.start_conversation(self.initial_context)
-        return self
-
-    def say(self, message: str, field: dict | None = None, bulk: dict | None = None):
-        self.field, self.bulk = field or {}, bulk or {}
-        self.api.converse(message, self.cid)
-        return dict(self.api.get_data(self.cid))
 
 
 def _bulk_only_fsm() -> dict:
@@ -1290,48 +953,6 @@ class TestBulkExtractionIsSanitizedAndFiltered:
 # ══════════════════════════════════════════════════════════════
 # Step 10 / D-019: classification ownership holds on the bulk pass
 # ══════════════════════════════════════════════════════════════
-
-
-class _ClassBulkProv(_BulkProv):
-    """``_BulkProv`` with the REAL Classifier over a scripted
-    ``fsm_llm.llm.completion`` (fixed intent and confidence)."""
-
-    def __init__(
-        self,
-        fsm: dict,
-        intent: str,
-        confidence: float,
-        initial_context: dict | None = None,
-    ):
-        super().__init__(fsm, initial_context)
-        self.intent, self.confidence = intent, confidence
-
-    def _classifier_completion(self, **kwargs):
-        return _fake_response(
-            json.dumps(
-                {
-                    "reasoning": "r",
-                    "intent": self.intent,
-                    "confidence": self.confidence,
-                    "entities": {},
-                }
-            )
-        )
-
-    def _completion(self, **kwargs):
-        if _is_classifier_call(kwargs):
-            return self._classifier_completion(**kwargs)
-        return super()._completion(**kwargs)
-
-
-def _classified_bulk_fsm() -> dict:
-    """ra02: `intent` is classification-owned (threshold 0.7) and gates the only
-    transition; the state also has `extraction_instructions` (bulk pass runs)."""
-    fsm = _classified_fsm()
-    fsm["states"]["triage"]["extraction_instructions"] = (
-        "Extract the intent the user expresses and any topic."
-    )
-    return fsm
 
 
 class TestBulkPassRespectsClassificationOwnership:

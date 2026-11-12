@@ -16,44 +16,29 @@ from loguru import logger
 from fsm_llm import FileSessionStore
 from fsm_llm.definitions import (
     FieldExtractionConfig,
-    FieldExtractionRequest,
     ResponseGenerationRequest,
 )
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.pipeline import MessagePipeline
-from tests.test_fsm_llm.test_audit_iter1_seam import (
-    _correction_fsm,
-    _fake_response,
-    _stream_chunk,
-)
-from tests.test_fsm_llm.test_audit_iter2_seam import (
+from tests.test_fsm_llm.support import (
+    _BACK_BULK,
+    _BACK_FIELD,
+    _BACK_TURN,
+    _back_edge_fsm,
     _ClassBulkProv,
     _classified_bulk_fsm,
+    _correction_fsm,
+    _EdgeProv,
+    _extract_field,
+    _fake_response,
+    _PassTwoSpy,
     _Prov,
 )
 
 # ══════════════════════════════════════════════════════════════
 # Step 2 / RB-01: uncoercible confidence at the field-extraction rungs
 # ══════════════════════════════════════════════════════════════
-
-
-def _extract_field(reply: str, field_type: str = "str"):
-    req = FieldExtractionRequest(
-        system_prompt="extract the field",
-        user_message="My name is Bob.",
-        field_name="name",
-        field_type=field_type,  # type: ignore[arg-type]
-    )
-    with (
-        patch("fsm_llm.llm.completion") as mock_comp,
-        patch(
-            "fsm_llm.llm.get_supported_openai_params",
-            return_value=["response_format"],
-        ),
-    ):
-        mock_comp.return_value = _fake_response(reply)
-        return LiteLLMInterface(model="gpt-4o", api_key="k").extract_field(req)
 
 
 _BAD_CONFIDENCES = ['"high"', "null", '{"x": 1}', '"95%"', '"0.9,"']
@@ -607,33 +592,6 @@ class TestRejectedCorrectionsAreCarried:
 # ══════════════════════════════════════════════════════════════
 
 
-class _PassTwoSpy(_Prov):
-    """``_Prov`` that also records the response-generation system prompt and
-    answers a streaming call, so both Pass-2 call sites can be inspected."""
-
-    def __init__(self, fsm: dict, store=None):
-        super().__init__(fsm, store)
-        self.pass2: list[str] = []
-
-    def _completion(self, **kwargs):
-        system = kwargs["messages"][0]["content"]
-        if "<response_generation>" in system:
-            self.pass2.append(system)
-            if kwargs.get("stream"):
-                return iter([_stream_chunk("ok")])
-        return super()._completion(**kwargs)
-
-    def say(self, message: str, bulk: dict, stream: bool = False) -> str:
-        self.field, self.bulk = {}, bulk
-        self.pass2.clear()
-        if stream:
-            list(self.api.converse_stream(message, self.cid))
-        else:
-            self.api.converse(message, self.cid)
-        assert self.pass2, "no response-generation call captured"
-        return self.pass2[-1]
-
-
 _BLOCK = "<rejected_corrections>"
 
 
@@ -1044,116 +1002,6 @@ class TestHandlerOnlyKeys:
 # ══════════════════════════════════════════════════════════════
 # Step 14 / RB-08: back-edge re-extraction (D-034)
 # ══════════════════════════════════════════════════════════════
-
-
-def _back_edge_fsm(name_extra_required: list[str] | None = None) -> dict:
-    """port of repros/back_edge.py: `name` -> `email` -> back to `name`.
-
-    ``name_extra_required`` adds required keys to `name` that the user never
-    supplies (the still-null case the call budget is stated for)."""
-
-    def _cond(key: str, logic: dict) -> dict:
-        return {"description": key, "requires_context_keys": [key], "logic": logic}
-
-    return {
-        "name": "Form",
-        "description": "back edge",
-        "version": "4.1",
-        "initial_state": "name",
-        "persona": "Concise.",
-        "states": {
-            "name": {
-                "id": "name",
-                "description": "collect name",
-                "purpose": "collect name",
-                "extraction_instructions": "Extract the user's full name.",
-                "required_context_keys": ["full_name", *(name_extra_required or [])],
-                "response_instructions": "Ask for name.",
-                "transitions": [
-                    {
-                        "target_state": "email",
-                        "description": "have name",
-                        "priority": 100,
-                        "conditions": [
-                            _cond("full_name", {"has_context": "full_name"})
-                        ],
-                    }
-                ],
-            },
-            "email": {
-                "id": "email",
-                "description": "collect email",
-                "purpose": "collect email",
-                "extraction_instructions": (
-                    "Extract the email and whether the user wants to change "
-                    "their name (wants_name_change)."
-                ),
-                "required_context_keys": ["email"],
-                "response_instructions": "Ask for email.",
-                "transitions": [
-                    {
-                        "target_state": "name",
-                        "description": "user wants to go back",
-                        "priority": 10,
-                        "conditions": [
-                            _cond(
-                                "wants_name_change",
-                                {"==": [{"var": "wants_name_change"}, True]},
-                            )
-                        ],
-                    },
-                    {
-                        "target_state": "done",
-                        "description": "have email",
-                        "priority": 100,
-                        "conditions": [_cond("email", {"has_context": "email"})],
-                    },
-                ],
-            },
-            "done": {
-                "id": "done",
-                "description": "end",
-                "purpose": "end",
-                "response_instructions": "Done.",
-                "transitions": [],
-            },
-        },
-    }
-
-
-class _EdgeProv(_Prov):
-    """``_Prov`` that records the kind of every Pass-1 provider call per turn."""
-
-    def __init__(self, fsm: dict, store=None):
-        super().__init__(fsm, store)
-        self.kinds: list[str] = []
-
-    def _completion(self, **kwargs):
-        system = kwargs["messages"][0]["content"]
-        if '"extracted_data"' in system:
-            self.kinds.append("bulk")
-        elif kwargs.get("response_format") is not None:
-            self.kinds.append("field")
-        return super()._completion(**kwargs)
-
-    def say(self, message: str, field: dict, bulk: dict) -> list[str]:
-        """One turn; returns the Pass-1 call kinds it made."""
-        self.field, self.bulk = field, bulk
-        self.kinds.clear()
-        self.api.converse(message, self.cid)
-        return list(self.kinds)
-
-    def reach_email(self, name: str = "Alice Smith") -> None:
-        kinds = self.say(f"I'm {name}", {"full_name": name}, {})
-        assert self.api.get_current_state(self.cid) == "email"
-        # a forward hop into a state with nothing pre-filled costs no bulk call
-        # beyond the one the source state's own extraction makes
-        assert kinds.count("bulk") == 1
-
-
-_BACK_TURN = "wait, change my name, it's Bob Jones"
-_BACK_FIELD = {"wants_name_change": True}
-_BACK_BULK = {"full_name": "Bob Jones", "wants_name_change": True}
 
 
 class TestBackEdgeReExtraction:

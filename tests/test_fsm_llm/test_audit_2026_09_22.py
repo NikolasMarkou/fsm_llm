@@ -22,7 +22,6 @@ import pytest
 from fsm_llm.api import API
 from fsm_llm.definitions import (
     ConversationBusyError,
-    FieldExtractionResponse,
     FSMDefinition,
     FSMError,
     State,
@@ -30,76 +29,18 @@ from fsm_llm.definitions import (
     Transition,
     TransitionCondition,
 )
-from fsm_llm.llm import LiteLLMInterface, LLMInterface
+from fsm_llm.llm import LLMInterface
+from tests.test_fsm_llm.support import (
+    _JOIN_TIMEOUT_S,
+    _a2026_09_22_api,
+    _blocked_fsm,
+    _join_all,
+    _mock_llm,
+)
 
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-_JOIN_TIMEOUT_S = 10.0
-
-
-def _mock_llm() -> MagicMock:
-    """A spec'd mock LLM: field extraction returns nothing, Pass 2 says "ok"."""
-    llm = MagicMock(spec=LLMInterface)
-    llm.model = "gpt-4"
-
-    def _extract_field(request):
-        return FieldExtractionResponse(
-            field_name=request.field_name,
-            value=None,
-            confidence=0.0,
-            reasoning="mock",
-            is_valid=False,
-        )
-
-    llm.extract_field.side_effect = _extract_field
-    llm.generate_response.return_value = MagicMock(
-        message="ok", message_type="response", reasoning="mock"
-    )
-    llm.generate_response_stream.side_effect = lambda request: iter(["o", "k"])
-    # The classifier sends through the conversation's own interface (D-006 of
-    # plan 944e2692): forward `complete` to a real LiteLLMInterface for the
-    # same model, so a patched `fsm_llm.llm.completion` still receives the
-    # classifier's provider request.
-    llm.complete.side_effect = LiteLLMInterface(model="gpt-4").complete
-    return llm
-
-
-def _blocked_fsm() -> FSMDefinition:
-    """``start`` waits on a key nobody sets, so every turn is BLOCKED."""
-    never = TransitionCondition(
-        description="never set",
-        logic={"==": [{"var": "never_set_flag"}, True]},
-    )
-    states = {
-        "start": State(
-            id="start",
-            description="Start",
-            purpose="Wait",
-            response_instructions="Respond",
-            transitions=[
-                Transition(target_state="end", description="Done", conditions=[never])
-            ],
-        ),
-        "end": State(id="end", description="End", purpose="End", transitions=[]),
-    }
-    return FSMDefinition(
-        name="audit_2026_09_22",
-        description="Blocked FSM for audit regression tests",
-        initial_state="start",
-        states=states,
-    )
-
-
-def _api() -> API:
-    return API.from_definition(_blocked_fsm(), llm_interface=_mock_llm())
-
-
-def _join_all(threads: list[threading.Thread]) -> None:
-    for t in threads:
-        t.join(timeout=_JOIN_TIMEOUT_S)
-    assert not any(t.is_alive() for t in threads), "a thread hung"
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +85,7 @@ class TestStep2EndedCacheRace:
     ``API._stack_lock`` (plan-2026-09-22T080837-8b258a25/D-003)."""
 
     def test_p0_1_reader_never_sees_the_gap_between_drop_and_cache_write(self):
-        api = _api()
+        api = _a2026_09_22_api()
         conv_id, _ = api.start_conversation(initial_context={"note": "n"})
         cache = _ParkOnWrite(conv_id)
         api._ended_conversations = cache
@@ -191,7 +132,7 @@ class TestStep2EndedCacheRace:
         assert isinstance(results["get_conversation_history"], list)
 
     def test_p0_1_concurrent_evictions_never_pop_the_same_key(self):
-        api = _api()
+        api = _a2026_09_22_api()
         ids = [api.start_conversation()[0] for _ in range(2)]
         cache = _MeetOnEvict()
         dict.__setitem__(cache, "oldest", {"data": {}, "state": "s", "history": []})
@@ -222,7 +163,7 @@ class TestStep2GetterFallbacks:
     (plan-2026-09-22T080837-8b258a25/D-004)."""
 
     def test_p1_4_history_after_end_comes_from_the_cache(self):
-        api = _api()
+        api = _a2026_09_22_api()
         conv_id, _ = api.start_conversation()
         api.converse("hello", conv_id)
         live = api.get_conversation_history(conv_id)
@@ -234,12 +175,12 @@ class TestStep2GetterFallbacks:
         "getter", ["get_data", "get_current_state", "get_conversation_history"]
     )
     def test_p1_4_unknown_id_still_raises_value_error(self, getter):
-        api = _api()
+        api = _a2026_09_22_api()
         with pytest.raises(ValueError):
             getattr(api, getter)("never-started")
 
     def test_p1_4_has_conversation_ended_unknown_id_is_false(self):
-        assert _api().has_conversation_ended("never-started") is False
+        assert _a2026_09_22_api().has_conversation_ended("never-started") is False
 
     @pytest.mark.parametrize(
         "getter",
@@ -255,7 +196,7 @@ class TestStep2GetterFallbacks:
         manager's own ``end_conversation`` removes the instance while the API
         keeps the conversation stack, so every getter raises a not-found
         ``FSMError`` internally and must answer from the ended cache."""
-        api = _api()
+        api = _a2026_09_22_api()
         conv_id, _ = api.start_conversation()
         api.converse("hello", conv_id)
         frame_id = api._get_current_fsm_conversation_id(conv_id)
@@ -291,7 +232,7 @@ class TestStep2GetterFallbacks:
     ):
         """A non-busy FSMError on a LIVE conversation is a real failure, not
         "ended": it re-raises even when a stale cache entry exists."""
-        api = _api()
+        api = _a2026_09_22_api()
         conv_id, _ = api.start_conversation()
         api._ended_conversations[conv_id] = {
             "data": {"note": "stale"},
@@ -309,7 +250,7 @@ class TestStep2GetterFallbacks:
     ):
         """Review concern 2: a live conversation whose state resolution fails
         must raise, not report "not ended"."""
-        api = _api()
+        api = _a2026_09_22_api()
         conv_id, _ = api.start_conversation()
 
         def _boom(*args: Any, **kwargs: Any) -> Any:
@@ -333,7 +274,7 @@ class TestStep2GetterFallbacks:
     def test_p1_5_busy_refusal_propagates_despite_a_cache_entry(
         self, getter, manager_method
     ):
-        api = _api()
+        api = _a2026_09_22_api()
         conv_id, _ = api.start_conversation()
         api._ended_conversations[conv_id] = {
             "data": {},
@@ -346,7 +287,7 @@ class TestStep2GetterFallbacks:
                 getattr(api, getter)(conv_id)
 
     def test_p1_5_not_found_fsm_error_without_cache_reraises_original(self):
-        api = _api()
+        api = _a2026_09_22_api()
         conv_id, _ = api.start_conversation()
         err = FSMError(f"Conversation {conv_id} not found")
         with patch.object(api.fsm_manager, "get_conversation_data", side_effect=err):
@@ -452,7 +393,7 @@ def _saved_state(api: API, **overrides: Any) -> Any:
 
 
 def _restore_api(**overrides: Any) -> tuple[API, _OneSessionStore]:
-    api = _api()
+    api = _a2026_09_22_api()
     store = _OneSessionStore(None)
     api._session_store = store
     store.state = _saved_state(api, **overrides)
@@ -516,7 +457,7 @@ class TestStep3RestoreLockOrder:
         assert reach_ins == []
 
     def test_p0_3_seed_on_unknown_conversation_raises_fsm_error(self):
-        api = _api()
+        api = _a2026_09_22_api()
         with pytest.raises(FSMError, match="not found"):
             api.fsm_manager.seed_restored_conversation(
                 "no-such-id",
@@ -633,7 +574,7 @@ class TestStep4ConfigPassthrough:
         from fsm_llm.constants import DEFAULT_MAX_FSM_CACHE_SIZE
         from fsm_llm.fsm import FSMManager
 
-        api = _api()
+        api = _a2026_09_22_api()
         assert api.fsm_manager._max_fsm_cache_size == 64
         assert DEFAULT_MAX_FSM_CACHE_SIZE == 64
         assert FSMManager(llm_interface=_mock_llm())._max_fsm_cache_size == 64
@@ -1054,7 +995,7 @@ class TestStep7FSMDefinitionNotFoundError:
     def test_api_loader_fallback_raises_the_typed_error(self):
         from fsm_llm.definitions import FSMDefinitionNotFoundError
 
-        api = _api()
+        api = _a2026_09_22_api()
         with pytest.raises(FSMDefinitionNotFoundError):
             api.fsm_manager.fsm_loader("evicted-content-hash")
 
@@ -1793,7 +1734,7 @@ class TestStep12Accessors:
             def hidden_buffers(self) -> frozenset[str]:
                 return frozenset({"via_property"})
 
-        api = _api()
+        api = _a2026_09_22_api()
         conv_id, _ = api.start_conversation()
         instance = api.fsm_manager.instances[conv_id]
         instance.context.working_memory = _Override()
@@ -1805,7 +1746,7 @@ class TestStep12Accessors:
             def to_dict(self) -> dict[str, Any]:
                 return {"core": {}}
 
-        api = _api()
+        api = _a2026_09_22_api()
         conv_id, _ = api.start_conversation()
         api.fsm_manager.instances[conv_id].context.working_memory = _Foreign()
         snapshot = api.fsm_manager.get_conversation_snapshot(conv_id)
@@ -2317,7 +2258,7 @@ class _Step14ConvLocks(dict):
 
 class TestStep14CacheLock:
     def test_cache_hit_does_not_take_manager_lock(self):
-        api = _api()
+        api = _a2026_09_22_api()
         conv_id, _ = api.start_conversation()
         manager = api.fsm_manager
         manager.get_fsm_definition(api.fsm_id)
@@ -2332,7 +2273,7 @@ class TestStep14CacheLock:
         assert [n for n, _ in tracker.acquires if n == "manager"] == []
 
     def test_lock_order_under_concurrent_start_and_converse(self):
-        api = _api()
+        api = _a2026_09_22_api()
         manager = api.fsm_manager
         convs = [api.start_conversation()[0] for _ in range(3)]
         tracker = _Step14Tracker()
@@ -2393,7 +2334,7 @@ class TestStep14CacheLock:
         assert tracker.under_cache_lock() == []
 
     def test_concurrent_miss_keeps_first_inserted_definition(self):
-        api = _api()
+        api = _a2026_09_22_api()
         manager = api.fsm_manager
         manager.fsm_cache.clear()
         first = api.fsm_definition.model_copy()

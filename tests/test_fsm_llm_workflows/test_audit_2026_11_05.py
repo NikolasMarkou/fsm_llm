@@ -28,6 +28,7 @@ from fsm_llm.workflows import (
     wait_event_step,
 )
 from fsm_llm.workflows.exceptions import WorkflowInstanceError, WorkflowValidationError
+from tests.test_fsm_llm_workflows.support import _Gen, _single
 
 # ---------------------------------------------------------------
 # helpers
@@ -38,12 +39,6 @@ def _record_hooks(engine: WorkflowEngine) -> list[tuple[str, dict[str, Any]]]:
     seen: list[tuple[str, dict[str, Any]]] = []
     engine.add_hook(lambda name, inst, data: seen.append((name, dict(data))))
     return seen
-
-
-def _single(step) -> Any:
-    wf = create_workflow("wf", "wf")
-    wf.with_initial_step(step)
-    return wf
 
 
 # ---------------------------------------------------------------
@@ -281,11 +276,6 @@ class TestLLMInterfaceValidatedBehaviour:
 # ---------------------------------------------------------------
 # F-WE-05: every step type's referenced states are validated
 # ---------------------------------------------------------------
-
-
-class _Gen:
-    def generate(self, prompt: str) -> str:
-        return "x"
 
 
 class TestReferencedStatesAreValidated:

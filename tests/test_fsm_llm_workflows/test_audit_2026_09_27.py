@@ -55,30 +55,15 @@ from fsm_llm.workflows.steps import (
     TimerStep,
     WorkflowStep,
 )
+from tests.test_fsm_llm_workflows.support import (
+    _CoreLikeLLM,
+    _settle,
+    _wait_then_done,
+)
 
 # ---------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------
-
-
-def _wait_then_done(
-    workflow_id: str,
-    event_type: str = "go",
-    **wait_kwargs: Any,
-) -> WorkflowDefinition:
-    """wait(event) -> done (terminal)."""
-    wf = create_workflow(workflow_id, workflow_id)
-    wf.with_initial_step(
-        wait_event_step(
-            "wait", "Wait", event_type, success_step_id="done", **wait_kwargs
-        )
-    )
-    wf.with_step(auto_step("done", "Done", next_step_id=""))
-    return wf
-
-
-async def _settle(seconds: float = 0.05) -> None:
-    await asyncio.sleep(seconds)
 
 
 class _DynamicLoopStep(WorkflowStep):
@@ -92,23 +77,6 @@ class _DynamicLoopStep(WorkflowStep):
 class _TerminalStep(WorkflowStep):
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         return WorkflowStepResult.success_result()
-
-
-class _FakeLLMResponse:
-    def __init__(self, message: str) -> None:
-        self.message = message
-
-
-class _CoreLikeLLM:
-    """Shaped like fsm_llm.LLMInterface: sync generate_response only."""
-
-    def __init__(self, reply: str) -> None:
-        self.reply = reply
-        self.requests: list[Any] = []
-
-    def generate_response(self, request: Any) -> _FakeLLMResponse:
-        self.requests.append(request)
-        return _FakeLLMResponse(self.reply)
 
 
 class _AgentResult:

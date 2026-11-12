@@ -15,7 +15,7 @@ import time
 import pytest
 
 from fsm_llm.prompts import BasePromptBuilder, DataExtractionPromptBuilder
-from tests.test_fsm_llm.test_audit_iter2_seam import _PromptSpy
+from tests.test_fsm_llm.support import _PromptSpy
 
 # ══════════════════════════════════════════════════════════════
 # Step 2 / D-047: the sanitizer escapes a nested or padded closing tag again
@@ -136,10 +136,7 @@ class TestEmptyContainerIsSetForNonAgentFsms:
         from unittest.mock import patch
 
         from fsm_llm import API
-        from tests.test_fsm_llm.test_audit_iter1_seam import (
-            _correction_fsm,
-            _fake_response,
-        )
+        from tests.test_fsm_llm.support import _correction_fsm, _fake_response
 
         fsm = _correction_fsm()
         fsm["states"]["profile"]["field_extractions"] = [
@@ -225,7 +222,7 @@ class TestClosingFenceNeedsALeadingFence:
 
         from fsm_llm.definitions import FieldExtractionRequest
         from fsm_llm.llm import LiteLLMInterface
-        from tests.test_fsm_llm.test_audit_iter1_seam import _fake_response
+        from tests.test_fsm_llm.support import _fake_response
 
         req = FieldExtractionRequest(
             system_prompt="extract",
@@ -252,7 +249,7 @@ class TestClosingFenceNeedsALeadingFence:
 
         from fsm_llm.definitions import BulkExtractionRequest
         from fsm_llm.llm import LiteLLMInterface
-        from tests.test_fsm_llm.test_audit_iter1_seam import _fake_response
+        from tests.test_fsm_llm.support import _fake_response
 
         req = BulkExtractionRequest(system_prompt="extract", user_message="hi")
         with (
@@ -278,7 +275,7 @@ def _grounded(message: str, value: str) -> tuple[dict, bool]:
     """One real ``converse`` turn: the bulk pass proposes ``value`` for a key
     a handler already holds as ``blue``. Returns the rejected corrections the
     turn recorded and whether the Pass-2 prompt carries the block."""
-    from tests.test_fsm_llm.test_audit_iter3_seam import _correction_fsm, _PassTwoSpy
+    from tests.test_fsm_llm.support import _correction_fsm, _PassTwoSpy
 
     with _PassTwoSpy(_correction_fsm()) as p:
         p.api.update_context(p.cid, {"favorite_color": "blue"})
@@ -342,7 +339,7 @@ def _failing_bulk_spy_class():
     """A ``_EdgeProv`` that records every Pass-2 system prompt and raises on
     the bulk ``data_extraction`` calls whose 1-based index within the turn is
     in ``fail_bulk`` (an empty set never fails)."""
-    from tests.test_fsm_llm.test_audit_iter3_seam import _EdgeProv, _stream_chunk
+    from tests.test_fsm_llm.support import _EdgeProv, _stream_chunk
 
     class _FailingBulk(_EdgeProv):
         def __init__(self, fsm, store=None):
@@ -380,7 +377,7 @@ def _failing_bulk_spy_class():
 def _no_config_fsm() -> dict:
     """One state with extraction instructions and NO declared keys: the
     no-config bulk fallback pass."""
-    from tests.test_fsm_llm.test_audit_iter1_seam import _correction_fsm
+    from tests.test_fsm_llm.support import _correction_fsm
 
     fsm = _correction_fsm()
     del fsm["states"]["profile"]["required_context_keys"]
@@ -396,7 +393,7 @@ class TestFailedBulkIsSurfacedToPassTwo:
 
     @pytest.mark.parametrize("stream", [False, True])
     def test_an_ordinary_turn_with_a_failed_bulk_call_says_so_once(self, stream):
-        from tests.test_fsm_llm.test_audit_iter1_seam import _correction_fsm
+        from tests.test_fsm_llm.support import _correction_fsm
 
         with _failing_bulk_spy_class()(_correction_fsm()) as p:
             p.api.update_context(p.cid, {"favorite_color": "blue"})
@@ -415,7 +412,7 @@ class TestFailedBulkIsSurfacedToPassTwo:
     def test_the_back_edge_rerun_failure_says_so_and_keeps_the_stored_value(self):
         """LV5-01: the email turn's own bulk call succeeds, the re-run in `name`
         raises; the reply must not claim the name was updated."""
-        from tests.test_fsm_llm.test_audit_iter3_seam import (
+        from tests.test_fsm_llm.support import (
             _BACK_BULK,
             _BACK_FIELD,
             _BACK_TURN,
@@ -434,7 +431,7 @@ class TestFailedBulkIsSurfacedToPassTwo:
         existed), so a turn without a failure adds no byte."""
         import hashlib
 
-        from tests.test_fsm_llm.test_audit_iter1_seam import _correction_fsm
+        from tests.test_fsm_llm.support import _correction_fsm
 
         with _failing_bulk_spy_class()(_correction_fsm()) as p:
             p.api.update_context(p.cid, {"favorite_color": "blue"})
@@ -450,8 +447,7 @@ class TestFailedBulkIsSurfacedToPassTwo:
         when both hold (the builder-level combination; a single scripted turn
         cannot refuse a value in one bulk call and fail in another)."""
         from fsm_llm.prompts import ResponseGenerationPromptBuilder
-        from tests.test_fsm_llm.test_audit_iter1_seam import _correction_fsm
-        from tests.test_fsm_llm.test_audit_iter3_seam import _PassTwoSpy
+        from tests.test_fsm_llm.support import _correction_fsm, _PassTwoSpy
 
         with _PassTwoSpy(_correction_fsm()) as p:
             instance = p.api.fsm_manager.instances[p.cid]
@@ -510,7 +506,7 @@ def _handler_only_warnings(fsm: dict) -> list[str]:
 
 
 def _fsm_with_handler_only(keys: list[str]) -> dict:
-    from tests.test_fsm_llm.test_audit_iter1_seam import _correction_fsm
+    from tests.test_fsm_llm.support import _correction_fsm
 
     fsm = _correction_fsm()
     fsm["handler_only_keys"] = keys
@@ -659,7 +655,7 @@ def _instruction_only(message: str, bulk: dict, seed: dict, agent: bool = False)
     """One real ``converse`` turn on the correction FSM, where ``nickname`` is
     named only in extraction_instructions. Returns (rejected corrections,
     stored data after the turn, whether the Pass-2 prompt carries the block)."""
-    from tests.test_fsm_llm.test_audit_iter3_seam import _correction_fsm, _PassTwoSpy
+    from tests.test_fsm_llm.support import _correction_fsm, _PassTwoSpy
 
     with _PassTwoSpy(_correction_fsm()) as p:
         p.api.update_context(
@@ -814,7 +810,7 @@ def _confirm_turn(
     whose bulk passes return ``bulks`` in order (the last one repeats).
     Returns (stored data, last response's rejected corrections, Pass-2 prompt)."""
     from fsm_llm.handlers import HandlerTiming
-    from tests.test_fsm_llm.test_audit_iter3_seam import _PassTwoSpy
+    from tests.test_fsm_llm.support import _PassTwoSpy
 
     class _Seq(_PassTwoSpy):
         def __init__(self, fsm):
@@ -917,8 +913,7 @@ _BENIGN_LONG = (
 
 def _all_system_prompts(message: str) -> list[str]:
     """Every system prompt one ``converse`` turn sends (Pass 1 bulk, Pass 2)."""
-    from tests.test_fsm_llm.test_audit_iter1_seam import _correction_fsm
-    from tests.test_fsm_llm.test_audit_iter2_seam import _Prov
+    from tests.test_fsm_llm.support import _correction_fsm, _Prov
 
     seen: list[str] = []
 
@@ -1290,7 +1285,7 @@ _SCOPE_MESSAGE = "I was charged twice, call me Bobby, the refund policy please"
 
 
 def _scoped_turn(read_keys: list[str] | None, stream: bool = False) -> str:
-    from tests.test_fsm_llm.test_audit_iter3_seam import _PassTwoSpy
+    from tests.test_fsm_llm.support import _PassTwoSpy
 
     with _PassTwoSpy(_scoped_fsm(read_keys)) as p:
         p.api.update_context(p.cid, {"risk_score": "high", "nickname": "Rob"})
@@ -1334,7 +1329,7 @@ class TestRejectedCorrectionsHonourReadKeys:
 
     def test_the_stored_values_are_untouched_by_the_scoping(self):
         """GUARD: scoping only changes what Pass 2 SEES."""
-        from tests.test_fsm_llm.test_audit_iter3_seam import _PassTwoSpy
+        from tests.test_fsm_llm.support import _PassTwoSpy
 
         with _PassTwoSpy(_scoped_fsm(["issue"])) as p:
             p.api.update_context(p.cid, {"risk_score": "high", "nickname": "Rob"})

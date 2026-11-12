@@ -38,6 +38,7 @@ from fsm_llm.monitor.instance_manager import (
     unregister_monitor_handlers,
 )
 from fsm_llm.monitor.server import _fsm_dict_to_snapshot
+from tests.test_fsm_llm_monitor.support import _manager
 
 # ---------------------------------------------------------------
 # helpers
@@ -84,12 +85,6 @@ def _snapshot_api(collected: dict[str, Any], extraction: Any = None) -> MagicMoc
     }
     api.get_stack_depth.return_value = 1
     return api
-
-
-def _manager() -> InstanceManager:
-    mgr = InstanceManager(config=MonitorConfig())
-    mgr.global_collector.cleanup()
-    return mgr
 
 
 # ---------------------------------------------------------------

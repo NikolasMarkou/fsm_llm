@@ -30,6 +30,7 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 ## Files
 
 - `conftest.py` - the `minimal_fsm_dict` fixture: a one-state FSM with only required fields.
+- `support.py` - helpers that more than one test file uses (FSM builders, fake provider responses, scripted providers). Not collected: the name has no `test_` prefix.
 - `fixtures/` - labelled corpora for the secret filter (`context_key_corpus.py`, `holdout_key_corpus.py`, `census_key_corpus.py`).
 - `test_api.py`, `test_api_elaborate.py` - the `API` class: loading definitions, starting and running conversations, FSM stacking.
 - `test_fsm.py`, `test_fsm_elaborate.py` - `FSMManager`: data filtering in `get_conversation_data`, stacking.

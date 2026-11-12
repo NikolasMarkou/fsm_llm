@@ -24,10 +24,8 @@ from fsm_llm.constants import (
 from fsm_llm.definitions import (
     ClassificationError,
     ClassificationExtractionConfig,
-    ClassificationResult,
     ClassificationSchema,
     ContextScope,
-    FieldExtractionResponse,
     FSMContext,
     FSMDefinition,
     FSMError,
@@ -45,111 +43,40 @@ from fsm_llm.handlers import (
     HandlerTiming,
     create_handler,
 )
-from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.prompts import build_classification_system_prompt
 from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 from tests.conftest import current_timing_factor
+from tests.test_fsm_llm.support import (
+    _A4_TRANSITION_KEY,
+    _a2_state,
+    _a3_api,
+    _a3_extraction_fsm,
+    _a6_last_prompt,
+    _a7_fsm,
+    _ambiguous_then_blocked_fsm,
+    _api,
+    _c3_fsm,
+    _c_log_capture,
+    _classification,
+    _ClassifierCapture,
+    _d3_aliased,
+    _d3_run_bounded,
+    _d3_walkers,
+    _mock_llm,
+    _raw_data,
+)
 
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
 
 
-def _mock_llm() -> MagicMock:
-    """A spec'd mock LLM: field extraction returns nothing, Pass 2 says "ok"."""
-    llm = MagicMock(spec=LLMInterface)
-    llm.model = "gpt-4"
-
-    def _extract_field(request):
-        return FieldExtractionResponse(
-            field_name=request.field_name,
-            value=None,
-            confidence=0.0,
-            reasoning="mock",
-            is_valid=False,
-        )
-
-    llm.extract_field.side_effect = _extract_field
-    llm.generate_response.return_value = MagicMock(
-        message="ok", message_type="response", reasoning="mock"
-    )
-    llm.generate_response_stream.side_effect = lambda request: iter(["o", "k"])
-    # The classifier sends through the conversation's own interface (D-006 of
-    # plan 944e2692): forward `complete` to a real LiteLLMInterface for the
-    # same model, so a patched `fsm_llm.llm.completion` still receives the
-    # classifier's provider request.
-    llm.complete.side_effect = LiteLLMInterface(model="gpt-4").complete
-    return llm
-
-
-def _classification(intent: str, confidence: float) -> ClassificationResult:
-    return ClassificationResult(
-        reasoning=f"picked {intent}", intent=intent, confidence=confidence
-    )
-
-
-def _ambiguous_then_blocked_fsm(
-    transition_classification: dict[str, Any] | None = None,
-) -> FSMDefinition:
-    """``start`` has two unconditioned, equal-priority transitions (AMBIGUOUS
-    every turn). ``a`` has one transition gated on a key nobody sets, so a turn
-    in ``a`` is BLOCKED and never reaches the classifier.
-    """
-    never = TransitionCondition(
-        description="never set",
-        logic={"==": [{"var": "never_set_flag"}, True]},
-    )
-    states = {
-        "start": State(
-            id="start",
-            description="Start",
-            purpose="Pick a branch",
-            response_instructions="Respond",
-            transitions=[
-                Transition(target_state="a", description="Go to a"),
-                Transition(target_state="b", description="Go to b"),
-            ],
-            transition_classification=transition_classification,
-        ),
-        "a": State(
-            id="a",
-            description="Branch a",
-            purpose="Wait",
-            response_instructions="Respond",
-            transitions=[
-                Transition(target_state="end", description="Done", conditions=[never])
-            ],
-        ),
-        "b": State(id="b", description="Branch b", purpose="End", transitions=[]),
-        "end": State(id="end", description="End", purpose="End", transitions=[]),
-    }
-    return FSMDefinition(
-        name="audit_fsm",
-        description="Audit FSM",
-        initial_state="start",
-        states=states,
-    )
-
-
-def _api(fsm_def: FSMDefinition) -> tuple[API, str, MagicMock]:
-    llm = _mock_llm()
-    api = API.from_definition(fsm_def, llm_interface=llm)
-    conv_id, _ = api.start_conversation()
-    return api, conv_id, llm
-
-
 _A4_RESULTS_KEY = "classification_results"
-_A4_TRANSITION_KEY = "transition_classification"
 
 
 def _raw_metadata(api: API, conv_id: str) -> dict[str, Any]:
     """The live instance metadata (no copy)."""
     return api.fsm_manager.instances[conv_id].context.metadata
-
-
-def _raw_data(api: API, conv_id: str) -> dict[str, Any]:
-    """The unfiltered instance context (``get_data`` strips internal keys)."""
-    return api.fsm_manager.instances[conv_id].context.data
 
 
 # ---------------------------------------------------------------------------
@@ -275,16 +202,6 @@ class TestStep01A1A8:
 # ---------------------------------------------------------------------------
 
 
-def _a2_state(transitions: list[Transition]) -> State:
-    return State(
-        id="start",
-        description="start",
-        purpose="route",
-        response_instructions="Respond",
-        transitions=transitions,
-    )
-
-
 def _a2_evaluate(
     transitions: list[Transition],
     data: dict[str, Any] | None = None,
@@ -389,100 +306,6 @@ class TestStep02A2:
 # ---------------------------------------------------------------------------
 # Step 3: A3 (classifiers get history, state purpose and scoped context)
 # ---------------------------------------------------------------------------
-
-
-class _ClassifierCapture:
-    """Patch the classifier's litellm boundary and record every ``messages``
-    list it is called with; replies with a fixed intent and confidence."""
-
-    def __init__(self, intent: str, confidence: float = 0.9):
-        self.intent, self.confidence = intent, confidence
-        self.calls: list[list[dict[str, str]]] = []
-        self._patches = [
-            patch("fsm_llm.llm.completion", side_effect=self._reply),
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
-        ]
-
-    def _reply(self, **kwargs):
-        self.calls.append(kwargs["messages"])
-        resp = MagicMock()
-        resp.choices = [MagicMock()]
-        resp.choices[0].message.content = json.dumps(
-            {
-                "reasoning": "r",
-                "intent": self.intent,
-                "confidence": self.confidence,
-                "entities": {},
-            }
-        )
-        return resp
-
-    def system(self, index: int = -1) -> str:
-        return self.calls[index][0]["content"]
-
-    def __enter__(self) -> _ClassifierCapture:
-        for p in self._patches:
-            p.start()
-        return self
-
-    def __exit__(self, *exc) -> None:
-        for p in reversed(self._patches):
-            p.stop()
-
-
-def _a3_extraction_fsm(context_keys: list[str] | None = None) -> FSMDefinition:
-    """``triage`` owns a classification field ``intent`` (browse is the
-    fallback, so a "browse" reply keeps the conversation in ``triage``)."""
-    states = {
-        "triage": State(
-            id="triage",
-            description="Triage",
-            purpose="Route the shopper to checkout or browsing",
-            response_instructions="Respond",
-            classification_extractions=[
-                ClassificationExtractionConfig(
-                    field_name="intent",
-                    intents=[
-                        IntentDefinition(name="buy", description="wants to buy"),
-                        IntentDefinition(name="browse", description="just looking"),
-                    ],
-                    fallback_intent="browse",
-                    confidence_threshold=0.5,
-                    context_keys=context_keys,
-                )
-            ],
-            transitions=[
-                Transition(
-                    target_state="done",
-                    description="Buy",
-                    conditions=[
-                        TransitionCondition(
-                            description="buy",
-                            logic={"==": [{"var": "intent"}, "buy"]},
-                        )
-                    ],
-                )
-            ],
-        ),
-        "done": State(id="done", description="Done", purpose="End", transitions=[]),
-    }
-    return FSMDefinition(
-        name="a3_fsm", description="A3 FSM", initial_state="triage", states=states
-    )
-
-
-_A3_CONTEXT = {
-    "topic": "running shoes",
-    "other": "hidden-value-xyz",
-    "password": "hunter2-secret",
-    "profile": {"api_key": "sk-live-123456", "tier": "gold"},
-}
-
-
-def _a3_api(fsm_def: FSMDefinition) -> tuple[API, str]:
-    api = API.from_definition(fsm_def, llm_interface=_mock_llm())
-    conv_id, _ = api.start_conversation(initial_context=dict(_A3_CONTEXT))
-    return api, conv_id
 
 
 class TestStep03A3:
@@ -1047,11 +870,6 @@ def _a6_api(session_store: Any = None) -> tuple[API, str, MagicMock]:
     return api, conv_id, llm
 
 
-def _a6_last_prompt(mock_method: MagicMock) -> str:
-    request = mock_method.call_args_list[-1].args[0]
-    return request.system_prompt
-
-
 def _a6_block(prompt: str) -> str:
     start = prompt.index("<conversation_summary>")
     end = prompt.index("</conversation_summary>", start)
@@ -1198,38 +1016,6 @@ class TestStep06A6:
 # ---------------------------------------------------------------------------
 
 
-def _a7_fsm(read_keys: list[str] | None = None) -> FSMDefinition:
-    """``chat`` loops (Pass 2 every turn); its edge to ``vip`` is gated on
-    ``tier == "gold"``, a key only WorkingMemory sets in these tests."""
-    gold = TransitionCondition(
-        description="tier is gold",
-        requires_context_keys=["tier"],
-        logic={"==": [{"var": "tier"}, "gold"]},
-    )
-    states = {
-        "chat": State(
-            id="chat",
-            description="Chat",
-            purpose="Talk",
-            response_instructions="Respond",
-            context_scope={"read_keys": read_keys} if read_keys else None,
-            transitions=[
-                Transition(target_state="vip", description="Gold", conditions=[gold])
-            ],
-        ),
-        "vip": State(
-            id="vip",
-            description="VIP",
-            purpose="Serve a VIP",
-            response_instructions="Respond",
-            transitions=[],
-        ),
-    }
-    return FSMDefinition(
-        name="a7_fsm", description="A7 FSM", initial_state="chat", states=states
-    )
-
-
 def _a7_api(
     wm_core: dict[str, Any] | None = None,
     wm_hidden: dict[str, Any] | None = None,
@@ -1358,43 +1144,6 @@ class _D1Response:
 
     def __init__(self, content: Any) -> None:
         self.choices = [_D1Choice(content)]
-
-
-def _d3_aliased(levels: int) -> dict[str, Any]:
-    """3-way aliasing per level: 3**levels paths through ``levels + 1`` dicts."""
-    cur: dict[str, Any] = {"leaf": 1}
-    for _ in range(levels):
-        cur = {"a": cur, "b": cur, "c": cur}
-    return cur
-
-
-def _d3_walkers() -> dict[str, Any]:
-    """The three context filters, each as ``data -> filtered``."""
-    from fsm_llm.context import clean_context_keys
-    from fsm_llm.fsm import _strip_internal_mapping
-    from fsm_llm.prompts import BasePromptBuilder
-
-    builder = BasePromptBuilder()
-    return {
-        "clean_context_keys": lambda d: clean_context_keys(d, "conv-d3"),
-        "get_data": _strip_internal_mapping,
-        "prompt": builder._filter_context_for_security,
-    }
-
-
-def _d3_run_bounded(fn: Any, data: Any, seconds: float) -> tuple[bool, Any]:
-    """Run ``fn(data)`` in a daemon thread; ``(finished, result)``."""
-    import threading
-
-    box: dict[str, Any] = {}
-
-    def _target() -> None:
-        box["result"] = fn(data)
-
-    worker = threading.Thread(target=_target, daemon=True)
-    worker.start()
-    worker.join(seconds)
-    return (not worker.is_alive(), box.get("result"))
 
 
 # Credential-shaped values per D5 name (numeric where real systems store one).
@@ -2949,36 +2698,6 @@ class _C2CopyOnce:
         return _C2CopyOnce()
 
 
-def _c3_fsm() -> FSMDefinition:
-    """``start`` -> ``mid`` deterministically; ``mid`` is BLOCKED forever."""
-    never = TransitionCondition(
-        description="never set",
-        logic={"==": [{"var": "never_set_flag"}, True]},
-    )
-    states = {
-        "start": State(
-            id="start",
-            description="Start",
-            purpose="Begin",
-            response_instructions="Respond",
-            transitions=[Transition(target_state="mid", description="Go on")],
-        ),
-        "mid": State(
-            id="mid",
-            description="Mid",
-            purpose="Wait",
-            response_instructions="Respond",
-            transitions=[
-                Transition(target_state="end", description="Done", conditions=[never])
-            ],
-        ),
-        "end": State(id="end", description="End", purpose="End", transitions=[]),
-    }
-    return FSMDefinition(
-        name="c3_fsm", description="C3 FSM", initial_state="start", states=states
-    )
-
-
 def _c3_api(delta_fn: Any, *, state: str = "start") -> tuple[API, str]:
     """An API whose one PRE_PROCESSING handler, in ``state``, returns
     ``delta_fn(context)``. The conversation is advanced to ``state`` first."""
@@ -3430,24 +3149,6 @@ class TestStep13C4C5:
 # ---------------------------------------------------------------------------
 # Step 14: C6-C12 (LOW items)
 # ---------------------------------------------------------------------------
-
-
-@contextmanager
-def _c_log_capture():
-    """Enable the library logger; collect every record as ``LEVEL|message``."""
-    from loguru import logger
-
-    messages: list[str] = []
-    logger.enable("fsm_llm")
-    hid = logger.add(
-        lambda m: messages.append(f"{m.record['level'].name}|{m.record['message']}"),
-        level="DEBUG",
-    )
-    try:
-        yield messages
-    finally:
-        logger.remove(hid)
-        logger.disable("fsm_llm")
 
 
 class _C6Handler(BaseHandler):

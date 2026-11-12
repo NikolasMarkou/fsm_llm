@@ -16,28 +16,27 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fsm_llm.api import API
-from fsm_llm.classification import Classifier
 from fsm_llm.definitions import (
     BulkExtractionRequest,
     ClassificationError,
     ClassificationResponseError,
-    ClassificationSchema,
     FieldExtractionRequest,
-    IntentDefinition,
     LLMResponseError,
 )
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.utilities import extract_json_from_text, strip_think_and_fences
-
-OLLAMA_MODEL = "ollama_chat/qwen3.5:9b-q8_0"
-
-
-def _fake_response(content: str) -> MagicMock:
-    resp = MagicMock()
-    resp.choices = [MagicMock()]
-    resp.choices[0].message.content = content
-    return resp
-
+from tests.test_fsm_llm.support import (
+    OLLAMA_MODEL,
+    _aiter1_ambiguous_fsm,
+    _classified_fsm,
+    _classifier,
+    _color_fsm,
+    _ConnectionHarness,
+    _correction_fsm,
+    _fake_response,
+    _greeter_fsm,
+    _stream_chunk,
+)
 
 # ══════════════════════════════════════════════════════════════
 # Step 2 / LV-01: typed field-extraction `value` + dict rejection
@@ -93,51 +92,6 @@ class TestFieldExtractionTypedSchemaOnTheWire:
     def test_non_ollama_keeps_json_object_format(self):
         params = self._run("gpt-4o", "str")
         assert params["response_format"] == {"type": "json_object"}
-
-
-def _color_fsm() -> dict:
-    return {
-        "name": "ColorBot",
-        "description": "typed field seam",
-        "version": "4.1",
-        "initial_state": "profile",
-        "persona": "Concise.",
-        "states": {
-            "profile": {
-                "id": "profile",
-                "description": "collect color",
-                "purpose": "Learn favorite color",
-                "field_extractions": [
-                    {
-                        "field_name": "favorite_color",
-                        "field_type": "str",
-                        "extraction_instructions": "Favorite color, one word.",
-                        "required": True,
-                    }
-                ],
-                "response_instructions": "Reply in one short sentence.",
-                "transitions": [
-                    {
-                        "target_state": "done",
-                        "description": "got color",
-                        "conditions": [
-                            {
-                                "description": "has color",
-                                "requires_context_keys": ["favorite_color"],
-                            }
-                        ],
-                    }
-                ],
-            },
-            "done": {
-                "id": "done",
-                "description": "end",
-                "purpose": "end",
-                "response_instructions": "Say goodbye.",
-                "transitions": [],
-            },
-        },
-    }
 
 
 class TestDictValueForStrFieldIsRejected:
@@ -233,52 +187,6 @@ class TestZeroConfidenceValueIsNotAccepted:
 # ══════════════════════════════════════════════════════════════
 # Step 3 / LV-04: plain-text streaming prompt (no JSON envelope)
 # ══════════════════════════════════════════════════════════════
-
-
-def _stream_chunk(text: str) -> MagicMock:
-    chunk = MagicMock()
-    chunk.choices = [MagicMock()]
-    chunk.choices[0].delta.content = text
-    chunk.choices[0].delta.reasoning_content = None
-    return chunk
-
-
-def _greeter_fsm(terminal: bool = False) -> dict:
-    """chat -> other. ``terminal=True`` gates the edge on ``go`` (the harness
-    sets it), so Pass 2 runs in the terminal state ``other``; otherwise the
-    edge never fires and Pass 2 runs in the non-terminal state ``chat``."""
-    gate = "go" if terminal else "never_set"
-    transitions = [
-        {
-            "target_state": "other",
-            "description": "gated",
-            "conditions": [{"description": "gated", "requires_context_keys": [gate]}],
-        }
-    ]
-    fsm = {
-        "name": "Greeter",
-        "description": "stream prompt seam",
-        "version": "4.1",
-        "initial_state": "chat",
-        "persona": "Concise.",
-        "states": {
-            "chat": {
-                "id": "chat",
-                "description": "chat",
-                "purpose": "Chat briefly",
-                "response_instructions": "Answer in one short sentence.",
-                "transitions": transitions,
-            },
-            "other": {
-                "id": "other",
-                "description": "other",
-                "purpose": "other",
-                "response_instructions": "Say bye.",
-                "transitions": [],
-            },
-        },
-    }
-    return fsm
 
 
 class _StreamHarness:
@@ -402,56 +310,6 @@ class TestStreamPromptIsPlainText:
 # ══════════════════════════════════════════════════════════════
 # Step 4 / LV-03: bulk-extraction correction overwrite (D-004)
 # ══════════════════════════════════════════════════════════════
-
-
-def _correction_fsm() -> dict:
-    """One collecting state: `favorite_color` has a config (required key),
-    `nickname` is named only in extraction_instructions. No transitions."""
-    return {
-        "name": "CorrectionBot",
-        "description": "bulk correction seam",
-        "version": "4.1",
-        "initial_state": "profile",
-        "persona": "Concise.",
-        "states": {
-            "profile": {
-                "id": "profile",
-                "description": "collect color",
-                "purpose": "Learn favorite color",
-                "required_context_keys": ["favorite_color"],
-                "extraction_instructions": (
-                    "Extract favorite_color (one word) and nickname."
-                ),
-                "response_instructions": "Reply in one short sentence.",
-                "transitions": [
-                    {
-                        "target_state": "done",
-                        "description": "sentinel, never true",
-                        "priority": 10,
-                        "conditions": [
-                            {
-                                "description": "sentinel",
-                                "requires_context_keys": ["favorite_color"],
-                                "logic": {"==": [{"var": "favorite_color"}, "__x__"]},
-                            }
-                        ],
-                    },
-                    {
-                        "target_state": "profile",
-                        "description": "keep chatting",
-                        "priority": 100,
-                    },
-                ],
-            },
-            "done": {
-                "id": "done",
-                "description": "end",
-                "purpose": "end",
-                "response_instructions": "Say goodbye.",
-                "transitions": [],
-            },
-        },
-    }
 
 
 class _CorrectionHarness:
@@ -900,70 +758,6 @@ class TestContextScopeReachesPass2Prompt:
 # ══════════════════════════════════════════════════════════════
 
 
-def _classified_fsm(explicit_field_extraction: bool = False, topic: bool = False):
-    """`intent` is owned by classification_extractions and gates the only
-    transition. ``topic`` adds an ordinary required key (vacuity guard)."""
-    state: dict = {
-        "id": "triage",
-        "description": "classify intent",
-        "purpose": "route",
-        "response_instructions": "Reply briefly.",
-        "classification_extractions": [
-            {
-                "field_name": "intent",
-                "intents": [
-                    {"name": "buy", "description": "wants to purchase"},
-                    {"name": "browse", "description": "just looking"},
-                ],
-                "fallback_intent": "browse",
-                "confidence_threshold": 0.7,
-                "required": False,
-            }
-        ],
-        "transitions": [
-            {
-                "target_state": "shop",
-                "description": "buying",
-                "conditions": [
-                    {
-                        "description": "intent is buy",
-                        "requires_context_keys": ["intent"],
-                        "logic": {"==": [{"var": "intent"}, "buy"]},
-                    }
-                ],
-            }
-        ],
-    }
-    if topic:
-        state["required_context_keys"] = ["topic"]
-    if explicit_field_extraction:
-        state["field_extractions"] = [
-            {
-                "field_name": "intent",
-                "field_type": "str",
-                "extraction_instructions": "Explicit intent extraction.",
-                "required": False,
-            }
-        ]
-    return {
-        "name": "ClassifiedBot",
-        "description": "classification ownership seam",
-        "version": "4.1",
-        "initial_state": "triage",
-        "persona": "Concise.",
-        "states": {
-            "triage": state,
-            "shop": {
-                "id": "shop",
-                "description": "shop",
-                "purpose": "shop",
-                "response_instructions": "Help shop.",
-                "transitions": [],
-            },
-        },
-    }
-
-
 class _ClassifiedHarness:
     """`API.converse` with a scripted classifier and a spying fake completion.
 
@@ -1055,55 +849,6 @@ class TestClassificationOwnedKeyIsNotPlainExtracted:
 # ══════════════════════════════════════════════════════════════
 
 
-def _ambiguous_fsm(self_loop: bool = False) -> dict:
-    """`hub` has two unconditional, equal-priority exits (AMBIGUOUS), or a single
-    declared unconditional self-loop (DETERMINISTIC, target == current state)."""
-
-    def _target(name: str, description: str) -> dict:
-        return {"target_state": name, "description": description, "priority": 100}
-
-    if self_loop:
-        gated = _target("billing", "billing, gated on a key that is never set")
-        gated["conditions"] = [
-            {
-                "description": "go set",
-                "requires_context_keys": ["go"],
-                "logic": {"==": [{"var": "go"}, True]},
-            }
-        ]
-        transitions = [_target("hub", "declared self-loop"), gated]
-    else:
-        transitions = [
-            _target("billing", "user asks about billing"),
-            _target("support", "user needs tech support"),
-        ]
-    states = {
-        "hub": {
-            "id": "hub",
-            "description": "hub",
-            "purpose": "route",
-            "response_instructions": "Reply briefly.",
-            "transitions": transitions,
-        },
-    }
-    for name in ("billing",) if self_loop else ("billing", "support"):
-        states[name] = {
-            "id": name,
-            "description": name,
-            "purpose": name,
-            "response_instructions": f"Handle {name}.",
-            "transitions": [],
-        }
-    return {
-        "name": "HubBot",
-        "description": "ambiguous transition seam",
-        "version": "4.1",
-        "initial_state": "hub",
-        "persona": "Concise.",
-        "states": states,
-    }
-
-
 class _StayHarness:
     """`API.converse` with a scripted (or raising) classifier, transition
     handlers counting their calls, and the Pass-2 system prompt captured."""
@@ -1160,7 +905,7 @@ class _StayHarness:
 
 class TestStayIsNotATransition:
     def test_classifier_error_is_not_a_transition(self):
-        h = _StayHarness(_ambiguous_fsm(), intent=None)
+        h = _StayHarness(_aiter1_ambiguous_fsm(), intent=None)
         assert h.run() == "hub"
         assert (h.pre, h.post) == (0, 0)
         assert "<transition_info>" not in h.response_prompts[-1]
@@ -1169,7 +914,7 @@ class TestStayIsNotATransition:
         from fsm_llm.constants import TRANSITION_CLASSIFICATION_FALLBACK_INTENT
 
         h = _StayHarness(
-            _ambiguous_fsm(), intent=TRANSITION_CLASSIFICATION_FALLBACK_INTENT
+            _aiter1_ambiguous_fsm(), intent=TRANSITION_CLASSIFICATION_FALLBACK_INTENT
         )
         assert h.run() == "hub"
         assert (h.pre, h.post) == (0, 0)
@@ -1177,14 +922,14 @@ class TestStayIsNotATransition:
 
     def test_classifier_selecting_a_real_target_still_transitions(self):
         """Vacuity guard: the ambiguous path is reached and still transitions."""
-        h = _StayHarness(_ambiguous_fsm(), intent="billing")
+        h = _StayHarness(_aiter1_ambiguous_fsm(), intent="billing")
         assert h.run() == "billing"
         assert (h.pre, h.post) == (1, 1)
         assert "<transition_info>" in h.response_prompts[-1]
 
     def test_declared_explicit_self_loop_still_fires_handlers(self):
         """Pins D-007: a DECLARED self-loop is design, not a "stay"."""
-        h = _StayHarness(_ambiguous_fsm(self_loop=True), intent="billing")
+        h = _StayHarness(_aiter1_ambiguous_fsm(self_loop=True), intent="billing")
         assert h.run() == "hub"
         assert (h.pre, h.post) == (1, 1)
         assert "<transition_info>" in h.response_prompts[-1]
@@ -1193,53 +938,6 @@ class TestStayIsNotATransition:
 # ══════════════════════════════════════════════════════════════
 # Step 9 / CF-03: the classifier inherits endpoint, key and timeout
 # ══════════════════════════════════════════════════════════════
-
-
-def _is_classifier_call(kwargs: dict) -> bool:
-    """True for a provider request the ``Classifier`` issued.
-
-    Every core call goes through ``fsm_llm.llm.completion``; a classifier
-    request is the one carrying the ``intent_classification`` schema (sent
-    when the model supports ``response_format``).
-    """
-    fmt = kwargs.get("response_format") or {}
-    return fmt.get("json_schema", {}).get("name") == "intent_classification"
-
-
-class _ConnectionHarness:
-    """`API.converse` with the REAL Classifier over a scripted
-    ``fsm_llm.llm.completion`` (the one binding every core call uses);
-    records the kwargs of every classifier call, fakes Pass 1 / Pass 2."""
-
-    def __init__(self, fsm: dict, intent: str, **api_kwargs):
-        self.fsm = fsm
-        self.intent = intent
-        self.api_kwargs = api_kwargs
-        self.classifier_calls: list[dict] = []
-
-    def _classifier_completion(self, **kwargs):
-        self.classifier_calls.append(kwargs)
-        return _fake_response(
-            json.dumps({"reasoning": "r", "intent": self.intent, "confidence": 0.95})
-        )
-
-    def _llm_completion(self, **kwargs):
-        if _is_classifier_call(kwargs):
-            return self._classifier_completion(**kwargs)
-        return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
-
-    def run(self):
-        with (
-            patch("fsm_llm.llm.completion", side_effect=self._llm_completion),
-            patch(
-                "fsm_llm.llm.get_supported_openai_params",
-                return_value=["response_format"],
-            ),
-        ):
-            api = API.from_definition(self.fsm, **self.api_kwargs)
-            cid, _ = api.start_conversation()
-            api.converse("I would like to buy a phone", cid)
-            return api.get_data(cid), api.get_current_state(cid)
 
 
 _PROXY = {
@@ -1270,7 +968,7 @@ class TestClassifierInheritsConnection:
         assert call["model"] == "gpt-4o"
 
     def test_ambiguous_transition_resolution_gets_key_base_and_timeout(self):
-        h = _ConnectionHarness(_ambiguous_fsm(), "billing", **_PROXY)
+        h = _ConnectionHarness(_aiter1_ambiguous_fsm(), "billing", **_PROXY)
         _, state = h.run()
         assert state == "billing"  # vacuity guard: classifier chose the target
         assert len(h.classifier_calls) == 1
@@ -1489,17 +1187,6 @@ class TestLinearFenceAndThink:
 # ══════════════════════════════════════════════════════════════
 # Step 11 / DH-08 + LS-05: dict-only JSON contract
 # ══════════════════════════════════════════════════════════════
-
-
-def _classifier() -> Classifier:
-    schema = ClassificationSchema(
-        intents=[
-            IntentDefinition(name="buy", description="wants to buy"),
-            IntentDefinition(name="browse", description="just looking"),
-        ],
-        fallback_intent="browse",
-    )
-    return Classifier(schema, model="gpt-4o")
 
 
 class TestDictOnlyJsonContract:

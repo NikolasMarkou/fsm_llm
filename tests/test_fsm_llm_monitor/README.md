@@ -25,6 +25,7 @@ flowchart LR
 ## Files
 
 - `conftest.py` - autouse fixture that removes `FSM_LLM_MONITOR_API_KEY` from the environment for every test.
+- `support.py` - helpers that more than one test file uses (`_manager()`). Not collected: the name has no `test_` prefix.
 - `__init__.py` - empty package marker.
 - `test_app.py` - HTTP routes, static files, public exports, version, API-key gate, WebSocket redaction hook, and that the UI log levels, Max Iterations limit and log CSS match the server constants (131 tests).
 - `test_server_security.py` - Origin and Host checks, body size limit, security headers, key-gated reads, WebSocket auth, error-to-status mapping, request bounds, dashboard config parsing, builder guards, preset path validation (36 tests).

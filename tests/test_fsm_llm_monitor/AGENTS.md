@@ -30,6 +30,7 @@ Manager test pattern: `InstanceManager(config=MonitorConfig())`, then `mgr.globa
 | File | Role | Notes |
 | --- | --- | --- |
 | `conftest.py` | autouse `_clear_monitor_api_key_env` | `monkeypatch.delenv("FSM_LLM_MONITOR_API_KEY", raising=False)`; without it an exported key makes about 22 `test_app.py` tests 401 |
+| `support.py` | `_manager()` (an `InstanceManager` with a cleaned global collector), shared by the dated audit file and the feature files it folds into | not collected (no `test_` prefix) |
 | `test_app.py` | routes, static assets, exports, version, API-key gate, WS redaction, UI limits vs server constants | 131 tests; asserts `"0.12.0"` for `/api/info` `monitor_version` and `fsm_llm.monitor.__version__` |
 | `test_server_security.py` | Origin/Host, body limit, headers, gated reads, WebSocket auth, error mapping, bounds, dashboard config, builder busy guard, `validate_preset_id` | 36 tests; autouse `_reset_key` reconfigures with env key `""` after each test |
 | `test_instance_manager.py` | `Managed*` classes, `InstanceManager`, handlers, snapshots, workflow presets, agent types, stub tools | 75 tests; contains unmarked `async def` tests |

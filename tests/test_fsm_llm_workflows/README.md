@@ -19,6 +19,7 @@ Async tests need no decorator: the repository's `pyproject.toml` sets `asyncio_m
 
 ## Files
 
+- `support.py` - helpers that more than one test file uses (a wait-then-done workflow builder, `_settle`, fake LLM responses). Not collected: the name has no `test_` prefix.
 - `test_workflows.py` - exceptions, models (`WorkflowStatus`, `WorkflowEvent`, `WorkflowStepResult`, `WorkflowInstance`, `EventListener`, `WaitEventConfig`), definition validation, basic DSL, internal-key filtering, terminal routing on `""`, nested-step serialization, package exports. 44 tests.
 - `test_dsl.py` - every DSL factory (`auto_step`, `api_step`, `llm_step`, `timer_step`, ...), the `WorkflowBuilder` fluent builder, and the `create_linear_workflow`, `create_conditional_workflow`, `create_event_driven_workflow` helpers. The builder classes pin that `build()` always validates (an empty builder is refused), that step call order is kept (the last `set_initial_step` is initial but the step keeps its position), that every failure inside `build()` is a `BuildError` chained from its cause, and that each build is isolated (mutating the builder after a build, or the product before the next build, touches neither; steps stay shared by reference). 41 tests.
 - `test_steps.py` - execution of `AutoStep`, `ConditionStep`, `APIStep`, `WaitEventStep`, `TimerStep`, `ParallelStep`, `ConversationStep`. 25 tests.

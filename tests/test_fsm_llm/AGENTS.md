@@ -66,6 +66,7 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | File | Role | Notes |
 | --- | --- | --- |
 | `conftest.py` | `minimal_fsm_dict` fixture | one state `only_state`, no transitions |
+| `support.py` | helpers shared by several test files: FSM builders (`_correction_fsm`, `_classified_fsm`), fake provider responses (`_fake_response`, `_stream_chunk`), the `_Prov` family of scripted providers, `_PassTwoSpy`, `_mock_llm`, `_api` | not collected (no `test_` prefix); a helper used by one file stays in that file; a clashing name carries its source as a prefix (`_aiter1_ambiguous_fsm`) |
 | `test_api.py`, `test_api_elaborate.py` | `API` loading, conversations, stacking | `test_api_elaborate.py` holds `TestBaseExceptionRollsBackUserMessage` |
 | `test_fsm.py`, `test_fsm_elaborate.py` | `FSMManager` data filtering, stacking | nested filtering of `get_conversation_data` |
 | `test_pipeline.py` | `MessagePipeline` 2-pass `process()` | Pass 2 failure is atomic (sync and stream) |
@@ -132,18 +133,12 @@ Helpers imported across files in this directory (module path `tests.test_fsm_llm
 
 | Defined in | Helpers | Imported by |
 | --- | --- | --- |
-| `test_audit_iter1_seam.py` | `_fake_response(content: str) -> MagicMock`, `_correction_fsm` | iter2, iter3, iter4 (iter4 imports `_correction_fsm` both directly and through iter3) |
-| `test_audit_iter1_seam.py` | `_stream_chunk` | iter3 (iter4 takes it only through iter3's re-export) |
-| `test_audit_iter1_seam.py` | `_ConnectionHarness`, `_ambiguous_fsm`, `_classified_fsm` | iter2 only |
-| `test_audit_iter2_seam.py` | `_Prov` | iter3, iter4 |
-| `test_audit_iter2_seam.py` | `_ClassBulkProv`, `_classified_bulk_fsm` | iter3 |
-| `test_audit_iter2_seam.py` | `_PromptSpy` | iter4 |
-| `test_audit_iter3_seam.py` | `_PassTwoSpy`, `_EdgeProv` (both subclass `_Prov`) | iter4 |
+| `support.py` | the helpers more than one test file needs (`_fake_response(content: str) -> MagicMock`, `_correction_fsm`, `_stream_chunk`, `_Prov`, `_PassTwoSpy`, `_EdgeProv`, `_PromptSpy`, `_ConnectionHarness`, `_mock_llm`, `_api` and others) | the dated audit files until they are folded into feature files, then the feature files |
 | `test_pipeline_handler_contract.py` | `_ExplodingHandler`, `_fsm_definition`, `_make_api` | `test_core_hardening_seam.py` |
 | `test_prompts_unit.py` | `_make_state`, `_make_instance`, `_make_fsm_definition` | `test_core_hardening_seam.py` (imported under `_make_prompt_*` aliases) |
 | `fixtures/context_key_corpus.py`, `fixtures/holdout_key_corpus.py` | name tuples, value maps, known-wrong frozensets; `arm_of(name: str) -> str` only in `holdout_key_corpus.py` | `test_context_unit.py` |
 
-iter3 re-exports iter1's `_correction_fsm` and `_stream_chunk`. iter4 imports `_stream_chunk` only from `test_audit_iter3_seam`, so moving or dropping iter3's import of it breaks iter4; `_correction_fsm` is also imported directly from iter1.
+A shared helper lives once in `support.py`; no test file imports a `_` helper from another dated file.
 
 Seam files fake the backend with `patch("fsm_llm.llm.completion", ...)` returning `MagicMock` responses built by `_fake_response`.
 
