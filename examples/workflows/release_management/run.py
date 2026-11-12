@@ -309,8 +309,8 @@ def print_release_summary(ctx: dict[str, Any]) -> None:
 class ProductionDeployStep(WorkflowStep):
     """Uses a ReactAgent to orchestrate production deployment."""
 
-    success_state: str = ""
-    error_state: str | None = None
+    success_step_id: str = ""
+    error_step_id: str | None = None
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         model = context.get("_model", os.getenv("LLM_MODEL", "gpt-4o-mini"))
@@ -345,7 +345,7 @@ class ProductionDeployStep(WorkflowStep):
                     "deploy_tools_used": result.tools_used,
                     "deploy_iterations": result.iterations_used,
                 },
-                next_state=self.success_state or None,
+                next_step_id=self.success_step_id or None,
                 message="Production deployment complete",
             )
         except Exception as e:
@@ -355,7 +355,7 @@ class ProductionDeployStep(WorkflowStep):
                     "production_deployed": False,
                     "deploy_error": str(e),
                 },
-                next_state=self.error_state or self.success_state or None,
+                next_step_id=self.error_step_id or self.success_step_id or None,
                 message=f"Production deployment failed: {e}",
             )
 
@@ -368,14 +368,14 @@ class ProductionDeployStep(WorkflowStep):
 class TestStep(WorkflowStep):
     """Run tests — may fail due to flaky tests."""
 
-    next_state: str = ""
+    next_step_id: str = ""
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         try:
             data = flaky_test_action(context)
             return WorkflowStepResult.success_result(
                 data=data,
-                next_state=self.next_state or None,
+                next_step_id=self.next_step_id or None,
                 message="Tests passed",
             )
         except RuntimeError as e:
@@ -405,7 +405,7 @@ def build_release_workflow(model: str) -> WorkflowEngine:
         auto_step(
             step_id="planning",
             name="Release Planning",
-            next_state="build",
+            next_step_id="build",
             action=planning_action,
             description="Validate prerequisites and create release plan",
         )
@@ -416,7 +416,7 @@ def build_release_workflow(model: str) -> WorkflowEngine:
         auto_step(
             step_id="build",
             name="Build Artifacts",
-            next_state="test",
+            next_step_id="test",
             action=build_action,
             description="Build Docker image, static assets, and migration package",
         )
@@ -426,7 +426,7 @@ def build_release_workflow(model: str) -> WorkflowEngine:
     inner_test_step = TestStep(
         step_id="test_inner",
         name="Run Test Suite",
-        next_state="staging_deploy",
+        next_step_id="staging_deploy",
         description="Execute unit, integration, and e2e tests",
     )
     workflow.with_step(
@@ -445,7 +445,7 @@ def build_release_workflow(model: str) -> WorkflowEngine:
         auto_step(
             step_id="staging_deploy",
             name="Deploy to Staging",
-            next_state="smoke_test",
+            next_step_id="smoke_test",
             action=staging_deploy_action,
             description="Deploy release candidate to staging environment",
         )
@@ -456,7 +456,7 @@ def build_release_workflow(model: str) -> WorkflowEngine:
         auto_step(
             step_id="smoke_test",
             name="Staging Smoke Tests",
-            next_state="production_deploy",
+            next_step_id="production_deploy",
             action=smoke_test_action,
             description="Run smoke tests against staging deployment",
         )
@@ -467,8 +467,8 @@ def build_release_workflow(model: str) -> WorkflowEngine:
         ProductionDeployStep(
             step_id="production_deploy",
             name="Production Deployment",
-            success_state="post_deploy_verify",
-            error_state="release_failed",
+            success_step_id="post_deploy_verify",
+            error_step_id="release_failed",
             description="Agent-driven production deployment with migration and CDN",
         )
     )
@@ -478,7 +478,7 @@ def build_release_workflow(model: str) -> WorkflowEngine:
         auto_step(
             step_id="post_deploy_verify",
             name="Post-Deploy Verification",
-            next_state="release_complete",
+            next_step_id="release_complete",
             action=post_deploy_verify_action,
             description="Verify production health, error rates, and latency",
         )
@@ -492,7 +492,7 @@ def build_release_workflow(model: str) -> WorkflowEngine:
             if callable(self.action_fn):
                 self.action_fn(context)
             return WorkflowStepResult.success_result(
-                data={}, next_state=None, message="Release complete"
+                data={}, next_step_id=None, message="Release complete"
             )
 
     workflow.with_step(

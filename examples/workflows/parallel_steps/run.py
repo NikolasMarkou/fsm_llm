@@ -30,13 +30,13 @@ class SummaryStep(WorkflowStep):
     """Terminal step that prints summary and ends the workflow."""
 
     action: Any = None
-    next_state: str | None = None
+    next_step_id: str | None = None
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         if callable(self.action):
             self.action(context)
         return WorkflowStepResult.success_result(
-            data={}, next_state=None, message="Done"
+            data={}, next_step_id=None, message="Done"
         )
 
 
@@ -100,7 +100,7 @@ def build_workflow() -> WorkflowEngine:
         auto_step(
             step_id="setup",
             name="Setup",
-            next_state="fetch_all",
+            next_step_id="fetch_all",
             action=setup_action,
             description="Initialize query params",
         )
@@ -108,8 +108,8 @@ def build_workflow() -> WorkflowEngine:
 
     # Step 2: Fetch all three sources concurrently. ParallelStep runs every inner
     # step under asyncio.gather with isolated context copies, then aggregates.
-    # (The inner steps' success/failure_state are unused — ParallelStep controls
-    # the transition via its own next_state.)
+    # (The inner steps' success/failure_step_id are unused — ParallelStep controls
+    # the transition via its own next_step_id.)
     workflow.with_step(
         parallel_step(
             step_id="fetch_all",
@@ -119,8 +119,8 @@ def build_workflow() -> WorkflowEngine:
                     step_id="fetch_weather",
                     name="Fetch Weather",
                     api_function=fetch_weather,
-                    success_state="summarize",
-                    failure_state="summarize",
+                    success_step_id="summarize",
+                    failure_step_id="summarize",
                     input_mapping={"city": "city"},
                     output_mapping={
                         "weather_data": "weather_data",
@@ -132,8 +132,8 @@ def build_workflow() -> WorkflowEngine:
                     step_id="fetch_news",
                     name="Fetch News",
                     api_function=fetch_news,
-                    success_state="summarize",
-                    failure_state="summarize",
+                    success_step_id="summarize",
+                    failure_step_id="summarize",
                     input_mapping={"topic": "topic"},
                     output_mapping={
                         "news_data": "news_data",
@@ -145,8 +145,8 @@ def build_workflow() -> WorkflowEngine:
                     step_id="fetch_events",
                     name="Fetch Events",
                     api_function=fetch_events,
-                    success_state="summarize",
-                    failure_state="summarize",
+                    success_step_id="summarize",
+                    failure_step_id="summarize",
                     input_mapping={"location": "location"},
                     output_mapping={
                         "events_data": "events_data",
@@ -155,7 +155,7 @@ def build_workflow() -> WorkflowEngine:
                     description="Get events data",
                 ),
             ],
-            next_state="summarize",
+            next_step_id="summarize",
             aggregation_function=_merge_results,
             description="Fetch weather, news, and events concurrently",
         )

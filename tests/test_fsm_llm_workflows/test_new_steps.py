@@ -33,23 +33,23 @@ class TestSwitchStep:
             name="Route",
             key="intent",
             cases={"buy": "checkout", "browse": "catalog", "help": "support"},
-            default_state="fallback",
+            default_step_id="fallback",
         )
 
     async def test_routes_to_matching_case(self, switch):
         result = await switch.execute({"intent": "buy"})
         assert result.success is True
-        assert result.next_state == "checkout"
+        assert result.next_step_id == "checkout"
 
     async def test_routes_to_default(self, switch):
         result = await switch.execute({"intent": "unknown"})
         assert result.success is True
-        assert result.next_state == "fallback"
+        assert result.next_step_id == "fallback"
 
     async def test_missing_key_uses_default(self, switch):
         result = await switch.execute({})
         assert result.success is True
-        assert result.next_state == "fallback"
+        assert result.next_step_id == "fallback"
 
     async def test_no_default_fails(self):
         switch = SwitchStep(
@@ -67,10 +67,10 @@ class TestSwitchStep:
             name="Route",
             key="level",
             cases={"1": "low", "2": "high"},
-            default_state="unknown",
+            default_step_id="unknown",
         )
         result = await switch.execute({"level": 1})
-        assert result.next_state == "low"
+        assert result.next_step_id == "low"
 
 
 # ---------------------------------------------------------------
@@ -85,7 +85,7 @@ class TestRetryStep:
         inner = AutoStep(
             step_id="inner",
             name="Inner",
-            next_state="done",
+            next_step_id="done",
         )
         step = RetryStep(
             step_id="retry",
@@ -95,7 +95,7 @@ class TestRetryStep:
         )
         result = await step.execute({})
         assert result.success is True
-        assert result.next_state == "done"
+        assert result.next_step_id == "done"
 
     async def test_retries_on_failure(self):
         call_count = {"n": 0}
@@ -108,10 +108,10 @@ class TestRetryStep:
                 call_count["n"] += 1
                 if call_count["n"] < 3:
                     return WorkflowStepResult.failure_result(
-                        error="failed", next_state="err"
+                        error="failed", next_step_id="err"
                     )
                 return WorkflowStepResult.success_result(
-                    data={"ok": True}, next_state="done"
+                    data={"ok": True}, next_step_id="done"
                 )
 
         step = RetryStep(
@@ -131,7 +131,7 @@ class TestRetryStep:
 
             async def execute(self, context):
                 return WorkflowStepResult.failure_result(
-                    error="always fails", next_state="err"
+                    error="always fails", next_step_id="err"
                 )
 
         step = RetryStep(
@@ -160,7 +160,7 @@ class TestRetryStep:
                 if call_count["n"] < 3:
                     raise ValueError("boom")
                 return WorkflowStepResult.success_result(
-                    data={"ok": True}, next_state="done"
+                    data={"ok": True}, next_step_id="done"
                 )
 
         step = RetryStep(
@@ -216,14 +216,14 @@ class TestAgentStep:
             name="Research",
             agent=mock_agent,
             task_template="Research {topic}",
-            success_state="analyze",
+            success_step_id="analyze",
             context_mapping={"findings": "key"},
         )
 
         result = await step.execute({"topic": "AI"})
 
         assert result.success is True
-        assert result.next_state == "analyze"
+        assert result.next_step_id == "analyze"
         mock_agent.run.assert_called_once_with("Research AI")
         assert result.data["findings"] == "value"
         assert result.data["agent_answer"] == "The answer is 42"
@@ -240,7 +240,7 @@ class TestAgentStep:
             step_id="summarize",
             name="Summarize",
             agent=mock_agent,
-            success_state="next",
+            success_step_id="next",
             context_mapping={"summary": "answer"},
         )
 
@@ -256,14 +256,14 @@ class TestAgentStep:
             step_id="fail",
             name="Fail",
             agent=mock_agent,
-            success_state="next",
-            error_state="error",
+            success_step_id="next",
+            error_step_id="error",
         )
 
         result = await step.execute({"task": "Do something"})
 
         assert result.success is False
-        assert result.next_state == "error"
+        assert result.next_step_id == "error"
 
     async def test_missing_template_key(self):
         mock_agent = MagicMock()
@@ -273,8 +273,8 @@ class TestAgentStep:
             name="Fail",
             agent=mock_agent,
             task_template="Research {missing_key}",
-            success_state="next",
-            error_state="error",
+            success_step_id="next",
+            error_step_id="error",
         )
 
         result = await step.execute({})
@@ -333,13 +333,13 @@ class TestStepsOverTheRealCore:
                 llm_interface=llm,
             ),
             task_template="What is the capital of {country}?",
-            success_state="report",
+            success_step_id="report",
             context_mapping={"finding": "answer", "calls": "observation_count"},
         )
 
         result = await step.execute({"country": "France"})
 
-        assert (result.success, result.next_state) == (True, "report")
+        assert (result.success, result.next_step_id) == (True, "report")
         assert queries == ["capital of France"]
         assert result.data["agent_answer"] == answer
         assert result.data["agent_research_success"] is True
@@ -399,7 +399,7 @@ class TestStepsOverTheRealCore:
                     },
                 },
             },
-            success_state="done",
+            success_step_id="done",
             auto_messages=["My name is Alice", "never sent: the FSM has ended"],
             context_mapping={"user_name": "name"},
             require_completion=True,
@@ -407,7 +407,7 @@ class TestStepsOverTheRealCore:
 
         result = await step.execute({})
 
-        assert (result.success, result.next_state) == (True, "done")
+        assert (result.success, result.next_step_id) == (True, "done")
         assert converse_calls == ["My name is Alice"]
         assert result.data["user_name"] == "Alice"
         assert result.data["conversation_intake_ended"] is True
@@ -482,7 +482,7 @@ class TestConversationStepLastSpokenReply:
             step_id="intake",
             name="Intake",
             fsm_definition=_name_capture_fsm(ask_speaks=ask_speaks),
-            success_state="done",
+            success_step_id="done",
             auto_messages=["My name is Alice"],
             context_mapping={"user_name": "name", "answer": "final_answer"},
             require_completion=True,
@@ -491,7 +491,7 @@ class TestConversationStepLastSpokenReply:
     async def test_silent_last_turn_keeps_the_last_spoken_reply(self, llm):
         result = await self._step(ask_speaks=True).execute({})
 
-        assert (result.success, result.next_state) == (True, "done")
+        assert (result.success, result.next_step_id) == (True, "done")
         collected = result.data["conversation_intake_data"]
         assert collected["name"] == "Alice"
         assert collected["final_answer"] == "What is your name?"
@@ -503,7 +503,7 @@ class TestConversationStepLastSpokenReply:
     async def test_conversation_that_never_spoke_adds_no_reply_keys(self, llm):
         result = await self._step(ask_speaks=False).execute({})
 
-        assert (result.success, result.next_state) == (True, "done")
+        assert (result.success, result.next_step_id) == (True, "done")
         collected = result.data["conversation_intake_data"]
         assert collected["name"] == "Alice"
         assert "final_answer" not in collected
@@ -601,7 +601,7 @@ class TestNewDSLFunctions:
             "Research",
             mock_agent,
             task_template="Research {topic}",
-            success_state="analyze",
+            success_step_id="analyze",
         )
         assert isinstance(step, AgentStep)
         assert step.step_id == "research"
@@ -609,7 +609,7 @@ class TestNewDSLFunctions:
     def test_retry_step_factory(self):
         from fsm_llm.workflows.dsl import retry_step
 
-        inner = AutoStep(step_id="inner", name="Inner", next_state="done")
+        inner = AutoStep(step_id="inner", name="Inner", next_step_id="done")
         step = retry_step("retry", "Retry", inner, max_retries=5)
         assert isinstance(step, RetryStep)
         assert step.max_retries == 5
@@ -622,7 +622,7 @@ class TestNewDSLFunctions:
             "Route",
             "intent",
             cases={"buy": "checkout"},
-            default_state="fallback",
+            default_step_id="fallback",
         )
         assert isinstance(step, SwitchStep)
         assert step.key == "intent"

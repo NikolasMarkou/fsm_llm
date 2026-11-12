@@ -58,11 +58,11 @@ class TestAutoStep:
     """Test auto_step factory."""
 
     def test_basic(self):
-        step = auto_step("s1", "Step 1", "next_state")
+        step = auto_step("s1", "Step 1", "next_step_id")
         assert isinstance(step, AutoStep)
         assert step.step_id == "s1"
         assert step.name == "Step 1"
-        assert step.next_state == "next_state"
+        assert step.next_step_id == "next_step_id"
         assert step.action is None
 
     def test_with_action(self):
@@ -86,8 +86,8 @@ class TestApiStep:
 
         step = api_step("s1", "API Call", fn, "success", "failure")
         assert isinstance(step, APIStep)
-        assert step.success_state == "success"
-        assert step.failure_state == "failure"
+        assert step.success_step_id == "success"
+        assert step.failure_step_id == "failure"
         assert step.input_mapping == {}
         assert step.output_mapping == {}
 
@@ -117,8 +117,8 @@ class TestConditionStep:
 
         step = condition_step("s1", "Check", fn, "yes", "no")
         assert isinstance(step, ConditionStep)
-        assert step.true_state == "yes"
-        assert step.false_state == "no"
+        assert step.true_step_id == "yes"
+        assert step.false_step_id == "no"
 
 
 class TestLlmStep:
@@ -133,14 +133,14 @@ class TestLlmStep:
             prompt_template="Hello {name}",
             context_mapping={"name": "user_name"},
             output_mapping={"response": "(.*)"},
-            next_state="done",
+            next_step_id="done",
         )
         assert isinstance(step, LLMStep)
         assert step.prompt_template == "Hello {name}"
-        assert step.next_state == "done"
-        assert step.error_state is None
+        assert step.next_step_id == "done"
+        assert step.error_step_id is None
 
-    def test_with_error_state(self):
+    def test_with_error_step_id(self):
         mock_llm = MagicMock()
         step = llm_step(
             "s1",
@@ -149,10 +149,10 @@ class TestLlmStep:
             prompt_template="test",
             context_mapping={},
             output_mapping={},
-            next_state="done",
-            error_state="error",
+            next_step_id="done",
+            error_step_id="error",
         )
-        assert step.error_state == "error"
+        assert step.error_step_id == "error"
 
 
 class TestWaitEventStep:
@@ -162,7 +162,7 @@ class TestWaitEventStep:
         step = wait_event_step("s1", "Wait", "payment_received", "paid")
         assert isinstance(step, WaitEventStep)
         assert step.config.event_type == "payment_received"
-        assert step.config.success_state == "paid"
+        assert step.config.success_step_id == "paid"
         assert step.config.timeout_seconds is None
 
     def test_with_timeout(self):
@@ -170,19 +170,19 @@ class TestWaitEventStep:
             "s1",
             "Wait",
             "event",
-            success_state="ok",
+            success_step_id="ok",
             timeout_seconds=30,
-            timeout_state="timed_out",
+            timeout_step_id="timed_out",
         )
         assert step.config.timeout_seconds == 30
-        assert step.config.timeout_state == "timed_out"
+        assert step.config.timeout_step_id == "timed_out"
 
     def test_with_event_mapping(self):
         step = wait_event_step(
             "s1",
             "Wait",
             "event",
-            success_state="ok",
+            success_step_id="ok",
             event_mapping={"amount": "payment_amount"},
         )
         assert step.config.event_mapping == {"amount": "payment_amount"}
@@ -195,7 +195,7 @@ class TestTimerStep:
         step = timer_step("s1", "Delay", 60, "next")
         assert isinstance(step, TimerStep)
         assert step.delay_seconds == 60
-        assert step.next_state == "next"
+        assert step.next_step_id == "next"
 
 
 class TestParallelStep:
@@ -207,12 +207,12 @@ class TestParallelStep:
         step = parallel_step("p1", "Parallel", [s1, s2], "merged")
         assert isinstance(step, ParallelStep)
         assert len(step.steps) == 2
-        assert step.next_state == "merged"
-        assert step.error_state is None
+        assert step.next_step_id == "merged"
+        assert step.error_step_id is None
 
-    def test_with_error_state(self):
-        step = parallel_step("p1", "P", [], "ok", error_state="err")
-        assert step.error_state == "err"
+    def test_with_error_step_id(self):
+        step = parallel_step("p1", "P", [], "ok", error_step_id="err")
+        assert step.error_step_id == "err"
 
     def test_with_aggregation(self):
         def fn(results):

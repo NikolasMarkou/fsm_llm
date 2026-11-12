@@ -89,7 +89,7 @@ async def run_workflow(model: str, task: str) -> dict:
         auto_step(
             "setup",
             "Task Setup",
-            next_state="agent_step",
+            next_step_id="agent_step",
             action=setup_task,
             description="Prepare task context for the agent",
         )
@@ -105,8 +105,8 @@ async def run_workflow(model: str, task: str) -> dict:
             context_mapping={"agent_answer": "final_answer"},
             auto_messages=["Continue.", "Continue.", "Continue."],
             max_turns=10,
-            success_state="post_process",
-            error_state="post_process",
+            success_step_id="post_process",
+            error_step_id="post_process",
             description="Run agent FSM to analyze the task",
         )
     )
@@ -115,7 +115,7 @@ async def run_workflow(model: str, task: str) -> dict:
         auto_step(
             "post_process",
             "Post Processing",
-            next_state="",
+            next_step_id="",
             action=post_process,
             description="Post-process the agent output",
         )

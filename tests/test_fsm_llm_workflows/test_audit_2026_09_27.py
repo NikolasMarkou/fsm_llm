@@ -69,9 +69,11 @@ def _wait_then_done(
     """wait(event) -> done (terminal)."""
     wf = create_workflow(workflow_id, workflow_id)
     wf.with_initial_step(
-        wait_event_step("wait", "Wait", event_type, success_state="done", **wait_kwargs)
+        wait_event_step(
+            "wait", "Wait", event_type, success_step_id="done", **wait_kwargs
+        )
     )
-    wf.with_step(auto_step("done", "Done", next_state=""))
+    wf.with_step(auto_step("done", "Done", next_step_id=""))
     return wf
 
 
@@ -84,7 +86,7 @@ class _DynamicLoopStep(WorkflowStep):
     static graph cannot see it)."""
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
-        return WorkflowStepResult.success_result(next_state=self.step_id)
+        return WorkflowStepResult.success_result(next_step_id=self.step_id)
 
 
 class _TerminalStep(WorkflowStep):
@@ -176,19 +178,19 @@ class TestProcessEventIsolation:
 class TestRewaitTimeoutSurvives:
     async def test_second_wait_on_same_event_still_times_out(self):
         wf = create_workflow("rewait", "Rewait")
-        wf.with_initial_step(wait_event_step("w1", "W1", "go", success_state="w2"))
+        wf.with_initial_step(wait_event_step("w1", "W1", "go", success_step_id="w2"))
         wf.with_step(
             wait_event_step(
                 "w2",
                 "W2",
                 "go",
-                success_state="done",
+                success_step_id="done",
                 timeout_seconds=0.05,
-                timeout_state="timed_out",
+                timeout_step_id="timed_out",
             )
         )
-        wf.with_step(auto_step("done", "Done", next_state=""))
-        wf.with_step(auto_step("timed_out", "Timed out", next_state=""))
+        wf.with_step(auto_step("done", "Done", next_step_id=""))
+        wf.with_step(auto_step("timed_out", "Timed out", next_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("rewait")
@@ -208,7 +210,7 @@ class TestRewaitTimeoutSurvives:
 
 
 class TestWaitTimeoutsAndTerminalWaits:
-    async def test_timeout_without_timeout_state_fails_instance(self):
+    async def test_timeout_without_timeout_step_id_fails_instance(self):
         engine = WorkflowEngine()
         engine.register_workflow(_wait_then_done("wf", timeout_seconds=0.05))
         iid = await engine.start("wf")
@@ -219,9 +221,9 @@ class TestWaitTimeoutsAndTerminalWaits:
         assert "timed out" in (inst.error or "")
         assert engine.timers == {}
 
-    async def test_empty_success_state_completes_on_event(self):
+    async def test_empty_success_step_id_completes_on_event(self):
         wf = create_workflow("wf", "wf")
-        wf.with_initial_step(wait_event_step("wait", "Wait", "go", success_state=""))
+        wf.with_initial_step(wait_event_step("wait", "Wait", "go", success_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("wf")
@@ -229,13 +231,13 @@ class TestWaitTimeoutsAndTerminalWaits:
         assert await engine.process_event(WorkflowEvent(event_type="go")) == [iid]
         assert engine.get_status(iid) == WorkflowStatus.COMPLETED
 
-    def test_timeout_state_without_timeout_seconds_rejected(self):
-        with pytest.raises(ValueError, match="timeout_state requires"):
-            WaitEventConfig(event_type="go", success_state="x", timeout_state="t")
+    def test_timeout_step_id_without_timeout_seconds_rejected(self):
+        with pytest.raises(ValueError, match="timeout_step_id requires"):
+            WaitEventConfig(event_type="go", success_step_id="x", timeout_step_id="t")
 
     def test_empty_event_type_rejected(self):
         with pytest.raises(ValueError):
-            WaitEventConfig(event_type="", success_state="x")
+            WaitEventConfig(event_type="", success_step_id="x")
 
 
 # ---------------------------------------------------------------
@@ -253,7 +255,7 @@ class TestLLMStepInterfaces:
             prompt_template="Q: {q}",
             context_mapping={"q": "question"},
             output_mapping={"answer": r"ANSWER: (\d+)", "raw": ""},
-            next_state="done",
+            next_step_id="done",
         )
         result = await step.execute({"question": "6*7"})
 
@@ -273,7 +275,7 @@ class TestLLMStepInterfaces:
             llm_interface=_SyncLLM(),
             prompt_template="hi",
             output_mapping={"out": ""},
-            next_state="done",
+            next_step_id="done",
         )
         result = await step.execute({})
         assert result.success is True
@@ -286,7 +288,7 @@ class TestLLMStepInterfaces:
             llm_interface=_CoreLikeLLM("no number here"),
             prompt_template="hi",
             output_mapping={"n": r"(\d+)"},
-            next_state="done",
+            next_step_id="done",
         )
         result = await step.execute({})
         assert result.success is True
@@ -300,7 +302,7 @@ class TestLLMStepInterfaces:
                 llm_interface=_CoreLikeLLM(""),
                 prompt_template="hi",
                 output_mapping={"n": "(unclosed"},
-                next_state="done",
+                next_step_id="done",
             )
 
 
@@ -310,7 +312,7 @@ class TestLLMStepInterfaces:
 
 
 class TestFailClosedRouting:
-    async def test_llm_failure_without_error_state_fails_instance(self):
+    async def test_llm_failure_without_error_step_id_fails_instance(self):
         class _Broken:
             def generate(self, prompt):
                 raise RuntimeError("provider down")
@@ -322,10 +324,10 @@ class TestFailClosedRouting:
                 name="LLM",
                 llm_interface=_Broken(),
                 prompt_template="hi",
-                next_state="after",
+                next_step_id="after",
             )
         )
-        wf.with_step(auto_step("after", "After", next_state=""))
+        wf.with_step(auto_step("after", "After", next_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("wf")
@@ -335,17 +337,17 @@ class TestFailClosedRouting:
         assert inst.current_step_id == "llm"
         assert "provider down" in (inst.error or "")
 
-    async def test_parallel_failure_without_error_state_has_no_route(self):
+    async def test_parallel_failure_without_error_step_id_has_no_route(self):
         bad = AutoStep(
             step_id="bad",
             name="Bad",
-            next_state="x",
+            next_step_id="x",
             action=lambda ctx: 1 / 0,
         )
-        step = ParallelStep(step_id="p", name="P", steps=[bad], next_state="next")
+        step = ParallelStep(step_id="p", name="P", steps=[bad], next_step_id="next")
         result = await step.execute({})
         assert result.success is False
-        assert result.next_state is None
+        assert result.next_step_id is None
 
     async def test_agent_reporting_failure_fails_step(self):
         agent = _RecordingAgent(_AgentResult("gave up", success=False))
@@ -353,20 +355,20 @@ class TestFailClosedRouting:
             step_id="a",
             name="A",
             agent=agent,
-            success_state="next",
-            error_state="err",
+            success_step_id="next",
+            error_step_id="err",
         )
         result = await step.execute({"task": "t"})
         assert result.success is False
-        assert result.next_state == "err"
+        assert result.next_step_id == "err"
         assert result.data["agent_success"] is False
 
-    async def test_conversation_failure_without_error_state_has_no_route(self):
+    async def test_conversation_failure_without_error_step_id_has_no_route(self):
         step = ConversationStep(
             step_id="c",
             name="C",
             fsm_definition={"name": "x"},
-            success_state="next",
+            success_step_id="next",
         )
         from unittest.mock import patch
 
@@ -374,7 +376,7 @@ class TestFailClosedRouting:
             mock_api.from_definition.side_effect = RuntimeError("no model")
             result = await step.execute({})
         assert result.success is False
-        assert result.next_state is None
+        assert result.next_step_id is None
 
 
 # ---------------------------------------------------------------
@@ -397,11 +399,15 @@ class TestParallelEmptyErrors:
             _SilentFail(step_id="c", name="C"),
         ):
             step = ParallelStep(
-                step_id="p", name="P", steps=[child], next_state="n", error_state="e"
+                step_id="p",
+                name="P",
+                steps=[child],
+                next_step_id="n",
+                error_step_id="e",
             )
             result = await step.execute({})
             assert result.success is False, type(child).__name__
-            assert result.next_state == "e"
+            assert result.next_step_id == "e"
             assert result.error
 
 
@@ -419,11 +425,11 @@ class TestAwaitableReturningCallables:
             step_id="c",
             name="C",
             condition=lambda ctx: is_big(ctx),
-            true_state="big",
-            false_state="small",
+            true_step_id="big",
+            false_step_id="small",
         )
-        assert (await step.execute({"n": 1})).next_state == "small"
-        assert (await step.execute({"n": 99})).next_state == "big"
+        assert (await step.execute({"n": 1})).next_step_id == "small"
+        assert (await step.execute({"n": 99})).next_step_id == "big"
 
     async def test_api_lambda_returning_coroutine(self):
         async def fetch(**kwargs):
@@ -433,8 +439,8 @@ class TestAwaitableReturningCallables:
             step_id="api",
             name="API",
             api_function=lambda **kw: fetch(**kw),
-            success_state="ok",
-            failure_state="bad",
+            success_step_id="ok",
+            failure_step_id="bad",
             output_mapping={"v": "value"},
         )
         result = await step.execute({})
@@ -446,7 +452,7 @@ class TestAwaitableReturningCallables:
             async def __call__(self, ctx):
                 return {"done": True}
 
-        step = AutoStep(step_id="a", name="A", next_state="n", action=_AsyncAction())
+        step = AutoStep(step_id="a", name="A", next_step_id="n", action=_AsyncAction())
         assert (await step.execute({})).data == {"done": True}
 
 
@@ -459,7 +465,7 @@ class TestInstanceIds:
     async def test_cancel_does_not_touch_timers_of_prefix_sharing_ids(self):
         wf = create_workflow("t", "t")
         wf.with_initial_step(timer_step("wait", "Wait", 60, "done"))
-        wf.with_step(auto_step("done", "Done", next_state=""))
+        wf.with_step(auto_step("done", "Done", next_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         await engine.start("t", instance_id="order")
@@ -500,7 +506,7 @@ class TestWorkflowDeadline:
         class _Slow(WorkflowStep):
             async def execute(self, context):
                 await asyncio.sleep(1)
-                return WorkflowStepResult.success_result(next_state="")
+                return WorkflowStepResult.success_result(next_step_id="")
 
         wf = create_workflow("slow", "slow")
         wf.with_initial_step(_Slow(step_id="s", name="S"))
@@ -525,7 +531,9 @@ class TestLoopsAndStepBudget:
         n = 30
         for i in range(n):
             nxt = f"s{i + 1}" if i < n - 1 else ""
-            wf.with_step(auto_step(f"s{i}", f"S{i}", next_state=nxt), is_initial=i == 0)
+            wf.with_step(
+                auto_step(f"s{i}", f"S{i}", next_step_id=nxt), is_initial=i == 0
+            )
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("long")
@@ -540,19 +548,19 @@ class TestLoopsAndStepBudget:
 
         wf = create_workflow("poll", "poll")
         wf.with_initial_step(
-            auto_step("check", "Check", next_state="route", action=poll)
+            auto_step("check", "Check", next_step_id="route", action=poll)
         )
         wf.with_step(
             condition_step(
                 "route",
                 "Ready?",
                 condition=lambda ctx: ctx["ready"],
-                true_state="done",
-                false_state="sleep",
+                true_step_id="done",
+                false_step_id="sleep",
             )
         )
         wf.with_step(timer_step("sleep", "Sleep", 0, "check"))
-        wf.with_step(auto_step("done", "Done", next_state=""))
+        wf.with_step(auto_step("done", "Done", next_step_id=""))
         assert wf.has_cycles() is True
         assert wf.has_synchronous_cycles() is False
 
@@ -566,8 +574,8 @@ class TestLoopsAndStepBudget:
 
     def test_synchronous_cycle_rejected(self):
         wf = create_workflow("cyc", "cyc")
-        wf.with_initial_step(auto_step("a", "A", next_state="b"))
-        wf.with_step(auto_step("b", "B", next_state="a"))
+        wf.with_initial_step(auto_step("a", "A", next_step_id="b"))
+        wf.with_step(auto_step("b", "B", next_step_id="a"))
         with pytest.raises(WorkflowValidationError, match="synchronous cycle"):
             wf.validate_structure()
 
@@ -621,10 +629,14 @@ class TestEventCorrelation:
         wf.with_initial_step(timer_step("pause", "Pause", 60, "wait"))
         wf.with_step(
             wait_event_step(
-                "wait", "Wait", "paid", success_state="done", event_mapping={"amt": "a"}
+                "wait",
+                "Wait",
+                "paid",
+                success_step_id="done",
+                event_mapping={"amt": "a"},
             )
         )
-        wf.with_step(auto_step("done", "Done", next_state=""))
+        wf.with_step(auto_step("done", "Done", next_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("wf")
@@ -652,7 +664,7 @@ class TestSwitchDefaults:
     async def test_dsl_default_fails_on_unmatched_value(self):
         wf = create_workflow("sw", "sw")
         wf.with_initial_step(switch_step("route", "Route", "k", cases={"a": "done"}))
-        wf.with_step(auto_step("done", "Done", next_state=""))
+        wf.with_step(auto_step("done", "Done", next_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("sw", {"k": "zzz"})
@@ -661,7 +673,7 @@ class TestSwitchDefaults:
     async def test_switch_outputs_reach_context(self):
         wf = create_workflow("sw", "sw")
         wf.with_initial_step(switch_step("route", "Route", "k", cases={"a": "done"}))
-        wf.with_step(auto_step("done", "Done", next_state=""))
+        wf.with_step(auto_step("done", "Done", next_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("sw", {"k": "a"})
@@ -680,10 +692,10 @@ class TestParallelChildren:
         child = AutoStep(
             step_id="c",
             name="C",
-            next_state="x",
+            next_step_id="x",
             action=lambda ctx: {"_secret": 1, "system_x": 2, "ok": 3},
         )
-        step = ParallelStep(step_id="p", name="P", steps=[child], next_state="n")
+        step = ParallelStep(step_id="p", name="P", steps=[child], next_step_id="n")
         result = await step.execute({})
         assert result.data == {"step_0_ok": 3}
 
@@ -693,18 +705,24 @@ class TestParallelChildren:
                 step_id="p",
                 name="P",
                 steps=[
-                    TimerStep(step_id="t", name="T", delay_seconds=1, next_state="x")
+                    TimerStep(step_id="t", name="T", delay_seconds=1, next_step_id="x")
                 ],
-                next_state="n",
+                next_step_id="n",
             )
 
     async def test_partial_data_kept_on_failure(self):
         good = AutoStep(
-            step_id="g", name="G", next_state="x", action=lambda ctx: {"v": 1}
+            step_id="g", name="G", next_step_id="x", action=lambda ctx: {"v": 1}
         )
-        bad = AutoStep(step_id="b", name="B", next_state="x", action=lambda ctx: 1 / 0)
+        bad = AutoStep(
+            step_id="b", name="B", next_step_id="x", action=lambda ctx: 1 / 0
+        )
         step = ParallelStep(
-            step_id="p", name="P", steps=[good, bad], next_state="n", error_state="e"
+            step_id="p",
+            name="P",
+            steps=[good, bad],
+            next_step_id="n",
+            error_step_id="e",
         )
         result = await step.execute({})
         assert result.success is False
@@ -713,8 +731,8 @@ class TestParallelChildren:
     async def test_uncopyable_context_falls_back_to_shallow_copy(self):
         import threading
 
-        child = AutoStep(step_id="c", name="C", next_state="x")
-        step = ParallelStep(step_id="p", name="P", steps=[child], next_state="n")
+        child = AutoStep(step_id="c", name="C", next_step_id="x")
+        step = ParallelStep(step_id="p", name="P", steps=[child], next_step_id="n")
         result = await step.execute({"lock": threading.Lock()})
         assert result.success is True
 
@@ -731,7 +749,7 @@ class TestAgentStepMapping:
             step_id="a",
             name="A",
             agent=agent,
-            success_state="next",
+            success_step_id="next",
             context_mapping={"result": "answer"},
         )
         result = await step.execute({"task": "t"})
@@ -744,7 +762,7 @@ class TestAgentStepMapping:
             step_id="a",
             name="A",
             agent=agent,
-            success_state="next",
+            success_step_id="next",
             input_mapping={"customer": "cust_id"},
         )
         await step.execute({"task": "t", "cust_id": "C-1"})
@@ -755,7 +773,7 @@ class TestAgentStepMapping:
             def run(self, task):
                 return f"done: {task}"
 
-        step = AgentStep(step_id="a", name="A", agent=_StrAgent(), success_state="n")
+        step = AgentStep(step_id="a", name="A", agent=_StrAgent(), success_step_id="n")
         result = await step.execute({"task": "t"})
         assert result.success is True
         assert result.data["agent_answer"] == "done: t"
@@ -798,13 +816,13 @@ class TestConversationStepFixes:
             name="C",
             fsm_definition={"name": "x"},
             timeout_seconds=0.05,
-            error_state="err",
+            error_step_id="err",
         )
         with patch("fsm_llm.workflows.steps.API") as mock_cls:
             mock_cls.from_definition.return_value = self._mock_api(delay=0.3)
             result = await step.execute({})
         assert result.success is False
-        assert result.next_state == "err"
+        assert result.next_step_id == "err"
         assert "timed out" in result.error
 
     async def test_ended_flag_and_require_completion(self):
@@ -814,15 +832,15 @@ class TestConversationStepFixes:
             step_id="c",
             name="C",
             fsm_definition={"name": "x"},
-            success_state="next",
-            error_state="err",
+            success_step_id="next",
+            error_step_id="err",
             require_completion=True,
         )
         with patch("fsm_llm.workflows.steps.API") as mock_cls:
             mock_cls.from_definition.return_value = self._mock_api(ended=False)
             result = await step.execute({})
         assert result.success is False
-        assert result.next_state == "err"
+        assert result.next_step_id == "err"
         assert result.data["conversation_c_ended"] is False
 
     async def test_user_input_is_sent_when_enabled(self):
@@ -865,13 +883,13 @@ class TestResourceRelease:
                 "wait",
                 "Wait",
                 "go",
-                success_state="done",
+                success_step_id="done",
                 timeout_seconds=0.05,
-                timeout_state="late",
+                timeout_step_id="late",
             )
         )
-        wf.with_step(auto_step("done", "Done", next_state=""))
-        wf.with_step(auto_step("late", "Late", next_state=""))
+        wf.with_step(auto_step("done", "Done", next_step_id=""))
+        wf.with_step(auto_step("late", "Late", next_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("wf")
@@ -887,7 +905,7 @@ class TestResourceRelease:
     async def test_failed_instances_are_purged_too(self):
         wf = create_workflow("f", "f")
         wf.with_initial_step(
-            auto_step("boom", "Boom", next_state="", action=lambda ctx: 1 / 0)
+            auto_step("boom", "Boom", next_step_id="", action=lambda ctx: 1 / 0)
         )
         engine = WorkflowEngine(max_completed_instances=2)
         engine.register_workflow(wf)
@@ -918,7 +936,7 @@ class TestDefinitionPinning:
         iid = await engine.start("wf")
 
         replacement = create_workflow("wf", "v2")
-        replacement.with_initial_step(auto_step("other", "Other", next_state=""))
+        replacement.with_initial_step(auto_step("other", "Other", next_step_id=""))
         engine.register_workflow(replacement)
         await engine.process_event(WorkflowEvent(event_type="go"))
 
@@ -930,7 +948,7 @@ class TestDefinitionPinning:
         engine = WorkflowEngine()
         wf = _wait_then_done("wf")
         engine.register_workflow(wf)
-        wf.with_step(auto_step("extra", "Extra", next_state=""))
+        wf.with_step(auto_step("extra", "Extra", next_step_id=""))
         assert "extra" not in engine.get_definition("wf").steps
 
 
@@ -946,7 +964,7 @@ class TestEngineApi:
         engine.add_hook(lambda name, inst, data: seen.append((name, data)))
         engine.add_hook(lambda *a: 1 / 0)  # a broken hook must not matter
         wf = create_workflow("h", "h")
-        wf.with_initial_step(auto_step("a", "A", next_state=""))
+        wf.with_initial_step(auto_step("a", "A", next_step_id=""))
         engine.register_workflow(wf)
         iid = await engine.start("h")
 
@@ -975,7 +993,7 @@ class TestEngineApi:
     async def test_background_start(self):
         engine = WorkflowEngine()
         wf = create_workflow("bg", "bg")
-        wf.with_initial_step(auto_step("a", "A", next_state=""))
+        wf.with_initial_step(auto_step("a", "A", next_step_id=""))
         engine.register_workflow(wf)
         iid = await engine.start("bg", wait=False)
         await _settle()
@@ -1021,7 +1039,7 @@ class TestLoggingOffByDefault:
             async def run():
                 engine = wfl.WorkflowEngine()
                 wf = wfl.create_workflow("w", "w")
-                wf.with_initial_step(wfl.auto_step("a", "A", next_state=""))
+                wf.with_initial_step(wfl.auto_step("a", "A", next_step_id=""))
                 engine.register_workflow(wf)
                 await engine.start("w")
 
@@ -1050,38 +1068,38 @@ class TestLoggingOffByDefault:
 
 
 class TestSmallerFixes:
-    async def test_auto_and_condition_error_state(self):
+    async def test_auto_and_condition_error_step_id(self):
         auto = AutoStep(
             step_id="a",
             name="A",
-            next_state="n",
-            error_state="e",
+            next_step_id="n",
+            error_step_id="e",
             action=lambda c: 1 / 0,
         )
         cond = ConditionStep(
             step_id="c",
             name="C",
             condition=lambda c: 1 / 0,
-            true_state="t",
-            false_state="f",
-            error_state="e",
+            true_step_id="t",
+            false_step_id="f",
+            error_step_id="e",
         )
         for step in (auto, cond):
             result = await step.execute({})
             assert result.success is False
-            assert result.next_state == "e"
+            assert result.next_step_id == "e"
 
     def test_non_dict_action_result_is_a_clear_error(self):
-        step = AutoStep(step_id="a", name="A", next_state="n", action=lambda c: ["x"])
+        step = AutoStep(step_id="a", name="A", next_step_id="n", action=lambda c: ["x"])
         result = asyncio.run(step.execute({}))
         assert result.success is False
         assert "must return a dict" in (result.error or "")
 
     async def test_history_records_step_error_without_redundant_entries(self):
         wf = create_workflow("h", "h")
-        wf.with_initial_step(auto_step("a", "A", next_state="b"))
+        wf.with_initial_step(auto_step("a", "A", next_step_id="b"))
         wf.with_step(switch_step("b", "B", "k", cases={"x": "done"}))
-        wf.with_step(auto_step("done", "Done", next_state=""))
+        wf.with_step(auto_step("done", "Done", next_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("h")
@@ -1116,17 +1134,17 @@ class TestSmallerFixes:
 
     def test_duplicate_step_id_rejected(self):
         wf = create_workflow("d", "d")
-        wf.with_step(auto_step("a", "A", next_state=""))
+        wf.with_step(auto_step("a", "A", next_step_id=""))
         with pytest.raises(WorkflowDefinitionError, match="Duplicate"):
-            wf.with_step(auto_step("a", "Other", next_state=""))
+            wf.with_step(auto_step("a", "Other", next_step_id=""))
 
     async def test_api_output_paths(self):
         step = APIStep(
             step_id="api",
             name="API",
             api_function=lambda: {"user": {"name": "Ada"}, "items": [1, 2]},
-            success_state="ok",
-            failure_state="bad",
+            success_step_id="ok",
+            failure_step_id="bad",
             output_mapping={"name": "user.name", "all": ""},
         )
         result = await step.execute({})
@@ -1137,15 +1155,15 @@ class TestSmallerFixes:
             step_id="api2",
             name="API2",
             api_function=lambda: [1, 2, 3],
-            success_state="ok",
-            failure_state="bad",
+            success_step_id="ok",
+            failure_step_id="bad",
             output_mapping={"rows": ""},
         )
         assert (await list_step.execute({})).data == {"rows": [1, 2, 3]}
 
     def test_float_delays_accepted(self):
         assert timer_step("t", "T", 0.25, "x").delay_seconds == 0.25
-        cfg = WaitEventConfig(event_type="e", success_state="x", timeout_seconds=0.5)
+        cfg = WaitEventConfig(event_type="e", success_step_id="x", timeout_seconds=0.5)
         assert cfg.timeout_seconds == 0.5
 
     def test_serialize_strips_custom_callables(self):
@@ -1153,7 +1171,7 @@ class TestSmallerFixes:
             callback: Any = None
 
             async def execute(self, context):
-                return WorkflowStepResult.success_result(next_state="")
+                return WorkflowStepResult.success_result(next_step_id="")
 
         wf = create_workflow("s", "s")
         wf.with_initial_step(_WithCallback(step_id="a", name="A", callback=print))
@@ -1161,8 +1179,10 @@ class TestSmallerFixes:
 
     async def test_retry_wrapping_timer_counts_as_pausing(self):
         wf = create_workflow("r", "r")
-        inner = TimerStep(step_id="t_inner", name="T", delay_seconds=0, next_state="a")
-        wf.with_initial_step(auto_step("a", "A", next_state="t"))
+        inner = TimerStep(
+            step_id="t_inner", name="T", delay_seconds=0, next_step_id="a"
+        )
+        wf.with_initial_step(auto_step("a", "A", next_step_id="t"))
         wf.with_step(RetryStep(step_id="t", name="T", step=inner))
         assert wf.has_synchronous_cycles() is False
 
@@ -1182,7 +1202,7 @@ class TestStepExecutor:
             auto_step(
                 "a",
                 "A",
-                next_state="",
+                next_step_id="",
                 action=lambda ctx: {"thread": threading.current_thread().name},
             )
         )
@@ -1200,12 +1220,12 @@ class TestStepExecutor:
 
 
 class _SlowStep(WorkflowStep):
-    next_state: str = ""
+    next_step_id: str = ""
     delay: float = 0.3
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         await asyncio.sleep(self.delay)
-        return WorkflowStepResult.success_result(next_state=self.next_state)
+        return WorkflowStepResult.success_result(next_step_id=self.next_step_id)
 
 
 def _two_waits_workflow() -> WorkflowDefinition:
@@ -1216,14 +1236,14 @@ def _two_waits_workflow() -> WorkflowDefinition:
             "wa",
             "WA",
             "A",
-            success_state="slow",
+            success_step_id="slow",
             timeout_seconds=0.1,
-            timeout_state="wb",
+            timeout_step_id="wb",
         )
     )
     wf.with_step(_SlowStep(step_id="slow", name="Slow"))
-    wf.with_step(wait_event_step("wb", "WB", "B", success_state="got_b"))
-    wf.with_step(auto_step("got_b", "Got B", next_state=""))
+    wf.with_step(wait_event_step("wb", "WB", "B", success_step_id="got_b"))
+    wf.with_step(auto_step("got_b", "Got B", next_step_id=""))
     return wf
 
 
@@ -1246,7 +1266,7 @@ class TestReviewFollowUp:
 
     async def test_cancelled_delivery_restores_undelivered_listeners(self):
         wf = create_workflow("cd", "cd")
-        wf.with_initial_step(wait_event_step("wa", "WA", "A", success_state="slow"))
+        wf.with_initial_step(wait_event_step("wa", "WA", "A", success_step_id="slow"))
         wf.with_step(_SlowStep(step_id="slow", name="Slow", delay=0.5))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
@@ -1265,9 +1285,9 @@ class TestReviewFollowUp:
 
     async def test_leaving_a_wait_drops_its_listener(self):
         wf = create_workflow("lw", "lw")
-        wf.with_initial_step(wait_event_step("wa", "WA", "A", success_state="wb"))
-        wf.with_step(wait_event_step("wb", "WB", "B", success_state="done"))
-        wf.with_step(auto_step("done", "Done", next_state=""))
+        wf.with_initial_step(wait_event_step("wa", "WA", "A", success_step_id="wb"))
+        wf.with_step(wait_event_step("wb", "WB", "B", success_step_id="done"))
+        wf.with_step(auto_step("done", "Done", next_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("lw", max_seconds=60)
@@ -1288,7 +1308,9 @@ class TestReviewFollowUp:
         ran: list[str] = []
         wf = create_workflow("bgc", "bgc")
         wf.with_initial_step(
-            auto_step("charge", "Charge", next_state="", action=lambda c: ran.append(1))
+            auto_step(
+                "charge", "Charge", next_step_id="", action=lambda c: ran.append(1)
+            )
         )
         engine = WorkflowEngine()
         engine.register_workflow(wf)
@@ -1307,7 +1329,7 @@ class TestReviewFollowUp:
             llm_interface=llm,
             prompt_template="x" * 12000,
             output_mapping={"out": ""},
-            next_state="done",
+            next_step_id="done",
         )
         result = await step.execute({})
         assert result.success is True
@@ -1316,7 +1338,7 @@ class TestReviewFollowUp:
 
     async def test_event_completion_clears_waiting_info(self):
         wf = create_workflow("wc", "wc")
-        wf.with_initial_step(wait_event_step("wait", "Wait", "go", success_state=""))
+        wf.with_initial_step(wait_event_step("wait", "Wait", "go", success_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("wc")

@@ -27,28 +27,28 @@ from fsm_llm.workflows.steps import (
 
 
 class TestParallelStepErrorHandling:
-    """F-001: ParallelStep should report failure even without error_state."""
+    """F-001: ParallelStep should report failure even without error_step_id."""
 
-    async def test_parallel_step_fails_when_substeps_fail_no_error_state(self):
-        """ParallelStep with no error_state must still return failure if substeps fail."""
+    async def test_parallel_step_fails_when_substeps_fail_no_error_step_id(self):
+        """ParallelStep with no error_step_id must still return failure if substeps fail."""
         failing_step = AutoStep(
             step_id="fail",
             name="Failing",
-            next_state="done",
+            next_step_id="done",
             action=lambda ctx: (_ for _ in ()).throw(ValueError("boom")),
         )
         ok_step = AutoStep(
             step_id="ok",
             name="OK",
-            next_state="done",
+            next_step_id="done",
         )
 
         parallel = ParallelStep(
             step_id="par",
             name="Parallel",
             steps=[ok_step, failing_step],
-            next_state="next",
-            error_state=None,  # No error_state configured
+            next_step_id="next",
+            error_step_id=None,  # No error_step_id configured
         )
 
         result = await parallel.execute({})
@@ -59,12 +59,12 @@ class TestParallelStepErrorHandling:
             "error" in result.message.lower() or "error" in (result.error or "").lower()
         )
 
-    async def test_parallel_step_fails_with_error_state(self):
-        """ParallelStep with error_state transitions to it on failure."""
+    async def test_parallel_step_fails_with_error_step_id(self):
+        """ParallelStep with error_step_id transitions to it on failure."""
         failing_step = AutoStep(
             step_id="fail",
             name="Failing",
-            next_state="done",
+            next_step_id="done",
             action=lambda ctx: (_ for _ in ()).throw(RuntimeError("fail")),
         )
 
@@ -72,31 +72,31 @@ class TestParallelStepErrorHandling:
             step_id="par",
             name="Parallel",
             steps=[failing_step],
-            next_state="next",
-            error_state="error_handler",
+            next_step_id="next",
+            error_step_id="error_handler",
         )
 
         result = await parallel.execute({})
 
         assert result.success is False
-        assert result.next_state == "error_handler"
+        assert result.next_step_id == "error_handler"
 
     async def test_parallel_step_succeeds_when_all_ok(self):
         """ParallelStep returns success when all substeps succeed."""
-        step_a = AutoStep(step_id="a", name="A", next_state="done")
-        step_b = AutoStep(step_id="b", name="B", next_state="done")
+        step_a = AutoStep(step_id="a", name="A", next_step_id="done")
+        step_b = AutoStep(step_id="b", name="B", next_step_id="done")
 
         parallel = ParallelStep(
             step_id="par",
             name="Parallel",
             steps=[step_a, step_b],
-            next_state="next",
+            next_step_id="next",
         )
 
         result = await parallel.execute({})
 
         assert result.success is True
-        assert result.next_state == "next"
+        assert result.next_step_id == "next"
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +147,7 @@ class TestConversationStepResourceCleanup:
             step_id="conv",
             name="Conv",
             fsm_file="fake.json",
-            success_state="done",
+            success_step_id="done",
             auto_messages=["msg1"],
         )
 
@@ -191,7 +191,7 @@ class TestLLMStepTemplateError:
             prompt_template="Hello {name}, your order {order_id} is ready",
             context_mapping={"name": "user_name"},  # order_id not mapped
             output_mapping={"result": ".*"},
-            next_state="done",
+            next_step_id="done",
         )
 
         # Context has user_name but template needs order_id too
@@ -233,7 +233,7 @@ class TestInstanceLockConcurrency:
     @staticmethod
     def _build_counting_terminal_step(step_id: str, counter: list):
         """A step that sleeps briefly (to widen the race window), then
-        completes with no next_state (terminal), incrementing ``counter``
+        completes with no next_step_id (terminal), incrementing ``counter``
         each time it actually runs."""
         import asyncio as _asyncio
 
@@ -245,7 +245,7 @@ class TestInstanceLockConcurrency:
                 counter.append(1)
                 await _asyncio.sleep(0.05)
                 return WorkflowStepResult.success_result(
-                    data={"ran": True}, next_state=None, message="done"
+                    data={"ran": True}, next_step_id=None, message="done"
                 )
 
         return _CountingTerminalStep(step_id=step_id, name="Counting")
@@ -270,7 +270,7 @@ class TestInstanceLockConcurrency:
                             "event_type": "resume",
                         }
                     },
-                    next_state=None,
+                    next_step_id=None,
                     message="waiting",
                 )
 
@@ -638,7 +638,7 @@ class TestFloatTimeoutSecondsEndToEnd:
                 return None
 
         engine = WorkflowEngine()
-        step = AutoStep(step_id="only", name="Only", next_state="term")
+        step = AutoStep(step_id="only", name="Only", next_step_id="term")
         term_step = _TerminalStep(step_id="term", name="Term")
         definition = WorkflowDefinition(
             workflow_id="wf-float-timeout",
@@ -691,7 +691,7 @@ class TestCancelMidChain:
         from fsm_llm.workflows.steps import WorkflowStep
 
         class _GatedStep(WorkflowStep):
-            next_state: str = ""
+            next_step_id: str = ""
 
             async def execute(self, context):
                 ran.append(self.step_id)
@@ -702,13 +702,15 @@ class TestCancelMidChain:
                 if gate is not None:
                     await gate.wait()
                 return WorkflowStepResult.success_result(
-                    data={}, next_state=self.next_state or None, message=self.step_id
+                    data={},
+                    next_step_id=self.next_step_id or None,
+                    message=self.step_id,
                 )
 
         steps = {}
         for i, sid in enumerate(chain):
             nxt = chain[i + 1] if i + 1 < len(chain) else ""
-            steps[sid] = _GatedStep(step_id=sid, name=sid, next_state=nxt)
+            steps[sid] = _GatedStep(step_id=sid, name=sid, next_step_id=nxt)
         return WorkflowDefinition(
             workflow_id="wf-cancel-chain",
             name="CancelChain",
@@ -806,18 +808,18 @@ class TestCancelMidChain:
 
 class TestTimerEmptyNextState:
     """F-WE-02 (plan 5ed71cf2 step 16): the validator accepts
-    ``TimerStep(next_state="")`` as a terminal step, like
-    ``wait_event_step(success_state="")``, but the engine used to run the
+    ``TimerStep(next_step_id="")`` as a terminal step, like
+    ``wait_event_step(success_step_id="")``, but the engine used to run the
     expiry through ``_transition_to_state`` and FAIL the instance with
     ``Invalid next state``. An empty target now completes the workflow.
     """
 
     @staticmethod
-    def _engine(next_state: str, extra_steps: dict | None = None):
+    def _engine(next_step_id: str, extra_steps: dict | None = None):
         from fsm_llm.workflows.definitions import WorkflowDefinition
         from fsm_llm.workflows.dsl import auto_step, timer_step
 
-        steps = {"w": timer_step("w", "w", 0.05, next_state)}
+        steps = {"w": timer_step("w", "w", 0.05, next_step_id)}
         steps.update(extra_steps or {})
         engine = WorkflowEngine()
         engine.register_workflow(
@@ -844,7 +846,7 @@ class TestTimerEmptyNextState:
             await asyncio.sleep(0.01)
         raise AssertionError("instance never reached a terminal status")
 
-    async def test_empty_next_state_completes_after_expiry(self):
+    async def test_empty_next_step_id_completes_after_expiry(self):
         from fsm_llm.workflows.constants import (
             CONTEXT_KEY_TIMER_EXPIRED,
             CONTEXT_KEY_TIMER_INFO,
@@ -861,7 +863,7 @@ class TestTimerEmptyNextState:
         assert f"{iid}_timer" not in engine.timers
         await engine.close()
 
-    async def test_valid_next_state_still_transitions(self):
+    async def test_valid_next_step_id_still_transitions(self):
         from fsm_llm.workflows.dsl import auto_step
         from fsm_llm.workflows.models import WorkflowStatus
 
@@ -875,13 +877,13 @@ class TestTimerEmptyNextState:
         assert instance.context.get("hit") == 1
         await engine.close()
 
-    async def test_invalid_non_empty_next_state_still_fails(self):
+    async def test_invalid_non_empty_next_step_id_still_fails(self):
         from fsm_llm.workflows.models import WorkflowStatus
 
         # The validator rejects an unknown non-empty target at registration,
         # so retarget the registered step to reach the engine-side guard.
         engine, _ = self._engine("")
-        engine.workflow_definitions["wf-timer"].steps["w"].next_state = "nowhere"
+        engine.workflow_definitions["wf-timer"].steps["w"].next_step_id = "nowhere"
         iid = await engine.start("wf-timer", wait=False)
         instance = await self._wait_terminal(engine, iid)
 

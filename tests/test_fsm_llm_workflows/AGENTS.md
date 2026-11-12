@@ -31,10 +31,10 @@ flowchart LR
 | --- | --- | --- |
 | `test_workflows.py` | 41 | Exception attributes and hierarchy under `WorkflowError`; `WorkflowStatus` values; `WorkflowEvent` UUID and ISO timestamp dump; `WorkflowStepResult.success_result`/`failure_result`, exception-to-string `error`; `WorkflowInstance` lifecycle and history; `EventListener.is_expired`; `WaitEventConfig` positive timeout; `WorkflowDefinition.validate_structure` errors; step data filter (`TestStepDataInternalKeyFilter`); `""` route completes (`TestSwitchStepTerminalRoute`, `TestWideTerminalPredicateAfterD020Revert`); Timer/Wait reach `WAITING`; `serialize()` of nested `RetryStep.step` and `ParallelStep.steps`; `__all__`, `__version__` equals `fsm_llm.__version__` |
 | `test_dsl.py` | 41 | Factories `create_workflow`, `auto_step`, `api_step`, `condition_step`, `llm_step`, `wait_event_step`, `timer_step`, `parallel_step`; `create_workflow_builder(...).add_step/set_initial_step/add_metadata/build`; `create_linear_workflow` (empty list raises `ValueError` "at least one step"), `create_conditional_workflow`, `create_event_driven_workflow` |
-| `test_steps.py` | 25 | `AutoStep` (sync/async action, action error returns a failure result), `ConditionStep`, `APIStep` (exception gives failure to `failure_state`), `WaitEventStep` `_waiting_info`, `TimerStep` `_timer_info`, `ParallelStep` (default `step_<i>_<key>` aggregation, custom aggregation, context isolation), `ConversationStep` (needs exactly one of `fsm_file`/`fsm_definition`, mappings, `max_turns`) |
+| `test_steps.py` | 25 | `AutoStep` (sync/async action, action error returns a failure result), `ConditionStep`, `APIStep` (exception gives failure to `failure_step_id`), `WaitEventStep` `_waiting_info`, `TimerStep` `_timer_info`, `ParallelStep` (default `step_<i>_<key>` aggregation, custom aggregation, context isolation), `ConversationStep` (needs exactly one of `fsm_file`/`fsm_definition`, mappings, `max_turns`) |
 | `test_new_steps.py` | 46 | `SwitchStep` (case, default, missing key, numeric value stringified, no default fails); `RetryStep` (retries failures and bare exceptions, re-raises original exception type on exhaustion); `AgentStep`; DSL `agent_step`, `retry_step`, `switch_step`; `remove_instance`, `max_completed_instances` purge |
 | `test_step_timeouts.py` | 21 (8 `slow`) | `timeout` default `None`; async actions/conditions over timeout return a failure whose `.error` says "timed out"; sync actions are not wrapped; `APIStep` and `ParallelStep` return failure instead; `_with_timeout` direct calls |
-| `test_audit_fixes.py` | 29 | F-001 parallel failure without `error_state`; F-002 `process_event` uses `.pop(` not `del self.event_listeners` (source inspection); F-004 `end_conversation` called on exception; F-007 missing template var gives failure; F-010 no `conversation_map`; F4 per-instance lock (no double execution, lock dropped on remove/purge); F5 terminal guards on `_fail` and `cancel`; F7 sub-second `max_seconds` reported as float |
+| `test_audit_fixes.py` | 29 | F-001 parallel failure without `error_step_id`; F-002 `process_event` uses `.pop(` not `del self.event_listeners` (source inspection); F-004 `end_conversation` called on exception; F-007 missing template var gives failure; F-010 no `conversation_map`; F4 per-instance lock (no double execution, lock dropped on remove/purge); F5 terminal guards on `_fail` and `cancel`; F7 sub-second `max_seconds` reported as float |
 | `test_audit_2026_09_27.py` | 74 | 2026-09-27 audit: 21 classes grouped by finding id (H, M and L series) plus `TestReviewFollowUp` |
 | `test_audit_2026_11_05.py` | 42 | 2026-11-05 audit (plan 5980fbb7 step 19): raising Auto/Condition steps record hook, history and cause (F-WE-01); user `TimeoutError` kept (F-WE-06); async `aggregation_function` (F-WE-07); `schedule_timer` on a terminal instance (F-WE-10); initial `status_changed running` (F-WE-13); `llm_interface` validated (F-WE-15); referenced states of every step type (F-WE-05); timer keys, re-arm and fired-timer cleanup (F-WE-02); completing from a wait (F-WE-03); cancel releases everything (F-WE-04) |
 | `__init__.py` | 0 | Empty |
@@ -45,9 +45,9 @@ This directory exports nothing; its surface is the pytest entry points and the m
 
 - Run: `.venv/bin/python -m pytest tests/test_fsm_llm_workflows/` (319 tests); `-m "not slow"` skips the 8 `slow` tests in `test_step_timeouts.py`.
 - Helpers in `test_audit_2026_09_27.py`:
-  - `_wait_then_done(workflow_id: str, event_type: str = "go", **wait_kwargs) -> WorkflowDefinition`: a `wait_event_step("wait", ...)` routed to a terminal `auto_step("done", ..., next_state="")`.
+  - `_wait_then_done(workflow_id: str, event_type: str = "go", **wait_kwargs) -> WorkflowDefinition`: a `wait_event_step("wait", ...)` routed to a terminal `auto_step("done", ..., next_step_id="")`.
   - `async _settle(seconds: float = 0.05) -> None`: `asyncio.sleep` wrapper used to let background work finish.
-  - `_two_waits_workflow() -> WorkflowDefinition`: `wa` (event `A`, `timeout_seconds=0.1`, `timeout_state="wb"`) -> `slow` (`_SlowStep`) -> `wb` (event `B`) -> `got_b` (terminal).
+  - `_two_waits_workflow() -> WorkflowDefinition`: `wa` (event `A`, `timeout_seconds=0.1`, `timeout_step_id="wb"`) -> `slow` (`_SlowStep`) -> `wb` (event `B`) -> `got_b` (terminal).
 - Class-local helpers: `TestConversationStep._mock_api(collected_data=None, responses=None)` in `test_steps.py` returns a `MagicMock` API (`start_conversation` gives `("conv-1", "Hello!")`, `converse` side effects, `has_conversation_ended` False, `get_data` default `{"name": "Alice"}`); `TestSwitchStep.switch` in `test_new_steps.py` is the only `@pytest.fixture` in the directory. `test_audit_fixes.py` builds counting and raising steps inside test classes (`_build_counting_terminal_step`, `_build_counting_waiting_step`, `_make_instance`).
 - Library surface exercised: `WorkflowEngine` (`register_workflow`, `start`, `process_event`, `advance`, `cancel`, `remove_instance`, `get_context`, `add_hook`, `close`), step classes in `fsm_llm.workflows.steps`, DSL factories in `fsm_llm.workflows.dsl`, models in `fsm_llm.workflows.models`, exceptions in `fsm_llm.workflows.exceptions`.
 
@@ -57,29 +57,29 @@ Fakes defined at module level in `test_audit_2026_09_27.py` (`_SlowStep` sits ju
 
 | Name | Shape |
 | --- | --- |
-| `_DynamicLoopStep(WorkflowStep)` | `execute` returns `success_result(next_state=self.step_id)` (runtime self-loop the static graph cannot see) |
+| `_DynamicLoopStep(WorkflowStep)` | `execute` returns `success_result(next_step_id=self.step_id)` (runtime self-loop the static graph cannot see) |
 | `_TerminalStep(WorkflowStep)` | `execute` returns `success_result()` |
-| `_SlowStep(WorkflowStep)` | fields `next_state: str = ""`, `delay: float = 0.3`; sleeps `delay` then succeeds to `next_state` |
+| `_SlowStep(WorkflowStep)` | fields `next_step_id: str = ""`, `delay: float = 0.3`; sleeps `delay` then succeeds to `next_step_id` |
 | `_FakeLLMResponse` | `.message: str` |
 | `_CoreLikeLLM` | `reply`, `requests: list`; sync `generate_response(request)` records the request and returns `_FakeLLMResponse(reply)` (shape of core `LLMInterface`) |
 | `_AgentResult` | `answer`, `success=True`, `final_context` (defaults to `{}`), `structured_output=None` |
 | `_RecordingAgent` | `result`, `calls: list[tuple[str, dict]]`; sync `run(task, **kwargs)` records and returns `result` |
 
-Assertions read `WorkflowStepResult` fields `success`, `next_state`, `data`, `error`, and `WorkflowInstance` fields `status`, `context`, `history`, `current_step_id`.
+Assertions read `WorkflowStepResult` fields `success`, `next_step_id`, `data`, `error`, and `WorkflowInstance` fields `status`, `context`, `history`, `current_step_id`.
 
 ## Invariants and constraints
 
 - Internal context keys (prefixes `_`, `system_`, `internal_`, `__`, case-insensitive) are stripped from step results; `_waiting_info` survives via `STEP_INTERNAL_WHITELIST` in `src/workflows/constants.py`. `TestStepDataInternalKeyFilter` asserts both directions.
-- `next_state == ""` on any successful result means terminal (D-013, D-020), including when a `RetryStep` returns an inner `SwitchStep` result. `TimerStep`/`WaitEventStep` return `next_state=None` and go `WAITING`.
+- `next_step_id == ""` on any successful result means terminal (D-013, D-020), including when a `RetryStep` returns an inner `SwitchStep` result. `TimerStep`/`WaitEventStep` return `next_step_id=None` and go `WAITING`.
 - Concurrency tests loop 5 or 20 times and accept either race winner but require: step body ran at most once, no call raised, final status consistent (`COMPLETED` implies `cancel` returned `False`).
 - Cancelling an already `COMPLETED`, `CANCELLED` or `FAILED` instance returns `False` without raising.
 
 Behaviour pinned by `test_audit_2026_09_27.py` (2026-09-27 audit findings in the H, M and L series):
 
 - Event delivery: one instance's expired deadline or non-`WAITING` status does not stop delivery to others; skipped instances are not mutated. `correlation_key` routes by payload value; `WorkflowEvent(instance_id=...)` targets one instance; an early targeted event is buffered until the wait is reached. An event never moves an instance that has moved to a different wait. Cancelling `process_event` mid-delivery restores undelivered listeners.
-- Waits: a follow-up wait on the same event keeps its timeout; timeout without `timeout_state` fails the instance and leaves `engine.timers == {}`; `success_state=""` completes; `WaitEventConfig` rejects `timeout_state` without `timeout_seconds` ("timeout_state requires") and empty `event_type`.
+- Waits: a follow-up wait on the same event keeps its timeout; timeout without `timeout_step_id` fails the instance and leaves `engine.timers == {}`; `success_step_id=""` completes; `WaitEventConfig` rejects `timeout_step_id` without `timeout_seconds` ("timeout_step_id requires") and empty `event_type`.
 - `LLMStep`: accepts an object with sync `generate_response(request)` (core `LLMInterface` shape; request has `user_message` and `system_prompt`) or sync `generate(prompt)` returning `str`; output regex with one group extracts, `""` maps the raw text, a miss leaves the key unset; invalid regex raises `ValueError` "valid regex" at construction; a prompt of 12000 chars keeps `user_message` at or under 10000 and puts the full text in `system_prompt`.
-- Fail-closed routing: a failed step with no `error_state` has `next_state is None` and the instance ends `FAILED` at that step. `AgentStep` with a result `success=False` fails the step.
+- Fail-closed routing: a failed step with no `error_step_id` has `next_step_id is None` and the instance ends `FAILED` at that step. `AgentStep` with a result `success=False` fails the step.
 - `ParallelStep`: a child raising `RuntimeError()` or returning `success=False` with no message still counts as failure; internal-prefix keys (`_secret`, `system_x`) are dropped; `TimerStep` children rejected ("cannot run inside a ParallelStep"); partial data kept on failure; uncopyable context (a `threading.Lock`) falls back to shallow copy.
 - Callables returning awaitables (lambda wrapping a coroutine, async `__call__`) are awaited.
 - Instance ids: cancelling `order` does not touch `order_2_timer`; a duplicate `instance_id` raises `WorkflowInstanceError` "already in use".
@@ -91,7 +91,7 @@ Behaviour pinned by `test_audit_2026_09_27.py` (2026-09-27 audit findings in the
 - Resources: default `max_completed_instances` is not `None`; `FAILED` instances are purged too; `max_history_entries` caps history (keeps newest).
 - Definition pinning: re-registering or mutating a workflow after `register_workflow` does not affect the registered copy or running instances.
 - Engine API: `add_hook(fn(name, instance, data))` sees `step_started`, `step_completed`, `status_changed`; a raising hook is ignored. `_user_input` is removed after `advance`. `start(..., wait=False)` runs in the background and skips an instance cancelled before it runs. `get_context` returns a copy; the caller's initial context is not mutated. `close()` clears timers and listeners, then `start` raises `WorkflowResourceError`. `WorkflowEngine(executor=pool)` runs sync callables on that executor.
-- Smaller fixes: `error_state` on `AutoStep`/`ConditionStep`; non-dict action result gives "must return a dict"; history records the `SwitchStep` error ("No matching case") with a single "Status changed to running" entry; `DependencyResolver` unknown dependency is not a cycle but `resolve()` raises "unknown"; exception `details` dicts are not mutated; empty event type in `register_event_listener` raises `WorkflowEventError`; duplicate step id raises `WorkflowDefinitionError` "Duplicate"; `APIStep` dotted output paths and `""` for whole result (dict or list); float delays; `serialize()` drops custom callable fields.
+- Smaller fixes: `error_step_id` on `AutoStep`/`ConditionStep`; non-dict action result gives "must return a dict"; history records the `SwitchStep` error ("No matching case") with a single "Status changed to running" entry; `DependencyResolver` unknown dependency is not a cycle but `resolve()` raises "unknown"; exception `details` dicts are not mutated; empty event type in `register_event_listener` raises `WorkflowEventError`; duplicate step id raises `WorkflowDefinitionError` "Duplicate"; `APIStep` dotted output paths and `""` for whole result (dict or list); float delays; `serialize()` drops custom callable fields.
 - Logging: a subprocess checks "Executing step" logs are 0 before and 1 after `fsm_llm.logging.enable_library_logging()`.
 
 ## Dependencies

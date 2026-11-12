@@ -28,15 +28,15 @@ class TestStepsWithoutTimeout:
     @pytest.mark.asyncio
     async def test_auto_transition_no_timeout(self):
         step = AutoStep(
-            step_id="s1", name="Test", next_state="done", timeout_seconds=None
+            step_id="s1", name="Test", next_step_id="done", timeout_seconds=None
         )
         result = await step.execute({})
         assert result.success is True
-        assert result.next_state == "done"
+        assert result.next_step_id == "done"
 
     @pytest.mark.asyncio
     async def test_auto_transition_default_timeout_is_none(self):
-        step = AutoStep(step_id="s1", name="Test", next_state="done")
+        step = AutoStep(step_id="s1", name="Test", next_step_id="done")
         assert step.timeout_seconds is None
 
     @pytest.mark.asyncio
@@ -45,13 +45,13 @@ class TestStepsWithoutTimeout:
             step_id="s1",
             name="Check",
             condition=lambda ctx: True,
-            true_state="yes",
-            false_state="no",
+            true_step_id="yes",
+            false_step_id="no",
             timeout_seconds=None,
         )
         result = await step.execute({})
         assert result.success is True
-        assert result.next_state == "yes"
+        assert result.next_step_id == "yes"
 
     @pytest.mark.asyncio
     async def test_api_call_no_timeout(self):
@@ -62,8 +62,8 @@ class TestStepsWithoutTimeout:
             step_id="s1",
             name="API",
             api_function=my_api,
-            success_state="done",
-            failure_state="error",
+            success_step_id="done",
+            failure_step_id="error",
             output_mapping={"result": "data"},
             timeout_seconds=None,
         )
@@ -76,14 +76,14 @@ class TestStepsWithoutTimeout:
         s1 = AutoStep(
             step_id="a",
             name="A",
-            next_state="done",
+            next_step_id="done",
             action=lambda ctx: {"v": 1},
         )
         step = ParallelStep(
             step_id="p1",
             name="Parallel",
             steps=[s1],
-            next_state="merged",
+            next_step_id="merged",
             timeout_seconds=None,
         )
         result = await step.execute({})
@@ -107,7 +107,7 @@ class TestAutoStepTimeout:
         step = AutoStep(
             step_id="s1",
             name="Fast",
-            next_state="done",
+            next_step_id="done",
             action=fast_action,
             timeout_seconds=1.0,
         )
@@ -125,7 +125,7 @@ class TestAutoStepTimeout:
         step = AutoStep(
             step_id="s1",
             name="Slow",
-            next_state="done",
+            next_step_id="done",
             action=slow_action,
             timeout_seconds=0.1,
         )
@@ -133,7 +133,7 @@ class TestAutoStepTimeout:
         result = await step.execute({})
 
         assert result.success is False
-        assert result.next_state is None
+        assert result.next_step_id is None
         assert "timed out" in (result.error or "")
 
     @pytest.mark.asyncio
@@ -146,7 +146,7 @@ class TestAutoStepTimeout:
         step = AutoStep(
             step_id="s1",
             name="Sync",
-            next_state="done",
+            next_step_id="done",
             action=sync_action,
             timeout_seconds=0.1,
         )
@@ -164,7 +164,7 @@ class TestAutoStepTimeout:
         step = AutoStep(
             step_id="my_step_id",
             name="Slow",
-            next_state="done",
+            next_step_id="done",
             action=slow_action,
             timeout_seconds=0.1,
         )
@@ -183,7 +183,7 @@ class TestAutoStepTimeout:
         step = AutoStep(
             step_id="s1",
             name="Slow",
-            next_state="done",
+            next_step_id="done",
             action=slow_action,
             timeout_seconds=0.1,
         )
@@ -211,8 +211,8 @@ class TestAPIStepTimeout:
             step_id="s1",
             name="API",
             api_function=fast_api,
-            success_state="done",
-            failure_state="error",
+            success_step_id="done",
+            failure_step_id="error",
             output_mapping={"status_result": "status"},
             timeout_seconds=1.0,
         )
@@ -233,14 +233,14 @@ class TestAPIStepTimeout:
             step_id="s1",
             name="API",
             api_function=slow_api,
-            success_state="done",
-            failure_state="error",
+            success_step_id="done",
+            failure_step_id="error",
             timeout_seconds=0.1,
         )
         # APIStep catches exceptions in execute() and returns failure result
         result = await step.execute({})
         assert result.success is False
-        assert result.next_state == "error"
+        assert result.next_step_id == "error"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -261,13 +261,13 @@ class TestConditionStepTimeout:
             step_id="s1",
             name="Check",
             condition=fast_check,
-            true_state="yes",
-            false_state="no",
+            true_step_id="yes",
+            false_step_id="no",
             timeout_seconds=1.0,
         )
         result = await step.execute({})
         assert result.success is True
-        assert result.next_state == "yes"
+        assert result.next_step_id == "yes"
 
     @pytest.mark.asyncio
     @pytest.mark.slow
@@ -280,15 +280,15 @@ class TestConditionStepTimeout:
             step_id="s1",
             name="Check",
             condition=slow_check,
-            true_state="yes",
-            false_state="no",
+            true_step_id="yes",
+            false_step_id="no",
             timeout_seconds=0.1,
         )
 
         result = await step.execute({})
 
         assert result.success is False
-        assert result.next_state is None
+        assert result.next_step_id is None
         assert "timed out" in (result.error or "")
 
     @pytest.mark.asyncio
@@ -302,8 +302,8 @@ class TestConditionStepTimeout:
             step_id="cond_step",
             name="SlowCheck",
             condition=slow_check,
-            true_state="yes",
-            false_state="no",
+            true_step_id="yes",
+            false_step_id="no",
             timeout_seconds=0.1,
         )
 
@@ -329,13 +329,13 @@ class TestParallelStepTimeout:
         s1 = AutoStep(
             step_id="a",
             name="A",
-            next_state="done",
+            next_step_id="done",
             action=fast_action,
         )
         s2 = AutoStep(
             step_id="b",
             name="B",
-            next_state="done",
+            next_step_id="done",
             action=fast_action,
         )
 
@@ -343,12 +343,12 @@ class TestParallelStepTimeout:
             step_id="p1",
             name="Parallel",
             steps=[s1, s2],
-            next_state="merged",
+            next_step_id="merged",
             timeout_seconds=2.0,
         )
         result = await step.execute({})
         assert result.success is True
-        assert result.next_state == "merged"
+        assert result.next_step_id == "merged"
 
     @pytest.mark.asyncio
     @pytest.mark.slow
@@ -362,7 +362,7 @@ class TestParallelStepTimeout:
         s1 = AutoStep(
             step_id="a",
             name="A",
-            next_state="done",
+            next_step_id="done",
             action=slow_action,
         )
 
@@ -370,14 +370,14 @@ class TestParallelStepTimeout:
             step_id="p1",
             name="Parallel",
             steps=[s1],
-            next_state="ok",
-            error_state="err",
+            next_step_id="ok",
+            error_step_id="err",
             timeout_seconds=0.1,
         )
         # ParallelStep catches exceptions in its execute() and returns failure
         result = await step.execute({})
         assert result.success is False
-        assert result.next_state == "err"
+        assert result.next_step_id == "err"
 
     @pytest.mark.asyncio
     async def test_parallel_with_one_slow_and_one_fast_within_timeout(self):
@@ -394,13 +394,13 @@ class TestParallelStepTimeout:
         s1 = AutoStep(
             step_id="a",
             name="Fast",
-            next_state="done",
+            next_step_id="done",
             action=fast_action,
         )
         s2 = AutoStep(
             step_id="b",
             name="Medium",
-            next_state="done",
+            next_step_id="done",
             action=medium_action,
         )
 
@@ -408,7 +408,7 @@ class TestParallelStepTimeout:
             step_id="p1",
             name="Parallel",
             steps=[s1, s2],
-            next_state="merged",
+            next_step_id="merged",
             timeout_seconds=2.0,
         )
         result = await step.execute({})
@@ -428,7 +428,7 @@ class TestWithTimeoutMethod:
         step = AutoStep(
             step_id="s1",
             name="Test",
-            next_state="done",
+            next_step_id="done",
             timeout_seconds=1.0,
         )
 
@@ -444,7 +444,7 @@ class TestWithTimeoutMethod:
         step = AutoStep(
             step_id="s1",
             name="Test",
-            next_state="done",
+            next_step_id="done",
             timeout_seconds=0.1,
         )
 
@@ -460,7 +460,7 @@ class TestWithTimeoutMethod:
         step = AutoStep(
             step_id="s1",
             name="Test",
-            next_state="done",
+            next_step_id="done",
             timeout_seconds=None,
         )
 

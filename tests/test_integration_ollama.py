@@ -441,20 +441,20 @@ class TestParallelStepIsolation:
         step1 = AutoStep(
             step_id="s1",
             name="Step 1",
-            next_state="done",
+            next_step_id="done",
             action=action_s1,
         )
         step2 = AutoStep(
             step_id="s2",
             name="Step 2",
-            next_state="done",
+            next_step_id="done",
             action=action_s2,
         )
 
         parallel = ParallelStep(
             step_id="parallel",
             name="Parallel",
-            next_state="end",
+            next_step_id="end",
             steps=[step1, step2],
         )
 

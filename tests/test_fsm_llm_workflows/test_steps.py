@@ -28,18 +28,20 @@ class TestAutoStep:
 
     @pytest.mark.asyncio
     async def test_execute_no_action(self):
-        step = AutoStep(step_id="s1", name="Test", next_state="done")
+        step = AutoStep(step_id="s1", name="Test", next_step_id="done")
         result = await step.execute({})
 
         assert result.success is True
-        assert result.next_state == "done"
+        assert result.next_step_id == "done"
 
     @pytest.mark.asyncio
     async def test_execute_with_sync_action(self):
         def my_action(ctx):
             return {"computed": ctx.get("x", 0) * 2}
 
-        step = AutoStep(step_id="s1", name="Test", next_state="done", action=my_action)
+        step = AutoStep(
+            step_id="s1", name="Test", next_step_id="done", action=my_action
+        )
         result = await step.execute({"x": 5})
 
         assert result.success is True
@@ -50,7 +52,9 @@ class TestAutoStep:
         async def my_action(ctx):
             return {"async_result": True}
 
-        step = AutoStep(step_id="s1", name="Test", next_state="done", action=my_action)
+        step = AutoStep(
+            step_id="s1", name="Test", next_step_id="done", action=my_action
+        )
         result = await step.execute({})
 
         assert result.success is True
@@ -61,10 +65,12 @@ class TestAutoStep:
         def bad_action(ctx):
             raise ValueError("boom")
 
-        step = AutoStep(step_id="s1", name="Test", next_state="done", action=bad_action)
+        step = AutoStep(
+            step_id="s1", name="Test", next_step_id="done", action=bad_action
+        )
         result = await step.execute({})
         assert result.success is False
-        assert result.next_state is None
+        assert result.next_step_id is None
         assert result.error == "boom"
 
 
@@ -82,13 +88,13 @@ class TestConditionStep:
             step_id="s1",
             name="Check",
             condition=lambda ctx: ctx.get("ready", False),
-            true_state="go",
-            false_state="wait",
+            true_step_id="go",
+            false_step_id="wait",
         )
         result = await step.execute({"ready": True})
 
         assert result.success is True
-        assert result.next_state == "go"
+        assert result.next_step_id == "go"
         assert result.data["condition_result"] is True
 
     @pytest.mark.asyncio
@@ -97,12 +103,12 @@ class TestConditionStep:
             step_id="s1",
             name="Check",
             condition=lambda ctx: ctx.get("ready", False),
-            true_state="go",
-            false_state="wait",
+            true_step_id="go",
+            false_step_id="wait",
         )
         result = await step.execute({"ready": False})
 
-        assert result.next_state == "wait"
+        assert result.next_step_id == "wait"
         assert result.data["condition_result"] is False
 
     @pytest.mark.asyncio
@@ -114,11 +120,11 @@ class TestConditionStep:
             step_id="s1",
             name="Check",
             condition=check,
-            true_state="go",
-            false_state="wait",
+            true_step_id="go",
+            false_step_id="wait",
         )
         result = await step.execute({})
-        assert result.next_state == "go"
+        assert result.next_step_id == "go"
 
     @pytest.mark.asyncio
     async def test_condition_error(self):
@@ -129,12 +135,12 @@ class TestConditionStep:
             step_id="s1",
             name="Check",
             condition=bad_check,
-            true_state="go",
-            false_state="wait",
+            true_step_id="go",
+            false_step_id="wait",
         )
         result = await step.execute({})
         assert result.success is False
-        assert result.next_state is None
+        assert result.next_step_id is None
         assert result.error == "check failed"
 
 
@@ -155,15 +161,15 @@ class TestAPIStep:
             step_id="s1",
             name="API",
             api_function=my_api,
-            success_state="done",
-            failure_state="error",
+            success_step_id="done",
+            failure_step_id="error",
             input_mapping={"query": "search_term"},
             output_mapping={"response": "result"},
         )
         result = await step.execute({"search_term": "hello"})
 
         assert result.success is True
-        assert result.next_state == "done"
+        assert result.next_step_id == "done"
         assert result.data.get("response") == "hello"
 
     @pytest.mark.asyncio
@@ -175,13 +181,13 @@ class TestAPIStep:
             step_id="s1",
             name="API",
             api_function=failing_api,
-            success_state="done",
-            failure_state="error",
+            success_step_id="done",
+            failure_step_id="error",
         )
         result = await step.execute({})
 
         assert result.success is False
-        assert result.next_state == "error"
+        assert result.next_step_id == "error"
 
     @pytest.mark.asyncio
     async def test_async_api(self):
@@ -192,8 +198,8 @@ class TestAPIStep:
             step_id="s1",
             name="API",
             api_function=my_api,
-            success_state="done",
-            failure_state="error",
+            success_step_id="done",
+            failure_step_id="error",
             output_mapping={"result": "data"},
         )
         result = await step.execute({})
@@ -217,7 +223,7 @@ class TestWaitEventStep:
             name="Wait",
             config=WaitEventConfig(
                 event_type="payment",
-                success_state="paid",
+                success_step_id="paid",
                 timeout_seconds=30,
             ),
         )
@@ -242,7 +248,7 @@ class TestTimerStep:
     @pytest.mark.asyncio
     async def test_execute(self):
         step = TimerStep(
-            step_id="s1", name="Delay", delay_seconds=60, next_state="next"
+            step_id="s1", name="Delay", delay_seconds=60, next_step_id="next"
         )
         result = await step.execute({})
 
@@ -250,7 +256,7 @@ class TestTimerStep:
         assert "_timer_info" in result.data
         info = result.data["_timer_info"]
         assert info["delay_seconds"] == 60
-        assert info["next_state"] == "next"
+        assert info["next_step_id"] == "next"
         assert info["waiting_for_timer"] is True
 
 
@@ -265,50 +271,50 @@ class TestParallelStep:
     @pytest.mark.asyncio
     async def test_all_succeed(self):
         s1 = AutoStep(
-            step_id="a", name="A", next_state="done", action=lambda ctx: {"val": 1}
+            step_id="a", name="A", next_step_id="done", action=lambda ctx: {"val": 1}
         )
         s2 = AutoStep(
-            step_id="b", name="B", next_state="done", action=lambda ctx: {"val": 2}
+            step_id="b", name="B", next_step_id="done", action=lambda ctx: {"val": 2}
         )
 
         step = ParallelStep(
-            step_id="p1", name="Parallel", steps=[s1, s2], next_state="merged"
+            step_id="p1", name="Parallel", steps=[s1, s2], next_step_id="merged"
         )
         result = await step.execute({})
 
         assert result.success is True
-        assert result.next_state == "merged"
+        assert result.next_step_id == "merged"
         # Default aggregation prefixes by step index
         assert "step_0_val" in result.data
         assert "step_1_val" in result.data
 
     @pytest.mark.asyncio
-    async def test_with_error_state(self):
+    async def test_with_error_step_id(self):
         def bad_action(ctx):
             raise ValueError("fail")
 
-        s1 = AutoStep(step_id="a", name="A", next_state="done", action=bad_action)
-        s2 = AutoStep(step_id="b", name="B", next_state="done")
+        s1 = AutoStep(step_id="a", name="A", next_step_id="done", action=bad_action)
+        s2 = AutoStep(step_id="b", name="B", next_step_id="done")
 
         step = ParallelStep(
             step_id="p1",
             name="Parallel",
             steps=[s1, s2],
-            next_state="ok",
-            error_state="err",
+            next_step_id="ok",
+            error_step_id="err",
         )
         result = await step.execute({})
 
         assert result.success is False
-        assert result.next_state == "err"
+        assert result.next_step_id == "err"
 
     @pytest.mark.asyncio
     async def test_custom_aggregation(self):
         s1 = AutoStep(
-            step_id="a", name="A", next_state="done", action=lambda ctx: {"count": 1}
+            step_id="a", name="A", next_step_id="done", action=lambda ctx: {"count": 1}
         )
         s2 = AutoStep(
-            step_id="b", name="B", next_state="done", action=lambda ctx: {"count": 2}
+            step_id="b", name="B", next_step_id="done", action=lambda ctx: {"count": 2}
         )
 
         def aggregate(results):
@@ -319,7 +325,7 @@ class TestParallelStep:
             step_id="p1",
             name="Parallel",
             steps=[s1, s2],
-            next_state="merged",
+            next_step_id="merged",
             aggregation_function=aggregate,
         )
         result = await step.execute({})
@@ -334,16 +340,16 @@ class TestParallelStep:
             ctx["mutated"] = True
             return {}
 
-        s1 = AutoStep(step_id="a", name="A", next_state="done", action=mutate)
+        s1 = AutoStep(step_id="a", name="A", next_step_id="done", action=mutate)
         s2 = AutoStep(
             step_id="b",
             name="B",
-            next_state="done",
+            next_step_id="done",
             action=lambda ctx: {"saw_mutation": ctx.get("mutated", False)},
         )
 
         step = ParallelStep(
-            step_id="p1", name="Parallel", steps=[s1, s2], next_state="done"
+            step_id="p1", name="Parallel", steps=[s1, s2], next_step_id="done"
         )
         original_ctx = {"original": True}
         await step.execute(original_ctx)
@@ -361,14 +367,14 @@ class TestWorkflowStepBase:
     """Test base WorkflowStep properties."""
 
     def test_step_model_fields(self):
-        step = AutoStep(step_id="s1", name="Test", next_state="next")
+        step = AutoStep(step_id="s1", name="Test", next_step_id="next")
         assert step.step_id == "s1"
         assert step.name == "Test"
         assert step.description == ""
 
     def test_step_with_description(self):
         step = AutoStep(
-            step_id="s1", name="Test", next_state="next", description="desc"
+            step_id="s1", name="Test", next_step_id="next", description="desc"
         )
         assert step.description == "desc"
 
@@ -396,7 +402,7 @@ class TestConversationStep:
         """ConversationStep must be rejected at construction if neither
         fsm_file nor fsm_definition is given (not only when it runs)."""
         with pytest.raises(ValueError, match="requires either"):
-            ConversationStep(step_id="conv1", name="Conv", success_state="done")
+            ConversationStep(step_id="conv1", name="Conv", success_step_id="done")
 
     def test_rejects_both_fsm_file_and_definition(self):
         with pytest.raises(ValueError, match="exactly one"):
@@ -418,7 +424,7 @@ class TestConversationStep:
             step_id="conv1",
             name="Collect Info",
             fsm_definition={"name": "test", "initial_state": "start", "states": {}},
-            success_state="process",
+            success_step_id="process",
             auto_messages=["My name is Alice"],
             context_mapping={"user_name": "name", "user_age": "age"},
         )
@@ -428,7 +434,7 @@ class TestConversationStep:
             result = await step.execute({})
 
         assert result.success is True
-        assert result.next_state == "process"
+        assert result.next_step_id == "process"
         assert result.data["user_name"] == "Alice"
         assert result.data["user_age"] == "30"
 
@@ -441,7 +447,7 @@ class TestConversationStep:
             step_id="conv1",
             name="Conv",
             fsm_definition={"name": "test", "initial_state": "s", "states": {}},
-            success_state="done",
+            success_step_id="done",
             initial_context={"conv_user": "workflow_user"},
         )
 
@@ -463,8 +469,8 @@ class TestConversationStep:
             step_id="conv1",
             name="Conv",
             fsm_definition={"name": "test", "initial_state": "s", "states": {}},
-            success_state="done",
-            error_state="error_state",
+            success_step_id="done",
+            error_step_id="error_step_id",
         )
 
         with patch("fsm_llm.workflows.steps.API") as MockAPI:
@@ -472,7 +478,7 @@ class TestConversationStep:
             result = await step.execute({})
 
         assert result.success is False
-        assert result.next_state == "error_state"
+        assert result.next_step_id == "error_step_id"
         assert "LLM unavailable" in result.message
 
     @pytest.mark.asyncio
@@ -485,7 +491,7 @@ class TestConversationStep:
             step_id="conv1",
             name="Conv",
             fsm_definition={"name": "test", "initial_state": "s", "states": {}},
-            success_state="done",
+            success_step_id="done",
             max_turns=2,
             auto_messages=["m1", "m2", "m3", "m4", "m5"],
         )

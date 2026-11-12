@@ -33,7 +33,7 @@ class TerminalStep(WorkflowStep):
         if callable(self.action):
             self.action(context)
         return WorkflowStepResult.success_result(
-            data={}, next_state=None, message="Done"
+            data={}, next_step_id=None, message="Done"
         )
 
 
@@ -100,8 +100,8 @@ def build_chained_workflow(model: str) -> WorkflowEngine:
                 "Cover diagnostics, drug discovery, and patient care."
             ],
             context_mapping={"key_findings": "final_answer"},
-            success_state="analysis",
-            error_state="summary",
+            success_step_id="analysis",
+            error_step_id="summary",
             description="Gather research findings via FSM conversation",
         )
     )
@@ -122,8 +122,8 @@ def build_chained_workflow(model: str) -> WorkflowEngine:
             context_mapping={
                 "conclusions": "final_answer",
             },
-            success_state="summary",
-            error_state="summary",
+            success_step_id="summary",
+            error_step_id="summary",
             description="Analyze research findings",
         )
     )

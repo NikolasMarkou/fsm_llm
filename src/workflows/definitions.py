@@ -58,7 +58,7 @@ def _serialize_step(step: WorkflowStep) -> dict[str, Any]:
       callables.
 
     Mirrors the ``RetryStep`` recursion precedent in
-    ``RetryStep.referenced_states``.
+    ``RetryStep.referenced_step_ids``.
     Failure mode: none — every `WorkflowStep` subclass either has no nested
     steps (returned as-is) or is one of the two known nesting shapes above.
     """
@@ -208,7 +208,7 @@ class WorkflowDefinition(BaseModel):
         all_states = set(self.steps.keys())
 
         for step_id, step in self.steps.items():
-            for state in step.referenced_states():
+            for state in step.referenced_step_ids():
                 if state not in all_states:
                     errors.append(
                         f"Step '{step_id}' references unknown state: '{state}'"
@@ -217,9 +217,9 @@ class WorkflowDefinition(BaseModel):
         return errors
 
     def _adjacency(self) -> dict[str, set[str]]:
-        """Step id -> the states it can route to (``referenced_states``)."""
+        """Step id -> the states it can route to (``referenced_step_ids``)."""
         return {
-            step_id: step.referenced_states() for step_id, step in self.steps.items()
+            step_id: step.referenced_step_ids() for step_id, step in self.steps.items()
         }
 
     def _validate_reachability(self) -> list[str]:
@@ -244,7 +244,7 @@ class WorkflowDefinition(BaseModel):
         return {
             step_id
             for step_id, step in self.steps.items()
-            if not step.referenced_states()
+            if not step.referenced_step_ids()
         }
 
     def has_cycles(self) -> bool:
@@ -297,7 +297,7 @@ class WorkflowDefinition(BaseModel):
                 return set()
             if pausing_breaks_cycle and self._is_pausing_step(step):
                 return set()
-            return step.referenced_states()
+            return step.referenced_step_ids()
 
         for start in list(self.steps):
             if color.get(start, WHITE) != WHITE:

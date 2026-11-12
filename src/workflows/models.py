@@ -82,7 +82,7 @@ class WorkflowStepResult(BaseModel):
 
     success: bool
     data: dict[str, Any] = Field(default_factory=dict)
-    next_state: str | None = None
+    next_step_id: str | None = None
     message: str | None = None
     error: str | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -101,23 +101,23 @@ class WorkflowStepResult(BaseModel):
     def success_result(
         cls,
         data: dict[str, Any] | None = None,
-        next_state: str | None = None,
+        next_step_id: str | None = None,
         message: str | None = None,
     ) -> WorkflowStepResult:
         """Create a successful result."""
         return cls(
-            success=True, data=data or {}, next_state=next_state, message=message
+            success=True, data=data or {}, next_step_id=next_step_id, message=message
         )
 
     @classmethod
     def failure_result(
-        cls, error: str, next_state: str | None = None, message: str | None = None
+        cls, error: str, next_step_id: str | None = None, message: str | None = None
     ) -> WorkflowStepResult:
         """Create a failure result."""
         return cls(
             success=False,
             error=error,
-            next_state=next_state,
+            next_step_id=next_step_id,
             message=message or f"Step failed: {error}",
         )
 
@@ -230,7 +230,7 @@ class EventListener(BaseModel):
     """Information about a workflow instance listening for an event."""
 
     instance_id: str
-    success_state: str
+    success_step_id: str
     event_mapping: dict[str, str] = Field(default_factory=dict)
     registered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     timeout_at: datetime | None = None
@@ -241,7 +241,7 @@ class EventListener(BaseModel):
     correlation_value: Any = None
     """The instance's ``context[correlation_key]`` when the listener was
     registered."""
-    timeout_state: str | None = None
+    timeout_step_id: str | None = None
     """Where a timed-out wait goes; ``None`` fails the instance."""
     step_id: str | None = None
     """The step whose wait registered this listener; an event is delivered
@@ -257,19 +257,19 @@ class EventListener(BaseModel):
 class WaitEventConfig(BaseModel):
     """Configuration for waiting for an event.
 
-    ``success_state=""`` completes the workflow when the event arrives.
+    ``success_step_id=""`` completes the workflow when the event arrives.
     With ``timeout_seconds`` set, the wait times out after that many seconds:
-    to ``timeout_state`` when given, otherwise the instance FAILS (it never
-    stays WAITING forever). ``timeout_state`` without ``timeout_seconds`` is
+    to ``timeout_step_id`` when given, otherwise the instance FAILS (it never
+    stays WAITING forever). ``timeout_step_id`` without ``timeout_seconds`` is
     rejected. ``correlation_key`` restricts delivery to events whose
     ``payload[correlation_key]`` equals the instance's
     ``context[correlation_key]``.
     """
 
     event_type: str
-    success_state: str
+    success_step_id: str
     timeout_seconds: float | None = None
-    timeout_state: str | None = None
+    timeout_step_id: str | None = None
     event_mapping: dict[str, str] = Field(default_factory=dict)
     correlation_key: str | None = None
 
@@ -288,9 +288,9 @@ class WaitEventConfig(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_timeout_state_needs_timeout(self):
-        if self.timeout_state and self.timeout_seconds is None:
+    def validate_timeout_step_id_needs_timeout(self):
+        if self.timeout_step_id and self.timeout_seconds is None:
             raise ValueError(
-                "timeout_state requires timeout_seconds (the wait would never time out)"
+                "timeout_step_id requires timeout_seconds (the wait would never time out)"
             )
         return self

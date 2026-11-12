@@ -47,7 +47,7 @@ from fsm_llm.workflows import (
 
 
 class TerminalStep(WorkflowStep):
-    """A step that ends the workflow. Returns no next_state so the engine
+    """A step that ends the workflow. Returns no next_step_id so the engine
     marks the workflow as COMPLETED."""
 
     action: Any = None
@@ -56,7 +56,7 @@ class TerminalStep(WorkflowStep):
         if callable(self.action):
             self.action(context)
         return WorkflowStepResult.success_result(
-            data={}, next_state=None, message="Workflow complete"
+            data={}, next_step_id=None, message="Workflow complete"
         )
 
 
@@ -152,8 +152,8 @@ def build_order_workflow(model: str) -> "WorkflowEngine":
                 "quantity": "quantity",
                 "shipping_address": "shipping_address",
             },
-            success_state="check_inventory",
-            error_state="order_failed",
+            success_step_id="check_inventory",
+            error_step_id="order_failed",
             description="Run FSM conversation to collect order info",
         )
     )
@@ -164,8 +164,8 @@ def build_order_workflow(model: str) -> "WorkflowEngine":
             step_id="check_inventory",
             name="Inventory Check",
             api_function=validate_inventory,
-            success_state="validate_order",
-            failure_state="order_failed",
+            success_step_id="validate_order",
+            failure_step_id="order_failed",
             input_mapping={"product_name": "product_name", "quantity": "quantity"},
             output_mapping={"in_stock": "in_stock", "total_price": "total_price"},
             description="Check product availability",
@@ -180,8 +180,8 @@ def build_order_workflow(model: str) -> "WorkflowEngine":
             condition=lambda ctx: (
                 ctx.get("in_stock", False) and ctx.get("customer_email")
             ),
-            true_state="process_payment",
-            false_state="order_failed",
+            true_step_id="process_payment",
+            false_step_id="order_failed",
             description="Verify inventory and customer info",
         )
     )
@@ -192,8 +192,8 @@ def build_order_workflow(model: str) -> "WorkflowEngine":
             step_id="process_payment",
             name="Process Payment",
             api_function=process_payment,
-            success_state="send_confirmation",
-            failure_state="order_failed",
+            success_step_id="send_confirmation",
+            failure_step_id="order_failed",
             input_mapping={
                 "total_price": "total_price",
                 "customer_email": "customer_email",
@@ -212,8 +212,8 @@ def build_order_workflow(model: str) -> "WorkflowEngine":
             step_id="send_confirmation",
             name="Send Confirmation",
             api_function=send_confirmation,
-            success_state="order_complete",
-            failure_state="order_complete",  # Still complete even if email fails
+            success_step_id="order_complete",
+            failure_step_id="order_complete",  # Still complete even if email fails
             input_mapping={
                 "customer_email": "customer_email",
                 "transaction_id": "transaction_id",

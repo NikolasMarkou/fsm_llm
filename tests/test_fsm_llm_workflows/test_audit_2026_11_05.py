@@ -59,8 +59,8 @@ class TestRaisingStepsRecordTheFailureBehaviour:
     @pytest.mark.parametrize(
         "make_step",
         [
-            lambda: auto_step("s", "S", next_state="", action=_boom),
-            lambda: condition_step("s", "S", _boom, true_state="", false_state=""),
+            lambda: auto_step("s", "S", next_step_id="", action=_boom),
+            lambda: condition_step("s", "S", _boom, true_step_id="", false_step_id=""),
         ],
         ids=["auto", "condition"],
     )
@@ -81,19 +81,19 @@ class TestRaisingStepsRecordTheFailureBehaviour:
         assert entries and "division by zero" in entries[0].error
 
     async def test_execute_returns_a_failure_result_not_an_exception(self):
-        step = auto_step("s", "S", next_state="", action=_boom)
+        step = auto_step("s", "S", next_step_id="", action=_boom)
         result = await step.execute({})
         assert result.success is False
-        assert result.next_state is None
+        assert result.next_step_id is None
         assert result.error == "division by zero"
 
-    async def test_error_state_route_is_unchanged(self):
+    async def test_error_step_id_route_is_unchanged(self):
         wf = create_workflow("wf", "wf")
         wf.with_initial_step(
-            auto_step("s", "S", next_state="ok", action=_boom, error_state="bad")
+            auto_step("s", "S", next_step_id="ok", action=_boom, error_step_id="bad")
         )
-        wf.with_step(auto_step("ok", "Ok", next_state=""))
-        wf.with_step(auto_step("bad", "Bad", next_state=""))
+        wf.with_step(auto_step("ok", "Ok", next_step_id=""))
+        wf.with_step(auto_step("bad", "Bad", next_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("wf")
@@ -115,7 +115,7 @@ class TestRaisingStepsRecordTheFailureBehaviour:
             retry_step(
                 "r",
                 "R",
-                auto_step("s", "S", next_state="", action=flaky),
+                auto_step("s", "S", next_step_id="", action=flaky),
                 max_retries=3,
                 backoff_factor=0,
             )
@@ -173,11 +173,11 @@ class TestAsyncAggregationBehaviour:
                 return {"total": len(results)}
 
         children = [
-            auto_step("c1", "C1", next_state="", action=lambda c: {"x": 1}),
-            auto_step("c2", "C2", next_state="", action=lambda c: {"y": 2}),
+            auto_step("c1", "C1", next_step_id="", action=lambda c: {"x": 1}),
+            auto_step("c2", "C2", next_step_id="", action=lambda c: {"y": 2}),
         ]
         wf = _single(
-            parallel_step("p", "P", children, next_state="", aggregation_function=agg)
+            parallel_step("p", "P", children, next_step_id="", aggregation_function=agg)
         )
         engine = WorkflowEngine()
         engine.register_workflow(wf)
@@ -194,7 +194,7 @@ class TestAsyncAggregationBehaviour:
 class TestTerminalInstanceTimerBehaviour:
     async def test_schedule_timer_refuses_a_terminal_instance(self):
         engine = WorkflowEngine()
-        engine.register_workflow(_single(auto_step("a", "A", next_state="")))
+        engine.register_workflow(_single(auto_step("a", "A", next_step_id="")))
         iid = await engine.start("wf")
         assert engine.get_status(iid) == WorkflowStatus.COMPLETED
 
@@ -204,7 +204,7 @@ class TestTerminalInstanceTimerBehaviour:
 
     async def test_both_entry_points_refuse_the_same_way(self):
         engine = WorkflowEngine()
-        engine.register_workflow(_single(auto_step("a", "A", next_state="")))
+        engine.register_workflow(_single(auto_step("a", "A", next_step_id="")))
         iid = await engine.start("wf")
         with pytest.raises(WorkflowInstanceError) as listen:
             await engine.register_event_listener(iid, "go")
@@ -237,7 +237,7 @@ class TestInitialRunningIsAnnouncedBehaviour:
                 )
             )
         )
-        engine.register_workflow(_single(auto_step("a", "A", next_state="")))
+        engine.register_workflow(_single(auto_step("a", "A", next_step_id="")))
         await engine.start("wf")
 
         assert [n for n, _, _ in seen] == [
@@ -292,21 +292,26 @@ class TestReferencedStatesAreValidated:
     @pytest.mark.parametrize(
         "make_step",
         [
-            lambda: auto_step("s", "S", next_state="nope"),
-            lambda: auto_step("s", "S", next_state="", error_state="nope"),
+            lambda: auto_step("s", "S", next_step_id="nope"),
+            lambda: auto_step("s", "S", next_step_id="", error_step_id="nope"),
             lambda: api_step("s", "S", print, "", "nope"),
             lambda: condition_step("s", "S", bool, "", "nope"),
-            lambda: condition_step("s", "S", bool, "", "", error_state="nope"),
-            lambda: llm_step("s", "S", _Gen(), "p", next_state="nope"),
+            lambda: condition_step("s", "S", bool, "", "", error_step_id="nope"),
+            lambda: llm_step("s", "S", _Gen(), "p", next_step_id="nope"),
             lambda: timer_step("s", "S", 1, "nope"),
-            lambda: parallel_step("s", "S", [], next_state="", error_state="nope"),
-            lambda: wait_event_step("s", "S", "e", success_state="nope"),
+            lambda: parallel_step("s", "S", [], next_step_id="", error_step_id="nope"),
+            lambda: wait_event_step("s", "S", "e", success_step_id="nope"),
             lambda: wait_event_step(
-                "s", "S", "e", success_state="", timeout_seconds=1, timeout_state="nope"
+                "s",
+                "S",
+                "e",
+                success_step_id="",
+                timeout_seconds=1,
+                timeout_step_id="nope",
             ),
             lambda: switch_step("s", "S", "k", cases={"a": "nope"}),
-            lambda: switch_step("s", "S", "k", cases={}, default_state="nope"),
-            lambda: retry_step("s", "S", auto_step("i", "I", next_state="nope")),
+            lambda: switch_step("s", "S", "k", cases={}, default_step_id="nope"),
+            lambda: retry_step("s", "S", auto_step("i", "I", next_step_id="nope")),
         ],
         ids=[
             "auto-next",
@@ -332,14 +337,14 @@ class TestReferencedStatesAreValidated:
 
     def test_terminal_markers_are_not_references(self):
         wf = create_workflow("wf", "wf")
-        wf.with_initial_step(wait_event_step("w", "W", "e", success_state=""))
+        wf.with_initial_step(wait_event_step("w", "W", "e", success_step_id=""))
         wf.validate_structure()
         assert wf.get_terminal_states() == {"w"}
 
     def test_unreachable_step_is_reported(self):
         wf = create_workflow("wf", "wf")
-        wf.with_initial_step(auto_step("a", "A", next_state=""))
-        wf.with_step(auto_step("lonely", "Lonely", next_state=""))
+        wf.with_initial_step(auto_step("a", "A", next_step_id=""))
+        wf.with_step(auto_step("lonely", "Lonely", next_step_id=""))
         with pytest.raises(WorkflowValidationError, match="not reachable"):
             wf.validate_structure()
 
@@ -354,7 +359,12 @@ class TestTimerKeysAndRearm:
         wf = create_workflow("wf", "wf")
         wf.with_initial_step(
             wait_event_step(
-                "w", "W", "go", success_state="t", timeout_seconds=60, timeout_state="t"
+                "w",
+                "W",
+                "go",
+                success_step_id="t",
+                timeout_seconds=60,
+                timeout_step_id="t",
             )
         )
         wf.with_step(timer_step("t", "T", 60, ""))
@@ -386,7 +396,7 @@ class TestTimerKeysAndRearm:
     async def test_timer_fires_and_forgets_its_entry(self):
         wf = create_workflow("wf", "wf")
         wf.with_initial_step(timer_step("t", "T", 0.01, "done"))
-        wf.with_step(auto_step("done", "Done", next_state=""))
+        wf.with_step(auto_step("done", "Done", next_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("wf")
@@ -397,7 +407,7 @@ class TestTimerKeysAndRearm:
     async def test_event_timeout_without_state_fails_and_forgets(self):
         wf = create_workflow("wf", "wf")
         wf.with_initial_step(
-            wait_event_step("w", "W", "go", success_state="", timeout_seconds=0.01)
+            wait_event_step("w", "W", "go", success_step_id="", timeout_seconds=0.01)
         )
         engine = WorkflowEngine()
         engine.register_workflow(wf)
@@ -409,7 +419,7 @@ class TestTimerKeysAndRearm:
 
     async def test_deadline_fails_a_waiting_instance_and_forgets_its_entry(self):
         wf = create_workflow("wf", "wf")
-        wf.with_initial_step(wait_event_step("w", "W", "go", success_state=""))
+        wf.with_initial_step(wait_event_step("w", "W", "go", success_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("wf", max_seconds=0.02)
@@ -424,10 +434,10 @@ class TestCompletingFromAWait:
         ctx = engine.workflow_instances[iid].context
         return "_waiting_info" in ctx, "_timer_info" in ctx
 
-    async def test_event_without_success_state(self):
+    async def test_event_without_success_step_id(self):
         wf = create_workflow("wf", "wf")
         wf.with_initial_step(
-            wait_event_step("w", "W", "go", success_state="", timeout_seconds=60)
+            wait_event_step("w", "W", "go", success_step_id="", timeout_seconds=60)
         )
         engine = WorkflowEngine()
         engine.register_workflow(wf)
@@ -451,10 +461,10 @@ class TestCompletingFromAWait:
         assert self._markers(engine, iid) == (False, False)
         assert engine.timers == {}
 
-    async def test_buffered_event_without_success_state(self):
+    async def test_buffered_event_without_success_step_id(self):
         wf = create_workflow("wf", "wf")
         wf.with_initial_step(timer_step("pause", "Pause", 60, "wait"))
-        wf.with_step(wait_event_step("wait", "Wait", "paid", success_state=""))
+        wf.with_step(wait_event_step("wait", "Wait", "paid", success_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("wf")
@@ -467,8 +477,8 @@ class TestCompletingFromAWait:
     async def test_transition_out_of_a_wait_clears_both_markers(self):
         wf = create_workflow("wf", "wf")
         wf.with_initial_step(timer_step("t", "T", 0.01, "w"))
-        wf.with_step(wait_event_step("w", "W", "go", success_state="done"))
-        wf.with_step(auto_step("done", "Done", next_state=""))
+        wf.with_step(wait_event_step("w", "W", "go", success_step_id="done"))
+        wf.with_step(auto_step("done", "Done", next_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("wf")
@@ -484,7 +494,7 @@ class TestCancelReleasesEverything:
     async def test_cancel_a_waiting_instance(self):
         wf = create_workflow("wf", "wf")
         wf.with_initial_step(
-            wait_event_step("w", "W", "go", success_state="", timeout_seconds=60)
+            wait_event_step("w", "W", "go", success_step_id="", timeout_seconds=60)
         )
         engine = WorkflowEngine()
         engine.register_workflow(wf)
@@ -504,7 +514,7 @@ class TestCancelReleasesEverything:
 
         class _Stray(WorkflowStep):
             async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
-                return WorkflowStepResult.success_result(next_state="nowhere")
+                return WorkflowStepResult.success_result(next_step_id="nowhere")
 
         wf = create_workflow("wf", "wf")
         wf.with_initial_step(_Stray(step_id="s", name="S"))

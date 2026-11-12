@@ -79,12 +79,12 @@ class Timer:
     def __init__(
         self,
         instance_id: str,
-        next_state: str | None,
+        next_step_id: str | None,
         expires_at: datetime,
         task: asyncio.Task | None = None,
     ):
         self.instance_id = instance_id
-        self.next_state = next_state
+        self.next_step_id = next_step_id
         self.expires_at = expires_at
         self.task = task
 
@@ -192,7 +192,7 @@ class WorkflowEngine:
         """Register ``hook(event_name, instance, data)``.
 
         Events: ``"step_started"`` (``{"step_id"}``), ``"step_completed"``
-        (``{"step_id", "success", "next_state", "error"}``) and
+        (``{"step_id", "success", "next_step_id", "error"}``) and
         ``"status_changed"`` (``{"status", "error"}``). A hook's exception is
         logged and never affects the workflow. A hook returning an awaitable
         is scheduled as a task.
@@ -542,12 +542,12 @@ class WorkflowEngine:
                 self._fail(instance, error)
                 return
 
-            next_state = await self._run_current_step(instance)
+            next_step_id = await self._run_current_step(instance)
             steps_run += 1
-            if next_state is None:
+            if next_step_id is None:
                 return
             try:
-                self._prepare_transition(instance, next_state)
+                self._prepare_transition(instance, next_step_id)
             except Exception as e:
                 logger.error(f"Error executing step {instance.current_step_id}: {e!s}")
                 self._fail(instance, e)
@@ -654,7 +654,7 @@ class WorkflowEngine:
                 instance,
                 step_id=step_id,
                 success=result.success,
-                next_state=result.next_state,
+                next_step_id=result.next_step_id,
                 error=result.error,
             )
 
@@ -694,24 +694,24 @@ class WorkflowEngine:
         self, instance: WorkflowInstance, result: WorkflowStepResult
     ) -> str | None:
         """Handle a successful step execution; return the next state or None."""
-        if result.next_state:
-            return result.next_state
+        if result.next_step_id:
+            return result.next_step_id
         # DECISION plan-2026-09-12T135914-45a654de/D-013
         # A step (e.g. SwitchStep) can signal "this specific route is
-        # terminal" by returning next_state="" -- distinct from a step
-        # that has no next_state field at all (also falsy, e.g. a step
+        # terminal" by returning next_step_id="" -- distinct from a step
+        # that has no next_step_id field at all (also falsy, e.g. a step
         # awaiting an event/timer, whose model default is None). Do NOT
         # re-derive terminality from WorkflowDefinition.get_terminal_states()
         # here: that is a static, WHOLE-STEP analysis (used for
         # reachability warnings) and cannot see that only ONE of a
         # SwitchStep's cases routes to "terminal". This applies to ANY
-        # step type whose result carries next_state == "" -- not just
+        # step type whose result carries next_step_id == "" -- not just
         # SwitchStep -- since ConditionStep, APIStep,
         # LLMStep, ParallelStep and RetryStep-wrapped steps all
         # share the same per-route "" == terminal semantics, and
         # definitions.py's own get_terminal_states() already treats ""
         # as a plan-wide terminal-step marker (see
-        # `referenced_states.discard("")` in definitions.py).
+        # `referenced_step_ids.discard("")` in definitions.py).
         #
         # DECISION plan-2026-09-12T135914-45a654de/D-020
         # A prior completion-fix (D-018) narrowed this check to
@@ -719,9 +719,9 @@ class WorkflowEngine:
         # pass found that narrowing REOPENED this exact bug for a
         # RetryStep-wrapped SwitchStep plus 4 other step types. Do NOT
         # reintroduce an isinstance-based narrowing of this predicate --
-        # keep the wide `result.next_state == ""` check for ANY
+        # keep the wide `result.next_step_id == ""` check for ANY
         # successful step result. See decisions.md D-020.
-        explicitly_terminal = result.next_state == ""
+        explicitly_terminal = result.next_step_id == ""
         return await self._handle_step_without_transition(
             instance, explicitly_terminal=explicitly_terminal
         )
@@ -732,8 +732,8 @@ class WorkflowEngine:
         """Handle a failed step result: follow its route or FAIL the instance."""
         logger.warning(f"Step failed: {instance.current_step_id} - {result.message}")
 
-        if result.next_state:
-            return result.next_state
+        if result.next_step_id:
+            return result.next_step_id
         message = result.message or "Step failed without error message"
         if result.error and result.error not in message:
             message = f"{message} ({result.error})"
@@ -741,19 +741,21 @@ class WorkflowEngine:
         self._fail(instance, error)
         return None
 
-    def _prepare_transition(self, instance: WorkflowInstance, next_state: str) -> None:
-        """Validate ``next_state`` and move the instance onto it (RUNNING)."""
+    def _prepare_transition(
+        self, instance: WorkflowInstance, next_step_id: str
+    ) -> None:
+        """Validate ``next_step_id`` and move the instance onto it (RUNNING)."""
         workflow_def = self._definition_for(instance)
 
-        if next_state not in workflow_def.steps:
+        if next_step_id not in workflow_def.steps:
             raise WorkflowStateError(
-                f"Invalid next state: {next_state}",
+                f"Invalid next state: {next_step_id}",
                 current_step_id=instance.current_step_id,
                 operation="transition",
             )
 
-        logger.info(f"Transitioning from {instance.current_step_id} to {next_state}")
-        instance.current_step_id = next_state
+        logger.info(f"Transitioning from {instance.current_step_id} to {next_step_id}")
+        instance.current_step_id = next_step_id
         self._leave_wait(instance, WorkflowStatus.RUNNING)
 
     def _leave_wait(self, instance: WorkflowInstance, status: WorkflowStatus) -> None:
@@ -770,14 +772,14 @@ class WorkflowEngine:
         self._set_status(instance, status)
 
     async def _transition_to_state(
-        self, instance: WorkflowInstance, next_state: str
+        self, instance: WorkflowInstance, next_step_id: str
     ) -> None:
-        """Transition to ``next_state`` and run from there.
+        """Transition to ``next_step_id`` and run from there.
 
         Raises ``WorkflowStateError`` for an unknown state (the instance is
         unchanged) and ``WorkflowTimeoutError`` for a deadline breach.
         """
-        self._prepare_transition(instance, next_state)
+        self._prepare_transition(instance, next_step_id)
         await self._execute_workflow_step(instance)
 
     async def _handle_step_without_transition(
@@ -791,7 +793,7 @@ class WorkflowEngine:
         Args:
             instance: The workflow instance whose current step just ran.
             explicitly_terminal: True when the step's OWN result signalled
-                termination for this invocation (``next_state == ""``, e.g. a
+                termination for this invocation (``next_step_id == ""``, e.g. a
                 ``SwitchStep`` routed to its terminal branch). When True, the
                 instance completes unconditionally, without consulting
                 ``WorkflowDefinition.get_terminal_states()``'s static
@@ -808,7 +810,7 @@ class WorkflowEngine:
             self._set_status(instance, WorkflowStatus.COMPLETED)
         elif isinstance(waiting_info, dict) and waiting_info.get("waiting_for_event"):
             event_type = waiting_info.get("event_type") or ""
-            success_state = waiting_info.get("success_state") or ""
+            success_step_id = waiting_info.get("success_step_id") or ""
             correlation_key = waiting_info.get("correlation_key")
             buffered = self._take_buffered_event(instance, event_type, correlation_key)
             if buffered is not None:
@@ -817,8 +819,8 @@ class WorkflowEngine:
                     f"'{event_type}' event"
                 )
                 self._apply_event(instance, waiting_info.get("event_mapping"), buffered)
-                if success_state:
-                    return success_state
+                if success_step_id:
+                    return success_step_id
                 self._leave_wait(instance, WorkflowStatus.COMPLETED)
                 return None
             logger.info(
@@ -829,9 +831,9 @@ class WorkflowEngine:
             await self.register_event_listener(
                 instance_id=instance.instance_id,
                 event_type=event_type,
-                success_state=success_state,
+                success_step_id=success_step_id,
                 timeout_seconds=waiting_info.get("timeout_seconds"),
-                timeout_state=waiting_info.get("timeout_state"),
+                timeout_step_id=waiting_info.get("timeout_step_id"),
                 event_mapping=waiting_info.get("event_mapping"),
                 correlation_key=correlation_key,
             )
@@ -844,7 +846,7 @@ class WorkflowEngine:
             await self.schedule_timer(
                 instance_id=instance.instance_id,
                 delay_seconds=timer_info["delay_seconds"],
-                next_state=timer_info["next_state"],
+                next_step_id=timer_info["next_step_id"],
             )
         else:
             # Check if this is a terminal step
@@ -871,17 +873,17 @@ class WorkflowEngine:
         self,
         instance_id: str,
         event_type: str,
-        success_state: str | None = None,
+        success_step_id: str | None = None,
         timeout_seconds: float | None = None,
-        timeout_state: str | None = None,
+        timeout_step_id: str | None = None,
         event_mapping: dict[str, str] | None = None,
         correlation_key: str | None = None,
     ) -> None:
         """Register a workflow instance to listen for an event.
 
-        ``success_state`` of ``""``/``None`` completes the instance when the
+        ``success_step_id`` of ``""``/``None`` completes the instance when the
         event arrives. With ``timeout_seconds``, the wait times out to
-        ``timeout_state``, or FAILS the instance when none is given.
+        ``timeout_step_id``, or FAILS the instance when none is given.
         ``correlation_key`` restricts delivery to events whose payload value
         for that key equals the instance's context value for it now.
         """
@@ -892,13 +894,13 @@ class WorkflowEngine:
         # Create listener
         listener = EventListener(
             instance_id=instance_id,
-            success_state=success_state or "",
+            success_step_id=success_step_id or "",
             event_mapping=event_mapping or {},
             correlation_key=correlation_key,
             correlation_value=(
                 instance.context.get(correlation_key) if correlation_key else None
             ),
-            timeout_state=timeout_state,
+            timeout_step_id=timeout_step_id,
             step_id=instance.current_step_id,
         )
 
@@ -914,26 +916,26 @@ class WorkflowEngine:
 
         # DECISION plan-2026-09-27T120000-5d1e7a3b/D-001
         # Schedule the timeout whenever timeout_seconds is set, with or
-        # without timeout_state. Do NOT go back to "only with timeout_state":
+        # without timeout_step_id. Do NOT go back to "only with timeout_step_id":
         # the listener then expired silently, later events were skipped, and
-        # the instance stayed WAITING forever. No timeout_state -> FAILED.
+        # the instance stayed WAITING forever. No timeout_step_id -> FAILED.
         if timeout_seconds is not None:
             self._arm_timer(
                 _timer_key(instance_id, "timeout", event_type),
                 instance_id,
-                timeout_state,
+                timeout_step_id,
                 timeout_seconds,
                 lambda: self._handle_event_timeout(
-                    instance_id, event_type, timeout_state
+                    instance_id, event_type, timeout_step_id
                 ),
                 "event timeout",
             )
             logger.info(f"Set up event timeout: {timeout_seconds} seconds")
 
     async def _handle_event_timeout(
-        self, instance_id: str, event_type: str, timeout_state: str | None
+        self, instance_id: str, event_type: str, timeout_step_id: str | None
     ) -> None:
-        """Handle an event timeout: go to ``timeout_state`` or FAIL."""
+        """Handle an event timeout: go to ``timeout_step_id`` or FAIL."""
         logger.info(
             f"Event timeout for instance {instance_id} waiting for {event_type}"
         )
@@ -968,7 +970,7 @@ class WorkflowEngine:
                 "timeout_at": datetime.now(timezone.utc).isoformat(),
             }
 
-            if not timeout_state:
+            if not timeout_step_id:
                 wait_seconds = None
                 waiting_info = instance.context.get(CONTEXT_KEY_WAITING_INFO) or {}
                 if isinstance(waiting_info, dict):
@@ -986,7 +988,7 @@ class WorkflowEngine:
             # NOTE (W-ISSUE-004): the step budget restarts here (event-mediated
             # transition); loops through a wait are allowed by design.
             try:
-                await self._transition_to_state(instance, timeout_state)
+                await self._transition_to_state(instance, timeout_step_id)
             except Exception as e:
                 self._fail(instance, e)
 
@@ -1109,8 +1111,8 @@ class WorkflowEngine:
                 # NOTE (W-ISSUE-004): the step budget restarts here
                 # (event-mediated transition); loops through a wait are
                 # allowed by design.
-                if listener.success_state:
-                    await self._transition_to_state(instance, listener.success_state)
+                if listener.success_step_id:
+                    await self._transition_to_state(instance, listener.success_step_id)
                 else:
                     self._leave_wait(instance, WorkflowStatus.COMPLETED)
         except Exception as e:
@@ -1216,7 +1218,7 @@ class WorkflowEngine:
         self,
         key: str,
         instance_id: str,
-        next_state: str | None,
+        next_step_id: str | None,
         delay: float,
         handler: Callable[[], Any],
         label: str,
@@ -1244,7 +1246,7 @@ class WorkflowEngine:
         if existing is not None:
             existing.cancel()
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
-        self.timers[key] = Timer(instance_id, next_state, expires_at, task)
+        self.timers[key] = Timer(instance_id, next_step_id, expires_at, task)
 
     def _forget_timer(self, key: str) -> None:
         """Drop the entry ``key`` when it is the task running this call (a timer
@@ -1254,9 +1256,9 @@ class WorkflowEngine:
             del self.timers[key]
 
     async def schedule_timer(
-        self, instance_id: str, delay_seconds: float, next_state: str
+        self, instance_id: str, delay_seconds: float, next_step_id: str
     ) -> None:
-        """Schedule a timer that moves a WAITING instance to ``next_state``.
+        """Schedule a timer that moves a WAITING instance to ``next_step_id``.
 
         Raises ``WorkflowInstanceError`` for an unknown or finished instance.
         """
@@ -1264,16 +1266,18 @@ class WorkflowEngine:
         self._arm_timer(
             _timer_key(instance_id, "timer"),
             instance_id,
-            next_state,
+            next_step_id,
             delay_seconds,
-            lambda: self._handle_timer_expiration(instance_id, next_state),
+            lambda: self._handle_timer_expiration(instance_id, next_step_id),
             "timer",
         )
         logger.info(
             f"Scheduled timer for instance {instance_id}: {delay_seconds} seconds"
         )
 
-    async def _handle_timer_expiration(self, instance_id: str, next_state: str) -> None:
+    async def _handle_timer_expiration(
+        self, instance_id: str, next_step_id: str
+    ) -> None:
         """Handle a timer expiration."""
         logger.info(f"Timer expired for instance {instance_id}")
 
@@ -1302,19 +1306,19 @@ class WorkflowEngine:
             # NOTE (W-ISSUE-004): the step budget restarts here (timer-mediated
             # transition); loops through a timer are allowed by design.
             try:
-                if next_state == "":
+                if next_step_id == "":
                     # DECISION plan-2026-11-05T134105-5ed71cf2/D-002
                     # An empty timer target is the terminal-route marker the
-                    # validator accepts (same as wait_event success_state="",
+                    # validator accepts (same as wait_event success_step_id="",
                     # see _deliver_event). Do NOT send it to
                     # _transition_to_state: it would raise "Invalid next
                     # state" and FAIL the instance after the full delay. Do
-                    # NOT apply this to APIStep(failure_state=""): a
+                    # NOT apply this to APIStep(failure_step_id=""): a
                     # failure with an empty route still fails (workflows
                     # D-003; completing would hide the error).
                     self._leave_wait(instance, WorkflowStatus.COMPLETED)
                 else:
-                    await self._transition_to_state(instance, next_state)
+                    await self._transition_to_state(instance, next_step_id)
             except Exception as e:
                 self._fail(instance, e)
 

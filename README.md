@@ -370,12 +370,12 @@ from fsm_llm.workflows import WorkflowEngine, auto_step, condition_step, create_
 
 wf = (
     create_workflow_builder("orders", "Order check")
-    .set_initial_step(auto_step("load", "Load order", next_state="route",
+    .set_initial_step(auto_step("load", "Load order", next_step_id="route",
                                 action=lambda ctx: {"amount": 1500}))
     .add_step(condition_step("route", "Big order?", condition=lambda ctx: ctx["amount"] >= 1000,
-                             true_state="review", false_state="done"))
-    .add_step(auto_step("review", "Manual review", next_state="done"))
-    .add_step(auto_step("done", "Finish", next_state=""))
+                             true_step_id="review", false_step_id="done"))
+    .add_step(auto_step("review", "Manual review", next_step_id="done"))
+    .add_step(auto_step("done", "Finish", next_step_id=""))
     .build()
 )
 

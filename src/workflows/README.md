@@ -13,16 +13,16 @@ flowchart TD
     D[WorkflowDefinition: steps + initial step] --> R[register_workflow validates it]
     R --> S[start creates an instance with a context dict]
     S --> X[run current step]
-    X -- next_state names a step --> X
+    X -- next_step_id names a step --> X
     X -- event wait --> W[WAITING until process_event]
     X -- timer --> T[WAITING until the timer fires]
     W --> X
     T --> X
-    X -- next_state is empty string, or step has no exits --> C[COMPLETED]
+    X -- next_step_id is empty string, or step has no exits --> C[COMPLETED]
     X -- failure with no error route --> F[FAILED]
 ```
 
-Each step returns a result with `success`, some `data` (merged into the context), and `next_state`. The engine follows `next_state` until a step pauses, ends, or fails. An instance moves through the statuses `pending`, `running`, `waiting`, and ends as `completed`, `failed`, or `cancelled`.
+Each step returns a result with `success`, some `data` (merged into the context), and `next_step_id`. The engine follows `next_step_id` until a step pauses, ends, or fails. An instance moves through the statuses `pending`, `running`, `waiting`, and ends as `completed`, `failed`, or `cancelled`.
 
 There are 11 step types: automatic (run a function, move on), API call, condition (yes/no branch), switch (branch on a context value), LLM processing, wait for event, timer, FSM conversation, agent, parallel (run several steps at once), and retry (re-run a step with a growing delay).
 
@@ -48,14 +48,14 @@ from fsm_llm.workflows import (
 )
 
 wf = create_workflow("orders", "Order check")
-wf.with_initial_step(auto_step("load", "Load order", next_state="route",
+wf.with_initial_step(auto_step("load", "Load order", next_step_id="route",
                                action=lambda ctx: {"amount": 1500}))
 wf.with_step(condition_step("route", "Big order?",
                             condition=lambda ctx: ctx["amount"] >= 1000,
-                            true_state="review", false_state="done"))
+                            true_step_id="review", false_step_id="done"))
 wf.with_step(wait_event_step("review", "Wait for approval", event_type="approved",
-                             success_state="done", event_mapping={"approver": "by"}))
-wf.with_step(auto_step("done", "Finish", next_state=""))
+                             success_step_id="done", event_mapping={"approver": "by"}))
+wf.with_step(auto_step("done", "Finish", next_step_id=""))
 
 async def main():
     engine = WorkflowEngine()
@@ -77,8 +77,8 @@ This snippet needs no model and no network. A step that calls an LLM, a conversa
 from fsm_llm import BuildError
 from fsm_llm.workflows import WorkflowBuilder, auto_step
 
-finish = auto_step("finish", "Finish", next_state="")
-start = auto_step("start", "Start", next_state="finish", action=lambda ctx: {"ok": True})
+finish = auto_step("finish", "Finish", next_step_id="")
+start = auto_step("start", "Start", next_step_id="finish", action=lambda ctx: {"ok": True})
 definition = (
     WorkflowBuilder("demo", "Demo")
     .add_step(finish)
@@ -88,7 +88,7 @@ definition = (
 )
 
 try:
-    WorkflowBuilder("bad", "Bad").set_initial_step(auto_step("a", "A", next_state="nowhere")).build()
+    WorkflowBuilder("bad", "Bad").set_initial_step(auto_step("a", "A", next_step_id="nowhere")).build()
 except BuildError as err:
     print(err.errors)             # ["Step 'a' references unknown state: 'nowhere'"]
 ```
@@ -104,11 +104,11 @@ Installing the `workflows` extra (`pip install -e ".[workflows]"` from a clone) 
 ## Things to know
 
 - Everything is `async`. Plain (sync) functions such as actions and conditions run in a thread pool; pass `WorkflowEngine(executor=...)` to choose it. A function that returns a coroutine is awaited. A timeout cannot stop a sync function that is already running in its thread.
-- A step returning `next_state=""` ends the workflow there.
-- A failed step goes to its `error_state` (for API steps, `failure_state`). With no error route the instance FAILS; it never continues down the success route.
+- A step returning `next_step_id=""` ends the workflow there.
+- A failed step goes to its `error_step_id` (for API steps, `failure_step_id`). With no error route the instance FAILS; it never continues down the success route.
 - Loops are allowed when they pass through a timer or event wait (polling, retry-until). A loop made only of steps that run back to back is rejected when the workflow is registered. One engine call runs at most `max_steps` steps (default 1000), then the instance FAILS.
 - Events: `process_event` wakes every instance waiting for that event type, or only one instance when `WorkflowEvent.instance_id` is set. A targeted event that arrives early is kept (up to 100 per instance) until that instance waits for it. `correlation_key="order_id"` on a wait accepts only events whose payload `order_id` equals the instance's own context value.
-- A wait with `timeout_seconds` and no `timeout_state` FAILS the instance when it times out.
+- A wait with `timeout_seconds` and no `timeout_step_id` FAILS the instance when it times out.
 - Keys a step returns that look internal (starting with `_`, `system_`, `internal_` or `__`, any case) are dropped from the context, except the engine's own `_waiting_info` and `_timer_info` markers.
 - `start(..., max_seconds=30)` limits the whole run, waits included, and raises `WorkflowTimeoutError` when a step runs past it.
 - Finished instances stay in memory: by default the 1000 most recent (`max_completed_instances`), each with at most 1000 history entries.

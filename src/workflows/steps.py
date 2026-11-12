@@ -66,7 +66,7 @@ async def _call_user_callable(fn: Callable[..., Any], *args: Any, **kwargs: Any)
     # Do NOT go back to `inspect.iscoroutinefunction(fn)` alone: a lambda that
     # returns a coroutine was run in the executor and its (truthy, never
     # awaited) coroutine object was used as the result, so a ConditionStep
-    # always took `true_state` and an APIStep silently mapped nothing.
+    # always took `true_step_id` and an APIStep silently mapped nothing.
 
     Note: a synchronous callable that is still running when a timeout fires
     cannot be stopped (Python threads are not cancellable); it keeps running
@@ -101,21 +101,22 @@ class WorkflowStep(BaseModel, ABC):
         """Execute the step. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement execute()")
 
-    def referenced_states(self) -> set[str]:
-        """The states this step can route to (empty markers dropped).
+    def referenced_step_ids(self) -> set[str]:
+        """The step ids this step can route to (empty markers dropped).
 
         Interface contract: the non-empty string values of the model fields
-        whose name ends in ``_state`` (``next_state``, ``error_state``, ...).
-        A step that names states elsewhere (a nested model, a mapping, a
+        whose name ends in ``_step_id`` (``next_step_id``, ``error_step_id``,
+        ...). That one suffix is the whole rule: name a routing field with it.
+        A step that names step ids elsewhere (a nested model, a mapping, a
         wrapped step) overrides this; ``WorkflowDefinition`` reads nothing else
         for validation, reachability and terminal detection. Never raises.
         """
-        states: set[str] = set()
+        step_ids: set[str] = set()
         for name in type(self).model_fields:
             value = getattr(self, name, None)
-            if name.endswith("_state") and isinstance(value, str) and value:
-                states.add(value)
-        return states
+            if name.endswith("_step_id") and isinstance(value, str) and value:
+                step_ids.add(value)
+        return step_ids
 
     async def _with_timeout(self, coro):
         """Wrap a coroutine with ``asyncio.wait_for`` if timeout is configured.
@@ -149,14 +150,14 @@ class AutoStep(WorkflowStep):
     """A step that automatically transitions to the next state.
 
     ``action`` may return a dict (merged into the context) or ``None``. When
-    the action fails, the step routes to ``error_state`` if one is set and
+    the action fails, the step routes to ``error_step_id`` if one is set and
     returns a failure result with no route otherwise (the instance then
     FAILS).
     """
 
-    next_state: str
+    next_step_id: str
     action: Callable[[dict[str, Any]], dict[str, Any]] | None = None
-    error_state: str | None = None
+    error_step_id: str | None = None
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Execute the step and transition automatically."""
@@ -175,14 +176,14 @@ class AutoStep(WorkflowStep):
 
             return WorkflowStepResult.success_result(
                 data=data,
-                next_state=self.next_state,
-                message=f"Auto-transitioned to {self.next_state}",
+                next_step_id=self.next_step_id,
+                message=f"Auto-transitioned to {self.next_step_id}",
             )
         except Exception as e:
             logger.error(f"Error in auto transition step {self.step_id}: {e!s}")
             return WorkflowStepResult.failure_result(
                 error=_error_text(e),
-                next_state=self.error_state,
+                next_step_id=self.error_step_id,
                 message=f"Auto-transition failed: {e!s}",
             )
 
@@ -197,8 +198,8 @@ class APIStep(WorkflowStep):
     """
 
     api_function: Callable[..., Any]
-    success_state: str
-    failure_state: str
+    success_step_id: str
+    failure_step_id: str
     input_mapping: dict[str, str] = Field(default_factory=dict)
     output_mapping: dict[str, str] = Field(default_factory=dict)
 
@@ -216,15 +217,15 @@ class APIStep(WorkflowStep):
 
             return WorkflowStepResult.success_result(
                 data=output_data,
-                next_state=self.success_state,
-                message=f"API call successful, transitioning to {self.success_state}",
+                next_step_id=self.success_step_id,
+                message=f"API call successful, transitioning to {self.success_step_id}",
             )
         except Exception as e:
             logger.error(f"Error in API call step {self.step_id}: {e!s}")
             return WorkflowStepResult.failure_result(
                 error=_error_text(e),
-                next_state=self.failure_state,
-                message=f"API call failed, transitioning to {self.failure_state}",
+                next_step_id=self.failure_step_id,
+                message=f"API call failed, transitioning to {self.failure_step_id}",
             )
 
     def _map_input_parameters(self, context: dict[str, Any]) -> dict[str, Any]:
@@ -264,14 +265,14 @@ class APIStep(WorkflowStep):
 class ConditionStep(WorkflowStep):
     """A step that evaluates a condition and transitions accordingly.
 
-    When the condition raises, the step routes to ``error_state`` if one is
+    When the condition raises, the step routes to ``error_step_id`` if one is
     set and returns a failure result with no route otherwise.
     """
 
     condition: Callable[[dict[str, Any]], bool]
-    true_state: str
-    false_state: str
-    error_state: str | None = None
+    true_step_id: str
+    false_step_id: str
+    error_step_id: str | None = None
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Evaluate the condition and determine the next state."""
@@ -281,18 +282,18 @@ class ConditionStep(WorkflowStep):
             )
 
             # Determine the next state
-            next_state = self.true_state if result else self.false_state
+            next_step_id = self.true_step_id if result else self.false_step_id
 
             return WorkflowStepResult.success_result(
-                next_state=next_state,
-                message=f"Condition evaluated to {result}, transitioning to {next_state}",
+                next_step_id=next_step_id,
+                message=f"Condition evaluated to {result}, transitioning to {next_step_id}",
                 data={"condition_result": result},
             )
         except Exception as e:
             logger.error(f"Error in condition step {self.step_id}: {e!s}")
             return WorkflowStepResult.failure_result(
                 error=_error_text(e),
-                next_state=self.error_state,
+                next_step_id=self.error_step_id,
                 message=f"Condition evaluation failed: {e!s}",
             )
 
@@ -310,7 +311,7 @@ class LLMStep(WorkflowStep):
     braces as ``{{`` and ``}}``). ``output_mapping`` is
     ``{context_key: regex}``: group 1 (or the whole match) is stored; an
     empty regex stores the whole response; a regex that does not match
-    leaves the key unset. On failure the step routes to ``error_state``, or
+    leaves the key unset. On failure the step routes to ``error_step_id``, or
     FAILS the instance when none is set.
     """
 
@@ -318,8 +319,8 @@ class LLMStep(WorkflowStep):
     prompt_template: str
     context_mapping: dict[str, str] = Field(default_factory=dict)
     output_mapping: dict[str, str] = Field(default_factory=dict)
-    next_state: str
-    error_state: str | None = None
+    next_step_id: str
+    error_step_id: str | None = None
     system_prompt: str = (
         "You are a precise assistant. Follow the instructions in the user "
         "message and answer with exactly what they ask for."
@@ -365,14 +366,14 @@ class LLMStep(WorkflowStep):
 
             return WorkflowStepResult.success_result(
                 data=output_data,
-                next_state=self.next_state,
-                message=f"LLM processing successful, transitioning to {self.next_state}",
+                next_step_id=self.next_step_id,
+                message=f"LLM processing successful, transitioning to {self.next_step_id}",
             )
         except Exception as e:
             logger.error(f"Error in LLM processing step {self.step_id}: {e!s}")
             return WorkflowStepResult.failure_result(
                 error=_error_text(e),
-                next_state=self.error_state,
+                next_step_id=self.error_step_id,
                 message=f"LLM processing failed: {e!s}",
             )
 
@@ -455,11 +456,11 @@ class WaitEventStep(WorkflowStep):
 
     config: WaitEventConfig
 
-    def referenced_states(self) -> set[str]:
-        """The success state and the timeout state of the wait."""
+    def referenced_step_ids(self) -> set[str]:
+        """The success step id and the timeout step id of the wait."""
         return {
             state
-            for state in (self.config.success_state, self.config.timeout_state)
+            for state in (self.config.success_step_id, self.config.timeout_step_id)
             if state
         }
 
@@ -469,8 +470,8 @@ class WaitEventStep(WorkflowStep):
             "waiting_for_event": True,
             "event_type": self.config.event_type,
             "timeout_seconds": self.config.timeout_seconds,
-            "timeout_state": self.config.timeout_state,
-            "success_state": self.config.success_state,
+            "timeout_step_id": self.config.timeout_step_id,
+            "success_step_id": self.config.success_step_id,
             "event_mapping": self.config.event_mapping,
             "correlation_key": self.config.correlation_key,
             "waiting_since": datetime.now(timezone.utc).isoformat(),
@@ -486,7 +487,7 @@ class TimerStep(WorkflowStep):
     """A step that waits for a specified time before transitioning."""
 
     delay_seconds: float
-    next_state: str
+    next_step_id: str
 
     @field_validator("delay_seconds")
     @classmethod
@@ -500,7 +501,7 @@ class TimerStep(WorkflowStep):
         timer_info = {
             "waiting_for_timer": True,
             "delay_seconds": self.delay_seconds,
-            "next_state": self.next_state,
+            "next_step_id": self.next_step_id,
             "timer_start": datetime.now(timezone.utc).isoformat(),
             "timer_end": (
                 datetime.now(timezone.utc) + timedelta(seconds=self.delay_seconds)
@@ -509,7 +510,7 @@ class TimerStep(WorkflowStep):
 
         return WorkflowStepResult.success_result(
             data={CONTEXT_KEY_TIMER_INFO: timer_info},
-            message=f"Timer set for {self.delay_seconds} seconds, will transition to {self.next_state}",
+            message=f"Timer set for {self.delay_seconds} seconds, will transition to {self.next_step_id}",
         )
 
 
@@ -532,7 +533,7 @@ class ConversationStep(WorkflowStep):
     ``{conversation_key: workflow_key}`` (input); ``context_mapping`` maps
     ``{workflow_key: conversation_key}`` (output). The effective time limit
     is the smaller of ``timeout_seconds`` and ``conversation_timeout``. Failures
-    route to ``error_state``, or FAIL the instance when none is set.
+    route to ``error_step_id``, or FAIL the instance when none is set.
     """
 
     fsm_file: str | None = None
@@ -540,8 +541,8 @@ class ConversationStep(WorkflowStep):
     model: str | None = None
     initial_context: dict[str, str] = Field(default_factory=dict)
     context_mapping: dict[str, str] = Field(default_factory=dict)
-    success_state: str = ""
-    error_state: str | None = None
+    success_step_id: str = ""
+    error_step_id: str | None = None
     max_turns: int = 20
     conversation_timeout: float | None = None
     require_completion: bool = False
@@ -606,7 +607,7 @@ class ConversationStep(WorkflowStep):
                 )
                 return WorkflowStepResult.failure_result(
                     error=f"Conversation timed out after {limit}s",
-                    next_state=self.error_state,
+                    next_step_id=self.error_step_id,
                     message="Conversation timed out",
                 )
             return fut.result()
@@ -614,7 +615,7 @@ class ConversationStep(WorkflowStep):
             logger.error(f"Error in conversation step {self.step_id}: {e!s}")
             return WorkflowStepResult.failure_result(
                 error=_error_text(e),
-                next_state=self.error_state,
+                next_step_id=self.error_step_id,
                 message=f"Conversation failed: {e!s}",
             )
 
@@ -700,13 +701,13 @@ class ConversationStep(WorkflowStep):
                 success=False,
                 data=output_data,
                 error=f"Conversation did not reach a terminal state in {turn} turns",
-                next_state=self.error_state,
+                next_step_id=self.error_step_id,
                 message="Conversation did not complete",
             )
 
         return WorkflowStepResult.success_result(
             data=output_data,
-            next_state=self.success_state,
+            next_step_id=self.success_step_id,
             message=f"Conversation completed in {turn} turns",
         )
 
@@ -716,20 +717,20 @@ class ParallelStep(WorkflowStep):
 
     Children get their own copy of the context (``deepcopy``, falling back
     to a shallow copy for values that cannot be deep-copied). Their
-    ``next_state`` is ignored; their data is merged as ``step_<index>_<key>``
+    ``next_step_id`` is ignored; their data is merged as ``step_<index>_<key>``
     (internal-prefix keys are dropped first) or by ``aggregation_function``.
     Event and timer steps cannot be children (they only pause a workflow).
     ``aggregation_function(results)`` may be sync (run in the step executor)
     or async.
 
-    If any child fails, the step fails: it routes to ``error_state``, or
+    If any child fails, the step fails: it routes to ``error_step_id``, or
     FAILS the instance when none is set, and still reports the data of the
     children that succeeded.
     """
 
     steps: list[WorkflowStep]
-    next_state: str
-    error_state: str | None = None
+    next_step_id: str
+    error_step_id: str | None = None
     aggregation_function: (
         Callable[[list[WorkflowStepResult]], dict[str, Any]] | None
     ) = None
@@ -760,15 +761,15 @@ class ParallelStep(WorkflowStep):
             if errors:
                 error_msg = "; ".join(errors)
                 # DECISION plan-2026-09-27T120000-5d1e7a3b/D-003
-                # Do NOT fall back to next_state when error_state is unset: a
+                # Do NOT fall back to next_step_id when error_step_id is unset: a
                 # failed child must not continue down the success route. With
-                # no error_state the failure has no next_state and the engine
+                # no error_step_id the failure has no next_step_id and the engine
                 # FAILS the instance.
                 return WorkflowStepResult(
                     success=False,
                     data=self._default_aggregate(results),
                     error=error_msg,
-                    next_state=self.error_state,
+                    next_step_id=self.error_step_id,
                     message=f"Parallel step had {len(errors)} error(s)",
                 )
 
@@ -777,14 +778,14 @@ class ParallelStep(WorkflowStep):
 
             return WorkflowStepResult.success_result(
                 data=aggregated_data,
-                next_state=self.next_state,
+                next_step_id=self.next_step_id,
                 message="Parallel step completed successfully",
             )
         except Exception as e:
             logger.error(f"Error in parallel step {self.step_id}: {e!s}")
             return WorkflowStepResult.failure_result(
                 error=_error_text(e),
-                next_state=self.error_state,
+                next_step_id=self.error_step_id,
                 message=f"Parallel step failed: {e!s}",
             )
 
@@ -900,7 +901,7 @@ class AgentStep(WorkflowStep):
             name="Research Step",
             agent=agent,
             task_template="Research {topic}",
-            success_state="analyze",
+            success_step_id="analyze",
             context_mapping={"findings": "answer"},
         )
 
@@ -913,7 +914,7 @@ class AgentStep(WorkflowStep):
     """A ``BaseAgent`` instance (or any object with a ``run(task)`` method)."""
     task_template: str = "{task}"
     """Format string for the agent task.  Placeholders are filled from context."""
-    success_state: str = ""
+    success_step_id: str = ""
     context_mapping: dict[str, str] = Field(default_factory=dict)
     """OUTPUT mapping ``{workflow_key: agent_result_key}``. ``agent_result_key``
     is looked up in ``final_context``; ``"answer"``, ``"success"`` and
@@ -921,7 +922,7 @@ class AgentStep(WorkflowStep):
     input_mapping: dict[str, str] = Field(default_factory=dict)
     """INPUT mapping ``{agent_context_key: workflow_key}`` passed to
     ``agent.run(task, initial_context=...)`` (only when non-empty)."""
-    error_state: str | None = None
+    error_step_id: str | None = None
 
     @field_validator("agent")
     @classmethod
@@ -987,13 +988,13 @@ class AgentStep(WorkflowStep):
                     success=False,
                     data=data,
                     error=f"Agent reported failure: {str(answer or '')[:200]}",
-                    next_state=self.error_state,
+                    next_step_id=self.error_step_id,
                     message="Agent step failed: agent reported success=False",
                 )
 
             return WorkflowStepResult.success_result(
                 data=data,
-                next_state=self.success_state,
+                next_step_id=self.success_step_id,
                 message=f"Agent completed: {str(answer or '')[:100]}",
             )
 
@@ -1001,7 +1002,7 @@ class AgentStep(WorkflowStep):
             logger.error(f"Agent step '{self.step_id}' failed: {e!s}")
             return WorkflowStepResult.failure_result(
                 error=_error_text(e),
-                next_state=self.error_state,
+                next_step_id=self.error_step_id,
                 message=f"Agent step failed: {e!s}",
             )
 
@@ -1036,10 +1037,10 @@ class RetryStep(WorkflowStep):
     backoff_factor: float = 1.0
     """Delay multiplier between retries (seconds). Delay = backoff_factor * attempt."""
 
-    def referenced_states(self) -> set[str]:
-        """The wrapped step's states (none for a duck-typed non-step)."""
+    def referenced_step_ids(self) -> set[str]:
+        """The wrapped step's step ids (none for a duck-typed non-step)."""
         if isinstance(self.step, WorkflowStep):
-            return self.step.referenced_states()
+            return self.step.referenced_step_ids()
         return set()
 
     @field_validator("step")
@@ -1131,7 +1132,7 @@ class SwitchStep(WorkflowStep):
             name="Route by intent",
             key="user_intent",
             cases={"buy": "checkout", "browse": "catalog", "help": "support"},
-            default_state="fallback",
+            default_step_id="fallback",
         )
 
     Output keys: ``switch_<step_id>_matched`` (the compared value) and
@@ -1142,24 +1143,24 @@ class SwitchStep(WorkflowStep):
     """Context key whose value determines the target state."""
     cases: dict[str, str]
     """Mapping of key values to target state IDs."""
-    default_state: str | None = None
+    default_step_id: str | None = None
     """State to transition to when the key value doesn't match any case.
     ``None`` means no default (the instance FAILS). Use ``""`` for terminal."""
 
-    def referenced_states(self) -> set[str]:
-        """Every case target and the default state."""
-        return {*self.cases.values(), *super().referenced_states()} - {""}
+    def referenced_step_ids(self) -> set[str]:
+        """Every case target and the default step id."""
+        return {*self.cases.values(), *super().referenced_step_ids()} - {""}
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Evaluate the context key and route to the matching state."""
         value = context.get(self.key)
         value_str = str(value) if value is not None else ""
 
-        target = self.cases.get(value_str, self.default_state)
+        target = self.cases.get(value_str, self.default_step_id)
         if target is None:
             return WorkflowStepResult.failure_result(
-                error=f"No matching case for {self.key}={value_str!r} and no default_state",
-                next_state="",
+                error=f"No matching case for {self.key}={value_str!r} and no default_step_id",
+                next_step_id="",
                 message=f"Switch step '{self.step_id}' has no route for value {value_str!r}",
             )
 
@@ -1168,7 +1169,7 @@ class SwitchStep(WorkflowStep):
                 f"switch_{self.step_id}_matched": value_str,
                 f"switch_{self.step_id}_target": target,
             },
-            next_state=target,
+            next_step_id=target,
             message=f"Routed to '{target}' (key={self.key}, value={value_str!r})",
         )
 

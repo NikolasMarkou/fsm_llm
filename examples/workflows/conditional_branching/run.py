@@ -31,7 +31,7 @@ class ProcessingStep(WorkflowStep):
     """A step that processes context and routes to next state."""
 
     handler: Any = None
-    success_state: str | None = None
+    success_step_id: str | None = None
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         data = {}
@@ -39,7 +39,7 @@ class ProcessingStep(WorkflowStep):
             data = self.handler(context) or {}
         return WorkflowStepResult.success_result(
             data=data,
-            next_state=self.success_state,
+            next_step_id=self.success_step_id,
             message=f"Processed: {self.step_id}",
         )
 
@@ -48,8 +48,8 @@ class ConditionStep(WorkflowStep):
     """A step that routes based on a condition."""
 
     condition: Any = None
-    true_state: str = ""
-    false_state: str = ""
+    true_step_id: str = ""
+    false_step_id: str = ""
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         if callable(self.condition):
@@ -57,11 +57,11 @@ class ConditionStep(WorkflowStep):
         else:
             result = False
 
-        next_state = self.true_state if result else self.false_state
+        next_step_id = self.true_step_id if result else self.false_step_id
         return WorkflowStepResult.success_result(
-            data={"condition_result": result, "routed_to": next_state},
-            next_state=next_state,
-            message=f"Condition: {'true' if result else 'false'} → {next_state}",
+            data={"condition_result": result, "routed_to": next_step_id},
+            next_step_id=next_step_id,
+            message=f"Condition: {'true' if result else 'false'} → {next_step_id}",
         )
 
 
@@ -190,7 +190,7 @@ def build_workflow() -> WorkflowEngine:
             step_id="intake",
             name="Ticket Intake",
             handler=intake_handler,
-            success_state="classify",
+            success_step_id="classify",
             description="Receive and parse support ticket",
         )
     )
@@ -201,7 +201,7 @@ def build_workflow() -> WorkflowEngine:
             step_id="classify",
             name="Classification",
             handler=classify_handler,
-            success_state="route",
+            success_step_id="route",
             description="Classify ticket priority and category",
         )
     )
@@ -212,8 +212,8 @@ def build_workflow() -> WorkflowEngine:
             step_id="route",
             name="Priority Router",
             condition=lambda ctx: ctx.get("is_urgent", False),
-            true_state="urgent_handler",
-            false_state="standard_handler",
+            true_step_id="urgent_handler",
+            false_step_id="standard_handler",
             description="Route based on urgency",
         )
     )
@@ -224,7 +224,7 @@ def build_workflow() -> WorkflowEngine:
             step_id="urgent_handler",
             name="Urgent Handler",
             handler=urgent_handler,
-            success_state="escalation",
+            success_step_id="escalation",
             description="Handle urgent ticket with immediate response",
         )
     )
@@ -234,7 +234,7 @@ def build_workflow() -> WorkflowEngine:
             step_id="escalation",
             name="Escalation",
             handler=escalation_handler,
-            success_state="notify",
+            success_step_id="notify",
             description="Escalate to management",
         )
     )
@@ -245,7 +245,7 @@ def build_workflow() -> WorkflowEngine:
             step_id="standard_handler",
             name="Standard Handler",
             handler=standard_handler,
-            success_state="auto_response",
+            success_step_id="auto_response",
             description="Queue ticket with standard SLA",
         )
     )
@@ -255,7 +255,7 @@ def build_workflow() -> WorkflowEngine:
             step_id="auto_response",
             name="Auto Response",
             handler=auto_response_handler,
-            success_state="notify",
+            success_step_id="notify",
             description="Send automated acknowledgment",
         )
     )
@@ -266,7 +266,7 @@ def build_workflow() -> WorkflowEngine:
             step_id="notify",
             name="Notification",
             handler=notify_handler,
-            success_state=None,  # Terminal
+            success_step_id=None,  # Terminal
             description="Send final notification",
         )
     )

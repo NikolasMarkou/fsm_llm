@@ -99,7 +99,7 @@ class TestEventAutoRegistration:
                 "wait",
                 "Wait",
                 event_type="order_confirmed",
-                success_state="process",
+                success_step_id="process",
                 event_mapping={"received_id": "order_id"},
             )
         )
@@ -125,7 +125,7 @@ class TestEventAutoRegistration:
                 "wait",
                 "Wait",
                 event_type="payment_done",
-                success_state="confirm",
+                success_step_id="confirm",
                 event_mapping={"amount": "paid_amount"},
             )
         )
@@ -153,7 +153,7 @@ class TestEventAutoRegistration:
                 "wait",
                 "Wait",
                 event_type="data_ready",
-                success_state="done",
+                success_step_id="done",
                 event_mapping={"local_key": "remote_key"},
             )
         )
@@ -181,7 +181,7 @@ class TestTimerAutoScheduling:
 
         wf = create_workflow("tmr_auto", "Timer Auto")
         wf.with_initial_step(
-            timer_step("wait", "Wait", delay_seconds=1, next_state="done")
+            timer_step("wait", "Wait", delay_seconds=1, next_step_id="done")
         )
         wf.with_step(auto_step("done", "Done", ""))
         engine.register_workflow(wf)
@@ -201,7 +201,7 @@ class TestTimerAutoScheduling:
 
         wf = create_workflow("tmr_fire", "Timer Fire")
         wf.with_initial_step(
-            timer_step("wait", "Wait", delay_seconds=0, next_state="done")
+            timer_step("wait", "Wait", delay_seconds=0, next_step_id="done")
         )
         wf.with_step(auto_step("done", "Done", ""))
         engine.register_workflow(wf)

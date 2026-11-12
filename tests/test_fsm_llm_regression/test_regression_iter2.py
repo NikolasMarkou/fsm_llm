@@ -97,13 +97,13 @@ class TestWaitEventStepValidation:
                 name="Wait for Payment",
                 config=WaitEventConfig(
                     event_type="payment_received",
-                    success_state="payment_done",
+                    success_step_id="payment_done",
                     timeout_seconds=300,
-                    timeout_state="payment_timeout",
+                    timeout_step_id="payment_timeout",
                 ),
             )
 
-            referenced = step.referenced_states()
+            referenced = step.referenced_step_ids()
             assert "payment_done" in referenced
             assert "payment_timeout" in referenced
         except ImportError:

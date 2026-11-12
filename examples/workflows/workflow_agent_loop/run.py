@@ -122,7 +122,7 @@ def check_quality(output: str) -> tuple[bool, float, str]:
 class AgentWithQualityGate(WorkflowStep):
     """Agent step with internal quality checking and retry loop."""
 
-    next_state: str = ""
+    next_step_id: str = ""
     max_retries: int = 2
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
@@ -181,7 +181,7 @@ class AgentWithQualityGate(WorkflowStep):
                 "total_iterations": total_iterations,
                 "attempts": min(attempt + 1, self.max_retries + 1),
             },
-            next_state=self.next_state or None,
+            next_step_id=self.next_step_id or None,
             message=f"Agent done (score: {best_score:.0%})",
         )
 
@@ -195,7 +195,7 @@ class TerminalStep(WorkflowStep):
         if callable(self.action_fn):
             self.action_fn(context)
         return WorkflowStepResult.success_result(
-            data={}, next_state=None, message="Done"
+            data={}, next_step_id=None, message="Done"
         )
 
 
@@ -228,7 +228,7 @@ def build_workflow(model: str) -> WorkflowEngine:
         auto_step(
             step_id="setup",
             name="Setup",
-            next_state="agent_with_gate",
+            next_step_id="agent_with_gate",
             action=lambda ctx: {"_model": ctx.get("_model", model)},
             description="Initialize workflow context",
         )
@@ -239,7 +239,7 @@ def build_workflow(model: str) -> WorkflowEngine:
         AgentWithQualityGate(
             step_id="agent_with_gate",
             name="Agent with Quality Gate",
-            next_state="format_output",
+            next_step_id="format_output",
             max_retries=2,
             description="Run agent with quality checking and retry",
         )

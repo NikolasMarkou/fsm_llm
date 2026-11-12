@@ -253,7 +253,7 @@ class TerminalStep(WorkflowStep):
         if callable(self.action):
             self.action(context)
         return WorkflowStepResult.success_result(
-            data={}, next_state=None, message="Workflow complete"
+            data={}, next_step_id=None, message="Workflow complete"
         )
 
 
@@ -458,8 +458,8 @@ def build_loan_workflow(model: str) -> WorkflowEngine:
                 "loan_term_months": "loan_term_months",
                 "existing_debts": "existing_debts",
             },
-            success_state="credit_check",
-            error_state="notify",
+            success_step_id="credit_check",
+            error_step_id="notify",
             description="Collect applicant info via FSM-driven conversation",
         )
     )
@@ -469,7 +469,7 @@ def build_loan_workflow(model: str) -> WorkflowEngine:
         auto_step(
             step_id="credit_check",
             name="Credit Bureau Check",
-            next_state="risk_assessment",
+            next_step_id="risk_assessment",
             action=credit_check_action,
             description="Verify credit score with bureau and assess credit history",
         )
@@ -480,7 +480,7 @@ def build_loan_workflow(model: str) -> WorkflowEngine:
         auto_step(
             step_id="risk_assessment",
             name="Risk Assessment",
-            next_state="approval_decision",
+            next_step_id="approval_decision",
             action=risk_assessment_action,
             description="Calculate risk score, DTI ratio, and determine approval path",
         )
@@ -497,7 +497,7 @@ def build_loan_workflow(model: str) -> WorkflowEngine:
                 "review": "documentation",
                 "denied": "notify",
             },
-            default_state="notify",
+            default_step_id="notify",
             description="Route to documentation or denial based on risk assessment",
         )
     )
@@ -507,7 +507,7 @@ def build_loan_workflow(model: str) -> WorkflowEngine:
         auto_step(
             step_id="documentation",
             name="Generate Documentation",
-            next_state="notify",
+            next_step_id="notify",
             action=documentation_action,
             description="Generate loan agreement and disclosure documents",
         )
@@ -518,7 +518,7 @@ def build_loan_workflow(model: str) -> WorkflowEngine:
         auto_step(
             step_id="notify",
             name="Send Notification",
-            next_state="complete",
+            next_step_id="complete",
             action=notification_action,
             description="Notify applicant and internal teams of decision",
         )

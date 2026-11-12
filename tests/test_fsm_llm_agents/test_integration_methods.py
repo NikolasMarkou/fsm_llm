@@ -143,7 +143,7 @@ class TestBuildReactFsmForWorkflow:
             step_id="agent",
             name="Agent Step",
             fsm_definition=fsm_def,
-            success_state="done",
+            success_step_id="done",
             auto_messages=["Continue."],
             max_turns=5,
         )

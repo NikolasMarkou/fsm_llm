@@ -295,8 +295,8 @@ def print_onboarding_summary(ctx: dict[str, Any]) -> None:
 class ComplianceAgentStep(WorkflowStep):
     """Runs a ReactAgent with compliance verification tools."""
 
-    success_state: str = ""
-    error_state: str | None = None
+    success_step_id: str = ""
+    error_step_id: str | None = None
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         model = context.get("_model", os.getenv("LLM_MODEL", "gpt-4o-mini"))
@@ -360,7 +360,7 @@ class ComplianceAgentStep(WorkflowStep):
                     "compliance_iterations": result.iterations_used,
                     "compliance_risk_score": "18/100 (LOW)",
                 },
-                next_state=self.success_state or None,
+                next_step_id=self.success_step_id or None,
                 message="Compliance verification complete",
             )
         except Exception as e:
@@ -370,7 +370,7 @@ class ComplianceAgentStep(WorkflowStep):
                     "compliance_passed": False,
                     "compliance_error": str(e),
                 },
-                next_state=self.error_state or self.success_state or None,
+                next_step_id=self.error_step_id or self.success_step_id or None,
                 message=f"Compliance verification failed: {e}",
             )
 
@@ -389,7 +389,7 @@ class TerminalStep(WorkflowStep):
         if callable(self.action):
             self.action(context)
         return WorkflowStepResult.success_result(
-            data={}, next_state=None, message="Workflow complete"
+            data={}, next_step_id=None, message="Workflow complete"
         )
 
 
@@ -412,7 +412,7 @@ def build_onboarding_workflow(model: str) -> WorkflowEngine:
         auto_step(
             step_id="profile_setup",
             name="Profile Setup",
-            next_state="compliance_verification",
+            next_step_id="compliance_verification",
             action=profile_setup_action,
             description="Create customer profile from submitted data",
         )
@@ -423,8 +423,8 @@ def build_onboarding_workflow(model: str) -> WorkflowEngine:
         ComplianceAgentStep(
             step_id="compliance_verification",
             name="Compliance Verification",
-            success_state="account_creation",
-            error_state="onboarding_failed",
+            success_step_id="account_creation",
+            error_step_id="onboarding_failed",
             description="Agent-driven KYB, sanctions screening, and risk assessment",
         )
     )
@@ -434,7 +434,7 @@ def build_onboarding_workflow(model: str) -> WorkflowEngine:
         auto_step(
             step_id="account_creation",
             name="Account Creation",
-            next_state="welcome_communication",
+            next_step_id="welcome_communication",
             action=account_creation_action,
             description="Create enterprise account with API keys and SLA",
         )
@@ -445,7 +445,7 @@ def build_onboarding_workflow(model: str) -> WorkflowEngine:
         auto_step(
             step_id="welcome_communication",
             name="Welcome Communication",
-            next_state="training_schedule",
+            next_step_id="training_schedule",
             action=welcome_communication_action,
             description="Send welcome package, docs, and assign account manager",
         )
@@ -456,7 +456,7 @@ def build_onboarding_workflow(model: str) -> WorkflowEngine:
         auto_step(
             step_id="training_schedule",
             name="Training Schedule",
-            next_state="onboarding_complete",
+            next_step_id="onboarding_complete",
             action=training_schedule_action,
             description="Schedule onboarding training sessions",
         )

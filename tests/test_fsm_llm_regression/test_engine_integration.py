@@ -169,9 +169,9 @@ class TestWorkflowEngineIntegration:
 
         workflow = create_workflow("test_linear", "Test Linear")
         workflow.with_initial_step(
-            auto_step("start", "Start", next_state="end", action=step_action)
+            auto_step("start", "Start", next_step_id="end", action=step_action)
         )
-        workflow.with_step(auto_step("end", "End", next_state=""))
+        workflow.with_step(auto_step("end", "End", next_step_id=""))
 
         engine = WorkflowEngine()
         engine.register_workflow(workflow)
@@ -199,12 +199,12 @@ class TestWorkflowEngineIntegration:
                 "check",
                 "Check",
                 condition=lambda ctx: ctx.get("value", 0) > 5,
-                true_state="high",
-                false_state="low",
+                true_step_id="high",
+                false_step_id="low",
             )
         )
-        workflow.with_step(auto_step("high", "High", next_state=""))
-        workflow.with_step(auto_step("low", "Low", next_state=""))
+        workflow.with_step(auto_step("high", "High", next_step_id=""))
+        workflow.with_step(auto_step("low", "Low", next_step_id=""))
 
         engine = WorkflowEngine()
         engine.register_workflow(workflow)
@@ -241,14 +241,14 @@ class TestWorkflowEngineIntegration:
                 "call_api",
                 "Call API",
                 api_function=mock_api,
-                success_state="done",
-                failure_state="error",
+                success_step_id="done",
+                failure_step_id="error",
                 input_mapping={"name": "user_name"},
                 output_mapping={"result_greeting": "greeting"},
             )
         )
-        workflow.with_step(auto_step("done", "Done", next_state=""))
-        workflow.with_step(auto_step("error", "Error", next_state=""))
+        workflow.with_step(auto_step("done", "Done", next_step_id=""))
+        workflow.with_step(auto_step("error", "Error", next_step_id=""))
 
         engine = WorkflowEngine()
         engine.register_workflow(workflow)
@@ -283,16 +283,16 @@ class TestWorkflowEngineIntegration:
 
         sub_steps = [
             auto_step(
-                f"sub_{i}", f"Sub {i}", next_state="", action=make_action(f"sub_{i}")
+                f"sub_{i}", f"Sub {i}", next_step_id="", action=make_action(f"sub_{i}")
             )
             for i in range(3)
         ]
 
         workflow = create_workflow("test_parallel", "Test Parallel")
         workflow.with_initial_step(
-            parallel_step("par", "Parallel", steps=sub_steps, next_state="done")
+            parallel_step("par", "Parallel", steps=sub_steps, next_step_id="done")
         )
-        workflow.with_step(auto_step("done", "Done", next_state=""))
+        workflow.with_step(auto_step("done", "Done", next_step_id=""))
 
         engine = WorkflowEngine()
         engine.register_workflow(workflow)
@@ -303,8 +303,8 @@ class TestWorkflowEngineIntegration:
         assert len(results) == 3
 
     @pytest.mark.asyncio
-    async def test_terminal_step_with_empty_next_state(self):
-        """auto_step with next_state='' should be a valid terminal step."""
+    async def test_terminal_step_with_empty_next_step_id(self):
+        """auto_step with next_step_id='' should be a valid terminal step."""
         from fsm_llm.workflows import (
             WorkflowEngine,
             auto_step,
@@ -313,8 +313,8 @@ class TestWorkflowEngineIntegration:
         from fsm_llm.workflows.models import WorkflowStatus
 
         workflow = create_workflow("test_terminal", "Test Terminal")
-        workflow.with_initial_step(auto_step("start", "Start", next_state="done"))
-        workflow.with_step(auto_step("done", "Done", next_state=""))
+        workflow.with_initial_step(auto_step("start", "Start", next_step_id="done"))
+        workflow.with_step(auto_step("done", "Done", next_step_id=""))
 
         # Should not raise during validation
         workflow.validate_structure()
@@ -343,10 +343,10 @@ class TestWorkflowEngineIntegration:
                 "wait",
                 "Wait for Event",
                 event_type="test_event",
-                success_state="done",
+                success_step_id="done",
             )
         )
-        workflow.with_step(auto_step("done", "Done", next_state=""))
+        workflow.with_step(auto_step("done", "Done", next_step_id=""))
 
         engine = WorkflowEngine()
         engine.register_workflow(workflow)
@@ -358,7 +358,7 @@ class TestWorkflowEngineIntegration:
 
         # Register listener and process event
         await engine.register_event_listener(
-            instance_id, "test_event", success_state="done"
+            instance_id, "test_event", success_step_id="done"
         )
         event = WorkflowEvent(event_type="test_event", payload={"data": "test"})
         await engine.process_event(event)
@@ -382,13 +382,13 @@ class TestWorkflowEngineIntegration:
         class CustomStep(WorkflowStep):
             """A custom step with state references."""
 
-            success_state: str = ""
-            error_state: str = ""
+            success_step_id: str = ""
+            error_step_id: str = ""
 
             async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
                 return WorkflowStepResult.success_result(
                     data={"custom": True},
-                    next_state=self.success_state if self.success_state else None,
+                    next_step_id=self.success_step_id if self.success_step_id else None,
                 )
 
         workflow = create_workflow("test_custom", "Test Custom Step")
@@ -396,12 +396,12 @@ class TestWorkflowEngineIntegration:
             CustomStep(
                 step_id="custom",
                 name="Custom",
-                success_state="done",
-                error_state="error",
+                success_step_id="done",
+                error_step_id="error",
             )
         )
-        workflow.with_step(auto_step("done", "Done", next_state=""))
-        workflow.with_step(auto_step("error", "Error", next_state=""))
+        workflow.with_step(auto_step("done", "Done", next_step_id=""))
+        workflow.with_step(auto_step("error", "Error", next_step_id=""))
 
         # Should not raise
         workflow.validate_structure()
@@ -424,9 +424,9 @@ class TestWorkflowEngineIntegration:
         from fsm_llm.workflows.models import WorkflowStatus
 
         workflow = create_workflow("test_concurrent", "Test Concurrent")
-        workflow.with_initial_step(auto_step("a", "A", next_state="b"))
-        workflow.with_step(auto_step("b", "B", next_state="c"))
-        workflow.with_step(auto_step("c", "C", next_state=""))
+        workflow.with_initial_step(auto_step("a", "A", next_step_id="b"))
+        workflow.with_step(auto_step("b", "B", next_step_id="c"))
+        workflow.with_step(auto_step("c", "C", next_step_id=""))
 
         engine = WorkflowEngine()
         engine.register_workflow(workflow)

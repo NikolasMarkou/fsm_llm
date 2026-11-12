@@ -475,8 +475,8 @@ User guide: `src/agents/README.md`. Audit record, adjusted decisions and deferre
 from fsm_llm.workflows import WorkflowEngine, create_workflow, auto_step, condition_step
 
 workflow = create_workflow("my_workflow", "My Workflow")
-workflow.with_initial_step(auto_step("start", "Start", next_state="check"))
-workflow.with_step(condition_step("check", "Check", condition=fn, true_state="ok", false_state="fail"))
+workflow.with_initial_step(auto_step("start", "Start", next_step_id="check"))
+workflow.with_step(condition_step("check", "Check", condition=fn, true_step_id="ok", false_step_id="fail"))
 
 engine = WorkflowEngine(max_concurrent_workflows=100)
 engine.register_workflow(workflow)
@@ -490,7 +490,7 @@ await engine.close()
 
 11 step types: `auto_step`, `api_step`, `condition_step`, `llm_step`, `wait_event_step`, `timer_step`, `parallel_step`, `conversation_step`, `agent_step`, `retry_step`, `switch_step`.
 
-Events and loops: `await engine.process_event(WorkflowEvent(event_type="paid", payload={...}))` wakes waiting instances (set `instance_id=` to target one; `wait_event_step(..., correlation_key=...)` matches a payload key against the instance context). Loops must pass through a `timer_step` or `wait_event_step`; purely synchronous cycles are rejected by `register_workflow`. A step failure with no error route FAILS the instance. `timer_step(..., next_state="")` completes the workflow on expiry, like `wait_event_step(..., success_state="")`; `api_step(..., failure_state="")` still fails the instance. `cancel` on a running chain takes effect between steps (the step in flight finishes) and returns `True`. `engine.add_hook(fn)` observes step and status changes. `WorkflowEngine(*, max_concurrent_workflows=100, max_completed_instances=1000, max_steps=1000, executor=None)` takes keyword arguments only. A `conversation_step` publishes `last_response`/`final_answer` as the last reply that was actually spoken (silent states say nothing), and adds neither key when nothing was spoken.
+Events and loops: `await engine.process_event(WorkflowEvent(event_type="paid", payload={...}))` wakes waiting instances (set `instance_id=` to target one; `wait_event_step(..., correlation_key=...)` matches a payload key against the instance context). Loops must pass through a `timer_step` or `wait_event_step`; purely synchronous cycles are rejected by `register_workflow`. A step failure with no error route FAILS the instance. `timer_step(..., next_step_id="")` completes the workflow on expiry, like `wait_event_step(..., success_step_id="")`; `api_step(..., failure_step_id="")` still fails the instance. `cancel` on a running chain takes effect between steps (the step in flight finishes) and returns `True`. `engine.add_hook(fn)` observes step and status changes. `WorkflowEngine(*, max_concurrent_workflows=100, max_completed_instances=1000, max_steps=1000, executor=None)` takes keyword arguments only. A `conversation_step` publishes `last_response`/`final_answer` as the last reply that was actually spoken (silent states say nothing), and adds neither key when nothing was spoken.
 
 ## Eval (`fsm_llm.eval`)
 

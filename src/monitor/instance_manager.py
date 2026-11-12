@@ -99,7 +99,7 @@ from .exceptions import (
 class _TerminalStep(WorkflowStep):
     """No-op terminal step (no outgoing transition) for monitor demo presets.
 
-    A step whose result carries no ``next_state`` and which references no
+    A step whose result carries no ``next_step_id`` and which references no
     other state is treated as terminal by ``WorkflowDefinition`` and drives
     the instance to COMPLETED.
     """
@@ -121,7 +121,7 @@ def _preset_linear() -> WorkflowDefinition:
         auto_step(
             "ingest",
             "Ingest",
-            next_state="process",
+            next_step_id="process",
             action=lambda ctx: {"ingested": True},
         )
     )
@@ -129,7 +129,7 @@ def _preset_linear() -> WorkflowDefinition:
         auto_step(
             "process",
             "Process",
-            next_state="finish",
+            next_step_id="finish",
             action=lambda ctx: {"processed": True},
         )
     )
@@ -149,15 +149,15 @@ def _preset_branching() -> WorkflowDefinition:
             "route",
             "Route by amount",
             condition=lambda ctx: float(ctx.get("amount", 0) or 0) >= 1000,
-            true_state="high_path",
-            false_state="low_path",
+            true_step_id="high_path",
+            false_step_id="low_path",
         )
     )
     wf.with_step(
         auto_step(
             "high_path",
             "High Path",
-            next_state="finish",
+            next_step_id="finish",
             action=lambda ctx: {"tier": "high"},
         )
     )
@@ -165,7 +165,7 @@ def _preset_branching() -> WorkflowDefinition:
         auto_step(
             "low_path",
             "Low Path",
-            next_state="finish",
+            next_step_id="finish",
             action=lambda ctx: {"tier": "low"},
         )
     )

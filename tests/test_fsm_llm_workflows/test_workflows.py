@@ -204,22 +204,22 @@ class TestWorkflowModels:
         from fsm_llm.workflows.models import WorkflowStepResult
 
         result = WorkflowStepResult.success_result(
-            data={"key": "val"}, next_state="done", message="ok"
+            data={"key": "val"}, next_step_id="done", message="ok"
         )
         assert result.success is True
         assert result.data == {"key": "val"}
-        assert result.next_state == "done"
+        assert result.next_step_id == "done"
         assert result.error is None
 
     def test_step_result_failure(self):
         from fsm_llm.workflows.models import WorkflowStepResult
 
         result = WorkflowStepResult.failure_result(
-            error="something broke", next_state="error_state"
+            error="something broke", next_step_id="error_step_id"
         )
         assert result.success is False
         assert result.error == "something broke"
-        assert result.next_state == "error_state"
+        assert result.next_step_id == "error_step_id"
         assert "failed" in result.message.lower()
 
     def test_step_result_exception_conversion(self):
@@ -263,7 +263,7 @@ class TestWorkflowModels:
         # Not expired
         listener = EventListener(
             instance_id="i-1",
-            success_state="done",
+            success_step_id="done",
             timeout_at=datetime.now(timezone.utc) + timedelta(hours=1),
         )
         assert listener.is_expired() is False
@@ -271,13 +271,13 @@ class TestWorkflowModels:
         # Expired
         listener_expired = EventListener(
             instance_id="i-1",
-            success_state="done",
+            success_step_id="done",
             timeout_at=datetime.now(timezone.utc) - timedelta(hours=1),
         )
         assert listener_expired.is_expired() is True
 
         # No timeout
-        listener_no_timeout = EventListener(instance_id="i-1", success_state="done")
+        listener_no_timeout = EventListener(instance_id="i-1", success_step_id="done")
         assert listener_no_timeout.is_expired() is False
 
     def test_wait_event_config_validation(self):
@@ -285,14 +285,14 @@ class TestWorkflowModels:
 
         # Valid
         config = WaitEventConfig(
-            event_type="click", success_state="done", timeout_seconds=30
+            event_type="click", success_step_id="done", timeout_seconds=30
         )
         assert config.timeout_seconds == 30
 
         # Invalid timeout
         with pytest.raises(ValueError, match="positive"):
             WaitEventConfig(
-                event_type="click", success_state="done", timeout_seconds=-1
+                event_type="click", success_step_id="done", timeout_seconds=-1
             )
 
 
@@ -316,7 +316,7 @@ class TestWorkflowDefinition:
         from fsm_llm.workflows.steps import AutoStep
 
         wf = WorkflowDefinition(workflow_id="wf-1", name="Test")
-        step = AutoStep(step_id="s1", name="Step 1", next_state="s2")
+        step = AutoStep(step_id="s1", name="Step 1", next_step_id="s2")
         wf.with_step(step, is_initial=True)
         assert "s1" in wf.steps
         assert wf.initial_step_id == "s1"
@@ -335,7 +335,7 @@ class TestWorkflowDefinition:
         from fsm_llm.workflows.steps import AutoStep
 
         wf = WorkflowDefinition(workflow_id="wf-1", name="Test")
-        step = AutoStep(step_id="s1", name="S1", next_state="end")
+        step = AutoStep(step_id="s1", name="S1", next_step_id="end")
         wf.with_step(step)
         with pytest.raises(WorkflowValidationError):
             wf.validate_structure()
@@ -360,9 +360,9 @@ class TestWorkflowDSL:
     def test_auto_step(self):
         from fsm_llm.workflows.dsl import auto_step
 
-        step = auto_step("s1", "Step 1", next_state="s2")
+        step = auto_step("s1", "Step 1", next_step_id="s2")
         assert step.step_id == "s1"
-        assert step.next_state == "s2"
+        assert step.next_step_id == "s2"
 
     def test_condition_step(self):
         from fsm_llm.workflows.dsl import condition_step
@@ -371,20 +371,20 @@ class TestWorkflowDSL:
             "s1",
             "Check",
             condition=lambda ctx: True,
-            true_state="yes",
-            false_state="no",
+            true_step_id="yes",
+            false_step_id="no",
         )
         assert step.step_id == "s1"
-        assert step.true_state == "yes"
-        assert step.false_state == "no"
+        assert step.true_step_id == "yes"
+        assert step.false_step_id == "no"
 
     def test_fluent_workflow_building(self):
         from fsm_llm.workflows.dsl import auto_step, create_workflow
 
         wf = (
             create_workflow("wf-1", "Pipeline")
-            .with_initial_step(auto_step("start", "Start", next_state="end"))
-            .with_step(auto_step("end", "End", next_state="end"))
+            .with_initial_step(auto_step("start", "Start", next_step_id="end"))
+            .with_step(auto_step("end", "End", next_step_id="end"))
         )
         assert wf.initial_step_id == "start"
         assert len(wf.steps) == 2
@@ -417,7 +417,7 @@ class TestStepDataInternalKeyFilter:
             async def execute(self, context):
                 return WorkflowStepResult(
                     success=True,
-                    next_state=None,
+                    next_step_id=None,
                     data={
                         # Whitelisted: must survive, or the engine can no longer
                         # detect that this step is waiting for an event.
@@ -472,19 +472,19 @@ class TestStepDataInternalKeyFilter:
 
 
 # ----------------------------------------------------------------
-# SwitchStep default_state="" terminal-route fix
+# SwitchStep default_step_id="" terminal-route fix
 # (plan-2026-09-12T135914-45a654de step 7, D-013)
 # ----------------------------------------------------------------
 
 
 class TestSwitchStepTerminalRoute:
-    """A ``SwitchStep`` routed to ``default_state=""`` must complete the
+    """A ``SwitchStep`` routed to ``default_step_id=""`` must complete the
     workflow instance instead of leaving it stuck ``RUNNING`` forever.
 
     Regression test for finding 10: `get_terminal_states()`'s static
     whole-step analysis never marks a `SwitchStep` with non-empty `cases`
     as terminal, even when the specific route taken returns
-    `next_state == ""`. See decisions.md D-013 / engine.py D-013 anchor.
+    `next_step_id == ""`. See decisions.md D-013 / engine.py D-013 anchor.
     """
 
     async def test_default_empty_string_route_completes_workflow(self):
@@ -493,13 +493,13 @@ class TestSwitchStepTerminalRoute:
         from fsm_llm.workflows.models import WorkflowStatus
         from fsm_llm.workflows.steps import AutoStep, SwitchStep
 
-        checkout = AutoStep(step_id="checkout", name="Checkout", next_state="")
+        checkout = AutoStep(step_id="checkout", name="Checkout", next_step_id="")
         switch = SwitchStep(
             step_id="route",
             name="Route",
             key="intent",
             cases={"buy": "checkout"},
-            default_state="",
+            default_step_id="",
         )
         definition = WorkflowDefinition(
             workflow_id="wf-switch-terminal",
@@ -529,9 +529,9 @@ class TestSwitchStepTerminalRoute:
             name="Route",
             key="intent",
             cases={"buy": "checkout"},
-            default_state="",
+            default_step_id="",
         )
-        checkout = AutoStep(step_id="checkout", name="Checkout", next_state="")
+        checkout = AutoStep(step_id="checkout", name="Checkout", next_step_id="")
         definition = WorkflowDefinition(
             workflow_id="wf-switch-matched",
             name="SwitchMatched",
@@ -559,9 +559,9 @@ class TestSwitchStepTerminalRoute:
 
 class TestTerminalNarrowingUnaffectedSteps:
     """`_handle_successful_step`'s ``explicitly_terminal`` signal is
-    ``result.next_state == ""`` for ANY step type (D-013, restored by D-020
+    ``result.next_step_id == ""`` for ANY step type (D-013, restored by D-020
     after a since-reverted D-018 narrowing). ``TimerStep``/``WaitEventStep``
-    never set ``next_state`` on their success result at all (falsy ``None``,
+    never set ``next_step_id`` on their success result at all (falsy ``None``,
     not ``""``), so they must keep reaching ``WorkflowStatus.WAITING`` exactly
     as before D-013 touched the terminal-detection logic. Regression test for
     review-iter-1.md concern 6's confirmation that these two step types are
@@ -574,7 +574,9 @@ class TestTerminalNarrowingUnaffectedSteps:
         from fsm_llm.workflows.models import WorkflowStatus
         from fsm_llm.workflows.steps import TimerStep
 
-        timer = TimerStep(step_id="wait", name="Wait", delay_seconds=60, next_state="")
+        timer = TimerStep(
+            step_id="wait", name="Wait", delay_seconds=60, next_step_id=""
+        )
         definition = WorkflowDefinition(
             workflow_id="wf-timer-waiting",
             name="TimerWaiting",
@@ -598,7 +600,7 @@ class TestTerminalNarrowingUnaffectedSteps:
         wait_step = WaitEventStep(
             step_id="wait",
             name="Wait",
-            config=WaitEventConfig(event_type="approved", success_state=""),
+            config=WaitEventConfig(event_type="approved", success_step_id=""),
         )
         definition = WorkflowDefinition(
             workflow_id="wf-event-waiting",
@@ -626,7 +628,7 @@ class TestTerminalNarrowingUnaffectedSteps:
 
 class TestWideTerminalPredicateAfterD020Revert:
     """`_handle_successful_step`'s ``explicitly_terminal`` signal must fire for
-    ANY successful step result with ``next_state == ""``, regardless of the
+    ANY successful step result with ``next_step_id == ""``, regardless of the
     executing step's own type -- including when that result was produced by
     an inner step wrapped by a ``RetryStep``. See decisions.md D-020.
     """
@@ -634,7 +636,7 @@ class TestWideTerminalPredicateAfterD020Revert:
     async def test_retry_wrapped_switch_step_completes_workflow(self):
         """Concern 1: RetryStep.execute returns the inner SwitchStep's result
         verbatim, but the engine's terminal check must key off the RESULT
-        (next_state == ""), not the executing step's class -- otherwise the
+        (next_step_id == ""), not the executing step's class -- otherwise the
         outer RetryStep fails the isinstance(step, SwitchStep) check and the
         route hangs RUNNING (the exact D-018 regression).
         """
@@ -643,13 +645,13 @@ class TestWideTerminalPredicateAfterD020Revert:
         from fsm_llm.workflows.models import WorkflowStatus
         from fsm_llm.workflows.steps import AutoStep, RetryStep, SwitchStep
 
-        checkout = AutoStep(step_id="checkout", name="Checkout", next_state="")
+        checkout = AutoStep(step_id="checkout", name="Checkout", next_step_id="")
         inner_switch = SwitchStep(
             step_id="inner-route",
             name="Inner Route",
             key="intent",
             cases={"buy": "checkout"},
-            default_state="",
+            default_step_id="",
         )
         retry = RetryStep(
             step_id="route",
@@ -683,13 +685,13 @@ class TestWideTerminalPredicateAfterD020Revert:
         from fsm_llm.workflows.models import WorkflowStatus
         from fsm_llm.workflows.steps import AutoStep, ConditionStep
 
-        review = AutoStep(step_id="review", name="Review", next_state="")
+        review = AutoStep(step_id="review", name="Review", next_step_id="")
         condition = ConditionStep(
             step_id="cond",
             name="Condition",
             condition=lambda ctx: True,
-            true_state="",
-            false_state="review",
+            true_step_id="",
+            false_step_id="review",
         )
         definition = WorkflowDefinition(
             workflow_id="wf-condition-terminal",
@@ -720,7 +722,7 @@ class TestSerializeNestedSteps:
         from fsm_llm.workflows.definitions import WorkflowDefinition
         from fsm_llm.workflows.steps import AutoStep, RetryStep
 
-        inner = AutoStep(step_id="inner", name="Inner", next_state="done")
+        inner = AutoStep(step_id="inner", name="Inner", next_step_id="done")
         retry = RetryStep(step_id="retry", name="Retry", step=inner, max_retries=2)
         definition = WorkflowDefinition(
             workflow_id="wf-retry-serialize",
@@ -735,19 +737,19 @@ class TestSerializeNestedSteps:
         assert retry_dict["type"] == "RetryStep"
         assert "step" in retry_dict
         assert retry_dict["step"]["type"] == "AutoStep"
-        assert retry_dict["step"]["next_state"] == "done"
+        assert retry_dict["step"]["next_step_id"] == "done"
 
     def test_parallel_step_nested_steps_survive(self):
         from fsm_llm.workflows.definitions import WorkflowDefinition
         from fsm_llm.workflows.steps import AutoStep, ParallelStep
 
-        nested_a = AutoStep(step_id="a", name="A", next_state="done")
-        nested_b = AutoStep(step_id="b", name="B", next_state="done")
+        nested_a = AutoStep(step_id="a", name="A", next_step_id="done")
+        nested_b = AutoStep(step_id="b", name="B", next_step_id="done")
         parallel = ParallelStep(
             step_id="parallel",
             name="Parallel",
             steps=[nested_a, nested_b],
-            next_state="done",
+            next_step_id="done",
         )
         definition = WorkflowDefinition(
             workflow_id="wf-parallel-serialize",
@@ -765,7 +767,7 @@ class TestSerializeNestedSteps:
         for nested_dict, step_id in zip(nested_dicts, ("a", "b"), strict=True):
             assert nested_dict["type"] == "AutoStep"
             assert nested_dict["step_id"] == step_id
-            assert nested_dict["next_state"] == "done"
+            assert nested_dict["next_step_id"] == "done"
 
 
 class TestPackageImports:
