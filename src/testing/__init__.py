@@ -14,8 +14,10 @@ dict, the Pass-2 reply per state, metered, and an unscripted call recorded and
 raised as ``UnscriptedCallError``); the reply builders ``final_reply``,
 ``tool_call_reply`` and ``malformed_reply``; ``state_in_prompt``, the one
 reader of the state tag of a response prompt; and ``hash_embed``, a pure
-embedder. ``ScriptedUser``, assertions and ``PathRecorder`` follow in the next
-steps of the plan.
+embedder; ``ScriptedUser``, which drives a conversation from fixed messages and
+rules, ``advance_until_terminal`` for message-free FSMs, and the
+``ConversationRun`` record of either (the visited path included). Assertions
+and ``PathRecorder`` follow in the next step of the plan.
 
 Import it by name, ``from fsm_llm.testing import ...``; ``import fsm_llm`` never
 loads it and no library module imports it. It imports the core and
@@ -40,12 +42,16 @@ from .doubles import (
     hash_embed,
     state_in_prompt,
 )
+from .user import ConversationRun, ScriptedUser, advance_until_terminal
 
 __all__ = [
+    "ConversationRun",
     "MockLLM2Interface",
     "PromptGroundedLLM",
     "ScriptedLLM",
+    "ScriptedUser",
     "UnscriptedCallError",
+    "advance_until_terminal",
     "final_reply",
     "hash_embed",
     "malformed_reply",

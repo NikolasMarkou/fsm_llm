@@ -25,7 +25,20 @@ llm = ScriptedLLM([tool_call_reply(("lookup", {"q": "rome"})), "It is sunny."])
 llm.assert_exhausted()
 ```
 
-The doubles are plain classes: their attributes are public and may change between turns, and a test may subclass them. They are not `unittest.mock` objects. The rest (`ScriptedUser`, the assertions and `PathRecorder`) arrives in later steps of the plan that added the package; do not rely on it before that lands.
+- `ScriptedUser(messages=(), *, rules=(), fallback=None, max_turns=25).run(api, *, initial_context=None, close=False)`: a user that sends its messages, then the answer of the first rule whose regex (or callable) fits the last reply, then the fallback, then stops (also when the conversation ended or `max_turns` is spent). It returns a frozen `ConversationRun` (`api`, `conversation_id`, `greeting`, `messages`, `replies`, `states`, `ended`). `states` is the visited path: the state after the start and after each reply. Exceptions of the API or the LLM propagate.
+- `advance_until_terminal(api, *, max_steps, initial_context=None, max_seconds=None, close=False)`: the same record for an FSM that needs no user message (`API.run_until_terminal`); a spent budget raises `RunBudgetExceededError`.
+
+```python
+from fsm_llm import API
+from fsm_llm.testing import ScriptedLLM, ScriptedUser
+
+llm = ScriptedLLM(extraction_data={"mood": "happy"}, responses={"greeting": "Hi!"}, default_response="Ok.")
+api = API.from_file("examples/basic/simple_greeting/fsm.json", llm_interface=llm)
+run = ScriptedUser(["hello", "good, thanks"]).run(api)
+assert run.states == ("greeting", "conversation", "farewell")
+```
+
+The doubles are plain classes: their attributes are public and may change between turns, and a test may subclass them. They are not `unittest.mock` objects. The rest (the assertions and `PathRecorder`) arrives in later steps of the plan that added the package; do not rely on it before that lands.
 
 ## How it fits
 
@@ -43,6 +56,7 @@ flowchart TD
 
 - `__init__.py` - module docstring and the static `__all__`.
 - `doubles.py` - `MockLLM2Interface`, `PromptGroundedLLM`, `ScriptedLLM`, `UnscriptedCallError`, `state_in_prompt`, `hash_embed`.
+- `user.py` - `ScriptedUser`, `ConversationRun`, `advance_until_terminal`.
 - `builders.py` - `final_reply`, `tool_call_reply`, `malformed_reply`.
 - `__version__.py` - re-exports the package version.
 

@@ -1689,6 +1689,9 @@ fsm_llm.synthesis.run_gates def(data: Any, policy: SynthesisPolicy, *, inputs: I
 fsm_llm.synthesis.strip_abort def(data: object) -> dict[str, Any] | None
 fsm_llm.synthesis.verify_stored def(definition: FSMDefinition | dict[str, Any], policy: SynthesisPolicy, *, inputs: Iterable[str] = (), return_keys: Iterable[str] = ()) -> GateReport
 # fsm_llm.testing
+fsm_llm.testing.ConversationRun class
+  def __init__(self, api: API, conversation_id: str, greeting: str, messages: tuple[str, ...], replies: tuple[str, ...], states: tuple[str, ...], ended: bool) -> None
+  property final_state
 fsm_llm.testing.MockLLM2Interface class(LLMInterface)
   def __init__(self, extraction_data: dict[str, object] | None = None, response_text: str = 'Hello! How can I help you?', cut_reply: bool = False, cut_fields: tuple[str, ...] | set[str] | list[str] = ()) -> None
   def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse
@@ -1709,7 +1712,11 @@ fsm_llm.testing.ScriptedLLM class(_Metered, LLMInterface)
   def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse
   def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse
   def generate_response_stream(self, request: ResponseGenerationRequest) -> Iterator[str]
+fsm_llm.testing.ScriptedUser class
+  def __init__(self, messages: Sequence[str] = (), *, rules: Sequence[ScriptedRule] = (), fallback: str | None = None, max_turns: int = 25) -> None
+  def run(self, api: API, *, initial_context: Mapping[str, Any] | None = None, close: bool = False) -> ConversationRun
 fsm_llm.testing.UnscriptedCallError class(AssertionError)
+fsm_llm.testing.advance_until_terminal def(api: API, *, max_steps: int, initial_context: Mapping[str, Any] | None = None, max_seconds: float | None = None, close: bool = False) -> ConversationRun
 fsm_llm.testing.final_reply def(text: str | None, finish_reason: str | None = None) -> CompletionResponse
 fsm_llm.testing.hash_embed def(dim: int = 8) -> Callable[[str], list[float]]
 fsm_llm.testing.malformed_reply def(text: str | None = None) -> CompletionResponse

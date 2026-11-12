@@ -1,7 +1,7 @@
 # fsm_llm.testing
 
 Path: `src/testing`
-Purpose: The seventh subpackage of `fsm_llm`: public test doubles, a scripted user and assertions for code built on the package. Plan d454fd62 (roadmap row 0.9). Today `__all__` holds the two promoted doubles (`MockLLM2Interface`, `PromptGroundedLLM`, step 22), `ScriptedLLM`, `UnscriptedCallError`, `state_in_prompt`, `hash_embed` and the three reply builders (step 23); the rest is added by steps 24 and 25.
+Purpose: The seventh subpackage of `fsm_llm`: public test doubles, a scripted user and assertions for code built on the package. Plan d454fd62 (roadmap row 0.9). Today `__all__` holds the two promoted doubles (`MockLLM2Interface`, `PromptGroundedLLM`, step 22), `ScriptedLLM`, `UnscriptedCallError`, `state_in_prompt`, `hash_embed` and the three reply builders (step 23), and `ScriptedUser`, `ConversationRun` and `advance_until_terminal` (step 24); the assertions and `PathRecorder` follow in step 25.
 
 ## Scope
 
@@ -21,6 +21,7 @@ flowchart TD
 | --- | --- | --- |
 | `__init__.py` | Module docstring, one static `__all__` | Names are added to `__all__` and to `docs/api.txt` in the same commit |
 | `doubles.py` | `MockLLM2Interface` (fixed answers) and `PromptGroundedLLM` (a fact only when the prompt shows its evidence), moved verbatim from `tests/conftest.py`; the private `_CURRENT_STATE_TAG` regex (the one tag regex, read through `state_in_prompt`); `ScriptedLLM` (reply queue, `extraction_data`, `responses` per state, `stream_chunks`, `unexpected`, `assert_exhausted()`, metered through core's `_Metered`), `UnscriptedCallError`, `hash_embed` | Plain classes with mutable attributes, subclassed by the repo's own tests; the dead `transition_target` argument was dropped; Interface-contract docstrings |
+| `user.py` | `ScriptedUser` (messages, then rules read against the last reply, then a fallback, bounded by `max_turns`), `ConversationRun` (frozen record: `api`, `conversation_id`, `greeting`, `messages`, `replies`, `states`, `ended`) and `advance_until_terminal` for message-free FSMs | `states` is the path, sampled like `fsm_llm.eval` does (after the start and after each reply; one turn makes at most one transition); exceptions propagate; same loop idea as `eval/cases.py`, which stays untouched (bench-pinned) |
 | `builders.py` | `final_reply`, `tool_call_reply`, `malformed_reply`: the three `CompletionResponse` shapes | `kind` values from `fsm_llm.codes.CompletionKind`; Interface-contract docstrings |
 | `__version__.py` | Re-export of `fsm_llm.__version__` | Same shape as every subpackage |
 
