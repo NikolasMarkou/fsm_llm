@@ -16,8 +16,9 @@ flowchart LR
     conftest --> tools[test_tools.py]
     builders --> B[FSMArtifactBuilder / WorkflowArtifactBuilder / AgentArtifactBuilder]
     tools --> T[create_*_tools registries]
-    agent[test_agent.py, test_meta_conversation.py, test_review_fixes_meta.py, test_integration.py] --> M[MetaBuilderAgent on the meta FSM]
+    agent[test_agent.py, test_meta_conversation.py, test_integration.py] --> M[MetaBuilderAgent on the meta FSM]
     fsm[test_meta_fsm.py] --> F[build_meta_builder_fsm]
+    out[test_meta_output.py, test_meta_cli.py] --> O[save_artifact, fsm-llm-meta]
     prompts[test_prompts.py] --> P[meta_prompts]
     defs[test_definitions.py] --> D[ArtifactType, BuildProgress, MetaBuilderConfig, MetaBuilderResult]
 ```
@@ -26,16 +27,16 @@ flowchart LR
 
 - `conftest.py` - fixtures: empty `FSMArtifactBuilder`, `WorkflowArtifactBuilder`, `AgentArtifactBuilder`, a 3-state `populated_fsm_builder` ("GreetingBot"), a `meta_config`, and `offline_llm`, which makes every LLM call fail at once; the scripted interface `ScriptedMetaLLM`; and an autouse `_offline_network` fixture that calls `block_network` from `tests/conftest.py`, so any IPv4/IPv6 connect (loopback too) raises `ConnectionRefusedError` (`TestOfflineNetworkGuard` in `test_agent.py` pins this).
 - `test_meta_fsm.py` - the meta FSM: structure, gates, the build request and its schemas, a run through the core engine (52 tests).
-- `test_meta_conversation.py` - whole conversations by behaviour: each artifact kind, a type switch, a failed then fixed build, outages, `max_turns`, what the monitor reads (41 tests).
-- `test_review_fixes_meta.py` - review fixes: malformed build replies, keyword hints and negation, the build prompt sentence (90 tests).
-- `test_agent.py` - `MetaBuilderAgent`: config, start/send lifecycle, type detection, build triggers, result building, output helpers, schema-echo rejection, provider-failure handling, workflow `step_type` enum, runs through core (55 tests).
+- `test_meta_conversation.py` - whole conversations by behaviour: each artifact kind, a type switch, a failed then fixed build, outages, `max_turns`, what the monitor reads, build reply parsing (core JSON ladder), a retryable failed start, a malformed build reply as a validation error, no session state beside the FSM, a reclassification keeping the type, `start` never building, the build prompt never doubled, keyword hints and negation (41 tests).
+- `test_agent.py` - `MetaBuilderAgent`: config, start/send lifecycle, type detection, build triggers (also with trailing punctuation), result building, output helpers, schema-echo rejection, provider-failure handling, workflow `step_type` enum, runs through core (55 tests).
 - `test_builders.py` - core behavior of the three builders: add, remove, update, transitions, `to_dict`, validation, summaries at three detail levels (91 tests).
 - `test_builders_elaborate.py` - builder edge cases, config type checks, `VALID_STEP_TYPES`, exception attributes and hierarchy, `MetaBuilderConfig` range checks, summary content (76 tests).
 - `test_tools.py` - tool registries from `create_fsm_tools`, `create_workflow_tools`, `create_agent_tools`, `create_builder_tools`, plus two newer classes (35 tests): `TestToolReplyText` pins the exact reply text of every meta tool as a golden script run on a fresh builder (so later replies depend on earlier calls), and `TestToolWarningIsolation` runs 8 threads against one registry and checks each call's reply carries only its own warnings, and that warnings left by direct builder mutators do not leak into a later reply.
 - `test_integration.py` - reachability errors, workflow transitions, tool registries mutating a builder, `final_context` on the result, type alias ordering (11 tests).
 - `test_definitions.py` - `ArtifactType`, `BuildProgress`, `MetaBuilderConfig`, `MetaBuilderResult` (26 tests).
 - `test_prompts.py` - welcome, review and collect-turn messages from `fsm_llm.agents.meta_prompts` (4 tests).
-- `test_meta_cleanup_fixes.py` - the 2026-11-05 meta fixes (plan 5980fbb7 step 14): trigger punctuation, build reply parsing, retryable start, atomic `save_artifact`, one orphan error (32 tests).
+- `test_meta_output.py` - `save_artifact`: an atomic write, a failed replace keeps the old file, an unserialisable artifact creates no directory.
+- `test_meta_cli.py` - the `fsm-llm-meta` script run in process on an ASCII terminal: the artifact printed with escapes, a domain error as one stderr line and exit 1.
 - `test_handlers.py`, `test_handlers_elaborate.py` - one import check each: `MetaBuilderAgent` imports from `fsm_llm.agents.meta_builder`. The old handlers module no longer exists.
 - `__init__.py` - empty package marker.
 

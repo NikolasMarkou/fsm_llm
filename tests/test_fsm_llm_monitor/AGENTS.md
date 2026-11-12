@@ -29,26 +29,25 @@ Manager test pattern: `InstanceManager(config=MonitorConfig())`, then `mgr.globa
 | File | Role | Notes |
 | --- | --- | --- |
 | `conftest.py` | autouse `_clear_monitor_api_key_env` | `monkeypatch.delenv("FSM_LLM_MONITOR_API_KEY", raising=False)`; without it an exported key makes about 22 `test_app.py` tests 401 |
-| `support.py` | `_manager()` (an `InstanceManager` with a cleaned global collector), shared by the feature files | not collected (no `test_` prefix) |
+| `support.py` | `_manager(**config)` (an `InstanceManager` with a cleaned global collector; keyword arguments go to `MonitorConfig`), shared by the feature files | not collected (no `test_` prefix) |
 | `test_app.py` | routes, static assets, exports, version, API-key gate, WS redaction, UI limits vs server constants | 131 tests; asserts `"0.12.0"` for `/api/info` `monitor_version` and `fsm_llm.monitor.__version__` |
 | `test_server_security.py` | Origin/Host, body limit, headers, gated reads, WebSocket auth, error mapping, bounds, dashboard config, builder busy guard, `validate_preset_id` | 36 tests; autouse `_reset_key` reconfigures with env key `""` after each test |
-| `test_instance_manager.py` | `Managed*` classes, `InstanceManager`, handlers, snapshots, workflow presets, agent types, stub tools | 75 tests; contains unmarked `async def` tests |
+| `test_instance_manager.py` | `Managed*` classes, `InstanceManager`, handlers, snapshots, workflow presets, agent types, stub tools, failed launch, terminal send, OTEL re-enable (real SDK), instance event feed, `close()` teardown | 75 tests; contains unmarked `async def` tests |
 | `test_collector.py` | `EventCollector` | 38 tests |
 | `test_definitions.py` | models, `normalize_message_history`, `model_to_dict` | 50 tests |
 | `test_otel.py` | `OTELExporter` | 20 tests; autouse `_mock_otel` fixture |
-| `test_instance_manager_fixes.py` | 2026-11-05 instance manager and collector fixes (plan 5980fbb7 step 16) | 13 tests |
-| `test_server_consistency.py` | 2026-11-05 server and SPA fixes (plan 5980fbb7 step 17) | 57 tests |
+| `test_server_consistency.py` | 2026-11-05 server and SPA fixes (plan 5980fbb7 step 17), preset UTF-8 read, route-launched workflow stop | 57 tests; autouse `_reset_key` |
 
 ## Public interface
 
 Suite entry points (what a new test uses):
 
 - Fixtures: `_clear_monitor_api_key_env` (autouse, `conftest.py`), `_reset_key` (autouse, `test_server_security.py`), `_mock_otel` (autouse, `test_otel.py`).
-- Helpers: `_client(api_key=None) -> TestClient` (`test_server_security.py`); `_minimal_fsm_dict()` (in `test_app.py`); `_manager() -> InstanceManager`, `_fsm(mgr, iid, api=None) -> ManagedFSM`, `_fire(api, timing, current, target)`, `_snapshot_api(collected, extraction=None) -> MagicMock` (`test_instance_manager.py`), fakes `_FakeAPI`, `_FakeHandlerSystem` (`test_collector.py`) and `_Secretive` (`test_instance_manager.py`); `_build_otel_mocks()`, `_import_otel()`, `_make_event(event_type="conversation_start", conv_id="conv-1", **kwargs)` (`test_otel.py`).
+- Helpers: `_client(api_key=None) -> TestClient` (`test_server_security.py`); `_minimal_fsm_dict()` (in `test_app.py`); `_manager(**config) -> InstanceManager` (`support.py`, shared by `test_instance_manager.py` and `test_server_consistency.py`), `_fsm(mgr, iid, api=None) -> ManagedFSM`, `_fire(api, timing, current, target)`, `_snapshot_api(collected, extraction=None) -> MagicMock` (`test_instance_manager.py`), fakes `_FakeAPI`, `_FakeHandlerSystem` (`test_collector.py`) and `_Secretive` (`test_instance_manager.py`); `_build_otel_mocks()`, `_import_otel()`, `_make_event(event_type="conversation_start", conv_id="conv-1", **kwargs)` (`test_otel.py`).
 - Test classes per file:
   - `test_app.py`: `TestWebServer`, `TestMonitorImports`, `TestUiMatchesServerLimits`, `TestServerFSMEndpoints`, `TestServerInstanceEndpoints`, `TestServerConfigEndpoints`, `TestDashboardConfigEndpoints`, `TestServerPresetEndpoints`, `TestServerErrorHandling`, `TestActivityEndpoint`, `TestServerHygieneAndWorkflow`, `TestApiKeyGate`, `TestDashboardWebsocketRedaction`, `TestCliHelpers`.
   - `test_server_security.py`: `TestOriginAndHost`, `TestApiKeyGating`, `TestWebSocket`, `TestErrorMapping`, `TestRequestBounds`, `TestDashboardConfig`, `TestBuilderGuards`, `TestPresetValidation`.
-  - `test_instance_manager.py`: `TestManagedClasses`, `TestInstanceManager`, `TestRegisterMonitorHandlers`, `TestSnapshotInternalKeyHiding`, `TestConversationCaching`, `TestInstanceManagerListFilter`, `TestDestroyInstance`, `TestActivitySnapshots`, `TestFindExamplesDir`, `TestWorkflowPresets`, `TestDisabledAgentTypes`, `TestAgentConcurrencyHardening`, `TestStubToolExecution`, `TestRedaction`, `TestCancelAgent`, `TestFSMLifecycle`, `TestWorkflowTracking`.
+  - `test_instance_manager.py`: `TestManagedClasses`, `TestInstanceManager`, `TestRegisterMonitorHandlers`, `TestSnapshotInternalKeyHiding`, `TestConversationCaching`, `TestInstanceManagerListFilter`, `TestDestroyInstance`, `TestActivitySnapshots`, `TestFindExamplesDir`, `TestWorkflowPresets`, `TestDisabledAgentTypes`, `TestAgentConcurrencyHardening`, `TestStubToolExecution`, `TestRedaction`, `TestCancelAgent`, `TestFSMLifecycle`, `TestWorkflowTracking`, `TestFailedLaunchKeepsFinishedInstance`, `TestTerminalSendKeepsTheConversationOpenWhenEndFails`, `TestOtelReenableDoesNotExportTwice`, `TestInstanceEventFeed`, `TestCloseTearsDownEveryInstanceType`.
 
 Monitor surface the tests pin:
 

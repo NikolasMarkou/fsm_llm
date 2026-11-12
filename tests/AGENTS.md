@@ -117,7 +117,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 
 - `ModuleNotFoundError: tests...`: pytest run from outside the repo root.
 - `test_packaging.py` count failures: a test was added or removed without updating the pinned doc literals.
-- Version failures after a release: `"0.12.0"` literals in `test_fsm_llm_monitor/test_app.py` and `test_fsm_llm_regression/test_regression_review.py`.
+- Version failures after a release: `"0.12.0"` literals in `test_fsm_llm_monitor/test_app.py` and `test_fsm_llm_regression/test_regression_cli_and_exports.py`.
 - A wall-clock budget that is too tight for a traced or loaded run: use the `timing_factor` fixture (or raise `FSM_LLM_TEST_TIMING_FACTOR`), never a skip. Live Ollama tests time out under GPU load.
 - An OpenTelemetry "I/O operation on closed file" traceback after an agents run is shutdown noise, not a failure.
 

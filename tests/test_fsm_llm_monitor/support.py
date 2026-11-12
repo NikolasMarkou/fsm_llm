@@ -6,7 +6,7 @@ from fsm_llm.monitor.definitions import MonitorConfig
 from fsm_llm.monitor.instance_manager import InstanceManager
 
 
-def _manager() -> InstanceManager:
-    mgr = InstanceManager(config=MonitorConfig())
+def _manager(**config) -> InstanceManager:
+    mgr = InstanceManager(config=MonitorConfig(**config))
     mgr.global_collector.cleanup()
     return mgr

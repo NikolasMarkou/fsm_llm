@@ -28,6 +28,7 @@ from fsm_llm.monitor.definitions import DashboardConfig, InstanceInfo, MonitorCo
 from fsm_llm.monitor.exceptions import MetricCollectionError
 from fsm_llm.monitor.instance_manager import InstanceManager
 from fsm_llm.monitor.server import app, configure
+from tests.test_fsm_llm_monitor.support import _manager
 
 STATIC = Path(server_module.__file__).parent / "static"
 
@@ -339,3 +340,107 @@ class TestStaticPins:
             '<span class="pagination-info">Page 2 of 3</span>'
             '<button class="btn btn-sm" data-action="inst-page-next">Next &raquo;</button>'
         )
+
+
+_UTF8_SCRIPT = """
+import json
+from pathlib import Path
+from fsm_llm.monitor import server
+from fsm_llm.monitor.instance_manager import InstanceManager, find_examples_dir
+
+preset = "basic/form_filling/fsm.json"
+expected = json.loads(
+    (find_examples_dir() / preset).read_bytes().decode("utf-8")
+)
+mgr = InstanceManager()
+mgr.global_collector.cleanup()
+assert mgr._resolve_fsm_data(preset, None) == expected
+assert server._read_preset_json(preset) == expected
+scanned = server._scan_fsm_presets()["fsm"]
+assert not [p for p in scanned if p.get("parse_error")], scanned
+assert server._load_flows()["agents"]
+print("OK")
+"""
+
+
+class TestPresetJsonIsReadAsUtf8:
+    """F-MI-12 / F-MS-01: presets and flows.json decode as UTF-8 whatever the
+    locale says."""
+
+    def test_presets_load_under_an_ascii_locale(self):
+        env = dict(
+            os.environ,
+            PYTHONUTF8="0",
+            PYTHONCOERCECLOCALE="0",
+            LC_ALL="C",
+            LANG="C",
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", _UTF8_SCRIPT],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert proc.returncode == 0, proc.stderr[-2000:]
+        assert "OK" in proc.stdout
+
+
+class TestRouteLaunchedWorkflowIsStopped:
+    """REVIEW-C1: ``POST /api/workflow/launch`` runs ``launch_workflow`` in a
+    worker thread, where no loop is running; the engine still lives on the
+    server loop, so end_instance and close must stop it there."""
+
+    @staticmethod
+    def _launch(client, mgr):
+        r = client.post(
+            "/api/workflow/launch",
+            json={"preset_id": mgr.get_workflow_presets()[0]["id"]},
+        )
+        assert r.status_code == 200, r.text
+        inst = mgr._instances[r.json()["instance_id"]]
+        stopped: list[int] = []
+        original = inst.engine.close
+
+        async def _spy() -> None:
+            stopped.append(1)
+            await original()
+
+        inst.engine.close = _spy
+        return inst, stopped
+
+    @staticmethod
+    def _wait(stopped: list[int], timing_factor: float) -> None:
+        import time
+
+        deadline = time.monotonic() + 2 * timing_factor
+        while not stopped and time.monotonic() < deadline:
+            time.sleep(0.02)
+
+    def test_end_instance_stops_the_engine(self, timing_factor):
+        from fastapi.testclient import TestClient
+
+        from fsm_llm.monitor import server
+
+        mgr = _manager()
+        server.configure(manager=mgr)
+        with TestClient(server.app) as client:
+            inst, stopped = self._launch(client, mgr)
+            assert inst.loop is not None
+            r = client.delete(f"/api/instances/{inst.instance_id}")
+            assert r.status_code == 200, r.text
+            self._wait(stopped, timing_factor)
+        assert stopped == [1]
+
+    def test_close_stops_the_engine(self, timing_factor):
+        from fastapi.testclient import TestClient
+
+        from fsm_llm.monitor import server
+
+        mgr = _manager()
+        server.configure(manager=mgr)
+        with TestClient(server.app) as client:
+            _inst, stopped = self._launch(client, mgr)
+            mgr.close()
+            self._wait(stopped, timing_factor)
+        assert stopped == [1]

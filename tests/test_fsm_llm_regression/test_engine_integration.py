@@ -8,11 +8,24 @@ the interaction between extensions and core.
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 from typing import Any
 
 import pytest
 
 from fsm_llm.definitions import FSMDefinition
+from fsm_llm.reasoning.constants import ContextKeys, ReasoningType
+from fsm_llm.reasoning.handlers import OutputFormatter
+from fsm_llm.reasoning.utilities import map_reasoning_type
+from fsm_llm.workflows.dsl import (
+    auto_step,
+    create_workflow,
+    timer_step,
+    wait_event_step,
+)
+from fsm_llm.workflows.engine import WorkflowEngine
+from fsm_llm.workflows.models import WorkflowEvent, WorkflowStatus
 from tests.test_fsm_llm_reasoning.test_engine_scripted import (
     _PROBLEM,
     _VALID_SCRIPT,
@@ -442,3 +455,372 @@ class TestWorkflowEngineIntegration:
 
         stats = engine.get_statistics()
         assert stats["active_workflows"] == 0
+
+
+class TestFalsySolutionExtraction:
+    """ED-001: extract_final_solution must use `is not None` instead of truthiness."""
+
+    def test_calculation_result_zero_is_returned(self):
+        """CALCULATION_RESULT=0 must be returned, not dropped."""
+        context = {ContextKeys.CALCULATION_RESULT: 0}
+        result = OutputFormatter.extract_final_solution(context)
+        assert result == "0"
+
+    def test_calculation_result_false_is_returned(self):
+        """CALCULATION_RESULT=False must be returned as 'False'."""
+        context = {ContextKeys.CALCULATION_RESULT: False}
+        result = OutputFormatter.extract_final_solution(context)
+        assert result == "False"
+
+    def test_proposed_solution_zero_is_returned(self):
+        """PROPOSED_SOLUTION=0 must be returned."""
+        context = {ContextKeys.PROPOSED_SOLUTION: 0}
+        result = OutputFormatter.extract_final_solution(context)
+        assert result == "0"
+
+    def test_empty_string_still_falls_through(self):
+        """Empty string is a genuinely absent solution — should fall through."""
+        context = {ContextKeys.FINAL_SOLUTION: ""}
+        result = OutputFormatter.extract_final_solution(context)
+        assert "Solution process completed" in result
+
+    def test_none_still_falls_through(self):
+        """None is a genuinely absent solution — should fall through."""
+        context = {ContextKeys.FINAL_SOLUTION: None}
+        result = OutputFormatter.extract_final_solution(context)
+        assert "Solution process completed" in result
+
+    def test_priority_order_respected_with_zero(self):
+        """FINAL_SOLUTION=0 takes priority over PROPOSED_SOLUTION='real answer'."""
+        context = {
+            ContextKeys.FINAL_SOLUTION: 0,
+            ContextKeys.PROPOSED_SOLUTION: "real answer",
+        }
+        result = OutputFormatter.extract_final_solution(context)
+        assert result == "0"
+
+    def test_fallback_chain_skips_none_finds_zero(self):
+        """First key is None, second key is 0 — should return '0'."""
+        context = {
+            ContextKeys.FINAL_SOLUTION: None,
+            ContextKeys.PROPOSED_SOLUTION: None,
+            ContextKeys.CALCULATION_RESULT: 0,
+        }
+        result = OutputFormatter.extract_final_solution(context)
+        assert result == "0"
+
+
+class TestEventAutoRegistration:
+    """ED-002: Engine must auto-register event listeners from _waiting_info."""
+
+    async def test_wait_event_step_auto_registers_listener(self):
+        """After WaitEventStep, engine should auto-register event listener."""
+        engine = WorkflowEngine()
+
+        wf = create_workflow("evt_auto", "Event Auto")
+        wf.with_initial_step(auto_step("setup", "Setup", "wait"))
+        wf.with_step(
+            wait_event_step(
+                "wait",
+                "Wait",
+                event_type="order_confirmed",
+                success_step_id="process",
+                event_mapping={"received_id": "order_id"},
+            )
+        )
+        wf.with_step(auto_step("process", "Process", ""))
+        engine.register_workflow(wf)
+
+        iid = await engine.start("evt_auto", {})
+        inst = engine.get_instance(iid)
+        assert inst.status == WorkflowStatus.WAITING
+
+        # Listener should have been auto-registered
+        assert "order_confirmed" in engine.event_listeners
+        assert iid in engine.event_listeners["order_confirmed"]
+
+    async def test_event_fires_without_manual_registration(self):
+        """After auto-registration, sending an event should advance the workflow."""
+        engine = WorkflowEngine()
+
+        wf = create_workflow("evt_fire", "Event Fire")
+        wf.with_initial_step(auto_step("setup", "Setup", "wait"))
+        wf.with_step(
+            wait_event_step(
+                "wait",
+                "Wait",
+                event_type="payment_done",
+                success_step_id="confirm",
+                event_mapping={"amount": "paid_amount"},
+            )
+        )
+        wf.with_step(auto_step("confirm", "Confirm", ""))
+        engine.register_workflow(wf)
+
+        iid = await engine.start("evt_fire", {})
+
+        # Send event — should transition automatically
+        event = WorkflowEvent(event_type="payment_done", payload={"paid_amount": 99})
+        await engine.process_event(event)
+
+        inst = engine.get_instance(iid)
+        assert inst.status == WorkflowStatus.COMPLETED
+        assert inst.current_step_id == "confirm"
+        assert inst.context.get("amount") == 99
+
+    async def test_event_mapping_applied_correctly(self):
+        """Event payload should be mapped to context via event_mapping."""
+        engine = WorkflowEngine()
+
+        wf = create_workflow("evt_map", "Event Map")
+        wf.with_initial_step(
+            wait_event_step(
+                "wait",
+                "Wait",
+                event_type="data_ready",
+                success_step_id="done",
+                event_mapping={"local_key": "remote_key"},
+            )
+        )
+        wf.with_step(auto_step("done", "Done", ""))
+        engine.register_workflow(wf)
+
+        iid = await engine.start("evt_map", {})
+
+        event = WorkflowEvent(
+            event_type="data_ready",
+            payload={"remote_key": "hello_world"},
+        )
+        await engine.process_event(event)
+
+        inst = engine.get_instance(iid)
+        assert inst.context.get("local_key") == "hello_world"
+
+
+class TestTimerAutoScheduling:
+    """ED-002: Engine must auto-schedule timers from _timer_info."""
+
+    async def test_timer_step_auto_schedules(self):
+        """After TimerStep, engine should auto-schedule the timer."""
+        engine = WorkflowEngine()
+
+        wf = create_workflow("tmr_auto", "Timer Auto")
+        wf.with_initial_step(
+            timer_step("wait", "Wait", delay_seconds=1, next_step_id="done")
+        )
+        wf.with_step(auto_step("done", "Done", ""))
+        engine.register_workflow(wf)
+
+        iid = await engine.start("tmr_auto", {})
+
+        inst = engine.get_instance(iid)
+        assert inst.status == WorkflowStatus.WAITING
+
+        # Timer should have been auto-scheduled
+        timer_key = f"{iid}_timer"
+        assert timer_key in engine.timers
+
+    async def test_timer_fires_and_advances_workflow(self, timing_factor):
+        """Auto-scheduled timer should transition the workflow after delay."""
+        engine = WorkflowEngine()
+
+        wf = create_workflow("tmr_fire", "Timer Fire")
+        wf.with_initial_step(
+            timer_step("wait", "Wait", delay_seconds=0, next_step_id="done")
+        )
+        wf.with_step(auto_step("done", "Done", ""))
+        engine.register_workflow(wf)
+
+        iid = await engine.start("tmr_fire", {})
+
+        # Give the timer task a moment to fire (delay_seconds=0 but
+        # asyncio.sleep(0) still yields to event loop once)
+        await asyncio.sleep(0.1 * timing_factor)
+
+        inst = engine.get_instance(iid)
+        assert inst.status == WorkflowStatus.COMPLETED
+        assert inst.current_step_id == "done"
+
+
+class TestTypeMappingAliases:
+    """ED-003: Natural language aliases must map to correct reasoning types."""
+
+    def test_math_maps_to_calculator(self):
+        assert map_reasoning_type("math") == ReasoningType.SIMPLE_CALCULATOR.value
+
+    def test_calculator_maps_to_calculator(self):
+        assert map_reasoning_type("calculator") == ReasoningType.SIMPLE_CALCULATOR.value
+
+    def test_compute_maps_to_calculator(self):
+        assert map_reasoning_type("compute") == ReasoningType.SIMPLE_CALCULATOR.value
+
+    def test_logic_maps_to_deductive(self):
+        assert map_reasoning_type("logic") == ReasoningType.DEDUCTIVE.value
+
+    def test_logical_maps_to_deductive(self):
+        assert map_reasoning_type("logical") == ReasoningType.DEDUCTIVE.value
+
+    def test_pattern_maps_to_inductive(self):
+        assert map_reasoning_type("pattern") == ReasoningType.INDUCTIVE.value
+
+    def test_observation_maps_to_inductive(self):
+        assert map_reasoning_type("observation") == ReasoningType.INDUCTIVE.value
+
+    def test_innovative_maps_to_creative(self):
+        assert map_reasoning_type("innovative") == ReasoningType.CREATIVE.value
+
+    def test_brainstorm_maps_to_creative(self):
+        assert map_reasoning_type("brainstorm") == ReasoningType.CREATIVE.value
+
+    def test_evaluate_maps_to_critical(self):
+        assert map_reasoning_type("evaluate") == ReasoningType.CRITICAL.value
+
+    def test_assessment_maps_to_critical(self):
+        assert map_reasoning_type("assessment") == ReasoningType.CRITICAL.value
+
+    def test_hypothesis_maps_to_abductive(self):
+        assert map_reasoning_type("hypothesis") == ReasoningType.ABDUCTIVE.value
+
+    def test_abduction_maps_to_abductive(self):
+        assert map_reasoning_type("abduction") == ReasoningType.ABDUCTIVE.value
+
+    def test_compare_maps_to_analogical(self):
+        assert map_reasoning_type("compare") == ReasoningType.ANALOGICAL.value
+
+    def test_case_insensitive(self):
+        assert map_reasoning_type("MATH") == ReasoningType.SIMPLE_CALCULATOR.value
+        assert map_reasoning_type("Logic") == ReasoningType.DEDUCTIVE.value
+
+    def test_whitespace_stripped(self):
+        assert map_reasoning_type("  math  ") == ReasoningType.SIMPLE_CALCULATOR.value
+
+    def test_unknown_still_defaults_to_analytical(self):
+        assert (
+            map_reasoning_type("quantum_teleportation")
+            == ReasoningType.ANALYTICAL.value
+        )
+
+    def test_all_canonical_names_map_to_themselves(self):
+        """Every ReasoningType enum value should map to itself."""
+        for rt in ReasoningType:
+            assert map_reasoning_type(rt.value) == rt.value
+
+
+class TestWaitEventStepValidation:
+    """F-004: WaitEventStep success/timeout states must be validated."""
+
+    def test_wait_event_step_states_are_validated(self):
+        """The referenced states of a WaitEventStep include both states."""
+        try:
+            from fsm_llm.workflows.models import WaitEventConfig
+            from fsm_llm.workflows.steps import WaitEventStep
+
+            step = WaitEventStep(
+                step_id="wait_payment",
+                name="Wait for Payment",
+                config=WaitEventConfig(
+                    event_type="payment_received",
+                    success_step_id="payment_done",
+                    timeout_seconds=300,
+                    timeout_step_id="payment_timeout",
+                ),
+            )
+
+            referenced = step.referenced_step_ids()
+            assert "payment_done" in referenced
+            assert "payment_timeout" in referenced
+        except ImportError:
+            import pytest
+
+            pytest.skip("fsm_llm.workflows not installed")
+
+
+class TestContextPruningLog:
+    """C2: prune_context should compute actual new size."""
+
+    def test_prune_reports_different_sizes(self):
+        from fsm_llm.reasoning.constants import ContextKeys, Defaults
+        from fsm_llm.reasoning.handlers import ReasoningHandlers
+
+        # Create context large enough to trigger pruning
+        large_list = [f"item_{i}" for i in range(50)]
+        context = {
+            ContextKeys.PROBLEM_STATEMENT: "test",
+            ContextKeys.REASONING_TRACE: large_list,
+            ContextKeys.LOGICAL_STEPS: large_list.copy(),
+            ContextKeys.OBSERVATIONS: large_list.copy(),
+        }
+        # Pad to exceed threshold
+        context["_padding"] = "x" * (Defaults.CONTEXT_PRUNE_THRESHOLD + 1000)
+
+        result = ReasoningHandlers.prune_context(context)
+
+        # Should have pruned something
+        assert len(result) > 0
+        # At least one list should be truncated to 10
+        for key in result:
+            if isinstance(result[key], list):
+                assert len(result[key]) <= 10
+
+
+class TestContextKeysConstants:
+    """C3: merge_reasoning_results should only use ContextKeys constants."""
+
+    def test_no_raw_strings_in_merge(self):
+        """All keys in merge_reasoning_results should come from ContextKeys."""
+        from fsm_llm.reasoning.handlers import ContextManager
+
+        source = inspect.getsource(ContextManager.merge_reasoning_results)
+
+        # These raw strings should no longer appear as dict keys
+        forbidden_raw_keys = [
+            '"deductive_conclusion"',
+            '"best_explanation"',
+            '"adapted_solution_or_understanding"',
+            '"analogy_confidence"',
+            '"assessment_confidence"',
+            '"calculation_error_details"',
+            '"hybrid_synthesis_summary"',
+            '"explanation_confidence"',
+            '"analogical_solution"',
+            '"inductive_hypothesis"',
+        ]
+
+        for key in forbidden_raw_keys:
+            # Check it's not used as a dict key assignment (results[key] = ...)
+            pattern = f"results[{key}]"
+            assert pattern not in source, (
+                f"Raw string {key} found in merge_reasoning_results — use ContextKeys constant"
+            )
+
+    def test_all_reasoning_types_covered(self):
+        """merge_reasoning_results should handle all ReasoningType values."""
+        from fsm_llm.reasoning.constants import ReasoningType
+        from fsm_llm.reasoning.handlers import ContextManager
+
+        for rt in ReasoningType:
+            # Should not crash for any reasoning type
+            result = ContextManager.merge_reasoning_results(
+                orchestrator_context={}, sub_fsm_context={}, reasoning_type=rt.value
+            )
+            # Should always have a completion flag
+            assert f"{rt.value}_reasoning_completed" in result
+
+
+class TestNoMergeStrategyAlias:
+    """H4: reasoning engine should use ContextMergeStrategy directly."""
+
+    def test_engine_imports_context_merge_strategy(self):
+        from fsm_llm.reasoning import engine
+
+        source = inspect.getsource(engine)
+        # Should import from public API (not internal fsm_llm.api)
+        assert "ContextMergeStrategy" in source
+        # Must come from fsm_llm, not fsm_llm.api
+        assert "from fsm_llm import" in source
+        # Should not import the alias from constants
+        assert "from .constants import" in source
+        import_line = next(
+            line for line in source.split("\n") if "from .constants import" in line
+        )
+        assert "MergeStrategy" not in import_line

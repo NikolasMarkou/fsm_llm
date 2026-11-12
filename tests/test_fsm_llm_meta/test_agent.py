@@ -19,7 +19,7 @@ from fsm_llm.agents.exceptions import (
     MetaBuilderError,
     MetaValidationError,
 )
-from fsm_llm.agents.meta_builder import MetaBuilderAgent
+from fsm_llm.agents.meta_builder import MetaBuilderAgent, _normalize_message
 from fsm_llm.agents.meta_prompts import artifact_schema
 from fsm_llm.definitions import CompletionResponse, LLMResponseError
 
@@ -701,3 +701,27 @@ class TestMetaBuilderThroughCreateAgent:
                 .set_config_option("max_turns", 3)
                 .build()
             )
+
+
+def _trigger(message: str) -> bool:
+    return MetaBuilderAgent._is_build_trigger(_normalize_message(message))
+
+
+class TestTriggersTolerateTrailingPunctuation:
+    """F-AM-01: "Done." builds as "done" does."""
+
+    @pytest.mark.parametrize(
+        "message",
+        ["Done.", "ok!", "make it.", "go!", "ship it!", "finish.", "approve.",
+         "Yes!!", "lgtm...", "ok ?", "build now!"],
+    )  # fmt: skip
+    def test_a_trigger_with_trailing_punctuation_builds(self, message):
+        assert _trigger(message)
+
+    @pytest.mark.parametrize(
+        "message",
+        ["don't build it yet", "done with the first state, thanks.", "no.",
+         "okay then", "go on and add a state.", "yes, but add a state!"],
+    )  # fmt: skip
+    def test_punctuation_does_not_turn_other_messages_into_triggers(self, message):
+        assert not _trigger(message)

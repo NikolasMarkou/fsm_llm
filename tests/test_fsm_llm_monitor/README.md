@@ -27,12 +27,11 @@ flowchart LR
 - `__init__.py` - empty package marker.
 - `test_app.py` - HTTP routes, static files, public exports, version, API-key gate, WebSocket redaction hook, and that the UI log levels, Max Iterations limit and log CSS match the server constants (131 tests).
 - `test_server_security.py` - Origin and Host checks, body size limit, security headers, key-gated reads, WebSocket auth, error-to-status mapping, request bounds, dashboard config parsing, builder guards, preset path validation (36 tests).
-- `test_instance_manager.py` - `ManagedFSM`/`ManagedWorkflow`/`ManagedAgent`, `InstanceManager` lookups, ending an instance, activity, workflow presets, disabled agent types, agent status resolution, stub tools (75 tests).
+- `test_instance_manager.py` - `ManagedFSM`/`ManagedWorkflow`/`ManagedAgent`, `InstanceManager` lookups, ending an instance, activity, workflow presets, disabled agent types, agent status resolution, stub tools, a failed launch keeping a finished instance, a terminal send when `end_conversation` fails, one span per exporter after an OTEL re-enable (real `opentelemetry` SDK, skipped without it), the instance event feed, `close()` teardown of every instance type (75 tests).
 - `test_collector.py` - `EventCollector` buffers, metrics, log filtering, handler callbacks, loguru sink, cursors, thread safety (38 tests).
 - `test_definitions.py` - Pydantic models and helpers in `definitions.py` (50 tests).
 - `test_otel.py` - `OTELExporter` enable, disable, shutdown and event routing (20 tests).
-- `test_instance_manager_fixes.py` - the 2026-11-05 instance manager and collector fixes (plan 5980fbb7 step 16): launch validation, `end_conversation` refusal, close teardown (13 tests).
-- `test_server_consistency.py` - the 2026-11-05 server and SPA fixes (plan 5980fbb7 step 17): the `/ws` tick, visualize routes, guard headers, worker-thread launch, Ctrl-C exit, string-level SPA pins (57 tests).
+- `test_server_consistency.py` - the 2026-11-05 server and SPA fixes (plan 5980fbb7 step 17): the `/ws` tick, visualize routes, guard headers, worker-thread launch, Ctrl-C exit, string-level SPA pins, preset JSON read as UTF-8 under an ASCII locale (subprocess), the route-launched workflow engine stopped by `end_instance` and `close` (57 tests).
 
 ## How to use it
 

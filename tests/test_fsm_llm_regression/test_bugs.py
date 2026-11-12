@@ -1,5 +1,7 @@
 """Regression tests for identified bugs in fsm_llm."""
 
+from __future__ import annotations
+
 import inspect
 import os
 import re
@@ -772,3 +774,97 @@ class TestForbiddenContextPatterns:
                 for pattern in FORBIDDEN_CONTEXT_PATTERNS
             )
             assert not matches, f"FORBIDDEN_CONTEXT_PATTERNS should NOT match '{key}'"
+
+
+class TestLLMTimeout:
+    """H1: LiteLLMInterface should support timeout."""
+
+    def test_default_timeout_is_120(self):
+        from fsm_llm.llm import LiteLLMInterface
+
+        interface = LiteLLMInterface(model="test-model")
+        assert interface.timeout == 120.0
+
+    def test_custom_timeout(self):
+        from fsm_llm.llm import LiteLLMInterface
+
+        interface = LiteLLMInterface(model="test-model", timeout=30.0)
+        assert interface.timeout == 30.0
+
+    def test_none_timeout_disables(self):
+        from fsm_llm.llm import LiteLLMInterface
+
+        interface = LiteLLMInterface(model="test-model", timeout=None)
+        assert interface.timeout is None
+
+    def test_timeout_passed_to_completion(self):
+        from fsm_llm.llm import LiteLLMInterface
+
+        interface = LiteLLMInterface(model="test-model", timeout=45.0)
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = '{"message": "hello"}'
+
+        with (
+            patch("fsm_llm.llm.completion", return_value=mock_response) as mock_comp,
+            patch("fsm_llm.llm.get_supported_openai_params", return_value=None),
+        ):
+            interface._make_llm_call(
+                [{"role": "user", "content": "test"}], "response_generation"
+            )
+            call_kwargs = mock_comp.call_args
+            assert call_kwargs[1].get("timeout") == 45.0
+
+    def test_none_timeout_not_passed_to_completion(self):
+        from fsm_llm.llm import LiteLLMInterface
+
+        interface = LiteLLMInterface(model="test-model", timeout=None)
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = '{"message": "hello"}'
+
+        with (
+            patch("fsm_llm.llm.completion", return_value=mock_response) as mock_comp,
+            patch("fsm_llm.llm.get_supported_openai_params", return_value=None),
+        ):
+            interface._make_llm_call(
+                [{"role": "user", "content": "test"}], "response_generation"
+            )
+            call_kwargs = mock_comp.call_args
+            assert "timeout" not in call_kwargs[1]
+
+
+class TestNoDuplicateImportRe:
+    """H2: llm.py should not have duplicate 'import re'."""
+
+    def test_single_import_re(self):
+        from fsm_llm import llm
+
+        source = inspect.getsource(llm)
+        count = source.count("import re")
+        # re is no longer used after _parse_transition_response was removed
+        assert count <= 1, f"Expected 0 or 1 'import re', found {count}"
+
+
+class TestNoAsyncHandlers:
+    """M1: Handler system should not have async support."""
+
+    def test_no_asyncio_import(self):
+        from fsm_llm import handlers
+
+        source = inspect.getsource(handlers)
+        # asyncio should not be imported
+        assert "import asyncio" not in source
+
+    def test_no_async_execution_lambda_type(self):
+        from fsm_llm import handlers
+
+        assert not hasattr(handlers, "AsyncExecutionLambda")
+
+    def test_lambda_handler_no_is_async(self):
+        from fsm_llm.handlers import create_handler
+
+        handler = create_handler("test").do(lambda ctx: {"ok": True})
+        assert not hasattr(handler, "is_async")

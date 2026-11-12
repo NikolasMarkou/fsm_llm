@@ -26,13 +26,13 @@ Test layers, from pure to LLM-adjacent:
 1. Pure builder tests (`test_builders.py`, `test_builders_elaborate.py`): call builder methods, assert on `states`/`steps`/`tools`, returned warning lists, raised `BuilderError`, `to_dict()`, `validate_complete()`, `get_summary(level)`.
 2. Tool tests (`test_tools.py`, part of `test_integration.py`): build a `ToolRegistry` over a builder, call `registry.execute(ToolCall(...))`, assert the builder was mutated in place.
 3. FSM tests (`test_meta_fsm.py`): `build_meta_builder_fsm()` loads as `FSMDefinition`, validates clean, priorities distinct, silent states silent, handler-only keys, routing on `===` gates, the build state's request (schemas with the `step_type` and `agent_type` enums), and the FSM run through core.
-4. Agent tests (`test_agent.py`, `test_meta_conversation.py`, `test_review_fixes_meta.py`, part of `test_integration.py`): drive `MetaBuilderAgent` through its public driver (`start`/`send`/`run`/`run_interactive`) on the real FSM and core `API`; there is no session state in Python to set (the agent reads everything from the conversation's context).
+4. Agent tests (`test_agent.py`, `test_meta_conversation.py`, part of `test_integration.py`): drive `MetaBuilderAgent` through its public driver (`start`/`send`/`run`/`run_interactive`) on the real FSM and core `API`; there is no session state in Python to set (the agent reads everything from the conversation's context).
 
 LLM isolation methods used:
 
 | Method | Where |
 | --- | --- |
-| `ScriptedMetaLLM(intents=, builds=, replies=)` (conftest), passed as `llm_interface=`: classifier calls (`call_type == "classification"`), build calls and collect replies (Pass 2) answered from queues, every request recorded | `test_meta_conversation.py`, `test_meta_fsm.py`, `test_review_fixes_meta.py`, most of `test_agent.py` |
+| `ScriptedMetaLLM(intents=, builds=, replies=)` (conftest), passed as `llm_interface=`: classifier calls (`call_type == "classification"`), build calls and collect replies (Pass 2) answered from queues, every request recorded | `test_meta_conversation.py`, `test_meta_fsm.py`, most of `test_agent.py` |
 | `monkeypatch.setattr("fsm_llm.llm.completion", ...)` (core's one send binding) raising or returning a fake response | `TestLlmCallProviderFailure`, `TestWorkflowStepTypeEnum` |
 | `offline_llm` fixture (conftest): `fsm_llm.llm.completion` raises `RuntimeError("offline")`, so the keyword type (`_detect_type_fallback`) and the canned collect reply are asserted with no network call | `TestTypeDetection`, `TestStartSendFlow` |
 
@@ -48,10 +48,10 @@ LLM isolation methods used:
 | `test_integration.py` | Cross-piece checks | 11 tests |
 | `test_definitions.py` | Pydantic models and enum | 26 tests |
 | `test_prompts.py` | Prompt text builders | 4 tests |
-| `test_meta_cleanup_fixes.py` | 2026-11-05 meta fixes (plan 5980fbb7 step 14) | 32 tests |
+| `test_meta_output.py` | `save_artifact`: atomic write, failed replace keeps the old file | new file |
+| `test_meta_cli.py` | `fsm-llm-meta` script on an unencodable stdout, domain error as one stderr line | new file |
 | `test_meta_fsm.py` | `build_meta_builder_fsm` structure, gates, build request, run through core | 52 tests |
-| `test_meta_conversation.py` | Conversations by behaviour with `ScriptedMetaLLM`: each artifact kind, type switch, build retry, outages, lifecycle, monitor state, collect-reply build prompt | 41 tests |
-| `test_review_fixes_meta.py` | Review fixes: malformed build reply, no Python session state, reclassification keeps the type, `start` never builds, prompt never doubled, keyword hints, negation | 90 tests |
+| `test_meta_conversation.py` | Conversations by behaviour with `ScriptedMetaLLM`: each artifact kind, type switch, build retry, outages, lifecycle, monitor state, collect-reply build prompt, reply parsing, retryable start, malformed build reply, no session state beside the FSM, reclassification, `start` never builds, prompt never doubled, keyword hints, negation | 41 tests |
 | `test_handlers.py`, `test_handlers_elaborate.py` | Import smoke test | 1 test each; handlers module was removed, only the `fsm_llm.agents.meta_builder` import is checked |
 | `__init__.py` | Package marker | empty |
 
@@ -138,5 +138,5 @@ Agent:
 - Run: `.venv/bin/python -m pytest tests/test_fsm_llm_meta/ -q` from the repo root.
 - Use the conftest fixtures instead of building builders inline; for new tool tests use `_make_call` in `test_tools.py`.
 - Inject `ScriptedMetaLLM` with `llm_interface=` (or patch `fsm_llm.llm.completion`); do not add tests that need a live provider.
-- Read the DECISION notes in `TestSchemaEchoRejection`, `TestLlmCallProviderFailure`, `TestWorkflowStepTypeEnum` and the D-0xx references of plan 944e2692 in `test_meta_fsm.py`, `test_meta_conversation.py`, `test_review_fixes_meta.py` before changing the behavior they pin.
+- Read the DECISION notes in `TestSchemaEchoRejection`, `TestLlmCallProviderFailure`, `TestWorkflowStepTypeEnum` and the D-0xx references of plan 944e2692 in `test_meta_fsm.py`, `test_meta_conversation.py` before changing the behavior they pin.
 - Adding or removing tests changes the suite count (515) stated in this file and the README here. Re-measure with `.venv/bin/python -m pytest tests/test_fsm_llm_meta --collect-only -q | tail -1`.

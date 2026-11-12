@@ -3,6 +3,8 @@ Regression tests for Plan 13 fixes.
 Ensures professionalization and operational fixes remain in place.
 """
 
+from __future__ import annotations
+
 import os
 
 import pytest
@@ -192,3 +194,124 @@ class TestUnifiedVersioning:
         from fsm_llm.workflows import __version__ as workflows_version
 
         assert workflows_version == main_version
+
+
+class TestVersionAlignment:
+    """C1: pyproject.toml and __version__.py must agree."""
+
+    def test_version_is_0_5_0(self):
+        from fsm_llm.__version__ import __version__
+
+        assert __version__ == "0.12.0"
+
+    def test_init_exports_correct_version(self):
+        import fsm_llm
+
+        assert fsm_llm.__version__ == "0.12.0"
+
+
+class TestRequirementsAlignment:
+    """H5: requirements.txt should match pyproject.toml core deps.
+
+    Note: requirements.txt was removed in favor of pyproject.toml as the
+    single source of truth for dependencies. These tests are skipped.
+    """
+
+    @pytest.mark.skip(
+        reason="requirements.txt removed; deps managed via pyproject.toml"
+    )
+    def test_requirements_has_correct_dotenv_version(self):
+        import pathlib
+
+        req_path = pathlib.Path(__file__).parents[2] / "requirements.txt"
+        content = req_path.read_text(encoding="utf-8")
+        assert "python-dotenv>=1.0.0" in content
+        # Should not have dev deps
+        assert "pytest" not in content
+        assert "pytest-mock" not in content
+
+    @pytest.mark.skip(
+        reason="requirements.txt removed; deps managed via pyproject.toml"
+    )
+    def test_requirements_has_litellm_upper_bound(self):
+        import pathlib
+
+        req_path = pathlib.Path(__file__).parents[2] / "requirements.txt"
+        content = req_path.read_text(encoding="utf-8")
+        assert "<2.0" in content
+
+    def test_litellm_excludes_compromised_versions(self):
+        """Verify pyproject.toml structurally excludes compromised litellm versions.
+
+        litellm 1.82.7 and 1.82.8 were compromised with credential-stealing
+        malware via .pth file injection (March 2026 PyPI supply-chain
+        incident). These must remain unreachable by ANY environment that
+        respects this dependency spec -- either via explicit `!=` excludes,
+        or via a version floor at/above 1.83.0 (litellm's first release
+        built on its post-incident, isolated CI/CD v2 pipeline; see
+        docs.litellm.ai/blog/security-update-march-2026), which excludes
+        them structurally without needing to name them.
+        """
+        import pathlib
+        import tomllib
+
+        from packaging.requirements import Requirement
+        from packaging.specifiers import SpecifierSet
+        from packaging.version import Version
+
+        pyproject_path = pathlib.Path(__file__).parents[2] / "pyproject.toml"
+        with open(pyproject_path, "rb") as f:
+            data = tomllib.load(f)
+        deps = data["project"]["dependencies"]
+        litellm_deps = [d for d in deps if d.startswith("litellm")]
+        assert len(litellm_deps) == 1, "Expected exactly one litellm dependency"
+        litellm_dep = litellm_deps[0]
+        spec: SpecifierSet = Requirement(litellm_dep).specifier
+        for compromised in ("1.82.7", "1.82.8"):
+            assert not spec.contains(Version(compromised)), (
+                f"litellm dependency spec {litellm_dep!r} must not permit the "
+                f"compromised version {compromised}"
+            )
+
+
+class TestConsolidatedAll:
+    """M3: __all__ should be defined once, not extended dynamically."""
+
+    def test_no_dynamic_all_extension(self):
+        import pathlib
+
+        init_path = pathlib.Path(__file__).parents[2] / "src" / "__init__.py"
+        source = init_path.read_text(encoding="utf-8")
+        assert source.count("__all__.extend") == 0, (
+            "__all__ should not be extended dynamically"
+        )
+        assert source.count("__all__.append") == 0, (
+            "__all__ should not be appended to dynamically"
+        )
+
+    def test_all_exports_are_importable(self):
+        import fsm_llm
+
+        for name in fsm_llm.__all__:
+            assert hasattr(fsm_llm, name), f"{name} in __all__ but not importable"
+
+    def test_okf_and_skill_errors_are_exported_with_the_other_exceptions(self):
+        import fsm_llm
+        from fsm_llm import definitions
+
+        for name in ("OKFError", "SkillError"):
+            assert name in fsm_llm.__all__
+            assert getattr(fsm_llm, name) is getattr(definitions, name)
+            assert issubclass(getattr(fsm_llm, name), fsm_llm.FSMError)
+
+
+class TestNoDeadToxDocs:
+    """M6: tox.ini should not have unused docs environment."""
+
+    def test_no_sphinx_in_tox(self):
+        import pathlib
+
+        tox_path = pathlib.Path(__file__).parents[2] / "tox.ini"
+        content = tox_path.read_text(encoding="utf-8")
+        assert "sphinx" not in content.lower()
+        assert "[testenv:docs]" not in content

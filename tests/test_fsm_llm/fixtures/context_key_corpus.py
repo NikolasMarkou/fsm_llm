@@ -547,7 +547,7 @@ CRYPTO_KEY_SAFE_KEYS: tuple[str, ...] = (
     "map_key",
     "ref_key",
     # the PUBLIC half of an asymmetric pair -- pinned by an existing regression
-    # test (tests/test_fsm_llm_regression/test_regression_iter2.py), invariant I-7
+    # test (tests/test_fsm_llm_regression/test_regression_core_bugs.py), invariant I-7
     "public_key",
     "public_keys",
     # this framework's own generic-reference `*_key` idiom

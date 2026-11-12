@@ -413,7 +413,8 @@ _PASSWORD_POLICY_SUFFIXES = (
 #     it as ordinary. `license_key`, `activation_key` and `serial_key` remain
 #     stripped as the unambiguous license-credential spellings.
 #   - `public` is NOT in the crypto denylist (a public key is not a secret;
-#     invariant I-7, pinned by tests/test_fsm_llm_regression/test_regression_iter2.py).
+#     invariant I-7, pinned by tests/test_fsm_llm_regression/test_regression_core_bugs.py,
+#     TestForbiddenContextPatterns).
 #     `ssh_public_key` still strips, because `ssh` is.
 # See decisions.md D-015.
 
