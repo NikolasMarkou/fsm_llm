@@ -64,7 +64,12 @@ def audit() -> int:
             if pth.name in KNOWN_SAFE:
                 continue
             try:
-                content = pth.read_text(encoding="utf-8")
+                # `site` reads UTF-8 with an optional BOM (then the locale
+                # encoding on 3.13+); Windows tools write both. `utf-8-sig`
+                # keeps a BOM from hiding an `import` line from the pattern,
+                # and `replace` keeps an ANSI byte in a path from crashing the
+                # audit while the code lines (ASCII) are still scanned.
+                content = pth.read_text(encoding="utf-8-sig", errors="replace")
             except OSError:
                 continue
             if is_editable_finder(pth.name, content):

@@ -176,7 +176,8 @@ def run_example(
     """Run one example to completion or timeout and return its scored result.
 
     The subprocess gets a copy of the environment plus ``LLM_MODEL=model``,
-    ``PYTHONDONTWRITEBYTECODE=1`` and ``PYTHONUNBUFFERED=1``, the target's stdin
+    ``PYTHONDONTWRITEBYTECODE=1``, ``PYTHONUNBUFFERED=1``, ``PYTHONIOENCODING=utf-8``
+    and ``PYTHONUTF8=1`` (the pipes are UTF-8 on both sides), the target's stdin
     script (or none), and ``cwd``. Never raises: a timeout gives
     ``exit_code=None, timed_out=True`` with the partial output; any other
     failure to run gives ``exit_code=-1``. The child runs through
@@ -193,6 +194,12 @@ def run_example(
     env["LLM_MODEL"] = model
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
+    # `run_tracked` encodes the stdin script and decodes both pipes as UTF-8; a
+    # child on a Windows host (or a legacy locale) would use cp1252, mangle
+    # every non-ASCII reply and die printing an emoji. Both variables: an
+    # ambient PYTHONIOENCODING outranks PYTHONUTF8 for the standard streams.
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     start = time.monotonic()
     try:
         proc = run_tracked(

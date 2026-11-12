@@ -1226,3 +1226,37 @@ class TestAuditPthEditableFinder:
             name, self._HOOK + "\nimport os; os.system('x')"
         )
         assert not audit_pth.is_editable_finder(name, "import os; os.system('x')")
+
+
+class TestAuditPthReadsWhatSiteReads:
+    """A `.pth` is decoded by `site` (UTF-8 with an optional BOM, then the
+    locale encoding on 3.13+), and Windows tools write both a BOM and ANSI
+    bytes. The audit must neither crash on a file it cannot decode nor be
+    blinded by a BOM in front of an `import` line."""
+
+    _CODE = b"import os; os.system('echo owned')\n"
+
+    def _audit(self, tmp_path, monkeypatch, name: str, data: bytes):
+        (tmp_path / name).write_bytes(data)
+        monkeypatch.setattr(audit_pth.site, "getsitepackages", lambda: [str(tmp_path)])
+        return audit_pth.audit()
+
+    def test_a_pth_that_is_not_utf8_does_not_crash_the_audit(
+        self, tmp_path, monkeypatch
+    ):
+        path_only = "C:\\Users\\J\u00fcrgen\\src\n".encode("cp1252")
+        assert self._audit(tmp_path, monkeypatch, "legacy.pth", path_only) == 0
+
+    def test_code_in_a_pth_that_is_not_utf8_is_still_flagged(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        data = b"# J\xfcrgen\n" + self._CODE
+        assert self._audit(tmp_path, monkeypatch, "evil.pth", data) == 1
+        assert "evil.pth" in capsys.readouterr().err
+
+    def test_a_bom_does_not_hide_code_from_the_audit(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        data = b"\xef\xbb\xbf" + self._CODE
+        assert self._audit(tmp_path, monkeypatch, "bom.pth", data) == 1
+        assert "bom.pth" in capsys.readouterr().err

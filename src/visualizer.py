@@ -1678,6 +1678,13 @@ def main(fsm_path, style: str = "full", *, output_format: str = "ascii"):
     # it exists to print never reaches the user. See decisions.md D-014. The
     # enable goes through the one `enable_library_logging`.
     enable_library_logging()
+    # The default diagram is box drawing, which a redirected Windows stdout
+    # (cp1252) cannot encode: write it as \uXXXX through the shared helper
+    # instead of ending in a UnicodeEncodeError. Imported here, not at module
+    # level: `cli_support` pulls in `okf`, and `import fsm_llm` loads neither.
+    from .cli_support import escape_unencodable_output
+
+    escape_unencodable_output()
 
     diagram = visualize_fsm_from_file(fsm_path, style, output_format=output_format)
 

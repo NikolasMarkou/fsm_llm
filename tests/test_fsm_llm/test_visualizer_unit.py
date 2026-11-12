@@ -511,6 +511,32 @@ class TestVisualizeCliEmitsOutput:
         assert "not found" in output
 
 
+class TestVisualizeSurvivesAnUnencodableStdout:
+    """The default diagram is box drawing. A stdout that cannot encode it (a
+    redirected Windows stdout is cp1252, a pipe under a legacy locale likewise)
+    must get the diagram as `\\uXXXX` text through the shared
+    `cli_support.escape_unencodable_output`, not a UnicodeEncodeError."""
+
+    @pytest.mark.parametrize("encoding", ["cp1252", "ascii"])
+    def test_a_cp1252_or_ascii_stdout_gets_escapes_not_a_traceback(
+        self, tmp_path, monkeypatch, encoding
+    ):
+        path = tmp_path / "linear.json"
+        path.write_text(json.dumps(_linear_fsm_data()), encoding="utf-8")
+        raw = io.BytesIO()
+        stream = io.TextIOWrapper(raw, encoding=encoding, errors="strict")
+        monkeypatch.setattr(sys, "stdout", stream)
+
+        from fsm_llm.visualizer import main
+
+        assert main(str(path)) == 0
+
+        stream.flush()
+        text = raw.getvalue().decode(encoding)
+        assert "LinearFSM" in text
+        assert "\\u2500" in text, "box drawing is written as an escape"
+
+
 # ------------------------------------------------------------------
 # F-17 / SC-18: the STATES section must render an intact box
 # ------------------------------------------------------------------

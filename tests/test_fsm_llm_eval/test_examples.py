@@ -307,6 +307,35 @@ class TestTimeoutPartialOutput:
         result = run_example(target, "m", sys.executable, tmp_path)
         assert "u=1" in result.stdout
 
+    def test_the_child_speaks_utf8_whatever_the_host_locale(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """`run_tracked` decodes the child's pipes as UTF-8 and encodes its
+        stdin script as UTF-8, but a child on a Windows host (or a legacy
+        locale) writes the locale encoding, cp1252, and could not even print an
+        emoji. The ambient cp1252 stands for that host."""
+        monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
+        monkeypatch.delenv("PYTHONUTF8", raising=False)
+        target = self._target(
+            tmp_path,
+            "import sys\n"
+            "print('e=\\u00e9 emoji=\\U0001f600')\n"
+            "print('in=' + sys.stdin.read())\n",
+            timeout=30,
+        )
+        target = ExampleTarget(
+            name=target.name,
+            category=target.category,
+            path=target.path,
+            interactive=False,
+            stdin_data="caf\u00e9\n",
+            timeout=30,
+        )
+        result = run_example(target, "m", sys.executable, tmp_path)
+        assert result.exit_code == 0, result.stderr
+        assert "e=\u00e9 emoji=\U0001f600" in result.stdout
+        assert "in=caf\u00e9" in result.stdout
+
     @pytest.mark.parametrize(
         "out, err",
         [(b"partial \xe9", b"warn"), ("partial text", "warn"), (None, None)],
