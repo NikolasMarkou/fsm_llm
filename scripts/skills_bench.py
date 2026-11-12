@@ -383,7 +383,8 @@ def run_trial(
     if raw is not None:
         raw.parent.mkdir(parents=True, exist_ok=True)
         raw.write_text(
-            json.dumps({"row": row, "wire": wire, "tools": trace}, default=str)
+            json.dumps({"row": row, "wire": wire, "tools": trace}, default=str),
+            encoding="utf-8",
         )
     return row
 

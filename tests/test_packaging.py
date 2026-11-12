@@ -18,6 +18,7 @@ from __future__ import annotations
 import ast
 import collections
 import importlib
+import json
 import os
 import pathlib
 import re
@@ -557,6 +558,155 @@ class TestDeclaredRangesMatchPins:
             if ln.strip().startswith("litellm")
         ]
         assert len(lines) == 1, lines
+
+
+# ══════════════════════════════════════════════════════════════
+# Explicit text encodings (D-011, D-018): Windows and the C locale do not
+# default to UTF-8, so every text file call names its encoding.
+# ══════════════════════════════════════════════════════════════
+
+#: Receivers of an `.open(...)` that is not a file open (os.open takes flags).
+_NOT_A_FILE_OPEN_RECEIVERS = {"os", "webbrowser"}
+#: Calls whose mode defaults to binary: only an explicit text mode is checked.
+_BINARY_DEFAULT_CALLS = {"NamedTemporaryFile", "TemporaryFile", "SpooledTemporaryFile"}
+
+
+def _text_mode(call: ast.Call, positional_index: int, default: str) -> bool:
+    """True when the call opens in text mode (or the mode is not a literal)."""
+    mode_node: ast.expr | None = None
+    if len(call.args) > positional_index:
+        mode_node = call.args[positional_index]
+    for kw in call.keywords:
+        if kw.arg == "mode":
+            mode_node = kw.value
+    if mode_node is None:
+        return "b" not in default
+    if isinstance(mode_node, ast.Constant) and isinstance(mode_node.value, str):
+        return "b" not in mode_node.value
+    return True  # a computed mode cannot be proved binary
+
+
+def _unencoded_text_calls(tree: ast.AST) -> list[int]:
+    """Line numbers of text-mode file calls with no `encoding` argument."""
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = (
+            func.attr
+            if isinstance(func, ast.Attribute)
+            else func.id
+            if isinstance(func, ast.Name)
+            else ""
+        )
+        has_encoding = any(kw.arg in ("encoding", None) for kw in node.keywords)
+        if name in ("read_text", "write_text"):
+            positional_encoding = 1 if name == "read_text" else 2
+            if not has_encoding and len(node.args) < positional_encoding:
+                lines.append(node.lineno)
+        elif name == "open" and isinstance(func, ast.Name):
+            if _text_mode(node, 1, "r") and not has_encoding:
+                lines.append(node.lineno)
+        elif name == "open" and isinstance(func, ast.Attribute):
+            receiver = func.value
+            if isinstance(receiver, ast.Name) and (
+                receiver.id in _NOT_A_FILE_OPEN_RECEIVERS
+            ):
+                continue
+            if _text_mode(node, 0, "r") and not has_encoding:
+                lines.append(node.lineno)
+        elif name == "fdopen":
+            if _text_mode(node, 1, "r") and not has_encoding:
+                lines.append(node.lineno)
+        elif name in _BINARY_DEFAULT_CALLS:
+            if _text_mode(node, 0, "w+b") and not has_encoding:
+                lines.append(node.lineno)
+    return sorted(lines)
+
+
+class TestExplicitEncodings:
+    """No text-mode file call in `src/` or `scripts/` relies on the locale."""
+
+    def test_no_text_file_call_without_an_encoding(self):
+        offenders: list[str] = []
+        roots = [_REPO_ROOT / "src", _REPO_ROOT / "scripts"]
+        for root in roots:
+            for path in sorted(root.rglob("*.py")):
+                rel = path.relative_to(_REPO_ROOT)
+                # scripts/bench_data is frozen, tracked history: never edited.
+                if rel.parts[:2] == ("scripts", "bench_data"):
+                    continue
+                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(rel))
+                offenders += [f"{rel}:{n}" for n in _unencoded_text_calls(tree)]
+        assert not offenders, "text file call without encoding=: " + ", ".join(
+            offenders
+        )
+
+    def test_the_scanner_flags_and_accepts_the_known_shapes(self):
+        bad = ast.parse(
+            "p.read_text()\n"
+            "p.write_text(s)\n"
+            "open(p)\n"
+            "open(p, 'w')\n"
+            "p.open()\n"
+            "os.fdopen(fd, 'w')\n"
+            "tempfile.NamedTemporaryFile(mode='w')\n"
+            "open(p, mode)\n"
+        )
+        assert _unencoded_text_calls(bad) == [1, 2, 3, 4, 5, 6, 7, 8]
+        good = ast.parse(
+            "p.read_text(encoding='utf-8')\n"
+            "p.write_text(s, encoding='utf-8')\n"
+            "p.read_text('utf-8')\n"
+            "open(p, 'rb')\n"
+            "p.open('wb')\n"
+            "os.fdopen(fd, 'wb')\n"
+            "os.open(p, flags)\n"
+            "webbrowser.open(url)\n"
+            "tempfile.NamedTemporaryFile()\n"
+            "open(p, 'w', encoding='utf-8')\n"
+        )
+        assert _unencoded_text_calls(good) == []
+
+    def test_a_utf8_session_file_loads_under_the_c_locale(self, tmp_path):
+        """src/session.py `load` read the file with the locale encoding."""
+        session = {
+            "conversation_id": "c1",
+            "fsm_id": "f1",
+            "current_state": "start",
+            "context_data": {"city": "Zürich", "note": "日本"},
+        }
+        (tmp_path / "s1.json").write_bytes(
+            json.dumps(session, ensure_ascii=False).encode("utf-8")
+        )
+        script = (
+            "import locale, sys\n"
+            "from fsm_llm.session import FileSessionStore\n"
+            "assert sys.flags.utf8_mode == 0, 'UTF-8 mode is on'\n"
+            "print(locale.getpreferredencoding(False))\n"
+            "state = FileSessionStore(sys.argv[1]).load('s1')\n"
+            "print(ascii(None if state is None else state.context_data))\n"
+        )
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("PYTHONUTF8", "PYTHONIOENCODING", "LANG", "LC_CTYPE")
+        }
+        env.update(LC_ALL="C", PYTHONCOERCECLOCALE="0")
+        proc = subprocess.run(
+            [sys.executable, "-X", "utf8=0", "-c", script, str(tmp_path)],
+            capture_output=True,
+            text=True,
+            encoding="ascii",
+            env=env,
+            cwd=tmp_path,
+            timeout=120,
+        )
+        assert proc.returncode == 0, proc.stderr
+        encoding, loaded = proc.stdout.splitlines()
+        assert encoding.lower() in ("ansi_x3.4-1968", "ascii", "us-ascii"), encoding
+        assert loaded == ascii(session["context_data"])
 
 
 # ══════════════════════════════════════════════════════════════

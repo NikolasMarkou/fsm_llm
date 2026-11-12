@@ -64,7 +64,7 @@ def audit() -> int:
             if pth.name in KNOWN_SAFE:
                 continue
             try:
-                content = pth.read_text()
+                content = pth.read_text(encoding="utf-8")
             except OSError:
                 continue
             if is_editable_finder(pth.name, content):

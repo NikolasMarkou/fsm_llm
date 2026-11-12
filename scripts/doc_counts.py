@@ -80,7 +80,7 @@ def pytest_collection_finish(session):
         names = {m.name for m in i.iter_markers()}
         live = {"live"} if {"real_llm", "skipif"} <= names else set()
         rows.append([i.nodeid, sorted(names & set(MARKERS) | live)])
-    Path(os.environ[OUT_ENV]).write_text(json.dumps(rows))
+    Path(os.environ[OUT_ENV]).write_text(json.dumps(rows), encoding="utf-8")
 
 
 def _suite(path: str) -> str | None:
@@ -117,7 +117,7 @@ def measure() -> dict:
             raise RuntimeError(
                 f"collection failed: {run.stdout[-1500:]}{run.stderr[-1500:]}"
             )
-        rows = json.loads(out.read_text())
+        rows = json.loads(out.read_text(encoding="utf-8"))
     files, slow_files, live_files = Counter(), Counter(), Counter()
     classes, markers = Counter(), Counter()
     for nodeid, marks in rows:
@@ -254,7 +254,7 @@ def scan(measured: dict) -> list[str]:
         if md in HISTORICAL or md.startswith(tuple(HISTORICAL)):
             continue
         doc = _Doc(measured, md)
-        lines = (ROOT / md).read_text(errors="replace").splitlines()
+        lines = (ROOT / md).read_text(encoding="utf-8", errors="replace").splitlines()
         for ln, line in enumerate(lines, 1):
             doc.line(ln, line)
         bad += doc.bad

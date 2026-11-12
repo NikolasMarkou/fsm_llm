@@ -671,7 +671,9 @@ def run_trial(arm: str, task: Task, trial: int, workdir: Path, raw: Path | None 
     row["phase"] = phase(row)
     if raw is not None:
         raw.parent.mkdir(parents=True, exist_ok=True)
-        raw.write_text(json.dumps({"row": row, "wire": wire}, default=str))
+        raw.write_text(
+            json.dumps({"row": row, "wire": wire}, default=str), encoding="utf-8"
+        )
     return row
 
 

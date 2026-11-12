@@ -8,7 +8,6 @@ Python files, directories, or programmatic definitions.
 from __future__ import annotations
 
 import hashlib
-import importlib
 import importlib.util
 import sys
 import warnings

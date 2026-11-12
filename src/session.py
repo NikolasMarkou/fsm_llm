@@ -187,7 +187,7 @@ class FileSessionStore(SessionStore):
         # avoids corruption when two saves for the same id race (auto-save).
         fd, tmp_name = tempfile.mkstemp(dir=str(self._dir), suffix=".tmp")
         try:
-            with os.fdopen(fd, "w") as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(json.dumps(data, indent=2, default=redacting_json_default))
                 f.flush()
                 os.fsync(f.fileno())
@@ -212,7 +212,7 @@ class FileSessionStore(SessionStore):
         try:
             if not path.exists():
                 return None
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
             return SessionState.model_validate(data)
         except (json.JSONDecodeError, ValueError, OSError) as e:
             # OSError covers PermissionError, ENAMETOOLONG from exists() and the

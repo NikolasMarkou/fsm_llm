@@ -151,6 +151,14 @@ select = [
     "B",     # flake8-bugbear
     "RUF",   # ruff-specific rules
 ]
+# PLW1514 (unspecified-encoding) is still a preview rule in the pinned ruff
+# (D-018). `preview` plus `explicit-preview-rules` selects ONLY the rules named
+# in `extend-select`: nothing else in the preview set is switched on by prefix.
+# Windows and the C locale do not default to UTF-8, so every text file call names
+# its encoding. The AST gate is tests/test_packaging.py::TestExplicitEncodings.
+preview = true
+explicit-preview-rules = true
+extend-select = ["PLW1514"]
 ignore = [
     "E402",    # module-level import not at top (from __future__)
     "E501",    # line too long (handled by formatter)
@@ -174,7 +182,11 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["B011", "B017"]  # tests may use assert True/False and assertRaises
+"tests/*" = [
+    "B011",
+    "B017",  # tests may use assert True/False and assertRaises
+    "PLW1514",  # TEMPORARY: step 8 adds encoding= to tests and removes this line
+]
 "examples/*" = ["E501"]
 "src/monitor/*" = ["RUF012"]
 
