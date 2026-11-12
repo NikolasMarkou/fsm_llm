@@ -1,6 +1,6 @@
 # test_fsm_llm
 
-The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 77 test files (5,998 collected tests) plus a `fixtures/` package of labelled secret-filter data.
+The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 79 test files (6,195 collected tests) plus a `fixtures/` package of labelled secret-filter data.
 
 ## What it is for
 
@@ -72,6 +72,8 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_validator_unit.py`, `test_visualizer_unit.py` - `FSMValidator` and the ASCII visualizer, including their CLIs.
 - `test_flow_analysis.py` - `fsm_llm.flow_analysis`: the shared graph primitive (with a golden table that pinned the validator's trap detection before it moved), the data-flow and liveness analyses that runtime synthesis uses as gates, and a parity test between the analysis's key-minting rule and the pipeline's.
 - `test_synthesize_field.py` - the optional `synthesize` state field: what the loader accepts and refuses, that the pipeline mints no extraction for such a state, and a spike of a runner-style push from the `before_step` hook.
+- `test_schema_registry.py` - `fsm_llm.schema_registry`: the registry of the version each definition field appeared in (proven complete by walking the models reachable from `FSMDefinition`), the loader and validator version warnings, and `fsm-llm-validate --upgrade`.
+- `test_codes.py` - `fsm_llm.codes`: the status, reason and completion-kind vocabulary, held equal to the wire strings of the modules it mirrors, and its mappers.
 - `test_runner_unit.py`, `test_utilities_unit.py` - the interactive runner's redaction and JSON helpers, FSM file loading.
 - `test_logging_unit.py`, `test_logging_structured.py` - logging helpers, `setup_logging()` and JSON output; child-process tests that `setup_logging()` and `enable_debug_logging()` replace loguru's default handler (a library record prints once, the host's default output stays, `LOGURU_*` settings apply).
 - `test_okf.py`, `test_okf_cli.py` - Open Knowledge Format: the shared path-confinement helper, parser, loader, link graph, search, writer, `capped_note`, the memory export and handler of `okf_bridge.py` (`TestBridgeLayering`: the bridge imports only public names of `okf`), and the `fsm-llm-okf` command.

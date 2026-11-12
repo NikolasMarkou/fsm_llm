@@ -1,7 +1,7 @@
 # test_fsm_llm
 
 Path: `tests/test_fsm_llm`
-Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass MessagePipeline, transitions, prompts, LLM wrapper, handlers, memory, validator, visualizer, logging), 77 test files, 5,998 collected tests.
+Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass MessagePipeline, transitions, prompts, LLM wrapper, handlers, memory, validator, visualizer, logging), 79 test files, 6,195 collected tests.
 
 ## Scope
 
@@ -96,6 +96,8 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_validator_unit.py` | `FSMValidator`, agrees with the loader, `fsm-llm-validate` output | |
 | `test_flow_analysis.py` | `fsm_llm.flow_analysis`: the component primitive (a golden table written before the validator's Tarjan moved there, a very long chain), G3 data flow and G4 liveness findings, the `_minted_keys` parity with the pipeline over every example state | Refactor proof; pins the D-017 mirror |
 | `test_synthesize_field.py` | The optional `State.synthesize` field: load and refusal rules, the pipeline mint change (no extraction, handler-only result key), `fsm_id` of existing FSMs unchanged, a spike of the push-from-`before_step` seam on the real `API` | No synthesis package code |
+| `test_schema_registry.py` | `fsm_llm.schema_registry`: the field-introduction registry proven complete by walking the models reachable from `FSMDefinition`, `newer_fields`, the loader warning, the validator warnings (never stricter than the loader), `upgrade_fsm_file` and `fsm-llm-validate --upgrade` | declared versions are explicit, so no test leans on the default; log capture through a sink, never `caplog` |
+| `test_codes.py` | `fsm_llm.codes`: `Status`, `Reason`, `CompletionKind` equal the wire strings of the pinned synthesis, agents and `CompletionResponse` modules; the stop-reason, tool-status and approval mappers | reads the pinned modules, never edits them |
 | `test_visualizer_unit.py` | ASCII visualizer, box alignment, truncation, CLI output | |
 | `test_runner_unit.py`, `test_utilities_unit.py` | runner redaction, `extract_json_from_text`, FSM loading | |
 | `test_logging_unit.py`, `test_logging_structured.py` | logging helpers, `setup_logging`, JSON formatter, `replace_default_handler` | `TestDefaultHandlerIsReplacedNotDoubled` runs child processes (`sys.path` from `fsm_llm.__file__`, no `-I`) |
@@ -182,7 +184,7 @@ Seam files fake the backend with `patch("fsm_llm.llm.completion", ...)` returnin
 - New regression for a public-path bug: add a seam test that drives `API.converse` or patched `fsm_llm.llm.completion`, not only a helper-level test.
 - Reuse helpers from earlier seam files by import rather than copying, and keep their names stable.
 - Do not relabel, delete or regenerate corpus rows to improve a rate; do not add filter words to catch one corpus entry. Add names from real vocabulary without reading `constants.py` first.
-- After adding or removing tests, re-measure with the first command below. The suite count (5,998) is pinned by `tests/test_packaging.py::test_per_suite_table` (marked slow), which compares a measured `--collect-only` count per suite against a documented literal of the form `pytest tests/test_fsm_llm/  # ... (N tests)`; run that test after changing the count. The counts stated in this file (77 test files, 5,998 tests, 14 slow) are not pinned by any test and must be updated by hand.
+- After adding or removing tests, re-measure with the first command below. The suite count (6,195) is pinned by `tests/test_packaging.py::test_per_suite_table` (marked slow), which compares a measured `--collect-only` count per suite against a documented literal of the form `pytest tests/test_fsm_llm/  # ... (N tests)`; run that test after changing the count. The counts stated in this file (79 test files, 6,195 tests, 14 slow) are not pinned by any test and must be updated by hand.
 
 ```bash
 .venv/bin/python -m pytest tests/test_fsm_llm/ --collect-only -q | tail -1

@@ -31,6 +31,7 @@ Tests fall into four styles:
 - `test_regression_logic_and_visualizer.py` - plan 7: empty `and`/`or`, visualizer box widths, instance cleanup when a START_CONVERSATION handler fails, removed `early_termination`.
 - `test_regression_messages_and_operators.py` - plan 12: message truncation length, allowed JsonLogic operator names, validator output without emoji, Python 3.10 floor, no `HANDLER_ERROR_SKIP`.
 - `test_regression_review.py` - review fixes C1 to M6: version `0.12.0`, reasoning context pruning and `ContextKeys` use, LLM `timeout`, litellm spec excludes 1.82.7 and 1.82.8, no async handlers, static `__all__`, no Sphinx in `tox.ini`.
+- `test_api_snapshot.py` - the public API snapshot: `docs/api.txt` must equal the output of `scripts/api_snapshot.py` (3 tests); regenerate it with `make api-snapshot` after a deliberate public change.
 - `test_regression_transition_eval.py` - plan 8: strict condition matching stops on error, priority tie-break, dict content in response parsing, no CONTEXT_UPDATE handlers for empty data, `pop_fsm` failure path.
 
 ## How to use it
@@ -42,7 +43,7 @@ From the repo root, with the project virtualenv:
 .venv/bin/python -m pytest tests/test_fsm_llm_regression/test_regression_core_bugs.py -k VB14b
 ```
 
-At the time of writing, 265 tests are collected: 262 pass and 2 are skipped (the two `requirements.txt` checks in `test_regression_review.py`). The run takes about a second.
+At the time of writing, 268 tests are collected: 266 pass and 2 are skipped (the two `requirements.txt` checks in `test_regression_review.py`). The run takes about a second.
 
 ## Things to know
 

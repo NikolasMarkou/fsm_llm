@@ -388,6 +388,50 @@ print(visualize_fsm_ascii(fsm_dict, style="compact"))
 
 `FSMGraphNode{id, description, purpose, is_initial, is_terminal}`, `FSMGraphEdge{source, target, description, priority}`. `build_fsm_graph` accepts an `FSMDefinition` or a dict and raises `ValueError` for a definition whose initial state or a transition target is missing, or whose shape is malformed. CLI: `fsm-llm-visualize --fsm F --format ascii|mermaid|dot` (`--style` applies to ASCII only; `fsm-llm --mode visualize` prints ASCII). The monitor's FSM graphs read the same function.
 
+## Definition versions and `fsm-llm-validate` (`fsm_llm.schema_registry`)
+
+```python
+from fsm_llm.schema_registry import (
+    FIELD_VERSIONS, SCHEMA_VERSION_DEFAULT, newer_fields, parse_version)
+
+SCHEMA_VERSION_DEFAULT              # "4.2": the version a definition without `version` takes
+FIELD_VERSIONS["State.synthesize"]  # "4.2"; keys are "Model.field", values the version that added it
+parse_version("4.1")                # (4, 1); None for a text that is not N.M ("v4.1", "4", "4.1.1")
+newer_fields(definition)            # tuple[SchemaFinding, ...]; each has .model, .field, .introduced,
+                                    # .declared, .state_id and .message
+```
+
+The registry is a leaf core module (imports no other `fsm_llm` module, never logs). Its tiers are coarse: the 4.0-era common fields are `"4.0"`, every field added since the 2-pass rewrite is `"4.1"`, and `State.synthesize` with every `SynthesizeConfig` field is `"4.2"`. A test walks the models reachable from `FSMDefinition`, so a field missing from `FIELD_VERSIONS` (or an entry for a field that is gone) fails the build. `newer_fields` lists the fields the author actually set (not `None`, not equal to the default) that the declared version predates; a declared version that does not parse, or is below 4.0, gives no finding.
+
+The loader logs one warning per construction for such a field (library logging is off by default) and still loads the definition. `fsm-llm-validate` reports the same facts as warnings in its JSON report; `is_valid` is unchanged, so the validator is never stricter than the loader. A definition that omits `version` takes the current default and never warns. A definition that declares `"4.1"` explicitly now has a different `fsm_id` than before the default moved to `"4.2"` (the id hashes the declared version); a stored session of it restores with an `fsm_id` mismatch warning, and a stored synthesis procedure that declares `"4.1"` is stored again under a new digest.
+
+```bash
+fsm-llm-validate --fsm path.json [--upgrade]
+```
+
+`--upgrade` first rewrites the file in place to `SCHEMA_VERSION_DEFAULT`, then validates it. Only a string `version` that does not parse as `N.M` or is older than the default is rewritten (`"3.0"`, `"4.1"`, `"v4.1"`); an omitted, non-string, current or newer (`"5.0"`) version is left alone, so it never downgrades and a second run changes nothing (no write, mtime kept). The write is atomic (a same-directory temp file, fsync, `os.replace`), keeps the file mode and follows a symlink to its target; a rewritten file is reformatted to indent 2 with its key order kept. An unreadable file, invalid JSON, a non-object top level or a failed write leaves the file as it was and the normal validation reports on it. stdout stays the JSON report only. `fsm-llm --mode validate` does not take `--upgrade`.
+
+## Status, reason and completion-kind vocabulary (`fsm_llm.codes`)
+
+```python
+from fsm_llm.codes import (
+    CompletionKind, Reason, Status,
+    approval_code, status_of_stop_reason, status_of_tool_status)
+
+Status.from_string("ok")            # Status.OK; "bogus", "", None raise ValueError naming the values
+Status.OK == "ok"                   # True: a str, Enum, so == , hashing, `in` and json.dumps work as for the string
+status_of_stop_reason("max_iterations")  # (Status.ABORTED, Reason.BUDGET_SPENT)
+status_of_tool_status("rejected")        # (Status.FAILED, Reason.APPROVAL_DENIED)
+approval_code(None)                      # (Status.FAILED, Reason.APPROVAL_REQUIRED)
+```
+
+- `Status`: `ok`, `failed`, `aborted`, `running`, `abstained`. `Reason`: the 15 reason codes of `fsm_llm.synthesis` in their pinned order, plus `needs_user_input` (written by `synthesis.tools`, outside the pinned `REASONS` tuple). `CompletionKind`: `calls`, `final`, `malformed` (the `kind` of a `CompletionResponse` and of a completion-state result).
+- The values are the strings already on the wire. The modules that own them (`synthesis.constants`, the agents constants, `CompletionResponse`) keep their strings; `tests/test_fsm_llm/test_codes.py` reads them and fails on drift. `definitions.py` takes the statuses of its `synthesize` sample results from `Status`.
+- The three mappers are pure and lossy by design, and each says so in its docstring: a spent `max_iterations` becomes `aborted` with `budget_spent` (the budget kind stays in `stop_reason`); an approval timeout is folded into denied. A timed-out tool call (`unknown`) is deliberately refused with `ValueError`, never mapped to `failed`: the call may still take effect, and `failed` reads as safe to run again.
+- Import it by name; `fsm_llm/__init__.py` does not load it. In messages use `.value`, not an f-string of a member.
+
+The public names of the packages, with signatures, are also in the generated `docs/api.txt`; regenerate it with `make api-snapshot` after a deliberate public change (a regression test fails until you do).
+
 ## Logging (`fsm_llm`)
 
 Library logging is off until you ask for it: `import fsm_llm` calls `logger.disable("fsm_llm")` once, which silences every subpackage too.

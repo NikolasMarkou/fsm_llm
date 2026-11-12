@@ -45,6 +45,8 @@ One LLM layer (`src/llm.py`, the only module that imports litellm): `LLMInterfac
 | `src/llm.py`, `classification.py` | `LLMInterface`, `LiteLLMInterface` (`complete`, `usage`), `LiteLLMEmbedder`, `tool_exchange`; `Classifier` | Only litellm import; the classifier uses the conversation's interface |
 | `src/security.py`, `constants.py` | `has_internal_prefix`, `is_forbidden_context_entry`, `resolve_within`, defaults, `OKF_*` limits | Single source for key filtering; shared path-confinement helper |
 | `src/flow_analysis.py` | Static analysis over an `FSMDefinition`: `strongly_connected_components` (the one graph primitive, shared with `FSMValidator`), `analyze_data_flow` (G3), `analyze_liveness` (G4), `declared_available`, frozen `FlowFinding`s | Core module, imports only `definitions`; never logs, never raises on a loaded definition; `FSMValidator.validate()` calls none of the analyses (never stricter than the loader) |
+| `src/schema_registry.py` | `SCHEMA_VERSION_DEFAULT` (`"4.2"`), `FIELD_VERSIONS` ("Model.field" to the definition version that added it), `parse_version`, `newer_fields`, frozen `SchemaFinding` | Leaf core module, imports no `fsm_llm` module, never logs; a test walks the models reachable from `FSMDefinition`, so a field missing from the table fails the build; the loader and `fsm-llm-validate` warn on a field newer than the declared version |
+| `src/codes.py` | `Status`, `Reason`, `CompletionKind` (`str, Enum` with `from_string`), `status_of_stop_reason`, `status_of_tool_status`, `approval_code` | Standard library only; values equal the wire strings of synthesis, agents and `CompletionResponse`, held by `test_codes.py`; `definitions.py` uses `Status` for its status literals |
 | `src/okf.py`, `okf_cli.py` | Open Knowledge Format (OKF v0.2, SPEC at commit ad30107, pre-1.0 and mutable): `load_bundle`, `OKFBundle`, `check_bundle`, `write_bundle`; public helpers `iso_utc`, `has_lone_surrogate`, `writes_within_caps`, `capped_note`; `fsm-llm-okf` | Core modules, import no subpackage; not imported by `fsm_llm/__init__.py` |
 | `src/okf_bridge.py` | Memory entries and plain FSMs to OKF: `bundle_from_memory_entries`, `create_okf_handler` | 289 lines, split out of `okf.py` (which is about 1,320 lines now); imports only public names of `okf`; no re-export |
 | `src/cli_support.py` | The CLI skeleton `okf_cli` and `agent_skills_cli` share: `run_cli`, `exit_main`, `report_error`, `report_issues`, `add_max_seconds`, `escape_unencodable_output`, `positive_seconds` | Stdlib, `constants`, `okf.capped_line` and `okf.strip_unsafe_text` only; neither CLI imports a private name from the other |
@@ -68,6 +70,7 @@ One LLM layer (`src/llm.py`, the only module that imports litellm): `LLMInterfac
 | `scripts/skills_bench.py` | Pre-registered Agent Skills read-hint ablation (bench id `skills-disclosure`, blocks B0 and B1): `register`, `run`, `report` | Registered, NOT RUN (live runs declined); the read hint is a recorded default, not a measurement |
 | `scripts/type_check.py` | Runs mypy on the package `fsm_llm` by exposing `src/` under that name through a temporary symlink and `MYPYPATH` (`mypy src/` would name modules `src.*` and turn every `fsm_llm.*` import into `Any`); `make type-check`, tox, CI | Linux and macOS (symlink); `src/` must never be put on `sys.path` (it holds `logging.py`) |
 | `scripts/doc_counts.py` | Compares the count tokens of the shapes it knows (`N tests`, marker, `N slow`, `N live`/`N gated`, `tests in N files`, rows) in the tracked `.md` files with one `pytest --collect-only`; exit 1 on drift or on such a token no rule names; prose numbers with no token shape are not read | `make counts`; skips when `mcp` is importable |
+| `scripts/api_snapshot.py` | Prints the public API (static `__all__` of the seven packages and the named core modules, with signatures) for `docs/api.txt`; `--write PATH`; `make api-snapshot` | `tests/test_fsm_llm_regression/test_api_snapshot.py` fails when `docs/api.txt` differs; regenerate and review the diff in the same commit; never edit `docs/api.txt` by hand |
 | `evaluation/datasets/` | `simple_greeting_cases.json`, `name_capture_fsm.json` | Samples for `fsm-llm-eval run` |
 | `examples/<category>/<name>/` | `run.py` plus FSM JSON; 8 categories | Evaluation baselines |
 | `pyproject.toml`, `Makefile`, `tox.ini`, `constraints.txt`, `MANIFEST.in`, `.pre-commit-config.yaml` | Build, tasks, envs, exact pins, sdist, hooks | All checked by `test_packaging.py` |
@@ -82,7 +85,7 @@ Model resolution: `model=` argument, then env `LLM_MODEL`, then `DEFAULT_LLM_MOD
 ```bash
 fsm-llm --fsm <path.json>            # Run FSM interactively (needs env LLM_MODEL)
 fsm-llm-visualize --fsm <path.json> [--format ascii|mermaid|dot]  # Diagram
-fsm-llm-validate --fsm <path.json>   # Validate FSM definition
+fsm-llm-validate --fsm <path.json> [--upgrade]  # Validate FSM definition (--upgrade stamps the current version first)
 fsm-llm-monitor                      # Web dashboard at http://127.0.0.1:8420
 fsm-llm-meta                         # Interactive artifact builder (fsm_llm.agents.meta_cli)
 python -m fsm_llm.reasoning "problem" [--type T]    # Reasoning CLI (no console script)
@@ -194,7 +197,7 @@ Rules for NEW code, so the vocabulary stays one across core and the subpackages.
 ## Working here
 
 ```bash
-make test           # pytest -v (13,777 tests)
+make test           # pytest -v (13,977 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # python scripts/type_check.py (mypy -p fsm_llm)
@@ -204,21 +207,22 @@ make coverage       # pytest with --cov=fsm_llm
 make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis]" + pre-commit install
 make audit          # python scripts/audit_pth.py
 make counts         # python scripts/doc_counts.py (fails when a documented test count drifts)
+make api-snapshot   # python scripts/api_snapshot.py --write docs/api.txt (regenerate the public API snapshot)
 ```
 
 ```bash
-pytest                                 # Run all tests (13,777 collected)
-pytest tests/test_fsm_llm/            # Core package tests (5,998 tests)
+pytest                                 # Run all tests (13,977 collected)
+pytest tests/test_fsm_llm/            # Core package tests (6,195 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (232 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (330 tests)
 pytest tests/test_fsm_llm_agents/     # Agents tests (3,194 tests)
 pytest tests/test_fsm_llm_monitor/    # Monitor tests (458 tests)
 pytest tests/test_fsm_llm_meta/       # Meta-builder tests (515 tests)
-pytest tests/test_fsm_llm_regression/ # Regression tests (265 tests)
+pytest tests/test_fsm_llm_regression/ # Regression tests (268 tests)
 pytest tests/test_examples/           # Example validation tests (67 tests)
 pytest tests/test_fsm_llm_eval/       # Eval tests (430 tests)
 pytest tests/test_fsm_llm_synthesis/  # Synthesis tests (2,037 tests)
-# The 10 suites above sum to 13,526. The remaining 251 are five root-level files:
+# The 10 suites above sum to 13,726. The remaining 251 are five root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (50),
 #   tests/test_bench_common.py (19), tests/test_agents_bench.py (132)
 #   and tests/test_skills_bench.py (38)
