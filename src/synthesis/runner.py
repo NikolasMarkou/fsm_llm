@@ -37,6 +37,7 @@ from fsm_llm.definitions import (
 )
 from fsm_llm.expressions import is_missing
 from fsm_llm.logging import logger
+from fsm_llm.state_kinds import kind_of
 from fsm_llm.transition_evaluator import TransitionEvaluator
 
 from .constants import (
@@ -146,7 +147,7 @@ def runnable_reason(
     compile with that policy already simulated) or a failed ``verify_stored``,
     checked in that order. Shared by the runner and the agent tools; never
     raises."""
-    if any(s.completion for s in definition.states.values()):
+    if any(not kind_of(s).supported_in_procedure for s in definition.states.values()):
         return REASON_COMPLETION_UNSUPPORTED
     if lifecycle not in _ALLOWED_LIFECYCLES[min_lifecycle]:
         return REASON_LIFECYCLE_TOO_LOW

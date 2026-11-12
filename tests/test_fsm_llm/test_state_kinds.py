@@ -14,6 +14,7 @@ from __future__ import annotations
 import ast
 import copy
 import typing
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, ClassVar, get_args, get_origin
@@ -1728,6 +1729,296 @@ class TestVerifierHooks:
         )
         loaded.states["a"] = bypass
         assert analyze_data_flow(loaded) == []
+
+
+class TestToolAndProcedureHooks:
+    """Plan d454fd62 step 52: the declared tool names (three copies before) and the
+    "a procedure cannot hold this kind" rule read the registry; every answer is
+    equal to the parent's."""
+
+    _ROOT = _MODULE.parent / "synthesis"
+
+    # Frozen oracles of the three parent copies.
+    @staticmethod
+    def _old_synthesizer(definition: FSMDefinition) -> list[str]:
+        states = definition.states.values()
+        return sorted(
+            {
+                t["function"]["name"]
+                for s in states
+                if s.completion and s.completion.tools
+                for t in s.completion.tools
+            }
+        )
+
+    @staticmethod
+    def _old_library(definition: FSMDefinition) -> list[str]:
+        return sorted(
+            {
+                t["function"]["name"]
+                for s in definition.states.values()
+                if s.completion and s.completion.tools
+                for t in s.completion.tools
+                if isinstance(t.get("function"), dict)
+                and isinstance(t["function"].get("name"), str)
+            }
+        )
+
+    @staticmethod
+    def _old_policy(completion: dict[str, Any]) -> list[str | None]:
+        tools = completion.get("tools")
+        entries = [] if tools is None else tools if isinstance(tools, list) else [tools]
+        names: list[str | None] = []
+        for tool in entries:
+            fn = tool.get("function") if isinstance(tool, dict) else None
+            name = fn.get("name") if isinstance(fn, dict) else None
+            names.append(name if isinstance(name, str) and name else None)
+        return names
+
+    _RAW_TOOLS: ClassVar[list[Any]] = [
+        None,
+        [],
+        [{"type": "function", "function": {"name": "a"}}],
+        [
+            {"type": "function", "function": {"name": "a"}},
+            {"type": "function", "function": {"name": "b"}},
+        ],
+        [{"type": "function", "function": {"name": ""}}],
+        [{"type": "function", "function": {"name": 3}}],
+        [{"type": "function", "function": "a"}],
+        [{"type": "function"}],
+        ["a", 3, None, {"function": {"name": "z"}}],
+        {"type": "function", "function": {"name": "solo"}},
+        "not a list",
+        [{"function": {"name": "a"}}, {"function": {"name": "a"}}],
+    ]
+
+    def _loaded(self):
+        for name, (raw, _options) in _CORPUS.items():
+            try:
+                yield name, FSMDefinition(**copy.deepcopy(raw))
+            except Exception:
+                continue
+
+    # ---- no kind branch in the readers -------------------------------
+
+    @pytest.mark.parametrize("module", ["synthesizer", "library"])
+    def test_the_typed_readers_read_no_completion_config(self, module):
+        tree = ast.parse((self._ROOT / f"{module}.py").read_text(encoding="utf-8"))
+        assert [
+            n.lineno
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Attribute) and n.attr == "completion"
+        ] == [], module
+
+    def test_the_policy_keeps_no_copy_of_the_tool_reader(self):
+        tree = ast.parse((self._ROOT / "policy.py").read_text(encoding="utf-8"))
+        defined = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+        assert "_completion_tool_names" not in defined
+
+    def test_the_runner_refusal_reads_the_hook_not_the_config(self):
+        node = _function_node(self._ROOT / "runner.py", "runnable_reason")
+        assert _config_attributes(node) == set()
+
+    # ---- equal to the parent over the corpus -------------------------
+
+    def test_the_typed_hook_equals_both_parent_copies_over_the_corpus(self):
+        seen = 0
+        for name, definition in self._loaded():
+            states = definition.states.values()
+            got = sorted(sk.declared_tool_names(states))
+            assert got == self._old_synthesizer(definition), name
+            assert got == self._old_library(definition), name
+            seen += len(got)
+        assert seen > 0, "the corpus holds no completion tool"
+
+    def test_the_raw_hook_equals_the_parent_policy_reader(self):
+        for tools in self._RAW_TOOLS:
+            completion = {"tools": tools}
+            assert list(
+                sk.COMPLETION.raw_declared_tools({"completion": completion})
+            ) == (self._old_policy(completion)), tools
+        assert list(sk.COMPLETION.raw_declared_tools({"completion": {}})) == []
+
+    def test_the_raw_hook_equals_the_parent_over_the_corpus_states(self):
+        for name, (raw, _options) in _CORPUS.items():
+            for state in (raw.get("states") or {}).values():
+                if not isinstance(state, dict):
+                    continue
+                completion = state.get("completion")
+                if isinstance(completion, dict):
+                    assert list(
+                        sk.COMPLETION.raw_declared_tools(state)
+                    ) == self._old_policy(completion), name
+
+    def test_the_typed_hook_reads_a_state_around_the_loader(self):
+        state = _plain_state().model_copy(
+            update={
+                "completion": SimpleNamespace(tools=[{"function": {"name": "x"}}, 3])
+            }
+        )
+        assert sk.COMPLETION.declared_tools(state) == ("x",)
+
+    def test_a_kind_without_tools_declares_none(self):
+        state = _plain_state(synthesize=_synthesize())
+        assert sk.CONVERSATION.declared_tools(state) == ()
+        assert sk.SYNTHESIZE.declared_tools(state) == ()
+        assert sk.CONVERSATION.raw_declared_tools({}) == ()
+        assert sk.SYNTHESIZE.raw_declared_tools({"synthesize": {}}) == ()
+        assert sk.declared_tool_names([state]) == frozenset()
+
+    # ---- supported_in_procedure --------------------------------------
+
+    def test_only_the_completion_kind_is_unsupported_in_a_procedure(self):
+        assert {spec.name: spec.supported_in_procedure for spec in sk.KINDS} == {
+            "conversation": True,
+            "completion": False,
+            "synthesize": True,
+        }
+
+    def test_the_runner_refusal_equals_the_parent_over_the_corpus(self):
+        from fsm_llm.synthesis.policy import SynthesisPolicy
+        from fsm_llm.synthesis.runner import runnable_reason
+
+        refused = 0
+        for name, definition in self._loaded():
+            old = any(s.completion for s in definition.states.values())
+            got = runnable_reason(
+                definition,
+                "verified",
+                min_lifecycle="verified",
+                policy=SynthesisPolicy(),
+                inputs=(),
+                return_keys=(),
+            )
+            assert (got == "completion_unsupported") is old, name
+            refused += old
+        assert refused > 0
+
+    # ---- a new kind needs no edit in the readers ---------------------
+
+    def test_the_runner_refuses_the_kinds_the_hook_names(self, monkeypatch):
+        from fsm_llm.synthesis.policy import SynthesisPolicy
+        from fsm_llm.synthesis.runner import runnable_reason
+
+        definition = FSMDefinition(
+            **_host_definition(
+                [
+                    _host_edge("end", _host_condition(_OK)),
+                    _host_edge("fail", _host_condition(_FAILED)),
+                ]
+            )
+        )
+
+        def reason():
+            return runnable_reason(
+                definition,
+                "verified",
+                min_lifecycle="verified",
+                policy=SynthesisPolicy(),
+                inputs=(),
+                return_keys=(),
+            )
+
+        assert reason() != "completion_unsupported"
+        spec = replace(sk.SYNTHESIZE, supported_in_procedure=False)
+        monkeypatch.setattr(sk, "SYNTHESIZE", spec)
+        monkeypatch.setattr(sk, "KINDS", (*sk.KINDS[:2], spec))
+        assert reason() == "completion_unsupported"
+
+    def _swap_completion(self, monkeypatch, **changes):
+        spec = replace(sk.COMPLETION, **changes)
+        monkeypatch.setattr(sk, "COMPLETION", spec)
+        monkeypatch.setattr(sk, "KINDS", (sk.KINDS[0], spec, sk.KINDS[2]))
+
+    def test_the_library_reads_the_tools_the_hook_names(self, monkeypatch, tmp_path):
+        from fsm_llm.synthesis.library import FSMLibrary
+
+        definition = FSMDefinition(
+            name="T",
+            description="t",
+            initial_state="a",
+            states={
+                "a": {
+                    "id": "a",
+                    "description": "d",
+                    "purpose": "p",
+                    "completion": _completion(),
+                    "transitions": [{"target_state": "t", "description": "go"}],
+                },
+                "t": {"id": "t", "description": "d", "purpose": "p"},
+            },
+        )
+
+        def tools_used():
+            lib = FSMLibrary(tmp_path / str(len(list(tmp_path.iterdir()))))
+            record = lib.put(
+                definition, goal="g", inputs_required=[], return_keys=["k"]
+            )
+            return record.signature["tools_used"]
+
+        assert tools_used() == ["f"]
+        self._swap_completion(monkeypatch, declared_tools=lambda state: ("zz", "aa"))
+        assert tools_used() == ["aa", "zz"]
+
+    def test_the_approval_request_names_the_tools_the_hook_names(self, monkeypatch):
+        from fsm_llm.synthesis.synthesizer import _approval_request
+
+        definition = FSMDefinition(
+            name="T",
+            description="t",
+            initial_state="a",
+            states={
+                "a": {
+                    "id": "a",
+                    "description": "d",
+                    "purpose": "p",
+                    "completion": _completion(),
+                    "transitions": [{"target_state": "t", "description": "go"}],
+                },
+                "t": {"id": "t", "description": "d", "purpose": "p"},
+            },
+        )
+        result = SimpleNamespace(
+            definition=definition,
+            report=SimpleNamespace(verdicts={}),
+            simulation=None,
+        )
+
+        def summary():
+            return _approval_request("g", ("k",), result, "d" * 64).summary
+
+        assert summary().endswith("tools: f")
+        self._swap_completion(monkeypatch, declared_tools=lambda state: ("zz",))
+        assert summary().endswith("tools: zz")
+
+    def test_the_policy_reads_the_raw_tools_the_hook_names(self, monkeypatch):
+        from fsm_llm.synthesis.policy import (
+            SynthesisPolicy,
+            check_policy,
+            needs_approval,
+        )
+
+        data = {
+            "name": "T",
+            "initial_state": "a",
+            "states": {
+                "a": {
+                    "id": "a",
+                    "completion": {"response_format_key": "_shape"},
+                    "transitions": [{"target_state": "t"}],
+                },
+                "t": {"id": "t"},
+            },
+        }
+        policy = SynthesisPolicy()
+        assert needs_approval(data, policy) is False
+        assert [f.code for f in check_policy(data, policy)] == []
+        self._swap_completion(monkeypatch, raw_declared_tools=lambda state: ("evil",))
+        assert needs_approval(data, policy) is True
+        assert "completion-tool-not-allowed" in [
+            f.code for f in check_policy(data, policy)
+        ]
 
 
 def _completion_config():

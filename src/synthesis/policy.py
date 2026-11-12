@@ -49,6 +49,7 @@ from fsm_llm.definitions import (
 )
 from fsm_llm.okf import capped_line, has_lone_surrogate, strip_unsafe_text
 from fsm_llm.security import has_internal_prefix, is_forbidden_context_entry
+from fsm_llm.state_kinds import raw_kinds
 
 from .constants import (
     ABORT_CONTEXT_KEY,
@@ -299,8 +300,9 @@ def _key_names(state: dict[str, Any]) -> Iterator[str]:
 def _extracted_names(state: dict[str, Any]) -> set[str]:
     """The distinct names a state's extractions cover, read from the raw dict.
 
-    A superset of the keys the pipeline mints an extraction for (a mirror of
-    ``_minted_keys`` in src/flow_analysis.py, plan 2cefeb61 D-017 item 7): the
+    A superset of the keys the pipeline mints an extraction for (the superset
+    of ``KindSpec.minted_keys`` in src/state_kinds.py, which replaced the hand
+    mirror ``flow_analysis._minted_keys``; plan 2cefeb61 D-017 item 7): the
     explicit ``field_extractions``, the ``classification_extractions`` fields,
     ``required_context_keys`` and the keys the state's own edges require.
     """
@@ -373,26 +375,21 @@ def _text_problems(value: object, limit: int) -> set[str]:
     return found
 
 
-def _completion_tool_names(completion: dict[str, Any]) -> list[str | None]:
-    """The function name of each ``completion.tools`` entry; ``None`` for an
-    entry that has no readable name."""
-    tools = completion.get("tools")
-    entries = [] if tools is None else tools if isinstance(tools, list) else [tools]
-    names: list[str | None] = []
-    for tool in entries:
-        fn = tool.get("function") if isinstance(tool, dict) else None
-        name = fn.get("name") if isinstance(fn, dict) else None
-        names.append(name if isinstance(name, str) and name else None)
-    return names
+def _raw_tool_names(state: dict[str, Any]) -> list[str | None]:
+    """The tools the kinds a RAW state holds a config for declare, one entry per
+    tool (``None`` for an entry with no readable name). The raw read stays raw
+    (D-004): G5 judges the dict a model wrote, before any ``State`` exists, so
+    it asks each kind's ``raw_declared_tools`` hook, never a typed one."""
+    return [
+        name for spec in raw_kinds(state) for name in spec.raw_declared_tools(state)
+    ]
 
 
 def needs_approval(data: object, policy: SynthesisPolicy) -> bool:
     """Whether a human must approve this compile before it runs: the policy
     demands it, or a ``completion`` state lists tools. Never raises."""
     return policy.require_approval or any(
-        _completion_tool_names(state["completion"])
-        for _, state in _states(data)
-        if isinstance(state.get("completion"), dict)
+        _raw_tool_names(state) for _, state in _states(data)
     )
 
 
@@ -533,14 +530,14 @@ def check_policy(data: object, policy: SynthesisPolicy) -> list[PolicyFinding]:
                 ),
                 internal_ok=True,
             )
-            for tool in _completion_tool_names(completion):
-                if tool is None or tool not in policy.allowed_tools:
-                    add(
-                        "completion-tool-not-allowed",
-                        sid,
-                        f"tool {_q(tool)} is not allowed",
-                        str(tool),
-                    )
+        for tool in _raw_tool_names(state):
+            if tool is None or tool not in policy.allowed_tools:
+                add(
+                    "completion-tool-not-allowed",
+                    sid,
+                    f"tool {_q(tool)} is not allowed",
+                    str(tool),
+                )
         judge_names(sid, _key_names(state))
     return out
 

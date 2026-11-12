@@ -46,6 +46,7 @@ from fsm_llm.definitions import FSMDefinition
 from fsm_llm.logging import logger
 from fsm_llm.okf import capped_line, iso_utc
 from fsm_llm.security import resolve_within
+from fsm_llm.state_kinds import declared_tool_names
 
 from .constants import (
     DEFAULT_MAX_TRACES,
@@ -355,14 +356,7 @@ class FSMLibrary:
         if lifecycle not in (LIFECYCLE_DRAFT, LIFECYCLE_VERIFIED):
             raise SynthesisError(f"a new entry is draft or verified, not {lifecycle!r}")
         digest, text = _canonical(definition)
-        tools = {
-            t["function"]["name"]
-            for s in definition.states.values()
-            if s.completion and s.completion.tools
-            for t in s.completion.tools
-            if isinstance(t.get("function"), dict)
-            and isinstance(t["function"].get("name"), str)
-        }
+        tools = declared_tool_names(definition.states.values())
         with self._lock:
             old = self._read_record(digest)
             if self._read_definition(digest) is None:

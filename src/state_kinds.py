@@ -100,6 +100,20 @@ Interface contract:
     key a state of the kind writes its result to, or ``None``; the validator warns
     on an extraction channel naming such a key (it is never extracted).
 
+  - ``declared_tools(state)``: the names of the tools the state's config declares
+    (``completion.tools``, each entry's ``function.name``), in declaration order;
+    an entry with no readable name is skipped. Empty for a kind that declares no
+    tools. Read through ``declared_tool_names`` (below), the one place that
+    spells the rule.
+  - ``raw_declared_tools(state_dict)``: the raw twin, for gate G5, which judges
+    the dict a model wrote before it is loaded: one entry per declared tool, the
+    name or ``None`` for an entry with no readable name (G5 refuses it). Never
+    raises on a malformed ``tools`` value. Called only for a state whose raw
+    ``config_field`` value is a dict.
+  - ``supported_in_procedure``: ``False`` when a stored procedure may not hold a
+    state of the kind (the runner refuses it with ``completion_unsupported``).
+    Data, not a hook.
+
 - ``RawLintServices``: the three facts the raw lint needs and this leaf may not
   import (``result_kinds`` the reply kinds of a completion reply read off
   ``CompletionResponse``, ``default_result_key`` the completion result key a
@@ -146,6 +160,7 @@ __all__ = [
     "CompletionStateKind",
     "KindSpec",
     "RawLintServices",
+    "declared_tool_names",
     "definition_problem",
     "get_kind",
     "kind_of",
@@ -309,6 +324,37 @@ def _completion_lint_raw(
 def _completion_raw_result_key(state: dict[str, Any], services: Any) -> str | None:
     key: str = state["completion"].get("result_key") or services.default_result_key
     return key
+
+
+def _tool_names(tools: object) -> tuple[str | None, ...]:
+    """One entry per declared tool: its function name, or ``None`` for an entry
+    with no readable (string, non-empty) name. ``tools`` is read as given, so a
+    raw value (absent, a single dict, a string) never raises."""
+    entries = () if tools is None else tools if isinstance(tools, list) else (tools,)
+    names: list[str | None] = []
+    for tool in entries:
+        function = tool.get("function") if isinstance(tool, dict) else None
+        name = function.get("name") if isinstance(function, dict) else None
+        names.append(name if isinstance(name, str) and name else None)
+    return tuple(names)
+
+
+def _no_declared_tools(state: Any) -> tuple[str, ...]:
+    return ()
+
+
+def _no_raw_declared_tools(state: dict[str, Any]) -> tuple[str | None, ...]:
+    return ()
+
+
+def _completion_declared_tools(state: Any) -> tuple[str, ...]:
+    config = getattr(state, "completion", None)
+    names = _tool_names(getattr(config, "tools", None))
+    return tuple(name for name in names if name is not None)
+
+
+def _completion_raw_declared_tools(state: dict[str, Any]) -> tuple[str | None, ...]:
+    return _tool_names(state["completion"].get("tools"))
 
 
 def _no_state_problem(state: Any) -> str | None:
@@ -512,6 +558,11 @@ class KindSpec:
     typed_keys: Callable[[Any], dict[str, tuple[str, tuple[str, ...]]]] = _typed_keys
     lint_raw: Callable[[str, dict[str, Any], dict[str, Any], Any], list[str]] = _no_lint
     raw_result_key: Callable[[dict[str, Any], Any], str | None] = _no_raw_result_key
+    declared_tools: Callable[[Any], tuple[str, ...]] = _no_declared_tools
+    raw_declared_tools: Callable[[dict[str, Any]], tuple[str | None, ...]] = (
+        _no_raw_declared_tools
+    )
+    supported_in_procedure: bool = True
 
 
 # The extraction channels a kind that replaces Pass 1 cannot also declare: they
@@ -541,6 +592,11 @@ COMPLETION = KindSpec(
     check_state=_completion_check_state,
     lint_raw=_completion_lint_raw,
     raw_result_key=_completion_raw_result_key,
+    declared_tools=_completion_declared_tools,
+    raw_declared_tools=_completion_raw_declared_tools,
+    # A stored procedure may not hold a completion state (the runner's reason
+    # code `completion_unsupported`, kept unchanged).
+    supported_in_procedure=False,
 )
 
 # The synthesize result key is NOT dropped on push today (an inherited
@@ -590,6 +646,16 @@ def raw_kinds(state: dict[str, Any]) -> tuple[KindSpec, ...]:
         spec
         for spec in KINDS
         if spec.config_field and isinstance(state.get(spec.config_field), dict)
+    )
+
+
+def declared_tool_names(states: Iterable[Any]) -> frozenset[str]:
+    """The tool names declared by *states*: the union of each state's
+    ``kind_of(state).declared_tools(state)``. The one answer shared by the
+    approval request, the library's ``tools_used`` and any later reader (callers
+    sort it)."""
+    return frozenset(
+        name for state in states for name in kind_of(state).declared_tools(state)
     )
 
 

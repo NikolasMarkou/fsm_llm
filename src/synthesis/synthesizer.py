@@ -53,6 +53,7 @@ from fsm_llm.llm import (
 )
 from fsm_llm.logging import logger
 from fsm_llm.okf import capped_line, strip_unsafe_text
+from fsm_llm.state_kinds import declared_tool_names
 from fsm_llm.utilities import extract_json_from_text
 from fsm_llm.visualizer import build_fsm_graph, to_mermaid
 
@@ -187,14 +188,7 @@ def _approval_request(
     goal: str, keys: tuple[str, ...], result: CompileResult, digest: str
 ) -> ProcedureApprovalRequest:
     states = result.definition.states.values()
-    tools = sorted(
-        {
-            t["function"]["name"]
-            for s in states
-            if s.completion and s.completion.tools
-            for t in s.completion.tools
-        }
-    )
+    tools = sorted(declared_tool_names(states))
     diagram = strip_unsafe_text(
         to_mermaid(build_fsm_graph(result.definition)), multiline=True
     )
