@@ -1,7 +1,7 @@
 # fsm_llm.testing
 
 Path: `src/testing`
-Purpose: The seventh subpackage of `fsm_llm`: public test doubles, a scripted user and assertions for code built on the package. Plan d454fd62 (roadmap row 0.9). Today only the wiring and the skeleton exist: `__all__` is empty and the names are added by the plan's steps 22 to 25.
+Purpose: The seventh subpackage of `fsm_llm`: public test doubles, a scripted user and assertions for code built on the package. Plan d454fd62 (roadmap row 0.9). Today `__all__` holds the two promoted doubles (`MockLLM2Interface`, `PromptGroundedLLM`, step 22) and the names are added by the plan's steps 22 to 25.
 
 ## Scope
 
@@ -19,7 +19,8 @@ flowchart TD
 
 | File | Role | Notes |
 | --- | --- | --- |
-| `__init__.py` | Module docstring, one static `__all__` (empty until step 22) | Names are added to `__all__` and to `docs/api.txt` in the same commit |
+| `__init__.py` | Module docstring, one static `__all__` | Names are added to `__all__` and to `docs/api.txt` in the same commit |
+| `doubles.py` | `MockLLM2Interface` (fixed answers) and `PromptGroundedLLM` (a fact only when the prompt shows its evidence), moved verbatim from `tests/conftest.py`; the private `_CURRENT_STATE_TAG` regex | Plain classes with mutable attributes, subclassed by the repo's own tests; the dead `transition_target` argument was dropped; Interface-contract docstrings |
 | `__version__.py` | Re-export of `fsm_llm.__version__` | Same shape as every subpackage |
 
 ## Invariants and constraints

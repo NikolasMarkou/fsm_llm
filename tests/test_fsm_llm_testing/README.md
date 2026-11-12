@@ -4,7 +4,7 @@ The pytest suite for `fsm_llm.testing`, the public test-helper subpackage of the
 
 ## What it is for
 
-`fsm_llm.testing` will hold the fake LLM interfaces, the scripted user and the assertions that other projects use to test code built on `fsm_llm`. For now only the wiring exists, so this suite checks the layering: the module is imported by name, no library module imports it, it imports no `pytest`, `litellm` or other subpackage, and `import fsm_llm` does not load it. Tests for each public name are added together with the name.
+`fsm_llm.testing` will hold the fake LLM interfaces, the scripted user and the assertions that other projects use to test code built on `fsm_llm`. Today it checks the contract of the two promoted doubles and the layering: the module is imported by name, no library module imports it, it imports no `pytest`, `litellm` or other subpackage, and `import fsm_llm` does not load it. Tests for each public name are added together with the name.
 
 ## How it works
 
@@ -14,6 +14,7 @@ The pytest suite for `fsm_llm.testing`, the public test-helper subpackage of the
 ## Files
 
 - `__init__.py` - empty package marker.
+- `test_doubles.py` - the contract of `MockLLM2Interface` and `PromptGroundedLLM` (mutable attributes, `call_history.clear()`, subclassing, cut flags, evidence grounding, bulk quoting, `complete` raising), identity with the `tests/conftest.py` re-exports, the dead `transition_target` scan, a child process with every socket refused.
 - `test_layering.py` - the import probes, the library-wide scan for imports of `fsm_llm.testing`, the `pytest` and `litellm` ban, the no-other-subpackage rule, and the skeleton checks (docstring, one static `__all__`).
 
 ## How to use it

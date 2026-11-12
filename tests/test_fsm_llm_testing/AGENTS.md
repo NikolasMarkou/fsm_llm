@@ -1,7 +1,7 @@
 # test_fsm_llm_testing
 
 Path: `tests/test_fsm_llm_testing`
-Purpose: Offline pytest suite for `fsm_llm.testing` (the public test doubles, scripted user and assertions). Today it pins the layering of the wired skeleton; each public name brings its own tests.
+Purpose: Offline pytest suite for `fsm_llm.testing` (the public test doubles, scripted user and assertions). Today it pins the contract of the two promoted doubles and the layering of the package; each public name brings its own tests.
 
 ## Scope
 
@@ -19,6 +19,7 @@ Covers `fsm_llm.testing` as a leaf of the package: imported by name, loaded by n
 
 | File | Covers |
 | --- | --- |
+| `test_doubles.py` | `TestExports`, `TestMockLLM2Interface`, `TestPromptGroundedLLM`, `TestNoNetworkNoPytest` |
 | `test_layering.py` | `TestImportProbes`, `TestSourceLayering`, `TestSkeleton` |
 | `__init__.py` | Empty package marker |
 

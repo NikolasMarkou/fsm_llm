@@ -7,12 +7,11 @@ Public test doubles, a scripted user and assertions for code built on
 drives a conversation, and assertion helpers that name a state, a context
 value, a visited path or a run result in one line.
 
-This module is the documented skeleton of the seventh subpackage. It is wired
-into the build (packages list, the ``testing`` extra, install lists, API
-snapshot) and exports nothing yet: ``__all__`` is empty and the names are
-added by the steps that follow (the promoted ``MockLLM2Interface`` and
-``PromptGroundedLLM``, ``ScriptedLLM``, reply builders, ``ScriptedUser``,
-assertions and ``PathRecorder``).
+Exported today: the two fake ``LLMInterface`` implementations promoted from
+the repository's own test configuration, ``MockLLM2Interface`` (fixed answers)
+and ``PromptGroundedLLM`` (a fact comes back only when the prompt shows its
+evidence). ``ScriptedLLM``, reply builders, ``ScriptedUser``, assertions and
+``PathRecorder`` follow in the next steps of the plan.
 
 Import it by name, ``from fsm_llm.testing import ...``; ``import fsm_llm`` never
 loads it and no library module imports it. It imports the core and
@@ -28,5 +27,9 @@ from __future__ import annotations
 
 # Version info: imported via __version__.py to stay in sync
 from .__version__ import __version__  # noqa: F401
+from .doubles import MockLLM2Interface, PromptGroundedLLM
 
-__all__: list[str] = []
+__all__ = [
+    "MockLLM2Interface",
+    "PromptGroundedLLM",
+]

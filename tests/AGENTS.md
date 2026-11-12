@@ -71,11 +71,11 @@ Suite folders (test counts from full collection) and root files at this level.
 
 ## Public interface
 
-From `tests/conftest.py` (import as `from tests.conftest import ...` or use as fixtures):
+From `tests/conftest.py` (import as `from tests.conftest import ...` or use as fixtures). The two doubles below live in `fsm_llm.testing` (step 22 of plan d454fd62) and are re-exported here, so `tests.conftest.MockLLM2Interface is fsm_llm.testing.MockLLM2Interface`; the repo-wide switch of the importers to `fsm_llm.testing` is step 26:
 
 | Name | Kind | Use |
 | --- | --- | --- |
-| `MockLLM2Interface(extraction_data=None, response_text="Hello! How can I help you?", transition_target=None)` | `LLMInterface` subclass | `extract_field` returns `extraction_data.get(field_name)` (confidence 1.0, or 0.0 and `is_valid=False` when missing); `generate_response` returns `response_text`; `cut_reply=True` and `cut_fields=` flag the reply or a field `truncated` (a cut field has value `None`); calls appended to `call_history` as `(name, request)` |
+| `MockLLM2Interface(extraction_data=None, response_text="Hello! How can I help you?", cut_reply=False, cut_fields=())` | `LLMInterface` subclass | `extract_field` returns `extraction_data.get(field_name)` (confidence 1.0, or 0.0 and `is_valid=False` when missing); `generate_response` returns `response_text`; `cut_reply=True` and `cut_fields=` flag the reply or a field `truncated` (a cut field has value `None`); calls appended to `call_history` as `(name, request)` |
 | `PromptGroundedLLM(facts=None, responses=None, default_response="ok")` | `LLMInterface` subclass | A fact `{field_name: (value, evidence)}` comes back only when `evidence` is in the request text (`extract_field`: system prompt, user message, JSON context; `extract_bulk_data`: only fields the prompt names, evidence in prompt or message, so a prompt without the evidence yields `{}`); `generate_response` returns `responses[state]` for the prompt's `<current_state>`, else `default_response`; `requests` records `(kind, request)`, `calls(kind)` filters. Used by the agents Phase-1 loop tests |
 | `block_network(monkeypatch, node)`, `network_exempt(node)` | functions | Patch `socket.socket.connect`/`connect_ex` to raise `ConnectionRefusedError` for IPv4/IPv6 (loopback included, Unix sockets untouched) unless the test is marked `real_llm` or `integration`; autoused by the agents and meta conftests only |
 | `configure_mock_extract_field(mock_llm, mock_data=None)` | function | Gives a `Mock(spec=LLMInterface)` a working `extract_field`; default data `{"name": "TestUser", "email": "test@test.com", "age": "25"}` |

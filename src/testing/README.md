@@ -8,7 +8,12 @@ A test of a bot, an agent or a workflow should not call a real model: it is slow
 
 ## Status
 
-The subpackage is wired into the build and has no public name yet: `fsm_llm.testing.__all__` is empty. The names arrive in later steps of the plan that added it (`MockLLM2Interface` and `PromptGroundedLLM` promoted from `tests/conftest.py`, then `ScriptedLLM`, reply builders, `ScriptedUser`, the assertions and `PathRecorder`). Do not rely on anything here before that lands.
+Two names are public today, both fake `LLMInterface` implementations promoted from the repository's own `tests/conftest.py` and moved unchanged (one dead argument aside):
+
+- `MockLLM2Interface(extraction_data=None, response_text=..., cut_reply=False, cut_fields=())`: answers every field from a dict and every reply with one text; `call_history` records `(method, request)`; `cut_reply` and `cut_fields` simulate a reply cut at `max_tokens`. It implements neither `extract_bulk_data` nor `complete`.
+- `PromptGroundedLLM(facts=None, responses=None, default_response="ok")`: a fact `{field: (value, evidence)}` is returned only when the evidence text is in the request, like a real model reading its prompt; replies follow the prompt's `<current_state>` tag; `complete` raises `LLMResponseError`; `requests` and `calls(kind)` record the rest.
+
+Both are plain classes: their attributes are public and may change between turns, and a test may subclass them. They are not `unittest.mock` objects. The rest (`ScriptedLLM`, reply builders, `ScriptedUser`, the assertions and `PathRecorder`) arrives in later steps of the plan that added the package; do not rely on it before that lands.
 
 ## How it fits
 
@@ -24,7 +29,8 @@ flowchart TD
 
 ## Files
 
-- `__init__.py` - module docstring and the static, empty `__all__`.
+- `__init__.py` - module docstring and the static `__all__`.
+- `doubles.py` - `MockLLM2Interface` and `PromptGroundedLLM`.
 - `__version__.py` - re-exports the package version.
 
 ## Tests

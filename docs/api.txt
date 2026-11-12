@@ -1689,6 +1689,17 @@ fsm_llm.synthesis.run_gates def(data: Any, policy: SynthesisPolicy, *, inputs: I
 fsm_llm.synthesis.strip_abort def(data: object) -> dict[str, Any] | None
 fsm_llm.synthesis.verify_stored def(definition: FSMDefinition | dict[str, Any], policy: SynthesisPolicy, *, inputs: Iterable[str] = (), return_keys: Iterable[str] = ()) -> GateReport
 # fsm_llm.testing
+fsm_llm.testing.MockLLM2Interface class(LLMInterface)
+  def __init__(self, extraction_data: dict[str, object] | None = None, response_text: str = 'Hello! How can I help you?', cut_reply: bool = False, cut_fields: tuple[str, ...] | set[str] | list[str] = ()) -> None
+  def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse
+  def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse
+fsm_llm.testing.PromptGroundedLLM class(LLMInterface)
+  def __init__(self, facts: dict[str, tuple[object, str]] | None = None, responses: dict[str, str] | None = None, default_response: str = 'ok') -> None
+  def calls(self, kind: str) -> list
+  def complete(self, request: CompletionRequest) -> CompletionResponse
+  def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse
+  def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse
+  def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse
 # fsm_llm.workflows
 fsm_llm.workflows.APIStep class(WorkflowStep)
   field step_id: str required

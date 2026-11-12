@@ -184,9 +184,14 @@ class TestSkeleton:
         assigns = [
             n
             for n in tree.body
-            if isinstance(n, (ast.Assign, ast.AnnAssign))
-            and "__all__"
-            in [getattr(t, "id", None) for t in getattr(n, "targets", [n.target])]
+            if (
+                isinstance(n, ast.Assign)
+                and "__all__" in [getattr(t, "id", None) for t in n.targets]
+            )
+            or (
+                isinstance(n, ast.AnnAssign)
+                and getattr(n.target, "id", None) == "__all__"
+            )
         ]
         assert len(assigns) == 1, "exactly one static __all__"
         assert isinstance(assigns[0].value, (ast.List, ast.Tuple))

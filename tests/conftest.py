@@ -4,7 +4,6 @@ Global test configuration and fixtures for the entire test suite.
 
 import json
 import os
-import re
 import socket
 import sys
 from pathlib import Path
@@ -14,19 +13,14 @@ from unittest.mock import Mock
 import pytest
 
 from fsm_llm.constants import ENV_LLM_MODEL
-from fsm_llm.definitions import (
-    BulkExtractionRequest,
-    CompletionRequest,
-    CompletionResponse,
-    DataExtractionResponse,
-    FieldExtractionRequest,
-    FieldExtractionResponse,
-    FSMDefinition,
-    LLMResponseError,
-    ResponseGenerationRequest,
-    ResponseGenerationResponse,
-)
+from fsm_llm.definitions import FSMDefinition, ResponseGenerationResponse
 from fsm_llm.llm import LLMInterface
+
+# The two doubles live in the public ``fsm_llm.testing`` module (plan d454fd62
+# step 22); every test file still imports them from here until step 26.
+# ``_CURRENT_STATE_TAG`` stays reachable for ``test_grounded_patterns.py``.
+from fsm_llm.testing import MockLLM2Interface, PromptGroundedLLM  # noqa: F401
+from fsm_llm.testing.doubles import _CURRENT_STATE_TAG  # noqa: F401
 
 #: Ollama tag the live suites expect to be pulled (a model name without its
 #: ``ollama_chat/`` provider prefix). The package has no default model: live
@@ -208,55 +202,6 @@ def test_fixtures_root():
     return fixtures_path
 
 
-class MockLLM2Interface(LLMInterface):
-    """Mock LLM implementing the 2-pass architecture for fsm_llm functional tests."""
-
-    def __init__(
-        self,
-        extraction_data=None,
-        response_text="Hello! How can I help you?",
-        transition_target=None,
-        cut_reply=False,
-        cut_fields=(),
-    ):
-        self.extraction_data = extraction_data or {}
-        self.response_text = response_text
-        self.transition_target = transition_target
-        self.call_history = []
-        # A provider cut-off at max_tokens (plan 0068b055 D-025): when True the
-        # Pass-2 reply carries `truncated=True`; a field named in `cut_fields`
-        # comes back unusable (value None) with `truncated=True`. Both are plain
-        # attributes, so a test can change them between turns.
-        self.cut_reply = cut_reply
-        self.cut_fields = set(cut_fields)
-
-    def generate_response(
-        self, request: ResponseGenerationRequest
-    ) -> ResponseGenerationResponse:
-        self.call_history.append(("generate_response", request))
-        return ResponseGenerationResponse(
-            message=self.response_text,
-            message_type="response",
-            reasoning="Mock response",
-            truncated=self.cut_reply,
-        )
-
-    def extract_field(self, request):
-        self.call_history.append(("extract_field", request))
-        from fsm_llm.definitions import FieldExtractionResponse
-
-        cut = request.field_name in self.cut_fields
-        value = None if cut else self.extraction_data.get(request.field_name)
-        return FieldExtractionResponse(
-            field_name=request.field_name,
-            value=value,
-            confidence=1.0 if value is not None else 0.0,
-            reasoning="Mock field extraction",
-            is_valid=value is not None,
-            truncated=cut,
-        )
-
-
 def configure_mock_extract_field(mock_llm, mock_data=None):
     """Configure a Mock(spec=LLMInterface) with a working extract_field side_effect.
 
@@ -279,107 +224,6 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 
     mock_llm.extract_field.side_effect = _mock_extract_field
     return mock_llm
-
-
-#: Where the response prompt names the state it answers for (``prompts.py``).
-_CURRENT_STATE_TAG = re.compile(r"<current_state>([^<]+)</current_state>")
-
-
-class PromptGroundedLLM(LLMInterface):
-    """Fake LLM that knows a fact only when the prompt shows its evidence.
-
-    ``MockLLM2Interface`` answers every field from a fixed dict whatever the
-    prompt says, so it cannot tell a context-free prompt from a grounded one.
-    This fake can: a value comes back only when the text it would ground on
-    is in the request, like a real model reading its prompt.
-
-    Interface contract (shared by the agents Phase-1 tests):
-        - ``facts``: ``{field_name: (value, evidence)}``. ``evidence`` is a
-          substring; the field resolves to ``value`` only when it occurs in
-          the request text.
-        - ``extract_field``: the text is ``system_prompt``, ``user_message``
-          and the JSON-dumped ``context``. Returns ``value`` (``is_valid=True``)
-          or ``None`` (``is_valid=False``, confidence 0) for a missing fact or
-          absent evidence.
-        - ``extract_bulk_data``: returns only facts whose name the prompt asks
-          for (``"name"`` quoted in ``system_prompt``) and whose evidence is in
-          ``system_prompt`` or ``user_message``. A context-free prompt
-          therefore yields ``{}``.
-        - ``generate_response``: ``responses[state]`` for the state named by
-          the prompt's ``<current_state>`` tag, else ``default_response``.
-        - ``complete``: scripts no reply; raises ``LLMResponseError``, so a
-          classifier call fails soft exactly like a provider outage (core
-          refuses an interface without ``complete`` for an FSM that
-          classifies, D-029 of plan 944e2692). Not recorded.
-        - ``requests``: every other call as ``(kind, request)`` in call
-          order, kind being the method name. Only ``complete`` raises.
-    """
-
-    def __init__(
-        self,
-        facts: dict[str, tuple[object, str]] | None = None,
-        responses: dict[str, str] | None = None,
-        default_response: str = "ok",
-    ) -> None:
-        self.model = "prompt-grounded-fake"
-        self.facts = dict(facts or {})
-        self.responses = dict(responses or {})
-        self.default_response = default_response
-        self.requests: list[tuple[str, object]] = []
-
-    def calls(self, kind: str) -> list:
-        """The recorded requests of one kind, in call order."""
-        return [request for k, request in self.requests if k == kind]
-
-    def _grounded(self, name: str, text: str) -> object | None:
-        value, evidence = self.facts.get(name, (None, ""))
-        return value if evidence and evidence in text else None
-
-    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
-        self.requests.append(("extract_field", request))
-        text = "\n".join(
-            [
-                request.system_prompt,
-                request.user_message or "",
-                json.dumps(request.context or {}, default=str),
-            ]
-        )
-        value = self._grounded(request.field_name, text)
-        return FieldExtractionResponse(
-            field_name=request.field_name,
-            value=value,
-            confidence=1.0 if value is not None else 0.0,
-            reasoning="prompt-grounded fake",
-            is_valid=value is not None,
-        )
-
-    def extract_bulk_data(
-        self, request: BulkExtractionRequest
-    ) -> DataExtractionResponse:
-        self.requests.append(("extract_bulk_data", request))
-        text = f"{request.system_prompt}\n{request.user_message or ''}"
-        data = {}
-        for name in self.facts:
-            if f'"{name}"' not in request.system_prompt:
-                continue
-            value = self._grounded(name, text)
-            if value is not None:
-                data[name] = value
-        return DataExtractionResponse(extracted_data=data)
-
-    def generate_response(
-        self, request: ResponseGenerationRequest
-    ) -> ResponseGenerationResponse:
-        self.requests.append(("generate_response", request))
-        match = _CURRENT_STATE_TAG.search(request.system_prompt)
-        state = match.group(1) if match else None
-        message = self.responses.get(state or "", self.default_response)
-        return ResponseGenerationResponse(
-            message=message, message_type="response", reasoning="prompt-grounded fake"
-        )
-
-    def complete(self, request: CompletionRequest) -> CompletionResponse:
-        raise LLMResponseError("PromptGroundedLLM scripts no completion replies")
 
 
 @pytest.fixture
