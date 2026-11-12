@@ -273,7 +273,9 @@ def analyze_data_flow(
         state = states[sid]
         classified = bool(state.classification_extractions)
         if (
-            state.completion is None
+            # a kind that replaces Pass 1 declares no bulk extraction (the loader
+            # refuses `extraction_instructions` beside it)
+            "extraction_instructions" not in kind_of(state).forbidden_declarations
             and state.extraction_instructions
             and not classified
             and not set(kind_of(state).minted_keys(state)) - handler_only

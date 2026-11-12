@@ -76,6 +76,38 @@ Interface contract:
     in the loader, never in ``validator.py`` (it may not be stricter than the
     loader): see the anchor at ``_synthesize_check_definition``.
 
+  - ``mentioned_keys(state)``: the key names the state declares or requires
+    (``required_context_keys``, each extraction's ``field_name``, each
+    classification's ``field_name``, each edge condition's
+    ``requires_context_keys``), in that order, duplicates kept; a gate that only
+    reads a key in its logic does not mention it, and a ``result_key`` is not a
+    mention (it is handler-only). Gate G6a narrows a key to a type only when no
+    other state mentions it. The default reads the fields by ``getattr``, so a
+    kind that replaces Pass 1 (no extraction fields) still mentions the keys its
+    edges require.
+  - ``typed_keys(state)``: ``{key: (kind, intents)}`` for the keys whose value the
+    state's own extraction types: ``kind`` is ``"intent"`` (a classification,
+    ``intents`` its intent names), ``"bool"`` or ``"number"`` (a typed field,
+    ``intents`` empty) or ``"any"`` (every other field type, a later entry of the
+    same name wins). Plain data; G6a drops the ``"any"`` entries.
+  - ``lint_raw(state_id, state_dict, fsm_data, services)``: the kind's lint over
+    the RAW dict of one state (``FSMValidator`` never builds a ``State``, so it
+    cannot use the typed hooks above): a list of WARNING messages, empty when
+    there is nothing to say. Called only for a state whose raw ``config_field``
+    value is a dict. Never stricter than the loader: a warning, never an error.
+    ``services`` is a ``RawLintServices`` (see below).
+  - ``raw_result_key(state_dict, services)``: the raw twin of ``result_key``: the
+    key a state of the kind writes its result to, or ``None``; the validator warns
+    on an extraction channel naming such a key (it is never extracted).
+
+- ``RawLintServices``: the three facts the raw lint needs and this leaf may not
+  import (``result_kinds`` the reply kinds of a completion reply read off
+  ``CompletionResponse``, ``default_result_key`` the completion result key a
+  state without one gets, ``string_literals`` the string leaves of a JsonLogic
+  node); ``validator`` builds one from its own imports.
+
+- ``raw_kinds(state_dict)``: the specs a raw state dict holds a config for, in
+  registry order (the raw twin of ``kind_of``, used by the validator's lint).
 - ``state_problem(state)``: the one State-level refusal rule: for every kind
   whose config the state holds, in registry order, the first forbidden
   declaration found (``a <kind> state cannot also declare [...]``), then the
@@ -113,10 +145,12 @@ __all__ = [
     "SYNTHESIZE_SAMPLES",
     "CompletionStateKind",
     "KindSpec",
+    "RawLintServices",
     "definition_problem",
     "get_kind",
     "kind_of",
     "owned_result_keys",
+    "raw_kinds",
     "state_problem",
 ]
 
@@ -186,6 +220,95 @@ def _produced_keys(state: Any, handler_only: frozenset[str]) -> frozenset[str]:
     keys -= handler_only
     own = spec.result_key(state)
     return frozenset(keys | {own}) if own else frozenset(keys)
+
+
+def _mentioned_keys(state: Any) -> tuple[str, ...]:
+    """The default ``mentioned_keys``: see the module contract."""
+    return (
+        *(getattr(state, "required_context_keys", None) or []),
+        *(f.field_name for f in getattr(state, "field_extractions", None) or []),
+        *(
+            c.field_name
+            for c in getattr(state, "classification_extractions", None) or []
+        ),
+        *(
+            key
+            for t in getattr(state, "transitions", None) or []
+            for c in getattr(t, "conditions", None) or []
+            for key in getattr(c, "requires_context_keys", None) or []
+        ),
+    )
+
+
+# The extraction value types a gate can reason about: a field type to the kind
+# of value the pool of gate G6a holds for it. Any other field type is "any".
+_TYPED_KINDS = {"bool": "bool", "int": "number", "float": "number"}
+
+
+def _typed_keys(state: Any) -> dict[str, tuple[str, tuple[str, ...]]]:
+    """The default ``typed_keys``: see the module contract."""
+    found: dict[str, tuple[str, tuple[str, ...]]] = {
+        c.field_name: ("intent", tuple(i.name for i in c.intents))
+        for c in getattr(state, "classification_extractions", None) or []
+    }
+    for f in getattr(state, "field_extractions", None) or []:
+        found[f.field_name] = (_TYPED_KINDS.get(f.field_type, "any"), ())
+    return found
+
+
+@dataclass(frozen=True)
+class RawLintServices:
+    """What a raw lint needs and this leaf may not import (see the module
+    contract). Built once per validation by ``validator``."""
+
+    result_kinds: tuple[str, ...]
+    default_result_key: str
+    string_literals: Callable[[Any], set[str]]
+
+
+def _no_lint(
+    state_id: str, state: dict[str, Any], fsm_data: dict[str, Any], services: Any
+) -> list[str]:
+    return []
+
+
+def _no_raw_result_key(state: dict[str, Any], services: Any) -> str | None:
+    return None
+
+
+def _completion_lint_raw(
+    state_id: str, state: dict[str, Any], fsm_data: dict[str, Any], services: Any
+) -> list[str]:
+    """A completion state whose transitions do not cover every result kind it
+    can produce (``calls``, ``final``, ``malformed`` with tools; ``final``,
+    ``malformed`` for a structured turn): no unconditional transition and a kind
+    no condition names as a string literal. An uncovered kind stalls the state,
+    and skip-if-set makes no further call, so the step budget burns."""
+    kinds = (
+        services.result_kinds
+        if state["completion"].get("tools")
+        else tuple(k for k in services.result_kinds if k != "calls")
+    )
+    transitions = state.get("transitions") or []
+    if any(not t.get("conditions") for t in transitions):
+        return []
+    named: set[str] = set()
+    for transition in transitions:
+        for condition in transition.get("conditions") or []:
+            named |= services.string_literals(condition.get("logic"))
+    missing = [kind for kind in kinds if kind not in named]
+    if not missing:
+        return []
+    return [
+        f"Completion state '{state_id}' has no transition for result "
+        f"kind(s) {missing} and no unconditional transition: such a "
+        "turn stays in the state and makes no further call"
+    ]
+
+
+def _completion_raw_result_key(state: dict[str, Any], services: Any) -> str | None:
+    key: str = state["completion"].get("result_key") or services.default_result_key
+    return key
 
 
 def _no_state_problem(state: Any) -> str | None:
@@ -385,6 +508,10 @@ class KindSpec:
     check_definition: Callable[
         [Any, Any, Any, Callable[[Any], set[str]]], str | None
     ] = _no_definition_problem
+    mentioned_keys: Callable[[Any], tuple[str, ...]] = _mentioned_keys
+    typed_keys: Callable[[Any], dict[str, tuple[str, tuple[str, ...]]]] = _typed_keys
+    lint_raw: Callable[[str, dict[str, Any], dict[str, Any], Any], list[str]] = _no_lint
+    raw_result_key: Callable[[dict[str, Any], Any], str | None] = _no_raw_result_key
 
 
 # The extraction channels a kind that replaces Pass 1 cannot also declare: they
@@ -412,6 +539,8 @@ COMPLETION = KindSpec(
     forbidden_declarations=_EXTRACTION_DECLARATIONS,
     dryrun_judged=False,
     check_state=_completion_check_state,
+    lint_raw=_completion_lint_raw,
+    raw_result_key=_completion_raw_result_key,
 )
 
 # The synthesize result key is NOT dropped on push today (an inherited
@@ -447,6 +576,21 @@ def kind_of(state: Any) -> KindSpec:
         if spec.config_field and getattr(state, spec.config_field, None) is not None:
             return spec
     return CONVERSATION
+
+
+def raw_kinds(state: dict[str, Any]) -> tuple[KindSpec, ...]:
+    """The specs a RAW state dict holds a config for, in ``KINDS`` order.
+
+    The raw twin of ``kind_of`` (a spec per kind, not only the first): a kind is
+    held when the dict's ``config_field`` value is a dict (a non-dict value is
+    not a config; the loader refuses it). The default kind has no config field
+    and is never returned. ``FSMValidator`` reads raw dicts through it.
+    """
+    return tuple(
+        spec
+        for spec in KINDS
+        if spec.config_field and isinstance(state.get(spec.config_field), dict)
+    )
 
 
 def state_problem(state: Any) -> str | None:

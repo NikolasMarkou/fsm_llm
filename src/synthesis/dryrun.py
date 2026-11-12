@@ -38,6 +38,7 @@ from fsm_llm.definitions import (
     reachable_from,
 )
 from fsm_llm.flow_analysis import FlowFinding
+from fsm_llm.state_kinds import kind_of
 from fsm_llm.transition_evaluator import TransitionEvaluator
 
 from .constants import MAX_ASSIGNMENTS
@@ -46,7 +47,6 @@ _ABSENT: Any = object()  # a key left out of the context
 _ORDER = frozenset({">", ">=", "<", "<="})
 _EQUAL = frozenset({"==", "===", "!=", "!=="})
 _LOGICAL = frozenset({"!", "!!", "and", "or", "if"})
-_KINDS = {"bool": "bool", "int": "number", "float": "number"}
 
 # DECISION plan-2026-11-10T194139-2cefeb61/D-059
 # The pool of an untyped key holds every kind of value a model can extract:
@@ -204,12 +204,7 @@ def _narrowing(
     """Keys whose value the state's own extraction types: bool, number or
     intent name. Only a key no other state mentions, no input and no handler
     can supply (another producer could write another type)."""
-    found = {
-        c.field_name: ("intent", tuple(i.name for i in c.intents))
-        for c in state.classification_extractions or []
-    }
-    for f in state.field_extractions or []:
-        found[f.field_name] = (_KINDS.get(f.field_type, "any"), ())
+    found = kind_of(state).typed_keys(state)
     return {
         k: v
         for k, v in found.items()
@@ -222,18 +217,7 @@ def _mentions(definition: FSMDefinition) -> dict[str, set[str]]:
     in logic is not a producer; a ``result_key`` is ``handler_only_names``)."""
     mentions: dict[str, set[str]] = {}
     for sid, state in definition.states.items():
-        names = [
-            *(state.required_context_keys or []),
-            *(f.field_name for f in state.field_extractions or []),
-            *(c.field_name for c in state.classification_extractions or []),
-            *(
-                key
-                for t in state.transitions or []
-                for c in t.conditions or []
-                for key in c.requires_context_keys or []
-            ),
-        ]
-        for name in names:
+        for name in kind_of(state).mentioned_keys(state):
             mentions.setdefault(name, set()).add(sid)
     return mentions
 
@@ -291,7 +275,7 @@ def _search(
     edges = state.transitions or []
     scans = {i: _scan(t) for i, t in enumerate(edges)}
     judged = {i: s for i, s in scans.items() if s is not None}
-    if not judged or state.completion is not None or state.synthesize is not None:
+    if not judged or not kind_of(state).dryrun_judged:
         return {}, {}
     lits = [v for found, _, _ in judged.values() for v in found]
     keys = sorted({k for _, reads, _ in judged.values() for k in reads})

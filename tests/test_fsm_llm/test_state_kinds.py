@@ -1186,6 +1186,550 @@ class TestDefinitionCheckHooks:
         }
 
 
+class TestVerifierHooks:
+    """Plan d454fd62 step 51: G4 (through the produced keys), the dry-run gate G6a
+    and the raw-dict lint of the validator read the registry, so a new kind needs
+    no edit in them; every verdict is equal to the parent's."""
+
+    _ROOT = _MODULE.parent
+
+    @staticmethod
+    def _old_mentions(state: State) -> list[str]:
+        """Frozen oracle: the names `dryrun._mentions` collected before the hook."""
+        return [
+            *(state.required_context_keys or []),
+            *(f.field_name for f in state.field_extractions or []),
+            *(c.field_name for c in state.classification_extractions or []),
+            *(
+                key
+                for t in state.transitions or []
+                for c in t.conditions or []
+                for key in c.requires_context_keys or []
+            ),
+        ]
+
+    @staticmethod
+    def _old_typed(state: State) -> dict[str, tuple[str, tuple[str, ...]]]:
+        """Frozen oracle: the typed keys `dryrun._narrowing` built before the hook."""
+        kinds = {"bool": "bool", "int": "number", "float": "number"}
+        found = {
+            c.field_name: ("intent", tuple(i.name for i in c.intents))
+            for c in state.classification_extractions or []
+        }
+        for f in state.field_extractions or []:
+            found[f.field_name] = (kinds.get(f.field_type, "any"), ())
+        return found
+
+    @staticmethod
+    def _old_kind_warnings(fsm_data: dict[str, Any]) -> list[str]:
+        """Frozen oracle: the warnings `FSMValidator._validate_completion_states`
+        added before the hooks, in order."""
+        results = ("calls", "final", "malformed")
+        structured = ("final", "malformed")
+
+        def literals(node: Any) -> set[str]:
+            if isinstance(node, str):
+                return {node}
+            if isinstance(node, dict):
+                return set().union(*(literals(v) for v in node.values()))
+            if isinstance(node, list):
+                return set().union(*(literals(v) for v in node))
+            return set()
+
+        out: list[str] = []
+        states = fsm_data.get("states", {})
+        result_keys: set[str] = set()
+        for state_id, state in states.items():
+            completion = state.get("completion")
+            if not isinstance(completion, dict):
+                continue
+            result_keys.add(completion.get("result_key") or "completion_result")
+            kinds = results if completion.get("tools") else structured
+            transitions = state.get("transitions") or []
+            if any(not t.get("conditions") for t in transitions):
+                continue
+            named: set[str] = set()
+            for transition in transitions:
+                for condition in transition.get("conditions") or []:
+                    named |= literals(condition.get("logic"))
+            missing = [kind for kind in kinds if kind not in named]
+            if missing:
+                out.append(
+                    f"Completion state '{state_id}' has no transition for result "
+                    f"kind(s) {missing} and no unconditional transition: such a "
+                    "turn stays in the state and makes no further call"
+                )
+        handler_only = set(fsm_data.get("handler_only_keys") or [])
+        for state_id, state in states.items():
+            declared = [
+                ("field_extractions", fe.get("field_name"))
+                for fe in state.get("field_extractions") or []
+            ]
+            declared += [
+                ("classification_extractions", ce.get("field_name"))
+                for ce in state.get("classification_extractions") or []
+            ]
+            declared += [
+                ("required_context_keys", key)
+                for key in state.get("required_context_keys") or []
+            ]
+            for channel, key in declared:
+                if key in result_keys or (
+                    key in handler_only and channel != "classification_extractions"
+                ):
+                    out.append(
+                        f"State '{state_id}' {channel} names '{key}', a key only "
+                        "handlers or a completion call write: it is never "
+                        "extracted"
+                    )
+        return out
+
+    _WANTED = ("Completion state '", "a key only handlers or a completion call")
+
+    @staticmethod
+    def _stage_warnings(fsm_data: dict[str, Any]) -> list[str]:
+        """The warnings of the validator's kind stage alone (raw shapes that never
+        load reach it too): `_validate_kind_states`, which the parent spelled
+        `_validate_completion_states`."""
+        from fsm_llm.validator import FSMValidator
+
+        validator = FSMValidator(copy.deepcopy(fsm_data))
+        validator._validate_kind_states()
+        return list(validator.result.warnings)
+
+    @staticmethod
+    def _kind_warnings(fsm_data: dict[str, Any]) -> list[str]:
+        """The kind warnings of a whole `validate()` run."""
+        from fsm_llm.validator import FSMValidator
+
+        warnings = FSMValidator(copy.deepcopy(fsm_data)).validate().warnings
+        return [w for w in warnings if any(p in w for p in TestVerifierHooks._WANTED)]
+
+    def _states(self):
+        for name, (raw, _options) in _CORPUS.items():
+            try:
+                loaded = FSMDefinition(**copy.deepcopy(raw))
+            except Exception:
+                continue
+            for state in loaded.states.values():
+                yield name, loaded, state
+
+    # ---- no kind branch in the readers -------------------------------
+
+    @pytest.mark.parametrize("name", ["_search", "_narrowing", "_mentions"])
+    def test_the_dryrun_readers_read_no_kind_config(self, name):
+        node = _function_node(self._ROOT / "synthesis" / "dryrun.py", name)
+        assert _config_attributes(node) == set(), name
+
+    @pytest.mark.parametrize("name", ["_narrowing", "_mentions"])
+    def test_the_dryrun_readers_read_no_extraction_field(self, name):
+        """The extraction fields are read by the kind's hooks, not by the gate."""
+        node = _function_node(self._ROOT / "synthesis" / "dryrun.py", name)
+        fields = {
+            n.attr
+            for n in ast.walk(node)
+            if isinstance(n, ast.Attribute)
+            and n.attr
+            in {
+                "field_extractions",
+                "classification_extractions",
+                "required_context_keys",
+            }
+        }
+        assert fields == set(), name
+
+    @pytest.mark.parametrize("name", ["analyze_data_flow", "analyze_liveness"])
+    def test_the_flow_analyses_read_no_kind_config(self, name):
+        node = _function_node(self._ROOT / "flow_analysis.py", name)
+        assert _config_attributes(node) == set(), name
+
+    def test_the_validator_asks_the_kinds_for_its_raw_rules(self):
+        """`FSMValidator` never names a kind config: no `.get("completion")`."""
+        tree = ast.parse((self._ROOT / "validator.py").read_text(encoding="utf-8"))
+        cls = next(
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.ClassDef) and n.name == "FSMValidator"
+        )
+        named = {
+            call.args[0].value
+            for call in ast.walk(cls)
+            if isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and call.func.attr == "get"
+            and call.args
+            and isinstance(call.args[0], ast.Constant)
+            and call.args[0].value in {"completion", "synthesize"}
+        }
+        assert named == set()
+
+    # ---- equality with the parent rules ------------------------------
+
+    def test_mentioned_keys_equal_the_old_rule_over_the_corpus(self):
+        checked = 0
+        for name, _loaded, state in self._states():
+            hook = list(sk.kind_of(state).mentioned_keys(state))
+            assert hook == self._old_mentions(state), (name, state.id)
+            checked += 1
+        assert checked > 300
+
+    def test_typed_keys_equal_the_old_rule_over_the_corpus(self):
+        checked = typed = 0
+        for name, _loaded, state in self._states():
+            hook = sk.kind_of(state).typed_keys(state)
+            assert hook == self._old_typed(state), (name, state.id)
+            checked += 1
+            typed += any(kind != "any" for kind, _ in hook.values())
+        assert checked > 300 and typed > 10
+
+    def test_typed_keys_keep_a_later_field_over_a_classification_of_its_name(self):
+        state = _plain_state(
+            classification_extractions=[
+                {
+                    "field_name": "k",
+                    "intents": [
+                        {"name": "x", "description": "x"},
+                        {"name": "y", "description": "y"},
+                    ],
+                    "fallback_intent": "y",
+                }
+            ],
+            field_extractions=[
+                {
+                    "field_name": "k",
+                    "field_type": "int",
+                    "extraction_instructions": "k",
+                },
+                {
+                    "field_name": "s",
+                    "field_type": "str",
+                    "extraction_instructions": "s",
+                },
+            ],
+        )
+        assert sk.CONVERSATION.typed_keys(state) == {
+            "k": ("number", ()),
+            "s": ("any", ()),
+        }
+
+    def test_the_dryrun_verdicts_over_the_corpus_are_judged_by_the_hook(self):
+        """`dryrun_judged` is False for exactly the kinds that were skipped."""
+        for name, _loaded, state in self._states():
+            skipped = state.completion is not None or state.synthesize is not None
+            assert sk.kind_of(state).dryrun_judged is (not skipped), (name, state.id)
+
+    def test_the_raw_lint_equals_the_old_validator_rule_over_the_corpus(self):
+        """Through `validate()`: a definition the structure stage refuses never
+        reaches the lint (no warning), every other one says what it said."""
+        from fsm_llm.validator import FSMValidator
+
+        checked = warned = 0
+        for name, (raw, _options) in _CORPUS.items():
+            reached = FSMValidator(copy.deepcopy(raw)).validate()
+            expected = self._old_kind_warnings(raw) if reached.is_valid else []
+            assert self._kind_warnings(raw) == expected, name
+            assert self._stage_kind_warnings(raw) == self._old_kind_warnings(raw), name
+            checked += 1
+            warned += bool(expected)
+        assert checked > 100 and warned >= 2
+
+    def _stage_kind_warnings(self, raw: dict[str, Any]) -> list[str]:
+        return [
+            w for w in self._stage_warnings(raw) if any(p in w for p in self._WANTED)
+        ]
+
+    @staticmethod
+    def _raw_shapes():
+        edge = {"target_state": "b", "description": "go"}
+        gated = {
+            **edge,
+            "conditions": [
+                {
+                    "description": "g",
+                    "logic": {
+                        "or": [
+                            {"==": [{"var": "completion_result.kind"}, "final"]},
+                            {"==": [{"var": "completion_result.kind"}, "malformed"]},
+                        ]
+                    },
+                }
+            ],
+        }
+        all_three = {
+            **edge,
+            "conditions": [
+                {
+                    "description": "g",
+                    "logic": {
+                        "in": [
+                            {"var": "completion_result.kind"},
+                            ["calls", "final", "malformed"],
+                        ]
+                    },
+                }
+            ],
+        }
+        tools = [{"type": "function", "function": {"name": "f"}}]
+        for label, completion in {
+            "tools": {"tools": tools},
+            "structured": {"response_format_key": "_fmt"},
+            "custom-key": {"tools": tools, "result_key": "res"},
+        }.items():
+            for edges_label, edges in {
+                "gated-two": [gated],
+                "gated-all": [all_three],
+                "unconditional": [edge],
+                "mixed": [gated, edge],
+                "none": [],
+            }.items():
+                yield f"{label}/{edges_label}", completion, edges
+
+    def test_the_raw_lint_equals_the_old_rule_over_raw_shapes(self):
+        """Raw dicts that never load (no transitions, odd keys) are linted too:
+        the validator reads raw dicts and must say what it said before."""
+        checked = warned = 0
+        for label, completion, edges in self._raw_shapes():
+            for channel in (None, "completion_result", "res", "handlers"):
+                state: dict[str, Any] = {
+                    "id": "a",
+                    "description": "d",
+                    "purpose": "p",
+                    "completion": completion,
+                    "transitions": edges,
+                }
+                other: dict[str, Any] = {"id": "b", "description": "d", "purpose": "p"}
+                if channel:
+                    other["required_context_keys"] = [channel]
+                    other["field_extractions"] = [
+                        {"field_name": channel, "field_type": "str"}
+                    ]
+                raw = {
+                    "name": "N",
+                    "description": "d",
+                    "initial_state": "a",
+                    "handler_only_keys": ["handlers"],
+                    "states": {"a": state, "b": other},
+                }
+                expected = self._old_kind_warnings(raw)
+                assert self._stage_kind_warnings(raw) == expected, (label, channel)
+                checked += 1
+                warned += bool(expected)
+        assert checked == 60 and warned >= 30
+
+    def test_a_non_dict_completion_is_not_linted(self):
+        raw = {
+            "name": "N",
+            "description": "d",
+            "initial_state": "a",
+            "states": {"a": {"id": "a", "completion": "nope"}},
+        }
+        assert self._stage_kind_warnings(raw) == []
+        assert self._old_kind_warnings(raw) == []
+
+    # ---- a new kind needs no edit in the readers ---------------------
+
+    def _swap_conversation(self, monkeypatch, **changes):
+        from dataclasses import replace
+
+        spec = replace(sk.CONVERSATION, **changes)
+        monkeypatch.setattr(sk, "CONVERSATION", spec)
+        monkeypatch.setattr(sk, "KINDS", (spec, *sk.KINDS[1:]))
+
+    @staticmethod
+    def _dead_edge_definition() -> FSMDefinition:
+        return FSMDefinition(
+            name="T",
+            description="t",
+            initial_state="ask",
+            states={
+                "ask": {
+                    "id": "ask",
+                    "description": "d",
+                    "purpose": "p",
+                    "field_extractions": [
+                        {
+                            "field_name": "ok",
+                            "field_type": "bool",
+                            "extraction_instructions": "ok",
+                        }
+                    ],
+                    "transitions": [
+                        {
+                            "target_state": "done",
+                            "description": "go",
+                            "conditions": [
+                                {
+                                    "description": "g",
+                                    "logic": {"==": [{"var": "ok"}, "yes"]},
+                                }
+                            ],
+                        }
+                    ],
+                },
+                "done": {"id": "done", "description": "d", "purpose": "p"},
+            },
+        )
+
+    def test_the_gate_judges_the_edges_of_the_kinds_the_hook_names(self, monkeypatch):
+        from fsm_llm.synthesis.dryrun import analyze_dryrun
+
+        definition = self._dead_edge_definition()
+        assert {f.code for f in analyze_dryrun(definition)} == {
+            "edge-unfireable",
+            "terminal-unreachable",
+        }
+        self._swap_conversation(monkeypatch, dryrun_judged=False)
+        assert analyze_dryrun(definition) == []
+
+    def test_the_gate_narrows_the_keys_the_hook_types(self, monkeypatch):
+        from fsm_llm.synthesis.dryrun import analyze_dryrun
+
+        self._swap_conversation(monkeypatch, typed_keys=lambda state: {})
+        assert analyze_dryrun(self._dead_edge_definition()) == []
+
+    def test_the_gate_counts_the_keys_the_hook_mentions(self, monkeypatch):
+        """A key another state mentions is not narrowed: the hook says who does."""
+        from fsm_llm.synthesis.dryrun import analyze_dryrun
+
+        definition = self._dead_edge_definition()
+        done = definition.states["done"]
+        self._swap_conversation(
+            monkeypatch,
+            mentioned_keys=lambda state: ("ok",) if state is done else (),
+        )
+        # `ask` no longer mentions `ok` itself: the mention of `done` alone is
+        # another state's, so the key is not narrowed and the edge can fire.
+        assert analyze_dryrun(definition) == []
+
+    def test_the_liveness_pass_reads_the_produced_keys_of_the_kind(self, monkeypatch):
+        """G4 counts a gate read as satisfiable through `produced_keys`: the same
+        loop is fine while the kind produces `k`, and `cycle-no-exit` when it
+        produces nothing."""
+        from fsm_llm.flow_analysis import analyze_liveness
+
+        loop = {"target_state": "a", "description": "again", "priority": 2}
+        leave = {
+            "target_state": "b",
+            "description": "go",
+            "priority": 1,
+            "conditions": [
+                {"description": "g", "logic": {"==": [{"var": "k"}, "done"]}}
+            ],
+        }
+
+        definition = FSMDefinition(
+            name="T",
+            description="t",
+            initial_state="a",
+            states={
+                "a": {
+                    "id": "a",
+                    "description": "d",
+                    "purpose": "p",
+                    "field_extractions": [
+                        {
+                            "field_name": "k",
+                            "field_type": "str",
+                            "extraction_instructions": "k",
+                        }
+                    ],
+                    "transitions": [loop, leave],
+                },
+                "b": {"id": "b", "description": "d", "purpose": "p"},
+            },
+        )
+        assert [f.code for f in analyze_liveness(definition)] == []
+        self._swap_conversation(
+            monkeypatch, produced_keys=lambda state, handler_only: frozenset()
+        )
+        assert [f.code for f in analyze_liveness(definition)] == ["cycle-no-exit"]
+
+    def test_a_kind_with_its_own_raw_lint_needs_no_edit_in_the_validator(
+        self, monkeypatch
+    ):
+        from dataclasses import replace
+
+        def lint(state_id, state, fsm_data, services):
+            return [f"marker state '{state_id}' says {sorted(state['marker'])}"]
+
+        marker = replace(
+            sk.CONVERSATION,
+            name="marker",
+            config_field="marker",
+            lint_raw=lint,
+            raw_result_key=lambda state, services: state["marker"].get("key"),
+        )
+        raw = {
+            "name": "N",
+            "description": "d",
+            "initial_state": "a",
+            "states": {
+                "a": {
+                    "id": "a",
+                    "description": "d",
+                    "purpose": "p",
+                    "marker": {"key": "mk", "x": 1},
+                    "transitions": [{"target_state": "b", "description": "go"}],
+                },
+                "b": {
+                    "id": "b",
+                    "description": "d",
+                    "purpose": "p",
+                    "required_context_keys": ["mk"],
+                },
+            },
+        }
+        from fsm_llm.validator import FSMValidator
+
+        monkeypatch.setattr(sk, "KINDS", (*sk.KINDS, marker))
+        warnings = FSMValidator(raw).validate().warnings
+        assert "marker state 'a' says ['key', 'x']" in warnings
+        assert any("State 'b' required_context_keys names 'mk'" in w for w in warnings)
+
+    def test_the_raw_hooks_default_to_nothing(self):
+        services = sk.RawLintServices(("calls",), "k", lambda node: set())
+        assert sk.CONVERSATION.lint_raw("s", {}, {}, services) == []
+        assert sk.SYNTHESIZE.lint_raw("s", {"synthesize": {}}, {}, services) == []
+        assert sk.CONVERSATION.raw_result_key({}, services) is None
+        assert sk.SYNTHESIZE.raw_result_key({"synthesize": {}}, services) is None
+        assert sk.COMPLETION.raw_result_key({"completion": {}}, services) == "k"
+        assert (
+            sk.COMPLETION.raw_result_key({"completion": {"result_key": "r"}}, services)
+            == "r"
+        )
+
+    def test_a_kind_that_forbids_bulk_extraction_cannot_raise_the_bulk_finding(self):
+        """`analyze_data_flow` asks the kind (its forbidden declarations) instead of
+        testing `.completion`: a state built around the loader with both is silent
+        for the kinds that refuse the declaration, and flagged for the default."""
+        from fsm_llm.flow_analysis import analyze_data_flow
+
+        def definition(**extra):
+            return FSMDefinition(
+                name="T",
+                description="t",
+                initial_state="a",
+                states={
+                    "a": {
+                        "id": "a",
+                        "description": "d",
+                        "purpose": "p",
+                        "extraction_instructions": "get it",
+                        "transitions": [{"target_state": "b", "description": "go"}],
+                    },
+                    "b": {"id": "b", "description": "d", "purpose": "p"},
+                },
+            )
+
+        loaded = definition()
+        assert [f.code for f in analyze_data_flow(loaded)] == ["bulk-extraction"]
+        bypass = loaded.states["a"].model_copy(
+            update={"completion": _completion_config()}
+        )
+        loaded.states["a"] = bypass
+        assert analyze_data_flow(loaded) == []
+
+
 def _completion_config():
     from fsm_llm.definitions import CompletionStateConfig
 

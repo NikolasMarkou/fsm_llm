@@ -48,15 +48,13 @@ from .schema_registry import (
     newer_fields,
     parse_version,
 )
+from .state_kinds import RawLintServices, raw_kinds
 from .utilities import read_json_object
 
 # The result kinds a completion state can produce, read off the one model
 # that defines them: every kind with tools, all but ``calls`` without.
 _RESULT_KINDS: tuple[str, ...] = get_args(
     CompletionResponse.model_fields["kind"].annotation
-)
-_STRUCTURED_RESULT_KINDS: tuple[str, ...] = tuple(
-    kind for kind in _RESULT_KINDS if kind != "calls"
 )
 
 
@@ -278,7 +276,7 @@ class FSMValidator:
         self._validate_terminal_states()
         self._validate_required_context_keys()
         self._validate_handler_only_keys()
-        self._validate_completion_states()
+        self._validate_kind_states()
         self._validate_unknown_keys()
         self._validate_schema_versions()
         self._validate_transition_classification_keys()
@@ -627,49 +625,36 @@ class FSMValidator:
                     "for a typo)"
                 )
 
-    def _validate_completion_states(self) -> None:
-        """Warn on completion-state designs that fail silently at run time.
+    def _validate_kind_states(self) -> None:
+        """Warn on kind-specific designs that fail silently at run time.
 
-        Two WARNINGs (never errors: the loader accepts both shapes):
+        The raw-dict twin of the state kinds (``state_kinds``): this validator
+        never builds a ``State``, so it asks each kind's ``lint_raw`` and
+        ``raw_result_key`` for the rules over the raw dicts. Two WARNINGs (never
+        errors: the loader accepts both shapes):
 
-        - A completion state whose transitions do not cover every result kind
-          it can produce (``calls``, ``final``, ``malformed`` with tools;
-          ``final``, ``malformed`` for a structured turn): no unconditional
-          transition and a kind no condition names as a string literal. An
-          uncovered kind stalls the state, and skip-if-set makes no further
-          call, so the step budget burns.
+        - Each kind's own lint (today: a completion state whose transitions do
+          not cover a result kind it can produce).
         - An extraction channel (``field_extractions``,
           ``classification_extractions``, ``required_context_keys``) naming a
-          handler-owned key: a completion state's ``result_key``, or a
+          handler-owned key: a kind's ``raw_result_key``, or a
           ``handler_only_keys`` entry (classification on those is reported by
           ``_validate_handler_only_keys``). The pipeline never extracts such a
           key, so the declaration is dead.
         """
+        services = RawLintServices(
+            result_kinds=_RESULT_KINDS,
+            default_result_key=DEFAULT_COMPLETION_RESULT_KEY,
+            string_literals=_string_literals,
+        )
         result_keys: set[str] = set()
         for state_id, state in self.states.items():
-            completion = state.get("completion")
-            if not isinstance(completion, dict):
-                continue
-            result_keys.add(
-                completion.get("result_key") or DEFAULT_COMPLETION_RESULT_KEY
-            )
-            kinds = (
-                _RESULT_KINDS if completion.get("tools") else _STRUCTURED_RESULT_KINDS
-            )
-            transitions = state.get("transitions") or []
-            if any(not t.get("conditions") for t in transitions):
-                continue
-            named: set[str] = set()
-            for transition in transitions:
-                for condition in transition.get("conditions") or []:
-                    named |= _string_literals(condition.get("logic"))
-            missing = [kind for kind in kinds if kind not in named]
-            if missing:
-                self.result.add_warning(
-                    f"Completion state '{state_id}' has no transition for result "
-                    f"kind(s) {missing} and no unconditional transition: such a "
-                    "turn stays in the state and makes no further call"
-                )
+            for spec in raw_kinds(state):
+                key = spec.raw_result_key(state, services)
+                if key is not None:
+                    result_keys.add(key)
+                for message in spec.lint_raw(state_id, state, self.fsm_data, services):
+                    self.result.add_warning(message)
         handler_only = set(self.fsm_data.get("handler_only_keys") or [])
         for state_id, state in self.states.items():
             declared = [
