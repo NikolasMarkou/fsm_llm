@@ -110,6 +110,7 @@ from .handlers import (
     BaseHandler,
     FSMHandler,
     HandlerBuilder,
+    HandlerErrorMode,
     HandlerExecutionError,
     HandlerSystem,
     HandlerSystemError,
@@ -269,6 +270,7 @@ __all__ = [
     "BaseHandler",
     "HandlerBuilder",
     "HandlerTiming",
+    "HandlerErrorMode",
     "create_handler",
     "clear_keys_on_entry",
     # Context utilities

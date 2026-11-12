@@ -102,7 +102,7 @@ def _make_pipeline(
     fsm_def=None,
     llm=None,
     handler_system=None,
-    error_mode="continue",
+    handler_error_mode="continue",
 ):
     """Create a MessagePipeline with defaults wired up."""
     if fsm_def is None:
@@ -126,7 +126,7 @@ def _make_pipeline(
         llm = _make_mock_llm()
 
     if handler_system is None:
-        handler_system = HandlerSystem(error_mode=error_mode)
+        handler_system = HandlerSystem(handler_error_mode=handler_error_mode)
 
     # Real prompt builders (they only build strings)
     dep = DataExtractionPromptBuilder()
@@ -243,7 +243,7 @@ class TestExecuteHandlers:
     def test_deep_copies_context_before_passing_to_handlers(self):
         """Handler mutations should not affect the original instance context."""
         handler = _ContextCapturingHandler(result={"added_key": "value"})
-        hs = HandlerSystem(error_mode="continue")
+        hs = HandlerSystem(handler_error_mode="continue")
         hs.register_handler(handler)
 
         pipeline = _make_pipeline(handler_system=hs)
@@ -258,7 +258,7 @@ class TestExecuteHandlers:
 
     def test_merges_handler_results_into_instance_context(self):
         handler = _ContextCapturingHandler(result={"new_key": "new_value"})
-        hs = HandlerSystem(error_mode="continue")
+        hs = HandlerSystem(handler_error_mode="continue")
         hs.register_handler(handler)
 
         pipeline = _make_pipeline(handler_system=hs)
@@ -274,7 +274,7 @@ class TestExecuteHandlers:
     def test_none_value_deletes_key_from_context(self):
         """A handler returning None for a key requests deletion."""
         handler = _ContextCapturingHandler(result={"to_delete": None})
-        hs = HandlerSystem(error_mode="continue")
+        hs = HandlerSystem(handler_error_mode="continue")
         hs.register_handler(handler)
 
         pipeline = _make_pipeline(handler_system=hs)
@@ -291,7 +291,7 @@ class TestExecuteHandlers:
 
     def test_none_value_for_nonexistent_key_is_harmless(self):
         handler = _ContextCapturingHandler(result={"nonexistent": None})
-        hs = HandlerSystem(error_mode="continue")
+        hs = HandlerSystem(handler_error_mode="continue")
         hs.register_handler(handler)
 
         pipeline = _make_pipeline(handler_system=hs)
@@ -306,7 +306,7 @@ class TestExecuteHandlers:
     def test_error_context_merged_before_handler_call(self):
         """error_context dict should be visible to handlers."""
         handler = _ContextCapturingHandler()
-        hs = HandlerSystem(error_mode="continue")
+        hs = HandlerSystem(handler_error_mode="continue")
         hs.register_handler(handler)
 
         pipeline = _make_pipeline(handler_system=hs)
@@ -331,7 +331,7 @@ class TestExecuteHandlers:
             def execute(self, context):
                 raise RuntimeError("handler boom")
 
-        hs = HandlerSystem(error_mode="continue")
+        hs = HandlerSystem(handler_error_mode="continue")
         hs.register_handler(FailHandler(name="fail"))
 
         pipeline = _make_pipeline(handler_system=hs)
@@ -350,7 +350,7 @@ class TestExecuteHandlers:
             def execute(self, context):
                 raise RuntimeError("handler boom")
 
-        hs = HandlerSystem(error_mode="raise")
+        hs = HandlerSystem(handler_error_mode="raise")
         hs.register_handler(FailHandler(name="fail"))
 
         pipeline = _make_pipeline(handler_system=hs)
@@ -363,7 +363,7 @@ class TestExecuteHandlers:
 
     def test_uses_instance_current_state_when_current_state_not_provided(self):
         handler = _ContextCapturingHandler()
-        hs = HandlerSystem(error_mode="continue")
+        hs = HandlerSystem(handler_error_mode="continue")
         hs.register_handler(handler)
 
         pipeline = _make_pipeline(handler_system=hs)
@@ -389,7 +389,7 @@ class TestExecuteHandlers:
 
         h.should_execute = custom_should
 
-        hs = HandlerSystem(error_mode="continue")
+        hs = HandlerSystem(handler_error_mode="continue")
         hs.register_handler(h)
         pipeline = _make_pipeline(handler_system=hs)
         instance = _make_instance()
@@ -646,7 +646,7 @@ class TestProcess:
                 call_order.append(self.name)
                 return {}
 
-        hs = HandlerSystem(error_mode="continue")
+        hs = HandlerSystem(handler_error_mode="continue")
         hs.register_handler(OrderTracker("pre_proc", HandlerTiming.PRE_PROCESSING))
         hs.register_handler(OrderTracker("post_proc", HandlerTiming.POST_PROCESSING))
 
@@ -866,7 +866,7 @@ class TestProcessPass2FailureIsAtomic:
                 captured.context.metadata["turn_meta"] = "turn_value"
                 return {}
 
-        hs = HandlerSystem(error_mode="continue")
+        hs = HandlerSystem(handler_error_mode="continue")
         hs.register_handler(_WmMetaMutatingHandler())
 
         llm = _make_mock_llm()
@@ -973,7 +973,7 @@ class TestProcessStreamPass2FailureIsAtomic:
                 captured.context.metadata["turn_meta"] = "turn_value"
                 return {}
 
-        hs = HandlerSystem(error_mode="continue")
+        hs = HandlerSystem(handler_error_mode="continue")
         hs.register_handler(_WmMetaMutatingHandler())
 
         llm = _make_mock_llm()
@@ -1024,7 +1024,7 @@ class TestProcessStreamPass2FailureIsAtomic:
                 captured.context.metadata["turn_meta"] = "turn_value"
                 return {}
 
-        hs = HandlerSystem(error_mode="continue")
+        hs = HandlerSystem(handler_error_mode="continue")
         hs.register_handler(_WmMetaMutatingHandler())
 
         def _yield_then_raise(_request):

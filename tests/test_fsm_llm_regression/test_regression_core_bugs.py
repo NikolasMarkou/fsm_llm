@@ -438,18 +438,18 @@ class TestVB13VisualizerDepthsWrongInitial:
         assert state_metrics["middle"]["depth"] == 0
 
 
-# ── VB14: error_mode="skip" identical to "continue" ────────────
+# ── VB14: handler_error_mode="skip" identical to "continue" ────────────
 
 
 class TestVB14SkipErrorMode:
-    """VB14: error_mode='skip' should either not exist or behave differently from 'continue'."""
+    """VB14: handler_error_mode='skip' should either not exist or behave differently from 'continue'."""
 
     def test_skip_not_accepted_or_behaves_differently(self):
         from fsm_llm.handlers import HandlerSystem
 
         # After fix, "skip" should be rejected
-        with pytest.raises(ValueError, match="Invalid error_mode"):
-            HandlerSystem(error_mode="skip")
+        with pytest.raises(ValueError, match="Invalid handler_error_mode"):
+            HandlerSystem(handler_error_mode="skip")
 
 
 # ── VB14b: Numeric string comparison fails ──────────────────────

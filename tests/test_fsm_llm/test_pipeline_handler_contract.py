@@ -130,11 +130,11 @@ def _fsm_definition():
     )
 
 
-def _make_api(mock_llm2_interface, handlers, error_mode="continue"):
+def _make_api(mock_llm2_interface, handlers, handler_error_mode="continue"):
     api = API.from_definition(
         _fsm_definition(),
         llm_interface=mock_llm2_interface,
-        handler_error_mode=error_mode,
+        handler_error_mode=handler_error_mode,
         handlers=list(handlers),
     )
     conversation_id, _ = api.start_conversation()
@@ -150,7 +150,7 @@ class TestCriticalHandlerPropagatesThroughPipeline:
     def test_critical_pre_processing_failure_raises_out_of_converse(
         self, mock_llm2_interface
     ):
-        """SC-1: critical=True + error_mode='continue' -> converse raises."""
+        """SC-1: critical=True + handler_error_mode='continue' -> converse raises."""
         api, conv_id = _make_api(
             mock_llm2_interface,
             [
@@ -184,11 +184,11 @@ class TestCriticalHandlerPropagatesThroughPipeline:
             api.converse("hello", conv_id)
 
     def test_non_critical_handler_raises_under_raise_mode(self, mock_llm2_interface):
-        """Pre-existing behavior: error_mode='raise' still propagates."""
+        """Pre-existing behavior: handler_error_mode='raise' still propagates."""
         api, conv_id = _make_api(
             mock_llm2_interface,
             [_ExplodingHandler("plain_pre", HandlerTiming.PRE_PROCESSING)],
-            error_mode="raise",
+            handler_error_mode="raise",
         )
 
         with pytest.raises(HandlerExecutionError, match="plain_pre"):

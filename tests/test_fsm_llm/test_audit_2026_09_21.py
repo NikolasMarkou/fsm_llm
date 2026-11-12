@@ -3186,10 +3186,10 @@ class TestStep12_1:
                 m.startswith("WARNING|") and str(MAX_TIMED_HANDLER_STRAGGLERS) in m
                 for m in logs
             )
-            # A refused call fails the timeout way, honouring error_mode.
+            # A refused call fails the timeout way, honouring handler_error_mode.
             from fsm_llm.handlers import HandlerExecutionError
 
-            strict = HandlerSystem(error_mode="raise", handler_timeout=0.02)
+            strict = HandlerSystem(handler_error_mode="raise", handler_timeout=0.02)
             strict.register_handler(_C2Handler("hang", 1, _hang))
             errors = []
             for _ in range(MAX_TIMED_HANDLER_STRAGGLERS + 1):
@@ -3582,7 +3582,7 @@ class TestStep14C6C12:
         def _boom(*args: Any) -> bool:
             raise ValueError("cond boom")
 
-        system = HandlerSystem(error_mode="raise")
+        system = HandlerSystem(handler_error_mode="raise")
         system.register_handler(create_handler("cond").when(_boom).do(lambda c: {}))
         with pytest.raises(HandlerExecutionError) as exc_info:
             system.execute_handlers(HandlerTiming.PRE_PROCESSING, "s", None, {})

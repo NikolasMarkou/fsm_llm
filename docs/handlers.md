@@ -98,9 +98,9 @@ The fluent API returned by `api.create_handler(name)`:
 
 ## Error Handling
 
-The `HandlerSystem` has an `error_mode`:
-- **`"continue"`** (default) -- Log error, skip failed handler, continue with others
-- **`"raise"`** -- Stop execution, propagate exception
+The `HandlerSystem` takes a `handler_error_mode`, a `HandlerErrorMode` (importable from `fsm_llm`) or its string value. `API`, `FSMManager` and the builders' `set_handler_error_mode` take the same value under the same name, and an unknown value raises `ValueError` naming `handler_error_mode`:
+- **`HandlerErrorMode.CONTINUE`** / `"continue"` (default) -- Log error, skip failed handler, continue with others
+- **`HandlerErrorMode.RAISE`** / `"raise"` -- Stop execution, propagate exception
 
 When no handler subscribes to a timing, the pipeline skips that timing entirely (no
 context deep-copy, no call), so an FSM without handlers pays nothing for the hook points.

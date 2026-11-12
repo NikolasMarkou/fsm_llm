@@ -175,7 +175,7 @@ class TestContextCleaningEmptyHandlers:
         from fsm_llm.fsm import FSMManager
         from fsm_llm.handlers import HandlerSystem, HandlerTiming
 
-        handler_system = HandlerSystem(error_mode="continue")
+        handler_system = HandlerSystem(handler_error_mode="continue")
 
         mock_llm = MagicMock()
         fsm_definition = FSMDefinition.model_validate(

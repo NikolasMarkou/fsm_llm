@@ -18,6 +18,7 @@ from typing import Any, TypeVar
 from .api import API
 from .definitions import BuildError, FSMDefinition
 from .fsm import FSMManager
+from .handlers import HandlerErrorMode
 
 _T = TypeVar("_T")
 
@@ -147,7 +148,7 @@ class APIBuilder:
         self._handlers.append(handler)
         return self
 
-    def set_handler_error_mode(self, mode: str) -> APIBuilder:
+    def set_handler_error_mode(self, mode: HandlerErrorMode | str) -> APIBuilder:
         return self._put("handler_error_mode", mode)
 
     def set_transition_config(self, config: Any) -> APIBuilder:
@@ -232,7 +233,7 @@ class FSMManagerBuilder:
     def set_handler_system(self, handler_system: Any) -> FSMManagerBuilder:
         return self._put("handler_system", handler_system)
 
-    def set_handler_error_mode(self, mode: str) -> FSMManagerBuilder:
+    def set_handler_error_mode(self, mode: HandlerErrorMode | str) -> FSMManagerBuilder:
         return self._put("handler_error_mode", mode)
 
     def set_max_fsm_cache_size(self, size: int) -> FSMManagerBuilder:

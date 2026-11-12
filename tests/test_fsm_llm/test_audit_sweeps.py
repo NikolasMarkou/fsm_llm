@@ -38,6 +38,7 @@ from fsm_llm.constants import (
     has_internal_prefix,
     is_forbidden_context_entry,
 )
+from fsm_llm.handlers import HandlerErrorMode
 from fsm_llm.prompts import BasePromptBuilder
 from fsm_llm.transition_evaluator import TransitionEvaluatorConfig
 
@@ -253,10 +254,10 @@ class TestContextFilterAgreement:
 
 # (class, kwarg) -> (API kwarg, non-default value factory, read-back from API)
 _REACHABLE = {
-    ("HandlerSystem", "error_mode"): (
+    ("HandlerSystem", "handler_error_mode"): (
         "handler_error_mode",
-        lambda: "raise",
-        lambda api: api.handler_system.error_mode,
+        lambda: HandlerErrorMode.RAISE,  # a member: the read-back is by identity
+        lambda api: api.handler_system.handler_error_mode,
     ),
     ("HandlerSystem", "handler_timeout"): (
         "handler_timeout",

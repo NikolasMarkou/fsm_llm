@@ -21,7 +21,7 @@ API(
     max_history_size: int = 5,
     max_message_length: int = 1000,
     handlers: list[FSMHandler] | None = None,
-    handler_error_mode: str = "continue",
+    handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE,
     transition_config: TransitionEvaluatorConfig | None = None,
     session_store: SessionStore | None = None,
     handler_timeout: float | None = None,
@@ -30,7 +30,7 @@ API(
 )
 ```
 
-`handler_timeout` (seconds, `None` disables it) goes to the API's single `HandlerSystem`, so the cap of 4 still-running timed-out handler threads (`constants.MAX_TIMED_HANDLER_STRAGGLERS`) is shared by every conversation of that `API`. `max_fsm_cache_size` bounds `FSMManager`'s FSM definition cache and must be at least 1 (`ValueError` otherwise). The prompt builders and the FSM loader are not configurable through `API`; construct `FSMManager` directly for those.
+`handler_error_mode` is a `HandlerErrorMode` (`CONTINUE` or `RAISE`) or its string value, coerced once in `HandlerSystem`; any other value raises `ValueError`. `handler_timeout` (seconds, `None` disables it) goes to the API's single `HandlerSystem`, so the cap of 4 still-running timed-out handler threads (`constants.MAX_TIMED_HANDLER_STRAGGLERS`) is shared by every conversation of that `API`. `max_fsm_cache_size` bounds `FSMManager`'s FSM definition cache and must be at least 1 (`ValueError` otherwise). The prompt builders and the FSM loader are not configurable through `API`; construct `FSMManager` directly for those.
 
 With `llm_interface`, the interface owns every LLM setting: `API` raises `ValueError` when `api_key`, a non-None `temperature` or `max_tokens`, a `model` other than the interface's own, or any `**llm_kwargs` are given beside it. It also raises `ValueError` (in `__init__` and `push_fsm`) when a definition's `classification_extractions` would classify through an interface that does not implement `complete`. `fsm_id` is `fsm_<name>_<8 hex>` from a sha256 of `model_dump(exclude_defaults=True)`, so only a change of the definition document changes it.
 
@@ -157,7 +157,7 @@ Fluent API returned by `api.create_handler()`:
 | `.on_context_update(*keys)` | Shorthand: `.at(CONTEXT_UPDATE).when_keys_updated()` |
 | `.when(condition)` | Custom condition lambda |
 | `.with_priority(n)` | Execution priority (lower runs first, default 100) |
-| `.critical(value=True)` | Mark the handler critical: its failure raises `HandlerExecutionError` even in `error_mode="continue"` |
+| `.critical(value=True)` | Mark the handler critical: its failure raises `HandlerExecutionError` even in `handler_error_mode="continue"` |
 | `.do(fn)` | Set handler function and build |
 | `.build()` | Build the handler from the current configuration (`.do(fn)` calls it) |
 
@@ -188,6 +188,10 @@ except BuildError as exc:
 ## HandlerTiming Enum
 
 `START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION`, `ERROR`
+
+## HandlerErrorMode Enum
+
+`CONTINUE` (`"continue"`, the default: log the failure and run the next handler) and `RAISE` (`"raise"`: raise `HandlerExecutionError`); a `str` enum with `HandlerErrorMode.from_string(value)`, exported from `fsm_llm`. Every `handler_error_mode` parameter (`API`, `FSMManager`, `HandlerSystem`, the builders' `set_handler_error_mode`) accepts a member or its exact string.
 
 ## LLMInterface (`fsm_llm.llm`)
 

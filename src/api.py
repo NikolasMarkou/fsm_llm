@@ -125,6 +125,7 @@ from .handlers import (
     BaseHandler,
     FSMHandler,
     HandlerBuilder,
+    HandlerErrorMode,
     HandlerSystem,
     HandlerTiming,
     create_handler,
@@ -616,7 +617,7 @@ class API:
         max_history_size: int = DEFAULT_MAX_HISTORY_SIZE,
         max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH,
         handlers: list[FSMHandler] | None = None,
-        handler_error_mode: str = "continue",
+        handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE,
         transition_config: TransitionEvaluatorConfig | None = None,
         session_store: SessionStore | None = None,
         handler_timeout: float | None = None,
@@ -637,7 +638,8 @@ class API:
                 last ``max_history_size`` messages (default 5)
             max_message_length: Maximum message length
             handlers: Optional list of handlers
-            handler_error_mode: Handler error handling mode
+            handler_error_mode: What a failing handler does: ``HandlerErrorMode``
+                or its string (``"continue"``, the default, or ``"raise"``)
             transition_config: Configuration for transition evaluation
             session_store: Optional store used by save_session/restore_session
             handler_timeout: Seconds a handler may run before it times out
@@ -742,7 +744,7 @@ class API:
 
         # Initialize handler system (single instance shared with FSMManager)
         self.handler_system = HandlerSystem(
-            error_mode=handler_error_mode, handler_timeout=handler_timeout
+            handler_error_mode=handler_error_mode, handler_timeout=handler_timeout
         )
 
         # Initialize enhanced FSM manager with the 2-pass architecture

@@ -2,7 +2,7 @@
 Unit tests for handler timeout functionality in the HandlerSystem.
 
 Tests cover: handler_timeout parameter,
-timeout with error_mode interaction, and backward compatibility with
+timeout with handler_error_mode interaction, and backward compatibility with
 handler_timeout=None.
 """
 
@@ -158,7 +158,7 @@ class TestHandlerExceedsTimeout:
 
     @pytest.mark.slow
     def test_slow_handler_raises_handler_execution_error(self):
-        hs = HandlerSystem(handler_timeout=0.1, error_mode="raise")
+        hs = HandlerSystem(handler_timeout=0.1, handler_error_mode="raise")
         hs.register_handler(SlowHandler(sleep_seconds=2.0))
 
         with pytest.raises(HandlerExecutionError) as exc_info:
@@ -174,7 +174,7 @@ class TestHandlerExceedsTimeout:
 
     @pytest.mark.slow
     def test_timeout_error_includes_handler_name(self):
-        hs = HandlerSystem(handler_timeout=0.1, error_mode="raise")
+        hs = HandlerSystem(handler_timeout=0.1, handler_error_mode="raise")
         hs.register_handler(SlowHandler(name="my_slow_handler", sleep_seconds=2.0))
 
         with pytest.raises(HandlerExecutionError) as exc_info:
@@ -189,7 +189,7 @@ class TestHandlerExceedsTimeout:
 
     @pytest.mark.slow
     def test_timeout_error_message_includes_duration(self):
-        hs = HandlerSystem(handler_timeout=0.1, error_mode="raise")
+        hs = HandlerSystem(handler_timeout=0.1, handler_error_mode="raise")
         hs.register_handler(SlowHandler(name="timed_out", sleep_seconds=2.0))
 
         with pytest.raises(HandlerExecutionError) as exc_info:
@@ -204,17 +204,17 @@ class TestHandlerExceedsTimeout:
 
 
 # ══════════════════════════════════════════════════════════════
-# 5. Timeout with error_mode interaction
+# 5. Timeout with handler_error_mode interaction
 # ══════════════════════════════════════════════════════════════
 
 
 class TestTimeoutErrorModeInteraction:
-    """Timeout behavior depends on error_mode."""
+    """Timeout behavior depends on handler_error_mode."""
 
     @pytest.mark.slow
     def test_timeout_with_continue_mode_swallows_error(self):
         """In continue mode, timeout should be caught and logged, not raised."""
-        hs = HandlerSystem(handler_timeout=0.1, error_mode="continue")
+        hs = HandlerSystem(handler_timeout=0.1, handler_error_mode="continue")
         hs.register_handler(SlowHandler(name="slow_swallowed", sleep_seconds=2.0))
 
         # Should not raise
@@ -231,7 +231,7 @@ class TestTimeoutErrorModeInteraction:
     @pytest.mark.slow
     def test_timeout_with_raise_mode_propagates_error(self):
         """In raise mode, timeout should propagate as HandlerExecutionError."""
-        hs = HandlerSystem(handler_timeout=0.1, error_mode="raise")
+        hs = HandlerSystem(handler_timeout=0.1, handler_error_mode="raise")
         hs.register_handler(SlowHandler(sleep_seconds=2.0))
 
         with pytest.raises(HandlerExecutionError):
@@ -245,7 +245,7 @@ class TestTimeoutErrorModeInteraction:
     @pytest.mark.slow
     def test_continue_mode_runs_subsequent_handlers_after_timeout(self):
         """After one handler times out in continue mode, remaining handlers should still run."""
-        hs = HandlerSystem(handler_timeout=0.1, error_mode="continue")
+        hs = HandlerSystem(handler_timeout=0.1, handler_error_mode="continue")
         hs.register_handler(
             SlowHandler(name="slow_first", sleep_seconds=2.0, result={"slow_ran": True})
         )
@@ -279,7 +279,7 @@ class TestTimeoutErrorModeInteraction:
                 time.sleep(2.0)
                 return {}
 
-        hs = HandlerSystem(handler_timeout=0.1, error_mode="continue")
+        hs = HandlerSystem(handler_timeout=0.1, handler_error_mode="continue")
         hs.register_handler(CriticalSlowHandler())
 
         with pytest.raises(HandlerExecutionError):

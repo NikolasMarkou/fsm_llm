@@ -566,7 +566,7 @@ class TestFieldExtractionContextIsBounded:
 # ══════════════════════════════════════════════════════════════
 
 
-def _failing_start(failure, handlers, error_mode="continue"):
+def _failing_start(failure, handlers, handler_error_mode="continue"):
     """Drive ``start_conversation`` to failure with ``handlers`` registered.
 
     ``failure`` is raised from the initial-response LLM call, which is what
@@ -588,7 +588,7 @@ def _failing_start(failure, handlers, error_mode="continue"):
     api = API.from_definition(
         _fsm_definition(),
         llm_interface=llm,
-        handler_error_mode=error_mode,
+        handler_error_mode=handler_error_mode,
         handlers=list(handlers),
     )
 

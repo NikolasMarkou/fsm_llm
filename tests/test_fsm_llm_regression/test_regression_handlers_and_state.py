@@ -26,7 +26,7 @@ class TestPostTransitionCurrentState:
         # Track what current_state POST_TRANSITION receives
         received_states = []
 
-        handler_system = HandlerSystem(error_mode="continue")
+        handler_system = HandlerSystem(handler_error_mode="continue")
         handler = (
             create_handler("track_state")
             .at(HandlerTiming.POST_TRANSITION)
@@ -69,18 +69,18 @@ class TestPostTransitionCurrentState:
         )
 
 
-# ── B2: Handler exceptions bypass error_mode ─────────────────
+# ── B2: Handler exceptions bypass handler_error_mode ─────────────────
 
 
 class TestHandlerErrorModeRespected:
-    """B2: _execute_handlers should respect handler_system.error_mode."""
+    """B2: _execute_handlers should respect handler_system.handler_error_mode."""
 
     def test_raise_mode_propagates_exception(self):
-        """When error_mode='raise', handler exceptions should propagate."""
+        """When handler_error_mode='raise', handler exceptions should propagate."""
         from fsm_llm.definitions import FSMContext, FSMInstance
         from fsm_llm.fsm import FSMManager
 
-        handler_system = HandlerSystem(error_mode="raise")
+        handler_system = HandlerSystem(handler_error_mode="raise")
         handler = (
             create_handler("exploding_handler")
             .at(HandlerTiming.PRE_PROCESSING)
@@ -107,11 +107,11 @@ class TestHandlerErrorModeRespected:
             )
 
     def test_continue_mode_swallows_exception(self):
-        """When error_mode='continue', handler exceptions should be swallowed."""
+        """When handler_error_mode='continue', handler exceptions should be swallowed."""
         from fsm_llm.definitions import FSMContext, FSMInstance
         from fsm_llm.fsm import FSMManager
 
-        handler_system = HandlerSystem(error_mode="continue")
+        handler_system = HandlerSystem(handler_error_mode="continue")
         handler = (
             create_handler("exploding_handler")
             .at(HandlerTiming.PRE_PROCESSING)

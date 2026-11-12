@@ -86,10 +86,10 @@ class TestVisualizerBoxTruncation:
 
 
 class TestStartConversationHandlerCleanup:
-    """VB3: If START_CONVERSATION handler raises with error_mode='raise', instance should be cleaned up."""
+    """VB3: If START_CONVERSATION handler raises with handler_error_mode='raise', instance should be cleaned up."""
 
     def test_handler_failure_cleans_up_instance(self):
-        """When START_CONVERSATION handler fails (error_mode=raise), instance must not leak."""
+        """When START_CONVERSATION handler fails (handler_error_mode=raise), instance must not leak."""
         from fsm_llm.definitions import FSMDefinition
         from fsm_llm.fsm import FSMManager
         from fsm_llm.handlers import HandlerSystem, HandlerTiming, create_handler
@@ -116,7 +116,7 @@ class TestStartConversationHandlerCleanup:
             },
         )
 
-        handler_system = HandlerSystem(error_mode="raise")
+        handler_system = HandlerSystem(handler_error_mode="raise")
         handler = (
             create_handler("failing_handler")
             .at(HandlerTiming.START_CONVERSATION)

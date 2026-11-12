@@ -631,9 +631,9 @@ class MessagePipeline:
 
         except Exception as e:
             # DECISION plan-2026-07-18T051819-80b0bd4d/D-006 [STALE]: re-raise UNCONDITIONALLY.
-            # HandlerSystem.execute_handlers raises only when error_mode == "raise" OR
+            # HandlerSystem.execute_handlers raises only when handler_error_mode == "raise" OR
             # the failing handler is critical=True, so anything escaping it already
-            # means "must propagate". Do NOT reintroduce an `if error_mode == "raise"`
+            # means "must propagate". Do NOT reintroduce an `if handler_error_mode == "raise"`
             # re-gate here: it swallowed every critical failure under "continue".
             #
             # SCOPE OF THE partial-context MERGE BELOW: it preserves what earlier

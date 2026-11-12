@@ -15,6 +15,7 @@ from fsm_llm import API
 from fsm_llm.handlers import (
     BaseHandler,
     HandlerBuilder,
+    HandlerErrorMode,
     HandlerExecutionError,
     HandlerSystem,
     HandlerSystemError,
@@ -73,28 +74,62 @@ class NeverRunHandler(BaseHandler):
 
 
 class TestHandlerSystemInit:
-    """Tests for HandlerSystem.__init__ with valid and invalid error_mode."""
+    """Tests for HandlerSystem.__init__ with valid and invalid handler_error_mode."""
 
     def test_init_continue_mode(self):
-        hs = HandlerSystem(error_mode="continue")
-        assert hs.error_mode == "continue"
+        hs = HandlerSystem(handler_error_mode="continue")
+        assert hs.handler_error_mode == "continue"
         assert hs.handlers == []
 
     def test_init_raise_mode(self):
-        hs = HandlerSystem(error_mode="raise")
-        assert hs.error_mode == "raise"
+        hs = HandlerSystem(handler_error_mode="raise")
+        assert hs.handler_error_mode == "raise"
 
     def test_init_default_mode_is_continue(self):
         hs = HandlerSystem()
-        assert hs.error_mode == "continue"
+        assert hs.handler_error_mode == "continue"
 
     def test_init_invalid_mode_raises(self):
-        with pytest.raises(ValueError, match="Invalid error_mode"):
-            HandlerSystem(error_mode="skip")
+        with pytest.raises(ValueError, match="Invalid handler_error_mode"):
+            HandlerSystem(handler_error_mode="skip")
 
     def test_init_invalid_mode_nonsense(self):
-        with pytest.raises(ValueError, match="Invalid error_mode"):
-            HandlerSystem(error_mode="explode")
+        with pytest.raises(ValueError, match="Invalid handler_error_mode"):
+            HandlerSystem(handler_error_mode="explode")
+
+
+class TestHandlerErrorMode:
+    """HandlerErrorMode is the one closed vocabulary for handler_error_mode."""
+
+    def test_members_and_values(self):
+        assert [m.value for m in HandlerErrorMode] == ["continue", "raise"]
+        assert HandlerErrorMode.CONTINUE == "continue"
+        assert HandlerErrorMode.RAISE == "raise"
+
+    @pytest.mark.parametrize(
+        "given, expected",
+        [
+            (HandlerErrorMode.CONTINUE, HandlerErrorMode.CONTINUE),
+            (HandlerErrorMode.RAISE, HandlerErrorMode.RAISE),
+            ("continue", HandlerErrorMode.CONTINUE),
+            ("raise", HandlerErrorMode.RAISE),
+        ],
+    )
+    def test_accepts_members_and_strings(self, given, expected):
+        assert HandlerErrorMode.from_string(given) is expected
+        assert HandlerSystem(handler_error_mode=given).handler_error_mode is expected
+
+    @pytest.mark.parametrize("bad", ["bogus", "", None, 3, 1.5])
+    def test_rejects_everything_else(self, bad):
+        with pytest.raises(ValueError, match="Invalid handler_error_mode") as exc:
+            HandlerSystem(handler_error_mode=bad)
+        assert repr(bad) in str(exc.value)
+
+    def test_message_lists_values_not_member_reprs(self):
+        with pytest.raises(ValueError) as exc:
+            HandlerSystem(handler_error_mode="bogus")
+        assert "['continue', 'raise']" in str(exc.value)
+        assert "HandlerErrorMode." not in str(exc.value)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -135,10 +170,10 @@ class TestHandlerSystemRegister:
 
 
 class TestHandlerSystemExecuteContinue:
-    """execute_handlers with error_mode='continue'."""
+    """execute_handlers with handler_error_mode='continue'."""
 
     def test_handler_failure_continues_to_next(self):
-        hs = HandlerSystem(error_mode="continue")
+        hs = HandlerSystem(handler_error_mode="continue")
         hs.register_handler(FailingHandler(name="fail1", priority=10))
         hs.register_handler(AlwaysRunHandler(name="ok", priority=20, result={"x": 1}))
 
@@ -146,7 +181,7 @@ class TestHandlerSystemExecuteContinue:
         assert result["x"] == 1
 
     def test_context_propagation_across_handlers(self):
-        hs = HandlerSystem(error_mode="continue")
+        hs = HandlerSystem(handler_error_mode="continue")
         hs.register_handler(AlwaysRunHandler(name="h1", priority=10, result={"a": 1}))
         hs.register_handler(AlwaysRunHandler(name="h2", priority=20, result={"b": 2}))
 
@@ -156,10 +191,10 @@ class TestHandlerSystemExecuteContinue:
 
 
 class TestHandlerSystemExecuteRaise:
-    """execute_handlers with error_mode='raise'."""
+    """execute_handlers with handler_error_mode='raise'."""
 
     def test_handler_failure_raises_handler_execution_error(self):
-        hs = HandlerSystem(error_mode="raise")
+        hs = HandlerSystem(handler_error_mode="raise")
         hs.register_handler(FailingHandler(name="fail_handler"))
 
         with pytest.raises(HandlerExecutionError) as exc_info:
@@ -169,7 +204,7 @@ class TestHandlerSystemExecuteRaise:
 
     def test_raise_mode_stops_at_first_failure(self):
         """After a raise, subsequent handlers should not execute."""
-        hs = HandlerSystem(error_mode="raise")
+        hs = HandlerSystem(handler_error_mode="raise")
         tracker = []
         h1 = AlwaysRunHandler(name="h1", priority=10, result={"a": 1})
         h1_orig_execute = h1.execute
@@ -326,10 +361,10 @@ class TestExecuteHandlersDeepCopyFailureIsNotSwallowed:
     non-deep-copyable context value (e.g. a live ``threading.Lock`` a caller
     left in ``context``) with a handler that WOULD qualify:
 
-    * under the default ``error_mode="continue"``: silently produced ``{}``
+    * under the default ``handler_error_mode="continue"``: silently produced ``{}``
       -- no exception, the handler simply never ran -- instead of the bare
       ``TypeError`` it raised pre-D-020.
-    * under ``error_mode="raise"``: raised ``HandlerExecutionError``
+    * under ``handler_error_mode="raise"``: raised ``HandlerExecutionError``
       attributed to the qualifying handler, even though that handler was
       NEVER actually invoked -- the deep-copy failed before ``execute()``
       was ever called.
@@ -345,7 +380,7 @@ class TestExecuteHandlersDeepCopyFailureIsNotSwallowed:
         return {"lock": threading.Lock(), "a": 1}
 
     def test_continue_mode_raises_instead_of_silently_swallowing(self):
-        hs = HandlerSystem(error_mode="continue")
+        hs = HandlerSystem(handler_error_mode="continue")
         hs.register_handler(AlwaysRunHandler(name="qualifies", result={"x": 1}))
 
         with pytest.raises(TypeError):
@@ -357,7 +392,7 @@ class TestExecuteHandlersDeepCopyFailureIsNotSwallowed:
             )
 
     def test_raise_mode_raises_a_copy_failure_not_a_handler_attribution(self):
-        hs = HandlerSystem(error_mode="raise")
+        hs = HandlerSystem(handler_error_mode="raise")
         hs.register_handler(AlwaysRunHandler(name="qualifies", result={"x": 1}))
 
         # The deep-copy failure must surface as the plain TypeError it is,
@@ -375,7 +410,7 @@ class TestExecuteHandlersDeepCopyFailureIsNotSwallowed:
     def test_handler_genuinely_never_ran_when_copy_fails(self):
         """The qualifying handler's ``execute()`` must never be reached."""
         ran = []
-        hs = HandlerSystem(error_mode="continue")
+        hs = HandlerSystem(handler_error_mode="continue")
         hs.register_handler(
             create_handler("would_run").do(lambda ctx: ran.append(True) or {})
         )
@@ -800,7 +835,7 @@ class TestLambdaHandlerExecute:
         def bad_fn(ctx):
             raise ValueError("bad value")
 
-        system = HandlerSystem(error_mode="raise")
+        system = HandlerSystem(handler_error_mode="raise")
         system.register_handler(
             create_handler("bad").at(HandlerTiming.PRE_PROCESSING).do(bad_fn)
         )
@@ -1202,9 +1237,9 @@ class TestHandlerBuilderCritical:
 
         An attribute-only assertion would be satisfied by a builder that sets the
         flag and wires it to nothing, so this drives ``execute_handlers`` in
-        ``error_mode="continue"`` -- where a NON-critical failure is swallowed.
+        ``handler_error_mode="continue"`` -- where a NON-critical failure is swallowed.
         """
-        system = HandlerSystem(error_mode="continue")
+        system = HandlerSystem(handler_error_mode="continue")
         system.register_handler(
             create_handler("boom")
             .at(HandlerTiming.PRE_PROCESSING)
@@ -1225,7 +1260,7 @@ class TestHandlerBuilderCritical:
         Without this, the test above would also pass under a build() that marked
         EVERY handler critical.
         """
-        system = HandlerSystem(error_mode="continue")
+        system = HandlerSystem(handler_error_mode="continue")
         system.register_handler(
             create_handler("boom")
             .at(HandlerTiming.PRE_PROCESSING)

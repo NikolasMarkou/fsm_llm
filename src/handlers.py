@@ -110,6 +110,34 @@ class HandlerTiming(str, Enum):
     ERROR = "error"
 
 
+class HandlerErrorMode(str, Enum):
+    """What ``HandlerSystem`` does when a handler fails.
+
+    ``CONTINUE`` logs the failure and moves on to the next handler; ``RAISE``
+    raises ``HandlerExecutionError`` (a ``critical`` handler raises in both
+    modes). A ``str`` enum, so ``"raise"`` and ``HandlerErrorMode.RAISE`` are
+    interchangeable wherever ``handler_error_mode`` is accepted.
+    """
+
+    CONTINUE = "continue"
+    RAISE = "raise"
+
+    @classmethod
+    def from_string(cls, value: HandlerErrorMode | str) -> HandlerErrorMode:
+        """Return the member for a member or an exact value string.
+
+        Raises ``ValueError`` naming ``handler_error_mode`` and the valid values
+        for anything else (another string, ``None``, a number).
+        """
+        try:
+            return cls(value)
+        except ValueError:
+            valid_values = [member.value for member in cls]
+            raise ValueError(
+                f"Invalid handler_error_mode: {value!r}. Must be one of {valid_values}"
+            ) from None
+
+
 # Type aliases for better code readability and type safety
 ExecutionLambda = Callable[[dict[str, Any]], dict[str, Any]]
 """Type alias for execution lambda functions."""
@@ -274,34 +302,31 @@ class HandlerSystem:
     """
 
     def __init__(
-        self, error_mode: str = "continue", handler_timeout: float | None = None
+        self,
+        handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE,
+        handler_timeout: float | None = None,
     ):
         """
         Initialize the handler system with specified error handling behavior.
 
-        :param error_mode: How to handle errors during handler execution
-        :type error_mode: str
+        :param handler_error_mode: How to handle errors during handler execution:
+            a ``HandlerErrorMode`` or its value string (``"continue"`` or
+            ``"raise"``), coerced once here
+        :type handler_error_mode: HandlerErrorMode | str
         :param handler_timeout: Maximum seconds a handler may run before timeout.
             ``None`` disables timeout (default). Reachable through
             ``API(handler_timeout=...)``.
         :type handler_timeout: float | None
-        :raises ValueError: If error_mode is not one of: continue, raise
+        :raises ValueError: If handler_error_mode is not one of: continue, raise
         """
         # Rebound, never mutated in place (copy-on-write, see register_handler).
         self.handlers: list[FSMHandler] = []
         self._registration_lock = threading.Lock()
-        self.error_mode = error_mode
+        self.handler_error_mode = HandlerErrorMode.from_string(handler_error_mode)
         self.handler_timeout = handler_timeout
         # Timed-handler threads still running after their timeout (D-049).
         self._stragglers: list[threading.Thread] = []
         self._stragglers_lock = threading.Lock()
-
-        # Validate error mode parameter
-        valid_modes = ["continue", "raise"]
-        if error_mode not in valid_modes:
-            raise ValueError(
-                f"Invalid error_mode: {error_mode}. Must be one of {valid_modes}"
-            )
 
     def register_handler(self, handler: FSMHandler) -> None:
         """
@@ -411,13 +436,13 @@ class HandlerSystem:
         def _report_and_maybe_raise(
             handler_name: str, handler: FSMHandler, exc: Exception
         ) -> None:
-            """Log + apply the configured error_mode for a failure at ``handler``.
+            """Log + apply the configured handler_error_mode for a failure at ``handler``.
 
             Shared by the ``should_execute()`` probe and the actual handler
             execution below so both failure points get identical error-mode
             semantics without duplicating the raise/continue decision twice.
-            Raises ``HandlerExecutionError`` (critical or error_mode="raise");
-            otherwise returns normally (error_mode="continue").
+            Raises ``HandlerExecutionError`` (critical or handler_error_mode="raise");
+            otherwise returns normally (handler_error_mode="continue").
             """
             # C6: a condition lambda's failure arrives already wrapped by
             # `LambdaHandler.should_execute`; wrapping it again doubled the
@@ -428,7 +453,7 @@ class HandlerSystem:
                 error = HandlerExecutionError(handler_name, exc)
             logger.error(f"{error!s}\n{traceback.format_exc()}")
             is_critical = getattr(handler, "critical", False)
-            if self.error_mode == "raise" or is_critical:
+            if self.handler_error_mode is HandlerErrorMode.RAISE or is_critical:
                 error.partial_context = dict(output_context)
                 if error is exc:
                     raise error
@@ -446,7 +471,7 @@ class HandlerSystem:
                 )
             except Exception as e:
                 _report_and_maybe_raise(handler_name, handler, e)
-                continue  # error_mode == "continue": move to the next handler
+                continue  # handler_error_mode == "continue": move to the next handler
 
             if not should_run:
                 continue
@@ -462,9 +487,9 @@ class HandlerSystem:
             # threading.Lock a caller left in context) is a caller bug, not a
             # handler-execution failure: pre-D-020 it raised a bare
             # TypeError straight out of execute_handlers. With the copy
-            # inside the try, the default error_mode="continue" silently
+            # inside the try, the default handler_error_mode="continue" silently
             # swallowed it (empty dict, handler never ran, no exception) and
-            # error_mode="raise" misattributed it to a handler that was never
+            # handler_error_mode="raise" misattributed it to a handler that was never
             # actually invoked. Do NOT move this back inside the try below --
             # that reintroduces both regressions. See decisions.md D-025.
             if updated_context is None:
@@ -492,7 +517,7 @@ class HandlerSystem:
 
             except Exception as e:
                 _report_and_maybe_raise(handler_name, handler, e)
-                continue  # error_mode == "continue": move to the next handler
+                continue  # handler_error_mode == "continue": move to the next handler
 
         return output_context
 
@@ -750,7 +775,7 @@ class HandlerBuilder:
         Mark the handler as critical.
 
         A critical handler's failure is raised as a ``HandlerExecutionError`` even
-        when the ``HandlerSystem`` runs in ``error_mode="continue"``, where a
+        when the ``HandlerSystem`` runs in ``handler_error_mode="continue"``, where a
         non-critical failure would only be logged and skipped.
 
         Composes in any order with the other chain steps, and must be followed by

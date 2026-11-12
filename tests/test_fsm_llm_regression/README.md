@@ -25,7 +25,7 @@ Tests fall into four styles:
 - `test_regression_cli_and_exports.py` - plan 13: CLI `main_cli` entry points, `ContextMergeStrategy` export, no `fsm_llm.workflows.cli`, README badge and headings, `docs/quickstart.md` links, `py.typed`, shared version.
 - `test_regression_core_bugs.py` - plan 6 (VB1 to VB25): self-transitions, reasoning never shown as the reply, error wrapping, terminal-state rejection, visualizer depth and sorting, validator cascades, numeric string comparison.
 - `test_regression_expressions_and_transitions.py` - plan 5: `ValueError` propagation in `converse`, `max_history_size=0`, high-priority single transitions, JsonLogic `and`/`or` values, chained `>`, prompt tag escaping, `--version` flag.
-- `test_regression_handlers_and_state.py` - plan 4: POST_TRANSITION sees the new state, handler `error_mode`, missing or `None` LLM content.
+- `test_regression_handlers_and_state.py` - plan 4: POST_TRANSITION sees the new state, handler `handler_error_mode`, missing or `None` LLM content.
 - `test_regression_iter2.py` - iter-2 F-003 to F-006: `api_key` forbidden pattern, WaitForEventStep state validation, LRU FSM cache, `less`. F-001 and F-002 are tested elsewhere (named in the file docstring).
 - `test_regression_jsonlogic_and_merge.py` - plan 9: multi-key JsonLogic dicts raise, reserved LLM kwargs, `transition_decision` never gets structured output, context merge, LIFO stack teardown in `end_conversation`, history role mapping (an unknown role becomes system), exception chaining, `min`/`max`/`missing_some`, `None` comparisons, removed dead code.
 - `test_regression_logic_and_visualizer.py` - plan 7: empty `and`/`or`, visualizer box widths, instance cleanup when a START_CONVERSATION handler fails, removed `early_termination`.

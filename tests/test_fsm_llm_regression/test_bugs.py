@@ -376,7 +376,7 @@ class TestDuplicateErrorModes:
 
         source = inspect.getsource(HandlerSystem.execute_handlers)
         # After the fix, "skip" should not appear as a separate branch
-        assert 'error_mode == "skip"' not in source, (
+        assert 'handler_error_mode == "skip"' not in source, (
             "The 'skip' error mode is dead code — identical to 'continue'"
         )
 

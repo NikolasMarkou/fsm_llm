@@ -133,7 +133,7 @@ class TestHandlerCriticalFlag:
     """Tests for the critical handler flag added in step 7."""
 
     def test_critical_handler_raises_in_continue_mode(self):
-        """Critical handlers should raise even when error_mode='continue'."""
+        """Critical handlers should raise even when handler_error_mode='continue'."""
         from fsm_llm.handlers import (
             BaseHandler,
             HandlerExecutionError,
@@ -153,7 +153,7 @@ class TestHandlerCriticalFlag:
             def execute(self, context):
                 raise RuntimeError("critical failure")
 
-        system = HandlerSystem(error_mode="continue")
+        system = HandlerSystem(handler_error_mode="continue")
         system.register_handler(FailingHandler())
 
         with pytest.raises(HandlerExecutionError, match="critical failure"):
@@ -180,7 +180,7 @@ class TestHandlerCriticalFlag:
             def execute(self, context):
                 raise RuntimeError("non-critical failure")
 
-        system = HandlerSystem(error_mode="continue")
+        system = HandlerSystem(handler_error_mode="continue")
         system.register_handler(FailingHandler())
 
         # Should not raise

@@ -42,7 +42,7 @@ from .definitions import (
     State,
     StateNotFoundError,
 )
-from .handlers import HandlerSystem, HandlerTiming
+from .handlers import HandlerErrorMode, HandlerSystem, HandlerTiming
 
 # --------------------------------------------------------------
 # Local imports
@@ -224,7 +224,7 @@ class FSMManager:
         max_history_size: int = DEFAULT_MAX_HISTORY_SIZE,
         max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH,
         handler_system: HandlerSystem | None = None,
-        handler_error_mode: str = "continue",
+        handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE,
         max_fsm_cache_size: int = DEFAULT_MAX_FSM_CACHE_SIZE,
     ):
         if llm_interface is None:
@@ -283,7 +283,7 @@ class FSMManager:
 
         # Handler system
         self.handler_system = handler_system or HandlerSystem(
-            error_mode=handler_error_mode
+            handler_error_mode=handler_error_mode
         )
 
         # Prompt builders (stored for attribute access by tests/API)

@@ -648,7 +648,7 @@ class TestStep4LiveDictProbe:
     """D-039 reverts the P1-3 read-only probe: the uncopied-phase probe gets
     the caller's live dict again, per the pure-predicate contract (D-020)."""
 
-    @pytest.mark.parametrize("error_mode", ["continue", "raise"])
+    @pytest.mark.parametrize("handler_error_mode", ["continue", "raise"])
     @pytest.mark.parametrize(
         "condition",
         [
@@ -659,7 +659,7 @@ class TestStep4LiveDictProbe:
         ids=["json_dumps", "deepcopy", "isinstance_dict"],
     )
     def test_step_4_1_serialising_read_only_condition_fires(
-        self, condition, error_mode
+        self, condition, handler_error_mode
     ):
         from fsm_llm.handlers import HandlerSystem, HandlerTiming, create_handler
 
@@ -669,7 +669,7 @@ class TestStep4LiveDictProbe:
             fired.append(1)
             return {"logged": True}
 
-        system = HandlerSystem(error_mode=error_mode)
+        system = HandlerSystem(handler_error_mode=handler_error_mode)
         system.register_handler(create_handler("reader").when(condition).do(_action))
         context = {"existing": 1}
         result = system.execute_handlers(
