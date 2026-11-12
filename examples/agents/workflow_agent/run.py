@@ -125,12 +125,12 @@ async def run_workflow(model: str, task: str) -> dict:
     engine = WorkflowEngine()
     engine.register_workflow(wf_builder)
 
-    instance_id = await engine.start_workflow(
+    instance_id = await engine.start(
         "agent_workflow",
         initial_context={"user_task": task},
     )
 
-    instance = engine.get_workflow_instance(instance_id)
+    instance = engine.get_instance(instance_id)
     return instance.context if instance else {}
 
 

@@ -61,7 +61,7 @@ LifecycleHook = Callable[[str, WorkflowInstance, dict[str, Any]], Any]
 
 
 class _CancelRequest:
-    """A ``cancel_workflow`` call waiting for an instance's lock.
+    """A ``cancel`` call waiting for an instance's lock.
 
     Interface contract: ``reason`` is the caller's text; ``honored`` is set
     to ``True`` only by the run loop that cancelled the instance on this
@@ -121,7 +121,7 @@ class WorkflowEngine:
 
     Every argument is keyword-only: the first positional slot held the
     removed ``handler_system`` (plan 07ad3f8c step 18), so an old positional
-    call must fail at construction, not later inside ``start_workflow``.
+    call must fail at construction, not later inside ``start``.
 
     Args:
         max_concurrent_workflows: Maximum number of active (RUNNING/WAITING)
@@ -160,7 +160,7 @@ class WorkflowEngine:
         self.timers: dict[str, Timer] = {}
         self._instance_locks: dict[str, asyncio.Lock] = {}
         # Cancels waiting for an instance lock, by instance id. Registered by
-        # `cancel_workflow` BEFORE it awaits the lock, removed in its
+        # `cancel` BEFORE it awaits the lock, removed in its
         # `finally` (and with the instance); read once per loop iteration.
         self._cancel_requests: dict[str, _CancelRequest] = {}
         # Definition each instance was started with (re-registering a
@@ -217,7 +217,7 @@ class WorkflowEngine:
 
         # DECISION plan-2026-09-12T065608-089d0ec7/D-003
         # F4 fix: the lock is acquired ONLY at the outermost public entry
-        # points (`start_workflow`, `advance_workflow`, `cancel_workflow`,
+        # points (`start`, `advance`, `cancel`,
         # `process_event`'s per-instance delivery loop,
         # `_handle_timer_expiration`, `_handle_event_timeout`,
         # `_handle_deadline`) -- never inside
@@ -265,7 +265,7 @@ class WorkflowEngine:
 
         # DECISION plan-2026-09-12T065608-089d0ec7/D-005
         # Do NOT call update_status(FAILED, ...) unconditionally. If the
-        # instance is already terminal (e.g. a concurrent cancel_workflow won
+        # instance is already terminal (e.g. a concurrent cancel won
         # the race for this instance's lock before a step exception was
         # handled), update_status raises WorkflowStateError (terminal states
         # map to an empty transition set in _VALID_STATUS_TRANSITIONS) from
@@ -285,7 +285,7 @@ class WorkflowEngine:
     # Registration and start
     # ------------------------------------------------------------------
 
-    async def shutdown(self) -> None:
+    async def close(self) -> None:
         """Stop the engine: cancel and await every timer and background
         task, drop listeners and buffered events, and refuse new starts.
 
@@ -326,7 +326,7 @@ class WorkflowEngine:
         self.workflow_definitions[workflow.workflow_id] = registered
         logger.info(f"Registered workflow: {workflow.workflow_id}")
 
-    async def start_workflow(
+    async def start(
         self,
         workflow_id: str,
         initial_context: dict[str, Any] | None = None,
@@ -349,7 +349,7 @@ class WorkflowEngine:
                 background task.
 
         Raises:
-            WorkflowResourceError: the engine is shut down or the concurrent
+            WorkflowResourceError: the engine is closed or the concurrent
                 limit is reached.
             WorkflowInstanceError: ``instance_id`` is already in use.
             WorkflowTimeoutError: the run exceeded ``max_seconds``; its
@@ -358,11 +358,11 @@ class WorkflowEngine:
         if self._closed:
             raise WorkflowResourceError(
                 resource_type="workflow_engine",
-                resource_id="shutdown",
-                message="Engine has been shut down",
+                resource_id="closed",
+                message="Engine has been closed",
             )
         # Check concurrent workflow limit
-        if len(self.get_active_workflows()) >= self.max_concurrent_workflows:
+        if len(self.list_active_instances()) >= self.max_concurrent_workflows:
             raise WorkflowResourceError(
                 resource_type="workflow_engine",
                 resource_id="concurrent_limit",
@@ -459,7 +459,7 @@ class WorkflowEngine:
         instance_id: str,
         initial_context: dict[str, Any] | None,
     ) -> WorkflowInstance:
-        """Create a new (PENDING) workflow instance; ``start_workflow`` moves it
+        """Create a new (PENDING) workflow instance; ``start`` moves it
         to RUNNING once the engine holds it, so hooks hear the change."""
         if not workflow_def.initial_step_id:
             raise WorkflowDefinitionError(
@@ -508,10 +508,10 @@ class WorkflowEngine:
             # running asyncio task (that would interrupt user code mid-step and
             # leave resources half-released) and not through a second lock in
             # an inner method (089d0ec7/D-003: locks only at outermost entry
-            # points). `cancel_workflow` cannot get the instance lock until
+            # points). `cancel` cannot get the instance lock until
             # this whole chain returns, so it registers a request first; a
             # step already in flight runs to completion. Do NOT make
-            # `cancel_workflow` take the lock first or call update_status
+            # `cancel` take the lock first or call update_status
             # (CANCELLED) on a terminal instance (089d0ec7/D-015).
             request = self._cancel_requests.get(instance.instance_id)
             if request is not None and not instance.is_terminal():
@@ -853,7 +853,7 @@ class WorkflowEngine:
             else:
                 logger.warning(
                     f"Step {instance.current_step_id} has no transition and is not "
-                    "terminal; the instance stays RUNNING until advance_workflow"
+                    "terminal; the instance stays RUNNING until advance"
                 )
         return None
 
@@ -938,7 +938,7 @@ class WorkflowEngine:
 
         # F4: hold the per-instance lock across the status re-check and the
         # transition, so this timeout cannot interleave with a concurrent
-        # advance_workflow/cancel_workflow/process_event transition on the
+        # advance/cancel/process_event transition on the
         # same instance.
         async with self._get_instance_lock(instance_id):
             # DECISION plan_2026-05-29_5b2fbb09/D-001 [STALE]
@@ -1278,7 +1278,7 @@ class WorkflowEngine:
         # F4: per-instance lock, same reasoning as _handle_event_timeout above.
         async with self._get_instance_lock(instance_id):
             # Symmetric guard (RW3-001): if the instance was advanced out of
-            # WAITING by some other path (e.g. an external advance_workflow)
+            # WAITING by some other path (e.g. an external advance)
             # before this timer fired, do not drive a stale transition.
             if instance.status != WorkflowStatus.WAITING:
                 logger.debug(
@@ -1353,7 +1353,7 @@ class WorkflowEngine:
     # Advance / cancel / cleanup
     # ------------------------------------------------------------------
 
-    async def advance_workflow(self, instance_id: str, user_input: str = "") -> bool:
+    async def advance(self, instance_id: str, user_input: str = "") -> bool:
         """Re-run an active instance's current step.
 
         ``user_input`` is placed in the context under ``_user_input`` for the
@@ -1368,7 +1368,7 @@ class WorkflowEngine:
         instance = self.workflow_instances[instance_id]
 
         # F4: hold the per-instance lock across the is_active() check AND the
-        # step execution, so a concurrent cancel_workflow/advance_workflow on
+        # step execution, so a concurrent cancel/advance on
         # the same instance cannot interleave with this call's mutation of
         # instance.context/status (re-check is_active() under the lock).
         async with self._get_instance_lock(instance_id):
@@ -1383,9 +1383,7 @@ class WorkflowEngine:
                 instance.context.pop(CONTEXT_KEY_USER_INPUT, None)
         return True
 
-    async def cancel_workflow(
-        self, instance_id: str, reason: str = "Cancelled by user"
-    ) -> bool:
+    async def cancel(self, instance_id: str, reason: str = "Cancelled by user") -> bool:
         """Cancel a workflow instance.
 
         A cancel of an instance whose chain of steps is running takes effect
@@ -1408,7 +1406,7 @@ class WorkflowEngine:
         # until it ends, so the chain loop has to see the request (D-017).
         request = self._cancel_requests.setdefault(instance_id, _CancelRequest(reason))
         try:
-            # F4: see advance_workflow's comment -- same per-instance lock,
+            # F4: see advance's comment -- same per-instance lock,
             # held across the status mutation and resource cleanup.
             async with self._get_instance_lock(instance_id):
                 # DECISION plan-2026-09-12T065608-089d0ec7/D-015
@@ -1426,7 +1424,7 @@ class WorkflowEngine:
                 if instance.is_terminal():
                     logger.debug(
                         f"Instance {instance_id} already terminal "
-                        f"({instance.status.value}); cancel_workflow is a no-op"
+                        f"({instance.status.value}); cancel is a no-op"
                     )
                     if not request.honored:
                         return False
@@ -1522,25 +1520,25 @@ class WorkflowEngine:
     # Queries
     # ------------------------------------------------------------------
 
-    def get_workflow_instance(self, instance_id: str) -> WorkflowInstance | None:
+    def get_instance(self, instance_id: str) -> WorkflowInstance | None:
         """Get a workflow instance by ID (the live object)."""
         return self.workflow_instances.get(instance_id)
 
-    def get_workflow_definition(self, workflow_id: str) -> WorkflowDefinition | None:
+    def get_definition(self, workflow_id: str) -> WorkflowDefinition | None:
         """Get a registered workflow definition by ID."""
         return self.workflow_definitions.get(workflow_id)
 
-    def get_workflow_status(self, instance_id: str) -> WorkflowStatus | None:
+    def get_status(self, instance_id: str) -> WorkflowStatus | None:
         """Get the status of a workflow instance."""
-        instance = self.get_workflow_instance(instance_id)
+        instance = self.get_instance(instance_id)
         return instance.status if instance else None
 
-    def get_workflow_context(self, instance_id: str) -> dict[str, Any] | None:
+    def get_context(self, instance_id: str) -> dict[str, Any] | None:
         """Get a shallow copy of a workflow instance's context."""
-        instance = self.get_workflow_instance(instance_id)
+        instance = self.get_instance(instance_id)
         return dict(instance.context) if instance else None
 
-    def get_active_workflows(self) -> list[str]:
+    def list_active_instances(self) -> list[str]:
         """Get a list of active workflow instance IDs."""
         return [
             instance_id
@@ -1557,7 +1555,7 @@ class WorkflowEngine:
 
         return {
             "total_workflows": len(self.workflow_instances),
-            "active_workflows": len(self.get_active_workflows()),
+            "active_workflows": len(self.list_active_instances()),
             "registered_definitions": len(self.workflow_definitions),
             "event_listeners": sum(
                 len(listeners) for listeners in self.event_listeners.values()

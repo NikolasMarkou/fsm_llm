@@ -11,7 +11,7 @@ Some jobs are not one chat but a pipeline: load an order, check it, wait for a m
 ```mermaid
 flowchart TD
     D[WorkflowDefinition: steps + initial step] --> R[register_workflow validates it]
-    R --> S[start_workflow creates an instance with a context dict]
+    R --> S[start creates an instance with a context dict]
     S --> X[run current step]
     X -- next_state names a step --> X
     X -- event wait --> W[WAITING until process_event]
@@ -60,11 +60,11 @@ wf.with_step(auto_step("done", "Finish", next_state=""))
 async def main():
     engine = WorkflowEngine()
     engine.register_workflow(wf)
-    iid = await engine.start_workflow("orders")
-    print(engine.get_workflow_status(iid))            # WorkflowStatus.WAITING
+    iid = await engine.start("orders")
+    print(engine.get_status(iid))            # WorkflowStatus.WAITING
     await engine.process_event(WorkflowEvent(event_type="approved", payload={"by": "ana"}))
-    print(engine.get_workflow_status(iid))            # WorkflowStatus.COMPLETED
-    print(engine.get_workflow_context(iid)["approver"])  # ana
+    print(engine.get_status(iid))            # WorkflowStatus.COMPLETED
+    print(engine.get_context(iid)["approver"])  # ana
 
 asyncio.run(main())
 ```
@@ -110,7 +110,7 @@ Installing the `workflows` extra (`pip install -e ".[workflows]"` from a clone) 
 - Events: `process_event` wakes every instance waiting for that event type, or only one instance when `WorkflowEvent.instance_id` is set. A targeted event that arrives early is kept (up to 100 per instance) until that instance waits for it. `correlation_key="order_id"` on a wait accepts only events whose payload `order_id` equals the instance's own context value.
 - A wait with `timeout_seconds` and no `timeout_state` FAILS the instance when it times out.
 - Keys a step returns that look internal (starting with `_`, `system_`, `internal_` or `__`, any case) are dropped from the context, except the engine's own `_waiting_info` and `_timer_info` markers.
-- `start_workflow(..., max_seconds=30)` limits the whole run, waits included, and raises `WorkflowTimeoutError` when a step runs past it.
+- `start(..., max_seconds=30)` limits the whole run, waits included, and raises `WorkflowTimeoutError` when a step runs past it.
 - Finished instances stay in memory: by default the 1000 most recent (`max_completed_instances`), each with at most 1000 history entries.
 - `engine.add_hook(fn)` calls `fn(event_name, instance, data)` on `step_started`, `step_completed` and `status_changed`.
 - Log output is off until `fsm_llm.setup_logging()` or `fsm_llm.enable_debug_logging()` is called.

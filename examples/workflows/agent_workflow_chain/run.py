@@ -165,9 +165,9 @@ async def run():
 
     try:
         engine = build_chained_workflow(model)
-        instance_id = await engine.start_workflow("agent_chain", initial_context={})
+        instance_id = await engine.start("agent_chain", initial_context={})
 
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         if instance:
             print(f"\nWorkflow status: {instance.status.value}")
             context_keys = [k for k in instance.context if not k.startswith("_")]

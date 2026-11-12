@@ -223,7 +223,7 @@ class TestDeadCodeRemoved:
 
 
 class TestInstanceLockConcurrency:
-    """F4: concurrent advance_workflow/cancel_workflow calls on the SAME
+    """F4: concurrent advance/cancel calls on the SAME
     instance must not corrupt current_step_id/status/context, and must not
     execute the same step body twice for a single logical advance.
 
@@ -277,7 +277,7 @@ class TestInstanceLockConcurrency:
         return _CountingWaitingStep(step_id=step_id, name="CountingWaiting")
 
     async def test_concurrent_advance_calls_do_not_double_execute_step(self):
-        """Two concurrent advance_workflow() calls on the same RUNNING
+        """Two concurrent advance() calls on the same RUNNING
         instance must only ever execute the step body once: whichever call
         loses the lock race must observe the (by-then) terminal instance via
         is_active() and no-op, rather than re-running the step concurrently."""
@@ -305,8 +305,8 @@ class TestInstanceLockConcurrency:
             engine.workflow_instances["race-advance-1"] = instance
 
             results = await asyncio.gather(
-                engine.advance_workflow("race-advance-1"),
-                engine.advance_workflow("race-advance-1"),
+                engine.advance("race-advance-1"),
+                engine.advance("race-advance-1"),
             )
 
             # Exactly one step execution, regardless of which call won the
@@ -318,7 +318,7 @@ class TestInstanceLockConcurrency:
             assert instance.context.get("ran") is True
 
     async def test_concurrent_advance_and_cancel_leave_consistent_state(self):
-        """A concurrent advance_workflow() + cancel_workflow() on the same
+        """A concurrent advance() + cancel() on the same
         instance must always end CANCELLED, must never execute the step body
         more than once, and must never raise (WAITING->CANCELLED is always a
         valid transition, so no ordering of the two calls can hit an invalid
@@ -347,13 +347,13 @@ class TestInstanceLockConcurrency:
             engine.workflow_instances["race-cancel-1"] = instance
 
             _advance_result, cancel_result = await asyncio.gather(
-                engine.advance_workflow("race-cancel-1"),
-                engine.cancel_workflow("race-cancel-1"),
+                engine.advance("race-cancel-1"),
+                engine.cancel("race-cancel-1"),
             )
 
             # The step never ran more than once no matter the interleaving.
             assert len(counter) <= 1
-            # cancel_workflow always succeeds: RUNNING->CANCELLED and
+            # cancel always succeeds: RUNNING->CANCELLED and
             # WAITING->CANCELLED are both valid transitions.
             assert cancel_result is True
             assert instance.status == WorkflowStatus.CANCELLED
@@ -491,11 +491,11 @@ class TestHandleStepExceptionTerminalGuard:
 
 
 class TestCancelWorkflowTerminalGuard:
-    """F5 completion-fix (step 4.1): cancel_workflow's own update_status
+    """F5 completion-fix (step 4.1): cancel's own update_status
     call must not raise WorkflowStateError when the instance is already
-    terminal by the time cancel_workflow acquires the per-instance lock --
+    terminal by the time cancel acquires the per-instance lock --
     the same terminal-transition hazard D-005 fixed for
-    _handle_step_exception, but left unguarded on cancel_workflow itself.
+    _handle_step_exception, but left unguarded on cancel itself.
     Reproduced by the iter-1 REFLECT reviewer as
     `[True, WorkflowStateError("... completed -> cancelled")]`
     (findings/review-iter-1.md concern 3).
@@ -523,7 +523,7 @@ class TestCancelWorkflowTerminalGuard:
 
         # Before the fix, this raised WorkflowStateError from inside
         # update_status (COMPLETED -> CANCELLED is not a valid transition).
-        result = await engine.cancel_workflow(instance.instance_id)
+        result = await engine.cancel(instance.instance_id)
 
         assert result is False
         assert instance.status == WorkflowStatus.COMPLETED
@@ -535,7 +535,7 @@ class TestCancelWorkflowTerminalGuard:
         instance = self._make_instance(WorkflowStatus.CANCELLED)
         engine.workflow_instances[instance.instance_id] = instance
 
-        result = await engine.cancel_workflow(instance.instance_id)
+        result = await engine.cancel(instance.instance_id)
 
         assert result is False
         assert instance.status == WorkflowStatus.CANCELLED
@@ -547,7 +547,7 @@ class TestCancelWorkflowTerminalGuard:
         instance = self._make_instance(WorkflowStatus.FAILED)
         engine.workflow_instances[instance.instance_id] = instance
 
-        result = await engine.cancel_workflow(instance.instance_id)
+        result = await engine.cancel(instance.instance_id)
 
         assert result is False
         assert instance.status == WorkflowStatus.FAILED
@@ -555,16 +555,16 @@ class TestCancelWorkflowTerminalGuard:
     async def test_concurrent_advance_completes_and_cancel_races_the_lock(self):
         """Direct reproduction of the reviewer's finding: a step that
         completes the instance (terminal, non-WAITING) races a concurrent
-        cancel_workflow() waiting on the same per-instance lock. Neither call
+        cancel() waiting on the same per-instance lock. Neither call
         may ever raise, regardless of which one wins the lock race:
 
-        - if cancel_workflow wins first, RUNNING->CANCELLED is a valid
+        - if cancel wins first, RUNNING->CANCELLED is a valid
           transition, so it succeeds normally (cancel_result True, counter
-          stays 0, advance_workflow's own is_active() guard then makes it a
+          stays 0, advance's own is_active() guard then makes it a
           clean no-op returning False);
-        - if advance_workflow wins first, it runs the step to completion
-          (COMPLETED) before cancel_workflow gets the lock, and this fix's
-          terminal guard makes cancel_workflow a no-op returning False
+        - if advance wins first, it runs the step to completion
+          (COMPLETED) before cancel gets the lock, and this fix's
+          terminal guard makes cancel a no-op returning False
           instead of raising WorkflowStateError (the reviewer's exact
           repro).
         """
@@ -594,8 +594,8 @@ class TestCancelWorkflowTerminalGuard:
             engine.workflow_instances["cancel-vs-complete-1"] = instance
 
             advance_result, cancel_result = await asyncio.gather(
-                engine.advance_workflow("cancel-vs-complete-1"),
-                engine.cancel_workflow("cancel-vs-complete-1"),
+                engine.advance("cancel-vs-complete-1"),
+                engine.cancel("cancel-vs-complete-1"),
                 return_exceptions=True,
             )
 
@@ -609,11 +609,11 @@ class TestCancelWorkflowTerminalGuard:
                 WorkflowStatus.CANCELLED,
             )
             if instance.status == WorkflowStatus.COMPLETED:
-                # advance_workflow won the lock race and ran the step first.
+                # advance won the lock race and ran the step first.
                 assert cancel_result is False
                 assert len(counter) == 1
             else:
-                # cancel_workflow won the lock race before the step ran.
+                # cancel won the lock race before the step ran.
                 assert cancel_result is True
                 assert len(counter) == 0
 
@@ -664,7 +664,7 @@ class TestFloatTimeoutSecondsEndToEnd:
 
 
 # ---------------------------------------------------------------------------
-# F-WE-01: cancel_workflow must take effect on a RUNNING chain
+# F-WE-01: cancel must take effect on a RUNNING chain
 # ---------------------------------------------------------------------------
 
 
@@ -723,10 +723,10 @@ class TestCancelMidChain:
         engine = WorkflowEngine()
         engine.register_workflow(self._build(["a", "b", "c"], ran, gates))
 
-        iid = await engine.start_workflow("wf-cancel-chain", wait=False)
+        iid = await engine.start("wf-cancel-chain", wait=False)
         await asyncio.wait_for(gates["a_started"].wait(), 5)
         # Step a is in flight; the chain holds the instance lock.
-        cancel = asyncio.ensure_future(engine.cancel_workflow(iid, "stop now"))
+        cancel = asyncio.ensure_future(engine.cancel(iid, "stop now"))
         await asyncio.sleep(0.02)  # let cancel register and block on the lock
         gates["a"].set()
 
@@ -746,9 +746,9 @@ class TestCancelMidChain:
         engine = WorkflowEngine()
         engine.register_workflow(self._build(["a"], ran, gates))
 
-        iid = await engine.start_workflow("wf-cancel-chain", wait=False)
+        iid = await engine.start("wf-cancel-chain", wait=False)
         await asyncio.wait_for(gates["a_started"].wait(), 5)
-        cancel = asyncio.ensure_future(engine.cancel_workflow(iid))
+        cancel = asyncio.ensure_future(engine.cancel(iid))
         await asyncio.sleep(0.02)
         gates["a"].set()  # the only step ends the workflow; no later iteration
 
@@ -765,16 +765,16 @@ class TestCancelMidChain:
         engine = WorkflowEngine()
         engine.register_workflow(self._build(["a", "b"], ran, {}))
 
-        iid = await engine.start_workflow("wf-cancel-chain", wait=True)
+        iid = await engine.start("wf-cancel-chain", wait=True)
         assert engine.workflow_instances[iid].status == WorkflowStatus.COMPLETED
 
-        assert await engine.cancel_workflow(iid) is False
+        assert await engine.cancel(iid) is False
         assert engine.workflow_instances[iid].status == WorkflowStatus.COMPLETED
         assert engine._cancel_requests == {}
 
     async def test_cancel_of_unknown_instance_leaves_no_request(self):
         engine = WorkflowEngine()
-        assert await engine.cancel_workflow("nope") is False
+        assert await engine.cancel("nope") is False
         assert engine._cancel_requests == {}
 
     async def test_cancel_of_waiting_instance_still_works(self):
@@ -792,10 +792,10 @@ class TestCancelMidChain:
                 initial_step_id="w",
             )
         )
-        iid = await engine.start_workflow("wf-cancel-wait")
+        iid = await engine.start("wf-cancel-wait")
         assert engine.workflow_instances[iid].status == WorkflowStatus.WAITING
 
-        assert await engine.cancel_workflow(iid, "bye") is True
+        assert await engine.cancel(iid, "bye") is True
         instance = engine.workflow_instances[iid]
         assert instance.status == WorkflowStatus.CANCELLED
         assert instance.context[CONTEXT_KEY_CANCELLATION_REASON] == "bye"
@@ -850,14 +850,14 @@ class TestTimerEmptyNextState:
         from fsm_llm.workflows.models import WorkflowStatus
 
         engine, _ = self._engine("")
-        iid = await engine.start_workflow("wf-timer", wait=False)
+        iid = await engine.start("wf-timer", wait=False)
         instance = await self._wait_terminal(engine, iid)
 
         assert instance.status == WorkflowStatus.COMPLETED
         assert CONTEXT_KEY_TIMER_EXPIRED in instance.context
         assert CONTEXT_KEY_TIMER_INFO not in instance.context
         assert f"{iid}_timer" not in engine.timers
-        await engine.shutdown()
+        await engine.close()
 
     async def test_valid_next_state_still_transitions(self):
         from fsm_llm.workflows.dsl import auto_step
@@ -866,12 +866,12 @@ class TestTimerEmptyNextState:
         engine, _ = self._engine(
             "done", {"done": auto_step("done", "Done", "", lambda ctx: {"hit": 1})}
         )
-        iid = await engine.start_workflow("wf-timer", wait=False)
+        iid = await engine.start("wf-timer", wait=False)
         instance = await self._wait_terminal(engine, iid)
 
         assert instance.status == WorkflowStatus.COMPLETED
         assert instance.context.get("hit") == 1
-        await engine.shutdown()
+        await engine.close()
 
     async def test_invalid_non_empty_next_state_still_fails(self):
         from fsm_llm.workflows.models import WorkflowStatus
@@ -880,8 +880,8 @@ class TestTimerEmptyNextState:
         # so retarget the registered step to reach the engine-side guard.
         engine, _ = self._engine("")
         engine.workflow_definitions["wf-timer"].steps["w"].next_state = "nowhere"
-        iid = await engine.start_workflow("wf-timer", wait=False)
+        iid = await engine.start("wf-timer", wait=False)
         instance = await self._wait_terminal(engine, iid)
 
         assert instance.status == WorkflowStatus.FAILED
-        await engine.shutdown()
+        await engine.close()

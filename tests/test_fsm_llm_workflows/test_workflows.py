@@ -396,9 +396,9 @@ class TestStepDataInternalKeyFilter:
             initial_step_id="mixed",
         )
         engine.register_workflow(definition)
-        instance_id = await engine.start_workflow("wf-filter")
+        instance_id = await engine.start("wf-filter")
 
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         context = instance.context
 
         # Direction 1 — the whitelist override still works. `_waiting_info`
@@ -462,11 +462,11 @@ class TestSwitchStepTerminalRoute:
 
         engine = WorkflowEngine()
         engine.register_workflow(definition)
-        instance_id = await engine.start_workflow(
+        instance_id = await engine.start(
             "wf-switch-terminal", initial_context={"intent": "unmatched"}
         )
 
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         assert instance.status == WorkflowStatus.COMPLETED
 
     async def test_matched_case_still_routes_normally(self):
@@ -495,11 +495,11 @@ class TestSwitchStepTerminalRoute:
 
         engine = WorkflowEngine()
         engine.register_workflow(definition)
-        instance_id = await engine.start_workflow(
+        instance_id = await engine.start(
             "wf-switch-matched", initial_context={"intent": "buy"}
         )
 
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         assert instance.current_step_id == "checkout"
         assert instance.status == WorkflowStatus.COMPLETED
 
@@ -538,9 +538,9 @@ class TestTerminalNarrowingUnaffectedSteps:
 
         engine = WorkflowEngine()
         engine.register_workflow(definition)
-        instance_id = await engine.start_workflow("wf-timer-waiting")
+        instance_id = await engine.start("wf-timer-waiting")
 
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         assert instance.status == WorkflowStatus.WAITING
 
     async def test_wait_for_event_step_reaches_waiting(self):
@@ -563,9 +563,9 @@ class TestTerminalNarrowingUnaffectedSteps:
 
         engine = WorkflowEngine()
         engine.register_workflow(definition)
-        instance_id = await engine.start_workflow("wf-event-waiting")
+        instance_id = await engine.start("wf-event-waiting")
 
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         assert instance.status == WorkflowStatus.WAITING
 
 
@@ -622,11 +622,11 @@ class TestWideTerminalPredicateAfterD020Revert:
 
         engine = WorkflowEngine()
         engine.register_workflow(definition)
-        instance_id = await engine.start_workflow(
+        instance_id = await engine.start(
             "wf-retry-switch-terminal", initial_context={"intent": "unmatched"}
         )
 
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         assert instance.status == WorkflowStatus.COMPLETED
 
     async def test_condition_step_empty_branch_completes_workflow(self):
@@ -656,9 +656,9 @@ class TestWideTerminalPredicateAfterD020Revert:
 
         engine = WorkflowEngine()
         engine.register_workflow(definition)
-        instance_id = await engine.start_workflow("wf-condition-terminal")
+        instance_id = await engine.start("wf-condition-terminal")
 
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         assert instance.status == WorkflowStatus.COMPLETED
 
 

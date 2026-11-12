@@ -137,8 +137,8 @@ class TestProcessEventIsolation:
         engine = WorkflowEngine()
         engine.register_workflow(_wait_then_done("wf"))
         # A: tiny workflow timeout; B: none. A is registered first.
-        a = await engine.start_workflow("wf", max_seconds=5)
-        b = await engine.start_workflow("wf")
+        a = await engine.start("wf", max_seconds=5)
+        b = await engine.start("wf")
         engine.workflow_instances[a].deadline = engine.workflow_instances[
             a
         ].created_at.replace(year=2000)
@@ -146,14 +146,14 @@ class TestProcessEventIsolation:
         affected = await engine.process_event(WorkflowEvent(event_type="go"))
 
         assert b in affected
-        assert engine.get_workflow_status(b) == WorkflowStatus.COMPLETED
-        assert engine.get_workflow_status(a) == WorkflowStatus.FAILED
+        assert engine.get_status(b) == WorkflowStatus.COMPLETED
+        assert engine.get_status(a) == WorkflowStatus.FAILED
 
     async def test_non_waiting_instance_is_skipped_and_not_mutated(self):
         engine = WorkflowEngine()
         engine.register_workflow(_wait_then_done("wf", event_mapping={"got": "value"}))
-        a = await engine.start_workflow("wf")
-        b = await engine.start_workflow("wf")
+        a = await engine.start("wf")
+        b = await engine.start("wf")
         # A leaves WAITING without its listener being cleaned up (the race
         # between a cancel and a concurrent process_event).
         engine.workflow_instances[a].status = WorkflowStatus.CANCELLED
@@ -164,8 +164,8 @@ class TestProcessEventIsolation:
 
         assert affected == [b]
         assert "got" not in engine.workflow_instances[a].context
-        assert engine.get_workflow_status(a) == WorkflowStatus.CANCELLED
-        assert engine.get_workflow_status(b) == WorkflowStatus.COMPLETED
+        assert engine.get_status(a) == WorkflowStatus.CANCELLED
+        assert engine.get_status(b) == WorkflowStatus.COMPLETED
 
 
 # ---------------------------------------------------------------
@@ -191,7 +191,7 @@ class TestRewaitTimeoutSurvives:
         wf.with_step(auto_step("timed_out", "Timed out", next_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("rewait")
+        iid = await engine.start("rewait")
 
         await engine.process_event(WorkflowEvent(event_type="go"))
         assert engine.workflow_instances[iid].current_step_id == "w2"
@@ -211,7 +211,7 @@ class TestWaitTimeoutsAndTerminalWaits:
     async def test_timeout_without_timeout_state_fails_instance(self):
         engine = WorkflowEngine()
         engine.register_workflow(_wait_then_done("wf", timeout_seconds=0.05))
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
         await _settle(0.2)
 
         inst = engine.workflow_instances[iid]
@@ -224,10 +224,10 @@ class TestWaitTimeoutsAndTerminalWaits:
         wf.with_initial_step(wait_event_step("wait", "Wait", "go", success_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
 
         assert await engine.process_event(WorkflowEvent(event_type="go")) == [iid]
-        assert engine.get_workflow_status(iid) == WorkflowStatus.COMPLETED
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
 
     def test_timeout_state_without_timeout_seconds_rejected(self):
         with pytest.raises(ValueError, match="timeout_state requires"):
@@ -328,7 +328,7 @@ class TestFailClosedRouting:
         wf.with_step(auto_step("after", "After", next_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
 
         inst = engine.workflow_instances[iid]
         assert inst.status == WorkflowStatus.FAILED
@@ -464,22 +464,22 @@ class TestInstanceIds:
         wf.with_step(auto_step("done", "Done", next_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        await engine.start_workflow("t", instance_id="order")
-        await engine.start_workflow("t", instance_id="order_2")
+        await engine.start("t", instance_id="order")
+        await engine.start("t", instance_id="order_2")
 
-        await engine.cancel_workflow("order")
+        await engine.cancel("order")
 
         assert "order_2_timer" in engine.timers
         assert not engine.timers["order_2_timer"].task.cancelled()
-        await engine.shutdown()
+        await engine.close()
 
     async def test_duplicate_instance_id_rejected(self):
         engine = WorkflowEngine()
         engine.register_workflow(_wait_then_done("wf"))
-        await engine.start_workflow("wf", instance_id="same")
+        await engine.start("wf", instance_id="same")
         with pytest.raises(WorkflowInstanceError, match="already in use"):
-            await engine.start_workflow("wf", instance_id="same")
-        assert engine.get_workflow_status("same") == WorkflowStatus.WAITING
+            await engine.start("wf", instance_id="same")
+        assert engine.get_status("same") == WorkflowStatus.WAITING
 
 
 # ---------------------------------------------------------------
@@ -491,11 +491,11 @@ class TestWorkflowDeadline:
     async def test_deadline_fails_waiting_instance(self):
         engine = WorkflowEngine()
         engine.register_workflow(_wait_then_done("wf"))
-        iid = await engine.start_workflow("wf", max_seconds=0.05)
-        assert engine.get_workflow_status(iid) == WorkflowStatus.WAITING
+        iid = await engine.start("wf", max_seconds=0.05)
+        assert engine.get_status(iid) == WorkflowStatus.WAITING
         await _settle(0.2)
 
-        assert engine.get_workflow_status(iid) == WorkflowStatus.FAILED
+        assert engine.get_status(iid) == WorkflowStatus.FAILED
         assert engine.event_listeners["go"] == {}
 
     async def test_timeout_error_names_instance(self):
@@ -509,11 +509,11 @@ class TestWorkflowDeadline:
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         with pytest.raises(WorkflowTimeoutError) as exc_info:
-            await engine.start_workflow("slow", max_seconds=0.05)
+            await engine.start("slow", max_seconds=0.05)
 
         iid = exc_info.value.instance_id
         assert iid is not None
-        assert engine.get_workflow_status(iid) == WorkflowStatus.FAILED
+        assert engine.get_status(iid) == WorkflowStatus.FAILED
 
 
 # ---------------------------------------------------------------
@@ -530,8 +530,8 @@ class TestLoopsAndStepBudget:
             wf.with_step(auto_step(f"s{i}", f"S{i}", next_state=nxt), is_initial=i == 0)
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("long")
-        assert engine.get_workflow_status(iid) == WorkflowStatus.COMPLETED
+        iid = await engine.start("long")
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
 
     async def test_polling_loop_through_timer_is_allowed(self):
         polls = {"n": 0}
@@ -560,10 +560,10 @@ class TestLoopsAndStepBudget:
 
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("poll")
+        iid = await engine.start("poll")
         await _settle(0.2)
 
-        assert engine.get_workflow_status(iid) == WorkflowStatus.COMPLETED
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
         assert polls["n"] == 3
 
     def test_synchronous_cycle_rejected(self):
@@ -578,7 +578,7 @@ class TestLoopsAndStepBudget:
         wf.with_initial_step(_DynamicLoopStep(step_id="loop", name="Loop"))
         engine = WorkflowEngine(max_steps=5)
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("dyn")
+        iid = await engine.start("dyn")
 
         inst = engine.workflow_instances[iid]
         assert inst.status == WorkflowStatus.FAILED
@@ -594,29 +594,29 @@ class TestEventCorrelation:
     async def test_correlation_key_routes_to_matching_instance(self):
         engine = WorkflowEngine()
         engine.register_workflow(_wait_then_done("wf", correlation_key="order_id"))
-        one = await engine.start_workflow("wf", {"order_id": 1})
-        two = await engine.start_workflow("wf", {"order_id": 2})
+        one = await engine.start("wf", {"order_id": 1})
+        two = await engine.start("wf", {"order_id": 2})
 
         affected = await engine.process_event(
             WorkflowEvent(event_type="go", payload={"order_id": 2})
         )
 
         assert affected == [two]
-        assert engine.get_workflow_status(one) == WorkflowStatus.WAITING
-        assert engine.get_workflow_status(two) == WorkflowStatus.COMPLETED
+        assert engine.get_status(one) == WorkflowStatus.WAITING
+        assert engine.get_status(two) == WorkflowStatus.COMPLETED
 
     async def test_targeted_event_only_reaches_target(self):
         engine = WorkflowEngine()
         engine.register_workflow(_wait_then_done("wf"))
-        one = await engine.start_workflow("wf")
-        two = await engine.start_workflow("wf")
+        one = await engine.start("wf")
+        two = await engine.start("wf")
 
         affected = await engine.process_event(
             WorkflowEvent(event_type="go", instance_id=one)
         )
 
         assert affected == [one]
-        assert engine.get_workflow_status(two) == WorkflowStatus.WAITING
+        assert engine.get_status(two) == WorkflowStatus.WAITING
 
     async def test_early_targeted_event_is_buffered(self):
         wf = create_workflow("wf", "wf")
@@ -629,7 +629,7 @@ class TestEventCorrelation:
         wf.with_step(auto_step("done", "Done", next_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
 
         # Arrives while the instance is still in the timer, not the wait.
         assert (
@@ -657,8 +657,8 @@ class TestSwitchDefaults:
         wf.with_step(auto_step("done", "Done", next_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("sw", {"k": "zzz"})
-        assert engine.get_workflow_status(iid) == WorkflowStatus.FAILED
+        iid = await engine.start("sw", {"k": "zzz"})
+        assert engine.get_status(iid) == WorkflowStatus.FAILED
 
     async def test_switch_outputs_reach_context(self):
         wf = create_workflow("sw", "sw")
@@ -666,8 +666,8 @@ class TestSwitchDefaults:
         wf.with_step(auto_step("done", "Done", next_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("sw", {"k": "a"})
-        ctx = engine.get_workflow_context(iid)
+        iid = await engine.start("sw", {"k": "a"})
+        ctx = engine.get_context(iid)
         assert ctx["switch_route_matched"] == "a"
         assert ctx["switch_route_target"] == "done"
 
@@ -878,10 +878,10 @@ class TestResourceRelease:
         wf.with_step(auto_step("late", "Late", next_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
         await _settle(0.2)
 
-        assert engine.get_workflow_status(iid) == WorkflowStatus.COMPLETED
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
         assert engine.timers == {}
         assert engine.get_statistics()["active_timers"] == 0
 
@@ -895,10 +895,8 @@ class TestResourceRelease:
         )
         engine = WorkflowEngine(max_completed_instances=2)
         engine.register_workflow(wf)
-        ids = [await engine.start_workflow("f") for _ in range(4)]
-        assert all(
-            engine.get_workflow_status(i) in (WorkflowStatus.FAILED, None) for i in ids
-        )
+        ids = [await engine.start("f") for _ in range(4)]
+        assert all(engine.get_status(i) in (WorkflowStatus.FAILED, None) for i in ids)
         assert len(engine.workflow_instances) == 2
 
     def test_history_is_capped(self):
@@ -921,7 +919,7 @@ class TestDefinitionPinning:
     async def test_reregistration_does_not_affect_running_instance(self):
         engine = WorkflowEngine()
         engine.register_workflow(_wait_then_done("wf"))
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
 
         replacement = create_workflow("wf", "v2")
         replacement.with_initial_step(auto_step("other", "Other", next_state=""))
@@ -937,7 +935,7 @@ class TestDefinitionPinning:
         wf = _wait_then_done("wf")
         engine.register_workflow(wf)
         wf.with_step(auto_step("extra", "Extra", next_state=""))
-        assert "extra" not in engine.get_workflow_definition("wf").steps
+        assert "extra" not in engine.get_definition("wf").steps
 
 
 # ---------------------------------------------------------------
@@ -954,9 +952,9 @@ class TestEngineApi:
         wf = create_workflow("h", "h")
         wf.with_initial_step(auto_step("a", "A", next_state=""))
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("h")
+        iid = await engine.start("h")
 
-        assert engine.get_workflow_status(iid) == WorkflowStatus.COMPLETED
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
         names = [n for n, _ in seen]
         assert names == [
             "status_changed",
@@ -970,8 +968,8 @@ class TestEngineApi:
     async def test_user_input_removed_after_advance(self):
         engine = WorkflowEngine()
         engine.register_workflow(_wait_then_done("wf"))
-        iid = await engine.start_workflow("wf")
-        assert await engine.advance_workflow(iid, "hi") is True
+        iid = await engine.start("wf")
+        assert await engine.advance(iid, "hi") is True
         assert "_user_input" not in engine.workflow_instances[iid].context
         assert (
             "auto_transition_states"
@@ -983,28 +981,28 @@ class TestEngineApi:
         wf = create_workflow("bg", "bg")
         wf.with_initial_step(auto_step("a", "A", next_state=""))
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("bg", wait=False)
+        iid = await engine.start("bg", wait=False)
         await _settle()
-        assert engine.get_workflow_status(iid) == WorkflowStatus.COMPLETED
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
 
     async def test_context_getter_returns_copy_and_initial_context_is_copied(self):
         engine = WorkflowEngine()
         engine.register_workflow(_wait_then_done("wf"))
         initial = {"a": 1}
-        iid = await engine.start_workflow("wf", initial)
-        engine.get_workflow_context(iid)["a"] = 999
+        iid = await engine.start("wf", initial)
+        engine.get_context(iid)["a"] = 999
         assert engine.workflow_instances[iid].context["a"] == 1
         assert "_workflow_info" not in initial
 
-    async def test_shutdown_refuses_new_starts_and_clears_listeners(self):
+    async def test_close_refuses_new_starts_and_clears_listeners(self):
         engine = WorkflowEngine()
         engine.register_workflow(_wait_then_done("wf", timeout_seconds=60))
-        await engine.start_workflow("wf")
-        await engine.shutdown()
+        await engine.start("wf")
+        await engine.close()
         assert engine.timers == {}
         assert engine.event_listeners == {}
         with pytest.raises(WorkflowResourceError):
-            await engine.start_workflow("wf")
+            await engine.start("wf")
 
 
 # ---------------------------------------------------------------
@@ -1029,7 +1027,7 @@ class TestLoggingOffByDefault:
                 wf = wfl.create_workflow("w", "w")
                 wf.with_initial_step(wfl.auto_step("a", "A", next_state=""))
                 engine.register_workflow(wf)
-                await engine.start_workflow("w")
+                await engine.start("w")
 
             asyncio.run(run())
             before = sum("Executing step" in line for line in lines)
@@ -1092,7 +1090,7 @@ class TestSmallerFixes:
         wf.with_step(auto_step("done", "Done", next_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("h")
+        iid = await engine.start("h")
 
         history = engine.workflow_instances[iid].history
         assert isinstance(history[0], WorkflowHistoryEntry)
@@ -1118,7 +1116,7 @@ class TestSmallerFixes:
     async def test_empty_event_type_listener_rejected(self):
         engine = WorkflowEngine()
         engine.register_workflow(_wait_then_done("wf"))
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
         with pytest.raises(WorkflowEventError):
             await engine.register_event_listener(iid, "")
 
@@ -1197,8 +1195,8 @@ class TestStepExecutor:
         with ThreadPoolExecutor(thread_name_prefix="wf-exec") as pool:
             engine = WorkflowEngine(executor=pool)
             engine.register_workflow(wf)
-            iid = await engine.start_workflow("ex")
-        assert engine.get_workflow_context(iid)["thread"].startswith("wf-exec")
+            iid = await engine.start("ex")
+        assert engine.get_context(iid)["thread"].startswith("wf-exec")
 
 
 # ---------------------------------------------------------------
@@ -1239,8 +1237,8 @@ class TestReviewFollowUp:
     async def test_event_not_delivered_to_a_different_wait(self):
         engine = WorkflowEngine()
         engine.register_workflow(_two_waits_workflow())
-        first = await engine.start_workflow("tw")
-        second = await engine.start_workflow("tw")
+        first = await engine.start("tw")
+        second = await engine.start("tw")
 
         # Delivery to `first` runs the slow step (0.3 s) while `second`
         # times out into `wb`; the A event must not then move `second`.
@@ -1258,8 +1256,8 @@ class TestReviewFollowUp:
         wf.with_step(_SlowStep(step_id="slow", name="Slow", delay=0.5))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        await engine.start_workflow("cd")
-        second = await engine.start_workflow("cd")
+        await engine.start("cd")
+        second = await engine.start("cd")
 
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(
@@ -1278,19 +1276,19 @@ class TestReviewFollowUp:
         wf.with_step(auto_step("done", "Done", next_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("lw", max_seconds=60)
+        iid = await engine.start("lw", max_seconds=60)
 
-        # advance_workflow re-registers the A listener while the event is
+        # advance re-registers the A listener while the event is
         # being delivered; leaving `wa` must drop it.
         await asyncio.gather(
-            engine.advance_workflow(iid),
+            engine.advance(iid),
             engine.process_event(WorkflowEvent(event_type="A")),
         )
 
         assert engine.workflow_instances[iid].current_step_id == "wb"
         assert iid not in engine.event_listeners.get("A", {})
         assert await engine.process_event(WorkflowEvent(event_type="A")) == []
-        await engine.shutdown()
+        await engine.close()
 
     async def test_background_start_skips_cancelled_instance(self):
         ran: list[str] = []
@@ -1300,12 +1298,12 @@ class TestReviewFollowUp:
         )
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("bgc", wait=False)
-        assert await engine.cancel_workflow(iid) is True
+        iid = await engine.start("bgc", wait=False)
+        assert await engine.cancel(iid) is True
         await _settle()
 
         assert ran == []
-        assert engine.get_workflow_status(iid) == WorkflowStatus.CANCELLED
+        assert engine.get_status(iid) == WorkflowStatus.CANCELLED
 
     async def test_long_prompt_fits_core_request_limits(self):
         llm = _CoreLikeLLM("ok")
@@ -1327,6 +1325,6 @@ class TestReviewFollowUp:
         wf.with_initial_step(wait_event_step("wait", "Wait", "go", success_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wc")
+        iid = await engine.start("wc")
         await engine.process_event(WorkflowEvent(event_type="go"))
         assert "_waiting_info" not in engine.workflow_instances[iid].context

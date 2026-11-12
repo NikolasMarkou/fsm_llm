@@ -175,9 +175,9 @@ class TestWorkflowEngineIntegration:
 
         engine = WorkflowEngine()
         engine.register_workflow(workflow)
-        instance_id = await engine.start_workflow("test_linear")
+        instance_id = await engine.start("test_linear")
 
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         assert instance is not None
         assert instance.status == WorkflowStatus.COMPLETED
         assert "step1" in actions_called
@@ -210,18 +210,14 @@ class TestWorkflowEngineIntegration:
         engine.register_workflow(workflow)
 
         # Test false branch
-        instance_id = await engine.start_workflow(
-            "test_cond", initial_context={"value": 3}
-        )
-        instance = engine.get_workflow_instance(instance_id)
+        instance_id = await engine.start("test_cond", initial_context={"value": 3})
+        instance = engine.get_instance(instance_id)
         assert instance.status == WorkflowStatus.COMPLETED
         assert instance.current_step_id == "low"
 
         # Test true branch
-        instance_id = await engine.start_workflow(
-            "test_cond", initial_context={"value": 10}
-        )
-        instance = engine.get_workflow_instance(instance_id)
+        instance_id = await engine.start("test_cond", initial_context={"value": 10})
+        instance = engine.get_instance(instance_id)
         assert instance.status == WorkflowStatus.COMPLETED
         assert instance.current_step_id == "high"
 
@@ -256,11 +252,11 @@ class TestWorkflowEngineIntegration:
 
         engine = WorkflowEngine()
         engine.register_workflow(workflow)
-        instance_id = await engine.start_workflow(
+        instance_id = await engine.start(
             "test_api", initial_context={"user_name": "Alice"}
         )
 
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         assert instance.status == WorkflowStatus.COMPLETED
         assert instance.current_step_id == "done"
         assert instance.context.get("result_greeting") == "Hello, Alice!"
@@ -300,9 +296,9 @@ class TestWorkflowEngineIntegration:
 
         engine = WorkflowEngine()
         engine.register_workflow(workflow)
-        instance_id = await engine.start_workflow("test_parallel")
+        instance_id = await engine.start("test_parallel")
 
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         assert instance.status == WorkflowStatus.COMPLETED
         assert len(results) == 3
 
@@ -325,9 +321,9 @@ class TestWorkflowEngineIntegration:
 
         engine = WorkflowEngine()
         engine.register_workflow(workflow)
-        instance_id = await engine.start_workflow("test_terminal")
+        instance_id = await engine.start("test_terminal")
 
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         assert instance.status == WorkflowStatus.COMPLETED
 
     @pytest.mark.asyncio
@@ -354,10 +350,10 @@ class TestWorkflowEngineIntegration:
 
         engine = WorkflowEngine()
         engine.register_workflow(workflow)
-        instance_id = await engine.start_workflow("test_event")
+        instance_id = await engine.start("test_event")
 
         # Should be waiting
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         assert instance.status == WorkflowStatus.WAITING
 
         # Register listener and process event
@@ -368,7 +364,7 @@ class TestWorkflowEngineIntegration:
         await engine.process_event(event)
 
         # Should be completed, not stuck at WAITING
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         assert instance.status == WorkflowStatus.COMPLETED
         assert "_waiting_info" not in instance.context
 
@@ -412,9 +408,9 @@ class TestWorkflowEngineIntegration:
 
         engine = WorkflowEngine()
         engine.register_workflow(workflow)
-        instance_id = await engine.start_workflow("test_custom")
+        instance_id = await engine.start("test_custom")
 
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         assert instance.status == WorkflowStatus.COMPLETED
 
     @pytest.mark.asyncio
@@ -437,11 +433,11 @@ class TestWorkflowEngineIntegration:
 
         instance_ids = []
         for _ in range(10):
-            iid = await engine.start_workflow("test_concurrent")
+            iid = await engine.start("test_concurrent")
             instance_ids.append(iid)
 
         for iid in instance_ids:
-            instance = engine.get_workflow_instance(iid)
+            instance = engine.get_instance(iid)
             assert instance.status == WorkflowStatus.COMPLETED
 
         stats = engine.get_statistics()

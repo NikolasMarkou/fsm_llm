@@ -274,11 +274,9 @@ async def run():
     print("Flow: Setup → Agent (with quality gate + retry) → Output\n")
 
     engine = build_workflow(model)
-    instance_id = await engine.start_workflow(
-        "agent_loop", initial_context={"_model": model}
-    )
+    instance_id = await engine.start("agent_loop", initial_context={"_model": model})
 
-    instance = engine.get_workflow_instance(instance_id)
+    instance = engine.get_instance(instance_id)
     if instance:
         print(f"\nWorkflow status: {instance.status.value}")
         print(f"Quality score: {instance.context.get('quality_score', 'N/A')}")

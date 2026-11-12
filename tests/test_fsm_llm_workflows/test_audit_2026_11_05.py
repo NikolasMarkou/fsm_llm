@@ -68,7 +68,7 @@ class TestRaisingStepsRecordTheFailureBehaviour:
         engine = WorkflowEngine()
         seen = _record_hooks(engine)
         engine.register_workflow(_single(make_step()))
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
 
         instance = engine.workflow_instances[iid]
         assert instance.status == WorkflowStatus.FAILED
@@ -96,7 +96,7 @@ class TestRaisingStepsRecordTheFailureBehaviour:
         wf.with_step(auto_step("bad", "Bad", next_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
         instance = engine.workflow_instances[iid]
         assert instance.status == WorkflowStatus.COMPLETED
         assert next(e.step_id for e in instance.history if e.error) == "s"
@@ -122,8 +122,8 @@ class TestRaisingStepsRecordTheFailureBehaviour:
         )
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf")
-        assert engine.get_workflow_status(iid) == WorkflowStatus.COMPLETED
+        iid = await engine.start("wf")
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
         assert len(calls) == 3
 
 
@@ -181,9 +181,9 @@ class TestAsyncAggregationBehaviour:
         )
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf")
-        assert engine.get_workflow_status(iid) == WorkflowStatus.COMPLETED
-        assert engine.get_workflow_context(iid)["total"] == 2
+        iid = await engine.start("wf")
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
+        assert engine.get_context(iid)["total"] == 2
 
 
 # ---------------------------------------------------------------
@@ -195,8 +195,8 @@ class TestTerminalInstanceTimerBehaviour:
     async def test_schedule_timer_refuses_a_terminal_instance(self):
         engine = WorkflowEngine()
         engine.register_workflow(_single(auto_step("a", "A", next_state="")))
-        iid = await engine.start_workflow("wf")
-        assert engine.get_workflow_status(iid) == WorkflowStatus.COMPLETED
+        iid = await engine.start("wf")
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
 
         with pytest.raises(WorkflowInstanceError, match="completed"):
             await engine.schedule_timer(iid, 60, "a")
@@ -205,7 +205,7 @@ class TestTerminalInstanceTimerBehaviour:
     async def test_both_entry_points_refuse_the_same_way(self):
         engine = WorkflowEngine()
         engine.register_workflow(_single(auto_step("a", "A", next_state="")))
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
         with pytest.raises(WorkflowInstanceError) as listen:
             await engine.register_event_listener(iid, "go")
         with pytest.raises(WorkflowInstanceError) as timer:
@@ -238,7 +238,7 @@ class TestInitialRunningIsAnnouncedBehaviour:
             )
         )
         engine.register_workflow(_single(auto_step("a", "A", next_state="")))
-        await engine.start_workflow("wf")
+        await engine.start("wf")
 
         assert [n for n, _, _ in seen] == [
             "status_changed",
@@ -360,28 +360,28 @@ class TestTimerKeysAndRearm:
         wf.with_step(timer_step("t", "T", 60, ""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf", max_seconds=120)
+        iid = await engine.start("wf", max_seconds=120)
         assert set(engine.timers) == {f"{iid}_go_timeout", f"{iid}_deadline"}
 
         await engine.process_event(WorkflowEvent(event_type="go"))
         assert set(engine.timers) == {f"{iid}_timer", f"{iid}_deadline"}
-        assert engine.get_workflow_status(iid) == WorkflowStatus.WAITING
+        assert engine.get_status(iid) == WorkflowStatus.WAITING
 
     async def test_rearming_replaces_and_cancels_the_old_task(self):
         wf = create_workflow("wf", "wf")
         wf.with_initial_step(timer_step("t", "T", 60, ""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
         first = engine.timers[f"{iid}_timer"]
 
-        assert await engine.advance_workflow(iid) is True
+        assert await engine.advance(iid) is True
         second = engine.timers[f"{iid}_timer"]
         await asyncio.sleep(0)
         assert second is not first
         assert first.task is not None and first.task.cancelled()
         assert second.task is not None and not second.task.done()
-        await engine.shutdown()
+        await engine.close()
 
     async def test_timer_fires_and_forgets_its_entry(self):
         wf = create_workflow("wf", "wf")
@@ -389,9 +389,9 @@ class TestTimerKeysAndRearm:
         wf.with_step(auto_step("done", "Done", next_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
         await asyncio.sleep(0.1)
-        assert engine.get_workflow_status(iid) == WorkflowStatus.COMPLETED
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
         assert engine.timers == {}
 
     async def test_event_timeout_without_state_fails_and_forgets(self):
@@ -401,9 +401,9 @@ class TestTimerKeysAndRearm:
         )
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
         await asyncio.sleep(0.1)
-        assert engine.get_workflow_status(iid) == WorkflowStatus.FAILED
+        assert engine.get_status(iid) == WorkflowStatus.FAILED
         assert engine.timers == {}
         assert engine.event_listeners.get("go", {}) == {}
 
@@ -412,9 +412,9 @@ class TestTimerKeysAndRearm:
         wf.with_initial_step(wait_event_step("w", "W", "go", success_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf", max_seconds=0.02)
+        iid = await engine.start("wf", max_seconds=0.02)
         await asyncio.sleep(0.15)
-        assert engine.get_workflow_status(iid) == WorkflowStatus.FAILED
+        assert engine.get_status(iid) == WorkflowStatus.FAILED
         assert engine.timers == {}
 
 
@@ -431,10 +431,10 @@ class TestCompletingFromAWait:
         )
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
         assert await engine.process_event(WorkflowEvent(event_type="go")) == [iid]
 
-        assert engine.get_workflow_status(iid) == WorkflowStatus.COMPLETED
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
         assert self._markers(engine, iid) == (False, False)
         assert engine.timers == {}
         assert engine.event_listeners.get("go", {}) == {}
@@ -444,10 +444,10 @@ class TestCompletingFromAWait:
         wf.with_initial_step(timer_step("t", "T", 0.01, ""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
         await asyncio.sleep(0.1)
 
-        assert engine.get_workflow_status(iid) == WorkflowStatus.COMPLETED
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
         assert self._markers(engine, iid) == (False, False)
         assert engine.timers == {}
 
@@ -457,11 +457,11 @@ class TestCompletingFromAWait:
         wf.with_step(wait_event_step("wait", "Wait", "paid", success_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
         await engine.process_event(WorkflowEvent(event_type="paid", instance_id=iid))
         await engine._handle_timer_expiration(iid, "wait")
 
-        assert engine.get_workflow_status(iid) == WorkflowStatus.COMPLETED
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
         assert self._markers(engine, iid) == (False, False)
 
     async def test_transition_out_of_a_wait_clears_both_markers(self):
@@ -471,12 +471,12 @@ class TestCompletingFromAWait:
         wf.with_step(auto_step("done", "Done", next_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
         await asyncio.sleep(0.1)
-        assert engine.get_workflow_status(iid) == WorkflowStatus.WAITING
+        assert engine.get_status(iid) == WorkflowStatus.WAITING
         assert self._markers(engine, iid) == (True, False)
         await engine.process_event(WorkflowEvent(event_type="go"))
-        assert engine.get_workflow_status(iid) == WorkflowStatus.COMPLETED
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
         assert self._markers(engine, iid) == (False, False)
 
 
@@ -488,11 +488,11 @@ class TestCancelReleasesEverything:
         )
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf", max_seconds=120)
+        iid = await engine.start("wf", max_seconds=120)
         assert engine.timers and engine.event_listeners["go"]
 
-        assert await engine.cancel_workflow(iid) is True
-        assert engine.get_workflow_status(iid) == WorkflowStatus.CANCELLED
+        assert await engine.cancel(iid) is True
+        assert engine.get_status(iid) == WorkflowStatus.CANCELLED
         assert engine.timers == {}
         assert engine.event_listeners.get("go", {}) == {}
 
@@ -510,7 +510,7 @@ class TestCancelReleasesEverything:
         wf.with_initial_step(_Stray(step_id="s", name="S"))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf")
+        iid = await engine.start("wf")
         instance = engine.workflow_instances[iid]
         assert instance.status == WorkflowStatus.FAILED
         assert "Invalid next state" in (instance.error or "")

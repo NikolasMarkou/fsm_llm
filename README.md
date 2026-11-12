@@ -383,8 +383,8 @@ wf = (
 async def main():
     engine = WorkflowEngine()
     engine.register_workflow(wf)
-    instance_id = await engine.start_workflow("orders")
-    print(engine.get_workflow_status(instance_id))
+    instance_id = await engine.start("orders")
+    print(engine.get_status(instance_id))
 
 
 asyncio.run(main())

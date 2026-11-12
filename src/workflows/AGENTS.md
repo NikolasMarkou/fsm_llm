@@ -30,7 +30,7 @@ stateDiagram-v2
     cancelled --> [*]
 ```
 
-`_create_workflow_instance` copies `initial_context` and sets `_workflow_info` (the instance is PENDING); `start_workflow` stores it and moves it to RUNNING through `_set_status` before the first step, so hooks hear that change too.
+`_create_workflow_instance` copies `initial_context` and sets `_workflow_info` (the instance is PENDING); `start` stores it and moves it to RUNNING through `_set_status` before the first step, so hooks hear that change too.
 
 Step driver (`engine.py`): every entry point takes the instance lock, then calls `_execute_workflow_step(instance)`, a LOOP (not recursion, D-002) that calls `_run_current_step` until it returns `None`, at most `max_steps` times per call (over budget: FAILED with `WorkflowStateError`).
 
@@ -65,15 +65,15 @@ Wake-ups after WAITING: `process_event` -> `_deliver_event` -> `_transition_to_s
 
 `WorkflowEngine(*, max_concurrent_workflows=100, max_completed_instances=1000 (None keeps all), max_steps=1000 (<1 raises ValueError), executor=None)`:
 - `register_workflow(defn)`: runs `defn.validate()`, stores a copy with its own `steps` dict. Re-registering an id affects new instances only (instances pin their definition in `_instance_definitions`).
-- `async start_workflow(workflow_id, initial_context=None, instance_id=None, max_seconds=None, wait=True) -> str`. Raises `WorkflowResourceError` after `shutdown()` or at `max_concurrent_workflows` active instances, `WorkflowDefinitionError` for an unknown workflow, `WorkflowInstanceError` for an id the engine still holds (D-005), `WorkflowTimeoutError` on deadline. `wait=False` returns at once and runs in a background task, which does nothing if another entry point already drove or cancelled the instance.
-- `async advance_workflow(instance_id, user_input="") -> bool`: re-runs the current step (re-arms a wait and its timeout); `_user_input` is set only for that run. False if unknown or not active.
-- `async cancel_workflow(instance_id, reason="Cancelled by user") -> bool`: sets `_cancellation_reason`, CANCELLED. On a RUNNING chain it registers a `_CancelRequest` before awaiting the instance lock and the run loop honours it between steps (the step in flight finishes, later steps do not run; True). False if unknown or already terminal by another route (D-015, 5ed71cf2/D-017).
+- `async start(workflow_id, initial_context=None, instance_id=None, max_seconds=None, wait=True) -> str`. Raises `WorkflowResourceError` after `close()` or at `max_concurrent_workflows` active instances, `WorkflowDefinitionError` for an unknown workflow, `WorkflowInstanceError` for an id the engine still holds (D-005), `WorkflowTimeoutError` on deadline. `wait=False` returns at once and runs in a background task, which does nothing if another entry point already drove or cancelled the instance.
+- `async advance(instance_id, user_input="") -> bool`: re-runs the current step (re-arms a wait and its timeout); `_user_input` is set only for that run. False if unknown or not active.
+- `async cancel(instance_id, reason="Cancelled by user") -> bool`: sets `_cancellation_reason`, CANCELLED. On a RUNNING chain it registers a `_CancelRequest` before awaiting the instance lock and the run loop honours it between steps (the step in flight finishes, later steps do not run; True). False if unknown or already terminal by another route (D-015, 5ed71cf2/D-017).
 - `async process_event(event: WorkflowEvent) -> list[str]`: ids of instances woken.
 - `async register_event_listener(instance_id, event_type, success_state=None, timeout_seconds=None, timeout_state=None, event_mapping=None, correlation_key=None)`: raises `WorkflowEventError` for empty `event_type`, `WorkflowInstanceError` for unknown or terminal instance. `correlation_value` is captured from the context now.
 - `async schedule_timer(instance_id, delay_seconds, next_state)`: raises `WorkflowInstanceError` if unknown or terminal (like `register_event_listener`; one `_live_instance` guard); replaces (cancels) an existing `{id}_timer`.
-- `async shutdown()`: cancels and awaits timers and background tasks, clears listeners and buffers, refuses new starts; instance statuses unchanged.
+- `async close()`: cancels and awaits timers and background tasks, clears listeners and buffers, refuses new starts; instance statuses unchanged.
 - `remove_instance(id) -> bool` (terminal only), `add_hook(fn)`, `remove_hook(fn) -> bool`.
-- Queries: `get_workflow_instance` (live object), `get_workflow_definition`, `get_workflow_status -> WorkflowStatus | None`, `get_workflow_context -> dict | None` (shallow copy), `get_active_workflows -> list[str]`, `get_statistics()` (`total_workflows`, `active_workflows`, `registered_definitions`, `event_listeners`, `active_timers`, `buffered_events`, `status_breakdown`).
+- Queries: `get_instance` (live object), `get_definition`, `get_status -> WorkflowStatus | None`, `get_context -> dict | None` (shallow copy), `list_active_instances -> list[str]`, `get_statistics()` (`total_workflows`, `active_workflows`, `registered_definitions`, `event_listeners`, `active_timers`, `buffered_events`, `status_breakdown`).
 - Hooks: `fn(event_name, instance, data)`; `step_started {step_id}`, `step_completed {step_id, success, next_state, error}`, `status_changed {status, error}`. Exceptions logged as WARNING; an awaitable result is scheduled as a task.
 
 `WorkflowDefinition{workflow_id, name, description="", steps: dict[str, WorkflowStep], initial_step_id=None, metadata}`:
@@ -109,12 +109,12 @@ DSL (`dsl.py`): `create_workflow(workflow_id, name, description="")`, `workflow_
 - `WaitEventConfig{event_type (non-empty), success_state, timeout_seconds (>0), timeout_state (requires timeout_seconds), event_mapping{ctx_key: payload_key}, correlation_key}`.
 - `EventListener{instance_id, success_state, event_mapping, registered_at, timeout_at, correlation_key, correlation_value, timeout_state, step_id}`; `is_expired()`.
 - `Timer(instance_id, next_state, expires_at, task)`; keys in `engine.timers`: `{id}_timer`, `{id}_{event_type}_timeout`, `{id}_deadline`.
-- Engine context keys (`constants.py`, constants `CONTEXT_KEY_WAITING_INFO`, `_TIMER_INFO`, `_WORKFLOW_INFO`, `_EVENT_TIMEOUT`, `_TIMER_EXPIRED`, `_LAST_EVENT`, `_USER_INPUT`, `_CANCELLATION_REASON`; values unchanged): `_waiting_info`, `_timer_info` (both in `STEP_INTERNAL_WHITELIST`, cleared on every transition), `_workflow_info {workflow_id, instance_id}`, `_timeout {event_type, timeout_at}`, `_timer_expired {expired_at}`, `_last_event` (event dump), `_user_input` (only during an `advance_workflow` run), `_cancellation_reason`.
+- Engine context keys (`constants.py`, constants `CONTEXT_KEY_WAITING_INFO`, `_TIMER_INFO`, `_WORKFLOW_INFO`, `_EVENT_TIMEOUT`, `_TIMER_EXPIRED`, `_LAST_EVENT`, `_USER_INPUT`, `_CANCELLATION_REASON`; values unchanged): `_waiting_info`, `_timer_info` (both in `STEP_INTERNAL_WHITELIST`, cleared on every transition), `_workflow_info {workflow_id, instance_id}`, `_timeout {event_type, timeout_at}`, `_timer_expired {expired_at}`, `_last_event` (event dump), `_user_input` (only during an `advance` run), `_cancellation_reason`.
 - Limits: `DEFAULT_MAX_STEPS = 1000`, `DEFAULT_MAX_COMPLETED_INSTANCES = 1000`, `DEFAULT_MAX_HISTORY_ENTRIES = 1000`, `MAX_BUFFERED_EVENTS_PER_INSTANCE = 100` (deque, oldest dropped), `PARALLEL_DEEPCOPY_WARNING_THRESHOLD = 10`, `PAUSING_STEP_TYPES = {"WaitForEventStep", "TimerStep"}`.
 
 ## Invariants and constraints
 
-- Locks: take the per-instance lock ONLY at outermost entry points (`start_workflow`, `_run_in_background`, `advance_workflow`, `cancel_workflow`, `_deliver_event`, `_handle_timer_expiration`, `_handle_event_timeout`, `_handle_deadline`); never inside `_execute_workflow_step`/`_transition_to_state` (`asyncio.Lock` is not reentrant, D-003).
+- Locks: take the per-instance lock ONLY at outermost entry points (`start`, `_run_in_background`, `advance`, `cancel`, `_deliver_event`, `_handle_timer_expiration`, `_handle_event_timeout`, `_handle_deadline`); never inside `_execute_workflow_step`/`_transition_to_state` (`asyncio.Lock` is not reentrant, D-003).
 - `process_event` (D-001): collect and consume matching listeners (no awaits) without touching instances (skips expired and non-correlating ones); no candidates and a target set means buffer the event (dropped if the instance is unknown or terminal). Delivery per instance under its lock only while still WAITING at the listener's `step_id`; cancel the wait timeout BEFORE transitioning; one instance's exception FAILS only that instance; on `CancelledError` undelivered listeners are restored.
 - Every wait with `timeout_seconds` schedules a timeout; no `timeout_state` means FAILED with `WorkflowTimeoutError` (D-001). Timeout, timer and deadline handlers act only on a still-WAITING instance.
 - `_prepare_transition` drops the instance's listeners and wait timers but not `{id}_deadline`. Terminal cleanup matches `Timer.instance_id`, never the key prefix (D-005).
@@ -123,7 +123,7 @@ DSL (`dsl.py`): `create_workflow(workflow_id, name, description="")`, `workflow_
 - `next_state == ""` on ANY successful result means terminal for that route; no isinstance narrowing (D-013, D-020).
 - A failure result with no `next_state` FAILS the instance; no step falls back to its success route (D-003).
 - User callables go through `steps._call_user_callable`: async callables awaited, sync ones in `STEP_EXECUTOR` (engine executor or loop default), a returned awaitable awaited (D-004).
-- `_fail` (every step exception) and `cancel_workflow` never overwrite a terminal status (D-005, D-015). A cancel of a running chain goes through `_cancel_requests` (registered before the lock wait, checked at the top of each `_execute_workflow_step` iteration, removed in `cancel_workflow`'s `finally` and with the instance); never cancel the running task or take a second lock to do it (5ed71cf2/D-017).
+- `_fail` (every step exception) and `cancel` never overwrite a terminal status (D-005, D-015). A cancel of a running chain goes through `_cancel_requests` (registered before the lock wait, checked at the top of each `_execute_workflow_step` iteration, removed in `cancel`'s `finally` and with the instance); never cancel the running task or take a second lock to do it (5ed71cf2/D-017).
 - Reported workflow timeout is the configured float, not truncated (D-011).
 - `Timer.cancel()` never cancels the task running it. Re-scheduling a timer or event timeout cancels the old task first.
 - Do not revert iterative DFS in `_has_cycle` to recursion.
@@ -137,7 +137,7 @@ DSL (`dsl.py`): `create_workflow(workflow_id, name, description="")`, `workflow_
 ## Failure modes
 
 - `WorkflowError(message, details)` (subclass of core `FSMError`) -> `WorkflowDefinitionError(workflow_id, message)`, `WorkflowStepError(step_id, message, cause)`, `WorkflowInstanceError(instance_id, message)`, `WorkflowTimeoutError(operation, timeout_seconds, details, instance_id=None)`, `WorkflowValidationError(validation_errors)`, `WorkflowStateError(current_state, operation, message)`, `WorkflowEventError(event_type, message)`, `WorkflowResourceError(resource_type, resource_id, message)`. Constructors copy `details`.
-- Step exceptions do not escape `start_workflow`/`advance_workflow` (instance FAILED), except `WorkflowTimeoutError`. `process_event` does not raise for one instance's failure. Background, timer and timeout tasks log errors.
+- Step exceptions do not escape `start`/`advance` (instance FAILED), except `WorkflowTimeoutError`. `process_event` does not raise for one instance's failure. Background, timer and timeout tasks log errors.
 - A non-terminal step with no transition and no wait marker leaves the instance RUNNING with a WARNING.
 - A timeout cannot stop a sync callable already running in a worker thread.
 - Logging is off until `fsm_llm.setup_logging()` / `enable_debug_logging()` (core disables the `fsm_llm` logger at import, which covers this subpackage; never add a subpackage-level disable).

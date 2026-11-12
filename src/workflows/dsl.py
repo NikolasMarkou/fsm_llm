@@ -400,7 +400,7 @@ def conversation_step(
         conversation_timeout: Time limit for the conversation in seconds
         timeout_seconds: Per-step time limit (the smaller limit wins)
         require_completion: Fail when the conversation has not ended
-        use_user_input: Also send ``advance_workflow``'s user input
+        use_user_input: Also send ``advance``'s user input
 
     Returns:
         A new conversation step

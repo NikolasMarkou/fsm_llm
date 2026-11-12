@@ -195,10 +195,10 @@ async def run():
 
     start = time.monotonic()
     engine = build_workflow()
-    instance_id = await engine.start_workflow("parallel_fetch", initial_context={})
+    instance_id = await engine.start("parallel_fetch", initial_context={})
     elapsed = time.monotonic() - start
 
-    instance = engine.get_workflow_instance(instance_id)
+    instance = engine.get_instance(instance_id)
     if instance:
         print(f"\nWorkflow status: {instance.status.value}")
         print(f"Execution time: {elapsed:.2f}s")

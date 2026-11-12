@@ -295,13 +295,11 @@ async def run():
         engine = build_order_workflow(model)
 
         # Start the workflow with empty initial context
-        instance_id = await engine.start_workflow(
-            "order_processing", initial_context={}
-        )
+        instance_id = await engine.start("order_processing", initial_context={})
         print(f"Workflow started: {instance_id}\n")
 
         # The workflow runs automatically — check status
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         if instance:
             print(f"\nFinal status: {instance.status.value}")
             print(f"Final context keys: {list(instance.context.keys())}")

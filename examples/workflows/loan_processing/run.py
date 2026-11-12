@@ -592,12 +592,12 @@ async def run():
             "monthly_rent_or_mortgage": LOAN_APPLICATION["monthly_rent_or_mortgage"],
         }
 
-        instance_id = await engine.start_workflow(
+        instance_id = await engine.start(
             "loan_processing", initial_context=initial_context
         )
         print(f"\nWorkflow started: {instance_id}")
 
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         if instance:
             print(f"\nFinal status: {instance.status.value}")
             context_keys = sorted(k for k in instance.context if not k.startswith("_"))

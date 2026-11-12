@@ -551,13 +551,13 @@ async def run():
     try:
         engine = build_release_workflow(model)
 
-        instance_id = await engine.start_workflow(
+        instance_id = await engine.start(
             "release_management",
             initial_context={"_model": model},
         )
         print(f"\nWorkflow started: {instance_id}")
 
-        instance = engine.get_workflow_instance(instance_id)
+        instance = engine.get_instance(instance_id)
         if instance:
             print(f"\nFinal status: {instance.status.value}")
             context_keys = sorted(k for k in instance.context if not k.startswith("_"))

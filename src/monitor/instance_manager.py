@@ -1362,7 +1362,7 @@ class InstanceManager:
 
         The run is tracked as active before it starts; the engine hook
         removes it (and emits completed/failed/cancelled) when it ends, which
-        for pure auto/condition presets happens inside ``start_workflow``.
+        for pure auto/condition presets happens inside the engine's ``start``.
         """
         inst = self._get_workflow(instance_id)
         # The engine's timers and background runs live on THIS loop. The
@@ -1384,7 +1384,7 @@ class InstanceManager:
             },
         )
         try:
-            await inst.engine.start_workflow(
+            await inst.engine.start(
                 workflow_id=workflow_id,
                 initial_context=initial_context or {},
                 instance_id=wf_instance_id,
@@ -1392,7 +1392,7 @@ class InstanceManager:
         finally:
             # A run that failed before the engine registered it never reports
             # a status change: settle it here.
-            if inst.engine.get_workflow_instance(wf_instance_id) is None:
+            if inst.engine.get_instance(wf_instance_id) is None:
                 with self._lock:
                     inst.run_statuses[wf_instance_id] = "failed"
                     if wf_instance_id in inst.active_instance_ids:
@@ -1420,7 +1420,7 @@ class InstanceManager:
         engine hook)."""
         inst = self._get_workflow(instance_id)
         self._validate_workflow_instance_id(inst, instance_id, wf_instance_id)
-        result = await inst.engine.advance_workflow(wf_instance_id, user_input)
+        result = await inst.engine.advance(wf_instance_id, user_input)
         return bool(result)
 
     async def send_workflow_event(
@@ -1467,7 +1467,7 @@ class InstanceManager:
         """Cancel a workflow instance."""
         inst = self._get_workflow(instance_id)
         self._validate_workflow_instance_id(inst, instance_id, wf_instance_id)
-        result = await inst.engine.cancel_workflow(wf_instance_id, reason=reason)
+        result = await inst.engine.cancel(wf_instance_id, reason=reason)
         return bool(result)
 
     def get_workflow_status(
@@ -1478,13 +1478,13 @@ class InstanceManager:
         # Accept ids the engine still knows about (e.g. just-completed/cancelled
         # instances removed from active_instance_ids) so status stays queryable;
         # only fall back to the active-list validator if the engine has no record.
-        wf_instance = inst.engine.get_workflow_instance(wf_instance_id)
+        wf_instance = inst.engine.get_instance(wf_instance_id)
         if wf_instance is None:
             self._validate_workflow_instance_id(inst, instance_id, wf_instance_id)
             raise KeyError(f"Workflow run not found: {wf_instance_id}")
         drop_internal = not self.config.show_internal_keys
-        status = inst.engine.get_workflow_status(wf_instance_id)
-        context = inst.engine.get_workflow_context(wf_instance_id)
+        status = inst.engine.get_status(wf_instance_id)
+        context = inst.engine.get_context(wf_instance_id)
         status_str = _status_str(status).lower()
 
         # Extract step history if available
@@ -1861,11 +1861,11 @@ class InstanceManager:
                 except RuntimeError:
                     running = None
                 if running is loop:
-                    task = loop.create_task(engine.shutdown())
+                    task = loop.create_task(engine.close())
                     _pending_tasks.add(task)
                     task.add_done_callback(_pending_tasks.discard)
                 else:
-                    asyncio.run_coroutine_threadsafe(engine.shutdown(), loop)
+                    asyncio.run_coroutine_threadsafe(engine.close(), loop)
         else:
             inst.cancel_event.set()
             # DECISION plan-2026-09-12T065608-089d0ec7/D-007

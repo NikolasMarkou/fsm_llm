@@ -240,10 +240,13 @@ class TestShutdownTearsDownEveryInstanceType:
         async def go() -> None:
             managed = mgr.launch_workflow(preset_id="demo_linear")
 
-            async def _shutdown() -> None:
+            async def _close() -> None:
                 stopped.append(1)
 
-            managed.engine.shutdown = _shutdown
+            # The mock replaces a real engine method: a stale name would
+            # create a new attribute and the assertion below would fail.
+            assert callable(getattr(type(managed.engine), "close", None))
+            managed.engine.close = _close
             mgr.shutdown()
             await asyncio.sleep(0.05)
 
@@ -265,13 +268,13 @@ class TestRouteLaunchedWorkflowIsStopped:
         assert r.status_code == 200, r.text
         inst = mgr._instances[r.json()["instance_id"]]
         stopped: list[int] = []
-        original = inst.engine.shutdown
+        original = inst.engine.close
 
         async def _spy() -> None:
             stopped.append(1)
             await original()
 
-        inst.engine.shutdown = _spy
+        inst.engine.close = _spy
         return inst, stopped
 
     @staticmethod

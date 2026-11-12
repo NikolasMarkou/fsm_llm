@@ -67,7 +67,7 @@ class WorkflowTimeoutError(WorkflowError):
         self.operation = operation
         self.timeout_seconds = timeout_seconds
         #: The workflow instance that timed out, when known. Lets a caller of
-        #: ``start_workflow`` find the (now FAILED) instance even though the
+        #: ``start`` find the (now FAILED) instance even though the
         #: call raised before returning its id.
         self.instance_id = instance_id
 

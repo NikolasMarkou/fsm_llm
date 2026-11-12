@@ -524,7 +524,7 @@ class ConversationStep(WorkflowStep):
     as steps in a larger workflow.
 
     The conversation is started, driven by ``auto_messages`` (at most
-    ``max_turns`` turns; plus the ``advance_workflow`` user input when
+    ``max_turns`` turns; plus the ``advance`` user input when
     ``use_user_input`` is set), and its collected data is returned. It is NOT
     guaranteed to reach a terminal state: ``conversation_<step_id>_ended``
     reports whether it did, and ``require_completion=True`` turns a

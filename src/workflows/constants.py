@@ -25,10 +25,10 @@ CONTEXT_KEY_EVENT_TIMEOUT = "_timeout"
 CONTEXT_KEY_TIMER_EXPIRED = "_timer_expired"
 #: The last event delivered to the instance (``WorkflowEvent.model_dump()``).
 CONTEXT_KEY_LAST_EVENT = "_last_event"
-#: ``user_input`` of the latest ``advance_workflow`` call. Present only while
+#: ``user_input`` of the latest ``advance`` call. Present only while
 #: the step that call re-runs is executing; removed afterwards.
 CONTEXT_KEY_USER_INPUT = "_user_input"
-#: Reason passed to ``cancel_workflow``.
+#: Reason passed to ``cancel``.
 CONTEXT_KEY_CANCELLATION_REASON = "_cancellation_reason"
 
 #: Internal keys a step result may set (they bypass the internal-prefix
