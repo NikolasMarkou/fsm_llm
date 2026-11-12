@@ -25,7 +25,7 @@ from .constants import (
     MAX_CONTEXT_FILTER_NODES,
     is_forbidden_context_entry,
 )
-from .definitions import FSMDefinition, FSMDefinitionNotFoundError
+from .definitions import FSMDefinition, FSMDefinitionNotFoundError, FSMError
 
 # --------------------------------------------------------------
 # Local imports
@@ -171,7 +171,7 @@ _CYCLE = object()
 _DROP_REASONS = ((_TOO_DEEP, "too_deep"), (_CYCLE, "cycle"))
 
 
-class ContextFilterWorkError(ValueError):
+class ContextFilterError(FSMError, ValueError):
     """``filter_context_tree`` refused a cyclic input whose aliasing would
     unfold past its work ceiling. Raised instead of returning a partial value
     (see ``filter_context_tree``'s contract)."""
@@ -529,7 +529,7 @@ def filter_context_tree(
           containers are walked per path (the active-path guard makes their
           result path-dependent); if those walks charge more than
           ``MAX_CONTEXT_FILTER_NODES + CONTEXT_FILTER_CYCLIC_WORK_FACTOR *
-          distinct_items`` items it raises ``ContextFilterWorkError`` (only a
+          distinct_items`` items it raises ``ContextFilterError`` (only a
           cycle that is itself heavily aliased gets there).
         - Four call sites today: `fsm.py::_strip_internal_mapping` (silent,
           bare-prefix predicate), `context.py::clean_mapping` (5-reason
@@ -595,7 +595,7 @@ def filter_context_tree(
         if not memoisable:
             remaining[0] -= len(value) + 1
             if remaining[0] < 0:
-                raise ContextFilterWorkError(
+                raise ContextFilterError(
                     "context has cyclic references aliased too heavily to "
                     f"filter (more than {CONTEXT_FILTER_CYCLIC_WORK_FACTOR}x "
                     "its distinct size); refusing to return a partial value"

@@ -1730,9 +1730,9 @@ class TestStep08_1:
 
     def test_d3_cyclic_aliasing_fails_loudly_not_partially(self):
         """Aliasing that also contains a cycle cannot be memoised: the data
-        walkers raise ``ContextFilterWorkError`` instead of returning a
+        walkers raise ``ContextFilterError`` instead of returning a
         truncated value, and they do it fast."""
-        from fsm_llm.utilities import ContextFilterWorkError
+        from fsm_llm.utilities import ContextFilterError
 
         cur: dict[str, Any] = {"leaf": 1}
         for _ in range(14):
@@ -1747,7 +1747,7 @@ class TestStep08_1:
             def _target(walker=walker, box=box) -> None:
                 try:
                     box["result"] = walker(data)
-                except ContextFilterWorkError as exc:
+                except ContextFilterError as exc:
                     box["error"] = exc
 
             worker = threading.Thread(target=_target, daemon=True)
@@ -1755,6 +1755,24 @@ class TestStep08_1:
             worker.join(10.0)
             assert not worker.is_alive(), f"{name}: did not finish in 10s"
             assert "error" in box, f"{name}: returned {type(box.get('result'))}"
+
+    def test_d3_work_refusal_is_an_fsm_error_and_a_value_error(self):
+        """The refusal joins the ``FSMError`` tree like ``BuildError`` and
+        stays a ``ValueError``, so an ``except ValueError`` keeps catching it;
+        the old name ``ContextFilterWorkError`` no longer exists."""
+        import fsm_llm.utilities as utilities
+        from fsm_llm.definitions import FSMError
+        from fsm_llm.fsm import _strip_internal_mapping
+
+        cur: dict[str, Any] = {"leaf": 1}
+        for _ in range(14):
+            cur = {"a": cur, "b": cur, "c": cur}
+            cur["me"] = cur
+        with pytest.raises(utilities.ContextFilterError) as caught:
+            _strip_internal_mapping({"root": cur})
+        assert isinstance(caught.value, FSMError)
+        assert isinstance(caught.value, ValueError)
+        assert not hasattr(utilities, "ContextFilterWorkError")
 
     def test_d3_shared_container_under_different_cycles_stays_correct(self):
         """Guard: a container reached once inside a cycle and once outside it
@@ -3904,14 +3922,14 @@ class TestStep14_2:
         assert conv_id not in api._ended_conversations
 
     def test_c12_pathological_cyclic_context_can_be_ended_and_swept(self):
-        from fsm_llm.utilities import ContextFilterWorkError
+        from fsm_llm.utilities import ContextFilterError
 
         api, ends = _c12_api()
         ended_id, _ = api.start_conversation()
         swept_id, _ = api.start_conversation()
         for cid in (ended_id, swept_id):
             _raw_data(api, cid)["graph"] = _c12_pathological_graph()
-        with pytest.raises(ContextFilterWorkError):
+        with pytest.raises(ContextFilterError):
             api.get_data(ended_id)
         api.end_conversation(ended_id)
         assert ended_id not in api.fsm_manager.instances

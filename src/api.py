@@ -1935,7 +1935,7 @@ class API:
             # DECISION plan-2026-09-21T203800-8a03483a/D-053
             # Only the lock-timeout refusal blocks the end. Do NOT re-raise
             # every snapshot error while the instance is present: a context the
-            # data walker refuses (`ContextFilterWorkError`) or any other read
+            # data walker refuses (`ContextFilterError`) or any other read
             # failure then made the conversation impossible to end or sweep
             # (review pass 2). The ended cache is best-effort. See D-053.
             try:

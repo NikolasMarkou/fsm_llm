@@ -37,7 +37,7 @@ MAX_CONTEXT_FILTER_DEPTH = 16
 # `save_session`, the extracted-data commit): truncating DATA silently cut a
 # 150,000-item list and dropped later keys. That walker memoises every
 # container that cannot reach a cycle (D-052) and raises
-# `ContextFilterWorkError` when cycle-reaching containers unfold past
+# `ContextFilterError` when cycle-reaching containers unfold past
 # `MAX_CONTEXT_FILTER_NODES + CONTEXT_FILTER_CYCLIC_WORK_FACTOR * distinct
 # items`. See decisions.md D-011, D-045.
 MAX_CONTEXT_FILTER_NODES = 100_000
