@@ -110,6 +110,18 @@ def _timer_key(instance_id: str, kind: str, event_type: str = "") -> str:
     return "_".join(part for part in (instance_id, event_type, kind) if part)
 
 
+def _timeout_error(
+    operation: str, timeout_seconds: float, instance_id: str
+) -> WorkflowTimeoutError:
+    """The one spelling of a ``WorkflowTimeoutError`` raised by the engine."""
+    return WorkflowTimeoutError(
+        f"Operation '{operation}' timed out after {timeout_seconds} seconds",
+        operation=operation,
+        timeout_seconds=timeout_seconds,
+        instance_id=instance_id,
+    )
+
+
 class WorkflowEngine:
     """Engine for executing workflow definitions.
 
@@ -355,16 +367,16 @@ class WorkflowEngine:
         """
         if self._closed:
             raise WorkflowResourceError(
+                "Engine has been closed",
                 resource_type="workflow_engine",
                 resource_id="closed",
-                message="Engine has been closed",
             )
         # Check concurrent workflow limit
         if len(self.list_active_instances()) >= self.max_concurrent_workflows:
             raise WorkflowResourceError(
+                f"Maximum concurrent workflows ({self.max_concurrent_workflows}) exceeded",
                 resource_type="workflow_engine",
                 resource_id="concurrent_limit",
-                message=f"Maximum concurrent workflows ({self.max_concurrent_workflows}) exceeded",
             )
 
         # Get and validate workflow definition
@@ -377,8 +389,8 @@ class WorkflowEngine:
         instance_id = instance_id or str(uuid.uuid4())
         if instance_id in self.workflow_instances:
             raise WorkflowInstanceError(
+                "Instance id already in use (remove_instance it first)",
                 instance_id=instance_id,
-                message="Instance id already in use (remove_instance it first)",
             )
         instance = self._create_workflow_instance(
             workflow_def, instance_id, initial_context
@@ -440,7 +452,7 @@ class WorkflowEngine:
         """Get a workflow definition, raising an error if not found."""
         if workflow_id not in self.workflow_definitions:
             raise WorkflowDefinitionError(
-                workflow_id=workflow_id, message="Workflow definition not found"
+                "Workflow definition not found", workflow_id=workflow_id
             )
         return self.workflow_definitions[workflow_id]
 
@@ -461,8 +473,8 @@ class WorkflowEngine:
         to RUNNING once the engine holds it, so hooks hear the change."""
         if not workflow_def.initial_step_id:
             raise WorkflowDefinitionError(
+                "Workflow does not have an initial step defined",
                 workflow_id=workflow_def.workflow_id,
-                message="Workflow does not have an initial step defined",
             )
 
         # Create instance (the caller's dict is copied, never shared)
@@ -520,13 +532,11 @@ class WorkflowEngine:
 
             if steps_run >= self.max_steps:
                 error = WorkflowStateError(
-                    current_state=instance.current_step_id,
+                    f"Step budget exceeded: {self.max_steps} steps in "
+                    f"one engine call for instance {instance.instance_id} "
+                    "(a custom step may be routing in a loop)",
+                    current_step_id=instance.current_step_id,
                     operation="execute",
-                    message=(
-                        f"Step budget exceeded: {self.max_steps} steps in "
-                        f"one engine call for instance {instance.instance_id} "
-                        "(a custom step may be routing in a loop)"
-                    ),
                 )
                 logger.error(str(error))
                 self._fail(instance, error)
@@ -559,11 +569,11 @@ class WorkflowEngine:
         # `WorkflowTimeoutError`'s message, which is actively misleading (the
         # `asyncio.wait_for` call below already receives the correct float
         # timeout — only this reporting helper was truncating). See D-011.
-        def _timeout_error() -> WorkflowTimeoutError:
-            return WorkflowTimeoutError(
-                timeout_seconds=self._timeout_seconds(instance),
-                operation=f"step {instance.current_step_id}",
-                instance_id=instance.instance_id,
+        def _step_timeout() -> WorkflowTimeoutError:
+            return _timeout_error(
+                f"step {instance.current_step_id}",
+                self._timeout_seconds(instance),
+                instance.instance_id,
             )
 
         # Check workflow-level timeout (cheap fast-path at the step boundary)
@@ -571,7 +581,7 @@ class WorkflowEngine:
             instance.deadline is not None
             and datetime.now(timezone.utc) > instance.deadline
         ):
-            error = _timeout_error()
+            error = _step_timeout()
             self._fail(instance, error)
             raise error
         try:
@@ -595,13 +605,13 @@ class WorkflowEngine:
                         instance.deadline - datetime.now(timezone.utc)
                     ).total_seconds()
                     if remaining <= 0:
-                        raise _timeout_error()
+                        raise _step_timeout()
                     try:
                         result = await asyncio.wait_for(
                             current_step.execute(instance.context), timeout=remaining
                         )
                     except asyncio.TimeoutError as e:
-                        raise _timeout_error() from e
+                        raise _step_timeout() from e
                 else:
                     result = await current_step.execute(instance.context)
             finally:
@@ -609,11 +619,9 @@ class WorkflowEngine:
 
             if not isinstance(result, WorkflowStepResult):
                 raise WorkflowStepError(
+                    f"execute() returned {type(result).__name__}, "
+                    "expected a WorkflowStepResult",
                     step_id=step_id,
-                    message=(
-                        f"execute() returned {type(result).__name__}, "
-                        "expected a WorkflowStepResult"
-                    ),
                 )
 
             # Update context and history (filter internal keys to prevent overwrites).
@@ -676,9 +684,9 @@ class WorkflowEngine:
         """Get the current step, raising an error if not found."""
         if step_id not in workflow_def.steps:
             raise WorkflowStateError(
-                current_state=step_id,
+                "Step not found in workflow definition",
+                current_step_id=step_id,
                 operation="get_step",
-                message="Step not found in workflow definition",
             )
         return workflow_def.steps[step_id]
 
@@ -729,7 +737,7 @@ class WorkflowEngine:
         message = result.message or "Step failed without error message"
         if result.error and result.error not in message:
             message = f"{message} ({result.error})"
-        error = WorkflowStepError(step_id=instance.current_step_id, message=message)
+        error = WorkflowStepError(message, step_id=instance.current_step_id)
         self._fail(instance, error)
         return None
 
@@ -739,9 +747,9 @@ class WorkflowEngine:
 
         if next_state not in workflow_def.steps:
             raise WorkflowStateError(
-                current_state=instance.current_step_id,
+                f"Invalid next state: {next_state}",
+                current_step_id=instance.current_step_id,
                 operation="transition",
-                message=f"Invalid next state: {next_state}",
             )
 
         logger.info(f"Transitioning from {instance.current_step_id} to {next_state}")
@@ -878,7 +886,7 @@ class WorkflowEngine:
         for that key equals the instance's context value for it now.
         """
         if not event_type:
-            raise WorkflowEventError(event_type="", message="event_type is required")
+            raise WorkflowEventError("event_type is required", event_type="")
         instance = self._live_instance(instance_id, "listen for events")
 
         # Create listener
@@ -967,10 +975,10 @@ class WorkflowEngine:
                     wait_seconds = waiting_info.get("timeout_seconds")
                 self._fail(
                     instance,
-                    WorkflowTimeoutError(
-                        operation=f"wait for event '{event_type}'",
-                        timeout_seconds=float(wait_seconds or 0.0),
-                        instance_id=instance_id,
+                    _timeout_error(
+                        f"wait for event '{event_type}'",
+                        float(wait_seconds or 0.0),
+                        instance_id,
                     ),
                 )
                 return
@@ -1195,12 +1203,12 @@ class WorkflowEngine:
         instance = self.workflow_instances.get(instance_id)
         if instance is None:
             raise WorkflowInstanceError(
-                instance_id=instance_id, message="Workflow instance not found"
+                "Workflow instance not found", instance_id=instance_id
             )
         if instance.is_terminal():
             raise WorkflowInstanceError(
+                f"Instance is {instance.status.value}; cannot {purpose}",
                 instance_id=instance_id,
-                message=f"Instance is {instance.status.value}; cannot {purpose}",
             )
         return instance
 
@@ -1340,10 +1348,10 @@ class WorkflowEngine:
             )
             self._fail(
                 instance,
-                WorkflowTimeoutError(
-                    operation=f"step {instance.current_step_id}",
-                    timeout_seconds=self._timeout_seconds(instance),
-                    instance_id=instance_id,
+                _timeout_error(
+                    f"step {instance.current_step_id}",
+                    self._timeout_seconds(instance),
+                    instance_id,
                 ),
             )
 

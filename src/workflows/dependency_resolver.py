@@ -77,7 +77,10 @@ class DependencyResolver:
             unknown = deps - self._steps
             if unknown:
                 raise WorkflowValidationError(
-                    [f"Step '{step_id}' depends on unknown steps: {sorted(unknown)}"]
+                    "Validation failed with 1 error(s)",
+                    validation_errors=[
+                        f"Step '{step_id}' depends on unknown steps: {sorted(unknown)}"
+                    ],
                 )
 
         # Kahn's algorithm
@@ -108,7 +111,10 @@ class DependencyResolver:
             # Cycle detected — find the cycle members
             remaining = [s for s in self._steps if in_degree[s] > 0]
             raise WorkflowValidationError(
-                [f"Dependency cycle detected involving steps: {sorted(remaining)}"]
+                "Validation failed with 1 error(s)",
+                validation_errors=[
+                    f"Dependency cycle detected involving steps: {sorted(remaining)}"
+                ],
             )
 
         logger.debug(f"Resolved {len(self._steps)} steps into {len(waves)} waves")

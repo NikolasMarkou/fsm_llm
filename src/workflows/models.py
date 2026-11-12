@@ -167,9 +167,9 @@ class WorkflowInstance(BaseModel):
         allowed = _VALID_STATUS_TRANSITIONS.get(self.status, set())
         if status != self.status and status not in allowed:
             raise WorkflowStateError(
-                current_state=self.current_step_id,
+                f"Invalid status transition: {self.status.value} → {status.value}",
+                current_step_id=self.current_step_id,
                 operation="update_status",
-                message=f"Invalid status transition: {self.status.value} → {status.value}",
             )
         changed = status != self.status
         self.status = status

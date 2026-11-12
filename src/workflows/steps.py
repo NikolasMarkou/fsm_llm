@@ -141,8 +141,7 @@ class WorkflowStep(BaseModel, ABC):
             if raised:
                 raise
             raise WorkflowStepError(
-                step_id=self.step_id,
-                message=f"Step timed out after {self.timeout_seconds}s",
+                f"Step timed out after {self.timeout_seconds}s", step_id=self.step_id
             ) from e
 
 
@@ -387,17 +386,15 @@ class LLMStep(WorkflowStep):
             return self.prompt_template.format(**prompt_vars)
         except KeyError as e:
             raise WorkflowStepError(
+                f"Prompt template variable {e} not found in context mapping",
                 step_id=self.step_id,
-                message=f"Prompt template variable {e} not found in context mapping",
                 cause=e,
             ) from e
         except (ValueError, IndexError) as e:
             raise WorkflowStepError(
+                f"Prompt template is not a valid format string ({e}); "
+                "write literal braces as '{{' and '}}'",
                 step_id=self.step_id,
-                message=(
-                    f"Prompt template is not a valid format string ({e}); "
-                    "write literal braces as '{{' and '}}'"
-                ),
                 cause=e,
             ) from e
 
@@ -941,8 +938,7 @@ class AgentStep(WorkflowStep):
                 task = self.task_template.format(**context)
             except KeyError as e:
                 raise WorkflowStepError(
-                    step_id=self.step_id,
-                    message=f"Missing context key for task template: {e}",
+                    f"Missing context key for task template: {e}", step_id=self.step_id
                 ) from e
 
             kwargs: dict[str, Any] = {}

@@ -101,8 +101,7 @@ class WorkflowDefinition(BaseModel):
         existing = self.steps.get(step.step_id)
         if existing is not None and existing is not step:
             raise WorkflowDefinitionError(
-                workflow_id=self.workflow_id,
-                message=f"Duplicate step_id '{step.step_id}'",
+                f"Duplicate step_id '{step.step_id}'", workflow_id=self.workflow_id
             )
         self.steps[step.step_id] = step
         if is_initial:
@@ -173,7 +172,10 @@ class WorkflowDefinition(BaseModel):
                     )
 
         if errors:
-            raise WorkflowValidationError(errors)
+            raise WorkflowValidationError(
+                f"Validation failed with {len(errors)} error(s)",
+                validation_errors=errors,
+            )
 
     def _validate_steps(self) -> list[str]:
         """Validate individual steps."""

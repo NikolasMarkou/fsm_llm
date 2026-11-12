@@ -1103,8 +1103,8 @@ class TestSmallerFixes:
 
     def test_exception_details_are_not_mutated(self):
         details = {"k": 1}
-        WorkflowStepError("s", "m", cause=ValueError("x"), details=details)
-        WorkflowTimeoutError("op", 1.0, details=details)
+        WorkflowStepError("m", step_id="s", cause=ValueError("x"), details=details)
+        WorkflowTimeoutError("t", operation="op", timeout_seconds=1.0, details=details)
         assert details == {"k": 1}
 
     async def test_empty_event_type_listener_rejected(self):

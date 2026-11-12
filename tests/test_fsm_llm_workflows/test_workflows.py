@@ -32,7 +32,7 @@ class TestWorkflowExceptions:
     def test_workflow_definition_error(self):
         from fsm_llm.workflows.exceptions import WorkflowDefinitionError
 
-        err = WorkflowDefinitionError("wf-1", "missing step")
+        err = WorkflowDefinitionError("missing step", workflow_id="wf-1")
         assert "wf-1" in str(err)
         assert "missing step" in str(err)
         assert err.workflow_id == "wf-1"
@@ -41,7 +41,7 @@ class TestWorkflowExceptions:
         from fsm_llm.workflows.exceptions import WorkflowStepError
 
         cause = ValueError("bad value")
-        err = WorkflowStepError("step-1", "failed", cause=cause)
+        err = WorkflowStepError("failed", step_id="step-1", cause=cause)
         assert err.step_id == "step-1"
         assert err.cause is cause
         assert err.details["cause"] == "bad value"
@@ -50,14 +50,14 @@ class TestWorkflowExceptions:
     def test_workflow_instance_error(self):
         from fsm_llm.workflows.exceptions import WorkflowInstanceError
 
-        err = WorkflowInstanceError("inst-1", "not found")
+        err = WorkflowInstanceError("not found", instance_id="inst-1")
         assert err.instance_id == "inst-1"
         assert "inst-1" in str(err)
 
     def test_workflow_timeout_error(self):
         from fsm_llm.workflows.exceptions import WorkflowTimeoutError
 
-        err = WorkflowTimeoutError("process", 30)
+        err = WorkflowTimeoutError("timed out", operation="process", timeout_seconds=30)
         assert err.operation == "process"
         assert err.timeout_seconds == 30
         assert err.details["timeout_seconds"] == 30
@@ -65,27 +65,32 @@ class TestWorkflowExceptions:
     def test_workflow_validation_error(self):
         from fsm_llm.workflows.exceptions import WorkflowValidationError
 
-        err = WorkflowValidationError(["error 1", "error 2"])
+        err = WorkflowValidationError(
+            "Validation failed with 2 error(s)",
+            validation_errors=["error 1", "error 2"],
+        )
         assert len(err.validation_errors) == 2
         assert "2 error(s)" in str(err)
 
     def test_workflow_state_error(self):
         from fsm_llm.workflows.exceptions import WorkflowStateError
 
-        err = WorkflowStateError("running", "cancel", "cannot cancel")
-        assert err.current_state == "running"
+        err = WorkflowStateError(
+            "cannot cancel", current_step_id="step-1", operation="cancel"
+        )
+        assert err.current_step_id == "step-1"
         assert err.operation == "cancel"
 
     def test_workflow_event_error(self):
         from fsm_llm.workflows.exceptions import WorkflowEventError
 
-        err = WorkflowEventError("click", "unhandled")
+        err = WorkflowEventError("unhandled", event_type="click")
         assert err.event_type == "click"
 
     def test_workflow_resource_error(self):
         from fsm_llm.workflows.exceptions import WorkflowResourceError
 
-        err = WorkflowResourceError("timer", "t-1", "expired")
+        err = WorkflowResourceError("expired", resource_type="timer", resource_id="t-1")
         assert err.resource_type == "timer"
         assert err.resource_id == "t-1"
 
@@ -115,6 +120,51 @@ class TestWorkflowExceptions:
         ]:
             assert issubclass(exc_cls, WorkflowError)
             assert issubclass(exc_cls, Exception)
+
+    def test_constructors_take_the_message_first_and_ids_by_keyword(self):
+        """Like core: ``Cls(message, *, <id>=None, details=None)``."""
+        import inspect
+
+        from fsm_llm.workflows import exceptions as exc
+
+        expected = {
+            "WorkflowDefinitionError": ["workflow_id"],
+            "WorkflowStepError": ["step_id", "cause"],
+            "WorkflowInstanceError": ["instance_id"],
+            "WorkflowTimeoutError": ["operation", "timeout_seconds", "instance_id"],
+            "WorkflowValidationError": ["validation_errors"],
+            "WorkflowStateError": ["current_step_id", "operation"],
+            "WorkflowEventError": ["event_type"],
+            "WorkflowResourceError": ["resource_type", "resource_id"],
+        }
+        for name, ids in expected.items():
+            params = list(inspect.signature(getattr(exc, name)).parameters.values())
+            assert params[0].name == "message"
+            assert params[0].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+            assert [p.name for p in params[1:]] == [*ids, "details"]
+            for p in params[1:]:
+                assert p.kind is inspect.Parameter.KEYWORD_ONLY
+                assert p.default is None
+
+    def test_state_error_carries_current_step_id(self):
+        from fsm_llm.workflows.exceptions import WorkflowStateError
+
+        err = WorkflowStateError("nope", current_step_id="s1", operation="op")
+        assert err.current_step_id == "s1"
+        assert not hasattr(err, "current_state")
+        assert err.details == {"current_step_id": "s1", "operation": "op"}
+        assert str(err) == "State 's1' - op: nope"
+
+    def test_ids_left_out_add_no_prefix(self):
+        from fsm_llm.workflows.exceptions import (
+            WorkflowResourceError,
+            WorkflowStepError,
+        )
+
+        assert str(WorkflowStepError("plain")) == "plain"
+        assert WorkflowStepError("plain").step_id is None
+        assert str(WorkflowResourceError("plain")) == "plain"
+        assert str(WorkflowResourceError("m", resource_type="timer")) == "timer: m"
 
 
 # ----------------------------------------------------------------
