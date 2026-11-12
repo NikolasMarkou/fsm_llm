@@ -449,6 +449,7 @@ fsm_llm.State class(BaseModel)
   field context_scope: ContextScope | None = None
   field completion: CompletionStateConfig | None = None
   field synthesize: SynthesizeConfig | None = None
+  property kind
 fsm_llm.StateNotFoundError class(FSMError)
   def __init__(self, message: str, state_id: str | None = None, **kwargs)
 fsm_llm.Transition class(BaseModel)

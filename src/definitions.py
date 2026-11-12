@@ -58,6 +58,7 @@ from .constants import (
 )
 from .logging import logger
 from .schema_registry import SCHEMA_VERSION_DEFAULT, newer_fields
+from .state_kinds import kind_of
 
 # --------------------------------------------------------------
 # Identifier charset policy
@@ -1895,6 +1896,19 @@ class State(BaseModel):
                     "transition targets (a terminal state has none)"
                 )
         return self
+
+    # DECISION plan-2026-11-12T073150-d454fd62/D-015: `kind` is a plain
+    # property over the kind registry. Do NOT make it a field, a
+    # `computed_field` or a `PrivateAttr`: each would reach `model_dump`, which
+    # `API.process_fsm_definition` hashes with `exclude_defaults=True`, and move
+    # every `fsm_id` and library digest (a plain property is also absent from
+    # `model_fields` and the JSON schema; a test pins all three).
+    @property
+    def kind(self) -> str:
+        """The state's kind name: ``conversation``, ``completion`` or
+        ``synthesize`` (see ``fsm_llm.state_kinds``). Derived from the config
+        fields; not part of the definition, its dump or its ``fsm_id``."""
+        return kind_of(self).name
 
 
 # --------------------------------------------------------------
