@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import re
+import weakref
 from collections import deque
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -1955,6 +1956,29 @@ _SYNTHESIZE_SAMPLES: tuple[tuple[str, dict[str, Any] | None], ...] = (
 )
 
 
+# Definition objects whose schema-version findings were already logged
+# (D-003), keyed by identity; an entry removes itself when the object is
+# collected, so a recycled id can never suppress a new definition.
+_REPORTED_DEFINITIONS: dict[int, weakref.ref[FSMDefinition]] = {}
+
+
+def _first_report(definition: FSMDefinition) -> bool:
+    """True the first time `definition` is seen, False on every later call.
+
+    Private to `FSMDefinition.validate_fsm_structure`; never raises. The flag
+    lives outside the model so equality, `model_dump` and `fsm_id` are untouched.
+    """
+    key = id(definition)
+    if key in _REPORTED_DEFINITIONS:
+        return False
+
+    def _forget(_ref: weakref.ref[FSMDefinition]) -> None:
+        _REPORTED_DEFINITIONS.pop(key, None)
+
+    _REPORTED_DEFINITIONS[key] = weakref.ref(definition, _forget)
+    return True
+
+
 class FSMDefinition(BaseModel):
     """
     Complete FSM definition for the 2-pass architecture.
@@ -2068,17 +2092,30 @@ class FSMDefinition(BaseModel):
 
         self._check_synthesize_states()
         # DECISION plan-2026-11-12T023759-9013b0e3/D-003: a declared version
-        # older than the fields used is a WARNING, once per construction, and
-        # nothing else. Do NOT raise or add an error here: the loader and
+        # older than the fields used is a WARNING, once per definition object,
+        # and nothing else. Do NOT raise or add an error here: the loader and
         # `FSMValidator` must never be stricter than they were (the
         # never-stricter pins), and a file declaring "4.1" with a `synthesize`
         # state has always loaded. Library logging is off by default, so the
         # visible channel is the `FSMValidator` report (`_validate_schema_versions`).
-        newer = newer_fields(self)
-        if newer:
-            logger.warning(
-                f"FSM '{self.name}': " + "; ".join(finding.message for finding in newer)
-            )
+        # Once per OBJECT, not per construction: pydantic runs this validator
+        # again each time the instance is validated as a field of another model
+        # (`FSMStackFrame` in `API.start_conversation` and `push_fsm`), which
+        # logged one WARNING per conversation. The object is remembered in
+        # `_REPORTED_DEFINITIONS` (by identity, dropped when it is collected).
+        # Do NOT use a `PrivateAttr` or any field for the flag (a private attr
+        # makes pydantic synthesize a `model_post_init` that reaches the public
+        # API snapshot, and a field would reach `model_dump` and move `fsm_id`
+        # and the library digest) and do NOT use a content-keyed or
+        # once-per-process cache (unrelated definitions and tests would
+        # suppress each other).
+        if _first_report(self):
+            newer = newer_fields(self)
+            if newer:
+                logger.warning(
+                    f"FSM '{self.name}': "
+                    + "; ".join(finding.message for finding in newer)
+                )
         logger.debug(f"FSM '{self.name}' validation successful")
         return self
 

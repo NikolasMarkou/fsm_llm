@@ -7,6 +7,7 @@ that is not registered fails here. Every definition below declares its version
 explicitly, so none of these tests depends on the default version.
 """
 
+import contextlib
 import json
 import os
 import stat
@@ -473,18 +474,25 @@ def _declared_body(version: str | None, *, with_synthesize: bool) -> dict[str, A
     return body
 
 
-def _loader_warnings(body: dict[str, Any]) -> list[str]:
-    """Build the definition with library logging on; return its WARNING lines."""
+@contextlib.contextmanager
+def _captured_warnings() -> typing.Iterator[list[str]]:
+    """Library logging on, a sink collecting every WARNING line; restored on exit."""
     from fsm_llm.logging import logger
 
     lines: list[str] = []
     logger.enable("fsm_llm")
     sink_id = logger.add(lambda m: lines.append(str(m)), level="WARNING")
     try:
-        FSMDefinition(**body)
+        yield lines
     finally:
         logger.remove(sink_id)
         logger.disable("fsm_llm")
+
+
+def _loader_warnings(body: dict[str, Any]) -> list[str]:
+    """Build the definition with library logging on; return its WARNING lines."""
+    with _captured_warnings() as lines:
+        FSMDefinition(**body)
     return lines
 
 
@@ -526,6 +534,86 @@ class TestLoaderWarning:
         lines = _loader_warnings(body)
         assert len(lines) == 1
         assert "'solve'" in lines[0] and "'other'" in lines[0]
+
+
+class TestLoaderWarnsOncePerDefinitionObject:
+    """D-003: a definition object reports its findings once, not once per frame.
+
+    pydantic runs the after-validator of `FSMDefinition` again whenever an
+    instance is validated as a field of another model (`FSMStackFrame` in
+    `API.start_conversation` and `push_fsm`), so without a per-object flag a
+    server with library logging on logged one WARNING per conversation.
+    """
+
+    @staticmethod
+    def _body() -> dict[str, Any]:
+        body = _declared_body("4.0", with_synthesize=False)
+        body["states"]["solve"]["extraction_instructions"] = "pull a name"
+        return body
+
+    @staticmethod
+    def _version_lines(lines: list[str]) -> list[str]:
+        return [line for line in lines if "needs definition version" in line]
+
+    def test_one_warning_over_construct_start_converse_and_push(self):
+        from fsm_llm import API
+        from tests.conftest import MockLLM2Interface
+
+        with _captured_warnings() as lines:
+            definition = FSMDefinition(**self._body())
+            assert len(self._version_lines(lines)) == 1
+
+            api = API.from_definition(definition, llm_interface=MockLLM2Interface())
+            first, _ = api.start_conversation()
+            second, _ = api.start_conversation()
+            api.converse("hello", first)
+            api.converse("hello again", second)
+            assert len(self._version_lines(lines)) == 1
+
+            # a pushed definition object was already reported at its construction
+            api.push_fsm(first, definition)
+            assert len(self._version_lines(lines)) == 1
+
+    def test_a_pushed_dict_is_a_new_definition_and_warns_once(self):
+        from fsm_llm import API
+        from tests.conftest import MockLLM2Interface
+
+        api = API.from_definition(_definition("4.2"), llm_interface=MockLLM2Interface())
+        conversation_id, _ = api.start_conversation()
+        with _captured_warnings() as lines:
+            api.push_fsm(conversation_id, self._body())
+        assert len(self._version_lines(lines)) == 1
+
+    def test_a_second_independent_definition_warns_again(self):
+        with _captured_warnings() as lines:
+            FSMDefinition(**self._body())
+            FSMDefinition(**self._body())
+        assert len(self._version_lines(lines)) == 2
+
+    def test_a_collected_definition_leaves_no_entry_behind(self):
+        import gc
+
+        from fsm_llm import definitions
+
+        definition = FSMDefinition(**self._body())
+        key = id(definition)
+        assert key in definitions._REPORTED_DEFINITIONS
+        del definition
+        gc.collect()
+        assert key not in definitions._REPORTED_DEFINITIONS
+
+    def test_the_flag_changes_neither_dump_nor_equality_nor_id(self):
+        from fsm_llm.api import API
+
+        reported = FSMDefinition(**self._body())
+        fresh = FSMDefinition(**self._body())
+        assert reported == fresh
+        assert reported.model_dump() == fresh.model_dump()
+        assert not any(key.startswith("_") for key in reported.model_dump())
+        assert (
+            API.process_fsm_definition(reported)[1]
+            == (API.process_fsm_definition(self._body())[1])
+        )
 
 
 class TestValidatorWarning:
