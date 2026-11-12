@@ -25,7 +25,7 @@ from fsm_llm.handlers import (
     clear_keys_on_entry,
     create_handler,
 )
-from tests.conftest import PromptGroundedLLM
+from fsm_llm.testing import PromptGroundedLLM
 
 # ── Helpers ───────────────────────────────────────────────────
 

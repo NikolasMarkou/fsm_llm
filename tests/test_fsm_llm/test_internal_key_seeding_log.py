@@ -28,7 +28,7 @@ from fsm_llm import API
 from fsm_llm.constants import RESERVED_CONTEXT_KEYS
 from fsm_llm.definitions import FSMContext
 from fsm_llm.handlers import HandlerTiming, create_handler
-from tests.conftest import MockLLM2Interface
+from fsm_llm.testing import MockLLM2Interface
 
 
 def _fsm() -> dict[str, Any]:

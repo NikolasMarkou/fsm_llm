@@ -17,7 +17,7 @@ import fsm_llm
 from fsm_llm import API, FSMError, ModelNotConfiguredError
 from fsm_llm.constants import ENV_LLM_MODEL
 from fsm_llm.llm import resolve_model
-from tests.conftest import MockLLM2Interface
+from fsm_llm.testing import MockLLM2Interface
 
 _FSM = {
     "name": "m",

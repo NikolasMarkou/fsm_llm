@@ -306,7 +306,7 @@ class TestStepsOverTheRealCore:
     async def test_agent_step_runs_a_react_agent_to_success(self, converse_calls):
         pytest.importorskip("fsm_llm.agents")
         from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry
-        from tests.conftest import PromptGroundedLLM
+        from fsm_llm.testing import PromptGroundedLLM
 
         answer = "The capital of France is Paris."
         queries: list[str] = []
@@ -353,8 +353,8 @@ class TestStepsOverTheRealCore:
         self, converse_calls, monkeypatch
     ):
         from fsm_llm import API
+        from fsm_llm.testing import MockLLM2Interface
         from fsm_llm.workflows.steps import ConversationStep
-        from tests.conftest import MockLLM2Interface
 
         llm = MockLLM2Interface(extraction_data={"name": "Alice"}, response_text="Hi!")
         real_from_definition = API.from_definition
@@ -461,7 +461,7 @@ class TestConversationStepLastSpokenReply:
     @pytest.fixture
     def llm(self, monkeypatch):
         from fsm_llm import API
-        from tests.conftest import MockLLM2Interface
+        from fsm_llm.testing import MockLLM2Interface
 
         llm = MockLLM2Interface(
             extraction_data={"name": "Alice"}, response_text="What is your name?"

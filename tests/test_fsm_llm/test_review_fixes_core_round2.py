@@ -29,12 +29,10 @@ from fsm_llm.definitions import (
 )
 from fsm_llm.handlers import create_handler
 from fsm_llm.llm import LiteLLMInterface
-from tests.conftest import MockLLM2Interface
+from fsm_llm.testing import MockLLM2Interface, final_reply, tool_call_reply
 from tests.test_fsm_llm.test_completion_state import (
     _MESSAGES,
     _api,
-    _calls,
-    _final,
     _ScriptedLLM,
     _start,
     _to_call_model,
@@ -59,9 +57,11 @@ class TestToolTurnNeedsAUserMessage:
     nothing became the result."""
 
     def test_a_transcript_holding_only_a_tool_exchange_is_refused(self):
-        llm = _ScriptedLLM(_final("answer to nothing"))
+        llm = _ScriptedLLM(final_reply("answer to nothing"))
         api = _api(_tool_fsm(), llm)
-        exchange = tool_exchange(None, _calls(("add", {"a": 2, "b": 3})).calls, ["5"])
+        exchange = tool_exchange(
+            None, tool_call_reply(("add", {"a": 2, "b": 3})).calls, ["5"]
+        )
         conv_id, _ = api.start_conversation(initial_context={_MESSAGES: exchange})
         _to_call_model(api, conv_id)
         with pytest.raises(LLMResponseError, match="no user message"):
@@ -73,7 +73,9 @@ class TestToolTurnNeedsAUserMessage:
         once, the session is saved with the result but not the transcript,
         and after the restore the runner rebuilds a task-less exchange."""
         fsm = _tool_fsm()
-        llm = _ScriptedLLM(_calls(("add", {"a": 2, "b": 3})), _final("never sent"))
+        llm = _ScriptedLLM(
+            tool_call_reply(("add", {"a": 2, "b": 3})), final_reply("never sent")
+        )
         store = FileSessionStore(str(tmp_path))
         api = API.from_definition(fsm, llm_interface=llm, session_store=store)
         crashed: list[bool] = []
@@ -108,7 +110,7 @@ class TestToolTurnNeedsAUserMessage:
         assert len(llm.requests) == 1  # nothing was sent after the restore
 
     def test_a_transcript_with_the_task_still_runs(self):
-        llm = _ScriptedLLM(_calls(("add", {"a": 2, "b": 3})), _final("5"))
+        llm = _ScriptedLLM(tool_call_reply(("add", {"a": 2, "b": 3})), final_reply("5"))
         api = _api(_tool_fsm(), llm)
         conv_id = _start(api)
         api.run_until_terminal(conv_id, max_steps=6)
@@ -398,7 +400,7 @@ class TestSecondsExemptStatesAreStatesOfTheDefinition:
     waived anything."""
 
     def test_an_unknown_state_is_refused_at_call_time(self):
-        llm = _ScriptedLLM(_final("5"))
+        llm = _ScriptedLLM(final_reply("5"))
         api = _api(_tool_fsm(), llm)
         conv_id = _start(api)
         with pytest.raises(ValueError, match=r"\['run_tool'\]"):
@@ -413,7 +415,7 @@ class TestSecondsExemptStatesAreStatesOfTheDefinition:
         assert api.get_current_state(conv_id) == "intake"
 
     def test_known_states_run(self):
-        llm = _ScriptedLLM(_final("5"))
+        llm = _ScriptedLLM(final_reply("5"))
         api = _api(_tool_fsm(), llm)
         conv_id = _start(api)
         api.run_until_terminal(
@@ -422,7 +424,7 @@ class TestSecondsExemptStatesAreStatesOfTheDefinition:
         assert api.get_current_state(conv_id) == "done"
 
     def test_an_ended_conversation_runs_nothing_and_is_not_checked(self):
-        llm = _ScriptedLLM(_final("5"))
+        llm = _ScriptedLLM(final_reply("5"))
         api = _api(_tool_fsm(), llm)
         conv_id = _start(api)
         api.run_until_terminal(conv_id, max_steps=5)

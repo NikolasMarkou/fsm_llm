@@ -24,7 +24,7 @@ import pytest
 from fsm_llm import api as api_module
 from fsm_llm.api import API
 from fsm_llm.definitions import FSMDefinition
-from tests.conftest import MockLLM2Interface
+from fsm_llm.testing import MockLLM2Interface
 
 # Generous relative to the work being done (all in-process, mocked LLM); small enough that a
 # genuine regression surfaces as a fast failure rather than a CI hang.

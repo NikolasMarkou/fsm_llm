@@ -60,7 +60,8 @@ from fsm_llm.okf import (
     strip_unsafe_text,
     write_bundle,
 )
-from tests.test_fsm_llm.test_completion_state import _calls, _final, _ScriptedLLM
+from fsm_llm.testing import final_reply, tool_call_reply
+from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 
 _TOOLS = ("okf_list", "okf_read", "okf_search", "okf_links")
 _PAST = "2020-01-01T00:00:00+00:00"
@@ -653,7 +654,8 @@ class TestNativeFcIntegration:
         )
         registry = create_okf_tools(bundle)
         llm = _ScriptedLLM(
-            _calls(("okf_read", {"id": "docs/zephyr"})), _final("The limit is 7341 KB.")
+            tool_call_reply(("okf_read", {"id": "docs/zephyr"})),
+            final_reply("The limit is 7341 KB."),
         )
         agent = create_agent(
             "native_fc",
@@ -684,7 +686,8 @@ class TestNativeFcIntegration:
         bundle = _hostile_bundle()
         registry = create_okf_tools(bundle)
         llm = _ScriptedLLM(
-            _calls(("okf_read", {"id": f"inject/{_M_ID}"})), _final("done")
+            tool_call_reply(("okf_read", {"id": f"inject/{_M_ID}"})),
+            final_reply("done"),
         )
         agent = create_agent(
             "native_fc",

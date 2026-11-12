@@ -29,7 +29,7 @@ from fsm_llm.agents import (
 from fsm_llm.agents.base import _with_instructions
 from fsm_llm.agents.definitions import MetaBuilderConfig
 from fsm_llm.agents.sop import SOPDefinition, SOPRegistry
-from tests.conftest import PromptGroundedLLM
+from fsm_llm.testing import PromptGroundedLLM
 
 
 def _search(query: str) -> str:

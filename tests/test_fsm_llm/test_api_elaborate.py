@@ -1283,7 +1283,7 @@ class TestHistoryWindowFollowsMaxHistorySize:
     """D-004: the number is the prompt window in messages, passed unchanged."""
 
     def test_prompt_shows_max_history_size_messages(self):
-        from tests.conftest import MockLLM2Interface
+        from fsm_llm.testing import MockLLM2Interface
 
         llm = MockLLM2Interface()
         api = API.from_definition(_LOOP_FSM, llm_interface=llm, max_history_size=20)
@@ -1320,7 +1320,7 @@ class TestHistoryWindowFollowsMaxHistorySize:
     )
     def test_coerced_size_is_validated_before_the_prompt_configs(self, given, shown):
         """A float or numeric string the Conversation coerces works as before."""
-        from tests.conftest import MockLLM2Interface
+        from fsm_llm.testing import MockLLM2Interface
 
         llm = MockLLM2Interface()
         api = API.from_definition(_LOOP_FSM, llm_interface=llm, max_history_size=given)
@@ -1335,7 +1335,7 @@ class TestHistoryWindowFollowsMaxHistorySize:
         assert _shown_messages(_converse_twelve_turns(api, llm)) == shown
 
     def test_default_size_prompt_is_byte_identical(self):
-        from tests.conftest import MockLLM2Interface
+        from fsm_llm.testing import MockLLM2Interface
 
         llm = MockLLM2Interface()
         api = API.from_definition(_LOOP_FSM, llm_interface=llm)
@@ -1343,7 +1343,7 @@ class TestHistoryWindowFollowsMaxHistorySize:
 
     def test_agent_config_max_history_size_reaches_the_prompt(self):
         from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry
-        from tests.conftest import MockLLM2Interface
+        from fsm_llm.testing import MockLLM2Interface
 
         def echo(query: str) -> str:
             """Echo the query."""

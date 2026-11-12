@@ -30,7 +30,7 @@ flowchart LR
 
 Fake LLM conventions:
 
-- `PromptGroundedLLM` (`tests/conftest.py`): a fact comes back only when its evidence string is in the request, so a test fails when the prompt lacks the context the fix claims to add. `test_grounded_patterns.py` (one class per pattern) and `test_trust_boundary.py` drive `agent.run()` through the real `API` with it; assert on `fake.calls("extract_field")` prompts as well as on the result. It cannot show whether a real model will terminate or fill a field (D-034 of plan 06a5ec0a); extraction changes still need a live probe.
+- `PromptGroundedLLM` (`fsm_llm.testing`): a fact comes back only when its evidence string is in the request, so a test fails when the prompt lacks the context the fix claims to add. `test_grounded_patterns.py` (one class per pattern) and `test_trust_boundary.py` drive `agent.run()` through the real `API` with it; assert on `fake.calls("extract_field")` prompts as well as on the result. It cannot show whether a real model will terminate or fill a field (D-034 of plan 06a5ec0a); extraction changes still need a live probe.
 - Older files define their own fake (only one cross-file import):
 
 - Subclass `fsm_llm.llm.LLMInterface`, set `self.model`, implement `extract_field(FieldExtractionRequest) -> FieldExtractionResponse`, `generate_response(...) -> ResponseGenerationResponse`, and optionally `extract_bulk_data(...) -> DataExtractionResponse`.

@@ -15,7 +15,7 @@ from loguru import logger
 
 from fsm_llm.agents import ReactAgent
 from fsm_llm.agents.constants import ContextKeys
-from tests.conftest import PromptGroundedLLM
+from fsm_llm.testing import PromptGroundedLLM
 from tests.test_fsm_llm_agents.test_advance_driver import (
     _ANSWER,
     _FACTS,

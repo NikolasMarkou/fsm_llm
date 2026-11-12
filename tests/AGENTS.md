@@ -44,7 +44,7 @@ Suite folders (test counts from full collection) and root files at this level.
 | `test_fsm_llm_workflows/` | `fsm_llm.workflows` steps, DSL, `WorkflowEngine`, timeouts, audit fixes | 330 tests. Real short sleeps; 8 `slow` |
 | `test_fsm_llm_monitor/` | `fsm_llm.monitor` server via `TestClient`, security, `InstanceManager`, `EventCollector`, `OTELExporter` | 458 tests. Local autouse fixture deletes `FSM_LLM_MONITOR_API_KEY`; audit file skips whole when workflows missing |
 | `test_fsm_llm_eval/` | `fsm_llm.eval` and `fsm-llm-eval`: config, records, stats, scoring golden table, examples mode, cases mode, exit codes; parity with `scripts/bench_common.py` | 431 tests. Reads `evaluation/` files and needs a git checkout |
-| `test_fsm_llm_synthesis/` | `fsm_llm.synthesis` (policy G5, gates, G6a `dryrun`, G6b `simulation`, `synthesizer`, `library`, `runner`, `tools`, `traces`, `diagnose`, `patch`, `repair`), the concierge end to end, and the offline checks of `scripts/synthesis_bench.py` (`test_synthesis_bench.py`; blocks s0 to s2 were run, see `scripts/bench_data/README.md`) | Own `conftest.py` (`ScriptedStrongLLM`, `ScriptedRunnerLLM`, `host_fsm`, `good_fsm`, `stuck_fsm`) that fails on any built `LiteLLMInterface` or provider call; see `test_fsm_llm_synthesis/AGENTS.md` |
+| `test_fsm_llm_synthesis/` | `fsm_llm.synthesis` (policy G5, gates, G6a `dryrun`, G6b `simulation`, `synthesizer`, `library`, `runner`, `tools`, `traces`, `diagnose`, `patch`, `repair`), the concierge end to end, and the offline checks of `scripts/synthesis_bench.py` (`test_synthesis_bench.py`; blocks s0 to s2 were run, see `scripts/bench_data/README.md`) | Own `conftest.py` (`ScriptedRunnerLLM`, `ByTurn`, `host_fsm`, `good_fsm`, `stuck_fsm`) that fails on any built `LiteLLMInterface` or provider call; see `test_fsm_llm_synthesis/AGENTS.md` |
 | `test_fsm_llm_testing/` | `fsm_llm.testing` (the seventh subpackage): import probes and source scans for its layering (loaded by no library module, no `pytest`, `litellm` or other subpackage), the skeleton checks | 9 tests (step 21; grows with steps 22 to 25). Child-process probes with the model-server variables on a closed port |
 | `test_fsm_llm_regression/` | One class per fixed bug id across core, reasoning, workflows, CLI, packaging text | 268 tests. Many private-method and source-text pins |
 | `test_examples/` | Every `examples/**/*.json` loads as JSON with `name`/`initial_state`/`states`, parses as `FSMDefinition`, passes `FSMValidator.validate()`; at least 5 files exist | 67 tests. Marker `examples`; 14 JSON files today |
@@ -71,7 +71,7 @@ Suite folders (test counts from full collection) and root files at this level.
 
 ## Public interface
 
-From `tests/conftest.py` (import as `from tests.conftest import ...` or use as fixtures). The two doubles below live in `fsm_llm.testing` (step 22 of plan d454fd62) and are re-exported here, so `tests.conftest.MockLLM2Interface is fsm_llm.testing.MockLLM2Interface`; the repo-wide switch of the importers to `fsm_llm.testing` is step 26:
+From `tests/conftest.py` (import as `from tests.conftest import ...` or use as fixtures), plus the two doubles below. They live in the public `fsm_llm.testing` (import them from there: `from fsm_llm.testing import MockLLM2Interface, PromptGroundedLLM`); `tests/conftest.py` does not re-export them, and a guard test in `tests/test_fsm_llm_testing/test_doubles.py` fails when a test module imports them from `tests.conftest`:
 
 | Name | Kind | Use |
 | --- | --- | --- |
@@ -123,7 +123,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 
 - Put a test in the suite folder that matches the source subpackage; repo-wide checks go at this level.
 - Conventions: files `test_<module>.py` / `test_<module>_elaborate.py`, classes `Test<Feature>`, helpers prefixed `_`; regressions named after the bug or audit id with a docstring stating the fixed behaviour.
-- Use `MockLLM2Interface` or `configure_mock_extract_field` instead of a real model; patch `fsm_llm.llm.completion` (core's one send binding; nothing else calls litellm) for seam tests, or inject a scripted `LLMInterface` with `llm_interface=` (implement `complete` when the FSM classifies or has a completion state).
+- Use a double from `fsm_llm.testing` (`MockLLM2Interface`, `ScriptedLLM`, ...) or `configure_mock_extract_field` instead of a real model; patch `fsm_llm.llm.completion` (core's one send binding; nothing else calls litellm) for seam tests, or inject a scripted `LLMInterface` with `llm_interface=` (implement `complete` when the FSM classifies or has a completion state).
 - Mark anything sleeping about a second or more, or needing a model, `slow`; live tests also get `integration` and `real_llm`.
 - A new suite folder or root test file must be added to the root `AGENTS.md` Testing block (per-suite line or root-file list) or `test_per_suite_table` / `test_root_file_breakdown` fail.
 - A new subpackage under `src/` must be added to `_EXPECTED_SUBPACKAGES` in `test_packaging.py`, given an extra, and requested by every install list.

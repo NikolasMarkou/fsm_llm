@@ -32,11 +32,8 @@ from fsm_llm.definitions import (
 from fsm_llm.synthesis import FSMLibrary, SynthesisPolicy, digest_of, run_gates
 from fsm_llm.synthesis.gates import GATES
 from fsm_llm.synthesis.synthesizer import normalise_extraction
-from tests.test_fsm_llm_synthesis.conftest import (
-    ByTurn,
-    ScriptedRunnerLLM,
-    ScriptedStrongLLM,
-)
+from fsm_llm.testing import ScriptedLLM
+from tests.test_fsm_llm_synthesis.conftest import ByTurn, ScriptedRunnerLLM
 
 BAD = sb.bc.BenchDataError
 # Block s1 (plan 2cefeb61 step 9, D-093, D-100, D-101; step 10.2, D-105): the whole-word grader and the
@@ -48,10 +45,11 @@ TASKS = {t.id: t for t in sb.TASKS}
 FAMILIES = ("collect", "route", "branch", "retry")
 
 
-class _Strong(ScriptedStrongLLM):
+class _Strong(ScriptedLLM):
     """The compile (and scenario writer) model: the reference child, then prose."""
 
-    model = sb.MODEL
+    def __init__(self, replies):
+        super().__init__(replies, model=sb.MODEL)
 
     def usage(self):
         return LLMUsage(calls=len(self.requests), prompt_tokens=7 * len(self.requests))

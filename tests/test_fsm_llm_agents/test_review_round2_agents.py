@@ -30,7 +30,7 @@ from fsm_llm.agents.base import BaseAgent
 from fsm_llm.agents.constants import StopReason
 from fsm_llm.agents.definitions import EvaluationResult
 from fsm_llm.definitions import ConversationBusyError
-from tests.conftest import PromptGroundedLLM
+from fsm_llm.testing import PromptGroundedLLM
 from tests.test_fsm_llm_agents.test_advance_driver import (
     _CALL,
     _HITL_TASK,

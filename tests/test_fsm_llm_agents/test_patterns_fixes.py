@@ -33,7 +33,7 @@ from fsm_llm.agents.definitions import ChainStep
 from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.summarization import make_observation_summarizer
 from fsm_llm.agents.tools import ToolRegistry
-from tests.conftest import PromptGroundedLLM
+from fsm_llm.testing import PromptGroundedLLM
 
 
 class _Out(BaseModel):

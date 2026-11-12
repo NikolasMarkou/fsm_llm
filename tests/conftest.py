@@ -15,12 +15,7 @@ import pytest
 from fsm_llm.constants import ENV_LLM_MODEL
 from fsm_llm.definitions import FSMDefinition, ResponseGenerationResponse
 from fsm_llm.llm import LLMInterface
-
-# The two doubles live in the public ``fsm_llm.testing`` module (plan d454fd62
-# step 22); every test file still imports them from here until step 26.
-# ``_CURRENT_STATE_TAG`` stays reachable for ``test_grounded_patterns.py``.
-from fsm_llm.testing import MockLLM2Interface, PromptGroundedLLM  # noqa: F401
-from fsm_llm.testing.doubles import _CURRENT_STATE_TAG  # noqa: F401
+from fsm_llm.testing import MockLLM2Interface
 
 #: Ollama tag the live suites expect to be pulled (a model name without its
 #: ``ollama_chat/`` provider prefix). The package has no default model: live
@@ -235,24 +230,7 @@ def mock_llm2_interface():
 @pytest.fixture
 def mock_llm_interface():
     """Mock LLM interface for deterministic testing."""
-    from fsm_llm.definitions import FieldExtractionResponse
-
-    mock = Mock(spec=LLMInterface)
-
-    # extract_field returns per-field response — uses the field_name from request
-    def _mock_extract_field(request):
-        # Default mock data keyed by field name
-        mock_data = {"name": "TestUser", "email": "test@test.com", "age": "25"}
-        value = mock_data.get(request.field_name)
-        return FieldExtractionResponse(
-            field_name=request.field_name,
-            value=value,
-            confidence=1.0 if value is not None else 0.0,
-            reasoning="Mock field extraction",
-            is_valid=value is not None,
-        )
-
-    mock.extract_field.side_effect = _mock_extract_field
+    mock = configure_mock_extract_field(Mock(spec=LLMInterface))
 
     # generate_response returns a simple string
     mock.generate_response.return_value = ResponseGenerationResponse(

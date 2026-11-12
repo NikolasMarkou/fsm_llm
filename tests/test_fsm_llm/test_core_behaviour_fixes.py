@@ -31,8 +31,8 @@ from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
 )
+from fsm_llm.testing import MockLLM2Interface
 from fsm_llm.utilities import coerce_confidence, coerce_float, coerce_int
-from tests.conftest import MockLLM2Interface
 
 _TWO_STATE = {
     "name": "b",

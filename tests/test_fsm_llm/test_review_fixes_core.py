@@ -42,15 +42,13 @@ from fsm_llm.llm import (
     check_tool_transcript,
 )
 from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT
+from fsm_llm.testing import MockLLM2Interface, final_reply, tool_call_reply
 from fsm_llm.validator import FSMValidator
-from tests.conftest import MockLLM2Interface
 from tests.test_fsm_llm.test_completion_state import (
     _MESSAGES,
     _RESULT,
     _api,
-    _calls,
     _context,
-    _final,
     _ScriptedLLM,
     _start,
     _state,
@@ -308,7 +306,7 @@ class TestPushedChildOwnsItsCompletionResult:
     def test_the_child_makes_its_own_call(self):
         child = _tool_fsm()
         child["name"] = "Child"
-        llm = _ScriptedLLM(_final("parent answer"), _final("child answer"))
+        llm = _ScriptedLLM(final_reply("parent answer"), final_reply("child answer"))
         api = _api(self._parent(), llm)
         conv_id = _start(api, "parent task")
         api.advance(conv_id)
@@ -333,7 +331,7 @@ class TestPushedChildOwnsItsCompletionResult:
     def test_an_explicitly_passed_result_is_kept(self):
         child = _tool_fsm()
         child["name"] = "Child"
-        llm = _ScriptedLLM(_final("parent answer"))
+        llm = _ScriptedLLM(final_reply("parent answer"))
         api = _api(self._parent(), llm)
         conv_id = _start(api, "parent task")
         api.advance(conv_id)
@@ -350,7 +348,9 @@ class TestToolTurnWithoutATaskIsRefused:
 
     def test_a_restore_mid_tool_loop_fails_loudly(self, tmp_path: Path):
         fsm = _tool_fsm()
-        llm = _ScriptedLLM(_calls(("add", {"a": 2, "b": 3})), _final("never sent"))
+        llm = _ScriptedLLM(
+            tool_call_reply(("add", {"a": 2, "b": 3})), final_reply("never sent")
+        )
         store = FileSessionStore(str(tmp_path))
         api = API.from_definition(fsm, llm_interface=llm, session_store=store)
         api.register_handler(_tool_runner())
@@ -370,7 +370,7 @@ class TestToolTurnWithoutATaskIsRefused:
         assert restored.get_current_state(restored_id) == "call_model"
 
     def test_an_absent_transcript_on_a_tool_turn_is_refused(self):
-        llm = _ScriptedLLM(_final("never sent"))
+        llm = _ScriptedLLM(final_reply("never sent"))
         api = _api(_tool_fsm(), llm)
         conv_id, _ = api.start_conversation()
         _to_call_model(api, conv_id)
@@ -468,7 +468,7 @@ class TestTranscriptIsDeepCopied:
     must not rewrite the context transcript."""
 
     def test_a_nested_mutation_of_the_request_leaves_the_context(self):
-        llm = _ScriptedLLM(_calls(("add", {"a": 2, "b": 3})), _final("5"))
+        llm = _ScriptedLLM(tool_call_reply(("add", {"a": 2, "b": 3})), final_reply("5"))
         api = _api(_tool_fsm(), llm)
         conv_id = _start(api)
         for _ in range(4):  # ... -> call_model (second model turn) -> done

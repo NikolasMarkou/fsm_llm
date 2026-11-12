@@ -5006,7 +5006,7 @@ class TestUserVisibleData:
 
     def test_bare_system_value_reaches_per_field_extraction_prompt(self):
         from fsm_llm import API
-        from tests.conftest import MockLLM2Interface
+        from fsm_llm.testing import MockLLM2Interface
 
         fsm = {
             "name": "t",

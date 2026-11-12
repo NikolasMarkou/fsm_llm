@@ -99,7 +99,7 @@ def _definition_dict():
 
 
 def _mock_llm():
-    from tests.conftest import MockLLM2Interface
+    from fsm_llm.testing import MockLLM2Interface
 
     return MockLLM2Interface()
 

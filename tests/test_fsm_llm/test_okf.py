@@ -61,7 +61,8 @@ from fsm_llm.okf_bridge import bundle_from_memory_entries, create_okf_handler
 from fsm_llm.okf_cli import main as okf_cli_main
 from fsm_llm.prompts import ResponseGenerationPromptBuilder
 from fsm_llm.security import resolve_within
-from tests.conftest import MockLLM2Interface, symlink_or_skip
+from fsm_llm.testing import MockLLM2Interface
+from tests.conftest import symlink_or_skip
 
 
 class TestResolveWithin:

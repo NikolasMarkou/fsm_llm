@@ -39,7 +39,7 @@ from fsm_llm.agents.hitl import HumanInTheLoop
 from fsm_llm.agents.parallel_react import ParallelReactAgent
 from fsm_llm.agents.prompts import build_think_extraction_instructions
 from fsm_llm.agents.tools import ToolRegistry, schema_types
-from tests.conftest import PromptGroundedLLM
+from fsm_llm.testing import PromptGroundedLLM
 from tests.test_fsm_llm_agents import test_native_fc_golden as golden
 from tests.test_fsm_llm_agents.test_review_fixes_tools_native import (
     _OldRegistry,

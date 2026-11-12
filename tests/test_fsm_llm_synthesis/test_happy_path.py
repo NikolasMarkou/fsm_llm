@@ -19,11 +19,8 @@ from fsm_llm.definitions import (
 )
 from fsm_llm.synthesis import Simulator, SynthesisPolicy, run_gates, simulation
 from fsm_llm.synthesis.dryrun import edge_witnesses
-from tests.test_fsm_llm_synthesis.conftest import (
-    ByTurn,
-    ScriptedRunnerLLM,
-    ScriptedStrongLLM,
-)
+from fsm_llm.testing import ScriptedLLM
+from tests.test_fsm_llm_synthesis.conftest import ByTurn, ScriptedRunnerLLM
 
 
 class TestTheHonestDouble:
@@ -99,7 +96,7 @@ def _compiled(
     return report.definition
 
 
-class NoWriter(ScriptedStrongLLM):
+class NoWriter(ScriptedLLM):
     def __init__(self) -> None:
         super().__init__([json.dumps({"scenarios": []})] * 4)
 
@@ -419,12 +416,12 @@ class TestTheCorrectionChannel:
             done=_step("done"),
         )
 
-    def _writer(self) -> ScriptedStrongLLM:
+    def _writer(self) -> ScriptedLLM:
         two = [
             {"kind": "correction", "turns": ["party is 12", "party is 6"]},
             {"kind": "correction", "turns": ["party is 20", "party is 4"]},
         ]
-        return ScriptedStrongLLM([json.dumps({"scenarios": two})])
+        return ScriptedLLM([json.dumps({"scenarios": two})])
 
     def test_a_compile_without_the_channel_fails_with_a_code_the_repair_explains(self):
         report, _ = _simulate(

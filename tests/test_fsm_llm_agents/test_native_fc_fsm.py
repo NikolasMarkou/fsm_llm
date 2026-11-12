@@ -48,9 +48,9 @@ from fsm_llm.definitions import (
     CompletionResponse,
     FSMDefinition,
     LLMResponseError,
-    ModelToolCall,
 )
 from fsm_llm.llm import check_tool_transcript
+from fsm_llm.testing import final_reply, tool_call_reply
 from fsm_llm.utilities import extract_json_from_text
 from fsm_llm.validator import FSMValidator
 from fsm_llm.visualizer import build_fsm_graph, to_mermaid
@@ -119,21 +119,6 @@ def _parse_answer(text: str) -> _Answer | None:
         return _Answer(**data)
     except ValueError:
         return None
-
-
-def _calls(*calls: tuple[str, dict[str, Any]], text: str | None = None) -> Any:
-    return CompletionResponse(
-        kind="calls",
-        text=text,
-        calls=tuple(
-            ModelToolCall(id=f"call_{i}", name=name, arguments=args)
-            for i, (name, args) in enumerate(calls, start=1)
-        ),
-    )
-
-
-def _final(text: str | None) -> CompletionResponse:
-    return CompletionResponse(kind="final", text=text)
 
 
 _MALFORMED = CompletionResponse(kind="malformed")
@@ -408,7 +393,7 @@ class TestGoldenRequestsThroughCore:
 class TestModelLoop:
     def test_direct_answer_makes_one_call_and_runs_nothing(self) -> None:
         tools = _Tools()
-        llm = _ScriptedLLM(_final("5"))
+        llm = _ScriptedLLM(final_reply("5"))
         api, conv_id, steps = _run(tools, llm)
         assert [s.state_after for s in steps] == [_S.CONCLUDE]
         assert tools.log == []
@@ -426,8 +411,8 @@ class TestModelLoop:
     def test_calls_run_in_order_and_the_transcript_is_paired(self) -> None:
         tools = _Tools()
         llm = _ScriptedLLM(
-            _calls(("lookup", {"word": "five"}), ("add", {"a": 2, "b": 3})),
-            _final("2 + 3 = 5"),
+            tool_call_reply(("lookup", {"word": "five"}), ("add", {"a": 2, "b": 3})),
+            final_reply("2 + 3 = 5"),
         )
         api, conv_id, steps = _run(tools, llm)
         assert [s.state_after for s in steps] == [
@@ -460,7 +445,8 @@ class TestModelLoop:
     def test_text_beside_the_calls_stays_in_the_transcript(self) -> None:
         tools = _Tools()
         llm = _ScriptedLLM(
-            _calls(("add", {"a": 1, "b": 1}), text="Let me add."), _final("2")
+            tool_call_reply(("add", {"a": 1, "b": 1}), text="Let me add."),
+            final_reply("2"),
         )
         _run(tools, llm)
         assistant = llm.requests[1].messages[2]
@@ -472,7 +458,9 @@ class TestModelLoop:
 
     def test_failed_tool_is_shown_to_the_model_as_failed(self) -> None:
         tools = _Tools()
-        llm = _ScriptedLLM(_calls(("broken", {"reason": "disk full"})), _final("no"))
+        llm = _ScriptedLLM(
+            tool_call_reply(("broken", {"reason": "disk full"})), final_reply("no")
+        )
         _run(tools, llm)
         tool_message = llm.requests[1].messages[-1]
         assert tool_message["role"] == "tool"
@@ -482,7 +470,8 @@ class TestModelLoop:
     def test_trace_is_redacted_but_the_tool_gets_the_real_arguments(self) -> None:
         tools = _Tools()
         llm = _ScriptedLLM(
-            _calls(("login", {"user": "ann", "password": "hunter2"})), _final("ok")
+            tool_call_reply(("login", {"user": "ann", "password": "hunter2"})),
+            final_reply("ok"),
         )
         api, conv_id, _ = _run(tools, llm)
         assert tools.log == [("login", {"user": "ann", "password": "hunter2"})]
@@ -493,7 +482,7 @@ class TestModelLoop:
 
     def test_malformed_turn_runs_nothing_and_ends_with_no_result(self) -> None:
         tools = _Tools()
-        llm = _ScriptedLLM(_calls(("add", {"a": 1, "b": 2})), _MALFORMED)
+        llm = _ScriptedLLM(tool_call_reply(("add", {"a": 1, "b": 2})), _MALFORMED)
         api, conv_id, steps = _run(tools, llm)
         assert steps[-1].state_after == _S.CONCLUDE
         assert len(llm.requests) == 2
@@ -505,7 +494,7 @@ class TestModelLoop:
 
     def test_empty_final_answer_is_no_result(self) -> None:
         tools = _Tools()
-        api, conv_id, _ = _run(tools, _ScriptedLLM(_final(None)))
+        api, conv_id, _ = _run(tools, _ScriptedLLM(final_reply(None)))
         data = api.get_data(conv_id)
         assert data[_K.LOOP_END] == NativeLoopEnd.FINAL
         assert data[_K.ANSWER] == ""
@@ -514,7 +503,9 @@ class TestModelLoop:
     @pytest.mark.parametrize("turns", [1, 2, 3])
     def test_loop_ends_exhausted_after_max_tool_turns(self, turns: int) -> None:
         tools = _Tools()
-        llm = _ScriptedLLM(*[_calls(("add", {"a": i, "b": 1})) for i in range(turns)])
+        llm = _ScriptedLLM(
+            *[tool_call_reply(("add", {"a": i, "b": 1})) for i in range(turns)]
+        )
         api, conv_id, steps = _run(tools, llm, max_tool_turns=turns)
         assert len(llm.requests) == turns
         assert len(tools.log) == turns
@@ -530,7 +521,7 @@ class TestModelLoop:
         """A planted result key would skip the first model turn; a planted
         transcript would speak for the model."""
         tools = _Tools()
-        llm = _ScriptedLLM(_final("5"))
+        llm = _ScriptedLLM(final_reply("5"))
         api, conv_id, _ = _run(
             tools,
             llm,
@@ -610,9 +601,9 @@ class TestForcedFinalTool:
     def test_forced_turn_after_a_final_answer_runs_the_forced_call(self) -> None:
         tools = _Tools()
         llm = _ScriptedLLM(
-            _calls(("lookup", {"word": "paris"})),
-            _final("Paris is a word."),
-            _calls(("write_note", {"text": "Paris: a word"})),
+            tool_call_reply(("lookup", {"word": "paris"})),
+            final_reply("Paris is a word."),
+            tool_call_reply(("write_note", {"text": "Paris: a word"})),
         )
         api, conv_id, steps = _run(tools, llm, force_final_tool="write_note")
         assert [s.state_after for s in steps][-2:] == [_S.FORCE_FINAL, _S.CONCLUDE]
@@ -635,14 +626,18 @@ class TestForcedFinalTool:
 
     def test_no_forced_turn_when_the_tool_already_ran(self) -> None:
         tools = _Tools()
-        llm = _ScriptedLLM(_calls(("write_note", {"text": "done"})), _final("Saved."))
+        llm = _ScriptedLLM(
+            tool_call_reply(("write_note", {"text": "done"})), final_reply("Saved.")
+        )
         _run(tools, llm, force_final_tool="write_note")
         assert len(llm.requests) == 2
         assert tools.names() == ["write_note"]
 
     def test_forced_turn_follows_a_malformed_loop_and_keeps_no_result(self) -> None:
         tools = _Tools()
-        llm = _ScriptedLLM(_MALFORMED, _calls(("write_note", {"text": "partial"})))
+        llm = _ScriptedLLM(
+            _MALFORMED, tool_call_reply(("write_note", {"text": "partial"}))
+        )
         api, conv_id, _ = _run(tools, llm, force_final_tool="write_note")
         assert tools.names() == ["write_note"]
         assert api.get_data(conv_id)[ContextKeys.FORCED_STOP_REASON] == (
@@ -651,7 +646,7 @@ class TestForcedFinalTool:
 
     def test_malformed_forced_turn_runs_nothing(self) -> None:
         tools = _Tools()
-        llm = _ScriptedLLM(_final("Done."), _MALFORMED)
+        llm = _ScriptedLLM(final_reply("Done."), _MALFORMED)
         api, conv_id, _ = _run(tools, llm, force_final_tool="write_note")
         assert len(llm.requests) == 2
         assert tools.log == []
@@ -663,7 +658,7 @@ class TestForcedFinalTool:
 class TestRepairTurn:
     def test_unparsed_answer_is_repaired_by_a_structured_turn(self) -> None:
         tools = _Tools()
-        llm = _ScriptedLLM(_final("It is five."), _final('{"answer": "5"}'))
+        llm = _ScriptedLLM(final_reply("It is five."), final_reply('{"answer": "5"}'))
         api, conv_id, steps = _run(tools, llm, repair=True)
         assert [s.state_after for s in steps] == [_S.REPAIR, _S.CONCLUDE]
         repair = llm.requests[1]
@@ -678,13 +673,13 @@ class TestRepairTurn:
 
     def test_parsed_answer_needs_no_repair(self) -> None:
         tools = _Tools()
-        llm = _ScriptedLLM(_final('{"answer": "5"}'))
+        llm = _ScriptedLLM(final_reply('{"answer": "5"}'))
         _run(tools, llm, repair=True)
         assert len(llm.requests) == 1
 
     def test_unparsable_repair_is_discarded(self) -> None:
         tools = _Tools()
-        llm = _ScriptedLLM(_final("It is five."), _final("still prose"))
+        llm = _ScriptedLLM(final_reply("It is five."), final_reply("still prose"))
         api, conv_id, _ = _run(tools, llm, repair=True)
         data = api.get_data(conv_id)
         assert data[_K.ANSWER] == "It is five."
@@ -693,9 +688,9 @@ class TestRepairTurn:
     def test_repair_never_sees_the_forced_nudge(self) -> None:
         tools = _Tools()
         llm = _ScriptedLLM(
-            _final("five"),
-            _calls(("write_note", {"text": "five"})),
-            _final('{"answer": "5"}'),
+            final_reply("five"),
+            tool_call_reply(("write_note", {"text": "five"})),
+            final_reply('{"answer": "5"}'),
         )
         _run(tools, llm, force_final_tool="write_note", repair=True)
         repair = llm.requests[2]
@@ -706,7 +701,7 @@ class TestRepairTurn:
         self,
     ) -> None:
         tools = _Tools()
-        llm = _ScriptedLLM(_MALFORMED, _final('{"answer": "5"}'))
+        llm = _ScriptedLLM(_MALFORMED, final_reply('{"answer": "5"}'))
         api, conv_id, _ = _run(tools, llm, repair=True)
         data = api.get_data(conv_id)
         assert data[_K.ANSWER] == '{"answer": "5"}'

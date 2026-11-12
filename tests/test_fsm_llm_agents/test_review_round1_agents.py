@@ -57,7 +57,7 @@ from fsm_llm.definitions import (
     RunBudgetExceededError,
 )
 from fsm_llm.llm import LLMInterface
-from tests.conftest import PromptGroundedLLM
+from fsm_llm.testing import PromptGroundedLLM
 from tests.test_fsm_llm_agents.test_advance_driver import (
     _CALL,
     _HITL_BUILDERS,

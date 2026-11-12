@@ -24,7 +24,7 @@ from fsm_llm.definitions import (
     ResponseGenerationRequest,
 )
 from fsm_llm.llm import LiteLLMInterface
-from tests.conftest import MockLLM2Interface
+from fsm_llm.testing import MockLLM2Interface
 
 
 def _fsm() -> dict[str, Any]:

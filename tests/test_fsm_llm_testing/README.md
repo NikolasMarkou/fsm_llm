@@ -14,7 +14,7 @@ The pytest suite for `fsm_llm.testing`, the public test-helper subpackage of the
 ## Files
 
 - `__init__.py` - empty package marker.
-- `test_doubles.py` - the contract of `MockLLM2Interface` and `PromptGroundedLLM` (mutable attributes, `call_history.clear()`, subclassing, cut flags, evidence grounding, bulk quoting, `complete` raising), identity with the `tests/conftest.py` re-exports, the dead `transition_target` scan, a child process with every socket refused.
+- `test_doubles.py` - the contract of `MockLLM2Interface` and `PromptGroundedLLM` (mutable attributes, `call_history.clear()`, subclassing, cut flags, evidence grounding, bulk quoting, `complete` raising), a guard that no test module imports the doubles from `tests.conftest`, the dead `transition_target` scan, a child process with every socket refused.
 - `test_scripted_llm.py` - the contract of `ScriptedLLM`: queue, extraction, per-state replies, streaming, `unexpected` and `assert_exhausted()` (also under `python -O`), metered usage with errors, and a pipeline test that a swallowed unscripted extraction call stays detectable.
 - `test_builders.py` - `final_reply`, `tool_call_reply`, `malformed_reply`, `state_in_prompt` (one regex, drift test against the real prompt builder) and `hash_embed`.
 - `test_user.py` - `ScriptedUser` (messages, rules, fallback, `max_turns`, stopping on an ended conversation, `close`, propagating exceptions, argument checks), `ConversationRun` (frozen, path equal to `fsm_llm.eval` `visited_states`) and `advance_until_terminal`, on the `simple_greeting` and `form_filling` example FSM files (read only) and inline FSMs.

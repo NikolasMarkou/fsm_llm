@@ -29,8 +29,8 @@ from fsm_llm.synthesis.policy import (
     needs_approval,
     strip_abort,
 )
+from fsm_llm.testing import MockLLM2Interface
 from fsm_llm.validator import FSMValidator
-from tests.conftest import MockLLM2Interface
 from tests.test_fsm_llm_synthesis.conftest import good_fsm as _good
 
 

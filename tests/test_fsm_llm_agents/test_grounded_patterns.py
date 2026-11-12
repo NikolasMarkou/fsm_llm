@@ -28,7 +28,8 @@ from fsm_llm.definitions import (
     ModelToolCall,
     ResponseGenerationRequest,
 )
-from tests.conftest import _CURRENT_STATE_TAG, PromptGroundedLLM, network_exempt
+from fsm_llm.testing import PromptGroundedLLM, state_in_prompt
+from tests.conftest import network_exempt
 from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 
 
@@ -1253,9 +1254,9 @@ class TestReflexionLoop:
         llm, _, _ = self._run()
 
         states = [
-            m.group(1)
+            state
             for r in llm.calls("generate_response")
-            if (m := _CURRENT_STATE_TAG.search(r.system_prompt))
+            if (state := state_in_prompt(r.system_prompt))
         ]
         assert "evaluate" not in states and "reflect" not in states
         assert not llm.calls("extract_bulk_data")
@@ -1397,9 +1398,9 @@ class TestPlanExecuteLoop:
         self._agent(llm, _source_registry(runs)).run("What is the capital of France?")
 
         states = {
-            m.group(1)
+            state
             for r in llm.calls("generate_response")
-            if (m := _CURRENT_STATE_TAG.search(r.system_prompt))
+            if (state := state_in_prompt(r.system_prompt))
         }
         assert states <= {"synthesize"}
         for request in llm.calls("extract_field"):
@@ -1529,9 +1530,9 @@ class TestDebateLoop:
         llm, _ = self._run()
 
         states = {
-            m.group(1)
+            state
             for r in llm.calls("generate_response")
-            if (m := _CURRENT_STATE_TAG.search(r.system_prompt))
+            if (state := state_in_prompt(r.system_prompt))
         }
         assert states == {"conclude"}
         assert not llm.calls("extract_bulk_data")
@@ -1617,9 +1618,9 @@ _CHAIN_TASK = "Write a note about tides"
 
 def _spoken_states(llm: PromptGroundedLLM) -> set[str]:
     return {
-        m.group(1)
+        state
         for r in llm.calls("generate_response")
-        if (m := _CURRENT_STATE_TAG.search(r.system_prompt))
+        if (state := state_in_prompt(r.system_prompt))
     }
 
 

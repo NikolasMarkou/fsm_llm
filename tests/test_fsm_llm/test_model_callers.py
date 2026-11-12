@@ -30,7 +30,7 @@ from fsm_llm.definitions import (
     IntentDefinition,
 )
 from fsm_llm.llm import CompletionRequest, CompletionResponse
-from tests.conftest import MockLLM2Interface
+from fsm_llm.testing import MockLLM2Interface
 
 
 @pytest.fixture

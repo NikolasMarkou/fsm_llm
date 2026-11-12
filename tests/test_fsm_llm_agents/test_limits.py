@@ -30,7 +30,7 @@ from fsm_llm.agents.swarm import SwarmAgent
 from fsm_llm.agents.tool_registries import CachingToolRegistry, RetryingToolRegistry
 from fsm_llm.agents.tools import ToolRegistry, check_timeout
 from fsm_llm.agents.verified_react import VerifiedReactAgent
-from tests.conftest import MockLLM2Interface
+from fsm_llm.testing import MockLLM2Interface
 
 HUGE = 10**5000
 

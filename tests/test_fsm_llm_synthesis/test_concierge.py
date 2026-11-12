@@ -2,7 +2,7 @@
 End to end, offline: a concierge host FSM whose ``gather`` state is a
 ``synthesize`` state, on REAL ``API`` objects.
 
-The strong model is ``ScriptedStrongLLM`` and the cheap model (the host's own
+The strong model is ``ScriptedLLM`` and the cheap model (the host's own
 interface, under the pushed child too) is ``ScriptedRunnerLLM``, both from
 conftest; the network is blocked. Every scenario runs both ways the runner
 drives a conversation: ``converse`` (user turns drive the child) and ``run``
@@ -26,11 +26,8 @@ from fsm_llm.synthesis import (
     create_procedure_tools,
 )
 from fsm_llm.synthesis.constants import PROCEDURE_UNTRUSTED_LABEL as LABEL
-from tests.test_fsm_llm_synthesis.conftest import (
-    ScriptedRunnerLLM,
-    ScriptedStrongLLM,
-    host_fsm,
-)
+from fsm_llm.testing import ScriptedLLM
+from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, host_fsm
 
 GOAL = "collect visa application data"
 KEYS = ["passport_no", "travel_dates", "purpose"]
@@ -110,7 +107,7 @@ class _Rig:
     api: API
     runner: ProcedureRunner
     cheap: ScriptedRunnerLLM
-    strong: ScriptedStrongLLM
+    strong: ScriptedLLM
     library: FSMLibrary | None
 
     def start(self) -> str:
@@ -148,7 +145,7 @@ def _rig(
     cheap = ScriptedRunnerLLM(
         ANSWERS if extraction is None else extraction, {**REPLIES, **HOST_REPLIES}
     )
-    strong = ScriptedStrongLLM(replies)
+    strong = ScriptedLLM(replies)
     lib = FSMLibrary(tmp_path / "lib") if library else None
     synth = FSMSynthesizer(strong, policy=policy, library=lib)
     host = _host()
@@ -280,7 +277,7 @@ class TestFailurePaths:
 class TestTools:
     def test_obtain_then_run_a_message_free_procedure(self, tmp_path):
         cheap = ScriptedRunnerLLM(ANSWERS, REPLIES)
-        strong = ScriptedStrongLLM(_good_after_bad())
+        strong = ScriptedLLM(_good_after_bad())
         library = FSMLibrary(tmp_path / "lib")
         registry = create_procedure_tools(
             FSMSynthesizer(strong, library=library), runner_llm=cheap

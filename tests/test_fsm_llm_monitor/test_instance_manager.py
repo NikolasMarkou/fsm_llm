@@ -1033,7 +1033,7 @@ class TestAgentRunEventsOnTheCoreLoop:
         pytest.importorskip("fsm_llm.agents")
         from fsm_llm.monitor import instance_manager as im
         from fsm_llm.monitor.definitions import StubToolConfig
-        from tests.conftest import PromptGroundedLLM
+        from fsm_llm.testing import PromptGroundedLLM
 
         llm = PromptGroundedLLM(facts=_REACT_FACTS, default_response=_REACT_ANSWER)
         real_cls = im._AGENT_CLASSES["ReactAgent"]
@@ -1129,7 +1129,7 @@ class TestAgentRunEventsOnTheCoreLoop:
     def test_fsm_chat_path_sends_the_user_message_through_converse(self, monkeypatch):
         from fsm_llm import API
         from fsm_llm.monitor import instance_manager as im
-        from tests.conftest import MockLLM2Interface
+        from fsm_llm.testing import MockLLM2Interface
 
         llm = MockLLM2Interface(
             extraction_data={"name": "Alice"}, response_text="Hello Alice!"
@@ -1172,7 +1172,7 @@ class TestDestroyClosesBeforeUnregister:
     def _live_manager(self, monkeypatch):
         from fsm_llm import API
         from fsm_llm.monitor import instance_manager as im
-        from tests.conftest import MockLLM2Interface
+        from fsm_llm.testing import MockLLM2Interface
 
         llm = MockLLM2Interface(response_text="What is your name?")
         real_from_definition = API.from_definition

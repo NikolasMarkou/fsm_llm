@@ -16,7 +16,7 @@ import threading
 
 from fsm_llm import API
 from fsm_llm.definitions import FSMError, ResponseGenerationResponse
-from tests.conftest import MockLLM2Interface
+from fsm_llm.testing import MockLLM2Interface
 
 _WAIT = 5.0  # bound on every wait/join; a healthy run never gets near it
 

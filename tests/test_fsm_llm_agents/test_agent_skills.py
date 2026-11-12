@@ -39,7 +39,8 @@ from fsm_llm.definitions import (
 from fsm_llm.frontmatter import split_frontmatter
 from fsm_llm.llm import LLMInterface
 from fsm_llm.okf import strip_unsafe_text
-from tests.test_fsm_llm.test_completion_state import _calls, _final, _ScriptedLLM
+from fsm_llm.testing import final_reply, tool_call_reply
+from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 
 _TOOLS = ("skill_list", "skill_load", "skill_read")
 _MARKERS = ("namepwn-1", "DESCPWN-2", "BODYPWN-3", "FILEPWN-4", "TEXTPWN-5")
@@ -484,12 +485,12 @@ class TestEndToEnd:
     def test_a_scripted_native_fc_run_reads_a_skill_end_to_end(self, hostile: Path):
         registry = _registry(hostile)
         llm = _ScriptedLLM(
-            _calls(("skill_list", {})),
-            _calls(("skill_load", {"name": "gateway-ops"})),
-            _calls(
+            tool_call_reply(("skill_list", {})),
+            tool_call_reply(("skill_load", {"name": "gateway-ops"})),
+            tool_call_reply(
                 ("skill_read", {"name": "gateway-ops", "path": "references/limits.md"})
             ),
-            _final("The limit is 6218 KB."),
+            final_reply("The limit is 6218 KB."),
         )
         agent = create_agent(
             "native_fc",

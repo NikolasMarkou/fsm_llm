@@ -42,11 +42,8 @@ from fsm_llm.synthesis.prompts import (
     patch_system_prompt,
 )
 from fsm_llm.synthesis.repair import PATCH_MAX_TOKENS, decide, propose_patch
-from tests.test_fsm_llm_synthesis.conftest import (
-    ScriptedRunnerLLM,
-    ScriptedStrongLLM,
-    good_fsm,
-)
+from fsm_llm.testing import ScriptedLLM
+from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, good_fsm
 from tests.test_fsm_llm_synthesis.test_runner import CONTEXT, _host, _rig
 from tests.test_fsm_llm_synthesis.test_runner import GOAL as HOST_GOAL
 
@@ -77,7 +74,7 @@ def _diag(code: str = "value-gate-unmet", state: str = "qq_mid", keys=("qq_key",
 
 
 def _ask(reply: Any, diagnoses: Any = None, definition: Any = None):
-    llm = ScriptedStrongLLM([reply])
+    llm = ScriptedLLM([reply])
     ops = propose_patch(
         [_diag()] if diagnoses is None else diagnoses,
         definition or _definition(),
@@ -87,7 +84,7 @@ def _ask(reply: Any, diagnoses: Any = None, definition: Any = None):
     return ops, llm
 
 
-def _bytes(llm: ScriptedStrongLLM) -> str:
+def _bytes(llm: ScriptedLLM) -> str:
     assert len(llm.requests) == 1
     return llm.requests[0].model_dump_json()
 
@@ -176,7 +173,7 @@ class TestNoCall:
         ],
     )
     def test_nothing_to_patch_makes_no_call(self, diagnoses):
-        llm = ScriptedStrongLLM([])
+        llm = ScriptedLLM([])
         assert propose_patch(diagnoses, _definition(), POLICY, llm) == []
         assert llm.requests == []
 
@@ -228,7 +225,7 @@ class TestReplies:
 
     def test_a_provider_outage_is_a_synthesis_error(self):
         cause = LLMResponseError("boom SECRET_TEXT")
-        llm = ScriptedStrongLLM([cause])
+        llm = ScriptedLLM([cause])
         with pytest.raises(SynthesisError) as info:
             propose_patch([_diag()], _definition(), POLICY, llm)
         assert info.value.__cause__ is cause
@@ -323,10 +320,10 @@ class Rig:
             self.lib.add_scenarios(self.parent, [{"kind": "happy", "turns": ["go"]}])
         _stuck_runs(self.lib, self.parent, failures)
         self.llm = Cheap()
-        self.writer = ScriptedStrongLLM([NO_SCENARIOS] * writes)
+        self.writer = ScriptedLLM([NO_SCENARIOS] * writes)
         self.sim = Simulator(self.llm, self.writer)
         self.synth = FSMSynthesizer(
-            ScriptedStrongLLM([]),
+            ScriptedLLM([]),
             policy=self.policy,
             library=self.lib,
             reviewer=reviewer,
@@ -854,12 +851,12 @@ class TestTheLoopEndToEnd:
         assert [(d.code, d.state) for d in found] == [("extraction-miss", "ask")]
 
         # 3. a scripted strong model proposes the fix, restricted to that state
-        patcher = ScriptedStrongLLM([json.dumps({"patch": FIX})])
+        patcher = ScriptedLLM([json.dumps({"patch": FIX})])
         ops = propose_patch(found, stripped, policy, patcher)
         assert ops == FIX and len(patcher.requests) == 1
 
         # 4. judged without writing, then written
-        sim = Simulator(cheap, ScriptedStrongLLM([NO_SCENARIOS] * 4))
+        sim = Simulator(cheap, ScriptedLLM([NO_SCENARIOS] * 4))
         args: dict[str, Any] = dict(
             library=library,
             synthesizer=rig.synth,

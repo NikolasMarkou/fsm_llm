@@ -76,7 +76,7 @@ from fsm_llm.definitions import (
     DataExtractionResponse,
     FSMDefinition,
 )
-from tests.conftest import PromptGroundedLLM
+from fsm_llm.testing import PromptGroundedLLM, state_in_prompt
 from tests.test_fsm_llm_agents.test_grounded_patterns import _TurnAwareLLM
 
 _TASK = "What is the capital of France?"
@@ -1903,7 +1903,6 @@ class TestPlannerPatternsMakeNoSyntheticTurns:
 # Step 13: reply-speaking patterns on the core loop
 # ---------------------------------------------------------------------------
 
-_STATE_TAG = re.compile(r"<current_state>([^<]+)</current_state>")
 _MARKER = re.compile(r"^\[\w+\]$")
 _NUMBER = re.compile(r"(\d+)")
 
@@ -1911,9 +1910,9 @@ _NUMBER = re.compile(r"(\d+)")
 def _spoken(llm: PromptGroundedLLM) -> list[str]:
     """The state of every reply request, in call order."""
     return [
-        match.group(1)
+        state
         for request in llm.calls("generate_response")
-        if (match := _STATE_TAG.search(request.system_prompt))
+        if (state := state_in_prompt(request.system_prompt))
     ]
 
 

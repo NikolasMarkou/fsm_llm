@@ -30,7 +30,7 @@ from fsm_llm.prompts import (
     ResponsePromptConfig,
 )
 from fsm_llm.session import FileSessionStore, SessionState
-from tests.conftest import MockLLM2Interface
+from fsm_llm.testing import MockLLM2Interface
 
 # Deliberate reuse: ``test_pipeline_handler_contract`` already owns the minimal
 # two-state FSM, the ``API.from_definition`` wiring, and the "always raises at

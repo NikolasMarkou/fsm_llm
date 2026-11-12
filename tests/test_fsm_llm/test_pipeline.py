@@ -1781,7 +1781,7 @@ def _cap_fsm(*, extraction_instructions=None, max_message_length=None):
 class TestPromptTooLargeError:
     def _api(self, fsm, **kwargs):
         from fsm_llm import API
-        from tests.conftest import MockLLM2Interface
+        from fsm_llm.testing import MockLLM2Interface
 
         llm = MockLLM2Interface()
         return API.from_definition(fsm, llm_interface=llm, **kwargs), llm
@@ -2005,7 +2005,7 @@ class TestSeededTimestampFormats:
         from datetime import datetime
 
         from fsm_llm import API, FileSessionStore
-        from tests.conftest import MockLLM2Interface
+        from fsm_llm.testing import MockLLM2Interface
 
         store = FileSessionStore(tmp_path)
         api = API.from_definition(

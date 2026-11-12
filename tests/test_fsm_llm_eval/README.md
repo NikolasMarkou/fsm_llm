@@ -8,7 +8,7 @@ The pytest suite for `fsm_llm.eval`, the evaluation package of the FSM-LLM repos
 
 ## How it works
 
-- Conversation cases run against `MockLLM2Interface` from `tests/conftest.py`, a fake 2-pass LLM. A small test FSM moves from `start` to `done` only when the fake LLM "extracts" a `name`, so the same case can be made to pass or fail.
+- Conversation cases run against `MockLLM2Interface` from `fsm_llm.testing`, a fake 2-pass LLM. A small test FSM moves from `start` to `done` only when the fake LLM "extracts" a `name`, so the same case can be made to pass or fail.
 - Example runs use a tiny examples tree written to a temporary directory. Each fake `run.py` runs under the current Python, so no real example and no model is touched.
 - The scoring rubric is pinned by a golden table copied from the original `scripts/eval.py` at commit `0facf56`. A mismatch means the rubric changed.
 - `scripts/bench_common.py` is the one stdlib source of the statistics and record helpers that `agents_bench.py` and `skills_bench.py` share, so they run without network access. Parity tests check it gives the same results as `fsm_llm.eval`.

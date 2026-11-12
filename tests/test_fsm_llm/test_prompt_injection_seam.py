@@ -139,7 +139,7 @@ def injection_llm():
     ``None``, so ``destination`` is never satisfied, no transition fires, and
     the conversation stays in ``collect`` for as many turns as a test needs.
     """
-    from tests.conftest import MockLLM2Interface
+    from fsm_llm.testing import MockLLM2Interface
 
     return MockLLM2Interface(response_text=ADVERSARIAL_ASSISTANT_MESSAGE)
 

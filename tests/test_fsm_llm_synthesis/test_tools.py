@@ -2,7 +2,7 @@
 Tests for ``fsm_llm.synthesis.tools.create_procedure_tools``.
 
 Every call goes through the REAL ``ToolRegistry.execute``; the strong model is
-``ScriptedStrongLLM`` and the cheap model under a run is ``ScriptedRunnerLLM``
+``ScriptedLLM`` and the cheap model under a run is ``ScriptedRunnerLLM``
 (both in conftest). A reply is data for a model: it starts with the fixed label,
 carries codes, ids and capped values only, and fits the agent loop's cap.
 """
@@ -32,7 +32,8 @@ from fsm_llm.synthesis import tools as tools_module
 from fsm_llm.synthesis.constants import PROCEDURE_UNTRUSTED_LABEL as LABEL
 from fsm_llm.synthesis.exceptions import SynthesisError
 from fsm_llm.synthesis.gates import GATES
-from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, ScriptedStrongLLM
+from fsm_llm.testing import ScriptedLLM
+from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM
 
 GOAL = "Collect the answer"
 LEAK = "LEAKED-MODEL-TEXT"
@@ -43,7 +44,7 @@ HEX = "0123456789abcdef" * 4
 class _Rig:
     registry: ToolRegistry
     library: FSMLibrary | None
-    strong: ScriptedStrongLLM
+    strong: ScriptedLLM
     cheap: ScriptedRunnerLLM
     synth: FSMSynthesizer
 
@@ -74,7 +75,7 @@ def _rig(
     policy: SynthesisPolicy | None = None,
     library: bool = True,
 ) -> _Rig:
-    strong = ScriptedStrongLLM([json.dumps(valid_fsm)] if replies is None else replies)
+    strong = ScriptedLLM([json.dumps(valid_fsm)] if replies is None else replies)
     cheap = ScriptedRunnerLLM({"answer": "42"} if extraction is None else extraction)
     lib = FSMLibrary(tmp_path / "lib") if library else None
     synth = FSMSynthesizer(strong, policy=policy, library=lib)
@@ -120,7 +121,7 @@ class TestConstants:
             return_keys=["answer"],
             lifecycle="verified",
         )
-        synth = FSMSynthesizer(ScriptedStrongLLM([]), library=library)
+        synth = FSMSynthesizer(ScriptedLLM([]), library=library)
         full = create_procedure_tools(synth, runner_llm=ScriptedRunnerLLM())
         dump = lambda r: json.dumps(  # noqa: E731
             [t.model_dump(mode="json", exclude={"execute_fn"}) for t in r.list_tools()],
@@ -140,7 +141,7 @@ class TestConstants:
             assert tool.annotations.open_world is True
 
     def test_a_missing_runner_llm_is_refused(self, valid_fsm, tmp_path):
-        synth = FSMSynthesizer(ScriptedStrongLLM([]))
+        synth = FSMSynthesizer(ScriptedLLM([]))
         with pytest.raises(ValueError, match="runner_llm"):
             create_procedure_tools(synth)
 
@@ -280,7 +281,7 @@ class TestRequireSimulation:
             gates_passed=gates,
             lifecycle="verified",
         )
-        strong, cheap = ScriptedStrongLLM([]), ScriptedRunnerLLM({"answer": "42"})
+        strong, cheap = ScriptedLLM([]), ScriptedRunnerLLM({"answer": "42"})
         synth = FSMSynthesizer(
             strong, policy=policy, library=lib, simulator=Simulator(cheap, strong)
         )

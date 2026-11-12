@@ -17,7 +17,7 @@ from fsm_llm.agents import AgentConfig, ReactAgent, SelfConsistencyAgent, ToolRe
 from fsm_llm.agents.constants import Defaults
 from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.reasoning import ReasoningEngine
-from tests.conftest import MockLLM2Interface
+from fsm_llm.testing import MockLLM2Interface
 from tests.test_fsm_llm.test_llm_complete import _Provider, _reply
 
 

@@ -15,8 +15,8 @@ Doubles and helpers (`conftest.py` unless named):
 
 | Double | What it does |
 | --- | --- |
-| `ScriptedStrongLLM(replies)` | The compiler and scenario writer. `complete` pops a queue (text, `CompletionResponse` or an exception to raise); keeps `requests`; an exhausted queue raises `IndexError` |
-| `ScriptedRunnerLLM(extraction_data, responses)` | The cheap model under a pushed child and on the host. Extracts a fixed dict, replies per state (`<current_state>` tag), `usage()` counts recorded requests, `count(kind, state)` and `shown(kind, state)` read the history |
+| `fsm_llm.testing.ScriptedLLM(replies)` (not in `conftest.py`) | The compiler and scenario writer. `complete` pops a queue (text, `CompletionResponse` or an exception to raise); keeps `requests`; an exhausted queue raises `UnscriptedCallError`; metered (set `llm.usage = None` for a model with no meter) |
+| `ScriptedRunnerLLM(extraction_data, responses)` | The cheap model under a pushed child and on the host (a `MockLLM2Interface` subclass on purpose: no bulk extraction, no `complete`). Extracts a fixed dict, replies per state (`<current_state>` tag), `usage()` counts recorded requests, `count(kind, state)` and `shown(kind, state)` read the history |
 | `ByTurn` | An honest executor: extracts a key only if the current turn says `<key> is <value>`, typed by the field type |
 | `good_fsm()`, `valid_fsm()`, `stuck_fsm()` | A fresh compile that passes G1 to G5 for `return_keys=("answer",)`; a stuck one whose edge needs a value nothing extracts |
 | `host_fsm(...)` | A host: greet, a `synthesize` state, ok on `status == ok`, fail on `status in [failed, aborted]` |
@@ -67,7 +67,7 @@ The package exports (`fsm_llm.synthesis.__all__`), the reason codes (`constants.
 ## Dependencies
 
 - `fsm_llm.synthesis` and its submodules, core (`definitions`, `api`, `validator`, `flow_analysis`, `transition_evaluator`), `fsm_llm.agents` (`ToolRegistry`, `ToolCall`), `fsm_llm.eval`.
-- `tests.conftest` (`MockLLM2Interface`, `block_network`), `scripts/synthesis_bench.py`, `scripts/bench_common.py`.
+- `tests.conftest` (`block_network`), `fsm_llm.testing` (`MockLLM2Interface`, `ScriptedLLM`, `state_in_prompt`), `scripts/synthesis_bench.py`, `scripts/bench_common.py`.
 - pytest only; no network.
 
 ## Failure modes

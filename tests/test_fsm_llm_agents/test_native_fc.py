@@ -36,6 +36,7 @@ from fsm_llm.definitions import (
     ModelToolCall,
     RunBudgetExceededError,
 )
+from fsm_llm.testing import final_reply
 from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 
 
@@ -61,10 +62,6 @@ def _calls(*calls: tuple[str, dict[str, Any]], text: str | None = None) -> Any:
             for i, (name, args) in enumerate(calls, start=1)
         ),
     )
-
-
-def _final(text: str | None) -> CompletionResponse:
-    return CompletionResponse(kind="final", text=text)
 
 
 _MALFORMED = CompletionResponse(kind="malformed")
@@ -158,7 +155,7 @@ class TestSystemPolicy:
         )
 
     def test_no_policy_leaves_the_system_message_exactly_as_it_was(self):
-        llm = _ScriptedLLM(_final("done"))
+        llm = _ScriptedLLM(final_reply("done"))
         messages = self._first_request(self._agent(llm), llm)
 
         assert messages[0] == {"role": "system", "content": _SYSTEM_PROMPT}
@@ -166,7 +163,7 @@ class TestSystemPolicy:
 
     def test_a_constructor_policy_is_appended_to_the_base_prompt(self):
         """Appended, never substituted: the base prompt is what offers tools."""
-        llm = _ScriptedLLM(_final("done"))
+        llm = _ScriptedLLM(final_reply("done"))
         agent = self._agent(llm, system_policy="RULES:\n- write the file")
 
         messages = self._first_request(agent, llm)
@@ -178,7 +175,7 @@ class TestSystemPolicy:
 
     def test_the_policy_is_read_at_run_time_not_at_construction(self):
         """`roles.py` sets this on an agent it received from a factory."""
-        llm = _ScriptedLLM(_final("done"))
+        llm = _ScriptedLLM(final_reply("done"))
         agent = self._agent(llm)
         agent.system_policy = "EXIT GATE: stop when done"
 
@@ -194,7 +191,7 @@ class TestSystemPolicy:
 
     def test_the_policy_does_not_leak_into_the_user_turn(self):
         """The whole point is that the standing half is NOT in the task."""
-        llm = _ScriptedLLM(_final("done"))
+        llm = _ScriptedLLM(final_reply("done"))
         agent = self._agent(llm, system_policy="RULES:\n- write the file")
 
         messages = self._first_request(agent, llm, task="GOAL: ship it")
@@ -253,7 +250,7 @@ class TestOutputResponseFormatHelper:
 
 class TestLoop:
     def test_direct_answer_no_tools(self):
-        llm = _ScriptedLLM(_final("42"))
+        llm = _ScriptedLLM(final_reply("42"))
         result = _agent(llm).run("what is the answer?")
         assert result.answer == "42"
         assert result.success is True
@@ -263,7 +260,7 @@ class TestLoop:
 
     def test_single_tool_then_answer(self):
         llm = _ScriptedLLM(
-            _calls(("weather", {"city": "Paris"})), _final("It's sunny in Paris.")
+            _calls(("weather", {"city": "Paris"})), final_reply("It's sunny in Paris.")
         )
         result = _agent(llm).run("weather in Paris?")
         assert result.answer == "It's sunny in Paris."
@@ -279,7 +276,7 @@ class TestLoop:
     def test_multiple_tool_calls_in_one_turn(self):
         llm = _ScriptedLLM(
             _calls(("weather", {"city": "Paris"}), ("weather", {"city": "Rome"})),
-            _final("Done."),
+            final_reply("Done."),
         )
         result = _agent(llm).run("compare weather")
         assert [c.parameters for c in result.trace.tool_calls] == [
@@ -299,7 +296,7 @@ class TestLoop:
         assert result.iterations_used == 3
 
     def test_uses_get_json_schemas(self):
-        llm = _ScriptedLLM(_final("ok"))
+        llm = _ScriptedLLM(final_reply("ok"))
         registry = _registry()
         _agent(llm, registry=registry).run("q")
         request = llm.requests[0]
@@ -316,7 +313,7 @@ class TestSuccessSignal:
     """
 
     def test_tool_calls_without_a_final_answer_are_not_success(self):
-        llm = _ScriptedLLM(_calls(("weather", {"city": "Oslo"})), _final(""))
+        llm = _ScriptedLLM(_calls(("weather", {"city": "Oslo"})), final_reply(""))
         result = _agent(llm).run("q")
         assert result.tools_used == ["weather"]
         assert result.answer == ""
@@ -332,7 +329,7 @@ class TestSuccessSignal:
 
     def test_final_answer_after_tool_use_is_success(self):
         llm = _ScriptedLLM(
-            _calls(("weather", {"city": "Oslo"})), _final("It is sunny.")
+            _calls(("weather", {"city": "Oslo"})), final_reply("It is sunny.")
         )
         result = _agent(llm).run("q")
         assert result.answer == "It is sunny."
@@ -346,19 +343,21 @@ class TestTerminalConstrainedDecoding:
     """
 
     def test_does_not_fire_without_an_output_schema(self):
-        llm = _ScriptedLLM(_final("just prose"))
+        llm = _ScriptedLLM(final_reply("just prose"))
         result = _agent(llm).run("q")
         assert len(llm.requests) == 1
         assert result.answer == "just prose"
 
     def test_does_not_fire_when_the_answer_already_parses(self):
-        llm = _ScriptedLLM(_final(_VALID_PAYLOAD))
+        llm = _ScriptedLLM(final_reply(_VALID_PAYLOAD))
         result = _agent(llm, output_schema=_Answer).run("q")
         assert len(llm.requests) == 1
         assert result.structured_output.findings_count == 3
 
     def test_fires_once_when_the_answer_does_not_parse(self):
-        llm = _ScriptedLLM(_final("I looked at three files."), _final(_VALID_PAYLOAD))
+        llm = _ScriptedLLM(
+            final_reply("I looked at three files."), final_reply(_VALID_PAYLOAD)
+        )
         result = _agent(llm, output_schema=_Answer).run("q")
         # EXACTLY one repair attempt: no retry loop.
         assert len(llm.requests) == 2
@@ -375,8 +374,8 @@ class TestTerminalConstrainedDecoding:
     def test_repair_reuses_the_tool_result_history(self):
         llm = _ScriptedLLM(
             _calls(("weather", {"city": "Oslo"})),
-            _final("It was sunny."),
-            _final(_VALID_PAYLOAD),
+            final_reply("It was sunny."),
+            final_reply(_VALID_PAYLOAD),
         )
         result = _agent(llm, output_schema=_Answer).run("q")
         assert len(llm.requests) == 3
@@ -386,7 +385,8 @@ class TestTerminalConstrainedDecoding:
 
     def test_unparseable_repair_leaves_the_original_answer_intact(self):
         llm = _ScriptedLLM(
-            _final("a perfectly usable prose answer"), _final("still not JSON")
+            final_reply("a perfectly usable prose answer"),
+            final_reply("still not JSON"),
         )
         result = _agent(llm, output_schema=_Answer).run("q")
         assert len(llm.requests) == 2
@@ -397,7 +397,7 @@ class TestTerminalConstrainedDecoding:
     def test_repair_can_rescue_an_empty_final_answer(self):
         """The measured live failure: Ollama returns empty content on the final
         turn. Success is decided AFTER the repair, so the rescue counts."""
-        llm = _ScriptedLLM(_final(""), _final(_VALID_PAYLOAD))
+        llm = _ScriptedLLM(final_reply(""), final_reply(_VALID_PAYLOAD))
         result = _agent(llm, output_schema=_Answer).run("q")
         assert result.answer == _VALID_PAYLOAD
         assert result.success is True
@@ -408,7 +408,7 @@ class TestTerminalConstrainedDecoding:
         llm = _ScriptedLLM(
             _calls(("weather", {"city": "X"})),
             _calls(("weather", {"city": "X"})),
-            _final(_VALID_PAYLOAD),
+            final_reply(_VALID_PAYLOAD),
         )
         result = _agent(llm, output_schema=_Answer, max_iterations=2).run("loop")
         assert result.structured_output.findings_count == 3
@@ -436,7 +436,7 @@ class TestForcedFinalTool:
         reg.execute = spy  # type: ignore[method-assign]
 
         llm = _ScriptedLLM(
-            _final("here is my prose answer"),
+            final_reply("here is my prose answer"),
             _calls(("weather", {"city": "Paris"})),
         )
         result = _agent(llm, registry=reg, force_final_tool="weather").run(
@@ -456,14 +456,14 @@ class TestForcedFinalTool:
         assert result.answer == "here is my prose answer"
 
     def test_default_off_issues_no_forced_turn(self):
-        llm = _ScriptedLLM(_final("prose answer"))
+        llm = _ScriptedLLM(final_reply("prose answer"))
         result = _agent(llm).run("q")
 
         assert len(llm.requests) == 1
         assert result.trace.tool_calls == []
 
     def test_forced_turn_fires_exactly_once(self):
-        llm = _ScriptedLLM(_final("prose"), _calls(("weather", {"city": "X"})))
+        llm = _ScriptedLLM(final_reply("prose"), _calls(("weather", {"city": "X"})))
         _agent(llm, force_final_tool="weather").run("q")
 
         # Exactly two completions; a third would find no scripted reply.
@@ -471,7 +471,7 @@ class TestForcedFinalTool:
         assert llm.replies == []
 
     def test_malformed_forced_turn_is_absorbed(self):
-        llm = _ScriptedLLM(_final("prose"), _MALFORMED)
+        llm = _ScriptedLLM(final_reply("prose"), _MALFORMED)
         result = _agent(llm, force_final_tool="weather").run("q")
 
         assert result.answer == "prose"
@@ -481,7 +481,7 @@ class TestForcedFinalTool:
     def test_non_degradable_forced_turn_error_still_propagates(self):
         """A genuine outage on the forced turn is NOT swallowed."""
         outage = LLMResponseError("Completion call failed: 503")
-        llm = _ScriptedLLM(_final("prose"), outage)
+        llm = _ScriptedLLM(final_reply("prose"), outage)
 
         with pytest.raises(AgentError) as excinfo:
             _agent(llm, force_final_tool="weather").run("q")
@@ -489,14 +489,14 @@ class TestForcedFinalTool:
         assert excinfo.value.__cause__ is outage
 
     def test_forced_turn_skipped_when_tool_already_called(self):
-        llm = _ScriptedLLM(_calls(("weather", {"city": "Paris"})), _final("done"))
+        llm = _ScriptedLLM(_calls(("weather", {"city": "Paris"})), final_reply("done"))
         result = _agent(llm, force_final_tool="weather", max_iterations=3).run("q")
 
         assert len(llm.requests) == 2
         assert [c.tool_name for c in result.trace.tool_calls] == ["weather"]
 
     def test_forced_turn_skipped_when_tool_absent_from_registry(self):
-        llm = _ScriptedLLM(_final("prose"))
+        llm = _ScriptedLLM(final_reply("prose"))
         result = _agent(llm, force_final_tool="not_a_tool").run("q")
 
         assert len(llm.requests) == 1
@@ -523,7 +523,7 @@ class TestMalformedToolCallDegrades:
         assert len(llm.requests) == 2
 
     def test_the_repair_turn_still_runs_after_a_malformed_tool_turn(self):
-        llm = _ScriptedLLM(_MALFORMED, _final(_VALID_PAYLOAD))
+        llm = _ScriptedLLM(_MALFORMED, final_reply(_VALID_PAYLOAD))
         result = _agent(llm, output_schema=_Answer).run("q")
 
         assert llm.requests[1].tools is None
@@ -540,7 +540,7 @@ class TestMalformedToolCallDegrades:
         assert excinfo.value.__cause__ is outage
 
     def test_a_malformed_repair_turn_keeps_the_original_answer(self):
-        llm = _ScriptedLLM(_final("a usable prose answer"), _MALFORMED)
+        llm = _ScriptedLLM(final_reply("a usable prose answer"), _MALFORMED)
         result = _agent(llm, output_schema=_Answer).run("q")
 
         assert result.answer == "a usable prose answer"
@@ -646,8 +646,8 @@ class TestRunsOnCore:
         monkeypatch.setattr("litellm.completion", refuse)
         llm = _ScriptedLLM(
             _calls(("weather", {"city": "Oslo"})),
-            _final("Sunny."),
-            _final(_VALID_PAYLOAD),
+            final_reply("Sunny."),
+            final_reply(_VALID_PAYLOAD),
         )
         result = _agent(llm, output_schema=_Answer).run("q")
 
@@ -682,7 +682,7 @@ class TestRunsOnCore:
         """D-009: caller context is the run's context like every pattern's
         (parent: ignored, ``final_context == {"task": task}``); run outputs
         and the pattern's own keys are stripped, and the model never sees it."""
-        llm = _ScriptedLLM(_final("real answer"))
+        llm = _ScriptedLLM(final_reply("real answer"))
         result = _agent(llm).run(
             "q",
             initial_context={
@@ -706,7 +706,7 @@ class TestRunsOnCore:
         llm = _ScriptedLLM(
             *[_calls(("weather", {"city": "X"})) for _ in range(max_iterations)],
             _calls(("write_note", {"text": "notes"})),
-            _final(_VALID_PAYLOAD),
+            final_reply(_VALID_PAYLOAD),
         )
         registry = _registry()
         registry.register_function(

@@ -2,7 +2,7 @@
 Tests for ``fsm_llm.synthesis.synthesizer`` and ``prompts``: the compile and
 repair loop, the strong-model contract and the goal fence.
 
-The strong model is ``ScriptedStrongLLM`` (conftest). The fence tests read the
+The strong model is ``ScriptedLLM`` (conftest). The fence tests read the
 REAL request (``CompletionRequest.model_dump_json()``), not the helper output.
 """
 
@@ -35,7 +35,7 @@ from fsm_llm.definitions import (
     LLMResponseError,
     LLMUsage,
 )
-from fsm_llm.llm import LiteLLMInterface
+from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.synthesis import (
     FSMLibrary,
     GateReport,
@@ -70,12 +70,8 @@ from fsm_llm.synthesis.synthesizer import (
     normalise_extraction,
     reviewer_from_hitl,
 )
-from tests.test_fsm_llm_synthesis.conftest import (
-    ByTurn,
-    ScriptedRunnerLLM,
-    ScriptedStrongLLM,
-    stuck_fsm,
-)
+from fsm_llm.testing import ScriptedLLM, UnscriptedCallError, final_reply
+from tests.test_fsm_llm_synthesis.conftest import ByTurn, ScriptedRunnerLLM, stuck_fsm
 
 RET = ("answer",)
 
@@ -84,8 +80,8 @@ def _text(fsm: dict[str, Any]) -> str:
     return json.dumps(fsm)
 
 
-def _synth(replies: list[Any], **kw: Any) -> tuple[FSMSynthesizer, ScriptedStrongLLM]:
-    llm = ScriptedStrongLLM(replies)
+def _synth(replies: list[Any], **kw: Any) -> tuple[FSMSynthesizer, ScriptedLLM]:
+    llm = ScriptedLLM(replies)
     return FSMSynthesizer(llm, **kw), llm
 
 
@@ -245,17 +241,13 @@ def _slipped_reply() -> str:
 
 def _finding_text(reply: Any) -> str:
     report = _judge(
-        reply if isinstance(reply, CompletionResponse) else _final(reply),
+        reply if isinstance(reply, CompletionResponse) else final_reply(reply),
         SynthesisPolicy(),
         (),
         RET,
     )
     (finding,) = report.findings
     return finding.message
-
-
-def _final(text: str) -> CompletionResponse:
-    return CompletionResponse(kind="final", text=text)
 
 
 class TestUnparseableReplyDetail:
@@ -301,7 +293,7 @@ class TestUnparseableReplyDetail:
         assert "parser" not in _finding_text(reply)
 
     def test_a_valid_object_still_runs_the_gates(self, valid_fsm):
-        report = _judge(_final(_text(valid_fsm)), SynthesisPolicy(), (), RET)
+        report = _judge(final_reply(_text(valid_fsm)), SynthesisPolicy(), (), RET)
         assert report.passed
 
 
@@ -407,19 +399,19 @@ class TestBracketRepair:
     def test_a_repaired_reply_with_an_unknown_key_still_fails_g5(self, valid_fsm):
         bad = copy.deepcopy(valid_fsm)
         bad["bogus_key"] = 1
-        report = _judge(_final(_slipped(bad)), SynthesisPolicy(), (), RET)
+        report = _judge(final_reply(_slipped(bad)), SynthesisPolicy(), (), RET)
         assert {(f.gate, f.code) for f in report.findings} == {("G5", "unknown-key")}
 
     def test_a_repaired_reply_that_the_loader_refuses_fails_g1(self, valid_fsm):
         bad = copy.deepcopy(valid_fsm)
         bad["initial_state"] = "nowhere"
-        report = _judge(_final(_slipped(bad)), SynthesisPolicy(), (), RET)
+        report = _judge(final_reply(_slipped(bad)), SynthesisPolicy(), (), RET)
         assert not report.passed
         assert {f.gate for f in report.findings} == {"G1"}
 
     def test_every_gate_judges_a_repaired_reply(self, valid_fsm):
         bad = _two_defects(valid_fsm)
-        report = _judge(_final(_slipped(bad)), SynthesisPolicy(), (), RET)
+        report = _judge(final_reply(_slipped(bad)), SynthesisPolicy(), (), RET)
         assert {f.gate for f in report.findings} == {"G5"}
 
     def test_a_truncated_reply_is_never_repaired(self, valid_fsm, monkeypatch):
@@ -439,7 +431,7 @@ class TestBracketRepair:
             synthesizer_module, "_repair_brackets", lambda t: calls.append(t)
         )
         for text in (_text(valid_fsm), "```json\n" + _text(valid_fsm) + "\n```"):
-            assert _judge(_final(text), SynthesisPolicy(), (), RET).passed
+            assert _judge(final_reply(text), SynthesisPolicy(), (), RET).passed
         assert calls == []
 
     def test_an_unreadable_reply_keeps_the_parser_position(self):
@@ -452,11 +444,11 @@ class TestConstruction:
         with pytest.raises(ValueError, match="exactly one"):
             FSMSynthesizer()
         with pytest.raises(ValueError, match="exactly one"):
-            FSMSynthesizer(ScriptedStrongLLM([]), model="ollama_chat/x")
+            FSMSynthesizer(ScriptedLLM([]), model="ollama_chat/x")
 
     def test_an_llm_without_complete_is_refused(self):
-        class NoComplete(ScriptedStrongLLM):
-            complete = ScriptedStrongLLM.__mro__[1].complete  # the base one
+        class NoComplete(ScriptedLLM):
+            complete = LLMInterface.complete  # the base one
 
         with pytest.raises(ValueError, match="complete"):
             FSMSynthesizer(NoComplete([]))
@@ -685,9 +677,9 @@ def _tool_fsm(valid_fsm: dict[str, Any]) -> dict[str, Any]:
 
 def _obtainer(
     tmp_path: Any, replies: list[Any], **kw: Any
-) -> tuple[FSMSynthesizer, ScriptedStrongLLM]:
+) -> tuple[FSMSynthesizer, ScriptedLLM]:
     kw.setdefault("library", FSMLibrary(tmp_path / "lib"))
-    llm = ScriptedStrongLLM(replies)
+    llm = ScriptedLLM(replies)
     llm.model = "strong-x"  # type: ignore[attr-defined]
     return FSMSynthesizer(llm, **kw), llm
 
@@ -737,7 +729,7 @@ class TestObtainLibrary:
         synth.obtain(GOAL, inputs=("name",), return_keys=RET)
         ask = {"goal": GOAL, "inputs": ("name",), "return_keys": RET, **kw}
         goal = ask.pop("goal")
-        with pytest.raises(IndexError):  # a strong call was attempted
+        with pytest.raises(UnscriptedCallError):  # a strong call was attempted
             synth.obtain(goal, **ask)
 
     @pytest.mark.parametrize(
@@ -761,7 +753,7 @@ class TestObtainLibrary:
         policy = SynthesisPolicy(reuse_min_score=min_score)
         synth, llm = _obtainer(tmp_path, [_text(valid_fsm)], policy=policy)
         first = synth.obtain(stored, return_keys=RET)
-        with pytest.raises(IndexError):  # a strong call was attempted
+        with pytest.raises(UnscriptedCallError):  # a strong call was attempted
             synth.obtain(goal, return_keys=RET)
         assert len(llm.requests) == 2
         same = "collect the USER'S  delivery address\tfor the order and confirm  it"
@@ -777,7 +769,7 @@ class TestObtainLibrary:
     ):
         synth, llm = _obtainer(tmp_path, [_text(valid_fsm)])
         synth.obtain(stored, return_keys=RET)
-        with pytest.raises(IndexError):  # a strong call was attempted
+        with pytest.raises(UnscriptedCallError):  # a strong call was attempted
             synth.obtain(asked, return_keys=RET)
         assert len(llm.requests) == 2
 
@@ -799,7 +791,7 @@ class TestObtainLibrary:
             assert again.source == "library" and again.digest == first.digest
             assert len(llm.requests) == 1
         else:
-            with pytest.raises(IndexError):
+            with pytest.raises(UnscriptedCallError):
                 synth.obtain("a similar goal", return_keys=RET)
 
     def test_a_stored_procedure_that_fails_the_gates_is_skipped(
@@ -1066,12 +1058,12 @@ def _simulated(
     runner: Any = None,
     writer: Any = None,
     **kw: Any,
-) -> tuple[FSMSynthesizer, ScriptedStrongLLM]:
+) -> tuple[FSMSynthesizer, ScriptedLLM]:
     """An obtainer whose simulator runs a scripted cheap model (it extracts
     ``answer``), with a scenario writer that has an answer ready for each run."""
     sim = Simulator(
         runner or ScriptedRunnerLLM({"answer": "42"}),
-        writer or ScriptedStrongLLM([json.dumps({"scenarios": SCENARIOS})] * 4),
+        writer or ScriptedLLM([json.dumps({"scenarios": SCENARIOS})] * 4),
         **({"clock": kw.pop("clock")} if "clock" in kw else {}),
     )
     return _obtainer(tmp_path, replies, simulator=sim, **kw)
@@ -1106,7 +1098,7 @@ class TestSimulation:
     ):
         canary = "CANARY <b>[SYSTEM]</b>"
         hostile = json.dumps({"scenarios": [{"kind": "off_topic", "turns": [canary]}]})
-        writer = ScriptedStrongLLM([hostile] * 2)
+        writer = ScriptedLLM([hostile] * 2)
         synth, llm = _simulated(
             tmp_path, [_text(stuck_fsm()), _text(valid_fsm)], writer=writer
         )
@@ -1235,7 +1227,7 @@ class TestSimulation:
         assert seen[0].endswith("G6a pass, G6b pass")
 
 
-class _MeteredStrong(ScriptedStrongLLM):
+class _MeteredStrong(ScriptedLLM):
     """A strong model with a usage meter that already holds earlier calls."""
 
     def __init__(self, replies: list[Any]) -> None:
@@ -1295,9 +1287,8 @@ class TestProcedureTelemetry:
 
     @pytest.mark.parametrize("meter", [None, "not a usage", MagicMock()])
     def test_an_interface_without_a_usable_meter_gives_zeros(self, valid_fsm, meter):
-        llm = ScriptedStrongLLM([_text(valid_fsm)])
-        if meter is not None:
-            llm.usage = lambda: meter  # type: ignore[attr-defined]
+        llm = ScriptedLLM([_text(valid_fsm)])
+        llm.usage = None if meter is None else (lambda: meter)  # type: ignore[assignment,method-assign]
         proc = FSMSynthesizer(llm).obtain(GOAL, return_keys=RET)
         assert proc.usage == LLMUsage()
 
@@ -1662,7 +1653,7 @@ class TestNormaliseExtraction:
         assert report.passed, (task.id, report.repair_text())
 
 
-class _NoWriter(ScriptedStrongLLM):
+class _NoWriter(ScriptedLLM):
     def __init__(self) -> None:
         super().__init__([json.dumps({"scenarios": []})] * 4)
 

@@ -97,7 +97,7 @@ class TestReasoningEngine:
 
     def test_an_injected_interface_needs_no_model(self, unset):
         from fsm_llm.reasoning import ReasoningEngine
-        from tests.conftest import MockLLM2Interface
+        from fsm_llm.testing import MockLLM2Interface
 
         engine = ReasoningEngine(llm_interface=MockLLM2Interface())
         assert isinstance(engine.model, str)

@@ -2,7 +2,7 @@
 Tests for ``fsm_llm.synthesis.runner.ProcedureRunner`` on REAL ``API`` objects.
 
 The host is a concierge FSM with one ``synthesize`` state; the strong model is
-``ScriptedStrongLLM``, the cheap model under the pushed procedure is
+``ScriptedLLM``, the cheap model under the pushed procedure is
 ``ScriptedRunnerLLM`` (both in conftest). The runner is driven the two ways it
 supports: ``run`` (core ``run_until_terminal`` with the runner's hook) and
 ``converse`` (user turns). Failure tests read the result the PARENT sees.
@@ -44,11 +44,8 @@ from fsm_llm.synthesis import (
 )
 from fsm_llm.synthesis import runner as runner_module
 from fsm_llm.synthesis.gates import GATES
-from tests.test_fsm_llm_synthesis.conftest import (
-    ScriptedRunnerLLM,
-    ScriptedStrongLLM,
-    host_fsm,
-)
+from fsm_llm.testing import ScriptedLLM
+from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, host_fsm
 
 GOAL = "Book a table for two"
 PERSONA = "A calm hotel concierge"
@@ -89,7 +86,7 @@ class _Rig:
     runner: ProcedureRunner
     conv: str
     cheap: ScriptedRunnerLLM
-    strong: ScriptedStrongLLM
+    strong: ScriptedLLM
     synth: FSMSynthesizer
     library: FSMLibrary | None
     stream: list[tuple[str, dict[str, Any]]]
@@ -151,7 +148,7 @@ def _rig(
     cheap = cheap or ScriptedRunnerLLM(
         {"answer": "42"} if extraction is None else extraction, dict(REPLIES)
     )
-    strong = ScriptedStrongLLM([json.dumps(valid_fsm)] if replies is None else replies)
+    strong = ScriptedLLM([json.dumps(valid_fsm)] if replies is None else replies)
     library = FSMLibrary(tmp_path / "lib") if tmp_path is not None else None
     synth = FSMSynthesizer(strong, policy=policy, library=library)
     host = _host(**(config or {}))
@@ -1077,7 +1074,9 @@ class TestObtainedEvent:
         assert fields["completion_tokens"] == 9
 
     def test_a_first_pass_compile_has_empty_rounds_and_zero_usage(self, valid_fsm):
-        fields = self._obtained(_rig(valid_fsm))
+        rig = _rig(valid_fsm)
+        rig.strong.usage = None  # a strong model that keeps no meter reports zeros
+        fields = self._obtained(rig)
         assert fields["rounds"] == "" and fields["calls"] == 0
         assert isinstance(fields["seconds"], float) and fields["seconds"] >= 0
 

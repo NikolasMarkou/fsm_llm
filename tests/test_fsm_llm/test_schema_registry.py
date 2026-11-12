@@ -559,7 +559,7 @@ class TestLoaderWarnsOncePerDefinitionObject:
 
     def test_one_warning_over_construct_start_converse_and_push(self):
         from fsm_llm import API
-        from tests.conftest import MockLLM2Interface
+        from fsm_llm.testing import MockLLM2Interface
 
         with _captured_warnings() as lines:
             definition = FSMDefinition(**self._body())
@@ -578,7 +578,7 @@ class TestLoaderWarnsOncePerDefinitionObject:
 
     def test_a_pushed_dict_is_a_new_definition_and_warns_once(self):
         from fsm_llm import API
-        from tests.conftest import MockLLM2Interface
+        from fsm_llm.testing import MockLLM2Interface
 
         api = API.from_definition(_definition("4.2"), llm_interface=MockLLM2Interface())
         conversation_id, _ = api.start_conversation()

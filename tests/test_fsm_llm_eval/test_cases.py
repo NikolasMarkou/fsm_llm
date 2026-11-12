@@ -34,7 +34,7 @@ from fsm_llm.eval import (
 from fsm_llm.eval import __main__ as cli
 from fsm_llm.eval import cases as cases_mod
 from fsm_llm.eval.cases import CaseReport
-from tests.conftest import MockLLM2Interface
+from fsm_llm.testing import MockLLM2Interface
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SAMPLE_DATASET = _REPO_ROOT / "evaluation" / "datasets" / "simple_greeting_cases.json"

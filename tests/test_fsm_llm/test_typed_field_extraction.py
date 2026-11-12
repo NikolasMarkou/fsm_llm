@@ -14,7 +14,7 @@ import pytest
 from fsm_llm import API, FieldExtractionConfig, typed_field_extraction
 from fsm_llm.constants import EXTRACTION_ENVELOPE_KEYS, FIELD_PROMPT_CONTEXT_LABEL
 from fsm_llm.definitions import TypedFieldType
-from tests.conftest import PromptGroundedLLM
+from fsm_llm.testing import PromptGroundedLLM
 
 _NOTE = "Trip note: the client flies to Lyon on Friday."
 _HIDDEN = "UNLISTED-MARKER-4411"

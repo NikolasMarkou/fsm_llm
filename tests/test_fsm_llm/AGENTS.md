@@ -113,11 +113,11 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 
 A test suite exports no product API. What other files consume:
 
-Fixtures and helpers from `tests/conftest.py` (shared by all suites):
+Fixtures and helpers from `tests/conftest.py` (shared by all suites), and the doubles of `fsm_llm.testing`:
 
 | Name | Kind | Use |
 | --- | --- | --- |
-| `MockLLM2Interface(extraction_data=None, response_text="Hello! How can I help you?", cut_reply=False, cut_fields=())` (defined in `fsm_llm.testing`, re-exported by `tests/conftest.py`) | `LLMInterface` subclass | 2-pass mock; `extract_field` returns `extraction_data[field_name]`, records calls in `call_history`; `cut_reply=True` flags the Pass-2 reply `truncated`, a name in `cut_fields` comes back with value `None` and `truncated=True` (plain attributes, changeable between turns) |
+| `MockLLM2Interface(extraction_data=None, response_text="Hello! How can I help you?", cut_reply=False, cut_fields=())` (defined in `fsm_llm.testing`; import it from there) | `LLMInterface` subclass | 2-pass mock; `extract_field` returns `extraction_data[field_name]`, records calls in `call_history`; `cut_reply=True` flags the Pass-2 reply `truncated`, a name in `cut_fields` comes back with value `None` and `truncated=True` (plain attributes, changeable between turns) |
 | `configure_mock_extract_field(mock_llm, mock_data=None)` | function | gives a `Mock(spec=LLMInterface)` a working `extract_field` side effect |
 | `mock_llm_interface`, `mock_llm2_interface` | fixtures | the two mock styles above |
 | `sample_fsm_definition`, `sample_fsm_definition_v2` | fixtures | v3.0 and v4.1 FSM definitions |

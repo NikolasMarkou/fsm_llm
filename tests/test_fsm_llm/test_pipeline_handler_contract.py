@@ -51,7 +51,7 @@ import pytest
 from fsm_llm.api import API
 from fsm_llm.definitions import FSMDefinition
 from fsm_llm.handlers import BaseHandler, HandlerExecutionError, HandlerTiming
-from tests.conftest import MockLLM2Interface
+from fsm_llm.testing import MockLLM2Interface
 
 # ----------------------------------------------------------------------
 # Helpers

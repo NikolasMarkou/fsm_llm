@@ -15,7 +15,7 @@ from fsm_llm.agents.auto_memory import AutoMemoryReactAgent
 from fsm_llm.agents.constants import ContextKeys
 from fsm_llm.agents.exceptions import AgentError, AgentTimeoutError
 from fsm_llm.agents.verified_react import VerifiedReactAgent
-from tests.conftest import PromptGroundedLLM
+from fsm_llm.testing import PromptGroundedLLM
 
 _ANSWER = "The capital of France is Paris."
 

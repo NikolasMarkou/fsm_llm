@@ -41,7 +41,7 @@ from fsm_llm.agents.native_fc import NativeFCHandlers
 from fsm_llm.agents.prompts import build_think_extraction_instructions
 from fsm_llm.agents.tool_registries import CachingToolRegistry, RetryingToolRegistry
 from fsm_llm.agents.tools import ToolRegistry
-from tests.conftest import PromptGroundedLLM
+from fsm_llm.testing import PromptGroundedLLM
 from tests.test_fsm_llm_agents import test_native_fc_golden as golden
 from tests.test_fsm_llm_agents.test_toolspec import (
     _approved_context,

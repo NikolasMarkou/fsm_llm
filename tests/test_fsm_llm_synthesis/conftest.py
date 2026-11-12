@@ -1,5 +1,5 @@
-"""Shared fixtures of the synthesis suite: no network, a valid compile and a
-scripted strong model."""
+"""Shared fixtures of the synthesis suite: no network, a valid compile and the
+cheap-model doubles (the strong model is ``fsm_llm.testing.ScriptedLLM``)."""
 
 import re
 from typing import Any
@@ -8,15 +8,13 @@ import pytest
 
 import fsm_llm.llm as llm_module
 from fsm_llm.definitions import (
-    CompletionRequest,
-    CompletionResponse,
     DataExtractionResponse,
     LLMUsage,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
-from fsm_llm.llm import LLMInterface
-from tests.conftest import MockLLM2Interface, block_network
+from fsm_llm.testing import MockLLM2Interface, state_in_prompt
+from tests.conftest import block_network
 
 
 @pytest.fixture(autouse=True)
@@ -51,36 +49,6 @@ def foreign_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return seen
 
 
-class ScriptedStrongLLM(LLMInterface):
-    """A strong model that answers ``complete`` from a queue.
-
-    Each item is a reply text, a ``CompletionResponse`` or an exception
-    instance the call raises. Every request is kept in ``requests``. An
-    exhausted queue raises ``IndexError`` (an unexpected call).
-    """
-
-    def __init__(self, replies: list[Any]) -> None:
-        self.replies = list(replies)
-        self.requests: list[CompletionRequest] = []
-
-    def complete(self, request: CompletionRequest) -> CompletionResponse:
-        self.requests.append(request)
-        reply = self.replies.pop(0)
-        if isinstance(reply, BaseException):
-            raise reply
-        if isinstance(reply, CompletionResponse):
-            return reply
-        return CompletionResponse(kind="final", text=reply)
-
-    def generate_response(
-        self, request: ResponseGenerationRequest
-    ) -> ResponseGenerationResponse:
-        raise NotImplementedError("the strong model only completes")
-
-
-_STATE_TAG = re.compile(r"<current_state>([^<]+)</current_state>")
-
-
 class ScriptedRunnerLLM(MockLLM2Interface):
     """The cheap model under a pushed procedure.
 
@@ -91,6 +59,11 @@ class ScriptedRunnerLLM(MockLLM2Interface):
     kind (system prompt, user message, extraction context), optionally only
     the replies written for one state. ``usage()`` is the meter a simulator
     reads: one call per recorded request.
+
+    It stays on ``MockLLM2Interface`` and not on ``ScriptedLLM`` on purpose: a
+    cheap model here has no bulk extraction (``ByTurn`` adds its own) and no
+    ``complete`` (the pipeline takes the field-by-field path and refuses a
+    classifying FSM), and ``ScriptedLLM`` implements both.
     """
 
     def __init__(
@@ -113,8 +86,7 @@ class ScriptedRunnerLLM(MockLLM2Interface):
 
     @staticmethod
     def _state_of(request: Any) -> str:
-        found = _STATE_TAG.search(request.system_prompt)
-        return found.group(1) if found else ""
+        return state_in_prompt(request.system_prompt) or ""
 
     def count(self, kind: str, state: str | None = None) -> int:
         """How many requests of ``kind`` were made (for ``state``, if given)."""

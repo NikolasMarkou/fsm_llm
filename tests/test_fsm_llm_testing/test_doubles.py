@@ -1,7 +1,7 @@
 """Contract of the promoted doubles `MockLLM2Interface` and `PromptGroundedLLM`.
 
 Step 22 of plan d454fd62 moved both classes out of `tests/conftest.py` into
-`fsm_llm.testing`. The move is byte-equivalent apart from one dead parameter
+`fsm_llm.testing` (step 26 then moved every importer to the public module). The move is byte-equivalent apart from one dead parameter
 (`MockLLM2Interface(transition_target=)`, stored and never read), so these tests
 pin what the repo's own tests rely on: mutable attributes, subclassing,
 `call_history.clear()`, the cut-off flags, evidence grounding, bulk quoting and
@@ -32,7 +32,7 @@ from fsm_llm.definitions import (
     ResponseGenerationRequest,
 )
 from fsm_llm.llm import LLMInterface, implements_complete
-from fsm_llm.testing import MockLLM2Interface, PromptGroundedLLM, doubles
+from fsm_llm.testing import MockLLM2Interface, PromptGroundedLLM
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -103,10 +103,35 @@ class TestExports:
         ]
         assert isinstance(assign.value, (ast.List, ast.Tuple))
 
-    def test_conftest_holds_the_public_classes_not_copies(self) -> None:
-        assert conftest.MockLLM2Interface is public.MockLLM2Interface
-        assert conftest.PromptGroundedLLM is public.PromptGroundedLLM
-        assert conftest._CURRENT_STATE_TAG is doubles._CURRENT_STATE_TAG
+    def test_no_test_module_imports_the_doubles_from_conftest(self) -> None:
+        # Step 26 of plan d454fd62 moved every importer to `fsm_llm.testing` and
+        # removed the re-exports: a test imports the doubles from the public module.
+        moved = {"MockLLM2Interface", "PromptGroundedLLM", "_CURRENT_STATE_TAG"}
+        offenders = []
+        for path in sorted((_REPO / "tests").rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and (
+                    (node.module or "").rsplit(".", 1)[-1] == "conftest"
+                ):
+                    hit = moved & {alias.name for alias in node.names}
+                elif isinstance(node, ast.Attribute) and node.attr in moved:
+                    hit = (
+                        {node.attr}
+                        if isinstance(node.value, ast.Name)
+                        and node.value.id == "conftest"
+                        else set()
+                    )
+                else:
+                    continue
+                if hit:
+                    where = f"{path.relative_to(_REPO).as_posix()}:{node.lineno}"
+                    offenders.append(f"{where} {sorted(hit)}")
+        assert offenders == []
+        assert not hasattr(conftest, "PromptGroundedLLM")
+        assert not hasattr(conftest, "_CURRENT_STATE_TAG")
 
     def test_conftest_defines_no_class_of_its_own_double(self) -> None:
         tree = ast.parse(inspect.getsource(conftest))

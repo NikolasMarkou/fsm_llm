@@ -28,21 +28,24 @@ from fsm_llm.constants import (
     DEFAULT_COMPLETION_RESULT_KEY,
 )
 from fsm_llm.definitions import (
-    CompletionRequest,
     CompletionResponse,
     FSMDefinition,
     FSMError,
     LLMResponseError,
     ModelToolCall,
-    ResponseGenerationResponse,
 )
 from fsm_llm.handlers import create_handler
 from fsm_llm.llm import LiteLLMInterface, LLMInterface, check_tool_transcript
 from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT
+from fsm_llm.testing import (
+    MockLLM2Interface,
+    ScriptedLLM,
+    final_reply,
+    tool_call_reply,
+)
 from fsm_llm.validator import FSMValidator
 from fsm_llm.visualizer import build_fsm_graph, visualize_fsm_ascii
-from tests.conftest import MockLLM2Interface
 from tests.test_fsm_llm.test_llm_complete import _call, _Provider, _reply
 
 _SYSTEM = "You answer arithmetic and word questions with the tools you have."
@@ -177,46 +180,21 @@ def _structured_fsm() -> dict[str, Any]:
     return fsm
 
 
-class _ScriptedLLM(LLMInterface):
-    """Answers ``complete`` from a script; records every request it gets."""
+class _ScriptedLLM(ScriptedLLM):
+    """Answers ``complete`` from a script; records every request it gets.
+
+    A completion FSM makes no extraction and speaks only when a state asks for
+    a reply: Pass 2 answers ``"The answer is 5."``, an extraction call is an
+    unscripted call (it raises) and ``other_calls`` names every call that was
+    not ``complete``.
+    """
 
     def __init__(self, *replies: CompletionResponse | BaseException) -> None:
-        self.replies = list(replies)
-        self.requests: list[CompletionRequest] = []
-        self.other_calls: list[str] = []
+        super().__init__(replies, default_response="The answer is 5.")
 
-    def complete(self, request: CompletionRequest) -> CompletionResponse:
-        self.requests.append(request)
-        reply = self.replies.pop(0)
-        if isinstance(reply, BaseException):
-            raise reply
-        return reply
-
-    def generate_response(self, request: Any) -> ResponseGenerationResponse:
-        self.other_calls.append("generate_response")
-        return ResponseGenerationResponse(message="The answer is 5.")
-
-    def extract_field(self, request: Any) -> Any:
-        self.other_calls.append("extract_field")
-        raise AssertionError("a completion FSM made a field extraction call")
-
-    def extract_bulk_data(self, request: Any) -> Any:
-        self.other_calls.append("extract_bulk_data")
-        raise AssertionError("a completion FSM made a bulk extraction call")
-
-
-def _calls(*calls: tuple[str, dict[str, Any]]) -> CompletionResponse:
-    return CompletionResponse(
-        kind="calls",
-        calls=tuple(
-            ModelToolCall(id=f"call_{i}", name=name, arguments=args)
-            for i, (name, args) in enumerate(calls, start=1)
-        ),
-    )
-
-
-def _final(text: str) -> CompletionResponse:
-    return CompletionResponse(kind="final", text=text)
+    @property
+    def other_calls(self) -> list[str]:
+        return [name for name, _ in self.call_history if name != "complete"]
 
 
 def _tool_runner(log: list[str] | None = None, result_key: str = _RESULT) -> Any:
@@ -488,7 +466,7 @@ class TestToolExchange:
 
 class TestCompletionTurn:
     def test_sends_exactly_instructions_plus_transcript(self):
-        llm = _ScriptedLLM(_calls(("add", {"a": 2, "b": 3})))
+        llm = _ScriptedLLM(tool_call_reply(("add", {"a": 2, "b": 3})))
         api = _api(_tool_fsm(), llm)
         conv_id = _start(api)
         _to_call_model(api, conv_id)
@@ -508,7 +486,7 @@ class TestCompletionTurn:
         assert (step.state_after, step.response) == ("run_tools", None)
 
     def test_result_is_written_and_drives_the_transition(self):
-        llm = _ScriptedLLM(_calls(("add", {"a": 2, "b": 3})))
+        llm = _ScriptedLLM(tool_call_reply(("add", {"a": 2, "b": 3})))
         api = API.from_definition(_tool_fsm(), llm_interface=llm)
         conv_id = _start(api)
         _to_call_model(api, conv_id)
@@ -537,7 +515,7 @@ class TestCompletionTurn:
 
     @pytest.mark.parametrize(
         "reply, target",
-        [(_final("5"), "done"), (CompletionResponse(kind="malformed"), "failed")],
+        [(final_reply("5"), "done"), (CompletionResponse(kind="malformed"), "failed")],
     )
     def test_transitions_read_the_result_kind(
         self, reply: CompletionResponse, target: str
@@ -568,7 +546,7 @@ class TestCompletionTurn:
         assert tool_log == []
 
     def test_named_tool_choice_is_sent_as_a_function_choice(self):
-        llm = _ScriptedLLM(_calls(("lookup", {"word": "x"})))
+        llm = _ScriptedLLM(tool_call_reply(("lookup", {"word": "x"})))
         api = _api(_tool_fsm(tool_choice="lookup"), llm)
         conv_id = _start(api)
         _to_call_model(api, conv_id)
@@ -579,7 +557,7 @@ class TestCompletionTurn:
         }
 
     def test_keyword_tool_choice_is_sent_as_given(self):
-        llm = _ScriptedLLM(_calls(("lookup", {"word": "x"})))
+        llm = _ScriptedLLM(tool_call_reply(("lookup", {"word": "x"})))
         api = _api(_tool_fsm(tool_choice="required"), llm)
         conv_id = _start(api)
         _to_call_model(api, conv_id)
@@ -587,7 +565,7 @@ class TestCompletionTurn:
         assert llm.requests[0].tool_choice == "required"
 
     def test_no_instructions_sends_no_system_message(self):
-        llm = _ScriptedLLM(_final("5"))
+        llm = _ScriptedLLM(final_reply("5"))
         api = _api(_tool_fsm(instructions=None), llm)
         conv_id = _start(api)
         _to_call_model(api, conv_id)
@@ -607,7 +585,7 @@ class TestCompletionTurn:
         assert step.state_after == "done"
 
     def test_result_is_committed_without_cleaning(self):
-        reply = _calls(("add", {"_id": 1, "a": None, "b": {"_nested": None}}))
+        reply = tool_call_reply(("add", {"_id": 1, "a": None, "b": {"_nested": None}}))
         llm = _ScriptedLLM(reply)
         api = API.from_definition(_tool_fsm(), llm_interface=llm)
         conv_id = _start(api)
@@ -622,7 +600,7 @@ class TestCompletionTurn:
         }
 
     def test_transcript_is_neither_written_nor_aliased(self):
-        llm = _ScriptedLLM(_calls(("add", {"a": 2, "b": 3})))
+        llm = _ScriptedLLM(tool_call_reply(("add", {"a": 2, "b": 3})))
         api = API.from_definition(_tool_fsm(), llm_interface=llm)
         conv_id = _start(api)
         _to_call_model(api, conv_id)
@@ -668,7 +646,7 @@ class TestCompletionTurnFailures:
         assert api.get_current_state(conv_id) == "call_model"
 
     def test_orphan_tool_call_is_refused_before_any_call(self):
-        llm = _ScriptedLLM(_final("never sent"))
+        llm = _ScriptedLLM(final_reply("never sent"))
         orphan = [
             {"role": "user", "content": "What is 2 + 3?"},
             {"role": "assistant", "content": None, "tool_calls": [_call("add", "{}")]},
@@ -680,7 +658,7 @@ class TestCompletionTurnFailures:
         assert api.get_current_state(conv_id) == "call_model"
 
     def test_transcript_that_is_not_a_list_is_refused(self):
-        llm = _ScriptedLLM(_final("never sent"))
+        llm = _ScriptedLLM(final_reply("never sent"))
         api, conv_id = self._ready(llm, **{_MESSAGES: "What is 2 + 3?"})
         with pytest.raises(LLMResponseError, match="not a list"):
             api.advance(conv_id)
@@ -696,7 +674,7 @@ class TestCompletionTurnFailures:
 
 class TestStructuredTurn:
     def test_sends_the_response_format_and_no_tools(self):
-        llm = _ScriptedLLM(_final('{"answer": "5"}'))
+        llm = _ScriptedLLM(final_reply('{"answer": "5"}'))
         api = _api(_structured_fsm(), llm)
         conv_id = _start(api, _answer_format=_FORMAT)
         _to_call_model(api, conv_id)
@@ -709,7 +687,7 @@ class TestStructuredTurn:
 
     @pytest.mark.parametrize("value", [None, {}, "json"])
     def test_missing_response_format_is_refused(self, value: Any):
-        llm = _ScriptedLLM(_final("never sent"))
+        llm = _ScriptedLLM(final_reply("never sent"))
         api = _api(_structured_fsm(), llm)
         conv_id = _start(api)
         _to_call_model(api, conv_id)
@@ -753,7 +731,7 @@ class TestOwnedKeysAreNeverMinted:
 
 class TestEntryPoints:
     def test_converse_does_not_add_the_user_message_to_the_transcript(self):
-        llm = _ScriptedLLM(_final("5"))
+        llm = _ScriptedLLM(final_reply("5"))
         api = _api(_tool_fsm(done_speaks=True), llm)
         conv_id = _start(api)
         _to_call_model(api, conv_id)
@@ -766,7 +744,7 @@ class TestEntryPoints:
         assert api.get_conversation_history(conv_id)[0] == {"user": "please hurry"}
 
     def test_converse_on_a_silent_completion_state_returns_empty(self):
-        llm = _ScriptedLLM(_calls(("add", {"a": 2, "b": 3})))
+        llm = _ScriptedLLM(tool_call_reply(("add", {"a": 2, "b": 3})))
         api = _api(_tool_fsm(), llm)
         conv_id = _start(api)
         _to_call_model(api, conv_id)
@@ -774,7 +752,7 @@ class TestEntryPoints:
         assert llm.other_calls == []
 
     def test_advance_stream_runs_the_turn_silently(self):
-        llm = _ScriptedLLM(_calls(("add", {"a": 2, "b": 3})))
+        llm = _ScriptedLLM(tool_call_reply(("add", {"a": 2, "b": 3})))
         api = _api(_tool_fsm(), llm)
         conv_id = _start(api)
         _to_call_model(api, conv_id)
@@ -786,8 +764,8 @@ class TestEntryPoints:
 
     def test_run_until_terminal_over_a_tool_loop(self):
         llm = _ScriptedLLM(
-            _calls(("add", {"a": 2, "b": 3}), ("lookup", {"word": "five"})),
-            _final("2 + 3 = 5"),
+            tool_call_reply(("add", {"a": 2, "b": 3}), ("lookup", {"word": "five"})),
+            final_reply("2 + 3 = 5"),
         )
         tool_log: list[str] = []
         api = _api(_tool_fsm(), llm, tool_log=tool_log)
@@ -823,7 +801,7 @@ class TestEntryPoints:
         assert llm.other_calls == []
 
     def test_run_until_terminal_stream_over_a_tool_loop(self):
-        llm = _ScriptedLLM(_calls(("add", {"a": 2, "b": 3})), _final("5"))
+        llm = _ScriptedLLM(tool_call_reply(("add", {"a": 2, "b": 3})), final_reply("5"))
         api = _api(_tool_fsm(done_speaks=True), llm)
         conv_id = _start(api)
         chunks = list(api.run_until_terminal_stream(conv_id, max_steps=10))
