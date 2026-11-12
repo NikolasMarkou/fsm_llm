@@ -1149,7 +1149,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
 # --------------------------------------------------------------
 
 
-def read_json_object(file_path: str) -> dict[str, Any]:
+def read_json_object(path: str) -> dict[str, Any]:
     """Read a raw FSM definition file: UTF-8 JSON whose top level is an object.
 
     The one reader of ``load_fsm_from_file``, ``validate_fsm_from_file`` and
@@ -1162,19 +1162,19 @@ def read_json_object(file_path: str) -> dict[str, Any]:
         ValueError: the JSON is not an object ("FSM definition must be a JSON
             object").
     """
-    with open(file_path, encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, dict):
         raise ValueError("FSM definition must be a JSON object")
     return data
 
 
-def load_fsm_from_file(file_path: str) -> FSMDefinition:
+def load_fsm_from_file(path: str) -> FSMDefinition:
     """
     Load FSM definition from JSON file with enhanced validation.
 
     Args:
-        file_path: Path to JSON file containing FSM definition
+        path: Path to JSON file containing FSM definition
 
     Returns:
         Validated FSM definition object
@@ -1183,15 +1183,15 @@ def load_fsm_from_file(file_path: str) -> FSMDefinition:
         FileNotFoundError: If file doesn't exist
         ValueError: If JSON is invalid or doesn't conform to FSM structure
     """
-    logger.info(f"Loading FSM definition from file: {file_path}")
+    logger.info(f"Loading FSM definition from file: {path}")
 
     try:
         # Check file exists
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"FSM definition file not found: {file_path}")
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"FSM definition file not found: {path}")
 
         # Load and parse JSON
-        fsm_data = read_json_object(file_path)
+        fsm_data = read_json_object(path)
 
         # Create and validate FSM definition
         fsm_definition = FSMDefinition(**fsm_data)
@@ -1211,7 +1211,7 @@ def load_fsm_from_file(file_path: str) -> FSMDefinition:
         logger.error(error_msg)
         raise ValueError(error_msg) from e
     except Exception as e:
-        error_msg = f"Error loading FSM definition from {file_path}: {e!s}"
+        error_msg = f"Error loading FSM definition from {path}: {e!s}"
         logger.error(error_msg)
         raise ValueError(error_msg) from e
 

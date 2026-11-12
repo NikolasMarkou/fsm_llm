@@ -453,18 +453,18 @@ def get_version_info():
 # --------------------------------------------------------------
 
 
-def quick_start(fsm_file: str, model: str | None = None) -> API:
+def quick_start(path: str, model: str | None = None) -> API:
     """
     Quick start helper for new users.
 
     Args:
-        fsm_file: Path to FSM definition file
+        path: Path to FSM definition file
         model: LLM model to use
 
     Returns:
         Configured API instance ready to use
     """
-    return API.from_file(fsm_file, model=model)
+    return API.from_file(path, model=model)
 
 
 # --------------------------------------------------------------
