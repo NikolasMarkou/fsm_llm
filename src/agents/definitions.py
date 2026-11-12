@@ -105,7 +105,9 @@ class ToolDefinition(BaseModel):
     execute_fn: Callable[..., Any] | None = Field(default=None, exclude=True)
     args_model: type[BaseModel] | None = Field(default=None, exclude=True)
 
-    model_config = {"arbitrary_types_allowed": True}
+    # extra="forbid": a removed spelling (``timeout_s``) must raise, not be
+    # dropped, or the tool would run with no time limit.
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
     @field_validator("name")
     @classmethod
