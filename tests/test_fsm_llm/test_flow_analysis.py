@@ -19,6 +19,7 @@ import pytest
 from fsm_llm import definitions, flow_analysis
 from fsm_llm.definitions import FSMDefinition, State
 from fsm_llm.pipeline import MessagePipeline
+from fsm_llm.state_kinds import kind_of
 from fsm_llm.validator import FSMValidator
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -747,11 +748,20 @@ def _pipeline_keys(state: State) -> set[str]:
     }
 
 
-class TestProducedKeysMirrorsThePipeline:
+def _hook_keys(state: State) -> set[str]:
+    return set(kind_of(state).minted_keys(state))
+
+
+class TestMintedKeysHookMatchesThePipeline:
+    """The minting rule is one hook (`KindSpec.minted_keys`); the pipeline builds
+    its configs from it and the analyses read it. These pin that the keys the
+    pipeline mints for are exactly the hook's (plan 2cefeb61 D-017 item 7,
+    plan d454fd62 step 48: the hand mirror is gone)."""
+
     @pytest.mark.parametrize("name", sorted(_HAND_STATES))
     def test_hand_state(self, name):
         state = State(**_state("s", **_HAND_STATES[name]))
-        assert flow_analysis._minted_keys(state) == _pipeline_keys(state)
+        assert _hook_keys(state) == _pipeline_keys(state)
 
     def test_every_example_state(self):
         checked, drifted = 0, []
@@ -764,9 +774,25 @@ class TestProducedKeysMirrorsThePipeline:
                 continue
             for sid, state in definition.states.items():
                 checked += 1
-                if flow_analysis._minted_keys(state) != _pipeline_keys(state):
+                if _hook_keys(state) != _pipeline_keys(state):
                     drifted.append(f"{path}::{sid}")
         assert checked > 50
+        assert drifted == []
+
+    def test_every_corpus_state(self):
+        from tests.test_fsm_llm import kind_corpus
+
+        checked, drifted = 0, []
+        for name, (raw, _options) in kind_corpus.corpus().items():
+            try:
+                definition = FSMDefinition(**raw)
+            except Exception:
+                continue
+            for sid, state in definition.states.items():
+                checked += 1
+                if _hook_keys(state) != _pipeline_keys(state):
+                    drifted.append(f"{name}::{sid}")
+        assert checked > 300
         assert drifted == []
 
 

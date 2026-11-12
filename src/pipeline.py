@@ -83,6 +83,7 @@ from .prompts import (
     ResponseGenerationPromptBuilder,
     sanitize_text_for_prompt,
 )
+from .state_kinds import kind_of
 from .transition_evaluator import TransitionEvaluator
 from .utilities import (
     coerce_float,
@@ -1609,71 +1610,36 @@ class MessagePipeline:
         ``result_key`` among them) are never minted into extractions. A
         synthesize state gets none either: a runner writes its result key.
         """
-        # DECISION plan-2026-11-10T194139-2cefeb61/D-017 (item 7)
-        # This minting rule has a deliberate mirror, `_minted_keys` in
-        # src/flow_analysis.py (a pure analysis must not import this module).
-        # Do NOT change the rule here (the completion/synthesize exclusion, the
-        # classification-owned filter, explicit field_extractions winning)
-        # without the mirror there: the parity test in
-        # tests/test_fsm_llm/test_flow_analysis.py pins them over every example state.
-        if state.completion is not None or state.synthesize is not None:
-            return []
-        configs: list[FieldExtractionConfig] = []
-
-        # Collect all required keys: from state-level AND from transition
-        # conditions' requires_context_keys.  This ensures fields that
-        # transitions depend on are extracted even if the state doesn't
-        # list them in its own required_context_keys.
-        all_required_keys: list[str] = list(state.required_context_keys or [])
-        if state.transitions:
-            for transition in state.transitions:
-                if transition.conditions:
-                    for condition in transition.conditions:
-                        if condition.requires_context_keys:
-                            for key in condition.requires_context_keys:
-                                if key not in all_required_keys:
-                                    all_required_keys.append(key)
-
-        # DECISION plan-2026-09-19T175721-21cd7f8e/D-006: a key owned by a
-        # classification_extractions entry is NOT auto-minted as a plain
-        # extraction. Minting it let the plain extractor fill a key the
-        # classifier had just rejected below its confidence threshold (the
-        # gated transition then fired anyway) and cost one wasted LLM call per
-        # turn. Do NOT gate this in the transition evaluator (wrong layer).
-        # Explicit ``field_extractions`` with the same name still win below.
-        classification_owned = {
-            c.field_name for c in (state.classification_extractions or [])
-        }
-        all_required_keys = [
-            k for k in all_required_keys if k not in classification_owned
-        ]
-
-        # Auto-convert required keys → one config per key
-        if all_required_keys:
-            instructions = (
-                state.extraction_instructions
-                or "Extract the value of this field from the user's input."
+        # The minting rule (which keys, in which order, minus classification-owned
+        # keys, explicit field_extractions winning) lives in ONE place:
+        # `KindSpec.minted_keys` in src/state_kinds.py, which also carries the
+        # D-017 (item 7) anchor. The flow analyses read the same hook. Do NOT
+        # re-spell the rule here.
+        names = kind_of(state).minted_keys(state)
+        if not names:
+            return []  # a kind that mints nothing gets no config, explicit or not
+        explicit = list(state.field_extractions or [])
+        explicit_names = {fc.field_name for fc in explicit}
+        instructions = (
+            state.extraction_instructions
+            or "Extract the value of this field from the user's input."
+        )
+        # One config per auto-minted key; an explicit config of the same name
+        # overrides it (the explicit ones are appended after, user-defined, and
+        # take priority).
+        configs: list[FieldExtractionConfig] = [
+            FieldExtractionConfig(
+                field_name=key,
+                field_type="any",
+                extraction_instructions=f"Extract the '{key}' field. {instructions}",
+                context_keys=None,  # all context
+                required=True,
+                confidence_threshold=state.extraction_confidence_threshold,
             )
-            for key in all_required_keys:
-                configs.append(
-                    FieldExtractionConfig(
-                        field_name=key,
-                        field_type="any",
-                        extraction_instructions=(
-                            f"Extract the '{key}' field. {instructions}"
-                        ),
-                        context_keys=None,  # all context
-                        required=True,
-                        confidence_threshold=state.extraction_confidence_threshold,
-                    )
-                )
-
-        # Append explicit field_extractions (user-defined, take priority)
-        if state.field_extractions:
-            # Avoid duplicates: explicit configs override auto-generated ones
-            explicit_names = {fc.field_name for fc in state.field_extractions}
-            configs = [c for c in configs if c.field_name not in explicit_names]
-            configs.extend(state.field_extractions)
+            for key in names
+            if key not in explicit_names
+        ]
+        configs.extend(explicit)
 
         return configs
 

@@ -43,6 +43,20 @@ Interface contract:
     declare (they would be dead config); the loader refuses them.
   - ``dryrun_judged``: ``False`` when gate G6a does not judge the edges that
     leave a state of the kind.
+  - ``minted_keys(state)``: the ordered names the pipeline mints a plain
+    extraction for in the state: the auto-minted keys (``required_context_keys``
+    then each edge's ``requires_context_keys``, first occurrence order, minus
+    the keys a ``classification_extractions`` entry owns, minus the names an
+    explicit extraction overrides) followed by the explicit
+    ``field_extractions`` names, in list order. Empty for a kind that
+    mints nothing (completion, synthesize). The ONE minting rule: the pipeline
+    builds its extraction configs from it and the data-flow and liveness
+    analyses read the same tuple (never re-spell it elsewhere).
+  - ``produced_keys(state, handler_only)``: the keys the state can write on
+    arrival or while the conversation sits in it: ``minted_keys`` plus its
+    classification fields, minus ``handler_only``, plus its own ``result_key``
+    (only that state writes it). A ``frozenset``. The one arrival rule of G3
+    and G4 (``flow_analysis.declared_available``).
 
 ``State.kind`` is a plain property over ``kind_of`` (never a field, a computed
 field or a private attribute: any of them would reach ``model_dump`` and move
@@ -96,6 +110,45 @@ def _no_result_key(state: Any) -> str | None:
     return None
 
 
+# DECISION plan-2026-11-10T194139-2cefeb61/D-017 (item 7)
+# This is the ONE minting rule. It used to be spelled twice (the pipeline's
+# `_build_field_configs_from_state` and a hand mirror `_minted_keys` in
+# flow_analysis.py, kept equal by a parity test); both now read it through
+# `KindSpec.minted_keys`. Do NOT re-spell it in either place and do NOT change
+# it without the corpus: the completion/synthesize exclusion (those kinds use
+# `_no_minted_keys`), the classification-owned filter (plan 21cd7f8e D-006)
+# and explicit `field_extractions` winning over an auto-minted key.
+def _conversation_minted_keys(state: Any) -> tuple[str, ...]:
+    """The conversation kind's ``minted_keys`` (see the module contract)."""
+    auto: list[str] = list(getattr(state, "required_context_keys", None) or [])
+    for transition in getattr(state, "transitions", None) or []:
+        for condition in getattr(transition, "conditions", None) or []:
+            for key in getattr(condition, "requires_context_keys", None) or []:
+                if key not in auto:
+                    auto.append(key)
+    owned = {
+        c.field_name for c in getattr(state, "classification_extractions", None) or []
+    }
+    explicit = [f.field_name for f in getattr(state, "field_extractions", None) or []]
+    # An explicit extraction of the same name overrides the auto-minted one.
+    return (*(k for k in auto if k not in owned and k not in explicit), *explicit)
+
+
+def _no_minted_keys(state: Any) -> tuple[str, ...]:
+    return ()
+
+
+def _produced_keys(state: Any, handler_only: frozenset[str]) -> frozenset[str]:
+    """The default ``produced_keys``: see the module contract."""
+    spec = kind_of(state)
+    keys = set(spec.minted_keys(state)) | {
+        c.field_name for c in getattr(state, "classification_extractions", None) or []
+    }
+    keys -= handler_only
+    own = spec.result_key(state)
+    return frozenset(keys | {own}) if own else frozenset(keys)
+
+
 def _result_key_of(config_field: str) -> Callable[[Any], str | None]:
     """The hook reading ``<config_field>.result_key`` (``None`` when unset)."""
 
@@ -120,6 +173,8 @@ class KindSpec:
     inherits_result_on_push: bool = True
     forbidden_declarations: tuple[str, ...] = ()
     dryrun_judged: bool = True
+    minted_keys: Callable[[Any], tuple[str, ...]] = _no_minted_keys
+    produced_keys: Callable[[Any, frozenset[str]], frozenset[str]] = _produced_keys
 
 
 # The extraction channels a kind that replaces Pass 1 cannot also declare: they
@@ -131,7 +186,10 @@ _EXTRACTION_DECLARATIONS = (
     "extraction_instructions",
 )
 
-CONVERSATION = KindSpec(name=CompletionStateKind.CONVERSATION.value)
+CONVERSATION = KindSpec(
+    name=CompletionStateKind.CONVERSATION.value,
+    minted_keys=_conversation_minted_keys,
+)
 
 COMPLETION = KindSpec(
     name=CompletionStateKind.COMPLETION.value,

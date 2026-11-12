@@ -504,6 +504,156 @@ class TestResultKeyReaders:
         assert context == {"synthesis_result": {"status": "ok"}, "other": 1}
 
 
+class TestMintingHooks:
+    """Plan d454fd62 step 48: the minting rule and the produced-keys rule live in
+    the registry; the pipeline and the flow analyses read the hooks, and the hand
+    mirror in flow_analysis is gone."""
+
+    @staticmethod
+    def _old_minted(state: State) -> list[str]:
+        """Frozen oracle: the rule `MessagePipeline._build_field_configs_from_state`
+        spelled before the hook (ordered list of the config field names)."""
+        if state.completion is not None or state.synthesize is not None:
+            return []
+        required: list[str] = list(state.required_context_keys or [])
+        for transition in state.transitions or []:
+            for condition in transition.conditions or []:
+                for key in condition.requires_context_keys or []:
+                    if key not in required:
+                        required.append(key)
+        owned = {c.field_name for c in state.classification_extractions or []}
+        required = [k for k in required if k not in owned]
+        names: list[str] = []
+        if required:
+            names = list(required)
+        if state.field_extractions:
+            explicit = {fc.field_name for fc in state.field_extractions}
+            names = [n for n in names if n not in explicit]
+            names.extend(fc.field_name for fc in state.field_extractions)
+        return names
+
+    @staticmethod
+    def _old_produced(state: State, handler_only: frozenset[str]) -> set[str]:
+        """Frozen oracle: `flow_analysis._produced` and `_minted_keys` before the hooks."""
+        minted: set[str] = set()
+        if state.completion is None and state.synthesize is None:
+            minted = set(state.required_context_keys or [])
+            for transition in state.transitions or []:
+                for condition in transition.conditions or []:
+                    minted.update(condition.requires_context_keys or [])
+            owned = {c.field_name for c in state.classification_extractions or []}
+            minted = (minted - owned) | {
+                f.field_name for f in state.field_extractions or []
+            }
+        keys = minted | {c.field_name for c in state.classification_extractions or []}
+        keys -= handler_only
+        config = state.completion or state.synthesize
+        return keys | {config.result_key} if config is not None else keys
+
+    def _states(self):
+        for name, (raw, _options) in _CORPUS.items():
+            try:
+                loaded = FSMDefinition(**copy.deepcopy(raw))
+            except Exception:
+                continue
+            for state in loaded.states.values():
+                yield name, loaded, state
+
+    def test_minted_keys_equal_the_old_pipeline_rule_over_the_corpus(self):
+        from fsm_llm.pipeline import MessagePipeline
+
+        checked = minting = 0
+        for name, _loaded, state in self._states():
+            checked += 1
+            hook = list(sk.kind_of(state).minted_keys(state))
+            assert hook == self._old_minted(state), (name, state.id)
+            configs = MessagePipeline._build_field_configs_from_state(state)
+            assert [c.field_name for c in configs] == hook, (name, state.id)
+            minting += bool(hook)
+        assert checked > 300 and minting > 50  # the corpus holds both shapes
+
+    def test_produced_keys_equal_the_old_flow_rule_over_the_corpus(self):
+        from fsm_llm.definitions import handler_only_names
+
+        checked = 0
+        for name, loaded, state in self._states():
+            handler_only = handler_only_names(loaded)
+            assert sk.kind_of(state).produced_keys(state, handler_only) == frozenset(
+                self._old_produced(state, handler_only)
+            ), (name, state.id)
+            checked += 1
+        assert checked > 300
+
+    def test_a_kind_that_mints_nothing_gets_no_config_even_with_explicit_fields(self):
+        """A completion state built around the loader (`model_construct`) with an
+        explicit extraction still mints nothing: the kind decides, as before."""
+        from fsm_llm.definitions import FieldExtractionConfig
+        from fsm_llm.pipeline import MessagePipeline
+
+        state = _plain_state(completion=_completion())
+        bypass = state.model_copy(
+            update={
+                "field_extractions": [
+                    FieldExtractionConfig(
+                        field_name="a",
+                        field_type="str",
+                        extraction_instructions="get a",
+                    )
+                ],
+                "required_context_keys": ["k"],
+            }
+        )
+        assert sk.kind_of(bypass).name == "completion"
+        assert sk.kind_of(bypass).minted_keys(bypass) == ()
+        assert MessagePipeline._build_field_configs_from_state(bypass) == []
+
+    def test_the_hooks_of_a_new_kind_default_to_minting_nothing(self):
+        spec = sk.KindSpec(name="probe", config_field="probe")
+        state = _plain_state(required_context_keys=["k"])
+        assert spec.minted_keys(state) == ()
+
+    def test_the_mirror_in_flow_analysis_is_gone(self):
+        from fsm_llm import flow_analysis
+
+        assert not hasattr(flow_analysis, "_minted_keys")
+
+    @pytest.mark.parametrize(
+        ("path", "name", "owner"),
+        [
+            ("pipeline.py", "_build_field_configs_from_state", "MessagePipeline"),
+            ("flow_analysis.py", "_produced", None),
+            ("flow_analysis.py", "declared_available", None),
+        ],
+    )
+    def test_no_reader_branches_on_a_kind_config(self, path, name, owner):
+        """Guards (D-015): the minting and arrival rules ask the registry, never
+        `.completion` or `.synthesize`."""
+        node = _function_node(_MODULE.parent / path, name, owner)
+        assert _config_attributes(node) == set(), (path, name)
+
+    @pytest.mark.parametrize(
+        ("path", "name", "owner"),
+        [
+            ("pipeline.py", "_build_field_configs_from_state", "MessagePipeline"),
+            ("flow_analysis.py", "_produced", None),
+            ("flow_analysis.py", "declared_available", None),
+        ],
+    )
+    def test_the_minting_rule_is_not_spelled_outside_the_registry(
+        self, path, name, owner
+    ):
+        """Guards (plan 2cefeb61 D-017 item 7): the rule's inputs are read in
+        `state_kinds.py` only, so there is no second spelling to keep in step."""
+        node = _function_node(_MODULE.parent / path, name, owner)
+        read = {
+            n.attr
+            for n in ast.walk(node)
+            if isinstance(n, ast.Attribute)
+            and n.attr in {"required_context_keys", "requires_context_keys"}
+        }
+        assert read == set(), (path, name)
+
+
 class TestLeafModule:
     def _imports(self) -> list[str]:
         tree = ast.parse(_MODULE.read_text(encoding="utf-8"))

@@ -110,47 +110,14 @@ class FlowFinding:
     message: str
 
 
-# DECISION plan-2026-11-10T194139-2cefeb61/D-017 (item 7)
-# `_minted_keys` is a deliberate mirror of the pipeline's
-# `MessagePipeline._build_field_configs_from_state`. Do NOT import the pipeline
-# here (it couples a pure analysis to the largest module) and do NOT change this
-# rule without the mirror in src/pipeline.py: the parity test in
-# tests/test_fsm_llm/test_flow_analysis.py pins the two over every example state.
-def _minted_keys(state: State) -> set[str]:
-    """The keys the pipeline mints a plain extraction for in `state`.
-
-    A deliberate mirror of `MessagePipeline._build_field_configs_from_state`
-    (kept by a parity test over every example state, plan 2cefeb61 D-017 item
-    7; importing the pipeline here would couple a pure analysis to its largest
-    module): nothing for a completion or synthesize state; else
-    `required_context_keys` plus every `requires_context_keys` of the state's
-    own edges, minus keys a `classification_extractions` entry owns, plus the
-    explicit `field_extractions` names (which win over that filter).
-    """
-    if state.completion is not None or state.synthesize is not None:
-        return set()
-    keys = set(state.required_context_keys or [])
-    for transition in state.transitions or []:
-        for condition in transition.conditions or []:
-            keys.update(condition.requires_context_keys or [])
-    owned = {c.field_name for c in state.classification_extractions or []}
-    return (keys - owned) | {f.field_name for f in state.field_extractions or []}
-
-
 def _result_key(state: State) -> str | None:
     return kind_of(state).result_key(state)
 
 
-def _produced(state: State, handler_only: frozenset[str]) -> set[str]:
-    """Keys `state` can write on arrival or while the conversation sits in it:
-    its minted and classification keys minus the handler-only set, plus its own
-    completion or synthesize result key (only that state writes it)."""
-    keys = _minted_keys(state) | {
-        c.field_name for c in state.classification_extractions or []
-    }
-    keys -= handler_only
-    own = _result_key(state)
-    return keys | {own} if own else keys
+def _produced(state: State, handler_only: frozenset[str]) -> frozenset[str]:
+    """Keys `state` can write on arrival or while the conversation sits in it
+    (its kind's `produced_keys` hook, which also reads the one minting rule)."""
+    return kind_of(state).produced_keys(state, handler_only)
 
 
 def _proven(transition: Transition) -> set[str]:
@@ -309,7 +276,7 @@ def analyze_data_flow(
             state.completion is None
             and state.extraction_instructions
             and not classified
-            and not _minted_keys(state) - handler_only
+            and not set(kind_of(state).minted_keys(state)) - handler_only
         ):
             add(
                 "bulk-extraction",
