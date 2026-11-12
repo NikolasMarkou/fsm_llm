@@ -58,7 +58,7 @@ from .constants import (
 )
 from .logging import logger
 from .schema_registry import SCHEMA_VERSION_DEFAULT, newer_fields
-from .state_kinds import KINDS, kind_of
+from .state_kinds import KINDS, kind_of, state_problem
 
 # --------------------------------------------------------------
 # Identifier charset policy
@@ -1847,56 +1847,12 @@ class State(BaseModel):
                 f"State '{self.id}': required_context_keys {bad_keys} are empty or "
                 "internal-prefixed and can never be extracted"
             )
-        if self.completion is not None:
-            # A completion state's Pass 1 is its one completion call: no other
-            # extraction channel runs beside it, so declaring one is dead
-            # config. A terminal state runs no turn, so its completion never
-            # would either.
-            conflicts = [
-                name
-                for name, value in (
-                    ("field_extractions", self.field_extractions),
-                    ("classification_extractions", self.classification_extractions),
-                    ("required_context_keys", self.required_context_keys),
-                    ("extraction_instructions", self.extraction_instructions),
-                )
-                if value
-            ]
-            if conflicts:
-                raise ValueError(
-                    f"State '{self.id}': a completion state cannot also declare "
-                    f"{conflicts}"
-                )
-            if not self.transitions:
-                raise ValueError(
-                    f"State '{self.id}': a completion state needs a transition "
-                    "(a terminal state runs no turn)"
-                )
-        if self.synthesize is not None:
-            conflicts = [
-                name
-                for name, value in (
-                    ("completion", self.completion),
-                    ("field_extractions", self.field_extractions),
-                    ("classification_extractions", self.classification_extractions),
-                    ("required_context_keys", self.required_context_keys),
-                    ("extraction_instructions", self.extraction_instructions),
-                )
-                if value
-            ]
-            if conflicts:
-                raise ValueError(
-                    f"State '{self.id}': a synthesize state cannot also declare "
-                    f"{conflicts}"
-                )
-            if self.synthesize.on_failure not in {
-                transition.target_state for transition in self.transitions
-            }:
-                raise ValueError(
-                    f"State '{self.id}': synthesize on_failure "
-                    f"{self.synthesize.on_failure!r} must be one of the state's "
-                    "transition targets (a terminal state has none)"
-                )
+        # The completion and synthesize rules (forbidden declarations, needs a
+        # transition, on_failure must be a target) live with their kind: see
+        # `state_kinds.state_problem`.
+        problem = state_problem(self)
+        if problem is not None:
+            raise ValueError(f"State '{self.id}': {problem}")
         return self
 
     # DECISION plan-2026-11-12T073150-d454fd62/D-015: `kind` is a plain

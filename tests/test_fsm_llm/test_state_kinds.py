@@ -15,7 +15,8 @@ import ast
 import copy
 import typing
 from pathlib import Path
-from typing import Any, get_args, get_origin
+from types import SimpleNamespace
+from typing import Any, ClassVar, get_args, get_origin
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -652,6 +653,212 @@ class TestMintingHooks:
             and n.attr in {"required_context_keys", "requires_context_keys"}
         }
         assert read == set(), (path, name)
+
+
+class TestStateValidationHooks:
+    """Plan d454fd62 step 49: the State validator asks the registry for the rules
+    of a kind (forbidden declarations, the per-kind state check), so a new kind
+    needs no edit in it; every refusal text is byte-equal to the parent's."""
+
+    _FIELDS: ClassVar[dict[str, Any]] = {
+        "field_extractions": [
+            {"field_name": "a", "field_type": "str", "extraction_instructions": "a"}
+        ],
+        "classification_extractions": [
+            {
+                "field_name": "c",
+                "intents": [
+                    {"name": "x", "description": "x"},
+                    {"name": "y", "description": "y"},
+                ],
+                "fallback_intent": "y",
+            }
+        ],
+        "required_context_keys": ["k"],
+        "extraction_instructions": "extract",
+    }
+
+    @staticmethod
+    def _old_refusal(raw: dict[str, Any]) -> str | None:
+        """Frozen oracle: the text the State validator built for the completion
+        and synthesize rules before the hooks (None when it accepts)."""
+        sid = raw["id"]
+        completion, synthesize = raw.get("completion"), raw.get("synthesize")
+        extraction = (
+            "field_extractions",
+            "classification_extractions",
+            "required_context_keys",
+            "extraction_instructions",
+        )
+        if completion is not None:
+            conflicts = [n for n in extraction if raw.get(n)]
+            if conflicts:
+                return (
+                    f"State '{sid}': a completion state cannot also declare {conflicts}"
+                )
+            if not raw.get("transitions"):
+                return (
+                    f"State '{sid}': a completion state needs a transition "
+                    "(a terminal state runs no turn)"
+                )
+        if synthesize is not None:
+            conflicts = [n for n in ("completion", *extraction) if raw.get(n)]
+            if conflicts:
+                return (
+                    f"State '{sid}': a synthesize state cannot also declare {conflicts}"
+                )
+            targets = {t["target_state"] for t in raw.get("transitions") or []}
+            if synthesize["on_failure"] not in targets:
+                return (
+                    f"State '{sid}': synthesize on_failure "
+                    f"{synthesize['on_failure']!r} must be one of the state's "
+                    "transition targets (a terminal state has none)"
+                )
+        return None
+
+    @staticmethod
+    def _shapes():
+        """Every combination of kind configs, declared channels, and edges."""
+        import itertools
+
+        channels = list(TestStateValidationHooks._FIELDS)
+        for has_completion, has_synthesize in itertools.product([0, 1], repeat=2):
+            for picked in [(), *((c,) for c in channels), tuple(channels)]:
+                for edges in ("none", "t", "other"):
+                    raw: dict[str, Any] = {
+                        "id": "s",
+                        "description": "d",
+                        "purpose": "p",
+                    }
+                    if has_completion:
+                        raw["completion"] = _completion()
+                    if has_synthesize:
+                        raw["synthesize"] = _synthesize()
+                    for name in picked:
+                        raw[name] = copy.deepcopy(
+                            TestStateValidationHooks._FIELDS[name]
+                        )
+                    if edges != "none":
+                        raw["transitions"] = [
+                            {
+                                "target_state": "t" if edges == "t" else "u",
+                                "description": "go",
+                            }
+                        ]
+                    yield raw
+
+    def test_the_validator_reads_no_kind_config(self):
+        """Guards (D-015): `State._validate_extraction_configs` never reads
+        `.completion` or `.synthesize` (a new kind would need an edit there)."""
+        node = _function_node(
+            _MODULE.parent / "definitions.py", "_validate_extraction_configs", "State"
+        )
+        assert _config_attributes(node) == set()
+
+    def test_every_refusal_text_equals_the_old_rule_text(self):
+        """Guards: over every kind and declaration shape the State refuses with
+        exactly the text the inline rules built, and accepts what they accepted."""
+        refused = accepted = 0
+        for raw in self._shapes():
+            expected = self._old_refusal(raw)
+            try:
+                State(**copy.deepcopy(raw))
+            except ValidationError as exc:
+                text = exc.errors()[0]["msg"]
+                if expected is None:
+                    # another rule of the same validator or model refused it
+                    for rule in (
+                        "a completion state",
+                        "a synthesize state",
+                        "on_failure",
+                    ):
+                        assert rule not in text, raw
+                    continue
+                assert text == f"Value error, {expected}", raw
+                refused += 1
+            else:
+                assert expected is None, raw
+                accepted += 1
+        assert refused > 50 and accepted > 5
+
+    def test_state_problem_is_the_one_refusal_rule(self):
+        done = _plain_state(completion=_completion())
+        assert sk.state_problem(done) is None
+        bare = State.model_construct(
+            id="s", completion=_completion_config(), transitions=[]
+        )
+        assert sk.state_problem(bare) == (
+            "a completion state needs a transition (a terminal state runs no turn)"
+        )
+
+    def test_a_state_holding_two_configs_is_judged_by_both_kinds_in_order(self):
+        """`kind_of` names one kind, but the rules of every set config apply, in
+        registry order (completion first): the refusal of the pair is the
+        synthesize one, as before the hooks."""
+        both = State.model_construct(
+            id="s",
+            completion=_completion_config(),
+            synthesize=_synthesize_config(),
+            transitions=[_edge("t")],
+            field_extractions=None,
+            classification_extractions=None,
+            required_context_keys=None,
+            extraction_instructions=None,
+        )
+        assert sk.state_problem(both) == (
+            "a synthesize state cannot also declare ['completion']"
+        )
+
+    def test_a_kind_with_its_own_rules_needs_no_edit_in_the_validator(self):
+        """A spec registered at runtime brings its own forbidden declarations and
+        its own state check; `state_problem` applies both."""
+        from dataclasses import replace
+
+        marker = replace(
+            sk.CONVERSATION,
+            name="marker",
+            config_field="marker",
+            forbidden_declarations=("extraction_instructions",),
+            check_state=lambda s: None if s.transitions else "a marker needs an edge",
+        )
+        # the hooks read a state by getattr only, so any object with the fields works
+        state = SimpleNamespace(
+            id="s", marker=object(), extraction_instructions="x", transitions=[]
+        )
+        original = sk.KINDS
+        sk.KINDS = (*original, marker)
+        try:
+            assert sk.state_problem(state) == (
+                "a marker state cannot also declare ['extraction_instructions']"
+            )
+            state.extraction_instructions = None
+            assert sk.state_problem(state) == "a marker needs an edge"
+        finally:
+            sk.KINDS = original
+        assert sk.KINDS == original
+
+    def test_the_default_check_accepts_everything(self):
+        plain = _plain_state()
+        assert sk.CONVERSATION.check_state(plain) is None
+        assert sk.state_problem(plain) is None
+
+
+def _completion_config():
+    from fsm_llm.definitions import CompletionStateConfig
+
+    return CompletionStateConfig(**_completion())
+
+
+def _synthesize_config():
+    from fsm_llm.definitions import SynthesizeConfig
+
+    return SynthesizeConfig(**_synthesize())
+
+
+def _edge(target: str):
+    from fsm_llm.definitions import Transition
+
+    return Transition(target_state=target, description="go")
 
 
 class TestLeafModule:

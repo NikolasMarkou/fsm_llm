@@ -40,7 +40,12 @@ Interface contract:
   - ``inherits_result_on_push``: ``False`` when ``API.push_fsm`` must drop the
     parent's value of the result key from the child's initial context.
   - ``forbidden_declarations``: the ``State`` fields the kind cannot also
-    declare (they would be dead config); the loader refuses them.
+    declare (they would be dead config); the loader refuses them (see
+    ``state_problem``). Data, not a hook: a field is declared when its value is
+    truthy.
+  - ``check_state(state)``: the kind's own structural rule over one state, a
+    message (without the ``State '<id>':`` prefix) or ``None`` when the state is
+    fine. Called after the forbidden declarations; default accepts.
   - ``dryrun_judged``: ``False`` when gate G6a does not judge the edges that
     leave a state of the kind.
   - ``minted_keys(state)``: the ordered names the pipeline mints a plain
@@ -57,6 +62,15 @@ Interface contract:
     classification fields, minus ``handler_only``, plus its own ``result_key``
     (only that state writes it). A ``frozenset``. The one arrival rule of G3
     and G4 (``flow_analysis.declared_available``).
+
+- ``state_problem(state)``: the one State-level refusal rule: for every kind
+  whose config the state holds, in registry order, the first forbidden
+  declaration found (``a <kind> state cannot also declare [...]``), then the
+  kind's ``check_state``; ``None`` when nothing is wrong. The State validator
+  raises ``ValueError(f"State '<id>': {problem}")`` from it, so the loader and
+  ``fsm-llm-validate`` keep one verdict. Every set config is judged, not only
+  ``kind_of``'s: a state built around the validator with two configs is judged
+  by both.
 
 ``State.kind`` is a plain property over ``kind_of`` (never a field, a computed
 field or a private attribute: any of them would reach ``model_dump`` and move
@@ -79,6 +93,7 @@ __all__ = [
     "KindSpec",
     "get_kind",
     "kind_of",
+    "state_problem",
 ]
 
 _E = TypeVar("_E", bound=Enum)
@@ -149,6 +164,27 @@ def _produced_keys(state: Any, handler_only: frozenset[str]) -> frozenset[str]:
     return frozenset(keys | {own}) if own else frozenset(keys)
 
 
+def _no_state_problem(state: Any) -> str | None:
+    return None
+
+
+def _completion_check_state(state: Any) -> str | None:
+    # A terminal state runs no turn, so its completion call would never run.
+    if not getattr(state, "transitions", None):
+        return "a completion state needs a transition (a terminal state runs no turn)"
+    return None
+
+
+def _synthesize_check_state(state: Any) -> str | None:
+    on_failure = state.synthesize.on_failure
+    if on_failure not in {t.target_state for t in state.transitions or []}:
+        return (
+            f"synthesize on_failure {on_failure!r} must be one of the state's "
+            "transition targets (a terminal state has none)"
+        )
+    return None
+
+
 def _result_key_of(config_field: str) -> Callable[[Any], str | None]:
     """The hook reading ``<config_field>.result_key`` (``None`` when unset)."""
 
@@ -175,6 +211,7 @@ class KindSpec:
     dryrun_judged: bool = True
     minted_keys: Callable[[Any], tuple[str, ...]] = _no_minted_keys
     produced_keys: Callable[[Any, frozenset[str]], frozenset[str]] = _produced_keys
+    check_state: Callable[[Any], str | None] = _no_state_problem
 
 
 # The extraction channels a kind that replaces Pass 1 cannot also declare: they
@@ -201,6 +238,7 @@ COMPLETION = KindSpec(
     inherits_result_on_push=False,
     forbidden_declarations=_EXTRACTION_DECLARATIONS,
     dryrun_judged=False,
+    check_state=_completion_check_state,
 )
 
 # The synthesize result key is NOT dropped on push today (an inherited
@@ -213,6 +251,7 @@ SYNTHESIZE = KindSpec(
     inherits_result_on_push=True,
     forbidden_declarations=("completion", *_EXTRACTION_DECLARATIONS),
     dryrun_judged=False,
+    check_state=_synthesize_check_state,
 )
 
 KINDS: tuple[KindSpec, ...] = (CONVERSATION, COMPLETION, SYNTHESIZE)
@@ -233,3 +272,25 @@ def kind_of(state: Any) -> KindSpec:
         if spec.config_field and getattr(state, spec.config_field, None) is not None:
             return spec
     return CONVERSATION
+
+
+def state_problem(state: Any) -> str | None:
+    """The first rule of a kind that *state* breaks, as a message, else ``None``.
+
+    Applies to every kind whose config the state holds, in ``KINDS`` order
+    (completion before synthesize): the forbidden declarations first, then the
+    kind's ``check_state``. The message has no state id; the State validator
+    prefixes it. Reads ``state`` by ``getattr`` only.
+    """
+    for spec in KINDS:
+        if not spec.config_field or getattr(state, spec.config_field, None) is None:
+            continue
+        conflicts = [
+            name for name in spec.forbidden_declarations if getattr(state, name, None)
+        ]
+        if conflicts:
+            return f"a {spec.name} state cannot also declare {conflicts}"
+        problem = spec.check_state(state)
+        if problem is not None:
+            return problem
+    return None
