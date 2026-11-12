@@ -1957,9 +1957,11 @@ _SYNTHESIZE_SAMPLES: tuple[tuple[str, dict[str, Any] | None], ...] = (
 
 
 # Definition objects whose schema-version findings were already logged
-# (D-003), keyed by identity; an entry removes itself when the object is
-# collected, so a recycled id can never suppress a new definition.
-_REPORTED_DEFINITIONS: dict[int, weakref.ref[FSMDefinition]] = {}
+# (D-003), keyed by identity. The value is weak: the entry vanishes when the
+# object is collected, so a recycled id can never suppress a new definition.
+_REPORTED_DEFINITIONS: weakref.WeakValueDictionary[int, FSMDefinition] = (
+    weakref.WeakValueDictionary()
+)
 
 
 def _first_report(definition: FSMDefinition) -> bool:
@@ -1969,13 +1971,9 @@ def _first_report(definition: FSMDefinition) -> bool:
     lives outside the model so equality, `model_dump` and `fsm_id` are untouched.
     """
     key = id(definition)
-    if key in _REPORTED_DEFINITIONS:
+    if _REPORTED_DEFINITIONS.get(key) is definition:
         return False
-
-    def _forget(_ref: weakref.ref[FSMDefinition]) -> None:
-        _REPORTED_DEFINITIONS.pop(key, None)
-
-    _REPORTED_DEFINITIONS[key] = weakref.ref(definition, _forget)
+    _REPORTED_DEFINITIONS[key] = definition
     return True
 
 
@@ -2103,6 +2101,9 @@ class FSMDefinition(BaseModel):
         # (`FSMStackFrame` in `API.start_conversation` and `push_fsm`), which
         # logged one WARNING per conversation. The object is remembered in
         # `_REPORTED_DEFINITIONS` (by identity, dropped when it is collected).
+        # DECISION plan-2026-11-12T023759-9013b0e3/D-016: the once-per-object
+        # rule above is this decision's. A definition changed after its first
+        # report is not re-reported (accepted).
         # Do NOT use a `PrivateAttr` or any field for the flag (a private attr
         # makes pydantic synthesize a `model_post_init` that reaches the public
         # API snapshot, and a field would reach `model_dump` and move `fsm_id`

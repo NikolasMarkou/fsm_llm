@@ -758,17 +758,12 @@ def _write_definition(path, version: Any = "4.1", **extra: Any):
     return body
 
 
-def _write_definition_text(path, version: Any) -> str:
-    _write_definition(path, version)
-    return path.read_text(encoding="utf-8")
-
-
 def _without_version(data: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in data.items() if k != "version"}
 
 
 class TestUpgradeFsmFile:
-    """`upgrade_fsm_file` validates first and stamps only a 4.0 to 4.1 FSM file."""
+    """`upgrade_fsm_file` validates first and stamps only a 4.0 or 4.1 file (any 4.0 up to below the default)."""
 
     @pytest.mark.parametrize("version", ["4.0", "4.1"])
     def test_an_older_version_is_rewritten_and_loads_clean(self, tmp_path, version):
@@ -855,7 +850,7 @@ class TestUpgradeFsmFile:
         from fsm_llm.validator import upgrade_fsm_file
 
         path = tmp_path / "fsm.json"
-        body = json.loads(_write_definition_text(path, "4.1"))
+        body = _write_definition(path, "4.1")
         body["extra_number"] = 1
         crlf = json.dumps(body, indent=4).replace("\n", "\r\n")
         crlf = crlf.replace('"extra_number": 1', '"extra_number": 1e2')
@@ -878,14 +873,37 @@ class TestUpgradeFsmFile:
         assert path.read_bytes() == before
 
     def test_an_omitted_version_is_left_omitted(self, tmp_path):
+        # D-017: a missing `version` already means the default, so it is
+        # "nothing to do" (no write, no refusal), like a current version.
         from fsm_llm.validator import upgrade_fsm_file
 
         path = tmp_path / "fsm.json"
         _write_definition(path, None)
         before = path.read_bytes()
         result = upgrade_fsm_file(str(path))
-        assert result.rewritten is False and result.refusal is not None
+        assert result.rewritten is False and result.refusal is None
         assert path.read_bytes() == before
+
+    def test_a_deeply_nested_file_is_a_refusal_not_a_crash(self, tmp_path):
+        from fsm_llm.validator import upgrade_fsm_file
+
+        path = tmp_path / "deep.json"
+        text = ("[" * 100_000 + "]" * 100_000).encode()
+        path.write_bytes(text)
+        result = upgrade_fsm_file(str(path))
+        assert result.rewritten is False and result.refusal is not None
+        assert path.read_bytes() == text
+
+    def test_a_deeply_nested_value_in_an_fsm_is_a_refusal_not_a_crash(self, tmp_path):
+        from fsm_llm.validator import upgrade_fsm_file
+
+        path = tmp_path / "deep.json"
+        body = json.dumps(_declared_body("4.1", with_synthesize=False))[:-1]
+        text = (body + ', "deep": ' + "[" * 100_000 + "]" * 100_000 + "}").encode()
+        path.write_bytes(text)
+        result = upgrade_fsm_file(str(path))
+        assert result.rewritten is False and result.refusal is not None
+        assert path.read_bytes() == text
 
     @pytest.mark.parametrize("version", [4.1, 4, None, ["4.1"]])
     def test_a_non_string_version_is_left_alone(self, tmp_path, version):
@@ -1088,8 +1106,8 @@ class TestValidateMainUpgrade:
         assert after["version"] == SCHEMA_VERSION_DEFAULT
         assert _without_version(after) == _without_version(original)
 
-    @pytest.mark.parametrize("version", [SCHEMA_VERSION_DEFAULT, "4.10", "5.0"])
-    def test_a_current_or_newer_fsm_is_a_no_op_with_the_validation_exit(
+    @pytest.mark.parametrize("version", [SCHEMA_VERSION_DEFAULT, "4.10", "5.0", None])
+    def test_a_current_newer_or_omitted_fsm_is_a_no_op_with_the_validation_exit(
         self, tmp_path, capsys, version
     ):
         from fsm_llm.validator import main
@@ -1102,6 +1120,20 @@ class TestValidateMainUpgrade:
         assert json.loads(capsys.readouterr().out)["is_valid"] is True
         assert path.read_bytes() == before
         assert path.stat().st_mtime_ns == stamp
+
+    def test_a_deeply_nested_file_exits_one_with_no_traceback_and_a_report(
+        self, tmp_path, capsys
+    ):
+        from fsm_llm.validator import main
+
+        path = tmp_path / "deep.json"
+        text = ("[" * 100_000 + "]" * 100_000).encode()
+        path.write_bytes(text)
+        assert main(str(path)) == 1  # plain validation reports it as invalid
+        assert json.loads(capsys.readouterr().out)["is_valid"] is False
+        assert main(str(path), upgrade=True) == 1
+        assert json.loads(capsys.readouterr().out)["is_valid"] is False
+        assert path.read_bytes() == text
 
     def test_a_json_object_that_is_not_an_fsm_is_not_rewritten_and_exits_one(
         self, tmp_path, capsys
