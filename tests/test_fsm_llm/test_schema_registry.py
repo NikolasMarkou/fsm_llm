@@ -191,8 +191,9 @@ class TestRegistryTiers:
             ("FSMDefinition.handler_only_keys", "4.1"),
             ("State.completion", "4.1"),
             ("State.extraction_instructions", "4.1"),
-            ("Transition.llm_description", "4.1"),
             ("IntentDefinition.name", "4.1"),
+            ("Transition.llm_description", "4.0"),
+            ("TransitionCondition.evaluation_priority", "4.0"),
             ("State.purpose", "4.0"),
             ("FSMDefinition.version", "4.0"),
             ("Transition.priority", "4.0"),
@@ -282,6 +283,22 @@ class TestNewerFields:
             a=_state(
                 "a",
                 extraction_instructions="get x",
+                response_instructions="say y",
+            ),
+        )
+        assert _found(definition) == {
+            ("State", "extraction_instructions", "a"),
+            ("State", "response_instructions", "a"),
+        }
+
+    def test_llm_description_and_evaluation_priority_are_4_0_fields(self):
+        # Both exist in the 4.0 schema (the 2-pass package at commit 586f412f,
+        # version default "4.0"), so an honest 4.0 file using them is quiet.
+        definition = _definition(
+            "4.0",
+            a=_state(
+                "a",
+                required_context_keys=["x"],
                 transitions=[
                     {
                         "target_state": "end",
@@ -298,11 +315,7 @@ class TestNewerFields:
                 ],
             ),
         )
-        assert _found(definition) == {
-            ("State", "extraction_instructions", "a"),
-            ("Transition", "llm_description", "a"),
-            ("TransitionCondition", "evaluation_priority", "a"),
-        }
+        assert newer_fields(definition) == ()
 
     def test_a_4_0_file_using_only_4_0_fields_is_quiet(self):
         definition = _definition(
@@ -320,12 +333,10 @@ class TestNewerFields:
     def test_a_supplied_value_equal_to_the_default_is_not_use(self):
         default_retries = State.model_fields["extraction_retries"].default
         quiet = _state("a", extraction_retries=default_retries)
-        quiet["transitions"] = [
-            {"target_state": "end", "description": "go", "llm_description": None}
-        ]
+        quiet["response_instructions"] = None
         definition = _definition("4.0", a=quiet)
         assert ("State", "extraction_retries", "a") not in _found(definition)
-        assert ("Transition", "llm_description", "a") not in _found(definition)
+        assert ("State", "response_instructions", "a") not in _found(definition)
 
     def test_a_non_default_value_of_the_same_field_is_use(self):
         default_retries = State.model_fields["extraction_retries"].default
@@ -345,22 +356,15 @@ class TestNewerFields:
         )
         assert _found(definition) == {("FSMDefinition", "handler_only_keys", None)}
 
-    def test_the_same_field_in_many_transitions_is_one_finding_per_state(self):
-        transitions = [
-            {
-                "target_state": "end",
-                "description": "go",
-                "priority": i,
-                "llm_description": "why",
-            }
-            for i in range(1, 4)
-        ]
+    def test_the_same_field_in_many_states_is_one_finding_per_state(self):
         definition = _definition(
             "4.0",
-            a=_state("a", transitions=transitions),
-            b=_state("b", transitions=transitions),
+            a=_state("a", extraction_instructions="get a"),
+            b=_state("b", extraction_instructions="get b"),
         )
-        findings = [f for f in newer_fields(definition) if f.field == "llm_description"]
+        findings = [
+            f for f in newer_fields(definition) if f.field == "extraction_instructions"
+        ]
         assert sorted(f.state_id for f in findings) == ["a", "b"]
 
     def test_nested_extraction_models_are_walked(self):

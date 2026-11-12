@@ -5,10 +5,14 @@ can import `SCHEMA_VERSION_DEFAULT` from it), never logs and never raises on a
 loaded definition. `newer_fields` returns frozen findings; the loader and the
 validator decide how to report them.
 
-The tiers are honest but coarse. The 4.0-era common fields are "4.0"; every
-field shipped since the 2-pass rewrite is "4.1" (each was added as "v4.1
-unchanged", so one tier is all the history supports); `State.synthesize` and
-every `SynthesizeConfig` field are "4.2". A test walks the annotations
+The tiers are honest but coarse. A field of the 4.0 schema is "4.0": the 2-pass
+package at commit 586f412f (version default "4.0") already declares
+`Transition.llm_description` and `TransitionCondition.evaluation_priority`
+beside the common name/state/transition fields. The fields first seen at the
+"4.1" default (commit 4fb5a8b6: `State.extraction_instructions` and
+`response_instructions`) and every field shipped since (each added as "v4.1
+unchanged", so one tier is all the history supports) are "4.1";
+`State.synthesize` and every `SynthesizeConfig` field are "4.2". A test walks the annotations
 reachable from `FSMDefinition`, so a field or nested model missing from
 `FIELD_VERSIONS` fails the build.
 """
@@ -48,12 +52,10 @@ _TABLE: dict[str, dict[str, str]] = {
         "4.2": "synthesize",
     },
     "Transition": {
-        "4.0": "target_state description conditions priority",
-        "4.1": "llm_description",
+        "4.0": "target_state description conditions priority llm_description",
     },
     "TransitionCondition": {
-        "4.0": "description requires_context_keys logic",
-        "4.1": "evaluation_priority",
+        "4.0": "description requires_context_keys logic evaluation_priority",
     },
     "FieldExtractionConfig": {
         "4.1": (
