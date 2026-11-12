@@ -3,10 +3,12 @@ from __future__ import annotations
 """Tests for fsm_llm.agents.adapt module."""
 
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from fsm_llm.agents.adapt import ADaPTAgent
+from fsm_llm.agents.base import BaseAgent
 from fsm_llm.agents.constants import (
     ADaPTStates,
     ContextKeys,
@@ -22,6 +24,7 @@ from fsm_llm.agents.exceptions import (
 from fsm_llm.agents.fsm_definitions import build_adapt_fsm
 from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.definitions import (
+    DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
     FSMDefinition,
@@ -29,6 +32,8 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
+from fsm_llm.testing import PromptGroundedLLM
+from tests.test_fsm_llm_agents.support import SequenceMockLLM, _Out
 
 
 def _dummy_tool(params):
@@ -768,3 +773,259 @@ class TestADaPTRunsNoTool:
         result = agent.run("Name the capital of France")
         assert result.tools_used == []
         assert calls == []
+
+
+class TestADaPTSubtaskExecution:
+    """
+    Verify that _execute_subtasks is actually called when the assessment
+    says failure and decomposition produces subtasks.
+
+    Previously the DECOMPOSE->COMBINE transition fired inside converse(),
+    making COMBINE terminal before the run-loop could check for subtasks.
+    The fix adds a PRE_TRANSITION handler that executes subtasks when
+    leaving the DECOMPOSE state.
+    """
+
+    def test_execute_subtasks_is_called(self):
+        """When attempt fails and subtasks are produced, _execute_subtasks
+        must be called during the DECOMPOSE->COMBINE transition."""
+        from fsm_llm.agents.adapt import ADaPTAgent
+
+        # Extraction sequence for ADaPT FSM:
+        #   attempt -> extract attempt_result
+        #   assess  -> extract attempt_succeeded=False
+        #   decompose -> extract subtasks
+        #   combine -> extract final_answer
+        extraction_sequence = [
+            # 1. attempt: produce an attempt result
+            {"attempt_result": "Partial answer, need more detail."},
+            # 2. assess: attempt failed
+            {"attempt_succeeded": False, "assessment": "needs decomposition"},
+            # 3. decompose: produce subtasks
+            {
+                "subtasks": ["Define neural networks", "Explain backpropagation"],
+                "operator": "AND",
+            },
+            # 4. combine: final answer
+            {"final_answer": "Neural networks learn through backpropagation."},
+        ]
+
+        mock_llm = SequenceMockLLM(extraction_sequence)
+        config = AgentConfig(max_iterations=15, timeout_seconds=30.0)
+
+        agent = ADaPTAgent(
+            config=config,
+            max_depth=2,
+            llm_interface=mock_llm,
+        )
+
+        # Patch _execute_subtasks to track if it's called and return mock results
+        execute_called = {"count": 0, "args": None}
+
+        def mock_execute_subtasks(
+            subtasks, operator, depth, initial_context, start_time=None, *, holder
+        ):
+            execute_called["count"] += 1
+            execute_called["args"] = {
+                "subtasks": subtasks,
+                "operator": operator,
+                "depth": depth,
+            }
+            # Return mock subtask results
+            return [
+                {
+                    "subtask": str(s),
+                    "answer": f"Answer for: {s}",
+                    "success": True,
+                    "depth": depth,
+                }
+                for s in subtasks
+            ]
+
+        agent._execute_subtasks = mock_execute_subtasks
+
+        # Patch Classifier to avoid real LLM calls for ambiguous transitions.
+        # The mock picks the first intent from the schema (like old decide_transition).
+        def _make_mock_classifier(schema, **kwargs):
+            classifier_instance = MagicMock()
+            first_intent = schema.intents[0].name if schema.intents else "unknown"
+
+            def _classify(msg, context=None):
+                result = MagicMock()
+                result.intent = first_intent
+                result.confidence = 0.9
+                result.reasoning = "mock"
+                result.entities = {}
+                return result
+
+            classifier_instance.classify.side_effect = _classify
+            return classifier_instance
+
+        with patch("fsm_llm.pipeline.Classifier", side_effect=_make_mock_classifier):
+            result = agent.run("Explain how neural networks learn")
+
+        # The critical assertion: _execute_subtasks was called
+        assert execute_called["count"] >= 1, (
+            "_execute_subtasks was never called — the bug is back "
+            "(subtask execution timing is wrong)"
+        )
+
+        # Verify it was called with the correct subtasks
+        assert execute_called["args"] is not None
+        assert len(execute_called["args"]["subtasks"]) == 2
+        assert execute_called["args"]["operator"] == "AND"
+        assert result.success is True
+
+    def test_subtasks_not_executed_when_attempt_succeeds(self):
+        """When the attempt succeeds, _execute_subtasks should NOT be called."""
+        from fsm_llm.agents.adapt import ADaPTAgent
+
+        extraction_sequence = [
+            # 1. attempt: produce attempt result
+            {"attempt_result": "Complete answer here."},
+            # 2. assess: attempt succeeded
+            {"attempt_succeeded": True, "assessment": "looks good"},
+            # 3. combine: final answer (direct from success path)
+            {"final_answer": "Complete answer here."},
+        ]
+
+        mock_llm = SequenceMockLLM(extraction_sequence)
+        config = AgentConfig(max_iterations=15, timeout_seconds=30.0)
+
+        agent = ADaPTAgent(
+            config=config,
+            max_depth=2,
+            llm_interface=mock_llm,
+        )
+
+        execute_called = {"count": 0}
+
+        def mock_execute_subtasks(
+            subtasks, operator, depth, initial_context, start_time=None, *, holder
+        ):
+            execute_called["count"] += 1
+            return []
+
+        agent._execute_subtasks = mock_execute_subtasks
+
+        # Patch Classifier to avoid real LLM calls for ambiguous transitions.
+        def _make_mock_classifier(schema, **kwargs):
+            classifier_instance = MagicMock()
+            first_intent = schema.intents[0].name if schema.intents else "unknown"
+
+            def _classify(msg, context=None):
+                result = MagicMock()
+                result.intent = first_intent
+                result.confidence = 0.9
+                result.reasoning = "mock"
+                result.entities = {}
+                return result
+
+            classifier_instance.classify.side_effect = _classify
+            return classifier_instance
+
+        with patch("fsm_llm.pipeline.Classifier", side_effect=_make_mock_classifier):
+            result = agent.run("Simple question")
+
+        # _execute_subtasks should NOT have been called
+        assert execute_called["count"] == 0
+        assert result.success is True
+
+
+class TestADaPTStructuredOutputAndLifecycle:
+    """F-AP-02: ADaPT honours ``output_schema`` and registers lifecycle handlers."""
+
+    def _run(self, monkeypatch, **extra):
+        calls: list[str] = []
+        original = BaseAgent._register_lifecycle_handlers
+
+        def spy(self, api, agent_type):
+            calls.append(agent_type)
+            return original(self, api, agent_type)
+
+        monkeypatch.setattr(BaseAgent, "_register_lifecycle_handlers", spy)
+        llm = PromptGroundedLLM(
+            facts={
+                "attempt_result": ('{"answer": "x"}', "Plan the trip"),
+                "attempt_succeeded": (True, '{"answer": "x"}'),
+            }
+        )
+        agent = ADaPTAgent(
+            config=AgentConfig(max_iterations=10, output_schema=_Out),
+            max_depth=1,
+            llm_interface=llm,
+            **extra,
+        )
+        return agent.run("Plan the trip"), calls
+
+    def test_structured_output_is_filled(self, monkeypatch):
+        result, _ = self._run(monkeypatch)
+        assert result.answer == '{"answer": "x"}'
+        assert result.structured_output == _Out(answer="x")
+
+    def test_lifecycle_handlers_are_registered(self, monkeypatch):
+        _, calls = self._run(monkeypatch)
+        assert calls == ["adapt"]
+
+
+class _AdaptLLM(LLMInterface):
+    """The attempt of the root task fails, it decomposes into a succeeding
+    and a failing subtask, and the model answers ``operator`` AND."""
+
+    def __init__(self) -> None:
+        self.model = "mock-model"
+        self.fields: list[str] = []
+
+    def extract_field(self, request: Any) -> FieldExtractionResponse:
+        name = request.field_name
+        self.fields.append(name)
+        task = str((request.context or {}).get("task", ""))
+        value: Any = {
+            "attempt_result": f"attempt at {task}",
+            "attempt_succeeded": "good" in task,
+            "subtasks": ["good sub", "bad sub"],
+            "operator": "AND",
+        }.get(name)
+        return FieldExtractionResponse(
+            field_name=name,
+            value=value,
+            confidence=0.9,
+            reasoning="m",
+            is_valid=value is not None,
+        )
+
+    def extract_bulk_data(self, request: Any) -> DataExtractionResponse:
+        return DataExtractionResponse(extracted_data={})
+
+    def generate_response(self, request: Any) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="Combined reply of the run, long enough.",
+            message_type="response",
+            reasoning="m",
+        )
+
+
+class TestAdaptOperatorIsARunOutput:
+    """RED on the parent: a caller-seeded ``operator`` "OR" was kept, core
+    never asked the model, the failing subtask never ran and the run
+    reported ``(True, "evidence")`` (``probe_adapt.py``)."""
+
+    @pytest.mark.parametrize("seed", ["OR", "or"])
+    def test_caller_operator_cannot_change_the_outcome(self, seed: str):
+        llm = _AdaptLLM()
+        agent = ADaPTAgent(
+            config=AgentConfig(max_iterations=6, model="mock/model"),
+            max_depth=1,
+            llm_interface=llm,
+        )
+
+        result = agent.run("root task", initial_context={"operator": seed})
+
+        ran = [entry["subtask"] for entry in result.final_context["subtask_results"]]
+        assert ran == ["good sub", "bad sub"]
+        assert (result.success, result.stop_reason) == (False, "no_result")
+        assert llm.fields.count("operator") == 1
+        assert result.final_context["operator"] == "AND"
+
+    def test_operator_is_in_the_patterns_run_outputs(self):
+        assert ContextKeys.OPERATOR in ADaPTAgent._run_output_keys

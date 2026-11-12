@@ -13,12 +13,14 @@ the request bytes are pinned by ``test_native_fc_golden.py``.
 from __future__ import annotations
 
 import json
+import time
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from pydantic import BaseModel
 
+import fsm_llm.api as api_module
 from fsm_llm.agents import (
     AgentConfig,
     NativeFunctionCallingReactAgent,
@@ -26,10 +28,19 @@ from fsm_llm.agents import (
     tool,
 )
 from fsm_llm.agents.base import BaseAgent, _output_response_format
-from fsm_llm.agents.constants import ContextKeys, NativeFCContextKeys, StopReason
-from fsm_llm.agents.definitions import AgentTrace, ToolCall
-from fsm_llm.agents.exceptions import AgentError, BudgetExhaustedError
-from fsm_llm.agents.native_fc import _SYSTEM_PROMPT
+from fsm_llm.agents.constants import (
+    ContextKeys,
+    NativeFCContextKeys,
+    NativeFCStates,
+    StopReason,
+)
+from fsm_llm.agents.definitions import AgentTrace, ToolCall, ToolResult
+from fsm_llm.agents.exceptions import (
+    AgentError,
+    AgentTimeoutError,
+    BudgetExhaustedError,
+)
+from fsm_llm.agents.native_fc import _SYSTEM_PROMPT, NativeFCHandlers
 from fsm_llm.definitions import (
     CompletionResponse,
     LLMResponseError,
@@ -38,6 +49,7 @@ from fsm_llm.definitions import (
 )
 from fsm_llm.testing import final_reply
 from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
+from tests.test_fsm_llm_agents import test_native_fc_golden as golden
 
 
 @tool
@@ -758,3 +770,322 @@ class TestSuccessSeam:
         assert BaseAgent._run_outcome(
             {NativeFCContextKeys.ANSWER: "Paris"}, trace, [NativeFCContextKeys.ANSWER]
         ) == (True, StopReason.ANSWERED)
+
+
+class _RecordingRegistry(ToolRegistry):
+    def __init__(self) -> None:
+        super().__init__()
+        self.ran: list[str] = []
+
+    def execute(self, tool_call: ToolCall, *, gated: bool = False) -> ToolResult:
+        self.ran.append(tool_call.tool_name)
+        return super().execute(tool_call, gated=gated)
+
+
+def _recording_native(**config: Any) -> tuple[Any, _RecordingRegistry]:
+    registry = _RecordingRegistry()
+    for tool_def in golden._registry().list_tools():
+        registry.register(tool_def)
+    settings: dict[str, Any] = {"model": "gpt-4o-mini", **config}
+    agent = NativeFunctionCallingReactAgent(registry, config=AgentConfig(**settings))
+    return agent, registry
+
+
+class TestRunToolsFinishesPastTheDeadline:
+    """Each model call costs 1.2 s of a 1.0 s budget, so the deadline passes
+    during the first calls turn. e1f63a9 ran that turn's tools; with
+    ``RUN_TOOLS`` removed from ``SECONDS_EXEMPT`` the run raised before."""
+
+    def test_run_tools_is_exempt(self):
+        assert NativeFCStates.RUN_TOOLS in NativeFCStates.SECONDS_EXEMPT
+        assert NativeFCStates.CALL_MODEL not in NativeFCStates.SECONDS_EXEMPT
+
+    def test_exhausted_loop_still_runs_its_tools_and_the_forced_write(
+        self, monkeypatch
+    ):
+        recorder = _timed_recorder(
+            monkeypatch,
+            [
+                golden._calls(golden._PARIS),
+                golden._calls(golden._NOTE),
+                golden._final("x"),
+            ],
+            1.2,
+        )
+        agent, registry = _recording_native(
+            max_iterations=1, timeout_seconds=1.0, force_final_tool="write_note"
+        )
+        result = agent.run("t")
+        assert len(recorder.requests) == 2
+        assert registry.ran == ["weather", "write_note"]
+        assert [c.tool_name for c in result.trace.tool_calls] == [
+            "weather",
+            "write_note",
+        ]
+
+    def test_mid_loop_runs_the_turns_tools_then_times_out(self, monkeypatch):
+        """e1f63a9 parity: the clock stops the run at the next model turn.
+        (The tools run on ``run_tools`` entry, so this case alone does not
+        tell the mutant apart; the exhausted case above does.)"""
+        recorder = _timed_recorder(
+            monkeypatch,
+            [golden._calls(golden._PARIS), golden._final("x")],
+            1.2,
+        )
+        agent, registry = _recording_native(max_iterations=5, timeout_seconds=1.0)
+        with pytest.raises(AgentTimeoutError):
+            agent.run("t")
+        assert len(recorder.requests) == 1
+        assert registry.ran == ["weather"]
+
+
+_K = NativeFCContextKeys
+
+
+_SECRET = "sk-test-0123456789abcdef0123456789abcdef"
+
+
+class _FakeClock:
+    """Stands in for ``fsm_llm.api``'s ``time``; each model call costs time."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(time, name)
+
+
+def _timed_recorder(
+    monkeypatch: pytest.MonkeyPatch, script: list[Any], seconds: float
+) -> golden._Recorder:
+    clock = _FakeClock()
+    monkeypatch.setattr(api_module, "time", clock)
+    recorder = golden._Recorder(script)
+
+    def call(**kwargs: Any) -> Any:
+        clock.now += seconds
+        return recorder(**kwargs)
+
+    for binding in golden._BINDINGS:
+        monkeypatch.setattr(binding, call)
+    return recorder
+
+
+def _native(**config: Any) -> NativeFunctionCallingReactAgent:
+    settings: dict[str, Any] = {"model": "gpt-4o-mini", "max_iterations": 5, **config}
+    return NativeFunctionCallingReactAgent(
+        golden._registry(), config=AgentConfig(**settings)
+    )
+
+
+class TestPostLoopTurnsFinishPastTheDeadline:
+    """``budget.py clock`` of review pass 5: each call costs 0.6 s of a 1.0 s
+    budget, the loop ends with a final answer at 1.2 s. e1f63a9 ran the
+    forced write and the repair; the parent raised AgentTimeoutError."""
+
+    def test_forced_write_runs_and_the_answer_ships(self, monkeypatch):
+        recorder = _timed_recorder(
+            monkeypatch,
+            [
+                golden._calls(golden._PARIS),
+                golden._final("plain answer"),
+                golden._calls(golden._NOTE),
+            ],
+            0.6,
+        )
+        result = _native(timeout_seconds=1.0, force_final_tool="write_note").run("t")
+        assert len(recorder.requests) == 3
+        assert result.success is True
+        assert result.answer == "plain answer"
+        assert [c.tool_name for c in result.trace.tool_calls] == [
+            "weather",
+            "write_note",
+        ]
+
+    def test_repair_runs_and_its_answer_ships(self, monkeypatch):
+        recorder = _timed_recorder(
+            monkeypatch,
+            [
+                golden._calls(golden._PARIS),
+                golden._final("plain answer"),
+                golden._final(golden._REPORT),
+            ],
+            0.6,
+        )
+        result = _native(timeout_seconds=1.0, output_schema=golden._WeatherReport).run(
+            "t"
+        )
+        assert len(recorder.requests) == 3
+        assert result.success is True
+        assert result.structured_output == golden._WeatherReport(
+            city="Paris", conditions="sunny"
+        )
+
+    def test_a_loop_turn_past_the_deadline_still_times_out(self, monkeypatch):
+        from fsm_llm.agents.exceptions import AgentTimeoutError
+
+        recorder = _timed_recorder(
+            monkeypatch,
+            [golden._calls(golden._PARIS), golden._calls(golden._ROME)],
+            0.6,
+        )
+        with pytest.raises(AgentTimeoutError):
+            _native(timeout_seconds=1.0).run("t")
+        assert len(recorder.requests) == 2
+
+
+class TestRawArgumentsStayOut:
+    def test_forced_turn_arguments_are_not_in_final_context(self, monkeypatch):
+        secret_note = ("call_9", "write_note", {"text": "done", "api_key": _SECRET})
+        recorder = golden._Recorder(
+            [
+                golden._calls(golden._PARIS),
+                golden._final("Paris is sunny."),
+                golden._calls(secret_note),
+            ]
+        )
+        for binding in golden._BINDINGS:
+            monkeypatch.setattr(binding, recorder)
+        result = _native(force_final_tool="write_note").run("t")
+        assert result.success is True
+        assert _SECRET not in json.dumps(result.final_context, default=str)
+        assert _K.FORCED_REPLY not in result.final_context
+        shown = result.trace.tool_calls[-1].parameters
+        assert shown["api_key"] == "<redacted>"
+
+    def test_a_refused_turn_clears_its_reply(self):
+        handlers = NativeFCHandlers(golden._registry(), max_tool_turns=5)
+        context = {
+            ContextKeys.AGENT_TRACE: [],
+            _K.MODEL_REPLY: {
+                "kind": "calls",
+                "text": None,
+                "calls": [{"id": "c", "name": "", "arguments": {"api_key": _SECRET}}],
+            },
+        }
+        delta = handlers.run_tools(context)
+        assert delta[_K.MODEL_REPLY] is None
+        assert delta[_K.LOOP_END] == "malformed"
+
+
+class TestSystemPolicyType:
+    def test_a_callable_in_the_old_complete_fn_slot_is_refused(self):
+        def legacy_complete(*args: Any) -> dict[str, Any]:
+            return {}
+
+        with pytest.raises(TypeError, match="system_policy must be a str or None"):
+            NativeFunctionCallingReactAgent(
+                golden._registry(), AgentConfig(model="m"), legacy_complete
+            )
+
+    def test_setting_a_non_str_later_is_refused(self):
+        agent = _native()
+        with pytest.raises(TypeError):
+            agent.system_policy = 42  # type: ignore[assignment]
+
+    def test_str_and_none_are_accepted(self):
+        agent = _native()
+        agent.system_policy = "Be brief."
+        assert agent._system_message().endswith("\n\nBe brief.")
+        agent.system_policy = None
+        assert agent.system_policy is None
+
+
+class TestEmptyToolNameIsMalformed:
+    def test_nameless_call_ends_the_loop_and_runs_nothing(self, monkeypatch):
+        recorder = golden._Recorder(
+            [golden._raw_calls(("call_1", "", '{"city": "Paris"}'))]
+        )
+        for binding in golden._BINDINGS:
+            monkeypatch.setattr(binding, recorder)
+        result = _native().run("t")
+        assert len(recorder.requests) == 1
+        assert result.success is False
+        assert result.stop_reason == "no_result"
+        assert result.trace.tool_calls == []
+
+
+def _scripted(monkeypatch: pytest.MonkeyPatch, script: list[Any]) -> golden._Recorder:
+    recorder = golden._Recorder(script)
+    for binding in golden._BINDINGS:
+        monkeypatch.setattr(binding, recorder)
+    return recorder
+
+
+class TestSurvivingMutants:
+    def test_m01_whitespace_answer_after_a_tool_is_no_result(self, monkeypatch):
+        _scripted(monkeypatch, [golden._calls(golden._PARIS), golden._final("   ")])
+        result = _native().run("t")
+        assert result.success is False
+        assert result.stop_reason == "no_result"
+
+    def test_m16_answer_is_the_model_text_verbatim(self, monkeypatch):
+        _scripted(monkeypatch, [golden._final("  Paris is sunny.\n")])
+        result = _native().run("t")
+        assert result.answer == "  Paris is sunny.\n"
+
+    def test_m17_caller_context_never_stands_in_for_the_answer(self, monkeypatch):
+        _scripted(
+            monkeypatch,
+            [golden._final("not json"), golden._final("still not json")],
+        )
+        result = _native(output_schema=golden._WeatherReport).run(
+            "t", initial_context={"city": "Forged", "conditions": "forged"}
+        )
+        assert result.final_context["city"] == "Forged"
+        assert result.structured_output is None
+
+    @pytest.mark.parametrize(
+        ("script", "max_iterations", "expected"),
+        [
+            ([golden._final("x")], 5, 1),
+            ([golden._calls(golden._PARIS), golden._final("x")], 5, 2),
+            ([golden._calls(golden._PARIS), golden._calls(golden._ROME)], 2, 2),
+        ],
+        ids=["final", "tool_then_final", "exhausted"],
+    )
+    def test_m18_iterations_used_counts_loop_model_turns(
+        self, monkeypatch, script, max_iterations, expected
+    ):
+        _scripted(monkeypatch, script)
+        result = _native(max_iterations=max_iterations).run("t")
+        assert result.iterations_used == expected
+
+    def test_m19_a_raising_registry_fails_the_run(self, monkeypatch):
+        class Broken(ToolRegistry):
+            def execute(self, tool_call: ToolCall, *, gated: bool = False) -> Any:
+                raise RuntimeError("registry broke its never-raise contract")
+
+        registry = Broken()
+        for tool_def in golden._registry().list_tools():
+            registry.register(tool_def)
+        recorder = _scripted(
+            monkeypatch, [golden._calls(golden._PARIS), golden._final("x")]
+        )
+        agent = NativeFunctionCallingReactAgent(
+            registry, config=AgentConfig(model="gpt-4o-mini")
+        )
+        with pytest.raises(AgentError, match="never-raise"):
+            agent.run("t")
+        assert len(recorder.requests) == 1
+
+    def test_m23_repair_turn_never_sees_the_forced_exchange(self, monkeypatch):
+        recorder = _scripted(
+            monkeypatch,
+            [
+                golden._calls(golden._PARIS),
+                golden._final("Paris is sunny."),
+                golden._calls(golden._NOTE),
+                golden._final(golden._REPORT),
+            ],
+        )
+        _native(force_final_tool="write_note", output_schema=golden._WeatherReport).run(
+            "t"
+        )
+        repair = recorder.requests[-1]["messages"]
+        assert "response_format" in recorder.requests[-1]
+        assert not any(m.get("tool_calls") for m in repair[3:])
+        assert not any(m.get("tool_call_id") == "call_9" for m in repair)

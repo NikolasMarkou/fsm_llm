@@ -5,6 +5,7 @@ Embeddings are injected via embed_fn so tests are deterministic and need no LLM.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -381,3 +382,20 @@ class TestDefaultEmbedder:
         store.search("python")
 
         assert provider.requests == []
+
+
+class TestSemanticStoreLoaders:
+    """F-AI-13: ``load`` and the constructor disagreed on a blank file."""
+
+    def test_blank_file_loads_as_an_empty_store(self, tmp_path: Path):
+        path = tmp_path / "mem.json"
+        path.write_text("  \n", encoding="utf-8")
+        embed = lambda text: [1.0]  # noqa: E731
+        assert len(SemanticMemoryStore(persist_path=str(path), embed_fn=embed)) == 0
+        assert len(SemanticMemoryStore.load(str(path), embed_fn=embed)) == 0
+
+    def test_invalid_payload_names_the_file(self, tmp_path: Path):
+        path = tmp_path / "mem.json"
+        path.write_text('{"entries": [1]}', encoding="utf-8")
+        with pytest.raises(ValueError, match=r"mem\.json"):
+            SemanticMemoryStore.load(str(path), embed_fn=lambda text: [1.0])

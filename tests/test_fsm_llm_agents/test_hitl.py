@@ -2,8 +2,12 @@ from __future__ import annotations
 
 """Tests for fsm_llm.agents.hitl module."""
 
+from unittest.mock import MagicMock
+
+from fsm_llm.agents import ReactAgent, SelfConsistencyAgent
 from fsm_llm.agents.definitions import ApprovalRequest, ToolCall
 from fsm_llm.agents.hitl import HumanInTheLoop
+from fsm_llm.testing import PromptGroundedLLM
 
 
 def _always_approve(request: ApprovalRequest) -> bool:
@@ -183,3 +187,20 @@ class TestApprovalTimeoutCallbackErrors:
             logger.disable("fsm_llm")
 
         assert not any("raised after" in m for m in captured), captured
+
+
+class TestBaseHookAsksForHitlApproval:
+    """F-XD-05: the base ``_on_loop_iteration`` is the HITL driver."""
+
+    def test_the_hook_runs_the_driver(self):
+        agent = SelfConsistencyAgent(llm_interface=PromptGroundedLLM())
+        agent._handle_hitl_approval = MagicMock()  # type: ignore[method-assign]
+        agent._on_loop_iteration("api", "conv", 1)  # type: ignore[arg-type]
+        agent._handle_hitl_approval.assert_called_once_with("api", "conv")
+
+    def test_the_three_hitl_patterns_inherit_it(self):
+        from fsm_llm.agents.reasoning_react import ReasoningReactAgent
+        from fsm_llm.agents.reflexion import ReflexionAgent
+
+        for cls in (ReactAgent, ReflexionAgent, ReasoningReactAgent):
+            assert "_on_loop_iteration" not in vars(cls)

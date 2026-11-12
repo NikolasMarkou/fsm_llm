@@ -1339,3 +1339,56 @@ class TestIncompleteBundleSignal:
         same = OKFMemoryBackend(_zephyr_bundle()).search("Zephyr gateway payload")
         assert partial.search("Zephyr gateway payload") == same
         assert all("incompletely" not in text for text, _, _ in same)
+
+
+def _integrations_fixes_bundle() -> OKFBundle:
+    return OKFBundle(
+        [
+            OKFConcept(
+                id="docs/zephyr",
+                type="Doc",
+                title="Zephyr gateway",
+                body="The Zephyr gateway accepts payloads up to 7341 KB.\n",
+            ),
+            OKFConcept(id="docs/banana", type="Doc", title="Banana", body="Fruit."),
+        ]
+    )
+
+
+class TestOKFBackendStoreOutage:
+    """F-AI-02: a store that cannot embed hid the lexical fallback."""
+
+    def test_provider_down_after_reindex_falls_back_to_lexical(self):
+        up = {"ok": True}
+
+        def embed(text: str) -> list[float]:
+            if not up["ok"]:
+                raise RuntimeError("embedding provider down")
+            return [1.0 if "zephyr" in text.lower() else 0.0, 0.1]
+
+        store = SemanticMemoryStore(embed_fn=embed)
+        backend = OKFMemoryBackend(_integrations_fixes_bundle(), store=store)
+        backend.reindex()
+        question = "what payload size does the zephyr gateway accept"
+        assert backend.search(question)[0][2]["id"] == "docs/zephyr"
+        up["ok"] = False
+        hits = backend.search(question)
+        assert [h[2]["id"] for h in hits][:1] == ["docs/zephyr"]
+
+
+class TestOKFBoolOffset:
+    """F-AI-10 (OKF side): a bool offset is 0, as in the skill tools."""
+
+    @pytest.mark.parametrize("tool", ["okf_read", "okf_list"])
+    def test_bool_offset_is_zero(self, tool: str):
+        registry = create_okf_tools(_integrations_fixes_bundle())
+        params = {"id": "docs/zephyr"} if tool == "okf_read" else {}
+
+        def run(offset: Any) -> str:
+            result = registry.execute(
+                ToolCall(tool_name=tool, parameters={**params, "offset": offset})
+            )
+            assert result.success, result.error
+            return str(result.result)
+
+        assert run(True) == run(0)

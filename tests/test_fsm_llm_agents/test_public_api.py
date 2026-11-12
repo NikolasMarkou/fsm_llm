@@ -622,3 +622,43 @@ class TestInertParametersRemoved:
                 entry_agent="a",
                 llm_interface=object(),
             )
+
+
+class TestPhase2Exports:
+    """Test that all Phase 2 classes are exported correctly."""
+
+    def test_agents_exports(self):
+        """All Phase 2 agent classes are importable from fsm_llm.agents."""
+        import fsm_llm.agents as m
+
+        assert hasattr(m, "SwarmAgent")
+        assert hasattr(m, "AgentGraph")
+        assert hasattr(m, "AgentGraphBuilder")
+        assert hasattr(m, "MCPToolProvider")
+        assert hasattr(m, "SOPDefinition")
+        assert hasattr(m, "SOPRegistry")
+        assert hasattr(m, "load_builtin_sops")
+        assert hasattr(m, "SemanticToolRegistry")
+        assert hasattr(m, "AgentServer")
+        assert hasattr(m, "RemoteAgentTool")
+
+    def test_workflows_exports(self):
+        """DependencyResolver is importable from fsm_llm.workflows."""
+        from fsm_llm.workflows import DependencyResolver
+
+        assert DependencyResolver is not None
+
+    def test_monitor_exports(self):
+        """OTELExporter is importable from fsm_llm.monitor."""
+        from fsm_llm.monitor import OTELExporter
+
+        assert OTELExporter is not None
+
+    def test_swarm_in_create_agent_patterns(self):
+        """SwarmAgent is available via create_agent pattern list."""
+        from fsm_llm.agents import create_agent
+
+        with pytest.raises(TypeError):
+            # SwarmAgent needs 'agents' kwarg, so this will fail,
+            # but it proves the pattern is recognized
+            create_agent(pattern="swarm")

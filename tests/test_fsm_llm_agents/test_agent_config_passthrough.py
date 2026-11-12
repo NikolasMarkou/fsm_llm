@@ -6,7 +6,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm.agents import AgentConfig, ReactAgent, tool
+from fsm_llm import API, LiteLLMInterface
+from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry, tool
+from fsm_llm.agents.exceptions import AgentError
+from fsm_llm.reasoning import ReasoningEngine
+from fsm_llm.testing import MockLLM2Interface
 
 
 @tool
@@ -86,3 +90,73 @@ class TestCreateApiPassthrough:
         captured = self._capture_kwargs(AgentConfig())
         assert "max_history_size" not in captured
         assert "caching" not in captured
+
+
+def _review_round2_callers_registry() -> ToolRegistry:
+    registry = ToolRegistry()
+    registry.register_function(lambda query: f"found {query}", name="search")
+    return registry
+
+
+class TestPromptCacheWithAnInjectedInterface:
+    def test_refused_at_construction_naming_the_flag(self):
+        with pytest.raises(AgentError, match="enable_prompt_cache"):
+            ReactAgent(
+                _review_round2_callers_registry(),
+                config=AgentConfig(model="x/y", enable_prompt_cache=True),
+                llm_interface=MockLLM2Interface(),
+            )
+
+    def test_a_config_replaced_after_construction_is_refused_at_run(self):
+        agent = ReactAgent(
+            _review_round2_callers_registry(),
+            config=AgentConfig(model="x/y"),
+            llm_interface=MockLLM2Interface(),
+        )
+        agent.config = AgentConfig(model="x/y", enable_prompt_cache=True)
+        with pytest.raises(AgentError, match="enable_prompt_cache"):
+            agent._create_api({"name": "x"})
+
+    def test_without_an_interface_caching_still_reaches_the_interface(self):
+        agent = ReactAgent(
+            _review_round2_callers_registry(),
+            config=AgentConfig(model="gpt-4o", enable_prompt_cache=True),
+        )
+        from fsm_llm.agents.fsm_definitions import build_react_fsm
+
+        api = agent._create_api(build_react_fsm(agent.tools))
+        assert api.llm_interface.kwargs.get("caching") is True
+
+
+class TestInjectedInterfaceOwnsItsSettings:
+    def test_agent_config_defaults_are_not_passed_beside_it(self):
+        injected = LiteLLMInterface("ollama_chat/qwen3.5:4b", temperature=0.2)
+        agent = ReactAgent(
+            _review_round2_callers_registry(),
+            config=AgentConfig(model="gpt-4o", temperature=0.9, max_tokens=50),
+            llm_interface=injected,
+        )
+        from fsm_llm.agents.fsm_definitions import build_react_fsm
+
+        api = agent._create_api(build_react_fsm(agent.tools))
+        assert api.llm_interface is injected
+        assert injected.temperature == 0.2
+
+    def test_a_setting_the_caller_passes_beside_it_is_still_refused(self):
+        agent = ReactAgent(
+            _review_round2_callers_registry(),
+            config=AgentConfig(model="gpt-4o"),
+            llm_interface=MockLLM2Interface(),
+            seed=7,
+        )
+        from fsm_llm.agents.fsm_definitions import build_react_fsm
+
+        with pytest.raises(ValueError, match="seed"):
+            agent._create_api(build_react_fsm(agent.tools))
+
+    def test_the_reasoning_engine_builds_on_an_injected_interface(self):
+        injected = MockLLM2Interface()
+        engine = ReasoningEngine(model="gpt-4o", llm_interface=injected)
+        assert engine.orchestrator.llm_interface is injected
+        with pytest.raises(ValueError, match="model"):
+            API.from_definition(engine.main_fsm, model="gpt-4o", llm_interface=injected)

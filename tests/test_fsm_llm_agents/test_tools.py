@@ -3,6 +3,7 @@ from __future__ import annotations
 """Tests for fsm_llm.agents.tools module."""
 
 import collections.abc
+import functools
 import sys
 import threading
 import time
@@ -2139,3 +2140,73 @@ class TestOneSchemaRule:
         )
         assert result.success, result.error
         assert seen == [{"city": "x"}]
+
+
+def _search(query: str, limit: int = 5) -> str:
+    return f"{query}:{limit}"
+
+
+async def _asearch(query: str) -> str:
+    return f"aio {query}"
+
+
+class _Obj:
+    def __call__(self, query: str) -> str:
+        return f"obj {query}"
+
+
+class _AObj:
+    async def __call__(self, query: str) -> str:
+        return f"aobj {query}"
+
+
+class _Meth:
+    def go(self, query: str) -> str:
+        return f"meth {query}"
+
+
+def _posonly(query: str, /, limit: int = 5) -> str:
+    return f"{query}:{limit}"
+
+
+_SHAPES = [
+    ("partial", functools.partial(_search, limit=2), {"query": "x"}, "x:2"),
+    ("callable_object", _Obj(), {"query": "x"}, "obj x"),
+    ("async_partial", functools.partial(_asearch), {"query": "x"}, "aio x"),
+    ("async_callable_object", _AObj(), {"query": "x"}, "aobj x"),
+    ("bound_method", _Meth().go, {"query": "x"}, "meth x"),
+    ("positional_only", _posonly, {"query": "x"}, "x:5"),
+    ("positional_only_both", _posonly, {"query": "x", "limit": 3}, "x:3"),
+]
+
+
+class TestRegisterFunctionShapes:
+    @pytest.mark.parametrize(
+        ("label", "fn", "params", "expected"), _SHAPES, ids=[s[0] for s in _SHAPES]
+    )
+    def test_registers_infers_and_executes(self, label, fn, params, expected):
+        registry = ToolRegistry()
+        registry.register_function(fn, name=label, description="d")
+        schema = registry.get(label).parameter_schema
+        assert schema["properties"]["query"] == {"type": "string"}
+        result = registry.execute(ToolCall(tool_name=label, parameters=params))
+        assert result.success, result.error
+        assert result.result == expected
+
+    def test_unnamed_callable_object_gets_its_type_name(self):
+        registry = ToolRegistry()
+        registry.register_function(_Obj(), description="d")
+        assert "_Obj" in registry
+
+    def test_positional_only_missing_value_is_a_failed_call(self):
+        runs: list[str] = []
+
+        def two(query: str, /, limit: int = 5) -> str:
+            runs.append(query)
+            return query
+
+        registry = ToolRegistry()
+        registry.register_function(two, name="two", description="d")
+        result = registry.execute(ToolCall(tool_name="two", parameters={"limit": 3}))
+        assert result.success is False
+        assert runs == []

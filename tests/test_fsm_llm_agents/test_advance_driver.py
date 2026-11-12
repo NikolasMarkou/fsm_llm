@@ -26,11 +26,12 @@ return a ``[state]`` marker, and that ADaPT sub-runs share the parent's clock.
 
 from __future__ import annotations
 
+import json
 import re
 import threading
 import time
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -54,8 +55,9 @@ from fsm_llm.agents import (
     ToolRegistry,
     VerifiedReactAgent,
 )
+from fsm_llm.agents import constants as agent_constants
 from fsm_llm.agents.base import BaseAgent
-from fsm_llm.agents.constants import RUN_OUTPUT_KEYS, ContextKeys
+from fsm_llm.agents.constants import RUN_OUTPUT_KEYS, ContextKeys, StopReason
 from fsm_llm.agents.definitions import AgentResult, ApprovalRequest, EvaluationResult
 from fsm_llm.agents.exceptions import (
     AgentError,
@@ -65,16 +67,27 @@ from fsm_llm.agents.exceptions import (
 from fsm_llm.agents.fsm_definitions import (
     _await_approval_state,
     build_adapt_fsm,
+    build_debate_fsm,
+    build_evalopt_fsm,
+    build_maker_checker_fsm,
+    build_orchestrator_fsm,
+    build_parallel_react_fsm,
+    build_plan_execute_fsm,
+    build_prompt_chain_fsm,
     build_react_fsm,
     build_reflexion_fsm,
+    build_rewoo_fsm,
+    build_self_consistency_fsm,
 )
 from fsm_llm.agents.handlers import AgentHandlers, approval_grant
 from fsm_llm.agents.verified_react import _REFLECTION_NOTE
 from fsm_llm.definitions import (
     BulkExtractionRequest,
     ClassificationResult,
+    ConversationBusyError,
     DataExtractionResponse,
     FSMDefinition,
+    RunBudgetExceededError,
 )
 from fsm_llm.testing import PromptGroundedLLM, state_in_prompt
 from tests.test_fsm_llm_agents.test_grounded_patterns import _TurnAwareLLM
@@ -2679,3 +2692,721 @@ class TestAnswerFallbacksNeverReturnAStateMarker:
         answer = agent._extract_answer({}, [])
 
         assert answer.endswith("could not determine an answer.")
+
+
+# Literal on purpose (the tests must fail on the parent for what the run
+# does): the record of the gated _CALL and of _OTHER_CALL.
+_RECORD = (
+    "transfer({'account': 'A-17', 'amount': 250}): was refused by the human "
+    "approver and was not performed."
+)
+
+
+_OTHER_RECORD = (
+    "transfer({'account': 'X-99', 'amount': 9999}): was refused by the human "
+    "approver and was not performed."
+)
+
+
+def _deny_first(asks: list[dict[str, Any]]) -> Any:
+    """An approver that refuses the first ask and approves every later one."""
+
+    def decide(request: Any) -> bool:
+        asks.append(dict(request.parameters))
+        return len(asks) > 1
+
+    return decide
+
+
+class _RetryLLM(_HitlLLM):
+    """Re-selects the denied ``transfer`` call unchanged (live qwen3.5:4b
+    behaviour, 3 asks per denied React run); concludes once it ran."""
+
+    def _grounded(self, name: str, text: str) -> object | None:
+        done = "Result: Transferred" in text
+        if name == "tool_name":
+            return None if done else "transfer"
+        if name == "tool_input":
+            return None if done else dict(_CALL)
+        if name == "should_terminate":
+            return True if done else None
+        return None
+
+
+class _SwitchCallLLM(_HitlLLM):
+    """After a denial of ``_CALL`` selects ``transfer(_OTHER_CALL)``; after a
+    denial of that one, ``check_balance``; concludes on a tool result."""
+
+    def _grounded(self, name: str, text: str) -> object | None:
+        done = "Result: Transferred" in text or "Result: Balance" in text
+        if "denied the call transfer({'account': 'X-99'" in text:
+            tool, call = "check_balance", {"account": "A-17"}
+        elif "denied the call transfer" in text:
+            tool, call = "transfer", dict(_OTHER_CALL)
+        else:
+            tool, call = "transfer", dict(_CALL)
+        if name == "tool_name":
+            return None if done else tool
+        if name == "tool_input":
+            return None if done else call
+        if name == "should_terminate":
+            return True if done else None
+        return None
+
+
+class _NestedSecretLLM(_HitlLLM):
+    """``_HitlLLM`` whose gated call nests secrets in a mapping and a list."""
+
+    def _grounded(self, name: str, text: str) -> object | None:
+        value = super()._grounded(name, text)
+        if name == "tool_input" and value == _CALL:
+            return {
+                **_CALL,
+                "auth": {"api_key": _SECRET},
+                "headers": [{"password": "hunter2"}, {"note": "keep me"}],
+            }
+        return value
+
+
+class TestRefusalRecordStaysTrue:
+    """D-045. RED on the parent 097cb6f: the record said "NOT performed ...
+    the refusal is final for this run" and stayed after the same call was
+    approved on the next ask and ran (``probe_k.py``)."""
+
+    @pytest.mark.parametrize("build", _HITL_BUILDERS)
+    def test_deny_then_approve_of_the_same_call_leaves_no_record(
+        self, monkeypatch: pytest.MonkeyPatch, build: Any
+    ):
+        asks: list[dict[str, Any]] = []
+        probe = _HitlProbe(
+            monkeypatch,
+            build,
+            decide=_deny_first(asks),
+            llm=_RetryLLM(default_response="Done."),
+        )
+
+        result = probe.agent.run(_HITL_TASK)
+
+        assert asks == [_CALL, _CALL]
+        assert probe.kinds("transfer") == [("transfer", "A-17", 250)]
+        (final,) = probe.final
+        assert _REFUSED_KEY not in final
+        assert _REFUSED_KEY not in result.final_context
+        prompt = _conclude_prompt(probe.llm)
+        assert "was refused by the human approver" not in prompt
+        assert "Transferred 250 from A-17" in prompt
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    @pytest.mark.parametrize("build", _HITL_BUILDERS)
+    def test_approving_a_different_call_keeps_the_refused_ones_record(
+        self, monkeypatch: pytest.MonkeyPatch, build: Any
+    ):
+        probe = _HitlProbe(
+            monkeypatch,
+            build,
+            decide=lambda request: request.parameters != _CALL,
+            llm=_SwitchCallLLM(default_response="Done."),
+        )
+
+        probe.agent.run(_HITL_TASK)
+
+        assert probe.kinds("transfer") == [("transfer", "X-99", 9999)]
+        (final,) = probe.final
+        assert final[_REFUSED_KEY] == [_RECORD]
+        assert _RECORD in _conclude_prompt(probe.llm)
+
+    @pytest.mark.parametrize("build", _HITL_BUILDERS)
+    def test_two_refused_calls_are_two_records_in_order(
+        self, monkeypatch: pytest.MonkeyPatch, build: Any
+    ):
+        # Kills mutant R6 (the driver overwrote the list instead of appending).
+        probe = _HitlProbe(
+            monkeypatch,
+            build,
+            decide=lambda request: False,
+            llm=_SwitchCallLLM(default_response="Done."),
+        )
+
+        probe.agent.run(_HITL_TASK)
+
+        assert [event[1] for event in probe.kinds("ask")] == [_CALL, _OTHER_CALL]
+        assert probe.kinds("transfer") == []
+        (final,) = probe.final
+        assert final[_REFUSED_KEY] == [_RECORD, _OTHER_RECORD]
+        prompt = _conclude_prompt(probe.llm)
+        assert _RECORD in prompt and _OTHER_RECORD in prompt
+
+    @pytest.mark.parametrize("build", _HITL_BUILDERS)
+    def test_nested_and_list_secrets_are_redacted_in_the_record(
+        self, monkeypatch: pytest.MonkeyPatch, build: Any
+    ):
+        probe = _HitlProbe(
+            monkeypatch,
+            build,
+            gate="policy",
+            decide=lambda request: False,
+            llm=_NestedSecretLLM(default_response="Done."),
+        )
+
+        probe.agent.run(_HITL_TASK)
+
+        (final,) = probe.final
+        (record,) = final[_REFUSED_KEY]
+        assert record == (
+            "transfer({'account': 'A-17', 'amount': 250, 'auth': {'api_key': "
+            "'<redacted>'}, 'headers': [{'password': '<redacted>'}, {'note': "
+            "'keep me'}]}): was refused by the human approver and was not "
+            "performed."
+        )
+        prompt = _conclude_prompt(probe.llm)
+        assert record in prompt
+        assert _SECRET not in prompt and "hunter2" not in prompt
+
+    @pytest.mark.parametrize("answer", ["yes", 1, {"approved": True}])
+    @pytest.mark.parametrize("build", _HITL_BUILDERS)
+    def test_a_truthy_non_bool_answer_is_a_denial(
+        self, monkeypatch: pytest.MonkeyPatch, build: Any, answer: Any
+    ):
+        # Kills mutant S11 (`is True` relaxed to truthiness).
+        probe = _HitlProbe(monkeypatch, build, decide=lambda request: answer)
+
+        probe.agent.run(_HITL_TASK)
+
+        assert probe.kinds("transfer") == []
+        assert [event[1] for event in probe.kinds("ask")] == [_CALL]
+        (final,) = probe.final
+        assert final[_REFUSED_KEY] == [_RECORD]
+
+    def test_record_wording_is_a_fact(self):
+        from fsm_llm.agents.handlers import refusal_record
+
+        record = refusal_record("transfer", json.dumps(_CALL))
+
+        assert record == _RECORD
+        assert "final" not in record and "NOT" not in record
+
+
+class _PlantingAnswerLLM(_HitlLLM):
+    """``_HitlLLM`` whose every bulk reply writes ``final_answer``."""
+
+    def extract_bulk_data(
+        self, request: BulkExtractionRequest
+    ) -> DataExtractionResponse:
+        self.requests.append(("extract_bulk_data", request))
+        return DataExtractionResponse(
+            extracted_data={ContextKeys.FINAL_ANSWER: "PLANTED ANSWER"}
+        )
+
+
+def _all_builder_fsms() -> list[tuple[str, dict[str, Any]]]:
+    tools = _registry([])
+    chain = [
+        ChainStep(
+            step_id="a",
+            name="A",
+            extraction_instructions="e",
+            response_instructions="r",
+        ),
+        ChainStep(
+            step_id="b",
+            name="B",
+            extraction_instructions="e",
+            response_instructions="r",
+        ),
+    ]
+    return [
+        ("react", build_react_fsm(tools, include_approval_state=True)),
+        ("reflexion", build_reflexion_fsm(tools, include_approval_state=True)),
+        ("parallel_react", build_parallel_react_fsm(tools)),
+        ("plan_execute", build_plan_execute_fsm(tools)),
+        ("rewoo", build_rewoo_fsm(tools)),
+        ("orchestrator", build_orchestrator_fsm()),
+        ("adapt", build_adapt_fsm()),
+        ("debate", build_debate_fsm()),
+        ("evalopt", build_evalopt_fsm()),
+        ("maker_checker", build_maker_checker_fsm("make it", "check it")),
+        ("prompt_chain", build_prompt_chain_fsm(chain)),
+        ("self_consistency", build_self_consistency_fsm()),
+    ]
+
+
+class TestFinalAnswerCannotBePlanted:
+    """D-046. RED on the parent: under ``use_classification=True`` the
+    ``think`` bulk reply wrote ``final_answer``, which the answer seam
+    preferred over the conclude reply (``probe_hitl.py B``), and four
+    terminal states asked Pass 2 for ``final_answer``."""
+
+    @pytest.fixture
+    def planting_probe(self, monkeypatch: pytest.MonkeyPatch) -> Any:
+        def classify(message: Any, context: Any = None) -> ClassificationResult:
+            return ClassificationResult(reasoning="m", intent="transfer", confidence=1)
+
+        monkeypatch.setattr(
+            "fsm_llm.pipeline.Classifier",
+            lambda **_: SimpleNamespace(classify=classify),
+        )
+
+        def build(decide: Any) -> _HitlProbe:
+            return _HitlProbe(
+                monkeypatch,
+                lambda **kwargs: ReactAgent(use_classification=True, **kwargs),
+                decide=decide,
+                llm=_PlantingAnswerLLM(default_response="The conclude reply."),
+            )
+
+        return build
+
+    def test_bulk_reply_does_not_replace_the_answer_of_an_approved_run(
+        self, planting_probe: Any
+    ):
+        probe = planting_probe(lambda request: True)
+
+        result = probe.agent.run(_HITL_TASK)
+
+        assert len(probe.llm.calls("extract_bulk_data")) >= 1
+        assert probe.kinds("transfer") == [("transfer", "A-17", 250)]
+        assert result.answer == "The conclude reply."
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    def test_bulk_reply_does_not_hide_the_refusal_of_a_denied_run(
+        self, planting_probe: Any
+    ):
+        probe = planting_probe(lambda request: False)
+
+        result = probe.agent.run(_HITL_TASK)
+
+        assert probe.kinds("transfer") == []
+        assert result.answer == "The conclude reply."
+        assert _RECORD in _conclude_prompt(probe.llm)
+
+    def test_conclude_request_does_not_ask_for_final_answer(self):
+        probe = _Probe()
+
+        probe.agent.run(_TASK)
+
+        # Core renders required keys humanized ("- Final answer") under
+        # <information_still_needed> with "work toward collecting them".
+        prompt = _conclude_prompt(probe.llm)
+        assert "<information_still_needed>" not in prompt
+        assert "Final answer" not in prompt
+
+    @pytest.mark.parametrize(
+        ("pattern", "fsm"), _all_builder_fsms(), ids=[n for n, _ in _all_builder_fsms()]
+    )
+    def test_no_state_asks_for_final_answer(self, pattern: str, fsm: dict[str, Any]):
+        for state in fsm["states"].values():
+            assert ContextKeys.FINAL_ANSWER not in (
+                state.get("required_context_keys") or []
+            ), (pattern, state["id"])
+
+
+def _members(owner: str) -> set[str]:
+    cls = getattr(agent_constants, owner)
+    return {
+        value
+        for name, value in vars(cls).items()
+        if name.isupper() and isinstance(value, str)
+    }
+
+
+class TestStateClassesNameEveryState:
+    """D-047. RED on the parent: 11 states had no member (the builders used
+    string literals; step 20 removed the members only they would read)."""
+
+    @pytest.mark.parametrize(
+        ("owner", "pattern"),
+        [
+            ("AgentStates", "react"),
+            ("AgentStates", "parallel_react"),
+            ("ReflexionStates", "reflexion"),
+            ("PlanExecuteStates", "plan_execute"),
+            ("REWOOStates", "rewoo"),
+            ("OrchestratorStates", "orchestrator"),
+            ("ADaPTStates", "adapt"),
+            ("DebateStates", "debate"),
+            ("EvalOptStates", "evalopt"),
+            ("MakerCheckerStates", "maker_checker"),
+            ("SelfConsistencyStates", "self_consistency"),
+        ],
+    )
+    def test_class_lists_every_state_of_its_fsm(self, owner: str, pattern: str):
+        (fsm,) = [fsm for name, fsm in _all_builder_fsms() if name == pattern]
+        states = set(fsm["states"])
+        if pattern == "parallel_react":  # no approval state (no HITL)
+            states.add(agent_constants.AgentStates.AWAIT_APPROVAL)
+        assert _members(owner) == states
+
+    def test_prompt_chain_states_are_the_prefix_and_output(self):
+        (fsm,) = [fsm for name, fsm in _all_builder_fsms() if name == "prompt_chain"]
+        prefix = agent_constants.PromptChainStates.STEP_PREFIX
+        output = agent_constants.PromptChainStates.OUTPUT
+        assert set(fsm["states"]) == {f"{prefix}0", f"{prefix}1", output}
+        assert fsm["initial_state"] == f"{prefix}0"
+
+
+class _OwnBudgetAgent(BaseAgent):
+    """A pattern that passes its own ``max_iterations`` to the run loops,
+    as Debate and PromptChain do."""
+
+    def __init__(self, own_max: int, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.own_max = own_max
+
+    def run(
+        self, task: str, initial_context: dict[str, Any] | None = None
+    ) -> AgentResult:
+        return self._standard_run(
+            task,
+            _endless_fsm(),
+            self._init_context(task, initial_context),
+            "endless",
+            max_iterations=self.own_max,
+        )
+
+    def run_stream(self, task: str) -> Any:
+        return self._standard_run_stream(
+            task,
+            _endless_fsm(),
+            self._init_context(task),
+            "endless",
+            max_iterations=self.own_max,
+        )
+
+    def _register_handlers(self, api: API) -> None:
+        pass
+
+
+class TestBudgetErrorOfTheRunLoops:
+    @pytest.mark.parametrize("stream", [False, True], ids=["run", "run_stream"])
+    def test_error_cites_the_patterns_own_max_iterations(self, stream: bool):
+        agent = _OwnBudgetAgent(
+            own_max=4,
+            config=AgentConfig(max_iterations=2),
+            llm_interface=PromptGroundedLLM(),
+        )
+
+        with pytest.raises(BudgetExhaustedError) as info:
+            if stream:
+                list(agent.run_stream(_TASK))
+            else:
+                agent.run(_TASK)
+
+        assert info.value.limit == 12
+        assert str(info.value) == (
+            "Agent budget exhausted: iterations limit (12) reached "
+            "(12 loop turns = max_iterations 4 x FSM_BUDGET_MULTIPLIER 3)"
+        )
+
+    @pytest.mark.parametrize("stream", [False, True], ids=["run", "run_stream"])
+    def test_error_is_chained_to_cores_run_budget_error(self, stream: bool):
+        agent = _OwnBudgetAgent(
+            own_max=2,
+            config=AgentConfig(max_iterations=2),
+            llm_interface=PromptGroundedLLM(),
+        )
+
+        with pytest.raises(BudgetExhaustedError) as info:
+            if stream:
+                list(agent.run_stream(_TASK))
+            else:
+                agent.run(_TASK)
+
+        cause = info.value.__cause__
+        assert isinstance(cause, RunBudgetExceededError)
+        assert (cause.budget, cause.limit, cause.steps_done) == ("steps", 6, 6)
+
+
+def _greeting_fsm() -> dict[str, Any]:
+    """A speaking initial state that hands over to a speaking terminal state."""
+    return {
+        "name": "greeter",
+        "description": "Greets, then answers",
+        "initial_state": "hello",
+        "states": {
+            "hello": {
+                "id": "hello",
+                "description": "Greeting",
+                "purpose": "Greet",
+                "response_instructions": "Greet the user",
+                "transitions": [
+                    {"target_state": "done", "description": "Always", "priority": 100}
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "Terminal",
+                "purpose": "Answer",
+                "response_instructions": "Give the answer",
+            },
+        },
+    }
+
+
+class _GreetingAgent(BaseAgent):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.loop_replies: list[list[str]] = []
+
+    def run(
+        self, task: str, initial_context: dict[str, Any] | None = None
+    ) -> AgentResult:
+        return self._standard_run(
+            task, _greeting_fsm(), self._init_context(task, initial_context), "greet"
+        )
+
+    def run_stream(self, task: str) -> Any:
+        return self._standard_run_stream(
+            task, _greeting_fsm(), self._init_context(task), "greet"
+        )
+
+    def _run_conversation_loop(self, *args: Any, **kwargs: Any) -> Any:
+        out = super()._run_conversation_loop(*args, **kwargs)
+        self.loop_replies.append(list(out[0]))
+        return out
+
+    def _register_handlers(self, api: API) -> None:
+        pass
+
+
+class TestGreetingOfASpeakingInitialState:
+    """No shipped pattern has a speaking initial state on these loops, so a
+    test pattern pins the branch (mutants B9, B10)."""
+
+    def _agent(self) -> _GreetingAgent:
+        llm = PromptGroundedLLM(
+            responses={"hello": "Hello there.", "done": "All done here."}
+        )
+        return _GreetingAgent(config=AgentConfig(), llm_interface=llm)
+
+    def test_run_loop_returns_the_greeting_first(self):
+        agent = self._agent()
+
+        result = agent.run(_TASK)
+
+        assert agent.loop_replies == [["Hello there.", "All done here."]]
+        assert result.answer == "All done here."
+
+    def test_stream_yields_the_greeting_first(self):
+        agent = self._agent()
+
+        assert list(agent.run_stream(_TASK)) == ["Hello there.", "All done here."]
+
+
+_REFUSED_TEXT = "was refused by the human approver"
+
+
+def _reflexion_fails_once(**kwargs: Any) -> ReflexionAgent:
+    """A Reflexion agent whose first evaluation fails, so the loop returns
+    to ``think`` after the first tool ran (where the model re-asks)."""
+    verdicts = iter([False])
+
+    def evaluate(context: dict[str, Any]) -> EvaluationResult:
+        passed = next(verdicts, True)
+        return EvaluationResult(passed=passed, score=float(passed), feedback="ok")
+
+    return ReflexionAgent(evaluation_fn=evaluate, **kwargs)
+
+
+_BUILDERS = [
+    pytest.param(ReactAgent, id="react"),
+    pytest.param(_reflexion_fails_once, id="reflexion"),
+    pytest.param(_reasoning_react, id="reasoning_react"),
+]
+
+
+def _approver(*answers: bool) -> tuple[list[dict[str, Any]], Any]:
+    """An approver giving ``answers`` in order (then denying); records asks."""
+    asks: list[dict[str, Any]] = []
+
+    def decide(request: Any) -> bool:
+        asks.append(dict(request.parameters))
+        return answers[len(asks) - 1] if len(asks) <= len(answers) else False
+
+    return asks, decide
+
+
+class _RepeatLLM(_HitlLLM):
+    """Re-selects ``transfer(_CALL)`` even after it ran (the live over-call
+    pattern, 3-4 asks per run); concludes once a denial follows a transfer
+    that ran."""
+
+    def _grounded(self, name: str, text: str) -> object | None:
+        done = "Result: Transferred" in text and "denied the call transfer" in text
+        if name == "tool_name":
+            return None if done else "transfer"
+        if name == "tool_input":
+            return None if done else dict(_CALL)
+        if name == "should_terminate":
+            return True if done else None
+        return None
+
+
+class _ThenOtherLLM(_HitlLLM):
+    """``transfer(_CALL)``; once it ran, ``transfer(_OTHER_CALL)``; concludes
+    on that call's denial."""
+
+    def _grounded(self, name: str, text: str) -> object | None:
+        done = "denied the call transfer({'account': 'X-99'" in text
+        call = _OTHER_CALL if "Result: Transferred" in text else _CALL
+        if name == "tool_name":
+            return None if done else "transfer"
+        if name == "tool_input":
+            return None if done else dict(call)
+        if name == "should_terminate":
+            return True if done else None
+        return None
+
+
+class TestRefusalRecordInEveryOrder:
+    """D-049. RED on the parent 086e0aa: approve then deny the identical
+    re-ask left ``transfer(...): was refused by the human approver and was
+    not performed.`` in ``refused_actions`` and in the conclude prompt,
+    although the transfer ran (``review_r2/probe_ad.py``)."""
+
+    @pytest.mark.parametrize("build", _BUILDERS)
+    def test_approve_then_deny_of_the_same_call_leaves_no_record(
+        self, monkeypatch: pytest.MonkeyPatch, build: Any
+    ):
+        asks, decide = _approver(True, False)
+        probe = _HitlProbe(
+            monkeypatch, build, decide=decide, llm=_RepeatLLM(default_response="Done.")
+        )
+
+        result = probe.agent.run(_HITL_TASK)
+
+        assert asks == [_CALL, _CALL]
+        assert probe.kinds("transfer") == [("transfer", "A-17", 250)]
+        (final,) = probe.final
+        assert _REFUSED_KEY not in final
+        assert _REFUSED_KEY not in result.final_context
+        prompt = _conclude_prompt(probe.llm)
+        assert _REFUSED_TEXT not in prompt
+        assert "Transferred 250 from A-17" in prompt
+        assert (result.success, result.stop_reason) == (True, "answered")
+
+    @pytest.mark.parametrize("build", _BUILDERS)
+    def test_deny_approve_deny_of_the_same_call_leaves_no_record(
+        self, monkeypatch: pytest.MonkeyPatch, build: Any
+    ):
+        asks, decide = _approver(False, True, False)
+        probe = _HitlProbe(
+            monkeypatch, build, decide=decide, llm=_RepeatLLM(default_response="Done.")
+        )
+
+        probe.agent.run(_HITL_TASK)
+
+        assert asks == [_CALL, _CALL, _CALL]
+        assert probe.kinds("transfer") == [("transfer", "A-17", 250)]
+        (final,) = probe.final
+        assert _REFUSED_KEY not in final
+        assert _REFUSED_TEXT not in _conclude_prompt(probe.llm)
+
+    @pytest.mark.parametrize("build", _BUILDERS)
+    def test_a_different_call_denied_after_one_ran_is_still_recorded(
+        self, monkeypatch: pytest.MonkeyPatch, build: Any
+    ):
+        asks, decide = _approver(True, False)
+        probe = _HitlProbe(
+            monkeypatch,
+            build,
+            decide=decide,
+            llm=_ThenOtherLLM(default_response="Done."),
+        )
+
+        probe.agent.run(_HITL_TASK)
+
+        assert asks == [_CALL, _OTHER_CALL]
+        assert probe.kinds("transfer") == [("transfer", "A-17", 250)]
+        (final,) = probe.final
+        assert final[_REFUSED_KEY] == [_OTHER_RECORD]
+        assert _OTHER_RECORD in _conclude_prompt(probe.llm)
+
+
+# Selects the lookup tool forever: only the iteration budget or an outside
+# end stops the run.
+_LOOKUP_FOREVER: dict[str, tuple[object, str]] = {
+    "tool_name": ("lookup", "capital"),
+    "tool_input": ({"query": "capital of France"}, "capital"),
+}
+
+
+class _EndsItsConversation(ReactAgent):
+    """Ends its own conversation from the hook before step ``end_at`` (as a
+    monitor "end conversation" click or another thread would)."""
+
+    end_at = 3
+
+    def _on_loop_iteration(
+        self, api: API, conversation_id: str, iteration: int
+    ) -> None:
+        super()._on_loop_iteration(api, conversation_id, iteration)
+        if iteration == self.end_at:
+            api.end_conversation(conversation_id)
+
+
+def _ending_agent(runs: list[str]) -> _EndsItsConversation:
+    return _EndsItsConversation(
+        tools=_registry(runs),
+        config=AgentConfig(max_iterations=6),
+        llm_interface=PromptGroundedLLM(facts=_LOOKUP_FOREVER),
+    )
+
+
+class TestRunEndedFromOutside:
+    """D-050. RED on the parent 086e0aa: ``run()`` raised ``AgentError
+    "React execution failed: Conversation ... not found"`` from its own
+    ``end_conversation`` in the ``finally`` (``review_r2/probe_end.py``), and
+    without that error the run reported ``(True, "answered")`` on the one
+    tool call made before the end."""
+
+    def test_run_returns_a_forced_stop(self):
+        runs: list[str] = []
+
+        result = _ending_agent(runs).run(_TASK)
+
+        assert runs == ["capital of France"]  # step 2 ran the tool; step 3 never ran
+        assert (result.success, result.stop_reason) == (False, StopReason.ENDED)
+        assert StopReason.ENDED in StopReason.FORCED
+
+    def test_stream_ends_without_an_error(self):
+        runs: list[str] = []
+
+        chunks = list(_ending_agent(runs).run_stream(_TASK))
+
+        assert runs == ["capital of France"]
+        assert all("[" not in chunk for chunk in chunks)
+
+    def test_a_run_that_concludes_is_not_reported_as_ended(self):
+        runs: list[str] = []
+        agent = _ending_agent(runs)
+        agent.end_at = 99  # never reached: the budget forces the stop
+
+        result = agent.run(_TASK)
+
+        assert result.stop_reason == StopReason.MAX_ITERATIONS
+
+
+class TestEndRunConversation:
+    """The cleanup tolerates only a conversation that is already gone."""
+
+    def test_an_end_refused_while_the_conversation_is_active_is_raised(self):
+        def refuse(conversation_id: str) -> None:
+            raise ConversationBusyError("a turn is running")
+
+        api = SimpleNamespace(
+            end_conversation=refuse, list_active_conversations=lambda: ["c-1"]
+        )
+
+        with pytest.raises(ConversationBusyError):
+            BaseAgent._end_run_conversation(cast(API, api), "c-1")
+
+    def test_an_error_that_is_not_an_fsm_error_is_raised(self):
+        def broken(conversation_id: str) -> None:
+            raise RuntimeError("boom")
+
+        api = SimpleNamespace(
+            end_conversation=broken, list_active_conversations=lambda: []
+        )
+
+        with pytest.raises(RuntimeError):
+            BaseAgent._end_run_conversation(cast(API, api), "c-1")

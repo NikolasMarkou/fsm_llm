@@ -22,6 +22,7 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
+from fsm_llm.testing import PromptGroundedLLM
 
 
 class TestDebateAgentCreation:
@@ -418,3 +419,19 @@ class TestDebateNullExtraction:
         assert states.count(DebateStates.JUDGE) == 2
         assert len(result.final_context[ContextKeys.DEBATE_ROUNDS]) == 2
         assert (result.success, result.stop_reason) == (True, "answered")
+
+
+class TestDebateUsesTheBaseAnswerLookup:
+    """F-AP-11: the success key is separate from the answer keys."""
+
+    def test_debate_has_no_extract_answer_override(self):
+        from fsm_llm.agents.debate import DebateAgent
+
+        assert "_extract_answer" not in vars(DebateAgent)
+
+    def test_the_conclude_reply_is_the_answer(self):
+        from fsm_llm.agents.debate import DebateAgent
+
+        agent = DebateAgent(llm_interface=PromptGroundedLLM())
+        ctx = {ContextKeys.PROPOSITION: "a proposition"}
+        assert agent._extract_answer(ctx, ["the verdict"]) == "the verdict"

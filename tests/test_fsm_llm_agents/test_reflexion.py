@@ -31,6 +31,10 @@ from fsm_llm.definitions import (
 )
 from fsm_llm.expressions import evaluate_logic
 from fsm_llm.llm import LLMInterface
+from tests.test_fsm_llm_agents.support import (
+    SequenceMockLLM,
+    _bug_fixes_make_registry,
+)
 
 
 def _search(params):
@@ -729,3 +733,141 @@ class TestEvaluationFnFailsClosed:
         assert "evaluation_passed" not in llm.asked
         assert result.final_context[ContextKeys.EVALUATION_PASSED] is True
         assert result.final_context[ContextKeys.EVALUATION_FEEDBACK] == "ok"
+
+
+class TestReflexionEvaluationFnActuallyCalled:
+    """
+    Verify that a user-provided evaluation_fn is actually invoked during
+    the Reflexion evaluate state.
+
+    Previously the fn was dead code because the run-loop tried to detect
+    the EVALUATE state via ``get_data()["_current_state"]`` which always
+    returned None (internal keys are stripped). The fix registers the fn
+    as a CONTEXT_UPDATE handler on the EVALUATE state.
+    """
+
+    def test_evaluation_fn_is_called(self):
+        """evaluation_fn must be called at least once during agent execution."""
+        from fsm_llm.agents.reflexion import ReflexionAgent
+
+        registry = _bug_fixes_make_registry()
+
+        # Track whether evaluation_fn fires
+        eval_called = {"count": 0}
+
+        def mock_eval_fn(context: dict[str, Any]) -> EvaluationResult:
+            eval_called["count"] += 1
+            return EvaluationResult(passed=True, score=1.0, feedback="good")
+
+        # Build extraction sequence for the Reflexion FSM.
+        # Only states with required_context_keys trigger extract_field
+        # calls. States without required_context_keys (like act) are
+        # skipped in the sequence.
+        # Flow: think -> act -> evaluate -> conclude
+        #
+        # NOTE: The evaluate state extraction must NOT include
+        # evaluation_passed because the transition evaluator re-merges
+        # raw extraction data on top of handler context updates. The
+        # evaluation_fn handler sets evaluation_passed in context; if
+        # the extraction also has it, the extraction value wins.
+        extraction_sequence = [
+            # 1. think state: select tool (has required_context_keys)
+            {
+                "tool_name": "search",
+                "tool_input": {"query": "test"},
+                "reasoning": "searching",
+            },
+            # 2. evaluate state: LLM extraction (has required_context_keys)
+            {"evaluation_score": 0.5, "evaluation_feedback": "partial"},
+            # 3. conclude state: final answer (has required_context_keys)
+            {"final_answer": "The answer is 42."},
+        ]
+
+        mock_llm = SequenceMockLLM(extraction_sequence)
+        config = AgentConfig(max_iterations=10, timeout_seconds=30.0)
+
+        agent = ReflexionAgent(
+            tools=registry,
+            config=config,
+            evaluation_fn=mock_eval_fn,
+            llm_interface=mock_llm,
+        )
+
+        result = agent.run("What is 6 times 7?")
+
+        # The critical assertion: evaluation_fn must have been called
+        assert eval_called["count"] >= 1, (
+            "evaluation_fn was never called — the bug is back "
+            "(evaluation_fn was dead code)"
+        )
+        assert result.success is True
+
+    def test_evaluation_fn_result_drives_transition(self):
+        """When evaluation_fn returns passed=True, the agent should conclude
+        (not reflect). When it returns passed=False, the agent should reflect."""
+        from fsm_llm.agents.reflexion import ReflexionAgent
+
+        registry = _bug_fixes_make_registry()
+
+        eval_results: list[bool] = []
+
+        def failing_eval_fn(context: dict[str, Any]) -> EvaluationResult:
+            """First call fails, second call passes."""
+            call_num = len(eval_results)
+            if call_num == 0:
+                eval_results.append(False)
+                return EvaluationResult(
+                    passed=False, score=0.2, feedback="insufficient"
+                )
+            eval_results.append(True)
+            return EvaluationResult(passed=True, score=0.9, feedback="good")
+
+        # Only states with required_context_keys trigger extract_field.
+        # Flow: think -> act -> evaluate (fail) -> reflect -> think
+        #       -> act -> evaluate (pass) -> conclude
+        #
+        # NOTE: evaluate state extraction must NOT include evaluation_passed
+        # (see note in test_evaluation_fn_is_called for rationale).
+        extraction_sequence = [
+            # 1. think: select tool (has required_context_keys)
+            {
+                "tool_name": "search",
+                "tool_input": {"query": "test"},
+                "reasoning": "searching",
+            },
+            # 2. evaluate: LLM extraction (has required_context_keys)
+            {"evaluation_score": 0.3},
+            # 3. reflect: produce reflection (has required_context_keys)
+            {
+                "reflection": "I should try a different approach",
+                "lessons": ["be more specific"],
+            },
+            # 4. think again: select tool (has required_context_keys)
+            {
+                "tool_name": "search",
+                "tool_input": {"query": "refined test"},
+                "reasoning": "retrying",
+            },
+            # 5. evaluate again: LLM extraction (has required_context_keys)
+            {"evaluation_score": 0.9},
+            # 6. conclude: final answer (has required_context_keys)
+            {"final_answer": "The refined answer is 42."},
+        ]
+
+        mock_llm = SequenceMockLLM(extraction_sequence)
+        config = AgentConfig(max_iterations=15, timeout_seconds=30.0)
+
+        agent = ReflexionAgent(
+            tools=registry,
+            config=config,
+            evaluation_fn=failing_eval_fn,
+            llm_interface=mock_llm,
+        )
+
+        result = agent.run("What is the meaning of life?")
+
+        # evaluation_fn was called exactly twice (fail then pass)
+        assert len(eval_results) == 2
+        assert eval_results[0] is False
+        assert eval_results[1] is True
+        assert result.success is True

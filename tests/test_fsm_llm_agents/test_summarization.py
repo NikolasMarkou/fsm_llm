@@ -11,7 +11,7 @@ from fsm_llm.agents import (
     make_observation_summarizer,
     tool,
 )
-from fsm_llm.agents.constants import ContextKeys
+from fsm_llm.agents.constants import ContextKeys, Defaults
 
 
 @tool
@@ -85,3 +85,26 @@ class TestWiring:
         agent._register_lifecycle_handlers(api, "react")
         names = [c.args[0] for c in api.create_handler.call_args_list if c.args]
         assert "AgentObservationSummarizer" not in names
+
+
+class TestSummariserDoesNotRewrapItsSummary:
+    """F-AP-15: output within the threshold is left alone."""
+
+    @pytest.mark.parametrize("threshold", [1, 2, 3, 4])
+    def test_a_second_pass_is_a_no_op(self, threshold):
+        summarise = make_observation_summarizer(threshold)
+        observations = [f"step{i}" for i in range(threshold + 3)]
+        first = summarise({ContextKeys.OBSERVATIONS: observations})
+        assert len(first[ContextKeys.OBSERVATIONS]) <= threshold
+        assert (
+            summarise({ContextKeys.OBSERVATIONS: first[ContextKeys.OBSERVATIONS]}) == {}
+        )
+
+    def test_keep_last_must_be_below_the_threshold(self):
+        with pytest.raises(ValueError, match="keep_last"):
+            make_observation_summarizer(3, keep_last=3)
+
+    def test_a_threshold_the_list_can_never_reach_is_refused(self):
+        AgentConfig(auto_summarize_after=Defaults.MAX_OBSERVATIONS - 1)
+        with pytest.raises(ValueError, match="auto_summarize_after"):
+            AgentConfig(auto_summarize_after=Defaults.MAX_OBSERVATIONS)

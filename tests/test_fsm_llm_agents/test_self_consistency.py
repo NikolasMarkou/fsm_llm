@@ -6,10 +6,11 @@ import ast
 import inspect
 import textwrap
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
-from fsm_llm import API
+from fsm_llm import API, LiteLLMInterface
 from fsm_llm.agents.constants import ContextKeys, Defaults, SelfConsistencyStates
 from fsm_llm.agents.definitions import AgentConfig
 from fsm_llm.agents.exceptions import AgentError
@@ -17,6 +18,7 @@ from fsm_llm.agents.fsm_definitions import build_self_consistency_fsm
 from fsm_llm.agents.self_consistency import SelfConsistencyAgent, _majority_vote
 from fsm_llm.definitions import FSMDefinition
 from fsm_llm.testing import PromptGroundedLLM
+from tests.test_fsm_llm.test_llm_complete import _Provider, _reply
 
 
 class TestSelfConsistencyCreation:
@@ -277,3 +279,73 @@ class TestSampleIsOneTurn:
         conv_id, greeting = api.start_conversation({"task": "x"})
         assert greeting == "ok"
         assert api.has_conversation_ended(conv_id) is True
+
+
+class TestAggregationFailureIsAnAgentError:
+    """F-AP-04: a failing or non-str ``aggregation_fn`` ends as ``AgentError``."""
+
+    def _agent(self, fn) -> SelfConsistencyAgent:
+        return SelfConsistencyAgent(
+            num_samples=2,
+            aggregation_fn=fn,
+            config=AgentConfig(max_iterations=5),
+            llm_interface=PromptGroundedLLM(default_response="Paris"),
+        )
+
+    def test_a_raising_function(self):
+        with pytest.raises(AgentError) as info:
+            self._agent(lambda _s: 1 / 0).run("Capital of France?")
+        assert isinstance(info.value.__cause__, ZeroDivisionError)
+
+    def test_a_non_str_result(self):
+        with pytest.raises(AgentError):
+            self._agent(lambda _s: 4).run("Capital of France?")
+
+    def test_none_is_no_result(self):
+        result = self._agent(lambda _s: None).run("Capital of France?")
+        assert (result.answer, result.success, result.stop_reason) == (
+            "",
+            False,
+            "no_result",
+        )
+
+
+class TestNoEndConversationMarker:
+    """F-AP-10: the lifecycle handlers write no key nothing reads."""
+
+    def test_no_end_conversation_handler(self):
+        agent = SelfConsistencyAgent(llm_interface=PromptGroundedLLM())
+        api = MagicMock()
+        agent._register_lifecycle_handlers(api, "x")
+        names = [c.args[0] for c in api.create_handler.call_args_list if c.args]
+        assert "AgentEndConversation" not in names
+        assert "AgentContextCompactor" in names
+
+
+class TestSelfConsistencySampleTemperatures:
+    """Each sample's temperature reaches the provider, with the interface
+    injected or built by core."""
+
+    @staticmethod
+    def _expected(n: int) -> list[float]:
+        low, high = Defaults.SAMPLE_TEMPERATURE_RANGE
+        return [low + (high - low) * i / (n - 1) for i in range(n)]
+
+    def test_through_an_injected_interface(self):
+        agent = SelfConsistencyAgent(
+            config=AgentConfig(model="gpt-4o"),
+            num_samples=3,
+            llm_interface=LiteLLMInterface("gpt-4o", temperature=0.1),
+        )
+        with _Provider(_reply('{"message": "Answer: 4"}')) as provider:
+            result = agent.run("What is 2 + 2?")
+        assert result.answer
+        sent = [call["temperature"] for call in provider.calls]
+        assert sent == pytest.approx(self._expected(3))
+
+    def test_through_the_interface_core_builds(self):
+        agent = SelfConsistencyAgent(config=AgentConfig(model="gpt-4o"), num_samples=3)
+        with _Provider(_reply('{"message": "Answer: 4"}')) as provider:
+            agent.run("What is 2 + 2?")
+        sent = [call["temperature"] for call in provider.calls]
+        assert sent == pytest.approx(self._expected(3))

@@ -3,9 +3,11 @@ from __future__ import annotations
 """Tests for fsm_llm.agents.react module."""
 
 import threading
+from unittest.mock import MagicMock
 
 import pytest
 
+from fsm_llm.agents.constants import ContextKeys
 from fsm_llm.agents.definitions import AgentConfig
 from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.handlers import AgentHandlers
@@ -18,6 +20,7 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
+from fsm_llm.testing import PromptGroundedLLM
 
 
 def _search(params):
@@ -125,7 +128,7 @@ class _DeterministicMockLLM(LLMInterface):
     conversations (as F9's regression test below needs): whichever thread
     asks for a given field always gets the same deterministic answer,
     unlike a call-index-based mock (see SequenceMockLLM in
-    test_bug_fixes.py), which would itself race under concurrent use.
+    support.py), which would itself race under concurrent use.
     """
 
     def __init__(self) -> None:
@@ -355,3 +358,90 @@ class TestReactAgentApprovalIsSingleUse:
         assert asks[:2] == [False, True]
         assert len(executions) >= 1
         assert asks.count(True) - len(executions) in (0, 1)
+
+
+class TestReactFamilySharedSkeleton:
+    """F-AR-01, F-AR-09, F-AR-11: the ReAct family shares its run pieces."""
+
+    @staticmethod
+    def _registry() -> ToolRegistry:
+        registry = ToolRegistry()
+        registry.register_function(lambda p: "ok", name="t", description="a tool")
+        return registry
+
+    def test_run_and_run_stream_build_the_same_fsm_and_context(self):
+        agent = ReactAgent(tools=self._registry(), llm_interface=PromptGroundedLLM())
+        fsm_def, context, handlers = agent._react_inputs("a task", {"hint": "x"})
+        again = agent._react_inputs("a task", {"hint": "x"})
+        assert fsm_def == again[0]
+        assert context == again[1]
+        assert handlers is not again[2]  # call-local, never shared
+        assert context[ContextKeys.OBSERVATIONS] == []
+        assert context[ContextKeys.ITERATION_BUDGET] == agent.config.max_iterations
+
+    @pytest.mark.parametrize(
+        "module, cls",
+        [
+            ("react", "ReactAgent"),
+            ("reflexion", "ReflexionAgent"),
+            ("reasoning_react", "ReasoningReactAgent"),
+            ("parallel_react", "ParallelReactAgent"),
+        ],
+    )
+    def test_register_handlers_without_handlers_names_the_class(self, module, cls):
+        import importlib
+
+        agent_cls = getattr(importlib.import_module(f"fsm_llm.agents.{module}"), cls)
+        agent = agent_cls(tools=self._registry(), llm_interface=PromptGroundedLLM())
+        with pytest.raises(AgentError, match=f"{cls}._register_handlers called"):
+            agent._register_handlers(MagicMock(), None)
+
+    @pytest.mark.parametrize("with_fn", [False, True])
+    def test_reflexion_registers_one_evaluator_handler(self, with_fn):
+        from fsm_llm.agents import ReflexionAgent
+        from fsm_llm.agents.constants import HandlerNames
+        from fsm_llm.agents.definitions import EvaluationResult
+        from fsm_llm.agents.handlers import AgentHandlers
+
+        agent = ReflexionAgent(
+            tools=self._registry(),
+            llm_interface=PromptGroundedLLM(),
+            evaluation_fn=(lambda ctx: EvaluationResult(passed=True))
+            if with_fn
+            else None,
+        )
+        api = MagicMock()
+        agent._register_handlers(api, AgentHandlers(agent.tools))
+        names = [c.args[0] for c in api.create_handler.call_args_list if c.args]
+        assert names.count(HandlerNames.REFLEXION_EVALUATOR) == 1
+
+    def test_reflexion_shares_the_react_loop_states(self):
+        from fsm_llm.agents.constants import AgentStates, ReflexionStates
+
+        assert ReflexionStates.THINK is AgentStates.THINK
+        assert ReflexionStates.ACT is AgentStates.ACT
+        assert ReflexionStates.CONCLUDE is AgentStates.CONCLUDE
+
+    def test_rewoo_trace_is_the_base_trace_and_keeps_a_name_with_a_paren(self):
+        from fsm_llm.agents.rewoo import REWOOAgent
+
+        assert "_build_trace" not in vars(REWOOAgent)
+        agent = REWOOAgent(tools=self._registry(), llm_interface=PromptGroundedLLM())
+        trace = agent._build_trace(
+            {
+                ContextKeys.AGENT_TRACE: [
+                    {
+                        "action": "calc(x)(1)",
+                        "tool_name": "calc(x)",
+                        "tool_input": {"a": 1},
+                        "thought": "why",
+                    },
+                    {"action": "plain(2)", "thought": "t"},
+                ],
+                ContextKeys.ITERATION_COUNT: 2,
+            },
+            2,
+        )
+        assert [c.tool_name for c in trace.tool_calls] == ["calc(x)", "plain"]
+        assert trace.tool_calls[0].parameters == {"a": 1}
+        assert trace.tool_calls[0].reasoning == "why"

@@ -252,3 +252,37 @@ class TestDefaultCompleteBoundary:
         assert "judge error" in result.feedback
         # The provider's own message reaches the feedback via the chained message.
         assert "provider down" in result.feedback
+
+
+class TestJudgeReadsAMalformedScoreAsZero:
+    """F-AP-03 / F-XD-01: NaN, inf and a boolean never pass the judge."""
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            '{"score": NaN, "feedback": "f"}',
+            '{"score": "nan", "feedback": "f"}',
+            '{"score": "inf", "feedback": "f"}',
+            '{"score": Infinity, "feedback": "f"}',
+            '{"score": true, "feedback": "f"}',
+        ],
+    )
+    def test_malformed_score_fails(self, reply):
+        judge = default_llm_judge(model="m", complete_fn=lambda _m, _p: reply)
+        result = judge("out", {"task": "t"})
+        assert (result.passed, result.score) == (False, 0.0)
+
+    @pytest.mark.parametrize(
+        ("reply", "passed", "score"),
+        [
+            ('{"score": 0.9}', True, 0.9),
+            ('{"score": 5}', True, 1.0),
+            ('{"score": -5}', False, 0.0),
+            ('{"score": "0.8"}', True, 0.8),
+            ('{"feedback": "no score"}', False, 0.0),
+        ],
+    )
+    def test_ordinary_scores_are_unchanged(self, reply, passed, score):
+        judge = default_llm_judge(model="m", complete_fn=lambda _m, _p: reply)
+        result = judge("out", None)
+        assert (result.passed, result.score) == (passed, score)

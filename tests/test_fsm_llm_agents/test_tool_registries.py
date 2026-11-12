@@ -243,3 +243,74 @@ class TestRetryingToolRegistry:
             RetryingToolRegistry(max_retries=-1)
         with pytest.raises(ValueError):
             RetryingToolRegistry(backoff_seconds=-1)
+
+
+class TestCacheSkipsGatedCalls:
+    def _registry(self, paid: list[int]) -> CachingToolRegistry:
+        def pay(amount: int) -> str:
+            paid.append(amount)
+            return f"paid {amount}"
+
+        registry = CachingToolRegistry()
+        registry.register_function(pay, requires_approval=True)
+        return registry
+
+    def test_each_granted_call_runs(self):
+        paid: list[int] = []
+        registry = self._registry(paid)
+        call = ToolCall(tool_name="pay", parameters={"amount": 10})
+        for _ in range(2):
+            assert registry.execute(call, gated=True).success
+        assert paid == [10, 10]
+        assert registry.cache_hits == 0
+
+    def test_a_granted_result_is_never_served_to_a_later_call(self):
+        paid: list[int] = []
+        registry = self._registry(paid)
+        call = ToolCall(tool_name="pay", parameters={"amount": 10})
+        registry.execute(call, gated=True)
+        registry.execute(call)
+        assert paid == [10, 10]
+
+    def test_ungated_calls_are_still_cached(self):
+        paid: list[int] = []
+        registry = self._registry(paid)
+        call = ToolCall(tool_name="pay", parameters={"amount": 10})
+        registry.execute(call)
+        registry.execute(call)
+        assert paid == [10]
+        assert registry.cache_hits == 1
+
+
+class TestRetryingRegistryRespectsApproval:
+    @staticmethod
+    def _failing(
+        registry: RetryingToolRegistry, runs: list[str], flagged: bool
+    ) -> None:
+        def pay(amount: str) -> str:
+            runs.append(amount)
+            raise RuntimeError("gateway down")
+
+        # Idempotent, so only the approval flag decides (step 5 retry rule).
+        registry.register_function(
+            pay,
+            name="pay",
+            description="d",
+            requires_approval=flagged,
+            annotations=ToolAnnotations(idempotent=True),
+        )
+
+    def test_flagged_tool_runs_once(self):
+        registry = RetryingToolRegistry(max_retries=3)
+        runs: list[str] = []
+        self._failing(registry, runs, flagged=True)
+        result = registry.execute(ToolCall(tool_name="pay", parameters={"amount": "9"}))
+        assert result.success is False
+        assert runs == ["9"]
+
+    def test_unflagged_idempotent_tool_is_still_retried(self):
+        registry = RetryingToolRegistry(max_retries=3)
+        runs: list[str] = []
+        self._failing(registry, runs, flagged=False)
+        registry.execute(ToolCall(tool_name="pay", parameters={"amount": "9"}))
+        assert runs == ["9"] * 4

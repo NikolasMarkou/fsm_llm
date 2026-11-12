@@ -9,7 +9,12 @@ import pytest
 
 from fsm_llm.agents.base import BaseAgent
 from fsm_llm.agents.definitions import AgentConfig, AgentResult
-from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
+from fsm_llm.agents.exceptions import (
+    AgentError,
+    AgentTimeoutError,
+    BudgetExhaustedError,
+)
+from fsm_llm.agents.tools import ToolRegistry
 
 
 class ConcreteAgent(BaseAgent):
@@ -345,3 +350,23 @@ class TestCreateAgent:
 
         agent = create_agent(pattern="auto_memory", tools=[search])
         assert isinstance(agent, AutoMemoryReactAgent)
+
+
+class TestOneEmptyRegistryGuard:
+    """F-AP-05: the six tool patterns refuse an empty registry the same way."""
+
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            "react",
+            "reflexion",
+            "rewoo",
+            "parallel_react",
+            "native_fc",
+        ],
+    )
+    def test_create_agent_refuses_an_empty_registry(self, pattern):
+        from fsm_llm.agents import create_agent
+
+        with pytest.raises(AgentError, match="empty tool registry"):
+            create_agent(pattern, ToolRegistry())

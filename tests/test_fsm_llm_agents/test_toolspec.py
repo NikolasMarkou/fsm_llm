@@ -11,7 +11,9 @@ call executed with ``gated=True``, TOOL-07), the ``gated`` keyword on every
 from __future__ import annotations
 
 import asyncio
+import enum
 import inspect
+import json
 import threading
 import time
 from typing import Annotated, Any, Literal, Optional, Union
@@ -19,13 +21,28 @@ from unittest.mock import Mock
 
 import pydantic
 import pytest
+from pydantic import BaseModel
 
-from fsm_llm.agents import ToolAnnotations, tool
+from fsm_llm.agents import (
+    AgentConfig,
+    NativeFunctionCallingReactAgent,
+    PlanExecuteAgent,
+    ReactAgent,
+    ReflexionAgent,
+    REWOOAgent,
+    ToolAnnotations,
+    tool,
+)
 from fsm_llm.agents.constants import ContextKeys
-from fsm_llm.agents.definitions import ToolCall, ToolDefinition
+from fsm_llm.agents.definitions import ToolCall, ToolDefinition, ToolResult
+from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.handlers import AgentHandlers
+from fsm_llm.agents.parallel_react import ParallelReactAgent
+from fsm_llm.agents.prompts import build_think_extraction_instructions
 from fsm_llm.agents.tool_registries import CachingToolRegistry, RetryingToolRegistry
-from fsm_llm.agents.tools import ToolRegistry
+from fsm_llm.agents.tools import ToolRegistry, schema_types
+from fsm_llm.testing import PromptGroundedLLM
+from tests.test_fsm_llm_agents import test_native_fc_golden as golden
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -763,3 +780,272 @@ def _wait_for_thread(name: str, timeout: float = 5.0) -> None:
             return
         time.sleep(0.01)
     raise AssertionError(f"thread {name} never started")
+
+
+class _Color(str, enum.Enum):
+    RED = "red"
+    BLUE = "blue"
+
+
+class _Size(enum.IntEnum):
+    S = 1
+    L = 2
+
+
+def _paint(color: _Color, size: _Size = _Size.S) -> str:
+    """Paint the fence."""
+    return f"{color.value} {int(size)}"
+
+
+def _enum_registry() -> ToolRegistry:
+    registry = ToolRegistry()
+    registry.register_function(_paint, name="paint")
+    return registry
+
+
+class TestRefParametersKeepTheirType:
+    def test_description_shows_str_enum_as_string_and_int_enum_as_integer(self):
+        text = _enum_registry().to_prompt_description()
+        assert "color [REQUIRED] (string)" in text
+        assert "size [optional] (integer)" in text
+        assert "(object)" not in text
+
+    def test_think_example_uses_the_referenced_type(self):
+        text = build_think_extraction_instructions(_enum_registry())
+        example = next(
+            json.loads(line) for line in text.splitlines() if '"paint"' in line
+        )
+        assert example["tool_input"]["color"] == "<color>"
+        assert example["tool_input"]["size"] == 0
+
+    def test_prompt_mode_agent_is_shown_the_enum_types(self):
+        """The text a ReAct agent's model actually receives."""
+        llm = PromptGroundedLLM()
+        agent = ReactAgent(
+            _enum_registry(),
+            config=AgentConfig(model="m", max_iterations=1),
+            llm_interface=llm,
+        )
+        try:
+            agent.run("paint the fence red")
+        except AgentError:
+            pass
+        prompts = [request.system_prompt for request in llm.calls("extract_field")]
+        assert prompts
+        assert any("color [REQUIRED] (string)" in p for p in prompts)
+        assert not any("color [REQUIRED] (object)" in p for p in prompts)
+
+    def test_a_model_reference_is_still_an_object(self):
+        root = {
+            "properties": {"p": {"$ref": "#/$defs/M"}},
+            "$defs": {"M": {"type": "object", "properties": {}}},
+        }
+        assert schema_types(root["properties"]["p"], root=root) == ["object"]
+
+    @pytest.mark.parametrize(
+        ("prop", "root"),
+        [
+            ({"$ref": "#/$defs/Missing"}, {"$defs": {}}),
+            ({"$ref": "#/$defs/Color"}, None),
+            ({"$ref": "https://example.com/schema.json"}, {"$defs": {}}),
+        ],
+        ids=["dangling", "no_root", "non_local"],
+    )
+    def test_an_unresolved_reference_reads_as_any_not_object(self, prop, root):
+        assert schema_types(prop, root=root) == []
+
+    def test_a_reference_cycle_terminates(self):
+        root = {"$defs": {"A": {"$ref": "#/$defs/B"}, "B": {"$ref": "#/$defs/A"}}}
+        assert schema_types({"$ref": "#/$defs/A"}, root=root) == []
+
+    def test_optional_enum_is_string_or_null(self):
+        root = {
+            "$defs": {"Color": {"enum": ["red"], "type": "string"}},
+        }
+        prop = {"anyOf": [{"$ref": "#/$defs/Color"}, {"type": "null"}]}
+        assert schema_types(prop, root=root) == ["string", "null"]
+
+
+class TestAgentsThatNeverPassGatedRunOldRegistries:
+    """D-033 says REWOO, ParallelReact and native_fc call ``execute(call)``
+    and so accept an override written against the old signature. On the
+    parent ParallelReact refused it at ``run()`` start (it built an
+    ``AgentHandlers`` only for the iteration limiter)."""
+
+    def test_parallel_react_runs_the_old_registry_tool(self):
+        ran: list[str] = []
+
+        class _Recording(_OldRegistry):
+            def execute(self, tool_call: ToolCall) -> ToolResult:  # type: ignore[override]
+                ran.append(tool_call.tool_name)
+                return super().execute(tool_call)
+
+        llm = PromptGroundedLLM(
+            facts={
+                "tool_calls": (
+                    [{"tool_name": "echo", "tool_input": {"q": "hi"}}],
+                    "echo hi",
+                ),
+            }
+        )
+        agent = ParallelReactAgent(
+            _with_tool(_Recording()),
+            config=AgentConfig(model="m", max_iterations=2),
+            llm_interface=llm,
+        )
+        agent.run("echo hi")
+        assert llm.requests, "the run made no model call"
+        assert "echo" in ran
+
+    @pytest.mark.parametrize(
+        "build",
+        [
+            lambda r: REWOOAgent(r, config=AgentConfig(model="m")),
+            lambda r: NativeFunctionCallingReactAgent(r, config=AgentConfig(model="m")),
+            lambda r: ParallelReactAgent(r, config=AgentConfig(model="m")),
+        ],
+        ids=["rewoo", "native_fc", "parallel_react"],
+    )
+    def test_construction_accepts_it(self, build):
+        build(_with_tool(_OldRegistry()))
+
+
+class _Inner(BaseModel):
+    title: str
+
+
+def _typed_search(
+    query: str,
+    limit: Optional[int] = None,  # noqa: UP045 (the review case, verbatim)
+    inner: _Inner | None = None,
+) -> str:
+    """Search the catalogue."""
+    return query
+
+
+class TestPromptSchemaSource:
+    def _registry(self) -> ToolRegistry:
+        registry = ToolRegistry()
+        registry.register_function(_typed_search, name="search")
+        return registry
+
+    def test_description_shows_optional_int_as_integer_or_null(self):
+        text = self._registry().to_prompt_description()
+        assert "limit [optional] (integer or null)" in text
+        assert "query [REQUIRED] (string)" in text
+        assert "inner [optional] (object or null)" in text
+
+    def test_description_and_native_schema_share_one_source(self):
+        registry = self._registry()
+        native = registry.get_json_schemas()[0]["function"]["parameters"]
+        assert native["properties"]["limit"]["anyOf"] == [
+            {"type": "integer"},
+            {"type": "null"},
+        ]
+        assert "(integer or null)" in registry.to_prompt_description()
+
+    def test_think_example_uses_the_typed_schema(self):
+        text = build_think_extraction_instructions(self._registry())
+        example = next(
+            json.loads(line) for line in text.splitlines() if '"search"' in line
+        )
+        assert example["tool_input"]["limit"] == 0
+
+    def test_prompt_mode_agent_is_shown_integer_or_null(self):
+        """The text a ReAct agent's model actually receives."""
+        llm = PromptGroundedLLM()
+        agent = ReactAgent(
+            self._registry(),
+            config=AgentConfig(model="m", max_iterations=1),
+            llm_interface=llm,
+        )
+        try:
+            agent.run("find shoes")
+        except AgentError:
+            pass
+        prompts = [request.system_prompt for request in llm.calls("extract_field")]
+        assert prompts
+        assert any("limit [optional] (integer or null)" in p for p in prompts)
+        assert not any("limit [optional] (string)" in p for p in prompts)
+
+    def test_explicit_schema_tools_are_unchanged(self):
+        text = golden._registry().to_prompt_description()
+        assert "city [REQUIRED] (string): City" in text
+
+
+class _OldRegistry(ToolRegistry):
+    def execute(self, tool_call: ToolCall) -> ToolResult:  # type: ignore[override]
+        return super().execute(tool_call)
+
+
+class _KwargsRegistry(ToolRegistry):
+    def execute(self, tool_call: ToolCall, **kwargs: Any) -> ToolResult:
+        return super().execute(tool_call, **kwargs)
+
+
+def _with_tool(registry: ToolRegistry) -> ToolRegistry:
+    registry.register_function(lambda q: q, name="echo", description="Echo q")
+    return registry
+
+
+class TestGatedKeywordRequired:
+    """Refused where ``gated=`` is passed (``AgentHandlers``, built at the
+    start of every run of the agents it executes for), before any model
+    call. On the parent each tool call raised a bare ``TypeError`` inside
+    the handler, which the run turned into a failed tool."""
+
+    @pytest.mark.parametrize(
+        "build",
+        [
+            lambda r, llm: ReactAgent(
+                r, config=AgentConfig(model="m"), llm_interface=llm
+            ),
+            lambda r, llm: ReflexionAgent(
+                r, config=AgentConfig(model="m"), llm_interface=llm
+            ),
+            lambda r, llm: PlanExecuteAgent(
+                r, config=AgentConfig(model="m"), llm_interface=llm
+            ),
+        ],
+        ids=["react", "reflexion", "plan_execute"],
+    )
+    def test_old_signature_is_refused_before_any_model_call(self, build):
+        llm = PromptGroundedLLM()
+        agent = build(_with_tool(_OldRegistry()), llm)
+        with pytest.raises(AgentError, match=r"_OldRegistry\.execute .*'gated'"):
+            agent.run("echo hi")
+        assert llm.requests == []
+
+    def test_executor_construction_refuses_it(self):
+        with pytest.raises(AgentError, match="gated"):
+            AgentHandlers(_with_tool(_OldRegistry()))
+
+    def test_reasoning_react_checks_the_callers_registry(self):
+        pytest.importorskip("fsm_llm.reasoning")
+        from fsm_llm.agents import ReasoningReactAgent
+
+        with pytest.raises(AgentError, match="_OldRegistry"):
+            ReasoningReactAgent(
+                _with_tool(_OldRegistry()), config=AgentConfig(model="m")
+            )
+
+    @pytest.mark.parametrize(
+        "build",
+        [
+            lambda r: REWOOAgent(r, config=AgentConfig(model="m")),
+            lambda r: NativeFunctionCallingReactAgent(r, config=AgentConfig(model="m")),
+        ],
+        ids=["rewoo", "native_fc"],
+    )
+    def test_agents_that_never_pass_gated_accept_it(self, build):
+        """They call ``execute(call)``: an older override still runs there."""
+        build(_with_tool(_OldRegistry()))
+
+    def test_kwargs_and_the_shipped_registries_are_accepted(self):
+        for registry in (
+            _KwargsRegistry(),
+            ToolRegistry(),
+            CachingToolRegistry(),
+            RetryingToolRegistry(),
+        ):
+            AgentHandlers(_with_tool(registry))

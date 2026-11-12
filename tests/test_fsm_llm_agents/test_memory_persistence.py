@@ -235,3 +235,53 @@ class TestConcurrentSaveIsAtomic:
             save_working_memory(_memory(), path)
 
         assert os.listdir(tmp_path) == [], "temp file leaked on non-OSError failure"
+
+
+class TestSessionPathValidation:
+    """Verify session_id is validated to prevent path traversal."""
+
+    def test_valid_session_ids(self):
+        """Valid session IDs are accepted."""
+        import tempfile
+
+        from fsm_llm.session import FileSessionStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            # These should not raise
+            store._path("abc-123")
+            store._path("session_456")
+            store._path("Conv-ID-789")
+
+    def test_path_traversal_rejected(self):
+        """Session IDs with path traversal patterns are rejected."""
+        import tempfile
+
+        from fsm_llm.session import FileSessionStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            with pytest.raises(ValueError, match="Invalid session_id"):
+                store._path("../etc/passwd")
+
+    def test_slash_rejected(self):
+        """Session IDs with slashes are rejected."""
+        import tempfile
+
+        from fsm_llm.session import FileSessionStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            with pytest.raises(ValueError, match="Invalid session_id"):
+                store._path("foo/bar")
+
+    def test_null_byte_rejected(self):
+        """Session IDs with null bytes are rejected."""
+        import tempfile
+
+        from fsm_llm.session import FileSessionStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = FileSessionStore(tmpdir)
+            with pytest.raises(ValueError, match="Invalid session_id"):
+                store._path("foo\x00bar")

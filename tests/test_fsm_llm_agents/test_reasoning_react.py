@@ -3,13 +3,17 @@ from __future__ import annotations
 """Tests for fsm_llm.agents.reasoning_react module."""
 
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from fsm_llm.agents.constants import ContextKeys, ReasoningIntegrationKeys
 from fsm_llm.agents.definitions import AgentConfig
 from fsm_llm.agents.tools import ToolRegistry
+from tests.test_fsm_llm_agents.support import (
+    SequenceMockLLM,
+    _bug_fixes_make_registry,
+)
 
 
 def _dummy_tool(params):
@@ -356,3 +360,115 @@ class TestReasonToolEngineFailure:
         assert "did not finish" in delta[ContextKeys.TOOL_ERROR]
         assert str(delta[ContextKeys.TOOL_RESULT]).startswith("Reasoning failed")
         assert ReasoningIntegrationKeys.REASONING_RESULT not in delta
+
+
+class TestReasoningReactAgentInterception:
+    """
+    Verify that when the LLM selects the "reason" tool, the
+    ReasoningEngine is invoked instead of the placeholder function.
+
+    Previously the run-loop checked tool_name after the POST_TRANSITION
+    handler had already executed the placeholder. The fix replaces the
+    standard execute_tool handler with a custom one that intercepts
+    "reason" before executing and calls ReasoningEngine.solve_problem().
+    """
+
+    def test_reasoning_engine_invoked_for_reason_tool(self):
+        """When the LLM picks tool_name='reason', ReasoningEngine.solve_problem
+        must be called — not the placeholder function."""
+        from fsm_llm.agents.reasoning_react import ReasoningReactAgent
+
+        registry = _bug_fixes_make_registry()
+
+        # Only states with required_context_keys trigger extract_field.
+        # Flow: think -> act -> think -> conclude
+        # Act has no required_context_keys, so it's skipped.
+        extraction_sequence = [
+            # 1. think: select the "reason" tool (has required_context_keys)
+            {
+                "tool_name": "reason",
+                "tool_input": {"problem": "Is 97 prime?"},
+                "reasoning": "I need structured reasoning",
+            },
+            # 2. think: terminate after reasoning (has required_context_keys)
+            {"tool_name": "none", "should_terminate": True, "reasoning": "done"},
+            # 3. conclude: final answer (has required_context_keys)
+            {"final_answer": "Yes, 97 is a prime number."},
+        ]
+
+        mock_llm = SequenceMockLLM(extraction_sequence)
+        config = AgentConfig(max_iterations=10, timeout_seconds=30.0)
+
+        # Patch ReasoningEngine to track if solve_problem is called
+        with patch(
+            "fsm_llm.agents.reasoning_react.ReasoningEngine"
+        ) as MockReasoningEngine:
+            mock_engine_instance = MagicMock()
+            mock_engine_instance.solve_problem.return_value = (
+                "97 is prime because it has no divisors other than 1 and itself.",
+                {
+                    "reasoning_trace": {
+                        "reasoning_types_used": ["analytical"],
+                        "final_confidence": 0.95,
+                    }
+                },
+            )
+            MockReasoningEngine.return_value = mock_engine_instance
+
+            agent = ReasoningReactAgent(
+                tools=registry,
+                config=config,
+                llm_interface=mock_llm,
+            )
+
+            result = agent.run("Is 97 prime?")
+
+            # The critical assertion: solve_problem was called, not the placeholder
+            mock_engine_instance.solve_problem.assert_called_once()
+            call_args = mock_engine_instance.solve_problem.call_args
+            assert "97" in call_args[0][0] or "97" in str(call_args)
+
+            assert result.success is True
+
+    def test_non_reason_tool_delegates_normally(self):
+        """When the LLM picks a regular tool (not 'reason'), the standard
+        execute_tool handler should run it normally."""
+        from fsm_llm.agents.reasoning_react import ReasoningReactAgent
+
+        # Only states with required_context_keys trigger extract_field.
+        # Flow: think -> act -> think -> conclude
+        # Act has no required_context_keys, so it's skipped.
+        extraction_sequence = [
+            # 1. think: select regular "search" tool (has required_context_keys)
+            {
+                "tool_name": "search",
+                "tool_input": {"query": "hello world"},
+                "reasoning": "need to search first",
+            },
+            # 2. think: terminate (has required_context_keys)
+            {"tool_name": "none", "should_terminate": True, "reasoning": "done"},
+            # 3. conclude: final answer (has required_context_keys)
+            {"final_answer": "Hello world results."},
+        ]
+
+        registry = _bug_fixes_make_registry()
+        mock_llm = SequenceMockLLM(extraction_sequence)
+        config = AgentConfig(max_iterations=10, timeout_seconds=30.0)
+
+        with patch(
+            "fsm_llm.agents.reasoning_react.ReasoningEngine"
+        ) as MockReasoningEngine:
+            mock_engine_instance = MagicMock()
+            MockReasoningEngine.return_value = mock_engine_instance
+
+            agent = ReasoningReactAgent(
+                tools=registry,
+                config=config,
+                llm_interface=mock_llm,
+            )
+
+            result = agent.run("Search hello world")
+
+            # ReasoningEngine.solve_problem should NOT have been called
+            mock_engine_instance.solve_problem.assert_not_called()
+            assert result.success is True

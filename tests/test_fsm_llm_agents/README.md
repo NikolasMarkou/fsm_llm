@@ -31,20 +31,20 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `__init__.py` - empty; makes the folder a package so `test_forced_stop_flag.py` can import from `test_maker_checker.py`.
 - `conftest.py` - autouse fixture `_offline_network`, which calls `block_network` from `tests/conftest.py`: for every test it patches `socket.socket.connect` and `connect_ex` (loopback included, because a model such as a local Ollama is on loopback) so any IPv4/IPv6 connection raises `ConnectionRefusedError` at once, naming the address. Unix sockets (MCP stdio, asyncio self-pipes) stay open, and tests marked `real_llm` or `integration` are exempt. The patch is undone at teardown.
 - `fixtures/native_fc_golden_requests.json` - recorded requests that `test_native_fc_golden.py` compares against.
-- `test_foundation_dedup.py`, `test_patterns_fixes.py`, `test_integrations_fixes.py` - tests of the 2026-11-05 source pass (plan 5980fbb7 steps 10, 11, 15), one class per fixed finding; `test_fsm_definitions_golden.py` pins the sha256 and `fsm_id` of 53 builder cases.
+- `test_foundation_dedup.py` - tests of the 2026-11-05 source pass (plan 5980fbb7 step 10), one class per fixed finding (the pass's pattern and integration findings now sit in the feature files below); `test_fsm_definitions_golden.py` pins the sha256 and `fsm_id` of 53 builder cases.
+- `support.py` - helpers shared by several test files (`SequenceMockLLM`, `_Out`, `_all_builder_fsms`, two registry builders); never collected.
 - `mcp_fixture_server.py` - a real stdio MCP server used by `test_mcp_stdio.py` (not a test). Tools `add`, `slow`, `fail`; flag `--hang`.
-- `test_advance_driver.py` - agents run on core's bounded loops (`run_until_terminal`) with no synthetic turn: loop hook, core budgets, HITL approval through `before_step`, VerifiedReact reflection and AutoMemory on the loop.
-- `test_adapt.py` - ADaPTAgent, its FSM, `DecompositionResult`, JSON-envelope leak fix, assess/decompose fallback edges.
-- `test_agent_config_passthrough.py` - newer `AgentConfig` fields and what `_create_api` forwards to `API.from_definition`.
+- `test_advance_driver.py` - agents run on core's bounded loops (`run_until_terminal`) with no synthetic turn: loop hook, core budgets (and the budget error of a pattern's own `max_iterations`), HITL approval through `before_step`, `refused_actions` records true in every order, `final_answer` never read, a run ended from outside, a speaking initial state's greeting, VerifiedReact reflection and AutoMemory on the loop.
+- `test_adapt.py` - ADaPTAgent, its FSM, `DecompositionResult`, JSON-envelope leak fix, assess/decompose fallback edges, `output_schema` and lifecycle handlers, `operator` as a run output, subtask execution.
+- `test_agent_config_passthrough.py` - newer `AgentConfig` fields and what `_create_api` forwards to `API.from_definition`, prompt cache and settings with an injected interface.
 - `test_auto_memory.py` - `augment_task_with_memories`, `remember_interaction`, `AutoMemoryReactAgent` recall and remember.
 - `test_auto_memory_coherence.py` - the `respond` action, recall score threshold, conclude prompt wording.
-- `test_base_agent.py` - `BaseAgent` budgets, answer extraction, trace building, context filtering, `create_agent`.
-- `test_bug_fixes.py` - three regressions: Reflexion `evaluation_fn`, ReasoningReact `reason` interception, ADaPT subtask timing.
+- `test_base_agent.py` - `BaseAgent` budgets, answer extraction, trace building, context filtering, `create_agent` (an empty registry is refused).
 - `test_cli_entrypoints.py` - `fsm-llm-meta` (`meta_cli.main_cli`) and `python -m fsm_llm.agents`.
 - `test_completion_guard.py` - `BaseAgent._completion_is_real` and `_has_execution_evidence`.
-- `test_composition.py` - `react_worker_factory`, `default_llm_judge`, `_default_complete` error wrapping.
+- `test_composition.py` - `react_worker_factory`, `default_llm_judge` (a malformed score fails), `_default_complete` error wrapping.
 - `test_constants.py` - constants classes are strings, unique and format correctly.
-- `test_debate.py` - DebateAgent, its FSM, typed `consensus_reached`, limiter boundary.
+- `test_debate.py` - DebateAgent, its FSM, typed `consensus_reached`, limiter boundary, the base answer lookup.
 - `test_definitions.py` - pydantic models, including the tool name rule (ASCII, 1 to 64 chars).
 - `test_evaluator_optimizer.py` - EvaluatorOptimizerAgent, its FSM, refine re-extraction, forced stop.
 - `test_exceptions.py` - agent exception hierarchy.
@@ -54,20 +54,21 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_grounded_patterns.py` - each pattern run through the real `API` with `PromptGroundedLLM`, a fake that only answers when the prompt contains the evidence.
 - `test_fsm_definitions.py` - ReAct FSM shape, required keys on planner states, typed `tool_name`/`tool_input`.
 - `test_handlers.py` - `AgentHandlers.execute_tool`, `make_iteration_limiter`, empty-input recovery.
-- `test_hitl.py` - `HumanInTheLoop` policy, callback, timeout and escalation.
+- `test_hitl.py` - `HumanInTheLoop` policy, callback, timeout and escalation; the base loop hook asks for approval.
 - `test_hitl_security.py` - a gated tool runs only on a driver grant bound to that exact call.
 - `test_integration_methods.py` - `to_classification_schema`, ReAct FSM used as a workflow step, reasoning key uniqueness.
 - `test_maker_checker.py` - MakerCheckerAgent, its FSM, re-judging each round, forced pass only on a check turn.
 - `test_limits.py` - `require_int_limit` and every `max_*` / `num_*` constructor limit: a bool, float (also 1.0, NaN, inf), string, `None`, a value below the minimum and an int past 2**63-1 are refused with a bounded message.
 - `test_mcp_stdio.py` - `MCPToolProvider` against the real fixture server (skipped without `mcp`).
-- `test_memory_persistence.py` - `save_working_memory`/`load_working_memory`, `MemorySessionStore`, atomic saves.
+- `test_mcp_provider.py` - `MCPToolProvider` with mocked sessions: result formatting without content, reconnect per call, timeouts, name collisions (no `mcp` SDK needed).
+- `test_memory_persistence.py` - `save_working_memory`/`load_working_memory`, `MemorySessionStore`, atomic saves, session id path validation of `FileSessionStore`.
 - `test_memory_tools.py` - `create_memory_tools` over `WorkingMemory`.
-- `test_native_fc.py` - `NativeFunctionCallingReactAgent` (an FSM run by core): loop, success signal, repair turn, forced final tool, Ollama gating, through a scripted `llm_interface=`.
+- `test_native_fc.py` - `NativeFunctionCallingReactAgent` (an FSM run by core): loop, success signal, repair turn, forced final tool, Ollama gating, post-loop turns past the deadline, raw arguments kept out of the final context, through a scripted `llm_interface=`.
 - `test_native_fc_golden.py` - the exact requests native_fc sends, compared with a recorded fixture (`fixtures/native_fc_golden_requests.json`).
 - `test_native_fc_fsm.py` - the native_fc FSM definition and its handlers.
 - `test_one_engine.py` - every pattern sends all its model calls to an injected `LLMInterface`; nothing reaches litellm directly.
-- `test_toolspec.py` - tool annotations, exact schemas, enforced tool timeouts, the `gated` keyword and retry rules.
-- `test_review_fixes_tools_native.py`, `test_review_round2_callers.py`, `test_review_fixes_round2_agents.py` - regression tests from the reviews of that work.
+- `test_toolspec.py` - tool annotations, exact schemas (Enum and `$ref` types shown to prompt-mode models), enforced tool timeouts, the `gated` keyword (old-signature registries refused or accepted per pattern) and retry rules.
+- `test_tool_timeouts.py` - a timed-out tool call ends as `unknown`: the waitable bound, `ToolRunStatus`, executor context and traces, parallel and REWOO batches, PlanExecute never re-runs such a step.
 - `test_orchestrator.py` - OrchestratorAgent, its FSM, delegation, typed `all_collected`.
 - `test_parallel_react.py` - ParallelReactAgent dispatch, concurrency, conclude needs evidence.
 - `test_plan_execute.py` - PlanExecuteAgent, its FSM, `PlanStep`, plan extraction, unplannable task.
@@ -78,30 +79,33 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_public_api.py` - `create_agent` (pattern first, `system_prompt=` keyword fills `instructions`), `AgentConfig` strict fields, `LLM_MODEL`, static `__all__`, core owning typed fields and key clearing, and `TestConfiguredAgentBuilder` (`ConfiguredAgentBuilder`: mutators return the same builder, a default build equals `create_agent`, config isolation and independent builds, shared callables, named-option refusal, tool registration).
 - `test_removed_timeout_keyword.py` - the removed `timeout_s` spelling raises on `ToolDefinition` (any unknown keyword does), `PythonToolDefinition` and `@tool`, and a tool file still using it lands in `PythonToolLoadReport.errors`. 6 tests.
 - `test_removed_legacy.py` - absence pins for removed agents names: a positional system prompt now raises listing the patterns, shim helpers and unraised exceptions are gone, native_fc has no private loop, terminal agent states extract nothing, the meta builders are artifact builders.
-- `test_review_round1_agents.py`, `test_review_round2_agents.py` - fixes from two review rounds of the step-driver plan: truthful `refused_actions` records in every order, run outputs that cannot be planted, a run ended from outside, budget errors of the run loops.
-- `test_security_review_fixes.py` - security review findings: run outputs cannot be forged through `initial_context`, `AgentServer`, graph edges or swarm hand-offs; unapprovable `requires_approval` tools fail closed; `HumanInTheLoop` kwargs are checked; fallback logs are redacted.
-- `test_react.py` - ReactAgent creation, HITL gating, concurrent runs, single-use approval.
-- `test_reasoning_react.py` - ReasoningReactAgent export, `reason` tool, per-run handlers.
-- `test_reflexion.py` - ReflexionAgent, its FSM, models, conclude needs evidence, every budget ends.
-- `test_remote.py` - `AgentServer` API key and input size limit, `RemoteAgentTool` auth header.
-- `test_review_fixes.py` - mixed review fixes: MCP results, stream auto-save, OTEL, swarm, SOP, remote timeout, session paths, agent graph.
+- `test_react.py` - ReactAgent creation, HITL gating, concurrent runs, single-use approval, the ReAct family's shared run skeleton.
+- `test_reasoning_react.py` - ReasoningReactAgent export, `reason` tool (interception), per-run handlers.
+- `test_reflexion.py` - ReflexionAgent, its FSM, models, conclude needs evidence, every budget ends, a user `evaluation_fn` is called.
+- `test_remote.py` - `AgentServer` API key and input size limit, `RemoteAgentTool` auth header (skipped as a module without fastapi or httpx).
+- `test_remote_agent.py` - `AgentServer` and `RemoteAgentTool` imports without the extras, `/invoke` timeout (per-test skips).
 - `test_rewoo.py` - REWOOAgent, its FSM, `#E1` evidence substitution, plan execution.
 - `test_run_stream.py` - `run_stream` through the real `API`: model text only, no state markers, verified and memory streams.
-- `test_self_consistency.py` - SelfConsistencyAgent, its FSM, `_majority_vote`.
-- `test_secret_hygiene.py` - secret-looking tool arguments and memory values stay out of observations, traces, logs and listings.
+- `test_self_consistency.py` - SelfConsistencyAgent, its FSM, `_majority_vote`, aggregation failures, lifecycle handlers, per-sample temperature.
+- `test_secret_hygiene.py` - secret-looking tool arguments and memory values stay out of observations, traces, logs (fallback DEBUG lines included) and listings.
 - `test_self_consistency_parallel.py` - parallel sampling matches serial.
-- `test_semantic_memory.py` - `SemanticMemoryStore` and its `remember`/`recall` tools.
+- `test_semantic_memory.py` - `SemanticMemoryStore` and its `remember`/`recall` tools, loaders.
+- `test_semantic_tools.py` - `SemanticToolRegistry`: retrieval, `top_k` bounds, embedding-failure log level.
+- `test_session_save_and_restore.py` - core session paths run from this suite: `converse_stream` auto-save, partial streams, restore seed (core code, kept here to keep the pinned ids).
+- `test_sop.py` - `SOPRegistry`: registration, `config_overrides` validation, load errors, the warning `register_directory` gives per failed file.
+- `test_swarm_graph.py` - `SwarmAgent` and `AgentGraph`: hand-offs, shared memory, iteration counts, edge-condition safety.
 - `test_semantic_memory_robustness.py` - thread safety, embedding model mismatch warning, `max_entries`, atomic save.
 - `test_python_tools.py` - `PythonToolLoader`: the `load_directory` report (`PythonToolLoadReport` with `tools` and `errors`), `from_directory` returning the list and warning once per failed file, dedupe, removed names.
 - `test_okf.py` - the OKF tools, memory backend and exporters in `fsm_llm.agents`.
 - `test_agent_skills.py` - `create_skill_tools`: the three read-only tools, reply budget against the 2,000-character observation cap, injection containment, parameter clamping, end-to-end runs (scripted `native_fc` and `ReactAgent`) and the no-execution pin.
-- `test_strands_phase2.py` - MCP provider and timeouts, swarm, agent graph, OTEL, `DependencyResolver`, SOPs (including the warning `register_directory` gives per failed file), semantic tools, A2A, exports.
-- `test_structured_output.py` - `output_schema` parsing into `structured_output`.
-- `test_summarization.py` - `make_observation_summarizer` and its handler wiring.
+- `test_structured_output.py` - `output_schema` parsing into `structured_output` (the model's answer outranks context hints).
+- `test_summarization.py` - `make_observation_summarizer` and its handler wiring (a summary is not wrapped twice).
 - `test_think_fallback.py` - `think` never BLOCKs; unknown tool names are not evidence.
-- `test_tool_registries.py` - `get_json_schemas`, `CachingToolRegistry`, `RetryingToolRegistry`.
-- `test_trust_boundary.py` - caller context cannot forge approval or a finished run (also through `AgentServer`), constructor kwargs checks, gated tools refused where there is no approval step.
-- `test_tools.py` - `ToolRegistry`, `@tool`, thread safety, `normalize_tool_input`, list and dict parameters.
+- `test_tool_registries.py` - `get_json_schemas`, `CachingToolRegistry` (never serves a granted call), `RetryingToolRegistry` (never retries a flagged tool).
+- `test_trust_boundary.py` - caller context cannot forge approval or a finished run (also through `AgentServer`, graph edges and swarm hand-offs), constructor kwargs checks, gated tools refused where there is no approval step, flagged tools with no approver fail closed.
+- `test_tools.py` - `ToolRegistry`, `@tool`, thread safety, `normalize_tool_input`, list and dict parameters, `register_function` shapes.
+- `test_otel_exporter.py` - `OTELExporter` (monitor code, tested from this suite): thread-safe span handling and the exporter lifecycle.
+- `test_dependency_resolver.py` - `DependencyResolver` of `fsm_llm.workflows` (kept here to keep the pinned ids).
 - `test_truncation.py` - `smart_truncate`.
 - `test_verified_react.py` - VerifiedReactAgent retries and periodic reflection.
 
@@ -121,6 +125,6 @@ The whole suite needs no network or API key; the `conftest.py` network block mak
 ## Things to know
 
 - Some tests skip when an optional package is missing: `mcp` (all of `test_mcp_stdio.py`, which is a module-level skip), `fastapi` and `httpx` (`test_remote.py` and the `AgentServer` tests in other files), the opentelemetry SDK (OTEL tests), `fsm_llm.reasoning` and `fsm_llm.workflows` (a few tests that use them). In a venv without `mcp` a default run shows 1 skipped.
-- The async tests in `test_strands_phase2.py` need `asyncio_mode = "auto"`, which `pyproject.toml` sets.
+- The async tests in `test_mcp_provider.py` need `asyncio_mode = "auto"`, which `pyproject.toml` sets.
 - Library logging is off by default. Tests that check a warning call `logger.enable("fsm_llm")`, add a sink, and disable logging again afterwards.
 - Many docstrings cite `DECISION plan-.../D-NNN` ids. They record why a behaviour exists; do not weaken those assertions.

@@ -6,8 +6,11 @@ import json
 
 from pydantic import BaseModel
 
+from fsm_llm.agents import PromptChainAgent
 from fsm_llm.agents.base import BaseAgent
-from fsm_llm.agents.definitions import AgentConfig, AgentResult
+from fsm_llm.agents.definitions import AgentConfig, AgentResult, ChainStep
+from fsm_llm.testing import PromptGroundedLLM
+from tests.test_fsm_llm_agents.support import _Out
 
 
 class SimpleReport(BaseModel):
@@ -174,3 +177,34 @@ class TestStructuredOutputDiagnostic:
         assert result is None
         # Diagnostic emitted naming the failed construction.
         assert any("context-key construction" in m for m in msgs)
+
+
+class TestStructuredOutputPrefersTheModelsAnswer:
+    """F-AP-01: a context key named like a schema field never replaces the answer."""
+
+    def _agent(self) -> PromptChainAgent:
+        return PromptChainAgent(
+            chain=[
+                ChainStep(
+                    step_id="s",
+                    name="s",
+                    extraction_instructions="x",
+                    response_instructions="y",
+                )
+            ],
+            config=AgentConfig(output_schema=_Out),
+            llm_interface=PromptGroundedLLM(),
+        )
+
+    def test_the_answer_json_outranks_a_caller_hint(self):
+        answer = json.dumps({"title": "Model title", "answer": "x"})
+        out = self._agent()._try_parse_structured_output(
+            answer, {"title": "CALLER HINT"}
+        )
+        assert out == _Out(title="Model title", answer="x")
+
+    def test_context_keys_still_fill_in_when_the_answer_is_prose(self):
+        out = self._agent()._try_parse_structured_output(
+            "prose, no json", {"title": "T", "answer": "A"}
+        )
+        assert out == _Out(title="T", answer="A")

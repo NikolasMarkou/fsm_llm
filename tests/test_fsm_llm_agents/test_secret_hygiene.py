@@ -305,3 +305,50 @@ class TestApprovalSummary:
         # D-016: the approver must see the exact call.
         assert seen[0].parameters == _INPUT
         assert _SECRET not in "\n".join(lines)
+
+
+_FALLBACK_SECRET = "sk-live-ABCDEF1234567890abcdef"
+
+
+def _debug_lines(action: Any) -> list[str]:
+    from fsm_llm.logging import logger
+
+    captured: list[str] = []
+    logger.enable("fsm_llm")
+    sink_id = logger.add(lambda m: captured.append(str(m)), level="DEBUG")
+    try:
+        action()
+    finally:
+        logger.remove(sink_id)
+        logger.disable("fsm_llm")
+    return captured
+
+
+class TestFallbackLogsRedacted:
+    def test_single_param_fallback(self):
+        def login(api_key: str) -> str:
+            return "ok"
+
+        registry = ToolRegistry()
+        registry.register_function(login, name="login", description="d")
+        lines = _debug_lines(
+            lambda: registry.execute(
+                ToolCall(tool_name="login", parameters={"key": _FALLBACK_SECRET})
+            )
+        )
+        assert any("kwarg mismatch" in line for line in lines)
+        assert not any(_FALLBACK_SECRET in line for line in lines)
+
+    def test_positional_mapping_fallback(self):
+        def login(api_key: str, region: str = "eu") -> str:
+            return "ok"
+
+        registry = ToolRegistry()
+        registry.register_function(login, name="login", description="d")
+        lines = _debug_lines(
+            lambda: registry.execute(
+                ToolCall(tool_name="login", parameters={"key": _FALLBACK_SECRET})
+            )
+        )
+        assert any("positional mapping" in line for line in lines)
+        assert not any(_FALLBACK_SECRET in line for line in lines)

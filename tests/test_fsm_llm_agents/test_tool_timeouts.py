@@ -1,197 +1,40 @@
-"""Review round 2 fixes for agents tools and native function calling (plan
-944e2692 step 18.6, D-037 item "18.6", review pass 9 warnings 1, 2, 4, 5;
-decisions D-041 to D-044).
+"""Tool timeouts end as an unknown outcome: bound, status mapping, parallel batches, PlanExecute, REWOO, native_fc.
 
-Each class pins one accepted finding and fails on the parent commit 1be35d7:
-``$ref`` (Enum) parameters shown to prompt-mode models with their real type,
-ParallelReact accepting an old-signature registry it never sends ``gated``,
-a timed-out call reported as ``tool_status: unknown`` everywhere it is
-visible (PlanExecute never re-runs it), and native_fc's ``run_tools`` state
-exempt from the wall clock.
+A timed-out call may have run its side effect, so every executor reports ``unknown``, never ``failed``,
+and PlanExecute never re-runs such a step (plan 944e2692 review fixes D-032, D-041 to D-044).
 """
 
 from __future__ import annotations
 
-import enum
-import json
+import contextvars
+import math
 import threading
+import time
 from typing import Any
 
+import pydantic
 import pytest
 
 from fsm_llm.agents import (
     AgentConfig,
     NativeFunctionCallingReactAgent,
     PlanExecuteAgent,
-    ReactAgent,
     REWOOAgent,
+    ToolAnnotations,
 )
-from fsm_llm.agents.constants import (
-    ContextKeys,
-    NativeFCStates,
-    StopReason,
-    ToolRunStatus,
-)
-from fsm_llm.agents.definitions import ToolCall, ToolResult
-from fsm_llm.agents.exceptions import AgentError, AgentTimeoutError
+from fsm_llm.agents.constants import ContextKeys, StopReason, ToolRunStatus
+from fsm_llm.agents.definitions import ToolCall, ToolDefinition, ToolResult
 from fsm_llm.agents.handlers import AgentHandlers
 from fsm_llm.agents.hitl import HumanInTheLoop
 from fsm_llm.agents.parallel_react import ParallelReactAgent
-from fsm_llm.agents.prompts import build_think_extraction_instructions
-from fsm_llm.agents.tools import ToolRegistry, schema_types
+from fsm_llm.agents.tool_registries import RetryingToolRegistry
+from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.testing import PromptGroundedLLM
 from tests.test_fsm_llm_agents import test_native_fc_golden as golden
-from tests.test_fsm_llm_agents.test_review_fixes_tools_native import (
-    _OldRegistry,
-    _timed_recorder,
-    _with_tool,
-)
 from tests.test_fsm_llm_agents.test_toolspec import (
     _approved_context,
     _policy_gates_everything,
 )
-
-# ---------------------------------------------------------------------------
-# W1: `$ref` parameters are described with the type they point to
-# ---------------------------------------------------------------------------
-
-
-class _Color(str, enum.Enum):
-    RED = "red"
-    BLUE = "blue"
-
-
-class _Size(enum.IntEnum):
-    S = 1
-    L = 2
-
-
-def _paint(color: _Color, size: _Size = _Size.S) -> str:
-    """Paint the fence."""
-    return f"{color.value} {int(size)}"
-
-
-def _enum_registry() -> ToolRegistry:
-    registry = ToolRegistry()
-    registry.register_function(_paint, name="paint")
-    return registry
-
-
-class TestRefParametersKeepTheirType:
-    def test_description_shows_str_enum_as_string_and_int_enum_as_integer(self):
-        text = _enum_registry().to_prompt_description()
-        assert "color [REQUIRED] (string)" in text
-        assert "size [optional] (integer)" in text
-        assert "(object)" not in text
-
-    def test_think_example_uses_the_referenced_type(self):
-        text = build_think_extraction_instructions(_enum_registry())
-        example = next(
-            json.loads(line) for line in text.splitlines() if '"paint"' in line
-        )
-        assert example["tool_input"]["color"] == "<color>"
-        assert example["tool_input"]["size"] == 0
-
-    def test_prompt_mode_agent_is_shown_the_enum_types(self):
-        """The text a ReAct agent's model actually receives."""
-        llm = PromptGroundedLLM()
-        agent = ReactAgent(
-            _enum_registry(),
-            config=AgentConfig(model="m", max_iterations=1),
-            llm_interface=llm,
-        )
-        try:
-            agent.run("paint the fence red")
-        except AgentError:
-            pass
-        prompts = [request.system_prompt for request in llm.calls("extract_field")]
-        assert prompts
-        assert any("color [REQUIRED] (string)" in p for p in prompts)
-        assert not any("color [REQUIRED] (object)" in p for p in prompts)
-
-    def test_a_model_reference_is_still_an_object(self):
-        root = {
-            "properties": {"p": {"$ref": "#/$defs/M"}},
-            "$defs": {"M": {"type": "object", "properties": {}}},
-        }
-        assert schema_types(root["properties"]["p"], root=root) == ["object"]
-
-    @pytest.mark.parametrize(
-        ("prop", "root"),
-        [
-            ({"$ref": "#/$defs/Missing"}, {"$defs": {}}),
-            ({"$ref": "#/$defs/Color"}, None),
-            ({"$ref": "https://example.com/schema.json"}, {"$defs": {}}),
-        ],
-        ids=["dangling", "no_root", "non_local"],
-    )
-    def test_an_unresolved_reference_reads_as_any_not_object(self, prop, root):
-        assert schema_types(prop, root=root) == []
-
-    def test_a_reference_cycle_terminates(self):
-        root = {"$defs": {"A": {"$ref": "#/$defs/B"}, "B": {"$ref": "#/$defs/A"}}}
-        assert schema_types({"$ref": "#/$defs/A"}, root=root) == []
-
-    def test_optional_enum_is_string_or_null(self):
-        root = {
-            "$defs": {"Color": {"enum": ["red"], "type": "string"}},
-        }
-        prop = {"anyOf": [{"$ref": "#/$defs/Color"}, {"type": "null"}]}
-        assert schema_types(prop, root=root) == ["string", "null"]
-
-
-# ---------------------------------------------------------------------------
-# W2: agents that never pass `gated` accept an old-signature registry
-# ---------------------------------------------------------------------------
-
-
-class TestAgentsThatNeverPassGatedRunOldRegistries:
-    """D-033 says REWOO, ParallelReact and native_fc call ``execute(call)``
-    and so accept an override written against the old signature. On the
-    parent ParallelReact refused it at ``run()`` start (it built an
-    ``AgentHandlers`` only for the iteration limiter)."""
-
-    def test_parallel_react_runs_the_old_registry_tool(self):
-        ran: list[str] = []
-
-        class _Recording(_OldRegistry):
-            def execute(self, tool_call: ToolCall) -> ToolResult:  # type: ignore[override]
-                ran.append(tool_call.tool_name)
-                return super().execute(tool_call)
-
-        llm = PromptGroundedLLM(
-            facts={
-                "tool_calls": (
-                    [{"tool_name": "echo", "tool_input": {"q": "hi"}}],
-                    "echo hi",
-                ),
-            }
-        )
-        agent = ParallelReactAgent(
-            _with_tool(_Recording()),
-            config=AgentConfig(model="m", max_iterations=2),
-            llm_interface=llm,
-        )
-        agent.run("echo hi")
-        assert llm.requests, "the run made no model call"
-        assert "echo" in ran
-
-    @pytest.mark.parametrize(
-        "build",
-        [
-            lambda r: REWOOAgent(r, config=AgentConfig(model="m")),
-            lambda r: NativeFunctionCallingReactAgent(r, config=AgentConfig(model="m")),
-            lambda r: ParallelReactAgent(r, config=AgentConfig(model="m")),
-        ],
-        ids=["rewoo", "native_fc", "parallel_react"],
-    )
-    def test_construction_accepts_it(self, build):
-        build(_with_tool(_OldRegistry()))
-
-
-# ---------------------------------------------------------------------------
-# W4: a timed-out call is `tool_status: unknown` everywhere it is visible
-# ---------------------------------------------------------------------------
 
 
 def _hanging_pay(release: threading.Event, ran: list[str]) -> Any:
@@ -460,73 +303,122 @@ class TestPlanExecuteNeverReRunsAnUnknownStep:
         assert result.stop_reason == StopReason.NO_RESULT
 
 
-# ---------------------------------------------------------------------------
-# W5: native_fc's run_tools state is exempt from the wall clock (D-032)
-# ---------------------------------------------------------------------------
+def _counting_tool(ran: list[int], seconds: float = 0.0) -> Any:
+    def slow(x: int) -> str:
+        time.sleep(seconds)
+        ran.append(x)
+        return "ok"
+
+    return slow
 
 
-class _RecordingRegistry(ToolRegistry):
-    def __init__(self) -> None:
-        super().__init__()
-        self.ran: list[str] = []
+class TestTimeoutBound:
+    @pytest.mark.parametrize("bad", [math.inf, 1e12, math.nan])
+    def test_definition_refuses_an_unwaitable_timeout(self, bad):
+        with pytest.raises(pydantic.ValidationError):
+            ToolDefinition(
+                name="t", description="d", execute_fn=lambda: 1, timeout_seconds=bad
+            )
 
-    def execute(self, tool_call: ToolCall, *, gated: bool = False) -> ToolResult:
-        self.ran.append(tool_call.tool_name)
-        return super().execute(tool_call, gated=gated)
+    @pytest.mark.parametrize("bad", [math.inf, 1e12])
+    def test_register_function_refuses_it(self, bad):
+        with pytest.raises(ValueError):
+            ToolRegistry().register_function(
+                _counting_tool([]), name="slow", description="d", timeout_seconds=bad
+            )
 
-
-def _recording_native(**config: Any) -> tuple[Any, _RecordingRegistry]:
-    registry = _RecordingRegistry()
-    for tool_def in golden._registry().list_tools():
-        registry.register(tool_def)
-    settings: dict[str, Any] = {"model": "gpt-4o-mini", **config}
-    agent = NativeFunctionCallingReactAgent(registry, config=AgentConfig(**settings))
-    return agent, registry
-
-
-class TestRunToolsFinishesPastTheDeadline:
-    """Each model call costs 1.2 s of a 1.0 s budget, so the deadline passes
-    during the first calls turn. e1f63a9 ran that turn's tools; with
-    ``RUN_TOOLS`` removed from ``SECONDS_EXEMPT`` the run raised before."""
-
-    def test_run_tools_is_exempt(self):
-        assert NativeFCStates.RUN_TOOLS in NativeFCStates.SECONDS_EXEMPT
-        assert NativeFCStates.CALL_MODEL not in NativeFCStates.SECONDS_EXEMPT
-
-    def test_exhausted_loop_still_runs_its_tools_and_the_forced_write(
-        self, monkeypatch
-    ):
-        recorder = _timed_recorder(
-            monkeypatch,
-            [
-                golden._calls(golden._PARIS),
-                golden._calls(golden._NOTE),
-                golden._final("x"),
-            ],
-            1.2,
+    def test_the_largest_waitable_timeout_is_accepted(self):
+        definition = ToolDefinition(
+            name="t",
+            description="d",
+            execute_fn=lambda: 1,
+            timeout_seconds=threading.TIMEOUT_MAX,
         )
-        agent, registry = _recording_native(
-            max_iterations=1, timeout_seconds=1.0, force_final_tool="write_note"
-        )
-        result = agent.run("t")
-        assert len(recorder.requests) == 2
-        assert registry.ran == ["weather", "write_note"]
-        assert [c.tool_name for c in result.trace.tool_calls] == [
-            "weather",
-            "write_note",
-        ]
+        assert definition.timeout_seconds == threading.TIMEOUT_MAX
 
-    def test_mid_loop_runs_the_turns_tools_then_times_out(self, monkeypatch):
-        """e1f63a9 parity: the clock stops the run at the next model turn.
-        (The tools run on ``run_tools`` entry, so this case alone does not
-        tell the mutant apart; the exhausted case above does.)"""
-        recorder = _timed_recorder(
-            monkeypatch,
-            [golden._calls(golden._PARIS), golden._final("x")],
-            1.2,
+    def test_a_timeout_set_after_registration_never_runs_the_tool(self):
+        """Bypassing the field check is refused before the worker starts.
+
+        On the parent the worker ran the tool, then the wait raised
+        ``OverflowError``: a tool that ran was reported failed and a
+        retry-safe one ran three times.
+        """
+        ran: list[int] = []
+        registry = RetryingToolRegistry(max_retries=2)
+        registry.register_function(
+            _counting_tool(ran),
+            name="slow",
+            description="d",
+            timeout_seconds=1.0,
+            annotations=ToolAnnotations(idempotent=True),
         )
-        agent, registry = _recording_native(max_iterations=5, timeout_seconds=1.0)
-        with pytest.raises(AgentTimeoutError):
-            agent.run("t")
-        assert len(recorder.requests) == 1
-        assert registry.ran == ["weather"]
+        registry.get("slow").timeout_seconds = 1e12
+        result = registry.execute(ToolCall(tool_name="slow", parameters={"x": 1}))
+        time.sleep(0.2)
+        assert ran == []
+        assert result.success is False
+        assert "invalid timeout_seconds" in (result.error or "")
+        assert result.timed_out is False
+
+
+class TestTimedOutOutcomeIsUnknown:
+    def _registry(self, release: threading.Event, ran: list[str]) -> ToolRegistry:
+        def pay(amount: str) -> str:
+            release.wait(5.0)
+            ran.append(amount)
+            return "paid"
+
+        registry = ToolRegistry()
+        registry.register_function(
+            pay,
+            name="pay",
+            description="d",
+            requires_approval=True,
+            timeout_seconds=0.1,
+        )
+        return registry
+
+    def test_result_is_marked_timed_out_and_says_so(self):
+        release, ran = threading.Event(), []
+        result = self._registry(release, ran).execute(
+            ToolCall(tool_name="pay", parameters={"amount": "9"})
+        )
+        release.set()
+        assert result.success is False
+        assert result.timed_out is True
+        assert "outcome is unknown" in (result.error or "")
+        assert "may still happen" in (result.error or "")
+        assert result.observation.startswith("[TOOL OUTCOME UNKNOWN] ")
+
+    def test_hitl_path_tells_the_model_the_outcome_is_unknown(self):
+        """An approved (gated) call that times out is not shown as failed."""
+        release, ran = threading.Event(), []
+        registry = self._registry(release, ran)
+        handlers = AgentHandlers(registry, requires_approval=_policy_gates_everything)
+        delta = handlers.execute_tool(_approved_context())
+        release.set()
+        observation = delta[ContextKeys.OBSERVATIONS][-1]
+        assert "[TOOL OUTCOME UNKNOWN]" in observation
+        assert "[TOOL FAILED]" not in observation
+        assert "outcome is unknown" in observation
+
+    def test_failure_and_success_observations_are_unchanged(self):
+        failed = ToolResult(tool_name="t", success=False, error="boom")
+        assert failed.observation == "[TOOL FAILED] Error: boom"
+        ok = ToolResult(tool_name="t", success=True, result="fine")
+        assert ok.observation == "fine"
+
+    def test_worker_sees_the_callers_context_variables(self):
+        """Review NOTE 5 (mutant M6): the worker runs in a copy of the
+        caller's context variables."""
+        var: contextvars.ContextVar[str] = contextvars.ContextVar("v", default="-")
+        var.set("caller")
+
+        def read() -> str:
+            return var.get()
+
+        registry = ToolRegistry()
+        registry.register_function(
+            read, name="read", description="d", timeout_seconds=5.0
+        )
+        assert registry.execute(ToolCall(tool_name="read")).result == "caller"
