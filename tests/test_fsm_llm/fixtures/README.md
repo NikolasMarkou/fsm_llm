@@ -40,6 +40,7 @@ Where the filter is known to be wrong on an entry and the fix was refused, the e
 - `context_key_corpus.py` - regression and shape-coverage corpus: name lists for passwords, crypto keys and auth tokens, value maps for the key and token names, carve-out shape entries, and the pinned known-wrong sets.
 - `holdout_key_corpus.py` - the burned holdout: 181 `(name, value, ground_truth)` rows for the `*_key` and `*_token` arms, `arm_of()`, and two pinned known-wrong sets.
 - `census_key_corpus.py` - the independence corpus: 341 `(name, value, ground_truth)` rows, plus the lists of contested rows.
+- `kind_equality_baseline.json` - generated, not hand-written: the recorded answers of the code before the state-kind refactor, read by `test_kind_equality.py` and written only by `python -m tests.test_fsm_llm.kind_corpus --write`.
 
 ## How to use it
 

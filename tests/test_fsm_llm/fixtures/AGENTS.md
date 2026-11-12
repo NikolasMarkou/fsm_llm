@@ -43,6 +43,7 @@ flowchart TD
 | `context_key_corpus.py` | Regression + shape coverage | Name tuples, value maps, carve-out triples, 5 pinned sets |
 | `holdout_key_corpus.py` | Burned holdout | 181 rows, `arm_of()`, 2 pinned sets |
 | `census_key_corpus.py` | Independence corpus | 341 rows, explicit `__all__`, contested-row tuples |
+| `kind_equality_baseline.json` | Generated record, not a corpus | The code's answers before the state-kind refactor; written only by `python -m tests.test_fsm_llm.kind_corpus --write`, read by `test_kind_equality.py` |
 
 ## Public interface
 
