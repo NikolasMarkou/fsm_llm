@@ -907,7 +907,7 @@ reply = runner.converse(conv_id, "four, Friday")  # or one user turn
 runner.end_conversation(conv_id)
 ```
 
-`hook(conv_id)` is the `before_step` the runner gives core `run_until_terminal`. The child gets only the declared inputs, runs on the host interface, and returns only the declared return keys, and only when all are present and it was not aborted. A child that spends `policy.max_turns` steps in total is aborted through the handler-only key `procedure_abort`. The result `{status, procedure_id, version, reason}` has `status` in `ok|failed|aborted|running` and `reason` one of `constants.REASONS` or `None`. One thread per conversation; the runner holds no lock. `runnable_reason` and `reason_of` are importable from `fsm_llm.synthesis.runner`.
+`hook(conversation_id)` is the `before_step` the runner gives core `run_until_terminal`. The child gets only the declared inputs, runs on the host interface, and returns only the declared return keys, and only when all are present and it was not aborted. A child that spends `policy.max_turns` steps in total is aborted through the handler-only key `procedure_abort`. The result `{status, procedure_id, version, reason}` has `status` in `ok|failed|aborted|running` and `reason` one of `constants.REASONS` or `None`. One thread per conversation; the runner holds no lock. `runnable_reason` and `reason_of` are importable from `fsm_llm.synthesis.runner`.
 
 ### Agents (`fsm_llm.agents`)
 

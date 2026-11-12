@@ -42,7 +42,7 @@ From the repo root, with the project virtualenv:
 .venv/bin/python -m pytest tests/test_fsm_llm_regression/test_regression_core_bugs.py -k VB14b
 ```
 
-At the time of writing, 264 tests are collected: 262 pass and 2 are skipped (the two `requirements.txt` checks in `test_regression_review.py`). The run takes about a second.
+At the time of writing, 265 tests are collected: 262 pass and 2 are skipped (the two `requirements.txt` checks in `test_regression_review.py`). The run takes about a second.
 
 ## Things to know
 

@@ -1,7 +1,7 @@
 # test_fsm_llm_workflows
 
 Path: `tests/test_fsm_llm_workflows`
-Purpose: pytest suite (319 tests, 8 files) for `fsm_llm.workflows`, the in-memory async workflow engine in `src/workflows/`.
+Purpose: pytest suite (322 tests, 8 files) for `fsm_llm.workflows`, the in-memory async workflow engine in `src/workflows/`.
 
 ## Scope
 
@@ -29,7 +29,7 @@ flowchart LR
 
 | File | Tests | What it pins |
 | --- | --- | --- |
-| `test_workflows.py` | 41 | Exception attributes and hierarchy under `WorkflowError`; `WorkflowStatus` values; `WorkflowEvent` UUID and ISO timestamp dump; `WorkflowStepResult.success_result`/`failure_result`, exception-to-string `error`; `WorkflowInstance` lifecycle and history; `EventListener.is_expired`; `WaitEventConfig` positive timeout; `WorkflowDefinition.validate_structure` errors; step data filter (`TestStepDataInternalKeyFilter`); `""` route completes (`TestSwitchStepTerminalRoute`, `TestWideTerminalPredicateAfterD020Revert`); Timer/Wait reach `WAITING`; `serialize()` of nested `RetryStep.step` and `ParallelStep.steps`; `__all__`, `__version__` equals `fsm_llm.__version__` |
+| `test_workflows.py` | 44 | Exception attributes and hierarchy under `WorkflowError`; `WorkflowStatus` values; `WorkflowEvent` UUID and ISO timestamp dump; `WorkflowStepResult.success_result`/`failure_result`, exception-to-string `error`; `WorkflowInstance` lifecycle and history; `EventListener.is_expired`; `WaitEventConfig` positive timeout; `WorkflowDefinition.validate_structure` errors; step data filter (`TestStepDataInternalKeyFilter`); `""` route completes (`TestSwitchStepTerminalRoute`, `TestWideTerminalPredicateAfterD020Revert`); Timer/Wait reach `WAITING`; `serialize()` of nested `RetryStep.step` and `ParallelStep.steps`; `__all__`, `__version__` equals `fsm_llm.__version__` |
 | `test_dsl.py` | 41 | Factories `create_workflow`, `auto_step`, `api_step`, `condition_step`, `llm_step`, `wait_event_step`, `timer_step`, `parallel_step`; `create_workflow_builder(...).add_step/set_initial_step/add_metadata/build`; `create_linear_workflow` (empty list raises `ValueError` "at least one step"), `create_conditional_workflow`, `create_event_driven_workflow` |
 | `test_steps.py` | 25 | `AutoStep` (sync/async action, action error returns a failure result), `ConditionStep`, `APIStep` (exception gives failure to `failure_step_id`), `WaitEventStep` `_waiting_info`, `TimerStep` `_timer_info`, `ParallelStep` (default `step_<i>_<key>` aggregation, custom aggregation, context isolation), `ConversationStep` (needs exactly one of `fsm_file`/`fsm_definition`, mappings, `max_turns`) |
 | `test_new_steps.py` | 46 | `SwitchStep` (case, default, missing key, numeric value stringified, no default fails); `RetryStep` (retries failures and bare exceptions, re-raises original exception type on exhaustion); `AgentStep`; DSL `agent_step`, `retry_step`, `switch_step`; `remove_instance`, `max_completed_instances` purge |
@@ -43,7 +43,7 @@ flowchart LR
 
 This directory exports nothing; its surface is the pytest entry points and the module-level helpers that tests share.
 
-- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_workflows/` (319 tests); `-m "not slow"` skips the 8 `slow` tests in `test_step_timeouts.py`.
+- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_workflows/` (322 tests); `-m "not slow"` skips the 8 `slow` tests in `test_step_timeouts.py`.
 - Helpers in `test_audit_2026_09_27.py`:
   - `_wait_then_done(workflow_id: str, event_type: str = "go", **wait_kwargs) -> WorkflowDefinition`: a `wait_event_step("wait", ...)` routed to a terminal `auto_step("done", ..., next_step_id="")`.
   - `async _settle(seconds: float = 0.05) -> None`: `asyncio.sleep` wrapper used to let background work finish.
@@ -107,7 +107,7 @@ Behaviour pinned by `test_audit_2026_09_27.py` (2026-09-27 audit findings in the
 
 ## Working here
 
-- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_workflows/` (about 10 s); `-m "not slow"` runs 311.
+- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_workflows/` (about 10 s); `-m "not slow"` runs 314.
 - New audit regressions: add a class per finding in the matching audit file, or a new `test_audit_<date>.py`; put helpers at module top with a `_` prefix (`_wait_then_done`, `_settle`, `_CoreLikeLLM`, `_RecordingAgent`).
 - Mark any test that sleeps near a second or more with `@pytest.mark.slow`.
 - Custom steps subclass `WorkflowStep` and implement `async def execute(self, context)`; extra pydantic fields are declared as class attributes (see `_SlowStep`).
