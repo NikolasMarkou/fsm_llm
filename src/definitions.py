@@ -30,6 +30,10 @@ from pydantic import (
     model_validator,
 )
 
+# --------------------------------------------------------------
+# local imports
+# --------------------------------------------------------------
+from .codes import Status
 from .constants import (
     ALLOWED_JSONLOGIC_OPERATIONS,
     COMPLETION_TOOL_CHOICE_KEYWORDS,
@@ -51,10 +55,6 @@ from .constants import (
     has_internal_prefix,
     is_forbidden_context_entry,
 )
-
-# --------------------------------------------------------------
-# local imports
-# --------------------------------------------------------------
 from .logging import logger
 from .schema_registry import SCHEMA_VERSION_DEFAULT, newer_fields
 
@@ -1949,9 +1949,9 @@ def orphaned_states_message(orphans: Iterable[str]) -> str:
 # which core may not import). `None` is "no result yet".
 _SYNTHESIZE_SAMPLES: tuple[tuple[str, dict[str, Any] | None], ...] = (
     ("absent", None),
-    ("running", {"status": "running"}),
-    ("failed", {"status": "failed", "reason": "compile_failed"}),
-    ("aborted", {"status": "aborted", "reason": "budget_spent"}),
+    ("running", {"status": Status.RUNNING.value}),
+    ("failed", {"status": Status.FAILED.value, "reason": "compile_failed"}),
+    ("aborted", {"status": Status.ABORTED.value, "reason": "budget_spent"}),
 )
 
 
@@ -2169,7 +2169,7 @@ class FSMDefinition(BaseModel):
                     for t in state.transitions
                     if evaluator.transition_passes(t, context)
                 ]
-                if result is None or result["status"] == "running":
+                if result is None or result["status"] == Status.RUNNING.value:
                     for transition in passing:
                         raise ValueError(
                             f"State '{state.id}': the transition to "
