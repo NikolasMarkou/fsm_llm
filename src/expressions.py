@@ -1095,7 +1095,7 @@ def _evaluate_logic(logic: Any, data: dict[str, Any] | None, _depth: int) -> Any
             return _UNDEFINED
 
     # Every allowed operator is in exactly one of the three dispatch tables
-    # (pinned by test_audit_sweeps), and the first two returned above.
+    # (pinned by test_expressions.py::TestOperatorSweep), and the first two returned above.
     operation = operations[operator]
 
     # Apply the operation with error handling

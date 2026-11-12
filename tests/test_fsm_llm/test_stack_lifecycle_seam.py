@@ -28,7 +28,7 @@ from fsm_llm import api as api_module
 from fsm_llm.api import API
 from fsm_llm.definitions import FSMDefinition
 from fsm_llm.testing import MockLLM2Interface
-from tests.test_fsm_llm.support import _correction_fsm, _Prov
+from tests.test_fsm_llm.support import _blocked_fsm, _correction_fsm, _Prov
 
 # Generous relative to the work being done (all in-process, mocked LLM); small enough that a
 # genuine regression surfaces as a fast failure rather than a CI hang.
@@ -648,3 +648,21 @@ class TestStackedSaveSessionStoresTheRoot:
         assert saved.current_state == "profile"
         assert saved.context_data.get("root_marker") == "R"
         assert saved.stack_depth == 1
+
+
+class TestStep7StackFrameNarrowing:
+    """``FSMStackFrame.fsm_definition`` accepts only an ``FSMDefinition``."""
+
+    def test_raw_string_definition_is_rejected(self):
+        from pydantic import ValidationError
+
+        from fsm_llm.api import FSMStackFrame
+
+        with pytest.raises(ValidationError):
+            FSMStackFrame(fsm_definition="some-id", conversation_id="c1")
+
+    def test_definition_object_is_accepted(self):
+        from fsm_llm.api import FSMStackFrame
+
+        frame = FSMStackFrame(fsm_definition=_blocked_fsm(), conversation_id="c1")
+        assert isinstance(frame.fsm_definition, FSMDefinition)

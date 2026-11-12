@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from fsm_llm.definitions import ModelNotConfiguredError
+from tests.test_fsm_llm.support import _JOIN_TIMEOUT_S
 
 
 class TestRunnerUsesAPI:
@@ -576,3 +579,206 @@ class TestRunnerSurvivesUnencodableOutput:
         api = self._api("HELLO", [RuntimeError("bad ☃")], [False, True])
         assert self._run(api, ("hi",)) == 1
         assert "bad \\u2603" in self._text(err)
+
+
+def _aliased_tower(levels: int, *, as_list: bool = False) -> dict:
+    """A dict whose every level holds the SAME child three times: 3**levels
+    paths over only ``levels + 1`` distinct containers."""
+    node: Any = {"leaf": "x", "password": "buried"}
+    for _ in range(levels):
+        node = [node, node, node] if as_list else {"a": node, "b": node, "c": node}
+    return {"root": node}
+
+
+def _redact_in_thread(payload: Any, timing_factor: float) -> tuple[bool, float, Any]:
+    """Run ``redact_context`` in a daemon thread so a super-linear walk FAILS
+    the test at the join timeout (scaled by *timing_factor*) instead of hanging
+    the suite."""
+    import time
+
+    from fsm_llm.utilities import redact_context
+
+    box: dict[str, Any] = {}
+
+    def _work() -> None:
+        started = time.perf_counter()
+        box["result"] = redact_context(payload)
+        box["elapsed"] = time.perf_counter() - started
+
+    worker = threading.Thread(target=_work, daemon=True)
+    worker.start()
+    worker.join(_JOIN_TIMEOUT_S * timing_factor)
+    return worker.is_alive(), box.get("elapsed", float("inf")), box.get("result")
+
+
+class TestStep13RunnerRedaction:
+    """Step 13 (D-016): ``redact_context`` had no cycle guard and no
+    memo. 3-way aliasing at depth 16 is 3**16 paths (more than 20 s), and a
+    self-cycle recursed to the depth bound on every path."""
+
+    @pytest.mark.parametrize("as_list", [False, True])
+    def test_three_way_aliased_depth_16_finishes_under_one_second(
+        self, as_list, timing_factor
+    ):
+        from fsm_llm.utilities import REDACTED
+
+        payload = _aliased_tower(15, as_list=as_list)
+        still_running, elapsed, result = _redact_in_thread(payload, timing_factor)
+
+        assert not still_running, "redaction did not finish (super-linear walk)"
+        assert elapsed < 1.0 * timing_factor
+        # Do NOT json.dumps the result here: it re-expands all 3**15 paths.
+        # Descend one path to the innermost level instead.
+        node = result["root"]
+        for _ in range(15):
+            children = node if as_list else [node["a"], node["b"], node["c"]]
+            assert children[0] is children[1] is children[2]  # shared result
+            node = children[0]
+        assert node == {"leaf": "x", "password": REDACTED}
+
+    def test_aliased_output_equals_unaliased_output(self):
+        from fsm_llm.utilities import redact_context
+
+        payload = _aliased_tower(6)
+        unaliased = json.loads(json.dumps(payload))
+        assert redact_context(payload) == redact_context(unaliased)
+
+    def test_shared_subtree_at_different_depths_truncates_per_depth(self):
+        """The memo is keyed by (id, depth): a subtree reached at depth 1 and
+        at depth 12 must be cut by the bound differently, exactly as its
+        un-aliased copies are."""
+        from fsm_llm.utilities import REDACTED, redact_context
+
+        chain: dict = {"password": "deep-secret", "keep": "v"}
+        for _ in range(8):
+            chain = {"n": chain}
+        wrapper: dict = {"shallow": chain}
+        cursor = wrapper
+        for _ in range(10):
+            cursor["down"] = {}
+            cursor = cursor["down"]
+        cursor["deep"] = chain
+
+        result = redact_context(wrapper)
+        assert result == redact_context(json.loads(json.dumps(wrapper)))
+        rendered = json.dumps(result)
+        assert "deep-secret" not in rendered
+        assert '"keep": "v"' in rendered  # shallow copy walked in full
+        assert REDACTED in rendered
+
+    def test_self_cycle_terminates_with_the_placeholder(self, timing_factor):
+        from fsm_llm.utilities import CYCLE_PLACEHOLDER, REDACTED
+
+        payload: dict = {"name": "Alice", "password": "p"}
+        payload["self"] = payload
+        still_running, _, result = _redact_in_thread(payload, timing_factor)
+
+        assert not still_running
+        assert result == {
+            "name": "Alice",
+            "password": REDACTED,
+            "self": CYCLE_PLACEHOLDER,
+        }
+        json.dumps(result)  # no "Circular reference detected"
+
+    def test_list_self_cycle_is_replaced_not_dropped(self):
+        from fsm_llm.utilities import CYCLE_PLACEHOLDER, redact_context
+
+        items: list = ["a"]
+        items.append(items)
+        assert redact_context({"items": items}) == {"items": ["a", CYCLE_PLACEHOLDER]}
+
+    def test_cycle_dependent_subtree_is_not_memoised(self):
+        """``shared`` is reached twice at depth 2: first on the path
+        root -> a -> shared, where its ``back`` edge closes a cycle to ``a``;
+        then on root -> w -> shared, where ``a`` is NOT active and must be
+        walked. Reusing the first result would print the wrong placeholder."""
+        from fsm_llm.utilities import CYCLE_PLACEHOLDER, REDACTED, redact_context
+
+        a: dict = {}
+        shared: dict = {"back": a, "password": "s"}
+        a["s"] = shared
+        result = redact_context({"a": a, "w": {"s2": shared}})
+
+        assert result["a"] == {"s": {"back": CYCLE_PLACEHOLDER, "password": REDACTED}}
+        assert result["w"]["s2"] == {
+            "back": {"s": CYCLE_PLACEHOLDER},
+            "password": REDACTED,
+        }
+
+    def test_acyclic_sibling_of_a_cycle_is_still_memoised(self, timing_factor):
+        """A cycle elsewhere must not switch the memo off for an unrelated
+        aliased subtree (the D-052 lesson): the tower stays linear."""
+        payload = _aliased_tower(15)
+        payload["self"] = payload
+        still_running, elapsed, _ = _redact_in_thread(payload, timing_factor)
+
+        assert not still_running
+        assert elapsed < 1.0 * timing_factor
+
+    # -- lazy debug dumps ---------------------------------------------------
+
+    def _run_main(self, per_turn_data, final_data):
+        import os
+
+        mock_api = MagicMock()
+        mock_api.start_conversation.return_value = ("conv-1", "Hello!")
+        mock_api.has_conversation_ended.side_effect = [False, True]
+        mock_api.converse.return_value = "Response"
+        mock_api.get_data.side_effect = [per_turn_data, final_data]
+
+        with patch.dict(os.environ, {"LLM_MODEL": "test-model"}, clear=True):
+            with patch("fsm_llm.runner.load_env"):
+                with patch("fsm_llm.runner.API.from_file", return_value=mock_api):
+                    with patch("fsm_llm.runner.setup_file_logging"):
+                        with patch("builtins.input", return_value="hi"):
+                            from fsm_llm.runner import main
+
+                            return main("/tmp/t.json", 5, 1000)
+
+    def test_no_redaction_runs_when_logging_is_disabled(self):
+        import fsm_llm.runner as runner_module
+        from fsm_llm.logging import logger
+
+        logger.disable("fsm_llm")
+        with (
+            patch.object(logger, "enable"),
+            patch.object(
+                runner_module, "redact_context", wraps=runner_module.redact_context
+            ) as spy,
+        ):
+            assert self._run_main({"turn": 1}, {"turn": 1}) == 0
+        # The per-turn debug dump stays lazy (no redaction while logging is
+        # disabled). The final dump is the CLI's printed product (F-HM-01), so
+        # it is redacted once for the terminal whatever the log level is.
+        assert spy.call_count == 1
+
+    def test_debug_dump_redacts_when_debug_is_enabled(self):
+        """Vacuity guard: with a DEBUG sink the dumps still run, redacted."""
+        import fsm_llm.runner as runner_module
+        from fsm_llm.logging import logger
+
+        records: list = []
+        # setup_file_logging (patched here) is what enables the library loggers
+        logger.enable("fsm_llm")
+        sink_id = logger.add(lambda m: records.append(m.record), level="DEBUG")
+        try:
+            with patch.object(
+                runner_module, "redact_context", wraps=runner_module.redact_context
+            ) as spy:
+                assert (
+                    self._run_main(
+                        {"turn": 1, "password": "TURN-SECRET"},
+                        {"password": "FINAL-SECRET"},
+                    )
+                    == 0
+                )
+        finally:
+            logger.remove(sink_id)
+            logger.disable("fsm_llm")
+
+        assert spy.call_count == 2
+        messages = [str(r["message"]) for r in records]
+        assert any(m.startswith("Context data: ") for m in messages)
+        assert any(m.startswith("Data: \n") for m in messages)
+        assert not any("SECRET" in m for m in messages)

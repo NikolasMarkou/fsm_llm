@@ -33,6 +33,10 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
     return mock_llm
 
 
+from typing import Any
+from unittest.mock import patch
+
+from fsm_llm.api import API
 from fsm_llm.context import clean_context_keys
 from fsm_llm.definitions import (
     ContextScope,
@@ -2114,3 +2118,137 @@ class TestEmptyContainerIsSetForNonAgentFsms:
             api.converse("hello", cid)
         asked = [p for p in prompts if "Extract the field 'favorite_color'" in p]
         assert asked == []
+
+
+class _RecordingLLM(LLMInterface):
+    """A custom interface that records every Pass-2 request it is sent."""
+
+    def __init__(self) -> None:
+        self.requests: list[Any] = []
+        self.stream_requests: list[Any] = []
+
+    def generate_response(self, request):
+        from fsm_llm.definitions import ResponseGenerationResponse
+
+        self.requests.append(request)
+        return ResponseGenerationResponse(message="real reply")
+
+    def generate_response_stream(self, request):
+        self.stream_requests.append(request)
+        yield "real reply"
+
+
+def _step11_fsm(initial_instructions: str) -> FSMDefinition:
+    """``start`` moves unconditionally to ``think`` (empty instructions)."""
+    states = {
+        "start": State(
+            id="start",
+            description="Start",
+            purpose="Start",
+            response_instructions=initial_instructions,
+            transitions=[Transition(target_state="think", description="Always")],
+        ),
+        "think": State(
+            id="think",
+            description="Think",
+            purpose="Think",
+            response_instructions="",
+            transitions=[Transition(target_state="end", description="Done")],
+        ),
+        "end": State(id="end", description="End", purpose="End", transitions=[]),
+    }
+    return FSMDefinition(
+        name="step11",
+        description="Silent-state sites",
+        initial_state="start",
+        states=states,
+    )
+
+
+def _step11_request(**overrides: Any) -> Any:
+    from fsm_llm.definitions import ResponseGenerationRequest
+
+    fields: dict[str, Any] = {"system_prompt": "A real prompt", "user_message": "hi"}
+    fields.update(overrides)
+    return ResponseGenerationRequest(**fields)
+
+
+class TestSilentStateMakesNoInterfaceCall:
+    def test_silent_greeting_makes_no_call_and_returns_no_text(self):
+        llm = _RecordingLLM()
+        api = API.from_definition(_step11_fsm(""), llm_interface=llm)
+        conv_id, greeting = api.start_conversation()
+        assert greeting == ""
+        assert llm.requests == []
+        assert api.get_conversation_history(conv_id) == []
+
+    def test_silent_sync_turn_makes_no_call_and_returns_no_text(self):
+        llm = _RecordingLLM()
+        api = API.from_definition(_step11_fsm("Greet"), llm_interface=llm)
+        conv_id, greeting = api.start_conversation()
+        assert greeting == "real reply"
+        assert api.converse("go", conv_id) == ""
+        assert api.get_current_state(conv_id) == "think"
+        assert len(llm.requests) == 1
+        assert api.get_conversation_history(conv_id) == [
+            {"system": "real reply"},
+            {"user": "go"},
+        ]
+
+    def test_silent_stream_turn_makes_no_call_and_yields_nothing(self):
+        llm = _RecordingLLM()
+        api = API.from_definition(_step11_fsm("Greet"), llm_interface=llm)
+        conv_id, _ = api.start_conversation()
+        assert list(api.converse_stream("go", conv_id)) == []
+        assert api.get_current_state(conv_id) == "think"
+        assert len(llm.requests) == 1
+        assert llm.stream_requests == []
+        assert api.get_conversation_history(conv_id) == [
+            {"system": "real reply"},
+            {"user": "go"},
+        ]
+
+    def test_request_has_no_skip_field(self):
+        from fsm_llm.definitions import ResponseGenerationRequest
+
+        assert "skip_generation" not in ResponseGenerationRequest.model_fields
+        # The model refuses unknown keywords (07ad3f8c/D-044): an old caller's
+        # flag fails loudly instead of being dropped.
+        with pytest.raises(ValueError, match="skip_generation"):
+            _step11_request(skip_generation=True)
+
+    def test_dot_system_prompt_is_an_ordinary_prompt(self):
+        from fsm_llm.llm import LiteLLMInterface
+
+        reply = MagicMock()
+        reply.choices = [MagicMock()]
+        reply.choices[0].message.content = '{"message": "Hello", "reasoning": ""}'
+        chunk = MagicMock()
+        chunk.choices = [MagicMock()]
+        chunk.choices[0].delta.content = "Hi"
+        chunk.choices[0].delta.reasoning_content = None
+        llm = LiteLLMInterface(model="gpt-4o-mini")
+        request = _step11_request(system_prompt=".")
+        with (
+            patch("fsm_llm.llm.completion", return_value=reply) as completion,
+            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+        ):
+            response = llm.generate_response(request)
+        assert completion.call_count == 1
+        sent = completion.call_args.kwargs["messages"]
+        assert sent[0] == {"role": "system", "content": "."}
+        assert response.message == "Hello"
+        with (
+            patch("fsm_llm.llm.completion", return_value=iter([chunk])) as completion,
+            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+        ):
+            assert list(llm.generate_response_stream(request)) == ["Hi"]
+        assert completion.call_count == 1
+
+    def test_write_only_fields_are_gone_and_old_kwargs_are_refused(self):
+        from fsm_llm.definitions import ResponseGenerationRequest
+
+        for name in ("extracted_data", "context", "previous_state"):
+            assert name not in ResponseGenerationRequest.model_fields
+            with pytest.raises(ValueError, match=name):
+                _step11_request(**{name: "x"})

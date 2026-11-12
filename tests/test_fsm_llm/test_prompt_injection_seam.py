@@ -1149,3 +1149,114 @@ class TestPaddedDifferentialAgainstPreD029:
         closer = "</task short"
         assert _pre_d029_sanitize(closer) == closer
         assert _sanitize(closer) == "&lt;/task short"  # (c) closed
+
+
+_SAFE = BasePromptBuilder._SAFE_TAGS
+
+
+_NAME = r"([A-Za-z_!?][A-Za-z0-9._:-]*)"
+
+
+# A complete tag with no nested `<`: what a reader of the prompt sees as markup.
+_LIVE_TAG = re.compile(r"<(?:\s*/)?\s*" + _NAME + r"[^<>]*>")
+
+
+_RAW_CLOSER = re.compile(r"<\s*/\s*" + _NAME)
+
+
+_RAW_OPENER = re.compile(r"<\s*" + _NAME)
+
+
+# Structural tokens are single symbols so length 5 still reaches `</task>`.
+_ALPHABET = ["<", ">", "/", " ", "\n", "a", "1", "b", "task", "!"]
+
+
+_MAX_LEN = 5
+
+
+def _asweeps_sanitize(text: str) -> str:
+    return BasePromptBuilder()._sanitize_text_for_prompt(text)
+
+
+def _violations(text: str, out: str) -> list[str]:
+    """Return the name of every stated invariant ``out`` breaks for ``text``."""
+    broken = []
+    flat = text.replace("\n", " ").replace("\r", " ")
+    if "\n" in out or "\r" in out:
+        broken.append("newline survived")  # docstring: strips newlines
+    if html.unescape(out) != flat:  # D-047 amendment: escape, never consume
+        broken.append("text lost or altered beyond escaping")
+    for m in _LIVE_TAG.finditer(out):  # D-017: allow-list of inert tags only
+        if m.group(1).lower() not in _SAFE:
+            broken.append(f"live tag {m.group(0)!r}")
+    for m in _RAW_CLOSER.finditer(out):  # D-026/D-040: a closer is never raw
+        if m.group(1).lower() not in _SAFE:
+            broken.append(f"raw closer {m.group(0)!r}")
+    for m in _RAW_OPENER.finditer(out):  # D-054: raw opener only with no `>` after
+        if m.group(1).lower() not in _SAFE and ">" in out[m.end() :]:
+            broken.append(f"raw opener {m.group(0)!r} before a '>'")
+    if ">" not in flat and "/" not in flat and out != flat:
+        broken.append("prose without '>' or '/' was changed")  # D-040 opener rule
+    return broken
+
+
+class TestSanitizerSweep:
+    def test_exhaustive_small_alphabet(self):
+        failures = []
+        count = 0
+        for length in range(_MAX_LEN + 1):
+            for symbols in itertools.product(_ALPHABET, repeat=length):
+                text = "".join(symbols)
+                count += 1
+                broken = _violations(text, _asweeps_sanitize(text))
+                if broken:
+                    failures.append((text, broken))
+        assert count == sum(len(_ALPHABET) ** n for n in range(_MAX_LEN + 1))
+        assert not failures, failures[:10]
+
+    @pytest.mark.parametrize("sample", ["a < b", "x<5", "1 <2", "if a < b then"])
+    def test_comparison_prose_unchanged(self, sample):
+        assert _asweeps_sanitize(sample) == sample
+
+    @pytest.mark.parametrize("sample", ["<b>x</b>", "<i>y</i>", "<B>z</B>"])
+    def test_safe_tags_pass_through(self, sample):
+        assert _asweeps_sanitize(sample) == sample
+
+    @pytest.mark.parametrize("pad", [255, 256, 257, 300])
+    def test_padded_closer_is_escaped(self, pad):
+        text = "</task" + " " * pad + ">"
+        out = _asweeps_sanitize(text)
+        assert "</task" not in out
+        assert not _violations(text, out)
+
+    @pytest.mark.parametrize("pad", [255, 256, 257, 300])
+    def test_padded_spaced_opener_is_escaped(self, pad):
+        # D-054: `< name` + padding + `>` is a padded OPENER, not a comparison.
+        text = "< task" + "x" * pad + " >"
+        out = _asweeps_sanitize(text)
+        assert out.startswith("&lt;")
+        assert not _violations(text, out)
+
+    @pytest.mark.parametrize("pad", [255, 256, 257, 300])
+    def test_padded_unterminated_closer_is_escaped(self, pad):
+        text = "bye </task" + " " * pad
+        out = _asweeps_sanitize(text)
+        assert "</task" not in out
+        assert not _violations(text, out)
+
+    @pytest.mark.parametrize(
+        ("pad", "escaped"), [(255, False), (256, False), (257, True), (300, True)]
+    )
+    def test_unterminated_opener_boundary(self, pad, escaped):
+        # D-040: an end-arm opener stays raw while at most 257 characters
+        # follow its first name character; past that the overflow arm escapes
+        # only `<y`, never the tail (D-047 amendment).
+        text = "x<y" + " " * pad
+        out = _asweeps_sanitize(text)
+        assert out == (("x&lt;y" + " " * pad) if escaped else text)
+
+    @pytest.mark.parametrize("pad", [256, 257, 300])
+    def test_padded_comparison_prose_unchanged(self, pad):
+        # D-047/D-054: space after `<`, no `/`, no later `>`: a comparison.
+        text = "latency < threshold" + " " * pad
+        assert _asweeps_sanitize(text) == text

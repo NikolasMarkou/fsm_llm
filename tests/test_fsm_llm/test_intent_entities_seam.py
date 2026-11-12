@@ -354,7 +354,7 @@ class TestSiblingCoercersAgree:
     `IntentScore.coerce_entity_values` and
     `ClassificationResult.coerce_entity_values` both delegate to the shared
     `definitions._coerce_entity_values` (D-010 of plan-2026-09-22T080837-8b258a25,
-    pinned in test_audit_2026_09_22.py). The original defect was precisely
+    pinned in test_definitions.py::TestStep7SharedEntityCoercer). The original defect was precisely
     their divergence.
     """
 

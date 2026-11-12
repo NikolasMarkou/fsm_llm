@@ -1790,3 +1790,62 @@ class TestStep06A6:
         assert summary is not None
         assert summary.startswith(saved_summary)
         assert "charlie three" in summary
+
+
+def _step14_history_instance(length: int) -> Any:
+    from fsm_llm.definitions import FSMInstance
+
+    instance = FSMInstance(fsm_id="f", current_state="s")
+    instance.context.conversation.exchanges = [
+        {"user": f"u{k}"} if k % 2 == 0 else {"system": f"s{k}"} for k in range(length)
+    ]
+    return instance
+
+
+class TestStep14HistoryUnit:
+    """P1-8 SKIPPED (decisions.md D-038): the exchange-count fetch cannot give
+    identical output under ``TOKEN_BUDGET``, which trusts the fetch window as
+    its only count bound. These pin today's window and the counter-example."""
+
+    @pytest.mark.parametrize("max_messages", [0, 1, 2, 3, 5, 10])
+    @pytest.mark.parametrize("length", [0, 1, 4, 11])
+    def test_fetch_window_is_max_history_messages_exchanges(self, max_messages, length):
+        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+
+        instance = _step14_history_instance(length)
+        conversation = instance.context.conversation
+        seen: list[Any] = []
+        original = type(conversation).get_summary_and_recent
+
+        def _spy(n: Any = None) -> Any:
+            seen.append(n)
+            return original(conversation, n)
+
+        object.__setattr__(conversation, "get_summary_and_recent", _spy)
+        builder = ResponseGenerationPromptBuilder()
+        builder.config = type(builder.config)(max_history_messages=max_messages)
+        builder._build_enhanced_history_section(instance)
+        assert seen == [max_messages]
+
+    def test_token_budget_renders_more_than_an_exchange_window_would(self):
+        import math
+
+        from fsm_llm.prompts import (
+            HistoryManagementStrategy,
+            ResponseGenerationPromptBuilder,
+            ResponsePromptConfig,
+        )
+
+        builder = ResponseGenerationPromptBuilder(
+            ResponsePromptConfig(
+                max_history_messages=2,
+                history_strategy=HistoryManagementStrategy.TOKEN_BUDGET,
+            )
+        )
+        rendered = "\n".join(
+            builder._build_enhanced_history_section(_step14_history_instance(4))
+        )
+        assert all(f'"{tag}"' in rendered for tag in ("u0", "s1", "u2", "s3"))
+        # The P1-8 expression would fetch only ceil(2 / 2) = 1 exchange.
+        conversation = _step14_history_instance(4).context.conversation
+        assert len(conversation.get_recent(math.ceil(2 / 2))) == 2

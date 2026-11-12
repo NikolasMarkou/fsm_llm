@@ -13,6 +13,8 @@ from typing import Any
 
 import pytest
 
+from fsm_llm import expressions
+from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS
 from fsm_llm.definitions import (
     FSMContext,
     Transition,
@@ -1154,3 +1156,44 @@ class TestStep09_3:
         assert _numeric_equal(a, b) is False
         assert evaluate_logic({"==": [a, b]}) is False
         assert evaluate_logic({"<=": [a, b]}) is False
+
+
+class TestOperatorSweep:
+    def test_short_circuit_operators_never_reach_operations(self):
+        short_circuit = expressions._SHORT_CIRCUIT_OPERATORS
+        assert short_circuit == {"and", "or", "if"}
+        assert short_circuit.isdisjoint(expressions.operations)
+
+    def test_every_allowed_operator_has_exactly_one_dispatcher(self):
+        tables = [
+            set(expressions.operations),
+            set(expressions._data_operators),
+            set(expressions._SHORT_CIRCUIT_OPERATORS),
+        ]
+        assert set().union(*tables) == ALLOWED_JSONLOGIC_OPERATIONS
+        assert sum(len(t) for t in tables) == len(ALLOWED_JSONLOGIC_OPERATIONS)
+
+    @pytest.mark.parametrize("operator", sorted(expressions.operations))
+    def test_every_eager_operator_is_dispatched(self, operator, monkeypatch):
+        """Each ``operations`` entry is the one ``evaluate_logic`` calls."""
+        sentinel = object()
+        monkeypatch.setitem(expressions.operations, operator, lambda *a: sentinel)
+        assert expressions.evaluate_logic({operator: [1, 2]}, {}) is sentinel
+
+    @pytest.mark.parametrize("operator", sorted(expressions._data_operators))
+    def test_every_data_operator_is_dispatched(self, operator, monkeypatch):
+        sentinel = object()
+        monkeypatch.setitem(expressions._data_operators, operator, lambda *a: sentinel)
+        assert expressions.evaluate_logic({operator: ["x"]}, {}) is sentinel
+
+    @pytest.mark.parametrize("operator", ["and", "or", "if"])
+    def test_every_short_circuit_operator_is_dispatched(self, operator, monkeypatch):
+        seen: list[str] = []
+
+        def spy(op, values, data, depth):
+            seen.append(op)
+            return "spied"
+
+        monkeypatch.setattr(expressions, "_evaluate_short_circuit", spy)
+        assert expressions.evaluate_logic({operator: [True, 1, 2]}, {}) == "spied"
+        assert seen == [operator]

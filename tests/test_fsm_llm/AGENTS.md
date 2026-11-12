@@ -27,7 +27,7 @@ Three test styles:
 | --- | --- | --- |
 | Unit | `*_unit.py`, `test_pipeline.py`, `test_fsm.py`, `test_expressions.py`, `test_memory.py`, ... | call one module directly |
 | Seam | `*_seam.py`, `test_pipeline_handler_contract.py`, `test_turn_guard_deterministic.py` | go through `API.converse` / `converse_stream` / `push_fsm` / `pop_fsm`, or `LiteLLMInterface` with `patch("fsm_llm.llm.completion")` |
-| Audit regression | `test_audit_2026_09_22.py`, `test_audit_sweeps.py` | one class per plan step, tests named after the audit id (`test_a1_*`, `test_p0_1_*`), each run RED before its fix |
+| Audit regression | classes named `TestStepNN...` and tests named after the audit id (`test_a1_*`, `test_p0_1_*`) inside the feature files | one class per plan step, each run RED before its fix; no `test_audit_*.py` file remains |
 
 ```mermaid
 flowchart TD
@@ -81,7 +81,7 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_handlers_unit.py`, `test_handler_timeout.py` | `HandlerSystem`, `HandlerBuilder`, `LambdaHandler`, timeouts | 7 timeout tests are `slow` |
 | `test_pipeline_handler_contract.py` | handler failures through `API.converse` | critical propagation, rollback |
 | `test_memory.py` | `WorkingMemory` | serialization, copy under concurrency |
-| `test_session.py` | `FileSessionStore` ids, soft failures, fsync before replace, file logging after a failed sink add | `_c5_clean_logging` snapshots and restores the global logging state |
+| `test_session.py` | `FileSessionStore` ids, soft failures, fsync before replace, file logging after a failed sink add, the default save hook | `_c5_clean_logging` snapshots and restores the global logging state |
 | `test_strands_features.py` | schema output, invocation state, streaming, `save_session`/`restore_session` | imports `fsm_llm.agents.base` |
 | `test_streaming_history_seam.py` | history after mid-stream error or abandonment | |
 | `test_stack_lifecycle_seam.py` | `push_fsm`/`pop_fsm` races, stale cleanup | uses a fake clock |
@@ -91,7 +91,7 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_prompt_injection_seam.py` | extraction prompt sanitising at `LLMInterface.extract_field` | |
 | `test_intent_entities_seam.py` | `IntentScore` keeps `None` entities | |
 | `test_core_hardening_seam.py` | `FileSessionStore.save`, `setup_logging`, bounded context, locks | |
-| `test_audit_sweeps.py` | operator table, context-filter, config, sanitizer agreement | |
+| `test_definitions.py` | `Conversation` history summary, `FSMDefinitionNotFoundError`, the shared entity coercer, version and session docs | the 2026-09-22 audit classes of those steps |
 | `test_core_behaviour_fixes.py`, `test_definitions_behaviour_fixes.py`, `test_llm_layer_behaviour_fixes.py`, `test_logging_behaviour_fixes.py`, `test_handlers_visualizer_fixes.py`, `test_visualizer_golden.py`, `test_okf_cli_frontmatter_fixes.py`, `test_resolve_model.py`, `test_api_key_compare_sites.py` | 2026-11-05 source pass (plan 5980fbb7 steps 2 to 9): one class per fixed finding | each fails on the parent commit (`test_visualizer_golden.py` is a golden pin of the renderers instead) |
 | `test_validator_unit.py` | `FSMValidator`, agrees with the loader, `fsm-llm-validate` output | |
 | `test_flow_analysis.py` | `fsm_llm.flow_analysis`: the component primitive (a golden table written before the validator's Tarjan moved there, a very long chain), G3 data flow and G4 liveness findings, the `_minted_keys` parity with the pipeline over every example state | Refactor proof; pins the D-017 mirror |

@@ -163,3 +163,91 @@ class TestRemovedCoreNames:
         record = context.metadata[constants.METADATA_KEY_TRANSITION_CLASSIFICATION]
         assert record["intent"] == "a"
         assert record["confidence"] == pytest.approx(0.95)
+
+
+class TestStep9DeadCoreSymbols:
+    @pytest.mark.parametrize(
+        "name", ["DomainSchema", "LLMRequestType", "validate_json_structure"]
+    )
+    def test_removed_public_names_are_gone(self, name):
+        import fsm_llm
+
+        assert name not in fsm_llm.__all__
+        assert not hasattr(fsm_llm, name)
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "LOG_FIELD_TIMESTAMP",
+            "LOG_FIELD_PACKAGE",
+            "LOG_MESSAGE_PREVIEW_LENGTH",
+            "LOG_RESPONSE_PREVIEW_LENGTH",
+            "DEFAULT_STEP_TIMEOUT",
+        ],
+    )
+    def test_removed_constants_are_gone(self, name):
+        from fsm_llm import constants
+
+        assert not hasattr(constants, name)
+
+    def test_context_compactor_has_no_summarize_on_trim(self):
+        from fsm_llm.context import ContextCompactor
+
+        with pytest.raises(TypeError):
+            ContextCompactor(summarize_on_trim=True)
+        assert not hasattr(ContextCompactor(), "summarize_on_trim")
+
+
+class TestStep9LeafDeadCode:
+    # The operator disjointness / one-dispatcher pins moved to
+    # test_expressions.py::TestOperatorSweep (plan step 15).
+    def test_short_circuit_still_lazy_and_if_still_works(self):
+        from fsm_llm.expressions import evaluate_logic
+
+        guard = {
+            "and": [{"!=": [{"var": "x"}, 0]}, {"<": [{"/": [1, {"var": "x"}]}, 5]}]
+        }
+        assert evaluate_logic(guard, {"x": 0}) is False
+        assert evaluate_logic({"or": [0, "", "last"]}) == "last"
+        assert evaluate_logic({"if": [False, "a", True, "b", "c"]}) == "b"
+        assert evaluate_logic({"if": [False, "a", "default"]}) == "default"
+
+    def test_if_condition_is_gone(self):
+        import fsm_llm.expressions as expressions
+
+        assert not hasattr(expressions, "if_condition")
+
+    def test_ollama_transition_schema_is_gone(self):
+        import fsm_llm.ollama as ollama
+
+        assert not hasattr(ollama, "TRANSITION_JSON_SCHEMA")
+        assert "transition_decision" not in ollama._CALL_TYPE_SCHEMAS
+        assert ollama.build_ollama_response_format("transition_decision") is None
+
+    def test_visualizer_unused_glyphs_are_gone(self):
+        from fsm_llm.visualizer import ARROW_STYLES, BOX_STYLES, ICONS
+
+        assert "note" not in ICONS
+        assert "section" not in BOX_STYLES
+        for key in ("down_arrow", "right_arrow", "diamond"):
+            assert key not in ARROW_STYLES
+
+    def test_prompt_helper_params_are_gone(self):
+        import inspect
+
+        from fsm_llm.prompts import BasePromptBuilder
+
+        est = inspect.signature(BasePromptBuilder._estimate_token_count).parameters
+        assert list(est) == ["self", "text"]
+        fmt = inspect.signature(BasePromptBuilder._build_response_format).parameters
+        assert "field_heading" not in fmt
+        lines = BasePromptBuilder._build_response_format("{}", ["a: b"])
+        assert "Where:" in lines
+
+    def test_additional_info_needed_is_gone(self):
+        from fsm_llm.definitions import DataExtractionResponse
+
+        assert "additional_info_needed" not in DataExtractionResponse.model_fields
+        # Pydantic's default extra="ignore": an old payload still validates.
+        resp = DataExtractionResponse.model_validate({"additional_info_needed": True})
+        assert not hasattr(resp, "additional_info_needed")

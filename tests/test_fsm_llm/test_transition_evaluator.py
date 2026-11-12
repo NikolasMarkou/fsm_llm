@@ -599,3 +599,84 @@ class TestStep02A2:
         ]
         result = _a2_evaluate(tied, config=TransitionEvaluatorConfig())
         assert result.result_type == TransitionEvaluationResult.AMBIGUOUS
+
+
+def _step10_state(priorities: list[int], passing: list[bool]) -> State:
+    return State(
+        id="s",
+        description="d",
+        purpose="p",
+        transitions=[
+            Transition(
+                target_state=f"t{i}",
+                description=f"to t{i}",
+                priority=priority,
+                conditions=[
+                    TransitionCondition(
+                        description=f"c{i}",
+                        logic={"==": [{"var": "go"}, ok]},
+                    )
+                ],
+            )
+            for i, (priority, ok) in enumerate(zip(priorities, passing, strict=True))
+        ],
+    )
+
+
+def _step10_evaluate(state: State, config: Any = None) -> Any:
+    from fsm_llm.definitions import FSMContext
+    from fsm_llm.transition_evaluator import TransitionEvaluator
+
+    return TransitionEvaluator(config).evaluate_transitions(
+        state, FSMContext(data={"go": True})
+    )
+
+
+class TestStep10ConfidenceRemoved:
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "MIN_BASE_CONFIDENCE",
+            "PRIORITY_SCALING_DIVISOR",
+            "CONDITION_SUCCESS_RATE_BOOST",
+        ],
+    )
+    def test_confidence_constants_are_gone(self, name):
+        from fsm_llm import constants
+
+        assert not hasattr(constants, name)
+
+    def test_transition_evaluation_has_no_confidence_field(self):
+        from fsm_llm.definitions import TransitionEvaluation
+
+        assert "confidence" not in TransitionEvaluation.model_fields
+        ev = _step10_evaluate(_step10_state([100], [True]))
+        assert not hasattr(ev, "confidence")
+        assert "confidence" not in ev.model_dump()
+
+    def test_per_transition_scores_carry_no_confidence(self):
+        from fsm_llm.transition_evaluator import TransitionEvaluator
+
+        evaluator = TransitionEvaluator()
+        state = _step10_state([100, 200], [True, False])
+        scores = evaluator._evaluate_individual_transitions(
+            state.transitions, {"go": True}
+        )
+        assert all("confidence" not in s for s in scores)
+        cond = evaluator._evaluate_transition_conditions(
+            state.transitions[0].conditions, {"go": True}
+        )
+        assert "confidence_factor" not in cond
+
+    def test_priority_outcomes_unchanged(self):
+        from fsm_llm.definitions import TransitionEvaluationResult as R
+
+        det = _step10_evaluate(_step10_state([200, 100], [True, True]))
+        assert det.result_type == R.DETERMINISTIC
+        assert det.deterministic_transition == "t1"
+        amb = _step10_evaluate(_step10_state([100, 100, 300], [True, True, True]))
+        assert amb.result_type == R.AMBIGUOUS
+        assert [o.target_state for o in amb.available_options] == ["t0", "t1"]
+        blocked = _step10_evaluate(_step10_state([100], [False]))
+        assert blocked.result_type == R.BLOCKED
+        assert blocked.blocked_reason == "c0"

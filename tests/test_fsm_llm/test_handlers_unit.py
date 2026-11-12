@@ -2657,3 +2657,39 @@ class TestStep14C6C12:
         assert conv_id in manager.instances
         busy.release.assert_not_called()
         assert any(m.startswith("ERROR|") and conv_id in m for m in messages)
+
+
+class TestStep4LiveDictProbe:
+    """D-039 reverts the P1-3 read-only probe: the uncopied-phase probe gets
+    the caller's live dict again, per the pure-predicate contract (D-020)."""
+
+    @pytest.mark.parametrize("handler_error_mode", ["continue", "raise"])
+    @pytest.mark.parametrize(
+        "condition",
+        [
+            lambda t, s, ts, ctx, uk: len(json.dumps(ctx)) > 0,
+            lambda t, s, ts, ctx, uk: copy.deepcopy(ctx) == {"existing": 1},
+            lambda t, s, ts, ctx, uk: isinstance(ctx, dict),
+        ],
+        ids=["json_dumps", "deepcopy", "isinstance_dict"],
+    )
+    def test_step_4_1_serialising_read_only_condition_fires(
+        self, condition, handler_error_mode
+    ):
+        from fsm_llm.handlers import HandlerSystem, HandlerTiming, create_handler
+
+        fired: list[int] = []
+
+        def _action(ctx):
+            fired.append(1)
+            return {"logged": True}
+
+        system = HandlerSystem(handler_error_mode=handler_error_mode)
+        system.register_handler(create_handler("reader").when(condition).do(_action))
+        context = {"existing": 1}
+        result = system.execute_handlers(
+            HandlerTiming.PRE_PROCESSING, "s", None, context
+        )
+        assert result == {"logged": True}
+        assert fired == [1]
+        assert context == {"existing": 1}

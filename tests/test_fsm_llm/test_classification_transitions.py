@@ -96,6 +96,7 @@ from tests.test_fsm_llm.support import (
     _ClassifierCapture,
     _ConnectionHarness,
     _fake_response,
+    _mock_llm,
 )
 
 # ---------------------------------------------------------------------------
@@ -2205,3 +2206,89 @@ class TestStep03A3:
             hier.classify("charge me back", context=ctx)
         assert len(cap.calls) == 2
         assert all("Resolve billing issues" in m[0]["content"] for m in cap.calls)
+
+
+def _step12_manager():
+    from fsm_llm.fsm import FSMManager
+
+    manager = FSMManager(llm_interface=_mock_llm(), fsm_loader=lambda x: None)
+    manager._conversation_locks["orphan"] = threading.Lock()
+    manager._conversation_locks["active"] = threading.Lock()
+    manager.instances["active"] = MagicMock()
+    return manager
+
+
+def _step12_result(confidence: float):
+    from fsm_llm.definitions import ClassificationResult
+
+    return ClassificationResult(reasoning="r", intent="a", confidence=confidence)
+
+
+class TestStep12Renames:
+    def test_prune_orphaned_locks_prunes_only_orphans(self):
+        manager = _step12_manager()
+        assert manager.prune_orphaned_locks() == ["orphan"]
+        assert set(manager._conversation_locks) == {"active"}
+
+    def test_api_cleanup_stale_conversations_is_not_deprecated(self):
+        import warnings
+
+        api = API.from_definition(_step12_fsm_dict(), llm_interface=_mock_llm())
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            assert api.cleanup_stale_conversations(max_idle_seconds=3600) == []
+
+    @pytest.mark.parametrize(
+        ("confidence", "expected"),
+        [(0.0, True), (0.59, True), (0.6, False), (1.0, False)],
+    )
+    def test_is_below_default_threshold(self, confidence, expected):
+        import warnings
+
+        result = _step12_result(confidence)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            assert result.is_below_default_threshold is expected
+
+    def test_classifier_method_keeps_its_name_without_warning(self):
+        import warnings
+
+        from fsm_llm.classification import Classifier
+        from fsm_llm.definitions import ClassificationSchema, IntentDefinition
+
+        clf = Classifier(
+            schema=ClassificationSchema(
+                intents=[
+                    IntentDefinition(name="a", description="A"),
+                    IntentDefinition(name="b", description="B"),
+                ],
+                fallback_intent="b",
+                confidence_threshold=0.8,
+            ),
+            model="gpt-4o",
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            assert clf.is_low_confidence(_step12_result(0.7)) is True
+            assert clf.is_low_confidence(_step12_result(0.8)) is False
+
+    def test_model_dump_does_not_expose_either_property(self):
+        dumped = _step12_result(0.5).model_dump()
+        assert "is_low_confidence" not in dumped
+        assert "is_below_default_threshold" not in dumped
+
+
+def _step12_fsm_dict() -> dict:
+    return {
+        "name": "s12",
+        "description": "d",
+        "initial_state": "start",
+        "states": {
+            "start": {
+                "id": "start",
+                "description": "d",
+                "purpose": "p",
+                "response_instructions": "",
+            }
+        },
+    }

@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
+import datetime
+import decimal
 import math
 import pathlib
 import re
 import threading
+import types
 from functools import partial
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from fsm_llm.api import API
 from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
 from fsm_llm.context import ContextCompactor, clean_context_keys
+from fsm_llm.definitions import FSMDefinition, State, Transition, TransitionCondition
+from fsm_llm.prompts import BasePromptBuilder
 from fsm_llm.security import _looks_like_credential_value, _token_value_is_credential
 from tests.test_fsm_llm.fixtures.context_key_corpus import (
     CARVE_OUT_CREDENTIAL_ENTRIES,
@@ -5505,3 +5511,513 @@ class TestStep08_2:
         expected = {"cookie_settings": {"analytics": True}, "pin_policy": {"min": 4}}
         assert BasePromptBuilder()._filter_context_for_security(data) == expected
         assert clean_context_keys(data, "c-d5-2", strip_forbidden_keys=True) == expected
+
+
+def _snapshot_fsm(context_keys: list[str]) -> FSMDefinition:
+    """``triage`` owns one classification field whose record snapshots
+    ``context_keys``; ``browse`` is the fallback, so the turn stays put."""
+    from fsm_llm.definitions import ClassificationExtractionConfig, IntentDefinition
+
+    triage = State(
+        id="triage",
+        description="Triage",
+        purpose="Route the shopper",
+        response_instructions="Respond",
+        classification_extractions=[
+            ClassificationExtractionConfig(
+                field_name="intent",
+                intents=[
+                    IntentDefinition(name="buy", description="wants to buy"),
+                    IntentDefinition(name="browse", description="just looking"),
+                ],
+                fallback_intent="browse",
+                confidence_threshold=0.5,
+                context_keys=context_keys,
+            )
+        ],
+        transitions=[
+            Transition(
+                target_state="done",
+                description="Buy",
+                conditions=[
+                    TransitionCondition(
+                        description="buy", logic={"==": [{"var": "intent"}, "buy"]}
+                    )
+                ],
+            )
+        ],
+    )
+    done = State(id="done", description="Done", purpose="End", transitions=[])
+    return FSMDefinition(
+        name="snapshot_fsm",
+        description="Snapshot FSM",
+        initial_state="triage",
+        states={"triage": triage, "done": done},
+    )
+
+
+def _classify_browse() -> Any:
+    """Patch the classifier's litellm boundary to answer ``browse``."""
+    import json
+
+    resp = MagicMock()
+    resp.choices = [MagicMock()]
+    resp.choices[0].message.content = json.dumps(
+        {"reasoning": "r", "intent": "browse", "confidence": 0.95, "entities": {}}
+    )
+    return (
+        patch("fsm_llm.llm.completion", return_value=resp),
+        patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+    )
+
+
+_TOP_SECRET = "sk-live-TOPSECRET123456"
+
+
+_NESTED_SECRET = "sk-proj-NESTEDSECRET987"
+
+
+_LIST_SECRET = "rt-LISTSECRET-9f8e7d6c5b4a"
+
+
+_DEEP_SECRET = "hunter2-DEEPSECRET"
+
+
+class TestStep5ContextSnapshotFilter:
+    """Security (D-007): ``classification_results[f]["context_snapshot"]`` is
+    built from security-filtered values: a forbidden entry is dropped at every
+    depth (top level, nested dict, dict inside a list), allowed values are kept
+    exactly. Driven through ``API.converse`` and
+    ``FSMManager.get_complete_conversation`` (the monitor's read path)."""
+
+    def _run(self, context: dict[str, Any], keys: list[str]) -> tuple[API, str]:
+        api = API.from_definition(_snapshot_fsm(keys), llm_interface=_mock_llm())
+        conv_id, _ = api.start_conversation(initial_context=context)
+        completion, params = _classify_browse()
+        with completion, params:
+            api.converse("just looking", conv_id)
+        return api, conv_id
+
+    def _context(self) -> dict[str, Any]:
+        return {
+            "api_key": _TOP_SECRET,
+            "topic": "running shoes",
+            "profile": {
+                "session_token": _NESTED_SECRET,
+                "tier": "gold",
+                "history": [{"refresh_token": _LIST_SECRET, "label": "a"}, 7],
+                "deep": {"password": _DEEP_SECRET, "ok": 1},
+            },
+        }
+
+    def test_secret_absent_from_snapshot_at_every_depth(self):
+        import json
+
+        api, conv_id = self._run(
+            self._context(), ["api_key", "profile", "topic", "missing"]
+        )
+        # The fixture reaches the branch: the secrets are really in context.
+        raw = api.fsm_manager.instances[conv_id].context.data
+        assert raw["api_key"] == _TOP_SECRET
+        assert raw["profile"]["session_token"] == _NESTED_SECRET
+
+        metadata = api.fsm_manager.get_complete_conversation(conv_id)["metadata"]
+        snapshot = metadata["classification_results"]["intent"]["context_snapshot"]
+        assert snapshot == {
+            "topic": "running shoes",
+            "profile": {
+                "tier": "gold",
+                "history": [{"label": "a"}, 7],
+                "deep": {"ok": 1},
+            },
+        }
+        dumped = json.dumps(metadata)
+        for secret in (_TOP_SECRET, _NESTED_SECRET, _LIST_SECRET, _DEEP_SECRET):
+            assert secret not in dumped
+        for name in ("api_key", "session_token", "refresh_token", "password"):
+            assert name not in dumped
+
+    def test_allowed_values_kept_exactly(self):
+        context = {
+            "topic": "running shoes",
+            "prefs": {"sizes": [9, 9.5], "colour": None, "tags": ("a", "b")},
+        }
+        api, conv_id = self._run(context, ["topic", "prefs"])
+        metadata = api.fsm_manager.get_complete_conversation(conv_id)["metadata"]
+        snapshot = metadata["classification_results"]["intent"]["context_snapshot"]
+        # JSON-native round trip unchanged (tuple -> list), nothing dropped.
+        assert snapshot == {
+            "topic": "running shoes",
+            "prefs": {"sizes": [9, 9.5], "colour": None, "tags": ["a", "b"]},
+        }
+
+    def test_cyclic_value_still_omitted(self):
+        cyclic: dict[str, Any] = {"tier": "gold"}
+        cyclic["self"] = cyclic
+        api, conv_id = self._run({"topic": "t", "loop": cyclic}, ["topic", "loop"])
+        metadata = api.fsm_manager.get_complete_conversation(conv_id)["metadata"]
+        snapshot = metadata["classification_results"]["intent"]["context_snapshot"]
+        assert snapshot == {"topic": "t"}
+
+
+class TestStep5NamedConstants:
+    """The two cross-module context/metadata keys are named constants."""
+
+    def test_output_response_format_constant(self):
+        from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT
+
+        assert CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT == "_output_response_format"
+
+    def test_provenance_constant_is_shared(self):
+        from fsm_llm import fsm, pipeline
+        from fsm_llm.constants import PROVENANCE_METADATA_KEY
+
+        assert PROVENANCE_METADATA_KEY == "_pipeline_extracted"
+        assert pipeline.PROVENANCE_METADATA_KEY is PROVENANCE_METADATA_KEY
+        assert fsm.PROVENANCE_METADATA_KEY is PROVENANCE_METADATA_KEY
+
+
+class _Step14Opaque:
+    """A leaf the walker must pass to ``leaf`` untouched (never walked)."""
+
+    def __repr__(self) -> str:
+        return "<opaque>"
+
+
+class _Step14DictSubclass(dict):
+    """A dict subclass: the fast path must NOT take it (full path instead)."""
+
+
+_STEP14_LEAVES: list[Any] = [
+    None,
+    0,
+    7,
+    -1.5,
+    True,
+    False,
+    "",
+    "text",
+    "_internal",
+    b"bytes",
+    {1, 2},
+    frozenset({"x"}),
+    types.MappingProxyType({"inner": [1, 2]}),
+    datetime.date(2026, 9, 22),
+    decimal.Decimal("1.5"),
+    _Step14Opaque(),
+]
+
+
+_STEP14_KEYS: list[Any] = [
+    "a",
+    "_hidden",
+    "password",
+    "b.c",
+    1,
+    2.5,
+    None,
+    True,
+    ("t", 1),
+    frozenset({"k"}),
+]
+
+
+def _step14_flat_inputs() -> list[dict[Any, Any]]:
+    """Deterministic flat roots: every value is a leaf, keys of mixed types."""
+    import random
+
+    rng = random.Random(143)
+    inputs: list[dict[Any, Any]] = [{}]
+    for size in (1, 2, 3, 5, 10):
+        for _ in range(12):
+            keys = rng.sample(_STEP14_KEYS, k=min(size, len(_STEP14_KEYS)))
+            inputs.append({key: rng.choice(_STEP14_LEAVES) for key in keys})
+    return inputs
+
+
+def _step14_run(
+    source: dict[Any, Any], max_depth: int, *, raise_at: int = -1
+) -> tuple[Any, list[tuple[str, Any]]]:
+    """Run the walker with recording hooks; return (result-or-exc, events)."""
+    from fsm_llm.utilities import filter_context_tree
+
+    events: list[tuple[str, Any]] = []
+
+    def _should_drop(key: Any, value: Any, full_key: str) -> str | None:
+        events.append(("should_drop", (repr(key), full_key)))
+        if len([e for e in events if e[0] == "should_drop"]) - 1 == raise_at:
+            raise ValueError(f"boom at {full_key}")
+        if not isinstance(key, str):
+            return "non_str"
+        if key.startswith("_") or value is None:
+            return "policy"
+        return None
+
+    def _on_drop(full_key: str, reason: str) -> None:
+        events.append(("on_drop", (full_key, reason)))
+
+    def _leaf(value: Any) -> Any:
+        events.append(("leaf", repr(value)))
+        return ("leafed", repr(value))
+
+    try:
+        result: Any = filter_context_tree(
+            source, max_depth, _should_drop, _on_drop, _leaf
+        )
+    except Exception as exc:  # compared by type and message
+        result = (type(exc), str(exc))
+    return result, events
+
+
+class TestStep14FastPath:
+    """The flat-root fast path skips the Tarjan pre-scan with identical output."""
+
+    def test_flat_root_skips_prescan(self):
+        from fsm_llm import utilities
+
+        with patch.object(
+            utilities,
+            "_cycle_reaching_containers",
+            wraps=utilities._cycle_reaching_containers,
+        ) as spy:
+            out = utilities.filter_context_tree(
+                {"a": 1, "b": "x", 3: None}, 16, lambda k, v, f: None
+            )
+        assert out == {"a": 1, "b": "x", 3: None}
+        assert spy.call_count == 0
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            {"a": {"b": 1}},
+            {"a": [1, 2]},
+            {"a": (1,)},
+            _Step14DictSubclass(a=1),
+            types.MappingProxyType({"a": 1}),
+        ],
+        ids=["nested-dict", "list", "tuple", "dict-subclass", "mapping-proxy"],
+    )
+    def test_non_flat_or_non_dict_root_keeps_prescan(self, source):
+        from fsm_llm import utilities
+
+        with patch.object(
+            utilities,
+            "_cycle_reaching_containers",
+            wraps=utilities._cycle_reaching_containers,
+        ) as spy:
+            utilities.filter_context_tree(source, 16, lambda k, v, f: None)
+        assert spy.call_count == 1
+
+    def test_prescan_values_the_fast_path_substitutes_are_exact(self):
+        from fsm_llm.utilities import _cycle_reaching_containers
+
+        for source in _step14_flat_inputs():
+            assert _cycle_reaching_containers(source) == (set(), len(source))
+
+    @pytest.mark.parametrize("max_depth", [-1, 0, 1, 16])
+    def test_fast_path_matches_full_path(self, max_depth):
+        compared = 0
+        for source in _step14_flat_inputs():
+            fast = _step14_run(source, max_depth)
+            full = _step14_run(_Step14DictSubclass(source), max_depth)
+            assert fast == full, source
+            compared += 1
+            for raise_at in range(min(len(source), 2)):
+                fast = _step14_run(source, max_depth, raise_at=raise_at)
+                full = _step14_run(
+                    _Step14DictSubclass(source), max_depth, raise_at=raise_at
+                )
+                assert fast == full, (source, raise_at)
+                assert fast[0][0] is ValueError
+        assert compared == len(_step14_flat_inputs())
+
+    def test_predicate_rebinding_a_value_to_a_cycle_matches_full_path(self):
+        def _run(source: dict[Any, Any]) -> tuple[Any, list[Any]]:
+            from fsm_llm.utilities import filter_context_tree
+
+            drops: list[Any] = []
+
+            def _should_drop(key: Any, value: Any, full_key: str) -> None:
+                if key == "a":
+                    source["b"] = source
+                return None
+
+            out = filter_context_tree(
+                source, 16, _should_drop, lambda k, r: drops.append((k, r))
+            )
+            return out, drops
+
+        fast_out, fast_drops = _run({"a": 1, "b": 2})
+        full_out, full_drops = _run(_Step14DictSubclass({"a": 1, "b": 2}))
+        assert fast_out == full_out == {"a": 1}
+        assert fast_drops == full_drops == [("b", "cycle")]
+
+
+# name -> value. Every entry's class is re-checked against the single oracle
+# (`is_forbidden_context_entry`, `has_internal_prefix`) so the list cannot drift.
+_FORBIDDEN = {
+    "password": "hunter2",
+    "api_key": "sk-live-4f9a8b7c6d5e4f3a2b1c",
+    "session_token": "eyJhbGciOiJIUzI1NiJ9.abc.def",
+    "pinCode": "4821",
+    "user_password": "x",
+    "client_secret": "x",
+    "accessToken": "abcdef123456",
+    "otp": "123456",
+    "cvv": "123",
+    "cookie": "a=b",
+}
+
+
+_INTERNAL = {
+    "system_prompt": "x",
+    "internal_flag": 1,
+    "__dunder": 1,
+    "SYSTEM_mode": "x",
+}
+
+
+_INTERNAL_AND_FORBIDDEN = {"_secret": "x"}
+
+
+_ALLOWED: dict[Any, Any] = {
+    "username": "alice",
+    "pin_attempts": 3,
+    "passenger": "Bob",
+    "order_key": "ORD-1",
+    "token_count": 5,
+    "passport_country": "GR",
+    "secretary": "Jane",
+    "email": "a@b.co",
+    1: "non-str key",
+}
+
+
+KEPT, DROPPED, REDACTED = "kept", "dropped", "redacted"
+
+
+KEPT, DROPPED, REDACTED = "kept", "dropped", "redacted"
+
+
+KEPT, DROPPED, REDACTED = "kept", "dropped", "redacted"
+
+
+# filter -> verdict per class. The differences are the documented contracts
+# (fsm.py D-010, context.py strip_forbidden_keys, runner.py D-014/D-015).
+_EXPECTED = {
+    "strip_internal": {
+        "forbidden": KEPT,
+        "internal": DROPPED,
+        "internal_and_forbidden": DROPPED,
+        "allowed": KEPT,
+    },
+    "clean_default": {
+        "forbidden": KEPT,  # warned, not dropped, unless strip_forbidden_keys
+        "internal": DROPPED,
+        "internal_and_forbidden": DROPPED,
+        "allowed": KEPT,
+    },
+    "clean_strict": {
+        "forbidden": DROPPED,
+        "internal": DROPPED,
+        "internal_and_forbidden": DROPPED,
+        "allowed": KEPT,
+    },
+    "prompt": {
+        "forbidden": DROPPED,
+        "internal": DROPPED,
+        "internal_and_forbidden": DROPPED,
+        "allowed": KEPT,
+    },
+    "runner": {
+        "forbidden": REDACTED,
+        "internal": KEPT,  # log redaction matches secrets only, not prefixes
+        "internal_and_forbidden": REDACTED,
+        "allowed": KEPT,
+    },
+}
+
+
+def _run_filter(name: str, ctx: dict) -> dict:
+    if name == "strip_internal":
+        from fsm_llm.fsm import _strip_internal_mapping
+
+        return _strip_internal_mapping(ctx)
+    if name in ("clean_default", "clean_strict"):
+        from fsm_llm.context import clean_context_keys
+
+        return clean_context_keys(
+            ctx, "sweep", strip_forbidden_keys=name == "clean_strict"
+        )
+    if name == "prompt":
+        return BasePromptBuilder()._filter_context_for_security(ctx)
+    from fsm_llm.utilities import redact_context
+
+    return redact_context(ctx)
+
+
+# position -> (wrap(entry) -> context, unwrap(filtered) -> entry mapping)
+_POSITIONS = {
+    "top": (lambda e: dict(e), lambda out: out),
+    "nested_dict": (lambda e: {"profile": dict(e)}, lambda out: out["profile"]),
+    "list_of_dicts": (lambda e: {"users": [dict(e)]}, lambda out: out["users"][0]),
+    "tuple_of_dicts": (
+        lambda e: {"items": (dict(e),)},
+        lambda out: out["items"][0],
+    ),
+}
+
+
+def _cases() -> list[tuple[str, Any, Any]]:
+    return [
+        (cls, key, value)
+        for cls, table in (
+            ("forbidden", _FORBIDDEN),
+            ("internal", _INTERNAL),
+            ("internal_and_forbidden", _INTERNAL_AND_FORBIDDEN),
+            ("allowed", _ALLOWED),
+        )
+        for key, value in table.items()
+    ]
+
+
+def _verdict(out: dict, key: Any, value: Any) -> str:
+    if key not in out:
+        return DROPPED
+    if out[key] == value:
+        return KEPT
+    if out[key] == "<redacted>":
+        return REDACTED
+    return f"rewritten to {out[key]!r}"
+
+
+class TestContextFilterAgreement:
+    def test_name_list_matches_the_oracle(self):
+        classes = {
+            (False, True): "forbidden",
+            (True, False): "internal",
+            (True, True): "internal_and_forbidden",
+            (False, False): "allowed",
+        }
+        wrong = []
+        for cls, key, value in _cases():
+            internal = isinstance(key, str) and has_internal_prefix(key)
+            forbidden = isinstance(key, str) and is_forbidden_context_entry(key, value)
+            if classes[(internal, forbidden)] != cls:
+                wrong.append((key, cls, classes[(internal, forbidden)]))
+        assert not wrong
+
+    @pytest.mark.parametrize("position", sorted(_POSITIONS))
+    @pytest.mark.parametrize("filter_name", sorted(_EXPECTED))
+    def test_every_filter_gives_its_contract_verdict(self, filter_name, position):
+        wrap, unwrap = _POSITIONS[position]
+        disagreements = []
+        for cls, key, value in _cases():
+            # A benign sibling proves the container itself survives.
+            entry = {key: value, "anchor_field": "keep-me"}
+            out = unwrap(_run_filter(filter_name, wrap(entry)))
+            assert out["anchor_field"] == "keep-me", (key, out)
+            verdict = _verdict(out, key, value)
+            if verdict != _EXPECTED[filter_name][cls]:
+                disagreements.append((key, cls, verdict))
+        assert not disagreements
