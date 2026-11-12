@@ -70,10 +70,12 @@ from .__version__ import __version__
 # local imports
 # --------------------------------------------------------------
 from .constants import (
+    CLI_EXIT_FAILURE,
     CLI_EXIT_INTERRUPTED,
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
 )
+from .definitions import ModelNotConfiguredError
 
 # --------------------------------------------------------------
 
@@ -145,6 +147,9 @@ def main_cli():
             return main_visualizer(fsm_path=args.fsm, style=args.style)
         else:
             raise ValueError(f"Invalid mode {args.mode}")
+    except ModelNotConfiguredError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return CLI_EXIT_FAILURE
     except KeyboardInterrupt:
         print("Interrupted", file=sys.stderr)
         return CLI_EXIT_INTERRUPTED

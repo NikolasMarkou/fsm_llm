@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from fsm_llm.definitions import ModelNotConfiguredError
+
 
 class TestRunnerUsesAPI:
     """Verify runner uses API class instead of FSMManager."""
@@ -29,12 +31,10 @@ class TestRunnerUsesAPI:
             assert "FSMManager" not in line, f"runner.py imports FSMManager: {line}"
 
     def test_runner_main_requires_llm_model_env(self):
-        """runner.main() should raise if LLM_MODEL env var is missing."""
+        """runner.main() should raise ModelNotConfiguredError if LLM_MODEL is missing."""
         with patch.dict(os.environ, {}, clear=True):
             with patch("fsm_llm.runner.dotenv.load_dotenv"):
-                with pytest.raises(
-                    RuntimeError, match="Missing required environment variable"
-                ):
+                with pytest.raises(ModelNotConfiguredError, match="LLM_MODEL"):
                     from fsm_llm.runner import main
 
                     main(fsm_path=None, max_history_size=5, max_message_length=1000)

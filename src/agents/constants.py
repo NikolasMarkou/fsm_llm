@@ -8,7 +8,6 @@ import threading
 
 from fsm_llm.constants import (
     CONTEXT_KEY_AGENT_TRACE,
-    DEFAULT_LLM_MODEL,
     DEFAULT_TEMPERATURE,
 )
 from fsm_llm.llm import DEFAULT_MAX_TOKENS
@@ -600,7 +599,6 @@ OBSERVATION_ENTRY = "[Step {step}] Tool: {tool} | Input: {input} | Result: {resu
 class Defaults:
     """Default configuration values."""
 
-    MODEL = DEFAULT_LLM_MODEL
     TEMPERATURE = DEFAULT_TEMPERATURE
     MAX_TOKENS = DEFAULT_MAX_TOKENS
     MAX_ITERATIONS = 10

@@ -12,18 +12,21 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from fsm_llm.cli_support import escape_unencodable_output
+from fsm_llm.cli_support import escape_unencodable_output, report_error
+from fsm_llm.definitions import ModelNotConfiguredError
 from fsm_llm.logging import logger, setup_cli_logging
 from fsm_llm.utilities import redacting_json_default
 
 from .__version__ import __version__
-from .constants import ContextKeys, Defaults, ReasoningType
+from .constants import ContextKeys, ReasoningType
 from .engine import ReasoningEngine
 from .utilities import get_available_reasoning_types
 
 # ============================================================================
 # CONSTANTS
 # ============================================================================
+
+_PROG = "python -m fsm_llm.reasoning"
 
 
 class OutputFormat:
@@ -105,9 +108,9 @@ Available reasoning types: {", ".join([rt.value for rt in ReasoningType])}
     model_group.add_argument(
         "--model",
         "-m",
-        default=Defaults.MODEL,
+        default=None,
         metavar="MODEL",
-        help=f"LLM model to use (default: {Defaults.MODEL})",
+        help="LLM model to use (default: env LLM_MODEL; there is no built-in model)",
     )
 
     # Output configuration
@@ -400,7 +403,7 @@ def display_available_reasoning_types() -> None:
 
 
 def solve_problem_with_engine(
-    problem: str, initial_context: dict[str, Any], model: str, verbose: bool
+    problem: str, initial_context: dict[str, Any], model: str | None, verbose: bool
 ) -> tuple[str, dict[str, Any]]:
     """
     Initialize the reasoning engine and solve the problem.
@@ -408,7 +411,7 @@ def solve_problem_with_engine(
     Args:
         problem: Problem statement to solve
         initial_context: Initial context for reasoning
-        model: LLM model to use
+        model: LLM model to use; ``None`` reads env ``LLM_MODEL``
         verbose: Whether to enable verbose logging
 
     Returns:
@@ -437,6 +440,8 @@ def solve_problem_with_engine(
 
         return solution, trace_info
 
+    except ModelNotConfiguredError:
+        raise  # a configuration failure: main() reports it as one line
     except Exception as e:
         logger.error(f"Failed to solve problem: {e}")
         raise
@@ -506,6 +511,11 @@ def main() -> int:
 
     except argparse.ArgumentError as e:
         logger.error(f"Argument error: {e}")
+        return 1
+
+    except ModelNotConfiguredError as e:
+        # A configuration failure, not a crash: one stderr line, no traceback.
+        report_error(_PROG, f"error: {e}")
         return 1
 
     except Exception as e:

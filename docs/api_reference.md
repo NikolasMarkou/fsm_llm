@@ -579,7 +579,7 @@ Settings precedence: built-in defaults < a dataset's embedded `config` (`run` on
 
 | Field | Default | Used by | Meaning |
 |-------|---------|---------|---------|
-| `model` | `None` | both | `None` = `$LLM_MODEL`, else `DEFAULT_LLM_MODEL`, read when the run starts |
+| `model` | `None` | both | `None` = `$LLM_MODEL`, read when the run starts; neither set exits 1 (`ModelNotConfiguredError`) |
 | `workers` | `4` | both | Parallel threads (>= 1). Only useful when the model server runs requests in parallel; with one slot (`OLLAMA_NUM_PARALLEL=1`) they queue, and the per-example timeout counts the wait: use 1 |
 | `timeout` | `120` | examples | Seconds for an example no timeout table names (>= 1) |
 | `output_root` | `"evaluation"` | both | Parent of auto-named run directories |
@@ -598,7 +598,7 @@ Settings precedence: built-in defaults < a dataset's embedded `config` (`run` on
 | `llm_kwargs` | `{}` | run | Extra `API(...)` keyword arguments (e.g. `api_base`, `api_key`, `max_history_size`), merged key by key; may not set `model`, `temperature`, `max_tokens`, `llm_interface`, `fsm_definition`, `definition`, `path`, or the non-JSON `handlers`, `transition_config`, `session_store`; values are not written to `results.json` |
 
 The model is the first set of `--model`, `--config` file, dataset `config`,
-`$LLM_MODEL`, `DEFAULT_LLM_MODEL`, so a dataset that pins `model` beats an exported
+`$LLM_MODEL`, so a dataset that pins `model` beats an exported
 `LLM_MODEL`. A case's `fsm` path is relative to the dataset file; `output_root` and
 `output_dir` are relative to the current directory. The LLM settings do not apply when
 an `llm_interface_factory` is given.
@@ -1008,7 +1008,6 @@ FSMError
 
 ```python
 from fsm_llm.constants import (
-    DEFAULT_LLM_MODEL,       # "ollama_chat/bonsai-2:27b"
     DEFAULT_TEMPERATURE,     # 0.5, the API and LiteLLMInterface default
     DEFAULT_MAX_HISTORY_SIZE, # 5
     DEFAULT_MAX_MESSAGE_LENGTH, # 1000
@@ -1016,6 +1015,6 @@ from fsm_llm.constants import (
 )
 ```
 
-Model resolution: the `model=` argument, then the process environment `LLM_MODEL`, then `DEFAULT_LLM_MODEL`. A `.env` file is loaded when `fsm_llm` is imported (litellm does it) and by the `fsm-llm` CLI, and it fills `LLM_MODEL` before the built-in default is read, so a stale `.env` silently beats `DEFAULT_LLM_MODEL`. python-dotenv searches upward from the loading module's own directory, not the current directory (in a checkout with `.venv` inside it, the repository root); `LITELLM_MODE=PRODUCTION` stops litellm's load, and `env -u LLM_MODEL` alone does not. The default embedder is `DEFAULT_EMBEDDING_MODEL` in `fsm_llm.llm` (`ollama/embeddinggemma-2:740m`); a `SemanticMemoryStore` file records its own.
+Model resolution: the `model=` argument, then the process environment `LLM_MODEL`; there is no built-in default, so with neither set `API`, `Classifier`, `AgentConfig()`, `ReasoningEngine`, the eval runs and the monitor launch routes raise `ModelNotConfiguredError` (a `FSMError` and a `ValueError`, so the monitor answers HTTP 400 with its message; a blank value counts as unset; an injected `llm_interface` needs no model; every CLI prints the message as one stderr line and exits 1). A `.env` file is loaded when `fsm_llm` is imported (litellm does it) and by the `fsm-llm` CLI, and it can fill `LLM_MODEL`. python-dotenv searches upward from the loading module's own directory, not the current directory (in a checkout with `.venv` inside it, the repository root); `LITELLM_MODE=PRODUCTION` stops litellm's load, and `env -u LLM_MODEL` alone does not. The default embedder is `DEFAULT_EMBEDDING_MODEL` in `fsm_llm.llm` (`ollama/embeddinggemma-2:740m`); a `SemanticMemoryStore` file records its own.
 
 Agent Skills limits and caps are `SKILL_*` constants in the same module: `SKILL_MAX_SKILLS` (500), `SKILL_MAX_FILE_BYTES` (262,144), `SKILL_MAX_RESOURCES` (1,000), `SKILL_MAX_LOAD_SECONDS` (60.0), `SKILL_MAX_DEPTH` (8), `SKILL_MAX_ISSUES` (5,000), `SKILL_MAX_ISSUES_PER_SKILL` (25), `SKILL_MAX_FRONTMATTER_BYTES` (16,384), `SKILL_MAX_YAML_DEPTH` (64); the format limits of the open standard `SKILL_NAME_MAX_CHARS` (64), `SKILL_DESCRIPTION_MAX_CHARS` (1,024), `SKILL_COMPATIBILITY_MAX_CHARS` (500), `SKILL_BODY_MAX_LINES` (500); the text caps `SKILL_READ_PAGE_CHARS` (1,500), `SKILL_LIST_MAX_ITEMS` (25), `SKILL_CATALOG_MAX_ITEMS` (50), `SKILL_CATALOG_DESCRIPTION_CHARS` (250); and the fixed texts `SKILL_UNTRUSTED_LABEL`, `SKILL_INCOMPLETE_NOTE`, `SKILL_CATALOG_END`, `SKILL_SKIPPED_NOTE` and `SKILL_READ_HINT`, plus the table `SKILL_DEFANG` that `render_catalog()` applies to skill text.

@@ -1372,8 +1372,8 @@ fsm_llm.monitor.InstanceManager class
   def get_workflow_presets(self) -> list[dict[str, str]]
   def get_workflow_status(self, instance_id: str, wf_instance_id: str) -> dict[str, Any]
   property global_collector
-  def launch_agent(self, agent_type: str = 'ReactAgent', task: str = '', tools_config: list[StubToolConfig] | None = None, model: str = 'ollama_chat/bonsai-2:27b', max_iterations: int = 10, timeout_seconds: float = 120.0, label: str = '') -> ManagedAgent
-  def launch_fsm(self, preset_id: str | None = None, fsm_json: dict[str, Any] | None = None, model: str = 'ollama_chat/bonsai-2:27b', temperature: float = 0.5, label: str = '') -> ManagedFSM
+  def launch_agent(self, agent_type: str = 'ReactAgent', task: str = '', tools_config: list[StubToolConfig] | None = None, model: str | None = None, max_iterations: int = 10, timeout_seconds: float = 120.0, label: str = '') -> ManagedAgent
+  def launch_fsm(self, preset_id: str | None = None, fsm_json: dict[str, Any] | None = None, model: str | None = None, temperature: float = 0.5, label: str = '') -> ManagedFSM
   def launch_workflow(self, preset_id: str | None = None, definition_json: dict[str, Any] | None = None, label: str = '') -> ManagedWorkflow
   def list_instances(self, type_filter: str | None = None) -> list[InstanceInfo]
   def send_message(self, instance_id: str, conversation_id: str, message: str) -> dict[str, Any]
@@ -1383,7 +1383,7 @@ fsm_llm.monitor.InstanceManager class
 fsm_llm.monitor.LaunchAgentRequest class(BaseModel)
   field agent_type: str = 'ReactAgent'
   field task: str required
-  field model: str = 'ollama_chat/bonsai-2:27b'
+  field model: str | None = None
   field max_iterations: int = 10
   field timeout_seconds: float = 120.0
   field tools: list[StubToolConfig] = factory
@@ -1391,7 +1391,7 @@ fsm_llm.monitor.LaunchAgentRequest class(BaseModel)
 fsm_llm.monitor.LaunchFSMRequest class(BaseModel)
   field preset_id: str | None = None
   field fsm_json: dict[str, Any] | None = None
-  field model: str = 'ollama_chat/bonsai-2:27b'
+  field model: str | None = None
   field temperature: float = 0.5
   field label: str = ''
 fsm_llm.monitor.LaunchWorkflowRequest class(BaseModel)
@@ -1517,7 +1517,7 @@ fsm_llm.reasoning.ReasoningClassificationResult class(TimestampedModel)
   property has_alternatives
   classmethod def validate_alternatives_unique(cls, v: list[str]) -> list[str]
 fsm_llm.reasoning.ReasoningEngine class
-  def __init__(self, model: str = 'ollama_chat/bonsai-2:27b', **kwargs)
+  def __init__(self, model: str | None = None, **kwargs)
   def solve_problem(self, problem: str, initial_context: dict[str, Any] | None = None) -> tuple[str, dict[str, Any]]
 fsm_llm.reasoning.ReasoningError class(FSMError)
 fsm_llm.reasoning.ReasoningExecutionError class(ReasoningError)

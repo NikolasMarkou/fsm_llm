@@ -12,8 +12,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from fsm_llm.constants import DEFAULT_LLM_MODEL
-
 from .constants import (
     DEFAULT_AGENT_MAX_ITERATIONS,
     DEFAULT_AGENT_TIMEOUT_SECONDS,
@@ -238,7 +236,7 @@ class LaunchFSMRequest(BaseModel):
 
     preset_id: str | None = None
     fsm_json: dict[str, Any] | None = None
-    model: str = DEFAULT_LLM_MODEL
+    model: str | None = None  # None or blank: env LLM_MODEL, else HTTP 400
     temperature: float = Field(
         default=DEFAULT_FSM_TEMPERATURE, ge=MIN_TEMPERATURE, le=MAX_TEMPERATURE
     )
@@ -277,7 +275,7 @@ class LaunchAgentRequest(BaseModel):
 
     agent_type: str = "ReactAgent"
     task: str = Field(..., min_length=1, max_length=MAX_TASK_LENGTH)
-    model: str = DEFAULT_LLM_MODEL
+    model: str | None = None  # None or blank: env LLM_MODEL, else HTTP 400
     max_iterations: int = Field(
         default=DEFAULT_AGENT_MAX_ITERATIONS, ge=1, le=MAX_AGENT_ITERATIONS
     )
@@ -368,7 +366,7 @@ class BuilderStartRequest(BaseModel):
     """Request to start a new builder session."""
 
     artifact_type: str = ""
-    model: str = DEFAULT_LLM_MODEL
+    model: str | None = None  # None or blank: env LLM_MODEL, else HTTP 400
     temperature: float = Field(default=0.7, ge=MIN_TEMPERATURE, le=MAX_TEMPERATURE)
     max_tokens: int = Field(default=2000, ge=1, le=MAX_BUILDER_TOKENS)
 

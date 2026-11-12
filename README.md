@@ -157,7 +157,7 @@ Do not use it for open-ended chat with no structure (a plain LLM call is simpler
     ```bash
     export LLM_MODEL=ollama_chat/qwen3.5:4b      # or openai/gpt-4o-mini with OPENAI_API_KEY set
     ```
-    The model is the `model=` argument, then `LLM_MODEL`, then the built-in default `ollama_chat/bonsai-2:27b`. A `.env` file (see `.env.example`) is read too.
+    The model is the `model=` argument, then `LLM_MODEL`; there is no built-in default, and with neither set the call raises `ModelNotConfiguredError` (a CLI prints its message and exits 1). A `.env` file (see `.env.example`) is read too.
 
 5.  **Verify the installation:**
     ```bash
@@ -215,7 +215,7 @@ Run it:
 ```python
 from fsm_llm import API
 
-api = API.from_file("greeter.json")   # no model given: env LLM_MODEL, else ollama_chat/bonsai-2:27b
+api = API.from_file("greeter.json")   # no model given: env LLM_MODEL, else ModelNotConfiguredError
 conv_id, opening = api.start_conversation()
 print("bot:", opening)
 print("bot:", api.converse("Hi, I'm Alice.", conv_id))
@@ -606,7 +606,7 @@ All taken from recorded open items:
 
 Things to know:
 
-- The `fsm-llm` command needs `LLM_MODEL`. The Python `API` falls back to `LLM_MODEL`, then to `ollama_chat/bonsai-2:27b`. A `.env` file (loaded when `fsm_llm` is imported, and by `fsm-llm`) sets `LLM_MODEL` before that built-in default, so a stale `.env` silently beats it.
+- The `fsm-llm` command needs `LLM_MODEL`. The Python `API` takes `model=`, then `LLM_MODEL`, and raises `ModelNotConfiguredError` when neither is set (there is no built-in default model). A `.env` file (loaded when `fsm_llm` is imported, and by `fsm-llm`) can set `LLM_MODEL`.
 - The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`; both also replace loguru's default handler, so a library record prints once.
 - One conversation handles one message at a time: a second `converse` on a conversation that is mid-turn raises `FSMError`.
 - Upgrading a clone from before the 2026-09-29 restructure: delete the old `src/fsm_llm_<sub>/` folders by hand (`make clean` does not remove them), then `pip install -e .`. A leftover folder breaks imports. After the later move of `src/fsm_llm/` to `src/`, run `pip install -e .` again.

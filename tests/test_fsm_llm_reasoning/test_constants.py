@@ -131,7 +131,6 @@ class TestDefaults:
     """Test Defaults configuration values."""
 
     def test_values(self):
-        assert isinstance(Defaults.MODEL, str)
         assert Defaults.TEMPERATURE == 0.7
         assert Defaults.MAX_TOKENS == 2000
         assert Defaults.MAX_RETRIES == 3

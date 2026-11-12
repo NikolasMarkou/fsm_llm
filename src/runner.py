@@ -20,6 +20,7 @@ from .constants import (
     ENV_LLM_MODEL,
     ENV_LLM_TEMPERATURE,
 )
+from .definitions import ModelNotConfiguredError
 from .llm import DEFAULT_MAX_TOKENS
 from .logging import logger, setup_file_logging
 from .utilities import redact_context, redacting_json_default
@@ -57,9 +58,12 @@ def main(fsm_path, max_history_size, max_message_length):
     setup_file_logging()
 
     # Check if critical environment variables are set
-    if not os.getenv(ENV_LLM_MODEL):
-        logger.error(f"Missing required environment variable: {ENV_LLM_MODEL}")
-        raise RuntimeError(f"Missing required environment variable: {ENV_LLM_MODEL}")
+    # DECISION plan-2026-11-12T073150-d454fd62/D-005
+    # No model is a configuration failure with the one shared message (it names
+    # the three ways to set one), reported by ``__main__`` as one stderr line.
+    # Do NOT fall back to a built-in model here.
+    if not (os.getenv(ENV_LLM_MODEL) or "").strip():
+        raise ModelNotConfiguredError()
 
     # Set up model from environment variables (API key handled by LiteLLM)
     llm_model = os.environ[ENV_LLM_MODEL]

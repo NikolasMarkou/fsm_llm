@@ -941,12 +941,6 @@ class TestDefaultModel:
     model-less ``API`` and a model-less ``Classifier`` raise
     ``ModelNotConfiguredError``."""
 
-    def test_default_llm_model_is_bonsai_27b(self):
-        # Removed with the constant in plan d454fd62 step 15.
-        from fsm_llm.constants import DEFAULT_LLM_MODEL
-
-        assert DEFAULT_LLM_MODEL == "ollama_chat/bonsai-2:27b"
-
     def test_default_embedding_model_is_embeddinggemma(self):
         from fsm_llm.llm import DEFAULT_EMBEDDING_MODEL
 

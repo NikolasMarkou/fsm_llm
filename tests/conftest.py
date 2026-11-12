@@ -13,7 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from fsm_llm.constants import DEFAULT_LLM_MODEL, ENV_LLM_MODEL
+from fsm_llm.constants import ENV_LLM_MODEL
 from fsm_llm.definitions import (
     BulkExtractionRequest,
     CompletionRequest,
@@ -28,9 +28,10 @@ from fsm_llm.definitions import (
 )
 from fsm_llm.llm import LLMInterface
 
-#: Ollama tag of the package default model (``DEFAULT_LLM_MODEL`` minus its
-#: ``ollama_chat/`` provider prefix). Live suites pass their own tag explicitly.
-OLLAMA_MODEL_TAG = DEFAULT_LLM_MODEL.split("/", 1)[1]
+#: Ollama tag the live suites expect to be pulled (a model name without its
+#: ``ollama_chat/`` provider prefix). The package has no default model: live
+#: suites pass the model explicitly, and this is the one place the tag lives.
+OLLAMA_MODEL_TAG = "bonsai-2:27b"
 #: Where a stock Ollama daemon publishes its model list.
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
 

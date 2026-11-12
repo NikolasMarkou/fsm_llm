@@ -8,8 +8,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from fsm_llm.constants import DEFAULT_LLM_MODEL
-
 
 class ReasoningType(str, Enum):
     """Types of reasoning strategies available."""
@@ -435,7 +433,6 @@ class HandlerNames:
 class Defaults:
     """Default configuration values."""
 
-    MODEL = DEFAULT_LLM_MODEL
     TEMPERATURE = 0.7
     MAX_TOKENS = 2000
     MAX_RETRIES = 3

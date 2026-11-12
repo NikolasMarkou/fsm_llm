@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from fsm_llm.constants import CLI_EXIT_FAILURE, CLI_EXIT_INTERRUPTED, CLI_EXIT_OK
+from fsm_llm.definitions import ModelNotConfiguredError
 
 from .cases import TrialResult, create_run_dir, load_cases, run_cases
 from .config import EvalConfig, load_config, merge_config, resolve_model
@@ -68,7 +69,7 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
     """Options every evaluation command shares. Every default is ``None``,
     so only flags the user actually passed override the config layers."""
     parser.add_argument(
-        "--model", help="LLM model (default: $LLM_MODEL, else the framework default)"
+        "--model", help="LLM model (default: $LLM_MODEL; there is no built-in model)"
     )
     parser.add_argument("--workers", type=int, help="Parallel workers (default: 4)")
     parser.add_argument(
@@ -336,7 +337,7 @@ def main_cli(argv: Sequence[str] | None = None) -> int:
         return CLI_EXIT_FAILURE
     try:
         return handler(args)
-    except EvalError as exc:
+    except (EvalError, ModelNotConfiguredError) as exc:
         print(f"{_PROG}: error: {exc}", file=sys.stderr)
         return CLI_EXIT_FAILURE
     except KeyboardInterrupt:  # before or after the runs (they handle their own)

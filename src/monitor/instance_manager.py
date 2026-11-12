@@ -31,8 +31,8 @@ from fsm_llm.agents import (
     SelfConsistencyAgent,
     ToolRegistry,
 )
-from fsm_llm.constants import DEFAULT_LLM_MODEL
 from fsm_llm.handlers import BaseHandler
+from fsm_llm.llm import resolve_model
 from fsm_llm.logging import logger
 from fsm_llm.security import resolve_within
 from fsm_llm.workflows import (
@@ -1057,7 +1057,7 @@ class InstanceManager:
         self,
         preset_id: str | None = None,
         fsm_json: dict[str, Any] | None = None,
-        model: str = DEFAULT_LLM_MODEL,
+        model: str | None = None,
         temperature: float = DEFAULT_FSM_TEMPERATURE,
         label: str = "",
     ) -> ManagedFSM:
@@ -1066,7 +1066,9 @@ class InstanceManager:
         if fsm_data is None:
             raise ValueError("Must provide either preset_id or fsm_json")
         instance_id = _new_instance_id()
-        api = API.from_definition(fsm_data, model=model, temperature=temperature)
+        api = API.from_definition(
+            fsm_data, model=resolve_model(model), temperature=temperature
+        )
 
         # Per-instance collector, wired next to the global one
         collector = self._new_collector()
@@ -1533,7 +1535,7 @@ class InstanceManager:
         agent_type: str = "ReactAgent",
         task: str = "",
         tools_config: list[StubToolConfig] | None = None,
-        model: str = DEFAULT_LLM_MODEL,
+        model: str | None = None,
         max_iterations: int = DEFAULT_AGENT_MAX_ITERATIONS,
         timeout_seconds: float = DEFAULT_AGENT_TIMEOUT_SECONDS,
         label: str = "",
@@ -1556,7 +1558,7 @@ class InstanceManager:
         registry = _stub_registry(tools_config or []) if needs_tools else None
         collector = self._new_collector()
         config = AgentConfig(
-            model=model,
+            model=resolve_model(model),
             max_iterations=max_iterations,
             timeout_seconds=timeout_seconds,
         )

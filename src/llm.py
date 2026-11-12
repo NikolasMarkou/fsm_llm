@@ -510,7 +510,7 @@ def resolve_model(model: str | None = None) -> str:
           uses the conversation's own interface).
     """
     # DECISION plan-2026-11-12T073150-d454fd62/D-005
-    # Do NOT fall back to a built-in model here (the old DEFAULT_LLM_MODEL): a
+    # Do NOT fall back to a built-in model here (the old built-in default): a
     # silent default sent a fresh install to a 27B local model it never chose.
     for candidate in (model, os.environ.get(ENV_LLM_MODEL)):
         if candidate is not None and candidate.strip():
@@ -2016,7 +2016,7 @@ class LiteLLMInterface(LLMInterface, _Metered):
         # installed litellm RENAMES `thinking` to `reasoning_content` and
         # DELETES `thinking` before building the Message/Delta object, making a
         # `.thinking`-only read dead code for the project's own
-        # DEFAULT_LLM_MODEL. Rationale + anti-simplification note live at the
+        # former default model. Rationale + anti-simplification note live at the
         # resolver's D-002 anchor. See decisions.md D-001/D-002.
         trace = resolve_reasoning_trace(message)
         if not trace:

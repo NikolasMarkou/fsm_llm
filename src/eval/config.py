@@ -66,7 +66,7 @@ _RESERVED_LLM_KWARGS = frozenset(
 class EvalConfig(BaseModel):
     """Settings shared by the evaluation commands (all optional).
 
-    ``model`` ``None`` means ``$LLM_MODEL``, else the framework default, read
+    ``model`` ``None`` means ``$LLM_MODEL`` (none set: ``ModelNotConfiguredError``), read
     when the run starts (:func:`resolve_model`). ``python`` ``None`` means the
     running interpreter. The three table fields add to or override the
     built-in repository tables in :mod:`fsm_llm.eval.constants`.
@@ -167,9 +167,10 @@ def merge_config(*layers: Mapping[str, Any] | None) -> EvalConfig:
 
 
 def resolve_model(config: EvalConfig) -> str:
-    """The model to evaluate: ``config.model``, then ``$LLM_MODEL``, then the default.
+    """The model to evaluate: ``config.model``, then ``$LLM_MODEL``.
 
     Read at call time, never at import. A blank value at either tier counts as
-    absent and falls through.
+    absent and falls through. Raises ``ModelNotConfiguredError`` when neither is
+    set: there is no built-in model (the eval CLI prints it and exits 1).
     """
     return resolve_llm_model(config.model)

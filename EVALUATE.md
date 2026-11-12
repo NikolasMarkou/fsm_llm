@@ -85,7 +85,7 @@ fsm-llm-eval examples [options]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--model` | `$LLM_MODEL` or `ollama_chat/bonsai-2:27b` | LLM model identifier |
+| `--model` | `$LLM_MODEL` (none: exit 1) | LLM model identifier |
 | `--workers` | 4 | Parallel workers, one example subprocess each. More workers only help when the model server runs requests in parallel. On a server with one slot (for example `OLLAMA_NUM_PARALLEL=1`) they queue behind each other, and the per-example timeout counts the wait, so examples time out that finish alone: use `--workers 1`, or raise the server's parallelism |
 | `--timeout` | 120 | Default timeout per example (seconds) |
 | `--category` | all | Filter by category (basic, agents, etc.) |
@@ -120,7 +120,7 @@ ollama list  # for Ollama models
 # or set OPENAI_API_KEY for cloud models
 ```
 
-**Which model runs.** The model is `--model`, then the process environment `LLM_MODEL`, then the built-in default `ollama_chat/bonsai-2:27b`. A `.env` file is loaded when `fsm_llm` is imported (litellm does it) and by the `fsm-llm` CLI, and it fills `LLM_MODEL` when the process environment leaves it unset, before the built-in default is consulted, so a stale `.env` silently beats the default. python-dotenv searches upward from the loading module's own directory, not from the current directory: in a checkout with `.venv` inside it, that is the repository root. The scorecard and `results.json` name the model that really ran, so read them. `LITELLM_MODE=PRODUCTION` stops litellm's load; `env -u LLM_MODEL` alone does not.
+**Which model runs.** The model is `--model`, then the process environment `LLM_MODEL`; with neither set the run exits 1 with `ModelNotConfiguredError`'s message (there is no built-in default). A `.env` file is loaded when `fsm_llm` is imported (litellm does it) and by the `fsm-llm` CLI, and it fills `LLM_MODEL` when the process environment leaves it unset. python-dotenv searches upward from the loading module's own directory, not from the current directory: in a checkout with `.venv` inside it, that is the repository root. The scorecard and `results.json` name the model that really ran, so read them. `LITELLM_MODE=PRODUCTION` stops litellm's load; `env -u LLM_MODEL` alone does not.
 
 ### Manual (single example)
 

@@ -21,6 +21,7 @@ from fsm_llm import (
 )
 from fsm_llm.api import llm_settings_for
 from fsm_llm.handlers import HandlerTiming
+from fsm_llm.llm import interface_model, resolve_model
 from fsm_llm.logging import logger
 
 from .constants import (
@@ -47,25 +48,43 @@ from .handlers import (
 )
 from .utilities import get_reasoning_fsm, map_reasoning_type
 
+#: What ``ReasoningEngine.model`` shows when an injected interface states no model.
+_INJECTED_MODEL_LABEL = "injected-llm-interface"
+
 
 class ReasoningEngine:
     """
     Main reasoning engine with enhanced error handling and flow control.
     """
 
-    def __init__(self, model: str = Defaults.MODEL, **kwargs):
+    def __init__(self, model: str | None = None, **kwargs):
         """
         Initialize the reasoning engine.
 
-        :param model: The LLM model to use
+        :param model: The LLM model to use; ``None`` reads env ``LLM_MODEL``
         :param kwargs: Additional arguments for the API
+
+        Raises ``ModelNotConfiguredError`` when no model is named (argument or
+        ``LLM_MODEL``) and no ``llm_interface`` is injected: there is no
+        built-in model. An injected interface owns its model, so none is
+        needed then.
 
         Thread safety: ``solve_problem()`` is serialized via an internal lock
         so that only one solve runs at a time on a given engine instance.
         """
         self._solve_lock = threading.Lock()
-        self.model = model
         self.api_kwargs = kwargs.copy()
+        # DECISION plan-2026-11-12T073150-d454fd62/D-005
+        # The model is resolved through llm.resolve_model only, which raises
+        # ModelNotConfiguredError when nothing is set. Do NOT give the
+        # parameter a built-in default model again, and do NOT read the
+        # environment here by hand. An injected interface needs no model.
+        injected = kwargs.get("llm_interface")
+        if injected is not None:
+            self.model = model or interface_model(injected) or _INJECTED_MODEL_LABEL
+        else:
+            self.model = resolve_model(model)
+        model = self.model
 
         # Load FSM definitions
         self._load_fsm_definitions()

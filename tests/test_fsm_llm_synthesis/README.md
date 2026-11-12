@@ -11,7 +11,7 @@ The pytest suite for `fsm_llm.synthesis`, the runtime FSM synthesis package of t
 - The strong model is `ScriptedStrongLLM` (in `conftest.py`): it answers `complete` from a queue of replies, keeps every request, and raises on an exhausted queue.
 - The cheap model that runs the host and the pushed child is `ScriptedRunnerLLM` (a subclass of the repository's `MockLLM2Interface`): it extracts a fixed dict, writes a reply per state, and has a `usage()` meter that a simulator can read. `ByTurn` is the honest variant: it extracts a key only if the user's turn says `<key> is <value>`.
 - Most tests run on REAL `API`, `FSMLibrary`, `ProcedureRunner`, `Simulator` and `ToolRegistry` objects, so a claim such as "a model cannot forge `procedure_abort`" is proven through the real pipeline.
-- An autouse fixture blocks every IPv4 and IPv6 connect for the test (`tests.conftest.block_network`), loopback included, because the default model is a local Ollama. The `foreign_calls` fixture also fails a test that builds a `LiteLLMInterface` or makes a provider call.
+- An autouse fixture blocks every IPv4 and IPv6 connect for the test (`tests.conftest.block_network`), loopback included, because the live bench model is a local Ollama. The `foreign_calls` fixture also fails a test that builds a `LiteLLMInterface` or makes a provider call.
 - The bench tests import `scripts/synthesis_bench.py` by adding `scripts/` to `sys.path`, and drive its host FSM, scripted user, grader and run loop with scripted models and a fake model-server client. They never register, run or smoke the bench against a server.
 
 ## Files

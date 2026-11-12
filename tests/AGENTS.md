@@ -82,7 +82,7 @@ From `tests/conftest.py` (import as `from tests.conftest import ...` or use as f
 | `mock_llm2_interface` | fixture | `MockLLM2Interface()` |
 | `sample_fsm_definition` | fixture | v3.0 one-state FSM from `fixtures/test_fsm_definitions/minimal_fsm.json` (written if missing) |
 | `sample_fsm_definition_v2` | fixture | v4.1 `greeting -> farewell`, gated on `requires_context_keys: ["user_name"]` |
-| `ollama_available(model_tag=OLLAMA_MODEL_TAG) -> bool` | function | One bounded GET to `http://localhost:11434/api/tags`; True only if a pulled model name contains the tag; never raises. `OLLAMA_MODEL_TAG` is `DEFAULT_LLM_MODEL` minus its `ollama_chat/` prefix |
+| `ollama_available(model_tag=OLLAMA_MODEL_TAG) -> bool` | function | One bounded GET to `http://localhost:11434/api/tags`; True only if a pulled model name contains the tag; never raises. `OLLAMA_MODEL_TAG` is the one literal tag the live suites expect (`bonsai-2:27b`; the package has no default model) |
 | `posix_only(reason) -> MarkDecorator` | function | `skipif(sys.platform == "win32")` for a test that needs POSIX mode bits, signals or a pid probe; `reason` is a required non-blank literal (checked by `TestPortabilityRules`) |
 | `skip_if_root()` | function | Call in the test body (never at decorator time): skips when the process is root, where modes are not enforced |
 | `symlink_or_skip(link, target, *, target_is_directory=False)` | function | The one way a test makes a symlink; skips where links are refused; a bare `symlink_to` or `os.symlink` fails `TestPortabilityRules` |

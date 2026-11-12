@@ -16,9 +16,9 @@ from fsm_llm.cli_support import exit_main, report_error, run_cli
 from fsm_llm.constants import (
     CLI_EXIT_FAILURE,
     CLI_EXIT_OK,
-    DEFAULT_LLM_MODEL,
     ENV_LLM_MODEL,
 )
+from fsm_llm.definitions import ModelNotConfiguredError
 
 from .constants import MetaDefaults
 from .definitions import MetaBuilderConfig
@@ -38,7 +38,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--model",
         type=str,
         default=None,
-        help=f"LLM model to use (default: env {ENV_LLM_MODEL}, else {DEFAULT_LLM_MODEL})",
+        help=f"LLM model to use (default: env {ENV_LLM_MODEL}; there is no built-in model)",
     )
     parser.add_argument(
         "--output",
@@ -97,13 +97,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run ``fsm-llm-meta`` and return its exit code (0, 1 or 130).
 
     Interface contract: a usage error or ``--help`` raises ``SystemExit``
-    (argparse); a ``MetaBuilderError``, an invalid option value or an
-    ``OSError`` is one stderr line and exit 1, never a traceback; unencodable
+    (argparse); a ``MetaBuilderError``, ``ModelNotConfiguredError`` (no model set),
+    an invalid option value or an ``OSError`` is one stderr line and exit 1, never a traceback; unencodable
     text is written as ``\\uXXXX`` escapes (the standard streams are
     reconfigured for the rest of the process, as in ``fsm-llm-okf``).
     """
     return run_cli(
-        _build_parser(), argv, prog=_PROG, errors=(MetaBuilderError, ValidationError)
+        _build_parser(),
+        argv,
+        prog=_PROG,
+        errors=(MetaBuilderError, ModelNotConfiguredError, ValidationError),
     )
 
 

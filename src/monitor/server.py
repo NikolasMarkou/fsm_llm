@@ -29,7 +29,8 @@ from pydantic import ValidationError
 from starlette.requests import Request
 
 from fsm_llm import __version__ as core_version
-from fsm_llm.definitions import ConversationBusyError
+from fsm_llm.definitions import ConversationBusyError, ModelNotConfiguredError
+from fsm_llm.llm import resolve_model
 from fsm_llm.logging import logger
 from fsm_llm.security import api_key_matches, checked_api_key, presented_api_key
 from fsm_llm.utilities import redacting_json_default
@@ -1340,8 +1341,13 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
             detail="fsm_llm.agents meta-builder not available",
         ) from None
 
+    try:
+        model = resolve_model(req.model)  # unset: ModelNotConfiguredError -> 400
+    except ModelNotConfiguredError as e:
+        _raise_http(e, "start builder session")
+
     config_kwargs: dict[str, Any] = {
-        "model": req.model,
+        "model": model,
         "temperature": req.temperature,
         "max_tokens": req.max_tokens,
     }
