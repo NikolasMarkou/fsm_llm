@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
+import tempfile
 from collections import deque
 from typing import Any, get_args
 
@@ -33,7 +36,7 @@ from .definitions import (
 )
 from .flow_analysis import strongly_connected_components
 from .logging import enable_library_logging, logger, setup_cli_logging
-from .schema_registry import newer_fields
+from .schema_registry import SCHEMA_VERSION_DEFAULT, newer_fields, parse_version
 from .utilities import read_json_object
 
 # The result kinds a completion state can produce, read off the one model
@@ -1111,7 +1114,75 @@ def validate_fsm_from_file(json_file: str) -> FSMValidationResult:
 # --------------------------------------------------------------
 
 
-def main(fsm_path):
+def upgrade_fsm_file(path: str) -> bool:
+    """Stamp the current definition version on an older FSM file, in place.
+
+    Contract:
+        path: an FSM definition JSON file (a symlink is followed; the link is
+            kept and its target rewritten).
+        Returns: True when the file was rewritten, False when nothing changed
+            or the file could not be upgraded. Never raises for an unreadable
+            file, invalid JSON, a non-object top level or a failed write: the
+            reason is logged and the file is left as it was (the normal
+            validation then reports on it).
+        Rewrites only a string ``version`` that does not parse as ``N.M`` or is
+        older than ``SCHEMA_VERSION_DEFAULT``. An omitted, non-string, current
+        or newer version is left alone.
+    """
+    # DECISION plan-2026-11-12T023759-9013b0e3/D-012
+    # Do NOT downgrade (a "5.0" file is never touched), do NOT rewrite or
+    # reformat a file when nothing changes (no write, mtime kept), do NOT write
+    # to stdout (it holds the JSON report only; the upgrade is a logger.info),
+    # and do NOT open the target for writing directly: the write is a
+    # same-directory temp file + os.replace (the `session.py` pattern) so a
+    # failure leaves the original intact. The schema is additive, so stamping
+    # the current version is always safe; the cost is that a rewritten file
+    # is reformatted to indent 2 (JSON has no comments to lose).
+    target = os.path.realpath(path)
+    try:
+        data = read_json_object(target)
+    except (OSError, ValueError) as e:  # JSONDecodeError, UnicodeDecodeError too
+        logger.warning(f"Not upgrading '{path}': {e}")
+        return False
+
+    version = data.get("version")
+    if not isinstance(version, str):
+        return False
+    current = parse_version(SCHEMA_VERSION_DEFAULT)
+    parsed = parse_version(version)
+    if parsed is not None and current is not None and parsed >= current:
+        return False
+    data["version"] = SCHEMA_VERSION_DEFAULT
+    text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+    try:
+        mode = stat.S_IMODE(os.stat(target).st_mode)
+        fd, tmp_name = tempfile.mkstemp(dir=os.path.dirname(target), suffix=".tmp")
+    except OSError as e:
+        logger.warning(f"Not upgrading '{path}': {e}")
+        return False
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_name, mode)
+        os.replace(tmp_name, target)
+    except (OSError, ValueError) as e:  # ValueError: a lone surrogate in a string
+        logger.warning(f"Not upgrading '{path}': {e}")
+        return False
+    finally:
+        # No-op after a successful os.replace, which consumed tmp_name.
+        if os.path.exists(tmp_name):
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+    logger.info(f"Upgraded '{path}' to definition version {SCHEMA_VERSION_DEFAULT}")
+    return True
+
+
+def main(fsm_path, upgrade: bool = False):
     # DECISION plan-2026-07-19T191147-4b664252/D-014 [STALE]
     # NOT redundant — do not delete. `logging.py` calls `logger.disable("fsm_llm")`
     # at import time, which is correct LIBRARY hygiene (a library must not hijack a
@@ -1124,6 +1195,9 @@ def main(fsm_path):
     # console script and `fsm-llm --mode validate` also call
     # `setup_cli_logging("INFO")` before this, so no DEBUG record is printed.
     enable_library_logging()
+
+    if upgrade:
+        upgrade_fsm_file(fsm_path)
 
     # Run validation
     validation_result = validate_fsm_from_file(fsm_path)
@@ -1156,9 +1230,18 @@ def main_cli():
     parser.add_argument(
         "--fsm", "-f", required=True, help="Path to FSM definition JSON file"
     )
+    parser.add_argument(
+        "--upgrade",
+        action="store_true",
+        help=(
+            "Rewrite the file in place to the current definition version "
+            f"({SCHEMA_VERSION_DEFAULT}) when it declares an older one, then "
+            "validate it. Never downgrades; writes nothing when nothing changes"
+        ),
+    )
     args = parser.parse_args()
     setup_cli_logging("INFO")
-    sys.exit(main(fsm_path=args.fsm))
+    sys.exit(main(fsm_path=args.fsm, upgrade=args.upgrade))
 
 
 # --------------------------------------------------------------
