@@ -33,6 +33,7 @@ from .definitions import (
 )
 from .flow_analysis import strongly_connected_components
 from .logging import enable_library_logging, logger, setup_cli_logging
+from .schema_registry import newer_fields
 from .utilities import read_json_object
 
 # The result kinds a completion state can produce, read off the one model
@@ -222,6 +223,7 @@ class FSMValidator:
         self.initial_state = fsm_data.get("initial_state", "")
         self.result = FSMValidationResult(self.fsm_name)
         self._reachable_states_cache: set[str] | None = None
+        self._definition: FSMDefinition | None = None
 
     def validate(self) -> FSMValidationResult:
         """
@@ -264,6 +266,7 @@ class FSMValidator:
         self._validate_handler_only_keys()
         self._validate_completion_states()
         self._validate_unknown_keys()
+        self._validate_schema_versions()
         self._validate_transition_classification_keys()
 
         # Stage 4-6: Analysis (won't affect validity but provides insights)
@@ -288,7 +291,7 @@ class FSMValidator:
         stricter than the loader.
         """
         try:
-            FSMDefinition(**self.fsm_data)
+            self._definition = FSMDefinition(**self.fsm_data)
         except ValidationError as e:
             # DECISION plan-2026-07-19T075908-70b6bdec/D-006 [STALE]: this ALLOW-list now
             # promotes `missing` too, closing the OPEN FOLLOW-UP that
@@ -737,6 +740,21 @@ class FSMValidator:
                         TransitionCondition,
                         f"state '{state_id}' transition #{t_idx} condition #{c_idx}",
                     )
+
+    def _validate_schema_versions(self) -> None:
+        """Warn (never error) when the declared version predates a field used.
+
+        # DECISION plan-2026-11-12T023759-9013b0e3/D-003
+        # WARNING tier ONLY -- never `add_error`. The loader accepts a
+        # definition declaring "4.1" that uses a 4.2 field, so an error would
+        # make this validator stricter than `API.from_file`. It reads the
+        # definition stage 0 loaded (nothing when that load failed) and the
+        # registry in `schema_registry`, one place for the field versions.
+        """
+        if self._definition is None:
+            return
+        for finding in newer_fields(self._definition):
+            self.result.add_warning(f"Version: {finding.message}")
 
     def _validate_transition_classification_keys(self) -> None:
         """Warn on a ``transition_classification`` key that names no target.

@@ -1359,6 +1359,25 @@ class TestConstraintSweepAgreement:
             f"in validator.py::_validate_pydantic_schema:\n" + "\n".join(disagreements)
         )
 
+    @pytest.mark.parametrize("declared", ["3.0", "4.0", "4.1", "4.2", "v4.1", "5.0"])
+    def test_a_declared_version_never_changes_the_agreement(self, declared):
+        """The version warning (schema_registry) is a WARNING in the validator
+        and a log line in the loader: stamping any declared version on every
+        sweep case must leave the validator/loader IFF intact."""
+        disagreements = []
+        for label, data in _all_agreement_cases():
+            stamped = {**data, "version": declared}
+            try:
+                FSMDefinition(**stamped)
+                loader_raises = False
+            except ValidationError:
+                loader_raises = True
+            result = FSMValidator(stamped).validate()
+            if loader_raises != (result.is_valid is False):
+                disagreements.append(label)
+            assert not any("needs definition version" in e for e in result.errors)
+        assert not disagreements, disagreements
+
 
 def _fsm_with_condition_logic(logic):
     """`_valid_fsm_data()` where start's single transition carries one condition

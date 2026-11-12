@@ -56,7 +56,7 @@ from .constants import (
 # local imports
 # --------------------------------------------------------------
 from .logging import logger
-from .schema_registry import SCHEMA_VERSION_DEFAULT
+from .schema_registry import SCHEMA_VERSION_DEFAULT, newer_fields
 
 # --------------------------------------------------------------
 # Identifier charset policy
@@ -2067,6 +2067,18 @@ class FSMDefinition(BaseModel):
             raise ValueError("No terminal states are reachable from initial state")
 
         self._check_synthesize_states()
+        # DECISION plan-2026-11-12T023759-9013b0e3/D-003: a declared version
+        # older than the fields used is a WARNING, once per construction, and
+        # nothing else. Do NOT raise or add an error here: the loader and
+        # `FSMValidator` must never be stricter than they were (the
+        # never-stricter pins), and a file declaring "4.1" with a `synthesize`
+        # state has always loaded. Library logging is off by default, so the
+        # visible channel is the `FSMValidator` report (`_validate_schema_versions`).
+        newer = newer_fields(self)
+        if newer:
+            logger.warning(
+                f"FSM '{self.name}': " + "; ".join(finding.message for finding in newer)
+            )
         logger.debug(f"FSM '{self.name}' validation successful")
         return self
 

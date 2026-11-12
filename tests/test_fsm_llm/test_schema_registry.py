@@ -439,3 +439,210 @@ class TestDefaultVersion:
             },
         )
         assert definition.version == SCHEMA_VERSION_DEFAULT
+
+
+def _declared_body(version: str | None, *, with_synthesize: bool) -> dict[str, Any]:
+    """A raw definition dict (what a file holds); `version=None` omits the key."""
+    solve = _synthesize_state() if with_synthesize else _state("solve")
+    body: dict[str, Any] = {
+        "name": "Registry",
+        "description": "d",
+        "initial_state": "start",
+        "states": {
+            "start": _state(
+                "start",
+                transitions=[
+                    {"target_state": "solve", "description": "go", "priority": 1},
+                    {"target_state": "end", "description": "skip", "priority": 2},
+                ],
+            ),
+            "solve": solve,
+            "end": {"id": "end", "description": "d", "purpose": "p"},
+        },
+    }
+    if version is not None:
+        body["version"] = version
+    return body
+
+
+def _loader_warnings(body: dict[str, Any]) -> list[str]:
+    """Build the definition with library logging on; return its WARNING lines."""
+    from fsm_llm.logging import logger
+
+    lines: list[str] = []
+    logger.enable("fsm_llm")
+    sink_id = logger.add(lambda m: lines.append(str(m)), level="WARNING")
+    try:
+        FSMDefinition(**body)
+    finally:
+        logger.remove(sink_id)
+        logger.disable("fsm_llm")
+    return lines
+
+
+class TestLoaderWarning:
+    """The loader names a field newer than the declared version, once, never raising."""
+
+    def test_a_declared_older_version_logs_one_warning_naming_the_field(self):
+        lines = _loader_warnings(_declared_body("4.1", with_synthesize=True))
+        assert len(lines) == 1
+        assert "State.synthesize" in lines[0]
+        assert "'solve'" in lines[0]
+        assert "4.1" in lines[0]
+        assert "4.2" in lines[0]
+
+    def test_the_definition_still_loads(self):
+        body = _declared_body("4.1", with_synthesize=True)
+        definition = FSMDefinition(**body)
+        assert definition.version == "4.1"
+        assert "synthesize" in definition.states["solve"].model_fields_set
+
+    @pytest.mark.parametrize(
+        "version", ["4.2", None, "3.0", "v4.1", "4", "4.1.1", "5.0"]
+    )
+    def test_no_warning_when_nothing_is_newer_or_the_version_is_unchecked(
+        self, version
+    ):
+        assert _loader_warnings(_declared_body(version, with_synthesize=True)) == []
+
+    def test_no_warning_for_a_definition_that_uses_no_newer_field(self):
+        assert _loader_warnings(_declared_body("4.1", with_synthesize=False)) == []
+
+    def test_one_warning_lists_every_finding(self):
+        body = _declared_body("4.1", with_synthesize=True)
+        other = _synthesize_state("other")
+        body["states"]["other"] = other
+        body["states"]["start"]["transitions"].append(
+            {"target_state": "other", "description": "go", "priority": 3}
+        )
+        lines = _loader_warnings(body)
+        assert len(lines) == 1
+        assert "'solve'" in lines[0] and "'other'" in lines[0]
+
+
+class TestValidatorWarning:
+    """`FSMValidator` carries the same fact as a WARNING and never an error."""
+
+    def test_the_report_warns_about_the_newer_field(self):
+        from fsm_llm.validator import FSMValidator
+
+        result = FSMValidator(_declared_body("4.1", with_synthesize=True)).validate()
+        hits = [w for w in result.warnings if "State.synthesize" in w]
+        assert len(hits) == 1
+        assert "'solve'" in hits[0] and "4.1" in hits[0] and "4.2" in hits[0]
+        assert not any("State.synthesize" in e for e in result.errors)
+
+    def test_the_verdict_is_what_it_was_without_the_warning(self):
+        from fsm_llm.validator import FSMValidator
+
+        older = FSMValidator(_declared_body("4.1", with_synthesize=True)).validate()
+        current = FSMValidator(_declared_body("4.2", with_synthesize=True)).validate()
+        assert older.is_valid is current.is_valid is True
+        assert older.errors == current.errors
+        assert not any("needs definition version" in w for w in current.warnings)
+
+    @pytest.mark.parametrize("version", ["4.2", None, "3.0", "v4.1", "4", "5.0"])
+    def test_no_warning_in_the_report_when_nothing_is_newer(self, version):
+        from fsm_llm.validator import FSMValidator
+
+        result = FSMValidator(_declared_body(version, with_synthesize=True)).validate()
+        assert not any("needs definition version" in w for w in result.warnings)
+
+    @pytest.mark.parametrize(
+        "version", ["3.0", "4.0", "4.1", "4.2", "v4.1", "4.1.1", "5.0"]
+    )
+    @pytest.mark.parametrize("with_synthesize", [True, False])
+    def test_never_stricter_than_the_loader(self, version, with_synthesize):
+        from pydantic import ValidationError
+
+        from fsm_llm.validator import FSMValidator
+
+        body = _declared_body(version, with_synthesize=with_synthesize)
+        try:
+            FSMDefinition(**body)
+            loads = True
+        except ValidationError:
+            loads = False
+        assert FSMValidator(body).validate().is_valid is loads
+
+    def test_a_definition_the_loader_refuses_gets_no_version_warning(self):
+        from fsm_llm.validator import FSMValidator
+
+        body = _declared_body("4.1", with_synthesize=True)
+        body["initial_state"] = "nowhere"
+        result = FSMValidator(body).validate()
+        assert result.is_valid is False
+        assert not any("needs definition version" in w for w in result.warnings)
+
+
+def _example_definition_bodies() -> list[tuple[str, dict[str, Any]]]:
+    from pathlib import Path
+
+    root = Path(__file__).parent.parent.parent / "examples"
+    found = []
+    for path in sorted(root.glob("**/*.json")):
+        import json
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and {"initial_state", "states"} <= data.keys():
+            found.append((str(path.relative_to(root)), data))
+    return found
+
+
+def _agent_definition_bodies() -> list[tuple[str, dict[str, Any]]]:
+    from fsm_llm.agents import fsm_definitions as fd
+    from fsm_llm.agents.tools import ToolRegistry
+
+    registry = ToolRegistry()
+    registry.register_function(lambda: "ok", name="search", description="Search")
+    schemas = [
+        {
+            "type": "function",
+            "function": {
+                "name": "lookup",
+                "description": "Run lookup",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+    return [
+        ("orchestrator", fd.build_orchestrator_fsm()),
+        ("adapt", fd.build_adapt_fsm()),
+        ("reflexion", fd.build_reflexion_fsm(registry)),
+        ("plan_execute", fd.build_plan_execute_fsm(registry)),
+        ("react", fd.build_react_fsm(registry)),
+        ("react_approval", fd.build_react_fsm(registry, include_approval_state=True)),
+        ("self_consistency", fd.build_self_consistency_fsm()),
+        ("debate", fd.build_debate_fsm()),
+        ("rewoo", fd.build_rewoo_fsm(registry)),
+        ("evalopt", fd.build_evalopt_fsm()),
+        ("maker_checker", fd.build_maker_checker_fsm("make it", "check it")),
+        ("meta_builder", fd.build_meta_builder_fsm()),
+        ("native_fc", fd.build_native_fc_fsm(schemas, instructions="Use the tools.")),
+    ]
+
+
+class TestShippedDefinitionsUseNoNewerField:
+    """Read-only sweep: the baseline tiers are right when no shipped file is flagged."""
+
+    def test_the_sweeps_find_something_to_check(self):
+        assert len(_example_definition_bodies()) >= 10
+        assert len(_agent_definition_bodies()) >= 10
+
+    def test_no_example_declares_a_version_older_than_its_fields(self):
+        flagged = {}
+        for label, body in _example_definition_bodies():
+            findings = newer_fields(FSMDefinition(**body))
+            if findings:
+                flagged[label] = [f.message for f in findings]
+        assert not flagged
+
+    def test_no_agent_built_definition_uses_a_field_newer_than_4_1(self):
+        # The builders omit `version`, so they would take the default and could
+        # never be flagged; declare 4.1 so the check bites.
+        flagged = {}
+        for label, body in _agent_definition_bodies():
+            findings = newer_fields(FSMDefinition(**{**body, "version": "4.1"}))
+            if findings:
+                flagged[label] = [f.message for f in findings]
+        assert not flagged
