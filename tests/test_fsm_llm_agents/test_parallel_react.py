@@ -157,7 +157,7 @@ class TestDispatch:
         out = agent._dispatch_parallel(self._ctx([]))
         assert out[ContextKeys.TOOL_STATUS] == "skipped"
 
-    def test_actually_concurrent(self):
+    def test_actually_concurrent(self, timing_factor):
         """Two slow tools overlap when max_parallel >= 2."""
         active = {"now": 0, "max": 0}
         lock = threading.Lock()
@@ -166,7 +166,7 @@ class TestDispatch:
             with lock:
                 active["now"] += 1
                 active["max"] = max(active["max"], active["now"])
-            time.sleep(0.05)
+            time.sleep(0.05 * timing_factor)
             with lock:
                 active["now"] -= 1
             return city

@@ -185,7 +185,7 @@ class TestFencedExampleDoesNotHideOrLeakAnObject:
 
 
 class TestTagSanitizerIsLinear:
-    def test_repeated_open_angle_finishes_fast(self):
+    def test_repeated_open_angle_finishes_fast(self, timing_factor):
         import time
 
         from fsm_llm.prompts import DataExtractionPromptBuilder
@@ -202,7 +202,7 @@ class TestTagSanitizerIsLinear:
         # chunk after it; the assertions below hold unchanged.
         import html
 
-        assert elapsed < 0.5
+        assert elapsed < 0.5 * timing_factor
         assert "</" not in out
         assert html.unescape(out) == "<a" * 10000
 

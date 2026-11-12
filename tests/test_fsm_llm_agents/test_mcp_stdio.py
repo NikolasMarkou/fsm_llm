@@ -35,8 +35,8 @@ def _provider(pid_file: Path, timeout: float, *extra: str) -> MCPToolProvider:
     )
 
 
-def _read_pid(pid_file: Path) -> int:
-    deadline = time.monotonic() + _EXIT_GRACE_SECONDS
+def _read_pid(pid_file: Path, timing_factor: float) -> int:
+    deadline = time.monotonic() + _EXIT_GRACE_SECONDS * timing_factor
     while time.monotonic() < deadline:
         text = pid_file.read_text(encoding="utf-8") if pid_file.exists() else ""
         if text.strip():
@@ -91,11 +91,13 @@ class TestMCPStdio:
         assert "error executing tool fail" in (result.error or "").lower()
 
     @posix_only("os.kill(pid, 0) is a liveness probe on POSIX and a kill on Windows")
-    def test_slow_call_times_out_and_child_exits(self, tmp_path: Path) -> None:
+    def test_slow_call_times_out_and_child_exits(
+        self, tmp_path: Path, timing_factor: float
+    ) -> None:
         pid_file = tmp_path / "pid"
         # Each call spawns its own server, so the timeout covers server start;
         # 8 s leaves room for start while staying far under the 120 s sleep.
-        provider = _provider(pid_file, 8.0)
+        provider = _provider(pid_file, 8.0 * timing_factor)
         asyncio.run(provider.discover_tools())
         registry = ToolRegistry()
         provider.register_tools(registry)
@@ -105,16 +107,22 @@ class TestMCPStdio:
 
         assert not result.success
         assert "timed out" in (result.error or "")
-        pid = _read_pid(pid_file)
-        assert _gone_within(pid, _EXIT_GRACE_SECONDS), f"MCP child {pid} still alive"
+        pid = _read_pid(pid_file, timing_factor)
+        assert _gone_within(pid, _EXIT_GRACE_SECONDS * timing_factor), (
+            f"MCP child {pid} still alive"
+        )
 
     @posix_only("os.kill(pid, 0) is a liveness probe on POSIX and a kill on Windows")
-    def test_hung_server_discovery_raises_agent_timeout(self, tmp_path: Path) -> None:
+    def test_hung_server_discovery_raises_agent_timeout(
+        self, tmp_path: Path, timing_factor: float
+    ) -> None:
         pid_file = tmp_path / "pid"
-        provider = _provider(pid_file, 5.0, "--hang")
+        provider = _provider(pid_file, 5.0 * timing_factor, "--hang")
 
         with pytest.raises(AgentTimeoutError):
             asyncio.run(provider.discover_tools())
 
-        pid = _read_pid(pid_file)
-        assert _gone_within(pid, _EXIT_GRACE_SECONDS), f"MCP child {pid} still alive"
+        pid = _read_pid(pid_file, timing_factor)
+        assert _gone_within(pid, _EXIT_GRACE_SECONDS * timing_factor), (
+            f"MCP child {pid} still alive"
+        )

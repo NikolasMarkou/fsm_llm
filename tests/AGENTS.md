@@ -88,13 +88,14 @@ From `tests/conftest.py` (import as `from tests.conftest import ...` or use as f
 | `posix_only(reason) -> MarkDecorator` | function | `skipif(sys.platform == "win32")` for a test that needs POSIX mode bits, signals or a pid probe; `reason` is a required non-blank literal (checked by `TestPortabilityRules`) |
 | `skip_if_root()` | function | Call in the test body (never at decorator time): skips when the process is root, where modes are not enforced |
 | `symlink_or_skip(link, target, *, target_is_directory=False)` | function | The one way a test makes a symlink; skips where links are refused; a bare `symlink_to` or `os.symlink` fails `TestPortabilityRules` |
+| `timing_factor` | fixture (function) -> `float` | Multiplier for a wall-clock budget: 1.0 normally, 5.0 when `sys.gettrace()` is set, `COV_CORE_SOURCE` is in the environment (pytest-cov) or a `coverage.Coverage` is running; `FSM_LLM_TEST_TIMING_FACTOR` (a finite float above 0) raises it when larger, an invalid value is ignored and the factor never drops below 1. Write `budget * timing_factor` in a test that asserts an elapsed time, joins a thread or waits on an event; when the test is about a time budget in product code, inject a fake monotonic clock instead (`test_run_until_terminal.py`, `test_advance_driver.py` `clock`). Never skip or deselect a test for being slow. `current_timing_factor()` is the same value as a plain function for shared helpers; `tests/test_fsm_llm/test_timing_factor.py` simulates every condition |
 | `test_fixtures_root` | fixture (session) | `tests/fixtures/`, created if missing; requested by `sample_fsm_definition` |
 
 Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `real_llm` (also declared in `pyproject.toml`). There is no collection hook: `fsm_llm.workflows` has no extra dependencies, so nothing is skipped for it.
 
 ## Data shapes
 
-- Env knobs: `FSM_LLM_REAL_SKILLS` (arms the Agent Skills home-directory test in `test_agent_skills.py`), `FSM_LLM_MONITOR_API_KEY` (cleared for monitor tests). No test reads `SKIP_SLOW_TESTS`, `TEST_REAL_LLM` or `TEST_LLM_MODEL`; `test_packaging.py` drops the first two from its collection child env.
+- Env knobs: `FSM_LLM_REAL_SKILLS` (arms the Agent Skills home-directory test in `test_agent_skills.py`), `FSM_LLM_MONITOR_API_KEY` (cleared for monitor tests), `FSM_LLM_TEST_TIMING_FACTOR` (a positive float: raises the `timing_factor` fixture, for a slow CI runner or a loaded machine; read at test time, never below 1). No test reads `SKIP_SLOW_TESTS`, `TEST_REAL_LLM` or `TEST_LLM_MODEL`; `test_packaging.py` drops the first two from its collection child env.
 - pytest config in `pyproject.toml`: `testpaths = ["tests"]`, `addopts = "-v --tb=short"`, `asyncio_mode = "auto"`, `asyncio_default_fixture_loop_scope = "function"`.
 - Marker counts (full collection): `slow` 42, `integration` 20, `real_llm` 19, `examples` 67; `-m "not slow"` collects 14,001.
 
@@ -117,7 +118,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 - `ModuleNotFoundError: tests...`: pytest run from outside the repo root.
 - `test_packaging.py` count failures: a test was added or removed without updating the pinned doc literals.
 - Version failures after a release: `"0.12.0"` literals in `test_fsm_llm_monitor/test_app.py` and `test_fsm_llm_regression/test_regression_review.py`.
-- Timing-sensitive workflow tests can flake on a loaded machine; live Ollama tests time out under GPU load.
+- A wall-clock budget that is too tight for a traced or loaded run: use the `timing_factor` fixture (or raise `FSM_LLM_TEST_TIMING_FACTOR`), never a skip. Live Ollama tests time out under GPU load.
 - An OpenTelemetry "I/O operation on closed file" traceback after an agents run is shutdown noise, not a failure.
 
 ## Working here

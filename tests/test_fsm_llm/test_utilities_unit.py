@@ -116,13 +116,15 @@ class TestExtractJsonFromText:
     # The complexity fix must NOT move the FIRST-wins tie-break (D-023).
     # --------------------------------------------------------------
 
-    def test_unbalanced_braces_do_not_scale_quadratically(self):
+    def test_unbalanced_braces_do_not_scale_quadratically(self, timing_factor):
         """20k bare `{` must not stall the caller (was 18.2s, O(n^2))."""
         start = time.perf_counter()
         result = extract_json_from_text("{" * 20_000)
         elapsed = time.perf_counter() - start
         assert result is None
-        assert elapsed < 0.5, f"took {elapsed:.2f}s — Strategy 3 regressed to O(n^2)"
+        assert elapsed < 0.5 * timing_factor, (
+            f"took {elapsed:.2f}s — Strategy 3 regressed to O(n^2)"
+        )
 
     def test_answer_then_example_returns_the_first_object(self):
         """FIRST-wins (D-023). Last-wins was shipped once and REVERTED."""

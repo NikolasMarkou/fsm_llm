@@ -383,10 +383,10 @@ class TestBracketRepair:
             "{" + "[" * 10**6,
         ],
     )
-    def test_a_bomb_gives_none_fast(self, bomb):
+    def test_a_bomb_gives_none_fast(self, bomb, timing_factor):
         started = time.monotonic()
         assert _repair_brackets(bomb) is None
-        assert time.monotonic() - started < 2
+        assert time.monotonic() - started < 2 * timing_factor
 
     def test_a_logged_slip_is_one_compile_call(self, valid_fsm):
         synth, llm = _synth([_slipped(valid_fsm)])

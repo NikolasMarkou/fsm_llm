@@ -841,7 +841,7 @@ class TestOverTheCapWitnesses:
 
 
 class TestSpeed:
-    def test_twelve_states_of_six_edges_in_under_two_seconds(self):
+    def test_twelve_states_of_six_edges_in_under_two_seconds(self, timing_factor):
         ids = [f"s{i}" for i in range(12)]
         states = []
         for i, sid in enumerate(ids[:-1]):
@@ -873,7 +873,7 @@ class TestSpeed:
             took = time.perf_counter() - start
         finally:
             (logger.enable if was_on else logger.disable)("fsm_llm")
-        assert took < 2.0
+        assert took < 2.0 * timing_factor
 
 
 # ------------------------------------------------------------- examples probe

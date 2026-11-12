@@ -136,6 +136,14 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "slow: marks tests as slow",
+    "integration: marks integration tests",
+    "examples: marks example tests",
+    "real_llm: marks tests requiring real LLM API",
+]
 
 # Branch coverage of the package, read by `pytest --cov` (and by the ratchet, which only
 # gates the canonical leg: Linux, Python 3.12, `mcp` installed). `make coverage` and the
@@ -147,14 +155,6 @@ source = ["fsm_llm"]
 [tool.coverage.report]
 precision = 2
 show_missing = true
-asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
-markers = [
-    "slow: marks tests as slow",
-    "integration: marks integration tests",
-    "examples: marks example tests",
-    "real_llm: marks tests requiring real LLM API",
-]
 
 [tool.ruff]
 target-version = "py311"

@@ -842,8 +842,11 @@ class TestReadConcurrency:
         conv_id, _ = api.start_conversation(seed)
         return api, conv_id
 
-    def test_concurrent_reads_never_tear_or_crash(self):
+    def test_concurrent_reads_never_tear_or_crash(self, timing_factor):
         api, conv_id = self._make_api()
+        # Wall-clock bound on the adaptive window; it grows with the factor so a
+        # traced or loaded run still reaches the read floor.
+        deadline_s = self._DEADLINE_S * timing_factor
         errors: list[tuple[str, BaseException]] = []
         errors_lock = threading.Lock()
         stop = threading.Event()
@@ -863,7 +866,7 @@ class TestReadConcurrency:
 
         def writer() -> int:
             turns = 0
-            deadline = time.monotonic() + self._DEADLINE_S
+            deadline = time.monotonic() + deadline_s
             try:
                 while (
                     turns < self._WRITER_TURNS or reads_tally[0] < self._MIN_READS
@@ -947,7 +950,7 @@ class TestReadConcurrency:
             # genuinely pathological environment, not an unlucky fast writer.
             assert reads_done >= self._MIN_READS, (
                 f"readers only completed {reads_done} cycles within "
-                f"{self._DEADLINE_S}s — the window was too narrow to prove "
+                f"{deadline_s}s — the window was too narrow to prove "
                 "anything; widen READERS/WRITER_TURNS/_DEADLINE_S"
             )
         finally:

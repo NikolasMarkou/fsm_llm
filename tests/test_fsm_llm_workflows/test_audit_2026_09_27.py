@@ -176,7 +176,7 @@ class TestProcessEventIsolation:
 
 
 class TestRewaitTimeoutSurvives:
-    async def test_second_wait_on_same_event_still_times_out(self):
+    async def test_second_wait_on_same_event_still_times_out(self, timing_factor):
         wf = create_workflow("rewait", "Rewait")
         wf.with_initial_step(wait_event_step("w1", "W1", "go", success_step_id="w2"))
         wf.with_step(
@@ -185,7 +185,7 @@ class TestRewaitTimeoutSurvives:
                 "W2",
                 "go",
                 success_step_id="done",
-                timeout_seconds=0.05,
+                timeout_seconds=0.05 * timing_factor,
                 timeout_step_id="timed_out",
             )
         )
@@ -197,7 +197,7 @@ class TestRewaitTimeoutSurvives:
 
         await engine.process_event(WorkflowEvent(event_type="go"))
         assert engine.workflow_instances[iid].current_step_id == "w2"
-        await _settle(0.2)
+        await _settle(0.2 * timing_factor)
 
         inst = engine.workflow_instances[iid]
         assert inst.current_step_id == "timed_out"
@@ -210,11 +210,13 @@ class TestRewaitTimeoutSurvives:
 
 
 class TestWaitTimeoutsAndTerminalWaits:
-    async def test_timeout_without_timeout_step_id_fails_instance(self):
+    async def test_timeout_without_timeout_step_id_fails_instance(self, timing_factor):
         engine = WorkflowEngine()
-        engine.register_workflow(_wait_then_done("wf", timeout_seconds=0.05))
+        engine.register_workflow(
+            _wait_then_done("wf", timeout_seconds=0.05 * timing_factor)
+        )
         iid = await engine.start("wf")
-        await _settle(0.2)
+        await _settle(0.2 * timing_factor)
 
         inst = engine.workflow_instances[iid]
         assert inst.status == WorkflowStatus.FAILED
@@ -492,20 +494,20 @@ class TestInstanceIds:
 
 
 class TestWorkflowDeadline:
-    async def test_deadline_fails_waiting_instance(self):
+    async def test_deadline_fails_waiting_instance(self, timing_factor):
         engine = WorkflowEngine()
         engine.register_workflow(_wait_then_done("wf"))
-        iid = await engine.start("wf", max_seconds=0.05)
+        iid = await engine.start("wf", max_seconds=0.05 * timing_factor)
         assert engine.get_status(iid) == WorkflowStatus.WAITING
-        await _settle(0.2)
+        await _settle(0.2 * timing_factor)
 
         assert engine.get_status(iid) == WorkflowStatus.FAILED
         assert engine.event_listeners["go"] == {}
 
-    async def test_timeout_error_names_instance(self):
+    async def test_timeout_error_names_instance(self, timing_factor):
         class _Slow(WorkflowStep):
             async def execute(self, context):
-                await asyncio.sleep(1)
+                await asyncio.sleep(1 * timing_factor)
                 return WorkflowStepResult.success_result(next_step_id="")
 
         wf = create_workflow("slow", "slow")
@@ -513,7 +515,7 @@ class TestWorkflowDeadline:
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         with pytest.raises(WorkflowTimeoutError) as exc_info:
-            await engine.start("slow", max_seconds=0.05)
+            await engine.start("slow", max_seconds=0.05 * timing_factor)
 
         iid = exc_info.value.instance_id
         assert iid is not None
@@ -539,7 +541,7 @@ class TestLoopsAndStepBudget:
         iid = await engine.start("long")
         assert engine.get_status(iid) == WorkflowStatus.COMPLETED
 
-    async def test_polling_loop_through_timer_is_allowed(self):
+    async def test_polling_loop_through_timer_is_allowed(self, timing_factor):
         polls = {"n": 0}
 
         def poll(ctx):
@@ -567,7 +569,7 @@ class TestLoopsAndStepBudget:
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("poll")
-        await _settle(0.2)
+        await _settle(0.2 * timing_factor)
 
         assert engine.get_status(iid) == WorkflowStatus.COMPLETED
         assert polls["n"] == 3
@@ -808,18 +810,20 @@ class TestConversationStepFixes:
         api.get_data.return_value = {"k": "v"}
         return api
 
-    async def test_base_timeout_is_honoured(self):
+    async def test_base_timeout_is_honoured(self, timing_factor):
         from unittest.mock import patch
 
         step = ConversationStep(
             step_id="c",
             name="C",
             fsm_definition={"name": "x"},
-            timeout_seconds=0.05,
+            timeout_seconds=0.05 * timing_factor,
             error_step_id="err",
         )
         with patch("fsm_llm.workflows.steps.API") as mock_cls:
-            mock_cls.from_definition.return_value = self._mock_api(delay=0.3)
+            mock_cls.from_definition.return_value = self._mock_api(
+                delay=0.3 * timing_factor
+            )
             result = await step.execute({})
         assert result.success is False
         assert result.next_step_id == "err"
@@ -876,7 +880,7 @@ class TestConversationStepFixes:
 
 
 class TestResourceRelease:
-    async def test_fired_event_timeout_leaves_no_timer(self):
+    async def test_fired_event_timeout_leaves_no_timer(self, timing_factor):
         wf = create_workflow("wf", "wf")
         wf.with_initial_step(
             wait_event_step(
@@ -884,7 +888,7 @@ class TestResourceRelease:
                 "Wait",
                 "go",
                 success_step_id="done",
-                timeout_seconds=0.05,
+                timeout_seconds=0.05 * timing_factor,
                 timeout_step_id="late",
             )
         )
@@ -893,7 +897,7 @@ class TestResourceRelease:
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("wf")
-        await _settle(0.2)
+        await _settle(0.2 * timing_factor)
 
         assert engine.get_status(iid) == WorkflowStatus.COMPLETED
         assert engine.timers == {}
@@ -1228,8 +1232,12 @@ class _SlowStep(WorkflowStep):
         return WorkflowStepResult.success_result(next_step_id=self.next_step_id)
 
 
-def _two_waits_workflow() -> WorkflowDefinition:
-    """wa (A, times out to wb) -> slow -> "" ; wb waits for B."""
+def _two_waits_workflow(timing_factor: float = 1.0) -> WorkflowDefinition:
+    """wa (A, times out to wb) -> slow -> "" ; wb waits for B.
+
+    The 0.1 s timeout and the 0.3 s slow step scale together by *timing_factor*,
+    so the order they must keep survives a traced or loaded run.
+    """
     wf = create_workflow("tw", "tw")
     wf.with_initial_step(
         wait_event_step(
@@ -1237,20 +1245,20 @@ def _two_waits_workflow() -> WorkflowDefinition:
             "WA",
             "A",
             success_step_id="slow",
-            timeout_seconds=0.1,
+            timeout_seconds=0.1 * timing_factor,
             timeout_step_id="wb",
         )
     )
-    wf.with_step(_SlowStep(step_id="slow", name="Slow"))
+    wf.with_step(_SlowStep(step_id="slow", name="Slow", delay=0.3 * timing_factor))
     wf.with_step(wait_event_step("wb", "WB", "B", success_step_id="got_b"))
     wf.with_step(auto_step("got_b", "Got B", next_step_id=""))
     return wf
 
 
 class TestReviewFollowUp:
-    async def test_event_not_delivered_to_a_different_wait(self):
+    async def test_event_not_delivered_to_a_different_wait(self, timing_factor):
         engine = WorkflowEngine()
-        engine.register_workflow(_two_waits_workflow())
+        engine.register_workflow(_two_waits_workflow(timing_factor))
         first = await engine.start("tw")
         second = await engine.start("tw")
 

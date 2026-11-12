@@ -407,6 +407,21 @@ class TestCoverageConfiguration:
         assert report["precision"] == 2
         assert report["show_missing"] is True
 
+    def test_the_coverage_tables_do_not_swallow_the_pytest_settings(self):
+        """Step 29 put the coverage tables inside ``[tool.pytest.ini_options]``:
+        ``asyncio_mode`` and ``markers`` then read as coverage keys, pytest ran
+        in strict mode and every async test failed. Pin where they live."""
+        tool = self._pyproject()["tool"]
+        ini = tool["pytest"]["ini_options"]
+        assert ini["asyncio_mode"] == "auto"
+        assert {m.split(":")[0] for m in ini["markers"]} >= {
+            "slow",
+            "integration",
+            "examples",
+            "real_llm",
+        }
+        assert set(tool["coverage"]["report"]) == {"precision", "show_missing"}
+
     def test_coverage_is_pinned_exactly_once_in_constraints(self):
         lines = [
             ln

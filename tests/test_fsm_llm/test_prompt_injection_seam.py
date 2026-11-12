@@ -557,7 +557,7 @@ class TestWhitespaceBeforeSlashClosingTagsCannotBypassTheAllowlist:
         assert "&lt; /task&gt;" in prompt
         assert "&lt; /response_generation&gt;" in prompt
 
-    def test_the_pattern_has_no_quadratic_whitespace_backtracking(self):
+    def test_the_pattern_has_no_quadratic_whitespace_backtracking(self, timing_factor):
         """D-026: the slash group is `(?:\\s*/)?`, NOT `\\s*/?\\s*`.
 
         Both accept the same language, but the flat form places two ambiguous
@@ -569,7 +569,7 @@ class TestWhitespaceBeforeSlashClosingTagsCannotBypassTheAllowlist:
         BasePromptBuilder()._sanitize_text_for_prompt(("<" + " " * 4000) * 20)
         elapsed = time.perf_counter() - start
 
-        assert elapsed < 1.0, (
+        assert elapsed < 1.0 * timing_factor, (
             f"sanitizing whitespace runs took {elapsed:.2f}s -- the tag pattern has "
             "likely been rewritten into an ambiguous `\\s*/?\\s*` form"
         )

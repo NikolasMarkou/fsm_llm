@@ -510,7 +510,9 @@ class TestDestroyInstance:
         assert wf.status == "completed"
         assert mgr.get_instance("wf1") is None
 
-    def test_end_instance_agent_joins_bounded_and_warns_if_still_alive(self):
+    def test_end_instance_agent_joins_bounded_and_warns_if_still_alive(
+        self, timing_factor
+    ):
         """A never-returning agent thread must not hang end_instance."""
         import time
 
@@ -543,7 +545,7 @@ class TestDestroyInstance:
 
         # Bounded: end_instance returns well within a few seconds, not
         # indefinitely (the thread never returns).
-        assert elapsed < 5.0
+        assert elapsed < 5.0 * timing_factor
         assert agent.status == "cancelled"
         assert agent.cancel_event.is_set()
         assert thread.is_alive()
@@ -553,9 +555,9 @@ class TestDestroyInstance:
         # Cleanup: release the background thread so it doesn't leak past the
         # test.
         never_returns.set()
-        thread.join(timeout=2.0)
+        thread.join(timeout=2.0 * timing_factor)
 
-    def test_end_instance_agent_joins_quickly_when_thread_finishes(self):
+    def test_end_instance_agent_joins_quickly_when_thread_finishes(self, timing_factor):
         """A thread that finishes promptly after cancellation is joined
         without triggering the still-alive warning."""
         mgr = InstanceManager(config=MonitorConfig())
@@ -564,7 +566,7 @@ class TestDestroyInstance:
         agent = ManagedAgent(instance_id="ag-quick")
 
         def _quick() -> None:
-            agent.cancel_event.wait(timeout=2.0)
+            agent.cancel_event.wait(timeout=2.0 * timing_factor)
 
         thread = threading.Thread(target=_quick, daemon=True)
         agent.thread = thread
@@ -580,7 +582,7 @@ class TestDestroyInstance:
         with mock.patch("fsm_llm.monitor.instance_manager.logger") as mock_logger:
             mgr.end_instance("ag-quick")
 
-        thread.join(timeout=2.0)
+        thread.join(timeout=2.0 * timing_factor)
         assert not thread.is_alive()
         mock_logger.warning.assert_not_called()
 

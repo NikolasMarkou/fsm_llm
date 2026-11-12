@@ -195,7 +195,7 @@ class TestTimerAutoScheduling:
         timer_key = f"{iid}_timer"
         assert timer_key in engine.timers
 
-    async def test_timer_fires_and_advances_workflow(self):
+    async def test_timer_fires_and_advances_workflow(self, timing_factor):
         """Auto-scheduled timer should transition the workflow after delay."""
         engine = WorkflowEngine()
 
@@ -210,7 +210,7 @@ class TestTimerAutoScheduling:
 
         # Give the timer task a moment to fire (delay_seconds=0 but
         # asyncio.sleep(0) still yields to event loop once)
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.1 * timing_factor)
 
         inst = engine.get_instance(iid)
         assert inst.status == WorkflowStatus.COMPLETED

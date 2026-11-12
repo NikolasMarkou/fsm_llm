@@ -48,7 +48,7 @@ This directory exports nothing; its surface is the pytest entry points and the m
 - Helpers in `test_audit_2026_09_27.py`:
   - `_wait_then_done(workflow_id: str, event_type: str = "go", **wait_kwargs) -> WorkflowDefinition`: a `wait_event_step("wait", ...)` routed to a terminal `auto_step("done", ..., next_step_id="")`.
   - `async _settle(seconds: float = 0.05) -> None`: `asyncio.sleep` wrapper used to let background work finish.
-  - `_two_waits_workflow() -> WorkflowDefinition`: `wa` (event `A`, `timeout_seconds=0.1`, `timeout_step_id="wb"`) -> `slow` (`_SlowStep`) -> `wb` (event `B`) -> `got_b` (terminal).
+  - `_two_waits_workflow(timing_factor=1.0) -> WorkflowDefinition`: `wa` (event `A`, `timeout_seconds=0.1 * timing_factor`, `timeout_step_id="wb"`) -> `slow` (`_SlowStep`, 0.3 s times the factor) -> `wb` (event `B`) -> `got_b` (terminal).
 - Class-local helpers: `TestConversationStep._mock_api(collected_data=None, responses=None)` in `test_steps.py` returns a `MagicMock` API (`start_conversation` gives `("conv-1", "Hello!")`, `converse` side effects, `has_conversation_ended` False, `get_data` default `{"name": "Alice"}`); `TestSwitchStep.switch` in `test_new_steps.py` is the only `@pytest.fixture` in the directory. `test_audit_fixes.py` builds counting and raising steps inside test classes (`_build_counting_terminal_step`, `_build_counting_waiting_step`, `_make_instance`).
 - Library surface exercised: `WorkflowEngine` (`register_workflow`, `start`, `process_event`, `advance`, `cancel`, `remove_instance`, `get_context`, `add_hook`, `close`), step classes in `fsm_llm.workflows.steps`, DSL factories in `fsm_llm.workflows.dsl`, models in `fsm_llm.workflows.models`, exceptions in `fsm_llm.workflows.exceptions`.
 

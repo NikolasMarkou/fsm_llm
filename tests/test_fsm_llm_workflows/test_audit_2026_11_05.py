@@ -393,37 +393,41 @@ class TestTimerKeysAndRearm:
         assert second.task is not None and not second.task.done()
         await engine.close()
 
-    async def test_timer_fires_and_forgets_its_entry(self):
+    async def test_timer_fires_and_forgets_its_entry(self, timing_factor):
         wf = create_workflow("wf", "wf")
-        wf.with_initial_step(timer_step("t", "T", 0.01, "done"))
+        wf.with_initial_step(timer_step("t", "T", 0.01 * timing_factor, "done"))
         wf.with_step(auto_step("done", "Done", next_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("wf")
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.1 * timing_factor)
         assert engine.get_status(iid) == WorkflowStatus.COMPLETED
         assert engine.timers == {}
 
-    async def test_event_timeout_without_state_fails_and_forgets(self):
+    async def test_event_timeout_without_state_fails_and_forgets(self, timing_factor):
         wf = create_workflow("wf", "wf")
         wf.with_initial_step(
-            wait_event_step("w", "W", "go", success_step_id="", timeout_seconds=0.01)
+            wait_event_step(
+                "w", "W", "go", success_step_id="", timeout_seconds=0.01 * timing_factor
+            )
         )
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("wf")
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.1 * timing_factor)
         assert engine.get_status(iid) == WorkflowStatus.FAILED
         assert engine.timers == {}
         assert engine.event_listeners.get("go", {}) == {}
 
-    async def test_deadline_fails_a_waiting_instance_and_forgets_its_entry(self):
+    async def test_deadline_fails_a_waiting_instance_and_forgets_its_entry(
+        self, timing_factor
+    ):
         wf = create_workflow("wf", "wf")
         wf.with_initial_step(wait_event_step("w", "W", "go", success_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start("wf", max_seconds=0.02)
-        await asyncio.sleep(0.15)
+        iid = await engine.start("wf", max_seconds=0.02 * timing_factor)
+        await asyncio.sleep(0.15 * timing_factor)
         assert engine.get_status(iid) == WorkflowStatus.FAILED
         assert engine.timers == {}
 
@@ -449,13 +453,13 @@ class TestCompletingFromAWait:
         assert engine.timers == {}
         assert engine.event_listeners.get("go", {}) == {}
 
-    async def test_timer_with_empty_target(self):
+    async def test_timer_with_empty_target(self, timing_factor):
         wf = create_workflow("wf", "wf")
-        wf.with_initial_step(timer_step("t", "T", 0.01, ""))
+        wf.with_initial_step(timer_step("t", "T", 0.01 * timing_factor, ""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("wf")
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.1 * timing_factor)
 
         assert engine.get_status(iid) == WorkflowStatus.COMPLETED
         assert self._markers(engine, iid) == (False, False)
@@ -474,15 +478,15 @@ class TestCompletingFromAWait:
         assert engine.get_status(iid) == WorkflowStatus.COMPLETED
         assert self._markers(engine, iid) == (False, False)
 
-    async def test_transition_out_of_a_wait_clears_both_markers(self):
+    async def test_transition_out_of_a_wait_clears_both_markers(self, timing_factor):
         wf = create_workflow("wf", "wf")
-        wf.with_initial_step(timer_step("t", "T", 0.01, "w"))
+        wf.with_initial_step(timer_step("t", "T", 0.01 * timing_factor, "w"))
         wf.with_step(wait_event_step("w", "W", "go", success_step_id="done"))
         wf.with_step(auto_step("done", "Done", next_step_id=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         iid = await engine.start("wf")
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.1 * timing_factor)
         assert engine.get_status(iid) == WorkflowStatus.WAITING
         assert self._markers(engine, iid) == (True, False)
         await engine.process_event(WorkflowEvent(event_type="go"))

@@ -278,14 +278,14 @@ class TestRouteLaunchedWorkflowIsStopped:
         return inst, stopped
 
     @staticmethod
-    def _wait(stopped: list[int]) -> None:
+    def _wait(stopped: list[int], timing_factor: float) -> None:
         import time
 
-        deadline = time.monotonic() + 2
+        deadline = time.monotonic() + 2 * timing_factor
         while not stopped and time.monotonic() < deadline:
             time.sleep(0.02)
 
-    def test_end_instance_stops_the_engine(self):
+    def test_end_instance_stops_the_engine(self, timing_factor):
         from fastapi.testclient import TestClient
 
         from fsm_llm.monitor import server
@@ -297,10 +297,10 @@ class TestRouteLaunchedWorkflowIsStopped:
             assert inst.loop is not None
             r = client.delete(f"/api/instances/{inst.instance_id}")
             assert r.status_code == 200, r.text
-            self._wait(stopped)
+            self._wait(stopped, timing_factor)
         assert stopped == [1]
 
-    def test_close_stops_the_engine(self):
+    def test_close_stops_the_engine(self, timing_factor):
         from fastapi.testclient import TestClient
 
         from fsm_llm.monitor import server
@@ -310,5 +310,5 @@ class TestRouteLaunchedWorkflowIsStopped:
         with TestClient(server.app) as client:
             _inst, stopped = self._launch(client, mgr)
             mgr.close()
-            self._wait(stopped)
+            self._wait(stopped, timing_factor)
         assert stopped == [1]

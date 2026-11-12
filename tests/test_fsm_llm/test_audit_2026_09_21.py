@@ -48,6 +48,7 @@ from fsm_llm.handlers import (
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.prompts import build_classification_system_prompt
 from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+from tests.conftest import current_timing_factor
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -1541,11 +1542,14 @@ class TestStep08D1D5:
 
     # -- D3 --------------------------------------------------------------
 
-    def test_d3_aliased_14_levels_completes_under_2s(self):
+    def test_d3_aliased_14_levels_completes_under_2s(self, timing_factor):
         data = {"root": _d3_aliased(14)}
+        budget = 2.0 * timing_factor
         for name, walker in _d3_walkers().items():
-            finished, result = _d3_run_bounded(walker, data, 2.0)
-            assert finished, f"{name}: 3-way aliasing at 14 levels did not finish in 2s"
+            finished, result = _d3_run_bounded(walker, data, budget)
+            assert finished, (
+                f"{name}: 3-way aliasing at 14 levels did not finish in {budget:g}s"
+            )
             assert isinstance(result, dict)
 
     def test_d3_self_cycle_dropped_not_looped(self):
@@ -1728,7 +1732,7 @@ class TestStep08_1:
             assert node == {"leaf": 1}, name
             assert result["z_last"] == 1, name
 
-    def test_d3_cyclic_aliasing_fails_loudly_not_partially(self):
+    def test_d3_cyclic_aliasing_fails_loudly_not_partially(self, timing_factor):
         """Aliasing that also contains a cycle cannot be memoised: the data
         walkers raise ``ContextFilterError`` instead of returning a
         truncated value, and they do it fast."""
@@ -1752,8 +1756,8 @@ class TestStep08_1:
 
             worker = threading.Thread(target=_target, daemon=True)
             worker.start()
-            worker.join(10.0)
-            assert not worker.is_alive(), f"{name}: did not finish in 10s"
+            worker.join(10.0 * timing_factor)
+            assert not worker.is_alive(), f"{name}: did not finish in time"
             assert "error" in box, f"{name}: returned {type(box.get('result'))}"
 
     def test_d3_work_refusal_is_an_fsm_error_and_a_value_error(self):
@@ -3767,10 +3771,13 @@ class TestStep14C6C12:
 
 
 @contextmanager
-def _c12_turn_holding(api: API, frame_id: str, max_hold: float = 3.0):
+def _c12_turn_holding(api: API, frame_id: str, max_hold: float | None = None):
     """Hold ``frame_id``'s conversation lock on another thread, as a running
-    turn does. Released on exit, or after ``max_hold`` seconds so a regression
-    that waits for the lock cannot hang the test."""
+    turn does. Released on exit, or after ``max_hold`` seconds (default 3 s
+    times ``current_timing_factor()``) so a regression that waits for the lock
+    cannot hang the test."""
+    if max_hold is None:
+        max_hold = 3.0 * current_timing_factor()
     lock = api.fsm_manager._conversation_locks[frame_id]
     held, done = threading.Event(), threading.Event()
 
@@ -3811,7 +3818,7 @@ def _c12_short_lock_timeout():
 class TestStep14_1:
     """Review-iter-1 W2: the C12 refusal on the API path."""
 
-    def test_c12_api_end_conversation_propagates_lock_timeout(self):
+    def test_c12_api_end_conversation_propagates_lock_timeout(self, timing_factor):
         import time
 
         api, ends = _c12_api()
@@ -3822,8 +3829,8 @@ class TestStep14_1:
             with pytest.raises(FSMError, match="still"):
                 api.end_conversation(conv_id)
             # Bounded by the (patched) lock timeout at every step, never by
-            # the holder releasing after 3 s.
-            assert time.monotonic() - started < 2.0
+            # the holder releasing after 3 s (both scaled by the same factor).
+            assert time.monotonic() - started < 2.0 * timing_factor
         assert ends == []
         assert frame_id in api.fsm_manager.instances
         assert conv_id in api.list_active_conversations()
@@ -4100,7 +4107,7 @@ class TestStep15D6D12B8:
     def test_d9_benign_shapes_unchanged(self, sample):
         assert _d9_sanitize(sample) == sample
 
-    def test_d9_linear_on_pathological_input(self):
+    def test_d9_linear_on_pathological_input(self, timing_factor):
         import html
         import time
 
@@ -4108,7 +4115,7 @@ class TestStep15D6D12B8:
             start = time.perf_counter()
             out = _d9_sanitize(payload)
             elapsed = time.perf_counter() - start
-            assert elapsed < 0.5, (payload[:4], elapsed)
+            assert elapsed < 0.5 * timing_factor, (payload[:4], elapsed)
             assert html.unescape(out) == payload
 
     # -- D10 --------------------------------------------------------------

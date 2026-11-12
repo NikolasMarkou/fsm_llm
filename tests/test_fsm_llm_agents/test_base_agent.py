@@ -69,11 +69,15 @@ class TestBaseAgentBudgets:
         # Should not raise
         agent._check_budgets(time.monotonic())
 
-    def test_run_budgets_are_the_step_ceiling_and_the_remaining_time(self):
+    def test_run_budgets_are_the_step_ceiling_and_the_remaining_time(
+        self, timing_factor
+    ):
         agent = ConcreteAgent(config=AgentConfig(max_iterations=5, timeout_seconds=60))
         max_steps, max_seconds = agent._run_budgets(time.monotonic() - 20.0)
         assert max_steps == 15  # 5 * FSM_BUDGET_MULTIPLIER
-        assert 39.0 < max_seconds <= 40.0
+        # 20 s were spent out of 60; the slack is the time between two clock
+        # reads (1 s, scaled by the factor on a traced or loaded run)
+        assert 40.0 - timing_factor < max_seconds <= 40.0
         assert agent._run_budgets(time.monotonic(), 2)[0] == 6
 
     def test_run_budgets_raise_timeout_when_the_clock_is_spent(self):

@@ -1947,9 +1947,10 @@ def _aliased_tower(levels: int, *, as_list: bool = False) -> dict:
     return {"root": node}
 
 
-def _redact_in_thread(payload: Any) -> tuple[bool, float, Any]:
+def _redact_in_thread(payload: Any, timing_factor: float) -> tuple[bool, float, Any]:
     """Run ``redact_context`` in a daemon thread so a super-linear walk FAILS
-    the test at the join timeout instead of hanging the suite."""
+    the test at the join timeout (scaled by *timing_factor*) instead of hanging
+    the suite."""
     import time
 
     from fsm_llm.utilities import redact_context
@@ -1963,7 +1964,7 @@ def _redact_in_thread(payload: Any) -> tuple[bool, float, Any]:
 
     worker = threading.Thread(target=_work, daemon=True)
     worker.start()
-    worker.join(_JOIN_TIMEOUT_S)
+    worker.join(_JOIN_TIMEOUT_S * timing_factor)
     return worker.is_alive(), box.get("elapsed", float("inf")), box.get("result")
 
 
@@ -1973,14 +1974,16 @@ class TestStep13RunnerRedaction:
     self-cycle recursed to the depth bound on every path."""
 
     @pytest.mark.parametrize("as_list", [False, True])
-    def test_three_way_aliased_depth_16_finishes_under_one_second(self, as_list):
+    def test_three_way_aliased_depth_16_finishes_under_one_second(
+        self, as_list, timing_factor
+    ):
         from fsm_llm.utilities import REDACTED
 
         payload = _aliased_tower(15, as_list=as_list)
-        still_running, elapsed, result = _redact_in_thread(payload)
+        still_running, elapsed, result = _redact_in_thread(payload, timing_factor)
 
         assert not still_running, "redaction did not finish (super-linear walk)"
-        assert elapsed < 1.0
+        assert elapsed < 1.0 * timing_factor
         # Do NOT json.dumps the result here: it re-expands all 3**15 paths.
         # Descend one path to the innermost level instead.
         node = result["root"]
@@ -2020,12 +2023,12 @@ class TestStep13RunnerRedaction:
         assert '"keep": "v"' in rendered  # shallow copy walked in full
         assert REDACTED in rendered
 
-    def test_self_cycle_terminates_with_the_placeholder(self):
+    def test_self_cycle_terminates_with_the_placeholder(self, timing_factor):
         from fsm_llm.utilities import CYCLE_PLACEHOLDER, REDACTED
 
         payload: dict = {"name": "Alice", "password": "p"}
         payload["self"] = payload
-        still_running, _, result = _redact_in_thread(payload)
+        still_running, _, result = _redact_in_thread(payload, timing_factor)
 
         assert not still_running
         assert result == {
@@ -2060,15 +2063,15 @@ class TestStep13RunnerRedaction:
             "password": REDACTED,
         }
 
-    def test_acyclic_sibling_of_a_cycle_is_still_memoised(self):
+    def test_acyclic_sibling_of_a_cycle_is_still_memoised(self, timing_factor):
         """A cycle elsewhere must not switch the memo off for an unrelated
         aliased subtree (the D-052 lesson): the tower stays linear."""
         payload = _aliased_tower(15)
         payload["self"] = payload
-        still_running, elapsed, _ = _redact_in_thread(payload)
+        still_running, elapsed, _ = _redact_in_thread(payload, timing_factor)
 
         assert not still_running
-        assert elapsed < 1.0
+        assert elapsed < 1.0 * timing_factor
 
     # -- lazy debug dumps ---------------------------------------------------
 

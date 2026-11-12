@@ -833,7 +833,7 @@ class TestClassifierCache:
         assert first_key not in pipeline._classifier_cache
         assert first not in pipeline._classifier_cache.values()
 
-    def test_eviction_race_two_threads(self):
+    def test_eviction_race_two_threads(self, timing_factor):
         """Concurrent misses past the bound must not raise. RED on the
         pre-step-2 code: the unlocked ``cache.pop(next(iter(cache)))`` raced a
         concurrent insert into ``RuntimeError: dictionary changed size during
@@ -868,7 +868,7 @@ class TestClassifierCache:
                 for t in threads:
                     t.start()
                 for t in threads:
-                    t.join(timeout=10)
+                    t.join(timeout=10 * timing_factor)
         finally:
             sys.setswitchinterval(old_interval)
 

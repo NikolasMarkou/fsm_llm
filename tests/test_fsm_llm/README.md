@@ -61,6 +61,7 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_strands_features.py` - schema-enforced output, invocation state, streaming, session save and restore.
 - `test_streaming_history_seam.py` - history stays consistent when a stream fails or is abandoned.
 - `test_stack_lifecycle_seam.py` - races in `push_fsm`/`pop_fsm` and stale-conversation cleanup.
+- `test_timing_factor.py` - the `timing_factor` fixture that scales wall-clock budgets under a tracer or load.
 - `test_turn_guard_deterministic.py` - a second `converse` on a busy conversation raises `FSMError`.
 - `test_prompt_injection_seam.py` - hostile user text is sanitized before it reaches the extraction prompt.
 - `test_intent_entities_seam.py` - `None` entity values survive intent classification.

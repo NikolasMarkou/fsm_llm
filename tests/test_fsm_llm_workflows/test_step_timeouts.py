@@ -380,7 +380,9 @@ class TestParallelStepTimeout:
         assert result.next_step_id == "err"
 
     @pytest.mark.asyncio
-    async def test_parallel_with_one_slow_and_one_fast_within_timeout(self):
+    async def test_parallel_with_one_slow_and_one_fast_within_timeout(
+        self, timing_factor
+    ):
         """Both steps finish within timeout."""
 
         async def fast_action(ctx):
@@ -409,7 +411,7 @@ class TestParallelStepTimeout:
             name="Parallel",
             steps=[s1, s2],
             next_step_id="merged",
-            timeout_seconds=2.0,
+            timeout_seconds=2.0 * timing_factor,
         )
         result = await step.execute({})
         assert result.success is True

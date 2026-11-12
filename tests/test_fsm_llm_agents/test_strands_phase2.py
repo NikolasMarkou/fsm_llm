@@ -157,29 +157,39 @@ class TestMCPTimeouts:
         monkeypatch.setattr(mcp_mod, "ClientSession", session_cls, raising=False)
         return mcp_mod.MCPToolProvider(server_params=object(), **kwargs)
 
-    async def test_hung_discovery_raises_agent_timeout(self, monkeypatch):
+    async def test_hung_discovery_raises_agent_timeout(
+        self, monkeypatch, timing_factor
+    ):
         from fsm_llm.agents.exceptions import AgentTimeoutError
 
-        provider = self._provider(monkeypatch, init_delay=self.HANG, timeout=0.05)
+        provider = self._provider(
+            monkeypatch, init_delay=self.HANG * timing_factor, timeout=0.05
+        )
         start = time.monotonic()
         with pytest.raises(AgentTimeoutError) as info:
-            await asyncio.wait_for(provider.discover_tools(), 1.0)
-        assert time.monotonic() - start < 2.0
+            await asyncio.wait_for(provider.discover_tools(), 1.0 * timing_factor)
+        assert time.monotonic() - start < 2.0 * timing_factor
         assert isinstance(info.value.__cause__, asyncio.TimeoutError)
 
-    async def test_fast_discovery_and_call_complete(self, monkeypatch):
-        provider = self._provider(monkeypatch, timeout=0.5)
-        tools = await asyncio.wait_for(provider.discover_tools(), 1.0)
+    async def test_fast_discovery_and_call_complete(self, monkeypatch, timing_factor):
+        provider = self._provider(monkeypatch, timeout=0.5 * timing_factor)
+        tools = await asyncio.wait_for(provider.discover_tools(), 1.0 * timing_factor)
         assert [t.name for t in tools] == ["echo"]
-        out = await asyncio.wait_for(tools[0].execute_fn(text="hi"), 1.0)
+        out = await asyncio.wait_for(
+            tools[0].execute_fn(text="hi"), 1.0 * timing_factor
+        )
         assert out == "echo:ok"
 
-    async def test_timeout_none_is_unbounded(self, monkeypatch):
-        provider = self._provider(monkeypatch, init_delay=0.1, timeout=None)
-        tools = await asyncio.wait_for(provider.discover_tools(), 1.0)
+    async def test_timeout_none_is_unbounded(self, monkeypatch, timing_factor):
+        provider = self._provider(
+            monkeypatch, init_delay=0.1 * timing_factor, timeout=None
+        )
+        tools = await asyncio.wait_for(provider.discover_tools(), 1.0 * timing_factor)
         assert [t.name for t in tools] == ["echo"]
 
-    async def test_hung_call_raises_tool_execution_error(self, monkeypatch):
+    async def test_hung_call_raises_tool_execution_error(
+        self, monkeypatch, timing_factor
+    ):
         from fsm_llm.agents.exceptions import ToolExecutionError
 
         provider = self._provider(monkeypatch, timeout=0.05)
@@ -187,26 +197,26 @@ class TestMCPTimeouts:
         import fsm_llm.agents.mcp as mcp_mod
 
         # Discovery was fast; now make the call hang (per-test subclass).
-        mcp_mod.ClientSession.call_delay = self.HANG
+        mcp_mod.ClientSession.call_delay = self.HANG * timing_factor
         start = time.monotonic()
         with pytest.raises(ToolExecutionError) as info:
-            await asyncio.wait_for(tools[0].execute_fn(text="hi"), 1.0)
-        assert time.monotonic() - start < 2.0
+            await asyncio.wait_for(tools[0].execute_fn(text="hi"), 1.0 * timing_factor)
+        assert time.monotonic() - start < 2.0 * timing_factor
         assert info.value.tool_name == "echo"
 
-    def test_hung_call_via_registry_is_failed_result(self, monkeypatch):
+    def test_hung_call_via_registry_is_failed_result(self, monkeypatch, timing_factor):
         import fsm_llm.agents.mcp as mcp_mod
         from fsm_llm.agents.definitions import ToolCall
         from fsm_llm.agents.tools import ToolRegistry
 
         provider = self._provider(monkeypatch, timeout=0.05)
         asyncio.run(provider.discover_tools())
-        mcp_mod.ClientSession.call_delay = self.HANG
+        mcp_mod.ClientSession.call_delay = self.HANG * timing_factor
         registry = ToolRegistry()
         provider.register_tools(registry)
         start = time.monotonic()
         result = registry.execute(ToolCall(tool_name="echo", parameters={"text": "hi"}))
-        assert time.monotonic() - start < 2.0
+        assert time.monotonic() - start < 2.0 * timing_factor
         assert result.success is False
         assert "echo" in (result.error or "")
 

@@ -119,8 +119,8 @@ class TestHandlerWithinTimeout:
 
         assert result.get("fast") is True
 
-    def test_slightly_slow_handler_within_timeout(self):
-        hs = HandlerSystem(handler_timeout=0.5)
+    def test_slightly_slow_handler_within_timeout(self, timing_factor):
+        hs = HandlerSystem(handler_timeout=0.5 * timing_factor)
         hs.register_handler(SlowHandler(sleep_seconds=0.05, result={"completed": True}))
 
         result = hs.execute_handlers(

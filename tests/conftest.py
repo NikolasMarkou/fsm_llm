@@ -3,6 +3,7 @@ Global test configuration and fixtures for the entire test suite.
 """
 
 import json
+import math
 import os
 import socket
 import sys
@@ -98,6 +99,73 @@ def symlink_or_skip(
         link.symlink_to(target, target_is_directory=is_dir)
     except (OSError, NotImplementedError):
         pytest.skip("symlinks are not supported here")
+
+
+#: Env knob that raises ``timing_factor`` (a positive float; a smaller or
+#: invalid value is ignored, so the factor never drops below 1).
+TIMING_FACTOR_ENV = "FSM_LLM_TEST_TIMING_FACTOR"
+#: Budget multiplier while a tracer or coverage is active (measured 1.3x to
+#: 1.9x of CPU-bound work under ``--cov --cov-branch``, more on a loaded host).
+TRACED_TIMING_FACTOR = 5.0
+
+
+def _coverage_running() -> bool:
+    """Whether a ``coverage.Coverage`` is measuring this process right now.
+
+    Python 3.12+ can measure through ``sys.monitoring``, which leaves
+    ``sys.gettrace()`` empty, so the tracer check alone would miss it. Never
+    imports ``coverage``: absent from ``sys.modules`` means not running.
+    """
+    module = sys.modules.get("coverage")
+    current = getattr(getattr(module, "Coverage", None), "current", None)
+    try:
+        return current is not None and current() is not None
+    except Exception:
+        return False
+
+
+def current_timing_factor() -> float:
+    """The multiplier a wall-clock budget needs on this run, never below 1.
+
+    Interface contract (the ``timing_factor`` fixture below, and tests that
+    simulate a condition by patching ``sys.gettrace`` or the environment):
+        - No parameters; reads ``sys.gettrace()``, ``COV_CORE_SOURCE`` (set by
+          pytest-cov for the whole run), a live ``coverage.Coverage`` and
+          ``FSM_LLM_TEST_TIMING_FACTOR`` at call time.
+        - Returns ``TRACED_TIMING_FACTOR`` (5.0) when a tracer, pytest-cov or
+          coverage is active, else 1.0; a valid ``FSM_LLM_TEST_TIMING_FACTOR``
+          (a finite float above 0) raises it when larger. A value that does
+          not parse, is not finite or is not above 0 is ignored; one below 1
+          cannot lower the floor.
+        - Never raises. Budgets are scaled, never skipped or deselected.
+    """
+    traced = (
+        sys.gettrace() is not None
+        or "COV_CORE_SOURCE" in os.environ
+        or _coverage_running()
+    )
+    factor = TRACED_TIMING_FACTOR if traced else 1.0
+    raw = os.environ.get(TIMING_FACTOR_ENV, "").strip()
+    if raw:
+        try:
+            override = float(raw)
+        except ValueError:
+            override = 0.0
+        if math.isfinite(override) and override > 0:
+            factor = max(factor, override)
+    return factor
+
+
+@pytest.fixture
+def timing_factor() -> float:
+    """Multiplier for a wall-clock budget: 1.0 normally, 5.0 under a tracer.
+
+    Use it as ``budget * timing_factor`` in a test that asserts an elapsed
+    time, joins a thread or waits on an event; a test about a time budget in
+    product code injects a fake monotonic clock instead. See
+    ``current_timing_factor`` for the rules and the env override.
+    """
+    return current_timing_factor()
 
 
 #: Markers whose tests may open real TCP connections under ``block_network``.

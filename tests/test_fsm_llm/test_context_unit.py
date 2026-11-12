@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import pathlib
 import re
+from functools import partial
 
 import pytest
 
@@ -37,6 +38,30 @@ from tests.test_fsm_llm.fixtures.holdout_key_corpus import (
     HOLDOUT_KNOWN_OVER_STRIPPED,
     arm_of,
 )
+
+#: Largest per-character time spread (slowest size over fastest) a linear
+#: pattern may show over a doubling sweep; a quadratic one shows 64x or more.
+_LINEAR_SPREAD = 2.5
+
+
+def _settled_spread(sweep, timing_factor, attempts=3):
+    """The lowest ``(spread, detail)`` of up to *attempts* runs of *sweep*.
+
+    Interface contract (the two ratio-based linear-time tests below):
+        - *sweep* is a zero-argument callable returning ``(spread, detail)``;
+          *timing_factor* is the ``timing_factor`` fixture value.
+        - Stops at the first sweep within ``_LINEAR_SPREAD * timing_factor``
+          and returns the lowest spread seen otherwise. A stall from load or a
+          tracer inflates one sweep; a quadratic pattern inflates every one,
+          so the retry hides noise and never a defect.
+    """
+    bound = _LINEAR_SPREAD * timing_factor
+    best = sweep()
+    for _ in range(attempts - 1):
+        if best[0] <= bound:
+            break
+        best = min(best, sweep(), key=lambda result: result[0])
+    return best
 
 
 class TestCleanContextKeys:
@@ -561,7 +586,7 @@ class TestForbiddenPatternMatching:
         )
         assert result == {"passwordless_login": True}
 
-    def test_patterns_are_linear_on_adversarial_input(self):
+    def test_patterns_are_linear_on_adversarial_input(self, timing_factor):
         """No catastrophic backtracking: a nearly-matching long key is fast."""
         import time
 
@@ -580,7 +605,9 @@ class TestForbiddenPatternMatching:
         for probe in probes:
             start = time.perf_counter()
             any(p.match(probe) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
-            assert time.perf_counter() - start < 0.5, f"slow on {probe[:16]!r}..."
+            assert time.perf_counter() - start < 0.5 * timing_factor, (
+                f"slow on {probe[:16]!r}..."
+            )
 
 
 # --------------------------------------------------------------
@@ -2193,7 +2220,7 @@ class TestCryptoKeyAndTokenTriggers:
         assert self._locate(c._CRYPTO_GAP) is not None
 
     # -- (c) ReDoS --------------------------------------------------------
-    def test_the_patterns_are_linear_on_adversarial_input(self):
+    def test_the_patterns_are_linear_on_adversarial_input(self, timing_factor):
         """SC-6/I-9. These patterns run inside `_is_forbidden_context_key` on the
         prompt path, while the per-conversation lock is held, over context keys
         that are arbitrary consumer input -- so catastrophic backtracking here is
@@ -2236,13 +2263,16 @@ class TestCryptoKeyAndTokenTriggers:
                 best = min(best or 1e9, (time.perf_counter() - start) / inner)
             return best
 
-        for label, generate in adversarial.items():
+        def sweep(generate):
             per_char = []
             for step in range(7):  # >= 6 doublings
                 text = generate(64 << step)
                 per_char.append(measure(text) / len(text))
-            spread = max(per_char) / min(per_char)
-            assert spread <= 2.5, (
+            return max(per_char) / min(per_char), per_char
+
+        for label, generate in adversarial.items():
+            spread, per_char = _settled_spread(partial(sweep, generate), timing_factor)
+            assert spread <= _LINEAR_SPREAD * timing_factor, (
                 f"{label}: time per character varied {spread:.2f}x over 7 "
                 f"doublings, which is not linear. ns/char by size: "
                 f"{[round(t * 1e9, 1) for t in per_char]}"
@@ -4814,7 +4844,7 @@ class TestDigitSuffixedCredentialNames:
         )
         assert clean_context_keys(dict(data), "c1", strip_forbidden_keys=True) == kept
 
-    def test_the_digit_suffix_stays_linear_on_adversarial_input(self):
+    def test_the_digit_suffix_stays_linear_on_adversarial_input(self, timing_factor):
         import time
 
         from fsm_llm.constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS
@@ -4831,7 +4861,7 @@ class TestDigitSuffixedCredentialNames:
                         any(p.match(text) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
                     best = min(best, (time.perf_counter() - start) / inner)
                 times.append(best / len(text))
-            return max(times) / min(times)
+            return max(times) / min(times), times
 
         for label, make in {
             '"key1_"*n': lambda n: "key1_" * n,
@@ -4840,7 +4870,8 @@ class TestDigitSuffixedCredentialNames:
             '"secret1"*n': lambda n: "secret1" * n,
             '"a1"*n+"keys2"': lambda n: "a1" * n + "keys2",
         }.items():
-            assert per_char(make) <= 2.5, label
+            spread, _ = _settled_spread(partial(per_char, make), timing_factor)
+            assert spread <= _LINEAR_SPREAD * timing_factor, label
 
 
 _DIFF_ATOMS = ("", "a", "ssh", "order", "max", "csrf", "api", "x_", "A", "_", "1")
@@ -4927,7 +4958,9 @@ class TestContainerValuesUnderAmbiguousKeyNames:
             "order_key": ["alpha", "beta"]
         }
 
-    def test_the_budget_depth_and_cycles_fail_closed_in_bounded_time(self):
+    def test_the_budget_depth_and_cycles_fail_closed_in_bounded_time(
+        self, timing_factor
+    ):
         import time
 
         deep: list = ["ordinary"]
@@ -4944,7 +4977,7 @@ class TestContainerValuesUnderAmbiguousKeyNames:
             "shared": is_forbidden_context_entry("order_key", [shared, shared]),
             "big_bytes": is_forbidden_context_entry("order_key", b"x" * 5_000_000),
         }
-        assert time.perf_counter() - start < 1.0
+        assert time.perf_counter() - start < 1.0 * timing_factor
         assert results == {
             "wide": True,
             "deep": True,
@@ -4978,13 +5011,13 @@ class TestContainerValuesUnderAmbiguousKeyNames:
         assert is_forbidden_context_entry("billed_tokens", [1, 2]) is True
         assert is_forbidden_context_entry("billed_tokens", 137) is False
 
-    def test_the_long_crypto_flood_stays_under_the_timing_pin(self):
+    def test_the_long_crypto_flood_stays_under_the_timing_pin(self, timing_factor):
         import time
 
         name = "ssh_" * 5000
         start = time.perf_counter()
         is_forbidden_context_entry(name, [_AUDIT_STRIPE])
-        assert time.perf_counter() - start < 0.5
+        assert time.perf_counter() - start < 0.5 * timing_factor
 
 
 class TestUserVisibleData:

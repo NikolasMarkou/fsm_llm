@@ -614,13 +614,18 @@ def _pid_alive(pid: int) -> bool:
     return stat.rsplit(")", 1)[1].split()[0] != "Z"
 
 
-def _pids_script(pids_file: Path) -> str:
-    """An example that starts a grandchild, records both pids, then sleeps."""
+def _pids_script(pids_file: Path, seconds: float = 30.0) -> str:
+    """An example that starts a grandchild, records both pids, then sleeps.
+
+    *seconds* is how long both sleep: a test that bounds how fast an interrupt
+    ends them scales it with its budget, so the bound keeps its meaning.
+    """
     return (
         "import os, subprocess, sys, time\n"
-        "kid = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "kid = subprocess.Popen("
+        f"[sys.executable, '-c', 'import time; time.sleep({seconds})'])\n"
         f"open({str(pids_file)!r}, 'w').write(str(os.getpid()) + ' ' + str(kid.pid))\n"
-        "time.sleep(30)\n"
+        f"time.sleep({seconds})\n"
     )
 
 
@@ -657,12 +662,15 @@ class TestSigtermEndsRunningExamples:
     its 360 s harness timeout). An interrupt now ends the running examples."""
 
     def test_sigterm_ends_the_running_example_and_its_subprocess_at_once(
-        self, tmp_path: Path
+        self, tmp_path: Path, timing_factor: float
     ):
         pids_file = tmp_path / "pids.txt"
         root = tmp_path / "examples"
-        _write(root / "basic" / "slow" / "run.py", _pids_script(pids_file))
-        config = _config(root, workers=1, timeout=60)
+        _write(
+            root / "basic" / "slow" / "run.py",
+            _pids_script(pids_file, 30.0 * timing_factor),
+        )
+        config = _config(root, workers=1, timeout=int(60 * timing_factor))
         run_dir = create_output_dir(config, "m")
         pids: list[int] = []
 
@@ -675,13 +683,14 @@ class TestSigtermEndsRunningExamples:
         start = time.monotonic()
         try:
             report = run_examples(discover_examples(config), config, "m", run_dir)
-            killer.join(10)
+            killer.join(10 * timing_factor)
             assert report.interrupted is True
             assert pids, "the script never started"
-            assert _wait_dead(pids) == []  # the example and its grandchild
+            # the example and its grandchild
+            assert _wait_dead(pids, 5.0 * timing_factor) == []
             # The pool thread, which Python joins at exit, is gone: the process
             # would exit now, not when the 30 s script ends.
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + 5 * timing_factor
             while time.monotonic() < deadline and any(
                 t.name.startswith("ThreadPoolExecutor") for t in threading.enumerate()
             ):
@@ -691,7 +700,7 @@ class TestSigtermEndsRunningExamples:
                 for t in threading.enumerate()
                 if t.name.startswith("ThreadPoolExecutor")
             ]
-            assert time.monotonic() - start < 15
+            assert time.monotonic() - start < 15 * timing_factor
         finally:
             for pid in pids:
                 try:
@@ -699,7 +708,9 @@ class TestSigtermEndsRunningExamples:
                 except OSError:
                     pass
 
-    def test_a_timeout_ends_the_examples_own_subprocess_too(self, tmp_path: Path):
+    def test_a_timeout_ends_the_examples_own_subprocess_too(
+        self, tmp_path: Path, timing_factor: float
+    ):
         pids_file = tmp_path / "pids.txt"
         script = tmp_path / "run.py"
         _write(script, _pids_script(pids_file))
@@ -709,14 +720,14 @@ class TestSigtermEndsRunningExamples:
             path=script,
             interactive=False,
             stdin_data=None,
-            timeout=2,
+            timeout=int(2 * timing_factor),
         )
         pids: list[int] = []
         try:
             result = run_example(target, "m", sys.executable, tmp_path)
-            pids.extend(_read_pids(pids_file, wait=1))
+            pids.extend(_read_pids(pids_file, wait=1 * timing_factor))
             assert result.timed_out is True
-            assert _wait_dead(pids) == []
+            assert _wait_dead(pids, 5.0 * timing_factor) == []
         finally:
             for pid in pids:
                 try:
@@ -766,10 +777,15 @@ class TestSigtermEndsRunningExamples:
         assert "Popen" not in source
         assert "run_tracked" not in source
 
-    def test_the_cli_process_exits_promptly_after_sigterm(self, tmp_path: Path):
+    def test_the_cli_process_exits_promptly_after_sigterm(
+        self, tmp_path: Path, timing_factor: float
+    ):
         pids_file = tmp_path / "pids.txt"
         root = tmp_path / "examples"
-        _write(root / "basic" / "slow" / "run.py", _pids_script(pids_file))
+        _write(
+            root / "basic" / "slow" / "run.py",
+            _pids_script(pids_file, 30.0 * timing_factor),
+        )
         out = tmp_path / "run"
         proc = subprocess.Popen(
             [
@@ -786,7 +802,7 @@ class TestSigtermEndsRunningExamples:
                 "--workers",
                 "1",
                 "--timeout",
-                "60",
+                str(int(60 * timing_factor)),
             ],
             cwd=tmp_path,
             stdout=subprocess.PIPE,
@@ -798,11 +814,13 @@ class TestSigtermEndsRunningExamples:
             pids.extend(_read_pids(pids_file))
             sent = time.monotonic()
             proc.send_signal(signal.SIGTERM)
-            _, err = proc.communicate(timeout=20)
+            _, err = proc.communicate(timeout=20 * timing_factor)
             lingered = time.monotonic() - sent
             assert proc.returncode == 130, err
-            assert lingered < 10, f"the process lingered {lingered:.1f}s"
-            assert _wait_dead(pids) == []
+            assert lingered < 10 * timing_factor, (
+                f"the process lingered {lingered:.1f}s"
+            )
+            assert _wait_dead(pids, 5.0 * timing_factor) == []
         finally:
             if proc.poll() is None:
                 proc.kill()

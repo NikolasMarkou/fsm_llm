@@ -955,7 +955,7 @@ class TestTimedOutApprovedCallRunsOnce:
     delta (grant and selection stay in context). The same grant must not run
     the tool again unasked; the callback is asked again instead."""
 
-    def test_timed_out_call_is_not_replayed(self):
+    def test_timed_out_call_is_not_replayed(self, timing_factor):
         import threading
 
         harness = _FlagHarness()
@@ -968,7 +968,7 @@ class TestTimedOutApprovedCallRunsOnce:
             body_runs.append(x)
             if len(body_runs) == 1:
                 started.set()
-                release.wait(10)  # outlives the handler timeout
+                release.wait(10 * timing_factor)  # outlives the handler timeout
             return "BOOM"
 
         harness.registry.register_function(
@@ -988,7 +988,7 @@ class TestTimedOutApprovedCallRunsOnce:
             config=AgentConfig(model="mock/model", max_iterations=6),
             hitl=HumanInTheLoop(approval_callback=decide),
             llm_interface=_TerminateAfterEvidenceLLM(),
-            handler_timeout=0.5,
+            handler_timeout=0.5 * timing_factor,
         )
         try:
             agent.run("do it")

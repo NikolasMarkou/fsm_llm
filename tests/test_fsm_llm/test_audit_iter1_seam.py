@@ -1437,29 +1437,29 @@ class TestLinearFenceAndThink:
     def test_extract_json_from_text_matches_old_outputs(self, text, expected):
         assert extract_json_from_text(text) == expected
 
-    def test_extract_json_unclosed_fence_then_spaces_is_linear(self):
+    def test_extract_json_unclosed_fence_then_spaces_is_linear(self, timing_factor):
         text = "```json" + " " * _LINEAR_N
         start = time.perf_counter()
         assert extract_json_from_text(text) is None
-        assert time.perf_counter() - start < _LINEAR_BUDGET_S
+        assert time.perf_counter() - start < _LINEAR_BUDGET_S * timing_factor
 
-    def test_extract_json_unclosed_fence_then_newlines_is_linear(self):
+    def test_extract_json_unclosed_fence_then_newlines_is_linear(self, timing_factor):
         text = "```" + "\n" * _LINEAR_N
         start = time.perf_counter()
         assert extract_json_from_text(text) is None
-        assert time.perf_counter() - start < _LINEAR_BUDGET_S
+        assert time.perf_counter() - start < _LINEAR_BUDGET_S * timing_factor
 
-    def test_strip_think_repeated_unterminated_open_tags_is_linear(self):
+    def test_strip_think_repeated_unterminated_open_tags_is_linear(self, timing_factor):
         text = "<think>a" * _LINEAR_N
         start = time.perf_counter()
         assert strip_think_and_fences(text) == text
-        assert time.perf_counter() - start < _LINEAR_BUDGET_S
+        assert time.perf_counter() - start < _LINEAR_BUDGET_S * timing_factor
 
-    def test_strip_think_many_closed_blocks_is_linear(self):
+    def test_strip_think_many_closed_blocks_is_linear(self, timing_factor):
         text = "<think>a</think>b" * _LINEAR_N
         start = time.perf_counter()
         assert strip_think_and_fences(text) == "b" * _LINEAR_N
-        assert time.perf_counter() - start < _LINEAR_BUDGET_S
+        assert time.perf_counter() - start < _LINEAR_BUDGET_S * timing_factor
 
     @pytest.mark.parametrize(
         "text",
@@ -1471,10 +1471,10 @@ class TestLinearFenceAndThink:
         ],
         ids=["ws-run", "fence-newlines", "fence-space-repeat", "newline-fence-repeat"],
     )
-    def test_strip_fence_shapes_are_linear(self, text):
-        assert _elapsed(strip_think_and_fences, text) < _LINEAR_BUDGET_S
+    def test_strip_fence_shapes_are_linear(self, text, timing_factor):
+        assert _elapsed(strip_think_and_fences, text) < _LINEAR_BUDGET_S * timing_factor
 
-    def test_extract_bulk_data_hostile_think_reply_is_bounded(self):
+    def test_extract_bulk_data_hostile_think_reply_is_bounded(self, timing_factor):
         """The shared stripper is reached from extract_bulk_data on the real seam."""
         llm = LiteLLMInterface(model=OLLAMA_MODEL)
         hostile = "<think>a" * _LINEAR_N
@@ -1483,7 +1483,7 @@ class TestLinearFenceAndThink:
             start = time.perf_counter()
             with pytest.raises(LLMResponseError):
                 llm.extract_bulk_data(request)
-            assert time.perf_counter() - start < _LINEAR_BUDGET_S
+            assert time.perf_counter() - start < _LINEAR_BUDGET_S * timing_factor
 
 
 # ══════════════════════════════════════════════════════════════

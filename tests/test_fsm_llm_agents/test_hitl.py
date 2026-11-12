@@ -134,7 +134,7 @@ class TestApprovalTimeoutCallbackErrors:
         with pytest.raises(RuntimeError, match="early failure"):
             hitl.request_approval(call, {})
 
-    def test_late_exception_after_timeout_is_logged(self):
+    def test_late_exception_after_timeout_is_logged(self, timing_factor):
         import threading
         import time
 
@@ -142,7 +142,7 @@ class TestApprovalTimeoutCallbackErrors:
 
         def _slow_boom(request: ApprovalRequest) -> bool:
             threads.append(threading.current_thread())
-            time.sleep(0.3)
+            time.sleep(0.3 * timing_factor)
             raise RuntimeError("late failure")
 
         hitl = HumanInTheLoop(approval_callback=_slow_boom, approval_timeout=0.05)
@@ -151,7 +151,7 @@ class TestApprovalTimeoutCallbackErrors:
         try:
             assert hitl.request_approval(call, {}) is False
             assert threads, "callback thread never started"
-            threads[0].join(timeout=5.0)
+            threads[0].join(timeout=5.0 * timing_factor)
             assert not threads[0].is_alive()
         finally:
             logger.remove(sink_id)
@@ -161,7 +161,7 @@ class TestApprovalTimeoutCallbackErrors:
         assert late, captured
         assert "RuntimeError" in late[0]
 
-    def test_late_return_after_timeout_logs_no_error(self):
+    def test_late_return_after_timeout_logs_no_error(self, timing_factor):
         import threading
         import time
 
@@ -169,7 +169,7 @@ class TestApprovalTimeoutCallbackErrors:
 
         def _slow_ok(request: ApprovalRequest) -> bool:
             threads.append(threading.current_thread())
-            time.sleep(0.3)
+            time.sleep(0.3 * timing_factor)
             return True
 
         hitl = HumanInTheLoop(approval_callback=_slow_ok, approval_timeout=0.05)
@@ -177,7 +177,7 @@ class TestApprovalTimeoutCallbackErrors:
         logger, captured, sink_id = self._capture_warnings()
         try:
             assert hitl.request_approval(call, {}) is False
-            threads[0].join(timeout=5.0)
+            threads[0].join(timeout=5.0 * timing_factor)
         finally:
             logger.remove(sink_id)
             logger.disable("fsm_llm")

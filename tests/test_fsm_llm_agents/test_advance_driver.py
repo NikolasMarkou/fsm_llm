@@ -337,13 +337,53 @@ def _endless_fsm() -> dict[str, Any]:
     }
 
 
+class _FakeClock:
+    """A monotonic clock that moves only when a test advances it.
+
+    Stands in for the ``time`` binding of ``fsm_llm.api`` and
+    ``fsm_llm.agents.base`` (the two modules that read the run budget); every
+    other attribute is the real ``time`` module's. A budget test built on it
+    cannot flake on a loaded or traced machine: no real second passes into it.
+    """
+
+    def __init__(self, start: float = 1000.0) -> None:
+        self.now = start
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(time, name)
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> _FakeClock:
+    """The fake clock, bound as ``time`` in core's api and the agents base."""
+    import fsm_llm.agents.base as agents_base
+    import fsm_llm.api as core_api
+
+    fake = _FakeClock()
+    monkeypatch.setattr(core_api, "time", fake)
+    monkeypatch.setattr(agents_base, "time", fake)
+    return fake
+
+
 class _EndlessAgent(BaseAgent):
-    """A pattern whose FSM never reaches its terminal state."""
+    """A pattern whose FSM never reaches its terminal state.
+
+    ``slow_step`` names the loop turn that costs ``slow_seconds``: on the fake
+    clock when ``clock`` is set (no real time passes), else a real sleep.
+    """
 
     def __init__(self, config: AgentConfig, **api_kwargs: Any) -> None:
         super().__init__(config, **api_kwargs)
         self.steps: list[tuple[int, str]] = []
         self.slow_step: int | None = None
+        self.slow_seconds = 0.05
+        self.clock: _FakeClock | None = None
 
     def run(
         self, task: str, initial_context: dict[str, Any] | None = None
@@ -365,7 +405,10 @@ class _EndlessAgent(BaseAgent):
     ) -> None:
         self.steps.append((iteration, api.get_current_state(conversation_id)))
         if iteration == self.slow_step:
-            time.sleep(0.05)
+            if self.clock is not None:
+                self.clock.advance(self.slow_seconds)
+            else:
+                time.sleep(self.slow_seconds)
 
 
 class TestBudgetsAreCores:
@@ -403,12 +446,15 @@ class TestBudgetsAreCores:
         assert converse_calls == []
 
     @pytest.mark.parametrize("stream", [False, True], ids=["run", "run_stream"])
-    def test_wall_clock_spent_between_steps_raises_timeout(self, stream: bool):
+    def test_wall_clock_spent_between_steps_raises_timeout(
+        self, stream: bool, clock: _FakeClock
+    ):
         agent = _EndlessAgent(
             AgentConfig(max_iterations=50, timeout_seconds=0.02),
             llm_interface=PromptGroundedLLM(),
         )
         agent.slow_step = 2
+        agent.clock = clock  # step 2 costs 0.05 fake seconds: step 3 is over budget
 
         with pytest.raises(AgentTimeoutError) as info:
             if stream:
@@ -2445,7 +2491,7 @@ class TestAdaptOnTheCoreLoop:
         assert (operator["field_type"], operator["required"]) == ("str", False)
 
     def test_sub_runs_get_what_is_left_of_the_parents_wall_clock(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, timing_factor: float
     ):
         budgets: list[float] = []
         run_until_terminal = API.run_until_terminal
@@ -2460,7 +2506,8 @@ class TestAdaptOnTheCoreLoop:
 
         assert result.success is True
         root, first, second = budgets
-        assert 59.0 < root <= 60.0
+        # at most 1 s (times the factor) passed between the run start and the root run
+        assert 60.0 - timing_factor < root <= 60.0
         # The root attempt took 0.05 s of the one clock before any sub-run.
         assert first <= 60.0 - 0.05
         assert second <= first

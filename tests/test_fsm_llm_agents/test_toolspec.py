@@ -628,9 +628,9 @@ def _tool_thread(name: str) -> threading.Thread:
 
 
 class TestTimeoutEnforced:
-    def test_slow_tool_fails_fast(self):
+    def test_slow_tool_fails_fast(self, timing_factor):
         def slow() -> str:
-            time.sleep(2.0)
+            time.sleep(2.0 * timing_factor)
             return "done"
 
         registry = ToolRegistry()
@@ -642,7 +642,7 @@ class TestTimeoutEnforced:
         elapsed = time.monotonic() - start
         assert result.success is False
         assert "timed out after 0.2 s" in (result.error or "")
-        assert elapsed < 1.0
+        assert elapsed < 1.0 * timing_factor
 
     def test_fast_tool_returns_its_value(self):
         def fast(q: str) -> str:
@@ -656,7 +656,7 @@ class TestTimeoutEnforced:
         assert result.success is True
         assert result.result == "A"
 
-    def test_tool_raising_before_the_timeout_is_a_failed_call(self):
+    def test_tool_raising_before_the_timeout_is_a_failed_call(self, timing_factor):
         def boom() -> str:
             raise ValueError("bad input")
 
@@ -666,13 +666,13 @@ class TestTimeoutEnforced:
         )
         start = time.monotonic()
         result = registry.execute(ToolCall(tool_name="boom"))
-        assert time.monotonic() - start < 1.0
+        assert time.monotonic() - start < 1.0 * timing_factor
         assert result.success is False
         assert result.error == "bad input"
 
-    def test_async_tool_is_timed_out(self):
+    def test_async_tool_is_timed_out(self, timing_factor):
         async def slow_async() -> str:
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(2.0 * timing_factor)
             return "done"
 
         registry = ToolRegistry()
@@ -681,7 +681,7 @@ class TestTimeoutEnforced:
         )
         start = time.monotonic()
         result = registry.execute(ToolCall(tool_name="slow_async"))
-        assert time.monotonic() - start < 1.0
+        assert time.monotonic() - start < 1.0 * timing_factor
         assert result.success is False
         assert "timed out" in (result.error or "")
 
