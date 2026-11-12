@@ -1,7 +1,7 @@
 # tests
 
 Path: `tests`
-Purpose: The full pytest tree of FSM-LLM (14,020 collected tests): ten suite folders for the `fsm_llm` package and its six subpackages, five repo-wide root test files, and the shared `conftest.py`.
+Purpose: The full pytest tree of FSM-LLM (14,024 collected tests): ten suite folders for the `fsm_llm` package and its six subpackages, five repo-wide root test files, and the shared `conftest.py`.
 
 ## Scope
 
@@ -31,7 +31,7 @@ Suite folders (test counts from full collection) and root files at this level.
 | File | Role | Notes |
 | --- | --- | --- |
 | `conftest.py` | Shared fixtures, fakes and marker registration (see Public interface) | 0 tests |
-| `test_packaging.py` | Repo-wide wiring and doc-count pins | 54 tests; classes listed below |
+| `test_packaging.py` | Repo-wide wiring and doc-count pins | 58 tests; classes listed below |
 | `test_bench_common.py` | Offline checks of `scripts/bench_common.py`, the stdlib helpers shared by the agents, skills and synthesis benches | 19 tests |
 | `test_agents_bench.py` | Offline checks of `scripts/agents_bench.py` | 132 tests |
 | `test_skills_bench.py` | Offline checks of `scripts/skills_bench.py` (Agent Skills read-hint ablation: fixture, grader, hint ablation, one trial, blocks, hygiene); scripted agents drive the REAL skill tools | 38 tests; never calls a model |
@@ -58,6 +58,8 @@ Suite folders (test counts from full collection) and root files at this level.
 - `TestDocumentedTestCountsMatchCollection` (`slow`): one `pytest --collect-only -q -o addopts= -p no:cacheprovider tests/` subprocess (env drops `PYTEST_ADDOPTS`, `SKIP_SLOW_TESTS`, `TEST_REAL_LLM`), then pins: root `AGENTS.md` `pytest -v (N tests)` and `Run all tests (N collected)`; root `README.md` `Run full test suite (N tests)`; the root `AGENTS.md` per-suite lines `pytest tests/<suite>/  # ... (N tests)` (dict equality both ways); the sentence `The N suites above sum to S. The remaining R ...`; the `tests/<file>.py (N)` root-file list. `CHANGELOG.md` is deliberately not pinned (D-015).
 - `TestNoTopLevelNameIsBoundTwice` (1 test): over every `src/**/*.py`, no top-level assignment, annotated assignment, def or class binds a name twice (`if`/`try` branches and `@overload` stubs are exempt); it replaced the constants-only test of `test_agent_skills.py`.
 - `TestNoPypiInstallHint` (1 test): no `pip install fsm-llm` hint in `src/` (that name on PyPI is another project).
+- `TestClassifiersMatchFloor` (4 tests): the version classifiers run contiguously from the `requires-python` floor (3.11), the newest equals the evidenced version, and the build backend asks for setuptools 77 or later.
+- `TestDeclaredRangesMatchPins` (4 tests): every declared dependency (core, extras, dependency groups) has an upper bound and exactly one `==` pin in `constraints.txt` inside its range, the build backend is pinned inside its range, and `constraints.txt` holds exactly one litellm line. Needs no network.
 - `TestEveryDocumentedCountMatchesCollection` (`slow`, 1 test): `scripts/doc_counts.py` (`make counts`) makes one more `--collect-only` child with a plugin that reads markers, then compares the count tokens of the shapes it knows in the tracked `.md` files (suite and folder docs, marker, `slow`, live and file counts, per-file rows) with it; a token of such a shape that no rule names fails too, a number in prose with no token shape (`1 test`, `2,011 passed`) is not read, and it skips when `mcp` is importable (the documented counts are the no-`mcp` counts).
 - `test_doc_counts_reads_the_slow_live_and_file_shapes` (11 parametrized cases, not `slow`): a fake measurement and one line each, offline, pinning that `scripts/doc_counts.py` reads the `N slow` / `(N slow)` cell, `N marked slow`, `N live` / `N gated`, `N offline tests` and `tests in N files` shapes.
 
@@ -88,7 +90,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 
 - Env knobs: `FSM_LLM_REAL_SKILLS` (arms the Agent Skills home-directory test in `test_agent_skills.py`), `FSM_LLM_MONITOR_API_KEY` (cleared for monitor tests). No test reads `SKIP_SLOW_TESTS`, `TEST_REAL_LLM` or `TEST_LLM_MODEL`; `test_packaging.py` drops the first two from its collection child env.
 - pytest config in `pyproject.toml`: `testpaths = ["tests"]`, `addopts = "-v --tb=short"`, `asyncio_mode = "auto"`, `asyncio_default_fixture_loop_scope = "function"`.
-- Marker counts (full collection): `slow` 42, `integration` 20, `real_llm` 19, `examples` 67; `-m "not slow"` collects 13,978.
+- Marker counts (full collection): `slow` 42, `integration` 20, `real_llm` 19, `examples` 67; `-m "not slow"` collects 13,982.
 
 ## Invariants and constraints
 

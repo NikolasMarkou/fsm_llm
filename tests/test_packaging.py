@@ -26,6 +26,9 @@ import sys
 import tomllib
 
 import pytest
+from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
+from packaging.version import Version
 
 _REPO_ROOT = pathlib.Path(__file__).parents[1]
 _SCRIPTS = str(_REPO_ROOT / "scripts")
@@ -459,6 +462,101 @@ class TestClassifiersMatchFloor:
             if (m := re.fullmatch(r"setuptools\s*>=\s*(\d+)(?:\.\d+)*", r.strip()))
         ]
         assert floors and floors[0] >= 77, requires
+
+
+def _normalized(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _declared_requirements() -> list[tuple[str, Requirement]]:
+    """(where, requirement) for every non-self requirement pyproject.toml declares.
+
+    Reads `[project].dependencies`, every extra and `[dependency-groups]` (string
+    entries; an `{include-group = ...}` table repeats another group). A
+    `fsm-llm[extra]` entry is the package naming itself and is skipped.
+    """
+    data = _pyproject()
+    found: list[tuple[str, str]] = [
+        ("project.dependencies", r) for r in data["project"].get("dependencies", [])
+    ]
+    for extra, reqs in data["project"].get("optional-dependencies", {}).items():
+        found += [(f"extra:{extra}", r) for r in reqs]
+    for group, reqs in data.get("dependency-groups", {}).items():
+        found += [(f"group:{group}", r) for r in reqs if isinstance(r, str)]
+    out = [(where, Requirement(text)) for where, text in found]
+    return [(w, r) for w, r in out if _normalized(r.name) != "fsm-llm"]
+
+
+def _constraint_pins() -> dict[str, list[str]]:
+    """`name -> [version, ...]` for every `name==version` line of constraints.txt.
+
+    A line that is not an exact pin fails here, so the file stays a pure pin list.
+    """
+    pins: dict[str, list[str]] = {}
+    for raw in _read("constraints.txt").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        m = re.fullmatch(
+            r"([A-Za-z0-9][A-Za-z0-9._-]*)==([0-9][A-Za-z0-9.!+_-]*)", line
+        )
+        assert m, f"constraints.txt line is not an exact pin: {raw!r}"
+        pins.setdefault(_normalized(m.group(1)), []).append(m.group(2))
+    return pins
+
+
+def _has_upper_bound(spec: SpecifierSet) -> bool:
+    return any(s.operator in {"<", "<=", "==", "~="} for s in spec)
+
+
+class TestDeclaredRangesMatchPins:
+    """No declared range admits an untested major; every pin lies in its range.
+
+    A range with no upper bound lets a fresh install pick a release nobody ran the
+    suite on. The exact pins in `constraints.txt` are the tested set, so a declared
+    range is acceptable only when it is bounded and contains that pin.
+    """
+
+    def test_every_declared_requirement_has_an_upper_bound(self):
+        unbounded = [
+            f"{where}: {req}"
+            for where, req in _declared_requirements()
+            if not _has_upper_bound(req.specifier)
+        ]
+        assert not unbounded, unbounded
+
+    def test_every_declared_requirement_has_one_exact_pin_in_its_range(self):
+        pins = _constraint_pins()
+        problems = []
+        for where, req in _declared_requirements():
+            versions = pins.get(_normalized(req.name), [])
+            if len(versions) != 1:
+                problems.append(f"{where}: {req} has {len(versions)} pins")
+            elif not req.specifier.contains(Version(versions[0]), prereleases=True):
+                problems.append(
+                    f"{where}: pin {req.name}=={versions[0]} is outside {req}"
+                )
+        assert not problems, problems
+
+    def test_the_build_backend_is_pinned_inside_its_range(self):
+        pins = _constraint_pins()
+        for text in _pyproject()["build-system"]["requires"]:
+            req = Requirement(text)
+            versions = pins.get(_normalized(req.name), [])
+            assert len(versions) == 1, f"{text!r} needs one pin in constraints.txt"
+            assert req.specifier.contains(Version(versions[0]), prereleases=True), (
+                f"{req.name}=={versions[0]} is outside {text!r}"
+            )
+
+    def test_constraints_hold_exactly_one_litellm_line(self):
+        """D-002 of plan c1d5bfbc: one litellm pin for every Python, no marker split."""
+        assert len(_constraint_pins()["litellm"]) == 1
+        lines = [
+            ln
+            for ln in _read("constraints.txt").splitlines()
+            if ln.strip().startswith("litellm")
+        ]
+        assert len(lines) == 1, lines
 
 
 # ══════════════════════════════════════════════════════════════

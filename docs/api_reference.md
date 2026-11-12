@@ -720,7 +720,7 @@ Open Knowledge Format (OKF) is a directory of markdown files with YAML frontmatt
 
 **Spec status.** This follows OKF v0.2, SPEC.md at commit `ad30107` (2026-08-21) of GoogleCloudPlatform/open-knowledge-format. The spec is pre-1.0 and mutable (upstream issue #24), so a later spec revision may change what is valid. Unknown types and keys, broken links and a missing `index.md` never reject a bundle; unknown frontmatter keys survive a round trip.
 
-`fsm_llm.okf` is a core module: `import fsm_llm` does not load it, import it by name. It needs `pyyaml>=6.0`, a declared core dependency (it was only a transitive one before). It imports no subpackage and no litellm.
+`fsm_llm.okf` is a core module: `import fsm_llm` does not load it, import it by name. It needs `pyyaml>=6.0,<7`, a declared core dependency (it was only a transitive one before). It imports no subpackage and no litellm.
 
 ### Reading a bundle
 

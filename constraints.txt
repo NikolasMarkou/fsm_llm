@@ -15,7 +15,32 @@
 # on 3.10. Versions 1.83.0-1.100.0 were NOT checked on 3.10. One pin for every
 # Python version on purpose: a per-version marker split would recreate the
 # CI-vs-local drift described below. Do not go back to 1.100.x.
-litellm==1.102.1
+# (Python 3.10 is no longer supported, so the 3.10 import failure above is history;
+# the one-pin-no-marker-split rule stands.) 1.109.1 declares requires-python
+# >=3.10,<3.16, so it installs on 3.11 to 3.15, which is the tested range.
+litellm==1.109.1
+
+# ---------------------------------------------------------------------------
+# Runtime dependencies and the build backend: one exact pin per direct dependency
+# of pyproject.toml, and `tests/test_packaging.py::TestDeclaredRangesMatchPins`
+# fails when a declared range has no upper bound, has no pin here, or does not
+# contain its pin. So a new dependency or a widened range needs a pin in this file
+# in the same commit. Versions were chosen with `uv pip compile` for Python 3.11
+# and 3.15 on linux, macos and windows (the one set resolves on all six).
+# ---------------------------------------------------------------------------
+loguru==0.8.0
+pydantic==2.14.3
+python-dotenv==1.2.4
+tenacity==9.2.1
+pyyaml==6.0.3
+fastapi==0.162.5
+uvicorn==0.54.0
+jinja2==3.1.6
+httpx==0.28.1
+opentelemetry-api==1.45.2
+opentelemetry-sdk==1.45.2
+setuptools==84.2.1
+wheel==0.48.0
 
 # ---------------------------------------------------------------------------
 # Dev toolchain — exact pins so CI and every developer resolve the SAME tools.
@@ -32,7 +57,7 @@ litellm==1.102.1
 # HOW TO BUMP (deliberately — there is no Dependabot in this repo, so these
 # tools receive no upstream fixes until a human does this):
 #   1. Raise the version(s) below.
-#   2. .venv/bin/python -m pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor]"
+#   2. .venv/bin/python -m pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis]" mcp
 #   3. Run the full local gate: pytest, mypy src/, ruff check, ruff format --check.
 #   4. Push and confirm a green GitHub Actions run on all three matrix legs.
 # One PR that raises all six at once, with CI as the acceptance test, is the

@@ -180,9 +180,9 @@ Rules for NEW code, so the vocabulary stays one across core and the subpackages.
 
 ## Dependencies
 
-- Core: loguru>=0.7.3, litellm>=1.83.0,<2.0 (compromised 1.82.7/1.82.8 are below the floor; `constraints.txt` pins 1.102.1), pydantic>=2.0, python-dotenv>=1.0.0, pyyaml>=6.0 (parses OKF and Agent Skills YAML frontmatter, in `frontmatter.py` only; declared explicitly because it was only a transitive dependency), tenacity>=8.0 (unimported, needed by litellm's sync retry path; do not remove).
-- Extras: `reasoning`, `agents`, `workflows`, `eval`, `synthesis` (no deps), `monitor` (fastapi, uvicorn, jinja2), `mcp` (mcp>=1.0.0), `otel` (opentelemetry-api/sdk>=1.20.0), `a2a` (httpx>=0.24.0), `all`, `dev`.
-- `constraints.txt` pins litellm, pytest, pytest-asyncio, pytest-cov, pytest-mock, ruff, mypy, mcp exactly.
+- Core: loguru>=0.7.3,<1, litellm>=1.109.0,<2.0 (compromised 1.82.7/1.82.8 are below the floor; `constraints.txt` pins 1.109.1), pydantic>=2.0,<3, python-dotenv>=1.0.0,<2, pyyaml>=6.0,<7 (parses OKF and Agent Skills YAML frontmatter, in `frontmatter.py` only; declared explicitly because it was only a transitive dependency), tenacity>=8.0,<10 (unimported, needed by litellm's sync retry path; do not remove).
+- Extras: `reasoning`, `agents`, `workflows`, `eval`, `synthesis` (no deps), `monitor` (fastapi, uvicorn, jinja2), `mcp` (mcp>=2.2,<3), `otel` (opentelemetry-api/sdk>=1.20.0,<2), `a2a` (httpx>=0.24.0,<1), `all`, `dev`.
+- `constraints.txt` pins every direct dependency (core, extras, dev tools) and the build backend exactly, one line each, and every declared range has an upper bound containing its pin (`TestDeclaredRangesMatchPins`).
 
 ## Failure modes
 
@@ -197,7 +197,7 @@ Rules for NEW code, so the vocabulary stays one across core and the subpackages.
 ## Working here
 
 ```bash
-make test           # pytest -v (14,020 tests)
+make test           # pytest -v (14,024 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # python scripts/type_check.py (mypy -p fsm_llm)
@@ -211,7 +211,7 @@ make api-snapshot   # python scripts/api_snapshot.py --write docs/api.txt (regen
 ```
 
 ```bash
-pytest                                 # Run all tests (14,020 collected)
+pytest                                 # Run all tests (14,024 collected)
 pytest tests/test_fsm_llm/            # Core package tests (6,234 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (232 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (330 tests)
@@ -222,8 +222,8 @@ pytest tests/test_fsm_llm_regression/ # Regression tests (268 tests)
 pytest tests/test_examples/           # Example validation tests (67 tests)
 pytest tests/test_fsm_llm_eval/       # Eval tests (430 tests)
 pytest tests/test_fsm_llm_synthesis/  # Synthesis tests (2,037 tests)
-# The 10 suites above sum to 13,765. The remaining 255 are five root-level files:
-#   tests/test_integration_ollama.py (12), tests/test_packaging.py (54),
+# The 10 suites above sum to 13,765. The remaining 259 are five root-level files:
+#   tests/test_integration_ollama.py (12), tests/test_packaging.py (58),
 #   tests/test_bench_common.py (19), tests/test_agents_bench.py (132)
 #   and tests/test_skills_bench.py (38)
 pytest -m "not slow"                  # Skip slow tests

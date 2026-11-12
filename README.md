@@ -564,7 +564,7 @@ Contributions are welcome, from a typo fix to a new agent pattern. Full rules ar
 
 ```bash
 make install-dev    # editable install with every extra, plus pre-commit hooks
-make test           # Run full test suite (14,020 tests)
+make test           # Run full test suite (14,024 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy on the fsm_llm package (src/)
@@ -610,7 +610,7 @@ Things to know:
 - The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`; both also replace loguru's default handler, so a library record prints once.
 - One conversation handles one message at a time: a second `converse` on a conversation that is mid-turn raises `FSMError`.
 - Upgrading a clone from before the 2026-09-29 restructure: delete the old `src/fsm_llm_<sub>/` folders by hand (`make clean` does not remove them), then `pip install -e .`. A leftover folder breaks imports. After the later move of `src/fsm_llm/` to `src/`, run `pip install -e .` again.
-- `constraints.txt` pins litellm and the dev tools to exact versions so CI and local runs match.
+- `constraints.txt` pins every direct dependency and the dev tools to exact versions so CI and local runs match.
 
 ---
 
