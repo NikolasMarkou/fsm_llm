@@ -29,8 +29,9 @@ Classification is built into the core package -- no extra install needed.
 
 ```bash
 export OPENAI_API_KEY="your-api-key-here"
-# Or create a .env file:
+# Or create a .env file and load it on purpose (nothing reads it unasked):
 echo "OPENAI_API_KEY=your-api-key-here" > .env
+# Python: fsm_llm.load_env()      CLI: fsm-llm --env-file .env --fsm your_fsm.json
 ```
 
 Environment variables used by the library and the `fsm-llm` command:
@@ -43,7 +44,7 @@ Environment variables used by the library and the `fsm-llm` command:
 | `FSM_PATH` | none | not usable with `fsm-llm`: `--fsm` is checked first and is mandatory |
 | `OPENAI_API_KEY` etc. | none | provider keys, read by litellm |
 
-Importing `fsm_llm` no longer loads a `.env` file, so prefer `export`; the `fsm-llm` CLI still reads a `.env` itself for now.
+Importing `fsm_llm` loads no `.env` file. Call `fsm_llm.load_env()` (it searches from the working directory upward, or takes a path, and never replaces a variable that is already set) or pass `--env-file PATH` to `fsm-llm`; otherwise `export` the variables.
 
 ## 3. Your First Bot
 
@@ -191,7 +192,7 @@ python examples/intermediate/book_recommendation/run.py  # Multi-branch conversa
 ### Useful Commands
 
 ```bash
-fsm-llm --fsm your_fsm.json           # Run any FSM interactively (needs LLM_MODEL set)
+fsm-llm --fsm your_fsm.json           # Run any FSM interactively (needs LLM_MODEL, --model or --env-file)
 fsm-llm-validate --fsm your_fsm.json  # Validate FSM structure
 fsm-llm-visualize --fsm your_fsm.json # ASCII visualization
 fsm-llm-monitor                       # Launch monitoring dashboard

@@ -519,6 +519,7 @@ fsm_llm.get_workflows def()
 fsm_llm.has_agents def()
 fsm_llm.has_reasoning def()
 fsm_llm.has_workflows def()
+fsm_llm.load_env def(path: str | os.PathLike[str] | None = None, *, override: bool = False) -> Path | None
 fsm_llm.load_fsm_definition def(fsm_id_or_path: str) -> FSMDefinition
 fsm_llm.load_fsm_from_file def(path: str) -> FSMDefinition
 fsm_llm.quick_start def(path: str, model: str | None = None) -> API

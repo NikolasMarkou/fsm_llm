@@ -6,8 +6,6 @@ import json
 import os
 import sys
 
-import dotenv
-
 from .api import API
 from .cli_support import escape_unencodable_output
 from .constants import (
@@ -17,11 +15,10 @@ from .constants import (
     DEFAULT_TEMPERATURE,
     ENV_FSM_PATH,
     ENV_LLM_MAX_TOKENS,
-    ENV_LLM_MODEL,
     ENV_LLM_TEMPERATURE,
 )
-from .definitions import ModelNotConfiguredError
-from .llm import DEFAULT_MAX_TOKENS
+from .env import load_env
+from .llm import DEFAULT_MAX_TOKENS, resolve_model
 from .logging import logger, setup_file_logging
 from .utilities import redact_context, redacting_json_default
 
@@ -42,31 +39,46 @@ def _report_failure(e: Exception) -> int:
     return CLI_EXIT_FAILURE
 
 
-def main(fsm_path, max_history_size, max_message_length):
+def main(
+    fsm_path,
+    max_history_size,
+    max_message_length,
+    *,
+    model=None,
+    env_file=None,
+):
     """
     Run an interactive FSM conversation from the CLI.
 
     Uses the public API class (not FSMManager directly) for consistency
     with how extension packages integrate.
+
+    Interface contract: *model* is the ``--model`` flag (``None``: use env
+    ``LLM_MODEL``); *env_file* is the ``--env-file`` path (``None``: read no
+    file). The model is *model*, then the process environment (which an
+    *env_file* fills only where the process has no value), else
+    ``ModelNotConfiguredError``. Raises ``FileNotFoundError`` for a missing
+    *env_file*. Returns the exit code.
     """
 
-    # Load environment variables from .env file
-    dotenv.load_dotenv()
+    # DECISION plan-2026-11-12T073150-d454fd62/D-005
+    # A .env file is read only when the caller asks (--env-file), through the
+    # one loader ``fsm_llm.env.load_env``; the process environment still wins.
+    # Do NOT search for a .env here and do NOT call python-dotenv directly: a
+    # stale file silently supplied the model and keys before this change.
+    if env_file is not None:
+        load_env(env_file)
 
     # Enable logging for CLI usage (the library disables it by default): file
     # logging enables the library loggers itself.
     setup_file_logging()
 
-    # Check if critical environment variables are set
     # DECISION plan-2026-11-12T073150-d454fd62/D-005
     # No model is a configuration failure with the one shared message (it names
-    # the three ways to set one), reported by ``__main__`` as one stderr line.
-    # Do NOT fall back to a built-in model here.
-    if not (os.getenv(ENV_LLM_MODEL) or "").strip():
-        raise ModelNotConfiguredError()
+    # the ways to set one), reported by ``__main__`` as one stderr line. Do NOT
+    # fall back to a built-in model here.
+    llm_model = resolve_model(model)
 
-    # Set up model from environment variables (API key handled by LiteLLM)
-    llm_model = os.environ[ENV_LLM_MODEL]
     try:
         temperature = float(os.environ.get(ENV_LLM_TEMPERATURE, DEFAULT_TEMPERATURE))
         max_tokens = int(os.environ.get(ENV_LLM_MAX_TOKENS, DEFAULT_MAX_TOKENS))

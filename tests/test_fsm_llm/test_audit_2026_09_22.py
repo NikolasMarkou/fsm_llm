@@ -2082,7 +2082,7 @@ class TestStep13RunnerRedaction:
         mock_api.get_data.side_effect = [per_turn_data, final_data]
 
         with patch.dict(os.environ, {"LLM_MODEL": "test-model"}, clear=True):
-            with patch("fsm_llm.runner.dotenv.load_dotenv"):
+            with patch("fsm_llm.runner.load_env"):
                 with patch("fsm_llm.runner.API.from_file", return_value=mock_api):
                     with patch("fsm_llm.runner.setup_file_logging"):
                         with patch("builtins.input", return_value="hi"):

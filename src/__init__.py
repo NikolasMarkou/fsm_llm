@@ -99,6 +99,11 @@ from .definitions import (
 )
 
 # --------------------------------------------------------------
+# Explicit .env loading (opt-in; importing fsm_llm reads no .env file)
+# --------------------------------------------------------------
+from .env import load_env
+
+# --------------------------------------------------------------
 # Expression Evaluation
 # --------------------------------------------------------------
 from .expressions import evaluate_logic
@@ -206,6 +211,8 @@ __all__ = [
     "FSMManager",
     "APIBuilder",
     "FSMManagerBuilder",
+    # Explicit .env loading
+    "load_env",
     # Core definitions
     "FSMDefinition",
     "FSMInstance",

@@ -332,7 +332,7 @@ class TestRunnerContextLoggingRedaction:
         sink_id = logger.add(str(log_file), level="DEBUG")
         try:
             with patch.dict(os.environ, {"LLM_MODEL": "test-model"}, clear=True):
-                with patch("fsm_llm.runner.dotenv.load_dotenv"):
+                with patch("fsm_llm.runner.load_env"):
                     with patch("fsm_llm.runner.API.from_file", return_value=mock_api):
                         with patch("fsm_llm.runner.setup_file_logging"):
                             with patch("builtins.input", return_value="hi"):

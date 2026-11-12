@@ -26,6 +26,7 @@ CLI synopsis
                             --fsm FILE
                             [--style {full,compact,minimal}]
                             [--history-size N] [--message-length L]
+                            [--model NAME] [--env-file PATH]
                             [--version]
 
 Positional / required arguments
@@ -45,6 +46,16 @@ Optional switches
 
 ``--style, -s`` *(visualize only)*
     Rendering style: ``full`` (rich, multi-section), ``compact``, or ``minimal``.
+
+``--model, -m`` *(run only)*
+    The model name. Without it the model is the environment variable
+    ``LLM_MODEL``; with neither, ``fsm-llm`` prints one line on stderr and
+    exits 1.
+
+``--env-file`` *(run only)*
+    Read this ``.env`` file into the environment first (``fsm_llm.load_env``).
+    A variable the process already has is not replaced. No ``.env`` file is
+    read unless you pass this flag.
 
 ``--history-size, -n``
     Circular buffer length for conversation memory
@@ -123,6 +134,20 @@ def main_cli():
         help=f"Maximum length of messages in characters (default: {DEFAULT_MAX_MESSAGE_LENGTH})",
     )
     parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default=None,
+        help="Model name for --mode run (default: env LLM_MODEL; there is no built-in model)",
+    )
+    parser.add_argument(
+        "--env-file",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Read this .env file into the environment before --mode run (the process environment wins; no .env is read without this flag)",
+    )
+    parser.add_argument(
         "--version", "-v", action="version", version=f"fsm_llm v{__version__}"
     )
     args = parser.parse_args()
@@ -138,6 +163,8 @@ def main_cli():
                 fsm_path=args.fsm,
                 max_history_size=args.history_size,
                 max_message_length=args.message_length,
+                model=args.model,
+                env_file=args.env_file,
             )
         elif args.mode == "validate":
             setup_cli_logging("INFO")
@@ -147,7 +174,7 @@ def main_cli():
             return main_visualizer(fsm_path=args.fsm, style=args.style)
         else:
             raise ValueError(f"Invalid mode {args.mode}")
-    except ModelNotConfiguredError as e:
+    except (ModelNotConfiguredError, FileNotFoundError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return CLI_EXIT_FAILURE
     except KeyboardInterrupt:

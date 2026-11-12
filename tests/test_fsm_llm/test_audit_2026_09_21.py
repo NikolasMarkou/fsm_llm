@@ -3496,7 +3496,7 @@ def _c8_run(api: MagicMock) -> Any:
 
     with (
         patch.dict(os.environ, {"LLM_MODEL": "test-model"}, clear=True),
-        patch("fsm_llm.runner.dotenv.load_dotenv"),
+        patch("fsm_llm.runner.load_env"),
         patch("fsm_llm.runner.API.from_file", return_value=api),
         patch("fsm_llm.runner.setup_file_logging"),
         patch("builtins.input", return_value="hi"),
