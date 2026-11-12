@@ -96,8 +96,9 @@ print(result.answer, result.success, [c.tool_name for c in result.trace.tool_cal
 Or with the factory. The pattern comes first, tools can be a list of `@tool` functions, and `system_prompt` gives the agent standing instructions:
 
 ```python
-from fsm_llm.agents import create_agent
-agent = create_agent("react", [add], system_prompt="Always show the sum you computed.")
+from fsm_llm.agents import AgentConfig, create_agent
+agent = create_agent("react", [add], config=AgentConfig(model="ollama_chat/qwen3.5:4b"),
+                     system_prompt="Always show the sum you computed.")
 print(agent("What is 2 + 3?").answer)
 
 for chunk in agent.run_stream("What is 4 + 5?"):  # only the model's text
@@ -109,11 +110,11 @@ The first argument must name a pattern (matched after `strip().lower()`); anythi
 Give an agent a knowledge bundle (a directory of markdown files with YAML frontmatter, the Open Knowledge Format, OKF v0.2, SPEC.md at commit ad30107, pre-1.0 and mutable). The four tools only read it:
 
 ```python
-from fsm_llm.agents import create_agent, create_okf_tools
+from fsm_llm.agents import AgentConfig, create_agent, create_okf_tools
 from fsm_llm.okf import load_bundle
 
 bundle = load_bundle("./my_bundle")          # never raises on bad content; problems are in bundle.issues
-agent = create_agent("react", create_okf_tools(bundle))
+agent = create_agent("react", create_okf_tools(bundle), config=AgentConfig(model="ollama_chat/qwen3.5:4b"))
 print(agent("What is the maximum payload size of the gateway?").answer)
 ```
 
@@ -123,10 +124,10 @@ Give an agent Agent Skills (folders with a `SKILL.md`, the open standard at agen
 
 ```python
 from fsm_llm.agent_skills import load_skills
-from fsm_llm.agents import create_agent, create_skill_tools
+from fsm_llm.agents import AgentConfig, create_agent, create_skill_tools
 
 catalog = load_skills("./skills")            # never raises on bad content; problems are in catalog.issues
-agent = create_agent("react", create_skill_tools(catalog))
+agent = create_agent("react", create_skill_tools(catalog), config=AgentConfig(model="ollama_chat/qwen3.5:4b"))
 print(agent(catalog.render_catalog() + "\n\nFill in the form.").answer)
 ```
 

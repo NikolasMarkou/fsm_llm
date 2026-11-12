@@ -790,6 +790,7 @@ fsm-llm-okf export MEMORY_JSON OUT_DIR [--overwrite]
 
 ```python
 from fsm_llm.agents import (
+    AgentConfig,
     OKFMemoryBackend,
     create_agent,
     create_okf_tools,
@@ -799,7 +800,7 @@ from fsm_llm.agents import (
 from fsm_llm.okf import load_bundle
 
 bundle = load_bundle("./my_bundle")
-agent = create_agent("react", create_okf_tools(bundle))
+agent = create_agent("react", create_okf_tools(bundle), config=AgentConfig(model="gpt-4o-mini"))
 result = agent("What is the maximum payload size the gateway accepts?")
 export_agent_result(result, "./my_bundle", task="payload size")     # writes runs/<stamp>-<hex>.md
 ```
@@ -876,10 +877,10 @@ Each PATH is a skills directory or one skill folder. `validate` prints one line 
 
 ```python
 from fsm_llm.agent_skills import load_skills
-from fsm_llm.agents import create_agent, create_skill_tools
+from fsm_llm.agents import AgentConfig, create_agent, create_skill_tools
 
 catalog = load_skills("./skills")
-agent = create_agent("react", create_skill_tools(catalog))
+agent = create_agent("react", create_skill_tools(catalog), config=AgentConfig(model="gpt-4o-mini"))
 result = agent(catalog.render_catalog() + "\n\nFill in the form.")
 ```
 

@@ -344,7 +344,7 @@ The same shape builds conversations, agents of any pattern, workflows, agent gra
 ### 4. Create an Agent in One Line
 
 ```python
-from fsm_llm.agents import create_agent, tool
+from fsm_llm.agents import AgentConfig, create_agent, tool
 
 
 @tool
@@ -353,7 +353,7 @@ def add(a: int, b: int) -> int:
     return a + b
 
 
-agent = create_agent("react", [add])
+agent = create_agent("react", [add], config=AgentConfig(model="ollama_chat/qwen3.5:4b"))   # or set LLM_MODEL
 result = agent("What is 19 + 23? Use the add tool.")
 print(result.answer, result.success, result.stop_reason)   # 19 + 23 equals 42. True answered
 ```
