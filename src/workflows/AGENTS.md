@@ -52,7 +52,7 @@ Wake-ups after WAITING: `process_event` -> `_deliver_event` -> `_transition_to_s
 | File | Role | Notes |
 | --- | --- | --- |
 | `engine.py` | `WorkflowEngine`, `Timer`, `LifecycleHook` alias | per-instance `asyncio.Lock`, event buffers, timers dict, background tasks; no `__all__` (module attributes such as `DEFAULT_MAX_STEPS` stay importable) |
-| `steps.py` | `WorkflowStep` ABC (`referenced_step_ids()`, `_with_timeout`) + 11 subclasses, `_call_user_callable`, `_STEP_EXECUTOR` ContextVar, `_lookup_path`, `_error_text` | Pydantic models, `arbitrary_types_allowed` |
+| `steps.py` | `WorkflowStep` ABC (`referenced_step_ids()`, `_with_timeout`) + 11 subclasses, `_call_user_callable`, `_STEP_EXECUTOR` ContextVar, `_lookup_path`, `_error_text` | Pydantic models, `arbitrary_types_allowed`, `extra="forbid"` (an unknown or removed keyword raises) |
 | `definitions.py` | `WorkflowDefinition`, `_serialize_step` | `validate_structure()` raises `WorkflowValidationError` with all errors |
 | `dsl.py` | step factories, `WorkflowBuilder`, `create_workflow_builder`, pattern helpers | pattern helpers register steps, they do not wire them |
 | `models.py` | `WorkflowStatus`, `WorkflowEvent`, `WorkflowStepResult`, `WorkflowHistoryEntry`, `WorkflowInstance`, `EventListener`, `WaitEventConfig` | `_VALID_STATUS_TRANSITIONS` |
@@ -109,6 +109,7 @@ DSL (`dsl.py`): `create_workflow(workflow_id, name, description="")`, `create_wo
 - `WaitEventConfig{event_type (non-empty), success_step_id, timeout_seconds (>0), timeout_step_id (requires timeout_seconds), event_mapping{ctx_key: payload_key}, correlation_key}`.
 - `EventListener{instance_id, success_step_id, event_mapping, registered_at, timeout_at, correlation_key, correlation_value, timeout_step_id, step_id}`; `is_expired()`.
 - `Timer(instance_id, next_step_id, expires_at, task)`; keys in `engine.timers`: `{id}_timer`, `{id}_{event_type}_timeout`, `{id}_deadline`.
+- Pydantic models (`WorkflowStep` and its subclasses, `WorkflowStepResult`, `WorkflowInstance`, `EventListener`, `WaitEventConfig`) set `extra="forbid"`: a removed spelling such as `next_state=` or `workflow_timeout=` raises a `ValidationError` instead of being dropped (`tests/test_fsm_llm_workflows/test_removed_keywords.py`). A custom `WorkflowStep` subclass that wants extra fields declares them.
 - Engine context keys (`constants.py`, constants `CONTEXT_KEY_WAITING_INFO`, `_TIMER_INFO`, `_WORKFLOW_INFO`, `_EVENT_TIMEOUT`, `_TIMER_EXPIRED`, `_LAST_EVENT`, `_USER_INPUT`, `_CANCELLATION_REASON`; values unchanged): `_waiting_info`, `_timer_info` (both in `STEP_INTERNAL_WHITELIST`, cleared on every transition), `_workflow_info {workflow_id, instance_id}`, `_timeout {event_type, timeout_at}`, `_timer_expired {expired_at}`, `_last_event` (event dump), `_user_input` (only during an `advance` run), `_cancellation_reason`.
 - Limits: `DEFAULT_MAX_STEPS = 1000`, `DEFAULT_MAX_COMPLETED_INSTANCES = 1000`, `DEFAULT_MAX_HISTORY_ENTRIES = 1000`, `MAX_BUFFERED_EVENTS_PER_INSTANCE = 100` (deque, oldest dropped), `PARALLEL_DEEPCOPY_WARNING_THRESHOLD = 10`.
 

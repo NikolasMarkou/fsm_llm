@@ -94,7 +94,7 @@ class WorkflowStep(BaseModel, ABC):
     """Maximum seconds this step may run. ``None`` (the default) disables the
     timeout; set a finite value for steps that call out to slow services."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
     @abstractmethod
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:

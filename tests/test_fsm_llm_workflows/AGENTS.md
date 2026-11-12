@@ -37,6 +37,7 @@ flowchart LR
 | `test_audit_fixes.py` | 29 | F-001 parallel failure without `error_step_id`; F-002 `process_event` uses `.pop(` not `del self.event_listeners` (source inspection); F-004 `end_conversation` called on exception; F-007 missing template var gives failure; F-010 no `conversation_map`; F4 per-instance lock (no double execution, lock dropped on remove/purge); F5 terminal guards on `_fail` and `cancel`; F7 sub-second `max_seconds` reported as float |
 | `test_audit_2026_09_27.py` | 74 | 2026-09-27 audit: 21 classes grouped by finding id (H, M and L series) plus `TestReviewFollowUp` |
 | `test_audit_2026_11_05.py` | 42 | 2026-11-05 audit (plan 5980fbb7 step 19): raising Auto/Condition steps record hook, history and cause (F-WE-01); user `TimeoutError` kept (F-WE-06); async `aggregation_function` (F-WE-07); `schedule_timer` on a terminal instance (F-WE-10); initial `status_changed running` (F-WE-13); `llm_interface` validated (F-WE-15); referenced states of every step type (F-WE-05); timer keys, re-arm and fired-timer cleanup (F-WE-02); completing from a wait (F-WE-03); cancel releases everything (F-WE-04) |
+| `test_removed_keywords.py` | 8 | Removed keywords raise instead of being dropped: `AutoStep(error_state=, timeout=)`, `SwitchStep(default_state=)`, `WaitEventConfig(timeout_state=, success_state=)`, `EventListener(success_state=)`, `WorkflowStepResult(next_state=)`, `WorkflowInstance(workflow_timeout=)`; the new spelling works |
 | `__init__.py` | 0 | Empty |
 
 ## Public interface

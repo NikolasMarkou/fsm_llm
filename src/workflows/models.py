@@ -87,7 +87,7 @@ class WorkflowStepResult(BaseModel):
     error: str | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
     @field_validator("error", mode="before")
     @classmethod
@@ -135,6 +135,8 @@ class WorkflowHistoryEntry(BaseModel):
 
 class WorkflowInstance(BaseModel):
     """Runtime instance of a workflow."""
+
+    model_config = ConfigDict(extra="forbid")
 
     instance_id: str
     workflow_id: str
@@ -229,6 +231,8 @@ class WorkflowInstance(BaseModel):
 class EventListener(BaseModel):
     """Information about a workflow instance listening for an event."""
 
+    model_config = ConfigDict(extra="forbid")
+
     instance_id: str
     success_step_id: str
     event_mapping: dict[str, str] = Field(default_factory=dict)
@@ -265,6 +269,8 @@ class WaitEventConfig(BaseModel):
     ``payload[correlation_key]`` equals the instance's
     ``context[correlation_key]``.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     event_type: str
     success_step_id: str

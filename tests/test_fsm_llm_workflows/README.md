@@ -27,6 +27,7 @@ Async tests need no decorator: the repository's `pyproject.toml` sets `asyncio_m
 - `test_audit_fixes.py` - regressions for earlier audit findings: parallel failure reporting, event listener cleanup, conversation cleanup, template errors, per-instance locking, terminal-status guards, float timeouts. 29 tests.
 - `test_audit_2026_09_27.py` - regressions for the 2026-09-27 audit (findings labelled H, M, L), grouped one class per finding. 74 tests.
 - `test_audit_2026_11_05.py` - regressions for the 2026-11-05 audit (plan 5980fbb7 step 19): failures raised by Auto and Condition steps are recorded, a user `TimeoutError` is kept, async `aggregation_function`, `schedule_timer` on a finished instance, the announced first RUNNING, `llm_interface` validation, referenced states, timer keys and completion from a wait. 42 tests.
+- `test_removed_keywords.py` - a removed keyword spelling (`error_state=`, `timeout=`, `default_state=`, `timeout_state=`, `next_state=`, `workflow_timeout=`) raises a `ValidationError` on the pydantic workflow models and the new spelling works. 8 tests.
 - `__init__.py` - empty package marker.
 
 ## How to use it
