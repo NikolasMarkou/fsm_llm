@@ -21,6 +21,7 @@ import yaml
 
 import fsm_llm.frontmatter as frontmatter
 import fsm_llm.okf as okf_module
+from fsm_llm.agent_skills import parse_skill_text
 from fsm_llm.constants import OKF_MAX_FRONTMATTER_BYTES, OKF_MAX_YAML_DEPTH
 from fsm_llm.definitions import OKFError
 from fsm_llm.frontmatter import (
@@ -570,3 +571,78 @@ class TestOkfKeepsItsWiring:
     def test_okf_has_no_loader_class_of_its_own(self) -> None:
         assert not hasattr(okf_module, "_OKFLoader")
         assert not hasattr(okf_module, "_flow_depth_exceeded")
+
+
+class TestQuotedBracketsAreNotNesting:
+    """F-OK-07: brackets inside a quoted scalar or a comment are text."""
+
+    @staticmethod
+    def _load(raw: str, max_depth: int = 64) -> tuple[dict[Any, Any], list[str]]:
+        codes: list[str] = []
+        data = load_yaml(
+            raw,
+            lambda sev, code, msg: codes.append(code),
+            max_bytes=16_384,
+            max_depth=max_depth,
+        )
+        return data, codes
+
+    @pytest.mark.parametrize("quote", ['"', "'"])
+    @pytest.mark.parametrize("bracket", ["[", "{"])
+    def test_a_flat_quoted_string_with_many_brackets_loads(
+        self, quote: str, bracket: str
+    ) -> None:
+        raw = f"description: {quote}uses {bracket * 70} as a literal{quote}\n"
+
+        data, codes = self._load(raw)
+
+        assert codes == []
+        assert data == {"description": f"uses {bracket * 70} as a literal"}
+
+    def test_a_quoted_string_inside_a_flow_list_loads(self) -> None:
+        data, codes = self._load("k: ['" + "[" * 70 + "', \"" + "{" * 70 + '"]\n')
+
+        assert codes == []
+        assert data["k"] == ["[" * 70, "{" * 70]
+
+    def test_a_comment_with_brackets_is_not_nesting(self) -> None:
+        data, codes = self._load("a: 1  # " + "[" * 100 + "\nb: 2\n")
+
+        assert codes == [] and data == {"a": 1, "b": 2}
+
+    def test_the_real_limit_still_holds_for_nested_flow_collections(self) -> None:
+        for raw in (
+            "k: " + "[" * 70 + "]" * 70,
+            "k: " + "{a: " * 70 + "1" + "}" * 70,
+            "k: 'x'\nj: " + "[" * 70 + "]" * 70,  # a quote before the nesting
+            "k: ['a', " + "[" * 70 + "]" * 70 + "]",
+        ):
+            data, codes = self._load(raw)
+            assert (data, codes) == ({}, ["frontmatter-too-deep"]), raw
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "a: [it's, " + "[" * 300 + "]" * 300 + "]\n",
+            "a: [foo 'bar, " + "[" * 300 + "]" * 300 + "]\n",  # a false quote span
+        ],
+    )
+    def test_an_apostrophe_cannot_hide_the_nesting(self, raw: str) -> None:
+        # A quote-like character in a plain scalar must not open a span that
+        # swallows a genuinely nested flow collection.
+        assert self._load(raw)[1] == ["frontmatter-too-deep"]
+
+    def test_a_flood_of_quoted_brackets_is_still_refused(self) -> None:
+        raw = "k: '" + "[" * 5000 + "'\n"
+
+        assert self._load(raw)[1] == ["frontmatter-too-deep"]
+
+    def test_parse_skill_text_accepts_the_flat_string(self) -> None:
+        text = (
+            '---\nname: ok\ndescription: "uses ' + "[" * 70 + ' literally"\n---\nbody\n'
+        )
+
+        skill, issues = parse_skill_text(text, "ok")
+
+        assert skill is not None
+        assert "frontmatter-too-deep" not in [i.code for i in issues]

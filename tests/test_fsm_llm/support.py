@@ -14,10 +14,13 @@ from fsm_llm.definitions import (
     ClassificationExtractionConfig,
     ClassificationResult,
     ClassificationSchema,
+    CompletionRequest,
+    CompletionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
     FSMDefinition,
     IntentDefinition,
+    ResponseGenerationResponse,
     State,
     Transition,
     TransitionCondition,
@@ -1250,3 +1253,153 @@ _BACK_FIELD = {"wants_name_change": True}
 
 
 _BACK_BULK = {"full_name": "Bob Jones", "wants_name_change": True}
+
+
+_TWO_STATE = {
+    "name": "b",
+    "description": "d",
+    "initial_state": "s",
+    "persona": "p",
+    "states": {
+        "s": {
+            "id": "s",
+            "description": "d",
+            "purpose": "p",
+            "response_instructions": "hi",
+            "transitions": [
+                {"target_state": "e", "description": "go", "priority": 100}
+            ],
+        },
+        "e": {
+            "id": "e",
+            "description": "d",
+            "purpose": "p",
+            "response_instructions": "bye",
+        },
+    },
+}
+
+
+def _fsm() -> dict[str, Any]:
+    return {
+        "name": "t",
+        "description": "d",
+        "initial_state": "a",
+        "states": {
+            "a": {
+                "id": "a",
+                "description": "a",
+                "purpose": "p",
+                "transitions": [{"target_state": "b", "description": "go"}],
+            },
+            "b": {"id": "b", "description": "b", "purpose": "p"},
+        },
+    }
+
+
+_INTENTS = ClassificationSchema(
+    intents=[
+        IntentDefinition(name="buy", description="wants to buy"),
+        IntentDefinition(name="browse", description="just looking"),
+    ],
+    fallback_intent="browse",
+)
+
+
+class _Custom(LLMInterface):
+    """A user's own interface: Pass 1/2 answer, ``complete`` runs ``bug``."""
+
+    model = "custom/m"
+
+    def __init__(self, bug: Any) -> None:
+        self.bug = bug
+
+    def generate_response(self, request: Any) -> ResponseGenerationResponse:
+        return ResponseGenerationResponse(
+            message="ok", message_type="response", reasoning=""
+        )
+
+    def extract_field(self, request: Any) -> FieldExtractionResponse:
+        return FieldExtractionResponse(
+            field_name=request.field_name, value=None, confidence=0.0, is_valid=False
+        )
+
+    def complete(self, request: CompletionRequest) -> CompletionResponse:
+        return self.bug(request)
+
+
+def _tie_fsm() -> dict[str, Any]:
+    return {
+        "name": "Tie",
+        "description": "Two transitions at one priority: the classifier decides",
+        "initial_state": "route",
+        "states": {
+            "route": _state(
+                "route",
+                response_instructions="Respond",
+                transitions=[
+                    {"target_state": "a", "description": "A"},
+                    {"target_state": "b", "description": "B"},
+                ],
+            ),
+            "a": _state("a"),
+            "b": _state("b"),
+        },
+    }
+
+
+def _classifying_fsm() -> dict[str, Any]:
+    return {
+        "name": "Classify",
+        "description": "One classification field",
+        "initial_state": "triage",
+        "states": {
+            "triage": _state(
+                "triage",
+                response_instructions="Respond",
+                classification_extractions=[
+                    {
+                        "field_name": "intent",
+                        "intents": [
+                            {"name": "buy", "description": "wants to buy"},
+                            {"name": "browse", "description": "just looking"},
+                        ],
+                        "fallback_intent": "browse",
+                    }
+                ],
+                transitions=[
+                    {
+                        "target_state": "done",
+                        "description": "Classified",
+                        "conditions": [
+                            {
+                                "description": "intent known",
+                                "requires_context_keys": ["intent"],
+                                "logic": {"==": [{"var": "intent"}, "buy"]},
+                            }
+                        ],
+                    }
+                ],
+            ),
+            "done": _state("done"),
+        },
+    }
+
+
+def _chain(error: BaseException) -> list[type[BaseException]]:
+    kinds: list[type[BaseException]] = []
+    current: BaseException | None = error
+    while current is not None:
+        kinds.append(type(current))
+        current = current.__cause__ or current.__context__
+    return kinds
+
+
+def _state(state_id: str, **extra: Any) -> dict[str, Any]:
+    return {
+        "id": state_id,
+        "description": f"The {state_id} state",
+        "purpose": f"Do the {state_id} work",
+        "response_instructions": "",
+        **extra,
+    }

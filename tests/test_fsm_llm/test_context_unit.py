@@ -6021,3 +6021,30 @@ class TestContextFilterAgreement:
             if verdict != _EXPECTED[filter_name][cls]:
                 disagreements.append((key, cls, verdict))
         assert not disagreements
+
+
+class TestContextCompactorUsesClearKeysDelta:
+    """F-AF-02: same validation and same clear rule as ``clear_keys_delta``."""
+
+    @pytest.mark.parametrize("bad", ["abc", b"abc", 5, [1, 2]])
+    def test_transient_keys_must_be_a_collection_of_names(self, bad):
+        with pytest.raises(ValueError, match="transient_keys"):
+            ContextCompactor(transient_keys=bad)
+
+    @pytest.mark.parametrize("bad", ["ab", [1], 7])
+    def test_prune_keys_must_be_a_collection_of_names(self, bad):
+        with pytest.raises(ValueError, match="prune_on_entry"):
+            ContextCompactor(prune_on_entry={"review": bad})
+
+    def test_none_arguments_still_mean_nothing_to_clear(self):
+        compactor = ContextCompactor(transient_keys=None, prune_on_entry=None)
+        assert compactor.compact({"a": 1}) == {}
+        assert compactor.prune({"_current_state": "s", "a": 1}) == {}
+
+    def test_a_key_holding_none_is_not_cleared(self):
+        compactor = ContextCompactor(
+            transient_keys={"x", "y"}, prune_on_entry={"s": {"x", "y"}}
+        )
+        context = {"x": None, "y": 1, "_current_state": "s"}
+        assert compactor.compact(context) == {"y": None}
+        assert compactor.prune(context) == {"y": None}

@@ -2693,3 +2693,53 @@ class TestStep4LiveDictProbe:
         assert result == {"logged": True}
         assert fired == [1]
         assert context == {"existing": 1}
+
+
+class TestLambdaHandlerNormalisesBareStrings:
+    """F-HV-09: a bare ``str`` is one name for all six set arguments."""
+
+    @staticmethod
+    def _handler(**sets) -> LambdaHandler:
+        args = {
+            "states": set(),
+            "target_states": set(),
+            "required_keys": set(),
+            "updated_keys": set(),
+        }
+        args.update(sets)
+        return LambdaHandler(
+            name="h",
+            condition_lambdas=[],
+            execution_lambda=lambda ctx: None,
+            timings=None,
+            **args,
+        )
+
+    def test_states_is_not_a_substring_test(self):
+        h = self._handler(states="abc")
+        t = HandlerTiming.PRE_PROCESSING
+        assert h.should_execute(t, "abc", None, {}) is True
+        assert h.should_execute(t, "b", None, {}) is False
+
+    def test_target_states_is_not_a_substring_test(self):
+        h = self._handler(target_states="abc")
+        t = HandlerTiming.PRE_TRANSITION
+        assert h.should_execute(t, "x", "abc", {}) is True
+        assert h.should_execute(t, "x", "b", {}) is False
+
+    def test_required_keys_is_not_a_character_set(self):
+        h = self._handler(required_keys="name")
+        t = HandlerTiming.PRE_PROCESSING
+        assert h.should_execute(t, "x", None, {"name": 1}) is True
+        assert h.should_execute(t, "x", None, {"n": 1, "a": 1, "m": 1, "e": 1}) is False
+
+    def test_updated_keys_is_not_a_character_set(self):
+        h = self._handler(updated_keys="name")
+        t = HandlerTiming.CONTEXT_UPDATE
+        assert h.should_execute(t, "x", None, {}, {"name"}) is True
+        assert h.should_execute(t, "x", None, {}, {"n"}) is False
+
+    def test_the_two_negative_sets_still_take_a_bare_string(self):
+        h = self._handler(not_states="abc", not_target_states="abc")
+        assert h.not_states == {"abc"}
+        assert h.not_target_states == {"abc"}

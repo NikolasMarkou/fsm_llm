@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
+from fsm_llm import APIBuilder
 from fsm_llm.api import API
 from fsm_llm.definitions import (
     ConversationBusyError,
@@ -29,13 +30,17 @@ from fsm_llm.definitions import (
     Transition,
     TransitionCondition,
 )
+from fsm_llm.fsm import FSMManager
 from fsm_llm.handlers import HandlerErrorMode, HandlerTiming, create_handler
-from fsm_llm.llm import LLMInterface
+from fsm_llm.llm import LiteLLMInterface, LLMInterface
+from fsm_llm.logging import logger
 from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT
+from fsm_llm.testing import MockLLM2Interface
 from fsm_llm.transition_evaluator import TransitionEvaluatorConfig
 from tests.conftest import current_timing_factor
 from tests.test_fsm_llm.support import (
     _JOIN_TIMEOUT_S,
+    _TWO_STATE,
     _a2026_09_22_api,
     _blocked_fsm,
     _c3_fsm,
@@ -45,6 +50,8 @@ from tests.test_fsm_llm.support import (
     _reentry_fsm,
     _Session,
 )
+from tests.test_fsm_llm.test_completion_state import _tool_fsm
+from tests.test_fsm_llm.test_llm_complete import _Provider, _reply
 
 # ======================================================================
 # ROBUST FIXTURES WITH COMPLETE FSM DEFINITIONS
@@ -1986,3 +1993,206 @@ class TestConfigReachability:
         value = llm if make is None else make()
         kwargs = {"fsm_definition": _sweep_fsm(), "llm_interface": llm, api_kw: value}
         assert read_back(API(**kwargs)) is value
+
+
+class TestHistoryAndLengthLimitsAreValidatedAtConstruction:
+    """F-AF-04: a bad limit used to fail every start_conversation instead."""
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"max_history_size": -1},
+            {"max_history_size": 1001},
+            {"max_message_length": 0},
+            {"max_message_length": 50001},
+        ],
+    )
+    def test_api_constructor_refuses_the_value(self, kwargs):
+        with pytest.raises(ValueError, match=next(iter(kwargs))):
+            API.from_definition(_TWO_STATE, llm_interface=MockLLM2Interface(), **kwargs)
+
+    @pytest.mark.parametrize(
+        "kwargs", [{"max_history_size": -1}, {"max_message_length": 0}]
+    )
+    def test_manager_constructor_refuses_the_value(self, kwargs):
+        with pytest.raises(ValueError, match=next(iter(kwargs))):
+            FSMManager(llm_interface=MockLLM2Interface(), **kwargs)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"max_history_size": 0, "max_message_length": 1},
+            {"max_history_size": 1000, "max_message_length": 50000},
+        ],
+    )
+    def test_the_bounds_themselves_are_accepted(self, kwargs):
+        api = API.from_definition(
+            _TWO_STATE, llm_interface=MockLLM2Interface(), **kwargs
+        )
+        api.start_conversation()
+
+
+class TestStartConversationErrorContract:
+    """F-AF-05 (type) and F-AF-12 (falsy ``initial_context``)."""
+
+    def test_a_value_error_passes_through_like_push_and_pop(self, monkeypatch):
+        api = API.from_definition(_TWO_STATE, llm_interface=MockLLM2Interface())
+
+        def boom(*args, **kwargs):
+            raise ValueError("bad value")
+
+        monkeypatch.setattr(api.fsm_manager, "start_conversation", boom)
+        with pytest.raises(ValueError, match="bad value") as caught:
+            api.start_conversation()
+        assert not isinstance(caught.value, FSMError)
+
+    def test_an_unexpected_error_is_still_wrapped(self, monkeypatch):
+        api = API.from_definition(_TWO_STATE, llm_interface=MockLLM2Interface())
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("kaput")
+
+        monkeypatch.setattr(api.fsm_manager, "start_conversation", boom)
+        with pytest.raises(FSMError, match="Failed to start conversation: kaput"):
+            api.start_conversation()
+
+    @pytest.mark.parametrize("bad", [[], "", 0, [1], "x"])
+    def test_a_non_dict_initial_context_is_refused_whatever_its_truthiness(self, bad):
+        api = API.from_definition(_TWO_STATE, llm_interface=MockLLM2Interface())
+        with pytest.raises(FSMError, match="initial_context must be a dict"):
+            api.start_conversation(initial_context=bad)
+
+    @pytest.mark.parametrize("fine", [None, {}, {"k": "v"}])
+    def test_none_and_dicts_still_start(self, fine):
+        api = API.from_definition(_TWO_STATE, llm_interface=MockLLM2Interface())
+        cid, _ = api.start_conversation(initial_context=fine)
+        assert cid
+
+
+class TestStreamFailureIsLoggedLikeTheSyncTurn:
+    """F-AF-09: a failing stream turn left no ERROR line, the sync turn did."""
+
+    def _failing_api(self, monkeypatch):
+        api = API.from_definition(
+            _TWO_STATE, llm_interface=MockLLM2Interface(response_text="x")
+        )
+        cid, _ = api.start_conversation()
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("pipeline exploded")
+
+        monkeypatch.setattr(api.fsm_manager._pipeline, "process", boom)
+        monkeypatch.setattr(api.fsm_manager._pipeline, "process_stream", boom)
+        return api, cid
+
+    def _error_records(self, run):
+        records: list[str] = []
+        logger.enable("fsm_llm")
+        sink_id = logger.add(lambda msg: records.append(str(msg)), level="ERROR")
+        try:
+            with pytest.raises(FSMError, match="Failed to process message"):
+                run()
+        finally:
+            logger.remove(sink_id)
+            logger.disable("fsm_llm")
+        return records
+
+    def test_sync_turn_logs_the_failure(self, monkeypatch):
+        api, cid = self._failing_api(monkeypatch)
+        records = self._error_records(lambda: api.converse("hi", cid))
+        assert any("pipeline exploded" in r for r in records)
+
+    def test_stream_turn_logs_the_failure(self, monkeypatch):
+        api, cid = self._failing_api(monkeypatch)
+        records = self._error_records(lambda: list(api.converse_stream("hi", cid)))
+        assert any("pipeline exploded" in r for r in records)
+
+
+class TestPathDefinitionIsAcceptedEverywhere:
+    """F-AF-19: ``API(Path)`` was refused while ``API.from_file(Path)`` worked."""
+
+    @pytest.fixture
+    def fsm_path(self, tmp_path):
+        path = tmp_path / "fsm.json"
+        path.write_text(json.dumps(_TWO_STATE), encoding="utf-8")
+        return path
+
+    def test_constructor_takes_a_path(self, fsm_path):
+        api = API(fsm_definition=fsm_path, llm_interface=MockLLM2Interface())
+        assert api.fsm_definition.name == "b"
+
+    def test_process_fsm_definition_takes_a_path(self, fsm_path):
+        definition, _ = API.process_fsm_definition(fsm_path)
+        assert definition.initial_state == "s"
+
+    def test_from_file_and_builder_still_take_a_path(self, fsm_path):
+        assert API.from_file(fsm_path, llm_interface=MockLLM2Interface()).fsm_id
+        built = (
+            APIBuilder().set_definition(fsm_path).set_llm_interface(MockLLM2Interface())
+        )
+        assert built.build().fsm_definition.name == "b"
+
+
+class TestApiRefusesSettingsBesideAnInjectedInterface:
+    """Review area 7, concern 1: ``API(llm_interface=..., seed=7)`` dropped
+    the seed silently (native_fc's ``agent.seed`` still reported it)."""
+
+    @pytest.mark.parametrize(
+        "settings", [{"seed": 7}, {"api_key": "k"}, {"timeout": 5, "caching": True}]
+    )
+    def test_refused(self, settings: dict[str, Any]):
+        with pytest.raises(ValueError, match="takes no LLM settings"):
+            API.from_definition(
+                _tool_fsm(), llm_interface=MockLLM2Interface(), **settings
+            )
+
+    def test_native_fc_seed_with_an_injected_interface_is_refused(self):
+        from fsm_llm.agents import AgentConfig, ToolRegistry, create_agent
+
+        def echo(x: str) -> str:
+            """Echo."""
+            return x
+
+        registry = ToolRegistry()
+        registry.register_function(echo, name="echo")
+        agent = create_agent(
+            "native_fc",
+            registry,
+            config=AgentConfig(model="gpt-4o-mini"),
+            seed=7,
+            llm_interface=LiteLLMInterface(model="gpt-4o-mini"),
+        )
+        # The provider binding is patched so a regression never sends.
+        with (
+            _Provider(_reply("done")) as provider,
+            pytest.raises(ValueError, match=r"\['seed'\]"),
+        ):
+            agent.run("hi")
+        assert provider.calls == []
+
+
+class TestApiRefusesEverySettingBesideAnInterface:
+    """Pass 8 warning 4: temperature, max_tokens and model beside an injected
+    interface were accepted and silently ignored."""
+
+    @pytest.mark.parametrize(
+        ("setting", "value"),
+        [("temperature", 0.9), ("max_tokens", 7), ("model", "gpt-4o"), ("seed", 7)],
+    )
+    def test_each_setting_is_refused(self, setting, value):
+        injected = LiteLLMInterface("ollama_chat/qwen3.5:4b", temperature=0.5)
+        with pytest.raises(ValueError, match=f"takes no LLM settings.*{setting}"):
+            API.from_definition(_tool_fsm(), llm_interface=injected, **{setting: value})
+
+    def test_a_model_on_an_interface_without_one_is_refused(self):
+        with pytest.raises(ValueError, match="model"):
+            API.from_definition(
+                _tool_fsm(), llm_interface=MockLLM2Interface(), model="gpt-4o"
+            )
+
+    def test_the_interface_own_model_is_accepted(self):
+        injected = LiteLLMInterface("ollama_chat/qwen3.5:4b")
+        api = API.from_definition(
+            _tool_fsm(), llm_interface=injected, model="ollama_chat/qwen3.5:4b"
+        )
+        assert api.llm_interface is injected

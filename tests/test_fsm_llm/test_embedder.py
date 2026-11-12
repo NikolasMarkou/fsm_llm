@@ -303,3 +303,52 @@ class TestEmbedderUsage:
         with _patched(_echo_provider()), patch("fsm_llm.llm.completion", completion):
             LiteLLMEmbedder(_MODEL).embed(["a"])
         completion.assert_not_called()
+
+
+class TestEmbedder:
+    """Review area 1, concerns 4 and 12."""
+
+    def test_a_generator_of_texts_is_embedded(self):
+        def provider(**params: Any) -> EmbeddingResponse:
+            return EmbeddingResponse(
+                data=[
+                    {"object": "embedding", "index": i, "embedding": [1.0, float(i)]}
+                    for i, _ in enumerate(params["input"])
+                ]
+            )
+
+        embedder = LiteLLMEmbedder("ollama/qwen3-embedding:0.6b")
+        with patch("fsm_llm.llm.embedding", side_effect=provider) as sent:
+            vectors = embedder.embed(t for t in ["hello", "world"])
+        assert vectors == [[1.0, 0.0], [1.0, 1.0]]
+        assert sent.call_args.kwargs["input"] == ["hello", "world"]
+
+    def test_a_generator_holding_a_non_string_is_refused(self):
+        embedder = LiteLLMEmbedder("ollama/qwen3-embedding:0.6b")
+        with pytest.raises(TypeError):
+            embedder.embed(t for t in ["hello", 3])  # type: ignore[misc]
+
+    @pytest.mark.parametrize(
+        "vectors, message",
+        [
+            ([[], []], "empty"),
+            ([[1.0, 2.0], [3.0]], "dimensions"),
+            ([[float("nan")], [1.0]], "non-finite"),
+            ([[1.0], [float("inf")]], "non-finite"),
+        ],
+    )
+    def test_an_unusable_vector_is_an_llm_response_error(
+        self, vectors: list[list[float]], message: str
+    ):
+        reply = EmbeddingResponse(
+            data=[
+                {"object": "embedding", "index": i, "embedding": v}
+                for i, v in enumerate(vectors)
+            ]
+        )
+        embedder = LiteLLMEmbedder("ollama/qwen3-embedding:0.6b")
+        with (
+            patch("fsm_llm.llm.embedding", return_value=reply),
+            pytest.raises(LLMResponseError, match=message),
+        ):
+            embedder.embed(["a", "b"])

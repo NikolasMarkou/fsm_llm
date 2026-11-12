@@ -782,3 +782,41 @@ class TestStep13RunnerRedaction:
         assert any(m.startswith("Context data: ") for m in messages)
         assert any(m.startswith("Data: \n") for m in messages)
         assert not any("SECRET" in m for m in messages)
+
+
+class TestRunnerPrintsNothingForASilentReply:
+    """The runner CLI logs no empty ``System:`` line (consumers review)."""
+
+    def _system_lines(self, greeting: str, reply: str) -> list[str]:
+        mock_api = MagicMock()
+        mock_api.start_conversation.return_value = ("conv-1", greeting)
+        mock_api.has_conversation_ended.side_effect = [False, True]
+        mock_api.converse.return_value = reply
+        mock_api.get_data.return_value = {}
+        lines: list[str] = []
+        with (
+            patch.dict(os.environ, {"LLM_MODEL": "test-model"}, clear=True),
+            patch("fsm_llm.runner.load_env"),
+            patch("fsm_llm.runner.API.from_file", return_value=mock_api),
+            patch("fsm_llm.runner.setup_file_logging"),
+            patch("builtins.input", return_value="hello"),
+            patch("fsm_llm.runner.logger") as logger,
+        ):
+            from fsm_llm.runner import main
+
+            assert main("/tmp/t.json", 5, 1000) == 0
+            lines = [
+                call.args[0]
+                for call in logger.info.call_args_list
+                if call.args and str(call.args[0]).startswith("System:")
+            ]
+        return lines
+
+    def test_silent_greeting_and_silent_reply_print_no_system_line(self):
+        assert self._system_lines("", "") == []
+
+    def test_spoken_replies_are_still_printed(self):
+        assert self._system_lines("Hello!", "Sure.") == [
+            "System: Hello!",
+            "System: Sure.",
+        ]

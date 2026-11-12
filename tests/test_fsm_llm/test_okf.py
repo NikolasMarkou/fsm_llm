@@ -5550,3 +5550,66 @@ class TestWriterNamesWhatItCannotRender:
             write_bundle(bundle, tmp_path / "out")
 
         assert not (tmp_path / "out").exists()
+
+
+class _Clock:
+    """Stand-in for ``time`` inside ``fsm_llm.okf``: moves only when ticked."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+class TestCheckBundleReportsTheDeadlineOnce:
+    """F-OK-06: ``backlinks`` already stored the frozen deadline issue."""
+
+    def test_a_deadline_left_by_backlinks_is_not_added_again(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bundle = OKFBundle(
+            (OKFConcept(id=f"c{i}", type="Note", body="[](/c0.md)") for i in range(6)),
+            max_seconds=10,
+        )
+        clock = _Clock()
+        monkeypatch.setattr(okf_module, "time", clock)
+        real = OKFBundle.outgoing
+
+        def slow(self: OKFBundle, cid: str) -> Any:
+            clock.now += 4.0
+            return real(self, cid)
+
+        monkeypatch.setattr(OKFBundle, "outgoing", slow)
+        bundle.backlinks("c0")  # spends the budget; leaves check-deadline behind
+        assert [i.code for i in bundle.issues] == ["check-deadline"]
+
+        clock.now = 0.0
+        stamps = okf_module._check_timestamps
+
+        def tick(*args: Any, **kwargs: Any) -> Any:
+            clock.now += 4.0  # the check itself runs past the budget too
+            return stamps(*args, **kwargs)
+
+        monkeypatch.setattr(okf_module, "_check_timestamps", tick)
+        monkeypatch.setattr(OKFBundle, "outgoing", real)
+
+        issues = check_bundle(bundle)
+
+        assert [i.code for i in issues].count("check-deadline") == 1
+
+
+class TestOkfModuleSurface:
+    """F-OK-12: a static ``__all__`` and no private alias only tests need."""
+
+    def test_all_is_static_and_names_real_attributes(self) -> None:
+        names = okf_module.__all__
+
+        assert isinstance(names, list | tuple) and len(set(names)) == len(names)
+        assert all(hasattr(okf_module, n) for n in names)
+        for needed in ("load_bundle", "check_bundle", "strip_unsafe_text", "iso_utc"):
+            assert needed in names
+
+    def test_no_private_alias_of_the_frontmatter_seam_is_left(self) -> None:
+        assert not hasattr(okf_module, "_Note")
+        assert not hasattr(okf_module, "_SURROGATE_RE")

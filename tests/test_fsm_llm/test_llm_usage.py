@@ -18,6 +18,7 @@ from litellm.types.utils import Choices, Message, ModelResponse
 from pydantic import ValidationError
 
 import fsm_llm
+import fsm_llm.llm as llm_module
 from fsm_llm.definitions import (
     BulkExtractionRequest,
     CompletionRequest,
@@ -418,3 +419,118 @@ class TestConcurrency:
             watcher.join()
 
         assert sum(harvested) + llm.usage().calls == self.THREADS * self.CALLS
+
+
+class TestUsageMeterLocks:
+    """Review area 1, concern 2: removing any meter lock left every test
+    green. These force the interleaving the locks exclude, so each fails
+    deterministically with its lock removed (no timing luck): the paused
+    thread waits on an event the other thread can only set when it is not
+    excluded. With the lock in place the pause times out and the result is
+    exact; the wait bounds the cost of the passing run."""
+
+    PAUSE = 0.5
+
+    def test_two_first_calls_build_one_meter(self, monkeypatch):
+        llm = LiteLLMInterface("gpt-4o")
+        built: list[Any] = []
+        first_inside = threading.Event()
+        second_built = threading.Event()
+        original = llm_module._UsageMeter.__init__
+
+        def init(meter: Any) -> None:
+            original(meter)
+            built.append(meter)
+            if len(built) == 1:
+                first_inside.set()
+                # Unlocked, the second caller also sees no meter and builds
+                # one now; locked, it waits on the creation lock instead.
+                second_built.wait(self.PAUSE)
+            else:
+                second_built.set()
+
+        monkeypatch.setattr(llm_module._UsageMeter, "__init__", init)
+        meters: list[Any] = []
+        first = threading.Thread(
+            target=lambda: meters.append(llm_module._meter_of(llm))
+        )
+        second = threading.Thread(
+            target=lambda: meters.append(llm_module._meter_of(llm))
+        )
+        first.start()
+        assert first_inside.wait(5)
+        second.start()
+        first.join(5)
+        second.join(5)
+
+        assert len(built) == 1
+        assert len(meters) == 2 and meters[0] is meters[1] is llm._usage_meter
+
+    def test_a_reset_during_a_count_loses_nothing(self):
+        meter = llm_module._UsageMeter()
+        inside = threading.Event()
+        release = threading.Event()
+        pause = self.PAUSE
+
+        class _PausingCounts(dict):
+            """Counts that pause the bumping thread between its read of the
+            counts dict and its add (the window the lock closes)."""
+
+            paused = False
+
+            def __getitem__(self, key: str) -> int:
+                if not _PausingCounts.paused:
+                    _PausingCounts.paused = True
+                    inside.set()
+                    release.wait(pause)
+                return super().__getitem__(key)
+
+        meter._counts["complete"] = _PausingCounts(
+            dict.fromkeys(llm_module._COUNTER_FIELDS, 0)
+        )
+        harvested: list[int] = []
+        bump = threading.Thread(target=lambda: meter._bump("complete", calls=1))
+        reset = threading.Thread(
+            target=lambda: harvested.append(meter.snapshot(reset=True).calls)
+        )
+        bump.start()
+        assert inside.wait(5)
+        reset.start()
+        # Unlocked, the reset finishes inside the window; locked, it waits.
+        reset.join(pause / 2)
+        release.set()
+        bump.join(5)
+        reset.join(5)
+
+        assert harvested[0] + meter.snapshot().calls == 1
+
+
+class TestMeterResetClearsInsideTheLock:
+    """Pass 8 warning 6: moving ``self._counts = {}`` out of the locked block
+    of ``snapshot`` (mutant M5) survived every test. Here a bump is run
+    right after the snapshot releases its lock: with the clear inside the
+    lock the bump lands in the fresh counts; with the clear outside, it lands
+    in the harvested dict and is then thrown away. Passes on the parent; it
+    exists to kill M5 deterministically (no timing)."""
+
+    def test_a_count_made_as_the_reset_releases_its_lock_is_kept(self):
+        meter = llm_module._UsageMeter()
+        meter._bump("complete", calls=3)
+        real = meter._lock
+        armed = [True]
+
+        class _BumpOnRelease:
+            def __enter__(self) -> None:
+                real.acquire()
+
+            def __exit__(self, *exc: object) -> None:
+                real.release()
+                if armed[0]:
+                    armed[0] = False
+                    meter._bump("complete", calls=1)
+
+        meter._lock = _BumpOnRelease()
+        harvested = meter.snapshot(reset=True)
+        remaining = meter.snapshot()
+        assert harvested.calls == 3
+        assert harvested.calls + remaining.calls == 4

@@ -21,6 +21,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from litellm.types.utils import Message
 
 from fsm_llm.api import API
 from fsm_llm.classification import Classifier
@@ -2405,3 +2406,63 @@ class TestStep15D6D12B8:
         assert evaluate_logic({"%": [-7, 3]}, {}) == 2.0
         doc = (_safe_mod.__doc__ or "").lower()
         assert "sign" in doc and "divisor" in doc
+
+
+_PRETTY = json.dumps(
+    {"intent": "buy", "items": [{"a": 1}], "note": "use } and { here"}, indent=2
+)
+
+
+def _recover(trace: str) -> str | None:
+    """The content ``_extract_content_from_thinking`` takes from a trace."""
+    return LiteLLMInterface._extract_content_from_thinking(
+        Message(content="", reasoning_content=trace)
+    )
+
+
+class TestTraceRecoveryReadsTheLastWholeObject:
+    """F-LL-01: the pretty-printed outer object, not an inner fragment."""
+
+    def test_pretty_printed_object_with_a_nested_one_line_object(self):
+        trace = (
+            'thinking...\n{\n  "intent": "buy",\n  "items": [\n    {"a": 1}\n  ]\n}\n'
+        )
+        assert json.loads(_recover(trace) or "") == {
+            "intent": "buy",
+            "items": [{"a": 1}],
+        }
+
+    def test_an_early_one_line_draft_loses_to_the_later_final_object(self):
+        trace = 'draft:\n{"value": "old"}\nfinal:\n{\n  "value": "new"\n}\n'
+        assert json.loads(_recover(trace) or "") == {"value": "new"}
+
+    def test_a_brace_inside_a_string_does_not_end_the_object(self):
+        recovered = _recover("x\n" + _PRETTY + "\n")
+        assert json.loads(recovered or "")["note"] == "use } and { here"
+
+    def test_no_object_falls_back_to_the_last_line(self):
+        assert _recover("first\nsecond\n") == "second"
+
+    def test_a_one_line_object_is_still_recovered(self):
+        assert _recover('noise\n{"message": "Hi"}\n') == '{"message": "Hi"}'
+
+
+class TestBalancedJsonObjects:
+    """The scanner behind the trace recovery (F-LL-01)."""
+
+    def test_only_outermost_parsing_spans_are_returned_in_order(self):
+        from fsm_llm.utilities import balanced_json_objects
+
+        text = 'a {"x": {"y": 1}} b {"z": "}"} c'
+        assert balanced_json_objects(text) == ['{"x": {"y": 1}}', '{"z": "}"}']
+
+    def test_an_unparseable_outer_span_hides_the_objects_inside_it(self):
+        from fsm_llm.utilities import balanced_json_objects
+
+        assert balanced_json_objects('{ oops {"a": 1} }') == []
+
+    @pytest.mark.parametrize("value", [None, 5, b"{}", ["{}"]])
+    def test_a_non_str_gives_an_empty_list(self, value):
+        from fsm_llm.utilities import balanced_json_objects
+
+        assert balanced_json_objects(value) == []

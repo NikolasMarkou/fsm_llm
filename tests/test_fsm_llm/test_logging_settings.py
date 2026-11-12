@@ -1,13 +1,11 @@
-"""RED-first tests for the step-7 logging fixes (plan 5980fbb7).
+"""Logging settings: level and format from arguments and environment.
 
-F-SU-01  ``setup_logging`` accepts a lower-case or blank level (argument and env)
-F-SU-07  JSON log lines label host records correctly; a bound extra cannot
-         overwrite the identity fields
-F-SU-08  ``setup_file_logging`` returns the handler id; unknown sink or format
-         is refused
-F-XS-09  the validate / visualize entry points do not print DEBUG records
-F-AF-16  ``enable_debug_logging`` lives in ``fsm_llm.logging`` and registers
-         through ``setup_logging`` (one format, one dedup key)
+Covers ``setup_logging`` level normalisation, the JSON line identity fields,
+the file-handler id, the CLI entry points' INFO level, the single
+``enable_debug_logging`` path and a bad ``FSM_LLM_LOG_FORMAT`` or
+``FSM_LLM_LOG_LEVEL`` in the environment (formerly findings F-SU-01, F-SU-07,
+F-SU-08 and REVIEW2-C2 of the 2026-11-05 source pass). The autouse fixture
+resets the handlers around each test and clears the two environment variables.
 """
 
 from __future__ import annotations
@@ -62,11 +60,6 @@ def _clean_handlers(monkeypatch):
     reset_handlers()
 
 
-# --------------------------------------------------------------
-# F-SU-01
-# --------------------------------------------------------------
-
-
 class TestLevelIsNormalised:
     def test_lowercase_level_argument(self, capsys):
         setup_logging(sink=LOG_SINK_STDOUT, level="info")
@@ -112,11 +105,6 @@ class TestLevelIsNormalised:
         ):
             assert runner.main("/tmp/t.json", 5, 1000) == 0
         assert "System: HELLO" in capsys.readouterr().out
-
-
-# --------------------------------------------------------------
-# F-SU-07
-# --------------------------------------------------------------
 
 
 def _json_lines(emit):
@@ -186,11 +174,6 @@ class TestJsonLineIdentity:
         assert json.loads(_record_to_json(record))["message"] == "m"
 
 
-# --------------------------------------------------------------
-# F-SU-08
-# --------------------------------------------------------------
-
-
 class TestFileLoggingHandlerId:
     def test_setup_file_logging_returns_the_handler_id(self, tmp_path):
         hid = setup_file_logging(str(tmp_path / "logs"))
@@ -239,10 +222,6 @@ class TestFileLoggingHandlerId:
                 assert setup_logging(sink=sink, format=fmt) != 0
         assert LOG_SINK_FILE
 
-
-# --------------------------------------------------------------
-# F-XS-09: CLI entry points
-# --------------------------------------------------------------
 
 _FSM = _REPO / "examples" / "basic" / "form_filling" / "fsm.json"
 
@@ -303,11 +282,6 @@ class TestCliEntryPointsLogAtInfo:
         assert "Form Filling" in proc.stdout
 
 
-# --------------------------------------------------------------
-# F-AF-16: one path for enable_debug_logging
-# --------------------------------------------------------------
-
-
 _LIB = logger.patch(lambda r: r.update(name="fsm_llm.sample"))
 
 
@@ -337,10 +311,6 @@ class TestEnableDebugLoggingIsOnePath:
         err = capsys.readouterr().err
         assert "dbg-line" in err and '"message"' not in err
 
-
-# --------------------------------------------------------------
-# REVIEW-C2: an unknown env format never crashes a CLI that ignored it before
-# --------------------------------------------------------------
 
 _BAD_FORMAT = {ENV_LOG_FORMAT: "text"}
 

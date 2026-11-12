@@ -33,7 +33,10 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
     return mock_llm
 
 
-from typing import Any
+import math
+from contextlib import contextmanager
+from decimal import Decimal
+from typing import Any, ClassVar
 from unittest.mock import patch
 
 from fsm_llm.api import API
@@ -51,13 +54,17 @@ from fsm_llm.definitions import (
     Transition,
 )
 from fsm_llm.handlers import BaseHandler, HandlerSystem, HandlerTiming
-from fsm_llm.llm import LLMInterface
+from fsm_llm.llm import LLMInterface, _embedding_vectors
+from fsm_llm.logging import logger
 from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
 )
+from fsm_llm.testing import MockLLM2Interface
 from fsm_llm.transition_evaluator import TransitionEvaluator
+from fsm_llm.utilities import coerce_confidence, coerce_float, coerce_int
+from tests.test_fsm_llm.support import _TWO_STATE
 
 # ── Helpers ───────────────────────────────────────────────────
 
@@ -2252,3 +2259,326 @@ class TestSilentStateMakesNoInterfaceCall:
             assert name not in ResponseGenerationRequest.model_fields
             with pytest.raises(ValueError, match=name):
                 _step11_request(**{name: "x"})
+
+
+_ONE_STATE = {
+    "name": "one",
+    "description": "d",
+    "initial_state": "a",
+    "states": {
+        "a": {
+            "id": "a",
+            "description": "d",
+            "purpose": "p",
+            "response_instructions": "hi",
+        }
+    },
+}
+
+
+@contextmanager
+def _debug_records():
+    """fsm_llm DEBUG records (the package is disabled at import)."""
+    records: list[str] = []
+    logger.enable("fsm_llm")
+    sink_id = logger.add(lambda msg: records.append(str(msg)), level="DEBUG")
+    try:
+        yield records
+    finally:
+        logger.remove(sink_id)
+        logger.disable("fsm_llm")
+
+
+def _validate(field_type: str, value: Any) -> FieldExtractionResponse:
+    return MessagePipeline._validate_field_extraction(
+        FieldExtractionResponse(
+            field_name="n", value=value, confidence=1.0, is_valid=True
+        ),
+        FieldExtractionConfig(
+            field_name="n",
+            field_type=field_type,  # type: ignore[arg-type]
+            extraction_instructions="get n",
+            confidence_threshold=0.0,
+        ),
+    )
+
+
+class TestNumericCoercionRejectsWhatIsNotANumber:
+    """F-PI-01: inf / nan / bool / truncation for int and float fields."""
+
+    @pytest.mark.parametrize("bad", [math.inf, -math.inf, math.nan, 3.7, True, False])
+    def test_int_field_marks_the_value_invalid_and_never_raises(self, bad):
+        out = _validate("int", bad)
+        assert out.is_valid is False
+        assert out.validation_error
+
+    @pytest.mark.parametrize("bad", [math.inf, -math.inf, math.nan, True, "nan", "inf"])
+    def test_float_field_rejects_non_finite_and_bool(self, bad):
+        out = _validate("float", bad)
+        assert out.is_valid is False
+
+    @pytest.mark.parametrize(
+        ("field_type", "huge"),
+        [
+            pytest.param("float", 10**400, id="float-int-1e400"),
+            pytest.param("float", -(10**400), id="float-int-neg-1e400"),
+            pytest.param("float", "1" * 400, id="float-400-digit-string"),
+            pytest.param("float", Decimal("Infinity"), id="float-decimal-inf"),
+            pytest.param("int", Decimal("Infinity"), id="int-decimal-inf"),
+            pytest.param("int", Decimal("-Infinity"), id="int-decimal-neg-inf"),
+        ],
+    )
+    def test_a_number_too_large_for_a_float_is_invalid_not_an_exception(
+        self, field_type, huge
+    ):
+        """REVIEW-C3: ``float(10**400)`` and ``int(Decimal('Infinity'))`` raise
+        ``OverflowError``, which ``_validate_field_extraction`` does not name;
+        a model-written 400-digit JSON number reached it on both extraction
+        paths (per field and bulk), which share this function."""
+        out = _validate(field_type, huge)
+        assert out.is_valid is False
+        assert out.validation_error
+
+    def test_the_helpers_keep_their_value_error_contract(self):
+        with pytest.raises(ValueError):
+            coerce_float(10**400)
+        with pytest.raises(ValueError):
+            coerce_int(Decimal("Infinity"))
+
+    @pytest.mark.parametrize("good", [7, 3.0, "12", -4])
+    def test_int_field_still_takes_integral_values(self, good):
+        out = _validate("int", good)
+        assert out.is_valid is True
+        assert out.value == int(good)
+        assert isinstance(out.value, int)
+
+    @pytest.mark.parametrize("good", [7, 3.5, "2.25", -1e3])
+    def test_float_field_still_takes_finite_numbers(self, good):
+        out = _validate("float", good)
+        assert out.is_valid is True
+        assert out.value == float(good)
+
+
+def _validate_with_rules(
+    field_type: str, value: Any, rules: dict[str, Any]
+) -> FieldExtractionResponse:
+    return MessagePipeline._validate_field_extraction(
+        FieldExtractionResponse(
+            field_name="n", value=value, confidence=1.0, is_valid=True
+        ),
+        FieldExtractionConfig(
+            field_name="n",
+            field_type=field_type,  # type: ignore[arg-type]
+            extraction_instructions="get n",
+            confidence_threshold=0.0,
+            validation_rules=rules,
+        ),
+    )
+
+
+def _range_machine(field_type: str, rules: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": "R",
+        "description": "d",
+        "initial_state": "ask",
+        "states": {
+            "ask": {
+                "id": "ask",
+                "description": "ask",
+                "purpose": "get n",
+                "field_extractions": [
+                    {
+                        "field_name": "n",
+                        "field_type": field_type,
+                        "extraction_instructions": "n",
+                        "validation_rules": rules,
+                    }
+                ],
+                "response_instructions": "ask",
+                "transitions": [
+                    {
+                        "target_state": "done",
+                        "description": "has n",
+                        "priority": 1,
+                        "conditions": [
+                            {"description": "n", "requires_context_keys": ["n"]}
+                        ],
+                    }
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "end",
+                "purpose": "end",
+                "response_instructions": "bye",
+            },
+        },
+    }
+
+
+_HUGE_VALUES = [
+    pytest.param(10**400, id="int-1e400"),
+    pytest.param(-(10**400), id="int-neg-1e400"),
+    pytest.param("1" * 400, id="digit-string-400"),
+]
+
+
+class TestRangeRulesNeverOverflow:
+    """REVIEW2-C1 (F-PI-01): ``float(10**400)`` raised ``OverflowError`` out of
+    the ``min_value``/``max_value`` checks, so a 400-digit number from the model
+    ended the turn with ``FSMError``. A huge value is out of range: an invalid
+    extraction, never an exception."""
+
+    @pytest.mark.parametrize("field_type", ["int", "any"])
+    @pytest.mark.parametrize("huge", _HUGE_VALUES)
+    @pytest.mark.parametrize("rule", ["min_value", "max_value"])
+    def test_a_huge_value_with_a_range_rule_is_decided_not_raised(
+        self, field_type, huge, rule
+    ):
+        out = _validate_with_rules(field_type, huge, {rule: 10})
+        positive = isinstance(huge, str) or huge > 0
+        out_of_range = positive if rule == "max_value" else not positive
+        assert out.is_valid is (not out_of_range)
+        if out_of_range:
+            assert out.validation_error
+
+    @pytest.mark.parametrize("huge", _HUGE_VALUES)
+    def test_a_huge_value_is_rejected_by_the_matching_bound_of_a_closed_range(
+        self, huge
+    ):
+        positive = isinstance(huge, str) or huge > 0
+        out = _validate_with_rules("int", huge, {"min_value": 0, "max_value": 10})
+        assert out.is_valid is False
+        assert ("exceeds maximum" if positive else "below minimum") in (
+            out.validation_error or ""
+        )
+
+    def test_a_huge_value_below_an_enormous_max_still_passes(self):
+        """The check is numeric, not skipped: 10**308 fits a float bound of
+        1e308 * 1.5 only as an exact comparison, and 10**309 does not."""
+        rules = {"max_value": 1.7e308}
+        assert _validate_with_rules("int", 10**308, rules).is_valid is True
+        assert _validate_with_rules("int", 10**309, rules).is_valid is False
+        assert _validate_with_rules("int", 10**400, rules).is_valid is False
+        low = {"min_value": -1.7e308}
+        assert _validate_with_rules("int", -(10**308), low).is_valid is True
+        assert _validate_with_rules("int", -(10**309), low).is_valid is False
+
+    @pytest.mark.parametrize("field_type", ["int", "float", "any"])
+    @pytest.mark.parametrize(
+        ("value", "valid"), [(5, True), (0, True), (10, True), (11, False), (-1, False)]
+    )
+    def test_a_normal_value_keeps_its_verdict(self, field_type, value, valid):
+        out = _validate_with_rules(field_type, value, {"min_value": 0, "max_value": 10})
+        assert out.is_valid is valid
+
+    def test_a_float_field_with_a_huge_value_is_invalid_with_a_range_rule(self):
+        for huge in (10**400, -(10**400), "1" * 400):
+            out = _validate_with_rules("float", huge, {"min_value": 0, "max_value": 10})
+            assert out.is_valid is False
+
+    @pytest.mark.parametrize("field_type", ["int", "any"])
+    @pytest.mark.parametrize("huge", _HUGE_VALUES)
+    def test_converse_survives_a_huge_number_and_stays_in_the_state(
+        self, field_type, huge
+    ):
+        machine = _range_machine(field_type, {"min_value": 0, "max_value": 10})
+        llm = MockLLM2Interface(extraction_data={"n": huge})
+        api = API.from_definition(machine, llm_interface=llm)
+        cid, _ = api.start_conversation()
+        api.converse("a very big number", cid)
+        assert api.get_current_state(cid) == "ask"
+        assert "n" not in api.get_data(cid)
+
+    def test_converse_still_accepts_an_in_range_number(self):
+        machine = _range_machine("int", {"min_value": 0, "max_value": 10})
+        llm = MockLLM2Interface(extraction_data={"n": 7})
+        api = API.from_definition(machine, llm_interface=llm)
+        cid, _ = api.start_conversation()
+        api.converse("seven", cid)
+        assert api.get_current_state(cid) == "done"
+        assert api.get_data(cid)["n"] == 7
+
+
+class TestOtherFloatSitesDoNotOverflow:
+    """REVIEW2-C1 sweep: the same ``float()``/``math.isfinite`` on an integer
+    too large for a float, at the two other model/provider-fed sites."""
+
+    @pytest.mark.parametrize("huge", [10**400, -(10**400)], ids=["pos", "neg"])
+    def test_a_huge_confidence_reads_as_the_default_like_infinity(self, huge):
+        assert coerce_confidence(huge, 0.5) == 0.5
+        assert coerce_confidence(math.inf, 0.5) == 0.5
+
+    @pytest.mark.parametrize("huge", [10**400, -(10**400)], ids=["pos", "neg"])
+    def test_an_embedding_with_a_huge_integer_is_a_refused_reply(self, huge):
+        from fsm_llm.definitions import LLMResponseError
+
+        reply = {"data": [{"index": 0, "embedding": [0.5, huge]}]}
+        with pytest.raises(LLMResponseError, match="non-finite"):
+            _embedding_vectors(reply, 1)
+
+
+class TestGreetingHonoursTheOutputResponseFormat:
+    """F-PI-09: a terminal-initial FSM's only reply carries the format."""
+
+    _FORMAT: ClassVar[dict[str, str]] = {"type": "json_object"}
+
+    def _greeting_request(self, context):
+        llm = MockLLM2Interface(response_text="hello")
+        api = API.from_definition(_ONE_STATE, llm_interface=llm)
+        api.start_conversation(initial_context=context)
+        (request,) = [r for kind, r in llm.call_history if kind == "generate_response"]
+        return request
+
+    def test_terminal_initial_state_sends_the_format(self):
+        request = self._greeting_request({"_output_response_format": self._FORMAT})
+        assert request.response_format == self._FORMAT
+
+    def test_no_format_in_context_sends_none(self):
+        assert self._greeting_request(None).response_format is None
+
+    def test_non_terminal_initial_state_still_sends_none(self):
+        llm = MockLLM2Interface(response_text="hello")
+        api = API.from_definition(_TWO_STATE, llm_interface=llm)
+        api.start_conversation(
+            initial_context={"_output_response_format": self._FORMAT}
+        )
+        (request,) = [r for kind, r in llm.call_history if kind == "generate_response"]
+        assert request.response_format is None
+
+
+class TestRejectedExtractionReasonIsLogged:
+    """F-XC-12: ``validation_error`` reaches the DEBUG line."""
+
+    def test_the_reason_is_in_the_log(self):
+        fsm = {
+            "name": "f",
+            "description": "d",
+            "initial_state": "a",
+            "states": {
+                "a": {
+                    "id": "a",
+                    "description": "d",
+                    "purpose": "p",
+                    "response_instructions": "hi",
+                    "field_extractions": [
+                        {
+                            "field_name": "n",
+                            "field_type": "int",
+                            "extraction_instructions": "get n",
+                        }
+                    ],
+                    "transitions": [
+                        {"target_state": "b", "description": "go", "priority": 1}
+                    ],
+                },
+                "b": {"id": "b", "description": "d", "purpose": "p"},
+            },
+        }
+        llm = MockLLM2Interface(extraction_data={"n": 3.7})
+        api = API.from_definition(fsm, llm_interface=llm)
+        cid, _ = api.start_conversation()
+        with _debug_records() as records:
+            api.converse("my number is 3.7", cid)
+        joined = "\n".join(records)
+        assert "Type coercion to int failed" in joined

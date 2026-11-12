@@ -11,6 +11,7 @@ import io
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,8 @@ import fsm_llm
 import fsm_llm.agent_skills_cli as skills_cli
 import fsm_llm.okf_cli as okf_cli
 from fsm_llm import cli_support
+from fsm_llm.constants import OKF_MAX_LOAD_SECONDS, SKILL_MAX_LOAD_SECONDS
+from fsm_llm.okf import OKFIssue
 
 _CLIS = pytest.mark.parametrize("mod", [okf_cli, skills_cli], ids=["okf", "skills"])
 _ESC, _BIDI, _CJK = chr(0x1B), chr(0x202E), chr(0x7F51)
@@ -198,3 +201,103 @@ class TestSmallHelpers:
 
     def test_positive_seconds_accepts_a_positive_number(self) -> None:
         assert cli_support.positive_seconds("0.5") == 0.5
+
+
+class _Issue:
+    def __init__(self, severity: str, code: str, path: str = "p") -> None:
+        self.severity, self.code, self.path = severity, code, path
+        self.message = "m\x1b[31m"
+
+
+class TestOneValidateReport:
+    """F-OK-09, F-XD-11, F-OK-08: the shared report and ``--max-seconds``."""
+
+    @staticmethod
+    def _report(issues: list[Any], *, strict: bool = False) -> Callable[[], int]:
+        return lambda: cli_support.report_issues(
+            issues,
+            label="things",
+            count=3,
+            strict=strict,
+            where=lambda issue: issue.path,
+        )
+
+    def test_the_report_lines_the_summary_and_the_exit_code(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        issues = [_Issue("warning", "w"), _Issue("info", "i"), _Issue("error", "e")]
+
+        code = self._report(issues)()
+
+        out, err = capsys.readouterr()
+        assert code == 1
+        assert out == "warning w p m\ninfo i p m\nerror e p m\n"
+        assert err == "3 things, 1 errors, 1 warnings, 1 info\n"
+
+    def test_a_warning_fails_only_under_strict(self) -> None:
+        warnings = [_Issue("warning", "w")]
+
+        assert self._report(warnings)() == 0
+        assert self._report(warnings, strict=True)() == 1
+        assert self._report([])() == 0
+
+    @pytest.mark.parametrize("code", ["load-deadline", "check-deadline"])
+    def test_both_deadline_codes_hint_the_flag(
+        self, capsys: pytest.CaptureFixture[str], code: str
+    ) -> None:
+        self._report([_Issue("error", code)])()
+
+        assert capsys.readouterr().out.endswith("m (raise with --max-seconds)\n")
+
+    def test_other_codes_have_no_hint(self, capsys: pytest.CaptureFixture[str]) -> None:
+        self._report([_Issue("error", "type-missing")])()
+
+        assert "--max-seconds" not in capsys.readouterr().out
+
+    def test_the_okf_cli_hints_a_check_deadline(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        (tmp_path / "a.md").write_text("---\ntype: Note\n---\nx\n", encoding="utf-8")
+        deadline = OKFIssue(severity="error", code="check-deadline", message="late")
+        monkeypatch.setattr(okf_cli, "check_bundle", lambda bundle: [deadline])
+
+        code = okf_cli.main(["validate", str(tmp_path)])
+
+        out = capsys.readouterr().out
+        assert code == 1
+        assert "error check-deadline - late (raise with --max-seconds)" in out
+
+    def test_the_max_seconds_argument_is_one_definition(self) -> None:
+        parser = argparse.ArgumentParser()
+        cli_support.add_max_seconds(parser, 7.0)
+        action = next(a for a in parser._actions if "--max-seconds" in a.option_strings)
+
+        assert action.type is cli_support.positive_seconds
+        assert parser.parse_args([]).max_seconds == 7.0
+        assert parser.parse_args(["--max-seconds", "2"]).max_seconds == 2.0
+
+    def test_neither_cli_repeats_the_report_or_the_argument(self) -> None:
+        for mod in (okf_cli, skills_cli):
+            source = inspect.getsource(mod)
+            assert "raise with --max-seconds" not in source
+            assert "type=positive_seconds" not in source
+            assert "Counter" not in source
+
+    def test_the_defaults_are_still_the_per_format_constants(self) -> None:
+        for mod, default in (
+            (okf_cli, OKF_MAX_LOAD_SECONDS),
+            (skills_cli, SKILL_MAX_LOAD_SECONDS),
+        ):
+            parser = mod._build_parser()
+            sub = next(
+                a for a in parser._actions if isinstance(a, argparse._SubParsersAction)
+            )
+            action = next(
+                a
+                for a in sub.choices["validate"]._actions
+                if "--max-seconds" in a.option_strings
+            )
+            assert action.default == default

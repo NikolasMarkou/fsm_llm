@@ -18,6 +18,7 @@ import json
 import sys
 import typing
 from contextlib import contextmanager, redirect_stdout
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -47,7 +48,8 @@ from fsm_llm.validator import (
     main_cli,
     validate_fsm_from_file,
 )
-from tests.test_fsm_llm.support import _Prov, _typed_fsm
+from tests.test_fsm_llm.support import _fsm, _Prov, _typed_fsm
+from tests.test_fsm_llm.test_completion_state import _RESULT, _tool_fsm
 
 # ------------------------------------------------------------------
 # Helpers
@@ -3197,3 +3199,219 @@ class TestStep8LoadTimeValidation:
         config = fsm.states["greeting"].transition_classification
         assert config is not None
         assert config["confidence_threshold"] == 0.7
+
+
+class TestValidatorAllowListCoversTheLoaderErrorTypes:
+    """F-DV-04: shapes the loader refuses are errors in fsm-llm-validate."""
+
+    @staticmethod
+    def _agrees_on_refusal(data: dict[str, Any], expected_type: str) -> None:
+        with pytest.raises(ValidationError) as caught:
+            FSMDefinition(**data)
+        assert {e["type"] for e in caught.value.errors()} == {expected_type}
+        assert FSMValidator(data).validate().is_valid is False
+
+    def test_an_oversized_integer_string(self):
+        data = _fsm()
+        data["states"]["a"]["transitions"][0]["priority"] = "9" * 5000
+        self._agrees_on_refusal(data, "int_parsing_size")
+
+    def test_a_lone_surrogate_in_a_string(self):
+        data = _fsm()
+        data["name"] = "\ud800"
+        self._agrees_on_refusal(data, "string_unicode")
+
+    def test_a_fractional_float_for_an_integer(self):
+        data = _fsm()
+        data["states"]["a"]["transitions"][0]["priority"] = 1.5
+        self._agrees_on_refusal(data, "int_from_float")
+
+    def test_an_infinite_number(self):
+        data = _fsm()
+        data["states"]["a"]["transitions"][0]["priority"] = float("inf")
+        self._agrees_on_refusal(data, "finite_number")
+
+
+class TestEachStructuralDefectIsReportedOnce:
+    """F-DV-07: the Schema line and the structure stage no longer both say it."""
+
+    @staticmethod
+    def _errors(data: dict[str, Any]) -> list[str]:
+        return FSMValidator(data).validate().errors
+
+    def test_a_dangling_target_is_named_once(self):
+        data = _fsm()
+        data["states"]["a"]["transitions"][0]["target_state"] = "zz"
+        named = [e for e in self._errors(data) if "'zz'" in e]
+        assert len(named) == 1, named
+
+    def test_an_orphan_is_named_once(self):
+        data = _fsm()
+        data["states"]["c"] = {"id": "c", "description": "c", "purpose": "p"}
+        named = [e for e in self._errors(data) if "Orphaned" in e]
+        assert len(named) == 1, named
+
+    def test_an_unknown_initial_state_is_named_once(self):
+        data = _fsm()
+        data["initial_state"] = "zz"
+        named = [e for e in self._errors(data) if "'zz'" in e]
+        assert len(named) == 1, named
+
+    def test_an_empty_definition_reports_the_initial_state_once(self):
+        named = [e for e in self._errors({}) if "initial" in e.lower()]
+        assert len(named) == 1, named
+
+    def test_the_verdict_and_the_error_set_of_a_second_defect_survive(self):
+        data = _fsm()
+        data["states"]["a"]["transitions"][0]["target_state"] = "zz"
+        data["states"]["c"] = {"id": "c", "description": "c", "purpose": "p"}
+        result = FSMValidator(data).validate()
+        assert result.is_valid is False
+        assert any("'zz'" in e for e in result.errors)
+        assert any("Orphaned" in e for e in result.errors)
+
+
+class TestTransitionClassificationKeysNamingNoTargetWarn:
+    """F-DV-08: a typo'd key is a WARNING, never an error."""
+
+    def test_a_key_that_is_no_target_warns(self):
+        data = _fsm()
+        data["states"]["a"]["transition_classification"] = {
+            "typo_state": {"description": "x"}
+        }
+        result = FSMValidator(data).validate()
+        assert result.is_valid is True
+        assert any("typo_state" in w for w in result.warnings), result.warnings
+
+    def test_a_key_naming_a_target_does_not_warn(self):
+        data = _fsm()
+        data["states"]["a"]["transition_classification"] = {"b": {"description": "x"}}
+        result = FSMValidator(data).validate()
+        assert not any("transition_classification" in w for w in result.warnings)
+
+
+class TestValidateFromFileGivesCleanMessages:
+    """F-DV-16: a non-object file and undecodable bytes have a clean message."""
+
+    def test_a_json_array_file(self, tmp_path: Path):
+        path = tmp_path / "list.json"
+        path.write_text("[]", encoding="utf-8")
+        result = validate_fsm_from_file(str(path))
+        assert result.is_valid is False
+        assert result.errors == ["FSM definition must be a JSON object"]
+
+    def test_undecodable_bytes(self, tmp_path: Path):
+        path = tmp_path / "bad.json"
+        path.write_bytes(b"\xff\xfe\x00{")
+        result = validate_fsm_from_file(str(path))
+        assert result.is_valid is False
+        assert len(result.errors) == 1
+        assert "UTF-8" in result.errors[0]
+        assert "codec" not in result.errors[0]
+
+    def test_a_valid_file_is_untouched(self, tmp_path: Path):
+        path = tmp_path / "ok.json"
+        path.write_text(json.dumps(copy.deepcopy(_fsm())), encoding="utf-8")
+        assert validate_fsm_from_file(str(path)).is_valid is True
+
+
+class TestSharedGraphWalkAndSchema:
+    """F-DV-14 / F-DV-05: the one reachability walk and the one cap."""
+
+    def test_reachable_from_follows_edges_and_tolerates_unknown_nodes(self):
+        from fsm_llm.definitions import reachable_from
+
+        adjacency = {"a": ["b", "ghost"], "b": ["a", "c"], "c": [], "d": ["a"]}
+        assert reachable_from(adjacency, ["a"]) == {"a", "b", "c", "ghost"}
+        assert reachable_from(adjacency, ["c"]) == {"c"}
+        assert reachable_from(adjacency, ["c", "d"]) == {"a", "b", "c", "d", "ghost"}
+
+    def test_the_config_inherits_the_schema_and_its_cap(self):
+        from fsm_llm.definitions import (
+            MAX_CLASSIFICATION_INTENTS,
+            ClassificationExtractionConfig,
+            ClassificationSchema,
+        )
+
+        assert issubclass(ClassificationExtractionConfig, ClassificationSchema)
+        intents = [
+            {"name": f"i{n}", "description": "d"}
+            for n in range(MAX_CLASSIFICATION_INTENTS + 1)
+        ]
+        with pytest.raises(ValueError):
+            ClassificationExtractionConfig(
+                field_name="f", intents=intents, fallback_intent="i0"
+            )
+        with pytest.raises(ValueError):
+            ClassificationSchema(intents=intents, fallback_intent="i0")
+
+
+class TestValidatorWarnsOnCompletionStates:
+    """Review area 2, concerns 5 and 8."""
+
+    def test_an_uncovered_result_kind_is_a_warning(self):
+        fsm = _tool_fsm()
+        call_model = fsm["states"]["call_model"]
+        call_model["transitions"] = call_model["transitions"][:2]
+        del fsm["states"]["failed"]
+        result = FSMValidator(fsm).validate()
+        assert result.is_valid
+        assert any("'call_model'" in w and "'malformed'" in w for w in result.warnings)
+
+    def test_full_coverage_or_a_fallback_edge_gives_no_warning(self):
+        covered = FSMValidator(_tool_fsm()).validate()
+        fallback = _tool_fsm()
+        transitions = fallback["states"]["call_model"]["transitions"]
+        transitions[2] = {"target_state": "failed", "description": "Otherwise"}
+        transitions[1]["conditions"] = []
+        for result in (covered, FSMValidator(fallback).validate()):
+            assert not any("result kind" in w for w in result.warnings)
+
+    @pytest.mark.parametrize(
+        "channel, entry",
+        [
+            (
+                "field_extractions",
+                [
+                    {
+                        "field_name": _RESULT,
+                        "field_type": "str",
+                        "extraction_instructions": "the result",
+                    }
+                ],
+            ),
+            ("required_context_keys", [_RESULT]),
+            (
+                "classification_extractions",
+                [
+                    {
+                        "field_name": _RESULT,
+                        "intents": [
+                            {"name": "a", "description": "a"},
+                            {"name": "b", "description": "b"},
+                        ],
+                        "fallback_intent": "b",
+                    }
+                ],
+            ),
+        ],
+    )
+    def test_an_extraction_of_a_completion_result_key_is_a_warning(
+        self, channel: str, entry: list[Any]
+    ):
+        fsm = _tool_fsm()
+        fsm["states"]["intake"][channel] = entry
+        result = FSMValidator(fsm).validate()
+        assert any(
+            f"'intake' {channel} names '{_RESULT}'" in w for w in result.warnings
+        )
+
+    def test_an_extraction_of_a_handler_only_key_is_a_warning(self):
+        fsm = _tool_fsm()
+        fsm["handler_only_keys"] = ["verdict"]
+        fsm["states"]["intake"]["required_context_keys"] = ["verdict"]
+        result = FSMValidator(fsm).validate()
+        assert any(
+            "'intake' required_context_keys names 'verdict'" in w
+            for w in result.warnings
+        )

@@ -39,6 +39,7 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 
 from loguru import logger
 
+import fsm_llm.classification as classification_module
 from fsm_llm.api import API
 from fsm_llm.classification import Classifier, HierarchicalClassifier
 from fsm_llm.constants import (
@@ -64,6 +65,7 @@ from fsm_llm.definitions import (
     FSMInstance,
     HierarchicalSchema,
     IntentDefinition,
+    LLMResponseError,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
     State,
@@ -81,23 +83,30 @@ from fsm_llm.prompts import (
     ResponseGenerationPromptBuilder,
     build_classification_system_prompt,
 )
+from fsm_llm.testing import MockLLM2Interface
 from fsm_llm.transition_evaluator import TransitionEvaluator
 from tests.test_fsm_llm.support import (
     _A4_TRANSITION_KEY,
+    _INTENTS,
     _a3_api,
     _a3_extraction_fsm,
     _aiter1_ambiguous_fsm,
     _ambiguous_then_blocked_fsm,
     _api,
+    _chain,
     _ClassBulkProv,
     _classification,
     _classified_bulk_fsm,
     _classified_fsm,
     _ClassifierCapture,
+    _classifying_fsm,
     _ConnectionHarness,
+    _Custom,
     _fake_response,
     _mock_llm,
+    _tie_fsm,
 )
+from tests.test_fsm_llm.test_completion_state import _tool_fsm
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1544,7 +1553,7 @@ def _hierarchical_schema() -> HierarchicalSchema:
 # ---------------------------------------------------------------------------
 
 
-def _tie_fsm(targets: list[str]) -> dict[str, Any]:
+def _tie_targets_fsm(targets: list[str]) -> dict[str, Any]:
     """``a`` (initial) owns one unconditioned, equal-priority exit per target,
     so every turn in ``a`` is a tie of ``len(targets)`` distinct targets."""
     states: dict[str, Any] = {
@@ -1590,7 +1599,7 @@ class TestOversizedTieSets:
     )
     def test_turn_stays_in_the_state(self, targets):
         llm = _RecordingInterface()
-        api = API.from_definition(_tie_fsm(targets), llm_interface=llm)
+        api = API.from_definition(_tie_targets_fsm(targets), llm_interface=llm)
         conv_id, _ = api.start_conversation()
 
         api.converse("hello", conv_id)
@@ -2292,3 +2301,248 @@ def _step12_fsm_dict() -> dict:
             }
         },
     }
+
+
+class _CountingInterface(LiteLLMInterface):
+    built = 0
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        type(self).built += 1
+        super().__init__(*args, **kwargs)
+
+
+class TestHierarchicalClassifierBuildsOneInterface:
+    """F-LL-10: one model, one interface, one usage meter."""
+
+    def _schema(self) -> HierarchicalSchema:
+        def schema(*names: str) -> ClassificationSchema:
+            return ClassificationSchema(
+                intents=[IntentDefinition(name=n, description=n) for n in names],
+                fallback_intent=names[-1],
+            )
+
+        return HierarchicalSchema(
+            domain_schema=schema("shop", "help", "other"),
+            intent_schemas={
+                "shop": schema("buy", "browse"),
+                "help": schema("refund", "faq"),
+            },
+        )
+
+    def test_three_stages_share_one_constructed_interface(self):
+        _CountingInterface.built = 0
+        with patch.object(
+            classification_module, "LiteLLMInterface", _CountingInterface
+        ):
+            clf = HierarchicalClassifier(self._schema(), model="gpt-4o-mini")
+        assert _CountingInterface.built == 1
+        stages = [clf._domain_classifier, *clf._intent_classifiers.values()]
+        assert len({id(stage._llm) for stage in stages}) == 1
+        assert {stage.model for stage in stages} == {"gpt-4o-mini"}
+
+    def test_the_default_model_is_unchanged(self):
+        _CountingInterface.built = 0
+        with patch.object(
+            classification_module, "LiteLLMInterface", _CountingInterface
+        ):
+            clf = HierarchicalClassifier(self._schema())
+        assert _CountingInterface.built == 1
+        assert clf._domain_classifier.model == clf._intent_classifiers["shop"].model
+
+
+def _no_such_attribute(request: Any) -> Any:
+    return request.no_such_attribute
+
+
+def _outage(request: Any) -> Any:
+    raise LLMResponseError("Completion call failed: provider down")
+
+
+class TestClassifierErrorContract:
+    """Review area 3, concern 1: a bug inside a custom interface's
+    ``complete`` became a silent "stay" or a skipped field, while the same
+    bug in ``generate_response`` failed the turn (0d9c218e/D-001)."""
+
+    @pytest.mark.parametrize("fsm", [_tie_fsm, _classifying_fsm])
+    def test_a_programming_error_in_complete_fails_the_turn(self, fsm: Any):
+        api = API.from_definition(fsm(), llm_interface=_Custom(_no_such_attribute))
+        conv_id, _ = api.start_conversation()
+        with pytest.raises((AttributeError, FSMError)) as caught:
+            api.converse("I want to buy it", conv_id)
+        assert AttributeError in _chain(caught.value)
+
+    def test_a_provider_error_is_a_classification_error(self):
+        classifier = Classifier(_INTENTS, llm_interface=_Custom(_outage))
+        with pytest.raises(FSMError, match="provider down") as caught:
+            classifier.classify("I want to buy it")
+        assert type(caught.value).__name__ == "ClassificationError"
+
+    def test_a_provider_error_at_a_tie_still_stays(self):
+        api = API.from_definition(_tie_fsm(), llm_interface=_Custom(_outage))
+        conv_id, _ = api.start_conversation()
+        api.converse("I want to buy it", conv_id)
+        assert api.get_current_state(conv_id) == "route"
+
+
+class TestClassifierNeedsAnInterfaceWithComplete:
+    """Review area 3, concerns 2 and 3: an interface without ``complete``
+    degraded every classification per turn; a model beside an interface
+    without one was accepted and mislabelled."""
+
+    @pytest.mark.parametrize("llm", ["garbage", MockLLM2Interface()])
+    def test_classifier_refuses(self, llm: Any):
+        with pytest.raises(ValueError, match="implements complete"):
+            Classifier(_INTENTS, llm_interface=llm)
+
+    def test_api_refuses_a_classifying_definition(self):
+        with pytest.raises(ValueError, match="does not implement complete"):
+            API.from_definition(_classifying_fsm(), llm_interface=MockLLM2Interface())
+
+    def test_api_refuses_a_classifying_child_on_push(self):
+        api = API.from_definition(_tie_fsm(), llm_interface=MockLLM2Interface())
+        conv_id, _ = api.start_conversation()
+        with pytest.raises(ValueError, match="does not implement complete"):
+            api.push_fsm(conv_id, _classifying_fsm())
+        assert api.get_stack_depth(conv_id) == 1
+
+    def test_api_accepts_it_without_classification(self):
+        API.from_definition(_tool_fsm(), llm_interface=MockLLM2Interface())
+
+    def test_api_accepts_it_when_every_entry_names_its_own_model(self):
+        fsm = _classifying_fsm()
+        fsm["states"]["triage"]["classification_extractions"][0]["model"] = "gpt-4o"
+        API.from_definition(fsm, llm_interface=MockLLM2Interface())
+
+    def test_a_model_beside_an_interface_without_one_is_refused(self):
+        class _NoModel(_Custom):
+            model = None  # type: ignore[assignment]
+
+        with pytest.raises(ValueError, match="different model"):
+            Classifier(_INTENTS, model="openai/gpt-4o", llm_interface=_NoModel(_outage))
+        assert Classifier(_INTENTS, llm_interface=_NoModel(_outage)).model is None
+
+
+def _gated_tie_fsm() -> dict[str, Any]:
+    """``route`` ties ``a``/``b`` until ``skip_a`` is set, then ``b`` wins."""
+    fsm = _tie_fsm()
+    fsm["states"]["route"]["transitions"][0]["conditions"] = [
+        {"description": "a is not skipped", "logic": {"!": [{"var": "skip_a"}]}}
+    ]
+    return fsm
+
+
+class TestTieWithAnInterfaceWithoutCompleteStays:
+    """Review round 3, pass 11 W1 (D-045, D-046): an interface without
+    ``complete`` made every tie turn raise, so the conversation could never
+    leave the state. D-020: the classification fails with
+    ``ClassificationError``, the tie stays, and a later turn that is not a tie
+    still transitions. Fails on the parent f85e07a (``FSMError``)."""
+
+    @pytest.mark.parametrize("mode", ["converse", "stream", "advance"])
+    def test_tie_stays_then_a_deterministic_turn_leaves(self, mode: str):
+        api = API.from_definition(_gated_tie_fsm(), llm_interface=MockLLM2Interface())
+        conv_id, _ = api.start_conversation()
+
+        def turn() -> None:
+            if mode == "converse":
+                api.converse("go", conv_id)
+            elif mode == "stream":
+                list(api.converse_stream("go", conv_id))
+            else:
+                api.advance(conv_id)
+
+        turn()
+        assert api.get_current_state(conv_id) == "route"
+        record = api.fsm_manager.instances[conv_id].context.metadata[
+            "transition_classification"
+        ]
+        assert record["fallback"] is True
+        assert "does not implement complete" in record["error"]
+
+        api.update_context(conv_id, {"skip_a": True})
+        turn()
+        assert api.get_current_state(conv_id) == "b"
+
+
+class TestHierarchicalClassifierTakesAnInterface:
+    """Review area 3, concern 5: ``HierarchicalClassifier`` had no ``llm_interface=``
+    and built one private interface per stage."""
+
+    def _schema(self) -> HierarchicalSchema:
+        return HierarchicalSchema(
+            domain_schema=ClassificationSchema(
+                intents=[
+                    IntentDefinition(name="shop", description="shopping"),
+                    IntentDefinition(name="other", description="anything else"),
+                ],
+                fallback_intent="other",
+            ),
+            intent_schemas={"shop": _INTENTS},
+        )
+
+    def test_every_stage_sends_through_the_one_interface(self):
+        llm = _Custom(_outage)
+        hierarchical = HierarchicalClassifier(self._schema(), llm_interface=llm)
+        stages = [
+            hierarchical._domain_classifier,
+            *hierarchical._intent_classifiers.values(),
+        ]
+        assert [stage._llm for stage in stages] == [llm, llm]
+        assert {stage.model for stage in stages} == {"custom/m"}
+
+    def test_settings_beside_the_interface_are_refused(self):
+        with pytest.raises(ValueError, match="no api_key"):
+            HierarchicalClassifier(
+                self._schema(), llm_interface=_Custom(_outage), api_key="k"
+            )
+
+
+def _raising(error: BaseException) -> Any:
+    def bug(request: Any) -> Any:
+        raise error
+
+    return bug
+
+
+_BUGS = [
+    RuntimeError("bug in a custom complete"),
+    ValueError("bad payload"),
+    KeyError("missing"),
+    TypeError("bad type"),
+    OSError("disk"),
+]
+
+
+class TestClassifierSoftFailsOnlyOnItsOwnErrors:
+    """Pass 8 warning 2: the pipeline's soft-fail tuple still held ValueError,
+    TypeError, KeyError, RuntimeError and OSError, so those bugs in a custom
+    interface became a silent stay or a skipped field."""
+
+    @pytest.mark.parametrize("fsm", [_tie_fsm, _classifying_fsm])
+    @pytest.mark.parametrize("error", _BUGS, ids=lambda e: type(e).__name__)
+    def test_a_bug_in_a_custom_complete_fails_the_turn(self, fsm, error):
+        api = API.from_definition(fsm(), llm_interface=_Custom(_raising(error)))
+        conv_id, _ = api.start_conversation()
+        start_state = api.get_current_state(conv_id)
+        with pytest.raises((FSMError, type(error))) as caught:
+            api.converse("I want to buy it", conv_id)
+        assert type(error) in _chain(caught.value)
+        assert api.get_current_state(conv_id) == start_state
+
+    @pytest.mark.parametrize("fsm", [_tie_fsm, _classifying_fsm])
+    def test_an_unreadable_reply_still_fails_soft(self, fsm):
+        def unreadable(request: Any) -> CompletionResponse:
+            return CompletionResponse(kind="final", text="not json at all")
+
+        api = API.from_definition(fsm(), llm_interface=_Custom(unreadable))
+        conv_id, _ = api.start_conversation()
+        start_state = api.get_current_state(conv_id)
+        api.converse("I want to buy it", conv_id)
+        assert api.get_current_state(conv_id) == start_state
+
+    def test_the_unreadable_reply_is_a_classification_error(self):
+        def unreadable(request: Any) -> CompletionResponse:
+            return CompletionResponse(kind="final", text="not json at all")
+
+        with pytest.raises(ClassificationResponseError):
+            Classifier(_INTENTS, llm_interface=_Custom(unreadable)).classify("buy")

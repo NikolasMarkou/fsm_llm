@@ -46,12 +46,15 @@ pre-turn snapshot, exactly like a Pass-2 failure would. See D-017 in
 decisions.md.
 """
 
+from __future__ import annotations
+
 import pytest
 
 from fsm_llm.api import API
 from fsm_llm.definitions import FSMDefinition
 from fsm_llm.handlers import BaseHandler, HandlerExecutionError, HandlerTiming
 from fsm_llm.testing import MockLLM2Interface
+from tests.test_fsm_llm.support import _TWO_STATE
 
 # ----------------------------------------------------------------------
 # Helpers
@@ -846,3 +849,22 @@ class TestContextUpdateOverwriteReachesTheGate:
         api.converse("approve it", conv_id)
 
         assert api.get_current_state(conv_id) == "e"
+
+
+class TestExecuteHandlersTakesItsStateArgumentsByKeyword:
+    """REVIEW-C6: ``MessagePipeline.execute_handlers`` lost its third positional
+    parameter ``conversation_id``; an old positional call bound the id to
+    ``current_state`` with no error."""
+
+    def test_an_old_positional_call_raises(self):
+        from fsm_llm.handlers import HandlerTiming
+
+        api = API.from_definition(_TWO_STATE, llm_interface=MockLLM2Interface())
+        cid, _ = api.start_conversation()
+        pipeline = api.fsm_manager._pipeline
+        instance = api.fsm_manager.instances[cid]
+        with pytest.raises(TypeError):
+            pipeline.execute_handlers(instance, HandlerTiming.PRE_PROCESSING, cid, "s")
+        pipeline.execute_handlers(
+            instance, HandlerTiming.PRE_PROCESSING, current_state="s"
+        )

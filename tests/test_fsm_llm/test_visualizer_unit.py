@@ -9,6 +9,8 @@ Tests cover:
 - Output is always a non-empty string containing state names
 """
 
+from __future__ import annotations
+
 import io
 import json
 import os
@@ -1423,6 +1425,7 @@ import re
 import pydantic
 
 import fsm_llm
+from fsm_llm import visualizer
 from fsm_llm.definitions import FSMDefinition
 from fsm_llm.visualizer import (
     OUTPUT_FORMATS,
@@ -1430,6 +1433,7 @@ from fsm_llm.visualizer import (
     FSMGraphEdge,
     FSMGraphNode,
     build_fsm_graph,
+    main,
     to_dot,
     to_mermaid,
 )
@@ -1904,3 +1908,176 @@ class TestVisualizeFormatFlag:
         assert visualize_fsm_from_file(str(path), output_format="dot") == to_dot(
             build_fsm_graph(_linear_fsm_data())
         )
+
+
+def _state(sid: str, targets: tuple[str, ...] = (), **extra) -> dict:
+    state = {"id": sid, "description": f"d {sid}", "purpose": f"p {sid}"}
+    if targets:
+        state["transitions"] = [
+            {"target_state": t, "description": f"to {t}", "priority": 100}
+            for t in targets
+        ]
+    state.update(extra)
+    return state
+
+
+def _fsm(initial: str, **states: tuple[str, ...]) -> dict:
+    return {
+        "name": "T",
+        "description": "d",
+        "initial_state": initial,
+        "states": {sid: _state(sid, tg) for sid, tg in states.items()},
+    }
+
+
+def _write(tmp_path: Path, data, name: str = "f.json") -> str:
+    path = tmp_path / name
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return str(path)
+
+
+class TestMaximumPathLength:
+    """F-HV-02: the METADATA row is the longest path, not the shallowest depth
+    of the deepest terminal."""
+
+    @staticmethod
+    def _row(fsm: dict) -> str:
+        out = visualize_fsm_ascii(fsm, "full")
+        (row,) = [ln for ln in out.splitlines() if "Maximum Path Length" in ln]
+        return row.strip("│ ").strip()
+
+    def test_shortcut_edge_to_the_terminal_does_not_hide_the_long_path(self):
+        fsm = _fsm("a", a=("b", "end"), b=("c",), c=("end",), end=())
+        assert self._row(fsm) == "Maximum Path Length: 4"
+
+    def test_a_loop_is_not_followed_twice(self):
+        fsm = _fsm("a", a=("b",), b=("a", "end"), end=())
+        assert self._row(fsm) == "Maximum Path Length: 3"
+
+    def test_a_chain_and_a_single_state(self):
+        assert self._row(_fsm("a", a=("b",), b=("c",), c=())) == (
+            "Maximum Path Length: 3"
+        )
+        assert self._row(_fsm("a", a=())) == "Maximum Path Length: 1"
+
+    def test_an_unreachable_terminal_is_not_counted(self):
+        fsm = _fsm("a", a=("a",), orphan=("z",), z=())
+        assert self._row(fsm) == "Maximum Path Length: 1"
+
+
+class TestStyleIsValidated:
+    """F-HV-06: ``style`` is refused like ``output_format``."""
+
+    def test_unknown_style_raises(self):
+        with pytest.raises(ValueError, match="unknown style 'bogus'"):
+            visualize_fsm_ascii(_fsm("a", a=()), "bogus")
+
+    def test_from_file_reports_it(self, tmp_path):
+        path = _write(tmp_path, _fsm("a", a=()))
+        out = visualize_fsm_from_file(path, "bogus")
+        assert out.startswith("Error:")
+        assert "unknown style 'bogus'" in out
+
+    def test_main_exits_with_failure(self, tmp_path):
+        assert main(_write(tmp_path, _fsm("a", a=())), "bogus") == 1
+
+    def test_the_three_styles_are_one_tuple(self):
+        assert visualizer.ASCII_STYLES == ("full", "compact", "minimal")
+
+
+class TestMalformedInputHasOneExitContract:
+    """F-HV-07: the same malformed input fails in every style."""
+
+    @staticmethod
+    def _bad_condition_keys() -> dict:
+        fsm = _fsm("a", a=("b",), b=())
+        fsm["states"]["a"]["transitions"][0]["conditions"] = [
+            {"description": "c", "requires_context_keys": [1]}
+        ]
+        return fsm
+
+    @staticmethod
+    def _bad_state_keys() -> dict:
+        fsm = _fsm("a", a=("b",), b=())
+        fsm["states"]["a"]["required_context_keys"] = [1, 2]
+        return fsm
+
+    @pytest.mark.parametrize("style", ["full", "compact", "minimal"])
+    @pytest.mark.parametrize("make", ["_bad_condition_keys", "_bad_state_keys"])
+    def test_every_style_fails(self, tmp_path, style, make):
+        path = _write(tmp_path, getattr(self, make)())
+        out = visualize_fsm_from_file(path, style)
+        assert out.startswith("Error:")
+        assert "Could not generate diagram" not in out
+        assert main(path, style) == 1
+
+    @pytest.mark.parametrize("style", ["full", "compact", "minimal"])
+    def test_a_good_definition_never_prints_the_fallback_line(self, style):
+        out = visualize_fsm_ascii(_fsm("a", a=("b",), b=()), style)
+        assert "Could not generate diagram" not in out
+
+
+class TestOneRawFsmJsonReader:
+    """F-HV-08: one reader (UTF-8, object check) for loader, validator, visualizer."""
+
+    def test_read_json_object_returns_the_object(self, tmp_path):
+        from fsm_llm.utilities import read_json_object
+
+        path = tmp_path / "u.json"
+        path.write_text(json.dumps({"name": "é"}, ensure_ascii=False), "utf-8")
+        assert read_json_object(str(path)) == {"name": "é"}
+
+    def test_read_json_object_refuses_a_list(self, tmp_path):
+        from fsm_llm.utilities import read_json_object
+
+        with pytest.raises(ValueError, match="must be a JSON object"):
+            read_json_object(_write(tmp_path, [1, 2]))
+
+    @pytest.mark.parametrize("fmt", ["ascii", "mermaid", "dot"])
+    def test_visualizer_says_it_is_not_an_object(self, tmp_path, fmt):
+        out = visualize_fsm_from_file(_write(tmp_path, [1, 2]), output_format=fmt)
+        assert out == "Error: FSM definition must be a JSON object"
+
+
+class TestBuildFsmGraphRefusesMalformedShapes:
+    """Review concern 6: the documented ``ValueError``, not ``AttributeError``."""
+
+    @pytest.mark.parametrize(
+        ("definition", "message"),
+        [
+            (
+                {"name": "n", "initial_state": "a", "states": {"a": "oops"}},
+                "State 'a' must be a mapping",
+            ),
+            (
+                {"name": "n", "initial_state": "a", "states": ["a"]},
+                "'states' must be a mapping",
+            ),
+            (
+                {
+                    "name": "n",
+                    "initial_state": "a",
+                    "states": {"a": {"transitions": ["b"]}, "b": {}},
+                },
+                "A transition of state 'a' must be a mapping",
+            ),
+            (
+                {
+                    "name": "n",
+                    "initial_state": "a",
+                    "states": {"a": {"transitions": {"target_state": "a"}}},
+                },
+                "'transitions' of state 'a' must be a list",
+            ),
+        ],
+    )
+    def test_malformed_shape_is_a_value_error(self, definition, message):
+        with pytest.raises(ValueError, match=message):
+            build_fsm_graph(definition)
+
+    def test_explicit_null_transitions_still_mean_terminal(self):
+        graph = build_fsm_graph(
+            {"name": "n", "initial_state": "a", "states": {"a": {"transitions": None}}}
+        )
+
+        assert [(node.id, node.is_terminal) for node in graph.nodes] == [("a", True)]

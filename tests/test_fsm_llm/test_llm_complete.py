@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -22,10 +23,13 @@ from pydantic import ValidationError
 import fsm_llm
 import fsm_llm.llm as llm_module
 from fsm_llm import constants
+from fsm_llm.classification import Classifier
+from fsm_llm.constants import RESERVED_LLM_CALL_KWARGS
 from fsm_llm.definitions import (
     CompletionRequest,
     CompletionResponse,
     FieldExtractionRequest,
+    FSMError,
     LLMResponseError,
     ModelToolCall,
     ResponseGenerationRequest,
@@ -38,6 +42,7 @@ from fsm_llm.llm import (
     is_malformed_tool_call_error,
 )
 from fsm_llm.logging import logger
+from tests.test_fsm_llm.support import _INTENTS
 
 OLLAMA_MODEL = "ollama_chat/qwen3.5:4b"
 
@@ -653,3 +658,203 @@ class TestInterfaceSurface:
         }
         assert "litellm" not in imported
         assert constants.MALFORMED_TOOL_CALL_MARKERS
+
+
+class TestDuplicateToolCallIdsAreMalformed:
+    """F-LL-02: refused before any tool runs, like an id-less call."""
+
+    def _request(self) -> CompletionRequest:
+        return CompletionRequest(
+            messages=[{"role": "user", "content": "add"}], tools=[_ADD_TOOL]
+        )
+
+    def test_two_calls_with_one_id_make_the_turn_malformed(self):
+        reply = _reply(
+            tool_calls=[
+                _call("add", '{"a": 1, "b": 2}', "c1"),
+                _call("add", '{"a": 3, "b": 4}', "c1"),
+            ]
+        )
+        response, _ = _complete(self._request(), reply)
+        assert response.kind == "malformed"
+        assert response.calls == ()
+
+    def test_distinct_ids_still_make_a_calls_turn(self):
+        reply = _reply(
+            tool_calls=[
+                _call("add", '{"a": 1, "b": 2}', "c1"),
+                _call("add", '{"a": 3, "b": 4}', "c2"),
+            ]
+        )
+        response, _ = _complete(self._request(), reply)
+        assert response.kind == "calls"
+        assert [c.id for c in response.calls] == ["c1", "c2"]
+
+
+_USER = [{"role": "user", "content": "What is 2 + 3?"}]
+
+
+def _sent(llm: LiteLLMInterface, request: CompletionRequest) -> dict[str, Any]:
+    """The provider kwargs of one ``complete`` call (supported params incl.
+    ``response_format``)."""
+    with _Provider(_reply("ok")) as provider:
+        llm.complete(request)
+    (params,) = provider.calls
+    return params
+
+
+class TestToolRulesHoldWhateverTheCallType:
+    """Review area 1, concern 1: the builder sent a ``response_format``
+    beside ``tools`` and forced Ollama temperature 0 on a tool turn when the
+    free-string ``call_type`` named an extraction or classification."""
+
+    @pytest.mark.parametrize(
+        "call_type", ["data_extraction", "field_extraction", "classification"]
+    )
+    @pytest.mark.parametrize("model", ["ollama_chat/qwen3.5:4b", "gpt-4o"])
+    def test_a_tool_turn_gets_no_response_format_and_keeps_its_temperature(
+        self, model: str, call_type: str
+    ):
+        llm = LiteLLMInterface(model, temperature=0.7)
+        params = _sent(
+            llm,
+            CompletionRequest(messages=_USER, tools=[_ADD_TOOL], call_type=call_type),
+        )
+        assert params["tools"] == [_ADD_TOOL]
+        assert "response_format" not in params
+        assert params["temperature"] == 0.7
+        # Nothing structured leaks into the user turn either (Ollama echo).
+        assert "schema" not in params["messages"][-1]["content"].lower()
+
+    def test_the_builder_refuses_tools_beside_a_response_format(self):
+        llm = LiteLLMInterface("gpt-4o")
+        with (
+            _Provider(_reply("ok")),
+            pytest.raises(ValueError, match="never both"),
+        ):
+            llm._build_call_params(
+                _USER,
+                "completion",
+                tools=[_ADD_TOOL],
+                response_format={"type": "json_object"},
+            )
+
+    def test_a_structured_turn_on_ollama_still_runs_at_temperature_zero(self):
+        llm = LiteLLMInterface("ollama_chat/qwen3.5:4b", temperature=0.7)
+        params = _sent(
+            llm,
+            CompletionRequest(messages=_USER, response_format={"type": "json_object"}),
+        )
+        assert params["temperature"] == 0
+
+
+class TestCompleteBuildsInsideItsErrorBoundary:
+    """Review area 1, concern 8: a builder error escaped ``complete`` raw."""
+
+    def test_a_failing_supported_params_lookup_is_an_llm_response_error(self):
+        llm = LiteLLMInterface("gpt-4o")
+        with (
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                side_effect=ConnectionError("registry down"),
+            ),
+            patch("fsm_llm.llm.completion") as provider,
+            pytest.raises(LLMResponseError, match="registry down") as caught,
+        ):
+            llm.complete(CompletionRequest(messages=_USER))
+        assert isinstance(caught.value.__cause__, ConnectionError)
+        provider.assert_not_called()
+
+
+class TestReservedCallKwargs:
+    """Review area 1, concern 11: the legacy tool kwargs and ``n`` set on a
+    constructor reached every extraction, classifier and Pass-2 call."""
+
+    @pytest.mark.parametrize("name", ["functions", "function_call", "n"])
+    def test_constructor_kwarg_never_reaches_a_request(self, name: str):
+        assert name in RESERVED_LLM_CALL_KWARGS
+        llm = LiteLLMInterface("gpt-4o", **{name: [{"name": "f"}]})
+        params = _sent(llm, CompletionRequest(messages=_USER))
+        assert name not in params
+
+
+class _Garbled:
+    """A provider reply whose message raises from ``content``."""
+
+    @property
+    def content(self) -> Any:
+        raise RuntimeError("garbled message object")
+
+
+class TestCompleteIsTotal:
+    """Pass 8 warning 3: a garbled reply raised a raw TypeError out of
+    ``complete`` (and so out of the classifier) instead of LLMResponseError."""
+
+    @pytest.mark.parametrize("tool_calls", [5, "call_1", {"id": "call_1"}, 2.5])
+    def test_a_tool_calls_value_that_is_not_a_list_is_a_response_error(
+        self, tool_calls
+    ):
+        reply = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="x", tool_calls=tool_calls)
+                )
+            ]
+        )
+        with _Provider(reply), pytest.raises(LLMResponseError, match="tool_calls"):
+            LiteLLMInterface("gpt-4o").complete(CompletionRequest(messages=_USER))
+
+    def test_an_unforeseen_reply_error_is_a_response_error(self):
+        reply = SimpleNamespace(choices=[SimpleNamespace(message=_Garbled())])
+        with _Provider(reply), pytest.raises(LLMResponseError, match="garbled"):
+            LiteLLMInterface("gpt-4o").complete(CompletionRequest(messages=_USER))
+
+    def test_the_classifier_turns_a_garbled_reply_into_a_classification_error(self):
+        reply = SimpleNamespace(
+            choices=[
+                SimpleNamespace(message=SimpleNamespace(content="x", tool_calls=5))
+            ]
+        )
+        classifier = Classifier(_INTENTS, llm_interface=LiteLLMInterface("gpt-4o"))
+        with _Provider(reply), pytest.raises(FSMError) as caught:
+            classifier.classify("I want to buy it")
+        assert type(caught.value).__name__ == "ClassificationError"
+
+
+class TestAnIdLessToolCallIsMalformed:
+    """Pass 8 note 10: a call without an id was returned as a runnable call
+    (id ``""``), so its tool ran before the next turn refused the transcript."""
+
+    @pytest.mark.parametrize("call_id", [None, "", 7])
+    def test_the_turn_is_malformed_with_no_calls(self, call_id):
+        calls = [
+            _call("add", '{"a": 2, "b": 3}', call_id="call_ok"),
+            {**_call("add", '{"a": 1, "b": 1}'), "id": call_id},
+        ]
+        provider_reply = _reply(None, tool_calls=calls)
+        # litellm mints an id for a None one; read the shape a non-litellm
+        # reply object would carry instead.
+        provider_reply.choices[0].message.tool_calls[1].id = call_id
+        with _Provider(provider_reply):
+            reply = LiteLLMInterface("gpt-4o").complete(
+                CompletionRequest(messages=_USER, tools=[_ADD_TOOL])
+            )
+        assert reply.kind == "malformed"
+        assert reply.calls == ()
+
+    def test_a_model_tool_call_needs_an_id(self):
+        with pytest.raises(ValidationError):
+            ModelToolCall(id="", name="add", arguments={})
+
+
+_ADD_TOOL: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "add",
+        "description": "Add two integers.",
+        "parameters": {
+            "type": "object",
+            "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+        },
+    },
+}

@@ -1270,3 +1270,37 @@ class TestStep14LLM:
         ):
             assert llm.generate_response(request).message == "hello"
         assert llm.apology_retry_count == 0
+
+
+class TestUnstructuredNumberRungSharesThePipelineRules:
+    """The raw-text rung of field extraction reads numbers like the validator."""
+
+    def _extract(self, text: str, field_type: str):
+        response = MagicMock()
+        response.choices = [MagicMock()]
+        response.choices[0].message.content = text
+        request = FieldExtractionRequest(
+            system_prompt="extract",
+            user_message="x",
+            field_name="n",
+            field_type=field_type,
+        )
+        return LiteLLMInterface(model="test-model")._parse_field_extraction_response(
+            response, request
+        )
+
+    @pytest.mark.parametrize(
+        ("text", "field_type", "value"),
+        [("7", "int", 7), ("2.5", "float", 2.5), ("3", "float", 3.0)],
+    )
+    def test_plain_numbers_are_kept(self, text, field_type, value):
+        out = self._extract(text, field_type)
+        assert out.is_valid and out.value == value
+
+    @pytest.mark.parametrize(
+        ("text", "field_type"),
+        [("nan", "float"), ("inf", "float"), ("1e999", "float"), ("3.7", "int")],
+    )
+    def test_non_finite_and_non_integral_text_gives_no_value(self, text, field_type):
+        out = self._extract(text, field_type)
+        assert out.value is None and out.is_valid is False

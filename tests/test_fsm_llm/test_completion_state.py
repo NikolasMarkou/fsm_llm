@@ -16,14 +16,17 @@ result key is never written, so every behaviour test below fails there.
 from __future__ import annotations
 
 import copy
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
 import fsm_llm
-from fsm_llm import API, CompletionStateConfig, State, tool_exchange
+from fsm_llm import API, CompletionStateConfig, FileSessionStore, State, tool_exchange
 from fsm_llm.constants import (
+    CONTEXT_KEY_RESPONSE_TEMPERATURE,
     DEFAULT_COMPLETION_MESSAGES_KEY,
     DEFAULT_COMPLETION_RESULT_KEY,
 )
@@ -46,6 +49,7 @@ from fsm_llm.testing import (
 )
 from fsm_llm.validator import FSMValidator
 from fsm_llm.visualizer import build_fsm_graph, visualize_fsm_ascii
+from tests.test_fsm_llm.support import _state
 from tests.test_fsm_llm.test_llm_complete import _call, _Provider, _reply
 
 _SYSTEM = "You answer arithmetic and word questions with the tools you have."
@@ -101,16 +105,6 @@ def _kind_is(kind: str, result_key: str = _RESULT) -> list[dict[str, Any]]:
             "logic": {"==": [{"var": f"{result_key}.kind"}, kind]},
         }
     ]
-
-
-def _state(state_id: str, **extra: Any) -> dict[str, Any]:
-    return {
-        "id": state_id,
-        "description": f"The {state_id} state",
-        "purpose": f"Do the {state_id} work",
-        "response_instructions": "",
-        **extra,
-    }
 
 
 def _tool_fsm(
@@ -889,3 +883,388 @@ class TestThroughLiteLLMInterface:
             "calls": [],
         }
         assert llm.usage().errors == 1
+
+
+class TestPushedChildOwnsItsCompletionResult:
+    """Review area 2, concern 1: a pushed child inherited the parent's
+    completion result, skipped its own model call (skip-if-set) and
+    answered with the parent's reply."""
+
+    def _parent(self) -> dict[str, Any]:
+        parent = _tool_fsm()
+        parent["states"]["call_model"]["transitions"][1]["target_state"] = "followup"
+        parent["states"]["followup"] = _state(
+            "followup",
+            transitions=[{"target_state": "done", "description": "End"}],
+        )
+        return parent
+
+    def test_the_child_makes_its_own_call(self):
+        child = _tool_fsm()
+        child["name"] = "Child"
+        llm = _ScriptedLLM(final_reply("parent answer"), final_reply("child answer"))
+        api = _api(self._parent(), llm)
+        conv_id = _start(api, "parent task")
+        api.advance(conv_id)
+        api.advance(conv_id)
+        assert api.get_data(conv_id)[_RESULT]["text"] == "parent answer"
+
+        api.push_fsm(
+            conv_id,
+            child,
+            context_to_pass={_MESSAGES: [{"role": "user", "content": "child task"}]},
+        )
+        api.advance(conv_id)
+        api.advance(conv_id)
+
+        assert len(llm.requests) == 2
+        assert llm.requests[1].messages[-1] == {
+            "role": "user",
+            "content": "child task",
+        }
+        assert api.get_data(conv_id)[_RESULT]["text"] == "child answer"
+
+    def test_an_explicitly_passed_result_is_kept(self):
+        child = _tool_fsm()
+        child["name"] = "Child"
+        llm = _ScriptedLLM(final_reply("parent answer"))
+        api = _api(self._parent(), llm)
+        conv_id = _start(api, "parent task")
+        api.advance(conv_id)
+        api.advance(conv_id)
+        handed = {"kind": "final", "text": "handed over", "calls": []}
+        api.push_fsm(conv_id, child, context_to_pass={_RESULT: handed})
+        assert api.get_data(conv_id)[_RESULT] == handed
+
+
+class TestToolTurnWithoutATaskIsRefused:
+    """Review area 2, concern 2: a session restored in the middle of a tool
+    loop (the transcript is an internal key, not saved) sent only the
+    instructions and took the model's answer to nothing as the result."""
+
+    def test_a_restore_mid_tool_loop_fails_loudly(self, tmp_path: Path):
+        fsm = _tool_fsm()
+        llm = _ScriptedLLM(
+            tool_call_reply(("add", {"a": 2, "b": 3})), final_reply("never sent")
+        )
+        store = FileSessionStore(str(tmp_path))
+        api = API.from_definition(fsm, llm_interface=llm, session_store=store)
+        api.register_handler(_tool_runner())
+        conv_id = _start(api)
+        for _ in range(3):  # intake -> call_model -> run_tools -> call_model
+            api.advance(conv_id)
+        assert api.get_current_state(conv_id) == "call_model"
+        api.save_session(conv_id)
+        (saved,) = list(tmp_path.iterdir())
+
+        restored = API.from_definition(fsm, llm_interface=llm, session_store=store)
+        restored.register_handler(_tool_runner())
+        restored_id, _ = restored.restore_session(saved.stem)
+        with pytest.raises(LLMResponseError, match="no user message"):
+            restored.advance(restored_id)
+        assert len(llm.requests) == 1  # only the call made before the save
+        assert restored.get_current_state(restored_id) == "call_model"
+
+    def test_an_absent_transcript_on_a_tool_turn_is_refused(self):
+        llm = _ScriptedLLM(final_reply("never sent"))
+        api = _api(_tool_fsm(), llm)
+        conv_id, _ = api.start_conversation()
+        _to_call_model(api, conv_id)
+        with pytest.raises(LLMResponseError, match="no user message"):
+            api.advance(conv_id)
+        assert llm.requests == []
+
+
+class TestTranscriptPairingIsExact:
+    """Review area 2, concern 4: ``check_tool_transcript`` accepted
+    duplicate, missing and coerced ids, non-text results, calls without a
+    function and user turns with no content."""
+
+    @staticmethod
+    def _round(
+        calls: list[dict[str, Any]], results: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        return [
+            {"role": "user", "content": "q"},
+            {"role": "assistant", "content": None, "tool_calls": calls},
+            *results,
+        ]
+
+    @staticmethod
+    def _result(call_id: Any, content: Any = "1") -> dict[str, Any]:
+        return {"role": "tool", "tool_call_id": call_id, "content": content}
+
+    @pytest.mark.parametrize(
+        "case",
+        [
+            "duplicate ids",
+            "missing ids",
+            "empty ids",
+            "int id answered by its str",
+            "None id answered by 'None'",
+            "dict tool content",
+            "None tool content",
+            "call without a function",
+            "arguments as a dict",
+            "call without a name",
+            "user content None",
+        ],
+    )
+    def test_refused(self, case: str):
+        tc = _call
+        transcripts = {
+            "duplicate ids": self._round(
+                [tc("add", "{}", "a"), tc("add", "{}", "a")],
+                [self._result("a"), self._result("a", "2")],
+            ),
+            "missing ids": self._round(
+                [{"type": "function", "function": {"name": "add", "arguments": "{}"}}],
+                [{"role": "tool", "content": "1"}],
+            ),
+            "empty ids": self._round([tc("add", "{}", "")], [self._result("")]),
+            "int id answered by its str": self._round(
+                [{**tc("add", "{}"), "id": 1}], [self._result("1")]
+            ),
+            "None id answered by 'None'": self._round(
+                [{**tc("add", "{}"), "id": None}], [self._result("None")]
+            ),
+            "dict tool content": self._round(
+                [tc("add", "{}", "a")], [self._result("a", {"x": 1})]
+            ),
+            "None tool content": self._round(
+                [tc("add", "{}", "a")], [self._result("a", None)]
+            ),
+            "call without a function": self._round(
+                [{"id": "a", "type": "function"}], [self._result("a")]
+            ),
+            "arguments as a dict": self._round(
+                [tc("add", {"a": 1}, "a")], [self._result("a")]
+            ),
+            "call without a name": self._round(
+                [tc("", "{}", "a")], [self._result("a")]
+            ),
+            "user content None": [{"role": "user", "content": None}],
+        }
+        with pytest.raises(LLMResponseError):
+            check_tool_transcript(transcripts[case])
+
+    def test_reordered_results_with_distinct_ids_still_pass(self):
+        check_tool_transcript(
+            self._round(
+                [_call("add", "{}", "a"), _call("add", "{}", "b")],
+                [self._result("b"), self._result("a", "2")],
+            )
+        )
+
+
+class TestTranscriptIsDeepCopied:
+    """Review area 2, concern 7: removing the transcript deep copy left the
+    suite green (the old test mutated only a top-level ``content``, which
+    pydantic copies anyway). An interface that mutates a nested tool call
+    must not rewrite the context transcript."""
+
+    def test_a_nested_mutation_of_the_request_leaves_the_context(self):
+        llm = _ScriptedLLM(tool_call_reply(("add", {"a": 2, "b": 3})), final_reply("5"))
+        api = _api(_tool_fsm(), llm)
+        conv_id = _start(api)
+        for _ in range(4):  # ... -> call_model (second model turn) -> done
+            api.advance(conv_id)
+        before = copy.deepcopy(_context(api, conv_id)[_MESSAGES])
+        sent = llm.requests[1].messages
+        assert sent[2]["tool_calls"][0]["function"]["name"] == "add"
+        sent[2]["tool_calls"][0]["function"]["arguments"] = "mutated"
+        assert _context(api, conv_id)[_MESSAGES] == before
+
+
+class TestToolTurnNeedsAUserMessage:
+    """Pass 8 warning 1: only a fully empty transcript was refused, so a tool
+    exchange rebuilt after a restore (no task) was sent and its answer to
+    nothing became the result."""
+
+    def test_a_transcript_holding_only_a_tool_exchange_is_refused(self):
+        llm = _ScriptedLLM(final_reply("answer to nothing"))
+        api = _api(_tool_fsm(), llm)
+        exchange = tool_exchange(
+            None, tool_call_reply(("add", {"a": 2, "b": 3})).calls, ["5"]
+        )
+        conv_id, _ = api.start_conversation(initial_context={_MESSAGES: exchange})
+        _to_call_model(api, conv_id)
+        with pytest.raises(LLMResponseError, match="no user message"):
+            api.advance(conv_id)
+        assert llm.requests == []
+
+    def test_a_restore_after_a_crashed_tool_turn_fails_loudly(self, tmp_path):
+        """The review's reproduction: a critical ``run_tools`` handler crashes
+        once, the session is saved with the result but not the transcript,
+        and after the restore the runner rebuilds a task-less exchange."""
+        fsm = _tool_fsm()
+        llm = _ScriptedLLM(
+            tool_call_reply(("add", {"a": 2, "b": 3})), final_reply("never sent")
+        )
+        store = FileSessionStore(str(tmp_path))
+        api = API.from_definition(fsm, llm_interface=llm, session_store=store)
+        crashed: list[bool] = []
+
+        def crash_once(context: dict[str, Any]) -> dict[str, Any]:
+            if not crashed:
+                crashed.append(True)
+                raise RuntimeError("tool host down")
+            return {}
+
+        api.register_handler(
+            create_handler("crash")
+            .on_state_entry("run_tools")
+            .critical()
+            .with_priority(1)
+            .do(crash_once)
+        )
+        conv_id = _start(api)
+        api.advance(conv_id)  # intake -> call_model
+        with pytest.raises(FSMError):
+            api.advance(conv_id)  # the call is made, run_tools entry crashes
+        assert len(llm.requests) == 1
+        api.save_session(conv_id)
+        (saved,) = list(tmp_path.iterdir())
+
+        restored = API.from_definition(fsm, llm_interface=llm, session_store=store)
+        restored.register_handler(_tool_runner())
+        restored_id, _ = restored.restore_session(saved.stem)
+        with pytest.raises(LLMResponseError, match="no user message"):
+            for _ in range(4):
+                restored.advance(restored_id)
+        assert len(llm.requests) == 1  # nothing was sent after the restore
+
+    def test_a_transcript_with_the_task_still_runs(self):
+        llm = _ScriptedLLM(tool_call_reply(("add", {"a": 2, "b": 3})), final_reply("5"))
+        api = _api(_tool_fsm(), llm)
+        conv_id = _start(api)
+        api.run_until_terminal(conv_id, max_steps=6)
+        assert api.get_current_state(conv_id) == "done"
+        assert [m["role"] for m in llm.requests[1].messages] == [
+            "system",
+            "user",
+            "assistant",
+            "tool",
+        ]
+
+
+class TestResponseTemperature:
+    """D-038: a conversation's Pass-2 temperature travels on the request
+    (``CONTEXT_KEY_RESPONSE_TEMPERATURE``), so it applies through an injected
+    interface; the parent had no such setting (a per-sample temperature
+    beside an injected interface was dropped)."""
+
+    @staticmethod
+    def _speaking_fsm() -> dict[str, Any]:
+        state = {
+            "description": "Talk",
+            "purpose": "Talk",
+            "response_instructions": "Say something",
+        }
+        return {
+            "name": "Talk",
+            "description": "A greeting, then a reply",
+            "initial_state": "hello",
+            "states": {
+                "hello": {
+                    "id": "hello",
+                    **state,
+                    "transitions": [{"target_state": "bye", "description": "On"}],
+                },
+                "bye": {"id": "bye", **state},
+            },
+        }
+
+    def test_the_greeting_and_the_reply_carry_it(self):
+        injected = LiteLLMInterface("gpt-4o", temperature=0.5)
+        api = API.from_definition(self._speaking_fsm(), llm_interface=injected)
+        with _Provider(_reply('{"message": "hi"}')) as provider:
+            conv_id, _ = api.start_conversation({CONTEXT_KEY_RESPONSE_TEMPERATURE: 1.3})
+            api.converse("hello", conv_id)
+        assert api.get_current_state(conv_id) == "bye"
+        assert len(provider.calls) == 2  # the greeting and the reply
+        assert [call["temperature"] for call in provider.calls] == [1.3, 1.3]
+
+    def test_the_stream_carries_it(self):
+        request_temperatures: list[Any] = []
+        original = LiteLLMInterface._build_call_params
+
+        def spy(self: Any, messages: Any, call_type: str, **kw: Any) -> Any:
+            if kw.get("stream"):
+                request_temperatures.append(kw.get("temperature"))
+            return original(self, messages, call_type, **kw)
+
+        fsm = self._speaking_fsm()
+        api = API.from_definition(fsm, llm_interface=LiteLLMInterface("gpt-4o"))
+        chunk = SimpleNamespace(
+            choices=[SimpleNamespace(delta=SimpleNamespace(content="hi"))]
+        )
+        with (
+            _Provider(_reply('{"message": "hi"}')) as provider,
+            pytest.MonkeyPatch.context() as mp,
+        ):
+            mp.setattr(LiteLLMInterface, "_build_call_params", spy)
+            conv_id, _ = api.start_conversation({CONTEXT_KEY_RESPONSE_TEMPERATURE: 0.2})
+            provider.replies = [iter([chunk])]
+            "".join(api.converse_stream("hello", conv_id))
+        assert request_temperatures == [0.2]
+
+    def test_absent_keeps_the_interface_temperature(self):
+        api = API.from_definition(
+            self._speaking_fsm(),
+            llm_interface=LiteLLMInterface("gpt-4o", temperature=0.4),
+        )
+        with _Provider(_reply('{"message": "hi"}')) as provider:
+            api.start_conversation()
+        assert provider.calls[0]["temperature"] == 0.4
+
+    @pytest.mark.parametrize("bad", [True, "hot", 3.0, -0.1])
+    def test_a_bad_value_fails_the_turn(self, bad):
+        api = API.from_definition(
+            self._speaking_fsm(), llm_interface=LiteLLMInterface("gpt-4o")
+        )
+        with _Provider(_reply('{"message": "hi"}')) as provider:
+            with pytest.raises((FSMError, ValidationError)):
+                api.start_conversation({CONTEXT_KEY_RESPONSE_TEMPERATURE: bad})
+        assert provider.calls == []
+
+
+class TestSecondsExemptStatesAreStatesOfTheDefinition:
+    """Pass 8 note 8: an unknown (typo) state id was accepted and never
+    waived anything."""
+
+    def test_an_unknown_state_is_refused_at_call_time(self):
+        llm = _ScriptedLLM(final_reply("5"))
+        api = _api(_tool_fsm(), llm)
+        conv_id = _start(api)
+        with pytest.raises(ValueError, match=r"\['run_tool'\]"):
+            api.run_until_terminal(
+                conv_id, max_steps=5, seconds_exempt_states=("run_tool",)
+            )
+        with pytest.raises(ValueError, match=r"\['run_tool'\]"):
+            api.run_until_terminal_stream(
+                conv_id, max_steps=5, seconds_exempt_states=("run_tool",)
+            )
+        assert llm.requests == []
+        assert api.get_current_state(conv_id) == "intake"
+
+    def test_known_states_run(self):
+        llm = _ScriptedLLM(final_reply("5"))
+        api = _api(_tool_fsm(), llm)
+        conv_id = _start(api)
+        api.run_until_terminal(
+            conv_id, max_steps=5, seconds_exempt_states=("run_tools", "done")
+        )
+        assert api.get_current_state(conv_id) == "done"
+
+    def test_an_ended_conversation_runs_nothing_and_is_not_checked(self):
+        llm = _ScriptedLLM(final_reply("5"))
+        api = _api(_tool_fsm(), llm)
+        conv_id = _start(api)
+        api.run_until_terminal(conv_id, max_steps=5)
+        assert (
+            api.run_until_terminal(
+                conv_id, max_steps=5, seconds_exempt_states=("nowhere",)
+            )
+            == ()
+        )

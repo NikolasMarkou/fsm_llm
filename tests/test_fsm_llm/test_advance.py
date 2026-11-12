@@ -32,6 +32,8 @@ from fsm_llm.definitions import (
 from fsm_llm.llm import LLMInterface
 from fsm_llm.memory import WorkingMemory
 from fsm_llm.session import FileSessionStore
+from fsm_llm.testing import MockLLM2Interface
+from tests.test_fsm_llm.support import _TWO_STATE
 
 _REPLY = "Here is the plan for your trip."
 
@@ -1319,3 +1321,35 @@ class TestAdvanceStream:
         assert saved is not None
         assert saved.current_state == "collect"
         assert "city" not in saved.context_data
+
+
+class TestAdvanceOnATerminalStateIsRefusedBeforeAnyWork:
+    """F-PI-05: sync ``advance`` used to run the whole turn, then raise."""
+
+    def _terminal(self):
+        llm = MockLLM2Interface(response_text="hello")
+        api = API.from_definition(_TWO_STATE, llm_interface=llm)
+        cid, _ = api.start_conversation()
+        api.converse("go", cid)
+        assert api.get_current_state(cid) == "e"
+        return api, llm, cid
+
+    def test_sync_makes_no_llm_call_and_leaves_history_alone(self):
+        api, llm, cid = self._terminal()
+        pipeline = api.fsm_manager._pipeline
+        instance = api.fsm_manager.instances[cid]
+        calls = len(llm.call_history)
+        exchanges = len(instance.context.conversation.exchanges)
+        with pytest.raises(FSMError, match="Cannot advance from terminal state 'e'"):
+            pipeline.advance(instance, cid)
+        assert len(llm.call_history) == calls
+        assert len(instance.context.conversation.exchanges) == exchanges
+
+    def test_stream_twin_agrees(self):
+        api, llm, cid = self._terminal()
+        pipeline = api.fsm_manager._pipeline
+        instance = api.fsm_manager.instances[cid]
+        calls = len(llm.call_history)
+        with pytest.raises(FSMError, match="Cannot advance from terminal state 'e'"):
+            list(pipeline.advance_stream(instance, cid))
+        assert len(llm.call_history) == calls

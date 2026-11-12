@@ -422,7 +422,7 @@ class TestExecuteClassificationExtractions:
         """The classifier sends through the conversation's interface (D-006
         of plan 944e2692). One that is not an ``LLMInterface`` implementing
         ``complete`` cannot classify (``API`` refuses the pair at
-        construction, see test_review_fixes_core.py); a pipeline reached
+        construction, see test_classification_transitions.py::TestClassifierNeedsAnInterfaceWithComplete); a pipeline reached
         without that check builds and caches nothing, and the field fails
         with ``ClassificationError`` as D-020 states: skipped, or raised when
         required (D-046 of plan 944e2692; it raised ``ValueError`` at

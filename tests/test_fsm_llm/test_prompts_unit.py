@@ -18,6 +18,7 @@ from fsm_llm.api import API
 from fsm_llm.constants import MAX_CONTEXT_FILTER_DEPTH
 from fsm_llm.definitions import (
     ContextScope,
+    Conversation,
     FieldExtractionConfig,
     FSMContext,
     FSMDefinition,
@@ -29,6 +30,7 @@ from fsm_llm.definitions import (
 from fsm_llm.prompts import (
     BasePromptBuilder,
     BasePromptConfig,
+    DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
     FieldExtractionPromptConfig,
     HistoryManagementStrategy,
@@ -1849,3 +1851,65 @@ class TestStep14HistoryUnit:
         # The P1-8 expression would fetch only ceil(2 / 2) = 1 exchange.
         conversation = _step14_history_instance(4).context.conversation
         assert len(conversation.get_recent(math.ceil(2 / 2))) == 2
+
+
+def _instance(exchanges: list[dict[str, str]]) -> FSMInstance:
+    conv = Conversation(exchanges=exchanges, max_history_size=10)
+    return FSMInstance(
+        fsm_id="f", current_state="s", context=FSMContext(data={}, conversation=conv)
+    )
+
+
+_FIELD = FieldExtractionConfig(
+    field_name="x", field_type="str", extraction_instructions="get x"
+)
+
+
+class TestFieldPromptContextGuard:
+    """F-SU-04: an unserialisable context value drops the section, not the turn."""
+
+    @pytest.mark.parametrize(
+        "context", [{"a": {1: "x", "b": "y"}}, {"a": 10**5000}], ids=["keys", "int"]
+    )
+    def test_prompt_is_built_without_the_context_section(self, context):
+        prompt = FieldExtractionPromptBuilder().build_field_extraction_prompt(
+            _instance([]), _FIELD, "hi", dynamic_context=context
+        )
+        assert "get x" in prompt
+        assert "10000000" not in prompt
+
+    def test_a_good_context_still_reaches_the_prompt(self):
+        prompt = FieldExtractionPromptBuilder().build_field_extraction_prompt(
+            _instance([]), _FIELD, "hi", dynamic_context={"colour": "teal"}
+        )
+        assert "teal" in prompt
+
+
+class TestOneHistoryRoleRule:
+    """F-SU-16: the three history renderers share one role rule."""
+
+    def test_the_pass_two_history_keeps_every_message_of_a_multi_key_entry(self):
+        instance = _instance(
+            [{"assistant": "A-msg", "system": "S-msg"}, {"user": "U1"}]
+        )
+        text = "\n".join(
+            DataExtractionPromptBuilder()._build_enhanced_history_section(instance)
+        )
+        assert "A-msg" in text
+        assert "S-msg" in text
+        assert "U1" in text
+
+    def test_role_case_is_ignored_by_the_field_prompt_like_the_others(self):
+        instance = _instance([{"User": "U-cap"}, {"system": "S"}])
+        prompt = FieldExtractionPromptBuilder().build_field_extraction_prompt(
+            instance, _FIELD, "hi"
+        )
+        assert "User: U-cap" in prompt
+        assert "Assistant: U-cap" not in prompt
+
+    def test_pass_two_history_marks_a_capitalised_role_as_the_user(self):
+        instance = _instance([{"User": "U-cap"}])
+        text = "\n".join(
+            DataExtractionPromptBuilder()._build_enhanced_history_section(instance)
+        )
+        assert '"user": "U-cap"' in text
