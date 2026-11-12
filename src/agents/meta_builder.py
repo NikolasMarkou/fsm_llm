@@ -62,6 +62,7 @@ from .definitions import (
     ArtifactType,
     MetaBuilderConfig,
     MetaBuilderResult,
+    default_agent_config,
 )
 from .exceptions import BuilderError, MetaBuilderError, MetaValidationError
 from .fsm_definitions import build_meta_builder_fsm
@@ -336,7 +337,7 @@ class MetaBuilderAgent:
         # A plain AgentConfig (create_agent, the builder) becomes a
         # MetaBuilderConfig here; see MetaBuilderConfig.from_agent_config.
         self.meta_config = (
-            MetaBuilderConfig()
+            default_agent_config(api_kwargs.get("llm_interface"), MetaBuilderConfig)
             if config is None
             else MetaBuilderConfig.from_agent_config(config)
         )

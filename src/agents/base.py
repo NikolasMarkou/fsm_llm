@@ -51,7 +51,13 @@ from .constants import (
     LogMessages,
     StopReason,
 )
-from .definitions import AgentConfig, AgentResult, AgentTrace, ToolCall
+from .definitions import (
+    AgentConfig,
+    AgentResult,
+    AgentTrace,
+    ToolCall,
+    default_agent_config,
+)
 from .exceptions import AgentError, AgentTimeoutError, BudgetExhaustedError
 from .handlers import (
     AgentHandlers,
@@ -488,7 +494,7 @@ class BaseAgent(ABC):
         **api_kwargs: Any,
     ) -> None:
         reject_misplaced_kwargs(type(self).__name__, api_kwargs)
-        self.config = config or AgentConfig()
+        self.config = config or default_agent_config(api_kwargs.get("llm_interface"))
         self._api_kwargs = api_kwargs
         self._refuse_prompt_cache_with_injected_interface()
 

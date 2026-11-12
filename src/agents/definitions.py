@@ -9,11 +9,12 @@ import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from fsm_llm.llm import resolve_model
+from fsm_llm.definitions import ModelNotConfiguredError
+from fsm_llm.llm import interface_model, resolve_model
 from fsm_llm.logging import logger
 
 from .constants import Defaults, MetaDefaults, ToolObservationPrefix, ToolRunStatus
@@ -207,14 +208,17 @@ class AgentTrace(BaseModel):
 
 
 def resolve_agent_model(model: str | None = None) -> str:
-    """The model an agent uses: *model*, else env ``LLM_MODEL``, else the default.
+    """The model an agent uses: *model*, else env ``LLM_MODEL``; never a default.
 
     Interface contract (2 call sites: the ``AgentConfig.model`` default factory
     and ``composition.default_llm_judge``):
         - A non-empty *model* wins. Otherwise a non-blank ``LLM_MODEL`` (read
-          now, stripped), otherwise ``Defaults.MODEL`` (core
-          ``DEFAULT_LLM_MODEL``). Always returns a non-empty string.
-        - Never raises.
+          now, stripped). Always returns a non-empty string.
+        - Raises ``ModelNotConfiguredError`` (an ``FSMError`` and a
+          ``ValueError``) when both are unset; pydantic lets a
+          ``default_factory`` exception propagate, so ``AgentConfig()`` raises
+          it too. An agent that holds an injected ``llm_interface`` does not
+          come here: see ``default_agent_config``.
 
     # DECISION plan-2026-09-29T103145-06a5ec0a/D-013
     Do NOT make ``AgentConfig.model`` default to ``None`` and resolve later:
@@ -225,6 +229,15 @@ def resolve_agent_model(model: str | None = None) -> str:
     return resolve_model(model)
 
 
+PLACEHOLDER_MODEL = "unset/placeholder"
+"""A model id that names nothing and is never sent to a provider.
+
+Used where ``AgentConfig.model`` must hold a string but no model was chosen:
+an agent with an injected ``llm_interface`` that states no ``model`` (the
+interface owns the model), and the second validation pass of
+``AgentArtifactBuilder._config_problems``."""
+
+
 class AgentConfig(BaseModel):
     """Configuration for an agent.
 
@@ -233,8 +246,8 @@ class AgentConfig(BaseModel):
     """
 
     model: str = Field(default_factory=resolve_agent_model)
-    """litellm model id. Default: env ``LLM_MODEL`` at construction, else
-    ``DEFAULT_LLM_MODEL``."""
+    """litellm model id. Default: env ``LLM_MODEL`` at construction; unset
+    raises ``ModelNotConfiguredError`` (there is no built-in model)."""
 
     max_iterations: int = Defaults.MAX_ITERATIONS
     timeout_seconds: float = Defaults.TIMEOUT_SECONDS
@@ -434,6 +447,41 @@ class AgentConfig(BaseModel):
         if not math.isfinite(v) or v <= 0:
             raise ValueError("timeout_seconds must be a finite positive number")
         return v
+
+
+_ConfigT = TypeVar("_ConfigT", bound=AgentConfig)
+
+
+def default_agent_config(
+    llm_interface: Any = None,
+    config_cls: type[_ConfigT] = AgentConfig,  # type: ignore[assignment]
+) -> _ConfigT:
+    """The config an agent gets when the caller passed none.
+
+    Interface contract (callers: ``BaseAgent.__init__``, ``create_agent``,
+    ``ConfiguredAgentBuilder``, ``MetaBuilderAgent``):
+        - ``llm_interface``: the interface injected into the agent, or ``None``.
+        - ``config_cls``: ``AgentConfig`` or a subclass.
+        - No interface: ``config_cls()``, which raises ``ModelNotConfiguredError``
+          when no ``LLM_MODEL`` is set.
+        - An interface: its own ``model`` string, else ``LLM_MODEL`` when set,
+          else ``PLACEHOLDER_MODEL``; never raises for the model, because the
+          interface, not this config, decides which model answers.
+    """
+    # DECISION plan-2026-11-12T073150-d454fd62/D-005
+    # Do NOT build ``AgentConfig()`` eagerly for an agent that holds an injected
+    # interface: with no built-in model it would raise for a user test that
+    # passes only a double. Do NOT read a model from the interface any other
+    # way than ``interface_model`` (a mock attribute is not a model).
+    if llm_interface is None:
+        return config_cls()
+    model = interface_model(llm_interface)
+    if model is None:
+        try:
+            model = resolve_model()
+        except ModelNotConfiguredError:
+            model = PLACEHOLDER_MODEL
+    return config_cls(model=model)
 
 
 def config_with(base: AgentConfig, **updates: Any) -> AgentConfig:

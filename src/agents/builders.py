@@ -14,7 +14,13 @@ from fsm_llm.builders import refuse_named_options
 from fsm_llm.definitions import BuildError
 
 from . import create_agent
-from .definitions import AgentConfig, MetaBuilderConfig, ToolDefinition, config_with
+from .definitions import (
+    AgentConfig,
+    MetaBuilderConfig,
+    ToolDefinition,
+    config_with,
+    default_agent_config,
+)
 from .exceptions import AgentError
 from .tools import ToolRegistry, registry_from
 
@@ -157,8 +163,14 @@ class ConfiguredAgentBuilder:
             base: AgentConfig = (
                 MetaBuilderConfig.from_agent_config(self._config)
                 if self._config
-                else MetaBuilderConfig()
+                else default_agent_config(
+                    self._options.get("llm_interface"), MetaBuilderConfig
+                )
             )
         else:
-            base = self._config.model_copy() if self._config else AgentConfig()
+            base = (
+                self._config.model_copy()
+                if self._config
+                else default_agent_config(self._options.get("llm_interface"))
+            )
         return config_with(base, **self._config_options)

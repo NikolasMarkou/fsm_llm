@@ -13,7 +13,6 @@ from dataclasses import replace
 from typing import Any
 
 from .constants import (
-    DEFAULT_LLM_MODEL,
     MAX_MULTI_INTENTS,
     RESERVED_LLM_CALL_KWARGS,
 )
@@ -38,6 +37,7 @@ from .llm import (
     cut_off_note,
     implements_complete,
     interface_model,
+    resolve_model,
 )
 from .logging import logger
 from .prompts import (
@@ -134,7 +134,7 @@ class Classifier:
     ``LLMResponseError`` (an outage, an unreadable reply) or the reply is not
     a classification; any other exception from the interface propagates.
     - ``llm_interface`` omitted: a ``fsm_llm.LiteLLMInterface`` constructed here from
-      ``model`` (default ``DEFAULT_LLM_MODEL``), ``api_key`` and
+      ``model`` (default env ``LLM_MODEL``, else ``ModelNotConfiguredError``), ``api_key`` and
       ``llm_kwargs`` (``timeout`` defaults to 120 seconds; ``retries`` has
       that interface's meaning; names in ``RESERVED_LLM_CALL_KWARGS`` are
       ignored, the prompt config owns ``temperature`` and ``max_tokens``).
@@ -201,7 +201,7 @@ class Classifier:
             self._llm = llm_interface
             self.model: str | None = model if model is not None else injected_model
         else:
-            self.model = model if model is not None else DEFAULT_LLM_MODEL
+            self.model = resolve_model(model)
             connection: dict[str, Any] = {
                 "timeout": DEFAULT_LLM_TIMEOUT_SECONDS,
                 **{
@@ -520,7 +520,8 @@ class HierarchicalClassifier:
     ``Classifier`` with the same ``model``, ``llm_interface``, ``api_key``,
     ``config`` and ``llm_kwargs`` (same rules and errors as ``Classifier``) and
     all of them send through ONE interface: the injected ``llm_interface``, or
-    the one built for ``model`` (default ``DEFAULT_LLM_MODEL``).
+    the one built for ``model`` (default env ``LLM_MODEL``; unset raises
+    ``ModelNotConfiguredError``).
     """
 
     def __init__(

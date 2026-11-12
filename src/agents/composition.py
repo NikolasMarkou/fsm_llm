@@ -23,12 +23,13 @@ import contextlib
 from collections.abc import Callable
 from typing import Any
 
-from fsm_llm.definitions import CompletionRequest
+from fsm_llm.definitions import CompletionRequest, ModelNotConfiguredError
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.logging import logger
 from fsm_llm.utilities import coerce_confidence, extract_json_from_text
 
 from .definitions import (
+    PLACEHOLDER_MODEL,
     AgentConfig,
     AgentResult,
     EvaluationResult,
@@ -122,7 +123,8 @@ def default_llm_judge(
 
     Args:
         model: Provider model id used to grade (when ``complete_fn`` is None).
-            ``None`` resolves now: env ``LLM_MODEL``, else ``DEFAULT_LLM_MODEL``.
+            ``None`` resolves now from env ``LLM_MODEL``; unset raises
+            ``ModelNotConfiguredError`` unless ``complete_fn`` is given.
         criteria: Optional extra grading criteria appended to the prompt.
         threshold: Score at/above which ``passed`` is True.
         complete_fn: Optional ``(model, prompt) -> str`` override (for tests or
@@ -134,7 +136,15 @@ def default_llm_judge(
     """
     criteria_clause = f", judged on: {criteria}" if criteria else ""
     complete = complete_fn or _default_complete
-    model = resolve_agent_model(model)
+    if complete_fn is None:
+        model = resolve_agent_model(model)
+    else:
+        # A custom backend owns the model: the name is only handed to it, so
+        # no model set is not an error (the default judge needs one).
+        try:
+            model = resolve_agent_model(model)
+        except ModelNotConfiguredError:
+            model = PLACEHOLDER_MODEL
 
     def judge(output: str, context: dict[str, Any] | None = None) -> EvaluationResult:
         task = ""

@@ -63,6 +63,7 @@ from .definitions import (
     ToolDefinition,
     ToolResult,
     config_with,
+    default_agent_config,
 )
 from .evaluator_optimizer import EvaluatorOptimizerAgent
 from .exceptions import (
@@ -242,7 +243,9 @@ def create_agent(
                 "pass the instructions once"
             )
         config = config_with(
-            config if config is not None else AgentConfig(),
+            config
+            if config is not None
+            else default_agent_config(kwargs.get("llm_interface")),
             instructions=system_prompt,
         )
     if config is not None:

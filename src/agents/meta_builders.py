@@ -17,11 +17,21 @@ from typing import Any, ClassVar
 
 from pydantic import ValidationError
 
-from fsm_llm.definitions import BuildError, FSMDefinition, reachable_from
+from fsm_llm.definitions import (
+    BuildError,
+    FSMDefinition,
+    ModelNotConfiguredError,
+    reachable_from,
+)
 from fsm_llm.logging import logger
 
 from .constants import MetaDefaults
-from .definitions import AgentConfig, ArtifactType, BuildProgress
+from .definitions import (
+    PLACEHOLDER_MODEL,
+    AgentConfig,
+    ArtifactType,
+    BuildProgress,
+)
 from .exceptions import BuilderError
 
 
@@ -941,9 +951,21 @@ class AgentArtifactBuilder(ArtifactBuilder):
         # ``MetaDefaults.AGENT_MODEL`` in this change: it is a fixed template
         # value, not the runtime default (``resolve_agent_model()``), and the
         # change is carried for the owner.
+        # DECISION plan-2026-11-12T073150-d454fd62/D-005: a config without a
+        # ``model`` and no ``LLM_MODEL`` makes ``AgentConfig``'s default
+        # factory raise ``ModelNotConfiguredError``, not a ``ValidationError``.
+        # Do NOT let it escape (this method never raises) and do NOT drop the
+        # other keys' problems: report ``model`` and validate the rest with a
+        # placeholder model.
         problems: dict[str, str] = {}
         try:
             AgentConfig.model_validate(config)
+        except ModelNotConfiguredError as exc:
+            problems["model"] = str(exc)
+            for key, reason in cls._config_problems(
+                {**config, "model": PLACEHOLDER_MODEL}
+            ).items():
+                problems.setdefault(key, reason)
         except ValidationError as exc:
             for err in exc.errors():
                 loc = err["loc"]

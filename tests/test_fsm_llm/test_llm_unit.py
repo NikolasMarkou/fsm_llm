@@ -938,8 +938,8 @@ class TestFieldExtractionNaNConfidence:
 class TestDefaultModel:
     """Plan 0068b055 step 0 (D-014, D-015): the framework default embedder is
     one constant. Plan d454fd62 D-005: there is no default chat model; a
-    model-less ``API`` raises ``ModelNotConfiguredError``. The classifier still
-    reads ``DEFAULT_LLM_MODEL`` until the callers step (plan d454fd62 step 14)."""
+    model-less ``API`` and a model-less ``Classifier`` raise
+    ``ModelNotConfiguredError``."""
 
     def test_default_llm_model_is_bonsai_27b(self):
         # Removed with the constant in plan d454fd62 step 15.
@@ -952,12 +952,10 @@ class TestDefaultModel:
 
         assert DEFAULT_EMBEDDING_MODEL == "ollama/embeddinggemma-2:740m"
 
-    def test_model_less_api_raises_and_the_classifier_still_has_its_default(
-        self, monkeypatch
-    ):
+    def test_model_less_api_and_classifier_raise(self, monkeypatch):
         from fsm_llm import API, ModelNotConfiguredError
         from fsm_llm.classification import Classifier
-        from fsm_llm.constants import DEFAULT_LLM_MODEL, ENV_LLM_MODEL
+        from fsm_llm.constants import ENV_LLM_MODEL
         from fsm_llm.definitions import ClassificationSchema, IntentDefinition
 
         monkeypatch.delenv(ENV_LLM_MODEL, raising=False)
@@ -979,7 +977,6 @@ class TestDefaultModel:
         }
         with pytest.raises(ModelNotConfiguredError):
             API.from_definition(fsm)
-        assert DEFAULT_LLM_MODEL == "ollama_chat/bonsai-2:27b"
         schema = ClassificationSchema(
             intents=[
                 IntentDefinition(name="a", description="first"),
@@ -987,4 +984,5 @@ class TestDefaultModel:
             ],
             fallback_intent="a",
         )
-        assert Classifier(schema).model == DEFAULT_LLM_MODEL
+        with pytest.raises(ModelNotConfiguredError):
+            Classifier(schema)

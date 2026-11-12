@@ -40,7 +40,6 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 from fsm_llm.api import API
 from fsm_llm.classification import Classifier, HierarchicalClassifier
 from fsm_llm.constants import (
-    DEFAULT_LLM_MODEL,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
     MAX_CLASSIFIER_CACHE_SIZE,
     METADATA_KEY_TRANSITION_CLASSIFICATION,
@@ -1470,9 +1469,10 @@ class TestClassifierUsesConversationInterface:
         (request,) = llm.requests
         assert request.messages[1] == {"role": "user", "content": "hi"}
 
-    def test_direct_classifier_without_llm_is_unchanged(self):
+    def test_direct_classifier_without_llm_builds_its_own_interface(self, monkeypatch):
+        monkeypatch.setenv("LLM_MODEL", "env/model")
         classifier = Classifier(_schema("a", "b"))
-        assert classifier.model == DEFAULT_LLM_MODEL
+        assert classifier.model == "env/model"
         assert isinstance(classifier._llm, LiteLLMInterface)
         assert classifier._llm.timeout == 120.0
 
