@@ -4,9 +4,12 @@
 Run `.venv/bin/python scripts/api_snapshot.py` (stdout) or
 `.venv/bin/python scripts/api_snapshot.py --write docs/api.txt` (`make
 api-snapshot`). `tests/test_fsm_llm_regression/test_api_snapshot.py` compares
-the stdout with the committed file, so a removed, renamed or retyped public
-name fails the build until the file is regenerated and reviewed in the same
-commit.
+the stdout with the committed file, so a removed or renamed name in the
+listed `__all__` lists, or a changed signature, model field, default or enum
+member, fails the build until the file is regenerated and reviewed in the same
+commit. Not covered: module functions outside `__all__`, `model_config`, the
+values of plain constant classes, the contents of factory defaults and
+property types.
 
 Public means the names in the static `__all__` of the modules in `MODULES`,
 plus the names listed in `EXPLICIT` for a module that has no `__all__`
@@ -62,7 +65,6 @@ EXPLICIT = {
 
 _ADDR = re.compile(r" at 0x[0-9a-fA-F]+")
 _TYPING = re.compile(r"\btyping\.")
-_OPT = re.compile(r"\bOptional\[([^\[\]]*)\]")
 
 
 def _t(a) -> str:

@@ -4,7 +4,8 @@ Tests for ``fsm_llm.schema_registry``: the field-introduction registry.
 The registry is proven complete by WALKING the annotations reachable from
 ``FSMDefinition`` (not by a hand list), so a new field or a new nested model
 that is not registered fails here. Every definition below declares its version
-explicitly, so none of these tests depends on the default version.
+explicitly, except in ``TestDefaultVersion``, the only class that reads the
+default version.
 """
 
 import contextlib
@@ -677,8 +678,6 @@ def _example_definition_bodies() -> list[tuple[str, dict[str, Any]]]:
     root = Path(__file__).parent.parent.parent / "examples"
     found = []
     for path in sorted(root.glob("**/*.json")):
-        import json
-
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, dict) and {"initial_state", "states"} <= data.keys():
             found.append((str(path.relative_to(root)), data))
