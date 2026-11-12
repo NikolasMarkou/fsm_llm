@@ -20,7 +20,7 @@ from __future__ import annotations
 # Core models and exceptions
 # Version info — imported via __version__.py to stay in sync (matches classification/reasoning pattern)
 from .__version__ import __version__
-from .constants import MAX_STEPS_PER_RUN
+from .constants import DEFAULT_MAX_STEPS
 
 # Workflow definition and validation
 from .definitions import WorkflowDefinition
@@ -129,7 +129,7 @@ __all__ = [
     # Engine
     "WorkflowEngine",
     "Timer",
-    "MAX_STEPS_PER_RUN",
+    "DEFAULT_MAX_STEPS",
     # Dependency Resolution
     "DependencyResolver",
     # Version

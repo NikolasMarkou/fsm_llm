@@ -544,7 +544,7 @@ class TestRemovedWorkflowLegacy:
         mod = importlib.import_module(module)
         assert not hasattr(mod, "MAX_STEP_DEPTH")
         assert "MAX_STEP_DEPTH" not in getattr(mod, "__all__", ())
-        assert mod.MAX_STEPS_PER_RUN == 1000
+        assert mod.DEFAULT_MAX_STEPS == 1000
 
     @pytest.mark.parametrize(
         "name",

@@ -137,7 +137,7 @@ class TestUserTimeoutErrorBehaviour:
         def upstream() -> Any:
             raise asyncio.TimeoutError("upstream socket timed out")
 
-        step = api_step("s", "S", upstream, "", "", timeout=5)
+        step = api_step("s", "S", upstream, "", "", timeout_seconds=5)
         result = await step.execute({})
         assert result.success is False
         assert "upstream socket timed out" in (result.error or "")
@@ -147,7 +147,7 @@ class TestUserTimeoutErrorBehaviour:
         async def slow() -> Any:
             await asyncio.sleep(5)
 
-        step = api_step("s", "S", slow, "", "", timeout=0.05)
+        step = api_step("s", "S", slow, "", "", timeout_seconds=0.05)
         result = await step.execute({})
         assert result.success is False
         assert "timed out after 0.05s" in (result.error or "")
@@ -360,7 +360,7 @@ class TestTimerKeysAndRearm:
         wf.with_step(timer_step("t", "T", 60, ""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf", workflow_timeout=120)
+        iid = await engine.start_workflow("wf", max_seconds=120)
         assert set(engine.timers) == {f"{iid}_go_timeout", f"{iid}_deadline"}
 
         await engine.process_event(WorkflowEvent(event_type="go"))
@@ -412,7 +412,7 @@ class TestTimerKeysAndRearm:
         wf.with_initial_step(wait_event_step("w", "W", "go", success_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf", workflow_timeout=0.02)
+        iid = await engine.start_workflow("wf", max_seconds=0.02)
         await asyncio.sleep(0.15)
         assert engine.get_workflow_status(iid) == WorkflowStatus.FAILED
         assert engine.timers == {}
@@ -488,7 +488,7 @@ class TestCancelReleasesEverything:
         )
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("wf", workflow_timeout=120)
+        iid = await engine.start_workflow("wf", max_seconds=120)
         assert engine.timers and engine.event_listeners["go"]
 
         assert await engine.cancel_workflow(iid) is True

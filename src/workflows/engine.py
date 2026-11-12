@@ -21,6 +21,7 @@ from fsm_llm.logging import logger
 # --------------------------------------------------------------
 from .constants import (
     DEFAULT_MAX_COMPLETED_INSTANCES,
+    DEFAULT_MAX_STEPS,
     KEY_CANCELLATION_REASON,
     KEY_LAST_EVENT,
     KEY_TIMEOUT,
@@ -30,7 +31,6 @@ from .constants import (
     KEY_WAITING_INFO,
     KEY_WORKFLOW_INFO,
     MAX_BUFFERED_EVENTS_PER_INSTANCE,
-    MAX_STEPS_PER_RUN,
     STEP_INTERNAL_WHITELIST,
 )
 from .definitions import WorkflowDefinition
@@ -52,7 +52,7 @@ from .models import (
 )
 from .steps import STEP_EXECUTOR
 
-__all__ = ["MAX_STEPS_PER_RUN", "Timer", "WorkflowEngine"]
+__all__ = ["DEFAULT_MAX_STEPS", "Timer", "WorkflowEngine"]
 
 #: Signature of a lifecycle hook: ``hook(event_name, instance, data)``.
 LifecycleHook = Callable[[str, WorkflowInstance, dict[str, Any]], Any]
@@ -128,7 +128,7 @@ class WorkflowEngine:
             instances.
         max_completed_instances: Maximum number of terminal instances kept in
             memory (oldest purged first). ``None`` keeps all of them.
-        max_steps_per_run: Maximum steps one engine call may execute before
+        max_steps: Maximum steps one engine call may execute before
             the instance is FAILED (guards custom steps with dynamic routing;
             static synchronous cycles are rejected at registration).
         executor: Executor for synchronous step callables. ``None`` uses the
@@ -140,17 +140,17 @@ class WorkflowEngine:
         *,
         max_concurrent_workflows: int = 100,
         max_completed_instances: int | None = DEFAULT_MAX_COMPLETED_INSTANCES,
-        max_steps_per_run: int = MAX_STEPS_PER_RUN,
+        max_steps: int = DEFAULT_MAX_STEPS,
         executor: Executor | None = None,
     ):
         """Initialize the workflow engine."""
-        if max_steps_per_run < 1:
-            raise ValueError("max_steps_per_run must be >= 1")
+        if max_steps < 1:
+            raise ValueError("max_steps must be >= 1")
 
         # Configuration
         self.max_concurrent_workflows = max_concurrent_workflows
         self.max_completed_instances = max_completed_instances
-        self.max_steps_per_run = max_steps_per_run
+        self.max_steps = max_steps
         self.executor = executor
 
         # Storage
@@ -331,7 +331,7 @@ class WorkflowEngine:
         workflow_id: str,
         initial_context: dict[str, Any] | None = None,
         instance_id: str | None = None,
-        workflow_timeout: float | None = None,
+        max_seconds: float | None = None,
         wait: bool = True,
     ) -> str:
         """Start a new workflow instance.
@@ -341,7 +341,7 @@ class WorkflowEngine:
             initial_context: Initial context data for the workflow (copied).
             instance_id: Optional custom instance ID (generated if omitted).
                 Must not belong to an instance the engine still holds.
-            workflow_timeout: Optional total time limit in seconds for the
+            max_seconds: Optional total time limit in seconds for the
                 entire workflow execution, waits included. ``None`` means no
                 limit.
             wait: ``True`` (default) runs the steps before returning.
@@ -352,7 +352,7 @@ class WorkflowEngine:
             WorkflowResourceError: the engine is shut down or the concurrent
                 limit is reached.
             WorkflowInstanceError: ``instance_id`` is already in use.
-            WorkflowTimeoutError: the run exceeded ``workflow_timeout``; its
+            WorkflowTimeoutError: the run exceeded ``max_seconds``; its
                 ``instance_id`` attribute names the (FAILED) instance.
         """
         if self._closed:
@@ -387,10 +387,10 @@ class WorkflowEngine:
         )
 
         # Set deadline for workflow-level timeout
-        if workflow_timeout is not None:
-            instance.workflow_timeout = workflow_timeout
+        if max_seconds is not None:
+            instance.max_seconds = max_seconds
             instance.deadline = datetime.now(timezone.utc) + timedelta(
-                seconds=workflow_timeout
+                seconds=max_seconds
             )
 
         # Store and execute
@@ -520,12 +520,12 @@ class WorkflowEngine:
                 request.honored = True
                 return
 
-            if steps_run >= self.max_steps_per_run:
+            if steps_run >= self.max_steps:
                 error = WorkflowStateError(
                     current_state=instance.current_step_id,
                     operation="execute",
                     message=(
-                        f"Step budget exceeded: {self.max_steps_per_run} steps in "
+                        f"Step budget exceeded: {self.max_steps} steps in "
                         f"one engine call for instance {instance.instance_id} "
                         "(a custom step may be routing in a loop)"
                     ),
@@ -552,12 +552,12 @@ class WorkflowEngine:
         stops here (paused, completed, failed).
         """
 
-        # Report the configured workflow_timeout (not deadline-minus-created_at,
+        # Report the configured max_seconds (not deadline-minus-created_at,
         # which is inflated by the construction-to-start gap). Fall back to the
         # deadline span only if the timeout was not recorded.
         # DECISION plan-2026-09-12T065608-089d0ec7/D-011
         # Do NOT re-introduce `int(...)` truncation here: a sub-second
-        # `workflow_timeout`/deadline span (e.g. 0.5s) would report as `0` in
+        # `max_seconds`/deadline span (e.g. 0.5s) would report as `0` in
         # `WorkflowTimeoutError`'s message, which is actively misleading (the
         # `asyncio.wait_for` call below already receives the correct float
         # timeout — only this reporting helper was truncating). See D-011.
@@ -668,8 +668,8 @@ class WorkflowEngine:
 
     @staticmethod
     def _timeout_seconds(instance: WorkflowInstance) -> float:
-        if instance.workflow_timeout is not None:
-            return float(instance.workflow_timeout)
+        if instance.max_seconds is not None:
+            return float(instance.max_seconds)
         if instance.deadline is not None:
             return (instance.deadline - instance.created_at).total_seconds()
         return 0.0

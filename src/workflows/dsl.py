@@ -62,7 +62,7 @@ def auto_step(
     action: Callable | None = None,
     description: str = "",
     error_state: str | None = None,
-    timeout: float | None = None,
+    timeout_seconds: float | None = None,
 ) -> AutoTransitionStep:
     """
     Create an auto transition step.
@@ -76,7 +76,7 @@ def auto_step(
         description: Optional description
         error_state: State to transition to if the action fails (otherwise the
             instance FAILS)
-        timeout: Optional per-step time limit in seconds
+        timeout_seconds: Optional per-step time limit in seconds
 
     Returns:
         A new auto transition step
@@ -88,7 +88,7 @@ def auto_step(
         action=action,
         description=description,
         error_state=error_state,
-        timeout=timeout,
+        timeout_seconds=timeout_seconds,
     )
 
 
@@ -104,7 +104,7 @@ def api_step(
     input_mapping: dict[str, str] | None = None,
     output_mapping: dict[str, str] | None = None,
     description: str = "",
-    timeout: float | None = None,
+    timeout_seconds: float | None = None,
 ) -> APICallStep:
     """
     Create an API call step.
@@ -119,7 +119,7 @@ def api_step(
         output_mapping: ``{context_key: result_key}``; ``result_key`` may be a
             dotted path, or ``""`` for the whole result
         description: Optional description
-        timeout: Optional per-step time limit in seconds
+        timeout_seconds: Optional per-step time limit in seconds
 
     Returns:
         A new API call step
@@ -133,7 +133,7 @@ def api_step(
         input_mapping=input_mapping or {},
         output_mapping=output_mapping or {},
         description=description,
-        timeout=timeout,
+        timeout_seconds=timeout_seconds,
     )
 
 
@@ -148,7 +148,7 @@ def condition_step(
     false_state: str,
     description: str = "",
     error_state: str | None = None,
-    timeout: float | None = None,
+    timeout_seconds: float | None = None,
 ) -> ConditionStep:
     """
     Create a condition step.
@@ -162,7 +162,7 @@ def condition_step(
         description: Optional description
         error_state: State to transition to if the condition raises
             (otherwise the instance FAILS)
-        timeout: Optional per-step time limit in seconds
+        timeout_seconds: Optional per-step time limit in seconds
 
     Returns:
         A new condition step
@@ -175,7 +175,7 @@ def condition_step(
         false_state=false_state,
         description=description,
         error_state=error_state,
-        timeout=timeout,
+        timeout_seconds=timeout_seconds,
     )
 
 
@@ -192,7 +192,7 @@ def llm_step(
     next_state: str = "",
     error_state: str | None = None,
     description: str = "",
-    timeout: float | None = None,
+    timeout_seconds: float | None = None,
     system_prompt: str | None = None,
 ) -> LLMProcessingStep:
     """
@@ -211,7 +211,7 @@ def llm_step(
         error_state: State to transition to on error (otherwise the
             instance FAILS)
         description: Optional description
-        timeout: Optional per-step time limit in seconds
+        timeout_seconds: Optional per-step time limit in seconds
         system_prompt: System prompt used with a core ``LLMInterface``
 
     Returns:
@@ -230,7 +230,7 @@ def llm_step(
         next_state=next_state,
         error_state=error_state,
         description=description,
-        timeout=timeout,
+        timeout_seconds=timeout_seconds,
         **extra,
     )
 
@@ -327,7 +327,7 @@ def parallel_step(
     error_state: str | None = None,
     aggregation_function: Callable | None = None,
     description: str = "",
-    timeout: float | None = None,
+    timeout_seconds: float | None = None,
 ) -> ParallelStep:
     """
     Create a parallel step.
@@ -341,7 +341,7 @@ def parallel_step(
             instance FAILS)
         aggregation_function: Function to aggregate results
         description: Optional description
-        timeout: Optional time limit in seconds for all children together
+        timeout_seconds: Optional time limit in seconds for all children together
 
     Returns:
         A new parallel step
@@ -354,7 +354,7 @@ def parallel_step(
         error_state=error_state,
         aggregation_function=aggregation_function,
         description=description,
-        timeout=timeout,
+        timeout_seconds=timeout_seconds,
     )
 
 
@@ -372,7 +372,7 @@ def conversation_step(
     error_state: str | None = None,
     description: str = "",
     conversation_timeout: float | None = None,
-    timeout: float | None = None,
+    timeout_seconds: float | None = None,
     require_completion: bool = False,
     use_user_input: bool = False,
 ) -> ConversationStep:
@@ -398,7 +398,7 @@ def conversation_step(
             instance FAILS)
         description: Optional description
         conversation_timeout: Time limit for the conversation in seconds
-        timeout: Per-step time limit (the smaller limit wins)
+        timeout_seconds: Per-step time limit (the smaller limit wins)
         require_completion: Fail when the conversation has not ended
         use_user_input: Also send ``advance_workflow``'s user input
 
@@ -419,7 +419,7 @@ def conversation_step(
         error_state=error_state,
         description=description,
         conversation_timeout=conversation_timeout,
-        timeout=timeout,
+        timeout_seconds=timeout_seconds,
         require_completion=require_completion,
         use_user_input=use_user_input,
     )
@@ -677,7 +677,7 @@ def agent_step(
     error_state: str | None = None,
     description: str = "",
     input_mapping: dict[str, str] | None = None,
-    timeout: float | None = None,
+    timeout_seconds: float | None = None,
 ) -> AgentStep:
     """Create an ``AgentStep`` that runs an FSM-LLM agent.
 
@@ -693,7 +693,7 @@ def agent_step(
         description: Step description.
         input_mapping: INPUT ``{agent_context_key: workflow_key}`` passed as
             ``agent.run(task, initial_context=...)``.
-        timeout: Optional per-step time limit in seconds.
+        timeout_seconds: Optional per-step time limit in seconds.
 
     Returns:
         Configured AgentStep instance.
@@ -708,7 +708,7 @@ def agent_step(
         error_state=error_state,
         description=description,
         input_mapping=input_mapping or {},
-        timeout=timeout,
+        timeout_seconds=timeout_seconds,
     )
 
 
@@ -719,7 +719,7 @@ def retry_step(
     max_retries: int = 3,
     backoff_factor: float = 1.0,
     description: str = "",
-    timeout: float | None = None,
+    timeout_seconds: float | None = None,
 ) -> RetryStep:
     """Create a ``RetryStep`` that wraps another step with retry logic.
 
@@ -731,7 +731,7 @@ def retry_step(
         backoff_factor: Linear delay multiplier: retry ``n`` waits
             ``backoff_factor * n`` seconds.
         description: Step description.
-        timeout: Optional time limit per attempt in seconds.
+        timeout_seconds: Optional time limit per attempt in seconds.
 
     Returns:
         Configured RetryStep instance.
@@ -743,7 +743,7 @@ def retry_step(
         max_retries=max_retries,
         backoff_factor=backoff_factor,
         description=description,
-        timeout=timeout,
+        timeout_seconds=timeout_seconds,
     )
 
 

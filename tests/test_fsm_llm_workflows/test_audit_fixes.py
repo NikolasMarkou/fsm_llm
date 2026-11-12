@@ -619,7 +619,7 @@ class TestCancelWorkflowTerminalGuard:
 
 
 class TestFloatTimeoutSecondsEndToEnd:
-    """F7 regression: a sub-second workflow_timeout must report its real
+    """F7 regression: a sub-second max_seconds must report its real
     float value (e.g. 0.5) in the raised WorkflowTimeoutError, not `0` from
     a stale `int(...)` truncation in engine.py's `_timeout_seconds()`
     helper. See decisions.md D-011."""
@@ -651,7 +651,7 @@ class TestFloatTimeoutSecondsEndToEnd:
             workflow_id="wf-float-timeout",
             current_step_id="only",
             status=WorkflowStatus.RUNNING,
-            workflow_timeout=0.5,
+            max_seconds=0.5,
             deadline=datetime.now(timezone.utc) - timedelta(seconds=1),
         )
         engine.workflow_instances[instance.instance_id] = instance

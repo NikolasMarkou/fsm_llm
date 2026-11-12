@@ -106,11 +106,11 @@ Installing the `workflows` extra (`pip install -e ".[workflows]"` from a clone) 
 - Everything is `async`. Plain (sync) functions such as actions and conditions run in a thread pool; pass `WorkflowEngine(executor=...)` to choose it. A function that returns a coroutine is awaited. A timeout cannot stop a sync function that is already running in its thread.
 - A step returning `next_state=""` ends the workflow there.
 - A failed step goes to its `error_state` (for API steps, `failure_state`). With no error route the instance FAILS; it never continues down the success route.
-- Loops are allowed when they pass through a timer or event wait (polling, retry-until). A loop made only of steps that run back to back is rejected when the workflow is registered. One engine call runs at most `max_steps_per_run` steps (default 1000), then the instance FAILS.
+- Loops are allowed when they pass through a timer or event wait (polling, retry-until). A loop made only of steps that run back to back is rejected when the workflow is registered. One engine call runs at most `max_steps` steps (default 1000), then the instance FAILS.
 - Events: `process_event` wakes every instance waiting for that event type, or only one instance when `WorkflowEvent.instance_id` is set. A targeted event that arrives early is kept (up to 100 per instance) until that instance waits for it. `correlation_key="order_id"` on a wait accepts only events whose payload `order_id` equals the instance's own context value.
 - A wait with `timeout_seconds` and no `timeout_state` FAILS the instance when it times out.
 - Keys a step returns that look internal (starting with `_`, `system_`, `internal_` or `__`, any case) are dropped from the context, except the engine's own `_waiting_info` and `_timer_info` markers.
-- `start_workflow(..., workflow_timeout=30)` limits the whole run, waits included, and raises `WorkflowTimeoutError` when a step runs past it.
+- `start_workflow(..., max_seconds=30)` limits the whole run, waits included, and raises `WorkflowTimeoutError` when a step runs past it.
 - Finished instances stay in memory: by default the 1000 most recent (`max_completed_instances`), each with at most 1000 history entries.
 - `engine.add_hook(fn)` calls `fn(event_name, instance, data)` on `step_started`, `step_completed` and `status_changed`.
 - Log output is off until `fsm_llm.setup_logging()` or `fsm_llm.enable_debug_logging()` is called.

@@ -90,7 +90,7 @@ class WorkflowStep(BaseModel, ABC):
     step_id: str
     name: str
     description: str = ""
-    timeout: float | None = None
+    timeout_seconds: float | None = None
     """Maximum seconds this step may run. ``None`` (the default) disables the
     timeout; set a finite value for steps that call out to slow services."""
 
@@ -123,7 +123,7 @@ class WorkflowStep(BaseModel, ABC):
         A ``TimeoutError`` raised by the awaited code itself is not this
         step's time limit and propagates unchanged.
         """
-        if self.timeout is None:
+        if self.timeout_seconds is None:
             return await coro
         raised = False
 
@@ -136,13 +136,13 @@ class WorkflowStep(BaseModel, ABC):
                 raise
 
         try:
-            return await asyncio.wait_for(run(), timeout=self.timeout)
+            return await asyncio.wait_for(run(), timeout=self.timeout_seconds)
         except asyncio.TimeoutError as e:
             if raised:
                 raise
             raise WorkflowStepError(
                 step_id=self.step_id,
-                message=f"Step timed out after {self.timeout}s",
+                message=f"Step timed out after {self.timeout_seconds}s",
             ) from e
 
 
@@ -534,7 +534,7 @@ class ConversationStep(WorkflowStep):
     ``FSMDefinition``) must be given. ``initial_context`` maps
     ``{conversation_key: workflow_key}`` (input); ``context_mapping`` maps
     ``{workflow_key: conversation_key}`` (output). The effective time limit
-    is the smaller of ``timeout`` and ``conversation_timeout``. Failures
+    is the smaller of ``timeout_seconds`` and ``conversation_timeout``. Failures
     route to ``error_state``, or FAIL the instance when none is set.
     """
 
@@ -580,7 +580,11 @@ class ConversationStep(WorkflowStep):
     auto_messages: list[str] = Field(default_factory=list)
 
     def _effective_timeout(self) -> float | None:
-        limits = [t for t in (self.timeout, self.conversation_timeout) if t is not None]
+        limits = [
+            t
+            for t in (self.timeout_seconds, self.conversation_timeout)
+            if t is not None
+        ]
         return min(limits) if limits else None
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
@@ -1015,7 +1019,7 @@ class RetryStep(WorkflowStep):
     """Wrap another step with automatic retry on failure.
 
     Makes ``max_retries + 1`` attempts; the delay before retry ``n`` (1-based)
-    is ``backoff_factor * n`` seconds (linear). ``timeout`` applies to each
+    is ``backoff_factor * n`` seconds (linear). ``timeout_seconds`` applies to each
     attempt. The last failure is returned (or re-raised) unchanged.
 
     Example::

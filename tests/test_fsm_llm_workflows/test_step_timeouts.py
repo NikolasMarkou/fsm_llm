@@ -23,12 +23,12 @@ from fsm_llm.workflows.steps import (
 
 
 class TestStepsWithoutTimeout:
-    """Steps with timeout=None should work without any timeout enforcement."""
+    """Steps with timeout_seconds=None should work without any timeout enforcement."""
 
     @pytest.mark.asyncio
     async def test_auto_transition_no_timeout(self):
         step = AutoTransitionStep(
-            step_id="s1", name="Test", next_state="done", timeout=None
+            step_id="s1", name="Test", next_state="done", timeout_seconds=None
         )
         result = await step.execute({})
         assert result.success is True
@@ -37,7 +37,7 @@ class TestStepsWithoutTimeout:
     @pytest.mark.asyncio
     async def test_auto_transition_default_timeout_is_none(self):
         step = AutoTransitionStep(step_id="s1", name="Test", next_state="done")
-        assert step.timeout is None
+        assert step.timeout_seconds is None
 
     @pytest.mark.asyncio
     async def test_condition_no_timeout(self):
@@ -47,7 +47,7 @@ class TestStepsWithoutTimeout:
             condition=lambda ctx: True,
             true_state="yes",
             false_state="no",
-            timeout=None,
+            timeout_seconds=None,
         )
         result = await step.execute({})
         assert result.success is True
@@ -65,7 +65,7 @@ class TestStepsWithoutTimeout:
             success_state="done",
             failure_state="error",
             output_mapping={"result": "data"},
-            timeout=None,
+            timeout_seconds=None,
         )
         result = await step.execute({})
         assert result.success is True
@@ -84,7 +84,7 @@ class TestStepsWithoutTimeout:
             name="Parallel",
             steps=[s1],
             next_state="merged",
-            timeout=None,
+            timeout_seconds=None,
         )
         result = await step.execute({})
         assert result.success is True
@@ -109,7 +109,7 @@ class TestAutoTransitionStepTimeout:
             name="Fast",
             next_state="done",
             action=fast_action,
-            timeout=1.0,
+            timeout_seconds=1.0,
         )
         result = await step.execute({})
         assert result.success is True
@@ -127,7 +127,7 @@ class TestAutoTransitionStepTimeout:
             name="Slow",
             next_state="done",
             action=slow_action,
-            timeout=0.1,
+            timeout_seconds=0.1,
         )
 
         result = await step.execute({})
@@ -148,7 +148,7 @@ class TestAutoTransitionStepTimeout:
             name="Sync",
             next_state="done",
             action=sync_action,
-            timeout=0.1,
+            timeout_seconds=0.1,
         )
         result = await step.execute({})
         assert result.success is True
@@ -166,7 +166,7 @@ class TestAutoTransitionStepTimeout:
             name="Slow",
             next_state="done",
             action=slow_action,
-            timeout=0.1,
+            timeout_seconds=0.1,
         )
 
         result = await step.execute({})
@@ -185,7 +185,7 @@ class TestAutoTransitionStepTimeout:
             name="Slow",
             next_state="done",
             action=slow_action,
-            timeout=0.1,
+            timeout_seconds=0.1,
         )
 
         result = await step.execute({})
@@ -214,7 +214,7 @@ class TestAPICallStepTimeout:
             success_state="done",
             failure_state="error",
             output_mapping={"status_result": "status"},
-            timeout=1.0,
+            timeout_seconds=1.0,
         )
         result = await step.execute({})
         assert result.success is True
@@ -235,7 +235,7 @@ class TestAPICallStepTimeout:
             api_function=slow_api,
             success_state="done",
             failure_state="error",
-            timeout=0.1,
+            timeout_seconds=0.1,
         )
         # APICallStep catches exceptions in execute() and returns failure result
         result = await step.execute({})
@@ -263,7 +263,7 @@ class TestConditionStepTimeout:
             condition=fast_check,
             true_state="yes",
             false_state="no",
-            timeout=1.0,
+            timeout_seconds=1.0,
         )
         result = await step.execute({})
         assert result.success is True
@@ -282,7 +282,7 @@ class TestConditionStepTimeout:
             condition=slow_check,
             true_state="yes",
             false_state="no",
-            timeout=0.1,
+            timeout_seconds=0.1,
         )
 
         result = await step.execute({})
@@ -304,7 +304,7 @@ class TestConditionStepTimeout:
             condition=slow_check,
             true_state="yes",
             false_state="no",
-            timeout=0.1,
+            timeout_seconds=0.1,
         )
 
         result = await step.execute({})
@@ -344,7 +344,7 @@ class TestParallelStepTimeout:
             name="Parallel",
             steps=[s1, s2],
             next_state="merged",
-            timeout=2.0,
+            timeout_seconds=2.0,
         )
         result = await step.execute({})
         assert result.success is True
@@ -372,7 +372,7 @@ class TestParallelStepTimeout:
             steps=[s1],
             next_state="ok",
             error_state="err",
-            timeout=0.1,
+            timeout_seconds=0.1,
         )
         # ParallelStep catches exceptions in its execute() and returns failure
         result = await step.execute({})
@@ -409,7 +409,7 @@ class TestParallelStepTimeout:
             name="Parallel",
             steps=[s1, s2],
             next_state="merged",
-            timeout=2.0,
+            timeout_seconds=2.0,
         )
         result = await step.execute({})
         assert result.success is True
@@ -429,7 +429,7 @@ class TestWithTimeoutMethod:
             step_id="s1",
             name="Test",
             next_state="done",
-            timeout=1.0,
+            timeout_seconds=1.0,
         )
 
         async def fast_coro():
@@ -445,7 +445,7 @@ class TestWithTimeoutMethod:
             step_id="s1",
             name="Test",
             next_state="done",
-            timeout=0.1,
+            timeout_seconds=0.1,
         )
 
         async def slow_coro():
@@ -461,7 +461,7 @@ class TestWithTimeoutMethod:
             step_id="s1",
             name="Test",
             next_state="done",
-            timeout=None,
+            timeout_seconds=None,
         )
 
         async def coro():

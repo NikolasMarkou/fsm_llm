@@ -267,7 +267,7 @@ class WorkflowDefinition(BaseModel):
         # validate() rejects ONLY synchronous cycles. Do NOT go back to
         # rejecting every cycle: polling / retry-until loops through a timer
         # or event step are the classic workflow shape and were impossible to
-        # register. The per-call step budget (engine `max_steps_per_run`)
+        # register. The per-call step budget (engine `max_steps`)
         # still bounds custom steps that route dynamically.
         """
         return self._has_cycle(pausing_breaks_cycle=True)

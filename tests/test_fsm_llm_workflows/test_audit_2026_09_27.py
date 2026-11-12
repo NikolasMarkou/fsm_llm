@@ -137,7 +137,7 @@ class TestProcessEventIsolation:
         engine = WorkflowEngine()
         engine.register_workflow(_wait_then_done("wf"))
         # A: tiny workflow timeout; B: none. A is registered first.
-        a = await engine.start_workflow("wf", workflow_timeout=5)
+        a = await engine.start_workflow("wf", max_seconds=5)
         b = await engine.start_workflow("wf")
         engine.workflow_instances[a].deadline = engine.workflow_instances[
             a
@@ -491,7 +491,7 @@ class TestWorkflowDeadline:
     async def test_deadline_fails_waiting_instance(self):
         engine = WorkflowEngine()
         engine.register_workflow(_wait_then_done("wf"))
-        iid = await engine.start_workflow("wf", workflow_timeout=0.05)
+        iid = await engine.start_workflow("wf", max_seconds=0.05)
         assert engine.get_workflow_status(iid) == WorkflowStatus.WAITING
         await _settle(0.2)
 
@@ -509,7 +509,7 @@ class TestWorkflowDeadline:
         engine = WorkflowEngine()
         engine.register_workflow(wf)
         with pytest.raises(WorkflowTimeoutError) as exc_info:
-            await engine.start_workflow("slow", workflow_timeout=0.05)
+            await engine.start_workflow("slow", max_seconds=0.05)
 
         iid = exc_info.value.instance_id
         assert iid is not None
@@ -576,7 +576,7 @@ class TestLoopsAndStepBudget:
     async def test_dynamic_loop_hits_step_budget(self):
         wf = create_workflow("dyn", "dyn")
         wf.with_initial_step(_DynamicLoopStep(step_id="loop", name="Loop"))
-        engine = WorkflowEngine(max_steps_per_run=5)
+        engine = WorkflowEngine(max_steps=5)
         engine.register_workflow(wf)
         iid = await engine.start_workflow("dyn")
 
@@ -801,7 +801,7 @@ class TestConversationStepFixes:
             step_id="c",
             name="C",
             fsm_definition={"name": "x"},
-            timeout=0.05,
+            timeout_seconds=0.05,
             error_state="err",
         )
         with patch("fsm_llm.workflows.steps.API") as mock_cls:
@@ -1278,7 +1278,7 @@ class TestReviewFollowUp:
         wf.with_step(auto_step("done", "Done", next_state=""))
         engine = WorkflowEngine()
         engine.register_workflow(wf)
-        iid = await engine.start_workflow("lw", workflow_timeout=60)
+        iid = await engine.start_workflow("lw", max_seconds=60)
 
         # advance_workflow re-registers the A listener while the event is
         # being delivered; leaving `wa` must drop it.
