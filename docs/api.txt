@@ -1,0 +1,1968 @@
+# fsm_llm
+fsm_llm.API class
+  def __init__(self, fsm_definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str], llm_interface: LLMInterface | None = None, model: str | None = None, api_key: str | None = None, temperature: float | None = None, max_tokens: int | None = None, max_history_size: int = 5, max_message_length: int = 1000, handlers: list[FSMHandler] | None = None, handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE, transition_config: TransitionEvaluatorConfig | None = None, session_store: SessionStore | None = None, handler_timeout: float | None = None, max_fsm_cache_size: int = 64, **llm_kwargs)
+  def advance(self, conversation_id: str) -> AdvanceResult
+  def advance_stream(self, conversation_id: str) -> Iterator[str]
+  def cleanup_stale_conversations(self, max_idle_seconds: float = 3600.0) -> list[str]
+  def close(self) -> None
+  def converse(self, user_message: str, conversation_id: str) -> str
+  def converse_stream(self, user_message: str, conversation_id: str) -> Iterator[str]
+  def create_handler(self, name: str = 'CustomHandler', timing: HandlerTiming | None = None, action: Any | None = None) -> HandlerBuilder
+  def end_conversation(self, conversation_id: str) -> None
+  classmethod def from_definition(cls, fsm_definition: FSMDefinition | dict[str, Any] | None = None, *, definition: FSMDefinition | dict[str, Any] | None = None, **kwargs: Any) -> API
+  classmethod def from_file(cls, path: Path | str, **kwargs: Any) -> API
+  def get_conversation_history(self, conversation_id: str) -> list[dict[str, str]]
+  def get_current_state(self, conversation_id: str) -> str
+  def get_data(self, conversation_id: str) -> dict[str, Any]
+  def get_llm_interface(self) -> LLMInterface
+  def get_stack_depth(self, conversation_id: str) -> int
+  def get_sub_conversation_id(self, conversation_id: str) -> str
+  def has_conversation_ended(self, conversation_id: str) -> bool
+  def list_active_conversations(self) -> list[str]
+  def load_session(self, session_id: str) -> SessionState | None
+  def pop_fsm(self, conversation_id: str, context_to_return: dict[str, Any] | None = None, merge_strategy: str | ContextMergeStrategy = ContextMergeStrategy.UPDATE) -> str
+  classmethod def process_fsm_definition(cls, fsm_definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str]) -> tuple[FSMDefinition, str]
+  def push_fsm(self, conversation_id: str, new_fsm_definition: FSMDefinition | dict[str, Any] | str, context_to_pass: dict[str, Any] | None = None, return_context: dict[str, Any] | None = None, shared_context_keys: list[str] | None = None, preserve_history: bool = False, inherit_context: bool = True) -> str
+  def register_handler(self, handler: FSMHandler) -> None
+  def register_handlers(self, handlers: list[FSMHandler]) -> None
+  def restore_session(self, session_id: str) -> tuple[str, SessionState] | None
+  def run_until_terminal(self, conversation_id: str, *, max_steps: int, max_seconds: float | None = None, before_step: Callable[[int], None] | None = None, seconds_exempt_states: Collection[str] = ()) -> tuple[AdvanceResult, ...]
+  def run_until_terminal_stream(self, conversation_id: str, *, max_steps: int, max_seconds: float | None = None, before_step: Callable[[int], None] | None = None, seconds_exempt_states: Collection[str] = ()) -> Iterator[str]
+  def save_session(self, conversation_id: str) -> None
+  def start_conversation(self, initial_context: dict[str, Any] | None = None, *, _suppress_start: bool = False) -> tuple[str, str]
+  def update_context(self, conversation_id: str, context_update: dict[str, Any]) -> None
+fsm_llm.APIBuilder class
+  def __init__(self) -> None
+  def add_handler(self, handler: Any) -> APIBuilder
+  def build(self) -> API
+  def set_api_key(self, api_key: str) -> APIBuilder
+  def set_definition(self, definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str]) -> APIBuilder
+  def set_handler_error_mode(self, mode: HandlerErrorMode | str) -> APIBuilder
+  def set_handler_timeout(self, seconds: float | None) -> APIBuilder
+  def set_llm_interface(self, llm_interface: Any) -> APIBuilder
+  def set_llm_option(self, name: str, value: Any) -> APIBuilder
+  def set_max_fsm_cache_size(self, size: int) -> APIBuilder
+  def set_max_history_size(self, size: int) -> APIBuilder
+  def set_max_message_length(self, length: int) -> APIBuilder
+  def set_max_tokens(self, max_tokens: int) -> APIBuilder
+  def set_model(self, model: str) -> APIBuilder
+  def set_session_store(self, store: Any) -> APIBuilder
+  def set_temperature(self, temperature: float) -> APIBuilder
+  def set_transition_config(self, config: Any) -> APIBuilder
+fsm_llm.AdvanceResult class(BaseModel)
+  field state_before: str required
+  field state_after: str required
+  field transition_outcome: TransitionEvaluationResult required
+  field response: str | None = None
+  field ended: bool required
+fsm_llm.BUFFER_CORE = 'core'
+fsm_llm.BUFFER_ENVIRONMENT = 'environment'
+fsm_llm.BUFFER_METADATA = 'metadata'
+fsm_llm.BUFFER_REASONING = 'reasoning'
+fsm_llm.BUFFER_SCRATCH = 'scratch'
+fsm_llm.BaseHandler class
+  def __init__(self, name: str | None = None, priority: int = 100, critical: bool = False)
+  def execute(self, context: dict[str, Any]) -> dict[str, Any]
+  property priority
+  def should_execute(self, timing: HandlerTiming, current_state: str, target_state: str | None, context: dict[str, Any], updated_keys: set[str] | None = None) -> bool
+fsm_llm.BuildError class(FSMError, ValueError)
+  def __init__(self, message: str, errors: list[str] | None = None, **kwargs)
+fsm_llm.ClassificationError class(FSMError)
+fsm_llm.ClassificationExtractionConfig class(ClassificationSchema)
+  field intents: list[IntentDefinition] required
+  field fallback_intent: str required
+  field confidence_threshold: float = 0.6
+  field field_name: str required
+  field required: bool = False
+  field model: str | None = None
+  field prompt_config: dict[str, Any] | None = None
+  field context_keys: list[str] | None = None
+fsm_llm.ClassificationPromptConfig class
+  def __init__(self, include_reasoning: bool = True, max_tokens: int = 512, temperature: float = 0.0, include_entities: bool = True, multi_intent: bool = False, max_intents: int = 3) -> None
+fsm_llm.ClassificationResponseError class(ClassificationError)
+fsm_llm.ClassificationResult class(BaseModel)
+  field reasoning: str required
+  field intent: str required
+  field confidence: float required
+  field entities: dict[str, str | None] = factory
+  classmethod def coerce_entity_values(cls, v: Any) -> dict[str, str | None]
+  property is_below_default_threshold
+fsm_llm.ClassificationSchema class(BaseModel)
+  field intents: list[IntentDefinition] required
+  field fallback_intent: str required
+  field confidence_threshold: float = 0.6
+  property intent_names
+  def validate_schema(self) -> ClassificationSchema
+fsm_llm.Classifier class
+  def __init__(self, schema: ClassificationSchema, model: str | None = None, *, llm_interface: LLMInterface | None = None, api_key: str | None = None, config: ClassificationPromptConfig | None = None, **llm_kwargs) -> None
+  def classify(self, user_message: str | None, context: dict[str, Any] | None = None) -> ClassificationResult
+  def classify_multi(self, user_message: str | None, context: dict[str, Any] | None = None) -> MultiClassificationResult
+  def is_low_confidence(self, result: ClassificationResult) -> bool
+fsm_llm.CompletionRequest class(BaseModel)
+  field messages: list[dict[str, Any]] required
+  field tools: list[dict[str, Any]] | None = None
+  field tool_choice: str | dict[str, Any] | None = None
+  field response_format: dict[str, Any] | None = None
+  field temperature: float | None = None
+  field max_tokens: int | None = None
+  field call_type: str = 'completion'
+fsm_llm.CompletionResponse class(BaseModel)
+  field kind: Literal['calls', 'final', 'malformed'] required
+  field text: str | None = None
+  field calls: tuple[ModelToolCall, ...] = ()
+  field finish_reason: str | None = None
+  property truncated
+fsm_llm.CompletionStateConfig class(BaseModel)
+  field tools: list[dict[str, Any]] | None = None
+  field tool_choice: str | None = None
+  field response_format_key: str | None = None
+  field instructions: str | None = None
+  field messages_key: str = '_completion_messages'
+  field result_key: str = 'completion_result'
+fsm_llm.ContextCompactor class
+  def __init__(self, transient_keys: set[str] | None = None, prune_on_entry: dict[str, set[str]] | None = None) -> None
+  def compact(self, context: dict[str, Any]) -> dict[str, Any]
+  def prune(self, context: dict[str, Any]) -> dict[str, Any]
+  def summarize(self, conversation: Any, llm_interface: LLMInterface | None = None) -> str | None
+fsm_llm.ContextMergeStrategy class(str, Enum)
+  ContextMergeStrategy.UPDATE = 'update'
+  ContextMergeStrategy.PRESERVE = 'preserve'
+fsm_llm.ContextScope class(BaseModel)
+  field read_keys: list[str] | None = None
+  field write_keys: list[str] | None = None
+fsm_llm.Conversation class(BaseModel)
+  field exchanges: list[dict[str, str]] = factory
+  field max_history_size: int = 5
+  field max_message_length: int = 1000
+  field summary: str | None = None
+  def add_system_message(self, message: str) -> None
+  def add_user_message(self, message: str) -> None
+  def get_recent(self, n: int | None = None) -> list[dict[str, str]]
+  def get_summary_and_recent(self, n: int | None = None) -> tuple[str | None, list[dict[str, str]]]
+  def search(self, query: str, limit: int = 5) -> list[dict[str, str]]
+fsm_llm.ConversationBusyError class(FSMError)
+  def __init__(self, message: str, conversation_id: str | None = None, **kwargs)
+fsm_llm.DEFAULT_BUFFERS = ('core', 'scratch', 'environment', 'reasoning')
+fsm_llm.DEFAULT_HIDDEN_BUFFERS = {'metadata'}
+fsm_llm.DataExtractionPromptBuilder class(BasePromptBuilder)
+  def __init__(self, config: DataExtractionPromptConfig | None = None)
+  def build_extraction_source_sections(self, instance: FSMInstance, context: dict[str, Any]) -> list[str]
+fsm_llm.DataExtractionPromptConfig class(BasePromptConfig)
+  def __init__(self, max_history_messages: int = 5, max_token_budget: int = 3000, history_strategy: HistoryManagementStrategy = HistoryManagementStrategy.HYBRID, max_context_keys: int = 200, chars_per_token: float = 2.5, token_estimation_factor: float = 1.3, utf8_expansion_factor: float = 1.5, cdata_overhead_tokens: int = 50, include_conversation_history: bool = True, include_persona: bool = True, filter_internal_context: bool = True, internal_key_prefixes: list[str] = <factory>, deterministic_output: bool = True, verbose_logging: bool = False) -> None
+fsm_llm.DataExtractionResponse class(BaseModel)
+  field extracted_data: dict[str, Any] = factory
+  field confidence: float = 1.0
+  field reasoning: str | None = None
+  field rejected_corrections: dict[str, Any] = factory
+  field extraction_failed: bool = False
+fsm_llm.FSMContext class(BaseModel)
+  field data: dict[str, Any] = factory
+  field conversation: Conversation = factory
+  field metadata: dict[str, Any] = factory
+  field working_memory: Any = None
+  def get_merged_data(self) -> dict[str, Any]
+  def get_user_visible_data(self) -> dict[str, Any]
+  def update(self, new_data: dict[str, Any]) -> None
+fsm_llm.FSMDefinition class(BaseModel)
+  field name: str required
+  field description: str required
+  field states: dict[str, State] required
+  field initial_state: str required
+  field version: str = '4.2'
+  field persona: str | None = None
+  field handler_only_keys: list[str] = factory
+  def validate_fsm_structure(self) -> FSMDefinition
+fsm_llm.FSMDefinitionNotFoundError class(FSMError, ValueError)
+  def __init__(self, fsm_id: str)
+fsm_llm.FSMError class(Exception)
+  def __init__(self, message: str, details: dict[str, Any] | None = None)
+fsm_llm.FSMGraph class(BaseModel)
+  field name: str required
+  field initial_state: str required
+  field nodes: tuple[FSMGraphNode, ...] required
+  field edges: tuple[FSMGraphEdge, ...] required
+fsm_llm.FSMGraphEdge class(BaseModel)
+  field source: str required
+  field target: str required
+  field description: str = ''
+  field priority: int required
+fsm_llm.FSMGraphNode class(BaseModel)
+  field id: str required
+  field description: str = ''
+  field purpose: str = ''
+  field is_initial: bool = False
+  field is_terminal: bool = False
+fsm_llm.FSMHandler class(Protocol)
+  def __init__(self, *args, **kwargs)
+  def execute(self, context: dict[str, Any]) -> dict[str, Any]
+  property priority
+  def should_execute(self, timing: HandlerTiming, current_state: str, target_state: str | None, context: dict[str, Any], updated_keys: set[str] | None = None) -> bool
+fsm_llm.FSMInstance class(BaseModel)
+  field fsm_id: str required
+  field current_state: str required
+  field context: FSMContext = factory
+  field persona: str | None = None
+  field last_extraction_response: DataExtractionResponse | None = None
+  field last_transition_decision: ClassificationResult | None = None
+  field last_response_generation: ResponseGenerationResponse | None = None
+fsm_llm.FSMManager class
+  def __init__(self, fsm_loader: Callable[[str], FSMDefinition] = load_fsm_definition, llm_interface: LLMInterface | None = None, data_extraction_prompt_builder: DataExtractionPromptBuilder | None = None, response_generation_prompt_builder: ResponseGenerationPromptBuilder | None = None, field_extraction_prompt_builder: FieldExtractionPromptBuilder | None = None, transition_evaluator: TransitionEvaluator | None = None, max_history_size: int = 5, max_message_length: int = 1000, handler_system: HandlerSystem | None = None, handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE, max_fsm_cache_size: int = 64)
+  def advance(self, conversation_id: str, log: Any = None) -> AdvanceResult
+  def advance_stream(self, conversation_id: str, log: Any = None) -> Iterator[str]
+  def copy_raw_context_data(self, conversation_id: str) -> dict[str, Any] | None
+  def end_conversation(self, conversation_id: str, log: Any = None) -> None
+  def get_complete_conversation(self, conversation_id: str) -> dict[str, Any]
+  def get_conversation_data(self, conversation_id: str) -> dict[str, Any]
+  def get_conversation_history(self, conversation_id: str) -> list[dict[str, str]]
+  def get_conversation_snapshot(self, conversation_id: str) -> dict[str, Any]
+  def get_conversation_state(self, conversation_id: str) -> str
+  def get_end_snapshot(self, conversation_id: str) -> dict[str, Any]
+  def get_fsm_definition(self, fsm_id: str) -> FSMDefinition
+  def has_conversation_ended(self, conversation_id: str, log: Any = None) -> bool
+  def has_instance(self, conversation_id: str) -> bool
+  def process_message(self, conversation_id: str, message: str, log: Any = None) -> str
+  def process_message_stream(self, conversation_id: str, message: str, log: Any = None) -> Iterator[str]
+  def prune_orphaned_locks(self) -> list[str]
+  def register_handler(self, handler)
+  def resolve_state_definition(self, instance: FSMInstance, conversation_id: str | None = None) -> State
+  def seed_restored_conversation(self, conversation_id: str, *, summary: str | None, history: list[dict[str, str]], provenance: dict[str, Any] | None, working_memory: Any) -> None
+  def set_conversation_state(self, conversation_id: str, state_name: str) -> None
+  def start_conversation(self, fsm_id: str, initial_context: dict[str, Any] | None = None, *, suppress_start: bool = False) -> tuple[str, str]
+  def update_conversation_context(self, conversation_id: str, context_update: dict[str, Any], log: Any = None) -> None
+fsm_llm.FSMManagerBuilder class
+  def __init__(self) -> None
+  def build(self) -> FSMManager
+  def set_data_extraction_prompt_builder(self, builder: Any) -> FSMManagerBuilder
+  def set_field_extraction_prompt_builder(self, builder: Any) -> FSMManagerBuilder
+  def set_fsm_loader(self, loader: Callable[[str], FSMDefinition]) -> FSMManagerBuilder
+  def set_handler_error_mode(self, mode: HandlerErrorMode | str) -> FSMManagerBuilder
+  def set_handler_system(self, handler_system: Any) -> FSMManagerBuilder
+  def set_llm_interface(self, llm_interface: Any) -> FSMManagerBuilder
+  def set_max_fsm_cache_size(self, size: int) -> FSMManagerBuilder
+  def set_max_history_size(self, size: int) -> FSMManagerBuilder
+  def set_max_message_length(self, length: int) -> FSMManagerBuilder
+  def set_response_generation_prompt_builder(self, builder: Any) -> FSMManagerBuilder
+  def set_transition_evaluator(self, evaluator: Any) -> FSMManagerBuilder
+fsm_llm.FSMValidationResult class
+  def __init__(self, fsm_name: str)
+  def add_error(self, message: str)
+  def add_info(self, message: str)
+  def add_warning(self, message: str)
+  def as_dict(self) -> dict[str, Any]
+fsm_llm.FSMValidator class
+  def __init__(self, fsm_data: dict[str, Any])
+  def validate(self) -> FSMValidationResult
+fsm_llm.FieldExtractionConfig class(BaseModel)
+  field field_name: str required
+  field field_type: Literal['str', 'int', 'float', 'bool', 'list', 'dict', 'any'] = 'str'
+  field extraction_instructions: str required
+  field context_keys: list[str] | None = None
+  field validation_rules: dict[str, Any] | None = None
+  field required: bool = True
+  field confidence_threshold: float = 0.0
+  def validate_validation_rule_keys(self) -> FieldExtractionConfig
+fsm_llm.FieldExtractionPromptBuilder class(BasePromptBuilder)
+  def __init__(self, config: FieldExtractionPromptConfig | None = None)
+  def build_field_extraction_prompt(self, instance: FSMInstance, field_config: FieldExtractionConfig, user_message: str | None, dynamic_context: dict[str, Any] | None = None) -> str
+fsm_llm.FieldExtractionPromptConfig class(BasePromptConfig)
+  def __init__(self, max_history_messages: int = 5, max_token_budget: int = 3000, history_strategy: HistoryManagementStrategy = HistoryManagementStrategy.HYBRID, max_context_keys: int = 200, chars_per_token: float = 2.5, token_estimation_factor: float = 1.3, utf8_expansion_factor: float = 1.5, cdata_overhead_tokens: int = 50, include_conversation_history: bool = True, include_persona: bool = True, filter_internal_context: bool = True, internal_key_prefixes: list[str] = <factory>, deterministic_output: bool = True, verbose_logging: bool = False, include_context_data: bool = True) -> None
+fsm_llm.FieldExtractionRequest class(_PromptRequest)
+  field system_prompt: str required
+  field user_message: str | None required
+  field field_name: str required
+  field field_type: Literal['str', 'int', 'float', 'bool', 'list', 'dict', 'any'] = 'str'
+  field context: dict[str, Any] | None = None
+  field validation_rules: dict[str, Any] | None = None
+fsm_llm.FieldExtractionResponse class(BaseModel)
+  field field_name: str required
+  field value: Any = None
+  field confidence: float = 1.0
+  field reasoning: str | None = None
+  field is_valid: bool = True
+  field validation_error: str | None = None
+  field truncated: bool = False
+fsm_llm.FileSessionStore class(SessionStore)
+  def __init__(self, directory: str | Path) -> None
+  def delete(self, session_id: str) -> bool
+  def exists(self, session_id: str) -> bool
+  def list_sessions(self) -> list[str]
+  def load(self, session_id: str) -> SessionState | None
+  def save(self, session_id: str, state: SessionState) -> None
+fsm_llm.HandlerBuilder class
+  def __init__(self, name: str = 'LambdaHandler')
+  def at(self, *timings: HandlerTiming) -> HandlerBuilder
+  def build(self) -> BaseHandler
+  def critical(self, value: bool = True) -> HandlerBuilder
+  def do(self, execution: ExecutionLambda) -> BaseHandler
+  def not_on_state(self, *states: str) -> HandlerBuilder
+  def not_on_target_state(self, *states: str) -> HandlerBuilder
+  def on_context_update(self, *keys: str) -> HandlerBuilder
+  def on_state(self, *states: str) -> HandlerBuilder
+  def on_state_entry(self, *states: str) -> HandlerBuilder
+  def on_state_exit(self, *states: str) -> HandlerBuilder
+  def on_target_state(self, *states: str) -> HandlerBuilder
+  def when(self, condition: ConditionLambda) -> HandlerBuilder
+  def when_context_has(self, *keys: str) -> HandlerBuilder
+  def when_keys_updated(self, *keys: str) -> HandlerBuilder
+  def with_priority(self, priority: int) -> HandlerBuilder
+fsm_llm.HandlerErrorMode class(str, Enum)
+  HandlerErrorMode.CONTINUE = 'continue'
+  HandlerErrorMode.RAISE = 'raise'
+fsm_llm.HandlerExecutionError class(HandlerSystemError)
+  def __init__(self, handler_name: str, original_error: Exception)
+fsm_llm.HandlerFn alias Callable[[str, dict[str, str | None]], Any]
+fsm_llm.HandlerSystem class
+  def __init__(self, handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE, handler_timeout: float | None = None)
+  def execute_handlers(self, timing: HandlerTiming, current_state: str, target_state: str | None, context: dict[str, Any], updated_keys: set[str] | None = None) -> dict[str, Any]
+  def handlers_at(self, timing: HandlerTiming) -> list[FSMHandler]
+  def register_handler(self, handler: FSMHandler) -> None
+fsm_llm.HandlerSystemError class(FSMError)
+fsm_llm.HandlerTiming class(str, Enum)
+  HandlerTiming.START_CONVERSATION = 'start_conversation'
+  HandlerTiming.PRE_PROCESSING = 'pre_processing'
+  HandlerTiming.POST_PROCESSING = 'post_processing'
+  HandlerTiming.PRE_TRANSITION = 'pre_transition'
+  HandlerTiming.POST_TRANSITION = 'post_transition'
+  HandlerTiming.CONTEXT_UPDATE = 'context_update'
+  HandlerTiming.END_CONVERSATION = 'end_conversation'
+  HandlerTiming.ERROR = 'error'
+fsm_llm.HierarchicalClassifier class
+  def __init__(self, schema: HierarchicalSchema, model: str | None = None, *, llm_interface: LLMInterface | None = None, api_key: str | None = None, config: ClassificationPromptConfig | None = None, **llm_kwargs) -> None
+  def classify(self, user_message: str | None, context: dict[str, Any] | None = None) -> HierarchicalResult
+fsm_llm.HierarchicalResult class(BaseModel)
+  field domain: ClassificationResult required
+  field intent: ClassificationResult required
+fsm_llm.HierarchicalSchema class(BaseModel)
+  field domain_schema: ClassificationSchema required
+  field intent_schemas: dict[str, ClassificationSchema] required
+  def validate_domain_coverage(self) -> HierarchicalSchema
+fsm_llm.IntentDefinition class(BaseModel)
+  field name: str required
+  field description: str required
+  def validate_name_format(self) -> IntentDefinition
+fsm_llm.IntentRouter class
+  def __init__(self, schema: ClassificationSchema, *, clarification_handler: HandlerFn | None = None) -> None
+  def register(self, intent: str, handler: HandlerFn) -> IntentRouter
+  def register_many(self, mapping: dict[str, HandlerFn]) -> IntentRouter
+  def route(self, user_message: str, result: ClassificationResult) -> Any
+  def route_multi(self, user_message: str, result: MultiClassificationResult) -> list[Any]
+  def validate(self) -> list[str]
+fsm_llm.IntentScore class(BaseModel)
+  field intent: str required
+  field confidence: float required
+  field entities: dict[str, str | None] = factory
+  classmethod def coerce_entity_values(cls, v: Any) -> dict[str, str | None]
+fsm_llm.InvalidTransitionError class(FSMError)
+  def __init__(self, message: str, source_state: str | None = None, target_state: str | None = None, **kwargs)
+fsm_llm.LLMCallCounts class(BaseModel)
+  field calls: int = 0
+  field errors: int = 0
+  field usage_missing: int = 0
+  field prompt_tokens: int = 0
+  field completion_tokens: int = 0
+  field total_tokens: int = 0
+fsm_llm.LLMInterface class(ABC)
+  def complete(self, request: CompletionRequest) -> CompletionResponse
+  def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse
+  def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse
+  def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse
+  def generate_response_stream(self, request: ResponseGenerationRequest) -> Iterator[str]
+fsm_llm.LLMResponseError class(FSMError)
+fsm_llm.LLMUsage class(LLMCallCounts)
+  field calls: int = 0
+  field errors: int = 0
+  field usage_missing: int = 0
+  field prompt_tokens: int = 0
+  field completion_tokens: int = 0
+  field total_tokens: int = 0
+  field by_kind: dict[str, LLMCallCounts] = factory
+fsm_llm.LiteLLMEmbedder class(_Metered)
+  def __init__(self, model: str, *, api_key: str | None = None, timeout: float | None = 120.0, retries: int = 0, **kwargs: Any) -> None
+  def embed(self, texts: Sequence[str]) -> list[list[float]]
+fsm_llm.LiteLLMInterface class(LLMInterface, _Metered)
+  def __init__(self, model: str, api_key: str | None = None, temperature: float = 0.5, max_tokens: int = 1000, timeout: float | None = 120.0, retries: int = 0, **kwargs)
+  def complete(self, request: CompletionRequest) -> CompletionResponse
+  def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse
+  def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse
+  def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse
+  def generate_response_stream(self, request: ResponseGenerationRequest) -> Iterator[str]
+fsm_llm.ModelToolCall class(BaseModel)
+  field id: str required
+  field name: str required
+  field arguments: dict[str, Any] = factory
+fsm_llm.MultiClassificationResult class(BaseModel)
+  field reasoning: str required
+  field intents: list[IntentScore] required
+  property primary
+fsm_llm.OKFError class(FSMError)
+fsm_llm.ResponseGenerationPromptBuilder class(BasePromptBuilder)
+  def __init__(self, config: ResponsePromptConfig | None = None)
+  def build_response_prompt(self, instance: FSMInstance, state: State, fsm_definition: FSMDefinition, extracted_data: dict[str, Any] | None = None, transition_occurred: bool = False, previous_state: str | None = None, user_message: str | None = '', plain_text_response: bool = False, context: dict[str, Any] | None = None, rejected_corrections: dict[str, Any] | None = None, extraction_failed: bool = False) -> str
+fsm_llm.ResponseGenerationRequest class(_PromptRequest)
+  field system_prompt: str required
+  field user_message: str | None required
+  field transition_occurred: bool = False
+  field response_format: dict[str, Any] | None = None
+  field temperature: float | None = None
+fsm_llm.ResponseGenerationResponse class(BaseModel)
+  field message: str required
+  field reasoning: str | None = None
+  field message_type: str = 'response'
+  field truncated: bool = False
+fsm_llm.ResponsePromptConfig class(BasePromptConfig)
+  def __init__(self, max_history_messages: int = 5, max_token_budget: int = 3000, history_strategy: HistoryManagementStrategy = HistoryManagementStrategy.HYBRID, max_context_keys: int = 200, chars_per_token: float = 2.5, token_estimation_factor: float = 1.3, utf8_expansion_factor: float = 1.5, cdata_overhead_tokens: int = 50, include_conversation_history: bool = True, include_persona: bool = True, filter_internal_context: bool = True, internal_key_prefixes: list[str] = <factory>, deterministic_output: bool = True, verbose_logging: bool = False, include_extracted_data: bool = True, enable_response_guidelines: bool = True, enable_persona_guidance: bool = True) -> None
+fsm_llm.RunBudgetExceededError class(FSMError)
+  def __init__(self, budget: Literal['steps', 'seconds'], limit: float, steps_done: int)
+fsm_llm.SessionState class(BaseModel)
+  field conversation_id: str required
+  field fsm_id: str required
+  field current_state: str required
+  field context_data: dict[str, Any] = factory
+  field conversation_history: list[dict[str, str]] = factory
+  field stack_depth: int = 1
+  field working_memory: dict[str, Any] | None = None
+  field conversation_summary: str | None = None
+  field saved_at: str = factory
+  field metadata: dict[str, Any] = factory
+fsm_llm.SessionStore class(ABC)
+  def delete(self, session_id: str) -> bool
+  def exists(self, session_id: str) -> bool
+  def list_sessions(self) -> list[str]
+  def load(self, session_id: str) -> SessionState | None
+  def save(self, session_id: str, state: SessionState) -> None
+fsm_llm.SkillError class(FSMError)
+fsm_llm.State class(BaseModel)
+  field id: str required
+  field description: str required
+  field purpose: str required
+  field extraction_instructions: str | None = None
+  field response_instructions: str | None = None
+  field transitions: list[Transition] = factory
+  field required_context_keys: list[str] | None = None
+  field extraction_retries: int = 1
+  field extraction_confidence_threshold: float = 0.0
+  field transition_classification: dict[str, Any] | None = None
+  field field_extractions: list[FieldExtractionConfig] | None = None
+  field classification_extractions: list[ClassificationExtractionConfig] | None = None
+  field context_scope: ContextScope | None = None
+  field completion: CompletionStateConfig | None = None
+  field synthesize: SynthesizeConfig | None = None
+fsm_llm.StateNotFoundError class(FSMError)
+  def __init__(self, message: str, state_id: str | None = None, **kwargs)
+fsm_llm.Transition class(BaseModel)
+  field target_state: str required
+  field description: str required
+  field conditions: list[TransitionCondition] | None = None
+  field priority: int = 100
+  field llm_description: str | None = None
+fsm_llm.TransitionCondition class(BaseModel)
+  field description: str required
+  field requires_context_keys: list[str] | None = None
+  field logic: dict[str, Any] | None = None
+  field evaluation_priority: int = 100
+fsm_llm.TransitionEvaluation class(BaseModel)
+  field result_type: TransitionEvaluationResult required
+  field deterministic_transition: str | None = None
+  field available_options: list[TransitionOption] = factory
+  field blocked_reason: str | None = None
+  def validate_result_consistency(self) -> TransitionEvaluation
+fsm_llm.TransitionEvaluationError class(FSMError)
+  def __init__(self, message: str, state_id: str | None = None, **kwargs)
+fsm_llm.TransitionEvaluationResult class(str, Enum)
+  TransitionEvaluationResult.DETERMINISTIC = 'deterministic'
+  TransitionEvaluationResult.AMBIGUOUS = 'ambiguous'
+  TransitionEvaluationResult.BLOCKED = 'blocked'
+fsm_llm.TransitionEvaluator class
+  def __init__(self, config: TransitionEvaluatorConfig | None = None)
+  def evaluate_transitions(self, current_state: State, context: FSMContext, extracted_data: dict[str, Any] | None = None) -> TransitionEvaluation
+  def transition_passes(self, transition: Transition, context: dict[str, Any]) -> bool
+fsm_llm.TransitionEvaluatorConfig class
+  def __init__(self, strict_condition_matching: bool = True, detailed_logging: bool = False) -> None
+fsm_llm.TransitionOption class(BaseModel)
+  field target_state: str required
+  field description: str required
+  field priority: int = 100
+fsm_llm.WorkingMemory class
+  def __init__(self, buffers: tuple[str, ...] | list[str] | None = None, initial_data: dict[str, Any] | None = None, hidden_buffers: frozenset[str] | set[str] | None = None) -> None
+  def clear_buffer(self, name: str) -> None
+  def create_buffer(self, name: str) -> None
+  def delete(self, buffer: str, key: str) -> bool
+  classmethod def from_dict(cls, data: dict[str, Any], hidden_buffers: frozenset[str] | builtins.set[str] | None = None) -> WorkingMemory
+  def get(self, buffer: str, key: str, default: Any = None) -> Any
+  def get_all_data(self) -> dict[str, Any]
+  def get_buffer(self, name: str) -> dict[str, Any]
+  def has_buffer(self, name: str) -> bool
+  property hidden_buffers
+  def import_flat_data(self, data: dict[str, Any], target_buffer: str = 'core') -> None
+  def list_buffers(self) -> list[str]
+  def search(self, query: str, limit: int = 20) -> list[tuple[str, str, Any]]
+  def set(self, buffer: str, key: str, value: Any) -> None
+  def to_dict(self) -> dict[str, Any]
+  def to_scoped_view(self, read_keys: list[str]) -> dict[str, Any]
+  def update_buffer(self, buffer: str, data: dict[str, Any]) -> None
+fsm_llm.build_classification_json_schema def(schema: ClassificationSchema, *, multi_intent: bool = False, max_intents: int = 3, include_reasoning: bool = True, include_entities: bool = True) -> dict
+fsm_llm.build_classification_system_prompt def(schema: ClassificationSchema, config: ClassificationPromptConfig | None = None, *, user_message: str | None = '') -> str
+fsm_llm.build_fsm_graph def(fsm: FSMDefinition | dict[str, Any]) -> FSMGraph
+fsm_llm.clear_keys_on_entry def(keys: Iterable[str], *, state: str, name: str | None = None, priority: int = 100) -> BaseHandler
+fsm_llm.create_handler def(name: str = 'LambdaHandler') -> HandlerBuilder
+fsm_llm.disable_warnings def()
+fsm_llm.enable_debug_logging def() -> None
+fsm_llm.evaluate_logic def(logic: Any, data: dict[str, Any] | None = None, _depth: int = 0) -> Any
+fsm_llm.extract_json_from_text def(text: str) -> dict[str, Any] | None
+fsm_llm.get_agents def()
+fsm_llm.get_fsm_summary def(fsm_definition: FSMDefinition) -> dict[str, Any]
+fsm_llm.get_reasoning def()
+fsm_llm.get_version_info def()
+fsm_llm.get_workflows def()
+fsm_llm.has_agents def()
+fsm_llm.has_reasoning def()
+fsm_llm.has_workflows def()
+fsm_llm.load_fsm_definition def(fsm_id_or_path: str) -> FSMDefinition
+fsm_llm.load_fsm_from_file def(path: str) -> FSMDefinition
+fsm_llm.quick_start def(path: str, model: str | None = None) -> API
+fsm_llm.setup_logging def(*, sink: str = 'stderr', format: str | None = None, level: str | None = None, log_dir: str = 'logs', rotation: str = '10 MB', retention: str = '1 month', compression: str = 'zip', context: bool = False) -> int
+fsm_llm.to_dot def(graph: FSMGraph) -> str
+fsm_llm.to_mermaid def(graph: FSMGraph) -> str
+fsm_llm.tool_exchange def(content: str | None, calls: Sequence[ModelToolCall | Mapping[str, Any]], results: Sequence[str]) -> list[dict[str, Any]]
+fsm_llm.typed_field_extraction def(field_name: str, field_type: TypedFieldType, instructions: str, *, context_keys: Sequence[str], required: bool = True) -> dict[str, Any]
+fsm_llm.validate_fsm_from_file def(json_file: str) -> FSMValidationResult
+fsm_llm.visualize_fsm_ascii def(fsm_data: dict[str, Any], style: str = 'full') -> str
+fsm_llm.visualize_fsm_from_file def(json_file: str, style: str = 'full', *, output_format: str = 'ascii') -> str
+# fsm_llm.agent_skills
+fsm_llm.agent_skills.AgentSkill class(BaseModel)
+  field name: str required
+  field description: str required
+  field directory: Path | None = None
+  field skill_md: str = 'SKILL.md'
+  field license: str | None = None
+  field compatibility: str | None = None
+  field metadata: dict[str, str] = factory
+  field allowed_tools: tuple[str, ...] = ()
+  field extra_keys: tuple[str, ...] = ()
+  field line_count: int = 0
+  field resources: tuple[str, ...] = ()
+fsm_llm.agent_skills.SkillCatalog class
+  def __init__(self, skills: Iterable[AgentSkill], *, issues: Iterable[SkillIssue] = (), max_file_bytes: int = 262144) -> None
+  def closest(self, name: object, n: int = 5) -> list[str]
+  def files_under(self, name: object, path: object) -> tuple[str, ...]
+  def get(self, name: object) -> AgentSkill | None
+  property incomplete
+  property names
+  def read_body(self, name: str, offset: Any = 0, *, size: int = 1500) -> tuple[str, int | None, int]
+  def read_resource(self, name: str, path: Any, offset: Any = 0, *, size: int = 1500) -> tuple[str, int | None, int]
+  def render_catalog(self, *, max_items: int = 50, description_chars: int = 250) -> str
+fsm_llm.agent_skills.SkillError class(FSMError)
+fsm_llm.agent_skills.SkillIssue class(BaseModel)
+  field severity: Literal['error', 'warning', 'info'] required
+  field code: str required
+  field message: str required
+  field path: str | None = None
+fsm_llm.agent_skills.SkillLimits class(BaseModel)
+  field max_skills: int = 500
+  field max_file_bytes: int = 262144
+  field max_resources_per_skill: int = 1000
+  field max_seconds: float = 60.0
+fsm_llm.agent_skills.incomplete_note def(catalog: SkillCatalog) -> str
+fsm_llm.agent_skills.load_skills def(path_or_paths: str | os.PathLike[str] | Iterable[str | os.PathLike[str]], *, limits: SkillLimits | None = None) -> SkillCatalog
+fsm_llm.agent_skills.parse_skill_text def(text: str, folder_name: str, *, directory: Path | None = None, skill_md: str = 'SKILL.md', resources: tuple[str, ...] = ()) -> tuple[AgentSkill | None, list[SkillIssue]]
+fsm_llm.agent_skills.skipped_note def(catalog: SkillCatalog) -> str
+# fsm_llm.codes
+fsm_llm.codes.CompletionKind class(str, Enum)
+  CompletionKind.CALLS = 'calls'
+  CompletionKind.FINAL = 'final'
+  CompletionKind.MALFORMED = 'malformed'
+fsm_llm.codes.Reason class(str, Enum)
+  Reason.INPUTS_MISSING = 'inputs_missing'
+  Reason.RETURN_KEYS_MISSING = 'return_keys_missing'
+  Reason.PROVIDER_ERROR = 'provider_error'
+  Reason.LIBRARY_ERROR = 'library_error'
+  Reason.COMPILE_FAILED = 'compile_failed'
+  Reason.PUSH_FAILED = 'push_failed'
+  Reason.APPROVAL_REQUIRED = 'approval_required'
+  Reason.APPROVAL_DENIED = 'approval_denied'
+  Reason.REVIEWER_ERROR = 'reviewer_error'
+  Reason.DEPTH_REFUSED = 'depth_refused'
+  Reason.COMPLETION_UNSUPPORTED = 'completion_unsupported'
+  Reason.LIFECYCLE_TOO_LOW = 'lifecycle_too_low'
+  Reason.NOT_SIMULATED = 'not_simulated'
+  Reason.BUDGET_SPENT = 'budget_spent'
+  Reason.UNEXPECTED_ERROR = 'unexpected_error'
+  Reason.NEEDS_USER_INPUT = 'needs_user_input'
+fsm_llm.codes.Status class(str, Enum)
+  Status.OK = 'ok'
+  Status.FAILED = 'failed'
+  Status.ABORTED = 'aborted'
+  Status.RUNNING = 'running'
+  Status.ABSTAINED = 'abstained'
+fsm_llm.codes.approval_code def(approved: bool | None, *, errored: bool = False) -> tuple[Status, Reason | None]
+fsm_llm.codes.status_of_stop_reason def(stop_reason: str) -> tuple[Status, Reason | None]
+fsm_llm.codes.status_of_tool_status def(tool_status: str) -> tuple[Status, Reason | None]
+# fsm_llm.flow_analysis
+fsm_llm.flow_analysis.FlowFinding class
+  def __init__(self, analysis: str, code: str, state: str, message: str) -> None
+fsm_llm.flow_analysis.analyze_data_flow def(definition: FSMDefinition, *, inputs: Iterable[str] = (), return_keys: Iterable[str] = (), require_guaranteed_return_keys: bool = True) -> list[FlowFinding]
+fsm_llm.flow_analysis.analyze_liveness def(definition: FSMDefinition, *, inputs: Iterable[str] = (), max_turns: int = 40) -> list[FlowFinding]
+fsm_llm.flow_analysis.declared_available def(definition: FSMDefinition, inputs: Iterable[str] = ()) -> dict[str, frozenset[str]]
+fsm_llm.flow_analysis.strongly_connected_components def(successors: Mapping[str, Sequence[str]], order: Mapping[str, int]) -> list[list[str]]
+# fsm_llm.frontmatter
+fsm_llm.frontmatter.Note alias Callable[[Literal['error', 'warning', 'info'], str, str], None]
+fsm_llm.frontmatter.SURROGATE_RE Pattern
+fsm_llm.frontmatter.load_yaml def(raw: str, note: Note, *, max_bytes: int, max_depth: int) -> dict[Any, Any]
+fsm_llm.frontmatter.lone_surrogate def(value: Any, *, max_depth: int, max_nodes: int) -> bool
+fsm_llm.frontmatter.read_bytes def(path: Path, limit: int) -> bytes
+fsm_llm.frontmatter.split_frontmatter def(text: str) -> tuple[str | None, str, str | None]
+# fsm_llm.okf
+fsm_llm.okf.INCOMPLETE_CODES = ('max-total-bytes', 'max-files', 'load-deadline', 'check-deadline')
+fsm_llm.okf.OKFBundle class
+  def __init__(self, concepts: Iterable[OKFConcept] = (), *, root: Path | None = None, issues: Iterable[OKFIssue] = (), okf_version: str | None = None, index_text: str = '', max_seconds: float | None = None) -> None
+  def backlinks(self, concept_id: str) -> _Ids
+  def get(self, concept_id: str) -> OKFConcept | None
+  property incomplete
+  def list(self, type: str | None = None, prefix: str | None = None, include_deprecated: bool = False) -> _Concepts
+  def outgoing(self, concept_id: str) -> _Ids
+  def put(self, concept: OKFConcept) -> None
+  def resolve_link(self, target: object, from_id: str) -> str | None
+  def search(self, query: str, limit: int = 5, include_deprecated: bool = False) -> _Hits
+fsm_llm.okf.OKFConcept class(BaseModel)
+  field id: str required
+  field type: str = ''
+  field title: str | None = None
+  field description: str | None = None
+  field resource: str | None = None
+  field tags: list[str] = factory
+  field sources: list[dict[Any, Any]] = factory
+  field generated: dict[Any, Any] | None = None
+  field verified: list[dict[Any, Any]] = factory
+  field status: str | None = None
+  field stale_after: str | datetime | None = None
+  field extra: dict[str, Any] = factory
+  field body: str = ''
+  property display_title
+  def flags(self, now: datetime | None = None) -> list[str]
+  property is_deprecated
+  property is_draft
+  def is_stale(self, now: datetime | None = None) -> bool
+  property trust
+fsm_llm.okf.OKFError class(FSMError)
+fsm_llm.okf.OKFIssue class(BaseModel)
+  field severity: Literal['error', 'warning', 'info'] required
+  field code: str required
+  field message: str required
+  field path: str | None = None
+  field id: str | None = None
+fsm_llm.okf.OKFLimits class(BaseModel)
+  field max_files: int = 5000
+  field max_file_bytes: int = 262144
+  field max_total_bytes: int = 33554432
+  field max_depth: int = 16
+  field max_seconds: float = 120.0
+fsm_llm.okf.TrustTier class(str, Enum)
+  TrustTier.UNVERIFIED = 'unverified'
+  TrustTier.MACHINE_CONFIRMED = 'machine-confirmed'
+  TrustTier.HUMAN_REVIEWED = 'human-reviewed'
+fsm_llm.okf.body_page def(concept: OKFConcept, offset: Any, size: int) -> tuple[str, int | None, int]
+fsm_llm.okf.capped_issues def(issues: list[Any], cap: int, stops: Container[str], kind: Callable[..., Any]) -> list[Any]
+fsm_llm.okf.capped_line def(value: object, cap: int = 200) -> str
+fsm_llm.okf.capped_note def(emit: Callable[..., None], cap: int, what: str) -> _fm.Note
+fsm_llm.okf.check_bundle def(bundle: OKFBundle) -> list[OKFIssue]
+fsm_llm.okf.close_ids def(bundle: OKFBundle, wanted: str, *, include_deprecated: bool = False, n: int = 5) -> list[str]
+fsm_llm.okf.has_lone_surrogate def(value: Any) -> bool
+fsm_llm.okf.incomplete_note def(bundle: OKFBundle) -> str
+fsm_llm.okf.iso_utc def(value: datetime) -> str
+fsm_llm.okf.load_bundle def(path: str | os.PathLike[str], *, limits: OKFLimits | None = None) -> OKFBundle
+fsm_llm.okf.parse_concept_text def(concept_id: str, text: str) -> tuple[OKFConcept, list[OKFIssue]]
+fsm_llm.okf.parse_okf_datetime def(value: object) -> tuple[datetime | None, str | None]
+fsm_llm.okf.strip_unsafe_text def(text: str, *, multiline: bool = False) -> str
+fsm_llm.okf.text_page def(text: str, offset: Any, size: int) -> tuple[str, int | None, int]
+fsm_llm.okf.write_bundle def(bundle: OKFBundle, path: str | os.PathLike[str], *, overwrite: bool = False, write_index: bool = True) -> list[Path]
+fsm_llm.okf.writes_within_caps def(concept: OKFConcept) -> bool
+# fsm_llm.okf_bridge
+fsm_llm.okf_bridge.bundle_from_memory_entries def(entries: Iterable[Any], *, generated_by: str | None = None, now: datetime | str | None = None) -> OKFBundle
+fsm_llm.okf_bridge.create_okf_handler def(bundle: OKFBundle, *, context_key: str = 'okf_concepts', timing: HandlerTiming = HandlerTiming.PRE_PROCESSING, states: Iterable[str] = (), query_key: str | None = None, max_items: int = 20, include_deprecated: bool = False, name: str = 'OKFContext') -> BaseHandler
+# fsm_llm.schema_registry
+fsm_llm.schema_registry.FIELD_VERSIONS dict
+fsm_llm.schema_registry.SCHEMA_VERSION_DEFAULT = '4.2'
+fsm_llm.schema_registry.SchemaFinding class
+  def __init__(self, model: str, field: str, introduced: str, declared: str, state_id: str | None = None) -> None
+  property message
+fsm_llm.schema_registry.newer_fields def(definition: BaseModel) -> tuple[SchemaFinding, ...]
+fsm_llm.schema_registry.parse_version def(text: object) -> tuple[int, int] | None
+# fsm_llm.agents
+fsm_llm.agents.ADaPTAgent class(BaseAgent)
+  def __init__(self, tools: ToolRegistry | None = None, config: AgentConfig | None = None, max_depth: int = 3, **api_kwargs: Any) -> None
+  def run(self, task: str, initial_context: dict[str, Any] | None = None, _depth: int = 0, _start_time: float | None = None) -> AgentResult
+fsm_llm.agents.AgentArtifactBuilder class(ArtifactBuilder)
+  def __init__(self) -> None
+  def add_tool(self, name: str, description: str, parameter_schema: dict[str, Any] | None = None) -> AgentArtifactBuilder
+  property artifact_type
+  def get_missing_fields(self) -> list[str]
+  def remove_tool(self, name: str) -> AgentArtifactBuilder
+  def set_agent_type(self, agent_type: str) -> AgentArtifactBuilder
+  def set_config(self, **kwargs: Any) -> AgentArtifactBuilder
+  def set_overview(self, name: str, description: str) -> AgentArtifactBuilder
+  def to_dict(self) -> dict[str, Any]
+  def validate_complete(self) -> list[str]
+  def validate_partial(self) -> list[str]
+fsm_llm.agents.AgentConfig class(BaseModel)
+  field model: str = factory
+  field max_iterations: int = 10
+  field timeout_seconds: float = 300.0
+  field temperature: float = 0.5
+  field max_tokens: int = 1000
+  field output_schema: type | None = None
+  field transition_config: Any = None
+  field max_history_size: int | None = None
+  field enable_prompt_cache: bool = False
+  field reflect_every_n: int | None = None
+  field auto_summarize_after: int | None = None
+  field verification_fn: Callable[..., Any] | None = None
+  field force_final_tool: str | None = None
+  field instructions: str | None = None
+  classmethod def bound_int_limit(cls, v: int | None) -> int | None
+  classmethod def refuse_bool_number(cls, v: Any) -> Any
+  classmethod def validate_auto_summarize_after(cls, v: int | None) -> int | None
+  classmethod def validate_force_final_tool(cls, v: str | None) -> str | None
+  classmethod def validate_max_iterations(cls, v: int) -> int
+  classmethod def validate_max_tokens(cls, v: int) -> int
+  classmethod def validate_model(cls, v: str) -> str
+  classmethod def validate_optional_positive(cls, v: int | None) -> int | None
+  classmethod def validate_output_schema(cls, v: type | None) -> type | None
+  classmethod def validate_temperature(cls, v: float) -> float
+  classmethod def validate_timeout_seconds(cls, v: float) -> float
+fsm_llm.agents.AgentError class(FSMError)
+fsm_llm.agents.AgentGraph class
+  def __init__(self, nodes: dict[str, BaseAgent], adjacency: dict[str, list[tuple[str, Callable | None]]], entry: str) -> None
+  property entry
+  def get_edges(self, node: str) -> list[str]
+  def get_terminal_nodes(self) -> list[str]
+  property nodes
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+fsm_llm.agents.AgentGraphBuilder class
+  def __init__(self) -> None
+  def add_edge(self, source: str, target: str, condition: Callable[[dict[str, Any]], bool] | None = None) -> AgentGraphBuilder
+  def add_node(self, name: str, agent: BaseAgent) -> AgentGraphBuilder
+  def build(self) -> AgentGraph
+  def set_entry(self, name: str) -> AgentGraphBuilder
+fsm_llm.agents.AgentResult class(BaseModel)
+  field answer: str required
+  field success: bool required
+  field trace: AgentTrace = factory
+  field final_context: dict[str, Any] = factory
+  field structured_output: Any = None
+  field stop_reason: str | None = None
+  property iterations_used
+  property tools_used
+fsm_llm.agents.AgentServer class
+  def __init__(self, agent: Any, host: str = '127.0.0.1', port: int = 8500, name: str | None = None, timeout: float = 300.0, api_key: str | None = None, max_input_chars: int | None = 100000, max_concurrent: int = 8) -> None
+  property app
+  def run(self, **kwargs: Any) -> None
+fsm_llm.agents.AgentStep class(BaseModel)
+  field iteration: int required
+  field thought: str = ''
+  field action: str = ''
+  field observation: str = ''
+  field timestamp: datetime = factory
+fsm_llm.agents.AgentTimeoutError class(AgentError)
+  def __init__(self, timeout_seconds: float)
+fsm_llm.agents.AgentTrace class(BaseModel)
+  field tool_calls: list[ToolCall] = factory
+  field total_iterations: int = 0
+  property tools_used
+fsm_llm.agents.ApprovalCallback alias Callable[[ApprovalRequest], bool]
+fsm_llm.agents.ApprovalDeniedError class(AgentError)
+  def __init__(self, action_description: str)
+fsm_llm.agents.ApprovalPolicy alias Callable[[ToolCall, dict[str, Any]], bool]
+fsm_llm.agents.ApprovalRequest class(BaseModel)
+  field tool_name: str required
+  field parameters: dict[str, Any] = factory
+  field reasoning: str = ''
+  field context_summary: dict[str, Any] = factory
+fsm_llm.agents.ArtifactBuilder class(ABC)
+  property artifact_type
+  def build(self) -> dict[str, Any]
+  def get_missing_fields(self) -> list[str]
+  def get_progress(self) -> BuildProgress
+  def get_summary(self, detail_level: str = 'full') -> str
+  def take_warnings(self) -> list[str]
+  def to_dict(self) -> dict[str, Any]
+  def validate_complete(self) -> list[str]
+  def validate_partial(self) -> list[str]
+fsm_llm.agents.ArtifactType class(str, Enum)
+  ArtifactType.FSM = 'fsm'
+  ArtifactType.WORKFLOW = 'workflow'
+  ArtifactType.AGENT = 'agent'
+fsm_llm.agents.AutoMemoryReactAgent class(ReactAgent)
+  def __init__(self, *args: Any, memory: MemoryBackend | None = None, recall_k: int = 3, recall_min_score: float = 0.25, auto_remember: bool = True, remember_only_on_success: bool = False, enable_respond: bool = True, **kwargs: Any) -> None
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+  def run_stream(self, task: str, initial_context: dict[str, Any] | None = None) -> Iterator[str]
+fsm_llm.agents.BaseAgent class(ABC)
+  def __init__(self, config: AgentConfig | None = None, **api_kwargs: Any) -> None
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+fsm_llm.agents.BudgetExhaustedError class(AgentError)
+  def __init__(self, budget_type: str, limit: int | float, detail: str = '')
+fsm_llm.agents.BuildProgress class(BaseModel)
+  field total_required: int = 0
+  field completed: int = 0
+  field missing: list[str] = factory
+  field warnings: list[str] = factory
+  property is_complete
+  property percentage
+fsm_llm.agents.BuilderError class(MetaBuilderError, BuildError)
+  def __init__(self, message: str, action: str | None = None, **kwargs: Any)
+fsm_llm.agents.CachingToolRegistry class(ToolRegistry)
+  def __init__(self, max_entries: int | None = 256) -> None
+  def clear_cache(self) -> None
+  def execute(self, tool_call: ToolCall, *, gated: bool = False) -> ToolResult
+fsm_llm.agents.ChainStep class(BaseModel)
+  field step_id: str required
+  field name: str required
+  field extraction_instructions: str required
+  field response_instructions: str required
+  field validation_fn: Callable[[dict[str, Any]], bool] | None = None
+fsm_llm.agents.ConfiguredAgentBuilder class
+  def __init__(self) -> None
+  def add_tool(self, tool: Any | ToolDefinition) -> ConfiguredAgentBuilder
+  def build(self) -> Any
+  def set_config(self, config: AgentConfig) -> ConfiguredAgentBuilder
+  def set_config_option(self, name: str, value: Any) -> ConfiguredAgentBuilder
+  def set_hitl(self, hitl: Any) -> ConfiguredAgentBuilder
+  def set_max_iterations(self, max_iterations: int) -> ConfiguredAgentBuilder
+  def set_max_tokens(self, max_tokens: int) -> ConfiguredAgentBuilder
+  def set_model(self, model: str) -> ConfiguredAgentBuilder
+  def set_option(self, name: str, value: Any) -> ConfiguredAgentBuilder
+  def set_pattern(self, pattern: str) -> ConfiguredAgentBuilder
+  def set_system_prompt(self, system_prompt: str) -> ConfiguredAgentBuilder
+  def set_temperature(self, temperature: float) -> ConfiguredAgentBuilder
+  def set_timeout_seconds(self, seconds: float) -> ConfiguredAgentBuilder
+  def set_tool_registry(self, registry: ToolRegistry) -> ConfiguredAgentBuilder
+fsm_llm.agents.DebateAgent class(BaseAgent)
+  def __init__(self, config: AgentConfig | None = None, num_rounds: int = 3, proposer_persona: str = '', critic_persona: str = '', judge_persona: str = '', **api_kwargs: Any) -> None
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+fsm_llm.agents.DebateRound class(BaseModel)
+  field round_num: int required
+  field proposition: str = ''
+  field critique: str = ''
+  field counter_argument: str = ''
+  field judge_verdict: str = ''
+fsm_llm.agents.DecompositionResult class(BaseModel)
+  field subtasks: list[str] = factory
+  field operator: str = 'AND'
+  field depth: int = 0
+  classmethod def validate_operator(cls, v: str) -> str
+fsm_llm.agents.EscalationCallback alias Callable[[str, dict[str, Any]], None]
+fsm_llm.agents.EvaluationError class(AgentError)
+  def __init__(self, message: str, evaluator: str | None = None, **kwargs: Any)
+fsm_llm.agents.EvaluationResult class(BaseModel)
+  field passed: bool required
+  field score: float = 0.0
+  field feedback: str = ''
+  field criteria_met: list[str] = factory
+fsm_llm.agents.EvaluatorOptimizerAgent class(BaseAgent)
+  def __init__(self, evaluation_fn: Callable[[str, dict[str, Any]], EvaluationResult], config: AgentConfig | None = None, max_refinements: int = 3, **api_kwargs: Any) -> None
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+fsm_llm.agents.FSMArtifactBuilder class(ArtifactBuilder)
+  def __init__(self) -> None
+  def add_state(self, state_id: str, description: str, purpose: str, extraction_instructions: str | None = None, response_instructions: str | None = None) -> FSMArtifactBuilder
+  def add_transition(self, from_state: str, target_state: str, description: str, priority: int = 100, conditions: list[dict[str, Any]] | None = None) -> FSMArtifactBuilder
+  property artifact_type
+  def get_missing_fields(self) -> list[str]
+  def remove_state(self, state_id: str) -> FSMArtifactBuilder
+  def remove_transition(self, from_state: str, target_state: str) -> FSMArtifactBuilder
+  def set_initial_state(self, state_id: str) -> FSMArtifactBuilder
+  def set_overview(self, name: str, description: str, persona: str | None = None) -> FSMArtifactBuilder
+  def to_dict(self) -> dict[str, Any]
+  def update_state(self, state_id: str, **fields: Any) -> FSMArtifactBuilder
+  def validate_complete(self) -> list[str]
+  def validate_partial(self) -> list[str]
+fsm_llm.agents.HumanInTheLoop class
+  def __init__(self, approval_policy: ApprovalPolicy | None = None, approval_callback: ApprovalCallback | None = None, on_escalation: EscalationCallback | None = None, confidence_threshold: float = 0.3, approval_timeout: float | None = None) -> None
+  def escalate(self, reason: str, context: dict[str, Any]) -> None
+  property has_approval_callback
+  property has_approval_policy
+  def request_approval(self, tool_call: ToolCall, context: dict[str, Any]) -> bool
+  def requires_approval(self, tool_call: ToolCall, context: dict[str, Any]) -> bool
+  def should_escalate_on_confidence(self, confidence: float) -> bool
+fsm_llm.agents.MCPToolProvider class
+  def __init__(self, server_params: Any | None = None, server_url: str | None = None, timeout: float | None = 30.0) -> None
+  static def create_mock_tool(name: str, description: str, parameter_schema: dict[str, Any] | None = None, execute_fn: Any = None) -> ToolDefinition
+  def discover_tools(self) -> list[ToolDefinition]
+  classmethod def from_stdio(cls, command: str, args: list[str] | None = None, env: dict[str, str] | None = None, timeout: float | None = 30.0) -> MCPToolProvider
+  classmethod def from_url(cls, url: str, timeout: float | None = 30.0) -> MCPToolProvider
+  def get_tool_names(self) -> list[str]
+  def register_tools(self, registry: Any) -> int
+  property skipped_tools
+  property tools
+fsm_llm.agents.MakerCheckerAgent class(BaseAgent)
+  def __init__(self, maker_instructions: str, checker_instructions: str, config: AgentConfig | None = None, max_revisions: int = 3, quality_threshold: float = 0.7, **api_kwargs: Any) -> None
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+fsm_llm.agents.MemoryEntry class
+  def __init__(self, id: str, text: str, metadata: dict[str, Any] | None = None, embedding: list[float] | None = None) -> None
+  classmethod def from_dict(cls, d: dict[str, Any]) -> MemoryEntry
+  def to_dict(self) -> dict[str, Any]
+fsm_llm.agents.MemorySessionStore class(SessionStore)
+  def __init__(self, base: SessionStore | None = None, directory: str | Path | None = None) -> None
+  def delete(self, session_id: str) -> bool
+  def list_sessions(self) -> list[str]
+  def load(self, session_id: str) -> SessionState | None
+  def load_memory(self, session_id: str) -> WorkingMemory | None
+  def load_session_with_memory(self, session_id: str) -> tuple[SessionState | None, WorkingMemory | None]
+  def save(self, session_id: str, state: SessionState) -> None
+  def save_memory(self, session_id: str, memory: WorkingMemory) -> None
+  def save_session_with_memory(self, session_id: str, state: SessionState, memory: WorkingMemory) -> None
+fsm_llm.agents.MetaBuilderAgent class
+  def __init__(self, config: AgentConfig | None = None, **api_kwargs: Any) -> None
+  def get_internal_state(self) -> dict[str, Any]
+  def get_result(self) -> MetaBuilderResult
+  def is_complete(self) -> bool
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> MetaBuilderResult
+  def run_interactive(self) -> MetaBuilderResult
+  def send(self, message: str) -> str
+  def start(self, initial_message: str = '') -> str
+fsm_llm.agents.MetaBuilderConfig class(AgentConfig)
+  field model: str = factory
+  field max_iterations: int = 10
+  field timeout_seconds: float = 300.0
+  field temperature: float = 0.7
+  field max_tokens: int = 4096
+  field output_schema: type | None = None
+  field transition_config: Any = None
+  field max_history_size: int | None = None
+  field enable_prompt_cache: bool = False
+  field reflect_every_n: int | None = None
+  field auto_summarize_after: int | None = None
+  field verification_fn: Callable[..., Any] | None = None
+  field force_final_tool: str | None = None
+  field instructions: str | None = None
+  field max_turns: int = 50
+  classmethod def from_agent_config(cls, config: AgentConfig) -> MetaBuilderConfig
+  def refuse_unread_agent_fields(self) -> MetaBuilderConfig
+  classmethod def validate_max_turns(cls, v: int) -> int
+fsm_llm.agents.MetaBuilderError class(AgentError)
+fsm_llm.agents.MetaBuilderResult class(AgentResult)
+  field answer: str = ''
+  field success: bool = True
+  field trace: AgentTrace = factory
+  field final_context: dict[str, Any] = factory
+  field structured_output: Any = None
+  field stop_reason: str | None = None
+  field artifact_type: ArtifactType = ArtifactType.FSM
+  field artifact: dict[str, Any] = factory
+  field artifact_json: str = ''
+  field is_valid: bool = True
+  field validation_errors: list[str] = factory
+  field conversation_turns: int = 0
+fsm_llm.agents.MetaValidationError class(MetaBuilderError)
+  def __init__(self, message: str, errors: list[str] | None = None, **kwargs: Any)
+fsm_llm.agents.NativeFunctionCallingReactAgent class(BaseAgent)
+  def __init__(self, tools: ToolRegistry, config: AgentConfig | None = None, system_policy: str | None = None, *, seed: int | None = None, **api_kwargs: Any) -> None
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+  property seed
+  property system_policy
+fsm_llm.agents.OKFMemoryBackend class
+  def __init__(self, bundle: OKFBundle, *, store: SemanticMemoryStore | None = None, include_deprecated: bool = False) -> None
+  def add(self, text: str, *args: Any, **kwargs: Any) -> None
+  property incomplete
+  def reindex(self) -> int
+  def search(self, query: str, k: int = 5) -> list[tuple[str, float, dict[str, Any]]]
+fsm_llm.agents.OrchestratorAgent class(BaseAgent)
+  def __init__(self, worker_factory: Callable[[str], AgentResult] | None = None, tools: ToolRegistry | None = None, config: AgentConfig | None = None, max_workers: int = 5, **api_kwargs: Any) -> None
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+fsm_llm.agents.OutputError class(MetaBuilderError)
+  def __init__(self, message: str, path: str | None = None, **kwargs: Any)
+fsm_llm.agents.ParallelReactAgent class(BaseAgent)
+  def __init__(self, tools: ToolRegistry, config: AgentConfig | None = None, max_parallel: int = 4, **api_kwargs: Any) -> None
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+fsm_llm.agents.PlanExecuteAgent class(BaseAgent)
+  def __init__(self, tools: ToolRegistry | None = None, config: AgentConfig | None = None, max_replans: int = 2, **api_kwargs: Any) -> None
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+fsm_llm.agents.PlanStep class(BaseModel)
+  field step_id: int required
+  field description: str required
+  field dependencies: list[int] = factory
+  field status: str = 'pending'
+  field result: str = ''
+fsm_llm.agents.PromptChainAgent class(BaseAgent)
+  def __init__(self, chain: list[ChainStep], config: AgentConfig | None = None, **api_kwargs: Any) -> None
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+fsm_llm.agents.PythonToolDefinition class
+  def __init__(self, name: str, description: str, execute: Callable[..., Any], parameter_schema: dict[str, Any] = <factory>, category: str = 'general', requires_approval: bool = False, metadata: dict[str, Any] = <factory>, annotations: ToolAnnotations = <factory>, timeout_seconds: float | None = None, args_model: type[BaseModel] | None = None) -> None
+  def to_tool_definition(self) -> ToolDefinition
+fsm_llm.agents.PythonToolLoadReport class
+  def __init__(self, tools: tuple[PythonToolDefinition, ...] = (), errors: tuple[tuple[str, str], ...] = ()) -> None
+fsm_llm.agents.PythonToolLoader class
+  static def by_category(python_tools: list[PythonToolDefinition]) -> dict[str, list[PythonToolDefinition]]
+  static def from_directory(path: str | Path, pattern: str = '*.py', category: str | None = None) -> list[PythonToolDefinition]
+  static def from_functions(*functions: Callable[..., Any], category: str = 'general') -> list[PythonToolDefinition]
+  static def load_directory(path: str | Path, pattern: str = '*.py', category: str | None = None) -> PythonToolLoadReport
+  static def to_tool_registry(python_tools: list[PythonToolDefinition], registry: ToolRegistry | None = None) -> ToolRegistry
+fsm_llm.agents.REWOOAgent class(BaseAgent)
+  def __init__(self, tools: ToolRegistry, config: AgentConfig | None = None, **api_kwargs: Any) -> None
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+fsm_llm.agents.ReactAgent class(BaseAgent)
+  def __init__(self, tools: ToolRegistry, config: AgentConfig | None = None, hitl: HumanInTheLoop | None = None, use_classification: bool = False, **api_kwargs: Any) -> None
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+  def run_stream(self, task: str, initial_context: dict[str, Any] | None = None) -> Iterator[str]
+fsm_llm.agents.ReasoningReactAgent class(BaseAgent)
+  def __init__(self, tools: ToolRegistry, config: AgentConfig | None = None, hitl: HumanInTheLoop | None = None, reasoning_model: str | None = None, **api_kwargs: Any) -> None
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+fsm_llm.agents.ReflexionAgent class(BaseAgent)
+  def __init__(self, tools: ToolRegistry, config: AgentConfig | None = None, evaluation_fn: Callable[[dict[str, Any]], EvaluationResult] | None = None, max_reflections: int = 3, hitl: HumanInTheLoop | None = None, **api_kwargs: Any) -> None
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+fsm_llm.agents.ReflexionMemory class(BaseModel)
+  field episode: int required
+  field task_summary: str = ''
+  field outcome: str = ''
+  field reflection: str = ''
+  field lessons: list[str] = factory
+  field timestamp: datetime = factory
+fsm_llm.agents.RemoteAgentTool class
+  def __init__(self, url: str, name: str, description: str, timeout: float = 120.0, api_key: str | None = None) -> None
+  def ainvoke(self, task: str, context: dict[str, Any] | None = None) -> str
+  def health_check(self) -> bool
+  def invoke(self, task: str, context: dict[str, Any] | None = None) -> str
+  def to_tool_definition(self) -> ToolDefinition
+  property url
+fsm_llm.agents.RetryingToolRegistry class(ToolRegistry)
+  def __init__(self, max_retries: int = 2, backoff_seconds: float = 0.0) -> None
+  def execute(self, tool_call: ToolCall, *, gated: bool = False) -> ToolResult
+fsm_llm.agents.SOPDefinition class
+  def __init__(self, name: str, description: str = '', agent_pattern: str = 'react', task_template: str = '', required_tools: list[str] | None = None, output_schema: dict[str, Any] | None = None, config_overrides: dict[str, Any] | None = None, metadata: dict[str, Any] | None = None) -> None
+  classmethod def from_dict(cls, data: dict[str, Any]) -> SOPDefinition
+  def render_task(self, **kwargs: Any) -> str
+  def to_agent_config(self, **overrides: Any) -> AgentConfig
+  def to_dict(self) -> dict[str, Any]
+fsm_llm.agents.SOPRegistry class
+  def __init__(self) -> None
+  def get(self, name: str) -> SOPDefinition
+  def has(self, name: str) -> bool
+  def list_names(self) -> list[str]
+  def list_sops(self) -> list[SOPDefinition]
+  def register(self, sop: SOPDefinition) -> SOPRegistry
+  def register_directory(self, directory: str | Path) -> int
+  def register_from_dict(self, data: dict[str, Any]) -> SOPRegistry
+  def register_from_file(self, path: str | Path) -> SOPRegistry
+  def remove(self, name: str) -> bool
+fsm_llm.agents.SelfConsistencyAgent class(BaseAgent)
+  def __init__(self, config: AgentConfig | None = None, num_samples: int = 5, aggregation_fn: Callable[[list[str]], str] | None = None, max_workers: int = 1, **api_kwargs: Any) -> None
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+fsm_llm.agents.SemanticMemoryStore class
+  def __init__(self, embedding_model: str | None = None, persist_path: str | None = None, embed_fn: EmbedFn | None = None, max_entries: int | None = None) -> None
+  def add(self, text: str, metadata: dict[str, Any] | None = None, entry_id: str | None = None) -> str
+  def all_entries(self) -> list[MemoryEntry]
+  def clear(self) -> None
+  def forget(self, entry_id: str) -> bool
+  classmethod def from_dict(cls, data: dict[str, Any], persist_path: str | None = None, embed_fn: EmbedFn | None = None, embedding_model: str | None = None) -> SemanticMemoryStore
+  classmethod def load(cls, path: str, embed_fn: EmbedFn | None = None) -> SemanticMemoryStore
+  def save(self, path: str | None = None) -> None
+  def search(self, query: str, k: int = 5) -> list[tuple[str, float, dict[str, Any]]]
+  def to_dict(self) -> dict[str, Any]
+fsm_llm.agents.SemanticToolRegistry class(ToolRegistry)
+  def __init__(self, embedding_model: str = 'ollama/embeddinggemma-2:740m', top_k: int = 5, auto_embed: bool = True, *, embed_fn: EmbedFn | None = None) -> None
+  property embedded_tool_count
+  property embedding_model
+  def rebuild_embeddings(self) -> int
+  def register(self, tool: ToolDefinition) -> SemanticToolRegistry
+  def retrieve(self, query: str, top_k: int | None = None) -> list[ToolDefinition]
+  def to_prompt_description(self, query: str | None = None, top_k: int | None = None) -> str
+fsm_llm.agents.StopReason class
+fsm_llm.agents.SwarmAgent class(BaseAgent)
+  def __init__(self, agents: dict[str, BaseAgent], entry_agent: str, max_handoffs: int = 10, memory: WorkingMemory | None = None, config: AgentConfig | None = None) -> None
+  def add_agent(self, name: str, agent: BaseAgent) -> SwarmAgent
+  property agents
+  property entry_agent
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+fsm_llm.agents.ToolAnnotations class(BaseModel)
+  field read_only: bool | None = None
+  field destructive: bool | None = None
+  field idempotent: bool | None = None
+  field open_world: bool | None = None
+  property retry_safe
+fsm_llm.agents.ToolCall class(BaseModel)
+  field tool_name: str required
+  field parameters: dict[str, Any] = factory
+  field reasoning: str = ''
+fsm_llm.agents.ToolDefinition class(BaseModel)
+  field name: str required
+  field description: str required
+  field parameter_schema: dict[str, Any] = factory
+  field requires_approval: bool = False
+  field annotations: ToolAnnotations = factory
+  field timeout_seconds: float | None = None
+  field execute_fn: Callable[..., Any] | None = None
+  field args_model: type[BaseModel] | None = None
+  classmethod def validate_name(cls, v: str) -> str
+fsm_llm.agents.ToolExecutionError class(AgentError)
+  def __init__(self, message: str, tool_name: str | None = None, **kwargs: Any)
+fsm_llm.agents.ToolNotFoundError class(AgentError)
+  def __init__(self, tool_name: str)
+fsm_llm.agents.ToolRegistry class
+  def __init__(self) -> None
+  def execute(self, tool_call: ToolCall, *, gated: bool = False) -> ToolResult
+  def get(self, name: str) -> ToolDefinition
+  def get_json_schemas(self) -> list[dict[str, Any]]
+  def list_tools(self) -> list[ToolDefinition]
+  def register(self, tool: ToolDefinition) -> ToolRegistry
+  def register_agent(self, agent: Any, name: str, description: str) -> ToolRegistry
+  def register_function(self, fn: Callable[..., Any], name: str | None = None, description: str | None = None, parameter_schema: dict[str, Any] | None = None, requires_approval: bool = False, *, annotations: ToolAnnotations | None = None, timeout_seconds: float | None = None) -> ToolRegistry
+  def register_python_tool(self, tool: Any) -> ToolRegistry
+  def to_classification_schema(self) -> dict[str, Any]
+  def to_prompt_description(self) -> str
+  property tool_names
+fsm_llm.agents.ToolResult class(BaseModel)
+  field tool_name: str required
+  field success: bool required
+  field result: Any = None
+  field error: str | None = None
+  field execution_time_ms: float = 0.0
+  field timed_out: bool = False
+  property observation
+  property status
+  property summary
+fsm_llm.agents.VerifiedReactAgent class(ReactAgent)
+  def __init__(self, *args: Any, max_verify_retries: int = 1, **kwargs: Any) -> None
+  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+  def run_stream(self, task: str, initial_context: dict[str, Any] | None = None) -> Iterator[str]
+fsm_llm.agents.WorkflowArtifactBuilder class(ArtifactBuilder)
+  def __init__(self) -> None
+  def add_step(self, step_id: str, step_type: str, name: str, description: str = '', config: dict[str, Any] | None = None) -> WorkflowArtifactBuilder
+  property artifact_type
+  def get_missing_fields(self) -> list[str]
+  def remove_step(self, step_id: str) -> WorkflowArtifactBuilder
+  def set_initial_step(self, step_id: str) -> WorkflowArtifactBuilder
+  def set_overview(self, workflow_id: str, name: str, description: str) -> WorkflowArtifactBuilder
+  def set_step_transition(self, from_step: str, to_step: str, condition: str | None = None) -> WorkflowArtifactBuilder
+  def to_dict(self) -> dict[str, Any]
+  def validate_complete(self) -> list[str]
+  def validate_partial(self) -> list[str]
+fsm_llm.agents.augment_task_with_memories def(task: str, memory: MemoryBackend, recall_k: int = 3, header: str = '[Relevant things you remember]', min_score: float = 0.0) -> str
+fsm_llm.agents.build_parallel_react_fsm def(registry: ToolRegistry, task_description: str = '', output_schema: type | None = None, context_keys: Sequence[str] = ()) -> dict[str, Any]
+fsm_llm.agents.create_agent def(pattern: str = 'react', tools: list | ToolRegistry | None = None, *, config: AgentConfig | None = None, system_prompt: str | None = None, **kwargs)
+fsm_llm.agents.create_agent_tools def(builder: AgentArtifactBuilder) -> ToolRegistry
+fsm_llm.agents.create_builder_tools def(builder: FSMArtifactBuilder | WorkflowArtifactBuilder | AgentArtifactBuilder, artifact_type: ArtifactType) -> ToolRegistry
+fsm_llm.agents.create_fsm_tools def(builder: FSMArtifactBuilder) -> ToolRegistry
+fsm_llm.agents.create_memory_tools def(memory: WorkingMemory) -> list[ToolDefinition]
+fsm_llm.agents.create_okf_tools def(bundle: OKFBundle, *, registry: ToolRegistry | None = None, include_deprecated: bool = False) -> ToolRegistry
+fsm_llm.agents.create_semantic_memory_tools def(store: SemanticMemoryStore, top_k: int = 5) -> list[ToolDefinition]
+fsm_llm.agents.create_skill_tools def(catalog: SkillCatalog, *, registry: ToolRegistry | None = None) -> ToolRegistry
+fsm_llm.agents.create_workflow_tools def(builder: WorkflowArtifactBuilder) -> ToolRegistry
+fsm_llm.agents.default_llm_judge def(model: str | None = None, criteria: str = '', threshold: float = 0.7, complete_fn: Callable[[str, str], str] | None = None) -> JudgeFn
+fsm_llm.agents.export_agent_result def(result: AgentResult, directory: str | Path, *, task: str | None = None, overwrite: bool = False) -> Path
+fsm_llm.agents.export_semantic_memory def(store: SemanticMemoryStore, directory: str | Path, *, overwrite: bool = False) -> list[Path]
+fsm_llm.agents.format_artifact_json def(artifact: dict[str, Any]) -> str
+fsm_llm.agents.format_summary def(result: MetaBuilderResult) -> str
+fsm_llm.agents.load_builtin_sops def() -> SOPRegistry
+fsm_llm.agents.load_working_memory def(path: str) -> WorkingMemory
+fsm_llm.agents.make_observation_summarizer def(threshold: int, keep_last: int | None = None, summarize_fn: SummarizeFn | None = None) -> Callable[[dict[str, Any]], dict[str, Any]]
+fsm_llm.agents.react_worker_factory def(tools: ToolRegistry, config: AgentConfig | None = None, agent_cls: type[ReactAgent] = ReactAgent, **agent_kwargs: Any) -> WorkerFn
+fsm_llm.agents.remember_interaction def(memory: MemoryBackend, task: str, answer: str, metadata: dict[str, Any] | None = None) -> None
+fsm_llm.agents.save_artifact def(artifact: dict[str, Any], path: str | Path) -> Path
+fsm_llm.agents.save_working_memory def(memory: WorkingMemory, path: str) -> None
+fsm_llm.agents.tool def(fn: Callable[..., Any] | None = None, *, name: str | None = None, description: str | None = None, parameter_schema: dict[str, Any] | None = None, requires_approval: bool = False, annotations: ToolAnnotations | None = None, timeout_seconds: float | None = None) -> Any
+fsm_llm.agents.with_auto_memory def(tools: Any, config: AgentConfig | None = None, memory: MemoryBackend | None = None, **kwargs: Any) -> AutoMemoryReactAgent
+# fsm_llm.eval
+fsm_llm.eval.CaseReport class
+  def __init__(self, run_dir: Path, model: str, trials: list[TrialResult], cases: list[dict[str, Any]], overall: dict[str, Any], wall_time: float, interrupted: bool = False) -> None
+fsm_llm.eval.ConversationCase class(BaseModel)
+  field id: str required
+  field fsm: str | dict[str, Any] required
+  field initial_context: dict[str, Any] = factory
+  field turns: list[str] required
+  field expect: Expectations required
+  field description: str = ''
+fsm_llm.eval.EvalConfig class(BaseModel)
+  field model: str | None = None
+  field workers: int = 4
+  field timeout: int = 120
+  field output_root: str = 'evaluation'
+  field output_dir: str | None = None
+  field fail_under: float | None = None
+  field examples_dir: str = 'examples'
+  field python: str | None = None
+  field category: str | None = None
+  field name_filter: str | None = None
+  field example_inputs: dict[str, str] = factory
+  field example_timeouts: dict[str, Annotated[int, Gt(gt=0)]] = factory
+  field category_timeouts: dict[str, Annotated[int, Gt(gt=0)]] = factory
+  field trials: int = 3
+  field temperature: float | None = None
+  field max_tokens: int | None = None
+  field llm_kwargs: dict[str, Any] = factory
+fsm_llm.eval.EvalConfigError class(EvalError)
+fsm_llm.eval.EvalDatasetError class(EvalError)
+fsm_llm.eval.EvalError class(FSMError)
+fsm_llm.eval.ExampleReport class
+  def __init__(self, run_dir: Path, model: str, results: list[ExampleResult], health: float, wall_time: float, interrupted: bool = False) -> None
+fsm_llm.eval.ExampleResult class
+  def __init__(self, name: str, category: str, exit_code: int | None, duration: float, stdout: str, stderr: str, timed_out: bool, error: str | None = None, score: int = 0, failures: list[str] = <factory>) -> None
+fsm_llm.eval.ExampleTarget class
+  def __init__(self, name: str, category: str, path: Path, interactive: bool, stdin_data: str | None, timeout: int) -> None
+fsm_llm.eval.Expectations class(BaseModel)
+  field final_state: str | None = None
+  field visited_states: list[str] | None = None
+  field context: dict[str, Any] | None = None
+  field context_keys: list[str] | None = None
+  field responses_contain: list[str] | None = None
+  field ended: bool | None = None
+fsm_llm.eval.TrialResult class
+  def __init__(self, case_id: str, trial: int, passed: bool, failures: list[str] = <factory>, error: str | None = None, final_state: str | None = None, visited_states: list[str] = <factory>, responses: list[str] = <factory>, context: dict[str, Any] = <factory>, ended: bool = False, turns_sent: int = 0, duration: float = 0.0) -> None
+  def first_failure(self) -> str
+  def to_row(self) -> dict[str, Any]
+fsm_llm.eval.append_row def(path: Path, row: dict[str, Any]) -> None
+fsm_llm.eval.check_expectations def(expect: Expectations, trial: TrialResult) -> list[str]
+fsm_llm.eval.classify_result def(result: ExampleResult) -> tuple[int, list[str]]
+fsm_llm.eval.discover_examples def(config: EvalConfig) -> list[ExampleTarget]
+fsm_llm.eval.fisher_exact_two_sided def(k1: int, n1: int, k2: int, n2: int) -> float
+fsm_llm.eval.get_timeout def(name: str, category: str, default: int, example_timeouts: Mapping[str, int] = {'advanced/e_commerce': 300, 'reasoning/math_tutor': 300, 'agents/reflexion': 240, 'agents/debate': 360, 'agents/evaluator_optimizer': 360, 'agents/orchestrator': 360, 'agents/adapt': 240, 'agents/memory_agent': 360, 'agents/concurrent_react': 240, 'agents/agent_as_tool': 360, 'agents/structured_output': 240, 'agents/react_hitl_combined': 240, 'agents/skill_loader': 240, 'agents/orchestrator_specialist': 360, 'agents/hierarchical_orchestrator': 360, 'agents/pipeline_review': 360, 'agents/adapt_with_memory': 360, 'agents/react_structured_pipeline': 360, 'agents/multi_debate_panel': 360, 'agents/reflexion_code_gen': 240, 'agents/agent_memory_chain': 360, 'agents/debate_with_tools': 240, 'agents/eval_opt_structured': 360, 'agents/legal_document_review': 360, 'agents/investment_portfolio': 360, 'agents/security_audit': 360, 'agents/medical_literature': 360, 'agents/architecture_review': 360, 'agents/supply_chain_optimizer': 360, 'agents/regulatory_compliance': 360, 'intermediate/adaptive_quiz': 300, 'meta/meta_review_loop': 240, 'meta/meta_from_spec': 240, 'meta/build_fsm': 240, 'meta/build_agent': 240, 'meta/build_workflow': 240, 'workflows/workflow_agent_loop': 360, 'workflows/loan_processing': 300, 'workflows/release_management': 360, 'workflows/customer_onboarding': 360}, category_timeouts: Mapping[str, int] = {'agents': 180, 'reasoning': 300, 'workflows': 180, 'advanced': 180, 'meta': 120}) -> int
+fsm_llm.eval.git_commit def(cwd: PathLike | None = None) -> str
+fsm_llm.eval.git_short_hash def(cwd: PathLike | None = None) -> str
+fsm_llm.eval.load_cases def(path: str | Path) -> tuple[list[ConversationCase], dict[str, Any]]
+fsm_llm.eval.load_config def(path: str | Path) -> dict[str, Any]
+fsm_llm.eval.make_run_dir def(root: PathLike, model: str, cwd: PathLike | None = None, now: datetime | None = None) -> Path
+fsm_llm.eval.merge_config def(*layers: Mapping[str, Any] | None) -> EvalConfig
+fsm_llm.eval.model_slug def(model: str) -> str
+fsm_llm.eval.open_run_dir def(output_dir: PathLike | None, output_root: PathLike, model: str, cwd: PathLike | None = None) -> Path
+fsm_llm.eval.pass_rate def(k: int, n: int) -> dict[str, Any]
+fsm_llm.eval.read_rows def(path: Path) -> list[dict[str, Any]]
+fsm_llm.eval.resolve_model def(config: EvalConfig) -> str
+fsm_llm.eval.run_case_trial def(case: ConversationCase, config: EvalConfig, trial: int, llm_interface_factory: LLMInterfaceFactory | None = None, *, checks: Sequence[TrialCheck] = (), stop: Callable[[], bool] | None = None) -> TrialResult
+fsm_llm.eval.run_cases def(cases: Sequence[ConversationCase], config: EvalConfig, run_dir: Path, *, llm_interface_factory: LLMInterfaceFactory | None = None, progress: TrialProgressCallback | None = None, dataset: str | Path | None = None, checks: Sequence[TrialCheck] = ()) -> CaseReport
+fsm_llm.eval.run_dataset def(path: str | Path, *, config: EvalConfig | Mapping[str, Any] | str | Path | None = None, llm_interface_factory: LLMInterfaceFactory | None = None, checks: Sequence[TrialCheck] = (), progress: TrialProgressCallback | None = None, **overrides: Any) -> CaseReport
+fsm_llm.eval.run_example def(target: ExampleTarget, model: str, python: str, cwd: Path) -> ExampleResult
+fsm_llm.eval.run_examples def(targets: list[ExampleTarget], config: EvalConfig, model: str, run_dir: Path, progress: ProgressCallback | None = None) -> ExampleReport
+fsm_llm.eval.utc_now def() -> str
+fsm_llm.eval.wilson_ci def(k: int, n: int, z: float = 1.96) -> tuple[float, float]
+fsm_llm.eval.write_case_report def(report: CaseReport, config: EvalConfig, dataset: str | Path | None = None) -> Path
+fsm_llm.eval.write_example_log def(result: ExampleResult, output_dir: Path) -> Path
+fsm_llm.eval.write_json def(path: Path, obj: Any) -> None
+fsm_llm.eval.write_scorecard def(report: ExampleReport, config: EvalConfig, git_hash: str, now: datetime | None = None) -> Path
+# fsm_llm.monitor
+fsm_llm.monitor.ActivityItem class(BaseModel)
+  field item_id: str required
+  field item_type: str required
+  field instance_id: str = ''
+  field label: str = ''
+  field status: str = 'active'
+  field current_step: str = ''
+  field detail: str = ''
+  field message_count: int = 0
+  field created_at: datetime = factory
+  field is_terminal: bool = False
+fsm_llm.monitor.ConversationSnapshot class(BaseModel)
+  field conversation_id: str required
+  field instance_id: str = ''
+  field current_state: str = ''
+  field state_description: str = ''
+  field is_terminal: bool = False
+  field context_data: dict[str, Any] = factory
+  field message_history: list[dict[str, str]] = factory
+  field stack_depth: int = 1
+  field last_extraction: dict[str, Any] | None = None
+  field last_transition: dict[str, Any] | None = None
+  field last_response: dict[str, Any] | None = None
+fsm_llm.monitor.DEFAULT_LOG_LEVEL = 'INFO'
+fsm_llm.monitor.DEFAULT_MAX_EVENTS = 1000
+fsm_llm.monitor.DEFAULT_MAX_LOG_LINES = 5000
+fsm_llm.monitor.DEFAULT_REFRESH_INTERVAL = 1.0
+fsm_llm.monitor.DashboardAlert class(BaseModel)
+  field alert_id: str required
+  field metric: str = ''
+  field condition: str = '>'
+  field threshold: float = 0.0
+  field description: str = ''
+fsm_llm.monitor.DashboardConfig class(BaseModel)
+  field name: str = ''
+  field description: str = ''
+  field panels: list[DashboardPanel] = factory
+  field alerts: list[DashboardAlert] = factory
+  field refresh_interval_seconds: int = 30
+  field retention_hours: int = 24
+fsm_llm.monitor.DashboardPanel class(BaseModel)
+  field panel_id: str required
+  field title: str required
+  field panel_type: str = 'metric'
+  field metric: str = ''
+  field description: str = ''
+fsm_llm.monitor.EVENT_AGENT_CANCELLED = 'agent_cancelled'
+fsm_llm.monitor.EVENT_AGENT_COMPLETED = 'agent_completed'
+fsm_llm.monitor.EVENT_AGENT_FAILED = 'agent_failed'
+fsm_llm.monitor.EVENT_AGENT_ITERATION = 'agent_iteration'
+fsm_llm.monitor.EVENT_AGENT_STARTED = 'agent_started'
+fsm_llm.monitor.EVENT_AGENT_TOOL_CALL = 'agent_tool_call'
+fsm_llm.monitor.EVENT_CONTEXT_UPDATE = 'context_update'
+fsm_llm.monitor.EVENT_CONVERSATION_END = 'conversation_end'
+fsm_llm.monitor.EVENT_CONVERSATION_START = 'conversation_start'
+fsm_llm.monitor.EVENT_ERROR = 'error'
+fsm_llm.monitor.EVENT_INSTANCE_DESTROYED = 'instance_destroyed'
+fsm_llm.monitor.EVENT_INSTANCE_LAUNCHED = 'instance_launched'
+fsm_llm.monitor.EVENT_POST_PROCESSING = 'post_processing'
+fsm_llm.monitor.EVENT_PRE_PROCESSING = 'pre_processing'
+fsm_llm.monitor.EVENT_STATE_TRANSITION = 'state_transition'
+fsm_llm.monitor.EVENT_WORKFLOW_ADVANCED = 'workflow_advanced'
+fsm_llm.monitor.EVENT_WORKFLOW_CANCELLED = 'workflow_cancelled'
+fsm_llm.monitor.EVENT_WORKFLOW_COMPLETED = 'workflow_completed'
+fsm_llm.monitor.EVENT_WORKFLOW_EVENT_DELIVERED = 'workflow_event_delivered'
+fsm_llm.monitor.EVENT_WORKFLOW_FAILED = 'workflow_failed'
+fsm_llm.monitor.EVENT_WORKFLOW_STARTED = 'workflow_started'
+fsm_llm.monitor.EndConversationRequest class(BaseModel)
+  field conversation_id: str required
+fsm_llm.monitor.EventCollector class
+  def __init__(self, max_events: int = 1000, max_log_lines: int = 5000) -> None
+  def cleanup(self) -> None
+  def clear(self) -> None
+  def create_context_capture_callbacks(self, sink: Any) -> dict[str, Any]
+  def create_handler_callbacks(self) -> dict[str, Any]
+  def create_loguru_sink(self) -> Any
+  def events_after(self, cursor: int, limit: int = 50) -> tuple[list[MonitorEvent], int]
+  def get_events(self, limit: int = 0) -> list[MonitorEvent]
+  def get_logs(self, limit: int = 0, level: str | None = None) -> list[LogRecord]
+  def get_metrics(self) -> MetricSnapshot
+  def logs_after(self, cursor: int, limit: int = 50) -> tuple[list[LogRecord], int]
+  def record_event(self, event: MonitorEvent) -> None
+  def record_log(self, record: LogRecord) -> None
+  def resize(self, max_events: int, max_log_lines: int) -> None
+  static def snapshot_context(ctx: dict[str, Any], max_value_len: int = 1500) -> dict[str, str]
+  property total_logs
+fsm_llm.monitor.FSMSnapshot class(BaseModel)
+  field name: str = ''
+  field description: str = ''
+  field version: str = ''
+  field initial_state: str = ''
+  field persona: str | None = None
+  field state_count: int = 0
+  field states: list[StateInfo] = factory
+fsm_llm.monitor.InstanceInfo class(BaseModel)
+  field instance_id: str required
+  field instance_type: str required
+  field label: str = ''
+  field status: str = 'running'
+  field created_at: datetime = factory
+  field source: str = 'custom'
+  field conversation_count: int = 0
+  field active_workflows: int = 0
+  field agent_type: str = ''
+  field task: str = ''
+fsm_llm.monitor.InstanceManager class
+  def __init__(self, config: MonitorConfig | None = None) -> None
+  def advance_workflow(self, instance_id: str, wf_instance_id: str, user_input: str = '') -> bool
+  def attach_api(self, api: API) -> None
+  def cancel_agent(self, instance_id: str) -> bool
+  def cancel_workflow(self, instance_id: str, wf_instance_id: str, reason: str = '') -> bool
+  def close(self) -> None
+  property config
+  property dashboard_config
+  property dashboard_config_version
+  def end_conversation(self, instance_id: str, conversation_id: str) -> None
+  def end_instance(self, instance_id: str) -> None
+  def get_active_conversations(self) -> list[str]
+  def get_agent_result(self, instance_id: str) -> dict[str, Any]
+  def get_agent_status(self, instance_id: str) -> dict[str, Any]
+  def get_all_activity_snapshots(self, include_ended: bool = True) -> list[ActivityItem]
+  def get_all_conversation_snapshots(self, include_ended: bool = True) -> list[ConversationSnapshot]
+  def get_capabilities(self) -> dict[str, bool]
+  def get_conversation_snapshot(self, conversation_id: str) -> ConversationSnapshot | None
+  def get_events(self, limit: int = 50) -> list[MonitorEvent]
+  def get_fsm_conversations(self, instance_id: str) -> list[ConversationSnapshot]
+  def get_instance(self, instance_id: str) -> ManagedInstance | None
+  def get_instance_collector(self, instance_id: str) -> EventCollector | None
+  def get_metrics(self) -> MetricSnapshot
+  def get_workflow_instances(self, instance_id: str) -> list[dict[str, Any]]
+  def get_workflow_presets(self) -> list[dict[str, str]]
+  def get_workflow_status(self, instance_id: str, wf_instance_id: str) -> dict[str, Any]
+  property global_collector
+  def launch_agent(self, agent_type: str = 'ReactAgent', task: str = '', tools_config: list[StubToolConfig] | None = None, model: str = 'ollama_chat/bonsai-2:27b', max_iterations: int = 10, timeout_seconds: float = 120.0, label: str = '') -> ManagedAgent
+  def launch_fsm(self, preset_id: str | None = None, fsm_json: dict[str, Any] | None = None, model: str = 'ollama_chat/bonsai-2:27b', temperature: float = 0.5, label: str = '') -> ManagedFSM
+  def launch_workflow(self, preset_id: str | None = None, definition_json: dict[str, Any] | None = None, label: str = '') -> ManagedWorkflow
+  def list_instances(self, type_filter: str | None = None) -> list[InstanceInfo]
+  def send_message(self, instance_id: str, conversation_id: str, message: str) -> dict[str, Any]
+  def send_workflow_event(self, instance_id: str, event_type: str, payload: dict[str, Any] | None = None, wf_instance_id: str | None = None) -> list[str]
+  def start_conversation(self, instance_id: str, initial_context: dict[str, Any] | None = None) -> tuple[str, str]
+  def start_workflow_instance(self, instance_id: str, workflow_id: str, initial_context: dict[str, Any] | None = None) -> str
+fsm_llm.monitor.LaunchAgentRequest class(BaseModel)
+  field agent_type: str = 'ReactAgent'
+  field task: str required
+  field model: str = 'ollama_chat/bonsai-2:27b'
+  field max_iterations: int = 10
+  field timeout_seconds: float = 120.0
+  field tools: list[StubToolConfig] = factory
+  field label: str = ''
+fsm_llm.monitor.LaunchFSMRequest class(BaseModel)
+  field preset_id: str | None = None
+  field fsm_json: dict[str, Any] | None = None
+  field model: str = 'ollama_chat/bonsai-2:27b'
+  field temperature: float = 0.5
+  field label: str = ''
+fsm_llm.monitor.LaunchWorkflowRequest class(BaseModel)
+  field preset_id: str | None = None
+  field definition_json: dict[str, Any] | None = None
+  field initial_context: dict[str, Any] = factory
+  field label: str = ''
+fsm_llm.monitor.LogRecord class(BaseModel)
+  field timestamp: datetime = factory
+  field level: str = 'INFO'
+  field message: str = ''
+  field module: str = ''
+  field function: str = ''
+  field line: int = 0
+  field conversation_id: str | None = None
+fsm_llm.monitor.MONITOR_HANDLER_NAME = 'fsm_llm.monitor'
+fsm_llm.monitor.MONITOR_HANDLER_PRIORITY = 9999
+fsm_llm.monitor.MetricCollectionError class(MonitorError)
+fsm_llm.monitor.MetricSnapshot class(BaseModel)
+  field timestamp: datetime = factory
+  field active_conversations: int = 0
+  field total_events: int = 0
+  field total_errors: int = 0
+  field total_transitions: int = 0
+  field events_per_type: dict[str, int] = factory
+  field states_visited: dict[str, int] = factory
+  field active_agents: int = 0
+  field active_workflows: int = 0
+  field total_agent_iterations: int = 0
+  field total_tool_calls: int = 0
+  field total_workflow_steps: int = 0
+fsm_llm.monitor.MonitorCapacityError class(MonitorError)
+fsm_llm.monitor.MonitorConfig class(BaseModel)
+  field refresh_interval: float = 1.0
+  field max_events: int = 1000
+  field max_log_lines: int = 5000
+  field log_level: str = 'INFO'
+  field show_internal_keys: bool = False
+  field auto_scroll_logs: bool = True
+  field max_instances: int = 200
+  field max_running_agents: int = 8
+fsm_llm.monitor.MonitorConnectionError class(MonitorError)
+fsm_llm.monitor.MonitorError class(FSMError)
+fsm_llm.monitor.MonitorEvent class(BaseModel)
+  field event_type: str required
+  field timestamp: datetime = factory
+  field conversation_id: str | None = None
+  field source_state: str | None = None
+  field target_state: str | None = None
+  field data: dict[str, Any] = factory
+  field level: str = 'INFO'
+  field message: str = ''
+fsm_llm.monitor.MonitorInitializationError class(MonitorError)
+fsm_llm.monitor.OTELExporter class
+  def __init__(self, service_name: str = 'fsm-llm', exporter: Any | None = None) -> None
+  property active_conversations
+  def disable(self) -> None
+  def enable(self, collector: Any) -> None
+  property is_enabled
+  def shutdown(self) -> None
+fsm_llm.monitor.SendMessageRequest class(BaseModel)
+  field message: str required
+  field conversation_id: str required
+fsm_llm.monitor.StartConversationRequest class(BaseModel)
+  field initial_context: dict[str, Any] = factory
+fsm_llm.monitor.StateInfo class(BaseModel)
+  field state_id: str required
+  field description: str = ''
+  field purpose: str = ''
+  field is_initial: bool = False
+  field is_terminal: bool = False
+  field transition_count: int = 0
+  field transitions: list[TransitionInfo] = factory
+fsm_llm.monitor.StubToolConfig class(BaseModel)
+  field name: str required
+  field description: str required
+  field stub_response: str = 'Tool executed successfully'
+fsm_llm.monitor.TransitionInfo class(BaseModel)
+  field target_state: str required
+  field description: str = ''
+  field priority: int = 100
+  field condition_count: int = 0
+  field has_logic: bool = False
+fsm_llm.monitor.WorkflowAdvanceRequest class(BaseModel)
+  field workflow_instance_id: str required
+  field user_input: str = ''
+fsm_llm.monitor.WorkflowCancelRequest class(BaseModel)
+  field workflow_instance_id: str required
+  field reason: str = ''
+fsm_llm.monitor.WorkflowEventRequest class(BaseModel)
+  field event_type: str required
+  field payload: dict[str, Any] = factory
+  field workflow_instance_id: str = ''
+fsm_llm.monitor.app FastAPI
+fsm_llm.monitor.configure def(*, manager: InstanceManager | None = None, cors_origins: list[str] | None = None, api_key: str | None = None, trusted_hosts: list[str] | None = None) -> None
+fsm_llm.monitor.model_to_dict def(obj: Any) -> dict[str, Any] | None
+# fsm_llm.reasoning
+fsm_llm.reasoning.ProblemContext class(TimestampedModel)
+  field timestamp: datetime = factory
+  field problem_statement: str required
+  field domain: ProblemDomain | str | None = None
+  field constraints: list[str] = factory
+  field initial_context: dict[str, Any] = factory
+  field priority: Literal['low', 'medium', 'high', 'urgent'] = 'medium'
+  field expected_solution_type: str | None = None
+  field user_preferences: dict[str, Any] = factory
+  property context_size
+  property has_constraints
+  property is_high_priority
+  classmethod def validate_constraints(cls, v: list[str]) -> list[str]
+  classmethod def validate_problem_not_empty(cls, v: str) -> str
+fsm_llm.reasoning.ReasoningClassificationError class(ReasoningError)
+fsm_llm.reasoning.ReasoningClassificationResult class(TimestampedModel)
+  field timestamp: datetime = factory
+  field recommended_type: str required
+  field justification: str required
+  field domain: ProblemDomain | str = ProblemDomain.GENERAL
+  field alternatives: list[str] = factory
+  field confidence: ConfidenceLevel = ConfidenceLevel.MEDIUM
+  field complexity_assessment: Literal['low', 'medium', 'high', 'very_high'] = 'medium'
+  field domain_indicators: list[str] = factory
+  property classification_summary
+  property has_alternatives
+  classmethod def validate_alternatives_unique(cls, v: list[str]) -> list[str]
+fsm_llm.reasoning.ReasoningEngine class
+  def __init__(self, model: str = 'ollama_chat/bonsai-2:27b', **kwargs)
+  def solve_problem(self, problem: str, initial_context: dict[str, Any] | None = None) -> tuple[str, dict[str, Any]]
+fsm_llm.reasoning.ReasoningError class(FSMError)
+fsm_llm.reasoning.ReasoningExecutionError class(ReasoningError)
+  def __init__(self, message: str, reasoning_type: str | None = None, **kwargs)
+fsm_llm.reasoning.ReasoningStep class(TimestampedModel)
+  field timestamp: datetime = factory
+  field step_type: ReasoningStepType required
+  field content: str required
+  field confidence: float = 0.0
+  field evidence: list[str] = factory
+  field context_keys_used: set[str] = factory
+  field execution_time_ms: float | None = None
+  property confidence_level
+  property has_evidence
+  classmethod def validate_content_not_empty(cls, v: str) -> str
+  classmethod def validate_evidence_items(cls, v: list[str]) -> list[str]
+fsm_llm.reasoning.ReasoningTrace class(TimestampedModel)
+  field timestamp: datetime = factory
+  field steps: list[dict[str, Any]] = factory
+  field reasoning_types_used: set[str] = factory
+  field final_confidence: float = 0.0
+  field execution_time_seconds: float | None = None
+  field context_evolution: list[dict[str, Any]] = factory
+  field decision_points: list[dict[str, Any]] = factory
+  property average_step_time
+  property reasoning_complexity
+  classmethod def remove_computed_fields_from_input(cls, data: Any) -> Any
+  property total_steps
+  property unique_states_visited
+fsm_llm.reasoning.ReasoningType class(str, Enum)
+  ReasoningType.SIMPLE_CALCULATOR = 'simple_calculator'
+  ReasoningType.ANALYTICAL = 'analytical'
+  ReasoningType.DEDUCTIVE = 'deductive'
+  ReasoningType.INDUCTIVE = 'inductive'
+  ReasoningType.ABDUCTIVE = 'abductive'
+  ReasoningType.ANALOGICAL = 'analogical'
+  ReasoningType.CREATIVE = 'creative'
+  ReasoningType.CRITICAL = 'critical'
+  ReasoningType.HYBRID = 'hybrid'
+fsm_llm.reasoning.SolutionResult class(TimestampedModel)
+  field timestamp: datetime = factory
+  field solution: str required
+  field confidence: float = 0.0
+  field reasoning_summary: str required
+  field trace: ReasoningTrace required
+  field execution_time_seconds: float | None = None
+  field validation_result: ValidationResult | None = None
+  field alternative_solutions: list[str] = factory
+  field key_insights: list[str] = factory
+  field used_context_keys: set[str] = factory
+  property confidence_level
+  property has_alternatives
+  property is_high_confidence
+  property is_validated
+  property reasoning_depth
+  property solution_quality_summary
+  classmethod def validate_solution_not_empty(cls, v: str) -> str
+fsm_llm.reasoning.ValidationResult class(TimestampedModel)
+  field timestamp: datetime = factory
+  field is_valid: bool required
+  field confidence: float = 0.0
+  field checks: dict[str, bool] = factory
+  field issues: list[str] = factory
+  field recommendations: list[str] = factory
+  field validation_criteria: list[str] = factory
+  property has_issues
+  property pass_rate
+  property passed_checks
+  property total_checks
+  property validation_summary
+fsm_llm.reasoning.get_available_reasoning_types def() -> dict[str, str]
+# fsm_llm.synthesis
+fsm_llm.synthesis.CompileResult class
+  def __init__(self, definition: FSMDefinition, data: dict[str, Any], report: GateReport, rounds: int, usage: LLMUsage | None, simulation: SimulationReport | None = None, failures: tuple[tuple[str, ...], ...] = ()) -> None
+fsm_llm.synthesis.Diagnosis class
+  def __init__(self, code: str, state: str, keys: tuple[str, ...], runs: int, share: float) -> None
+fsm_llm.synthesis.FSMLibrary class
+  def __init__(self, path: str | os.PathLike[str]) -> None
+  def add_patch(self, digest: str, ops: Sequence[dict[str, Any]]) -> None
+  def add_scenarios(self, digest: str, scenarios: Sequence[dict[str, Any]]) -> None
+  def add_trace(self, trace: RunTrace, *, max_traces: int = 200) -> None
+  def approve(self, digest: str, by: str) -> LibraryRecord
+  static def clean_scenarios(value: object) -> list[dict[str, Any]]
+  def count_lineage(self, digest: str) -> int
+  def deprecate(self, digest: str, *, keep_trusted: bool = False) -> LibraryRecord
+  def get_definition(self, digest: str) -> FSMDefinition
+  def get_record(self, digest: str) -> LibraryRecord
+  def put(self, definition: FSMDefinition, *, goal: str, inputs_required: Sequence[str], return_keys: Sequence[str], synthesizing_model: str = '', gates_passed: Sequence[str] = (), approved_by: str | None = None, lifecycle: str = 'draft', parent: str | None = None, parent_run: str | None = None, repair: str | None = None, replay: str | None = None) -> LibraryRecord
+  def read_scenarios(self, digest: str) -> list[dict[str, Any]]
+  def read_traces(self, digest: str, limit: int | None = None) -> tuple[tuple[RunTrace, ...], int]
+  def record_run(self, digest: str, success: bool, *, trust_after_successes: int | None = None) -> LibraryRecord
+  def retire_traces(self, digest: str, child: str) -> None
+  def search(self, goal: str, *, inputs_available: Collection[str], return_keys: Collection[str], tools_allowed: Collection[str], min_lifecycle: str, embed: EmbedTextsFn | None = None, top_k: int = 3) -> list[LibraryMatch]
+  def verify(self, digest: str) -> LibraryRecord
+fsm_llm.synthesis.FSMSynthesizer class
+  def __init__(self, llm: LLMInterface | None = None, *, model: str | None = None, policy: SynthesisPolicy | None = None, library: FSMLibrary | None = None, reviewer: Callable[[ProcedureApprovalRequest], bool] | None = None, embed: EmbedTextsFn | None = None, simulator: Simulator | None = None, clock: Callable[[], float] = monotonic) -> None
+  def approval(self, goal: str, return_keys: tuple[str, ...], result: CompileResult) -> str | None
+  def compile(self, goal: str, *, inputs: Sequence[str] = (), return_keys: Sequence[str]) -> CompileResult
+  def obtain(self, goal: str, *, inputs: Sequence[str] = (), return_keys: Sequence[str], min_lifecycle: str = 'verified') -> Procedure
+fsm_llm.synthesis.GateFinding class
+  def __init__(self, gate: str, code: str, state: str, message: str) -> None
+fsm_llm.synthesis.GateReport class
+  def __init__(self, findings: tuple[GateFinding, ...] = (), definition: FSMDefinition | None = None, injected: dict[str, Any] | None = None, skipped: tuple[str, ...] = ()) -> None
+  property passed
+  def repair_text(self, cap: int = 2000) -> str
+  property verdicts
+fsm_llm.synthesis.LibraryError class(SynthesisError)
+fsm_llm.synthesis.LibraryMatch class(tuple)
+fsm_llm.synthesis.LibraryRecord class(BaseModel)
+  field digest: str required
+  field name: str required
+  field version: str required
+  field lifecycle: str required
+  field signature: dict[str, list[str]] required
+  field provenance: dict[str, str | list[str] | None] required
+  field stats: dict[str, int] required
+fsm_llm.synthesis.PatchError class(SynthesisError)
+  def __init__(self, code: str, op: int | None = None)
+fsm_llm.synthesis.PolicyFinding class
+  def __init__(self, code: str, state: str, message: str, gate: str = 'G5') -> None
+fsm_llm.synthesis.Procedure class
+  def __init__(self, digest: str, definition: FSMDefinition, record: LibraryRecord | None, source: str, rounds: tuple[tuple[str, ...], ...] = (), seconds: float = 0.0, usage: LLMUsage = <factory>) -> None
+  property data
+fsm_llm.synthesis.ProcedureApprovalRequest class
+  def __init__(self, digest: str, mermaid: str, report: str, goal: str, summary: str) -> None
+  def text(self) -> str
+fsm_llm.synthesis.ProcedureRunner class
+  def __init__(self, api: API, definition: FSMDefinition | dict[str, Any], synthesizer: FSMSynthesizer, *, trace_sink: Callable[[str, dict[str, Any]], None] | None = None) -> None
+  def converse(self, conversation_id: str, message: str) -> str
+  def end_conversation(self, conversation_id: str) -> None
+  def hook(self, conversation_id: str) -> Callable[[int], None]
+  def run(self, conversation_id: str, *, max_steps: int, max_seconds: float | None = None) -> tuple[AdvanceResult, ...]
+fsm_llm.synthesis.PromotionResult class
+  def __init__(self, parent: str, code: str, child: str | None = None, parent_passes: tuple[int, ...] = (), child_passes: tuple[int, ...] = (), trials: int = 0, written: bool = False, deprecated: bool = False) -> None
+  property promote
+  def rates(self) -> tuple[dict[str, Any], dict[str, Any]]
+fsm_llm.synthesis.RunTrace class
+  def __init__(self, digest: str, version: str | None = None, mode: str = 'run', states: tuple[str, ...] = (), steps: int = 0, keys: tuple[str, ...] = (), kinds: tuple[tuple[str, str], ...] = (), status: str = 'ok', reason: str | None = None, stuck: str | None = None, outcome: str | None = None) -> None
+  classmethod def from_row(cls, row: object) -> RunTrace
+  def to_row(self) -> dict[str, Any]
+fsm_llm.synthesis.SimulationReport class
+  def __init__(self, findings: tuple[GateFinding, ...], scenarios: tuple[dict[str, Any], ...], overall: dict[str, Any], happy: dict[str, Any], generated: int, calls: int) -> None
+  property passed
+  def repair_text(self, cap: int = 2000) -> str
+fsm_llm.synthesis.Simulator class
+  def __init__(self, llm: LLMInterface, scenario_llm: LLMInterface | None = None, *, clock: Callable[[], float] = monotonic) -> None
+  def replay(self, definition: FSMDefinition | dict[str, Any], scenarios: Sequence[dict[str, Any]], *, inputs: Sequence[str], return_keys: Sequence[str], trials: int, policy: SynthesisPolicy) -> list[int] | None
+  def run(self, definition: FSMDefinition | dict[str, Any], *, goal: str, inputs: Sequence[str], return_keys: Sequence[str], policy: SynthesisPolicy) -> SimulationReport
+fsm_llm.synthesis.SynthesisError class(FSMError)
+fsm_llm.synthesis.SynthesisPolicy class
+  def __init__(self, max_states: int = 12, max_transitions_per_state: int = 6, max_fields_per_state: int = 10, max_text_chars: int = 600, max_synthesis_depth: int = 1, max_repair_rounds: int = 3, max_turns: int = 40, max_compile_tokens: int = 8192, max_synthesis_seconds: int = 300, max_sim_turns: int = 12, sim_trials: int = 2, max_simulation_seconds: int = 300, max_simulation_calls: int = 400, max_simulation_rounds: int = 2, dwell_threshold: int = 3, repair_min_failures: int = 3, max_patch_ops: int = 12, max_patch_chars: int = 8000, replay_trials: int = 2, max_repairs_per_lineage: int = 3, min_pass_rate: float = 0.5, reuse_min_score: float = 0.8, trust_after_successes: int | None = None, allowed_tools: frozenset[str] = {}, require_approval: bool = False, require_simulation: bool = False) -> None
+fsm_llm.synthesis.SynthesisRefusedError class(SynthesisError)
+  def __init__(self, message: str, code: str, details: dict[str, Any] | None = None)
+fsm_llm.synthesis.TraceRecorder class
+  def __init__(self, on_trace: Callable[[RunTrace], None]) -> None
+fsm_llm.synthesis.analyze_dryrun def(definition: FSMDefinition, *, inputs: Iterable[str] = ()) -> list[FlowFinding]
+fsm_llm.synthesis.apply_patch def(document: dict[str, Any], ops: list[dict[str, Any]], *, scope_states: Iterable[str], policy: SynthesisPolicy) -> dict[str, Any]
+fsm_llm.synthesis.check_policy def(data: object, policy: SynthesisPolicy) -> list[PolicyFinding]
+fsm_llm.synthesis.create_procedure_tools def(synthesizer: FSMSynthesizer, *, runner_llm: LLMInterface | None = None, registry: ToolRegistry | None = None, max_obtains: int = 20) -> ToolRegistry
+fsm_llm.synthesis.diagnose def(traces: Iterable[RunTrace], definition: FSMDefinition, policy: SynthesisPolicy, *, return_keys: Collection[str] = ()) -> tuple[Diagnosis, ...]
+fsm_llm.synthesis.digest_of def(definition: FSMDefinition) -> str
+fsm_llm.synthesis.inject_abort def(data: dict[str, Any]) -> dict[str, Any]
+fsm_llm.synthesis.needs_approval def(data: object, policy: SynthesisPolicy) -> bool
+fsm_llm.synthesis.propose_patch def(diagnoses: Sequence[Diagnosis], definition: dict[str, Any], policy: SynthesisPolicy, llm: LLMInterface) -> list[dict[str, Any]]
+fsm_llm.synthesis.repair_procedure def(parent_digest: str, ops: Sequence[dict[str, Any]], *, library: FSMLibrary, synthesizer: FSMSynthesizer, simulator: Simulator, replay_scripts: Sequence[dict[str, Any]] | None = None, write: bool = False) -> PromotionResult
+fsm_llm.synthesis.reviewer_from_hitl def(hitl: HumanInTheLoop) -> Callable[[ProcedureApprovalRequest], bool]
+fsm_llm.synthesis.run_gates def(data: Any, policy: SynthesisPolicy, *, inputs: Iterable[str] = (), return_keys: Iterable[str] = ()) -> GateReport
+fsm_llm.synthesis.strip_abort def(data: object) -> dict[str, Any] | None
+fsm_llm.synthesis.verify_stored def(definition: FSMDefinition | dict[str, Any], policy: SynthesisPolicy, *, inputs: Iterable[str] = (), return_keys: Iterable[str] = ()) -> GateReport
+# fsm_llm.workflows
+fsm_llm.workflows.APIStep class(WorkflowStep)
+  field step_id: str required
+  field name: str required
+  field description: str = ''
+  field timeout_seconds: float | None = None
+  field api_function: Callable[..., Any] required
+  field success_step_id: str required
+  field failure_step_id: str required
+  field input_mapping: dict[str, str] = factory
+  field output_mapping: dict[str, str] = factory
+  def execute(self, context: dict[str, Any]) -> WorkflowStepResult
+fsm_llm.workflows.AgentStep class(WorkflowStep)
+  field step_id: str required
+  field name: str required
+  field description: str = ''
+  field timeout_seconds: float | None = None
+  field agent: Any required
+  field task_template: str = '{task}'
+  field success_step_id: str = ''
+  field context_mapping: dict[str, str] = factory
+  field input_mapping: dict[str, str] = factory
+  field error_step_id: str | None = None
+  def execute(self, context: dict[str, Any]) -> WorkflowStepResult
+fsm_llm.workflows.AutoStep class(WorkflowStep)
+  field step_id: str required
+  field name: str required
+  field description: str = ''
+  field timeout_seconds: float | None = None
+  field next_step_id: str required
+  field action: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+  field error_step_id: str | None = None
+  def execute(self, context: dict[str, Any]) -> WorkflowStepResult
+fsm_llm.workflows.ConditionStep class(WorkflowStep)
+  field step_id: str required
+  field name: str required
+  field description: str = ''
+  field timeout_seconds: float | None = None
+  field condition: Callable[[dict[str, Any]], bool] required
+  field true_step_id: str required
+  field false_step_id: str required
+  field error_step_id: str | None = None
+  def execute(self, context: dict[str, Any]) -> WorkflowStepResult
+fsm_llm.workflows.ConversationStep class(WorkflowStep)
+  field step_id: str required
+  field name: str required
+  field description: str = ''
+  field timeout_seconds: float | None = None
+  field fsm_file: str | None = None
+  field fsm_definition: Any | None = None
+  field model: str | None = None
+  field initial_context: dict[str, str] = factory
+  field context_mapping: dict[str, str] = factory
+  field success_step_id: str = ''
+  field error_step_id: str | None = None
+  field max_turns: int = 20
+  field conversation_timeout: float | None = None
+  field require_completion: bool = False
+  field use_user_input: bool = False
+  field auto_messages: list[str] = factory
+  def execute(self, context: dict[str, Any]) -> WorkflowStepResult
+fsm_llm.workflows.DEFAULT_MAX_STEPS = 1000
+fsm_llm.workflows.DependencyResolver class
+  def __init__(self) -> None
+  def add_step(self, step_id: str, depends_on: list[str] | None = None) -> DependencyResolver
+  def clear(self) -> None
+  classmethod def from_dict(cls, dependencies: dict[str, list[str]]) -> DependencyResolver
+  def has_cycles(self) -> bool
+  def resolve(self) -> list[list[str]]
+  property step_count
+fsm_llm.workflows.EventListener class(BaseModel)
+  field instance_id: str required
+  field success_step_id: str required
+  field event_mapping: dict[str, str] = factory
+  field registered_at: datetime = factory
+  field timeout_at: datetime | None = None
+  field correlation_key: str | None = None
+  field correlation_value: Any = None
+  field timeout_step_id: str | None = None
+  field step_id: str | None = None
+  def is_expired(self) -> bool
+fsm_llm.workflows.LLMStep class(WorkflowStep)
+  field step_id: str required
+  field name: str required
+  field description: str = ''
+  field timeout_seconds: float | None = None
+  field llm_interface: Any required
+  field prompt_template: str required
+  field context_mapping: dict[str, str] = factory
+  field output_mapping: dict[str, str] = factory
+  field next_step_id: str required
+  field error_step_id: str | None = None
+  field system_prompt: str = 'You are a precise assistant. Follow the instructions in the user message and answer with exactly what they ask for.'
+  def execute(self, context: dict[str, Any]) -> WorkflowStepResult
+fsm_llm.workflows.ParallelStep class(WorkflowStep)
+  field step_id: str required
+  field name: str required
+  field description: str = ''
+  field timeout_seconds: float | None = None
+  field steps: list[WorkflowStep] required
+  field next_step_id: str required
+  field error_step_id: str | None = None
+  field aggregation_function: Callable[[list[WorkflowStepResult]], dict[str, Any]] | None = None
+  def execute(self, context: dict[str, Any]) -> WorkflowStepResult
+fsm_llm.workflows.RetryStep class(WorkflowStep)
+  field step_id: str required
+  field name: str required
+  field description: str = ''
+  field timeout_seconds: float | None = None
+  field step: Any required
+  field max_retries: int = 3
+  field backoff_factor: float = 1.0
+  def execute(self, context: dict[str, Any]) -> WorkflowStepResult
+  def referenced_step_ids(self) -> set[str]
+fsm_llm.workflows.SwitchStep class(WorkflowStep)
+  field step_id: str required
+  field name: str required
+  field description: str = ''
+  field timeout_seconds: float | None = None
+  field key: str required
+  field cases: dict[str, str] required
+  field default_step_id: str | None = None
+  def execute(self, context: dict[str, Any]) -> WorkflowStepResult
+  def referenced_step_ids(self) -> set[str]
+fsm_llm.workflows.Timer class
+  def __init__(self, instance_id: str, next_step_id: str | None, expires_at: datetime, task: asyncio.Task | None = None)
+  def cancel(self) -> None
+fsm_llm.workflows.TimerStep class(WorkflowStep)
+  field step_id: str required
+  field name: str required
+  field description: str = ''
+  field timeout_seconds: float | None = None
+  field delay_seconds: float required
+  field next_step_id: str required
+  def execute(self, context: dict[str, Any]) -> WorkflowStepResult
+fsm_llm.workflows.WaitEventConfig class(BaseModel)
+  field event_type: str required
+  field success_step_id: str required
+  field timeout_seconds: float | None = None
+  field timeout_step_id: str | None = None
+  field event_mapping: dict[str, str] = factory
+  field correlation_key: str | None = None
+  classmethod def validate_event_type(cls, v)
+  classmethod def validate_timeout(cls, v)
+  def validate_timeout_step_id_needs_timeout(self)
+fsm_llm.workflows.WaitEventStep class(WorkflowStep)
+  field step_id: str required
+  field name: str required
+  field description: str = ''
+  field timeout_seconds: float | None = None
+  field config: WaitEventConfig required
+  def execute(self, context: dict[str, Any]) -> WorkflowStepResult
+  def referenced_step_ids(self) -> set[str]
+fsm_llm.workflows.WorkflowBuilder class
+  def __init__(self, workflow_id: str, name: str, description: str = '')
+  def add_metadata(self, key: str, value: Any) -> WorkflowBuilder
+  def add_step(self, step: WorkflowStep) -> WorkflowBuilder
+  def build(self) -> WorkflowDefinition
+  def set_initial_step(self, step: WorkflowStep) -> WorkflowBuilder
+fsm_llm.workflows.WorkflowDefinition class(BaseModel)
+  field workflow_id: str required
+  field name: str required
+  field description: str = ''
+  field steps: dict[str, WorkflowStep] = factory
+  field initial_step_id: str | None = None
+  field metadata: dict[str, Any] = factory
+  def get_terminal_states(self) -> set[str]
+  def has_cycles(self) -> bool
+  def has_synchronous_cycles(self) -> bool
+  def serialize(self) -> dict[str, Any]
+  classmethod def validate_initial_step(cls, v, info)
+  def validate_structure(self) -> None
+  def with_initial_step(self, step: WorkflowStep) -> WorkflowDefinition
+  def with_step(self, step: WorkflowStep, is_initial: bool = False) -> WorkflowDefinition
+fsm_llm.workflows.WorkflowDefinitionError class(WorkflowError)
+  def __init__(self, message: str, *, workflow_id: str | None = None, details: dict[str, Any] | None = None)
+fsm_llm.workflows.WorkflowEngine class
+  def __init__(self, *, max_concurrent_workflows: int = 100, max_completed_instances: int | None = 1000, max_steps: int = 1000, executor: Executor | None = None)
+  def add_hook(self, hook: LifecycleHook) -> None
+  def advance(self, instance_id: str, user_input: str = '') -> bool
+  def cancel(self, instance_id: str, reason: str = 'Cancelled by user') -> bool
+  def close(self) -> None
+  def get_context(self, instance_id: str) -> dict[str, Any] | None
+  def get_definition(self, workflow_id: str) -> WorkflowDefinition | None
+  def get_instance(self, instance_id: str) -> WorkflowInstance | None
+  def get_statistics(self) -> dict[str, Any]
+  def get_status(self, instance_id: str) -> WorkflowStatus | None
+  def list_active_instances(self) -> list[str]
+  def process_event(self, event: WorkflowEvent) -> list[str]
+  def register_event_listener(self, instance_id: str, event_type: str, success_step_id: str | None = None, timeout_seconds: float | None = None, timeout_step_id: str | None = None, event_mapping: dict[str, str] | None = None, correlation_key: str | None = None) -> None
+  def register_workflow(self, workflow: WorkflowDefinition) -> None
+  def remove_hook(self, hook: LifecycleHook) -> bool
+  def remove_instance(self, instance_id: str) -> bool
+  def schedule_timer(self, instance_id: str, delay_seconds: float, next_step_id: str) -> None
+  def start(self, workflow_id: str, initial_context: dict[str, Any] | None = None, instance_id: str | None = None, max_seconds: float | None = None, wait: bool = True) -> str
+fsm_llm.workflows.WorkflowError class(FSMError)
+fsm_llm.workflows.WorkflowEvent class(BaseModel)
+  field event_type: str required
+  field payload: dict[str, Any] = factory
+  field timestamp: datetime = factory
+  field event_id: str = factory
+  field instance_id: str | None = None
+  def model_dump(self, **kwargs) -> dict[str, Any]
+fsm_llm.workflows.WorkflowEventError class(WorkflowError)
+  def __init__(self, message: str, *, event_type: str | None = None, details: dict[str, Any] | None = None)
+fsm_llm.workflows.WorkflowHistoryEntry class(BaseModel)
+  field timestamp: datetime = factory
+  field step_id: str required
+  field status: str required
+  field message: str | None = None
+  field data: dict[str, Any] = factory
+  field error: str | None = None
+fsm_llm.workflows.WorkflowInstance class(BaseModel)
+  field instance_id: str required
+  field workflow_id: str required
+  field current_step_id: str required
+  field context: dict[str, Any] = factory
+  field status: WorkflowStatus = WorkflowStatus.PENDING
+  field created_at: datetime = factory
+  field updated_at: datetime = factory
+  field completed_at: datetime | None = None
+  field deadline: datetime | None = None
+  field max_seconds: float | None = None
+  field error: str | None = None
+  field history: list[WorkflowHistoryEntry] = factory
+  field max_history_entries: int | None = 1000
+  def add_history_entry(self, step_id: str, message: str, data: dict[str, Any] | None = None, error: str | None = None) -> None
+  def is_active(self) -> bool
+  def is_terminal(self) -> bool
+  def update_status(self, status: WorkflowStatus, error: Exception | None = None) -> None
+fsm_llm.workflows.WorkflowInstanceError class(WorkflowError)
+  def __init__(self, message: str, *, instance_id: str | None = None, details: dict[str, Any] | None = None)
+fsm_llm.workflows.WorkflowResourceError class(WorkflowError)
+  def __init__(self, message: str, *, resource_type: str | None = None, resource_id: str | None = None, details: dict[str, Any] | None = None)
+fsm_llm.workflows.WorkflowStateError class(WorkflowError)
+  def __init__(self, message: str, *, current_step_id: str | None = None, operation: str | None = None, details: dict[str, Any] | None = None)
+fsm_llm.workflows.WorkflowStatus class(str, Enum)
+  WorkflowStatus.PENDING = 'pending'
+  WorkflowStatus.RUNNING = 'running'
+  WorkflowStatus.WAITING = 'waiting'
+  WorkflowStatus.COMPLETED = 'completed'
+  WorkflowStatus.FAILED = 'failed'
+  WorkflowStatus.CANCELLED = 'cancelled'
+fsm_llm.workflows.WorkflowStep class(BaseModel, ABC)
+  field step_id: str required
+  field name: str required
+  field description: str = ''
+  field timeout_seconds: float | None = None
+  def execute(self, context: dict[str, Any]) -> WorkflowStepResult
+  def referenced_step_ids(self) -> set[str]
+fsm_llm.workflows.WorkflowStepError class(WorkflowError)
+  def __init__(self, message: str, *, step_id: str | None = None, cause: Exception | None = None, details: dict[str, Any] | None = None)
+fsm_llm.workflows.WorkflowStepResult class(BaseModel)
+  field success: bool required
+  field data: dict[str, Any] = factory
+  field next_step_id: str | None = None
+  field message: str | None = None
+  field error: str | None = None
+  field timestamp: datetime = factory
+  classmethod def convert_exception_to_string(cls, v)
+  classmethod def failure_result(cls, error: str, next_step_id: str | None = None, message: str | None = None) -> WorkflowStepResult
+  classmethod def success_result(cls, data: dict[str, Any] | None = None, next_step_id: str | None = None, message: str | None = None) -> WorkflowStepResult
+fsm_llm.workflows.WorkflowTimeoutError class(WorkflowError)
+  def __init__(self, message: str, *, operation: str | None = None, timeout_seconds: float | None = None, instance_id: str | None = None, details: dict[str, Any] | None = None)
+fsm_llm.workflows.WorkflowValidationError class(WorkflowError)
+  def __init__(self, message: str, *, validation_errors: list | None = None, details: dict[str, Any] | None = None)
+fsm_llm.workflows.agent_step def(step_id: str, name: str, agent: Any, task_template: str = '{task}', success_step_id: str = '', context_mapping: dict[str, str] | None = None, error_step_id: str | None = None, description: str = '', input_mapping: dict[str, str] | None = None, timeout_seconds: float | None = None) -> AgentStep
+fsm_llm.workflows.api_step def(step_id: str, name: str, api_function: Callable, success_step_id: str, failure_step_id: str, input_mapping: dict[str, str] | None = None, output_mapping: dict[str, str] | None = None, description: str = '', timeout_seconds: float | None = None) -> APIStep
+fsm_llm.workflows.auto_step def(step_id: str, name: str, next_step_id: str, action: Callable | None = None, description: str = '', error_step_id: str | None = None, timeout_seconds: float | None = None) -> AutoStep
+fsm_llm.workflows.condition_step def(step_id: str, name: str, condition: Callable, true_step_id: str, false_step_id: str, description: str = '', error_step_id: str | None = None, timeout_seconds: float | None = None) -> ConditionStep
+fsm_llm.workflows.conversation_step def(step_id: str, name: str, success_step_id: str = '', fsm_file: str | None = None, fsm_definition: Any | None = None, model: str | None = None, initial_context: dict[str, str] | None = None, context_mapping: dict[str, str] | None = None, auto_messages: list[str] | None = None, max_turns: int = 20, error_step_id: str | None = None, description: str = '', conversation_timeout: float | None = None, timeout_seconds: float | None = None, require_completion: bool = False, use_user_input: bool = False) -> ConversationStep
+fsm_llm.workflows.create_conditional_workflow def(workflow_id: str, name: str, initial_step: WorkflowStep, condition_step: ConditionStep, true_branch: list[WorkflowStep], false_branch: list[WorkflowStep], description: str = '') -> WorkflowDefinition
+fsm_llm.workflows.create_event_driven_workflow def(workflow_id: str, name: str, setup_steps: list[WorkflowStep], event_step: WaitEventStep, processing_steps: list[WorkflowStep], description: str = '') -> WorkflowDefinition
+fsm_llm.workflows.create_linear_workflow def(workflow_id: str, name: str, steps: list[WorkflowStep], description: str = '') -> WorkflowDefinition
+fsm_llm.workflows.create_workflow def(workflow_id: str, name: str, description: str = '') -> WorkflowDefinition
+fsm_llm.workflows.create_workflow_builder def(workflow_id: str, name: str, description: str = '') -> WorkflowBuilder
+fsm_llm.workflows.llm_step def(step_id: str, name: str, llm_interface: Any, prompt_template: str, context_mapping: dict[str, str] | None = None, output_mapping: dict[str, str] | None = None, next_step_id: str = '', error_step_id: str | None = None, description: str = '', timeout_seconds: float | None = None, system_prompt: str | None = None) -> LLMStep
+fsm_llm.workflows.parallel_step def(step_id: str, name: str, steps: list[WorkflowStep], next_step_id: str, error_step_id: str | None = None, aggregation_function: Callable | None = None, description: str = '', timeout_seconds: float | None = None) -> ParallelStep
+fsm_llm.workflows.retry_step def(step_id: str, name: str, step: WorkflowStep, max_retries: int = 3, backoff_factor: float = 1.0, description: str = '', timeout_seconds: float | None = None) -> RetryStep
+fsm_llm.workflows.switch_step def(step_id: str, name: str, key: str, cases: dict[str, str], default_step_id: str | None = None, description: str = '') -> SwitchStep
+fsm_llm.workflows.timer_step def(step_id: str, name: str, delay_seconds: float, next_step_id: str, description: str = '') -> TimerStep
+fsm_llm.workflows.wait_event_step def(step_id: str, name: str, event_type: str, success_step_id: str, timeout_seconds: float | None = None, timeout_step_id: str | None = None, event_mapping: dict[str, str] | None = None, description: str = '', correlation_key: str | None = None) -> WaitEventStep

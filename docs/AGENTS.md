@@ -5,7 +5,7 @@ Purpose: Long-form Markdown guides for FSM-LLM v0.12.0 (quickstart, FSM design, 
 
 ## Scope
 
-- In scope: 9 Markdown files at `docs/` with no subdirectories. FSM-LLM is one distribution (`fsm-llm`). The code lives in `src/`, and the extensions are subpackages: `fsm_llm.reasoning`, `fsm_llm.workflows`, `fsm_llm.agents`, `fsm_llm.monitor`, `fsm_llm.eval`, `fsm_llm.synthesis`.
+- In scope: 9 Markdown files and one generated text file (`api.txt`, the public API snapshot written by `scripts/api_snapshot.py`; never edit it by hand, run `make api-snapshot`) at `docs/` with no subdirectories. FSM-LLM is one distribution (`fsm-llm`). The code lives in `src/`, and the extensions are subpackages: `fsm_llm.reasoning`, `fsm_llm.workflows`, `fsm_llm.agents`, `fsm_llm.monitor`, `fsm_llm.eval`, `fsm_llm.synthesis`.
 - Out of scope: runnable code, per-package READMEs, `CHANGELOG.md`, `EVALUATE.md`, planning artifacts under `plans/`. By user preference, monitor docs belong in `api_reference.md`. Do not create a separate `docs/monitor.md`.
 
 ## Architecture

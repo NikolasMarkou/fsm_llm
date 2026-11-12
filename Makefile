@@ -1,4 +1,4 @@
-.PHONY: help test lint format type-check build clean install-dev coverage audit counts
+.PHONY: help test lint format type-check build clean install-dev coverage audit counts api-snapshot
 
 # Default target
 help: ## Show this help message
@@ -44,3 +44,6 @@ audit: ## Audit site-packages for suspicious .pth files
 
 counts: ## Fail when a documented test count differs from a collection
 	python scripts/doc_counts.py
+
+api-snapshot: ## Regenerate docs/api.txt, the public API snapshot
+	python scripts/api_snapshot.py --write docs/api.txt

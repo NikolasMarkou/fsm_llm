@@ -1,6 +1,6 @@
 # docs
 
-The `docs/` folder at the root of the FSM-LLM repository holds the long-form user guides for the framework. FSM-LLM is a Python library that runs conversations as JSON-defined finite state machines (FSMs), with an LLM doing data extraction and response writing. It contains Markdown files only, no code: the guides and records listed below, plus this index and a maintainer-notes file (`AGENTS.md`, for coding agents).
+The `docs/` folder at the root of the FSM-LLM repository holds the long-form user guides for the framework. FSM-LLM is a Python library that runs conversations as JSON-defined finite state machines (FSMs), with an LLM doing data extraction and response writing. It contains Markdown files and one generated text file, no code: the guides and records listed below, plus this index, a maintainer-notes file (`AGENTS.md`, for coding agents) and `api.txt`, the public API snapshot that `scripts/api_snapshot.py` writes (`make api-snapshot`) and `tests/test_fsm_llm_regression/test_api_snapshot.py` compares.
 
 ## What it is for
 
