@@ -212,11 +212,11 @@ class _Watch:
         self.fsm: dict[str, Any] = {}
         hook, create_api = agent._on_loop_iteration, agent._create_api
 
-        def _hook(api: Any, conv_id: str, iteration: int) -> None:
-            sub_id = api.get_sub_conversation_id(conv_id)
+        def _hook(api: Any, conversation_id: str, iteration: int) -> None:
+            sub_id = api.get_sub_conversation_id(conversation_id)
             full = api.fsm_manager.get_complete_conversation(sub_id)["collected_data"]
-            self.seen.append((api.get_current_state(conv_id), dict(full)))
-            hook(api, conv_id, iteration)
+            self.seen.append((api.get_current_state(conversation_id), dict(full)))
+            hook(api, conversation_id, iteration)
 
         def _create(fsm_def: dict[str, Any]) -> Any:
             self.fsm = fsm_def
@@ -523,19 +523,21 @@ class TestDriverGrant:
                 self.data = data
                 self.writes: list[dict[str, Any]] = []
 
-            def get_data(self, conv_id: str) -> dict[str, Any]:
+            def get_data(self, conversation_id: str) -> dict[str, Any]:
                 return dict(self.data)
 
             # The driver's policy view (D-005, P2-W1): the full context.
             fsm_manager = property(lambda self: self)
 
-            def get_sub_conversation_id(self, conv_id: str) -> str:
-                return conv_id
+            def get_sub_conversation_id(self, conversation_id: str) -> str:
+                return conversation_id
 
-            def get_complete_conversation(self, conv_id: str) -> dict[str, Any]:
+            def get_complete_conversation(self, conversation_id: str) -> dict[str, Any]:
                 return {"collected_data": dict(self.data)}
 
-            def update_context(self, conv_id: str, update: dict[str, Any]) -> None:
+            def update_context(
+                self, conversation_id: str, update: dict[str, Any]
+            ) -> None:
                 self.writes.append(update)
 
         pending = {

@@ -453,9 +453,9 @@ def _run_recording_states(agent: Any) -> tuple[Any, list[str]]:
     states: list[str] = []
     real_hook = agent._on_loop_iteration
 
-    def _hook(api: Any, conv_id: str, iteration: int) -> None:
-        states.append(api.get_current_state(conv_id))
-        real_hook(api, conv_id, iteration)
+    def _hook(api: Any, conversation_id: str, iteration: int) -> None:
+        states.append(api.get_current_state(conversation_id))
+        real_hook(api, conversation_id, iteration)
 
     agent._on_loop_iteration = _hook
     return agent.run("What is 2 + 2?"), states

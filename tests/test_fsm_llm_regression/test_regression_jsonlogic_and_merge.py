@@ -235,9 +235,9 @@ class TestEndConversationStackOrder:
             teardown_order: list[str] = []
             original_end = api.fsm_manager.end_conversation
 
-            def recording_end(conv_id, *args, **kwargs):
-                teardown_order.append(conv_id)
-                return original_end(conv_id, *args, **kwargs)
+            def recording_end(conversation_id, *args, **kwargs):
+                teardown_order.append(conversation_id)
+                return original_end(conversation_id, *args, **kwargs)
 
             api.fsm_manager.end_conversation = recording_end
             api.end_conversation(root)

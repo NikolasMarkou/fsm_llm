@@ -197,10 +197,12 @@ class _EndsItsConversation(ReactAgent):
 
     end_at = 3
 
-    def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
-        super()._on_loop_iteration(api, conv_id, iteration)
+    def _on_loop_iteration(
+        self, api: API, conversation_id: str, iteration: int
+    ) -> None:
+        super()._on_loop_iteration(api, conversation_id, iteration)
         if iteration == self.end_at:
-            api.end_conversation(conv_id)
+            api.end_conversation(conversation_id)
 
 
 def _ending_agent(runs: list[str]) -> _EndsItsConversation:
@@ -249,7 +251,7 @@ class TestEndRunConversation:
     """The cleanup tolerates only a conversation that is already gone."""
 
     def test_an_end_refused_while_the_conversation_is_active_is_raised(self):
-        def refuse(conv_id: str) -> None:
+        def refuse(conversation_id: str) -> None:
             raise ConversationBusyError("a turn is running")
 
         api = SimpleNamespace(
@@ -260,7 +262,7 @@ class TestEndRunConversation:
             BaseAgent._end_run_conversation(cast(API, api), "c-1")
 
     def test_an_error_that_is_not_an_fsm_error_is_raised(self):
-        def broken(conv_id: str) -> None:
+        def broken(conversation_id: str) -> None:
             raise RuntimeError("boom")
 
         api = SimpleNamespace(

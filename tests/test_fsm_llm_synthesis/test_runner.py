@@ -746,10 +746,10 @@ class TestFailuresAreFixedReasons:
         )
         real_update = rig.api.update_context
 
-        def refuse_failed(conv_id: str, data: dict[str, Any]) -> Any:
+        def refuse_failed(conversation_id: str, data: dict[str, Any]) -> Any:
             if data.get("synthesis_result", {}).get("status") == "failed":
                 raise RuntimeError(SECRET)
-            return real_update(conv_id, data)
+            return real_update(conversation_id, data)
 
         monkeypatch.setattr(rig.api, "update_context", refuse_failed)
         with pytest.raises(SystemExit) as caught:

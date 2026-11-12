@@ -107,7 +107,7 @@ class _Probe:
 
     ``histories`` holds the conversation history read just before the run
     ends its conversation; ``hook_calls`` every ``_on_loop_iteration`` call as
-    ``(api, conv_id, n, field_calls_so_far, state)``.
+    ``(api, conversation_id, n, field_calls_so_far, state)``.
     """
 
     def __init__(self, **config: Any) -> None:
@@ -128,25 +128,25 @@ class _Probe:
             api = create_api(fsm_def)
             end = api.end_conversation
 
-            def _end(conv_id: str) -> None:
-                self.histories.append(api.get_conversation_history(conv_id))
-                end(conv_id)
+            def _end(conversation_id: str) -> None:
+                self.histories.append(api.get_conversation_history(conversation_id))
+                end(conversation_id)
 
             api.end_conversation = _end  # type: ignore[method-assign]
             self.apis.append(api)
             return api
 
-        def _hook(api: API, conv_id: str, iteration: int) -> None:
+        def _hook(api: API, conversation_id: str, iteration: int) -> None:
             self.hook_calls.append(
                 (
                     api,
-                    conv_id,
+                    conversation_id,
                     iteration,
                     len(self.llm.calls("extract_field")),
-                    api.get_current_state(conv_id),
+                    api.get_current_state(conversation_id),
                 )
             )
-            hook(api, conv_id, iteration)
+            hook(api, conversation_id, iteration)
 
         self.agent._create_api = _create  # type: ignore[method-assign]
         self.agent._on_loop_iteration = _hook  # type: ignore[method-assign]
@@ -360,8 +360,10 @@ class _EndlessAgent(BaseAgent):
     def _register_handlers(self, api: API) -> None:
         pass
 
-    def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
-        self.steps.append((iteration, api.get_current_state(conv_id)))
+    def _on_loop_iteration(
+        self, api: API, conversation_id: str, iteration: int
+    ) -> None:
+        self.steps.append((iteration, api.get_current_state(conversation_id)))
         if iteration == self.slow_step:
             time.sleep(0.05)
 
@@ -591,20 +593,22 @@ class _HitlProbe:
         spend_grant = AgentHandlers.spend_grant
         approval_refusal = AgentHandlers.approval_refusal
 
-        def _advance(api: API, conv_id: str) -> Any:
-            state = api.get_current_state(conv_id)
+        def _advance(api: API, conversation_id: str) -> Any:
+            state = api.get_current_state(conversation_id)
             events.append(("step", state))
-            before = _full_context(api, conv_id)
+            before = _full_context(api, conversation_id)
             sent = len(self.llm.requests)
             try:
-                return advance(api, conv_id)
+                return advance(api, conversation_id)
             finally:
                 kinds = [kind for kind, _ in self.llm.requests[sent:]]
-                self.steps.append((state, kinds, before, _full_context(api, conv_id)))
+                self.steps.append(
+                    (state, kinds, before, _full_context(api, conversation_id))
+                )
 
-        def _advance_stream(api: API, conv_id: str) -> Any:
-            events.append(("step", api.get_current_state(conv_id)))
-            return advance_stream(api, conv_id)
+        def _advance_stream(api: API, conversation_id: str) -> Any:
+            events.append(("step", api.get_current_state(conversation_id)))
+            return advance_stream(api, conversation_id)
 
         def _spend_grant(handlers: AgentHandlers, context: dict[str, Any]) -> Any:
             events.append(("spend", context.get(_DRIVER_KEY)))
@@ -633,23 +637,23 @@ class _HitlProbe:
                 self.started_with.append(dict(context or {}))
                 return start(context)
 
-            def _end(conv_id: str) -> None:
-                self.final.append(_full_context(api, conv_id))
-                self.histories.append(api.get_conversation_history(conv_id))
-                end(conv_id)
+            def _end(conversation_id: str) -> None:
+                self.final.append(_full_context(api, conversation_id))
+                self.histories.append(api.get_conversation_history(conversation_id))
+                end(conversation_id)
 
             api.start_conversation = _start  # type: ignore[method-assign]
             api.end_conversation = _end  # type: ignore[method-assign]
             return api
 
-        def _hook(api: API, conv_id: str, iteration: int) -> None:
-            before = _full_context(api, conv_id).get(_DRIVER_KEY)
-            hook(api, conv_id, iteration)
-            after = _full_context(api, conv_id).get(_DRIVER_KEY)
-            state = api.get_current_state(conv_id)
+        def _hook(api: API, conversation_id: str, iteration: int) -> None:
+            before = _full_context(api, conversation_id).get(_DRIVER_KEY)
+            hook(api, conversation_id, iteration)
+            after = _full_context(api, conversation_id).get(_DRIVER_KEY)
+            state = api.get_current_state(conversation_id)
             self.hooks.append((iteration, state, before, after))
             if after_hook is not None:
-                after_hook(api, conv_id, state, after)
+                after_hook(api, conversation_id, state, after)
 
         self.agent._create_api = _create
         self.agent._on_loop_iteration = _hook
@@ -767,11 +771,13 @@ class TestHitlThroughBeforeStep:
     ):
         swapped: list[str] = []
 
-        def swap(api: API, conv_id: str, state: str, grant: Any) -> None:
+        def swap(api: API, conversation_id: str, state: str, grant: Any) -> None:
             # The selection changes after the human approved it.
             if grant is not None and not swapped:
                 swapped.append(state)
-                api.update_context(conv_id, {ContextKeys.TOOL_INPUT: dict(_OTHER_CALL)})
+                api.update_context(
+                    conversation_id, {ContextKeys.TOOL_INPUT: dict(_OTHER_CALL)}
+                )
 
         probe = _HitlProbe(
             monkeypatch,
@@ -883,7 +889,9 @@ class TestHitlThroughBeforeStep:
         llm = PromptGroundedLLM(facts=_FACTS, default_response=_ANSWER)
         agent = build(tools=registry, llm_interface=llm)
         steps: list[str] = []
-        monkeypatch.setattr(API, "advance", lambda api, conv_id: steps.append(conv_id))
+        monkeypatch.setattr(
+            API, "advance", lambda api, conversation_id: steps.append(conversation_id)
+        )
 
         def wipe(table: str) -> str:
             runs.append(table)
@@ -1293,10 +1301,10 @@ class TestVerifiedReactReflectEveryN:
         seen: list[tuple[int, str, Any]] = []
         hook = agent._on_loop_iteration
 
-        def _hook(api: API, conv_id: str, iteration: int) -> None:
-            hook(api, conv_id, iteration)
-            feedback = api.get_data(conv_id).get(ContextKeys.AGENT_FEEDBACK)
-            seen.append((iteration, api.get_current_state(conv_id), feedback))
+        def _hook(api: API, conversation_id: str, iteration: int) -> None:
+            hook(api, conversation_id, iteration)
+            feedback = api.get_data(conversation_id).get(ContextKeys.AGENT_FEEDBACK)
+            seen.append((iteration, api.get_current_state(conversation_id), feedback))
 
         agent._on_loop_iteration = _hook  # type: ignore[method-assign]
 
@@ -1409,7 +1417,7 @@ class TestAutoMemory:
         agent = self._agent(memory, [], timeout_seconds=0.02)
         steps: list[int] = []
 
-        def _slow(api: API, conv_id: str, iteration: int) -> None:
+        def _slow(api: API, conversation_id: str, iteration: int) -> None:
             steps.append(iteration)
             time.sleep(0.05)
 
@@ -1464,18 +1472,18 @@ class _Run:
                 self.started.update(context or {})
                 return start(context)
 
-            def _end(conv_id: str) -> None:
-                self.final.update(_full_context(api, conv_id))
-                self.history.extend(api.get_conversation_history(conv_id))
-                end(conv_id)
+            def _end(conversation_id: str) -> None:
+                self.final.update(_full_context(api, conversation_id))
+                self.history.extend(api.get_conversation_history(conversation_id))
+                end(conversation_id)
 
             api.start_conversation = _start  # type: ignore[method-assign]
             api.end_conversation = _end  # type: ignore[method-assign]
             return api
 
-        def _hook(api: API, conv_id: str, iteration: int) -> None:
-            events.append(("step", api.get_current_state(conv_id)))
-            hook(api, conv_id, iteration)
+        def _hook(api: API, conversation_id: str, iteration: int) -> None:
+            events.append(("step", api.get_current_state(conversation_id)))
+            hook(api, conversation_id, iteration)
 
         agent._create_api = _create  # type: ignore[method-assign]
         agent._on_loop_iteration = _hook  # type: ignore[method-assign]
@@ -2443,9 +2451,9 @@ class TestAdaptOnTheCoreLoop:
         budgets: list[float] = []
         run_until_terminal = API.run_until_terminal
 
-        def _recording(self: API, conv_id: str, **kwargs: Any) -> Any:
+        def _recording(self: API, conversation_id: str, **kwargs: Any) -> Any:
             budgets.append(kwargs["max_seconds"])
-            return run_until_terminal(self, conv_id, **kwargs)
+            return run_until_terminal(self, conversation_id, **kwargs)
 
         monkeypatch.setattr(API, "run_until_terminal", _recording)
 

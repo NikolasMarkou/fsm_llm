@@ -2287,11 +2287,11 @@ class TestForcedStopBeforeTheSpeakingState:
     @staticmethod
     def _closing(base, stop_at):
         class Closing(base):
-            def _on_loop_iteration(self, api, conv_id, iteration):
+            def _on_loop_iteration(self, api, conversation_id, iteration):
                 if iteration == stop_at:
-                    api.end_conversation(conv_id)
+                    api.end_conversation(conversation_id)
                     return
-                super()._on_loop_iteration(api, conv_id, iteration)
+                super()._on_loop_iteration(api, conversation_id, iteration)
 
         return Closing
 
