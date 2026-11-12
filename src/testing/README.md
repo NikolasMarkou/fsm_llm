@@ -38,7 +38,23 @@ run = ScriptedUser(["hello", "good, thanks"]).run(api)
 assert run.states == ("greeting", "conversation", "farewell")
 ```
 
-The doubles are plain classes: their attributes are public and may change between turns, and a test may subclass them. They are not `unittest.mock` objects. The rest (the assertions and `PathRecorder`) arrives in later steps of the plan that added the package; do not rely on it before that lands.
+- `assert_state(source, state_id)`: the conversation is in that state now (read live, so a test that kept talking asserts the new state). `source` is the `ConversationRun` or an `(api, conversation_id)` pair.
+- `assert_context(source, **expected)`: the named context keys hold those values (`==`; other keys are ignored, so it is a subset check; internal `_` keys are not visible). Failure: `context: key 'x' is missing (keys: [...])` or `context['x']: expected 1, got 2`.
+- `assert_path(source, expected, *, exact=True)`: the visited states. `source` is a `ConversationRun`, a list of state ids (`PathRecorder.path(id)`) or a non-empty sequence of `AdvanceResult`. `exact=False` accepts any ordered subsequence. Failure names the first difference with its index and prints both paths.
+- `assert_result(result, *, kind=None, status=None, reason=...)`: the `kind` of a completion state's `{kind, text, calls}` (or a `CompletionResponse`), the `status` and `reason` of a synthesis state's `{status, procedure_id, version, reason}`. Expected values may be `codes` members or strings; a typo raises `ValueError` listing the vocabulary. `reason=None` asserts there is no reason; leaving `reason` out checks nothing.
+- `PathRecorder(*, name="PathRecorder", priority=10_000)`: an opt-in handler (`API(handlers=[recorder])`) that records the initial state and each transition target per conversation id, for code under test that drives the conversation (an agent, a runner). `recorder.path(conversation_id)`, `recorder.frames`, `recorder.clear()`. It never changes a conversation, but registering ANY handler makes the pipeline deep-copy the context at every handler timing (with none it skips the copy), so a context value that cannot be deep-copied can fail a turn that passed before. A stay is not a transition: the recorder does not repeat the state, a `ConversationRun` does.
+
+```python
+from fsm_llm.testing import assert_context, assert_path, assert_state
+
+assert_state(run, "farewell")
+assert_context(run, mood="happy")
+assert_path(run, ["greeting", "conversation", "farewell"])
+```
+
+The assertions raise `AssertionError` explicitly (never `assert`, so `python -O` changes nothing), hide their own frames from the pytest traceback and do not import `pytest`.
+
+The doubles are plain classes: their attributes are public and may change between turns, and a test may subclass them. They are not `unittest.mock` objects.
 
 ## How it fits
 
@@ -57,6 +73,7 @@ flowchart TD
 - `__init__.py` - module docstring and the static `__all__`.
 - `doubles.py` - `MockLLM2Interface`, `PromptGroundedLLM`, `ScriptedLLM`, `UnscriptedCallError`, `state_in_prompt`, `hash_embed`.
 - `user.py` - `ScriptedUser`, `ConversationRun`, `advance_until_terminal`.
+- `assertions.py` - `assert_state`, `assert_context`, `assert_path`, `assert_result`, `PathRecorder`.
 - `builders.py` - `final_reply`, `tool_call_reply`, `malformed_reply`.
 - `__version__.py` - re-exports the package version.
 

@@ -1696,6 +1696,13 @@ fsm_llm.testing.MockLLM2Interface class(LLMInterface)
   def __init__(self, extraction_data: dict[str, object] | None = None, response_text: str = 'Hello! How can I help you?', cut_reply: bool = False, cut_fields: tuple[str, ...] | set[str] | list[str] = ()) -> None
   def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse
   def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse
+fsm_llm.testing.PathRecorder class(BaseHandler)
+  def __init__(self, *, name: str = 'PathRecorder', priority: int = 10000) -> None
+  def clear(self) -> None
+  def execute(self, context: dict[str, Any]) -> dict[str, Any]
+  property frames
+  def path(self, conversation_id: str) -> tuple[str, ...]
+  def should_execute(self, timing: HandlerTiming, current_state: str, target_state: str | None, context: dict[str, Any], updated_keys: set[str] | None = None) -> bool
 fsm_llm.testing.PromptGroundedLLM class(LLMInterface)
   def __init__(self, facts: dict[str, tuple[object, str]] | None = None, responses: dict[str, str] | None = None, default_response: str = 'ok') -> None
   def calls(self, kind: str) -> list
@@ -1717,6 +1724,10 @@ fsm_llm.testing.ScriptedUser class
   def run(self, api: API, *, initial_context: Mapping[str, Any] | None = None, close: bool = False) -> ConversationRun
 fsm_llm.testing.UnscriptedCallError class(AssertionError)
 fsm_llm.testing.advance_until_terminal def(api: API, *, max_steps: int, initial_context: Mapping[str, Any] | None = None, max_seconds: float | None = None, close: bool = False) -> ConversationRun
+fsm_llm.testing.assert_context def(source: ConversationRun | tuple[API, str], /, **expected: Any) -> None
+fsm_llm.testing.assert_path def(source: ConversationRun | Sequence[str] | Sequence[AdvanceResult], expected: Sequence[str], /, *, exact: bool = True) -> None
+fsm_llm.testing.assert_result def(result: Mapping[str, Any] | CompletionResponse | None, *, kind: CompletionKind | str | None = None, status: Status | str | None = None, reason: Reason | str | None | _Unset = <unset>) -> None
+fsm_llm.testing.assert_state def(source: ConversationRun | tuple[API, str], /, state_id: str) -> None
 fsm_llm.testing.final_reply def(text: str | None, finish_reason: str | None = None) -> CompletionResponse
 fsm_llm.testing.hash_embed def(dim: int = 8) -> Callable[[str], list[float]]
 fsm_llm.testing.malformed_reply def(text: str | None = None) -> CompletionResponse

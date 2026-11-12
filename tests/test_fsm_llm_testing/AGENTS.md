@@ -1,7 +1,7 @@
 # test_fsm_llm_testing
 
 Path: `tests/test_fsm_llm_testing`
-Purpose: Offline pytest suite for `fsm_llm.testing` (the public test doubles, scripted user and assertions). Today it pins the contract of the doubles (the two promoted ones, `ScriptedLLM`), the reply builders, `state_in_prompt`, `hash_embed`, `ScriptedUser`, `ConversationRun`, `advance_until_terminal` (driven offline on two example FSM files and inline FSMs, the path compared with what `fsm_llm.eval` samples) and the layering of the package; each public name brings its own tests.
+Purpose: Offline pytest suite for `fsm_llm.testing` (the public test doubles, scripted user and assertions). Today it pins the contract of the doubles (the two promoted ones, `ScriptedLLM`), the reply builders, `state_in_prompt`, `hash_embed`, `ScriptedUser`, `ConversationRun`, `advance_until_terminal` (driven offline on two example FSM files and inline FSMs, the path compared with what `fsm_llm.eval` samples), the assertions and `PathRecorder` and the layering of the package; each public name brings its own tests.
 
 ## Scope
 
@@ -23,6 +23,7 @@ Covers `fsm_llm.testing` as a leaf of the package: imported by name, loaded by n
 | `test_scripted_llm.py` | `TestShape`, `TestComplete`, `TestUnscriptedCalls`, `TestPipelineSeesUnexpectedCalls`, `TestExtraction`, `TestGenerateResponse`, `TestStream`, `TestUsage`, `TestSubclassing` |
 | `test_builders.py` | `TestFinalReply`, `TestToolCallReply`, `TestMalformedReply`, `TestStateInPrompt`, `TestHashEmbed`, `TestExports` |
 | `test_user.py` | `TestConversationRunRecord`, `TestStopping`, `TestRules`, `TestStartAndClose`, `TestExceptionsPropagate`, `TestConstruction`, `TestAdvanceUntilTerminal`, `TestExports` |
+| `test_assertions.py` | `TestAssertState`, `TestAssertContext`, `TestAssertPath`, `TestAssertResult`, `TestFailuresAreExplicit`, `TestPathRecorder`, `TestExports` |
 | `test_layering.py` | `TestImportProbes`, `TestSourceLayering`, `TestSkeleton` |
 | `__init__.py` | Empty package marker |
 

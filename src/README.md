@@ -70,7 +70,7 @@ flowchart TD
 | `monitor/` | FastAPI web dashboard to launch, watch and talk to FSMs, agents and workflows; optional OpenTelemetry export | `fsm-llm-monitor` (http://127.0.0.1:8420), `InstanceManager.attach_api`, `OTELExporter` |
 | `eval/` | Runs the repository examples and scores them 0 to 4, or runs scripted conversations against any FSM over several trials and reports pass rates with confidence intervals | `fsm-llm-eval examples`, `fsm-llm-eval run cases.json`, `run_dataset` |
 | `synthesis/` | Runtime FSM synthesis: a state names a goal, a model writes a child FSM for it, static checks and a bounded simulation judge it, a file-backed library stores it and a runner executes it as a child of the host conversation; two agent tools | `FSMSynthesizer`, `ProcedureRunner`, `FSMLibrary`, `SynthesisPolicy`, `create_procedure_tools` |
-| `testing/` | Public test helpers for code built on FSM-LLM: fake LLM interfaces (`MockLLM2Interface`, `PromptGroundedLLM`, `ScriptedLLM`), reply builders, `hash_embed`, `ScriptedUser`/`ConversationRun`/`advance_until_terminal` to drive a conversation and record its path, and assertions (not yet); imports the core only, never pytest | `fsm_llm.testing` (import by name) |
+| `testing/` | Public test helpers for code built on FSM-LLM: fake LLM interfaces (`MockLLM2Interface`, `PromptGroundedLLM`, `ScriptedLLM`), reply builders, `hash_embed`, `ScriptedUser`/`ConversationRun`/`advance_until_terminal` to drive a conversation and record its path, the assertions `assert_state`/`assert_context`/`assert_path`/`assert_result` and the opt-in `PathRecorder`; imports the core only, never pytest | `fsm_llm.testing` (import by name) |
 
 ## Files
 

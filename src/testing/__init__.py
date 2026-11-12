@@ -16,8 +16,11 @@ raised as ``UnscriptedCallError``); the reply builders ``final_reply``,
 reader of the state tag of a response prompt; and ``hash_embed``, a pure
 embedder; ``ScriptedUser``, which drives a conversation from fixed messages and
 rules, ``advance_until_terminal`` for message-free FSMs, and the
-``ConversationRun`` record of either (the visited path included). Assertions
-and ``PathRecorder`` follow in the next step of the plan.
+``ConversationRun`` record of either (the visited path included); the plain
+assertions ``assert_state``, ``assert_context``, ``assert_path`` and
+``assert_result`` (explicit ``AssertionError``, never ``assert``); and
+``PathRecorder``, an opt-in handler that records the states code under test
+visits.
 
 Import it by name, ``from fsm_llm.testing import ...``; ``import fsm_llm`` never
 loads it and no library module imports it. It imports the core and
@@ -33,6 +36,13 @@ from __future__ import annotations
 
 # Version info: imported via __version__.py to stay in sync
 from .__version__ import __version__  # noqa: F401
+from .assertions import (
+    PathRecorder,
+    assert_context,
+    assert_path,
+    assert_result,
+    assert_state,
+)
 from .builders import final_reply, malformed_reply, tool_call_reply
 from .doubles import (
     MockLLM2Interface,
@@ -47,11 +57,16 @@ from .user import ConversationRun, ScriptedUser, advance_until_terminal
 __all__ = [
     "ConversationRun",
     "MockLLM2Interface",
+    "PathRecorder",
     "PromptGroundedLLM",
     "ScriptedLLM",
     "ScriptedUser",
     "UnscriptedCallError",
     "advance_until_terminal",
+    "assert_context",
+    "assert_path",
+    "assert_result",
+    "assert_state",
     "final_reply",
     "hash_embed",
     "malformed_reply",
