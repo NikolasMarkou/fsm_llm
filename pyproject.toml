@@ -74,6 +74,9 @@ dev = [
     "pytest>=7.4.0,<10",
     "pytest-asyncio>=0.21.0,<2",
     "pytest-cov>=4.0.0,<8",
+    # coverage itself (pytest-cov only requires >=7.10.6): pinned in constraints.txt so the
+    # branch-coverage ratchet (scripts/coverage_ratchet.py) reads one measurement everywhere.
+    "coverage>=7.10.6,<8",
     "pytest-mock>=3.14.0,<4",
     "ruff>=0.4.0,<1",
     # The exact version is pinned in constraints.txt, not here — see the pin block there.
@@ -133,6 +136,17 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+
+# Branch coverage of the package, read by `pytest --cov` (and by the ratchet, which only
+# gates the canonical leg: Linux, Python 3.12, `mcp` installed). `make coverage` and the
+# tox coverage env still pass `--cov=fsm_llm --cov-branch` explicitly.
+[tool.coverage.run]
+branch = true
+source = ["fsm_llm"]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [

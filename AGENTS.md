@@ -73,6 +73,7 @@ One LLM layer (`src/llm.py`, the only module that imports litellm): `LLMInterfac
 | `scripts/skills_bench.py` | Pre-registered Agent Skills read-hint ablation (bench id `skills-disclosure`, blocks B0 and B1): `register`, `run`, `report` | Registered, NOT RUN (live runs declined); the read hint is a recorded default, not a measurement |
 | `scripts/type_check.py` | Runs mypy on the package `fsm_llm` by exposing `src/` under that name through a temporary symlink and `MYPYPATH` (`mypy src/` would name modules `src.*` and turn every `fsm_llm.*` import into `Any`); `make type-check`, tox, CI | Linux and macOS (symlink); `src/` must never be put on `sys.path` (it holds `logging.py`) |
 | `scripts/doc_counts.py` | Compares the count tokens of the shapes it knows (`N tests`, marker, `N slow`, `N live`/`N gated`, `tests in N files`, rows) in the tracked `.md` files with one `pytest --collect-only`; exit 1 on drift or on such a token no rule names; prose numbers with no token shape are not read | `make counts`; skips when `mcp` is importable |
+| `scripts/coverage_ratchet.py` | Branch-coverage ratchet over a `coverage json` report: `check COVERAGE_JSON` fails when the combined or branch percent is below `coverage-baseline.json` minus 0.10 pp, `update` only raises the baseline (floor to 0.01), `guard` fails on any decrease against `origin/main`; stdlib only, exit 0/1 | The baseline file is written from the canonical leg (Linux, Python 3.12, `mcp` installed) only; `[tool.coverage]` in `pyproject.toml`, `coverage` pinned in `constraints.txt` |
 | `scripts/api_snapshot.py` | Prints the public API (static `__all__` of the eight packages and the named core modules, with signatures) for `docs/api.txt`; `--write PATH`; `make api-snapshot` | `tests/test_fsm_llm_regression/test_api_snapshot.py` fails when `docs/api.txt` differs; regenerate and review the diff in the same commit; never edit `docs/api.txt` by hand |
 | `evaluation/datasets/` | `simple_greeting_cases.json`, `name_capture_fsm.json` | Samples for `fsm-llm-eval run` |
 | `examples/<category>/<name>/` | `run.py` plus FSM JSON; 8 categories | Evaluation baselines |
@@ -206,7 +207,7 @@ make format         # ruff format src/ tests/
 make type-check     # python scripts/type_check.py (mypy -p fsm_llm)
 make build          # python -m build (wheel + sdist)
 make clean          # remove build artifacts, caches, logs/
-make coverage       # pytest with --cov=fsm_llm
+make coverage       # pytest with --cov=fsm_llm --cov-branch
 make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis,testing]" + pre-commit install
 make audit          # python scripts/audit_pth.py
 make counts         # python scripts/doc_counts.py (fails when a documented test count drifts)

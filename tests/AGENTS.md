@@ -5,7 +5,7 @@ Purpose: The full pytest tree of FSM-LLM (14,043 collected tests): ten suite fol
 
 ## Scope
 
-- In: `conftest.py`, `__init__.py` (empty), `test_packaging.py`, `test_bench_common.py`, `test_agents_bench.py`, `test_skills_bench.py`, `test_integration_ollama.py`, `fixtures/test_fsm_definitions/minimal_fsm.json`, `test_examples/`, and the nine `test_fsm_llm*` suite folders.
+- In: `conftest.py`, `__init__.py` (empty), `test_packaging.py`, `test_bench_common.py`, `test_agents_bench.py`, `test_skills_bench.py`, `test_coverage_ratchet.py`, `test_integration_ollama.py`, `fixtures/test_fsm_definitions/minimal_fsm.json`, `test_examples/`, and the nine `test_fsm_llm*` suite folders.
 - Package under test: one top-level package `fsm_llm` (`src/`) with subpackages `agents`, `reasoning`, `workflows`, `monitor`, `eval`, `synthesis`, `testing`. The old top-level names (`fsm_llm_agents`, ...) no longer exist (no test checks for a leftover directory any more).
 - Out: the bench data under `scripts/bench_data/`, the examples themselves (`examples/`, evaluation baselines, never edit unless asked).
 
@@ -35,6 +35,7 @@ Suite folders (test counts from full collection) and root files at this level.
 | `test_bench_common.py` | Offline checks of `scripts/bench_common.py`, the stdlib helpers shared by the agents, skills and synthesis benches | 19 tests |
 | `test_agents_bench.py` | Offline checks of `scripts/agents_bench.py` | 132 tests |
 | `test_skills_bench.py` | Offline checks of `scripts/skills_bench.py` (Agent Skills read-hint ablation: fixture, grader, hint ablation, one trial, blocks, hygiene); scripted agents drive the REAL skill tools | 38 tests; never calls a model |
+| `test_coverage_ratchet.py` | Offline checks of `scripts/coverage_ratchet.py` (`check`, `update`, `guard` on tmp files and a throwaway git repo with an `origin/main` ref) and of the coverage config (`[tool.coverage]`, the `coverage` pin, `--cov-branch` in Makefile and tox) | 44 tests; no coverage run, no network |
 | `test_integration_ollama.py` | Live end-to-end on `ollama_chat/qwen3.5:9b-q8_0`, plus 4 model-free workflow checks | 12 tests |
 | `fixtures/test_fsm_definitions/minimal_fsm.json` | v3.0 one-state FSM behind the `sample_fsm_definition` fixture | Written by `conftest.py` if missing |
 | `test_fsm_llm/` | Core: `API`, `FSMManager`, `MessagePipeline`, `TransitionEvaluator`, `expressions`, classification (on the conversation interface), context, prompts, `LiteLLMInterface` (`complete`, usage counters), `LiteLLMEmbedder`, the `completion` state, `ollama`, handlers, `WorkingMemory`, session, validator, visualizer, runner, logging, OKF (`okf`, `okf_cli`), the shared `frontmatter` seam, Agent Skills (`agent_skills`) and `fsm-llm-skills` | 6,237 tests. Local `conftest.py` (`minimal_fsm_dict`); `fixtures/` holds labelled secret-filter corpora for `test_context_unit.py`; seam files import `_` helpers from each other; `test_docs_snippets.py` loads FSM JSON from root docs; 14 `slow` |

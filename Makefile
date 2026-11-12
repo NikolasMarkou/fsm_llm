@@ -17,7 +17,7 @@ type-check: ## Run type checker (mypy)
 	python scripts/type_check.py
 
 coverage: ## Run tests with coverage report
-	python -m pytest tests/ --cov=fsm_llm --cov-report=term-missing --cov-report=html
+	python -m pytest tests/ --cov=fsm_llm --cov-branch --cov-report=term-missing --cov-report=html
 
 build: ## Build wheel and sdist
 	@echo "Building package..."

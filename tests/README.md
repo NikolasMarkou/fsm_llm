@@ -61,6 +61,7 @@ flowchart TD
 - `test_bench_common.py` - 19 offline tests for `scripts/bench_common.py`, the stdlib helpers that `agents_bench.py`, `skills_bench.py` and `synthesis_bench.py` share: no socket at import, stdlib-only top-level imports, no direct `litellm` reference, Wilson interval, Fisher exact test, the manifest-field constant, JSONL row round trip, wire-digest masking, the restore-on-raise contract of `captured_wire`, `manifest_differences` and `pinned_drift`.
 - `test_agents_bench.py` - 132 offline tests for `scripts/agents_bench.py`: inert import, task set and its SHA-256, grader, metric math, manifest and pair disclosure, report, call meter, end-to-end run with fake results, arms, CLI.
 - `test_skills_bench.py` - 38 offline tests for `scripts/skills_bench.py` (the pre-registered Agent Skills read-hint ablation, registered and not run): the fixture and its hash, the grader against a reference solver and failing runs, the hint-off arm, one scripted trial, the block rules, the refusals and layout. Scripted agents drive the real skill tools; no model is called.
+- `test_coverage_ratchet.py` - 44 offline tests for `scripts/coverage_ratchet.py` (the branch-coverage ratchet: `check` against the baseline minus the tolerance, `update` that only raises and floors to 0.01, `guard` against an `origin/main` ref in a throwaway git repo) and for the coverage configuration (`[tool.coverage]` in `pyproject.toml`, the `coverage` pin, `--cov-branch` in the Makefile and tox coverage commands). No coverage run, no network.
 - `test_integration_ollama.py` - 12 tests, all marked `integration`, `real_llm` and `slow`. Most run a real conversation on `ollama_chat/qwen3.5:9b-q8_0` and skip without it; two small classes (`TestWorkflowUTCConsistency`, `TestParallelStepIsolation`) check workflow timestamps and parallel-step context isolation with no model.
 - `fixtures/test_fsm_definitions/minimal_fsm.json` - a one-state FSM loaded by the `sample_fsm_definition` fixture (the fixture writes it if missing).
 
@@ -74,7 +75,7 @@ From the repository root, with the project virtualenv:
 .venv/bin/python -m pytest tests/test_fsm_llm_workflows/ -q
 .venv/bin/python -m pytest --collect-only -q | tail -1   # re-measure the count
 make test        # python -m pytest tests/ -v
-make coverage    # same run with --cov=fsm_llm
+make coverage    # same run with --cov=fsm_llm --cov-branch (branch coverage; the baseline gate is scripts/coverage_ratchet.py)
 ```
 
 `make` uses `python` from the active environment, so activate `.venv` first. The pre-push hook and CI use narrower runs, see `.pre-commit-config.yaml` and `.github/workflows/python-package.yml` (CI skips the `slow`, `real_llm` and `integration` tests).
