@@ -2,15 +2,23 @@ from __future__ import annotations
 
 """Tests for fsm_llm.monitor.instance_manager."""
 
+import asyncio
 import threading
-from typing import ClassVar
+from typing import Any, ClassVar
 from unittest import mock
 from unittest.mock import MagicMock
 
 import pytest
 
-from fsm_llm.monitor.constants import EVENT_INSTANCE_LAUNCHED
+from fsm_llm.monitor.collector import EventCollector, redact_context
+from fsm_llm.monitor.constants import (
+    EVENT_INSTANCE_LAUNCHED,
+    EVENT_WORKFLOW_ADVANCED,
+    EVENT_WORKFLOW_COMPLETED,
+    EVENT_WORKFLOW_EVENT_DELIVERED,
+)
 from fsm_llm.monitor.definitions import MonitorConfig
+from fsm_llm.monitor.exceptions import MonitorCapacityError
 from fsm_llm.monitor.instance_manager import (
     InstanceManager,
     ManagedAgent,
@@ -19,6 +27,7 @@ from fsm_llm.monitor.instance_manager import (
     register_monitor_handlers,
     snapshot_from_api,
 )
+from tests.test_fsm_llm_monitor.support import _manager
 
 
 class TestManagedClasses:
@@ -1277,3 +1286,224 @@ class TestDestroyClosesBeforeUnregister:
         snap = mgr.get_conversation_snapshot(conv_id)
         assert snap is not None
         assert snap.is_terminal is True
+
+
+class _Secretive:
+    def __str__(self) -> str:
+        return "password=hunter2"
+
+
+def _snapshot_api(collected: dict[str, Any], extraction: Any = None) -> MagicMock:
+    api = MagicMock()
+    api.fsm_manager.get_complete_conversation.return_value = {
+        "current_state": {"id": "s", "description": "", "is_terminal": False},
+        "collected_data": collected,
+        "conversation_history": [],
+        "last_extraction_response": extraction,
+        "last_transition_decision": None,
+        "last_response_generation": None,
+    }
+    api.get_stack_depth.return_value = 1
+    return api
+
+
+class TestRedaction:
+    def test_snapshot_context_drops_secrets_and_never_calls_str(self):
+        out = EventCollector.snapshot_context(
+            {
+                "answer": "42",
+                "password": "hunter2",
+                "api_key": "sk-abcdefghijklmnopqrstuvwxyz0123",
+                "obj": _Secretive(),
+                "nested": {"token": "abc123secretvalue", "ok": 1},
+            }
+        )
+        assert out["answer"] == "42"
+        assert "password" not in out
+        assert "api_key" not in out
+        assert "hunter2" not in out.get("obj", "")
+        assert out["obj"] == "<redacted:_Secretive>"
+        assert "abc123secretvalue" not in out["nested"]
+
+    def test_redact_context_nested_internal_and_secret(self):
+        data = {"user": {"system_flag": "x", "name": "Ada", "password": "p"}}
+        assert redact_context(data) == {"user": {"name": "Ada"}}
+        assert redact_context(data, drop_internal=False) == {
+            "user": {"system_flag": "x", "name": "Ada"}
+        }
+
+    def test_snapshot_redacts_nested_values_and_last_extraction(self):
+        snap = snapshot_from_api(
+            _snapshot_api(
+                {"profile": {"password": "p", "city": "Oslo"}},
+                extraction={"extracted_data": {"api_key": "sk-1234567890abcdef"}},
+            ),
+            "c1",
+        )
+        assert snap.context_data == {"profile": {"city": "Oslo"}}
+        assert "api_key" not in snap.last_extraction["extracted_data"]
+
+    def test_agent_result_redacts_final_context_and_tool_params(self):
+        mgr = _manager()
+        agent = ManagedAgent("a1")
+        trace = MagicMock()
+        trace.total_iterations = 1
+        call = MagicMock()
+        call.tool_name = "login"
+        call.parameters = {"user": "ada", "password": "p"}
+        trace.tool_calls = [call]
+        trace.steps = []
+        agent.result = MagicMock(
+            answer="ok",
+            success=True,
+            final_context={"answer": "ok", "api_key": "sk-1234567890abcdef"},
+            trace=trace,
+        )
+        agent.status = "completed"
+        mgr._instances["a1"] = agent
+        result = mgr.get_agent_result("a1")
+        assert "api_key" not in result["final_context"]
+        assert result["tools_used"][0]["parameters"] == {"user": "ada"}
+
+
+class TestCancelAgent:
+    def test_cancel_after_completion_is_noop(self):
+        mgr = _manager()
+        agent = ManagedAgent("a1")
+        agent.status = "completed"
+        agent.result = MagicMock(answer="done", success=True, final_context={})
+        mgr._instances["a1"] = agent
+        assert mgr.cancel_agent("a1") is False
+        assert mgr.get_agent_status("a1")["status"] == "completed"
+        assert mgr.get_agent_result("a1")["answer"] == "done"
+
+    def test_cancel_running_agent_emits_once(self):
+        mgr = _manager()
+        agent = ManagedAgent("a1")
+        release = threading.Event()
+        agent.thread = threading.Thread(target=release.wait, daemon=True)
+        agent.thread.start()
+        mgr._instances["a1"] = agent
+        assert mgr.cancel_agent("a1") is True
+        assert mgr.cancel_agent("a1") is False
+        release.set()
+        cancelled = mgr.get_metrics().events_per_type.get("agent_cancelled", 0)
+        assert cancelled == 1
+        mgr.global_collector.cleanup()
+
+
+def _fsm(mgr: InstanceManager, iid: str, api: Any = None) -> ManagedFSM:
+    inst = ManagedFSM(iid, api or MagicMock())
+    mgr._instances[iid] = inst
+    return inst
+
+
+class TestFSMLifecycle:
+    def test_terminal_message_ends_conversation_and_completes(self):
+        mgr = _manager()
+        api = MagicMock()
+        api.converse.return_value = "bye"
+        api.get_current_state.return_value = "end"
+        api.has_conversation_ended.return_value = True
+        inst = _fsm(mgr, "f1", api)
+        inst.conversation_ids.append("c1")
+        mgr.send_message("f1", "c1", "hi")
+        api.end_conversation.assert_called_once_with("c1")
+        assert inst.status == "completed"
+
+    def test_manual_end_completes_instance_and_restart_reopens(self):
+        mgr = _manager()
+        inst = _fsm(mgr, "f1")
+        inst.conversation_ids.append("c1")
+        mgr.end_conversation("f1", "c1")
+        assert inst.status == "completed"
+        mgr.end_conversation("f1", "c1")  # already ended: no error
+        inst.api.start_conversation.return_value = ("c2", "hello")
+        mgr.start_conversation("f1")
+        assert inst.status == "running"
+
+    def test_end_unknown_conversation_is_key_error(self):
+        mgr = _manager()
+        _fsm(mgr, "f1")
+        with pytest.raises(KeyError):
+            mgr.end_conversation("f1", "nope")
+
+    def test_oldest_finished_instances_are_evicted(self):
+        mgr = InstanceManager(config=MonitorConfig(max_instances=2))
+        mgr.global_collector.cleanup()
+        old = _fsm(mgr, "old")
+        old.status = "completed"
+        _fsm(mgr, "live")
+        mgr._make_room()
+        assert "old" not in mgr._instances
+        assert "live" in mgr._instances
+
+    def test_capacity_error_when_everything_is_active(self):
+        mgr = InstanceManager(config=MonitorConfig(max_instances=1))
+        mgr.global_collector.cleanup()
+        _fsm(mgr, "live")
+        with pytest.raises(MonitorCapacityError):
+            mgr._make_room()
+
+    def test_agent_info_carries_task(self):
+        agent = ManagedAgent("a1", task="Find the capital of Norway")
+        assert agent.to_info().task == "Find the capital of Norway"
+
+
+class TestWorkflowTracking:
+    @pytest.fixture(autouse=True)
+    def _needs_workflows(self):
+        pytest.importorskip("fsm_llm.workflows")
+
+    def test_run_completion_and_steps_come_from_engine(self):
+        async def go():
+            mgr = _manager()
+            managed = mgr.launch_workflow(preset_id="demo_linear")
+            wf_id = await mgr.start_workflow_instance(
+                managed.instance_id, managed.workflow_id, {}
+            )
+            return mgr, managed, wf_id
+
+        mgr, managed, _wf_id = asyncio.run(go())
+        assert managed.active_instance_ids == []
+        assert managed.status == "completed"
+        metrics = mgr.get_metrics()
+        # demo_linear runs 3 steps: ingest, process, finish.
+        assert metrics.total_workflow_steps == 3
+        assert metrics.events_per_type.get(EVENT_WORKFLOW_COMPLETED) == 1
+        instance_events = mgr.get_instance_collector(managed.instance_id).get_events()
+        assert any(e.event_type == EVENT_WORKFLOW_ADVANCED for e in instance_events)
+        assert mgr.get_metrics().active_workflows == 0
+        mgr.global_collector.cleanup()
+
+    def test_event_delivery_is_not_counted_as_a_step(self):
+        async def go():
+            mgr = _manager()
+            managed = mgr.launch_workflow(preset_id="demo_linear")
+            await mgr.send_workflow_event(managed.instance_id, "ping", {})
+            return mgr
+
+        mgr = asyncio.run(go())
+        per_type = mgr.get_metrics().events_per_type
+        assert per_type.get(EVENT_WORKFLOW_EVENT_DELIVERED) == 1
+        assert mgr.get_metrics().total_workflow_steps == 0
+        mgr.global_collector.cleanup()
+
+    def test_workflow_status_hides_internal_and_secret_keys(self):
+        async def go():
+            mgr = _manager()
+            managed = mgr.launch_workflow(preset_id="demo_linear")
+            wf_id = await mgr.start_workflow_instance(
+                managed.instance_id,
+                managed.workflow_id,
+                {"password": "p", "system_flag": 1, "city": "Oslo"},
+            )
+            return mgr, managed, wf_id
+
+        mgr, managed, wf_id = asyncio.run(go())
+        ctx = mgr.get_workflow_status(managed.instance_id, wf_id)["context"]
+        assert ctx["city"] == "Oslo"
+        assert "password" not in ctx
+        assert "system_flag" not in ctx
+        assert "_workflow_info" not in ctx
+        mgr.global_collector.cleanup()

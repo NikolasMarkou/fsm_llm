@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import threading
 from datetime import UTC
+from typing import Any
 
+from fsm_llm.handlers import HandlerTiming
 from fsm_llm.monitor.collector import EventCollector
 from fsm_llm.monitor.constants import (
     EVENT_AGENT_ITERATION,
@@ -16,6 +18,13 @@ from fsm_llm.monitor.constants import (
     EVENT_WORKFLOW_ADVANCED,
 )
 from fsm_llm.monitor.definitions import LogRecord, MonitorEvent
+from fsm_llm.monitor.instance_manager import (
+    ManagedAgent,
+    _MonitorHandler,
+    register_monitor_handlers,
+    unregister_monitor_handlers,
+)
+from tests.test_fsm_llm_monitor.support import _manager
 
 
 class TestEventCollector:
@@ -450,3 +459,180 @@ class TestCollectorExtendedMetrics:
         assert metrics.total_agent_iterations == 0
         assert metrics.total_tool_calls == 0
         assert metrics.total_workflow_steps == 0
+
+
+class _FakeHandlerSystem:
+    def __init__(self) -> None:
+        self.handlers: list[Any] = []
+
+
+class _FakeAPI:
+    """Just enough of fsm_llm.API for handler registration."""
+
+    def __init__(self) -> None:
+        self.handler_system = _FakeHandlerSystem()
+
+    def register_handler(self, handler: Any) -> None:
+        self.handler_system.handlers.append(handler)
+
+
+def _fire(api: _FakeAPI, timing: HandlerTiming, current: str, target: str | None):
+    """Dispatch like the core: should_execute then execute, per handler."""
+    ctx = {"_conversation_id": "c1"}
+    for h in api.handler_system.handlers:
+        if h.should_execute(timing, current, target, ctx, None):
+            h.execute(dict(ctx))
+
+
+class TestTransitionStates:
+    def test_handler_passes_core_states_to_collector(self):
+        collector = EventCollector()
+        api = _FakeAPI()
+        register_monitor_handlers(api, collector)
+
+        _fire(api, HandlerTiming.START_CONVERSATION, "greet", None)
+        _fire(api, HandlerTiming.PRE_TRANSITION, "greet", "checkout")
+
+        transitions = [
+            e for e in collector.get_events() if e.event_type == EVENT_STATE_TRANSITION
+        ]
+        assert transitions[0].source_state == "greet"
+        assert transitions[0].target_state == "checkout"
+        visited = collector.get_metrics().states_visited
+        assert visited == {"greet": 1, "checkout": 1}
+
+    def test_states_survive_a_handler_timeout(self):
+        """F-HV-01: with ``handler_timeout`` the handler runs in a worker thread;
+        the states set by ``should_execute`` must still reach ``execute``."""
+        from fsm_llm.handlers import HandlerSystem
+
+        collector = EventCollector()
+        api = _FakeAPI()
+        api.handler_system = HandlerSystem(handler_timeout=5)
+        api.register_handler = api.handler_system.register_handler
+        register_monitor_handlers(api, collector)
+
+        api.handler_system.execute_handlers(
+            HandlerTiming.PRE_TRANSITION,
+            "greet",
+            "checkout",
+            {"_conversation_id": "c1"},
+        )
+
+        transitions = [
+            e for e in collector.get_events() if e.event_type == EVENT_STATE_TRANSITION
+        ]
+        assert [(e.source_state, e.target_state) for e in transitions] == [
+            ("greet", "checkout")
+        ]
+
+    def test_capture_log_records_transition_and_end_state(self):
+        agent = ManagedAgent("a1")
+        collector = EventCollector()
+        from fsm_llm.monitor.instance_manager import _build_context_capture_handlers
+
+        api = _FakeAPI()
+        for h in _build_context_capture_handlers(collector, agent):
+            api.register_handler(h)
+        _fire(api, HandlerTiming.START_CONVERSATION, "think", None)
+        _fire(api, HandlerTiming.PRE_TRANSITION, "think", "act")
+        _fire(api, HandlerTiming.END_CONVERSATION, "conclude", None)
+
+        kinds = [
+            (e["type"], e.get("state") or e.get("target"))
+            for e in agent.conversation_log
+        ]
+        assert ("start", "think") in kinds
+        assert ("transition", "act") in kinds
+        assert ("end", "conclude") in kinds
+
+    def test_end_event_reports_final_state(self):
+        collector = EventCollector()
+        api = _FakeAPI()
+        register_monitor_handlers(api, collector)
+        _fire(api, HandlerTiming.END_CONVERSATION, "done", None)
+        end = collector.get_events()[0]
+        assert end.data["state"] == "done"
+
+
+class TestStreamCursors:
+    def test_burst_is_delivered_in_order_without_repeats(self):
+        c = EventCollector(max_log_lines=1000)
+        for i in range(120):
+            c.record_log(LogRecord(level="INFO", message=str(i)))
+        seen: list[str] = []
+        cursor = 0
+        for _ in range(5):
+            logs, cursor = c.logs_after(cursor, limit=50)
+            seen.extend(r.message for r in logs)
+        assert seen == [str(i) for i in range(120)]
+
+    def test_dropped_records_are_skipped_and_cleared_collector_restarts(self):
+        c = EventCollector(max_events=10)
+        for i in range(25):
+            c.record_event(MonitorEvent(event_type="t", message=str(i)))
+        events, cursor = c.events_after(0, limit=50)
+        assert [e.message for e in events] == [str(i) for i in range(15, 25)]
+        assert cursor == 25
+        c.clear()
+        c.record_event(MonitorEvent(event_type="t", message="new"))
+        events, cursor = c.events_after(cursor, limit=50)
+        assert [e.message for e in events] == ["new"]
+
+    def test_log_level_filter_is_case_insensitive_and_ranks_success(self):
+        c = EventCollector()
+        for level in ("DEBUG", "INFO", "SUCCESS", "ERROR"):
+            c.record_log(LogRecord(level=level, message=level))
+        assert {r.level for r in c.get_logs(level="info")} == {
+            "INFO",
+            "SUCCESS",
+            "ERROR",
+        }
+        assert {r.level for r in c.get_logs(level="warning")} == {"ERROR"}
+
+
+class TestHandlerLifecycle:
+    def test_register_twice_does_not_stack(self):
+        collector = EventCollector()
+        api = _FakeAPI()
+        register_monitor_handlers(api, collector)
+        register_monitor_handlers(api, collector)
+        _fire(api, HandlerTiming.PRE_TRANSITION, "a", "b")
+        assert collector.get_metrics().total_transitions == 1
+
+    def test_unregister_stops_recording(self):
+        collector = EventCollector()
+        api = _FakeAPI()
+        register_monitor_handlers(api, collector)
+        assert unregister_monitor_handlers(api, collector) == 7
+        _fire(api, HandlerTiming.PRE_TRANSITION, "a", "b")
+        assert collector.get_metrics().total_events == 0
+
+    def test_attach_api_twice_and_close(self):
+        api = _FakeAPI()
+        mgr = _manager()
+        mgr.attach_api(api)
+        mgr.attach_api(api)
+        _fire(api, HandlerTiming.PRE_TRANSITION, "a", "b")
+        assert mgr.global_collector.get_metrics().total_transitions == 1
+        mgr.close()
+        _fire(api, HandlerTiming.PRE_TRANSITION, "b", "c")
+        assert mgr.global_collector.get_metrics().total_transitions == 1
+
+    def test_attaching_another_api_switches_the_previous_one_off(self):
+        first, second = _FakeAPI(), _FakeAPI()
+        mgr = _manager()
+        mgr.attach_api(first)
+        mgr.attach_api(second)
+        _fire(first, HandlerTiming.PRE_TRANSITION, "a", "b")
+        assert mgr.global_collector.get_metrics().total_transitions == 0
+        _fire(second, HandlerTiming.PRE_TRANSITION, "a", "b")
+        assert mgr.global_collector.get_metrics().total_transitions == 1
+        mgr.global_collector.cleanup()
+
+    def test_handler_never_writes_context(self):
+        handler = _MonitorHandler(
+            "h", HandlerTiming.PRE_TRANSITION, lambda *a, **k: None, EventCollector()
+        )
+        assert handler.should_execute(HandlerTiming.PRE_TRANSITION, "a", "b", {})
+        assert handler.execute({"x": 1}) == {}

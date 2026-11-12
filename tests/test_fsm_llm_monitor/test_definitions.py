@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import pytest
+
 from fsm_llm.monitor.definitions import (
     ActivityItem,
     ConversationSnapshot,
@@ -18,6 +20,8 @@ from fsm_llm.monitor.definitions import (
     model_to_dict,
     normalize_message_history,
 )
+from fsm_llm.monitor.server import _fsm_dict_to_snapshot
+from tests.test_fsm_llm_monitor.support import _manager
 
 
 class TestMonitorEvent:
@@ -520,3 +524,44 @@ class TestBuilderStartRequestBounds:
         import fsm_llm.monitor.definitions as d
 
         assert not hasattr(d, "ApplyDashboardRequest")
+
+
+class TestConfig:
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"refresh_interval": 0},
+            {"refresh_interval": -1},
+            {"refresh_interval": float("nan")},
+            {"refresh_interval": float("inf")},
+            {"max_events": -5},
+            {"max_log_lines": 0},
+            {"log_level": "LOUD"},
+        ],
+    )
+    def test_invalid_values_rejected(self, kwargs):
+        with pytest.raises(ValueError):
+            MonitorConfig(**kwargs)
+
+    def test_log_level_normalised(self):
+        assert MonitorConfig(log_level="debug").log_level == "DEBUG"
+
+    def test_setting_config_resizes_global_buffers(self):
+        mgr = _manager()
+        for _ in range(50):
+            mgr.global_collector.record_event(MonitorEvent(event_type="t"))
+        mgr.config = MonitorConfig(max_events=20)
+        assert len(mgr.global_collector.get_events()) == 20
+        mgr.global_collector.cleanup()
+
+
+class TestDefaults:
+    def test_transition_priority_defaults_to_core_default(self):
+        assert TransitionInfo(target_state="x").priority == 100
+        snap = _fsm_dict_to_snapshot(
+            {
+                "initial_state": "a",
+                "states": {"a": {"transitions": [{"target_state": "b"}]}, "b": {}},
+            }
+        )
+        assert snap.states[0].transitions[0].priority == 100

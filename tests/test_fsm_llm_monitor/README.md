@@ -18,8 +18,6 @@ flowchart LR
     col[test_collector.py] --> collector[collector.py]
     defs[test_definitions.py] --> definitions[definitions.py]
     ot[test_otel.py] --> otel[otel.py with mocked opentelemetry]
-    audit[test_audit_2026_09_28.py] --> manager
-    audit --> collector
 ```
 
 ## Files
@@ -33,7 +31,6 @@ flowchart LR
 - `test_collector.py` - `EventCollector` buffers, metrics, log filtering, handler callbacks, loguru sink, cursors, thread safety (38 tests).
 - `test_definitions.py` - Pydantic models and helpers in `definitions.py` (50 tests).
 - `test_otel.py` - `OTELExporter` enable, disable, shutdown and event routing (20 tests).
-- `test_audit_2026_09_28.py` - one class per finding of the 2026-09-28 monitor audit (non-HTTP parts) (38 tests).
 - `test_instance_manager_fixes.py` - the 2026-11-05 instance manager and collector fixes (plan 5980fbb7 step 16): launch validation, `end_conversation` refusal, close teardown (13 tests).
 - `test_server_consistency.py` - the 2026-11-05 server and SPA fixes (plan 5980fbb7 step 17): the `/ws` tick, visualize routes, guard headers, worker-thread launch, Ctrl-C exit, string-level SPA pins (57 tests).
 
@@ -52,7 +49,7 @@ The monitor extra must be installed (`fastapi`, `uvicorn`, `jinja2`), for exampl
 - Any exported `FSM_LLM_MONITOR_API_KEY` is removed by `conftest.py`. Without it, many route tests would fail with 401.
 - `server.py` keeps module-level state (`_api_key`, builder sessions). Tests reset it with `configure(...)` in `setup_method`, `teardown_method` or an autouse fixture.
 - `test_otel.py` does not need `opentelemetry` installed. It puts fake modules into `sys.modules` and re-imports `fsm_llm.monitor.otel` for each test.
-- `test_audit_2026_09_28.py` calls `pytest.importorskip("fsm_llm.workflows")` at module level, so when `fsm_llm.workflows` cannot be imported the whole file is skipped, including its non-workflow tests. `TestStubToolExecution` is skipped without `fsm_llm.agents`.
+- `TestWorkflowTracking` (in `test_instance_manager.py`) skips itself when `fsm_llm.workflows` cannot be imported. `TestStubToolExecution` is skipped without `fsm_llm.agents`.
 - Async tests have no marker. They rely on `asyncio_mode = "auto"` in `pyproject.toml`.
 - `test_app.py` asserts the version string `"0.12.0"` in two places (`/api/info` `monitor_version` and `fsm_llm.monitor.__version__`). Update both on a version bump.
 - The server test files import `fastapi.testclient` at module level, so they fail at collection (they do not skip) when the monitor extra is missing.

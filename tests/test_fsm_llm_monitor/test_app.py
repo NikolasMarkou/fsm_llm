@@ -1474,3 +1474,13 @@ class TestDashboardWebsocketRedaction:
         text = json.dumps(payload, default=redacting_json_default)
         assert "sk-secret" not in text
         assert "<redacted:Leaky>" in text
+
+
+class TestCliHelpers:
+    def test_browser_url_for_wildcard_and_ipv6_binds(self):
+        from fsm_llm.monitor.__main__ import _browser_url
+
+        assert _browser_url("0.0.0.0", 8420) == "http://127.0.0.1:8420"
+        assert _browser_url("::", 8420) == "http://127.0.0.1:8420"
+        assert _browser_url("::1", 8420) == "http://[::1]:8420"
+        assert _browser_url("localhost", 9000) == "http://localhost:9000"
