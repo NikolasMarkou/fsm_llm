@@ -2,6 +2,8 @@
 Unit tests for reasoning engine constants.
 """
 
+from __future__ import annotations
+
 import pytest
 
 from fsm_llm.reasoning.constants import (
@@ -15,6 +17,7 @@ from fsm_llm.reasoning.constants import (
     OrchestratorStates,
     ReasoningType,
 )
+from fsm_llm.reasoning.handlers import ReasoningHandlers
 
 
 class TestReasoningType:
@@ -215,3 +218,68 @@ class TestLogMessages:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestMagicNumberConstants:
+    """F-011: Magic numbers should be in Defaults, not hardcoded."""
+
+    def test_min_solution_length_constant_exists(self):
+        assert hasattr(Defaults, "MIN_SOLUTION_LENGTH")
+        assert Defaults.MIN_SOLUTION_LENGTH == 20
+
+    def test_prune_list_max_length_constant_exists(self):
+        assert hasattr(Defaults, "PRUNE_LIST_MAX_LENGTH")
+        assert Defaults.PRUNE_LIST_MAX_LENGTH == 10
+
+    def test_prune_string_max_length_constant_exists(self):
+        assert hasattr(Defaults, "PRUNE_STRING_MAX_LENGTH")
+        assert Defaults.PRUNE_STRING_MAX_LENGTH == 1000
+
+    def test_prune_context_uses_list_constant(self):
+        """Verify prune_context respects PRUNE_LIST_MAX_LENGTH."""
+        context = {
+            ContextKeys.REASONING_TRACE: list(range(50)),
+            ContextKeys.PROBLEM_STATEMENT: "test problem",
+        }
+        # Trigger pruning by making context large enough
+        big_padding = {"_padding": "x" * (Defaults.CONTEXT_PRUNE_THRESHOLD + 1)}
+        full_context = {**context, **big_padding}
+        result = ReasoningHandlers.prune_context(full_context)
+        if ContextKeys.REASONING_TRACE in result:
+            assert (
+                len(result[ContextKeys.REASONING_TRACE])
+                <= Defaults.PRUNE_LIST_MAX_LENGTH
+            )
+
+    def test_validate_solution_uses_min_solution_length(self):
+        """Verify validate_solution uses MIN_SOLUTION_LENGTH constant."""
+        context = {
+            ContextKeys.PROPOSED_SOLUTION: "short",  # < MIN_SOLUTION_LENGTH
+            ContextKeys.KEY_INSIGHTS: "some insight",
+            ContextKeys.RETRY_COUNT: 0,
+        }
+        result = ReasoningHandlers.validate_solution(context)
+        assert result[ContextKeys.VALIDATION_RESULT] is False
+
+
+class TestNoHardcodedKeys:
+    """_classify_problem return dict must use ContextKeys constants,
+    not raw strings."""
+
+    def test_no_problem_domain_classified_string_in_source(self):
+        import inspect
+
+        from fsm_llm.reasoning.engine import ReasoningEngine
+
+        source = inspect.getsource(ReasoningEngine._classify_problem)
+        assert "problem_domain_classified" not in source
+
+    def test_classify_return_uses_context_keys(self):
+        """The return dict keys should match ContextKeys constants."""
+        import inspect
+
+        from fsm_llm.reasoning.engine import ReasoningEngine
+
+        source = inspect.getsource(ReasoningEngine._classify_problem)
+        assert "ContextKeys.PROBLEM_DOMAIN" in source
+        assert "ContextKeys.ALTERNATIVE_APPROACHES" in source

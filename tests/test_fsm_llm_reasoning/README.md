@@ -13,8 +13,6 @@ Each test imports from `fsm_llm.reasoning.*` and calls classes or static methods
 ## Files
 
 - `__init__.py` - empty, marks the directory as a package.
-- `test_audit_2026_11_05.py` - 17 tests for the reasoning audit fixes of plan 5980fbb7 step 18 (CLI escape and save, execution time, strategy choice, tracer, truncation marker, strategy table).
-- `test_audit_fixes.py` - 27 tests that pin audit fixes: context size limits, pruning constants, solution key coverage, exception re-raise order, removed dead code, and redacted JSON output.
 - `test_cli_logging.py` - 2 tests that the CLI `--verbose` flag turns library logging on and that it stays off without it.
 - `test_cli_output.py` - 3 tests that CLI JSON output and JSON save files list `reasoning_types_used` as a sorted list built from a real `ReasoningTrace`.
 - `test_constants.py` - 26 tests for `ReasoningType`, state name constants, `ContextKeys`, `HandlerNames`, `Defaults`, and message templates.

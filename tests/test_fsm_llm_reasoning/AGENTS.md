@@ -12,20 +12,18 @@ Covers `constants.py`, `definitions.py`, `exceptions.py`, `handlers.py`, `utilit
 Tests call static methods and model constructors directly with small context dicts keyed by `ContextKeys` constants, or drive whole solves on a scripted interface (`test_engine_scripted.py`). Three further techniques recur:
 
 - Bare engine: `object.__new__(ReasoningEngine)` plus a hand-set `engine.reasoning_fsms` dict, then call `engine._prepare_reasoning_execution(context)` (`test_engine.py::TestReasoningTypeFallback`).
-- Source assertions: `inspect.getsource(...)` on `ReasoningEngine`, `ReasoningEngine._classify_problem`, `ReasoningEngine._solve_problem_locked`, the `engine` module, and the `handlers` module, then string checks (`test_audit_fixes.py`).
+- Source assertions: `inspect.getsource(...)` on `ReasoningEngine`, `ReasoningEngine._classify_problem`, `ReasoningEngine._solve_problem_locked`, the `engine` module, and the `handlers` module, then string checks (`test_engine.py`, `test_handlers.py`, `test_constants.py`, `test_cli_output.py`).
 - Subprocess probe: `test_cli_logging.py` runs `sys.executable -c _PROBE`. The probe imports `fsm_llm.reasoning.__main__`, replaces `solve_problem_with_engine` with a stub that logs `I-PROBE` (info) and `D-PROBE` (debug) from a namespace named `fsm_llm.reasoning.engine`, sets `sys.argv` to `['fsm-llm-reasoning', 'what is 2+2?', '-o', 'json', ...]`, and exits with `m.main()`.
 
 ## Key files
 
 | File | Role | Notes |
 | --- | --- | --- |
-| `test_audit_2026_11_05.py` | 17 tests, each fix of plan 5980fbb7 step 18 (CLI escape and save, `--quiet`, summary once, `execution_time_seconds`, `direct computation` no special case, no classifier tracer, core truncation suffix, classifier cleanup warning, `STRATEGIES`, `get_reasoning_fsm`) | Failed on the parent commit |
-| `test_audit_fixes.py` | 27 regression tests for audit findings F-003, F-005, F-011 and senior-review fixes | Many assertions match literal source strings |
 | `test_cli_logging.py` | 2 parametrized cases: `["--verbose"]` gives 1 `I-PROBE` line in stderr, `[]` gives 0; `D-PROBE` never appears | Subprocess, `timeout=60`, deletes `FSM_LLM_LOG_LEVEL` |
-| `test_cli_output.py` | 3 tests: `_format_json_output` and `_save_as_json` fed a real `ReasoningTrace(...).model_dump()` write `reasoning_types_used` as a sorted list, never redacted | Uses `tmp_path` |
+| `test_cli_output.py` | `_format_json_output` and `_save_as_json` fed a real `ReasoningTrace(...).model_dump()` write `reasoning_types_used` as a sorted list, never redacted; CLI escape of unencodable output, `--quiet` output, summary facts stated once | Uses `tmp_path`; includes the plan 5980fbb7 step 18 CLI fixes |
 | `test_constants.py` | 26 tests on constant values | Pins literal strings and numbers |
 | `test_definitions.py` | 28 tests on Pydantic models | Validators, computed properties, thresholds |
-| `test_engine.py` | 10 tests: models, handlers, `map_reasoning_type`, ANALYTICAL-only fallback (D-009) | Uses loguru sink for the warning |
+| `test_engine.py` | Models, handlers, `map_reasoning_type`, ANALYTICAL-only fallback (D-009); audit regression classes (malformed user message, final solution keys, classification exception handling, removed dead code, `execution_time_seconds`, `direct computation` no special case, no classifier tracer, core truncation suffix, classifier cleanup warning) | Uses loguru sink for the warning; several assertions match literal source strings |
 | `test_engine_scripted.py` | 51 tests: whole solves through core on `_ScriptedLLM` (also imported by `tests/test_fsm_llm_regression/test_engine_integration.py`) | Asserts calls, history, stack, retries, budget and failure details |
 | `test_exceptions.py` | 8 tests on the exception hierarchy | `details`, `reasoning_type` attributes |
 | `test_golden_tables.py` | 21 tests: sha256 of the canonical JSON of the 11 FSM definitions and of the strategy tables (enum, registry keys, aliases, descriptions, merge ladder, calculator cases, solution order) | Captured before the prompt sentences, state ids and tables were generated; a hash moves only on purpose |
@@ -89,12 +87,12 @@ Model behaviour pinned in `test_definitions.py`:
 
 - Library logging is disabled at import. A test that needs a log line must call `logger.enable("fsm_llm")`, add a sink, and restore with `logger.remove(sink_id)` and `logger.disable("fsm_llm")` in `finally`. `caplog` cannot see loguru output.
 - Enabling logging is process-global, which is why the CLI test uses a subprocess. Do not move it in-process.
-- Rewording engine or handler source can fail `test_audit_fixes.py` even when behaviour is unchanged.
+- Rewording engine or handler source can fail the source-assertion tests of `test_engine.py`, `test_handlers.py`, `test_constants.py` and `test_cli_output.py` even when behaviour is unchanged.
 - Pruning tests in `TestPruneContext` and `test_prune_context_uses_list_constant` assert only inside `if key in result`, so they are weak checks.
 
 ## Working here
 
-- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_reasoning/` (232 tests: audit_fixes 27, cli_logging 2, cli_output 3, constants 26, definitions 28, engine 10, engine_scripted 51, exceptions 8, handlers 39).
+- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_reasoning/` (232 tests: cli_logging 2, cli_output 3, constants 26, definitions 28, engine 10, engine_scripted 51, exceptions 8, handlers 39).
 - Conventions: files `test_<module>.py`, classes `Test<Feature>`, local helpers prefixed `_` (for example `_make_engine`, `_PROBE`).
 - When changing a pinned constant, state name, or source string in `src/reasoning/`, update the matching assertion here in the same change, and read any `# DECISION` anchors near the edited code first (D-009 fallback, D-016 verbose logging, D-004 logging off by default are referenced in these tests).
 - Keep tests offline: build engines with `object.__new__` and hand-set attributes rather than constructing `ReasoningEngine` with a model.

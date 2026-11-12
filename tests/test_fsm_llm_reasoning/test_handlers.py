@@ -2,6 +2,10 @@
 Unit tests for reasoning engine handlers, context manager, and output formatter.
 """
 
+from __future__ import annotations
+
+import json
+
 import pytest
 
 from fsm_llm.reasoning.constants import (
@@ -413,3 +417,36 @@ class TestOutputFormatter:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestContextManagerEnforcement:
+    """F-005: extract_relevant_context must enforce max_size, not just warn."""
+
+    def test_enforce_max_size_removes_keys(self):
+        """Context exceeding max_size should have keys removed."""
+        source = {"key": "x" * 10000}
+        result = ContextManager.extract_relevant_context(source, ["key"], max_size=100)
+        size = len(json.dumps(result, default=str))
+        assert size <= 100
+
+    def test_enforce_max_size_keeps_fitting_keys(self):
+        """Keys that fit within budget should be kept."""
+        source = {"small": "ok", "big": "x" * 10000}
+        result = ContextManager.extract_relevant_context(
+            source, ["small", "big"], max_size=200
+        )
+        # small should fit, big should be removed
+        assert "small" in result
+        assert "big" not in result
+
+    def test_no_max_size_returns_all(self):
+        """Without max_size, all requested keys are returned."""
+        source = {"a": "x" * 10000, "b": "y" * 10000}
+        result = ContextManager.extract_relevant_context(source, ["a", "b"])
+        assert "a" in result
+        assert "b" in result
+
+    def test_max_size_with_empty_context(self):
+        """Empty context should return empty dict regardless of max_size."""
+        result = ContextManager.extract_relevant_context({}, ["key"], max_size=10)
+        assert result == {}

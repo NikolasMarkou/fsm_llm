@@ -13,11 +13,12 @@ import json
 
 import pytest
 
-from fsm_llm.reasoning.constants import ContextKeys, ReasoningType
+from fsm_llm.reasoning.constants import STRATEGIES, ContextKeys, ReasoningType
 from fsm_llm.reasoning.handlers import ContextManager, OutputFormatter
 from fsm_llm.reasoning.reasoning_modes import ALL_REASONING_FSMS
 from fsm_llm.reasoning.utilities import (
     get_available_reasoning_types,
+    get_reasoning_fsm,
     map_reasoning_type,
 )
 
@@ -157,3 +158,21 @@ def test_every_reasoning_type_has_an_fsm_a_description_and_an_alias():
     assert types <= set(ALL_REASONING_FSMS)
     assert types == set(get_available_reasoning_types())
     assert all(map_reasoning_type(t) == t for t in types)
+
+
+class TestOneStrategyTable:
+    """F-RE-02, F-RE-03, F-RE-07: tables derive from one registry."""
+
+    def test_strategies_cover_exactly_the_enum(self):
+        assert set(STRATEGIES) == {t.value for t in ReasoningType}
+
+    def test_every_state_id_is_its_key(self):
+        for fsm in ALL_REASONING_FSMS.values():
+            assert all(s["id"] == key for key, s in fsm["states"].items())
+
+    def test_get_reasoning_fsm_returns_a_copy_and_names_the_missing(self):
+        copy = get_reasoning_fsm("orchestrator")
+        copy["states"].clear()
+        assert ALL_REASONING_FSMS["orchestrator"]["states"]
+        with pytest.raises(KeyError, match="FSM definition not found: nope"):
+            get_reasoning_fsm("nope")
