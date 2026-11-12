@@ -293,6 +293,16 @@ class TestMonitorImports:
         assert issubclass(MetricCollectionError, MonitorError)
         assert issubclass(MonitorConnectionError, MonitorError)
 
+    def test_monitor_error_is_in_the_fsm_error_tree(self):
+        from fsm_llm import FSMError
+        from fsm_llm.monitor import MonitorCapacityError, MonitorError
+
+        assert issubclass(MonitorError, FSMError)
+        assert issubclass(MonitorCapacityError, FSMError)
+        err = MonitorCapacityError("full")
+        assert str(err) == "full"
+        assert err.details == {}
+
     def test_constant_imports(self):
         from fsm_llm.monitor import DEFAULT_REFRESH_INTERVAL
 

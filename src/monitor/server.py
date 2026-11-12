@@ -363,7 +363,7 @@ def configure(
     # manager being re-installed: configure(manager=current, api_key=...) is
     # how a caller rotates the key, and cleaning it up killed its log feed.
     if _manager is not None and _manager is not manager:
-        _manager.shutdown()
+        _manager.close()
 
     if manager is not None:
         _manager = manager
@@ -728,13 +728,13 @@ async def api_instance_destroy(instance_id: str) -> dict[str, str]:
     """Destroy a managed instance."""
     mgr = get_manager()
     try:
-        # DECISION plan-2026-09-12T065608-089d0ec7/D-007: destroy_instance can
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-007: end_instance can
         # now block for up to its bounded agent-teardown join timeout (see
         # instance_manager.py); keep it off the event loop the same way the
         # launch routes already do, rather than shrinking the join timeout to
         # sub-second (which would make the teardown warning fire on every
         # merely-slow agent, not just a genuinely hung one).
-        await asyncio.to_thread(mgr.destroy_instance, instance_id)
+        await asyncio.to_thread(mgr.end_instance, instance_id)
         return {"status": "ok"}
     except Exception as e:
         _raise_http(e, f"destroy instance {instance_id}")
@@ -851,7 +851,7 @@ async def api_workflow_launch(req: LaunchWorkflowRequest) -> dict[str, Any]:
     except BaseException as e:
         # Do not leave a half-launched engine behind.
         try:
-            await asyncio.to_thread(mgr.destroy_instance, managed.instance_id)
+            await asyncio.to_thread(mgr.end_instance, managed.instance_id)
         except Exception as cleanup_err:
             logger.debug(f"Failed to clean up workflow launch: {cleanup_err}")
         if isinstance(e, asyncio.TimeoutError):

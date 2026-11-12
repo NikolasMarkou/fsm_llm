@@ -225,7 +225,7 @@ fsm-llm-skills validate ./skills         # check Agent Skills folders (also list
 - The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`. This covers the subpackages too.
 - `FileSessionStore` saves state to JSON, so values like `datetime` come back as strings.
 - One conversation can only process one message at a time. A second concurrent call for the same conversation raises an error instead of waiting.
-- Errors from the core, reasoning, workflows, agents, eval and synthesis all derive from `FSMError`, and so does `BuildError`. The monitor's `MonitorError` does not.
+- Errors from the core, reasoning, workflows, agents, eval, synthesis and monitor all derive from `FSMError`, and so does `BuildError`.
 
 ## Where to go next
 

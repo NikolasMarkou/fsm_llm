@@ -100,12 +100,12 @@ class TestInstanceManager:
         mgr = self._make_manager()
         assert mgr.get_events() == []
 
-    def test_destroy_nonexistent_raises(self):
+    def test_end_instance_nonexistent_raises(self):
         mgr = self._make_manager()
         import pytest
 
         with pytest.raises(KeyError):
-            mgr.destroy_instance("nonexistent")
+            mgr.end_instance("nonexistent")
 
     def test_get_fsm_raises_for_missing(self):
         mgr = self._make_manager()
@@ -476,7 +476,7 @@ class TestInstanceManagerListFilter:
 class TestDestroyInstance:
     """Test instance destruction behavior."""
 
-    def test_destroy_agent_cancels(self):
+    def test_end_instance_agent_cancels(self):
         mgr = InstanceManager(config=MonitorConfig())
         mgr.global_collector.cleanup()
 
@@ -488,13 +488,13 @@ class TestDestroyInstance:
             mgr._instances["ag1"] = agent
             mgr._collectors["ag1"] = collector
 
-        mgr.destroy_instance("ag1")
+        mgr.end_instance("ag1")
         assert agent.status == "cancelled"
         assert agent.cancel_event.is_set()
         # Instance should be removed
         assert mgr.get_instance("ag1") is None
 
-    def test_destroy_workflow_completes(self):
+    def test_end_instance_workflow_completes(self):
         mgr = InstanceManager(config=MonitorConfig())
         mgr.global_collector.cleanup()
 
@@ -506,12 +506,12 @@ class TestDestroyInstance:
             mgr._instances["wf1"] = wf
             mgr._collectors["wf1"] = collector
 
-        mgr.destroy_instance("wf1")
+        mgr.end_instance("wf1")
         assert wf.status == "completed"
         assert mgr.get_instance("wf1") is None
 
-    def test_destroy_agent_joins_bounded_and_warns_if_still_alive(self):
-        """A never-returning agent thread must not hang destroy_instance."""
+    def test_end_instance_agent_joins_bounded_and_warns_if_still_alive(self):
+        """A never-returning agent thread must not hang end_instance."""
         import time
 
         mgr = InstanceManager(config=MonitorConfig())
@@ -538,10 +538,10 @@ class TestDestroyInstance:
 
         with mock.patch("fsm_llm.monitor.instance_manager.logger") as mock_logger:
             start = time.monotonic()
-            mgr.destroy_instance("ag-hang")
+            mgr.end_instance("ag-hang")
             elapsed = time.monotonic() - start
 
-        # Bounded: destroy_instance returns well within a few seconds, not
+        # Bounded: end_instance returns well within a few seconds, not
         # indefinitely (the thread never returns).
         assert elapsed < 5.0
         assert agent.status == "cancelled"
@@ -555,7 +555,7 @@ class TestDestroyInstance:
         never_returns.set()
         thread.join(timeout=2.0)
 
-    def test_destroy_agent_joins_quickly_when_thread_finishes(self):
+    def test_end_instance_agent_joins_quickly_when_thread_finishes(self):
         """A thread that finishes promptly after cancellation is joined
         without triggering the still-alive warning."""
         mgr = InstanceManager(config=MonitorConfig())
@@ -578,7 +578,7 @@ class TestDestroyInstance:
             mgr._collectors["ag-quick"] = collector
 
         with mock.patch("fsm_llm.monitor.instance_manager.logger") as mock_logger:
-            mgr.destroy_instance("ag-quick")
+            mgr.end_instance("ag-quick")
 
         thread.join(timeout=2.0)
         assert not thread.is_alive()
@@ -1187,14 +1187,14 @@ class TestDestroyClosesBeforeUnregister:
         conv_id, _ = mgr.start_conversation(inst.instance_id)
         return mgr, inst, conv_id
 
-    def test_destroy_ends_the_live_conversation_on_the_global_collector(
+    def test_end_instance_ends_the_live_conversation_on_the_global_collector(
         self, monkeypatch
     ):
         mgr, inst, conv_id = self._live_manager(monkeypatch)
         collector = mgr.global_collector
         assert collector.get_metrics().active_conversations == 1
 
-        mgr.destroy_instance(inst.instance_id)
+        mgr.end_instance(inst.instance_id)
 
         assert collector.get_metrics().active_conversations == 0
         ends = [
@@ -1204,10 +1204,12 @@ class TestDestroyClosesBeforeUnregister:
         ]
         assert len(ends) == 1
 
-    def test_destroy_keeps_the_live_conversation_in_the_ended_cache(self, monkeypatch):
+    def test_end_instance_keeps_the_live_conversation_in_the_ended_cache(
+        self, monkeypatch
+    ):
         mgr, inst, conv_id = self._live_manager(monkeypatch)
 
-        mgr.destroy_instance(inst.instance_id)
+        mgr.end_instance(inst.instance_id)
 
         snap = mgr.get_conversation_snapshot(conv_id)
         assert snap is not None
@@ -1215,7 +1217,7 @@ class TestDestroyClosesBeforeUnregister:
         assert snap.instance_id == inst.instance_id
         assert snap.current_state == "ask"
 
-    def test_destroy_ends_the_otel_conversation_span(self, monkeypatch):
+    def test_end_instance_ends_the_otel_conversation_span(self, monkeypatch):
         pytest.importorskip("opentelemetry.sdk.trace")
         from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
             InMemorySpanExporter,
@@ -1231,9 +1233,9 @@ class TestDestroyClosesBeforeUnregister:
         conv2, _ = mgr.start_conversation(inst.instance_id)
         assert conv2 in otel.active_conversations
 
-        mgr.destroy_instance(inst.instance_id)
+        mgr.end_instance(inst.instance_id)
 
-        # Before shutdown(): that would end every open span itself.
+        # Before close(): that would end every open span itself.
         assert otel.active_conversations == []
         otel._provider.force_flush()
         names = [s.name for s in sink.get_finished_spans()]
@@ -1250,11 +1252,11 @@ class TestDestroyClosesBeforeUnregister:
             api, "close", MagicMock(side_effect=RuntimeError("close failed"))
         )
 
-        mgr.destroy_instance(inst.instance_id)
+        mgr.end_instance(inst.instance_id)
 
         assert all(not h.active for h in monitor_handlers_on(api, collector))
 
-    def test_shutdown_ends_live_conversations_of_managed_fsms(self, monkeypatch):
+    def test_close_ends_live_conversations_of_managed_fsms(self, monkeypatch):
         mgr, _, conv_id = self._live_manager(monkeypatch)
         collector = mgr.global_collector
         recorded: list[str] = []
@@ -1267,7 +1269,7 @@ class TestDestroyClosesBeforeUnregister:
 
         monkeypatch.setattr(collector, "record_event", _spy)
 
-        mgr.shutdown()
+        mgr.close()
 
         assert recorded.count("conversation_end") == 1
         snap = mgr.get_conversation_snapshot(conv_id)

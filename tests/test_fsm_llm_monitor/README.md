@@ -33,7 +33,7 @@ flowchart LR
 - `test_definitions.py` - Pydantic models and helpers in `definitions.py` (50 tests).
 - `test_otel.py` - `OTELExporter` enable, disable, shutdown and event routing (20 tests).
 - `test_audit_2026_09_28.py` - one class per finding of the 2026-09-28 monitor audit (non-HTTP parts) (38 tests).
-- `test_instance_manager_fixes.py` - the 2026-11-05 instance manager and collector fixes (plan 5980fbb7 step 16): launch validation, `end_conversation` refusal, shutdown teardown (13 tests).
+- `test_instance_manager_fixes.py` - the 2026-11-05 instance manager and collector fixes (plan 5980fbb7 step 16): launch validation, `end_conversation` refusal, close teardown (13 tests).
 - `test_server_consistency.py` - the 2026-11-05 server and SPA fixes (plan 5980fbb7 step 17): the `/ws` tick, visualize routes, guard headers, worker-thread launch, Ctrl-C exit, string-level SPA pins (57 tests).
 
 ## How to use it

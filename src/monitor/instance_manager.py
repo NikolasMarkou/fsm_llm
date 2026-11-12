@@ -744,9 +744,9 @@ class InstanceManager:
         if previous is not None and previous is not api:
             unregister_monitor_handlers(previous, self._global_collector)
 
-    def shutdown(self) -> None:
+    def close(self) -> None:
         """Detach from every API, tear every instance down like
-        ``destroy_instance`` (agents are signalled, not joined) and remove the
+        ``end_instance`` (agents are signalled, not joined) and remove the
         log sink (the manager can no longer be used afterwards)."""
         with self._lock:
             attached_api = self._attached_api
@@ -1815,10 +1815,10 @@ class InstanceManager:
             ]
         return result
 
-    # --- Destroy ---
+    # --- End ---
 
-    def destroy_instance(self, instance_id: str) -> None:
-        """Destroy a managed instance and clean up resources."""
+    def end_instance(self, instance_id: str) -> None:
+        """End a managed instance (the ``end_*`` verb) and clean up resources."""
         with self._lock:
             inst = self._instances.pop(instance_id, None)
             self._collectors.pop(instance_id, None)
@@ -1845,8 +1845,8 @@ class InstanceManager:
 
     def _teardown(self, inst: ManagedInstance, *, join_agent: bool) -> None:
         """Release what an instance holds: end an FSM's conversations, stop a
-        workflow engine, signal an agent. ``destroy_instance`` and
-        ``shutdown`` share it; only ``destroy_instance`` waits for the agent."""
+        workflow engine, signal an agent. ``end_instance`` and
+        ``close`` share it; only ``end_instance`` waits for the agent."""
         if isinstance(inst, ManagedFSM):
             # End every conversation while the global handlers are still
             # active, then detach them (see ``_close_fsm_api``).
@@ -1873,7 +1873,7 @@ class InstanceManager:
             # abstract signature) so setting cancel_event cannot interrupt
             # in-flight work — do NOT assume the background thread stops
             # here. Bound our OWN wait instead: join with a short timeout so
-            # destroy_instance (called synchronously from an async FastAPI
+            # end_instance (called synchronously from an async FastAPI
             # route) never blocks indefinitely, and log a warning if the
             # thread is still alive after the timeout so the leak stays
             # observable. True mid-run cancellation remains OUT OF SCOPE —
@@ -1904,7 +1904,7 @@ class InstanceManager:
             victims = [i.instance_id for i in finished[:excess]]
         for victim in victims:
             try:
-                self.destroy_instance(victim)
+                self.end_instance(victim)
             except KeyError:
                 pass
         with self._lock:

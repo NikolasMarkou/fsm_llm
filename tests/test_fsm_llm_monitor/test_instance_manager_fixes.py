@@ -217,23 +217,23 @@ class TestPresetJsonIsReadAsUtf8:
         assert "OK" in proc.stdout
 
 
-class TestShutdownTearsDownEveryInstanceType:
-    """F-MI-13: shutdown() does what destroy_instance() does for agents and
+class TestCloseTearsDownEveryInstanceType:
+    """F-MI-13: close() does what end_instance() does for agents and
     workflow engines, not only for FSMs."""
 
-    def test_shutdown_sets_the_agent_cancel_flag(self, monkeypatch):
+    def test_close_sets_the_agent_cancel_flag(self, monkeypatch):
         _BlockingAgent.release.clear()
         monkeypatch.setitem(im._AGENT_CLASSES, "ReactAgent", _BlockingAgent)
         mgr = _manager()
         managed = mgr.launch_agent(task="t", tools_config=[_STUB])
         try:
-            mgr.shutdown()
+            mgr.close()
             assert managed.cancel_event.is_set()
         finally:
             _BlockingAgent.release.set()
             managed.thread.join(5)
 
-    def test_shutdown_stops_the_workflow_engine(self):
+    def test_close_stops_the_workflow_engine(self):
         mgr = _manager()
         stopped: list[int] = []
 
@@ -247,7 +247,7 @@ class TestShutdownTearsDownEveryInstanceType:
             # create a new attribute and the assertion below would fail.
             assert callable(getattr(type(managed.engine), "close", None))
             managed.engine.close = _close
-            mgr.shutdown()
+            mgr.close()
             await asyncio.sleep(0.05)
 
         asyncio.run(go())
@@ -257,7 +257,7 @@ class TestShutdownTearsDownEveryInstanceType:
 class TestRouteLaunchedWorkflowIsStopped:
     """REVIEW-C1: ``POST /api/workflow/launch`` runs ``launch_workflow`` in a
     worker thread, where no loop is running; the engine still lives on the
-    server loop, so destroy and shutdown must stop it there."""
+    server loop, so end_instance and close must stop it there."""
 
     @staticmethod
     def _launch(client, mgr):
@@ -285,7 +285,7 @@ class TestRouteLaunchedWorkflowIsStopped:
         while not stopped and time.monotonic() < deadline:
             time.sleep(0.02)
 
-    def test_destroy_stops_the_engine(self):
+    def test_end_instance_stops_the_engine(self):
         from fastapi.testclient import TestClient
 
         from fsm_llm.monitor import server
@@ -300,7 +300,7 @@ class TestRouteLaunchedWorkflowIsStopped:
             self._wait(stopped)
         assert stopped == [1]
 
-    def test_shutdown_stops_the_engine(self):
+    def test_close_stops_the_engine(self):
         from fastapi.testclient import TestClient
 
         from fsm_llm.monitor import server
@@ -309,6 +309,6 @@ class TestRouteLaunchedWorkflowIsStopped:
         server.configure(manager=mgr)
         with TestClient(server.app) as client:
             _inst, stopped = self._launch(client, mgr)
-            mgr.shutdown()
+            mgr.close()
             self._wait(stopped)
         assert stopped == [1]

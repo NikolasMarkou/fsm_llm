@@ -360,14 +360,14 @@ class TestHandlerLifecycle:
         _fire(api, HandlerTiming.PRE_TRANSITION, "a", "b")
         assert collector.get_metrics().total_events == 0
 
-    def test_attach_api_twice_and_shutdown(self):
+    def test_attach_api_twice_and_close(self):
         api = _FakeAPI()
         mgr = _manager()
         mgr.attach_api(api)
         mgr.attach_api(api)
         _fire(api, HandlerTiming.PRE_TRANSITION, "a", "b")
         assert mgr.global_collector.get_metrics().total_transitions == 1
-        mgr.shutdown()
+        mgr.close()
         _fire(api, HandlerTiming.PRE_TRANSITION, "b", "c")
         assert mgr.global_collector.get_metrics().total_transitions == 1
 

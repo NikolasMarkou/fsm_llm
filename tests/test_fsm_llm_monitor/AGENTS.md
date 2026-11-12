@@ -93,7 +93,7 @@ Instance manager:
 - Transition events carry the core's `current`/`target` states; END event `data["state"]` is the final state.
 - `snapshot_from_api(api, conv_id, show_internal_keys=...)`: internal prefixes `_`, `system_`, `internal_`, `__` (case-insensitive) hidden when False; secret-looking keys hidden either way; `last_extraction` is redacted.
 - `attach_api(api)` (`TestAttachApi`) registers the monitor handlers; nothing attached shows nothing; the attached API's conversations are listed and snapshotted; its listing or snapshot failures yield `[]` or `None`; snapshots honour `config.show_internal_keys`.
-- `destroy_instance`: agent -> `cancelled` with `cancel_event` set, bounded join (under 5 s) and one `logger.warning` naming the id if the thread is still alive; workflow -> `completed`; unknown id -> `KeyError`.
+- `end_instance`: agent -> `cancelled` with `cancel_event` set, bounded join (under 5 s) and one `logger.warning` naming the id if the thread is still alive; workflow -> `completed`; unknown id -> `KeyError`.
 - `_get_fsm`/`_get_workflow`/`_get_agent`: `KeyError` if missing, `TypeError` on wrong type. `launch_fsm()` without data: `ValueError` "Must provide".
 - `get_agent_status`: dead thread in `cancelling` -> `cancelled`; dead `running` without result -> `failed`. `cancel_agent` returns False on finished agents and emits `agent_cancelled` once.
 - `_AGENT_CLASSES` excludes `EvaluatorOptimizerAgent` and `MakerCheckerAgent`; includes `ReactAgent`, `DebateAgent`.

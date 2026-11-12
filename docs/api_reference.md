@@ -953,11 +953,9 @@ FSMError
 ├── ReasoningEngineError (-> ReasoningExecutionError, ReasoningClassificationError)
 ├── WorkflowError (-> Definition, Step, Instance, Timeout, Validation, State, Event, Resource)
 ├── EvalError (-> EvalConfigError, EvalDatasetError)
-└── AgentError (-> ToolExecution, ToolNotFound, BudgetExhausted, ApprovalDenied, AgentTimeout, Evaluation)
-    └── MetaBuilderError (-> Builder, MetaValidation, Output)
-
-Exception
-└── MonitorError (-> MonitorInitialization, MetricCollection, MonitorConnection)
+├── AgentError (-> ToolExecution, ToolNotFound, BudgetExhausted, ApprovalDenied, AgentTimeout, Evaluation)
+│   └── MetaBuilderError (-> Builder, MetaValidation, Output)
+└── MonitorError (-> MonitorInitialization, MetricCollection, MonitorConnection, MonitorCapacity)
 ```
 
 ## Constants
