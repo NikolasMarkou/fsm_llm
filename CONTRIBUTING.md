@@ -30,6 +30,7 @@ pytest -m "not slow"                  # skip the slow tests
 - A behaviour change needs a test that fails on the code before the change. Run it against the parent commit to confirm.
 - Test counts are written out as literals in `AGENTS.md` and `README.md`, and `tests/test_packaging.py` checks them against a fresh collection. When you add or remove tests, re-measure with `pytest --collect-only -q | tail -1` (and per suite) and update every literal. Never guess or adjust a count by hand.
 - `tests/test_fsm_llm/test_docs_snippets.py` loads every fenced block that names `"initial_state"` in the first-touch docs. A full FSM snippet in the docs must be a valid FSM.
+- Naming for new code (ids, units, constants, enums, builders, exceptions, verbs) follows the `Naming conventions` section of [AGENTS.md](AGENTS.md).
 
 ## Examples are frozen
 

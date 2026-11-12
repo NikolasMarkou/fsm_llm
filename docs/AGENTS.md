@@ -32,7 +32,6 @@ Links between the docs: `fsm_design.md` ends with `**Next:** [Handler Developmen
 | `strands_features.md` | Historical | 12 features to adapt, plus "Features NOT Recommended" |
 | `strands_features_phase_1.md` | Historical | 4 delivered features, commit `a7e3d88`, test counts from that time |
 | `strands_features_phase_2.md` | Historical | 8 features with estimated LOC and "Not yet implemented" notes from that time |
-| `normalization.md` | Proposal | Naming normalization report, staged from `workflows` outward (target vocabulary, per-stage rename tables, blast radius, open decisions). Nothing in it is applied. Not a guide: no version header, not in `_REFERENCE_DOCS` |
 
 ## Public interface
 

@@ -580,6 +580,7 @@ The default test run needs no network and no model. `pytest -m "not slow"` skips
 - A behavior change needs a test that fails on the code before your change.
 - Add an entry under `Unreleased` in `CHANGELOG.md` for any public removal or rename.
 - Do not edit `examples/` unless asked: they are evaluation baselines.
+- Naming for new code (ids, units, constants, exceptions, verbs) follows the `Naming conventions` section of [AGENTS.md](AGENTS.md).
 - litellm is imported only in `src/llm.py`. Do not add a second request builder or provider call elsewhere.
 - Internal-key and secret-key checks go through `fsm_llm.constants.has_internal_prefix` and `is_forbidden_context_entry`. Do not re-inline them.
 - Anything new that is configured with many settings gets a step-by-step builder that follows the convention in [src/AGENTS.md](src/AGENTS.md): setters only record, `build()` is the only validator.
