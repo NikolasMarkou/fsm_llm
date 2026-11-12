@@ -157,7 +157,7 @@ Do not use it for open-ended chat with no structure (a plain LLM call is simpler
     ```bash
     export LLM_MODEL=ollama_chat/qwen3.5:4b      # or openai/gpt-4o-mini with OPENAI_API_KEY set
     ```
-    The model is the `model=` argument, then `LLM_MODEL`; there is no built-in default, and with neither set the call raises `ModelNotConfiguredError` (a CLI prints its message and exits 1). No `.env` file is read unless you ask: call `fsm_llm.load_env()` (or `fsm_llm.load_env("path/to/.env")`) in Python, or pass `--env-file PATH` to a CLI; a variable already in the environment is never replaced (see `.env.example`).
+    The model is the `model=` argument, then `LLM_MODEL`; there is no built-in default, and with neither set the call raises `ModelNotConfiguredError` (a CLI prints its message and exits 1). No `.env` file is read unless you ask: call `fsm_llm.load_env()` (or `fsm_llm.load_env("path/to/.env")`) in Python, or pass `--env-file PATH` to a CLI that needs a model (`fsm-llm`, `fsm-llm-eval`, `fsm-llm-meta`, `python -m fsm_llm.reasoning`, `fsm-llm-monitor`); a variable already in the environment is never replaced (see `.env.example`).
 
 5.  **Verify the installation:**
     ```bash
@@ -508,15 +508,15 @@ The examples are evaluation baselines: `fsm-llm-eval examples` runs them in para
 | `fsm-llm --fsm <path.json> [--model M] [--env-file PATH]` | Chat with an FSM interactively (`--mode validate` and `--mode visualize` also exist) |
 | `fsm-llm-visualize --fsm <path.json> [--format ascii\|mermaid\|dot]` | Draw an FSM |
 | `fsm-llm-validate --fsm <path.json>` | Check an FSM definition for problems |
-| `fsm-llm-monitor` | Web dashboard at http://127.0.0.1:8420 (`--host`, `--port`, `--no-browser`, `--api-key`, `--otel`) |
-| `fsm-llm-meta [--model M] [--output FILE]` | Build FSMs, workflows or agents by chatting |
+| `fsm-llm-monitor` | Web dashboard at http://127.0.0.1:8420 (`--host`, `--port`, `--no-browser`, `--api-key`, `--otel`, `--env-file`) |
+| `fsm-llm-meta [--model M] [--env-file PATH] [--output FILE]` | Build FSMs, workflows or agents by chatting |
 | `fsm-llm-okf <validate\|list\|show\|search\|export>` | Check, browse, search and export Open Knowledge Format bundles |
 | `fsm-llm-skills <validate\|list\|show> PATH...` | Check (`--strict` for API portability), list and read Agent Skills folders |
-| `fsm-llm-eval examples [--category C] [--fail-under PCT]` | Score every example 0 to 4 |
-| `fsm-llm-eval run <dataset.json\|.jsonl> [--trials N]` | Run scripted conversations and report pass rates |
-| `python -m fsm_llm.reasoning "problem" [--type T]` | Solve a problem with the reasoning engine (no console script) |
+| `fsm-llm-eval examples [--category C] [--fail-under PCT] [--env-file PATH]` | Score every example 0 to 4 |
+| `fsm-llm-eval run <dataset.json\|.jsonl> [--trials N] [--env-file PATH]` | Run scripted conversations and report pass rates |
+| `python -m fsm_llm.reasoning "problem" [--type T] [--model M] [--env-file PATH]` | Solve a problem with the reasoning engine (no console script) |
 
-`fsm-llm` needs a model: `--model/-m NAME`, else `LLM_MODEL` in the environment, else the file given with `--env-file PATH` (the process environment wins over the file); with none it prints one `Error:` line naming these ways and exits 1. No `.env` file is read without `--env-file`. It also reads `LLM_TEMPERATURE` (default 0.5) and `LLM_MAX_TOKENS` (default 1000). `.env.example` lists the variables. Exit codes: 0 ok, 1 failure (a failed first model call prints `Error: ...` like a later turn), 130 Ctrl-C; `fsm-llm-eval` exits 2 below `--fail-under` and 130 on Ctrl-C or SIGTERM.
+`fsm-llm` needs a model: `--model/-m NAME`, else `LLM_MODEL` in the environment, else the file given with `--env-file PATH` (the process environment wins over the file); with none it prints one `Error:` line naming these ways and exits 1. No `.env` file is read without `--env-file`; `fsm-llm-eval`, `fsm-llm-meta`, `python -m fsm_llm.reasoning` and `fsm-llm-monitor` take the same `--env-file` and print the same one-line error with no model (the monitor starts without a model and its launch routes answer 400). The commands that need no model (`fsm-llm-okf`, `fsm-llm-skills`, `fsm-llm-validate`, `fsm-llm-visualize`) have no such flag. `fsm-llm` also reads `LLM_TEMPERATURE` (default 0.5) and `LLM_MAX_TOKENS` (default 1000). `.env.example` lists the variables. Exit codes: 0 ok, 1 failure (a failed first model call prints `Error: ...` like a later turn), 130 Ctrl-C; `fsm-llm-eval` exits 2 below `--fail-under` and 130 on Ctrl-C or SIGTERM.
 
 ---
 
@@ -606,7 +606,7 @@ All taken from recorded open items:
 
 Things to know:
 
-- The `fsm-llm` command needs `LLM_MODEL`. The Python `API` takes `model=`, then `LLM_MODEL`, and raises `ModelNotConfiguredError` when neither is set (there is no built-in default model). Importing `fsm_llm` loads no `.env` file; read one on purpose with `fsm_llm.load_env()` or `fsm-llm --env-file PATH`.
+- The `fsm-llm` command needs `LLM_MODEL`. The Python `API` takes `model=`, then `LLM_MODEL`, and raises `ModelNotConfiguredError` when neither is set (there is no built-in default model). Importing `fsm_llm` loads no `.env` file; read one on purpose with `fsm_llm.load_env()` or the `--env-file PATH` flag of a CLI.
 - The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`; both also replace loguru's default handler, so a library record prints once.
 - One conversation handles one message at a time: a second `converse` on a conversation that is mid-turn raises `FSMError`.
 - Upgrading a clone from before the 2026-09-29 restructure: delete the old `src/fsm_llm_<sub>/` folders by hand (`make clean` does not remove them), then `pip install -e .`. A leftover folder breaks imports. After the later move of `src/fsm_llm/` to `src/`, run `pip install -e .` again.

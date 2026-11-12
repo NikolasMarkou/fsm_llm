@@ -58,10 +58,12 @@ Scoring (`classify_result`, checked in order): score 0 when `exit_code == -1`, o
 
 CLI (`fsm-llm-eval`, `python -m fsm_llm.eval`):
 
-- `examples [--model M] [--workers N] [--timeout S] [--category C] [--filter S] [--output-dir D] [--examples-dir P] [--python EXE] [--config FILE] [--fail-under PCT] [--list]`. `--filter` maps to `name_filter`.
-- `run DATASET [--model M] [--trials N] [--temperature T] [--max-tokens N] [--workers N] [--output-dir D] [--config FILE] [--fail-under PCT] [--list]`.
+- `examples [--model M] [--env-file PATH] [--workers N] [--timeout S] [--category C] [--filter S] [--output-dir D] [--examples-dir P] [--python EXE] [--config FILE] [--fail-under PCT] [--list]`. `--filter` maps to `name_filter`.
+- `run DATASET [--model M] [--env-file PATH] [--trials N] [--temperature T] [--max-tokens N] [--workers N] [--output-dir D] [--config FILE] [--fail-under PCT] [--list]`.
 - Top level: `--version`; no subcommand prints help to stderr and returns 1.
 - Exit codes: `0` success, also for low scores; `1` usage error, bad config or dataset (incl. non-UTF-8, invalid JSON), unwritable output, missing examples dir, no example matched; `2` only with `--fail-under PCT` when the health score (`examples`) or overall pass rate (`run`) is below PCT (`below_percent`, exact rationals); `130` Ctrl-C or SIGTERM (`fsm_llm.constants.CLI_EXIT_INTERRUPTED`), after the partial report is written. `main_cli` catches `EvalError` (stderr, exit 1) and a stray `KeyboardInterrupt` (exit 130).
+
+`--env-file PATH` (`cli_support.add_env_file`, on both commands) is applied by `main_cli` before the handler runs, so the model it supplies reaches `resolve_model` and the example subprocesses; a missing file is one `fsm-llm-eval: error:` line, exit 1 (the same for `ModelNotConfiguredError`). It is not an `EvalConfig` field.
 
 `EvalConfig` fields and defaults: `model=None` (resolved at run time by `resolve_model`: `config.model`, then `$LLM_MODEL`, else `ModelNotConfiguredError` (the CLI exits 1 with one line); blank counts as absent), `workers=4` (>=1), `timeout=120` (>=1), `output_root="evaluation"`, `output_dir=None`, `fail_under=None` (0-100), `examples_dir="examples"`, `python=None` (running interpreter), `category=None`, `name_filter=None`, `example_inputs={}`, `example_timeouts={}`, `category_timeouts={}` (merged over the built-in tables), `trials=3` (>=1, cases only), `temperature=None` (>=0), `max_tokens=None` (>=1), `llm_kwargs={}`.
 

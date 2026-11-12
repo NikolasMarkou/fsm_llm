@@ -44,7 +44,7 @@ Environment variables used by the library and the `fsm-llm` command:
 | `FSM_PATH` | none | not usable with `fsm-llm`: `--fsm` is checked first and is mandatory |
 | `OPENAI_API_KEY` etc. | none | provider keys, read by litellm |
 
-Importing `fsm_llm` loads no `.env` file. Call `fsm_llm.load_env()` (it searches from the working directory upward, or takes a path, and never replaces a variable that is already set) or pass `--env-file PATH` to `fsm-llm`; otherwise `export` the variables.
+Importing `fsm_llm` loads no `.env` file. Call `fsm_llm.load_env()` (it searches from the working directory upward, or takes a path, and never replaces a variable that is already set) or pass `--env-file PATH` to `fsm-llm`, `fsm-llm-eval`, `fsm-llm-meta`, `python -m fsm_llm.reasoning` or `fsm-llm-monitor`; otherwise `export` the variables.
 
 ## 3. Your First Bot
 

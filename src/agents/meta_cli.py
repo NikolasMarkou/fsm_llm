@@ -12,7 +12,13 @@ from collections.abc import Sequence
 
 from pydantic import ValidationError
 
-from fsm_llm.cli_support import exit_main, report_error, run_cli
+from fsm_llm.cli_support import (
+    add_env_file,
+    apply_env_file,
+    exit_main,
+    report_error,
+    run_cli,
+)
 from fsm_llm.constants import (
     CLI_EXIT_FAILURE,
     CLI_EXIT_OK,
@@ -59,12 +65,16 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help=f"Maximum conversation turns (default: {MetaDefaults.MAX_TURNS})",
     )
+    add_env_file(parser)
     parser.set_defaults(func=_run)
     return parser
 
 
 def _run(args: argparse.Namespace) -> int:
     """The session and its report: summary and artifact to stdout, the rest to stderr."""
+    apply_env_file(
+        args
+    )  # before the model is resolved (a missing file: OSError, exit 1)
     config_kwargs: dict = {}
     if args.model:
         config_kwargs["model"] = args.model

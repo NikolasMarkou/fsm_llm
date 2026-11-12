@@ -61,6 +61,7 @@ The package ships with `fsm-llm` itself; the `reasoning` extra adds no dependenc
 python -m fsm_llm.reasoning "What is 15% of 240?"
 python -m fsm_llm.reasoning "Why might sales drop in summer?" --type abductive --output detailed
 python -m fsm_llm.reasoning "Compare a city to a cell" --model ollama_chat/qwen3.5:4b --save results.json
+python -m fsm_llm.reasoning "Explain a rainbow" --env-file .env   # LLM_MODEL from a file
 python -m fsm_llm.reasoning --list-types
 ```
 

@@ -30,6 +30,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from fsm_llm.cli_support import add_env_file, apply_env_file
 from fsm_llm.constants import CLI_EXIT_FAILURE, CLI_EXIT_INTERRUPTED, CLI_EXIT_OK
 from fsm_llm.definitions import ModelNotConfiguredError
 
@@ -82,6 +83,7 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
         metavar="PCT",
         help="Exit 2 when the score is below PCT (0-100)",
     )
+    add_env_file(parser)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -319,8 +321,9 @@ def main_cli(argv: Sequence[str] | None = None) -> int:
         - ``argv``: arguments WITHOUT the program name; ``None`` reads
           ``sys.argv[1:]``.
         - Returns the exit code (0, 1, 2 under ``--fail-under``, 130 on
-          Ctrl-C). ``EvalError`` (bad config or dataset, unwritable output) is
-          reported on stderr as exit 1, never raised.
+          Ctrl-C). ``EvalError`` (bad config or dataset, unwritable output), a
+          missing model (``ModelNotConfiguredError``) and a missing
+          ``--env-file`` are reported on stderr as exit 1, never raised.
         - Raises ``SystemExit`` only from argparse (``--help`` exits 0, a
           usage error exits 1).
     """
@@ -336,8 +339,9 @@ def main_cli(argv: Sequence[str] | None = None) -> int:
         parser.print_help(sys.stderr)
         return CLI_EXIT_FAILURE
     try:
+        apply_env_file(args)  # before any model is resolved
         return handler(args)
-    except (EvalError, ModelNotConfiguredError) as exc:
+    except (EvalError, ModelNotConfiguredError, FileNotFoundError) as exc:
         print(f"{_PROG}: error: {exc}", file=sys.stderr)
         return CLI_EXIT_FAILURE
     except KeyboardInterrupt:  # before or after the runs (they handle their own)

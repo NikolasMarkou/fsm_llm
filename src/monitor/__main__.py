@@ -2,8 +2,8 @@
 CLI entry point for fsm_llm.monitor.
 
 Usage:
-    python -m fsm_llm.monitor [--host HOST] [--port PORT] [--api-key KEY] [--otel]
-    fsm-llm-monitor [--host HOST] [--port PORT] [--api-key KEY] [--otel]
+    python -m fsm_llm.monitor [--host HOST] [--port PORT] [--api-key KEY] [--otel] [--env-file PATH]
+    fsm-llm-monitor [--host HOST] [--port PORT] [--api-key KEY] [--otel] [--env-file PATH]
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import threading
 import time
 import webbrowser
 
+from fsm_llm.cli_support import add_env_file, apply_env_file, report_error
 from fsm_llm.constants import CLI_EXIT_FAILURE, CLI_EXIT_INTERRUPTED, CLI_EXIT_OK
 
 from .constants import DEFAULT_TRUSTED_HOSTS
@@ -92,6 +93,7 @@ def main_cli() -> None:
         action="store_true",
         help="Export monitor events as OpenTelemetry spans (console exporter)",
     )
+    add_env_file(parser)
     args = parser.parse_args()
 
     if args.version:
@@ -115,6 +117,14 @@ def main_cli() -> None:
         print()
         print("Requires: fastapi, uvicorn, jinja2")
         sys.exit(CLI_EXIT_OK)
+
+    # The dashboard starts without a model; a launch request resolves one then
+    # (400 when none). The file supplies LLM_MODEL (and keys) to those launches.
+    try:
+        apply_env_file(args)
+    except FileNotFoundError as e:
+        report_error("fsm-llm-monitor", f"error: {e}")
+        sys.exit(CLI_EXIT_FAILURE)
 
     # Launch the web server
     try:

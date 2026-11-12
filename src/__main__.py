@@ -80,6 +80,7 @@ from .__version__ import __version__
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
+from .cli_support import add_env_file
 from .constants import (
     CLI_EXIT_FAILURE,
     CLI_EXIT_INTERRUPTED,
@@ -140,13 +141,7 @@ def main_cli():
         default=None,
         help="Model name for --mode run (default: env LLM_MODEL; there is no built-in model)",
     )
-    parser.add_argument(
-        "--env-file",
-        type=str,
-        default=None,
-        metavar="PATH",
-        help="Read this .env file into the environment before --mode run (the process environment wins; no .env is read without this flag)",
-    )
+    add_env_file(parser)  # read only for --mode run
     parser.add_argument(
         "--version", "-v", action="version", version=f"fsm_llm v{__version__}"
     )

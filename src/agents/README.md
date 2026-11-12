@@ -136,6 +136,7 @@ Build a new FSM by chatting (say "build it" when ready):
 
 ```bash
 fsm-llm-meta --model ollama_chat/qwen3.5:4b --output my_bot.json
+fsm-llm-meta --env-file .env --output my_bot.json    # model from LLM_MODEL in the file
 ```
 
 ## Where to go next

@@ -53,6 +53,7 @@ Run the dashboard:
 pip install -e ".[monitor]"      # from a clone of the repository
 fsm-llm-monitor                       # opens http://127.0.0.1:8420
 fsm-llm-monitor --port 9000 --no-browser
+fsm-llm-monitor --env-file .env       # launch requests find LLM_MODEL in that file
 python -m fsm_llm.monitor --info
 ```
 

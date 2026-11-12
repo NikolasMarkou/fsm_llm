@@ -3,11 +3,14 @@ The skeleton shared by ``fsm-llm-okf`` and ``fsm-llm-skills`` (the ``fsm-llm``
 runner uses only the unencodable-output escape): exit-code mapping,
 BrokenPipe parking, the unencodable-output escape, the ``--max-seconds`` argument
 and the ``validate`` report. Each CLI keeps its parser, commands, loader and
-program name. Interface contract: ``run_cli`` returns 0, 1 or 130 and lets a
+program name. It also holds the ``--env-file`` flag of the CLIs that need a model
+(``fsm-llm``, ``fsm-llm-eval``, ``fsm-llm-meta``, ``python -m fsm_llm.reasoning``,
+``fsm-llm-monitor``); the okf, skills, validate and visualize CLIs call no model
+and never get it. Interface contract: ``run_cli`` returns 0, 1 or 130 and lets a
 ``BrokenPipeError`` and a usage ``SystemExit`` through; ``exit_main`` never
 returns; ``report_issues`` prints and returns 0 or 1. Imports stdlib,
-``constants`` and ``okf.capped_line`` / ``okf.strip_unsafe_text`` only; not
-imported by ``fsm_llm/__init__.py``.
+``constants``, ``env.load_env`` and ``okf.capped_line`` / ``okf.strip_unsafe_text``
+only; not imported by ``fsm_llm/__init__.py``.
 """
 
 from __future__ import annotations
@@ -22,10 +25,13 @@ from contextlib import suppress
 from typing import Any, NoReturn
 
 from .constants import CLI_EXIT_FAILURE, CLI_EXIT_INTERRUPTED, CLI_EXIT_OK
+from .env import load_env
 from .okf import capped_line, strip_unsafe_text
 
 __all__ = [
+    "add_env_file",
     "add_max_seconds",
+    "apply_env_file",
     "escape_unencodable_output",
     "exit_main",
     "positive_seconds",
@@ -72,6 +78,36 @@ def add_max_seconds(
         metavar=metavar,
         help="wall-clock budget of the load (default %(default)s)",
     )
+
+
+def add_env_file(parser: argparse.ArgumentParser) -> None:
+    """Add ``--env-file PATH`` (dest ``env_file``, default ``None``) to *parser*.
+
+    Interface contract: only a CLI that can build a model interface adds it.
+    Pair it with :func:`apply_env_file`, called after parsing and before the
+    model is resolved.
+    """
+    parser.add_argument(
+        "--env-file",
+        default=None,
+        metavar="PATH",
+        help="read this .env file into the environment first (a variable the "
+        "process already has wins; no .env file is read without this flag)",
+    )
+
+
+def apply_env_file(args: argparse.Namespace) -> None:
+    """Read ``args.env_file`` (when given) with ``fsm_llm.load_env``.
+
+    Interface contract: a no-op when the flag is absent or ``None``. The file
+    fills only variables the process has not set, so the model precedence is the
+    ``--model`` flag, the process environment, the file, then
+    ``ModelNotConfiguredError``. Raises ``FileNotFoundError`` for a path that is
+    not a file; every caller turns it into one stderr line and exit 1.
+    """
+    path = getattr(args, "env_file", None)
+    if path is not None:
+        load_env(path)
 
 
 def report_issues(

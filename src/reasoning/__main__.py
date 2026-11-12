@@ -12,7 +12,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from fsm_llm.cli_support import escape_unencodable_output, report_error
+from fsm_llm.cli_support import (
+    add_env_file,
+    apply_env_file,
+    escape_unencodable_output,
+    report_error,
+)
 from fsm_llm.definitions import ModelNotConfiguredError
 from fsm_llm.logging import logger, setup_cli_logging
 from fsm_llm.utilities import redacting_json_default
@@ -112,6 +117,7 @@ Available reasoning types: {", ".join([rt.value for rt in ReasoningType])}
         metavar="MODEL",
         help="LLM model to use (default: env LLM_MODEL; there is no built-in model)",
     )
+    add_env_file(parser)
 
     # Output configuration
     output_group = parser.add_argument_group("output options")
@@ -462,6 +468,7 @@ def main() -> int:
         args = parser.parse_args()
 
         validate_arguments(args)
+        apply_env_file(args)  # before the model is resolved
 
         if args.verbose:
             # DECISION plan-2026-09-29T044048-3a032517/D-016
@@ -513,8 +520,9 @@ def main() -> int:
         logger.error(f"Argument error: {e}")
         return 1
 
-    except ModelNotConfiguredError as e:
-        # A configuration failure, not a crash: one stderr line, no traceback.
+    except (ModelNotConfiguredError, FileNotFoundError) as e:
+        # A configuration failure (no model, a missing --env-file), not a
+        # crash: one stderr line, no traceback.
         report_error(_PROG, f"error: {e}")
         return 1
 
