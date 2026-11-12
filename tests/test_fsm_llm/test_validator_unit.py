@@ -1795,7 +1795,9 @@ class TestValidateCliEmitsOutput:
         )
         assert "not found" in output
 
-    def test_library_import_still_leaves_logging_disabled(self):
+    def test_library_import_still_leaves_logging_disabled(
+        self, reloadable_logging_module
+    ):
         """Over-correction guard. The fix must stay INSIDE `main()`.
 
         If anyone "simplifies" it by deleting `logging.py`'s import-time

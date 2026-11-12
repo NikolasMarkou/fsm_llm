@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -13,6 +14,28 @@ import pytest
 
 from fsm_llm.definitions import ModelNotConfiguredError
 from tests.test_fsm_llm.support import _JOIN_TIMEOUT_S
+
+
+@contextmanager
+def _library_records(level: str):
+    """Yield the loguru records of the library, with its logging switched on.
+
+    The library disables its own loggers at import, so a sink added to
+    ``fsm_llm.logging.logger`` sees nothing unless the test enables them
+    itself. Relying on an earlier test having left them enabled made the
+    result depend on test order. Ends with the library disabled again, the
+    state it has at import.
+    """
+    from fsm_llm.logging import logger
+
+    records: list[dict[str, Any]] = []
+    logger.enable("fsm_llm")
+    sink_id = logger.add(lambda m: records.append(m.record), level=level)
+    try:
+        yield records
+    finally:
+        logger.remove(sink_id)
+        logger.disable("fsm_llm")
 
 
 class TestRunnerUsesAPI:
@@ -245,30 +268,20 @@ class TestRedactContextNonStringKeys:
         assert result["name"] == "Alice"
 
     def test_bytes_key_bypass_is_logged_at_warning(self):
-        from fsm_llm.logging import logger
         from fsm_llm.utilities import redact_context
 
-        records = []
-        sink_id = logger.add(lambda m: records.append(m.record), level="WARNING")
-        try:
+        with _library_records("WARNING") as records:
             result = redact_context({b"password": "BYTES-SECRET"})
-        finally:
-            logger.remove(sink_id)
 
         assert result[b"password"] == "BYTES-SECRET"
         assert any("Log-redaction skipped" in r["message"] for r in records)
 
     def test_string_keys_are_not_warned_about(self):
         """Vacuity guard: the warning must be specific to non-str keys."""
-        from fsm_llm.logging import logger
         from fsm_llm.utilities import redact_context
 
-        records = []
-        sink_id = logger.add(lambda m: records.append(m.record), level="WARNING")
-        try:
+        with _library_records("WARNING") as records:
             redact_context({"password": "p", "name": "Alice"})
-        finally:
-            logger.remove(sink_id)
 
         assert not any("Log-redaction skipped" in r["message"] for r in records)
 
@@ -297,15 +310,19 @@ class TestRunnerJsonDumpsSurvivesNonJsonNativeContextValues:
         # data dump) -- see runner.py's main().
         mock_api.get_data.side_effect = [per_turn_data, final_data]
 
+        # The per-turn dump is lazy: it runs (and takes the first get_data
+        # value) only while a DEBUG sink is live, so the test turns one on
+        # instead of inheriting it from an earlier test.
         env = {"LLM_MODEL": "test-model"}
-        with patch.dict(os.environ, env, clear=True):
-            with patch("fsm_llm.runner.load_env"):
-                with patch("fsm_llm.runner.API.from_file", return_value=mock_api):
-                    with patch("fsm_llm.runner.setup_file_logging"):
-                        with patch("builtins.input", return_value="hi"):
-                            from fsm_llm.runner import main
+        with _library_records("DEBUG"):
+            with patch.dict(os.environ, env, clear=True):
+                with patch("fsm_llm.runner.load_env"):
+                    with patch("fsm_llm.runner.API.from_file", return_value=mock_api):
+                        with patch("fsm_llm.runner.setup_file_logging"):
+                            with patch("builtins.input", return_value="hi"):
+                                from fsm_llm.runner import main
 
-                            return main("/tmp/t.json", 5, 1000)
+                                return main("/tmp/t.json", 5, 1000)
 
     def test_datetime_in_final_dump_does_not_crash_the_cli(self):
         """RED (pre-fix): the final dump (outside the per-turn try/except)

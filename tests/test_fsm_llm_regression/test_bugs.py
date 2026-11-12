@@ -52,8 +52,12 @@ class TestJsonEscapeHandling:
 class TestLoggingSideEffects:
     """B2: importing fsm_llm.logging creates logs/ directory."""
 
-    def test_import_does_not_create_logs_dir(self):
-        """Importing fsm_llm should not create a logs/ directory in CWD."""
+    def test_import_does_not_create_logs_dir(self, reloadable_logging_module):
+        """Importing fsm_llm should not create a logs/ directory in CWD.
+
+        The reload runs the module body again; the fixture restores the
+        module afterwards so no later test sees fresh handler registries.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             original_cwd = os.getcwd()
             try:
@@ -66,9 +70,7 @@ class TestLoggingSideEffects:
                 # Force re-import of the logging module
                 import importlib
 
-                import fsm_llm.logging as log_mod
-
-                importlib.reload(log_mod)
+                importlib.reload(reloadable_logging_module)
 
                 assert not os.path.exists(os.path.join(tmpdir, "logs")), (
                     "logs/ directory should not be created at import time"

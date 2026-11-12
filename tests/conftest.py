@@ -256,6 +256,29 @@ def _llm_model_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(ENV_LLM_MODEL, TEST_LLM_MODEL)
 
 
+@pytest.fixture
+def reloadable_logging_module():
+    """``fsm_llm.logging`` with its namespace restored after the test.
+
+    Interface contract: yields the module object. A test that calls
+    ``importlib.reload`` on it re-executes the module body in the same
+    namespace: every function becomes a new object (so ``fsm_llm.setup_logging``
+    and ``fsm_llm.logging.setup_logging`` stop being one function) and the
+    handler registries (``_library_handler_ids`` and the others) are replaced
+    by empty ones. Teardown puts back every name the module held on entry and
+    drops any name the reload added, so a reload cannot reach a later test.
+    Failure mode: none; it only reads and writes the module's ``__dict__``.
+    """
+    import fsm_llm.logging as log_module
+
+    saved = dict(vars(log_module))
+    yield log_module
+    namespace = vars(log_module)
+    for name in [name for name in namespace if name not in saved]:
+        del namespace[name]
+    namespace.update(saved)
+
+
 @pytest.fixture(scope="session")
 def test_fixtures_root():
     """Get the test fixtures directory path."""
