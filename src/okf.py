@@ -23,7 +23,7 @@ import time
 import unicodedata
 from collections.abc import Callable, Container, Iterable, Iterator
 from contextlib import suppress
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from enum import Enum
 from functools import partial
 from itertools import islice
@@ -169,19 +169,20 @@ _STRICT_TS_RE = re.compile(
 
 
 # DECISION plan-2026-10-21T140931-095ea5f8/D-014
-# Do NOT replace this parser with `datetime.fromisoformat`: on Python 3.10 it
-# rejects a `Z` suffix and fractions that are not 3 or 6 digits, and OKF
-# stamps use both. See decisions.md D-014.
+# Do NOT replace this parser with `datetime.fromisoformat`: on Python 3.10 (the
+# old floor) it rejected a `Z` suffix and fractions that are not 3 or 6 digits,
+# and OKF stamps use both. The parser stays: it also reports a warning code per
+# input shape, which `fromisoformat` cannot. See decisions.md D-014.
 def parse_okf_datetime(value: object) -> tuple[datetime | None, str | None]:
     """Parse an OKF timestamp: ``(aware datetime | None, warning code)``; the
     code is ``None`` (explicit offset: ``Z``, ``+HH``, ``+HH:MM``, ``+HHMM``),
     ``"date-only"`` (midnight UTC), ``"naive"`` (read as UTC) or ``"invalid"``."""
     if isinstance(value, datetime):
         if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc), "naive"
+            return value.replace(tzinfo=UTC), "naive"
         return value, None
     if isinstance(value, date):
-        midnight = datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+        midnight = datetime(value.year, value.month, value.day, tzinfo=UTC)
         return midnight, "date-only"
     match = _TS_RE.fullmatch(value.strip()) if isinstance(value, str) else None
     if match is None:
@@ -192,7 +193,7 @@ def parse_okf_datetime(value: object) -> tuple[datetime | None, str | None]:
         tz: timezone | None = None
         if zone:
             if zone in ("Z", "z"):
-                tz = timezone.utc
+                tz = UTC
             else:
                 digits = zone[1:].replace(":", "")
                 delta = timedelta(hours=int(digits[:2]), minutes=int(digits[2:] or 0))
@@ -203,9 +204,9 @@ def parse_okf_datetime(value: object) -> tuple[datetime | None, str | None]:
     except ValueError:
         return None, "invalid"
     if hour is None:
-        return parsed.replace(tzinfo=timezone.utc), "date-only"
+        return parsed.replace(tzinfo=UTC), "date-only"
     if tz is None:
-        return parsed.replace(tzinfo=timezone.utc), "naive"
+        return parsed.replace(tzinfo=UTC), "naive"
     return parsed.replace(tzinfo=tz), None
 
 
@@ -245,9 +246,9 @@ class OKFConcept(BaseModel):
         deadline, _ = parse_okf_datetime(self.stale_after)
         if deadline is None:
             return False
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         if now.tzinfo is None:
-            now = now.replace(tzinfo=timezone.utc)
+            now = now.replace(tzinfo=UTC)
         return now >= deadline
 
     @property
@@ -1047,7 +1048,7 @@ class _OKFDumper(yaml.SafeDumper):
 
 def iso_utc(value: datetime) -> str:
     """ISO 8601 with an explicit UTC offset; a naive value is taken as UTC."""
-    return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).isoformat()
+    return (value if value.tzinfo else value.replace(tzinfo=UTC)).isoformat()
 
 
 def _plain(value: Any) -> Any:

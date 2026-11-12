@@ -34,7 +34,7 @@ import re
 import tempfile
 import threading
 from collections.abc import Callable, Collection, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -413,7 +413,7 @@ class FSMLibrary:
                         "parent": parent,
                         "repair": repair,
                         "replay": replay,
-                        "created_at": iso_utc(datetime.now(timezone.utc)),
+                        "created_at": iso_utc(datetime.now(UTC)),
                     },
                     stats={"runs": 0, "successes": 0},
                 )

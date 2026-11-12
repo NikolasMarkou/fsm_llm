@@ -910,7 +910,7 @@ result = agent(catalog.render_catalog() + "\n\nFill in the form.")
 - A skill folder whose `SKILL.md` has an error (invalid frontmatter such as an unquoted colon in a description, a bad name) is not loaded and is absent from `skill_list` and `render_catalog()`. The skipped note (see `skipped_note`) says how many folders were skipped, but it is a lower bound once the issue cap is spent and it does not count a duplicate name (`name-duplicate`, by design: the name is loaded); `render_catalog()` of a catalog with no loaded skill still shows the note; `fsm-llm-skills validate` shows every reason.
 - Reading a long body takes many calls because each reply stays under the 2,000-character observation cap: the 50 KB `iterative-planner` skill takes 37 `skill_load` pages. Seven real skills from a local `~/.claude/skills` all load with 0 errors.
 - Accepted debt, private helpers shared across modules: `agents/agent_skills.py` imports `_int`, `_fit`, `_budget` and `_finish` from `agents/okf.py`. Follow-up: one shared module when a third agents consumer appears or when either file is next edited. (The two CLIs no longer share private helpers: both use `fsm_llm.cli_support`.) The Skills code also calls the public `okf.strip_unsafe_text`, `capped_line`, `text_page` and `capped_issues`.
-- Hardlinks and TOCTOU: see the Safety model. Python 3.10 to 3.12 on Linux.
+- Hardlinks and TOCTOU: see the Safety model. Python 3.11 to 3.12 on Linux.
 
 ## Synthesis (`fsm_llm.synthesis`)
 

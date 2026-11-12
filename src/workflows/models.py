@@ -5,7 +5,7 @@ Core data models for the FSM-LLM Workflow System.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -61,7 +61,7 @@ class WorkflowEvent(BaseModel):
 
     event_type: str
     payload: dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     instance_id: str | None = None
     """Deliver only to this workflow instance. ``None`` (the default) delivers
@@ -85,7 +85,7 @@ class WorkflowStepResult(BaseModel):
     next_step_id: str | None = None
     message: str | None = None
     error: str | None = None
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
@@ -125,7 +125,7 @@ class WorkflowStepResult(BaseModel):
 class WorkflowHistoryEntry(BaseModel):
     """An entry in the workflow execution history."""
 
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     step_id: str
     status: str
     message: str | None = None
@@ -143,8 +143,8 @@ class WorkflowInstance(BaseModel):
     current_step_id: str
     context: dict[str, Any] = Field(default_factory=dict)
     status: WorkflowStatus = WorkflowStatus.PENDING
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     completed_at: datetime | None = None
     deadline: datetime | None = None
     max_seconds: float | None = None
@@ -175,10 +175,10 @@ class WorkflowInstance(BaseModel):
             )
         changed = status != self.status
         self.status = status
-        self.updated_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(UTC)
 
         if changed and status in _TERMINAL_STATUSES:
-            self.completed_at = datetime.now(timezone.utc)
+            self.completed_at = datetime.now(UTC)
 
         if error:
             self.error = str(error)
@@ -236,7 +236,7 @@ class EventListener(BaseModel):
     instance_id: str
     success_step_id: str
     event_mapping: dict[str, str] = Field(default_factory=dict)
-    registered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    registered_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     timeout_at: datetime | None = None
 
     correlation_key: str | None = None
@@ -253,9 +253,7 @@ class EventListener(BaseModel):
 
     def is_expired(self) -> bool:
         """Check if the event listener has expired."""
-        return (
-            self.timeout_at is not None and datetime.now(timezone.utc) > self.timeout_at
-        )
+        return self.timeout_at is not None and datetime.now(UTC) > self.timeout_at
 
 
 class WaitEventConfig(BaseModel):

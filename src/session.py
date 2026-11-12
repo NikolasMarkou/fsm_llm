@@ -30,7 +30,7 @@ import json
 import os
 import re
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -82,9 +82,7 @@ class SessionState(BaseModel):
     # `conversation_history`. Default None keeps session files written
     # before this field existed loadable unchanged.
     conversation_summary: str | None = None
-    saved_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    saved_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

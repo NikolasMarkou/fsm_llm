@@ -13,7 +13,7 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from concurrent.futures import Executor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -132,13 +132,13 @@ class WorkflowStep(BaseModel, ABC):
             nonlocal raised
             try:
                 return await coro
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 raised = True
                 raise
 
         try:
             return await asyncio.wait_for(run(), timeout=self.timeout_seconds)
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             if raised:
                 raise
             raise WorkflowStepError(
@@ -479,7 +479,7 @@ class WaitEventStep(WorkflowStep):
             "success_step_id": self.config.success_step_id,
             "event_mapping": self.config.event_mapping,
             "correlation_key": self.config.correlation_key,
-            "waiting_since": datetime.now(timezone.utc).isoformat(),
+            "waiting_since": datetime.now(UTC).isoformat(),
         }
 
         return WorkflowStepResult.success_result(
@@ -507,9 +507,9 @@ class TimerStep(WorkflowStep):
             "waiting_for_timer": True,
             "delay_seconds": self.delay_seconds,
             "next_step_id": self.next_step_id,
-            "timer_start": datetime.now(timezone.utc).isoformat(),
+            "timer_start": datetime.now(UTC).isoformat(),
             "timer_end": (
-                datetime.now(timezone.utc) + timedelta(seconds=self.delay_seconds)
+                datetime.now(UTC) + timedelta(seconds=self.delay_seconds)
             ).isoformat(),
         }
 

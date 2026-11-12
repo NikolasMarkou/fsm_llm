@@ -5,6 +5,7 @@ Tests for new workflow step types: AgentStep, RetryStep, SwitchStep.
 Also tests for workflow engine improvements (instance cleanup, event warnings).
 """
 
+from datetime import UTC
 from unittest.mock import MagicMock
 
 import pytest
@@ -675,7 +676,7 @@ class TestWorkflowInstanceCleanup:
         assert engine.remove_instance("nonexistent") is False
 
     def test_max_completed_instances_purge(self):
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from fsm_llm.workflows.engine import WorkflowEngine
         from fsm_llm.workflows.models import WorkflowInstance, WorkflowStatus
@@ -689,8 +690,8 @@ class TestWorkflowInstanceCleanup:
                 workflow_id="wf-1",
                 current_step_id="done",
                 status=WorkflowStatus.COMPLETED,
-                completed_at=datetime(2026, 1, 1 + i, tzinfo=timezone.utc),
-                updated_at=datetime(2026, 1, 1 + i, tzinfo=timezone.utc),
+                completed_at=datetime(2026, 1, 1 + i, tzinfo=UTC),
+                updated_at=datetime(2026, 1, 1 + i, tzinfo=UTC),
             )
             engine.workflow_instances[f"test-{i}"] = instance
 

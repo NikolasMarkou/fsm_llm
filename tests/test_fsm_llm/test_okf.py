@@ -19,7 +19,7 @@ import time
 import tracemalloc
 import unicodedata
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, ClassVar
@@ -166,9 +166,6 @@ class TestResolveWithin:
         # resolved candidate never equals it nor has it as a parent.
         assert resolve_within(alias, "a.txt") is None
         assert resolve_within(alias, ".") is None
-
-
-UTC = timezone.utc
 
 
 def _parse(frontmatter: str, body: str = "body\n") -> tuple[OKFConcept, list[str]]:
@@ -1967,8 +1964,8 @@ class TestInteropFixture:
             "result",
         ]
         assert concept.trust is TrustTier.HUMAN_REVIEWED
-        assert concept.is_stale(datetime(2026, 9, 23, tzinfo=timezone.utc))
-        assert not concept.is_stale(datetime(2026, 9, 22, tzinfo=timezone.utc))
+        assert concept.is_stale(datetime(2026, 9, 23, tzinfo=UTC))
+        assert not concept.is_stale(datetime(2026, 9, 22, tzinfo=UTC))
 
     def test_a_bare_verified_mapping_is_a_one_element_list(
         self, bundle: OKFBundle

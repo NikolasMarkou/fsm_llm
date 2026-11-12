@@ -135,7 +135,7 @@ class TestRaisingStepsRecordTheFailureBehaviour:
 class TestUserTimeoutErrorBehaviour:
     async def test_user_timeout_keeps_its_own_text(self):
         def upstream() -> Any:
-            raise asyncio.TimeoutError("upstream socket timed out")
+            raise TimeoutError("upstream socket timed out")
 
         step = api_step("s", "S", upstream, "", "", timeout_seconds=5)
         result = await step.execute({})

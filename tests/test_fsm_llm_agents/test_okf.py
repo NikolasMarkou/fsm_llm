@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -844,7 +844,7 @@ class TestExportAgentResult:
         assert concept.generated and concept.generated["by"] == f"fsm-llm/{__version__}"
         at, warn = parse_okf_datetime(concept.generated["at"])
         assert warn is None and at is not None and at.utcoffset() == timedelta(0)
-        assert abs(datetime.now(timezone.utc) - at) < timedelta(minutes=1)
+        assert abs(datetime.now(UTC) - at) < timedelta(minutes=1)
         assert "## Task\n\nFind Zephyr" in concept.body
         assert "## Answer\n\nDone red." in concept.body
         assert "1. okf_read" in concept.body and "2. okf_search" in concept.body

@@ -275,7 +275,7 @@ class AgentServer:
                     iterations=result.trace.total_iterations,
                     tools_used=result.trace.tools_used,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 raise HTTPException(
                     status_code=504,
                     detail=f"Agent execution timed out ({self._timeout}s)",
@@ -315,7 +315,7 @@ class AgentServer:
                         }
                     )
                     yield f"data: {data}\n\n"
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield f"data: {json.dumps({'error': f'Agent execution timed out ({self._timeout}s)'})}\n\n"
                 except Exception as e:
                     error_id = self._log_failure("/stream", e)

@@ -24,7 +24,7 @@ import re
 import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -88,7 +88,7 @@ def fisher_exact_two_sided(k1: int, n1: int, k2: int, n2: int) -> float:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _git_commit() -> str:

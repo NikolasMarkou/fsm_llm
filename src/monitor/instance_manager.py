@@ -13,7 +13,7 @@ import contextvars
 import json
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -216,7 +216,7 @@ class _ManagedBase:
         self.instance_id = instance_id
         self.label = label
         self.status = "running"
-        self.created_at = datetime.now(timezone.utc)
+        self.created_at = datetime.now(UTC)
 
     def _info(self, **extra: Any) -> InstanceInfo:
         return InstanceInfo(

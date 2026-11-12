@@ -138,7 +138,7 @@ markers = [
 ]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 line-length = 88
 
 [tool.ruff.lint]
@@ -166,6 +166,11 @@ ignore = [
     # DO NOT "clean this up": removing it re-breaks pre-push until the hook rev is
     # bumped to match the constraints.txt pin.
     "UP038",   # non-pep604-isinstance — withdrawn upstream; see note above
+    # UP042 would turn every `(str, Enum)` into `StrEnum`. That is not a pure
+    # rename: `str()` and `format()` of a member change from "Cls.MEMBER" to the
+    # value, and wire strings and messages depend on the current spelling
+    # (AGENTS.md naming rules: "use .value"). Move-only floor step, no behaviour change.
+    "UP042",   # replace-str-enum: changes str()/format() of members, so (str, Enum) stays
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -177,7 +182,7 @@ ignore = [
 known-first-party = ["fsm_llm"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 warn_unused_ignores = true

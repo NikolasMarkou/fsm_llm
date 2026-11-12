@@ -9,15 +9,11 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from typing import Any
 
 import pytest
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:  # pragma: no cover - Python 3.10
-    import tomli as tomllib
 
 import fsm_llm.okf_cli as okf_cli
 from fsm_llm import okf as okf_module

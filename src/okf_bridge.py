@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from itertools import islice
 from typing import Any
 
@@ -155,7 +155,7 @@ def bundle_from_memory_entries(
     stamp = iso_utc(now) if isinstance(now, datetime) else capped_line(now, 100)
     generated = {
         "by": capped_line(generated_by, 200) or f"fsm-llm/{__version__}",
-        "at": stamp or iso_utc(datetime.now(timezone.utc)),
+        "at": stamp or iso_utc(datetime.now(UTC)),
     }
 
     def skip(index: int, why: str, code: str = "entry-skipped") -> None:
@@ -271,7 +271,7 @@ def create_okf_handler(
             found = [c for c, _ in bundle.search(query, max_items, include_deprecated)]
         else:
             found = bundle.list(include_deprecated=include_deprecated)[:max_items]
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return {
             context_key: [
                 {

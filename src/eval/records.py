@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +49,7 @@ def write_json(path: Path, obj: Any) -> None:
 
 def utc_now() -> str:
     """Current UTC time as ``YYYY-MM-DDTHH:MM:SSZ``."""
-    return datetime.now(timezone.utc).strftime(UTC_TIMESTAMP_FORMAT)
+    return datetime.now(UTC).strftime(UTC_TIMESTAMP_FORMAT)
 
 
 def git_commit(cwd: PathLike | None = None) -> str:

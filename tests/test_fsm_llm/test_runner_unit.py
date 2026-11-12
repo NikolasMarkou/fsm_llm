@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -310,7 +310,7 @@ class TestRunnerJsonDumpsSurvivesNonJsonNativeContextValues:
         (post-fix): main() returns 0, no exception."""
         result = self._run_with_context(
             per_turn_data={"turn": 1},
-            final_data={"turn": 1, "seen_at": datetime.now(timezone.utc)},
+            final_data={"turn": 1, "seen_at": datetime.now(UTC)},
         )
         assert result == 0
 
@@ -322,7 +322,7 @@ class TestRunnerJsonDumpsSurvivesNonJsonNativeContextValues:
         -1, proving the per-turn site is genuinely fixed rather than merely
         caught by the surrounding handler."""
         result = self._run_with_context(
-            per_turn_data={"turn": 1, "seen_at": datetime.now(timezone.utc)},
+            per_turn_data={"turn": 1, "seen_at": datetime.now(UTC)},
             final_data={"turn": 1},
         )
         assert result == 0

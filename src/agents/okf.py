@@ -33,7 +33,7 @@ import math
 import re
 import secrets
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -508,7 +508,7 @@ class OKFMemoryBackend:
         """Upsert one store entry per indexable concept; return how many."""
         if self._store is None:
             return 0
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         count = 0
         for concept in self._bundle.list(include_deprecated=self._include_deprecated):
             self._store.forget(concept.id)
@@ -564,7 +564,7 @@ class OKFMemoryBackend:
                     words, count, self._include_deprecated
                 )
             ]
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return [
             (
                 OKF_SUMMARY_LABEL + _summary(concept, now),
@@ -649,7 +649,7 @@ def export_agent_result(
           file. Raises ``OKFError`` from ``write_bundle`` (e.g. a symlinked
           directory).
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     answer = strip_unsafe_text(result.answer, multiline=True)[:_RUN_TEXT_CHARS]
     calls = result.trace.tool_calls
     sections = []

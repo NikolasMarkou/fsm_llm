@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import threading
 from collections import deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fsm_llm.constants import (
@@ -202,7 +202,7 @@ class EventCollector:
         try:
             with self._lock:
                 return MetricSnapshot(
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(UTC),
                     active_conversations=len(self._active_conversations),
                     total_events=self._total_events,
                     total_errors=self._total_errors,
@@ -257,7 +257,7 @@ class EventCollector:
         def _sink(message: Any) -> None:
             record = message.record
             log_record = LogRecord(
-                timestamp=record["time"].astimezone(timezone.utc),
+                timestamp=record["time"].astimezone(UTC),
                 level=record["level"].name,
                 message=str(record["message"]),
                 module=record["module"],
@@ -446,7 +446,7 @@ class EventCollector:
                 sink.conversation_log.append(entry)
 
         def _ts() -> str:
-            return datetime.now(timezone.utc).isoformat()
+            return datetime.now(UTC).isoformat()
 
         def _on_start(
             ctx: dict[str, Any],

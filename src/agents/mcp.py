@@ -234,8 +234,8 @@ class MCPToolProvider:
 
         try:
             return await asyncio.wait_for(self._discover(), timeout=self._timeout)
-        # asyncio.TimeoutError, not the builtin: they differ on Python 3.10.
-        except asyncio.TimeoutError as e:
+        # On Python 3.11+ asyncio.TimeoutError is the builtin TimeoutError.
+        except TimeoutError as e:
             raise AgentTimeoutError(self._timeout or 0.0) from e
 
     async def _discover(self) -> list[ToolDefinition]:
@@ -283,7 +283,7 @@ class MCPToolProvider:
             async def execute(**kwargs: Any) -> str:
                 try:
                     result = await asyncio.wait_for(call(**kwargs), timeout=timeout)
-                except asyncio.TimeoutError as e:
+                except TimeoutError as e:
                     raise ToolExecutionError(
                         f"MCP tool '{tool_name}' timed out after {timeout}s",
                         tool_name=tool_name,

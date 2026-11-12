@@ -37,8 +37,8 @@ flowchart LR
 | `test_regression_iter2.py` | iter-2: F-003..F-006 | 12 | F-001 is covered by `test_fsm_llm_workflows/test_workflows.py::TestStepDataInternalKeyFilter`, F-002 by `test_engine_integration.py` |
 | `test_regression_jsonlogic_and_merge.py` | plan 9: VB1..VB15 | 31 | Helper `_frame_definition(name)`; scans `src/*.py` for `"transition_decision"` |
 | `test_regression_logic_and_visualizer.py` | plan 7: VB1..VB4 | 9 | `build_state_boxes` width checks |
-| `test_regression_messages_and_operators.py` | plan 12: V1, V4, V5, V14, V15 | 10 | Reads `pyproject.toml` for `requires-python = ">=3.10"` |
-| `test_regression_review.py` | review: C1..C3, H1, H2, H4, H5, M1, M3, M6 | 22 | Version pin `"0.12.0"`; 2 skipped `requirements.txt` tests; needs `packaging` and `tomllib`/`tomli` |
+| `test_regression_messages_and_operators.py` | plan 12: V1, V4, V5, V14, V15 | 10 | Reads `pyproject.toml` for `requires-python = ">=3.11"` |
+| `test_regression_review.py` | review: C1..C3, H1, H2, H4, H5, M1, M3, M6 | 22 | Version pin `"0.12.0"`; 2 skipped `requirements.txt` tests; needs `packaging` and `tomllib` |
 | `test_api_snapshot.py` | the public API snapshot `docs/api.txt` equals the output of `scripts/api_snapshot.py` | 3 | Runs the script in a child process; `importorskip("fastapi")`; fails with `make api-snapshot` as the fix |
 | `test_regression_transition_eval.py` | plan 8: B1..B6 | 7 | Replaces pipeline methods with `MagicMock` |
 
@@ -66,7 +66,7 @@ Behaviors pinned, grouped by area (the assertion, not the history):
 - Definitions and tools: `FSMDefinition` rejects unknown initial state, unknown targets, no terminal state, and `state.id` not matching its key (`"does not match"`); `FSMValidator` reports no `Orphaned` errors when the initial state is invalid and finds one cycle for A->B->C->A; `FSMValidationResult` text uses `[VALID]`, `[INVALID]`, `[ERROR]`, `[WARN]`; `HandlerSystem(handler_error_mode="skip")` raises `ValueError` matching `"Invalid handler_error_mode"`.
 - Reasoning: `OutputFormatter.extract_final_solution` keeps `0` and `False`, skips `None` and `""`; `map_reasoning_type` aliases (math, logic, pattern, brainstorm, evaluate, hypothesis, compare, ...) are case and whitespace insensitive, unknown maps to analytical; `ContextManager.merge_reasoning_results` sets `<type>_reasoning_completed` for every `ReasoningType`; `ReasoningHandlers.prune_context` truncates lists to at most 10; every state in `ALL_REASONING_FSMS` has non-empty `extraction_instructions` and `response_instructions` and no bare `instructions` key.
 - Workflows: waiting on `wait_event_step` auto-registers `engine.event_listeners[event_type]`; `event_mapping` maps `{local_key: payload_key}`; `timer_step` registers `engine.timers[f"{iid}_timer"]` and completes after the delay; `_waiting_info` is removed after the event; `get_statistics()["active_workflows"] == 0` after completion; `WaitEventStep.referenced_step_ids` includes the success and timeout step ids; `fsm_llm.workflows.cli` does not exist.
-- Packaging text: `__version__ == "0.12.0"` in `fsm_llm.__version__`, `fsm_llm`, `fsm_llm.reasoning.__version__` and `fsm_llm.workflows`; README python badge has `3.10` and no `3.8`/`3.9`; README headings have no emoji; litellm spec in `pyproject.toml` excludes 1.82.7 and 1.82.8; `tox.ini` has no `sphinx` and no `[testenv:docs]`; `src/__init__.py` has no `__all__.extend`/`__all__.append` and every `__all__` name resolves.
+- Packaging text: `__version__ == "0.12.0"` in `fsm_llm.__version__`, `fsm_llm`, `fsm_llm.reasoning.__version__` and `fsm_llm.workflows`; README python badge has `3.11` and no `3.8`/`3.9`/`3.10`; README headings have no emoji; litellm spec in `pyproject.toml` excludes 1.82.7 and 1.82.8; `tox.ini` has no `sphinx` and no `[testenv:docs]`; `src/__init__.py` has no `__all__.extend`/`__all__.append` and every `__all__` name resolves.
 
 ## Invariants and constraints
 
@@ -78,7 +78,7 @@ Behaviors pinned, grouped by area (the assertion, not the history):
 ## Dependencies
 
 - Internal: `fsm_llm` and its `reasoning` and `workflows` subpackages; `tests/conftest.py` fixtures.
-- External: `pytest`, `pytest-asyncio` (`asyncio_mode = "auto"`), `unittest.mock`, `packaging` and `tomllib` (or `tomli` on 3.10) for the litellm spec test.
+- External: `pytest`, `pytest-asyncio` (`asyncio_mode = "auto"`), `unittest.mock`, `packaging` and `tomllib` for the litellm spec test.
 
 ## Failure modes
 

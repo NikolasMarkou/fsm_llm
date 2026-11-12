@@ -23,9 +23,9 @@ import pathlib
 import re
 import subprocess
 import sys
+import tomllib
 
 import pytest
-import tomllib
 
 _REPO_ROOT = pathlib.Path(__file__).parents[1]
 _SCRIPTS = str(_REPO_ROOT / "scripts")

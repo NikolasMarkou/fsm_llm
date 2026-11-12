@@ -7,7 +7,7 @@ the collector, instance manager, and web dashboard.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -46,7 +46,7 @@ class MonitorEvent(BaseModel):
     """A single observable event captured from the FSM system."""
 
     event_type: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     conversation_id: str | None = None
     source_state: str | None = None
     target_state: str | None = None
@@ -58,7 +58,7 @@ class MonitorEvent(BaseModel):
 class LogRecord(BaseModel):
     """A captured log record from loguru."""
 
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     level: str = "INFO"
     message: str = ""
     module: str = ""
@@ -70,7 +70,7 @@ class LogRecord(BaseModel):
 class MetricSnapshot(BaseModel):
     """Point-in-time metric snapshot of the FSM system."""
 
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     active_conversations: int = 0
     total_events: int = 0
     total_errors: int = 0
@@ -135,7 +135,7 @@ class ActivityItem(BaseModel):
     current_step: str = ""  # state for FSM, iteration info for agent, step for workflow
     detail: str = ""  # extra info (agent type, workflow name, etc.)
     message_count: int = 0  # messages for FSM, iterations for agent, steps for workflow
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     is_terminal: bool = False
 
 
@@ -225,7 +225,7 @@ class InstanceInfo(BaseModel):
     instance_type: str  # "fsm" | "workflow" | "agent"
     label: str = ""
     status: str = "running"  # "running" | "completed" | "failed" | "cancelled"
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     source: str = "custom"  # preset ID or "custom"
     conversation_count: int = 0
     active_workflows: int = 0

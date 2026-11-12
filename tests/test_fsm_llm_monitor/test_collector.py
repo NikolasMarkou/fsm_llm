@@ -3,7 +3,7 @@ from __future__ import annotations
 """Tests for fsm_llm.monitor.collector."""
 
 import threading
-from datetime import timezone
+from datetime import UTC
 
 from fsm_llm.monitor.collector import EventCollector
 from fsm_llm.monitor.constants import (
@@ -272,14 +272,14 @@ class TestMetricsTimestamp:
         collector = EventCollector()
         metrics = collector.get_metrics()
         assert metrics.timestamp.tzinfo is not None
-        assert metrics.timestamp.tzinfo == timezone.utc
+        assert metrics.timestamp.tzinfo == UTC
 
     def test_metrics_after_events(self):
         collector = EventCollector()
         collector.record_event(MonitorEvent(event_type="test", message="hello"))
         metrics = collector.get_metrics()
         assert metrics.total_events == 1
-        assert metrics.timestamp.tzinfo == timezone.utc
+        assert metrics.timestamp.tzinfo == UTC
 
 
 class TestLogSinkTimestamp:

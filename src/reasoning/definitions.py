@@ -7,7 +7,7 @@ with comprehensive validation, type safety, and computed properties.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Literal
 
@@ -98,7 +98,7 @@ class TimestampedModel(BaseModel):
     )
 
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         description="UTC timestamp when this model was created",
         json_schema_extra={"example": "2024-01-01T12:00:00Z"},
     )
@@ -107,7 +107,7 @@ class TimestampedModel(BaseModel):
     @property
     def age_seconds(self) -> float:
         """Calculate age in seconds since creation."""
-        return (datetime.now(timezone.utc) - self.timestamp).total_seconds()
+        return (datetime.now(UTC) - self.timestamp).total_seconds()
 
 
 # ============================================================================

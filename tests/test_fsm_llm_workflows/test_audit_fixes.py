@@ -7,6 +7,7 @@ Covers: F-001 (ParallelStep), F-002 (event race), F-004 (ConversationStep),
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -382,7 +383,7 @@ class TestInstanceLockConcurrency:
     def test_instance_lock_removed_on_purge(self):
         """F4 cleanup: _purge_oldest_terminal_instances must also drop the
         per-instance locks of purged instances."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from fsm_llm.workflows.models import WorkflowInstance, WorkflowStatus
 
@@ -394,8 +395,8 @@ class TestInstanceLockConcurrency:
                 workflow_id="wf-1",
                 current_step_id="done",
                 status=WorkflowStatus.COMPLETED,
-                completed_at=datetime(2026, 1, 1 + i, tzinfo=timezone.utc),
-                updated_at=datetime(2026, 1, 1 + i, tzinfo=timezone.utc),
+                completed_at=datetime(2026, 1, 1 + i, tzinfo=UTC),
+                updated_at=datetime(2026, 1, 1 + i, tzinfo=UTC),
             )
             engine._get_instance_lock(iid)
 
@@ -627,7 +628,7 @@ class TestFloatTimeoutSecondsEndToEnd:
     helper. See decisions.md D-011."""
 
     async def test_expired_deadline_reports_subsecond_float_timeout(self):
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         from fsm_llm.workflows.definitions import WorkflowDefinition
         from fsm_llm.workflows.models import WorkflowInstance, WorkflowStatus
@@ -654,7 +655,7 @@ class TestFloatTimeoutSecondsEndToEnd:
             current_step_id="only",
             status=WorkflowStatus.RUNNING,
             max_seconds=0.5,
-            deadline=datetime.now(timezone.utc) - timedelta(seconds=1),
+            deadline=datetime.now(UTC) - timedelta(seconds=1),
         )
         engine.workflow_instances[instance.instance_id] = instance
 

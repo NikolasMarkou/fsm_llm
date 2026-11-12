@@ -6,7 +6,7 @@ Welcome to FSM-LLM! This tutorial will have you building stateful conversations 
 
 ## Prerequisites
 
-- Python 3.10 or higher
+- Python 3.11 or higher
 - An LLM: a local Ollama model (the default is `ollama_chat/bonsai-2:27b`), or any LiteLLM provider such as OpenAI with its API key (set `LLM_MODEL` and the provider's key)
 
 ## 1. Installation

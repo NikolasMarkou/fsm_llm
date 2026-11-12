@@ -9,15 +9,11 @@ import io
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from typing import Any
 
 import pytest
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:  # pragma: no cover - Python 3.10
-    import tomli as tomllib
 
 import fsm_llm.agent_skills_cli as skills_cli
 from fsm_llm.agent_skills import AgentSkill, SkillCatalog, SkillIssue

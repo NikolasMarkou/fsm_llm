@@ -7,7 +7,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -192,7 +192,7 @@ class AgentStep(BaseModel):
     thought: str = ""
     action: str = ""
     observation: str = ""
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class AgentTrace(BaseModel):
@@ -518,7 +518,7 @@ class ReflexionMemory(BaseModel):
     outcome: str = ""
     reflection: str = ""
     lessons: list[str] = Field(default_factory=list)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class DebateRound(BaseModel):

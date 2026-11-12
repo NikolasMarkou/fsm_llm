@@ -459,7 +459,7 @@ async def _bounded(
     """
     try:
         return await asyncio.wait_for(awaitable, timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         raise HTTPException(status_code=504, detail=timeout_detail) from None
     except Exception as e:
         _raise_http(e, action)
@@ -1280,7 +1280,7 @@ _builder_busy: set[str] = set()
 _background_tasks: set[asyncio.Future[Any]] = set()
 # Lock protecting _builder_sessions. Initialized lazily (not at module import
 # time) to avoid creating an asyncio.Lock before an event loop exists (Python
-# 3.10+ deprecates that pattern).
+# deprecated that pattern in 3.10; the floor is 3.11).
 _builder_sessions_lock: asyncio.Lock | None = None
 
 
@@ -1355,7 +1355,7 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
             asyncio.to_thread(agent.start, initial_message),
             timeout=_LLM_OPERATION_TIMEOUT,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         raise HTTPException(status_code=504, detail="LLM operation timed out") from None
     except Exception as e:
         logger.error(f"Builder start failed: {e}")
@@ -1417,7 +1417,7 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
         response = await asyncio.wait_for(
             asyncio.shield(work), timeout=_BUILDER_OPERATION_TIMEOUT
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         work.add_done_callback(_release_when_done)
         raise HTTPException(
             status_code=504, detail="Builder operation timed out"

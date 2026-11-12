@@ -105,7 +105,7 @@ class TestV14NoEmojiInValidator:
 
 
 class TestV5PythonVersion:
-    """V5: Python version requirement must match pyproject.toml (3.10+)."""
+    """V5: Python version requirement must match pyproject.toml (3.11+)."""
 
     def test_minimum_python_version_is_3_11(self):
         from pathlib import Path

@@ -10,7 +10,7 @@ import inspect
 import uuid
 from collections.abc import Callable
 from concurrent.futures import Executor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fsm_llm.constants import has_internal_prefix
@@ -399,9 +399,7 @@ class WorkflowEngine:
         # Set deadline for workflow-level timeout
         if max_seconds is not None:
             instance.max_seconds = max_seconds
-            instance.deadline = datetime.now(timezone.utc) + timedelta(
-                seconds=max_seconds
-            )
+            instance.deadline = datetime.now(UTC) + timedelta(seconds=max_seconds)
 
         # Store and execute
         self.workflow_instances[instance_id] = instance
@@ -577,10 +575,7 @@ class WorkflowEngine:
             )
 
         # Check workflow-level timeout (cheap fast-path at the step boundary)
-        if (
-            instance.deadline is not None
-            and datetime.now(timezone.utc) > instance.deadline
-        ):
+        if instance.deadline is not None and datetime.now(UTC) > instance.deadline:
             error = _step_timeout()
             self._fail(instance, error)
             raise error
@@ -601,16 +596,14 @@ class WorkflowEngine:
             token = _STEP_EXECUTOR.set(self.executor)
             try:
                 if instance.deadline is not None:
-                    remaining = (
-                        instance.deadline - datetime.now(timezone.utc)
-                    ).total_seconds()
+                    remaining = (instance.deadline - datetime.now(UTC)).total_seconds()
                     if remaining <= 0:
                         raise _step_timeout()
                     try:
                         result = await asyncio.wait_for(
                             current_step.execute(instance.context), timeout=remaining
                         )
-                    except asyncio.TimeoutError as e:
+                    except TimeoutError as e:
                         raise _step_timeout() from e
                 else:
                     result = await current_step.execute(instance.context)
@@ -905,9 +898,7 @@ class WorkflowEngine:
         )
 
         if timeout_seconds is not None:
-            listener.timeout_at = datetime.now(timezone.utc) + timedelta(
-                seconds=timeout_seconds
-            )
+            listener.timeout_at = datetime.now(UTC) + timedelta(seconds=timeout_seconds)
 
         self.event_listeners.setdefault(event_type, {})[instance_id] = listener
         logger.info(
@@ -967,7 +958,7 @@ class WorkflowEngine:
 
             instance.context[CONTEXT_KEY_EVENT_TIMEOUT] = {
                 "event_type": event_type,
-                "timeout_at": datetime.now(timezone.utc).isoformat(),
+                "timeout_at": datetime.now(UTC).isoformat(),
             }
 
             if not timeout_step_id:
@@ -1245,7 +1236,7 @@ class WorkflowEngine:
         existing = self.timers.get(key)
         if existing is not None:
             existing.cancel()
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+        expires_at = datetime.now(UTC) + timedelta(seconds=delay)
         self.timers[key] = Timer(instance_id, next_step_id, expires_at, task)
 
     def _forget_timer(self, key: str) -> None:
@@ -1298,7 +1289,7 @@ class WorkflowEngine:
                 return
 
             instance.context[CONTEXT_KEY_TIMER_EXPIRED] = {
-                "expired_at": datetime.now(timezone.utc).isoformat()
+                "expired_at": datetime.now(UTC).isoformat()
             }
 
             self._forget_timer(_timer_key(instance_id, "timer"))
@@ -1327,9 +1318,7 @@ class WorkflowEngine:
         its deadline (a step boundary never comes while it waits)."""
         assert instance.deadline is not None
         instance_id = instance.instance_id
-        delay = max(
-            0.0, (instance.deadline - datetime.now(timezone.utc)).total_seconds()
-        )
+        delay = max(0.0, (instance.deadline - datetime.now(UTC)).total_seconds())
         self._arm_timer(
             _timer_key(instance_id, "deadline"),
             instance_id,

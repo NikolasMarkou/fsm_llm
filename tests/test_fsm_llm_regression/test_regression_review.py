@@ -7,7 +7,6 @@ Tests cover all Critical, High, and Medium fixes from the epistemic review.
 from __future__ import annotations
 
 import inspect
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -267,18 +266,11 @@ class TestRequirementsAlignment:
         them structurally without needing to name them.
         """
         import pathlib
+        import tomllib
 
         from packaging.requirements import Requirement
         from packaging.specifiers import SpecifierSet
         from packaging.version import Version
-
-        if sys.version_info >= (3, 11):
-            import tomllib
-        else:
-            try:
-                import tomllib
-            except ImportError:
-                import tomli as tomllib  # type: ignore[no-redef]
 
         pyproject_path = pathlib.Path(__file__).parents[2] / "pyproject.toml"
         with open(pyproject_path, "rb") as f:
