@@ -5,6 +5,8 @@ This test file uses proper FSMDefinition objects and handles Pydantic default va
 to ensure tests match real-world usage scenarios with the new architecture.
 """
 
+from __future__ import annotations
+
 import json
 import tempfile
 from pathlib import Path
@@ -20,8 +22,10 @@ from fsm_llm.definitions import (
     Transition,
     TransitionCondition,
 )
+from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import LLMInterface
 from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT
+from tests.test_fsm_llm.support import _reentry_fsm, _Session
 
 # ======================================================================
 # ROBUST FIXTURES WITH COMPLETE FSM DEFINITIONS
@@ -1010,3 +1014,138 @@ class TestPerformanceAndIntegration:
         # Note: This test verifies the context manager protocol works
         assert hasattr(api, "__enter__")
         assert hasattr(api, "__exit__")
+
+
+class TestSameConversationReentrancyIsBounded:
+    def test_error_handler_reentering_converse_does_not_recurse(self):
+        """repro1 port: RED on HEAD, the ERROR handler recursed 99 deep."""
+        from fsm_llm.definitions import FSMError
+
+        depth = {"n": 0, "max": 0}
+        raised: list[BaseException] = []
+        with _Session(_reentry_fsm()) as s:
+
+            def on_error(ctx):
+                depth["n"] += 1
+                depth["max"] = max(depth["max"], depth["n"])
+                try:
+                    s.api.converse("sorry, retrying", s.cid)
+                except FSMError as e:
+                    raised.append(e)
+                finally:
+                    depth["n"] -= 1
+                return {}
+
+            s.on(HandlerTiming.ERROR, on_error)
+            s.provider.down = True
+            with pytest.raises(FSMError):
+                s.api.converse("hello", s.cid)
+            assert depth["max"] == 1
+            # greeting + the ambiguity classifier (same binding) + the turn's
+            # own generation call; a recursing handler adds one per level.
+            assert s.provider.calls <= 3
+            assert len(raised) == 1
+            assert "already being processed" in str(raised[0])
+
+    def test_error_handler_reentering_converse_stream_does_not_recurse(self):
+        from fsm_llm.definitions import FSMError
+
+        depth = {"max": 0, "n": 0}
+        with _Session(_reentry_fsm()) as s:
+
+            def on_error(ctx):
+                depth["n"] += 1
+                depth["max"] = max(depth["max"], depth["n"])
+                try:
+                    list(s.api.converse_stream("retry", s.cid))
+                except FSMError:
+                    pass
+                finally:
+                    depth["n"] -= 1
+                return {}
+
+            s.on(HandlerTiming.ERROR, on_error)
+            s.provider.fail_stream = True
+            with pytest.raises(FSMError):
+                list(s.api.converse_stream("hello", s.cid))
+            assert depth["max"] == 1
+            # greeting + the ambiguity classifier (same binding) + the turn's
+            # own generation call; a recursing handler adds one per level.
+            assert s.provider.calls <= 3
+
+    def test_pre_processing_handler_calling_converse_raises_not_nests(self):
+        from fsm_llm.definitions import FSMError
+
+        seen: list[BaseException] = []
+        with _Session(_reentry_fsm()) as s:
+            armed = {"on": False}
+
+            def pre(ctx):
+                if armed["on"]:
+                    try:
+                        s.api.converse("nested", s.cid)
+                    except FSMError as e:
+                        seen.append(e)
+                return {}
+
+            s.on(HandlerTiming.PRE_PROCESSING, pre)
+            armed["on"] = True
+            s.api.converse("hello", s.cid)
+            assert len(seen) == 1
+            assert "already being processed" in str(seen[0])
+            # the nested call never ran: its message is nowhere in the history
+            users = [
+                m["user"] for m in s.api.get_conversation_history(s.cid) if "user" in m
+            ]
+            assert users == ["hello"]
+
+    def test_error_handler_can_still_write_via_update_context(self):
+        from fsm_llm.definitions import FSMError
+
+        with _Session(_reentry_fsm()) as s:
+            s.on(
+                HandlerTiming.ERROR,
+                lambda ctx: s.api.update_context(s.cid, {"error_seen": True}) or {},
+            )
+            s.provider.down = True
+            with pytest.raises(FSMError):
+                s.api.converse("hello", s.cid)
+            assert s.api.get_data(s.cid).get("error_seen") is True
+
+    def test_guard_is_released_after_a_failed_turn(self):
+        from fsm_llm.definitions import FSMError
+
+        with _Session(_reentry_fsm()) as s:
+            s.provider.down = True
+            with pytest.raises(FSMError):
+                s.api.converse("hello", s.cid)
+            s.provider.down = False
+            assert s.api.converse("again", s.cid)
+
+    def test_abandoned_stream_releases_the_guard(self):
+        with _Session(_reentry_fsm()) as s:
+            gen = s.api.converse_stream("hello", s.cid)
+            next(gen)
+            gen.close()
+            assert s.api.converse("after close", s.cid)
+            gen2 = s.api.converse_stream("hello", s.cid)
+            next(gen2)
+            del gen2  # CPython closes an unreferenced generator
+            assert s.api.converse("after del", s.cid)
+
+    def test_never_iterated_stream_does_not_hold_the_guard(self):
+        with _Session(_reentry_fsm()) as s:
+            _unused = s.api.converse_stream("hello", s.cid)
+            assert s.api.converse("meanwhile", s.cid)
+            del _unused
+
+    def test_converse_between_stream_iterations_raises(self):
+        """Documented D-018 cost: an open stream owns its conversation."""
+        from fsm_llm.definitions import FSMError
+
+        with _Session(_reentry_fsm()) as s:
+            gen = s.api.converse_stream("hello", s.cid)
+            next(gen)
+            with pytest.raises(FSMError, match="already being processed"):
+                s.api.converse("interleaved", s.cid)
+            gen.close()

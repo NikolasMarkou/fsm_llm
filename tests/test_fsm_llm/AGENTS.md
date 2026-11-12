@@ -27,17 +27,13 @@ Three test styles:
 | --- | --- | --- |
 | Unit | `*_unit.py`, `test_pipeline.py`, `test_fsm.py`, `test_expressions.py`, `test_memory.py`, ... | call one module directly |
 | Seam | `*_seam.py`, `test_pipeline_handler_contract.py`, `test_turn_guard_deterministic.py` | go through `API.converse` / `converse_stream` / `push_fsm` / `pop_fsm`, or `LiteLLMInterface` with `patch("fsm_llm.llm.completion")` |
-| Audit regression | `test_audit_2026_09_21.py`, `test_audit_2026_09_22.py`, `test_audit_2026_11_05.py`, `test_audit_iter1_seam.py`..`test_audit_iter4_seam.py`, `test_audit_sweeps.py` | one class per plan step, tests named after the audit id (`test_a1_*`, `test_p0_1_*`), each run RED before its fix |
+| Audit regression | `test_audit_2026_09_21.py`, `test_audit_2026_09_22.py`, `test_audit_2026_11_05.py`, `test_audit_sweeps.py` | one class per plan step, tests named after the audit id (`test_a1_*`, `test_p0_1_*`), each run RED before its fix |
 
 ```mermaid
 flowchart TD
     root[tests/conftest.py<br/>MockLLM2Interface, mock_llm_interface,<br/>mock_llm2_interface, sample_fsm_definition_v2, ollama_available]
     local[conftest.py<br/>minimal_fsm_dict]
     fx[fixtures/*_key_corpus.py]
-    i1[test_audit_iter1_seam.py] --> i2[test_audit_iter2_seam.py] --> i3[test_audit_iter3_seam.py]
-    i1 --> i4[test_audit_iter4_seam.py]
-    i2 --> i4
-    i3 --> i4
     phc[test_pipeline_handler_contract.py] --> chs[test_core_hardening_seam.py]
     pu[test_prompts_unit.py] --> chs
     fx --> cu[test_context_unit.py]
@@ -90,6 +86,7 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_stack_lifecycle_seam.py` | `push_fsm`/`pop_fsm` races, stale cleanup | uses a fake clock |
 | `test_timing_factor.py` | the `timing_factor` fixture and `current_timing_factor()` of `tests/conftest.py` | simulates a tracer, pytest-cov, a live coverage and the env override |
 | `test_turn_guard_deterministic.py` | concurrent `converse` on one conversation raises `FSMError` | event-synchronised, no sleeps |
+| `test_bulk_extraction.py` | bulk extraction through `API.converse`: correction overwrite, provenance, coercion and validation, rejected corrections, back-edge re-extraction, grounding, a failed bulk surfaced to Pass 2 | |
 | `test_prompt_injection_seam.py` | extraction prompt sanitising at `LLMInterface.extract_field` | |
 | `test_intent_entities_seam.py` | `IntentScore` keeps `None` entities | |
 | `test_core_hardening_seam.py` | `FileSessionStore.save`, `setup_logging`, bounded context, locks | |
@@ -158,13 +155,13 @@ Seam files fake the backend with `patch("fsm_llm.llm.completion", ...)` returnin
 - `-m "not slow"` deselects 14 tests (7 handler timeout, 7 live).
 - `test_context_unit.py` holds an `xfail(strict=True)` bound test: the key arm fails open above the 5% bound. An XPASS after a reporting-only change means the measurement changed; revert, do not celebrate. Do not change bound denominators in the same edit as a disclosure change.
 - fixtures invariants (enforced by `test_context_unit.py`): corpora must not import `fsm_llm.constants`; holdout and regression corpora share no names and exactly one value (`True`); census names appear in neither sibling; census numbers (341 rows, 196 distinct values, 124 in both arms) and banner strings are asserted verbatim; known-wrong sets are two-sided pins; credential values are synthetic (real vendor prefixes keep `NOTAREALTOKEN`-style bodies; census uses invented prefixes like `xk_live_`).
-- `test_audit_iter2_seam.py::TestDecisionAnchorsArePlacedAndQualified` asserts `# DECISION plan-2026-09-19T175721-21cd7f8e/D-016` in `fsm_llm.pipeline` and `/D-011` in `fsm_llm.validator`. Moving or rewording those anchors fails it.
+- `test_pipeline.py::TestDecisionAnchorsArePlacedAndQualified` asserts `# DECISION plan-2026-09-19T175721-21cd7f8e/D-016` in `fsm_llm.pipeline` and `/D-011` in `fsm_llm.validator`. Moving or rewording those anchors fails it.
 - Audit tests pin behaviour that was deliberately fixed. Treat a failure as a regression in `src/`, not a stale test, unless the plan decision it cites was reversed.
 
 ## Dependencies
 
 - Core modules of `fsm_llm` listed in Scope.
-- Cross-subpackage imports: `fsm_llm.agents` (`test_live_classification_memory.py`, `test_strands_features.py`, `test_audit_iter4_seam.py` via `fsm_llm.agents.fsm_definitions` and `fsm_llm.agents.tools.ToolRegistry`), `fsm_llm.workflows.exceptions` and `.models` (`test_logging_unit.py`), `fsm_llm.workflows` itself (`test_audit_2026_09_21.py`, which also simulates its import failing).
+- Cross-subpackage imports: `fsm_llm.agents` (`test_live_classification_memory.py`, `test_strands_features.py`, `test_validator_unit.py` via `fsm_llm.agents.fsm_definitions` and `fsm_llm.agents.tools.ToolRegistry`), `fsm_llm.workflows.exceptions` and `.models` (`test_logging_unit.py`), `fsm_llm.workflows` itself (`test_audit_2026_09_21.py`, which also simulates its import failing).
 - External: pytest, `unittest.mock`; the live file also uses litellm callbacks and a local Ollama.
 
 ## Failure modes

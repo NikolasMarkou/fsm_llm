@@ -2,18 +2,28 @@ from __future__ import annotations
 
 """Unit tests for llm.py — LiteLLMInterface with mocked litellm."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from fsm_llm.api import API
 from fsm_llm.definitions import (
+    FieldExtractionConfig,
     FieldExtractionRequest,
     FieldExtractionResponse,
     LLMResponseError,
     ResponseGenerationRequest,
 )
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
+from fsm_llm.pipeline import MessagePipeline
+from tests.test_fsm_llm.support import (
+    OLLAMA_MODEL,
+    _color_fsm,
+    _extract_field,
+    _fake_response,
+)
 
 
 class TestLiteLLMInterfaceInit:
@@ -980,3 +990,142 @@ class TestDefaultModel:
         )
         with pytest.raises(ModelNotConfiguredError):
             Classifier(schema)
+
+
+def _aiter1_field_request(field_type: str = "str") -> FieldExtractionRequest:
+    return FieldExtractionRequest(
+        system_prompt="extract the field",
+        user_message="My favorite color is blue.",
+        field_name="favorite_color",
+        field_type=field_type,  # type: ignore[arg-type]
+    )
+
+
+class TestFieldExtractionTypedSchemaOnTheWire:
+    """`LiteLLMInterface.extract_field` sends the field-typed schema (Ollama)."""
+
+    @staticmethod
+    def _run(model: str, field_type: str):
+        interface = LiteLLMInterface(model=model, api_key="test")
+        with (
+            patch("fsm_llm.llm.completion") as mock_comp,
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+        ):
+            mock_comp.return_value = _fake_response(
+                '{"field_name": "favorite_color", "value": "blue", "confidence": 0.9}'
+            )
+            interface.extract_field(_aiter1_field_request(field_type))
+            return mock_comp.call_args[1]
+
+    @pytest.mark.parametrize("field_type", ["str", "int", "float", "bool", "list"])
+    def test_ollama_value_type_forbids_object(self, field_type):
+        params = self._run(OLLAMA_MODEL, field_type)
+        schema = params["response_format"]["json_schema"]["schema"]
+        value_type = schema["properties"]["value"]["type"]
+        assert "object" not in value_type
+
+    def test_ollama_dict_field_still_allows_object(self):
+        params = self._run(OLLAMA_MODEL, "dict")
+        schema = params["response_format"]["json_schema"]["schema"]
+        assert "object" in schema["properties"]["value"]["type"]
+
+    def test_ollama_prompt_no_longer_shows_empty_value_schema(self):
+        params = self._run(OLLAMA_MODEL, "any")
+        prompt = params["messages"][-1]["content"]
+        assert '"value": {}' not in prompt
+        assert '"value": {"type": [' in prompt
+
+    def test_non_ollama_keeps_json_object_format(self):
+        params = self._run("gpt-4o", "str")
+        assert params["response_format"] == {"type": "json_object"}
+
+
+class TestZeroConfidenceValueIsNotAccepted:
+    """A self-reported confidence of 0.0 is "could not ground it", not a value."""
+
+    @staticmethod
+    def _converse(confidence: str):
+        payload = (
+            '{"field_name": "favorite_color", "value": "blue", '
+            f'"confidence": {confidence}}}'
+        )
+
+        def fake(**kwargs):
+            if kwargs.get("response_format") is not None:
+                return _fake_response(payload)
+            return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
+
+        with (
+            patch("fsm_llm.llm.completion", side_effect=fake),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+        ):
+            api = API.from_definition(_color_fsm(), model="gpt-4o", api_key="test")
+            cid, _ = api.start_conversation()
+            api.converse("My favorite color is blue.", cid)
+            return api.get_data(cid), api.get_current_state(cid)
+
+    def test_zero_confidence_value_is_left_unset(self):
+        data, state = self._converse("0.0")
+        assert "favorite_color" not in data
+        assert state == "profile"
+
+    def test_low_but_nonzero_confidence_is_still_stored(self):
+        data, state = self._converse("0.1")
+        assert data.get("favorite_color") == "blue"
+        assert state == "done"
+
+
+_BAD_CONFIDENCES = ['"high"', "null", '{"x": 1}', '"95%"', '"0.9,"']
+
+
+class TestFieldExtractionUncoercibleConfidence:
+    @pytest.mark.parametrize("bad", _BAD_CONFIDENCES)
+    def test_primary_rung_keeps_the_value_at_half_confidence(self, bad):
+        out = _extract_field(
+            f'{{"field_name": "name", "value": "Bob", "confidence": {bad}}}'
+        )
+        assert out.value == "Bob"
+        assert out.confidence == 0.5
+        assert out.is_valid
+
+    @pytest.mark.parametrize("bad", _BAD_CONFIDENCES)
+    def test_embedded_json_rung_keeps_the_value_at_half_confidence(self, bad):
+        # A prose prefix skips the primary rung; the embedded-JSON rung runs.
+        out = _extract_field(
+            f'Sure: {{"field_name": "name", "value": "Bob", "confidence": {bad}}} ok'
+        )
+        assert out.value == "Bob"
+        assert out.confidence == 0.5
+        assert out.is_valid
+
+    @pytest.mark.parametrize("bad", _BAD_CONFIDENCES)
+    def test_a_thresholded_field_rejects_the_unscored_value(self, bad):
+        out = _extract_field(
+            f'{{"field_name": "name", "value": "Bob", "confidence": {bad}}}'
+        )
+        checked = MessagePipeline._validate_field_extraction(
+            out,
+            FieldExtractionConfig(
+                field_name="name",
+                field_type="str",
+                extraction_instructions="the name",
+                confidence_threshold=0.9,
+            ),
+        )
+        assert not checked.is_valid
+
+    def test_a_normal_confidence_is_unchanged(self):
+        out = _extract_field(
+            '{"field_name": "name", "value": "Bob", "confidence": 0.8}'
+        )
+        assert (out.value, out.confidence) == ("Bob", 0.8)
+        out = _extract_field(
+            'Sure: {"field_name": "name", "value": "Bob", "confidence": 0.7} ok'
+        )
+        assert (out.value, out.confidence) == ("Bob", 0.7)

@@ -15,19 +15,35 @@ read from.
 from __future__ import annotations
 
 import json
+import time
+from contextlib import ExitStack
+from typing import Any
+from unittest.mock import patch
 
 import pytest
 
 from fsm_llm.api import API
 from fsm_llm.definitions import (
     RESPONSE_TEXT_MAX_LENGTH,
+    BulkExtractionRequest,
+    ClassificationResponseError,
     FieldExtractionRequest,
     FieldExtractionResponse,
+    LLMResponseError,
+    ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import (
     _GENERIC_FALLBACK_MESSAGE,
     LiteLLMInterface,
+)
+from fsm_llm.utilities import extract_json_from_text, strip_think_and_fences
+from tests.test_fsm_llm.support import (
+    OLLAMA_MODEL,
+    _classifier,
+    _extract_field,
+    _fake_response,
+    _stream_chunks,
 )
 
 
@@ -1030,3 +1046,712 @@ class TestEnvelopeSalvageIsLosslessAndVisible:
 
         assert result.value == 12
         assert result.confidence == 0.3
+
+
+# The corpora below were captured from the ORIGINAL regex implementations, so
+# they pin behavior equality across the rewrite, EXCEPT the six `_STRIP_CORPUS`
+# rows annotated `D-030` and the one annotated `D-048`: those pin the D-030 semantics (only a fence at the
+# START of the reply is stripped; a fence inside prose is kept). The `[1, 2]`
+# fenced-list row is deliberately absent: step 11 changes that contract (dict-only) on purpose.
+_STRIP_CORPUS: list[tuple[str, str]] = [
+    ('```json\n{"a": 1}\n```', '{"a": 1}'),
+    ('```\n{"a": 1}\n```', '{"a": 1}'),
+    ('```json{"a": 1}```', '{"a": 1}'),
+    ('  ```json  \n\n {"a": 1}  \n```  \n', '{"a": 1}'),
+    # D-048 trade-off: was '{"a": 1}' (a stray closing fence without a leading
+    # fence is now kept; extract_json_from_text still recovers the object)
+    ('{"a": 1}\n```', '{"a": 1}\n```'),
+    ('```json\n{"a": 1}', '{"a": 1}'),
+    ('<think>reason {"x":2}</think>{"a": 1}', '{"a": 1}'),
+    ('<think>a</think>b<think>c</think>{"a": 1}', 'b{"a": 1}'),
+    ('<think>a<think>b</think>c</think>{"a": 1}', 'c</think>{"a": 1}'),
+    ('<think>unterminated {"a": 1}', '<think>unterminated {"a": 1}'),
+    ('{"a": 1}<think>unterminated', '{"a": 1}<think>unterminated'),
+    ('<think>a</think>\n```json\n{"a": 1}\n```', '{"a": 1}'),
+    # D-030: was '{"a": 1}'
+    ('```\n```json\n{"a": 1}\n```\n```', '```json\n{"a": 1}\n```'),
+    # D-030: was 'text\n{"a": 1}\nmore'
+    ('text\n```json\n{"a": 1}\n```\nmore', 'text\n```json\n{"a": 1}\n```\nmore'),
+    ('```json\r\n{"a": 1}\r\n```\r\n', '{"a": 1}'),
+    ("````\nx\n````", "`\nx\n`"),
+    ("```jsonx\ny```", "x\ny"),
+    # D-030: was '{}'
+    ("```json\n\n\n```json\n{}\n```", "```json\n{}"),
+    ("<think></think>```json```", ""),
+    ("", ""),
+    ("```", ""),
+    ("\n```\n", ""),
+    # D-030: was 'a\nb'
+    ("a\n```\n\n```\nb", "a\n```\n\n```\nb"),
+    # D-030: was '{"z":1}'
+    ('```json\n```\n```json\n{"z":1}\n```', '```\n```json\n{"z":1}'),
+    ('<think>a</think></think>{"a": 1}', '</think>{"a": 1}'),
+    ('<THINK>a</THINK>{"a":1}', '<THINK>a</THINK>{"a":1}'),
+    ("```json ```", ""),
+    # D-030: was 'x```json\n{"a":1}\ny'
+    ('x```json\n{"a":1}\n```y', 'x```json\n{"a":1}\n```y'),
+    ('  \n```json\n{"a":1}\n```\n\n\n', '{"a":1}'),
+    ('``` \xa0 \n{"a":1}\u2003```', '{"a":1}'),
+]
+
+
+_EXTRACT_CORPUS: list[tuple[str, dict[str, Any] | None]] = [
+    ('```json\n{"a": 1}\n```', {"a": 1}),
+    ('Here:\n```json\n{"a": 1}\n```\nThanks', {"a": 1}),
+    ('```{"a": 1}```', {"a": 1}),
+    ('```json{"a":1}```', {"a": 1}),
+    ('```jsonx{"a":1}```', {"a": 1}),
+    ('```json\n{"a": 1}', {"a": 1}),
+    ('```\nnot json\n``` then {"b": 2}', {"b": 2}),
+    ('```json\n{"a": 1}\n``` and ```json\n{"b": 2}\n```', {"a": 1}),
+    ('```json\n{bad}\n``` {"c": 3}', {"c": 3}),
+    ('````\n{"a":1}\n````', {"a": 1}),
+    ('```\n```{"a":1}', {"a": 1}),
+    ('no fence {"a": 1} here', {"a": 1}),
+    ('```json   \n  \n {"a": 1} \n  \n```', {"a": 1}),
+    ('``` {"k": "v"} ```', {"k": "v"}),
+]
+
+
+_LINEAR_N = 50_000
+
+
+_LINEAR_BUDGET_S = 1.0
+
+
+def _elapsed(fn, arg: str) -> float:
+    start = time.perf_counter()
+    fn(arg)
+    return time.perf_counter() - start
+
+
+class TestLinearFenceAndThink:
+    @pytest.mark.parametrize(("text", "expected"), _STRIP_CORPUS)
+    def test_strip_think_and_fences_matches_old_outputs(self, text, expected):
+        """The corpus pins the D-030 semantics: only a leading fence is stripped."""
+        assert strip_think_and_fences(text) == expected
+
+    @pytest.mark.parametrize(("text", "expected"), _EXTRACT_CORPUS)
+    def test_extract_json_from_text_matches_old_outputs(self, text, expected):
+        assert extract_json_from_text(text) == expected
+
+    def test_extract_json_unclosed_fence_then_spaces_is_linear(self, timing_factor):
+        text = "```json" + " " * _LINEAR_N
+        start = time.perf_counter()
+        assert extract_json_from_text(text) is None
+        assert time.perf_counter() - start < _LINEAR_BUDGET_S * timing_factor
+
+    def test_extract_json_unclosed_fence_then_newlines_is_linear(self, timing_factor):
+        text = "```" + "\n" * _LINEAR_N
+        start = time.perf_counter()
+        assert extract_json_from_text(text) is None
+        assert time.perf_counter() - start < _LINEAR_BUDGET_S * timing_factor
+
+    def test_strip_think_repeated_unterminated_open_tags_is_linear(self, timing_factor):
+        text = "<think>a" * _LINEAR_N
+        start = time.perf_counter()
+        assert strip_think_and_fences(text) == text
+        assert time.perf_counter() - start < _LINEAR_BUDGET_S * timing_factor
+
+    def test_strip_think_many_closed_blocks_is_linear(self, timing_factor):
+        text = "<think>a</think>b" * _LINEAR_N
+        start = time.perf_counter()
+        assert strip_think_and_fences(text) == "b" * _LINEAR_N
+        assert time.perf_counter() - start < _LINEAR_BUDGET_S * timing_factor
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "x```" + " " * _LINEAR_N + "x",
+            "```" + "\n" * _LINEAR_N,
+            "``` " * _LINEAR_N,
+            "\n```x" * _LINEAR_N,
+        ],
+        ids=["ws-run", "fence-newlines", "fence-space-repeat", "newline-fence-repeat"],
+    )
+    def test_strip_fence_shapes_are_linear(self, text, timing_factor):
+        assert _elapsed(strip_think_and_fences, text) < _LINEAR_BUDGET_S * timing_factor
+
+    def test_extract_bulk_data_hostile_think_reply_is_bounded(self, timing_factor):
+        """The shared stripper is reached from extract_bulk_data on the real seam."""
+        llm = LiteLLMInterface(model=OLLAMA_MODEL)
+        hostile = "<think>a" * _LINEAR_N
+        request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
+        with patch("fsm_llm.llm.completion", return_value=_fake_response(hostile)):
+            start = time.perf_counter()
+            with pytest.raises(LLMResponseError):
+                llm.extract_bulk_data(request)
+            assert time.perf_counter() - start < _LINEAR_BUDGET_S * timing_factor
+
+
+class TestDictOnlyJsonContract:
+    @pytest.mark.parametrize(
+        "text",
+        ["42", "[1,2]", "true", '"hi"', "```json\n[1,2]\n```", "3.5", "[]"],
+        ids=["int", "list", "bool", "string", "fenced-list", "float", "empty-list"],
+    )
+    def test_non_dict_json_returns_none(self, text):
+        assert extract_json_from_text(text) is None
+
+    def test_top_level_array_of_objects_is_not_recovered(self):
+        """D-010: no fall-through into the interior of a valid non-object."""
+        assert extract_json_from_text('[{"a": 1}]') is None
+
+    def test_first_object_still_wins(self):
+        assert extract_json_from_text('{"a":1} {"b":2}') == {"a": 1}
+
+    def test_fenced_non_dict_falls_through_to_brace_scan(self):
+        text = '```json\n[1,2]\n``` then {"a": 1}'
+        assert extract_json_from_text(text) == {"a": 1}
+
+    @pytest.mark.parametrize("content", ["42", "[1,2]", "true"])
+    def test_classify_non_dict_json_raises_classification_error(self, content):
+        clf = _classifier()
+        with (
+            patch(
+                "fsm_llm.llm.completion",
+                return_value=_fake_response(content),
+            ),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=[],
+            ),
+            pytest.raises(ClassificationResponseError),
+        ):
+            clf.classify("I want a phone")
+
+    @pytest.mark.parametrize("content", ["[1,2]", "null", "42", "true", '"hi"'])
+    def test_extract_bulk_data_non_dict_json_returns_empty(self, content):
+        llm = LiteLLMInterface(model=OLLAMA_MODEL)
+        request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
+        with patch("fsm_llm.llm.completion", return_value=_fake_response(content)):
+            result = llm.extract_bulk_data(request)
+        assert result.extracted_data == {}
+
+    def test_extract_bulk_data_recovers_embedded_object(self):
+        llm = LiteLLMInterface(model=OLLAMA_MODEL)
+        request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
+        with patch(
+            "fsm_llm.llm.completion",
+            return_value=_fake_response('Sure! {"a": 1}'),
+        ):
+            result = llm.extract_bulk_data(request)
+        assert result.extracted_data == {"a": 1}
+
+    def test_extract_bulk_data_recovers_wrapped_extracted_data(self):
+        llm = LiteLLMInterface(model=OLLAMA_MODEL)
+        request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
+        reply = 'Here you go: {"extracted_data": {"name": "Ann"}, "confidence": 0.5}'
+        with patch("fsm_llm.llm.completion", return_value=_fake_response(reply)):
+            result = llm.extract_bulk_data(request)
+        assert result.extracted_data == {"name": "Ann"}
+        assert result.confidence == 0.5
+
+    @pytest.mark.parametrize("content", ["no json at all", ""])
+    def test_extract_bulk_data_unparseable_still_raises(self, content):
+        llm = LiteLLMInterface(model=OLLAMA_MODEL)
+        request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
+        with (
+            patch("fsm_llm.llm.completion", return_value=_fake_response(content)),
+            pytest.raises(LLMResponseError),
+        ):
+            llm.extract_bulk_data(request)
+
+
+_ANIMAL_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "Answer",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "animal": {"type": "string"},
+                "fun_fact": {"type": "string"},
+            },
+            "required": ["animal", "fun_fact"],
+        },
+    },
+}
+
+
+_MESSAGE_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "Answer",
+        "schema": {
+            "type": "object",
+            "properties": {"message": {"type": "string"}, "mood": {"type": "string"}},
+            "required": ["message"],
+        },
+    },
+}
+
+
+_APOLOGY = "I'm sorry, I couldn't generate a proper response. Please try again."
+
+
+def _terminal_fsm() -> dict:
+    return {
+        "name": "Fmt",
+        "description": "terminal format",
+        "version": "4.1",
+        "initial_state": "ask",
+        "persona": "Concise.",
+        "states": {
+            "ask": {
+                "id": "ask",
+                "description": "ask topic",
+                "purpose": "Learn the favorite animal",
+                "required_context_keys": ["animal"],
+                "extraction_instructions": "Extract animal (string).",
+                "response_instructions": "Ask for their favorite animal.",
+                "field_extractions": [
+                    {
+                        "field_name": "animal",
+                        "field_type": "str",
+                        "extraction_instructions": "the animal",
+                        "required": True,
+                    }
+                ],
+                "transitions": [
+                    {
+                        "target_state": "done",
+                        "description": "animal known",
+                        "priority": 0,
+                        "conditions": [
+                            {
+                                "description": "animal",
+                                "requires_context_keys": ["animal"],
+                            }
+                        ],
+                    }
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "end",
+                "purpose": "Summarise",
+                "response_instructions": "State the animal and one fun fact.",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class _ReplyProv:
+    """Scripted provider: field extraction gets ``otters``; a Pass-2 call
+    consumes the next item of ``replies`` (the last one repeats). Records the
+    number of non-extraction calls in ``pass2_calls``."""
+
+    def __init__(self, replies, stream_parts=None):
+        self.replies = list(replies)
+        self.stream_parts = stream_parts
+        self.pass2_calls = 0
+        self._stack = ExitStack()
+
+    def _completion(self, **kwargs):
+        rf = kwargs.get("response_format")
+        if kwargs.get("stream"):
+            return iter(_stream_chunks(self.stream_parts or ["x"]))
+        system = kwargs["messages"][0]["content"]
+        if "Extract the field 'animal'" in system:
+            return _fake_response(
+                json.dumps(
+                    {"field_name": "animal", "value": "otters", "confidence": 0.9}
+                )
+            )
+        if '"extracted_data"' in system:
+            return _fake_response(json.dumps({"extracted_data": {}, "confidence": 0.9}))
+        del rf
+        self.pass2_calls += 1
+        i = min(self.pass2_calls - 1, len(self.replies) - 1)
+        return _fake_response(self.replies[i])
+
+    def __enter__(self):
+        self._stack.enter_context(
+            patch("fsm_llm.llm.completion", side_effect=self._completion)
+        )
+        self._stack.enter_context(
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            )
+        )
+        self.api = API.from_definition(_terminal_fsm(), model="gpt-4o", api_key="test")
+        return self
+
+    def __exit__(self, *exc):
+        self._stack.close()
+
+    def to_done(self, schema):
+        self.cid, greeting = self.api.start_conversation(
+            {"_output_response_format": schema} if schema else None
+        )
+        self.greeting = greeting
+        self.calls_after_start = self.pass2_calls
+        reply = self.api.converse("I love otters.", self.cid)
+        assert self.api.get_current_state(self.cid) == "done"
+        return reply
+
+
+_ANIMAL_JSON = {"animal": "otters", "fun_fact": "Otters hold hands when they sleep."}
+
+
+class TestStructuredTerminalReplyIsNotTheApology:
+    def test_schema_without_message_key_returns_the_json(self):
+        with _ReplyProv(["ask", json.dumps(_ANIMAL_JSON)]) as p:
+            reply = p.to_done(_ANIMAL_SCHEMA)
+            history = p.api.get_conversation_history(p.cid)
+        assert reply != _APOLOGY
+        assert json.loads(reply) == _ANIMAL_JSON
+        assert json.loads(history[-1]["system"]) == _ANIMAL_JSON
+
+    def test_schema_with_message_key_still_returns_the_message_string(self):
+        body = json.dumps({"message": "Otters are great.", "mood": "warm"})
+        with _ReplyProv(["ask", body]) as p:
+            reply = p.to_done(_MESSAGE_SCHEMA)
+        assert reply == "Otters are great."
+
+    def test_no_schema_unstructured_json_reply_still_degrades_as_before(self):
+        """Without a requested schema nothing changed: a `{"animal": ...}` reply
+        on an ordinary terminal state is still the apology."""
+        with _ReplyProv(["ask", json.dumps(_ANIMAL_JSON)]) as p:
+            reply = p.to_done(None)
+        assert reply == _APOLOGY
+
+    def test_reply_over_the_5000_char_cap_degrades_as_before(self):
+        """Documented limit: the JSON text may not exceed the `message` cap."""
+        big = json.dumps({"animal": "otters", "fun_fact": "x" * 5200})
+        with _ReplyProv(["ask", big]) as p:
+            reply = p.to_done(_ANIMAL_SCHEMA)
+        assert reply == _APOLOGY
+
+    def test_stream_twin_yields_the_raw_json_unchanged(self):
+        """No code change on the stream path: raw deltas are yielded verbatim."""
+        raw = json.dumps(_ANIMAL_JSON)
+        with _ReplyProv(["ask"], stream_parts=[raw[:10], raw[10:]]) as p:
+            cid, _ = p.api.start_conversation(
+                {"_output_response_format": _ANIMAL_SCHEMA}
+            )
+            streamed = "".join(p.api.converse_stream("I love otters.", cid))
+            assert p.api.get_current_state(cid) == "done"
+        assert json.loads(streamed) == _ANIMAL_JSON
+
+
+_EMPTY = json.dumps({"message": "", "reasoning": ""})
+
+
+_GOOD = json.dumps({"message": "Welcome! What is your favorite animal?"})
+
+
+class TestEmptyReplyIsRetriedOnce:
+    def test_empty_greeting_then_good_reply_returns_the_good_reply(self):
+        with _ReplyProv([_EMPTY, _GOOD]) as p:
+            cid, greeting = p.api.start_conversation()
+            history = p.api.get_conversation_history(cid)
+        assert greeting == "Welcome! What is your favorite animal?"
+        assert p.pass2_calls == 2
+        assert all(_APOLOGY not in m.get("system", "") for m in history)
+
+    def test_two_consecutive_empties_return_the_apology_after_exactly_two_calls(self):
+        with _ReplyProv([_EMPTY, _EMPTY, _GOOD]) as p:
+            _, greeting = p.api.start_conversation()
+        assert greeting == _APOLOGY
+        assert p.pass2_calls == 2  # one retry, no loop; the third reply is unused
+
+    def test_empty_reply_on_a_later_turn_is_retried_through_converse(self):
+        with _ReplyProv([_GOOD, _EMPTY, "Otters it is."]) as p:
+            cid, _ = p.api.start_conversation()
+            before = p.pass2_calls
+            reply = p.api.converse("I love otters.", cid)
+            history = p.api.get_conversation_history(cid)
+        assert reply == "Otters it is."
+        assert p.pass2_calls - before == 2
+        assert all(_APOLOGY not in m.get("system", "") for m in history)
+
+    def test_normal_reply_makes_exactly_one_call(self):
+        with _ReplyProv([_GOOD]) as p:
+            _, greeting = p.api.start_conversation()
+        assert greeting == "Welcome! What is your favorite animal?"
+        assert p.pass2_calls == 1
+
+    def test_provider_error_on_the_retry_keeps_the_first_apology(self):
+        """The retry must not turn a shown apology into a failed turn."""
+        with _ReplyProv([_EMPTY]) as p:
+            real = p._completion
+            state = {"n": 0}
+
+            def flaky(**kwargs):
+                if kwargs["messages"][0]["content"].startswith("Extract"):
+                    return real(**kwargs)
+                state["n"] += 1
+                if state["n"] == 2:
+                    raise RuntimeError("provider down")
+                return real(**kwargs)
+
+            with patch("fsm_llm.llm.completion", side_effect=flaky):
+                _, greeting = p.api.start_conversation()
+        assert greeting == _APOLOGY
+
+
+_STRUCTURED_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {"name": "reply", "schema": {"type": "object"}},
+}
+
+
+def _generate(content: str, response_format=None):
+    req = ResponseGenerationRequest(
+        system_prompt="s",
+        user_message="u",
+        transition_occurred=False,
+        response_format=response_format,
+    )
+    with (
+        patch("fsm_llm.llm.completion") as mock_comp,
+        patch(
+            "fsm_llm.llm.get_supported_openai_params",
+            return_value=["response_format"],
+        ),
+    ):
+        mock_comp.return_value = _fake_response(content)
+        out = LiteLLMInterface(model="gpt-4o", api_key="k").generate_response(req)
+    return out.message
+
+
+class TestStructuredReplyWithReasoningKey:
+    def test_answer_plus_reasoning_returns_the_json_text(self):
+        body = json.dumps({"answer": "42", "reasoning": "because 6x7"})
+        message = _generate(body, _STRUCTURED_FORMAT)
+        assert json.loads(message) == {"answer": "42", "reasoning": "because 6x7"}
+
+    def test_answer_only_is_unchanged(self):
+        body = json.dumps({"answer": "42"})
+        assert json.loads(_generate(body, _STRUCTURED_FORMAT)) == {"answer": "42"}
+
+    def test_schema_with_message_key_still_returns_the_message(self):
+        body = json.dumps({"message": "hi there", "reasoning": "polite"})
+        assert _generate(body, _STRUCTURED_FORMAT) == "hi there"
+
+    def test_unstructured_reasoning_only_reply_is_not_shown(self):
+        # Re-baselined by plan-2026-09-21T203800-8a03483a/D-039 (audit D6):
+        # `reasoning` is internal and never becomes the user-facing reply.
+        from fsm_llm.llm import _GENERIC_FALLBACK_MESSAGE
+
+        body = json.dumps({"reasoning": "because x"})
+        assert _generate(body, None) == _GENERIC_FALLBACK_MESSAGE
+
+
+class TestFencedExampleDoesNotHideOrLeakAnObject:
+    def test_reply_with_an_object_before_a_fenced_example(self):
+        # The provider wraps its envelope in prose and then shows a fenced
+        # schema example. The object BEFORE the fence must be parsed whole:
+        # the regex fallback would cut its escaped-quote message at the `\\`.
+        content = (
+            'Here you go: {"message": "say \\"hi\\" now"}\n'
+            'Schema example:\n```json\n[{"a": 1}]\n```\nHope this helps.'
+        )
+        assert _generate(content) == 'say "hi" now'
+
+    def test_reply_with_only_a_fenced_array_does_not_leak_its_message(self):
+        message = _generate('```json\n[{"message": "leak"}]\n```')
+        assert message != "leak"
+
+
+_PROSE_WITH_FENCE = "Use:\n```python\nprint(1)\n```\nok"
+
+
+class TestInlineCodeFenceIsKept:
+    def test_inline_fence_in_prose_keeps_its_text(self):
+        from fsm_llm.utilities import strip_think_and_fences
+
+        assert strip_think_and_fences(_PROSE_WITH_FENCE) == _PROSE_WITH_FENCE
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ('```json\n{"a": 1}\n```', '{"a": 1}'),
+            ('```\n{"a": 1}\n```', '{"a": 1}'),
+            ('<think>x</think>```json\n{"a": 1}\n```', '{"a": 1}'),
+        ],
+    )
+    def test_a_reply_that_starts_with_a_fence_is_still_stripped(self, text, expected):
+        from fsm_llm.utilities import strip_think_and_fences
+
+        assert strip_think_and_fences(text) == expected
+
+    def test_field_extraction_of_prose_with_a_fence_keeps_the_fence(self):
+        response = _extract_field(_PROSE_WITH_FENCE)
+        assert "```python" in str(response.value)
+
+    def test_json_inside_a_mid_text_fence_is_still_recovered(self):
+        """D-030: fences in mid-text are not stripped, extract_json_from_text finds the JSON."""
+        from fsm_llm.definitions import BulkExtractionRequest
+
+        wrapped = 'text\n```json\n{"message": "hi"}\n```\nmore'
+        assert _generate(wrapped) == "hi"
+        assert _generate(wrapped, _STRUCTURED_FORMAT) == "hi"
+        field = _extract_field(
+            'text\n```json\n{"value": "Bob", "confidence": 0.9}\n```\nmore'
+        )
+        assert (field.value, field.confidence) == ("Bob", 0.9)
+        llm = LiteLLMInterface(model="ollama_chat/qwen3.5:4b")
+        request = BulkExtractionRequest(system_prompt="e", user_message="hi")
+        with patch(
+            "fsm_llm.llm.completion",
+            return_value=_fake_response('text\n```json\n{"name": "Bob"}\n```\nmore'),
+        ):
+            assert llm.extract_bulk_data(request).extracted_data == {"name": "Bob"}
+
+
+def _generate_counted(content: str):
+    """Return ``(provider_call_count, message)`` for an unstructured reply."""
+    req = ResponseGenerationRequest(
+        system_prompt="s",
+        user_message="u",
+        transition_occurred=False,
+    )
+    with (
+        patch("fsm_llm.llm.completion") as mock_comp,
+        patch(
+            "fsm_llm.llm.get_supported_openai_params",
+            return_value=["response_format"],
+        ),
+    ):
+        mock_comp.return_value = _fake_response(content)
+        out = LiteLLMInterface(model="gpt-4o", api_key="k").generate_response(req)
+    return mock_comp.call_count, out.message
+
+
+class TestPlainTextRungParsesBeforeReplacing:
+    @pytest.mark.parametrize(
+        "text",
+        ["{name}, welcome! Your code is {code}", "{1, 2, 3}"],
+    )
+    def test_brace_shaped_prose_reaches_the_user_after_one_call(self, text):
+        assert _generate_counted(text) == (1, text)
+
+    def test_think_prefixed_prose_is_stripped(self):
+        assert _generate_counted("<think>plan it</think>Hello there") == (
+            1,
+            "Hello there",
+        )
+
+    def test_think_block_only_reply_is_not_emptied(self):
+        # `... or content`: a reply that is only a think block stays as it was
+        _, message = _generate_counted("<think>only</think>")
+        assert message == "<think>only</think>"
+
+    def test_a_parseable_object_without_message_still_gets_the_apology(self):
+        # D-022 accepted case, unchanged: the reply is an envelope by shape AND parse
+        _, message = _generate_counted('{"a": 1}')
+        assert message != '{"a": 1}'
+        assert message
+
+    def test_an_envelope_with_message_yields_the_message(self):
+        assert _generate_counted('{"message": "hi"}')[1] == "hi"
+
+    def test_a_truncated_envelope_still_recovers_the_message(self):
+        # the embedded-JSON rung above repairs it; the plain-text rung is not reached
+        assert _generate_counted('{"message": "hi"') == (1, "hi")
+
+    def test_a_malformed_brace_envelope_is_shown_as_text(self):
+        # D-030 trade-off (a), documented: brace-shaped but unparseable, so it is
+        # prose now, not the generic apology
+        text = '{"message": hi}'
+        assert _generate_counted(text) == (1, text)
+
+    def test_think_prefixed_envelope_yields_the_message(self):
+        assert _generate_counted('<think>x</think>{"message": "hi"}')[1] == "hi"
+
+    def test_a_valid_array_envelope_is_still_replaced(self):
+        # pinned by test_llm_parse_fallback_seam ('top-level-array'): a PARSEABLE
+        # non-object envelope is plumbing, not prose
+        _, message = _generate_counted('[{"message": "leak"}]')
+        assert "leak" not in message
+        assert message
+
+
+class TestClosingFenceNeedsALeadingFence:
+    def test_prose_ending_in_a_code_block_keeps_both_fences(self):
+        from fsm_llm.utilities import strip_think_and_fences
+
+        text = "Here is the code:\n```python\nprint(1)\n```"
+        assert strip_think_and_fences(text) == text
+        assert strip_think_and_fences(text).count("```") == 2
+
+    def test_two_fenced_blocks_in_prose_keep_all_four_markers(self):
+        from fsm_llm.utilities import strip_think_and_fences
+
+        text = "Two blocks:\n```py\na\n```\nand\n```py\nb\n```"
+        assert strip_think_and_fences(text).count("```") == 4
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            '```json\n{"a": 1}\n```',
+            '<think>reason</think>\n```json\n{"a": 1}\n```',
+        ],
+    )
+    def test_a_fully_fenced_reply_is_still_unwrapped(self, text):
+        """GUARD: green on HEAD and after."""
+        from fsm_llm.utilities import strip_think_and_fences
+
+        assert strip_think_and_fences(text) == '{"a": 1}'
+
+    def test_a_stray_closing_fence_is_kept_by_the_helper(self):
+        """D-048 trade-off: was `{"a": 1}` (the one authorised corpus rewrite)."""
+        from fsm_llm.utilities import strip_think_and_fences
+
+        assert strip_think_and_fences('{"a": 1}\n```') == '{"a": 1}\n```'
+
+    def test_a_stray_closing_fence_still_yields_the_object_through_extract_field(
+        self,
+    ):
+        """GUARD: the JSON ladder recovers the object; the trade-off costs nothing."""
+        from unittest.mock import patch
+
+        from fsm_llm.definitions import FieldExtractionRequest
+        from fsm_llm.llm import LiteLLMInterface
+        from tests.test_fsm_llm.support import _fake_response
+
+        req = FieldExtractionRequest(
+            system_prompt="extract",
+            user_message="hi",
+            field_name="a",
+            field_type="int",
+        )
+        with (
+            patch(
+                "fsm_llm.llm.completion",
+                return_value=_fake_response('{"a": 1}\n```'),
+            ),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+        ):
+            out = LiteLLMInterface(model="gpt-4o", api_key="k").extract_field(req)
+        assert out.value == 1
+
+    def test_a_stray_closing_fence_still_yields_the_object_through_bulk(self):
+        """GUARD: same, through extract_bulk_data."""
+        from unittest.mock import patch
+
+        from fsm_llm.definitions import BulkExtractionRequest
+        from fsm_llm.llm import LiteLLMInterface
+        from tests.test_fsm_llm.support import _fake_response
+
+        req = BulkExtractionRequest(system_prompt="extract", user_message="hi")
+        with (
+            patch(
+                "fsm_llm.llm.completion",
+                return_value=_fake_response('{"a": 1}\n```'),
+            ),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+        ):
+            out = LiteLLMInterface(model="gpt-4o", api_key="k").extract_bulk_data(req)
+        assert out.extracted_data == {"a": 1}

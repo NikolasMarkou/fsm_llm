@@ -9,6 +9,8 @@ Tests cover:
 - get_fsm_summary: summary generation
 """
 
+from __future__ import annotations
+
 import json
 import time
 
@@ -433,3 +435,47 @@ class TestRedactingJsonDefault:
         text = _json.dumps({"creds": Leaky()}, default=redacting_json_default)
         assert "hunter2" not in text
         assert "<redacted:Leaky>" in text
+
+
+class TestExtractJsonFencedNonDictAndDepth:
+    def test_fenced_array_interior_object_is_not_returned(self):
+        from fsm_llm.utilities import extract_json_from_text
+
+        # RA-04: the fence body is a top-level array, which is not a payload.
+        # The brace scan must not recover the object inside it.
+        assert extract_json_from_text('```json\n[{"a":1}]\n```') is None
+
+    def test_fenced_array_then_real_object_returns_the_object(self):
+        from fsm_llm.utilities import extract_json_from_text
+
+        text = '```json\n[1]\n```\n{"b":2}'
+        assert extract_json_from_text(text) == {"b": 2}
+        # the interior object of the array is skipped, the later one wins
+        text = '```json\n[{"a":1}]\n``` then {"b":2}'
+        assert extract_json_from_text(text) == {"b": 2}
+
+    def test_fenced_object_and_undecodable_fence_unchanged(self):
+        from fsm_llm.utilities import extract_json_from_text
+
+        assert extract_json_from_text('```json\n{"a":1}\n```') == {"a": 1}
+        # an undecodable fence still falls through to the whole-text brace scan
+        assert extract_json_from_text('```json\n{"a":\n``` {"c":3}') == {"c": 3}
+
+    def test_deep_array_does_not_raise(self):
+        from fsm_llm.utilities import extract_json_from_text
+
+        # RA-06: json.loads raises RecursionError on deeply nested input
+        assert extract_json_from_text("[" * 100000) is None
+
+    def test_deep_dict_does_not_raise(self):
+        from fsm_llm.utilities import extract_json_from_text
+
+        deep = '{"a":' * 100000 + "1" + "}" * 100000
+        result = extract_json_from_text(deep)
+        assert result is None or isinstance(result, dict)
+
+    def test_deep_fenced_body_does_not_raise(self):
+        from fsm_llm.utilities import extract_json_from_text
+
+        deep = "```json\n" + "[" * 100000 + "\n```"
+        assert extract_json_from_text(deep) is None

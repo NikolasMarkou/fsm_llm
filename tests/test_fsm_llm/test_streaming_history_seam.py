@@ -21,6 +21,7 @@ fails the test instead of hanging the gate.
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from collections.abc import Iterator
@@ -37,6 +38,7 @@ from fsm_llm.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
+from tests.test_fsm_llm.support import _fake_response, _greeter_fsm, _stream_chunk
 
 # Hard bound on every generator consumption loop: the FSM under test yields at
 # most 3 chunks, so anything beyond this is a runaway and must fail, not hang.
@@ -462,3 +464,121 @@ class TestEagerPrologueOnCall:
         finally:
             release.set()
             t.join(timeout=5.0)
+
+
+class _StreamHarness:
+    """Drive `API.converse` / `converse_stream` against a fake `completion`."""
+
+    def __init__(self, stream_chunks: list[str], terminal: bool = False):
+        self.calls: list[dict] = []
+        self._chunks = stream_chunks
+        self._terminal = terminal
+
+    def _fake(self, **kwargs):
+        self.calls.append(kwargs)
+        if kwargs.get("stream"):
+            return iter([_stream_chunk(c) for c in self._chunks])
+        return _fake_response(json.dumps({"message": "Hello there.", "reasoning": ""}))
+
+    def run(self, mode: str, context: dict | None = None):
+        with (
+            patch("fsm_llm.llm.completion", side_effect=self._fake),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+        ):
+            api = API.from_definition(
+                _greeter_fsm(self._terminal), model="gpt-4o", api_key="test"
+            )
+            cid, _ = api.start_conversation()
+            ctx = dict(context or {})
+            if self._terminal:
+                ctx["go"] = True
+            if ctx:
+                api.update_context(cid, ctx)
+            self.calls.clear()  # drop the greeting call
+            if mode == "stream":
+                self.streamed = list(api.converse_stream("Hi there", cid))
+            else:
+                self.reply = api.converse("Hi there", cid)
+            self.history = api.get_conversation_history(cid)
+        return self
+
+    def system_prompt(self, stream: bool) -> str:
+        matching = [c for c in self.calls if bool(c.get("stream")) is stream]
+        assert matching, f"no {'stream' if stream else 'sync'} call captured"
+        return matching[-1]["messages"][0]["content"]
+
+
+class TestStreamPromptIsPlainText:
+    """`converse_stream` neither asks for, yields, nor stores a JSON envelope."""
+
+    def test_stream_system_prompt_has_no_message_schema_block(self):
+        h = _StreamHarness(["Hello", " there."]).run("stream")
+        prompt = h.system_prompt(stream=True)
+        assert '"message":' not in prompt
+        assert "valid JSON" not in prompt
+        assert "<response_format>" in prompt  # plain-text variant still present
+
+    def test_plain_chunks_are_yielded_verbatim_and_stored_identically(self):
+        h = _StreamHarness(["Hello", " there", "."]).run("stream")
+        assert h.streamed == ["Hello", " there", "."]
+        last = h.history[-1]
+        assert list(last.values()) == ["Hello there."]
+        assert not any('"message"' in v for e in h.history for v in e.values())
+
+    def test_terminal_state_with_output_response_format_keeps_json_prompt(self):
+        schema = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "out",
+                "schema": {
+                    "type": "object",
+                    "properties": {"message": {"type": "string"}},
+                },
+            },
+        }
+        h = _StreamHarness(['{"message": "hi"}'], terminal=True).run(
+            "stream", context={"_output_response_format": schema}
+        )
+        prompt = h.system_prompt(stream=True)
+        assert '"message":' in prompt
+        assert "valid JSON" in prompt
+
+    def test_terminal_state_without_output_format_streams_plain_text(self):
+        h = _StreamHarness(["Bye."], terminal=True).run("stream")
+        prompt = h.system_prompt(stream=True)
+        assert '"message":' not in prompt
+
+    def test_sync_converse_prompt_keeps_json_envelope_section(self):
+        h = _StreamHarness([]).run("converse")
+        prompt = h.system_prompt(stream=False)
+        assert '"message": "Your natural response to the user"' in prompt
+        assert "Your response must be valid JSON" in prompt
+
+    def test_sync_converse_prompt_is_byte_identical_to_pre_change(self):
+        """Hashes recorded on the unfixed tree (step-3 RED run)."""
+        import hashlib
+
+        h = _StreamHarness([]).run("converse")
+        prompt = h.system_prompt(stream=False)
+        section = prompt[
+            prompt.index("<response_format>") : prompt.index("</response_format>")
+        ]
+        assert (
+            hashlib.sha256(section.encode()).hexdigest()
+            == "f8dbf124c4e2d75d4e7adaa608a532a7fe62ff6a61ad49dc784ae43d40764d67"
+        )
+        assert (
+            hashlib.sha256(prompt.encode()).hexdigest()
+            == "9777721720503bc6d0df9aca74d9a177eeaac7e4f2c72c72efd79be1e802c7a8"
+        )
+
+    def test_builder_default_matches_explicit_json_variant(self):
+        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+
+        b = ResponseGenerationPromptBuilder()
+        assert b._build_response_format_section() == b._build_response_format_section(
+            plain_text=False
+        )

@@ -7,7 +7,9 @@ real ``API`` turn.
 
 from __future__ import annotations
 
+import json
 from typing import get_args
+from unittest.mock import patch
 
 import pytest
 
@@ -15,6 +17,7 @@ from fsm_llm import API, FieldExtractionConfig, typed_field_extraction
 from fsm_llm.constants import EXTRACTION_ENVELOPE_KEYS, FIELD_PROMPT_CONTEXT_LABEL
 from fsm_llm.definitions import TypedFieldType
 from fsm_llm.testing import PromptGroundedLLM
+from tests.test_fsm_llm.support import _color_fsm, _fake_response
 
 _NOTE = "Trip note: the client flies to Lyon on Friday."
 _HIDDEN = "UNLISTED-MARKER-4411"
@@ -187,3 +190,55 @@ class TestNarrowingThroughApi:
 
         assert all(_NOTE not in r.system_prompt for r in llm.calls("extract_field"))
         assert data.get("city") is None
+
+
+class TestDictValueForStrFieldIsRejected:
+    """A dict-wrapped answer for a str field is not stored and does not gate."""
+
+    @staticmethod
+    def _completion(field_payload: str):
+        def fake(**kwargs):
+            fmt = kwargs.get("response_format")
+            if fmt is not None:
+                return _fake_response(field_payload)
+            return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
+
+        return fake
+
+    def _converse(self, field_payload: str):
+        with (
+            patch(
+                "fsm_llm.llm.completion", side_effect=self._completion(field_payload)
+            ),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+        ):
+            api = API.from_definition(_color_fsm(), model="gpt-4o", api_key="test")
+            cid, _ = api.start_conversation()
+            api.converse("My favorite color is blue.", cid)
+            return api.get_data(cid), api.get_current_state(cid)
+
+    def test_dict_value_is_not_stored_and_transition_does_not_fire(self):
+        data, state = self._converse(
+            '{"field_name": "favorite_color", "value": {"blue": "blue"}, '
+            '"confidence": 0.9}'
+        )
+        assert "favorite_color" not in data
+        assert state == "profile"
+
+    def test_list_value_is_not_stored_for_str_field(self):
+        data, state = self._converse(
+            '{"field_name": "favorite_color", "value": ["blue"], "confidence": 0.9}'
+        )
+        assert "favorite_color" not in data
+        assert state == "profile"
+
+    def test_plain_string_value_is_stored_and_transition_fires(self):
+        """Vacuity guard: the rejection is a filter, not a dead extractor."""
+        data, state = self._converse(
+            '{"field_name": "favorite_color", "value": "blue", "confidence": 0.9}'
+        )
+        assert data.get("favorite_color") == "blue"
+        assert state == "done"

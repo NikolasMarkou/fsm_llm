@@ -6,10 +6,15 @@ covering all operators, error handling, and complex expressions that would be us
 real FSM transitions.
 """
 
+from __future__ import annotations
+
 from contextlib import contextmanager
+
+import pytest
 
 from fsm_llm.expressions import evaluate_logic, hard_equals, soft_equals
 from fsm_llm.logging import logger
+from tests.test_fsm_llm.support import _gate_fsm, _Prov
 
 
 class TestExpressionEvaluator:
@@ -766,3 +771,58 @@ class TestNumericStringOrdering:
         helper = " ".join((expressions._numeric_equal.__doc__ or "").split())
         assert "so the three agree on numeric equality" not in helper
         assert '``"01" <= "1"``' in helper
+
+
+def _level_gate_fsm(op: str) -> dict:
+    fsm = _gate_fsm()
+    gate = fsm["states"]["gate"]
+    gate["required_context_keys"] = ["level"]
+    cond = gate["transitions"][0]["conditions"][0]
+    cond["requires_context_keys"] = ["level"]
+    cond["logic"] = (
+        {op: [{"var": "level"}, 2]} if op == ">=" else {op: [2, {"var": "level"}]}
+    )
+    return fsm
+
+
+class TestNumericStringInequalityAgreesWithEquality:
+    @pytest.mark.parametrize(
+        "logic",
+        [
+            {"<=": [1, "1.0"]},
+            {">=": ["2", 2]},
+            {"<=": ["1.0", 1]},
+            {">=": [2, "2.0"]},
+            {"<=": [1, "1.0", 2]},
+        ],
+    )
+    def test_numeric_string_equal_pair_satisfies_the_inclusive_operator(self, logic):
+        assert evaluate_logic(logic) is True
+
+    @pytest.mark.parametrize(
+        "logic",
+        [
+            {"<=": ["abc", 1]},
+            {">=": [None, 1]},
+            {"<=": [2, "1.0"]},
+            {">=": [1, "1.5"]},
+            {"<=": ["abc", "abd"]},
+        ],
+    )
+    def test_non_numeric_and_unequal_pairs_keep_their_old_result(self, logic):
+        expected = {"<=": ["abc", "abd"]} == logic
+        assert evaluate_logic(logic) is expected
+
+    def test_equality_operator_agrees_with_the_inclusive_operators(self):
+        # Re-baselined by plan-2026-09-21T203800-8a03483a/D-013 (B3), which
+        # supersedes the D-023 "== untouched" pin: `==` now accepts the same
+        # numerically equal pairs `<=`/`>=` do; bools stay uncoerced.
+        assert evaluate_logic({"==": [1, "1.0"]}) is True
+        assert evaluate_logic({"!=": [1, "1.0"]}) is False
+        assert evaluate_logic({"==": [True, "1.0"]}) is False
+
+    @pytest.mark.parametrize("op", [">=", "<="])
+    def test_transition_condition_fires_through_converse(self, op):
+        with _Prov(_level_gate_fsm(op)) as p:
+            p.turn(field={"level": "2.0"})
+            assert p.api.get_current_state(p.cid) == "admin"

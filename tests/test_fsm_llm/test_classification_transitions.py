@@ -37,6 +37,8 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
     return mock_llm
 
 
+from loguru import logger
+
 from fsm_llm.api import API
 from fsm_llm.classification import Classifier, HierarchicalClassifier
 from fsm_llm.constants import (
@@ -78,6 +80,14 @@ from fsm_llm.prompts import (
     ResponseGenerationPromptBuilder,
 )
 from fsm_llm.transition_evaluator import TransitionEvaluator
+from tests.test_fsm_llm.support import (
+    _aiter1_ambiguous_fsm,
+    _ClassBulkProv,
+    _classified_bulk_fsm,
+    _classified_fsm,
+    _ConnectionHarness,
+    _fake_response,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1609,3 +1619,334 @@ class TestOversizedTieSets:
         )
 
         assert len(schema.intents) == 15
+
+
+class _StayHarness:
+    """`API.converse` with a scripted (or raising) classifier, transition
+    handlers counting their calls, and the Pass-2 system prompt captured."""
+
+    def __init__(self, fsm: dict, intent: str | None, confidence: float = 0.95):
+        self.fsm = fsm
+        self.intent = intent  # None -> the classifier raises
+        self.confidence = confidence
+        self.pre = 0
+        self.post = 0
+        self.response_prompts: list[str] = []
+
+    def _completion(self, **kwargs):
+        if kwargs.get("response_format") is None:
+            self.response_prompts.append(kwargs["messages"][0]["content"])
+        return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
+
+    def run(self):
+        from fsm_llm.definitions import ClassificationResult
+        from fsm_llm.handlers import HandlerTiming
+
+        classifier = MagicMock()
+        if self.intent is None:
+            classifier.classify.side_effect = ClassificationError("classifier down")
+        else:
+            classifier.classify.return_value = ClassificationResult(
+                reasoning="r", intent=self.intent, confidence=self.confidence
+            )
+
+        def _pre(ctx):
+            self.pre += 1
+            return {}
+
+        def _post(ctx):
+            self.post += 1
+            return {}
+
+        with (
+            patch("fsm_llm.llm.completion", side_effect=self._completion),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+            patch("fsm_llm.pipeline.Classifier", return_value=classifier),
+        ):
+            api = API.from_definition(self.fsm, model="gpt-4o", api_key="test")
+            api.create_handler("pre", HandlerTiming.PRE_TRANSITION, _pre)
+            api.create_handler("post", HandlerTiming.POST_TRANSITION, _post)
+            cid, _ = api.start_conversation()
+            self.response_prompts.clear()
+            api.converse("I have a question", cid)
+            return api.get_current_state(cid)
+
+
+class TestStayIsNotATransition:
+    def test_classifier_error_is_not_a_transition(self):
+        h = _StayHarness(_aiter1_ambiguous_fsm(), intent=None)
+        assert h.run() == "hub"
+        assert (h.pre, h.post) == (0, 0)
+        assert "<transition_info>" not in h.response_prompts[-1]
+
+    def test_fallback_intent_is_not_a_transition(self):
+        from fsm_llm.constants import TRANSITION_CLASSIFICATION_FALLBACK_INTENT
+
+        h = _StayHarness(
+            _aiter1_ambiguous_fsm(), intent=TRANSITION_CLASSIFICATION_FALLBACK_INTENT
+        )
+        assert h.run() == "hub"
+        assert (h.pre, h.post) == (0, 0)
+        assert "<transition_info>" not in h.response_prompts[-1]
+
+    def test_classifier_selecting_a_real_target_still_transitions(self):
+        """Vacuity guard: the ambiguous path is reached and still transitions."""
+        h = _StayHarness(_aiter1_ambiguous_fsm(), intent="billing")
+        assert h.run() == "billing"
+        assert (h.pre, h.post) == (1, 1)
+        assert "<transition_info>" in h.response_prompts[-1]
+
+    def test_declared_explicit_self_loop_still_fires_handlers(self):
+        """Pins D-007: a DECLARED self-loop is design, not a "stay"."""
+        h = _StayHarness(_aiter1_ambiguous_fsm(self_loop=True), intent="billing")
+        assert h.run() == "hub"
+        assert (h.pre, h.post) == (1, 1)
+        assert "<transition_info>" in h.response_prompts[-1]
+
+
+_PROXY = {
+    "model": "gpt-4o",
+    "api_key": "sk-proxy-secret",
+    "api_base": "http://proxy:4000",
+    "timeout": 7,
+}
+
+
+def _classified_fsm_with_model(model: str | None) -> dict:
+    fsm = _classified_fsm()
+    if model is not None:
+        fsm["states"]["triage"]["classification_extractions"][0]["model"] = model
+    return fsm
+
+
+class TestClassifierInheritsConnection:
+    def test_classification_extraction_gets_key_base_and_timeout(self):
+        h = _ConnectionHarness(_classified_fsm(), "buy", **_PROXY)
+        _, state = h.run()
+        assert state == "shop"  # vacuity guard: the real classifier ran
+        assert len(h.classifier_calls) == 1
+        call = h.classifier_calls[0]
+        assert call["api_key"] == "sk-proxy-secret"
+        assert call["api_base"] == "http://proxy:4000"
+        assert call["timeout"] == 7
+        assert call["model"] == "gpt-4o"
+
+    def test_ambiguous_transition_resolution_gets_key_base_and_timeout(self):
+        h = _ConnectionHarness(_aiter1_ambiguous_fsm(), "billing", **_PROXY)
+        _, state = h.run()
+        assert state == "billing"  # vacuity guard: classifier chose the target
+        assert len(h.classifier_calls) == 1
+        call = h.classifier_calls[0]
+        assert call["api_key"] == "sk-proxy-secret"
+        assert call["api_base"] == "http://proxy:4000"
+        assert call["timeout"] == 7
+
+    def test_default_timeout_still_bounded_without_explicit_timeout(self):
+        h = _ConnectionHarness(_classified_fsm(), "buy", model="gpt-4o", api_key="k")
+        h.run()
+        # LiteLLMInterface's own default (120.0) is inherited, never unbounded
+        assert h.classifier_calls[0]["timeout"] == 120.0
+
+    def test_same_model_config_override_keeps_connection(self):
+        h = _ConnectionHarness(_classified_fsm_with_model("gpt-4o"), "buy", **_PROXY)
+        h.run()
+        assert h.classifier_calls[0]["api_key"] == "sk-proxy-secret"
+
+    def test_other_provider_config_model_does_not_receive_the_key(self):
+        h = _ConnectionHarness(
+            _classified_fsm_with_model("anthropic/claude-3-haiku"), "buy", **_PROXY
+        )
+        h.run()
+        call = h.classifier_calls[0]
+        assert call["model"] == "anthropic/claude-3-haiku"
+        assert "api_key" not in call
+        assert "api_base" not in call
+
+    def test_interfaces_without_attributes_are_used_as_is(self):
+        """An interface with no ``model``, ``kwargs`` or ``timeout`` attribute
+        (a bare ``LLMInterface`` subclass, a spec'd mock, a plain mock) is the
+        interface the classifier sends through; nothing is read off it. A
+        config ``model`` then always differs from the interface's (absent)
+        model and gets its own interface with no inherited settings (D-006 of
+        plan 944e2692; the deleted ``_classifier_connection_kwargs`` helper
+        used to read those attributes)."""
+        import threading
+
+        from fsm_llm.definitions import ClassificationSchema, IntentDefinition
+        from fsm_llm.llm import LiteLLMInterface, LLMInterface
+        from fsm_llm.pipeline import MessagePipeline
+
+        schema = ClassificationSchema(
+            intents=[
+                IntentDefinition(name="a", description="a"),
+                IntentDefinition(name="b", description="b"),
+            ],
+            fallback_intent="b",
+        )
+
+        def _classifier(llm, model=None):
+            pipe = MessagePipeline.__new__(MessagePipeline)
+            pipe.llm_interface = llm
+            pipe._classifier_cache = {}
+            pipe._classifier_cache_lock = threading.Lock()
+            return pipe._get_classifier(schema, None, model=model)
+
+        class _Bare(LLMInterface):
+            def generate_response(self, request):
+                raise NotImplementedError
+
+            def complete(self, request):
+                raise NotImplementedError
+
+        for llm in (_Bare(), MagicMock(spec=LLMInterface)):
+            assert _classifier(llm)._llm is llm
+        # Not an LLMInterface at all: cannot classify, a soft
+        # ClassificationError (D-046 of plan 944e2692).
+        with pytest.raises(ClassificationError, match="does not implement complete"):
+            _classifier(MagicMock())
+        own = _classifier(_Bare(), model="gpt-4o")._llm
+        assert isinstance(own, LiteLLMInterface)
+        assert own.model == "gpt-4o"
+        assert own.kwargs == {}
+        assert own.timeout == 120.0
+
+
+class TestClassifierIgnoresReservedInterfaceKwargs:
+    @pytest.mark.parametrize("reserved", ["config", "schema"])
+    def test_classification_extraction_survives_reserved_kwarg(self, reserved):
+        h = _ConnectionHarness(
+            _classified_fsm(),
+            "buy",
+            model="gpt-4o",
+            api_key="sk-x",
+            timeout=9,
+            **{reserved: {"user_thing": 1}},
+        )
+        _, state = h.run()
+        # RED on HEAD: TypeError swallowed, classification silently skipped
+        assert state == "shop"
+        assert len(h.classifier_calls) == 1
+        call = h.classifier_calls[0]
+        assert call["api_key"] == "sk-x"
+        assert call["timeout"] == 9
+        # D-006 of plan 944e2692: the classifier sends through the
+        # conversation's interface, which passes its own kwargs on every
+        # request (as on Pass 1 and Pass 2). The old name filter existed only
+        # because Classifier(...) bound these names; it gets no kwargs now.
+        assert call[reserved] == {"user_thing": 1}
+
+    @pytest.mark.parametrize("reserved", ["config", "schema"])
+    def test_ambiguous_transition_survives_reserved_kwarg(self, reserved):
+        h = _ConnectionHarness(
+            _aiter1_ambiguous_fsm(),
+            "billing",
+            model="gpt-4o",
+            api_key="sk-x",
+            timeout=9,
+            **{reserved: {"user_thing": 1}},
+        )
+        _, state = h.run()
+        assert state == "billing"
+        assert len(h.classifier_calls) == 1
+        call = h.classifier_calls[0]
+        assert call["api_key"] == "sk-x"
+        assert call["timeout"] == 9
+        # As above: the conversation interface's kwargs, unfiltered.
+        assert call[reserved] == {"user_thing": 1}
+
+    def test_bound_names_in_interface_kwargs_cannot_break_construction(self):
+        """An interface whose kwargs use the names Classifier binds
+        (``schema``, ``model``, ``config``) still yields a classifier over
+        that very interface: the pipeline spreads no kwargs into
+        ``Classifier(...)`` (D-006 of plan 944e2692)."""
+        from unittest.mock import MagicMock
+
+        from fsm_llm.definitions import ClassificationSchema, IntentDefinition
+        from fsm_llm.pipeline import MessagePipeline
+
+        llm = MagicMock(spec=LLMInterface)
+        llm.model = "gpt-4o"
+        llm.timeout = 5
+        llm.kwargs = {
+            "schema": 1,
+            "model": 2,
+            "config": 3,
+            "api_key": "k",
+            "api_base": "b",
+        }
+        pipe = MessagePipeline.__new__(MessagePipeline)
+        pipe.llm_interface = llm
+        pipe._classifier_cache = {}
+        pipe._classifier_cache_lock = threading.Lock()
+        schema = ClassificationSchema(
+            intents=[
+                IntentDefinition(name="a", description="a"),
+                IntentDefinition(name="b", description="b"),
+            ],
+            fallback_intent="b",
+        )
+        classifier = pipe._get_classifier(schema, None)
+        assert classifier._llm is llm
+        assert classifier.model == "gpt-4o"
+
+
+class TestBelowThresholdClassifierStallIsPinned:
+    """Accepted behaviour (iteration 3 owns the log line): a classifier below
+    its threshold on a gated key leaves the key unset, the gated transition
+    does not fire and no transition handler runs. Pins the stall so a later
+    change is a decision, not an accident."""
+
+    def _run(self, confidence: float):
+        with _ClassBulkProv(_classified_bulk_fsm(), "buy", confidence) as p:
+            fired: list[str] = []
+            for timing in (HandlerTiming.PRE_TRANSITION, HandlerTiming.POST_TRANSITION):
+                p.api.register_handler(
+                    p.api.create_handler(f"spy_{timing.name}")
+                    .at(timing)
+                    .do(lambda ctx, t=timing: fired.append(t.name) or {})
+                )
+            data = p.say("hmm maybe something", bulk={"intent": "buy"})
+            return data, p.api.get_current_state(p.cid), fired
+
+    def test_below_threshold_leaves_key_unset_state_put_and_no_handler(self):
+        data, state, fired = self._run(0.2)
+        assert "intent" not in data
+        assert state == "triage"
+        assert fired == []
+
+    def test_above_threshold_fires_the_transition_and_its_handlers(self):
+        """Vacuity guard: the spies do observe a real transition."""
+        data, state, fired = self._run(0.95)
+        assert data.get("intent") == "buy"
+        assert state == "shop"
+        assert fired == ["PRE_TRANSITION", "POST_TRANSITION"]
+
+
+class TestBelowThresholdClassificationWarns:
+    def _warnings_for(self, confidence: float) -> list[str]:
+        records: list[str] = []
+        sink = logger.add(
+            lambda m: records.append(m.record["message"]), level="WARNING"
+        )
+        # logging.py calls logger.disable("fsm_llm") at import; without enable the
+        # sink sees nothing and the negative case would pass for the wrong reason.
+        logger.enable("fsm_llm")
+        try:
+            with _ClassBulkProv(_classified_bulk_fsm(), "buy", confidence) as p:
+                p.say("hmm maybe something", bulk={"intent": "buy"})
+        finally:
+            logger.remove(sink)
+            logger.disable("fsm_llm")
+        return [r for r in records if "below threshold" in r]
+
+    def test_one_warning_names_field_intent_confidence_and_threshold(self):
+        found = self._warnings_for(0.2)
+        assert len(found) == 1
+        for token in ("intent", "buy", "0.20", "0.7"):
+            assert token in found[0]
+
+    def test_no_warning_for_an_above_threshold_classification(self):
+        assert self._warnings_for(0.95) == []

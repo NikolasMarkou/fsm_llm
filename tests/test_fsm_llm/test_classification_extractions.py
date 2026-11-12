@@ -43,6 +43,12 @@ from fsm_llm.prompts import (
     ResponseGenerationPromptBuilder,
 )
 from fsm_llm.transition_evaluator import TransitionEvaluator
+from tests.test_fsm_llm.support import (
+    _ClassBulkProv,
+    _classified_bulk_fsm,
+    _classified_fsm,
+    _fake_response,
+)
 
 # ----------------------------------------------------------
 # Helpers
@@ -1138,3 +1144,121 @@ class TestClassificationNaNConfidence:
         clf = _classifier()
         result = clf._parse_single({"intent": "positive", "confidence": {"bad": 1}})
         assert result.confidence == 0.0
+
+
+class _ClassifiedHarness:
+    """`API.converse` with a scripted classifier and a spying fake completion.
+
+    ``plain_calls`` records the system prompt of every per-field extraction
+    call (the ones that carry a ``response_format`` and name a field).
+    """
+
+    def __init__(self, fsm: dict, intent: str, confidence: float, plain_value="buy"):
+        self.fsm = fsm
+        self.intent = intent
+        self.confidence = confidence
+        self.plain_value = plain_value
+        self.plain_calls: list[str] = []
+
+    def _completion(self, **kwargs):
+        system = kwargs["messages"][0]["content"]
+        if kwargs.get("response_format") is not None:
+            self.plain_calls.append(system)
+            return _fake_response(
+                json.dumps(
+                    {"field_name": "x", "value": self.plain_value, "confidence": 0.95}
+                )
+            )
+        return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
+
+    def run(self):
+        from fsm_llm.definitions import ClassificationResult
+
+        classifier = MagicMock()
+        classifier.classify.return_value = ClassificationResult(
+            reasoning="r", intent=self.intent, confidence=self.confidence
+        )
+        with (
+            patch("fsm_llm.llm.completion", side_effect=self._completion),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+            patch("fsm_llm.pipeline.Classifier", return_value=classifier),
+        ):
+            api = API.from_definition(self.fsm, model="gpt-4o", api_key="test")
+            cid, _ = api.start_conversation()
+            api.converse("I would like to buy a phone", cid)
+            return api.get_data(cid), api.get_current_state(cid)
+
+
+class TestClassificationOwnedKeyIsNotPlainExtracted:
+    def test_no_plain_extract_call_for_classification_key(self):
+        h = _ClassifiedHarness(_classified_fsm(), "buy", 0.95)
+        data, state = h.run()
+        assert h.plain_calls == []
+        assert data.get("intent") == "buy"
+        assert state == "shop"
+
+    def test_below_threshold_classification_leaves_key_unset_and_gate_closed(self):
+        h = _ClassifiedHarness(_classified_fsm(), "buy", 0.2)
+        data, state = h.run()
+        assert h.plain_calls == []
+        assert "intent" not in data
+        assert state == "triage"
+
+    def test_fallback_intent_is_still_stored(self):
+        h = _ClassifiedHarness(_classified_fsm(), "browse", 0.1)
+        data, state = h.run()
+        assert data.get("intent") == "browse"
+        assert state == "triage"
+
+    def test_ordinary_required_key_is_still_plain_extracted(self):
+        """Vacuity guard: the exclusion is per-key, not a disabled extractor."""
+        h = _ClassifiedHarness(_classified_fsm(topic=True), "buy", 0.95, "phones")
+        data, _ = h.run()
+        assert len(h.plain_calls) == 1
+        assert "'topic'" in h.plain_calls[0]
+        assert "'intent'" not in h.plain_calls[0]
+        assert data.get("topic") == "phones"
+
+    def test_explicit_field_extraction_with_same_name_still_wins(self):
+        h = _ClassifiedHarness(
+            _classified_fsm(explicit_field_extraction=True), "buy", 0.2
+        )
+        data, state = h.run()
+        assert len(h.plain_calls) == 1
+        assert data.get("intent") == "buy"
+        assert state == "shop"
+
+
+class TestBulkPassRespectsClassificationOwnership:
+    def test_bulk_cannot_fill_a_classifier_owned_key_below_threshold(self):
+        with _ClassBulkProv(_classified_bulk_fsm(), "buy", 0.2) as p:
+            data = p.say("hmm maybe something", bulk={"intent": "buy"})
+            state = p.api.get_current_state(p.cid)
+        assert "intent" not in data
+        assert state == "triage"
+
+    def test_ordinary_bulk_keys_still_added_next_to_a_classifier_owned_key(self):
+        with _ClassBulkProv(_classified_bulk_fsm(), "buy", 0.2) as p:
+            data = p.say("hmm maybe something", bulk={"intent": "buy", "topic": "cats"})
+        assert data.get("topic") == "cats"
+        assert "intent" not in data
+
+    def test_classifier_above_threshold_still_transitions(self):
+        """Vacuity guard: the classification path itself is intact."""
+        with _ClassBulkProv(_classified_bulk_fsm(), "buy", 0.95) as p:
+            data = p.say("I want to buy a phone", bulk={"topic": "phones"})
+            state = p.api.get_current_state(p.cid)
+        assert data.get("intent") == "buy"
+        assert state == "shop"
+
+    def test_agent_fsm_keeps_the_bulk_fill_for_a_classification_owned_key(self):
+        """Agent FSMs (`use_classification=True`) rely on the bulk fill when the
+        classifier is below threshold; the `agent_trace` marker keeps it."""
+        with _ClassBulkProv(
+            _classified_bulk_fsm(), "buy", 0.2, initial_context={"agent_trace": []}
+        ) as p:
+            data = p.say("hmm maybe something", bulk={"intent": "buy"})
+        assert data.get("intent") == "buy"

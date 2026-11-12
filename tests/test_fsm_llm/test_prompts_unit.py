@@ -5,11 +5,16 @@ Tests BasePromptConfig validation, text sanitization, token estimation,
 and the three prompt builders: DataExtraction, ResponseGeneration, Transition.
 """
 
+from __future__ import annotations
+
+import json
 from typing import ClassVar
+from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
 
+from fsm_llm.api import API
 from fsm_llm.constants import MAX_CONTEXT_FILTER_DEPTH
 from fsm_llm.definitions import (
     FieldExtractionConfig,
@@ -27,6 +32,14 @@ from fsm_llm.prompts import (
     HistoryManagementStrategy,
     ResponseGenerationPromptBuilder,
     ResponsePromptConfig,
+)
+from tests.test_fsm_llm.support import (
+    _correction_fsm,
+    _declared_secret_fsm,
+    _fake_response,
+    _greeter_fsm,
+    _Prov,
+    _stream_chunk,
 )
 
 # ============================================================================
@@ -1350,3 +1363,193 @@ class TestResponsePromptWithoutUserMessage:
         assert builder._build_response_task_section() == (
             builder._build_response_task_section(user_message="hello")
         )
+
+
+HIDDEN = "HIDDEN-VALUE-7431"
+
+
+SHOWN = "SHOWN-VALUE-2208"
+
+
+SECRET = "SECRET-TOKEN-9917"
+
+
+def _scoped_fsm(read_keys: list[str] | None, with_scope: bool = True) -> dict:
+    fsm = _greeter_fsm(False)
+    if with_scope:
+        fsm["states"]["chat"]["context_scope"] = {"read_keys": read_keys}
+    return fsm
+
+
+class _ScopeHarness:
+    """Capture the Pass-2 system prompt at the sync, stream and greeting sites."""
+
+    def __init__(self, fsm: dict, context: dict | None = None):
+        self.fsm = fsm
+        self.context = context if context is not None else {}
+        self.calls: list[dict] = []
+
+    def _fake(self, **kwargs):
+        self.calls.append(kwargs)
+        if kwargs.get("stream"):
+            return iter([_stream_chunk("ok")])
+        return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
+
+    def _patches(self):
+        return (
+            patch("fsm_llm.llm.completion", side_effect=self._fake),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+        )
+
+    def prompt(self, site: str) -> str:
+        p1, p2 = self._patches()
+        with p1, p2:
+            api = API.from_definition(self.fsm, model="gpt-4o", api_key="test")
+            cid, _ = api.start_conversation(initial_context=dict(self.context))
+            greeting = self.calls[-1]["messages"][0]["content"]
+            if site == "greeting":
+                return greeting
+            self.calls.clear()
+            if site == "stream":
+                list(api.converse_stream("Hi there", cid))
+                matching = [c for c in self.calls if c.get("stream")]
+            else:
+                api.converse("Hi there", cid)
+                matching = [c for c in self.calls if not c.get("stream")]
+            return matching[-1]["messages"][0]["content"]
+
+
+_SITES = ["sync", "stream", "greeting"]
+
+
+class TestContextScopeReachesPass2Prompt:
+    @pytest.mark.parametrize("site", _SITES)
+    def test_key_outside_read_keys_is_absent_from_prompt(self, site):
+        h = _ScopeHarness(_scoped_fsm(["shown"]), {"shown": SHOWN, "hidden": HIDDEN})
+        prompt = h.prompt(site)
+        assert HIDDEN not in prompt
+        assert SHOWN in prompt
+
+    @pytest.mark.parametrize("site", _SITES)
+    def test_unscoped_state_still_shows_every_key(self, site):
+        h = _ScopeHarness(
+            _scoped_fsm(None, with_scope=False),
+            {"shown": SHOWN, "hidden": HIDDEN},
+        )
+        prompt = h.prompt(site)
+        assert HIDDEN in prompt
+        assert SHOWN in prompt
+
+    @pytest.mark.parametrize("site", _SITES)
+    def test_scope_without_read_keys_is_unscoped(self, site):
+        h = _ScopeHarness(_scoped_fsm([]), {"shown": SHOWN, "hidden": HIDDEN})
+        prompt = h.prompt(site)
+        assert HIDDEN in prompt
+
+    @pytest.mark.parametrize("site", _SITES)
+    def test_secret_named_key_inside_read_keys_is_still_dropped(self, site):
+        h = _ScopeHarness(
+            _scoped_fsm(["shown", "api_token"]),
+            {"shown": SHOWN, "api_token": SECRET, "hidden": HIDDEN},
+        )
+        prompt = h.prompt(site)
+        assert SECRET not in prompt
+        assert HIDDEN not in prompt
+        assert SHOWN in prompt
+
+    @pytest.mark.parametrize("site", _SITES)
+    def test_read_keys_naming_absent_keys_do_not_break_the_prompt(self, site):
+        h = _ScopeHarness(_scoped_fsm(["not_yet_set"]), {"hidden": HIDDEN})
+        prompt = h.prompt(site)
+        assert HIDDEN not in prompt
+
+    def test_builder_context_arg_is_optional_and_defaults_to_none(self):
+        import inspect
+
+        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+
+        param = inspect.signature(
+            ResponseGenerationPromptBuilder.build_response_prompt
+        ).parameters["context"]
+        assert param.default is None
+
+    def test_unscoped_prompt_is_byte_identical_to_pre_change(self):
+        """Hash recorded on the unfixed tree (step-6 RED run), unscoped state."""
+        import hashlib
+
+        h = _ScopeHarness(
+            _scoped_fsm(None, with_scope=False),
+            {"shown": SHOWN, "hidden": HIDDEN},
+        )
+        digests = {
+            site: hashlib.sha256(h.prompt(site).encode()).hexdigest() for site in _SITES
+        }
+        assert digests == {
+            "sync": "cc5623b3329c5a3b0fddcc4ce98b2f3d3c2d81e8b940608bb23f7f52c8d4daef",
+            "stream": "78aecf1510e608bda9d92841f341592b163724ffbaabf689d85e641ddb84721c",
+            "greeting": "ee5972fd140e18804a4f6faf7221cc08e51be3aafdf4a0ac42caec98430c410e",
+        }
+
+
+class _PromptProv(_Prov):
+    """``_Prov`` that also records every non-extraction (Pass-2) system prompt."""
+
+    def __init__(self, fsm: dict):
+        super().__init__(fsm)
+        self.pass2_prompts: list[str] = []
+
+    def _completion(self, **kwargs):
+        system = kwargs["messages"][0]["content"]
+        if "<response_generation>" in system:
+            self.pass2_prompts.append(system)
+        return super()._completion(**kwargs)
+
+
+class TestExtractedDataSectionIsFiltered:
+    def test_declared_secret_field_never_reaches_the_pass2_prompt(self):
+        with _PromptProv(_declared_secret_fsm()) as p:
+            data = p.turn(
+                field={"favorite_color": "blue", "password": "S3CRET-hunter2"}
+            )
+        # the declared field still lands in the conversation data (per-field
+        # channel keeps working) ...
+        assert data.get("favorite_color") == "blue"
+        # ... but it is not echoed into the response-generation prompt
+        assert p.pass2_prompts
+        assert all("S3CRET-hunter2" not in s for s in p.pass2_prompts)
+
+    def test_benign_extracted_data_prompt_is_byte_identical_to_pre_change(self):
+        """Hash recorded on the unfixed tree (step-8 RED run)."""
+        import hashlib
+
+        with _PromptProv(_declared_secret_fsm()) as p:
+            p.turn(field={"favorite_color": "blue"})
+        section = p.pass2_prompts[-1]
+        assert '"favorite_color": "blue"' in section
+        digest = hashlib.sha256(section.encode()).hexdigest()
+        assert (
+            digest == "b43a45f016f0bcc680c59d78bd1cd05d5fd17b3f90ff4ec44765ac693df1ec2b"
+        )
+
+    def test_datetime_value_no_longer_drops_the_extracted_data_section(self):
+        import datetime
+
+        from fsm_llm.definitions import FSMContext, FSMDefinition, FSMInstance
+        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+
+        fsm = FSMDefinition(**_correction_fsm())
+        state = fsm.states["profile"]
+        instance = FSMInstance(
+            fsm_id="t", current_state="profile", context=FSMContext()
+        )
+        prompt = ResponseGenerationPromptBuilder().build_response_prompt(
+            instance=instance,
+            state=state,
+            fsm_definition=fsm,
+            extracted_data={"when": datetime.datetime(2026, 1, 2, 3, 4, 5)},
+        )
+        assert "<extracted_data>" in prompt
+        assert "2026-01-02 03:04:05" in prompt

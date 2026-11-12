@@ -6,6 +6,8 @@ management, generate_initial_response, full 2-pass process(), and the
 context-key cleaning the extraction commit relies on.
 """
 
+from __future__ import annotations
+
 from unittest.mock import MagicMock
 
 import pytest
@@ -2049,3 +2051,66 @@ class TestSeededTimestampFormats:
         assert saved is not None
         for key in ("_conversation_start", "_timestamp", "_transition_timestamp"):
             assert key not in saved.context_data
+
+
+class TestDecisionAnchorsArePlacedAndQualified:
+    _PLAN = "plan-2026-09-19T175721-21cd7f8e"
+
+    @pytest.mark.parametrize(
+        ("module", "decision"),
+        [("fsm_llm.pipeline", "D-016"), ("fsm_llm.validator", "D-011")],
+    )
+    def test_qualified_anchor_present(self, module, decision):
+        import importlib
+        import inspect
+
+        src = inspect.getsource(importlib.import_module(module))
+        assert f"# DECISION {self._PLAN}/{decision}" in src
+
+
+class TestEmptyContainerIsSetForNonAgentFsms:
+    def test_a_seeded_empty_list_makes_no_per_field_extraction_call(self):
+        """GUARD: a non-agent FSM keeps the existing skip-if-set behaviour, an
+        empty list counts as set (D-046 changes only agent-managed FSMs)."""
+        import json
+        from unittest.mock import patch
+
+        from fsm_llm import API
+        from tests.test_fsm_llm.support import _correction_fsm, _fake_response
+
+        fsm = _correction_fsm()
+        fsm["states"]["profile"]["field_extractions"] = [
+            {
+                "field_name": "favorite_color",
+                "field_type": "list",
+                "extraction_instructions": "the colors",
+                "required": True,
+            }
+        ]
+        prompts: list[str] = []
+
+        def completion(**kwargs):
+            prompts.append(kwargs["messages"][0]["content"])
+            if '"extracted_data"' in prompts[-1]:
+                return _fake_response(
+                    json.dumps({"extracted_data": {}, "confidence": 0.9})
+                )
+            if kwargs.get("response_format") is not None:
+                return _fake_response(
+                    json.dumps({"field_name": "x", "value": None, "confidence": 0.0})
+                )
+            return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
+
+        with (
+            patch("fsm_llm.llm.completion", side_effect=completion),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+        ):
+            api = API.from_definition(fsm, model="gpt-4o", api_key="test")
+            cid, _ = api.start_conversation({"favorite_color": []})
+            prompts.clear()
+            api.converse("hello", cid)
+        asked = [p for p in prompts if "Extract the field 'favorite_color'" in p]
+        assert asked == []

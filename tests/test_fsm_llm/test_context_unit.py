@@ -38,6 +38,7 @@ from tests.test_fsm_llm.fixtures.holdout_key_corpus import (
     HOLDOUT_KNOWN_OVER_STRIPPED,
     arm_of,
 )
+from tests.test_fsm_llm.support import _PromptSpy
 
 #: Largest per-character time spread (slowest size over fastest) a linear
 #: pattern may show over a doubling sweep; a quadratic one shows 64x or more.
@@ -5094,3 +5095,51 @@ class TestUserVisibleData:
             assert "MARK_NOTE" in prompt
             assert "MARK_BARE" in prompt
             assert "MARK_PREFIXED" not in prompt
+
+
+class TestCamelCaseSecretKeys:
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "newPassword",
+            "confirmPassword",
+            "adminPassword",
+            "clientSecret",
+            "appSecret",
+            "userCredentials",
+            "dbCredential",
+            "awsSecretKey",
+            "sshPrivateKey",
+        ],
+    )
+    def test_camel_case_secret_names_are_forbidden(self, key):
+        from fsm_llm.constants import is_forbidden_context_entry
+
+        assert is_forbidden_context_entry(key, "hunter2hunter2") is True
+
+    @pytest.mark.parametrize(
+        "key", ["tokenCount", "passwordPolicy", "keyboardLayout", "primaryKey"]
+    )
+    def test_camel_case_lookalikes_stay_open(self, key):
+        from fsm_llm.constants import is_forbidden_context_entry
+
+        assert is_forbidden_context_entry(key, 5) is False
+
+    def test_snake_case_names_unchanged(self):
+        from fsm_llm.constants import is_forbidden_context_entry
+
+        assert is_forbidden_context_entry("new_password", "x") is True
+        assert is_forbidden_context_entry("user_name", "x") is False
+
+    def test_hostile_str_subclass_key_is_not_camel_split(self):
+        from fsm_llm.constants import is_forbidden_context_entry
+
+        class Hostile(str):
+            def __getitem__(self, i):
+                raise RuntimeError("boom")
+
+        assert is_forbidden_context_entry(Hostile("userName"), "x") is False
+
+    def test_camel_case_secret_never_reaches_the_pass2_prompt(self):
+        spy = _PromptSpy("hi", initial_context={"newPassword": "S3CRETVALUE-42x"})
+        assert "S3CRETVALUE-42x" not in spy.prompt

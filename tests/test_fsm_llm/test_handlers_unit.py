@@ -5,7 +5,10 @@ Tests cover: HandlerSystem, HandlerBuilder, LambdaHandler, BaseHandler,
 HandlerExecutionError, priority ordering, context cascading, and metadata tracking.
 """
 
+from __future__ import annotations
+
 import copy
+import json
 import threading
 from unittest.mock import patch
 
@@ -25,7 +28,17 @@ from fsm_llm.handlers import (
     clear_keys_on_entry,
     create_handler,
 )
+from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.testing import PromptGroundedLLM
+from tests.test_fsm_llm.support import (
+    _correction_fsm,
+    _fake_response,
+    _greeter_fsm,
+    _Prov,
+    _reentry_fsm,
+    _Session,
+    _stream_chunk,
+)
 
 # ── Helpers ───────────────────────────────────────────────────
 
@@ -1447,3 +1460,531 @@ class TestClearKeysOnEntry:
         api.advance(conv_id)  # intro -> collect
 
         assert api.get_data(conv_id)["draft"] == "old"
+
+
+class _ErrorHandlerHarness:
+    """`API` over a completion that fails on demand; records ERROR handler calls.
+
+    ``fail`` is one of: ``"sync"`` (the non-stream call raises), ``"first"``
+    (the stream call raises before any chunk), ``"mid"`` (the stream yields one
+    chunk then raises), ``None`` (healthy).
+    """
+
+    def __init__(self, fail: str | None, exc: BaseException | None = None):
+        self._mode = fail
+        self.fail: str | None = None  # armed by ``start`` (greeting must succeed)
+        self.exc = exc if exc is not None else RuntimeError("provider down")
+        self.error_ctxs: list[dict] = []
+        self.handler_raises: BaseException | None = None
+
+    def _completion(self, **kwargs):
+        if kwargs.get("stream"):
+            if self.fail == "first":
+                raise self.exc
+            if self.fail == "mid":
+
+                def _gen():
+                    yield _stream_chunk("partial")
+                    raise self.exc
+
+                return _gen()
+            return iter([_stream_chunk("ok")])
+        if self.fail == "sync":
+            raise self.exc
+        return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
+
+    def _on_error(self, ctx):
+        self.error_ctxs.append(dict(ctx))
+        if self.handler_raises is not None:
+            raise self.handler_raises
+        return {}
+
+    def start(self, api):
+        """Start the conversation on a healthy LLM, then arm the failure."""
+        cid, _ = api.start_conversation()
+        self.fail = self._mode
+        return cid
+
+    def make_api(self):
+        from fsm_llm.handlers import HandlerTiming
+
+        api = API.from_definition(_greeter_fsm(False), model="gpt-4o", api_key="test")
+        builder = api.create_handler("err_spy").at(HandlerTiming.ERROR)
+        if self.handler_raises is not None:
+            builder = builder.critical()
+        api.register_handler(builder.do(self._on_error))
+        return api
+
+    def patches(self):
+        return (
+            patch("fsm_llm.llm.completion", side_effect=self._completion),
+            patch(
+                "fsm_llm.llm.get_supported_openai_params",
+                return_value=["response_format"],
+            ),
+        )
+
+
+class TestErrorHandlersFireForFSMErrorAndStream:
+    """ERROR handlers run for LLMResponseError and on the stream path only."""
+
+    def test_converse_llm_outage_fires_error_handler_once_and_reraises_fsmerror(self):
+        from fsm_llm.definitions import FSMError, LLMResponseError
+
+        h = _ErrorHandlerHarness("sync")
+        p1, p2 = h.patches()
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            with pytest.raises(FSMError) as ei:
+                api.converse("hi", cid)
+        assert isinstance(ei.value, LLMResponseError)
+        assert len(h.error_ctxs) == 1
+        assert "provider down" in h.error_ctxs[0]["_error"]
+        assert "_traceback" in h.error_ctxs[0]
+
+    def test_converse_failure_still_rolls_back_the_user_message(self):
+        from fsm_llm.definitions import FSMError
+
+        h = _ErrorHandlerHarness("sync")
+        p1, p2 = h.patches()
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            before = len(api.get_conversation_history(cid))
+            with pytest.raises(FSMError):
+                api.converse("hi", cid)
+            assert len(api.get_conversation_history(cid)) == before
+
+    def test_critical_handler_failure_replaces_fsmerror_with_original_as_cause(self):
+        from fsm_llm.definitions import LLMResponseError
+        from fsm_llm.handlers import HandlerExecutionError
+
+        h = _ErrorHandlerHarness("sync")
+        h.handler_raises = ValueError("handler exploded")
+        p1, p2 = h.patches()
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            with pytest.raises(HandlerExecutionError) as ei:
+                api.converse("hi", cid)
+        assert "handler exploded" in str(ei.value)
+        assert isinstance(ei.value.__cause__, LLMResponseError)
+
+    def test_stream_failure_at_first_token_fires_error_handler(self):
+        from fsm_llm.definitions import FSMError
+
+        h = _ErrorHandlerHarness("first")
+        p1, p2 = h.patches()
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            with pytest.raises(FSMError):
+                list(api.converse_stream("hi", cid))
+        assert len(h.error_ctxs) == 1
+        assert "provider down" in h.error_ctxs[0]["_error"]
+
+    def test_stream_failure_mid_stream_fires_error_handler(self):
+        h = _ErrorHandlerHarness("mid")
+        p1, p2 = h.patches()
+        got: list[str] = []
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            try:
+                for tok in api.converse_stream("hi", cid):
+                    got.append(tok)
+            except Exception:
+                pass
+        assert got[:1] == ["partial"]
+        assert len(h.error_ctxs) == 1
+
+    def test_stream_critical_handler_failure_replaces_error_with_cause(self):
+        from fsm_llm.handlers import HandlerExecutionError
+
+        h = _ErrorHandlerHarness("first")
+        h.handler_raises = ValueError("handler exploded")
+        p1, p2 = h.patches()
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            with pytest.raises(HandlerExecutionError) as ei:
+                list(api.converse_stream("hi", cid))
+        assert ei.value.__cause__ is not None
+
+    @pytest.mark.parametrize("exc_type", [KeyboardInterrupt, SystemExit])
+    def test_interrupts_fire_no_error_handler_sync_and_stream(self, exc_type):
+        h = _ErrorHandlerHarness("sync", exc=exc_type())
+        p1, p2 = h.patches()
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            with pytest.raises(exc_type):
+                api.converse("hi", cid)
+            h.fail = "first"
+            with pytest.raises(exc_type):
+                list(api.converse_stream("hi", cid))
+        assert h.error_ctxs == []
+
+    def test_generator_close_fires_no_error_handler_and_releases_lock(self):
+        h = _ErrorHandlerHarness(None)
+        p1, p2 = h.patches()
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            gen = api.converse_stream("hi", cid)
+            next(gen)
+            gen.close()
+            # lock released: a following turn is accepted, not "already processed"
+            assert api.converse("again", cid)
+        assert h.error_ctxs == []
+
+    def test_healthy_turns_fire_no_error_handler(self):
+        h = _ErrorHandlerHarness(None)
+        p1, p2 = h.patches()
+        with p1, p2:
+            api = h.make_api()
+            cid = h.start(api)
+            api.converse("hi", cid)
+            list(api.converse_stream("hi again", cid))
+        assert h.error_ctxs == []
+
+
+def _collect_fsm() -> dict:
+    """ra05: Pass 1 commits `name` and moves a -> b, Pass 2 can then fail."""
+    return {
+        "name": "Collect",
+        "description": "d",
+        "initial_state": "a",
+        "persona": "p",
+        "states": {
+            "a": {
+                "id": "a",
+                "description": "d",
+                "purpose": "collect",
+                "response_instructions": "Reply.",
+                "field_extractions": [
+                    {
+                        "field_name": "name",
+                        "field_type": "str",
+                        "extraction_instructions": "n",
+                        "required": True,
+                    }
+                ],
+                "transitions": [
+                    {
+                        "target_state": "b",
+                        "description": "have name",
+                        "priority": 1,
+                        "conditions": [
+                            {
+                                "description": "n",
+                                "requires_context_keys": ["name"],
+                                "logic": {"!=": [{"var": "name"}, None]},
+                            }
+                        ],
+                    }
+                ],
+            },
+            "b": {
+                "id": "b",
+                "description": "d",
+                "purpose": "p",
+                "response_instructions": "Reply b.",
+                "transitions": [
+                    {"target_state": "b", "description": "loop", "priority": 100},
+                    {
+                        "target_state": "z",
+                        "description": "end",
+                        "priority": 1,
+                        "conditions": [
+                            {
+                                "description": "never",
+                                "requires_context_keys": ["zzz"],
+                                "logic": {"==": [{"var": "zzz"}, 1]},
+                            }
+                        ],
+                    },
+                ],
+            },
+            "z": {
+                "id": "z",
+                "description": "d",
+                "purpose": "p",
+                "response_instructions": "bye",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class TestErrorHandlerReturnIsNotMerged:
+    def test_returned_delta_from_error_handler_is_dropped_sync_and_stream(self):
+        """ra05 port: Pass-2 failure after a committed Pass 1."""
+        from fsm_llm.definitions import FSMError
+
+        fired: list[int] = []
+        with _Session(_collect_fsm()) as s:
+
+            def on_error(ctx):
+                fired.append(1)
+                return {"handler_marker": "set-by-ERROR-handler"}
+
+            s.on(HandlerTiming.ERROR, on_error)
+            s.provider.fail_pass2 = True
+            with pytest.raises(FSMError):
+                s.api.converse("I am Bob", s.cid)
+            assert len(fired) == 1
+            data = s.api.get_data(s.cid)
+            assert "handler_marker" not in data
+            # the turn was rolled back: nothing from Pass 1 survived
+            assert "name" not in data
+            assert s.api.get_current_state(s.cid) == "a"
+
+            fired.clear()
+            s.provider.fail_pass2 = False
+            s.provider.fail_stream = True
+            # advance to b first so the stream turn has a non-terminal state
+            s.api.converse("I am Bob", s.cid)
+            assert s.api.get_current_state(s.cid) == "b"
+            with pytest.raises(FSMError):
+                list(s.api.converse_stream("hi again", s.cid))
+            assert len(fired) == 1
+            assert "handler_marker" not in s.api.get_data(s.cid)
+
+    def test_non_error_handler_delta_is_still_merged(self):
+        """Vacuity guard: only ERROR timing stopped merging."""
+        with _Session(_reentry_fsm()) as s:
+            s.on(HandlerTiming.PRE_PROCESSING, lambda ctx: {"pre_marker": 1})
+            s.api.converse("hello", s.cid)
+            assert s.api.get_data(s.cid).get("pre_marker") == 1
+
+
+def _three_field_advance_fsm() -> dict:
+    fields = ["alpha", "beta", "gamma"]
+    return {
+        "name": "ThreeField",
+        "description": "advance-turn deepcopy seam",
+        "version": "4.1",
+        "initial_state": "collect",
+        "persona": "x",
+        "states": {
+            "collect": {
+                "id": "collect",
+                "description": "collect three fields",
+                "purpose": "collect",
+                "required_context_keys": fields,
+                "field_extractions": [
+                    {
+                        "field_name": f,
+                        "field_type": "str",
+                        "extraction_instructions": f"the {f}",
+                        "required": True,
+                    }
+                    for f in fields
+                ],
+                "response_instructions": "Reply briefly.",
+                "transitions": [
+                    {
+                        "target_state": "done",
+                        "description": "all collected",
+                        "priority": 10,
+                        "conditions": [
+                            {
+                                "description": "all present",
+                                "requires_context_keys": fields,
+                                "logic": {"!=": [{"var": "alpha"}, None]},
+                            }
+                        ],
+                    }
+                ],
+            },
+            "done": {
+                "id": "done",
+                "description": "end",
+                "purpose": "end",
+                "response_instructions": "Bye.",
+                "transitions": [],
+            },
+        },
+    }
+
+
+class _DeepcopyCounter:
+    """Counts TOP-LEVEL ``copy.deepcopy`` calls (the recursive internals of one
+    call re-enter the patched module global and are not counted)."""
+
+    def __init__(self):
+        import copy
+
+        self._real = copy.deepcopy
+        self.count = 0
+        self._depth = 0
+
+    def __call__(self, obj, memo=None, _nil=[]):  # noqa: B006
+        if self._depth == 0:
+            self.count += 1
+        self._depth += 1
+        try:
+            return self._real(obj, memo) if memo is not None else self._real(obj)
+        finally:
+            self._depth -= 1
+
+
+class TestZeroHandlerTurnSkipsHandlerCopies:
+    def test_advance_turn_deepcopy_count_drops_with_no_handlers(self):
+        counter = _DeepcopyCounter()
+        with _Prov(_three_field_advance_fsm()) as p:
+            # _Prov registers a CONTEXT_UPDATE spy; drop it so the FSM has
+            # genuinely zero handlers.
+            p.api.fsm_manager.handler_system.handlers.clear()
+            p.field = {"alpha": "a", "beta": "b", "gamma": "c"}
+            with patch("copy.deepcopy", counter):
+                p.api.converse("a b c", p.cid)
+            assert p.api.get_current_state(p.cid) == "done"
+        # Baseline before the fix: 14 (10 handler-timing/transition copies plus
+        # the D-012 pre-turn snapshots). The snapshots must remain.
+        assert 1 <= counter.count <= 5, counter.count
+
+    def test_non_copyable_value_no_longer_breaks_start_conversation(self):
+        import threading
+
+        with _Prov(_correction_fsm()) as p:
+            p.api.fsm_manager.handler_system.handlers.clear()
+            cid, _ = p.api.start_conversation({"lock": threading.Lock()})
+            assert p.api.get_current_state(cid) == "profile"
+
+    def test_registered_handler_still_runs_and_sees_context(self):
+        seen: list[dict] = []
+        with _Prov(_correction_fsm()) as p:
+            p.api.register_handler(
+                p.api.create_handler("pre")
+                .at(HandlerTiming.PRE_PROCESSING)
+                .do(lambda ctx: seen.append(dict(ctx)) or {"from_handler": 1})
+            )
+            p.api.converse("hello", p.cid)
+            assert seen
+            assert p.api.get_data(p.cid).get("from_handler") == 1
+
+    def test_handlers_at_filters_by_timing(self):
+        with _Prov(_correction_fsm()) as p:
+            hs = p.api.fsm_manager.handler_system
+            assert hs.handlers_at(HandlerTiming.PRE_PROCESSING) == []
+            handler = (
+                p.api.create_handler("only_post")
+                .at(HandlerTiming.POST_PROCESSING)
+                .do(lambda ctx: {})
+            )
+            p.api.register_handler(handler)
+            assert hs.handlers_at(HandlerTiming.PRE_PROCESSING) == []
+            assert hs.handlers_at(HandlerTiming.POST_PROCESSING) == [handler]
+
+
+_DUCK_FSM = {
+    "name": "S",
+    "description": "d",
+    "version": "4.1",
+    "initial_state": "a",
+    "persona": "p",
+    "states": {
+        "a": {
+            "id": "a",
+            "description": "d",
+            "purpose": "p",
+            "response_instructions": "r",
+            "transitions": [
+                {
+                    "target_state": "b",
+                    "description": "never",
+                    "conditions": [
+                        {"description": "never", "logic": {"==": [1, 2]}},
+                    ],
+                }
+            ],
+        },
+        "b": {
+            "id": "b",
+            "description": "d",
+            "purpose": "p",
+            "response_instructions": "r",
+            "transitions": [],
+        },
+    },
+}
+
+
+class _DuckHandlerSystem:
+    """A handler system with only ``execute_handlers`` (no ``handlers_at``)."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def register_handler(self, handler):
+        pass
+
+    def close(self):
+        pass
+
+    def execute_handlers(
+        self,
+        timing,
+        current_state,
+        target_state,
+        context,
+        updated_keys=None,
+        error_context=None,
+    ):
+        self.calls += 1
+        return {}
+
+
+def _manager_with(handler_system):
+    from fsm_llm.definitions import FSMDefinition
+    from fsm_llm.fsm import FSMManager
+
+    definition = FSMDefinition(**_DUCK_FSM)
+    with (
+        patch(
+            "fsm_llm.llm.completion",
+            return_value=_fake_response(json.dumps({"message": "ok"})),
+        ),
+        patch(
+            "fsm_llm.llm.get_supported_openai_params",
+            return_value=["response_format"],
+        ),
+    ):
+        llm = LiteLLMInterface(model="gpt-4o", api_key="x")
+        manager = FSMManager(
+            fsm_loader=lambda fid: definition,
+            llm_interface=llm,
+            handler_system=handler_system,
+        )
+        cid, _ = manager.start_conversation("S")
+        response = manager.process_message(cid, "hello")
+    return response
+
+
+class TestHandlersAtIsOptional:
+    def test_duck_typed_handler_system_starts_and_converses(self):
+        duck = _DuckHandlerSystem()
+        response = _manager_with(duck)
+        assert response == "ok"
+        assert duck.calls > 0
+
+    def test_a_spec_mock_handler_system_keeps_the_old_path(self):
+        from unittest.mock import Mock
+
+        from fsm_llm.handlers import HandlerSystem
+
+        system = Mock(spec=HandlerSystem)
+        system.execute_handlers.return_value = {}
+        response = _manager_with(system)
+        assert response == "ok"
+        assert system.execute_handlers.call_count > 0
+
+    def test_a_non_callable_handlers_at_takes_the_old_path(self):
+        duck = _DuckHandlerSystem()
+        duck.handlers_at = None  # type: ignore[attr-defined]
+        response = _manager_with(duck)
+        assert response == "ok"
+        assert duck.calls > 0
