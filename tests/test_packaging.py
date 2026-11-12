@@ -381,6 +381,78 @@ class TestModuleDocstringsAreReal:
         )
 
 
+#: A test file or folder named after the audit, review or plan step that wrote it.
+#: Tests are named for the behaviour they pin (`test_<module>.py`), so a dated or
+#: process name is refused and the class goes into a feature file. Scope: every
+#: `.py` file and every folder under `tests/` (`__pycache__` skipped); data files
+#: (JSON, text) are out of scope, so a year inside a fixture name is not matched.
+#: Today nothing legitimate matches (`test_okf*.py`, `test_removed_*.py`,
+#: `test_regression_*.py` and the version pins in `test_regression_*` are clean);
+#: `20\d\d` is the year of a dated file, `iter\d` and `round\d` need the digit so
+#: `iter` and `round` in a feature name stay allowed. No allowlist.
+_DATED_TEST_NAME = re.compile(
+    r"audit|review|iter\d|round\d|_fixes|phase\d|20\d\d", re.IGNORECASE
+)
+
+
+def _dated_test_names(names: list[str]) -> list[str]:
+    """The repo-relative `tests/` paths (posix) whose file or folder name is dated."""
+    return [n for n in names if _DATED_TEST_NAME.search(n.rsplit("/", 1)[-1])]
+
+
+class TestNoDatedTestFiles:
+    """Test files are named for behaviour, never for the audit that found it.
+
+    Steps 34 to 42 of plan-2026-11-12T073150-d454fd62 folded 41 files named
+    `test_audit_*`, `test_*_review_*`, `test_*_fixes`, `test_*_iter2` and the like
+    into feature files; this guard keeps that state.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "tests/test_fsm_llm/test_audit_iter1_seam.py",
+            "tests/test_fsm_llm_agents/test_review_fixes_round2_agents.py",
+            "tests/test_fsm_llm_monitor/test_audit_2026_09_28.py",
+            "tests/test_fsm_llm_regression/test_regression_iter2.py",
+            "tests/test_fsm_llm_agents/test_strands_phase2.py",
+            "tests/test_fsm_llm_agents/test_bug_fixes.py",
+            "tests/test_fsm_llm_review_round1",
+        ],
+    )
+    def test_the_pattern_refuses_a_dated_name(self, name):
+        assert _dated_test_names([name]) == [name]
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "tests/test_fsm_llm/test_okf.py",
+            "tests/test_fsm_llm/test_okf_cli.py",
+            "tests/test_fsm_llm_agents/test_removed_legacy.py",
+            "tests/test_fsm_llm_regression/test_regression_cli_and_exports.py",
+            "tests/test_fsm_llm_workflows/test_wait_events.py",
+            "tests/test_fsm_llm/test_iteration_budget.py",
+            "tests/test_fsm_llm/test_rounding.py",
+            "tests/test_fsm_llm/fixtures/context_key_corpus.py",
+        ],
+    )
+    def test_the_pattern_keeps_a_behaviour_name(self, name):
+        assert _dated_test_names([name]) == []
+
+    def test_no_test_file_or_folder_under_tests_has_a_dated_name(self):
+        tests = _REPO_ROOT / "tests"
+        names = [
+            p.relative_to(_REPO_ROOT).as_posix()
+            for p in sorted(tests.rglob("*"))
+            if "__pycache__" not in p.parts and (p.is_dir() or p.suffix == ".py")
+        ]
+        assert len(names) > 100, "the walk found too few paths to mean anything"
+        assert _dated_test_names(names) == [], (
+            "name a test file for the behaviour it pins (a feature file), not "
+            "for the audit, review round or plan step that found it"
+        )
+
+
 class TestNoTopLevelNameIsBoundTwice:
     """A doubled top-level name (a copy-paste slip) silently keeps the last one.
     Ruff F811 sees a redefined def or import, not a doubled constant. `if` and
@@ -1220,6 +1292,59 @@ def test_doc_counts_reads_the_offline_test_depth_total(line, bad):
     doc = doc_counts._Doc(m, "docs/2026_roadmap.md")
     doc.line(1, line)
     assert len(doc.bad) == bad, doc.bad
+
+
+def _rows_measured() -> dict:
+    """A hand-built `measure()` result: suite `test_s` holds two test files."""
+    m = {k: collections.Counter() for k in ("files", "classes", "markers")}
+    m["files"] |= {
+        "tests/test_s/test_a.py": 3,
+        "tests/test_s/test_b.py": 4,
+        "tests/test_s/conftest.py": 0,
+        "tests/test_root.py": 2,
+    }
+    m["by_base"] = {
+        "test_a.py": ["tests/test_s/test_a.py"],
+        "test_b.py": ["tests/test_s/test_b.py"],
+        "conftest.py": ["tests/test_s/conftest.py"],
+        "test_root.py": ["tests/test_root.py"],
+    }
+    return m
+
+
+@pytest.mark.parametrize(
+    ("md", "lines", "want"),
+    [
+        # a complete README table is clean (conftest needs no row)
+        ("tests/test_s/README.md", ["- `test_a.py` - x", "| `test_b.py` | y |"], []),
+        # a README without the row of one test file: MISSING-ROW
+        ("tests/test_s/README.md", ["- `test_a.py` - x"], ["MISSING-ROW"]),
+        # one row may group files: "`a.py`, `b.py` - ..." and "`a.py` + `b.py`"
+        ("tests/test_s/README.md", ["- `test_a.py`, `test_b.py` - x"], []),
+        ("tests/test_s/README.md", ["| `test_a.py` + `test_b.py` | x |"], []),
+        # a row for a file that no longer exists: DEAD-ROW (also in AGENTS.md)
+        (
+            "tests/test_s/README.md",
+            ["- `test_a.py` - x", "- `test_b.py` - y", "- `test_gone.py` - z"],
+            ["DEAD-ROW"],
+        ),
+        ("tests/test_s/AGENTS.md", ["| `test_gone.py` | z |"], ["DEAD-ROW"]),
+        # AGENTS.md may group files by feature: no completeness rule for it
+        ("tests/test_s/AGENTS.md", ["| `test_a.py`, `test_b.py` | both |"], []),
+        # the root README table counts the root files only, not the suites'
+        ("tests/README.md", ["- `test_root.py` - 2 tests"], []),
+        ("tests/README.md", ["- `conftest.py` - fixtures"], ["MISSING-ROW"]),
+        # a doc outside tests/ is not read; a nested fixtures README is read for rows
+        ("docs/guide.md", ["- `test_gone.py` - z"], []),
+        ("tests/test_s/fixtures/README.md", ["- `test_gone.py` - z"], ["DEAD-ROW"]),
+        # prose that names a file mid-line is not a row
+        ("tests/test_s/AGENTS.md", ["See `test_gone.py` for more."], []),
+    ],
+)
+def test_doc_counts_checks_the_per_file_rows(md, lines, want):
+    """Guards: a dead row or a missing row in a tests/ doc goes unseen by the counts."""
+    got = doc_counts.file_rows(_rows_measured(), md, lines)
+    assert [g.split()[0] for g in got] == want, got
 
 
 # ══════════════════════════════════════════════════════════════

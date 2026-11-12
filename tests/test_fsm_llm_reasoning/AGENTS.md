@@ -21,13 +21,13 @@ Tests call static methods and model constructors directly with small context dic
 | --- | --- | --- |
 | `test_cli_logging.py` | 2 parametrized cases: `["--verbose"]` gives 1 `I-PROBE` line in stderr, `[]` gives 0; `D-PROBE` never appears | Subprocess, `timeout=60`, deletes `FSM_LLM_LOG_LEVEL` |
 | `test_cli_output.py` | `_format_json_output` and `_save_as_json` fed a real `ReasoningTrace(...).model_dump()` write `reasoning_types_used` as a sorted list, never redacted; CLI escape of unencodable output, `--quiet` output, summary facts stated once | Uses `tmp_path`; includes the plan 5980fbb7 step 18 CLI fixes |
-| `test_constants.py` | 26 tests on constant values | Pins literal strings and numbers |
+| `test_constants.py` | 33 tests on constant values | Pins literal strings and numbers |
 | `test_definitions.py` | 28 tests on Pydantic models | Validators, computed properties, thresholds |
 | `test_engine.py` | Models, handlers, `map_reasoning_type`, ANALYTICAL-only fallback (D-009); audit regression classes (malformed user message, final solution keys, classification exception handling, removed dead code, `execution_time_seconds`, `direct computation` no special case, no classifier tracer, core truncation suffix, classifier cleanup warning) | Uses loguru sink for the warning; several assertions match literal source strings |
 | `test_engine_scripted.py` | 51 tests: whole solves through core on `_ScriptedLLM` (also imported by `tests/test_fsm_llm_regression/test_engine_integration.py`) | Asserts calls, history, stack, retries, budget and failure details |
 | `test_exceptions.py` | 8 tests on the exception hierarchy | `details`, `reasoning_type` attributes |
-| `test_golden_tables.py` | 21 tests: sha256 of the canonical JSON of the 11 FSM definitions and of the strategy tables (enum, registry keys, aliases, descriptions, merge ladder, calculator cases, solution order) | Captured before the prompt sentences, state ids and tables were generated; a hash moves only on purpose |
-| `test_handlers.py` | 39 tests on `ReasoningHandlers`, `ContextManager`, `OutputFormatter` | Validation, trace, pruning, merge, final solution |
+| `test_golden_tables.py` | 24 tests: sha256 of the canonical JSON of the 11 FSM definitions and of the strategy tables (enum, registry keys, aliases, descriptions, merge ladder, calculator cases, solution order) | Captured before the prompt sentences, state ids and tables were generated; a hash moves only on purpose |
+| `test_handlers.py` | 43 tests on `ReasoningHandlers`, `ContextManager`, `OutputFormatter` | Validation, trace, pruning, merge, final solution |
 | `__init__.py` | Empty package marker | |
 
 ## Public interface under test

@@ -1,4 +1,4 @@
-"""Tests moved from dated audit files."""
+"""Workflow engine lifecycle: instance ids, deadlines, loop and step budgets, resource release, definition pinning, step failures, cancellation and instance-lock concurrency."""
 
 from __future__ import annotations
 

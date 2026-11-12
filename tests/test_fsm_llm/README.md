@@ -1,6 +1,6 @@
 # test_fsm_llm
 
-The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 79 test files (6,237 collected tests) plus a `fixtures/` package of labelled secret-filter data.
+The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 72 test files (6,237 collected tests) plus a `fixtures/` package of labelled secret-filter data.
 
 ## What it is for
 
@@ -42,6 +42,8 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_context_unit.py` - context cleaning, compaction, search, and the secret filter measured against `fixtures/`.
 - `test_prompts_unit.py` - prompt builders, text sanitizing, token estimates, secret filtering in prompts.
 - `test_llm_unit.py`, `test_ollama.py` - `LiteLLMInterface` and Ollama-specific parameters.
+- `test_model_not_configured.py`, `test_model_callers.py`, `test_default_model_removed.py` - no built-in default model: `resolve_model` raises `ModelNotConfiguredError` (a blank value counts as unset); the classifier, `AgentConfig`, agents and the meta builder resolve through it (an injected `llm_interface` needs no model); reasoning, eval, monitor and every CLI exit 1 with one stderr line.
+- `test_no_implicit_env.py`, `test_load_env.py`, `test_env_file_flag.py` - importing `fsm_llm` loads no `.env` (child interpreters), `fsm_llm.load_env` and `fsm-llm --env-file`/`--model`, and `--env-file` on the other model CLIs (and not on the four that call no model); precedence is argument, process environment, file, then `ModelNotConfiguredError`.
 - `test_llm_complete.py` - `LLMInterface.complete`, the one request primitive: `CompletionRequest` and `CompletionResponse` models, request rules in `LiteLLMInterface`, reply normalising, failures as `LLMResponseError`.
 - `test_llm_request_path.py` - the classifier sends through `fsm_llm.llm`, and no provider request carries an empty user turn.
 - `test_llm_usage.py` - the per-call-kind usage counters of `LiteLLMInterface` (`usage()`, `reset_usage()`), including errors, streams and concurrency.

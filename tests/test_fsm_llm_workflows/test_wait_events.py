@@ -1,4 +1,4 @@
-"""Tests moved from dated audit files."""
+"""Workflow wait events and timers: event correlation and isolation, wait timeouts that survive a re-wait, timer keys and re-arming, completing from a wait, the listener race."""
 
 from __future__ import annotations
 

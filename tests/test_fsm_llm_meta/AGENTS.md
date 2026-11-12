@@ -41,17 +41,17 @@ LLM isolation methods used:
 | File | Role | Notes |
 | --- | --- | --- |
 | `conftest.py` | Fixtures | `fsm_builder`, `workflow_builder`, `agent_builder`, `populated_fsm_builder`, `meta_config`, `offline_llm` |
-| `test_agent.py` | `MetaBuilderAgent` behavior | 55 tests; carries DECISION references |
+| `test_agent.py` | `MetaBuilderAgent` behavior | 72 tests; carries DECISION references |
 | `test_builders.py` | Builder core behavior | 91 tests |
 | `test_builders_elaborate.py` | Builder edge cases, exceptions, config validators | 76 tests |
 | `test_tools.py` | Tool registries | 35 tests; `_make_call(tool_name, **kwargs)` helper at file bottom |
 | `test_integration.py` | Cross-piece checks | 11 tests |
 | `test_definitions.py` | Pydantic models and enum | 26 tests |
 | `test_prompts.py` | Prompt text builders | 4 tests |
-| `test_meta_output.py` | `save_artifact`: atomic write, failed replace keeps the old file | new file |
-| `test_meta_cli.py` | `fsm-llm-meta` script on an unencodable stdout, domain error as one stderr line | new file |
+| `test_meta_output.py` | `save_artifact`: atomic write, failed replace keeps the old file | 2 tests |
+| `test_meta_cli.py` | `fsm-llm-meta` script on an unencodable stdout, domain error as one stderr line | 3 tests |
 | `test_meta_fsm.py` | `build_meta_builder_fsm` structure, gates, build request, run through core | 52 tests |
-| `test_meta_conversation.py` | Conversations by behaviour with `ScriptedMetaLLM`: each artifact kind, type switch, build retry, outages, lifecycle, monitor state, collect-reply build prompt, reply parsing, retryable start, malformed build reply, no session state beside the FSM, reclassification, `start` never builds, prompt never doubled, keyword hints, negation | 41 tests |
+| `test_meta_conversation.py` | Conversations by behaviour with `ScriptedMetaLLM`: each artifact kind, type switch, build retry, outages, lifecycle, monitor state, collect-reply build prompt, reply parsing, retryable start, malformed build reply, no session state beside the FSM, reclassification, `start` never builds, prompt never doubled, keyword hints, negation | 141 tests |
 | `test_handlers.py`, `test_handlers_elaborate.py` | Import smoke test | 1 test each; handlers module was removed, only the `fsm_llm.agents.meta_builder` import is checked |
 | `__init__.py` | Package marker | empty |
 

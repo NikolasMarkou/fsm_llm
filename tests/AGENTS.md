@@ -22,7 +22,7 @@ flowchart TD
     tsy[test_fsm_llm_synthesis/test_synthesis_bench.py] -->|sys.path += scripts/| syb[scripts/synthesis_bench.py]
 ```
 
-Test styles used across suites: unit (call one module), seam (drive a public entry point such as `API.converse` with `fsm_llm.llm.completion` patched), loop (run an agent end to end with a scripted fake LLM), structure (build an FSM dict and check states, edges, priorities, JsonLogic gates), source-text checks (`inspect.getsource`, `ast`, file reads), and audit regressions (one class per finding id, each run failing before its fix).
+Test styles used across suites: unit (call one module), seam (drive a public entry point such as `API.converse` with `fsm_llm.llm.completion` patched), loop (run an agent end to end with a scripted fake LLM), structure (build an FSM dict and check states, edges, priorities, JsonLogic gates), source-text checks (`inspect.getsource`, `ast`, file reads), and regression classes (one class per finding id, each run failing before its fix, in the feature file that owns the behaviour).
 
 ## Key files
 
@@ -42,8 +42,8 @@ Suite folders (test counts from full collection) and root files at this level.
 | `test_fsm_llm_agents/` | All agent patterns (`native_fc` as an FSM on core, pinned by a golden request fixture), `ToolRegistry` and ToolSpec, HITL grant security, memory, MCP (real stdio fixture server), `AgentServer`, `fsm-llm-meta` and `python -m fsm_llm.agents` CLIs, the OKF and Agent Skills tools (`test_okf.py`, `test_agent_skills.py`) | 3,194 tests. Local `conftest.py` autouses `block_network`; most files define their own fake `LLMInterface`, pattern loops use `PromptGroundedLLM` (`test_grounded_patterns.py`); skips without `mcp`, `fastapi`/`httpx`, OTEL SDK |
 | `test_fsm_llm_meta/` | Meta-builder in `fsm_llm.agents`: `FSMArtifactBuilder`, `WorkflowArtifactBuilder`, `AgentArtifactBuilder`, `create_*_tools`, `meta_prompts`, the meta FSM and `MetaBuilderAgent` on core | 515 tests. Autouse `block_network`; `ScriptedMetaLLM` (local conftest) answers classifier, build and collect calls from queues; `offline_llm` makes core's send binding raise so fallback paths run without a network call |
 | `test_fsm_llm_reasoning/` | `fsm_llm.reasoning` constants, models, exceptions, handlers, ANALYTICAL-only fallback, whole solves through core with a scripted `LLMInterface` (`test_engine_scripted.py`), CLI `--verbose` and JSON output | 232 tests. Engine built with `object.__new__` or on a scripted interface; source-string pins (no `converse(`, no "Continue reasoning") |
-| `test_fsm_llm_workflows/` | `fsm_llm.workflows` steps, DSL, `WorkflowEngine`, timeouts, audit fixes | 330 tests. Real short sleeps; 8 `slow` |
-| `test_fsm_llm_monitor/` | `fsm_llm.monitor` server via `TestClient`, security, `InstanceManager`, `EventCollector`, `OTELExporter` | 458 tests. Local autouse fixture deletes `FSM_LLM_MONITOR_API_KEY`; audit file skips whole when workflows missing |
+| `test_fsm_llm_workflows/` | `fsm_llm.workflows` steps, DSL, `WorkflowEngine`, timeouts, removed-keyword refusals | 330 tests. Real short sleeps; 8 `slow` |
+| `test_fsm_llm_monitor/` | `fsm_llm.monitor` server via `TestClient`, security, `InstanceManager`, `EventCollector`, `OTELExporter` | 458 tests. Local autouse fixture deletes `FSM_LLM_MONITOR_API_KEY`; `TestWorkflowTracking` skips when workflows is missing |
 | `test_fsm_llm_eval/` | `fsm_llm.eval` and `fsm-llm-eval`: config, records, stats, scoring golden table, examples mode, cases mode, exit codes; parity with `scripts/bench_common.py` | 431 tests. Reads `evaluation/` files and needs a git checkout |
 | `test_fsm_llm_synthesis/` | `fsm_llm.synthesis` (policy G5, gates, G6a `dryrun`, G6b `simulation`, `synthesizer`, `library`, `runner`, `tools`, `traces`, `diagnose`, `patch`, `repair`), the concierge end to end, and the offline checks of `scripts/synthesis_bench.py` (`test_synthesis_bench.py`; blocks s0 to s2 were run, see `scripts/bench_data/README.md`) | Own `conftest.py` (`ScriptedRunnerLLM`, `ByTurn`, `host_fsm`, `good_fsm`, `stuck_fsm`) that fails on any built `LiteLLMInterface` or provider call; see `test_fsm_llm_synthesis/AGENTS.md` |
 | `test_fsm_llm_testing/` | `fsm_llm.testing` (the seventh subpackage): import probes and source scans for its layering (loaded by no library module, no `pytest`, `litellm` or other subpackage), the skeleton checks | 9 tests (step 21; grows with steps 22 to 25). Child-process probes with the model-server variables on a closed port |
@@ -105,7 +105,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 - Default runs make no network call and no real LLM call; the agents and meta suites enforce it with `block_network`. Live tests self-skip: core `test_live_classification_memory.py` and `test_integration_ollama.py` on Ollama availability, so a default run without a model skips them.
 - Never use `caplog` for library logs; `fsm_llm` logs through loguru and is disabled at import. Enable with `logger.enable("fsm_llm")`, add a sink, then remove it and disable again.
 - Tests that change process globals (cwd, env vars, `server.py` API key, `sys.modules`, logging) restore them.
-- Audit and `DECISION plan-.../D-NNN` pins record deliberate fixes. Treat a failure as a regression in `src/` unless the cited decision was reversed; do not weaken, delete or regenerate them (secret-filter corpora, eval scoring golden table).
+- Regression classes and `DECISION plan-.../D-NNN` pins record deliberate fixes. Treat a failure as a regression in `src/` unless the cited decision was reversed; do not weaken, delete or regenerate them (secret-filter corpora, eval scoring golden table).
 - Every documented test count in root `AGENTS.md` and root `README.md` must equal the measured collection.
 
 ## Dependencies
@@ -124,7 +124,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 ## Working here
 
 - Put a test in the suite folder that matches the source subpackage; repo-wide checks go at this level.
-- Conventions: files `test_<module>.py` / `test_<module>_elaborate.py`, classes `Test<Feature>`, helpers prefixed `_`; regressions named after the bug or audit id with a docstring stating the fixed behaviour.
+- Conventions: files `test_<module>.py` / `test_<module>_elaborate.py`, classes `Test<Feature>`, helpers prefixed `_`; a regression is a class in the feature file for its behaviour, with the bug or audit id and the fixed behaviour in its docstring; never a new file named for an audit, review round, iteration or date (`TestNoDatedTestFiles` in `test_packaging.py` refuses `audit`, `review`, `iter<N>`, `round<N>`, `_fixes`, `phase<N>` and a year in a test file or folder name).
 - Use a double from `fsm_llm.testing` (`MockLLM2Interface`, `ScriptedLLM`, ...) or `configure_mock_extract_field` instead of a real model; patch `fsm_llm.llm.completion` (core's one send binding; nothing else calls litellm) for seam tests, or inject a scripted `LLMInterface` with `llm_interface=` (implement `complete` when the FSM classifies or has a completion state).
 - Mark anything sleeping about a second or more, or needing a model, `slow`; live tests also get `integration` and `real_llm`.
 - A new suite folder or root test file must be added to the root `AGENTS.md` Testing block (per-suite line or root-file list) or `test_per_suite_table` / `test_root_file_breakdown` fail.

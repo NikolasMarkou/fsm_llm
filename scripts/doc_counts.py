@@ -7,7 +7,9 @@ command and env scrub of `tests/test_packaging.py::measured`) that loads this
 module as a plugin to read each item's markers; every number comes from that
 run or a glob. `scan(measured)` ties each count token of each tracked .md file
 to a measured number by an explicit rule and returns the problems; a token no
-rule names is UNCLASSIFIED, also a problem. HISTORICAL files are skipped.
+rule names is UNCLASSIFIED, also a problem. `file_rows` adds the file-level
+rules: a row naming a missing test file is DEAD-ROW, a suite README without a
+row for one of its test files is MISSING-ROW. HISTORICAL files are skipped.
 
 The documented counts are the counts WITHOUT the optional `mcp` package, so
 with `mcp` importable `main` and the slow test in `tests/test_packaging.py` skip.
@@ -49,6 +51,9 @@ TOK = re.compile(
 CELL = re.compile(r"\|\s*(\d{1,3}(?:,\d{3})*)(?: \([^|)]*\))?\s*(?=\|)")
 RUN = re.compile(r"pytest (?:\S+ )*?tests/(test_[a-z_]+)")
 LEAD_FILE = re.compile(r"^\s*[|-]\s*`((?:test_[a-z0-9_]+|conftest)\.py)`")
+#: A row may group files: "- `test_a.py`, `test_b.py` - ..." or "| `a` + `b` |".
+LEAD_FILES = re.compile(r"^\s*[|-]\s*((?:`[^`]+`(?:\s*(?:,|\+|and)\s*)?)+)")
+ROW_FILE = re.compile(r"`((?:test_[a-z0-9_]+|conftest)\.py)`")
 LEAD_SUITE = re.compile(r"^\s*\|\s*`(test_[a-z_]+)/`")
 TOTAL_LINE = re.compile(
     "make test|Run all tests|Run full test suite|full test tree"
@@ -246,6 +251,41 @@ class _Doc:
                 self.put(ln, tm[0], got, self.token(tm, line, first, lead, lead_suite))
 
 
+def file_rows(m: dict, md: str, lines: list[str]) -> list[str]:
+    """Per-file row problems of one tests/ doc (the file-level drift the counts miss).
+
+    Interface: `m` is `measure()` output (`files`, `by_base`), `md` the repo-relative
+    doc path, `lines` its text lines; returns problem strings, `[]` for any doc that
+    is not a `tests/README.md` or `tests/AGENTS.md` (or of a suite folder). A row is
+    a line that starts with backticked `test_*.py` or `conftest.py` names, one or
+    several (`LEAD_FILES`: "- `a.py`, `b.py` - ..." is a row for both).
+    Rules: (1) every row of those docs names a file that exists under `tests/`, so
+    a folded or renamed file leaves no dead row; (2) a `README.md` of `tests/` or of
+    one suite folder is that folder's per-file table, so it carries a row for every
+    `test_*.py` in the folder (the root: files at that level only). `AGENTS.md`
+    may group files by feature, so only rule (1) holds for it. A suite folder with
+    no README.md (`test_examples`) has no table and no rule (2).
+    """
+    parts = md.split("/")
+    if parts[0] != "tests" or parts[-1] not in ("README.md", "AGENTS.md"):
+        return []
+    bad, rows = [], set()
+    for ln, line in enumerate(lines, 1):
+        if lead := LEAD_FILES.match(line):
+            for name in ROW_FILE.findall(lead[1]):
+                rows.add(name)
+                if name not in m["by_base"]:
+                    bad.append(f"DEAD-ROW {md}:{ln} row names `{name}`: no such file")
+    if parts[-1] != "README.md" or len(parts) > 3:
+        return bad
+    suite = parts[1] if len(parts) == 3 else None
+    for path in sorted(m["files"]):
+        name = Path(path).name
+        if _suite(path) == suite and name.startswith("test_") and name not in rows:
+            bad.append(f"MISSING-ROW {md}: no row for `{path}`")
+    return bad
+
+
 def scan(measured: dict) -> list[str]:
     """Problems found in the tracked .md files against `measured`; [] when clean."""
     bad: list[str] = []
@@ -257,7 +297,7 @@ def scan(measured: dict) -> list[str]:
         lines = (ROOT / md).read_text(encoding="utf-8", errors="replace").splitlines()
         for ln, line in enumerate(lines, 1):
             doc.line(ln, line)
-        bad += doc.bad
+        bad += doc.bad + file_rows(measured, md, lines)
     return bad
 
 

@@ -45,7 +45,7 @@ flowchart TD
 | `test_fsm_llm_agents/` | 3,194 | Every agent pattern (ReAct, Reflexion, Plan-Execute, Debate and others), tools, human approval (HITL) security, memory, MCP, remote serving, the agents CLI, the agents run loops, `ConfiguredAgentBuilder` and the OKF and Agent Skills tools |
 | `test_fsm_llm_meta/` | 515 | The meta-builder in `fsm_llm.agents`: FSM, workflow and agent artifact builders, builder tools (golden reply text, concurrency isolation), prompts, `MetaBuilderAgent` |
 | `test_fsm_llm_reasoning/` | 232 | Reasoning engine constants, models, exceptions, handlers, strategy fallback, CLI logging and JSON output, and whole scripted solves on the core step loop |
-| `test_fsm_llm_workflows/` | 330 | Async workflow engine: step types, DSL and `WorkflowBuilder`, engine lifecycle, timeouts, audit fixes |
+| `test_fsm_llm_workflows/` | 330 | Async workflow engine: step types, DSL and `WorkflowBuilder`, engine lifecycle, timeouts, removed-keyword refusals |
 | `test_fsm_llm_monitor/` | 458 | FastAPI dashboard: routes, security checks, instance manager, event collector, data models, OpenTelemetry exporter |
 | `test_fsm_llm_eval/` | 431 | `fsm_llm.eval` and the `fsm-llm-eval` CLI: example scoring, case datasets, config, statistics, result files |
 | `test_fsm_llm_synthesis/` | 2,037 | `fsm_llm.synthesis`: the gates, the library, the runner, the agent tools, traces, diagnosis and repair, the concierge end to end, and the offline checks of `scripts/synthesis_bench.py`. Bench status: three blocks run and recorded, all INCONCLUSIVE (see `docs/synthesis.md`). |

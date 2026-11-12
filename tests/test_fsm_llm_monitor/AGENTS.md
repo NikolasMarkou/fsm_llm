@@ -30,13 +30,13 @@ Manager test pattern: `InstanceManager(config=MonitorConfig())`, then `mgr.globa
 | --- | --- | --- |
 | `conftest.py` | autouse `_clear_monitor_api_key_env` | `monkeypatch.delenv("FSM_LLM_MONITOR_API_KEY", raising=False)`; without it an exported key makes about 22 `test_app.py` tests 401 |
 | `support.py` | `_manager(**config)` (an `InstanceManager` with a cleaned global collector; keyword arguments go to `MonitorConfig`), shared by the feature files | not collected (no `test_` prefix) |
-| `test_app.py` | routes, static assets, exports, version, API-key gate, WS redaction, UI limits vs server constants | 131 tests; asserts `"0.12.0"` for `/api/info` `monitor_version` and `fsm_llm.monitor.__version__` |
+| `test_app.py` | routes, static assets, exports, version, API-key gate, WS redaction, UI limits vs server constants | 132 tests; asserts `"0.12.0"` for `/api/info` `monitor_version` and `fsm_llm.monitor.__version__` |
 | `test_server_security.py` | Origin/Host, body limit, headers, gated reads, WebSocket auth, error mapping, bounds, dashboard config, builder busy guard, `validate_preset_id` | 36 tests; autouse `_reset_key` reconfigures with env key `""` after each test |
-| `test_instance_manager.py` | `Managed*` classes, `InstanceManager`, handlers, snapshots, workflow presets, agent types, stub tools, failed launch, terminal send, OTEL re-enable (real SDK), instance event feed, `close()` teardown | 75 tests; contains unmarked `async def` tests |
-| `test_collector.py` | `EventCollector` | 38 tests |
-| `test_definitions.py` | models, `normalize_message_history`, `model_to_dict` | 50 tests |
+| `test_instance_manager.py` | `Managed*` classes, `InstanceManager`, handlers, snapshots, workflow presets, agent types, stub tools, failed launch, terminal send, OTEL re-enable (real SDK), instance event feed, `close()` teardown | 100 tests; contains unmarked `async def` tests |
+| `test_collector.py` | `EventCollector` | 50 tests |
+| `test_definitions.py` | models, `normalize_message_history`, `model_to_dict` | 60 tests |
 | `test_otel.py` | `OTELExporter` | 20 tests; autouse `_mock_otel` fixture |
-| `test_server_consistency.py` | 2026-11-05 server and SPA fixes (plan 5980fbb7 step 17), preset UTF-8 read, route-launched workflow stop | 57 tests; autouse `_reset_key` |
+| `test_server_consistency.py` | 2026-11-05 server and SPA fixes (plan 5980fbb7 step 17), preset UTF-8 read, route-launched workflow stop | 60 tests; autouse `_reset_key` |
 
 ## Public interface
 
@@ -76,7 +76,7 @@ API-key gate (`TestApiKeyGate`, `TestApiKeyGating`, `TestWebSocket`):
 - WebSocket `/ws`: client sends `{"type": "auth", "api_key": ...}`; right or unneeded key gets a `metrics` message; wrong key closes with 4401; cross-origin closes with 4403.
 - `server.py` source must contain `default=redacting_json_default` and no `default=str` call site.
 
-Collector (`test_collector.py`, audit file):
+Collector (`test_collector.py`):
 - `get_events`/`get_logs` newest first; bounded deques (`max_events`, `max_log_lines`) while `total_events` keeps counting.
 - Metrics: `total_errors`, `total_transitions`, `states_visited`, `active_conversations`, `total_agent_iterations`, `total_tool_calls`, `total_workflow_steps`; `clear()` resets all; timestamps are UTC.
 - `get_logs(level=...)` is case-insensitive, `SUCCESS` ranks above INFO, unknown level returns all.
@@ -144,7 +144,7 @@ Payloads and records pinned elsewhere in the suite:
 ## Working here
 
 - Run: `.venv/bin/python -m pytest tests/test_fsm_llm_monitor/`.
-- Put tests for a source module in the matching `test_<module>.py`; audit regressions go in a dated file, one class per finding.
+- Put tests for a source module in the matching `test_<module>.py`; a regression goes in the feature file that owns the behaviour (`test_server_consistency.py` for server and SPA findings), one class per finding, never in a file named for an audit or a date.
 - Use the local `_minimal_fsm_dict()` helpers (defined in `test_app.py`) for FSM payloads.
 - After adding or removing tests, re-measure with `.venv/bin/python -m pytest tests/test_fsm_llm_monitor --collect-only -q | tail -1` and update the monitor per-suite count in the repo-root `AGENTS.md` Testing block and the totals there and in `README.md`; `tests/test_packaging.py` checks them against `--collect-only`.
 - Do not change files under `examples/`; preset tests read them.

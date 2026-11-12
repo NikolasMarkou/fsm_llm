@@ -1,4 +1,4 @@
-"""Tests moved from dated audit files."""
+"""Bulk extraction and correction in the pipeline: overwrite and provenance, coercion and validation, sanitising, rejected corrections and their Pass 2 reach, back-edge re-extraction, token-level grounding."""
 
 from __future__ import annotations
 
