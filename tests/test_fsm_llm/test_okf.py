@@ -2551,6 +2551,21 @@ class TestWriteRefusals:
 
         assert not (tmp_path / "does-not-exist.md").exists()
 
+    def test_a_symlink_loop_target_is_refused_on_every_python(
+        self, tmp_path: Path
+    ) -> None:
+        # Path.resolve() stopped raising on a loop in 3.13; the target must still
+        # be refused (and its link left in place) whatever the interpreter does.
+        out = tmp_path / "out"
+        out.mkdir()
+        symlink_or_skip(out / "a.md", out / "b.md")
+        symlink_or_skip(out / "b.md", out / "a.md")
+
+        with pytest.raises(OKFError, match="cannot be resolved"):
+            write_bundle(_bundle_of(_note("a")), out, overwrite=True)
+
+        assert (out / "a.md").is_symlink()
+
     def test_a_symlinked_directory_component_never_writes_outside(
         self, tmp_path: Path
     ) -> None:

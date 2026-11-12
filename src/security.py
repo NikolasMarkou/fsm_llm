@@ -19,10 +19,12 @@ every other name, private ones included, is imported from here.
 
 from __future__ import annotations
 
+import errno
 import hmac
 import math
 import os
 import re
+import sys
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from urllib.parse import unquote
@@ -111,6 +113,17 @@ def resolve_within(root: Path, relative: str | os.PathLike[str]) -> Path | None:
     a hostile local process.
     """
     resolved = (root / relative).resolve()
+    if sys.version_info >= (3, 13):
+        # Python 3.13 made the non-strict resolve() above stop quietly at a
+        # symlink loop and return the looped path; 3.11 and 3.12 raise
+        # RuntimeError. A strict resolve of the result raises ELOOP again, so the
+        # failure mode in the contract holds on every version. A missing target
+        # is fine and stays allowed.
+        try:
+            resolved.resolve(strict=True)
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                raise
     if resolved == root or root in resolved.parents:
         return resolved
     return None
