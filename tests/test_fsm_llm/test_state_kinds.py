@@ -843,6 +843,349 @@ class TestStateValidationHooks:
         assert sk.state_problem(plain) is None
 
 
+def _host_condition(logic, requires=("synthesis_result",)):
+    return {
+        "description": "c",
+        "requires_context_keys": list(requires),
+        "logic": logic,
+    }
+
+
+_OK = {"==": [{"var": "synthesis_result.status"}, "ok"]}
+_FAILED = {"in": [{"var": "synthesis_result.status"}, ["failed", "aborted"]]}
+
+
+def _host_edge(target, *conditions):
+    return {"target_state": target, "description": "go", "conditions": list(conditions)}
+
+
+def _host_definition(
+    edges, synth=None, handler_only=(), extra_states=None
+) -> dict[str, Any]:
+    """A start state, a synthesize state `work` (edges *edges*, failure state
+    `fail`) and the extra states, each reachable from `start`."""
+    extra = extra_states or {}
+    states: dict[str, Any] = {
+        "start": {
+            "id": "start",
+            "description": "d",
+            "purpose": "p",
+            "transitions": [
+                {"target_state": t, "description": "go"} for t in ["work", *extra]
+            ],
+        },
+        "work": {
+            "id": "work",
+            "description": "d",
+            "purpose": "p",
+            "synthesize": {
+                "goal": "g",
+                "return_keys": ["k"],
+                "on_failure": "fail",
+                **(synth or {}),
+            },
+            "transitions": edges,
+        },
+        "end": {"id": "end", "description": "d", "purpose": "p"},
+        "fail": {"id": "fail", "description": "d", "purpose": "p"},
+        **extra,
+    }
+    return {
+        "name": "n",
+        "description": "d",
+        "initial_state": "start",
+        "persona": "p",
+        "handler_only_keys": list(handler_only),
+        "states": states,
+    }
+
+
+def _status(value):
+    return {"==": [{"var": "synthesis_result.status"}, value]}
+
+
+def _abort_edge_only(target):
+    return _host_edge(
+        target,
+        _host_condition({"var": "procedure_abort"}, ("procedure_abort",)),
+    )
+
+
+def _host_scenarios() -> dict[str, dict[str, Any]]:
+    ok_edge = _host_edge("end", _host_condition(_OK))
+    fail_edge = _host_edge("fail", _host_condition(_FAILED))
+    other = {"==": [{"var": "x"}, 1]}
+    answer_slot = {
+        "ask": {
+            "id": "ask",
+            "description": "d",
+            "purpose": "p",
+            "completion": {**_completion(), "result_key": "answer_slot"},
+            "transitions": [{"target_state": "end", "description": "go"}],
+        }
+    }
+    nested = {
+        "nested": {
+            "id": "nested",
+            "description": "d",
+            "purpose": "p",
+            "synthesize": {
+                "goal": "g",
+                "return_keys": ["z"],
+                "on_failure": "fail",
+                "result_key": "other_result",
+            },
+            "transitions": [
+                _host_edge(
+                    "end",
+                    _host_condition(
+                        {"==": [{"var": "other_result.status"}, "ok"]},
+                        ("other_result",),
+                    ),
+                ),
+                _host_edge(
+                    "fail",
+                    _host_condition(
+                        {"in": [{"var": "other_result.status"}, ["failed", "aborted"]]},
+                        ("other_result",),
+                    ),
+                ),
+            ],
+        }
+    }
+    return {
+        "valid": _host_definition([ok_edge, fail_edge]),
+        "edge-reads-other-key": _host_definition(
+            [_host_edge("end", _host_condition(other, ("x",))), fail_edge]
+        ),
+        "edge-without-conditions": _host_definition(
+            [{"target_state": "end", "description": "go"}, fail_edge]
+        ),
+        "failed-only": _host_definition(
+            [ok_edge, _host_edge("fail", _host_condition(_status("failed")))]
+        ),
+        "aborted-only": _host_definition(
+            [ok_edge, _host_edge("fail", _host_condition(_status("aborted")))]
+        ),
+        "negated-fires-on-absent": _host_definition(
+            [
+                ok_edge,
+                _host_edge(
+                    "fail", _host_condition({"!": [{"var": "synthesis_result"}]}, ())
+                ),
+                fail_edge,
+            ]
+        ),
+        "fires-on-running": _host_definition(
+            [
+                _host_edge(
+                    "end",
+                    _host_condition({"!=": [{"var": "synthesis_result.status"}, "ok"]}),
+                ),
+                fail_edge,
+            ]
+        ),
+        "no-failure-edge-passes": _host_definition(
+            [ok_edge, _host_edge("fail", _host_condition(_status("never")))]
+        ),
+        "and-with-other-key": _host_definition(
+            [
+                ok_edge,
+                _host_edge(
+                    "fail",
+                    _host_condition(_FAILED),
+                    _host_condition({"==": [{"var": "note"}, "x"]}, ("note",)),
+                ),
+            ]
+        ),
+        "handler-only-edge-alone": _host_definition(
+            [_abort_edge_only("end"), fail_edge], handler_only=("procedure_abort",)
+        ),
+        "handler-only-failure-edge": _host_definition(
+            [ok_edge, _abort_edge_only("fail")], handler_only=("procedure_abort",)
+        ),
+        "return-key-handler-only": _host_definition(
+            [ok_edge, fail_edge],
+            synth={"return_keys": ["flag"]},
+            handler_only=("flag",),
+        ),
+        "input-handler-only-ok": _host_definition(
+            [ok_edge, fail_edge], synth={"inputs": ["flag"]}, handler_only=("flag",)
+        ),
+        "return-key-is-completion-result": _host_definition(
+            [ok_edge, fail_edge],
+            synth={"return_keys": ["answer_slot"]},
+            extra_states=answer_slot,
+        ),
+        "input-is-synthesize-result-of-other-state": _host_definition(
+            [ok_edge, fail_edge],
+            synth={"inputs": ["other_result"]},
+            extra_states=nested,
+        ),
+    }
+
+
+# The refusal text (or None: the definition loads) the loader produced for each
+# scenario BEFORE the edge checks moved into the registry (recorded on the parent
+# commit b409a0ea of plan d454fd62, never regenerated).
+_HOST_EXPECTED: dict[str, str | None] = {
+    "valid": None,
+    "edge-reads-other-key": "Value error, State 'work': the transition to 'end' must read the synthesize result key 'synthesis_result' (a condition that requires it or reads it in its logic), or it fires before the runner has produced a result",
+    "edge-without-conditions": "Value error, State 'work': the transition to 'end' must read the synthesize result key 'synthesis_result' (a condition that requires it or reads it in its logic), or it fires before the runner has produced a result",
+    "failed-only": "Value error, State 'work': no transition to 'fail' fires when the procedure failed or aborted (it does not pass when 'synthesis_result' is aborted, {'status': 'aborted', 'reason': 'budget_spent'})",
+    "aborted-only": "Value error, State 'work': no transition to 'fail' fires when the procedure failed or aborted (it does not pass when 'synthesis_result' is failed, {'status': 'failed', 'reason': 'compile_failed'})",
+    "negated-fires-on-absent": "Value error, State 'work': the transition to 'fail' fires before the runner has produced a result (it passes when 'synthesis_result' is absent)",
+    "fires-on-running": "Value error, State 'work': the transition to 'end' fires before the runner has produced a result (it passes when 'synthesis_result' is running)",
+    "no-failure-edge-passes": "Value error, State 'work': no transition to 'fail' fires when the procedure failed or aborted (it does not pass when 'synthesis_result' is failed, {'status': 'failed', 'reason': 'compile_failed'})",
+    "and-with-other-key": None,
+    "handler-only-edge-alone": None,
+    "handler-only-failure-edge": "Value error, State 'work': no transition to 'fail' fires when the procedure failed or aborted (it does not pass when 'synthesis_result' is failed, {'status': 'failed', 'reason': 'compile_failed'})",
+    "return-key-handler-only": "Value error, State 'work': synthesize return_keys entry 'flag' collides with a handler_only_keys entry",
+    "input-handler-only-ok": None,
+    "return-key-is-completion-result": "Value error, State 'work': synthesize return_keys entry 'answer_slot' collides with result_key of a completion state",
+    "input-is-synthesize-result-of-other-state": "Value error, State 'work': synthesize inputs entry 'other_result' collides with result_key of a synthesize state",
+}
+
+
+class TestDefinitionCheckHooks:
+    """Plan d454fd62 step 50: the loader's cross-state rules for a synthesize
+    state (its edges read the result key, run on sample results, and the host
+    keys do not collide with a runner-owned key) live in the kind spec; the
+    loader asks the registry and keeps only the call. Every refusal text is
+    byte-equal to the parent's."""
+
+    def test_the_loader_reads_no_kind_config_and_asks_the_registry(self):
+        """Guards (D-015): `_check_synthesize_states` names neither kind config nor
+        the sample constant; it calls `definition_problem` (a new kind with a
+        cross-state rule needs no edit in the loader)."""
+        node = _function_node(
+            _MODULE.parent / "definitions.py",
+            "_check_synthesize_states",
+            "FSMDefinition",
+        )
+        assert _config_attributes(node) == set()
+        names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+        assert "_SYNTHESIZE_SAMPLES" not in names
+        assert "definition_problem" in names
+
+    @pytest.mark.parametrize("name", sorted(_HOST_EXPECTED))
+    def test_every_refusal_text_equals_the_recorded_parent_text(self, name):
+        raw = _host_scenarios()[name]
+        expected = _HOST_EXPECTED[name]
+        if expected is None:
+            FSMDefinition(**copy.deepcopy(raw))
+            return
+        with pytest.raises(ValidationError) as excinfo:
+            FSMDefinition(**copy.deepcopy(raw))
+        assert excinfo.value.errors()[0]["msg"] == expected
+
+    def test_the_scenarios_cover_the_refusals_and_the_acceptances(self):
+        assert set(_host_scenarios()) == set(_HOST_EXPECTED)
+        refused = [v for v in _HOST_EXPECTED.values() if v is not None]
+        assert len(refused) >= 9 and len(refused) < len(_HOST_EXPECTED)
+
+    def test_the_synthesize_kind_owns_the_samples_and_the_definition_check(self):
+        state = _plain_state(synthesize=_synthesize())
+        samples = sk.SYNTHESIZE.sample_results(state)
+        assert [label for label, _ in samples] == [
+            "absent",
+            "running",
+            "failed",
+            "aborted",
+        ]
+        assert samples[0][1] is None
+        assert sk.CONVERSATION.sample_results(_plain_state()) == ()
+        assert (
+            sk.COMPLETION.sample_results(_plain_state(completion=_completion())) == ()
+        )
+
+    def test_the_sample_constant_of_the_loader_is_the_hook_data(self):
+        """`test_codes` reads `definitions._SYNTHESIZE_SAMPLES`; the name stays and
+        its value is the one tuple the hook returns (the leaf cannot import
+        `codes.Status`, so test_codes pins the strings against the enum)."""
+        from fsm_llm import definitions
+        from fsm_llm.codes import Status
+
+        state = _plain_state(synthesize=_synthesize())
+        assert definitions._SYNTHESIZE_SAMPLES is sk.SYNTHESIZE.sample_results(state)
+        assert sk._RUNNING == Status.RUNNING.value
+
+    def test_only_the_synthesize_kind_has_a_definition_check(self):
+        for spec in (sk.CONVERSATION, sk.COMPLETION):
+            assert spec.check_definition is sk._no_definition_problem
+        assert sk.SYNTHESIZE.check_definition is not sk._no_definition_problem
+
+    def test_the_evaluator_is_passed_in_and_nothing_else_runs_edges(self):
+        """The hook module never imports the evaluator: the one handed to
+        `definition_problem` is the one that judges the sample results."""
+        from fsm_llm.definitions import logic_referenced_keys
+
+        raw = _host_scenarios()["valid"]
+        definition = FSMDefinition(**copy.deepcopy(raw))
+        state = definition.states["work"]
+        seen: list[str] = []
+
+        class Probe:
+            def transition_passes(self, transition, context):
+                seen.append(sorted(context))
+                return False
+
+        problem = sk.definition_problem(
+            definition, state, Probe(), logic_referenced_keys
+        )
+        assert problem is not None and "no transition to 'fail' fires" in problem
+        assert seen and all(isinstance(keys, list) for keys in seen)
+
+    def test_a_kind_registered_at_runtime_brings_its_own_cross_state_rule(self):
+        """The loader asks the registry: replace the synthesize spec's check and
+        the loader refuses with the replacement's message, unedited."""
+        from dataclasses import replace
+
+        stub = replace(
+            sk.SYNTHESIZE,
+            check_definition=lambda d, s, e, k: f"stub rule on {s.id}",
+        )
+        original = sk.KINDS
+        sk.KINDS = (sk.CONVERSATION, sk.COMPLETION, stub)
+        try:
+            with pytest.raises(ValidationError) as excinfo:
+                FSMDefinition(**copy.deepcopy(_host_scenarios()["valid"]))
+            assert (
+                excinfo.value.errors()[0]["msg"]
+                == "Value error, State 'work': stub rule on work"
+            )
+        finally:
+            sk.KINDS = original
+        FSMDefinition(**copy.deepcopy(_host_scenarios()["valid"]))
+
+    def test_a_state_holding_two_configs_is_checked_by_every_kind(self):
+        """Behaviour kept: a completion-and-synthesize state built around the
+        validator still gets the synthesize edge rules (as `config is not None`
+        did), not only the rules of `kind_of`'s kind."""
+        both = State.model_construct(
+            id="s",
+            completion=_completion_config(),
+            synthesize=_synthesize_config(),
+            transitions=[_edge("t")],
+        )
+        definition = SimpleNamespace(states={"s": both}, handler_only_keys=[], name="n")
+        from fsm_llm.definitions import logic_referenced_keys
+        from fsm_llm.transition_evaluator import TransitionEvaluator
+
+        problem = sk.definition_problem(
+            definition, both, TransitionEvaluator(), logic_referenced_keys
+        )
+        assert problem is not None and "must read the synthesize result key" in problem
+
+    def test_owned_result_keys_labels_each_key_with_its_kind(self):
+        done = _plain_state(completion={**_completion(), "result_key": "slot"})
+        host = _plain_state(synthesize=_synthesize())
+        assert sk.owned_result_keys([done, host, _plain_state()]) == {
+            "slot": "result_key of a completion state",
+            "synthesis_result": "result_key of a synthesize state",
+        }
+
+
 def _completion_config():
     from fsm_llm.definitions import CompletionStateConfig
 

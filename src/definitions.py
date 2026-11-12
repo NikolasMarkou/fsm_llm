@@ -34,7 +34,6 @@ from pydantic import (
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-from .codes import Status
 from .constants import (
     ALLOWED_JSONLOGIC_OPERATIONS,
     COMPLETION_TOOL_CHOICE_KEYWORDS,
@@ -58,7 +57,12 @@ from .constants import (
 )
 from .logging import logger
 from .schema_registry import SCHEMA_VERSION_DEFAULT, newer_fields
-from .state_kinds import KINDS, kind_of, state_problem
+from .state_kinds import (
+    SYNTHESIZE_SAMPLES,
+    definition_problem,
+    kind_of,
+    state_problem,
+)
 
 # --------------------------------------------------------------
 # Identifier charset policy
@@ -1916,16 +1920,10 @@ def orphaned_states_message(orphans: Iterable[str]) -> str:
 # report each defect once (it skips a message a `Schema:` error already says).
 
 
-# Sample results `FSMDefinition._check_synthesize_states` runs a synthesize state's
-# edges on (D-035). Shaped as the runner writes the result key (`status`,
-# `procedure_id`, `version`, `reason`; producer: `fsm_llm.synthesis.runner._result`,
-# which core may not import). `None` is "no result yet".
-_SYNTHESIZE_SAMPLES: tuple[tuple[str, dict[str, Any] | None], ...] = (
-    ("absent", None),
-    ("running", {"status": Status.RUNNING.value}),
-    ("failed", {"status": Status.FAILED.value, "reason": "compile_failed"}),
-    ("aborted", {"status": Status.ABORTED.value, "reason": "budget_spent"}),
-)
+# The sample results a synthesize state's edges are run on (D-035) are the data
+# of the synthesize kind (`state_kinds.SYNTHESIZE_SAMPLES`); the name stays for
+# `test_codes`, which pins their strings against `codes.Status` and `Reason`.
+_SYNTHESIZE_SAMPLES = SYNTHESIZE_SAMPLES
 
 
 # Definition objects whose schema-version findings were already logged
@@ -2092,118 +2090,23 @@ class FSMDefinition(BaseModel):
         logger.debug(f"FSM '{self.name}' validation successful")
         return self
 
-    # DECISION plan-2026-11-10T194139-2cefeb61/D-034 and
-    # plan-2026-11-10T194139-2cefeb61/D-035: an edge of a synthesize state may
-    # read the result key OR a handler-only key (the runner's injected abort
-    # edge, handler-only `procedure_abort`, sits on every state of a compiled
-    # procedure, nested synthesize states included), and is then RUN on four
-    # sample results by the real evaluator. Do NOT
-    # require the result key alone, do NOT move this to validator.py (it may
-    # never be stricter than the loader), and do NOT fall back to a structural
-    # "mentions the key" rule alone: review pass 2 reproduced both holes
-    # (`status == "failed"` strands the parent after an abort; a `!` edge on
-    # the result fires only when there is none).
+    # The edge rules of a synthesize state stay in the LOADER (they need the whole
+    # FSM and `FSMValidator` may never be stricter than the loader: do NOT move
+    # this call to validator.py). They are the `check_definition` hook of the
+    # synthesize kind in state_kinds.py; its D-034/D-035 anchor says what the
+    # rules must keep. The real evaluator and `logic_referenced_keys` are handed
+    # in because that leaf module cannot import them.
     def _check_synthesize_states(self) -> None:
-        """Cross-state rules for synthesize states (they need the whole FSM).
-
-        1. Every transition must read the state's ``result_key`` (a condition
-           that requires it or reads it in its logic) or a ``handler_only_keys``
-           entry (only a handler or the runner writes one; the runner's
-           injected abort edge is of this kind). This is necessary, not enough
-           (rule 2 runs the edges); it also catches an edge on an unrelated key,
-           which the samples of rule 2 cannot see.
-        2. The real evaluator (``TransitionEvaluator.transition_passes``, never
-           a copy of its logic) runs the state's edges on four sample results,
-           shaped as the runner writes them (``status`` of ``running``,
-           ``failed`` or ``aborted``, or no result at all). No edge may pass the
-           absent or the ``running`` sample (it would fire before the runner
-           has decided), and an edge to ``on_failure`` must pass the ``failed`` sample
-           and an edge to it the ``aborted`` sample (or the parent is stranded
-           after a failure). An edge on a handler-only key alone passes no
-           sample: fine, but it cannot be the failure edge.
-        3. Host keys a synthesize state returns or takes may not be runner-owned:
-           a return key merged by ``pop_fsm`` would write a value the child's
-           model extracted over a handler-only key, a synthesize result or a
-           completion result; an input named like a result would be overwritten
-           by the runner. (A completion ``messages_key`` is internal-prefixed and
-           so can never be a public return key.)
-        """
-        # kinds in registry order: when two kinds share a key the later label wins
-        owned = {
-            key: f"result_key of a {spec.name} state"
-            for spec in KINDS
-            for state in self.states.values()
-            if kind_of(state) is spec and (key := spec.result_key(state)) is not None
-        }
+        """Cross-state rules of the state kinds (a synthesize state's edges and
+        host keys), each asked of the kind registry; see
+        ``state_kinds.definition_problem``."""
         from .transition_evaluator import TransitionEvaluator  # circular at import
 
         evaluator = TransitionEvaluator()
         for state in self.states.values():
-            config = state.synthesize
-            if config is None:
-                continue
-            reads = {config.result_key, *self.handler_only_keys}
-            for transition in state.transitions:
-                if not any(
-                    reads.intersection(condition.requires_context_keys or ())
-                    or reads.intersection(logic_referenced_keys(condition.logic))
-                    for condition in transition.conditions or ()
-                ):
-                    raise ValueError(
-                        f"State '{state.id}': the transition to "
-                        f"{transition.target_state!r} must read the synthesize "
-                        f"result key {config.result_key!r} (a condition that "
-                        "requires it or reads it in its logic), or it fires "
-                        "before the runner has produced a result"
-                    )
-            # other keys the edges require are present: an edge also gated on
-            # one (an AND) must not escape the samples for lacking it
-            others = {
-                key: "x"
-                for transition in state.transitions
-                for condition in transition.conditions or ()
-                for key in condition.requires_context_keys or ()
-                if key != config.result_key and key not in self.handler_only_keys
-            }
-            for label, result in _SYNTHESIZE_SAMPLES:
-                context: dict[str, Any] = dict(others)
-                if result is not None:
-                    context[config.result_key] = result
-                passing = [
-                    t
-                    for t in state.transitions
-                    if evaluator.transition_passes(t, context)
-                ]
-                if result is None or result["status"] == Status.RUNNING.value:
-                    for transition in passing:
-                        raise ValueError(
-                            f"State '{state.id}': the transition to "
-                            f"{transition.target_state!r} fires before the runner "
-                            f"has produced a result (it passes when "
-                            f"{config.result_key!r} is {label})"
-                        )
-                elif not any(t.target_state == config.on_failure for t in passing):
-                    raise ValueError(
-                        f"State '{state.id}': no transition to "
-                        f"{config.on_failure!r} fires when the procedure failed or "
-                        f"aborted (it does not pass when {config.result_key!r} is "
-                        f"{label}, {result!r})"
-                    )
-            for entry, names in (
-                ("return_keys", config.return_keys),
-                ("inputs", config.inputs),
-            ):
-                for name in names:
-                    if entry == "return_keys" and name in self.handler_only_keys:
-                        reason = "a handler_only_keys entry"
-                    elif name in owned:
-                        reason = owned[name]
-                    else:
-                        continue
-                    raise ValueError(
-                        f"State '{state.id}': synthesize {entry} entry {name!r} "
-                        f"collides with {reason}"
-                    )
+            problem = definition_problem(self, state, evaluator, logic_referenced_keys)
+            if problem is not None:
+                raise ValueError(f"State '{state.id}': {problem}")
 
 
 # --------------------------------------------------------------

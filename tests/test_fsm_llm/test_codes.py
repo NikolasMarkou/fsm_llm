@@ -131,8 +131,14 @@ class TestAgainstThePinnedVocabularies:
         annotation = CompletionResponse.model_fields["kind"].annotation
         assert [m.value for m in CompletionKind] == list(get_args(annotation))
 
-    def test_definitions_uses_the_same_status_class(self):
-        assert definitions.Status is codes.Status
+    def test_the_synthesize_kind_samples_are_the_status_strings(self):
+        """The samples live in the `state_kinds` leaf, which cannot import
+        `codes.Status`; the loader's name for them is the same tuple, and the
+        one status the hook compares against is the enum's value."""
+        from fsm_llm import state_kinds
+
+        assert definitions._SYNTHESIZE_SAMPLES is state_kinds.SYNTHESIZE_SAMPLES
+        assert state_kinds._RUNNING == Status.RUNNING.value
 
     def test_synthesize_samples_use_status_values(self):
         statuses = {

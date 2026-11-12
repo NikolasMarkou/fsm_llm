@@ -62,6 +62,19 @@ Interface contract:
     classification fields, minus ``handler_only``, plus its own ``result_key``
     (only that state writes it). A ``frozenset``. The one arrival rule of G3
     and G4 (``flow_analysis.declared_available``).
+  - ``sample_results(state)``: the sample results the loader runs the state's
+    edges on, a tuple of ``(label, result)`` (``None`` is "no result yet");
+    empty for a kind that has none. Shaped as the kind's runner writes its
+    result key.
+  - ``check_definition(definition, state, evaluator, logic_keys)``: the kind's
+    cross-state rule, which needs the whole definition: a message (without the
+    ``State '<id>':`` prefix) or ``None``. The loader hands in the two services
+    this leaf may not import, the real ``TransitionEvaluator`` (its
+    ``transition_passes(transition, context)`` judges the sample results) and
+    ``definitions.logic_referenced_keys``; ``definition`` is read by ``getattr``
+    (``states``, ``handler_only_keys``). Default accepts. The edge check stays
+    in the loader, never in ``validator.py`` (it may not be stricter than the
+    loader): see the anchor at ``_synthesize_check_definition``.
 
 - ``state_problem(state)``: the one State-level refusal rule: for every kind
   whose config the state holds, in registry order, the first forbidden
@@ -71,6 +84,14 @@ Interface contract:
   ``fsm-llm-validate`` keep one verdict. Every set config is judged, not only
   ``kind_of``'s: a state built around the validator with two configs is judged
   by both.
+- ``definition_problem(definition, state, evaluator, logic_keys)``: the one
+  definition-level refusal rule: the ``check_definition`` of every kind whose
+  config the state holds, in registry order; the first message, else ``None``.
+  ``FSMDefinition._check_synthesize_states`` raises
+  ``ValueError(f"State '<id>': {problem}")`` from it for each state.
+- ``owned_result_keys(states)``: ``{result key: "result_key of a <kind>
+  state"}`` over the given states, in registry order (a later kind wins a shared
+  key); the labels of the loader's collision refusal.
 
 ``State.kind`` is a plain property over ``kind_of`` (never a field, a computed
 field or a private attribute: any of them would reach ``model_dump`` and move
@@ -79,7 +100,7 @@ field or a private attribute: any of them would reach ``model_dump`` and move
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, TypeVar
@@ -89,10 +110,13 @@ __all__ = [
     "CONVERSATION",
     "KINDS",
     "SYNTHESIZE",
+    "SYNTHESIZE_SAMPLES",
     "CompletionStateKind",
     "KindSpec",
+    "definition_problem",
     "get_kind",
     "kind_of",
+    "owned_result_keys",
     "state_problem",
 ]
 
@@ -185,6 +209,149 @@ def _synthesize_check_state(state: Any) -> str | None:
     return None
 
 
+def _no_samples(state: Any) -> tuple[tuple[str, dict[str, Any] | None], ...]:
+    return ()
+
+
+def _no_definition_problem(
+    definition: Any, state: Any, evaluator: Any, logic_keys: Callable[[Any], set[str]]
+) -> str | None:
+    return None
+
+
+# Sample results the loader runs a synthesize state's edges on (D-035). Shaped as
+# the runner writes the result key (`status`, `procedure_id`, `version`, `reason`;
+# producer: `fsm_llm.synthesis.runner._result`, which core may not import). `None`
+# is "no result yet". The strings are the wire values of `codes.Status` and
+# `codes.Reason`: this leaf cannot import `codes`, so `test_codes` pins them
+# against the enums (and `_RUNNING` below). `definitions._SYNTHESIZE_SAMPLES` is
+# this tuple under the name `test_codes` reads.
+SYNTHESIZE_SAMPLES: tuple[tuple[str, dict[str, Any] | None], ...] = (
+    ("absent", None),
+    ("running", {"status": "running"}),
+    ("failed", {"status": "failed", "reason": "compile_failed"}),
+    ("aborted", {"status": "aborted", "reason": "budget_spent"}),
+)
+_RUNNING = "running"
+
+
+def _synthesize_samples(state: Any) -> tuple[tuple[str, dict[str, Any] | None], ...]:
+    return SYNTHESIZE_SAMPLES
+
+
+def owned_result_keys(states: Iterable[Any]) -> dict[str, str]:
+    """``{result key: "result_key of a <kind> state"}`` over *states*.
+
+    Kinds in registry order: when two kinds share a key the later label wins.
+    """
+    states = list(states)
+    return {
+        key: f"result_key of a {spec.name} state"
+        for spec in KINDS
+        for state in states
+        if kind_of(state) is spec and (key := spec.result_key(state)) is not None
+    }
+
+
+# DECISION plan-2026-11-10T194139-2cefeb61/D-034 and
+# plan-2026-11-10T194139-2cefeb61/D-035: an edge of a synthesize state may
+# read the result key OR a handler-only key (the runner's injected abort
+# edge, handler-only `procedure_abort`, sits on every state of a compiled
+# procedure, nested synthesize states included), and is then RUN on four
+# sample results by the real evaluator. Do NOT
+# require the result key alone, do NOT move this check to validator.py (it may
+# never be stricter than the loader; the loader calls it, see
+# `FSMDefinition._check_synthesize_states`), and do NOT fall back to a
+# structural "mentions the key" rule alone: review pass 2 reproduced both holes
+# (`status == "failed"` strands the parent after an abort; a `!` edge on
+# the result fires only when there is none).
+def _synthesize_check_definition(
+    definition: Any, state: Any, evaluator: Any, logic_keys: Callable[[Any], set[str]]
+) -> str | None:
+    """Cross-state rules for a synthesize state (they need the whole FSM).
+
+    1. Every transition must read the state's ``result_key`` (a condition that
+       requires it or reads it in its logic) or a ``handler_only_keys`` entry
+       (only a handler or the runner writes one; the runner's injected abort
+       edge is of this kind). This is necessary, not enough (rule 2 runs the
+       edges); it also catches an edge on an unrelated key, which the samples
+       of rule 2 cannot see.
+    2. The real evaluator (``TransitionEvaluator.transition_passes``, never a
+       copy of its logic) runs the state's edges on the four sample results,
+       shaped as the runner writes them (``status`` of ``running``, ``failed``
+       or ``aborted``, or no result at all). No edge may pass the absent or the
+       ``running`` sample (it would fire before the runner has decided), and an
+       edge to ``on_failure`` must pass the ``failed`` sample and an edge to it
+       the ``aborted`` sample (or the parent is stranded after a failure). An
+       edge on a handler-only key alone passes no sample: fine, but it cannot
+       be the failure edge.
+    3. Host keys a synthesize state returns or takes may not be runner-owned: a
+       return key merged by ``pop_fsm`` would write a value the child's model
+       extracted over a handler-only key, a synthesize result or a completion
+       result; an input named like a result would be overwritten by the runner.
+       (A completion ``messages_key`` is internal-prefixed and so can never be a
+       public return key.)
+    """
+    config = state.synthesize
+    handler_only = frozenset(getattr(definition, "handler_only_keys", None) or ())
+    reads = {config.result_key, *handler_only}
+    for transition in state.transitions:
+        if not any(
+            reads.intersection(condition.requires_context_keys or ())
+            or reads.intersection(logic_keys(condition.logic))
+            for condition in transition.conditions or ()
+        ):
+            return (
+                f"the transition to {transition.target_state!r} must read the "
+                f"synthesize result key {config.result_key!r} (a condition that "
+                "requires it or reads it in its logic), or it fires "
+                "before the runner has produced a result"
+            )
+    # other keys the edges require are present: an edge also gated on
+    # one (an AND) must not escape the samples for lacking it
+    others = {
+        key: "x"
+        for transition in state.transitions
+        for condition in transition.conditions or ()
+        for key in condition.requires_context_keys or ()
+        if key != config.result_key and key not in handler_only
+    }
+    for label, result in SYNTHESIZE.sample_results(state):
+        context: dict[str, Any] = dict(others)
+        if result is not None:
+            context[config.result_key] = result
+        passing = [
+            t for t in state.transitions if evaluator.transition_passes(t, context)
+        ]
+        if result is None or result["status"] == _RUNNING:
+            for transition in passing:
+                return (
+                    f"the transition to {transition.target_state!r} fires before "
+                    f"the runner has produced a result (it passes when "
+                    f"{config.result_key!r} is {label})"
+                )
+        elif not any(t.target_state == config.on_failure for t in passing):
+            return (
+                f"no transition to {config.on_failure!r} fires when the "
+                f"procedure failed or aborted (it does not pass when "
+                f"{config.result_key!r} is {label}, {result!r})"
+            )
+    owned = owned_result_keys(getattr(definition, "states", {}).values())
+    for entry, names in (
+        ("return_keys", config.return_keys),
+        ("inputs", config.inputs),
+    ):
+        for name in names:
+            if entry == "return_keys" and name in handler_only:
+                reason = "a handler_only_keys entry"
+            elif name in owned:
+                reason = owned[name]
+            else:
+                continue
+            return f"synthesize {entry} entry {name!r} collides with {reason}"
+    return None
+
+
 def _result_key_of(config_field: str) -> Callable[[Any], str | None]:
     """The hook reading ``<config_field>.result_key`` (``None`` when unset)."""
 
@@ -212,6 +379,12 @@ class KindSpec:
     minted_keys: Callable[[Any], tuple[str, ...]] = _no_minted_keys
     produced_keys: Callable[[Any, frozenset[str]], frozenset[str]] = _produced_keys
     check_state: Callable[[Any], str | None] = _no_state_problem
+    sample_results: Callable[[Any], tuple[tuple[str, dict[str, Any] | None], ...]] = (
+        _no_samples
+    )
+    check_definition: Callable[
+        [Any, Any, Any, Callable[[Any], set[str]]], str | None
+    ] = _no_definition_problem
 
 
 # The extraction channels a kind that replaces Pass 1 cannot also declare: they
@@ -252,6 +425,8 @@ SYNTHESIZE = KindSpec(
     forbidden_declarations=("completion", *_EXTRACTION_DECLARATIONS),
     dryrun_judged=False,
     check_state=_synthesize_check_state,
+    sample_results=_synthesize_samples,
+    check_definition=_synthesize_check_definition,
 )
 
 KINDS: tuple[KindSpec, ...] = (CONVERSATION, COMPLETION, SYNTHESIZE)
@@ -291,6 +466,26 @@ def state_problem(state: Any) -> str | None:
         if conflicts:
             return f"a {spec.name} state cannot also declare {conflicts}"
         problem = spec.check_state(state)
+        if problem is not None:
+            return problem
+    return None
+
+
+def definition_problem(
+    definition: Any, state: Any, evaluator: Any, logic_keys: Callable[[Any], set[str]]
+) -> str | None:
+    """The first cross-state rule of a kind that *state* breaks, else ``None``.
+
+    Applies to every kind whose config the state holds, in ``KINDS`` order, as
+    ``state_problem`` does. The message has no state id; the loader prefixes it.
+    *evaluator* is the real ``TransitionEvaluator`` and *logic_keys* is
+    ``definitions.logic_referenced_keys``, both passed in because this leaf
+    cannot import them.
+    """
+    for spec in KINDS:
+        if not spec.config_field or getattr(state, spec.config_field, None) is None:
+            continue
+        problem = spec.check_definition(definition, state, evaluator, logic_keys)
         if problem is not None:
             return problem
     return None
