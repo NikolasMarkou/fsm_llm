@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import types
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -31,6 +32,7 @@ from fsm_llm.definitions import (
     MultiClassificationResult,
     State,
     Transition,
+    TransitionCondition,
 )
 from fsm_llm.handlers import HandlerSystem
 from fsm_llm.llm import LiteLLMInterface, LLMInterface, _completion_response
@@ -44,10 +46,19 @@ from fsm_llm.prompts import (
 )
 from fsm_llm.transition_evaluator import TransitionEvaluator
 from tests.test_fsm_llm.support import (
+    _A4_TRANSITION_KEY,
+    _a3_api,
+    _a3_extraction_fsm,
+    _ambiguous_then_blocked_fsm,
+    _api,
     _ClassBulkProv,
+    _classification,
     _classified_bulk_fsm,
     _classified_fsm,
+    _ClassifierCapture,
     _fake_response,
+    _mock_llm,
+    _raw_data,
 )
 
 # ----------------------------------------------------------
@@ -1262,3 +1273,331 @@ class TestBulkPassRespectsClassificationOwnership:
         ) as p:
             data = p.say("hmm maybe something", bulk={"intent": "buy"})
         assert data.get("intent") == "buy"
+
+
+_A4_RESULTS_KEY = "classification_results"
+
+
+# The documented metadata keys are pinned as literals: they are the public
+# contract a monitor or debugger reads through get_complete_conversation.
+def _a4_metadata(api: API, conv_id: str) -> dict[str, Any]:
+    return api.fsm_manager.get_complete_conversation(conv_id)["metadata"]
+
+
+class TestStep04A4:
+    """A4: every classification-extraction result is recorded in full under
+    ``context.metadata["classification_results"][field_name]`` and the
+    transition-classification record is mirrored to
+    ``context.metadata["transition_classification"]``. Both are readable via
+    ``get_complete_conversation``, stay out of ``get_data`` and ``context.data``
+    (except the back-compat transition key), are JSON-native, and roll back
+    with the turn.
+    """
+
+    def test_a4_classification_result_visible_via_get_complete_conversation(self):
+        api, conv_id = _a3_api(_a3_extraction_fsm(context_keys=["topic"]))
+        with _ClassifierCapture("buy", 0.9):
+            api.converse("I want to buy these", conv_id)
+
+        metadata = _a4_metadata(api, conv_id)
+        assert metadata[_A4_RESULTS_KEY]["intent"] == {
+            "intent": "buy",
+            "confidence": 0.9,
+            "reasoning": "r",
+            "entities": {},
+            "context_snapshot": {"topic": "running shoes"},
+        }
+        # JSON-native: the whole metadata mapping serialises without default=.
+        json.dumps(metadata)
+
+    def test_a4_result_not_in_get_data(self):
+        api, conv_id = _a3_api(_a3_extraction_fsm())
+        with _ClassifierCapture("buy", 0.9):
+            api.converse("I want to buy these", conv_id)
+
+        data = api.get_data(conv_id)
+        assert data["intent"] == "buy"
+        assert _A4_RESULTS_KEY not in data
+        assert not any("classification" in k for k in _raw_data(api, conv_id))
+
+    def test_a4_fallback_and_low_confidence_results_are_recorded(self):
+        api, conv_id = _a3_api(_a3_extraction_fsm())
+        with _ClassifierCapture("browse", 0.95):
+            api.converse("just looking", conv_id)
+        record = _a4_metadata(api, conv_id)[_A4_RESULTS_KEY]["intent"]
+        assert record["intent"] == "browse"
+        assert "low_confidence" not in record
+
+        with _ClassifierCapture("buy", 0.2):
+            api.converse("maybe buy?", conv_id)
+        record = _a4_metadata(api, conv_id)[_A4_RESULTS_KEY]["intent"]
+        assert record["intent"] == "buy"
+        assert record["low_confidence"] is True
+        # The discarded result never became the field value.
+        assert api.get_data(conv_id)["intent"] == "browse"
+        assert api.get_current_state(conv_id) == "triage"
+
+    def test_a4_rollback_restores_metadata_result(self):
+        llm = _mock_llm()
+        api = API.from_definition(_a3_extraction_fsm(), llm_interface=llm)
+        conv_id, _ = api.start_conversation()
+        with _ClassifierCapture("browse", 0.95):
+            api.converse("just looking", conv_id)
+        prior = _a4_metadata(api, conv_id)[_A4_RESULTS_KEY]
+
+        llm.generate_response.side_effect = RuntimeError("pass 2 down")
+        with _ClassifierCapture("buy", 0.9), pytest.raises(FSMError):
+            api.converse("buy it now", conv_id)
+
+        assert api.get_current_state(conv_id) == "triage"
+        assert _a4_metadata(api, conv_id)[_A4_RESULTS_KEY] == prior
+        assert prior["intent"]["intent"] == "browse"
+
+    def test_a4_earlier_snapshot_not_mutated_by_later_turn(self):
+        api, conv_id = _a3_api(_a3_extraction_fsm())
+        with _ClassifierCapture("browse", 0.95):
+            api.converse("just looking", conv_id)
+        earlier = _a4_metadata(api, conv_id)
+
+        with _ClassifierCapture("browse", 0.7):
+            api.converse("still looking", conv_id)
+
+        assert earlier[_A4_RESULTS_KEY]["intent"]["confidence"] == 0.95
+        later = _a4_metadata(api, conv_id)
+        assert later[_A4_RESULTS_KEY]["intent"]["confidence"] == 0.7
+
+    def test_a4_context_snapshot_keeps_json_native_values_only(self):
+        api = API.from_definition(
+            _a3_extraction_fsm(context_keys=["topic", "handle"]),
+            llm_interface=_mock_llm(),
+        )
+        conv_id, _ = api.start_conversation(
+            initial_context={"topic": "running shoes", "handle": object()}
+        )
+        with _ClassifierCapture("browse", 0.95):
+            api.converse("just looking", conv_id)
+
+        record = _a4_metadata(api, conv_id)[_A4_RESULTS_KEY]["intent"]
+        assert record["context_snapshot"] == {"topic": "running shoes"}
+        json.dumps(record)
+
+    def test_a4_transition_record_in_metadata(self):
+        api, conv_id, _ = _api(_ambiguous_then_blocked_fsm())
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            mock_cls.return_value.classify.return_value = _classification("a", 0.95)
+            api.converse("a please", conv_id)
+
+        assert api.get_current_state(conv_id) == "a"
+        mirrored = _a4_metadata(api, conv_id)[_A4_TRANSITION_KEY]
+        assert "_transition_classification_result" not in _raw_data(api, conv_id)
+        assert mirrored["intent"] == "a"
+        assert mirrored["confidence"] == pytest.approx(0.95)
+        json.dumps(mirrored)
+
+        # A8's turn-start clear covers the metadata mirror too.
+        api.converse("still here", conv_id)
+        assert _A4_TRANSITION_KEY not in _a4_metadata(api, conv_id)
+
+    def test_a4_transition_low_confidence_and_failure_mirrored(self):
+        api, conv_id, _ = _api(
+            _ambiguous_then_blocked_fsm({"confidence_threshold": 0.9})
+        )
+        # One patch for both turns: the pipeline caches the classifier.
+        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            mock_cls.return_value.classify.side_effect = [
+                _classification("a", 0.05),
+                ClassificationError("down"),
+            ]
+            api.converse("maybe a?", conv_id)
+            assert _a4_metadata(api, conv_id)[_A4_TRANSITION_KEY]["low_confidence"]
+            api.converse("again", conv_id)
+        mirrored = _a4_metadata(api, conv_id)[_A4_TRANSITION_KEY]
+        assert mirrored == {"error": "down", "fallback": True}
+
+    def test_a4_session_save_restore_unaffected(self, tmp_path):
+        from fsm_llm.session import FileSessionStore
+
+        api = API.from_definition(
+            _a3_extraction_fsm(),
+            llm_interface=_mock_llm(),
+            session_store=FileSessionStore(tmp_path),
+        )
+        conv_id, _ = api.start_conversation()
+        with _ClassifierCapture("browse", 0.95):
+            api.converse("just looking", conv_id)
+        api.save_session(conv_id)
+
+        restored = api.restore_session(conv_id)
+        assert restored is not None
+        new_conv_id, state = restored
+        assert api.get_data(new_conv_id)["intent"] == "browse"
+        # Per-turn debug records are not session state; only provenance is.
+        assert set(state.metadata) == {"pipeline_extracted"}
+
+
+def _a5_config(field_name: str) -> ClassificationExtractionConfig:
+    return ClassificationExtractionConfig(
+        field_name=field_name,
+        intents=[
+            IntentDefinition(name="buy", description="wants to buy"),
+            IntentDefinition(name="browse", description="just looking"),
+        ],
+        fallback_intent="browse",
+        confidence_threshold=0.5,
+    )
+
+
+def _a5_fsm(
+    fields: tuple[str, ...] = ("intent",),
+    handler_only_keys: list[str] | None = None,
+) -> FSMDefinition:
+    """``greet`` owns no extraction and always moves to ``triage`` (one
+    unconditioned transition, DETERMINISTIC); ``triage`` owns one
+    classification field per name in ``fields`` and never leaves (its one
+    transition is gated on a key nobody sets), so no second transition runs."""
+    states = {
+        "greet": State(
+            id="greet",
+            description="Greet",
+            purpose="Say hello",
+            response_instructions="Respond",
+            transitions=[Transition(target_state="triage", description="Always")],
+        ),
+        "triage": State(
+            id="triage",
+            description="Triage",
+            purpose="Route the shopper",
+            response_instructions="Respond",
+            classification_extractions=[_a5_config(f) for f in fields],
+            transitions=[
+                Transition(
+                    target_state="done",
+                    description="Never",
+                    conditions=[
+                        TransitionCondition(
+                            description="never set",
+                            logic={"==": [{"var": "never_set_flag"}, True]},
+                        )
+                    ],
+                )
+            ],
+        ),
+        "done": State(id="done", description="Done", purpose="End", transitions=[]),
+    }
+    return FSMDefinition(
+        name="a5_fsm",
+        description="A5 FSM",
+        initial_state="greet",
+        states=states,
+        handler_only_keys=handler_only_keys or [],
+    )
+
+
+def _a5_self_loop_fsm() -> FSMDefinition:
+    """``triage`` owns ``intent``; its only passing transition is an
+    unconditioned self-loop (the edge to ``done`` is gated on a key nobody
+    sets)."""
+    never = TransitionCondition(
+        description="never set", logic={"==": [{"var": "never_set_flag"}, True]}
+    )
+    states = {
+        "triage": State(
+            id="triage",
+            description="Triage",
+            purpose="Route the shopper",
+            response_instructions="Respond",
+            classification_extractions=[_a5_config("intent")],
+            transitions=[
+                Transition(target_state="triage", description="Again"),
+                Transition(
+                    target_state="done", description="Never", conditions=[never]
+                ),
+            ],
+        ),
+        "done": State(id="done", description="Done", purpose="End", transitions=[]),
+    }
+    return FSMDefinition(
+        name="a5_loop", description="A5 loop", initial_state="triage", states=states
+    )
+
+
+class TestStep05A5:
+    """A5: after a transition into a different state, each of that state's
+    classification fields that is still unset (absent or None) is classified
+    on the same message, one classifier call per field. Self-loops,
+    agent-managed FSMs, already-set fields and ``handler_only_keys`` cost no
+    call (plan-2026-09-21T203800-8a03483a/D-006)."""
+
+    def test_a5_intent_for_next_state_is_classified_after_transition(self):
+        api, conv_id, _ = _api(_a5_fsm())
+        with _ClassifierCapture("buy", 0.9) as cap:
+            api.converse("hi, I want to buy running shoes", conv_id)
+
+        assert api.get_current_state(conv_id) == "triage"
+        assert api.get_data(conv_id)["intent"] == "buy"
+        assert len(cap.calls) == 1
+        record = _a4_metadata(api, conv_id)[_A4_RESULTS_KEY]["intent"]
+        assert record["intent"] == "buy"
+
+    def test_a5_stream_path_classifies_too(self):
+        api, conv_id, _ = _api(_a5_fsm())
+        with _ClassifierCapture("buy", 0.9) as cap:
+            assert "".join(api.converse_stream("hi, buy please", conv_id)) == "ok"
+
+        assert api.get_current_state(conv_id) == "triage"
+        assert api.get_data(conv_id)["intent"] == "buy"
+        assert len(cap.calls) == 1
+
+    def test_a5_exactly_one_extra_call_per_unset_field(self):
+        api, conv_id, _ = _api(_a5_fsm(fields=("intent", "mood")))
+        with _ClassifierCapture("buy", 0.9) as cap:
+            api.converse("hi, I want to buy", conv_id)
+
+        assert len(cap.calls) == 2
+        data = api.get_data(conv_id)
+        assert data["intent"] == "buy"
+        assert data["mood"] == "buy"
+
+    def test_a5_already_set_field_costs_no_call(self):
+        api = API.from_definition(
+            _a5_fsm(fields=("intent", "mood")), llm_interface=_mock_llm()
+        )
+        conv_id, _ = api.start_conversation(initial_context={"intent": "browse"})
+        with _ClassifierCapture("buy", 0.9) as cap:
+            api.converse("hi, I want to buy", conv_id)
+
+        assert len(cap.calls) == 1
+        data = api.get_data(conv_id)
+        assert data["intent"] == "browse"
+        assert data["mood"] == "buy"
+
+    def test_a5_self_loop_costs_no_call(self):
+        """Guard (passes on the pre-step source): the state's own pass just
+        classified this message; a below-threshold result leaves the field
+        unset, and the self-loop must not buy a second call for it."""
+        api, conv_id, _ = _api(_a5_self_loop_fsm())
+        with _ClassifierCapture("buy", 0.2) as cap:
+            api.converse("maybe buy?", conv_id)
+
+        assert len(cap.calls) == 1
+        assert "intent" not in api.get_data(conv_id)
+
+    def test_a5_handler_only_key_not_classified(self):
+        """Guard (passes on the pre-step source)."""
+        api, conv_id, _ = _api(_a5_fsm(handler_only_keys=["intent"]))
+        with _ClassifierCapture("buy", 0.9) as cap:
+            api.converse("hi, I want to buy", conv_id)
+
+        assert api.get_current_state(conv_id) == "triage"
+        assert cap.calls == []
+        assert "intent" not in api.get_data(conv_id)
+
+    def test_a5_agent_managed_fsm_costs_no_call(self):
+        """Guard (passes on the pre-step source)."""
+        api, conv_id, _ = _api(_a5_fsm())
+        api.update_context(conv_id, {"agent_trace": []})
+        with _ClassifierCapture("buy", 0.9) as cap:
+            api.converse("hi, I want to buy", conv_id)
+
+        assert api.get_current_state(conv_id) == "triage"
+        assert cap.calls == []

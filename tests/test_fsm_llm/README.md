@@ -59,6 +59,7 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_handlers_unit.py`, `test_handler_timeout.py` - `HandlerSystem`, `HandlerBuilder`, timing points, priorities, timeouts.
 - `test_pipeline_handler_contract.py` - handler failures seen through `API.converse`, including rollback.
 - `test_memory.py` - `WorkingMemory` buffers, serialization, copies and concurrency.
+- `test_session.py` - `FileSessionStore` id validation, soft failures, fsync-before-replace, and file logging after a failed sink add.
 - `test_strands_features.py` - schema-enforced output, invocation state, streaming, session save and restore.
 - `test_streaming_history_seam.py` - history stays consistent when a stream fails or is abandoned.
 - `test_stack_lifecycle_seam.py` - races in `push_fsm`/`pop_fsm` and stale-conversation cleanup.
@@ -68,7 +69,7 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_prompt_injection_seam.py` - hostile user text is sanitized before it reaches the extraction prompt.
 - `test_intent_entities_seam.py` - `None` entity values survive intent classification.
 - `test_core_hardening_seam.py` - session file writes, logging redaction, bounded context, read concurrency.
-- `test_audit_2026_09_21.py`, `test_audit_2026_09_22.py`, `test_audit_2026_11_05.py`, `test_audit_sweeps.py` - two core audits and cross-module agreement sweeps.
+- `test_audit_2026_09_22.py`, `test_audit_sweeps.py` - one core audit and cross-module agreement sweeps. The 2026-09-21 and 2026-11-05 audit classes now live in the feature files named after what they test (`test_api.py`, `test_handlers_unit.py`, `test_validator_unit.py`, `test_session.py` and others).
 - `test_core_behaviour_fixes.py`, `test_definitions_behaviour_fixes.py`, `test_llm_layer_behaviour_fixes.py`, `test_logging_behaviour_fixes.py`, `test_handlers_visualizer_fixes.py`, `test_visualizer_golden.py`, `test_okf_cli_frontmatter_fixes.py`, `test_resolve_model.py`, `test_api_key_compare_sites.py` - tests of the 2026-11-05 source pass (plan 5980fbb7 steps 2 to 9), one class per fixed finding; each fails on the parent commit (`test_visualizer_golden.py` is a golden pin of the renderers instead).
 - `test_review_round1_core.py`, `test_review_round2_core.py`, `test_review_fixes_core.py`, `test_review_fixes_core_round2.py` - findings of two review rounds of the step-driver and LLM-layer plans; each class pins one accepted finding.
 - `test_validator_unit.py`, `test_visualizer_unit.py` - `FSMValidator` and the ASCII visualizer, including their CLIs.

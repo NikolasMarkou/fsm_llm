@@ -18,29 +18,41 @@ import json
 import time
 from contextlib import ExitStack
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from fsm_llm.api import API
+from fsm_llm.classification import Classifier
 from fsm_llm.definitions import (
     RESPONSE_TEXT_MAX_LENGTH,
     BulkExtractionRequest,
     ClassificationResponseError,
+    ClassificationSchema,
     FieldExtractionRequest,
     FieldExtractionResponse,
+    IntentDefinition,
     LLMResponseError,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
+    TransitionCondition,
 )
 from fsm_llm.llm import (
     _GENERIC_FALLBACK_MESSAGE,
     LiteLLMInterface,
 )
+from fsm_llm.transition_evaluator import TransitionEvaluator
 from fsm_llm.utilities import extract_json_from_text, strip_think_and_fences
 from tests.test_fsm_llm.support import (
     OLLAMA_MODEL,
+    _a6_last_prompt,
+    _a7_fsm,
+    _api,
+    _c_log_capture,
     _classifier,
+    _d3_aliased,
+    _d3_run_bounded,
+    _d3_walkers,
     _extract_field,
     _fake_response,
     _stream_chunks,
@@ -1755,3 +1767,641 @@ class TestClosingFenceNeedsALeadingFence:
         ):
             out = LiteLLMInterface(model="gpt-4o", api_key="k").extract_bulk_data(req)
         assert out.extracted_data == {"a": 1}
+
+
+class _D1Message:
+    def __init__(self, content: Any) -> None:
+        self.content = content
+
+
+class _D1Choice:
+    def __init__(self, content: Any) -> None:
+        self.message = _D1Message(content)
+
+
+class _D1Response:
+    """Minimal litellm completion envelope (``choices[0].message.content``)."""
+
+    def __init__(self, content: Any) -> None:
+        self.choices = [_D1Choice(content)]
+
+
+# Credential-shaped values per D5 name (numeric where real systems store one).
+_D5_CREDENTIALS: dict[str, Any] = {
+    "passwd": "Tr0ub4dor&3xq",
+    "pwd": "Tr0ub4dor&3xq",
+    "pass": "Tr0ub4dor&3xq",
+    "passcode": 482913,
+    "passphrase": "correct horse battery staple",
+    "pin": 4821,
+    "otp": "492817",
+    "mfa_code": "731904",
+    "cvv": "123",
+    "ssn": "123-45-6789",
+    "credit_card": "4111 1111 1111 1111",
+    "card_number": "4111111111111111",
+    "cookie": "sessionid=9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+    "jwt": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJlLXZhbHVl",
+    "bearer": "9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2a",
+    "authorization": "Bearer 9dR2pQ7xL4mZ8vN3bK6tY1wJ5hG0sF2a",
+    "auth_header": "Basic dXNlcjpodW50ZXIy",
+    "recovery_codes": ["8f3k-2m9q", "7x1p-4n6r"],
+}
+
+
+class TestStep08D1D5:
+    """D1-D5: a ``<think>`` draft never becomes the reply; non-JSON leaves are
+    redacted on the prompt paths; cycles and aliasing are bounded; a flat bulk
+    reply's envelope keys are dropped; 18 credential names are stripped
+    (plan-2026-09-21T203800-8a03483a/D-009..D-012)."""
+
+    # -- D1 --------------------------------------------------------------
+
+    @pytest.mark.parametrize(
+        ("content", "expected"),
+        [
+            ('<think>{"message": "DRAFT"}</think>{"message": "FINAL"}', "FINAL"),
+            ('<think>{"message": "DRAFT"}</think>Plain final prose.', None),
+            ('<think>a\n{"message": "DRAFT"}\n</think>\n{"message": "FINAL"}', "FINAL"),
+        ],
+    )
+    def test_d1_think_draft_never_returned(self, content, expected):
+        from fsm_llm.llm import LiteLLMInterface
+
+        llm = LiteLLMInterface(model="test", api_key="test")
+        reply = llm._parse_response_generation_response(_D1Response(content))
+        assert "DRAFT" not in reply.message
+        if expected is not None:
+            assert reply.message == expected
+        else:
+            assert reply.message == "Plain final prose."
+
+    def test_d1_embedded_json_without_think_unchanged(self):
+        """Guard (passes on the pre-step source): first-wins Strategy 3."""
+        from fsm_llm.llm import LiteLLMInterface
+
+        llm = LiteLLMInterface(model="test", api_key="test")
+        reply = llm._parse_response_generation_response(
+            _D1Response('Here: {"message": "FIRST"} and {"message": "SECOND"}')
+        )
+        assert reply.message == "FIRST"
+
+    # -- D2 --------------------------------------------------------------
+
+    def test_d2_pydantic_model_redacted_in_prompt(self):
+        from pydantic import BaseModel
+
+        from fsm_llm.prompts import BasePromptBuilder
+
+        class Account(BaseModel):
+            password: str = "zzsecretzz"
+            name: str = "Ada"
+
+        filtered = BasePromptBuilder()._filter_context_for_security(
+            {"account": Account(), "n": [Account()], "city": "Oslo"}
+        )
+        assert filtered == {
+            "account": "<redacted:Account>",
+            "n": ["<redacted:Account>"],
+            "city": "Oslo",
+        }
+
+        api, conv_id, llm = _api(_a7_fsm())
+        api.update_context(conv_id, {"account": Account(), "city": "Oslo"})
+        api.converse("hello", conv_id)
+        prompt = _a6_last_prompt(llm.generate_response)
+        assert "zzsecretzz" not in prompt
+        assert "<redacted:Account>" in prompt
+        assert "Oslo" in prompt
+
+    def test_d2_dataclass_and_mappingproxy_redacted(self):
+        import dataclasses
+        import datetime
+        import decimal
+        from types import MappingProxyType
+
+        from fsm_llm.context import clean_context_keys
+        from fsm_llm.prompts import BasePromptBuilder
+
+        @dataclasses.dataclass
+        class Creds:
+            password: str = "zzsecretzz"
+
+        data = {
+            "creds": Creds(),
+            "proxy": MappingProxyType({"password": "zzsecretzz"}),
+            "nested": {"deep": (Creds(), 3, None, True, 1.5, "s")},
+            "when": datetime.datetime(2026, 1, 2, 3, 4, 5),
+            "amount": decimal.Decimal("9.99"),
+        }
+        prompt_view = BasePromptBuilder()._filter_context_for_security(data)
+        clean_view = clean_context_keys(data, "conv-d2", remove_none_values=False)
+        for view in (prompt_view, clean_view):
+            assert "zzsecretzz" not in repr(view)
+            assert view["creds"] == "<redacted:Creds>"
+            assert view["proxy"] == "<redacted:mappingproxy>"
+            # stdlib value scalars are data, not objects (D-032)
+            assert view["when"] == data["when"]
+            assert view["amount"] == data["amount"]
+            assert view["nested"]["deep"] == (
+                "<redacted:Creds>",
+                3,
+                None,
+                True,
+                1.5,
+                "s",
+            )
+
+    def test_d2_get_data_unchanged_for_json_native(self):
+        """Guard (passes on the pre-step source): ``get_data`` carries no leaf
+        hook, so JSON-native values AND handler-stored objects come back as-is."""
+        api, conv_id, _ = _api(_a7_fsm())
+        marker = object()
+        native = {
+            "name": "Ada",
+            "nums": [1, 2.5, True, None, ""],
+            "nested": {"t": (1, "x"), "d": {"k": [{"v": 0}]}},
+            "_internal": "hidden",
+        }
+        api.update_context(conv_id, {**native, "obj": marker})
+        data = api.get_data(conv_id)
+        assert data["obj"] is marker
+        expected = {k: v for k, v in native.items() if k != "_internal"}
+        assert {k: v for k, v in data.items() if k != "obj"} == expected
+
+    # -- D3 --------------------------------------------------------------
+
+    def test_d3_aliased_14_levels_completes_under_2s(self, timing_factor):
+        data = {"root": _d3_aliased(14)}
+        budget = 2.0 * timing_factor
+        for name, walker in _d3_walkers().items():
+            finished, result = _d3_run_bounded(walker, data, budget)
+            assert finished, (
+                f"{name}: 3-way aliasing at 14 levels did not finish in {budget:g}s"
+            )
+            assert isinstance(result, dict)
+
+    def test_d3_self_cycle_dropped_not_looped(self):
+        cyclic: dict[str, Any] = {"name": "bob"}
+        cyclic["self"] = cyclic
+        loop: list[Any] = [1]
+        loop.append(loop)
+        for name, walker in _d3_walkers().items():
+            assert walker({"root": cyclic}) == {"root": {"name": "bob"}}, name
+            assert walker({"lst": loop}) == {"lst": [1]}, name
+            top: dict[str, Any] = {"k": 1}
+            top["me"] = top
+            assert walker(top) == {"k": 1}, name
+
+    def test_d3_shared_acyclic_output_unchanged(self):
+        """Guard (passes on the pre-step source): a container reached twice
+        without a cycle is filtered at every occurrence."""
+        shared = {"x": 1, "_h": 2}
+        data = {"a": shared, "b": [shared, (shared,)], "c": {"d": shared}}
+        expected = {"a": {"x": 1}, "b": [{"x": 1}, ({"x": 1},)], "c": {"d": {"x": 1}}}
+        for name, walker in _d3_walkers().items():
+            assert walker(data) == expected, name
+
+    def test_d3_node_budget_truncates_fail_closed(self):
+        """The node budget is a PROMPT bound only (D-045): the data walkers
+        (``get_data``, ``clean_context_keys``) never truncate, see
+        ``TestStep08_1``."""
+        from fsm_llm.constants import MAX_CONTEXT_FILTER_NODES
+
+        big = {"first": "kept", "items": list(range(MAX_CONTEXT_FILTER_NODES + 50))}
+        result = _d3_walkers()["prompt"](big)
+        assert result["first"] == "kept"
+        assert len(result.get("items", [])) < MAX_CONTEXT_FILTER_NODES
+
+    # -- D4 --------------------------------------------------------------
+
+    def test_d4_flat_reply_envelope_keys_dropped(self):
+        from fsm_llm.definitions import BulkExtractionRequest
+        from fsm_llm.llm import LiteLLMInterface
+
+        llm = LiteLLMInterface(model="test", api_key="test")
+        request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
+        flat = '{"name": "Ann", "confidence": 0.8, "reasoning": "user said Ann"}'
+        with patch("fsm_llm.llm.completion", return_value=_D1Response(flat)):
+            result = llm.extract_bulk_data(request)
+        assert result.extracted_data == {"name": "Ann"}
+        assert result.confidence == 0.8
+
+        wrapped = (
+            '{"extracted_data": {"confidence": "high", "reasoning": "r"}, '
+            '"confidence": 0.4, "reasoning": "x"}'
+        )
+        with patch("fsm_llm.llm.completion", return_value=_D1Response(wrapped)):
+            result = llm.extract_bulk_data(request)
+        assert result.extracted_data == {"confidence": "high", "reasoning": "r"}
+        assert result.confidence == 0.4
+
+    # -- D5 --------------------------------------------------------------
+
+    @pytest.mark.parametrize("name", sorted(_D5_CREDENTIALS))
+    def test_d5_credential_name_stripped(self, name):
+        from fsm_llm.constants import is_forbidden_context_entry
+        from fsm_llm.context import clean_context_keys
+        from fsm_llm.prompts import BasePromptBuilder
+
+        value = _D5_CREDENTIALS[name]
+        camel = "new" + "".join(part.title() for part in name.split("_"))
+        for key in (name, f"user_{name}", name.upper(), f"db-{name}", camel):
+            assert is_forbidden_context_entry(key, value), key
+            assert is_forbidden_context_entry(key), f"{key} (name-only caller)"
+        data = {name: value, "city": "Oslo"}
+        assert clean_context_keys(data, "c", strip_forbidden_keys=True) == {
+            "city": "Oslo"
+        }
+        assert BasePromptBuilder()._filter_context_for_security(data) == {
+            "city": "Oslo"
+        }
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("shipping", "express"),
+            ("opinion", "positive"),
+            ("passenger", "Ada Lovelace"),
+            ("compass", "north"),
+            ("laptop", "ThinkPad X1"),
+            ("bypass", "none"),
+            ("spin", "clockwise"),
+            ("author", "Ada"),
+            ("passport_country", "NO"),
+            ("pinned", True),
+            ("cookie_banner", "shown"),
+            ("pin_attempts", 3),
+            ("otp_enabled", True),
+            ("criteria_pass_count", 2),
+            ("all_criteria_pass", True),
+            ("pass_status", "ok"),
+        ],
+    )
+    def test_d5_benign_lookalikes_kept(self, key, value):
+        """Guard (passes on the pre-step source): substring lookalikes,
+        policy/status suffixes and boolean flags stay visible."""
+        from fsm_llm.constants import is_forbidden_context_entry
+
+        assert not is_forbidden_context_entry(key, value)
+
+
+def _d_response(content: Any) -> MagicMock:
+    resp = MagicMock()
+    resp.choices = [MagicMock()]
+    resp.choices[0].message.content = content
+    return resp
+
+
+def _d_llm() -> Any:
+    from fsm_llm.llm import LiteLLMInterface
+
+    return LiteLLMInterface(model="gpt-4o")
+
+
+def _d_field_request(name: str = "email") -> Any:
+    from fsm_llm.definitions import FieldExtractionRequest
+
+    return FieldExtractionRequest(
+        system_prompt="extract", user_message="mail me", field_name=name
+    )
+
+
+def _d8_classifier(*names: str) -> Classifier:
+    schema = ClassificationSchema(
+        intents=[IntentDefinition(name=n, description=n) for n in names],
+        fallback_intent=names[-1],
+    )
+    return Classifier(schema, model="gpt-4o")
+
+
+def _d9_sanitize(text: str) -> str:
+    from fsm_llm.prompts import BasePromptBuilder
+
+    return BasePromptBuilder()._sanitize_text_for_prompt(text)
+
+
+class TestStep15D6D12B8:
+    # -- D6 ---------------------------------------------------------------
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"message": "", "reasoning": "INTERNAL-CHAIN user is gullible"},
+            {"message": None, "reasoning": "INTERNAL-CHAIN user is gullible"},
+            {"reasoning": "INTERNAL-CHAIN user is gullible"},
+        ],
+        ids=["empty-message", "null-message", "no-message"],
+    )
+    def test_d6_reasoning_never_shown_as_the_reply(self, payload):
+        from fsm_llm.llm import _GENERIC_FALLBACK_MESSAGE
+
+        result = _d_llm()._parse_response_generation_response(
+            _d_response(json.dumps(payload))
+        )
+        assert "INTERNAL-CHAIN" not in result.message
+        assert result.message == _GENERIC_FALLBACK_MESSAGE
+
+    def test_d6_structured_schema_without_message_still_returns_json(self):
+        # Guard: D-020 of 2026-09-19 (caller schema is the reply) is unchanged.
+        payload = {"answer": "42", "reasoning": "because 6x7"}
+        result = _d_llm()._parse_response_generation_response(
+            _d_response(json.dumps(payload)), structured=True
+        )
+        assert json.loads(result.message) == payload
+
+    # -- D8 ---------------------------------------------------------------
+    @pytest.mark.parametrize("reasoning", [None, ["a", "b"], 7, {"x": 1}])
+    def test_d8_non_str_reasoning_does_not_raise_single(self, reasoning):
+        result = _d8_classifier("buy", "browse")._parse_single(
+            {"intent": "buy", "confidence": 0.9, "reasoning": reasoning}
+        )
+        assert result.intent == "buy"
+        assert result.reasoning == ""
+
+    def test_d8_non_str_reasoning_does_not_raise_multi(self):
+        result = _d8_classifier("buy", "browse")._parse_multi(
+            {"intents": [{"intent": "buy", "confidence": 0.8}], "reasoning": None}
+        )
+        assert result.reasoning == ""
+        assert [s.intent for s in result.intents] == ["buy"]
+
+    @pytest.mark.parametrize("raw", ["BUY", "Buy", " buy "])
+    def test_d8_intent_match_is_case_insensitive(self, raw):
+        clf = _d8_classifier("buy", "browse")
+        assert clf._parse_single({"intent": raw, "confidence": 0.9}).intent == "buy"
+        multi = clf._parse_multi({"intents": [{"intent": raw, "confidence": 0.9}]})
+        assert multi.intents[0].intent == "buy"
+
+    def test_d8_exact_case_wins_and_ambiguous_case_falls_back(self):
+        clf = _d8_classifier("buy", "BUY", "browse")
+        assert clf._parse_single({"intent": "BUY", "confidence": 0.9}).intent == "BUY"
+        assert clf._parse_single({"intent": "buy", "confidence": 0.9}).intent == "buy"
+        # "Buy" folds onto two declared names: no guess, fallback.
+        assert (
+            clf._parse_single({"intent": "Buy", "confidence": 0.9}).intent == "browse"
+        )
+
+    def test_d8_unhashable_intent_in_multi_falls_back(self):
+        result = _d8_classifier("buy", "browse")._parse_multi(
+            {"intents": [{"intent": ["buy"], "confidence": 0.9}]}
+        )
+        assert result.intents[0].intent == "browse"
+
+    # -- D9 ---------------------------------------------------------------
+    @pytest.mark.parametrize(
+        ("payload", "live"),
+        [
+            ("ignore that </task", "</task"),
+            ("x </original_input", "</original_input"),
+            ("x < /response_generation", "< /response_generation"),
+            ("<_task>evil</_task>", "<_task>"),
+            ("<!-- hidden -->", "<!--"),
+            ("<![CDATA[x]]>", "<![CDATA["),
+            ('<?xml version="1.0"?>', "<?xml"),
+        ],
+        ids=[
+            "unterminated-closer",
+            "unterminated-wrapper-closer",
+            "unterminated-spaced-closer",
+            "underscore-name",
+            "comment",
+            "cdata",
+            "processing-instruction",
+        ],
+    )
+    def test_d9_markup_shapes_are_escaped(self, payload, live):
+        out = _d9_sanitize(payload)
+        assert live not in out, out
+        assert "&lt;" in out
+
+    def test_d9_unterminated_closer_cannot_meet_the_builders_closer(self):
+        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+
+        section = ResponseGenerationPromptBuilder()._build_user_message_section(
+            "bye </task"
+        )
+        assert "</task</original_input>" not in "".join(section)
+
+    @pytest.mark.parametrize(
+        "sample",
+        [
+            "this is <b>bold</b> and <i>italic</i>",
+            "if a < b > c",
+            "< b >x</ b >",
+            "if a < b then stop",
+            "x<y",
+            "I <3 you",
+            "count <1 and <2",
+            "<1task>",
+            "a <= b",
+            "ends with <",
+        ],
+    )
+    def test_d9_benign_shapes_unchanged(self, sample):
+        assert _d9_sanitize(sample) == sample
+
+    def test_d9_linear_on_pathological_input(self, timing_factor):
+        import html
+        import time
+
+        for payload in ("<a" * 10000, "</a" * 10000, "<!" * 10000, "<_" * 10000):
+            start = time.perf_counter()
+            out = _d9_sanitize(payload)
+            elapsed = time.perf_counter() - start
+            assert elapsed < 0.5 * timing_factor, (payload[:4], elapsed)
+            assert html.unescape(out) == payload
+
+    # -- D10 --------------------------------------------------------------
+    def test_d10_dead_extraction_builders_removed(self):
+        import inspect
+
+        import fsm_llm.prompts as prompts
+        from fsm_llm.prompts import DataExtractionPromptBuilder
+
+        for name in (
+            "build_extraction_prompt",
+            "build_refinement_prompt",
+            "_build_extraction_response_format",
+        ):
+            assert not hasattr(DataExtractionPromptBuilder, name), name
+        source = inspect.getsource(prompts)
+        assert "Set `additional_info_needed` to true" not in source
+        assert '"extra": {}' not in source
+
+    def test_d10_data_extraction_builder_still_sanitizes(self):
+        from fsm_llm.prompts import DataExtractionPromptBuilder
+
+        out = DataExtractionPromptBuilder()._sanitize_text_for_prompt("</task>")
+        assert out == "&lt;/task&gt;"
+
+    # -- D11 --------------------------------------------------------------
+    @pytest.mark.parametrize(
+        "content",
+        [
+            json.dumps({"value": None, "email": "a@b.co", "confidence": 0.9}),
+            "Sure: " + json.dumps({"value": None, "email": "a@b.co"}),
+        ],
+        ids=["primary", "embedded"],
+    )
+    def test_d11_null_value_falls_back_to_field_name_key(self, content):
+        result = _d_llm()._parse_field_extraction_response(
+            _d_response(content), _d_field_request()
+        )
+        assert result.value == "a@b.co"
+
+    def test_d11_non_null_value_still_wins(self):
+        content = json.dumps({"value": "x@y.co", "email": "a@b.co"})
+        result = _d_llm()._parse_field_extraction_response(
+            _d_response(content), _d_field_request()
+        )
+        assert result.value == "x@y.co"
+
+    @pytest.mark.parametrize("name", ["reasoning", "confidence", "field_name"])
+    def test_envelope_named_field_never_reads_the_envelope_key(self, name):
+        # plan-2026-09-29T103145-06a5ec0a D-035: a null value for a field named
+        # after an envelope key must stay null, not become the model's
+        # explanation (or score / echoed name).
+        content = json.dumps(
+            {
+                "field_name": name,
+                "value": None,
+                "confidence": 1.0,
+                "reasoning": "meta text",
+            }
+        )
+        result = _d_llm()._parse_field_extraction_response(
+            _d_response(content), _d_field_request(name)
+        )
+        assert result.value is None
+
+    @pytest.mark.parametrize(
+        ("name", "flat_value"),
+        [("confidence", 0.8), ("reasoning", "because the sky is blue")],
+    )
+    def test_envelope_named_field_reads_a_flat_reply(self, name, flat_value):
+        # Fix 24.1 (review api #3): the D-035 guard applies to envelope-shaped
+        # replies only; a flat reply (no `value`, no `field_name`, possible on
+        # providers that get only json_object) keeps its value.
+        result = _d_llm()._parse_field_extraction_response(
+            _d_response(json.dumps({name: flat_value})), _d_field_request(name)
+        )
+        assert result.value == flat_value
+
+    def test_envelope_named_field_still_reads_its_value(self):
+        content = json.dumps(
+            {"field_name": "reasoning", "value": "real", "reasoning": "meta"}
+        )
+        result = _d_llm()._parse_field_extraction_response(
+            _d_response(content), _d_field_request("reasoning")
+        )
+        assert result.value == "real"
+
+    # -- D12 --------------------------------------------------------------
+    @pytest.mark.parametrize(
+        ("call_type", "stream"),
+        [("response_generation", False), ("data_extraction", False)],
+    )
+    def test_d12_stream_and_response_format_kwargs_are_reserved(
+        self, call_type, stream
+    ):
+        from fsm_llm.llm import LiteLLMInterface
+
+        llm = LiteLLMInterface(
+            model="gpt-4o", stream=True, response_format={"type": "text"}, top_p=0.3
+        )
+        with patch("fsm_llm.llm.get_supported_openai_params", return_value=[]):
+            params = llm._build_call_params(
+                [{"role": "user", "content": "hi"}], call_type, stream=stream
+            )
+        assert "stream" not in params
+        assert "response_format" not in params
+        assert params["top_p"] == 0.3
+
+    def test_d12_explicit_stream_parameter_still_applies(self):
+        from fsm_llm.llm import LiteLLMInterface
+
+        llm = LiteLLMInterface(model="gpt-4o", stream=False)
+        with patch("fsm_llm.llm.get_supported_openai_params", return_value=[]):
+            params = llm._build_call_params(
+                [{"role": "user", "content": "hi"}], "response_generation", stream=True
+            )
+        assert params["stream"] is True
+
+    def test_d12_classifier_reserves_stream_and_response_format(self):
+        schema = ClassificationSchema(
+            intents=[
+                IntentDefinition(name="buy", description="b"),
+                IntentDefinition(name="browse", description="x"),
+            ],
+            fallback_intent="browse",
+        )
+        clf = Classifier(
+            schema, model="gpt-4o", stream=True, response_format={"type": "text"}
+        )
+        captured: dict[str, Any] = {}
+
+        def _fake_completion(**kwargs):
+            captured.update(kwargs)
+            return _d_response(json.dumps({"intent": "buy", "confidence": 0.9}))
+
+        with (
+            patch("fsm_llm.llm.completion", _fake_completion),
+            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+        ):
+            clf.classify("I want it")
+        assert "stream" not in captured
+        assert "response_format" not in captured
+
+    def test_d12_reserved_kwargs_warn_at_construction(self):
+        from fsm_llm.llm import LiteLLMInterface
+
+        with _c_log_capture() as messages:
+            LiteLLMInterface(model="gpt-4o", stream=True)
+        assert any(m.startswith("WARNING|") and "stream" in m for m in messages)
+
+    # -- B8 ---------------------------------------------------------------
+    @pytest.mark.parametrize("bad", ["not-an-int", None, True, 1.5, [1]])
+    def test_b8_missing_some_non_int_min_is_a_clean_error(self, bad):
+        from fsm_llm.definitions import TransitionEvaluationError
+        from fsm_llm.expressions import evaluate_logic
+
+        with pytest.raises(TransitionEvaluationError, match="missing_some"):
+            evaluate_logic({"missing_some": [bad, ["a"]]}, {"a": 1})
+
+    def test_b8_missing_some_integral_float_min_accepted(self):
+        from fsm_llm.expressions import evaluate_logic
+
+        assert evaluate_logic({"missing_some": [2.0, ["a", "b"]]}, {"a": 1}) == ["b"]
+        assert evaluate_logic({"missing_some": [1, ["a", "b"]]}, {"a": 1}) == []
+
+    def test_b8_missing_some_bad_min_fails_the_condition(self):
+        cond = TransitionCondition(
+            description="c", logic={"!": {"missing_some": ["x", ["a"]]}}
+        )
+        ev = TransitionEvaluator()
+        assert ev._evaluate_single_condition(cond, {"a": 1}) is False
+
+    @pytest.mark.parametrize(
+        ("logic", "expected"),
+        [
+            ({"in": [5, "hello5world"]}, True),
+            ({"in": [6, "hello5world"]}, False),
+            ({"contains": ["hello5world", 5]}, True),
+            ({"in": [True, "True"]}, False),
+            ({"in": [None, "None"]}, False),
+            ({"in": [1.5, "a1.5"]}, False),
+            ({"in": ["ell", "hello"]}, True),
+            ({"in": [5, [5, 6]]}, True),
+        ],
+    )
+    def test_b8_in_integer_needle_on_string_haystack(self, logic, expected):
+        from fsm_llm.expressions import evaluate_logic
+
+        assert evaluate_logic(logic, {}) is expected
+
+    def test_b8_mod_sign_semantics_documented(self):
+        from fsm_llm.expressions import _safe_mod, evaluate_logic
+
+        assert evaluate_logic({"%": [-7, 3]}, {}) == 2.0
+        doc = (_safe_mod.__doc__ or "").lower()
+        assert "sign" in doc and "divisor" in doc

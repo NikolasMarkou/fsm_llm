@@ -27,7 +27,7 @@ Three test styles:
 | --- | --- | --- |
 | Unit | `*_unit.py`, `test_pipeline.py`, `test_fsm.py`, `test_expressions.py`, `test_memory.py`, ... | call one module directly |
 | Seam | `*_seam.py`, `test_pipeline_handler_contract.py`, `test_turn_guard_deterministic.py` | go through `API.converse` / `converse_stream` / `push_fsm` / `pop_fsm`, or `LiteLLMInterface` with `patch("fsm_llm.llm.completion")` |
-| Audit regression | `test_audit_2026_09_21.py`, `test_audit_2026_09_22.py`, `test_audit_2026_11_05.py`, `test_audit_sweeps.py` | one class per plan step, tests named after the audit id (`test_a1_*`, `test_p0_1_*`), each run RED before its fix |
+| Audit regression | `test_audit_2026_09_22.py`, `test_audit_sweeps.py` | one class per plan step, tests named after the audit id (`test_a1_*`, `test_p0_1_*`), each run RED before its fix |
 
 ```mermaid
 flowchart TD
@@ -81,6 +81,7 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_handlers_unit.py`, `test_handler_timeout.py` | `HandlerSystem`, `HandlerBuilder`, `LambdaHandler`, timeouts | 7 timeout tests are `slow` |
 | `test_pipeline_handler_contract.py` | handler failures through `API.converse` | critical propagation, rollback |
 | `test_memory.py` | `WorkingMemory` | serialization, copy under concurrency |
+| `test_session.py` | `FileSessionStore` ids, soft failures, fsync before replace, file logging after a failed sink add | `_c5_clean_logging` snapshots and restores the global logging state |
 | `test_strands_features.py` | schema output, invocation state, streaming, `save_session`/`restore_session` | imports `fsm_llm.agents.base` |
 | `test_streaming_history_seam.py` | history after mid-stream error or abandonment | |
 | `test_stack_lifecycle_seam.py` | `push_fsm`/`pop_fsm` races, stale cleanup | uses a fake clock |
@@ -161,7 +162,7 @@ Seam files fake the backend with `patch("fsm_llm.llm.completion", ...)` returnin
 ## Dependencies
 
 - Core modules of `fsm_llm` listed in Scope.
-- Cross-subpackage imports: `fsm_llm.agents` (`test_live_classification_memory.py`, `test_strands_features.py`, `test_validator_unit.py` via `fsm_llm.agents.fsm_definitions` and `fsm_llm.agents.tools.ToolRegistry`), `fsm_llm.workflows.exceptions` and `.models` (`test_logging_unit.py`), `fsm_llm.workflows` itself (`test_audit_2026_09_21.py`, which also simulates its import failing).
+- Cross-subpackage imports: `fsm_llm.agents` (`test_live_classification_memory.py`, `test_strands_features.py`, `test_validator_unit.py` via `fsm_llm.agents.fsm_definitions` and `fsm_llm.agents.tools.ToolRegistry`), `fsm_llm.workflows.exceptions` and `.models` (`test_logging_unit.py`), `fsm_llm.workflows` itself (`test_handlers_unit.py`, which also simulates its import failing).
 - External: pytest, `unittest.mock`; the live file also uses litellm callbacks and a local Ollama.
 
 ## Failure modes

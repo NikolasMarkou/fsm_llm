@@ -461,7 +461,7 @@ def _cli_capture():
         # Step-14 C8 re-baseline: the primary payload (report / diagram) now
         # goes to stdout via print() and diagnostics stay on the logger, so
         # both streams land in the one buffer "the user sees". The stdout
-        # routing itself is pinned by test_audit_2026_09_21 test_c8_*.
+        # routing itself is pinned by test_handlers_unit.py test_c8_*.
         with redirect_stdout(buffer):
             yield buffer
     finally:

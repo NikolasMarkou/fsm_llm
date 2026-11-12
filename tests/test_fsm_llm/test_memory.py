@@ -1,11 +1,16 @@
 """Tests for WorkingMemory structured buffer system."""
 
+from __future__ import annotations
+
 import threading
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
 import fsm_llm.memory
+from fsm_llm.api import API
+from fsm_llm.definitions import FSMContext
 from fsm_llm.memory import (
     BUFFER_CORE,
     BUFFER_ENVIRONMENT,
@@ -16,6 +21,8 @@ from fsm_llm.memory import (
     DEFAULT_HIDDEN_BUFFERS,
     WorkingMemory,
 )
+from fsm_llm.transition_evaluator import TransitionEvaluator
+from tests.test_fsm_llm.support import _a6_last_prompt, _a7_fsm, _api
 
 
 class TestModuleDocstring:
@@ -1441,3 +1448,111 @@ class TestWorkingMemoryCopyUnderConcurrency:
         clone = copy.copy(memory)
 
         assert clone.get(BUFFER_CORE, "nested") is payload
+
+
+def _a7_api(
+    wm_core: dict[str, Any] | None = None,
+    wm_hidden: dict[str, Any] | None = None,
+    read_keys: list[str] | None = None,
+) -> tuple[API, str, MagicMock]:
+    from fsm_llm.memory import WorkingMemory
+
+    api, conv_id, llm = _api(_a7_fsm(read_keys))
+    wm = WorkingMemory(initial_data=wm_core or {})
+    for key, value in (wm_hidden or {}).items():
+        wm.set("metadata", key, value)
+    api.fsm_manager.instances[conv_id].context.working_memory = wm
+    return api, conv_id, llm
+
+
+class TestStep07A7:
+    """A7: non-hidden WorkingMemory data reaches the transition evaluator and
+    the Pass-2 system prompt at all three sites, under ``context.data`` (data
+    wins) and through ``read_keys`` (plan-2026-09-21T203800-8a03483a/D-008)."""
+
+    def test_a7_wm_key_gates_transition(self):
+        api, conv_id, _ = _a7_api(wm_core={"tier": "gold"})
+        api.converse("hello", conv_id)
+        assert api.get_current_state(conv_id) == "vip"
+
+    def test_a7_context_data_wins_on_collision_in_evaluator(self):
+        from fsm_llm.memory import WorkingMemory
+
+        context = FSMContext(data={"tier": "silver"})
+        context.working_memory = WorkingMemory(
+            initial_data={"tier": "gold", "wm_only": 1}
+        )
+        working = TransitionEvaluator()._prepare_working_context(
+            context, {"fresh": "x"}
+        )
+        assert working["tier"] == "silver"
+        assert working["wm_only"] == 1
+        assert working["fresh"] == "x"
+
+        api, conv_id, _ = _a7_api(wm_core={"tier": "gold"})
+        api.update_context(conv_id, {"tier": "silver"})
+        api.converse("hello", conv_id)
+        assert api.get_current_state(conv_id) == "chat"
+
+    def test_a7_wm_key_in_pass2_system_prompt(self):
+        api, conv_id, llm = _a7_api(wm_core={"fav_color": "teal"})
+        api.converse("hello", conv_id)
+        assert "teal" in _a6_last_prompt(llm.generate_response)
+
+    def test_a7_data_wins_on_collision_in_prompt(self):
+        api, conv_id, llm = _a7_api(wm_core={"fav_color": "teal"})
+        api.update_context(conv_id, {"fav_color": "crimson"})
+        api.converse("hello", conv_id)
+        prompt = _a6_last_prompt(llm.generate_response)
+        assert "crimson" in prompt
+        assert "teal" not in prompt
+
+    def test_a7_hidden_buffer_never_in_prompt(self):
+        api, conv_id, llm = _a7_api(
+            wm_core={"fav_color": "teal"}, wm_hidden={"billing_tier": "zzhidden"}
+        )
+        api.converse("hello", conv_id)
+        list(api.converse_stream("again", conv_id))
+        prompts = [
+            call.args[0].system_prompt
+            for call in llm.generate_response.call_args_list
+            + llm.generate_response_stream.call_args_list
+        ]
+        assert any("teal" in p for p in prompts)
+        assert not any("zzhidden" in p for p in prompts)
+
+        instance = api.fsm_manager.instances[conv_id]
+        working = TransitionEvaluator()._prepare_working_context(instance.context)
+        assert "billing_tier" not in working
+        assert working["fav_color"] == "teal"
+
+    def test_a7_read_keys_scope_applies_to_wm_keys(self):
+        api, conv_id, llm = _a7_api(
+            wm_core={"fav_color": "teal", "other_key": "qqother"},
+            read_keys=["fav_color"],
+        )
+        api.converse("hello", conv_id)
+        prompt = _a6_last_prompt(llm.generate_response)
+        assert "teal" in prompt
+        assert "qqother" not in prompt
+
+    def test_a7_greeting_and_stream_sites_too(self):
+        api, conv_id, llm = _a7_api(wm_core={"fav_color": "teal"})
+        instance = api.fsm_manager.instances[conv_id]
+        api.fsm_manager._pipeline.generate_initial_response(instance, conv_id)
+        assert "teal" in _a6_last_prompt(llm.generate_response)
+
+        list(api.converse_stream("hello", conv_id))
+        assert "teal" in _a6_last_prompt(llm.generate_response_stream)
+
+    def test_a7_no_wm_data_prompt_byte_identical(self):
+        """Guard (passes on the pre-step source): an attached but empty
+        WorkingMemory leaves the Pass-2 prompt byte-identical."""
+        plain_api, plain_id, plain_llm = _api(_a7_fsm())
+        wm_api, wm_id, wm_llm = _a7_api()
+        for api, conv_id in ((plain_api, plain_id), (wm_api, wm_id)):
+            api.update_context(conv_id, {"name": "Ada", "_internal": "x"})
+            api.converse("hello", conv_id)
+        assert _a6_last_prompt(plain_llm.generate_response) == _a6_last_prompt(
+            wm_llm.generate_response
+        )

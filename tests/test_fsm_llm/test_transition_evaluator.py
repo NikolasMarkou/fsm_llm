@@ -5,6 +5,10 @@ Tests the core transition evaluation logic: DETERMINISTIC, AMBIGUOUS, and BLOCKE
 condition evaluation, priority ranking, and configuration.
 """
 
+from __future__ import annotations
+
+from typing import Any
+
 import pytest
 
 from fsm_llm.definitions import (
@@ -12,9 +16,11 @@ from fsm_llm.definitions import (
     State,
     Transition,
     TransitionCondition,
+    TransitionEvaluation,
     TransitionEvaluationResult,
 )
 from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+from tests.test_fsm_llm.support import _a2_state
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -492,3 +498,104 @@ class TestSameTargetTies:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def _a2_evaluate(
+    transitions: list[Transition],
+    data: dict[str, Any] | None = None,
+    config: TransitionEvaluatorConfig | None = None,
+) -> TransitionEvaluation:
+    context = FSMContext()
+    context.data.update(data or {})
+    return TransitionEvaluator(config).evaluate_transitions(
+        _a2_state(transitions), context
+    )
+
+
+def _a2_conditions(count: int) -> list[TransitionCondition]:
+    return [
+        TransitionCondition(
+            description=f"x is set ({i})",
+            requires_context_keys=["x"],
+            logic={"==": [{"var": "x"}, 1]},
+        )
+        for i in range(count)
+    ]
+
+
+class TestStep02A2:
+    """A2: among passing transitions the unique lowest priority wins outright."""
+
+    def test_a2_unconditioned_priorities_0_and_200_still_deterministic_to_lower(
+        self,
+    ):
+        result = _a2_evaluate(
+            [
+                Transition(target_state="late", description="late", priority=200),
+                Transition(target_state="early", description="early", priority=0),
+            ]
+        )
+        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
+        assert result.deterministic_transition == "early"
+
+    def test_a2_priorities_100_and_150_deterministic_not_ambiguous(self):
+        result = _a2_evaluate(
+            [
+                Transition(target_state="b", description="b", priority=150),
+                Transition(target_state="a", description="a", priority=100),
+            ]
+        )
+        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
+        assert result.deterministic_transition == "a"
+
+    def test_a2_condition_count_cannot_invert_priority(self):
+        result = _a2_evaluate(
+            [
+                Transition(
+                    target_state="rich",
+                    description="five conditions",
+                    priority=850,
+                    conditions=_a2_conditions(5),
+                ),
+                Transition(
+                    target_state="lean",
+                    description="one condition",
+                    priority=800,
+                    conditions=_a2_conditions(1),
+                ),
+            ],
+            data={"x": 1},
+        )
+        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
+        assert result.deterministic_transition == "lean"
+
+    def test_a2_tie_at_lowest_is_ambiguous_with_only_tied_candidates(self):
+        result = _a2_evaluate(
+            [
+                Transition(target_state="a", description="a", priority=100),
+                Transition(target_state="c", description="c", priority=300),
+                Transition(target_state="b", description="b", priority=100),
+            ]
+        )
+        assert result.result_type == TransitionEvaluationResult.AMBIGUOUS
+        assert [o.target_state for o in result.available_options] == ["a", "b"]
+
+    def test_a2_priority_rule_has_no_threshold_config(self):
+        # The former no-op thresholds are gone (plan 07ad3f8c D-038).
+        with pytest.raises(TypeError):
+            TransitionEvaluatorConfig(ambiguity_threshold=0.9)
+        with pytest.raises(TypeError):
+            TransitionEvaluatorConfig(minimum_confidence=0.99)
+        close = [
+            Transition(target_state="a", description="a", priority=100),
+            Transition(target_state="b", description="b", priority=110),
+        ]
+        result = _a2_evaluate(close, config=TransitionEvaluatorConfig())
+        assert result.result_type == TransitionEvaluationResult.DETERMINISTIC
+        assert result.deterministic_transition == "a"
+        tied = [
+            Transition(target_state="a", description="a", priority=100),
+            Transition(target_state="b", description="b", priority=100),
+        ]
+        result = _a2_evaluate(tied, config=TransitionEvaluatorConfig())
+        assert result.result_type == TransitionEvaluationResult.AMBIGUOUS

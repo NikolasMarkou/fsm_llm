@@ -9,23 +9,34 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
+from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import Mock
+from typing import Any
+from unittest.mock import Mock, patch
 
 import pytest
 
 from fsm_llm.api import API
 from fsm_llm.definitions import (
     FSMDefinition,
+    FSMError,
     ResponseGenerationResponse,
     State,
     Transition,
     TransitionCondition,
 )
-from fsm_llm.handlers import HandlerTiming
+from fsm_llm.handlers import HandlerTiming, create_handler
 from fsm_llm.llm import LLMInterface
 from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT
-from tests.test_fsm_llm.support import _reentry_fsm, _Session
+from tests.conftest import current_timing_factor
+from tests.test_fsm_llm.support import (
+    _c3_fsm,
+    _mock_llm,
+    _raw_data,
+    _reentry_fsm,
+    _Session,
+)
 
 # ======================================================================
 # ROBUST FIXTURES WITH COMPLETE FSM DEFINITIONS
@@ -1149,3 +1160,181 @@ class TestSameConversationReentrancyIsBounded:
             with pytest.raises(FSMError, match="already being processed"):
                 s.api.converse("interleaved", s.cid)
             gen.close()
+
+
+@contextmanager
+def _c12_turn_holding(api: API, frame_id: str, max_hold: float | None = None):
+    """Hold ``frame_id``'s conversation lock on another thread, as a running
+    turn does. Released on exit, or after ``max_hold`` seconds (default 3 s
+    times ``current_timing_factor()``) so a regression that waits for the lock
+    cannot hang the test."""
+    if max_hold is None:
+        max_hold = 3.0 * current_timing_factor()
+    lock = api.fsm_manager._conversation_locks[frame_id]
+    held, done = threading.Event(), threading.Event()
+
+    def _hold() -> None:
+        with lock:
+            held.set()
+            done.wait(max_hold)
+
+    worker = threading.Thread(target=_hold, daemon=True)
+    worker.start()
+    assert held.wait(5.0)
+    try:
+        yield
+    finally:
+        done.set()
+        worker.join(5.0)
+
+
+def _c12_api() -> tuple[API, list[str]]:
+    """An API with an END_CONVERSATION handler that records each end."""
+    ends: list[str] = []
+    api = API.from_definition(_c3_fsm(), llm_interface=_mock_llm())
+    api.register_handler(
+        create_handler("c12_end")
+        .at(HandlerTiming.END_CONVERSATION)
+        .do(lambda ctx: ends.append(ctx.get("_conversation_id")) or {})
+    )
+    return api, ends
+
+
+@pytest.fixture
+def _c12_short_lock_timeout():
+    with patch("fsm_llm.fsm.END_CONVERSATION_LOCK_TIMEOUT_SECONDS", 0.2):
+        yield
+
+
+@pytest.mark.usefixtures("_c12_short_lock_timeout")
+class TestStep14_1:
+    """Review-iter-1 W2: the C12 refusal on the API path."""
+
+    def test_c12_api_end_conversation_propagates_lock_timeout(self, timing_factor):
+        import time
+
+        api, ends = _c12_api()
+        conv_id, _ = api.start_conversation(initial_context={"note": "n"})
+        frame_id = api._get_current_fsm_conversation_id(conv_id)
+        with _c12_turn_holding(api, frame_id):
+            started = time.monotonic()
+            with pytest.raises(FSMError, match="still"):
+                api.end_conversation(conv_id)
+            # Bounded by the (patched) lock timeout at every step, never by
+            # the holder releasing after 3 s (both scaled by the same factor).
+            assert time.monotonic() - started < 2.0 * timing_factor
+        assert ends == []
+        assert frame_id in api.fsm_manager.instances
+        assert conv_id in api.list_active_conversations()
+
+    def test_c12_api_bookkeeping_intact_after_refusal_and_retry_succeeds(self):
+        api, ends = _c12_api()
+        conv_id, _ = api.start_conversation(initial_context={"note": "n"})
+        child_def = _c3_fsm().model_copy(update={"name": "child"})
+        api.push_fsm(conv_id, child_def)
+        child_id = api._get_current_fsm_conversation_id(conv_id)
+        assert child_id != conv_id
+        for held in (child_id, conv_id):
+            with _c12_turn_holding(api, held):
+                with pytest.raises(FSMError, match="still"):
+                    api.end_conversation(conv_id)
+            # Nothing the API tracks was dropped by the refusal.
+            assert conv_id in api.list_active_conversations()
+            assert api.get_stack_depth(conv_id) == (2 if held == child_id else 1)
+            assert api._get_current_fsm_conversation_id(conv_id) == (
+                child_id if held == child_id else conv_id
+            )
+            assert conv_id in api._last_accessed
+            assert conv_id not in api._ended_conversations
+            assert api.get_data(conv_id)["note"] == "n"
+            assert api.has_conversation_ended(conv_id) is False
+        # The child frame ended before the root refused; the root is intact.
+        assert child_id not in api.fsm_manager.instances
+        assert ends == [child_id]
+        # Retry after the turn: ends normally and the ended cache answers.
+        api.end_conversation(conv_id)
+        assert api.list_active_conversations() == []
+        assert conv_id not in api.fsm_manager.instances
+        assert ends == [child_id, conv_id]
+        assert api.get_data(conv_id)["note"] == "n"
+        assert api.has_conversation_ended(conv_id) is True
+
+    def test_c12_cleanup_sweep_continues_past_a_refusal(self):
+        api, ends = _c12_api()
+        busy_id, _ = api.start_conversation()
+        idle_ids = [api.start_conversation()[0] for _ in range(2)]
+        with _c12_turn_holding(api, busy_id):
+            cleaned = api.cleanup_stale_conversations(max_idle_seconds=0)
+        assert sorted(cleaned) == sorted(idle_ids)
+        assert api.list_active_conversations() == [busy_id]
+        assert busy_id in api.fsm_manager.instances
+        # close() also logs and continues per conversation, then ends the rest.
+        other_id, _ = api.start_conversation()
+        with _c12_turn_holding(api, busy_id):
+            api.close()
+        assert api.list_active_conversations() == [busy_id]
+        assert other_id not in api.fsm_manager.instances
+        assert api.cleanup_stale_conversations(max_idle_seconds=0) == [busy_id]
+        assert sorted(ends) == sorted([*idle_ids, other_id, busy_id])
+
+
+def _c12_pathological_graph() -> list[Any]:
+    """Review pass 2 p2_cyc.py: a 3-way aliased 14-level list chain with a
+    back-edge (a cycle that is itself heavily aliased)."""
+    nodes: list[list[Any]] = [[] for _ in range(14)]
+    for i in range(13):
+        nodes[i].extend([nodes[i + 1]] * 3)
+    nodes[13].append(nodes[0])
+    return nodes[0]
+
+
+class TestStep14_2:
+    """Review pass 2 concern 1 (API half): only the lock-timeout refusal
+    (``ConversationBusyError``) blocks ``API.end_conversation``; any other
+    failure of the ended-cache snapshot is logged and the end proceeds
+    (plan-2026-09-21T203800-8a03483a/D-053)."""
+
+    @pytest.mark.usefixtures("_c12_short_lock_timeout")
+    def test_c12_refusal_is_conversation_busy_error(self):
+        import fsm_llm
+        from fsm_llm import ConversationBusyError
+
+        assert issubclass(ConversationBusyError, FSMError)
+        assert "ConversationBusyError" in fsm_llm.__all__
+        api, _ = _c12_api()
+        conv_id, _ = api.start_conversation()
+        with _c12_turn_holding(api, conv_id):
+            with pytest.raises(ConversationBusyError):
+                api.fsm_manager.end_conversation(conv_id)
+            with pytest.raises(ConversationBusyError):
+                api.end_conversation(conv_id)
+        assert conv_id in api.list_active_conversations()
+
+    def test_c12_end_proceeds_when_snapshot_fails(self):
+        api, ends = _c12_api()
+        conv_id, _ = api.start_conversation()
+        with patch.object(
+            api.fsm_manager, "get_end_snapshot", side_effect=RuntimeError("boom")
+        ):
+            api.end_conversation(conv_id)
+        assert api.list_active_conversations() == []
+        assert conv_id not in api.fsm_manager.instances
+        assert ends == [conv_id]
+        assert conv_id not in api._ended_conversations
+
+    def test_c12_pathological_cyclic_context_can_be_ended_and_swept(self):
+        from fsm_llm.utilities import ContextFilterError
+
+        api, ends = _c12_api()
+        ended_id, _ = api.start_conversation()
+        swept_id, _ = api.start_conversation()
+        for cid in (ended_id, swept_id):
+            _raw_data(api, cid)["graph"] = _c12_pathological_graph()
+        with pytest.raises(ContextFilterError):
+            api.get_data(ended_id)
+        api.end_conversation(ended_id)
+        assert ended_id not in api.fsm_manager.instances
+        assert api.cleanup_stale_conversations(max_idle_seconds=0) == [swept_id]
+        assert api.list_active_conversations() == []
+        assert swept_id not in api.fsm_manager.instances
+        assert sorted(ends) == sorted([ended_id, swept_id])

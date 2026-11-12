@@ -18,6 +18,7 @@ import json
 import sys
 import typing
 from contextlib import contextmanager, redirect_stdout
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -27,8 +28,19 @@ from pydantic import BaseModel, ValidationError
 
 import fsm_llm.logging as fsm_llm_logging
 from fsm_llm.api import API
-from fsm_llm.definitions import FieldExtractionConfig, FSMDefinition
+from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS
+from fsm_llm.definitions import (
+    ContextScope,
+    FieldExtractionConfig,
+    FSMContext,
+    FSMDefinition,
+    State,
+    Transition,
+    TransitionCondition,
+    TransitionEvaluationResult,
+)
 from fsm_llm.handlers import HandlerTiming
+from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 from fsm_llm.validator import (
     FSMValidationResult,
     FSMValidator,
@@ -1717,7 +1729,7 @@ def _cli_capture():
         # Step-14 C8 re-baseline: the primary payload (report / diagram) now
         # goes to stdout via print() and diagnostics stay on the logger, so
         # both streams land in the one buffer "the user sees". The stdout
-        # routing itself is pinned by test_audit_2026_09_21 test_c8_*.
+        # routing itself is pinned by test_handlers_unit.py test_c8_*.
         with redirect_stdout(buffer):
             yield buffer
     finally:
@@ -2496,3 +2508,528 @@ class TestInstructionOnlyKeyIsReported:
         )
         assert rejected == {}
         assert block is False
+
+
+def _b10_fsm_data(**start_overrides: Any) -> dict[str, Any]:
+    """A valid two-state FSM dict; ``start_overrides`` patch the start state."""
+    start: dict[str, Any] = {
+        "id": "start",
+        "description": "Start",
+        "purpose": "Begin",
+        "response_instructions": "Say hi",
+        "transitions": [{"target_state": "done", "description": "finish"}],
+    }
+    start.update(start_overrides)
+    return {
+        "name": "B10",
+        "description": "Load-time validation probe",
+        "initial_state": "start",
+        "states": {
+            "start": start,
+            "done": {
+                "id": "done",
+                "description": "Done",
+                "purpose": "End",
+                "response_instructions": "Bye",
+            },
+        },
+    }
+
+
+def _b5_fsm_data(logic: dict[str, Any]) -> dict[str, Any]:
+    data = _b10_fsm_data()
+    data["states"]["start"]["transitions"][0]["conditions"] = [
+        {"description": "gate", "logic": logic}
+    ]
+    return data
+
+
+def _b5_chain(levels: int) -> dict[str, Any]:
+    """``levels`` nested ``!!`` operator objects around the literal ``True``."""
+    node: Any = True
+    for _ in range(levels):
+        node = {"!!": node}
+    return node
+
+
+def _assert_loader_and_validator_reject(data: dict[str, Any]) -> None:
+    from pydantic import ValidationError
+
+    from fsm_llm.validator import FSMValidator
+
+    with pytest.raises(ValidationError):
+        FSMDefinition(**data)
+    assert FSMValidator(data).validate().is_valid is False
+
+
+def _assert_loader_and_validator_accept(data: dict[str, Any]) -> FSMDefinition:
+    from fsm_llm.validator import FSMValidator
+
+    fsm_def = FSMDefinition(**data)
+    assert FSMValidator(data).validate().is_valid is True
+    return fsm_def
+
+
+_B10_CLASSIFICATION = {
+    "field_name": "intent",
+    "intents": [
+        {"name": "buy", "description": "Wants to buy"},
+        {"name": "browse", "description": "Just looking"},
+    ],
+    "fallback_intent": "browse",
+}
+
+
+class TestStep10B5B6B9B10:
+    """Malformed logic, scopes and state configs fail at load time, in both
+    ``FSMDefinition`` and ``fsm-llm-validate``; valid ones keep loading."""
+
+    @pytest.mark.parametrize(
+        "logic",
+        [
+            {"==": [1, 1], "!!": True},
+            {"and": [{"==": [1, 1], "!!": True}]},
+            {"in": [{"var": "x", "missing": ["y"]}, ["a"]]},
+        ],
+    )
+    def test_b5_multi_key_logic_rejected_at_load(self, logic):
+        with pytest.raises(ValueError, match="exactly one"):
+            TransitionCondition(description="x", logic=logic)
+        _assert_loader_and_validator_reject(_b5_fsm_data(logic))
+
+    def test_b5_over_depth_logic_rejected_at_load(self):
+        with pytest.raises(ValueError, match="depth"):
+            TransitionCondition(description="x", logic=_b5_chain(60))
+        _assert_loader_and_validator_reject(_b5_fsm_data(_b5_chain(60)))
+
+    @pytest.mark.parametrize("levels", [49, 50, 51, 52])
+    def test_b5_load_acceptance_agrees_with_evaluate_logic(self, levels):
+        """The load-time depth bound is exactly the runtime one."""
+        from fsm_llm.definitions import TransitionEvaluationError
+        from fsm_llm.expressions import evaluate_logic
+
+        logic = _b5_chain(levels)
+        try:
+            evaluate_logic(logic, {})
+            runtime_ok = True
+        except TransitionEvaluationError:
+            runtime_ok = False
+        try:
+            TransitionCondition(description="x", logic=logic)
+            load_ok = True
+        except ValueError:
+            load_ok = False
+        assert load_ok == runtime_ok
+        assert load_ok is (levels <= 50)
+
+    @pytest.mark.parametrize(
+        ("logic", "data"),
+        [
+            ({"in": [{"var": "x"}, [{"foo": 1}]]}, {"x": {"foo": 1}}),
+            ({"in": [{"var": "x"}, [{}, {"a": 1, "b": 2}]]}, {"x": {}}),
+            ({"!!": {"var": ["profile", {"name": "anon"}]}}, {}),
+        ],
+    )
+    def test_b9_dict_in_data_list_accepted(self, logic, data):
+        from fsm_llm.expressions import evaluate_logic
+
+        TransitionCondition(description="x", logic=logic)
+        _assert_loader_and_validator_accept(_b5_fsm_data(logic))
+        assert evaluate_logic(logic, data) is True
+
+    @pytest.mark.parametrize(
+        "logic",
+        [{"and": [{"bogus": 1}]}, {"and": [{}]}, {"!": {"bogus": [1]}}],
+    )
+    def test_b9_operator_arguments_are_still_walked(self, logic):
+        """Guard: only data lists are data; operator arguments are still checked
+        (D-007 empty-dict rejection included)."""
+        with pytest.raises(ValueError):
+            TransitionCondition(description="x", logic=logic)
+
+    @pytest.mark.parametrize("operator", sorted(ALLOWED_JSONLOGIC_OPERATIONS))
+    def test_b9_walk_visits_exactly_what_evaluate_logic_evaluates(self, operator):
+        """Per operator: an unknown operator in its argument position is
+        rejected at load iff ``evaluate_logic`` evaluates that argument as logic
+        (so ``JSONLOGIC_RAW_ARGUMENT_OPERATIONS`` matches the runtime)."""
+        from fsm_llm.definitions import TransitionEvaluationError
+        from fsm_llm.expressions import evaluate_logic
+
+        logic = {operator: [{"bogus": 1}, {"bogus": 1}]}
+        try:
+            evaluate_logic(logic, {})
+            runtime_evaluates_argument = False
+        except TransitionEvaluationError as exc:
+            runtime_evaluates_argument = "'bogus'" in str(exc)
+        try:
+            TransitionCondition(description="x", logic=logic)
+            load_rejects = False
+        except ValueError:
+            load_rejects = True
+        assert load_rejects == runtime_evaluates_argument
+
+    def test_b9_deep_walk_no_recursion_error(self):
+        deep_data: Any = "leaf"
+        for _ in range(5000):
+            deep_data = [deep_data]
+        # Deep DATA is never walked, so it loads.
+        TransitionCondition(description="x", logic={"in": ["leaf", deep_data]})
+        # Deep LOGIC fails with a clean ValueError, not RecursionError.
+        with pytest.raises(ValueError, match="depth"):
+            TransitionCondition(description="x", logic=_b5_chain(5000))
+
+    @pytest.mark.parametrize("read_keys", ["username", {"username": True}, [1, 2]])
+    def test_b6_str_read_keys_rejected(self, read_keys):
+        with pytest.raises(ValueError):
+            State(
+                id="s",
+                description="d",
+                purpose="p",
+                context_scope={"read_keys": read_keys},
+            )
+        _assert_loader_and_validator_reject(
+            _b10_fsm_data(context_scope={"read_keys": read_keys})
+        )
+
+    @pytest.mark.parametrize(
+        "scope", [{"read_key": ["name"]}, {"read_keys": ["a"], "writes": ["b"]}]
+    )
+    def test_b6_unknown_scope_key_rejected(self, scope):
+        with pytest.raises(ValueError):
+            State(id="s", description="d", purpose="p", context_scope=scope)
+        _assert_loader_and_validator_reject(_b10_fsm_data(context_scope=scope))
+
+    def test_b6_non_dict_scope_rejected(self):
+        _assert_loader_and_validator_reject(_b10_fsm_data(context_scope="name"))
+
+    def test_b6_dict_scope_still_loads(self):
+        from fsm_llm.pipeline import MessagePipeline
+
+        fsm_def = _assert_loader_and_validator_accept(
+            _b10_fsm_data(context_scope={"read_keys": ["name"], "write_keys": ["o"]})
+        )
+        scope = fsm_def.states["start"].context_scope
+        assert isinstance(scope, ContextScope)
+        assert scope.read_keys == ["name"]
+        assert scope.write_keys == ["o"]
+        scoped = MessagePipeline._apply_context_scope(
+            {"name": "Ada", "username": "x", "n": 1},
+            fsm_def.states["start"],
+            "c",
+        )
+        assert scoped == {"name": "Ada"}
+
+    def test_b10_duplicate_field_name_rejected(self):
+        """Two configs of the SAME channel writing one key race for it."""
+        fields = [
+            {
+                "field_name": "intent",
+                "field_type": "str",
+                "extraction_instructions": "Extract intent",
+            }
+        ]
+        with pytest.raises(ValueError, match="intent"):
+            State(
+                id="s",
+                description="d",
+                purpose="p",
+                field_extractions=fields + fields,
+            )
+        _assert_loader_and_validator_reject(
+            _b10_fsm_data(field_extractions=fields + fields)
+        )
+        _assert_loader_and_validator_reject(
+            _b10_fsm_data(
+                classification_extractions=[_B10_CLASSIFICATION, _B10_CLASSIFICATION]
+            )
+        )
+
+    def test_b10_cross_channel_same_name_still_loads(self):
+        """Guard (D-033): one explicit field extraction named like a
+        classification field is the supported fallback pattern of
+        plan-2026-09-19T175721-21cd7f8e/D-006 (the extractor fills the key when
+        the classifier is below threshold); it keeps loading."""
+        fields = [
+            {
+                "field_name": "intent",
+                "field_type": "str",
+                "extraction_instructions": "Extract intent",
+            }
+        ]
+        _assert_loader_and_validator_accept(
+            _b10_fsm_data(
+                field_extractions=fields,
+                classification_extractions=[_B10_CLASSIFICATION],
+            )
+        )
+
+    @pytest.mark.parametrize(
+        "bad_key", ["", "_secret", "__dunder", "system_x", "internal_y", "SYSTEM_z"]
+    )
+    def test_b10_empty_or_internal_required_key_rejected(self, bad_key):
+        with pytest.raises(ValueError, match="required_context_keys"):
+            State(
+                id="s",
+                description="d",
+                purpose="p",
+                required_context_keys=["ok", bad_key],
+            )
+        _assert_loader_and_validator_reject(
+            _b10_fsm_data(required_context_keys=["ok", bad_key])
+        )
+
+    def test_b10_ordinary_required_keys_still_load(self):
+        _assert_loader_and_validator_accept(
+            _b10_fsm_data(required_context_keys=["email", "user_name", "systemic"])
+        )
+
+
+def _b7_state(state_id: str, *targets: str) -> dict[str, Any]:
+    return {
+        "id": state_id,
+        "description": state_id,
+        "purpose": state_id,
+        "transitions": [
+            {"target_state": target, "description": f"to {target}"}
+            for target in targets
+        ],
+    }
+
+
+def _b7_fsm_data(edges: dict[str, tuple[str, ...]]) -> dict[str, Any]:
+    """An FSM starting at ``start`` with the given adjacency; ``end`` is the
+    terminal and is always present."""
+    states = {sid: _b7_state(sid, *targets) for sid, targets in edges.items()}
+    states["end"] = _b7_state("end")
+    return {
+        "name": "B7",
+        "description": "Trap detection probe",
+        "initial_state": "start",
+        "states": states,
+    }
+
+
+def _b7_trap_warnings(data: dict[str, Any]) -> list[str]:
+    from fsm_llm.validator import FSMValidator
+
+    result = FSMValidator(data).validate()
+    assert result.is_valid is True, result.errors
+    return [w for w in result.warnings if "terminal" in w and "cycle" in w.lower()]
+
+
+def _b12_warnings(data: dict[str, Any], needle: str) -> list[str]:
+    from fsm_llm.validator import FSMValidator
+
+    result = FSMValidator(data).validate()
+    assert result.is_valid is True, result.errors
+    return [w for w in result.warnings if needle in w]
+
+
+class TestStep11B7B11B12B13:
+    """Trap regions are reported per SCC, the validator never crashes on
+    type-invalid input and never downgrades a loader failure, logic-only
+    gating counts, and ``strict_condition_matching`` never changes outcomes."""
+
+    def test_b7_interlocking_cycles_without_exit_warned(self):
+        # start -> a; a <-> b, b <-> c, no path from {a, b, c} to a terminal.
+        # Each simple cycle "escapes" into the other, so a per-cycle check
+        # accepts both; the SCC {a, b, c} is a closed trap.
+        data = _b7_fsm_data(
+            {
+                "start": ("a", "end"),
+                "a": ("b",),
+                "b": ("a", "c"),
+                "c": ("b",),
+            }
+        )
+        warnings = _b7_trap_warnings(data)
+        assert len(warnings) == 1, warnings
+        for state_id in ("a", "b", "c"):
+            assert f"'{state_id}'" in warnings[0]
+        assert "'start'" not in warnings[0]
+
+    def test_b7_self_loop_trap_warned(self):
+        data = _b7_fsm_data({"start": ("a", "end"), "a": ("a",)})
+        warnings = _b7_trap_warnings(data)
+        assert len(warnings) == 1 and "'a'" in warnings[0]
+
+    def test_b7_two_separate_trap_sccs_warned_once_each(self):
+        data = _b7_fsm_data(
+            {
+                "start": ("a", "end"),
+                "a": ("b",),
+                "b": ("a", "c"),
+                "c": ("d",),
+                "d": ("c",),
+            }
+        )
+        warnings = _b7_trap_warnings(data)
+        assert len(warnings) == 2, warnings
+
+    def test_b7_cycle_with_exit_not_warned(self):
+        """GUARD: interlocking cycles with one exit to the terminal are fine."""
+        data = _b7_fsm_data(
+            {
+                "start": ("a",),
+                "a": ("b",),
+                "b": ("a", "c"),
+                "c": ("b", "end"),
+            }
+        )
+        assert _b7_trap_warnings(data) == []
+
+    def test_b7_deep_chain_does_not_recurse(self):
+        """GUARD: SCC grouping is iterative (1,500 chained states in a loop)."""
+        count = 1500
+        edges: dict[str, tuple[str, ...]] = {"start": ("s0", "end")}
+        for i in range(count):
+            edges[f"s{i}"] = (f"s{(i + 1) % count}",)
+        warnings = _b7_trap_warnings(_b7_fsm_data(edges))
+        assert len(warnings) == 1
+
+    def test_b11_dead_branch_removed(self):
+        import inspect
+
+        from fsm_llm import definitions
+
+        source = inspect.getsource(definitions.FSMDefinition)
+        assert "unreachable_terminals" not in source
+
+    @pytest.mark.parametrize(
+        "mutate",
+        [
+            lambda d: d["states"].__setitem__("done", "not-a-dict"),
+            lambda d: d["states"]["start"].__setitem__("transitions", "nope"),
+            lambda d: d["states"]["start"].__setitem__("transitions", ["nope"]),
+            lambda d: d["states"]["start"].__setitem__("transitions", None),
+            lambda d: d["states"]["start"]["transitions"][0].__setitem__(
+                "target_state", {"x": 1}
+            ),
+            lambda d: d.__setitem__("states", ["start", "done"]),
+            lambda d: d.__setitem__("initial_state", ["start"]),
+        ],
+        ids=[
+            "state_str",
+            "transitions_str",
+            "transition_str",
+            "transitions_none",
+            "target_dict",
+            "states_list",
+            "initial_list",
+        ],
+    )
+    def test_b12_type_invalid_states_returns_result_not_raises(self, mutate):
+        from pydantic import ValidationError
+
+        from fsm_llm.validator import FSMValidationResult, FSMValidator
+
+        data = _b10_fsm_data()
+        mutate(data)
+        with pytest.raises((ValidationError, TypeError, ValueError)):
+            FSMDefinition(**data)
+        result = FSMValidator(data).validate()
+        assert isinstance(result, FSMValidationResult)
+        assert result.is_valid is False
+        assert result.errors
+
+    def test_b12_non_validation_error_is_error(self):
+        from fsm_llm.validator import FSMValidator
+
+        data: dict[Any, Any] = _b10_fsm_data()
+        data[1] = "non-string key"
+        with pytest.raises(TypeError):
+            FSMDefinition(**data)
+        result = FSMValidator(data).validate()
+        assert result.is_valid is False
+        assert any("keywords must be strings" in e for e in result.errors)
+
+    def test_b12_logic_only_gating_not_flagged(self):
+        data = _b10_fsm_data(required_context_keys=["email"])
+        data["states"]["start"]["transitions"][0]["conditions"] = [
+            {"description": "has email", "logic": {"!!": [{"var": "email"}]}}
+        ]
+        assert _b12_warnings(data, "required_context_keys") == []
+
+    def test_b12_logic_only_gating_other_key_still_flagged(self):
+        """GUARD: a logic reference to a DIFFERENT key does not gate."""
+        data = _b10_fsm_data(required_context_keys=["email"])
+        data["states"]["start"]["transitions"][0]["conditions"] = [
+            {"description": "has phone", "logic": {"!!": [{"var": "phone"}]}}
+        ]
+        assert _b12_warnings(data, "required_context_keys")
+
+    def test_b12_dotted_var_counts_as_reference(self):
+        data = _b10_fsm_data(required_context_keys=["profile"])
+        data["handler_only_keys"] = ["account"]
+        data["states"]["start"]["transitions"][0]["conditions"] = [
+            {
+                "description": "nested",
+                "logic": {
+                    "and": [
+                        {"==": [{"var": "profile.email"}, "x"]},
+                        {"==": [{"var": ["account.tier", "free"]}, "gold"]},
+                    ]
+                },
+            }
+        ]
+        assert _b12_warnings(data, "required_context_keys") == []
+        assert _b12_warnings(data, "handler_only_keys") == []
+
+    def test_b12_literal_value_is_not_a_reference(self):
+        """GUARD: a key name appearing only as a compared literal is not read."""
+        data = _b10_fsm_data()
+        data["handler_only_keys"] = ["account"]
+        data["states"]["start"]["transitions"][0]["conditions"] = [
+            {"description": "lit", "logic": {"==": [{"var": "kind"}, "account"]}}
+        ]
+        # Reported as INFO, not WARNING (07ad3f8c/D-044): an unreferenced
+        # listed key is what a handler-written key looks like.
+        from fsm_llm.validator import FSMValidator
+
+        assert _b12_warnings(data, "handler_only_keys") == []
+        info = FSMValidator(data).validate().info
+        assert [line for line in info if "handler_only_keys lists 'account'" in line]
+
+    def test_b13_strict_false_same_outcome_more_diagnostics(self):
+        state = State(
+            id="s",
+            description="d",
+            purpose="p",
+            transitions=[
+                Transition(
+                    target_state="t",
+                    description="both fail",
+                    conditions=[
+                        TransitionCondition(
+                            description="first", requires_context_keys=["a"]
+                        ),
+                        TransitionCondition(
+                            description="second", requires_context_keys=["b"]
+                        ),
+                    ],
+                )
+            ],
+        )
+        outcomes = {}
+        for strict in (True, False):
+            evaluator = TransitionEvaluator(
+                TransitionEvaluatorConfig(strict_condition_matching=strict)
+            )
+            scores = evaluator._evaluate_individual_transitions(state.transitions, {})
+            evaluation = evaluator.evaluate_transitions(state, FSMContext())
+            outcomes[strict] = (evaluation.result_type, scores[0])
+        assert outcomes[True][0] == outcomes[False][0]
+        assert outcomes[True][0] == TransitionEvaluationResult.BLOCKED
+        assert outcomes[True][1]["passes_conditions"] is False
+        assert outcomes[False][1]["passes_conditions"] is False
+        assert outcomes[True][1]["failed_conditions"] == ["first"]
+        assert outcomes[False][1]["failed_conditions"] == ["first", "second"]
+
+    def test_b13_flag_documented_as_diagnostics_only(self):
+        import inspect
+
+        from fsm_llm import transition_evaluator
+
+        source = inspect.getsource(transition_evaluator.TransitionEvaluatorConfig)
+        assert "diagnostic" in source.lower()
+        assert "never" in source.lower()
