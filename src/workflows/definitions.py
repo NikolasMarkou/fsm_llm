@@ -265,7 +265,7 @@ class WorkflowDefinition(BaseModel):
         such a step, so a loop through it cannot spin inside one engine call.
 
         # DECISION plan-2026-09-27T120000-5d1e7a3b/D-002
-        # validate() rejects ONLY synchronous cycles. Do NOT go back to
+        # validate_structure() rejects ONLY synchronous cycles. Do NOT go back to
         # rejecting every cycle: polling / retry-until loops through a timer
         # or event step are the classic workflow shape and were impossible to
         # register. The per-call step budget (engine `max_steps`)

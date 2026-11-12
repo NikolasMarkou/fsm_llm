@@ -452,7 +452,12 @@ class LLMStep(WorkflowStep):
 
 
 class WaitEventStep(WorkflowStep):
-    """A step that waits for an external event (see ``WaitEventConfig``)."""
+    """A step that waits for an external event (see ``WaitEventConfig``).
+
+    ``timeout_seconds`` on the step bounds the step's own execution;
+    ``config.timeout_seconds`` is how long the wait for the event may last.
+    They are different limits that share a spelling.
+    """
 
     config: WaitEventConfig
 
