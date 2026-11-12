@@ -164,7 +164,7 @@ fsm-llm-validate --fsm greeter.json      # check for problems
 fsm-llm-visualize --fsm greeter.json     # draw it
 ```
 
-To try it without a model, pass your own `llm_interface=` (a subclass of `fsm_llm.LLMInterface`); the repository's tests do this with the fakes in `fsm_llm.testing`.
+To try it without a model, pass your own `llm_interface=` (a subclass of `fsm_llm.LLMInterface`); the repository's tests do this with the fakes in `fsm_llm.testing` (guide: `docs/testing.md`).
 
 Run code at a point in the flow with a handler:
 

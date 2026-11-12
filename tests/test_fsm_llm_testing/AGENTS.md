@@ -24,6 +24,7 @@ Covers `fsm_llm.testing` as a leaf of the package: imported by name, loaded by n
 | `test_builders.py` | `TestFinalReply`, `TestToolCallReply`, `TestMalformedReply`, `TestStateInPrompt`, `TestHashEmbed`, `TestExports` |
 | `test_user.py` | `TestConversationRunRecord`, `TestStopping`, `TestRules`, `TestStartAndClose`, `TestExceptionsPropagate`, `TestConstruction`, `TestAdvanceUntilTerminal`, `TestExports` |
 | `test_assertions.py` | `TestAssertState`, `TestAssertContext`, `TestAssertPath`, `TestAssertResult`, `TestFailuresAreExplicit`, `TestPathRecorder`, `TestExports` |
+| `test_guide.py` | `TestGuideIsExecutable` |
 | `test_layering.py` | `TestImportProbes`, `TestSourceLayering`, `TestSkeleton` |
 | `__init__.py` | Empty package marker |
 

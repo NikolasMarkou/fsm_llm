@@ -51,7 +51,7 @@ flowchart TD
 | `test_fsm_llm_synthesis/` | 2,037 | `fsm_llm.synthesis`: the gates, the library, the runner, the agent tools, traces, diagnosis and repair, the concierge end to end, and the offline checks of `scripts/synthesis_bench.py`. Bench status: three blocks run and recorded, all INCONCLUSIVE (see `docs/synthesis.md`). |
 | `test_fsm_llm_testing/` | 9 | `fsm_llm.testing`, the public test-helper subpackage: its layering (imported by name, loaded by no library module, no `pytest`, `litellm` or other subpackage) |
 | `test_fsm_llm_regression/` | 268 | One class per fixed bug across core, reasoning, workflows, CLI and packaging text |
-| `test_examples/` | 67 | Every JSON file under `examples/` (14 today) loads, parses as an `FSMDefinition` and passes `FSMValidator` (43 tests), and every call into `fsm_llm` in the `examples/**/*.py` scripts still binds to the live signature, checked with `ast` and `inspect.signature` without running an example (24 tests) |
+| `test_examples/` | 67 | Every JSON file under `examples/` (14 today) loads, parses as an `FSMDefinition` and passes `FSMValidator` (43 tests), and every call into `fsm_llm` in the `examples/**/*.py` scripts still binds to the live signature, checked with `ast` and `inspect.signature` without running an example (24 tests); `test_example_scripted_paths.py` drives four shipped example FSMs offline with the public `fsm_llm.testing` doubles, scripted user and assertions, reading them as they are |
 
 ## Files at this level
 

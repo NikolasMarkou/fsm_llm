@@ -467,6 +467,7 @@ The index of the guides. For a first read, go in this order:
 -   **[FSM Design](docs/fsm_design.md)**: states, transitions, priorities, classification and the `completion` field.
 -   **[Handlers](docs/handlers.md)**: the 8 hook points and how to write a handler.
 -   **[Architecture](docs/architecture.md)**: the pipeline internals, the LLM layer, the step driver.
+-   **[Testing](docs/testing.md)**: test your own bot offline with `fsm_llm.testing`: fake LLMs, a scripted user, assertions.
 -   **[API Reference](docs/api_reference.md)**: every public name, builders, OKF, Agent Skills and the monitor.
 -   **[Agents Roadmap](docs/agents_roadmap.md)**: the agents audit record and deferred work.
 

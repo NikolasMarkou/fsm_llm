@@ -81,7 +81,7 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_agent_skills.py` - `fsm_llm.agent_skills`: the parser as a total function over every frontmatter value shape, the bounded loader, symlink and path confinement, the catalog that keeps no body, `render_catalog`, limits, real-world layouts and injection staying in labelled or stripped fields.
 - `test_agent_skills_cli.py` - `fsm-llm-skills`: `validate` (including `--strict`; a symlinked `SKILL.md` exits 1), `list`, `show` (`--file DIR` lists a directory), exit codes, output hygiene and wiring.
 - `test_cli_support.py` - `fsm_llm.cli_support`, the skeleton `fsm-llm-okf` and `fsm-llm-skills` share: exit-code mapping, BrokenPipe parking, the unencodable-output escape, the `--max-seconds` type, and pins that neither CLI re-inlines them or imports a private name from the other.
-- `test_docs_snippets.py` - every fenced `json` or `python` block that contains `"initial_state"` in `README.md`, `AGENTS.md`, `docs/quickstart.md`, `src/README.md`, `docs/api_reference.md`, `docs/architecture.md`, `docs/fsm_design.md`, `docs/handlers.md` and `docs/synthesis.md` must load through `FSMDefinition`.
+- `test_docs_snippets.py` - every fenced `json` or `python` block that contains `"initial_state"` in `README.md`, `AGENTS.md`, `docs/quickstart.md`, `src/README.md`, `docs/api_reference.md`, `docs/architecture.md`, `docs/fsm_design.md`, `docs/handlers.md`, `docs/synthesis.md` and `docs/testing.md` must load through `FSMDefinition`.
 - `test_live_classification_memory.py` - 7 real-model tests on Ollama `qwen3.5:9b-q8_0`, marked `integration`, `real_llm` and `slow`, skipped without the model.
 
 ## How to use it

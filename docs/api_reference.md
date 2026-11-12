@@ -980,6 +980,48 @@ runner.end_conversation(conv_id)
 - A host that resets its interface's usage meter during a run, or an interface with no meter, gets a provider outage recorded as `budget_spent`.
 - A corrupt library file blocks retrieval for the whole library until a human fixes it. Two processes on one directory are last writer wins on the run counters.
 
+## Testing (`fsm_llm.testing`)
+
+Public test doubles, a scripted user and assertions for code built on FSM-LLM. Import by name; `import fsm_llm` never loads it and no library module imports it. It imports the core and `fsm_llm.codes` only (never `pytest`, `litellm` or another subpackage), makes no network call and has no import side effect. Guide with runnable examples: [`docs/testing.md`](testing.md). The signatures are in the generated `docs/api.txt`.
+
+```python
+from fsm_llm import API
+from fsm_llm.testing import ScriptedLLM, ScriptedUser, assert_path, assert_state
+
+llm = ScriptedLLM(
+    extraction_data={"mood": "happy"},
+    responses={"greeting": "Hi!", "conversation": "Glad to hear it.", "farewell": "Bye."},
+)
+api = API.from_file("examples/basic/simple_greeting/fsm.json", llm_interface=llm)
+run = ScriptedUser(["hello", "doing great"]).run(api)
+assert_path(run, ["greeting", "conversation", "farewell"])
+assert_state(run, "farewell")
+llm.assert_exhausted()
+```
+
+### Doubles
+
+- `ScriptedLLM(replies=(), *, extraction_data=None, responses=None, default_response=None, stream_chunks=(), model=None)`: `replies` is the `complete` queue (a text, a `CompletionResponse` or an exception instance to raise); `extraction_data` answers field and bulk extraction (`None` means none expected); `responses` maps a state id to the Pass-2 reply. Keeps `requests` (the `complete` calls), `call_history` (every call as `(method, request)`), `calls(method)`, `unexpected`, and `usage()` / `reset_usage()` counting calls and errors like `LiteLLMInterface`. A call nothing scripted is recorded, counted as an error and raised as `UnscriptedCallError` (an `AssertionError`); the pipeline swallows an error raised during extraction, so end the test with `assert_exhausted()`, which fails on an unscripted call and on a reply never used.
+- `PromptGroundedLLM(facts=None, responses=None, default_response="ok")`: `facts` is `{field: (value, evidence)}`; a value comes back only when its evidence text is in the request. `complete` raises `LLMResponseError`.
+- `MockLLM2Interface(extraction_data=None, response_text=..., cut_reply=False, cut_fields=())`: every field from a dict, every reply one text; implements neither bulk extraction nor `complete`.
+- `final_reply(text, finish_reason=None)`, `tool_call_reply(*(name, arguments), text=None)`, `malformed_reply(text=None)`: the three kinds of `CompletionResponse`. `state_in_prompt(prompt)`: the state id a response prompt was written for. `hash_embed(dim=8)`: a pure `Callable[[str], list[float]]` embedder.
+
+The doubles are plain classes with public attributes, not `unittest.mock` objects; a test may subclass them.
+
+### Scripted user
+
+- `ScriptedUser(messages=(), *, rules=(), fallback=None, max_turns=25)`, `.run(api, *, initial_context=None, close=False) -> ConversationRun`: sends the messages, then the answer of the first rule `(regex | callable, utterance | sequence)` that fits the last reply, then `fallback`, then stops; also stops when the conversation ended or `max_turns` is spent (a stop, not an error). Exceptions propagate.
+- `advance_until_terminal(api, *, max_steps, initial_context=None, max_seconds=None, close=False) -> ConversationRun`: the same record for an FSM that needs no user message; a spent budget raises `RunBudgetExceededError`.
+- `ConversationRun` (frozen): `api`, `conversation_id`, `greeting`, `messages`, `replies`, `states` (the state after the start and after each reply), `ended`, `final_state`.
+
+### Assertions
+
+`assert_state(source, state_id)` (read live), `assert_context(source, **expected)` (a subset check), `assert_path(source, expected, *, exact=True)` (`exact=False` accepts an ordered subsequence), `assert_result(result, *, kind=None, status=None, reason=...)` (a completion state's `{kind, text, calls}`, a synthesis state's `{status, procedure_id, version, reason}` or a `CompletionResponse`). `source` is a `ConversationRun` or an `(api, conversation_id)` pair. They raise `AssertionError` explicitly (never `assert`, so `python -O` changes nothing), hide their frames from the pytest traceback and print the first divergence. Expected `kind`, `status` and `reason` go through the `fsm_llm.codes` `from_string` methods: a typo raises `ValueError` listing the vocabulary; `reason=None` asserts no reason, leaving it out checks nothing.
+
+### `PathRecorder`
+
+`PathRecorder(*, name="PathRecorder", priority=10_000)`: an opt-in handler (`API(handlers=[recorder])`) that records the initial state and each transition target per conversation id, for code under test that drives the conversation. `path(conversation_id)`, `frames`, `clear()`. It never changes a conversation, but registering any handler makes the pipeline deep-copy the context at every handler timing, so a context value that cannot be deep-copied can fail a turn that passed without it.
+
 ## Exception Hierarchy
 
 ```

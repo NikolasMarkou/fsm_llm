@@ -47,7 +47,7 @@ Suite folders (test counts from full collection) and root files at this level.
 | `test_fsm_llm_synthesis/` | `fsm_llm.synthesis` (policy G5, gates, G6a `dryrun`, G6b `simulation`, `synthesizer`, `library`, `runner`, `tools`, `traces`, `diagnose`, `patch`, `repair`), the concierge end to end, and the offline checks of `scripts/synthesis_bench.py` (`test_synthesis_bench.py`; blocks s0 to s2 were run, see `scripts/bench_data/README.md`) | Own `conftest.py` (`ScriptedRunnerLLM`, `ByTurn`, `host_fsm`, `good_fsm`, `stuck_fsm`) that fails on any built `LiteLLMInterface` or provider call; see `test_fsm_llm_synthesis/AGENTS.md` |
 | `test_fsm_llm_testing/` | `fsm_llm.testing` (the seventh subpackage): import probes and source scans for its layering (loaded by no library module, no `pytest`, `litellm` or other subpackage), the skeleton checks | 9 tests (step 21; grows with steps 22 to 25). Child-process probes with the model-server variables on a closed port |
 | `test_fsm_llm_regression/` | One class per fixed bug id across core, reasoning, workflows, CLI, packaging text | 268 tests. Many private-method and source-text pins |
-| `test_examples/` | Every `examples/**/*.json` loads as JSON with `name`/`initial_state`/`states`, parses as `FSMDefinition`, passes `FSMValidator.validate()`; at least 5 files exist | 67 tests. Marker `examples`; 14 JSON files today |
+| `test_examples/` | Every `examples/**/*.json` loads as JSON with `name`/`initial_state`/`states`, parses as `FSMDefinition`, passes `FSMValidator.validate()`; at least 5 files exist | 67 tests. Marker `examples`; 14 JSON files today. `test_example_scripted_paths.py` also drives four shipped example FSMs offline with `fsm_llm.testing` (no example edited) |
 
 `test_packaging.py` classes:
 

@@ -29,15 +29,18 @@ _FULL_FSM_DOCS = [
     "AGENTS.md",
 ]
 # Reference docs scanned too (plan-2026-09-19T175721-21cd7f8e D-052 (5)). At the
-# time of writing only docs/synthesis.md carries a block naming "initial_state"
-# (its concierge host FSM; docs/fsm_design.md has state-level JSON fragments
-# only); a full FSM added to one of them is picked up and must load.
+# time of writing docs/synthesis.md (its concierge host FSM) and docs/testing.md
+# (two small FSMs as Python dict literals, which the guide's own test also
+# runs) carry a block naming "initial_state"; docs/fsm_design.md has
+# state-level JSON fragments only. A full FSM added to one of them is picked
+# up and must load.
 _REFERENCE_DOCS = [
     "docs/api_reference.md",
     "docs/architecture.md",
     "docs/fsm_design.md",
     "docs/handlers.md",
     "docs/synthesis.md",
+    "docs/testing.md",
 ]
 _DOCS = [*_FULL_FSM_DOCS, *_REFERENCE_DOCS]
 _FENCE = re.compile(r"```(json|python)\n(.*?)```", re.DOTALL)
@@ -76,6 +79,7 @@ def test_the_extractor_found_the_first_touch_snippets():
     found = {label.split("#")[0] for label, _ in _SNIPPETS}
     assert set(_FULL_FSM_DOCS) <= found
     assert found <= set(_DOCS)
+    assert "docs/testing.md" in found
     assert all((_ROOT / rel).is_file() for rel in _REFERENCE_DOCS)
 
 

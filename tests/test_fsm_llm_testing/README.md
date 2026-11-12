@@ -19,6 +19,7 @@ The pytest suite for `fsm_llm.testing`, the public test-helper subpackage of the
 - `test_builders.py` - `final_reply`, `tool_call_reply`, `malformed_reply`, `state_in_prompt` (one regex, drift test against the real prompt builder) and `hash_embed`.
 - `test_user.py` - `ScriptedUser` (messages, rules, fallback, `max_turns`, stopping on an ended conversation, `close`, propagating exceptions, argument checks), `ConversationRun` (frozen, path equal to `fsm_llm.eval` `visited_states`) and `advance_until_terminal`, on the `simple_greeting` and `form_filling` example FSM files (read only) and inline FSMs.
 - `test_assertions.py` - `assert_state`, `assert_context`, `assert_path`, `assert_result` (pass, first-divergence message wording, typo `ValueError`, sentinel semantics of `reason`), the explicit-raise guarantees (no `assert` statement, hidden frames, a `python -O` child) and `PathRecorder` (path of an example FSM, stays, pushed frames, read-only behaviour, the deep-copy side effect observed).
+- `test_guide.py` - runs every Python block of `docs/testing.md` offline, in order, in one namespace, and checks the guide names every public helper and keeps its promised notes.
 - `test_layering.py` - the import probes, the library-wide scan for imports of `fsm_llm.testing`, the `pytest` and `litellm` ban, the no-other-subpackage rule, and the skeleton checks (docstring, one static `__all__`).
 
 ## How to use it
