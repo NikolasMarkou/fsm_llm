@@ -339,6 +339,27 @@ def _future_import_precedes_docstring(path: pathlib.Path) -> bool:
     )
 
 
+class TestCiRunsEveryTestOfItsMarkerSet:
+    """CI selects tests by marker only. A `--deselect` hides a test behind a
+    node id that stays in the file after the test is renamed, so the exclusion
+    silently outlives its reason (the one CI carried named a test that had not
+    existed since a rename)."""
+
+    def test_the_ci_pytest_command_deselects_nothing(self):
+        line = _one_line(
+            ".github/workflows/python-package.yml",
+            'python -m pytest tests/ -q -m "not slow',
+        )
+        assert "--deselect" not in line, line
+
+    def test_no_workflow_or_task_file_deselects_a_test(self):
+        for rel in ("Makefile", "tox.ini", ".github/workflows/python-package.yml"):
+            code = [
+                ln for ln in _read(rel).splitlines() if not ln.lstrip().startswith("#")
+            ]
+            assert not [ln for ln in code if "--deselect" in ln], rel
+
+
 class TestModuleDocstringsAreReal:
     """plan-2026-09-20T165703-0d9c218e D-003: a module docstring placed AFTER
     `from __future__ import annotations` is an inert expression, so

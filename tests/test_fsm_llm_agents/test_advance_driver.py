@@ -1458,14 +1458,18 @@ class TestAutoMemory:
 
         assert "BLUEBIRD" not in runs
 
-    def test_core_time_budget_ending_the_run_still_stores_the_raw_task(self):
+    def test_core_time_budget_ending_the_run_still_stores_the_raw_task(
+        self, clock: _FakeClock
+    ):
+        # The budget is read on the fake clock, so how slow the machine is
+        # cannot spend it before step 1 begins (a real 20 ms budget did).
         memory = _ListMemory()
         agent = self._agent(memory, [], timeout_seconds=0.02)
         steps: list[int] = []
 
         def _slow(api: API, conversation_id: str, iteration: int) -> None:
             steps.append(iteration)
-            time.sleep(0.05)
+            clock.advance(0.05)
 
         agent._on_loop_iteration = _slow
 
