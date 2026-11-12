@@ -39,7 +39,7 @@ class TestVisualizerBoxTruncation:
 
     def test_long_state_id_box_alignment(self):
         """Box lines should all be the same width, even if state_id exceeds box_width."""
-        from fsm_llm.visualizer import create_state_boxes
+        from fsm_llm.visualizer import build_state_boxes
 
         long_id = "a_very_long_state_name_that_definitely_exceeds_the_box_width_limit"
         states = {
@@ -48,7 +48,7 @@ class TestVisualizerBoxTruncation:
                 "purpose": "Testing",
             }
         }
-        boxes = create_state_boxes(
+        boxes = build_state_boxes(
             ordered_states=[long_id],
             initial_state=long_id,
             terminal_states=set(),
@@ -64,11 +64,11 @@ class TestVisualizerBoxTruncation:
 
     def test_normal_state_id_box_alignment(self):
         """Box lines for normal-length state IDs should also be consistent."""
-        from fsm_llm.visualizer import create_state_boxes
+        from fsm_llm.visualizer import build_state_boxes
 
         state_id = "greeting"
         states = {state_id: {"description": "Say hello", "purpose": "Greet user"}}
-        boxes = create_state_boxes(
+        boxes = build_state_boxes(
             ordered_states=[state_id],
             initial_state=state_id,
             terminal_states=set(),

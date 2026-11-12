@@ -154,14 +154,14 @@ def _states_box_row(vertical: str, content: str) -> str:
     # The `[:width]` slice before `.ljust(width)` is load-bearing, not defensive.
     # `ljust` NEVER shortens, so before this helper existed a long state id or a long
     # required-keys list pushed the right-hand border out of alignment for the rest of
-    # the box. This mirrors `create_state_boxes`' `[: box_width - 1].ljust(box_width - 1)`
+    # the box. This mirrors `build_state_boxes`' `[: box_width - 1].ljust(box_width - 1)`
     # (see the `[REUSE]` note in findings/cli-exports-coherence.md). Do NOT drop the
     # slice, and do NOT let callers pre-pad `content`. See decisions.md D-022.
     # D-033: `_fit` replaces the bare `[:width]` slice so an over-long id is
     # shortened VISIBLY and keeps its tail. The padding contract is unchanged.
-    # D-002 (plan-a8e47b88): `create_state_boxes` now routes through `_fit` too.
+    # D-002 (plan-a8e47b88): `build_state_boxes` now routes through `_fit` too.
     # D-007 (plan-a8e47b88): the sibling icon-budget branch in
-    # `create_states_section` (line ~569, at the time of this note) also fixed.
+    # `build_states_section` (line ~569, at the time of this note) also fixed.
     width = _STATES_BOX_INNER_WIDTH
     return "│ " + vertical + _fit(content, width).ljust(width) + vertical + " │"
 
@@ -186,7 +186,7 @@ def _section_box_row(content: str) -> str:
     """
     # DECISION plan-2026-07-19T191147-4b664252/D-028 [STALE]
     # SC-18 says "a 100-char state id does not break box alignment" — unscoped. Step 14
-    # fixed only `create_states_section` (via `_states_box_row`) and the pinning test
+    # fixed only `build_states_section` (via `_states_box_row`) and the pinning test
     # measured only that section, so the suite stayed green while METADATA rendered a
     # 119-char row, TRANSITIONS a 127-char row and PERSONA a stray 58-char row against
     # the same 62-char border. That is a scope-narrowed test standing in for a broader
@@ -310,10 +310,10 @@ def _require_initial_state(states: dict[str, Any], initial_state: str) -> None:
     """
     # DECISION plan-2026-07-19T191147-4b664252/D-021 [STALE]
     # This guard belongs HERE, ahead of `build_graph_representation`, and NOT in
-    # `create_states_section`. The finding located the failure at `states[state_id]` in the
+    # `build_states_section`. The finding located the failure at `states[state_id]` in the
     # states section, but the FIRST raise is actually `calculate_depths`'
     # `state_metrics[initial_state]["depth"] = 0` — which runs for EVERY style, before any
-    # section is built. A guard in `create_states_section` is therefore dead code that
+    # section is built. A guard in `build_states_section` is therefore dead code that
     # leaves `style="compact"`/`"minimal"` still emitting a bare `KeyError('start')`,
     # rendered by `visualize_fsm_from_file` as the useless `"Error: 'start'"`. Do NOT
     # "fix" this instead by skipping unknown ids while sorting: that hides a malformed
@@ -339,7 +339,7 @@ def _require_valid_transition_targets(states: dict[str, Any]) -> None:
     # Placement mirrors `_require_initial_state` (D-021) for the SAME measured reason:
     # the first raise is `calculate_depths`' `state_metrics[target]["depth"] = ...`
     # (probed, not read -- it fires for all three styles), which runs before any
-    # section is built. A guard inside `create_states_section` would be dead code for
+    # section is built. A guard inside `build_states_section` would be dead code for
     # `style="compact"`/`"minimal"`.
     #
     # Do NOT "simplify" this by wiring the visualizer into `FSMValidator`. Both
@@ -413,7 +413,7 @@ def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
     # Create header based on style
     name = _one_line(fsm_data.get("name"), _DEFAULT_NAME)
     if style != "minimal":
-        lines.extend(create_fancy_header(name))
+        lines.extend(build_fancy_header(name))
     else:
         # Simple header for minimal style
         lines.append(f"FSM: {name}")
@@ -422,20 +422,20 @@ def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
     # Add metadata based on style
     if style == "full":
         lines.extend(
-            create_metadata_section(fsm_data, initial_state, state_metrics, graph)
+            build_metadata_section(fsm_data, initial_state, state_metrics, graph)
         )
 
         # Add persona section if available
         if persona:
-            lines.extend(create_persona_section(persona))
+            lines.extend(build_persona_section(persona))
 
         # Add states section
         lines.extend(
-            create_states_section(states, initial_state, terminal_states, state_metrics)
+            build_states_section(states, initial_state, terminal_states, state_metrics)
         )
 
         # Add transitions section
-        lines.extend(create_transitions_section(graph))
+        lines.extend(build_transitions_section(graph))
     elif style == "compact" and persona:
         # In compact mode, just show a simplified persona section
         lines.append("╭" + "─" * 60 + "╮")
@@ -464,7 +464,7 @@ def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
 
         # Add legend
         lines.extend(
-            create_legend(
+            build_legend(
                 initial_state in terminal_states,
                 any(len(m["required_keys"]) > 0 for m in state_metrics.values()),
             )
@@ -490,7 +490,7 @@ def visualize_fsm_ascii(fsm_data: dict[str, Any], style: str = "full") -> str:
     return "\n".join(lines)
 
 
-def create_fancy_header(name: str) -> list[str]:
+def build_fancy_header(name: str) -> list[str]:
     """Create a fancy header for the FSM visualization."""
     # DECISION plan-2026-09-20T114608-a8e47b88/D-019
     # Width used to grow with the name (`max(60, len(name) + 10)`), while every
@@ -514,7 +514,7 @@ def create_fancy_header(name: str) -> list[str]:
     return lines
 
 
-def create_metadata_section(
+def build_metadata_section(
     fsm_data: dict[str, Any],
     initial_state: str,
     state_metrics: dict[str, dict[str, Any]],
@@ -572,7 +572,7 @@ def create_metadata_section(
     return lines
 
 
-def create_persona_section(persona: str) -> list[str]:
+def build_persona_section(persona: str) -> list[str]:
     """Create the persona section of the visualization."""
     # Prepare a more decorative persona section
     lines = [
@@ -609,7 +609,7 @@ def create_persona_section(persona: str) -> list[str]:
     return lines
 
 
-def create_states_section(
+def build_states_section(
     states: dict[str, Any],
     initial_state: str,
     terminal_states: set[str],
@@ -668,7 +668,7 @@ def create_states_section(
             # content is already exactly `width` chars, so `_fit` is a no-op. That
             # silently reproduces D-033's byte-identical-row bug for any long-
             # shared-prefix state that ALSO carries an icon (required_keys/
-            # branching/merge) -- the D-002 fix at `create_state_boxes` did not
+            # branching/merge) -- the D-002 fix at `build_state_boxes` did not
             # cover this sibling site. Route through `_fit` here too, reserving
             # `body` chars for the state-id text so the trailing icon still fits.
             # Do NOT go back to a bare slice. See decisions.md D-007.
@@ -708,7 +708,7 @@ def create_states_section(
     return lines
 
 
-def create_transitions_section(graph: dict[str, list]) -> list[str]:
+def build_transitions_section(graph: dict[str, list]) -> list[str]:
     """Create the transitions section of the visualization."""
     lines = [
         "┌" + "─" * 60 + "┐",
@@ -973,7 +973,7 @@ def sort_states_logically(
     return sorted_states
 
 
-def create_legend(is_initial_terminal: bool, has_input_states: bool) -> list[str]:
+def build_legend(is_initial_terminal: bool, has_input_states: bool) -> list[str]:
     """Create a legend explaining the diagram symbols."""
     legend = [
         "Legend:",
@@ -1038,7 +1038,7 @@ def generate_enhanced_ascii_diagram(
     )
 
     # Create state boxes
-    state_boxes = create_state_boxes(
+    state_boxes = build_state_boxes(
         ordered_states, initial_state, terminal_states, states
     )
 
@@ -1296,7 +1296,7 @@ def _box_row(vertical: str, content: str, box_width: int) -> str:
     return _fit(f"{vertical} {content}", box_width - 1).ljust(box_width - 1) + vertical
 
 
-def create_state_boxes(
+def build_state_boxes(
     ordered_states: list[str],
     initial_state: str,
     terminal_states: set[str],
@@ -1345,7 +1345,7 @@ def create_state_boxes(
         # TERMINAL/INITIAL states sharing a >60-char prefix rendered
         # byte-identical rows here in the STATE DIAGRAM section of
         # `--style full` output, even though `_fit` had already fixed the
-        # exact same defect for `create_states_section`/`create_transitions_section`
+        # exact same defect for `build_states_section`/`build_transitions_section`
         # (D-033). Routing through `_fit` completes that sweep; it does not
         # reverse D-033. Do NOT go back to a bare slice here. See decisions.md D-002.
         # The `_fit` now lives in `_box_row`, which every row of this box uses.

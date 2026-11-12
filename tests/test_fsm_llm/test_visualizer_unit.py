@@ -5,7 +5,7 @@ Tests cover:
 - visualize_fsm_ascii: basic FSM, multi-state FSM, different styles
 - generate_enhanced_ascii_diagram: diagram generation
 - sort_states_logically: ordering guarantees
-- create_state_boxes: box generation
+- build_state_boxes: box generation
 - Output is always a non-empty string containing state names
 """
 
@@ -23,9 +23,9 @@ from loguru import logger
 
 from fsm_llm.visualizer import (
     ICONS,
+    build_fancy_header,
     build_graph_representation,
-    create_fancy_header,
-    create_state_boxes,
+    build_state_boxes,
     generate_enhanced_ascii_diagram,
     main_cli,
     sort_states_logically,
@@ -240,7 +240,7 @@ class TestSortStatesLogically:
 
 
 # ==================================================================
-# create_state_boxes
+# build_state_boxes
 # ==================================================================
 
 
@@ -253,7 +253,7 @@ class TestCreateStateBoxes:
         terminal = {"end"}
         ordered = sort_states_logically(data["states"], "start", terminal, metrics)
 
-        boxes = create_state_boxes(ordered, "start", terminal, data["states"])
+        boxes = build_state_boxes(ordered, "start", terminal, data["states"])
         assert "start" in boxes
         assert "end" in boxes
         # Each box is a list of strings
@@ -269,7 +269,7 @@ class TestCreateStateBoxes:
         terminal = {"end"}
         ordered = sort_states_logically(data["states"], "start", terminal, metrics)
 
-        boxes = create_state_boxes(ordered, "start", terminal, data["states"])
+        boxes = build_state_boxes(ordered, "start", terminal, data["states"])
         start_text = "\n".join(boxes["start"])
         assert "start" in start_text
 
@@ -337,7 +337,7 @@ class TestVisualizeFSMAsciiEmptyTextFields:
         assert out
 
     def test_whitespace_only_state_purpose(self):
-        # Sibling of the same defect class: create_states_section guards with
+        # Sibling of the same defect class: build_states_section guards with
         # `if purpose:`, which whitespace-only passes, then indexes [0].
         data = _reproducer_fsm_data()
         data["states"]["s1"]["purpose"] = "   "
@@ -346,7 +346,7 @@ class TestVisualizeFSMAsciiEmptyTextFields:
         assert out
 
     def test_whitespace_only_transition_description(self):
-        # Sibling of the same defect class in create_transitions_section.
+        # Sibling of the same defect class in build_transitions_section.
         data = _reproducer_fsm_data()
         data["states"]["s2"] = {"id": "s2", "purpose": "q", "transitions": []}
         data["states"]["s1"]["transitions"] = [
@@ -609,10 +609,10 @@ def _long_id_fsm_data():
 
 
 class TestStatesSectionBoxIntegrity:
-    """F-17. `create_states_section` baked a literal "│ " into the state-id line
+    """F-17. `build_states_section` baked a literal "│ " into the state-id line
     and then wrapped that line in the box border AGAIN, so every state box in the
     default `full` style rendered a doubled glyph ("║│ greeting"). It also never
-    truncated its content, unlike `create_state_boxes`, so a long id, purpose or
+    truncated its content, unlike `build_state_boxes`, so a long id, purpose or
     required-keys list pushed the right border out of alignment.
     """
 
@@ -670,8 +670,8 @@ class TestWholeRenderBoxAlignment:
     """SC-18 says "a 100-char state id does not break box alignment" — about the
     RENDER, not about one section. The original pinning test measured only the
     STATES section (the box step 14 touched) via `_states_section_lines`, so the
-    suite stayed green while `create_metadata_section` emitted a 119-char row,
-    `create_transitions_section` a 127-char row, and `create_persona_section` a
+    suite stayed green while `build_metadata_section` emitted a 119-char row,
+    `build_transitions_section` a 127-char row, and `build_persona_section` a
     stray 58-char spacer, all against the same 62-char border. These tests
     measure EVERY bordered row of the WHOLE document instead, so a fix applied to
     one section builder and not its twins cannot pass.
@@ -771,7 +771,7 @@ class TestWholeRenderBoxAlignment:
 
 
 # ------------------------------------------------------------------
-# D-019 / fresh-audit-sweep.md finding #12: create_fancy_header computed its
+# D-019 / fresh-audit-sweep.md finding #12: build_fancy_header computed its
 # own width from `max(60, len(name) + 10)`, growing wider than every sibling
 # 60-col section box (METADATA/STATES/TRANSITIONS/PERSONA) for a name over
 # ~50 chars -- and never truncated a name that still did not fit.
@@ -821,7 +821,7 @@ class TestFancyHeaderBoxWidth:
         `_fit()`, not silently overflow `.center()` (which never truncates).
         """
         long_name = "y" * 200
-        lines = create_fancy_header(long_name)
+        lines = build_fancy_header(long_name)
 
         assert len(lines[0]) == 62, f"top border is {len(lines[0])} chars, not 62"
         assert len(lines[1]) == 62, f"name row is {len(lines[1])} chars, not 62"
@@ -835,7 +835,7 @@ class TestFancyHeaderBoxWidth:
     def test_a_short_name_is_unaffected(self):
         """Over-correction guard: a normal-length name must not be elided or
         otherwise changed by the width cap."""
-        lines = create_fancy_header("MyFSM")
+        lines = build_fancy_header("MyFSM")
         assert len(lines[0]) == 62
         assert "MyFSM" in lines[1]
         assert "…" not in lines[1]
@@ -889,7 +889,7 @@ class TestMissingInitialStateIsDiagnosable:
     def test_every_style_gets_the_contextual_error(self, style):
         """The first raise is in `calculate_depths`, which runs for EVERY style --
         not in the STATES section, which only `full` builds. A guard placed in
-        `create_states_section` would leave these two styles still raising KeyError.
+        `build_states_section` would leave these two styles still raising KeyError.
         """
         data = {"name": "Ghost", "initial_state": "ghost", "states": {}}
 
@@ -1141,7 +1141,7 @@ class TestTruncationIsVisibleAndUnambiguous:
 
 
 # ==================================================================
-# D-002 / fresh-audit-sweep.md finding #1: create_state_boxes never got the
+# D-002 / fresh-audit-sweep.md finding #1: build_state_boxes never got the
 # D-033 ellipsis fix
 # ==================================================================
 
@@ -1160,7 +1160,7 @@ def _state_diagram_prefix_collision_fsm_data():
     """Two TERMINAL states sharing a >60-char prefix, diverging only past the
     old bare ``[: box_width - 1]`` cutoff -- the exact shape
     ``findings/fresh-audit-sweep.md`` finding #1 describes for
-    ``create_state_boxes``.
+    ``build_state_boxes``.
     """
     return {
         "name": "StateDiagramPrefixCollisionFSM",
@@ -1198,8 +1198,8 @@ def _state_diagram_rows(output):
     start with the terminal style's vertical glyph (``"┃ "``), not the
     default ``"│ "`` -- the STATES-section content filter
     ``TestTruncationIsVisibleAndUnambiguous`` uses would not select these
-    rows at all; this is a genuinely different renderer (``create_state_boxes``,
-    not ``create_states_section``).
+    rows at all; this is a genuinely different renderer (``build_state_boxes``,
+    not ``build_states_section``).
     """
     return [
         line
@@ -1209,7 +1209,7 @@ def _state_diagram_rows(output):
 
 
 class TestStateDiagramBoxTruncationIsVisibleAndUnambiguous:
-    """D-002 / fresh-audit-sweep.md finding #1. ``create_state_boxes`` (used
+    """D-002 / fresh-audit-sweep.md finding #1. ``build_state_boxes`` (used
     only by the STATE DIAGRAM section of ``--style full`` output, via
     ``generate_enhanced_ascii_diagram``) never received D-033's ``_fit()``
     truncation fix, even though the D-022 comment at ``visualizer.py:147``
@@ -1276,13 +1276,13 @@ class TestStateDiagramBoxTruncationIsVisibleAndUnambiguous:
 
 
 # ==================================================================
-# D-007 / review-iter-1.md WARNING 4: create_states_section's icon-budget
+# D-007 / review-iter-1.md WARNING 4: build_states_section's icon-budget
 # branch (visualizer.py ~569) never got the D-033/D-002 _fit() fix either.
 # ==================================================================
 
 
 class TestStatesSectionIconBudgetTruncationIsVisible:
-    """The icon-budget branch of ``create_states_section`` pre-sliced
+    """The icon-budget branch of ``build_states_section`` pre-sliced
     ``state_line`` with a bare ``state_line[:body]`` BEFORE ``_states_box_row``'s
     own ``_fit()`` call ever saw it -- by the time ``_fit`` ran, the content was
     already exactly ``width`` chars long, so ``_fit`` was a no-op. This branch
@@ -1331,7 +1331,7 @@ class TestStatesSectionIconBudgetTruncationIsVisible:
         transitions, so they render as TERMINAL states whose box vertical
         glyph is ``"┃"`` nested inside the section's own ``"│ "`` border --
         distinct from the TRANSITIONS section's plain ``"│ "`` rows and from
-        ``create_state_boxes``' STATE DIAGRAM rows (which start with a bare
+        ``build_state_boxes``' STATE DIAGRAM rows (which start with a bare
         ``"┃ "``, no section border, and are a different renderer)."""
         return [
             line
