@@ -20,16 +20,16 @@ from fsm_llm.logging import logger
 # local imports
 # --------------------------------------------------------------
 from .constants import (
+    CONTEXT_KEY_CANCELLATION_REASON,
+    CONTEXT_KEY_EVENT_TIMEOUT,
+    CONTEXT_KEY_LAST_EVENT,
+    CONTEXT_KEY_TIMER_EXPIRED,
+    CONTEXT_KEY_TIMER_INFO,
+    CONTEXT_KEY_USER_INPUT,
+    CONTEXT_KEY_WAITING_INFO,
+    CONTEXT_KEY_WORKFLOW_INFO,
     DEFAULT_MAX_COMPLETED_INSTANCES,
     DEFAULT_MAX_STEPS,
-    KEY_CANCELLATION_REASON,
-    KEY_LAST_EVENT,
-    KEY_TIMEOUT,
-    KEY_TIMER_EXPIRED,
-    KEY_TIMER_INFO,
-    KEY_USER_INPUT,
-    KEY_WAITING_INFO,
-    KEY_WORKFLOW_INFO,
     MAX_BUFFERED_EVENTS_PER_INSTANCE,
     STEP_INTERNAL_WHITELIST,
 )
@@ -476,7 +476,7 @@ class WorkflowEngine:
         )
 
         # Add workflow metadata to context
-        instance.context[KEY_WORKFLOW_INFO] = {
+        instance.context[CONTEXT_KEY_WORKFLOW_INFO] = {
             "workflow_id": workflow_def.workflow_id,
             "instance_id": instance_id,
         }
@@ -515,7 +515,7 @@ class WorkflowEngine:
             # (CANCELLED) on a terminal instance (089d0ec7/D-015).
             request = self._cancel_requests.get(instance.instance_id)
             if request is not None and not instance.is_terminal():
-                instance.context[KEY_CANCELLATION_REASON] = request.reason
+                instance.context[CONTEXT_KEY_CANCELLATION_REASON] = request.reason
                 self._set_status(instance, WorkflowStatus.CANCELLED)
                 request.honored = True
                 return
@@ -759,8 +759,8 @@ class WorkflowEngine:
         at a different step, clear both wait markers, then set the status.
         """
         self._drop_wait_resources(instance.instance_id)
-        instance.context.pop(KEY_WAITING_INFO, None)
-        instance.context.pop(KEY_TIMER_INFO, None)
+        instance.context.pop(CONTEXT_KEY_WAITING_INFO, None)
+        instance.context.pop(CONTEXT_KEY_TIMER_INFO, None)
         self._set_status(instance, status)
 
     async def _transition_to_state(
@@ -791,8 +791,8 @@ class WorkflowEngine:
                 ``WorkflowDefinition.get_terminal_states()``'s static
                 whole-step analysis (see D-013 in decisions.md).
         """
-        waiting_info = instance.context.get(KEY_WAITING_INFO) or {}
-        timer_info = instance.context.get(KEY_TIMER_INFO) or {}
+        waiting_info = instance.context.get(CONTEXT_KEY_WAITING_INFO) or {}
+        timer_info = instance.context.get(CONTEXT_KEY_TIMER_INFO) or {}
 
         if explicitly_terminal:
             logger.info(
@@ -957,14 +957,14 @@ class WorkflowEngine:
             self._forget_timer(_timer_key(instance_id, "timeout", event_type))
             self.event_listeners.get(event_type, {}).pop(instance_id, None)
 
-            instance.context[KEY_TIMEOUT] = {
+            instance.context[CONTEXT_KEY_EVENT_TIMEOUT] = {
                 "event_type": event_type,
                 "timeout_at": datetime.now(timezone.utc).isoformat(),
             }
 
             if not timeout_state:
                 wait_seconds = None
-                waiting_info = instance.context.get(KEY_WAITING_INFO) or {}
+                waiting_info = instance.context.get(CONTEXT_KEY_WAITING_INFO) or {}
                 if isinstance(waiting_info, dict):
                     wait_seconds = waiting_info.get("timeout_seconds")
                 self._fail(
@@ -1140,7 +1140,7 @@ class WorkflowEngine:
                     f"event payload for instance {instance.instance_id}; "
                     f"context key '{context_key}' will not be set"
                 )
-        instance.context[KEY_LAST_EVENT] = event.model_dump()
+        instance.context[CONTEXT_KEY_LAST_EVENT] = event.model_dump()
 
     def _buffer_event(self, instance_id: str, event: WorkflowEvent) -> None:
         instance = self.workflow_instances.get(instance_id)
@@ -1287,7 +1287,7 @@ class WorkflowEngine:
                 )
                 return
 
-            instance.context[KEY_TIMER_EXPIRED] = {
+            instance.context[CONTEXT_KEY_TIMER_EXPIRED] = {
                 "expired_at": datetime.now(timezone.utc).isoformat()
             }
 
@@ -1376,11 +1376,11 @@ class WorkflowEngine:
                 return False
 
             if user_input:
-                instance.context[KEY_USER_INPUT] = user_input
+                instance.context[CONTEXT_KEY_USER_INPUT] = user_input
             try:
                 await self._execute_workflow_step(instance)
             finally:
-                instance.context.pop(KEY_USER_INPUT, None)
+                instance.context.pop(CONTEXT_KEY_USER_INPUT, None)
         return True
 
     async def cancel_workflow(
@@ -1431,7 +1431,7 @@ class WorkflowEngine:
                     if not request.honored:
                         return False
                 else:
-                    instance.context[KEY_CANCELLATION_REASON] = reason
+                    instance.context[CONTEXT_KEY_CANCELLATION_REASON] = reason
                     self._set_status(instance, WorkflowStatus.CANCELLED)
         finally:
             if self._cancel_requests.get(instance_id) is request:

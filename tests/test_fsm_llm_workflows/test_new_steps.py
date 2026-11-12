@@ -547,24 +547,24 @@ class TestRemovedWorkflowLegacy:
         assert mod.DEFAULT_MAX_STEPS == 1000
 
     @pytest.mark.parametrize(
-        "name",
+        ("name", "public"),
         [
-            "_KEY_WAITING_INFO",
-            "_KEY_TIMER_INFO",
-            "_KEY_WORKFLOW_INFO",
-            "_KEY_TIMEOUT",
-            "_KEY_TIMER_EXPIRED",
-            "_KEY_LAST_EVENT",
-            "_KEY_USER_INPUT",
-            "_KEY_CANCELLATION_REASON",
-            "_STEP_INTERNAL_WHITELIST",
+            ("_KEY_WAITING_INFO", "CONTEXT_KEY_WAITING_INFO"),
+            ("_KEY_TIMER_INFO", "CONTEXT_KEY_TIMER_INFO"),
+            ("_KEY_WORKFLOW_INFO", "CONTEXT_KEY_WORKFLOW_INFO"),
+            ("_KEY_TIMEOUT", "CONTEXT_KEY_EVENT_TIMEOUT"),
+            ("_KEY_TIMER_EXPIRED", "CONTEXT_KEY_TIMER_EXPIRED"),
+            ("_KEY_LAST_EVENT", "CONTEXT_KEY_LAST_EVENT"),
+            ("_KEY_USER_INPUT", "CONTEXT_KEY_USER_INPUT"),
+            ("_KEY_CANCELLATION_REASON", "CONTEXT_KEY_CANCELLATION_REASON"),
+            ("_STEP_INTERNAL_WHITELIST", "STEP_INTERNAL_WHITELIST"),
         ],
     )
-    def test_engine_private_alias_is_gone(self, name):
+    def test_engine_private_alias_is_gone(self, name, public):
         from fsm_llm.workflows import constants, engine
 
         assert not hasattr(engine, name)
-        assert hasattr(constants, name.lstrip("_"))
+        assert hasattr(constants, public)
 
     @pytest.mark.parametrize(
         "method",

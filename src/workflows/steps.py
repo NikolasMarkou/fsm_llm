@@ -27,9 +27,9 @@ from fsm_llm.definitions import USER_MESSAGE_MAX_CHARS, ResponseGenerationReques
 from fsm_llm.logging import logger
 
 from .constants import (
-    KEY_TIMER_INFO,
-    KEY_USER_INPUT,
-    KEY_WAITING_INFO,
+    CONTEXT_KEY_TIMER_INFO,
+    CONTEXT_KEY_USER_INPUT,
+    CONTEXT_KEY_WAITING_INFO,
     PARALLEL_DEEPCOPY_WARNING_THRESHOLD,
 )
 from .exceptions import WorkflowStepError
@@ -480,7 +480,7 @@ class WaitForEventStep(WorkflowStep):
         }
 
         return WorkflowStepResult.success_result(
-            data={KEY_WAITING_INFO: waiting_info},
+            data={CONTEXT_KEY_WAITING_INFO: waiting_info},
             message=f"Waiting for event of type {self.config.event_type}",
         )
 
@@ -511,7 +511,7 @@ class TimerStep(WorkflowStep):
         }
 
         return WorkflowStepResult.success_result(
-            data={KEY_TIMER_INFO: timer_info},
+            data={CONTEXT_KEY_TIMER_INFO: timer_info},
             message=f"Timer set for {self.delay_seconds} seconds, will transition to {self.next_state}",
         )
 
@@ -638,7 +638,7 @@ class ConversationStep(WorkflowStep):
             fsm = API.from_file(str(self.fsm_file), model=self.model)
 
         messages = list(self.auto_messages)
-        user_input = context.get(KEY_USER_INPUT)
+        user_input = context.get(CONTEXT_KEY_USER_INPUT)
         if self.use_user_input and isinstance(user_input, str) and user_input:
             messages.append(user_input)
 

@@ -45,6 +45,7 @@ from fsm_llm.workflows import (
     condition_step,
     create_workflow,
 )
+from fsm_llm.workflows.constants import CONTEXT_KEY_CANCELLATION_REASON
 
 from .collector import EventCollector, redact_context
 from .constants import (
@@ -1335,7 +1336,9 @@ class InstanceManager:
                 }
                 if status == "cancelled":
                     context = getattr(wf_instance, "context", {}) or {}
-                    event_data["reason"] = context.get("_cancellation_reason", "")
+                    event_data["reason"] = context.get(
+                        CONTEXT_KEY_CANCELLATION_REASON, ""
+                    )
                 if status == "failed":
                     event_data["error"] = str(data.get("error") or "")[:500]
                 _record(

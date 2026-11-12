@@ -715,7 +715,7 @@ class TestCancelMidChain:
         )
 
     async def test_cancel_between_steps_cancels_and_returns_true(self):
-        from fsm_llm.workflows.constants import KEY_CANCELLATION_REASON
+        from fsm_llm.workflows.constants import CONTEXT_KEY_CANCELLATION_REASON
         from fsm_llm.workflows.models import WorkflowStatus
 
         ran: list[str] = []
@@ -733,7 +733,7 @@ class TestCancelMidChain:
         assert await asyncio.wait_for(cancel, 5) is True
         instance = engine.workflow_instances[iid]
         assert instance.status == WorkflowStatus.CANCELLED
-        assert instance.context[KEY_CANCELLATION_REASON] == "stop now"
+        assert instance.context[CONTEXT_KEY_CANCELLATION_REASON] == "stop now"
         assert ran == ["a"]  # b and c never ran
         assert engine._cancel_requests == {}
         await asyncio.gather(*engine._background_tasks)
@@ -778,7 +778,7 @@ class TestCancelMidChain:
         assert engine._cancel_requests == {}
 
     async def test_cancel_of_waiting_instance_still_works(self):
-        from fsm_llm.workflows.constants import KEY_CANCELLATION_REASON
+        from fsm_llm.workflows.constants import CONTEXT_KEY_CANCELLATION_REASON
         from fsm_llm.workflows.definitions import WorkflowDefinition
         from fsm_llm.workflows.dsl import wait_event_step
         from fsm_llm.workflows.models import WorkflowStatus
@@ -798,7 +798,7 @@ class TestCancelMidChain:
         assert await engine.cancel_workflow(iid, "bye") is True
         instance = engine.workflow_instances[iid]
         assert instance.status == WorkflowStatus.CANCELLED
-        assert instance.context[KEY_CANCELLATION_REASON] == "bye"
+        assert instance.context[CONTEXT_KEY_CANCELLATION_REASON] == "bye"
         assert engine._cancel_requests == {}
 
 
@@ -844,8 +844,8 @@ class TestTimerEmptyNextState:
 
     async def test_empty_next_state_completes_after_expiry(self):
         from fsm_llm.workflows.constants import (
-            KEY_TIMER_EXPIRED,
-            KEY_TIMER_INFO,
+            CONTEXT_KEY_TIMER_EXPIRED,
+            CONTEXT_KEY_TIMER_INFO,
         )
         from fsm_llm.workflows.models import WorkflowStatus
 
@@ -854,8 +854,8 @@ class TestTimerEmptyNextState:
         instance = await self._wait_terminal(engine, iid)
 
         assert instance.status == WorkflowStatus.COMPLETED
-        assert KEY_TIMER_EXPIRED in instance.context
-        assert KEY_TIMER_INFO not in instance.context
+        assert CONTEXT_KEY_TIMER_EXPIRED in instance.context
+        assert CONTEXT_KEY_TIMER_INFO not in instance.context
         assert f"{iid}_timer" not in engine.timers
         await engine.shutdown()
 

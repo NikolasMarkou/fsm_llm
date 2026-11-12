@@ -13,27 +13,27 @@ from __future__ import annotations
 
 #: Set by ``WaitForEventStep``; tells the engine to park the instance and
 #: register an event listener. Cleared on every transition.
-KEY_WAITING_INFO = "_waiting_info"
+CONTEXT_KEY_WAITING_INFO = "_waiting_info"
 #: Set by ``TimerStep``; tells the engine to park the instance and schedule a
 #: timer. Cleared on every transition.
-KEY_TIMER_INFO = "_timer_info"
+CONTEXT_KEY_TIMER_INFO = "_timer_info"
 #: ``{"workflow_id", "instance_id"}`` of the running instance.
-KEY_WORKFLOW_INFO = "_workflow_info"
+CONTEXT_KEY_WORKFLOW_INFO = "_workflow_info"
 #: Written when an event wait times out: ``{"event_type", "timeout_at"}``.
-KEY_TIMEOUT = "_timeout"
+CONTEXT_KEY_EVENT_TIMEOUT = "_timeout"
 #: Written when a timer fires: ``{"expired_at"}``.
-KEY_TIMER_EXPIRED = "_timer_expired"
+CONTEXT_KEY_TIMER_EXPIRED = "_timer_expired"
 #: The last event delivered to the instance (``WorkflowEvent.model_dump()``).
-KEY_LAST_EVENT = "_last_event"
+CONTEXT_KEY_LAST_EVENT = "_last_event"
 #: ``user_input`` of the latest ``advance_workflow`` call. Present only while
 #: the step that call re-runs is executing; removed afterwards.
-KEY_USER_INPUT = "_user_input"
+CONTEXT_KEY_USER_INPUT = "_user_input"
 #: Reason passed to ``cancel_workflow``.
-KEY_CANCELLATION_REASON = "_cancellation_reason"
+CONTEXT_KEY_CANCELLATION_REASON = "_cancellation_reason"
 
 #: Internal keys a step result may set (they bypass the internal-prefix
 #: filter because the engine reads them to detect waiting/timer steps).
-STEP_INTERNAL_WHITELIST = frozenset({KEY_WAITING_INFO, KEY_TIMER_INFO})
+STEP_INTERNAL_WHITELIST = frozenset({CONTEXT_KEY_WAITING_INFO, CONTEXT_KEY_TIMER_INFO})
 
 # --------------------------------------------------------------
 # Engine limits and defaults
