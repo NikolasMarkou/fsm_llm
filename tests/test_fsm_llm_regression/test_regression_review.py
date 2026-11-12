@@ -348,6 +348,15 @@ class TestConsolidatedAll:
         for name in fsm_llm.__all__:
             assert hasattr(fsm_llm, name), f"{name} in __all__ but not importable"
 
+    def test_okf_and_skill_errors_are_exported_with_the_other_exceptions(self):
+        import fsm_llm
+        from fsm_llm import definitions
+
+        for name in ("OKFError", "SkillError"):
+            assert name in fsm_llm.__all__
+            assert getattr(fsm_llm, name) is getattr(definitions, name)
+            assert issubclass(getattr(fsm_llm, name), fsm_llm.FSMError)
+
 
 # ══════════════════════════════════════════════════════════════
 # M6: No dead tox docs env

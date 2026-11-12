@@ -80,9 +80,11 @@ from .definitions import (
     LLMUsage,
     ModelToolCall,
     MultiClassificationResult,
+    OKFError,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
     RunBudgetExceededError,
+    SkillError,
     # Core FSM models
     State,
     StateNotFoundError,
@@ -317,6 +319,8 @@ __all__ = [
     "ClassificationResponseError",
     "HandlerSystemError",
     "HandlerExecutionError",
+    "OKFError",
+    "SkillError",
     # Extension checks
     "has_workflows",
     "get_workflows",

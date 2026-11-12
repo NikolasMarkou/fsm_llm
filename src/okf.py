@@ -56,6 +56,7 @@ __all__ = [
     "INCOMPLETE_CODES",
     "OKFBundle",
     "OKFConcept",
+    "OKFError",
     "OKFIssue",
     "OKFLimits",
     "TrustTier",
@@ -1074,7 +1075,7 @@ def has_lone_surrogate(value: Any) -> bool:
         raise OKFError(str(exc)) from exc
 
 
-class _FrontmatterTooLarge(OKFError):
+class _FrontmatterTooLargeError(OKFError):
     """Frontmatter over ``OKF_MAX_FRONTMATTER_BYTES`` (the export cuts metadata)."""
 
 
@@ -1129,7 +1130,9 @@ def _render_concept(concept: OKFConcept) -> bytes:
     # The loader's bounds and measure: do NOT write what `load_bundle` rejects.
     data = f"---\n{dumped}---\n{body}".encode()
     if len(dumped.encode("utf-8", "replace")) > OKF_MAX_FRONTMATTER_BYTES:
-        raise _FrontmatterTooLarge(f"concept {concept.id!r}: frontmatter too large")
+        raise _FrontmatterTooLargeError(
+            f"concept {concept.id!r}: frontmatter too large"
+        )
     if len(data) > OKF_MAX_FILE_BYTES:
         raise OKFError(f"concept {concept.id!r}: file too large")
     return data
@@ -1141,7 +1144,7 @@ def writes_within_caps(concept: OKFConcept) -> bool:
     try:
         _render_concept(concept)
     except OKFError as exc:  # any other refusal: the writer names it
-        return not isinstance(exc, _FrontmatterTooLarge)
+        return not isinstance(exc, _FrontmatterTooLargeError)
     return True
 
 

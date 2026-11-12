@@ -67,6 +67,7 @@ from .security import resolve_within
 __all__ = [
     "AgentSkill",
     "SkillCatalog",
+    "SkillError",
     "SkillIssue",
     "SkillLimits",
     "incomplete_note",
