@@ -366,10 +366,10 @@ This prints `WorkflowStatus.COMPLETED`:
 
 ```python
 import asyncio
-from fsm_llm.workflows import WorkflowEngine, auto_step, condition_step, workflow_builder
+from fsm_llm.workflows import WorkflowEngine, auto_step, condition_step, create_workflow_builder
 
 wf = (
-    workflow_builder("orders", "Order check")
+    create_workflow_builder("orders", "Order check")
     .set_initial_step(auto_step("load", "Load order", next_state="route",
                                 action=lambda ctx: {"amount": 1500}))
     .add_step(condition_step("route", "Big order?", condition=lambda ctx: ctx["amount"] >= 1000,

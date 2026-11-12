@@ -71,7 +71,7 @@ asyncio.run(main())
 
 This snippet needs no model and no network. A step that calls an LLM, a conversation or an agent (`llm_step`, `conversation_step`, `agent_step`) needs one, and the `fsm_llm.agents` or core `fsm_llm` objects you pass in bring it.
 
-`create_workflow` returns a definition you add steps to; the engine validates it when you register it. To get a definition that is validated as soon as it is built, use `WorkflowBuilder` (or `workflow_builder(...)`). `build()` returns a fresh `WorkflowDefinition`, always validates it, and raises `BuildError` (core `fsm_llm.BuildError`, a `FSMError` and a `ValueError` with `.errors`) chained from the workflow error:
+`create_workflow` returns a definition you add steps to; the engine validates it when you register it. To get a definition that is validated as soon as it is built, use `WorkflowBuilder` (or `create_workflow_builder(...)`). `build()` returns a fresh `WorkflowDefinition`, always validates it, and raises `BuildError` (core `fsm_llm.BuildError`, a `FSMError` and a `ValueError` with `.errors`) chained from the workflow error:
 
 ```python
 from fsm_llm import BuildError

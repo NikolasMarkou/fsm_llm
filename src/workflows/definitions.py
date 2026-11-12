@@ -121,7 +121,7 @@ class WorkflowDefinition(BaseModel):
             raise ValueError(f"Initial step '{v}' not found in the steps dictionary")
         return v
 
-    def validate(self) -> None:  # type: ignore[override]
+    def validate_structure(self) -> None:
         """Validate the workflow definition."""
         errors = []
 

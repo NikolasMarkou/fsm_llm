@@ -317,7 +317,7 @@ class TestWorkflowEngineIntegration:
         workflow.with_step(auto_step("done", "Done", next_state=""))
 
         # Should not raise during validation
-        workflow.validate()
+        workflow.validate_structure()
 
         engine = WorkflowEngine()
         engine.register_workflow(workflow)
@@ -404,7 +404,7 @@ class TestWorkflowEngineIntegration:
         workflow.with_step(auto_step("error", "Error", next_state=""))
 
         # Should not raise
-        workflow.validate()
+        workflow.validate_structure()
 
         engine = WorkflowEngine()
         engine.register_workflow(workflow)

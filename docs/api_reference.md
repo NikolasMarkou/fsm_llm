@@ -486,7 +486,7 @@ status = engine.get_status(instance_id)
 await engine.close()
 ```
 
-`workflow_builder(id, name)` returns a `WorkflowBuilder` (`add_step`, `set_initial_step`, `add_metadata`); its `build()` always validates, returns a new `WorkflowDefinition` that later builder calls do not change, and raises `BuildError` chained from `WorkflowDefinitionError` or `WorkflowValidationError`. It has no `validate` argument.
+`create_workflow_builder(id, name)` returns a `WorkflowBuilder` (`add_step`, `set_initial_step`, `add_metadata`); its `build()` always validates, returns a new `WorkflowDefinition` that later builder calls do not change, and raises `BuildError` chained from `WorkflowDefinitionError` or `WorkflowValidationError`. It has no `validate` argument.
 
 11 step types: `auto_step`, `api_step`, `condition_step`, `llm_step`, `wait_event_step`, `timer_step`, `parallel_step`, `conversation_step`, `agent_step`, `retry_step`, `switch_step`.
 

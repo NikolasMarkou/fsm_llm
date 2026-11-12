@@ -503,7 +503,7 @@ class WorkflowBuilder:
                 wf.with_step(step)
             if self._initial is not None:
                 wf.initial_step_id = self._initial.step_id
-            wf.validate()
+            wf.validate_structure()
         except WorkflowValidationError as exc:
             raise BuildError(
                 str(exc), errors=[str(e) for e in exc.validation_errors]
@@ -516,7 +516,7 @@ class WorkflowBuilder:
 # --------------------------------------------------------------
 
 
-def workflow_builder(
+def create_workflow_builder(
     workflow_id: str, name: str, description: str = ""
 ) -> WorkflowBuilder:
     """
@@ -537,7 +537,7 @@ def workflow_builder(
 
 
 # Convenience functions for common workflow patterns
-def linear_workflow(
+def create_linear_workflow(
     workflow_id: str, name: str, steps: list[WorkflowStep], description: str = ""
 ) -> WorkflowDefinition:
     """
@@ -574,7 +574,7 @@ def linear_workflow(
 # --------------------------------------------------------------
 
 
-def conditional_workflow(
+def create_conditional_workflow(
     workflow_id: str,
     name: str,
     initial_step: WorkflowStep,
@@ -620,7 +620,7 @@ def conditional_workflow(
 # --------------------------------------------------------------
 
 
-def event_driven_workflow(
+def create_event_driven_workflow(
     workflow_id: str,
     name: str,
     setup_steps: list[WorkflowStep],

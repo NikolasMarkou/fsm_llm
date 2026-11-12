@@ -569,7 +569,7 @@ class TestLoopsAndStepBudget:
         wf.with_initial_step(auto_step("a", "A", next_state="b"))
         wf.with_step(auto_step("b", "B", next_state="a"))
         with pytest.raises(WorkflowValidationError, match="synchronous cycle"):
-            wf.validate()
+            wf.validate_structure()
 
     async def test_dynamic_loop_hits_step_budget(self):
         wf = create_workflow("dyn", "dyn")

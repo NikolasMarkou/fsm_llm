@@ -33,18 +33,18 @@ from .dsl import (
     api_step,
     auto_step,
     condition_step,
-    conditional_workflow,
     conversation_step,
+    create_conditional_workflow,
+    create_event_driven_workflow,
+    create_linear_workflow,
     create_workflow,
-    event_driven_workflow,
-    linear_workflow,
+    create_workflow_builder,
     llm_step,
     parallel_step,
     retry_step,
     switch_step,
     timer_step,
     wait_event_step,
-    workflow_builder,
 )
 
 # Core engine
@@ -136,7 +136,7 @@ __all__ = [
     "__version__",
     # DSL
     "create_workflow",
-    "workflow_builder",
+    "create_workflow_builder",
     "WorkflowBuilder",
     "auto_step",
     "api_step",
@@ -149,7 +149,7 @@ __all__ = [
     "agent_step",
     "retry_step",
     "switch_step",
-    "linear_workflow",
-    "conditional_workflow",
-    "event_driven_workflow",
+    "create_linear_workflow",
+    "create_conditional_workflow",
+    "create_event_driven_workflow",
 ]

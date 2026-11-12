@@ -13,16 +13,16 @@ from fsm_llm.workflows.dsl import (
     api_step,
     auto_step,
     condition_step,
-    conditional_workflow,
     conversation_step,
+    create_conditional_workflow,
+    create_event_driven_workflow,
+    create_linear_workflow,
     create_workflow,
-    event_driven_workflow,
-    linear_workflow,
+    create_workflow_builder,
     llm_step,
     parallel_step,
     timer_step,
     wait_event_step,
-    workflow_builder,
 )
 from fsm_llm.workflows.exceptions import (
     WorkflowDefinitionError,
@@ -229,7 +229,7 @@ def _end():
 
 def _valid_builder():
     return (
-        workflow_builder("wf-1", "Test")
+        create_workflow_builder("wf-1", "Test")
         .set_initial_step(auto_step("s1", "Step 1", "end"))
         .add_step(_end())
     )
@@ -240,7 +240,7 @@ class TestWorkflowBuilder:
 
     def test_build_empty_is_refused(self):
         with pytest.raises(BuildError) as ei:
-            workflow_builder("wf-1", "Test").build()
+            create_workflow_builder("wf-1", "Test").build()
         assert isinstance(ei.value.__cause__, WorkflowValidationError)
 
     def test_build_returns_definition(self):
@@ -250,7 +250,7 @@ class TestWorkflowBuilder:
 
     def test_add_step(self):
         wf = (
-            workflow_builder("wf-1", "Test")
+            create_workflow_builder("wf-1", "Test")
             .set_initial_step(auto_step("s1", "S1", "s2"))
             .add_step(auto_step("s2", "S2", "end"))
             .add_step(_end())
@@ -270,7 +270,7 @@ class TestWorkflowBuilder:
         s1 = auto_step("s1", "Step 1", "s2")
         s2 = auto_step("s2", "Step 2", "end")
         wf = (
-            workflow_builder("wf-1", "Test")
+            create_workflow_builder("wf-1", "Test")
             .set_initial_step(s1)
             .add_step(s2)
             .add_step(_end())
@@ -292,7 +292,7 @@ class TestWorkflowBuilderCallOrder:
         a = auto_step("a", "A", "end")
         b = auto_step("b", "B", "a")
         wf = (
-            workflow_builder("wf-1", "Test")
+            create_workflow_builder("wf-1", "Test")
             .set_initial_step(a)
             .set_initial_step(b)
             .add_step(_end())
@@ -303,7 +303,7 @@ class TestWorkflowBuilderCallOrder:
 
     def test_initial_step_keeps_its_call_position(self):
         wf = (
-            workflow_builder("wf-1", "Test")
+            create_workflow_builder("wf-1", "Test")
             .add_step(_end())
             .set_initial_step(auto_step("s1", "S1", "end"))
             .build()
@@ -325,7 +325,7 @@ class TestWorkflowBuilderBuildErrors:
     def test_non_step_raises_build_error_naming_position(self):
         with pytest.raises(BuildError, match=r"position 1.*NoneType"):
             (
-                workflow_builder("wf-1", "Test")
+                create_workflow_builder("wf-1", "Test")
                 .add_step(_end())
                 .add_step(None)  # type: ignore[arg-type]
                 .build()
@@ -333,7 +333,7 @@ class TestWorkflowBuilderBuildErrors:
 
     def test_non_step_initial_raises_build_error(self):
         with pytest.raises(BuildError):
-            workflow_builder("wf-1", "Test").set_initial_step(
+            create_workflow_builder("wf-1", "Test").set_initial_step(
                 "nope"  # type: ignore[arg-type]
             ).build()
 
@@ -342,7 +342,7 @@ class TestWorkflowBuilderConvention:
     """Mutators record, build() copies what the builder owns and validates."""
 
     def test_mutators_return_same_builder(self):
-        b = workflow_builder("wf-1", "Test")
+        b = create_workflow_builder("wf-1", "Test")
         s = auto_step("s1", "S1", "end")
         assert b.add_step(s) is b
         assert b.set_initial_step(s) is b
@@ -373,12 +373,17 @@ class TestWorkflowBuilderConvention:
 
     def test_steps_are_shared_by_reference(self):
         s = auto_step("s1", "S1", "end")
-        wf = workflow_builder("wf-1", "T").set_initial_step(s).add_step(_end()).build()
+        wf = (
+            create_workflow_builder("wf-1", "T")
+            .set_initial_step(s)
+            .add_step(_end())
+            .build()
+        )
         assert wf.steps["s1"] is s
 
     def test_duplicate_step_id_is_a_build_error(self):
         b = (
-            workflow_builder("wf-1", "Test")
+            create_workflow_builder("wf-1", "Test")
             .add_step(auto_step("s1", "A", "end"))
             .add_step(auto_step("s1", "B", "end"))
         )
@@ -387,7 +392,7 @@ class TestWorkflowBuilderConvention:
         assert isinstance(ei.value.__cause__, WorkflowDefinitionError)
 
     def test_invalid_workflow_is_a_build_error_with_errors(self):
-        b = workflow_builder("wf-1", "Test").set_initial_step(
+        b = create_workflow_builder("wf-1", "Test").set_initial_step(
             auto_step("s1", "S1", "nowhere")
         )
         with pytest.raises(BuildError) as ei:
@@ -399,23 +404,23 @@ class TestWorkflowBuilderConvention:
 
 
 class TestLinearWorkflow:
-    """Test linear_workflow factory."""
+    """Test create_linear_workflow factory."""
 
     def test_basic(self):
         s1 = auto_step("s1", "Step 1", "s2")
         s2 = auto_step("s2", "Step 2", "done")
-        wf = linear_workflow("wf-1", "Linear", [s1, s2])
+        wf = create_linear_workflow("wf-1", "Linear", [s1, s2])
         assert wf.initial_step_id == "s1"
         assert "s1" in wf.steps
         assert "s2" in wf.steps
 
     def test_empty_raises(self):
         with pytest.raises(ValueError, match="at least one step"):
-            linear_workflow("wf-1", "Empty", [])
+            create_linear_workflow("wf-1", "Empty", [])
 
 
 class TestConditionalWorkflow:
-    """Test conditional_workflow factory."""
+    """Test create_conditional_workflow factory."""
 
     def test_basic(self):
         init = auto_step("init", "Init", "check")
@@ -423,7 +428,9 @@ class TestConditionalWorkflow:
         yes_step = auto_step("yes", "Yes", "done")
         no_step = auto_step("no", "No", "done")
 
-        wf = conditional_workflow("wf-1", "Cond", init, check, [yes_step], [no_step])
+        wf = create_conditional_workflow(
+            "wf-1", "Cond", init, check, [yes_step], [no_step]
+        )
         assert wf.initial_step_id == "init"
         assert "check" in wf.steps
         assert "yes" in wf.steps
@@ -431,14 +438,14 @@ class TestConditionalWorkflow:
 
 
 class TestEventDrivenWorkflow:
-    """Test event_driven_workflow factory."""
+    """Test create_event_driven_workflow factory."""
 
     def test_with_setup(self):
         setup = auto_step("setup", "Setup", "wait")
         wait = wait_event_step("wait", "Wait", "event", "process")
         process = auto_step("process", "Process", "done")
 
-        wf = event_driven_workflow("wf-1", "Event", [setup], wait, [process])
+        wf = create_event_driven_workflow("wf-1", "Event", [setup], wait, [process])
         assert wf.initial_step_id == "setup"
         assert "wait" in wf.steps
         assert "process" in wf.steps
@@ -447,7 +454,7 @@ class TestEventDrivenWorkflow:
         wait = wait_event_step("wait", "Wait", "event", "process")
         process = auto_step("process", "Process", "done")
 
-        wf = event_driven_workflow("wf-1", "Event", [], wait, [process])
+        wf = create_event_driven_workflow("wf-1", "Event", [], wait, [process])
         assert wf.initial_step_id == "wait"
 
 

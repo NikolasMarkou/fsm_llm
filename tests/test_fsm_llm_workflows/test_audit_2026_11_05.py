@@ -327,13 +327,13 @@ class TestReferencedStatesAreValidated:
     def test_unknown_state_is_reported(self, make_step):
         wf = _single(make_step())
         with pytest.raises(WorkflowValidationError) as err:
-            wf.validate()
+            wf.validate_structure()
         assert any("unknown state: 'nope'" in e for e in err.value.validation_errors)
 
     def test_terminal_markers_are_not_references(self):
         wf = create_workflow("wf", "wf")
         wf.with_initial_step(wait_event_step("w", "W", "e", success_state=""))
-        wf.validate()
+        wf.validate_structure()
         assert wf.get_terminal_states() == {"w"}
 
     def test_unreachable_step_is_reported(self):
@@ -341,7 +341,7 @@ class TestReferencedStatesAreValidated:
         wf.with_initial_step(auto_step("a", "A", next_state=""))
         wf.with_step(auto_step("lonely", "Lonely", next_state=""))
         with pytest.raises(WorkflowValidationError, match="not reachable"):
-            wf.validate()
+            wf.validate_structure()
 
 
 # ---------------------------------------------------------------

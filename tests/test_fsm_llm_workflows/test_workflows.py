@@ -277,7 +277,7 @@ class TestWorkflowDefinition:
 
         wf = WorkflowDefinition(workflow_id="wf-1", name="Test")
         with pytest.raises(WorkflowValidationError):
-            wf.validate()
+            wf.validate_structure()
 
     def test_validate_missing_initial_step(self):
         from fsm_llm.workflows.definitions import WorkflowDefinition
@@ -288,7 +288,7 @@ class TestWorkflowDefinition:
         step = AutoStep(step_id="s1", name="S1", next_state="end")
         wf.with_step(step)
         with pytest.raises(WorkflowValidationError):
-            wf.validate()
+            wf.validate_structure()
 
 
 # ----------------------------------------------------------------

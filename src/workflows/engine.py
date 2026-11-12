@@ -314,7 +314,7 @@ class WorkflowEngine:
         definition. Re-registering an id replaces the definition for NEW
         instances only; running instances keep the one they started with.
         """
-        workflow.validate()
+        workflow.validate_structure()
         registered = workflow.model_copy(update={"steps": dict(workflow.steps)})
         if workflow.workflow_id in self.workflow_definitions:
             logger.info(
