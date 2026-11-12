@@ -25,9 +25,8 @@ Async tests need no decorator: the repository's `pyproject.toml` sets `asyncio_m
 - `test_steps.py` - execution of `AutoStep`, `ConditionStep`, `APIStep`, `WaitEventStep`, `TimerStep`, `ParallelStep`, `ConversationStep`. 25 tests.
 - `test_new_steps.py` - `SwitchStep`, `RetryStep`, `AgentStep`, their DSL factories, and engine instance removal and purging. 46 tests.
 - `test_step_timeouts.py` - the per-step `timeout_seconds` field and the `_with_timeout` helper. 21 tests, 8 marked `slow`.
-- `test_audit_fixes.py` - regressions for earlier audit findings: parallel failure reporting, event listener cleanup, conversation cleanup, template errors, per-instance locking, terminal-status guards, float timeouts. 29 tests.
-- `test_audit_2026_09_27.py` - regressions for the 2026-09-27 audit (findings labelled H, M, L), grouped one class per finding. 74 tests.
-- `test_audit_2026_11_05.py` - regressions for the 2026-11-05 audit (plan 5980fbb7 step 19): failures raised by Auto and Condition steps are recorded, a user `TimeoutError` is kept, async `aggregation_function`, `schedule_timer` on a finished instance, the announced first RUNNING, `llm_interface` validation, referenced states, timer keys and completion from a wait. 42 tests.
+- `test_engine_lifecycle.py` - the engine's lifecycle and resources: instance ids, `max_seconds` deadlines, loops and the step budget, release of timers and listeners on cancel and close, definition pinning, hooks and the engine API, silent logging by default (a subprocess), failures raised by steps, async `aggregation_function`, the announced first RUNNING, per-instance locking, terminal-status guards, float timeouts. 49 tests.
+- `test_wait_events.py` - waits and timers: event isolation between instances, correlation keys and targeted events, wait timeouts, re-waits, timer keys and re-arming, timers on finished instances, completing from a wait, listener cleanup. 31 tests.
 - `test_removed_keywords.py` - a removed keyword spelling (`error_state=`, `timeout=`, `default_state=`, `timeout_state=`, `next_state=`, `workflow_timeout=`) raises a `ValidationError` on the pydantic workflow models and the new spelling works. 8 tests.
 - `__init__.py` - empty package marker.
 
@@ -47,5 +46,5 @@ The full run takes about 10 to 15 seconds. `-m "not slow"` skips the 8 slow time
 
 - Tests import from `fsm_llm.workflows` (a subpackage of `fsm_llm`), not from a separate `fsm_llm_workflows` package.
 - The 8 `slow` tests each wait for a 0.1 s timeout on a 5 s sleep.
-- `test_audit_2026_09_27.py::TestLoggingOffByDefault` starts a Python subprocess to check that workflow logs stay off until `fsm_llm.logging.enable_library_logging()` is called.
+- `test_engine_lifecycle.py::TestLoggingOffByDefault` starts a Python subprocess to check that workflow logs stay off until `fsm_llm.logging.enable_library_logging()` is called.
 - Several concurrency tests repeat a race 5 or 20 times and accept either outcome of the race, but always check that a step body ran at most once and that nothing raised.

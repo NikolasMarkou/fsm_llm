@@ -4,9 +4,40 @@ Tests models, exceptions, definitions, and DSL without requiring
 async infrastructure.
 """
 
+from __future__ import annotations
+
+import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
+
+from fsm_llm.workflows import (
+    DependencyResolver,
+    WorkflowEngine,
+    WorkflowHistoryEntry,
+    auto_step,
+    create_workflow,
+    switch_step,
+    timer_step,
+)
+from fsm_llm.workflows.exceptions import (
+    WorkflowDefinitionError,
+    WorkflowEventError,
+    WorkflowStepError,
+    WorkflowTimeoutError,
+    WorkflowValidationError,
+)
+from fsm_llm.workflows.models import WaitEventConfig, WorkflowStepResult
+from fsm_llm.workflows.steps import (
+    APIStep,
+    AutoStep,
+    ConditionStep,
+    RetryStep,
+    TimerStep,
+    WorkflowStep,
+)
+from tests.test_fsm_llm_workflows.support import _wait_then_done
 
 # ----------------------------------------------------------------
 # Exception tests
@@ -790,3 +821,123 @@ class TestPackageImports:
         import fsm_llm.workflows
 
         assert fsm_llm.workflows.__version__ == fsm_llm.__version__
+
+
+class TestSmallerFixes:
+    async def test_auto_and_condition_error_step_id(self):
+        auto = AutoStep(
+            step_id="a",
+            name="A",
+            next_step_id="n",
+            error_step_id="e",
+            action=lambda c: 1 / 0,
+        )
+        cond = ConditionStep(
+            step_id="c",
+            name="C",
+            condition=lambda c: 1 / 0,
+            true_step_id="t",
+            false_step_id="f",
+            error_step_id="e",
+        )
+        for step in (auto, cond):
+            result = await step.execute({})
+            assert result.success is False
+            assert result.next_step_id == "e"
+
+    def test_non_dict_action_result_is_a_clear_error(self):
+        step = AutoStep(step_id="a", name="A", next_step_id="n", action=lambda c: ["x"])
+        result = asyncio.run(step.execute({}))
+        assert result.success is False
+        assert "must return a dict" in (result.error or "")
+
+    async def test_history_records_step_error_without_redundant_entries(self):
+        wf = create_workflow("h", "h")
+        wf.with_initial_step(auto_step("a", "A", next_step_id="b"))
+        wf.with_step(switch_step("b", "B", "k", cases={"x": "done"}))
+        wf.with_step(auto_step("done", "Done", next_step_id=""))
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start("h")
+
+        history = engine.workflow_instances[iid].history
+        assert isinstance(history[0], WorkflowHistoryEntry)
+        failed = [e for e in history if e.step_id == "b" and e.error]
+        assert failed and "No matching case" in failed[0].error
+        running = [e for e in history if e.message == "Status changed to running"]
+        assert len(running) == 1
+
+    def test_resolver_unknown_dependency_is_not_a_cycle(self):
+        resolver = DependencyResolver().add_step("a", depends_on=["ghost"])
+        assert resolver.has_cycles() is False
+        with pytest.raises(WorkflowValidationError, match="unknown"):
+            resolver.resolve()
+        cyclic = DependencyResolver.from_dict({"a": ["b"], "b": ["a"]})
+        assert cyclic.has_cycles() is True
+
+    def test_exception_details_are_not_mutated(self):
+        details = {"k": 1}
+        WorkflowStepError("m", step_id="s", cause=ValueError("x"), details=details)
+        WorkflowTimeoutError("t", operation="op", timeout_seconds=1.0, details=details)
+        assert details == {"k": 1}
+
+    async def test_empty_event_type_listener_rejected(self):
+        engine = WorkflowEngine()
+        engine.register_workflow(_wait_then_done("wf"))
+        iid = await engine.start("wf")
+        with pytest.raises(WorkflowEventError):
+            await engine.register_event_listener(iid, "")
+
+    def test_duplicate_step_id_rejected(self):
+        wf = create_workflow("d", "d")
+        wf.with_step(auto_step("a", "A", next_step_id=""))
+        with pytest.raises(WorkflowDefinitionError, match="Duplicate"):
+            wf.with_step(auto_step("a", "Other", next_step_id=""))
+
+    async def test_api_output_paths(self):
+        step = APIStep(
+            step_id="api",
+            name="API",
+            api_function=lambda: {"user": {"name": "Ada"}, "items": [1, 2]},
+            success_step_id="ok",
+            failure_step_id="bad",
+            output_mapping={"name": "user.name", "all": ""},
+        )
+        result = await step.execute({})
+        assert result.data["name"] == "Ada"
+        assert result.data["all"]["items"] == [1, 2]
+
+        list_step = APIStep(
+            step_id="api2",
+            name="API2",
+            api_function=lambda: [1, 2, 3],
+            success_step_id="ok",
+            failure_step_id="bad",
+            output_mapping={"rows": ""},
+        )
+        assert (await list_step.execute({})).data == {"rows": [1, 2, 3]}
+
+    def test_float_delays_accepted(self):
+        assert timer_step("t", "T", 0.25, "x").delay_seconds == 0.25
+        cfg = WaitEventConfig(event_type="e", success_step_id="x", timeout_seconds=0.5)
+        assert cfg.timeout_seconds == 0.5
+
+    def test_serialize_strips_custom_callables(self):
+        class _WithCallback(WorkflowStep):
+            callback: Any = None
+
+            async def execute(self, context):
+                return WorkflowStepResult.success_result(next_step_id="")
+
+        wf = create_workflow("s", "s")
+        wf.with_initial_step(_WithCallback(step_id="a", name="A", callback=print))
+        assert "callback" not in wf.serialize()["steps"]["a"]
+
+    async def test_retry_wrapping_timer_counts_as_pausing(self):
+        wf = create_workflow("r", "r")
+        inner = TimerStep(
+            step_id="t_inner", name="T", delay_seconds=0, next_step_id="a"
+        )
+        wf.with_initial_step(auto_step("a", "A", next_step_id="t"))
+        wf.with_step(RetryStep(step_id="t", name="T", step=inner))
+        assert wf.has_synchronous_cycles() is False

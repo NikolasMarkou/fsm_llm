@@ -2,11 +2,15 @@
 Unit tests for the workflow DSL factory functions and WorkflowBuilder.
 """
 
+from __future__ import annotations
+
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
 
 from fsm_llm import BuildError
+from fsm_llm.workflows import retry_step, switch_step
 from fsm_llm.workflows.definitions import WorkflowDefinition
 from fsm_llm.workflows.dsl import (
     WorkflowBuilder,
@@ -24,6 +28,7 @@ from fsm_llm.workflows.dsl import (
     timer_step,
     wait_event_step,
 )
+from fsm_llm.workflows.engine import WorkflowEngine
 from fsm_llm.workflows.exceptions import (
     WorkflowDefinitionError,
     WorkflowValidationError,
@@ -37,6 +42,7 @@ from fsm_llm.workflows.steps import (
     TimerStep,
     WaitEventStep,
 )
+from tests.test_fsm_llm_workflows.support import _Gen, _single
 
 
 class TestCreateWorkflow:
@@ -460,3 +466,149 @@ class TestEventDrivenWorkflow:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestReferencedStatesAreValidated:
+    @pytest.mark.parametrize(
+        "make_step",
+        [
+            lambda: auto_step("s", "S", next_step_id="nope"),
+            lambda: auto_step("s", "S", next_step_id="", error_step_id="nope"),
+            lambda: api_step("s", "S", print, "", "nope"),
+            lambda: condition_step("s", "S", bool, "", "nope"),
+            lambda: condition_step("s", "S", bool, "", "", error_step_id="nope"),
+            lambda: llm_step("s", "S", _Gen(), "p", next_step_id="nope"),
+            lambda: timer_step("s", "S", 1, "nope"),
+            lambda: parallel_step("s", "S", [], next_step_id="", error_step_id="nope"),
+            lambda: wait_event_step("s", "S", "e", success_step_id="nope"),
+            lambda: wait_event_step(
+                "s",
+                "S",
+                "e",
+                success_step_id="",
+                timeout_seconds=1,
+                timeout_step_id="nope",
+            ),
+            lambda: switch_step("s", "S", "k", cases={"a": "nope"}),
+            lambda: switch_step("s", "S", "k", cases={}, default_step_id="nope"),
+            lambda: retry_step("s", "S", auto_step("i", "I", next_step_id="nope")),
+        ],
+        ids=[
+            "auto-next",
+            "auto-error",
+            "api-failure",
+            "condition-false",
+            "condition-error",
+            "llm-next",
+            "timer",
+            "parallel-error",
+            "wait-success",
+            "wait-timeout",
+            "switch-case",
+            "switch-default",
+            "retry-inner",
+        ],
+    )
+    def test_unknown_state_is_reported(self, make_step):
+        wf = _single(make_step())
+        with pytest.raises(WorkflowValidationError) as err:
+            wf.validate_structure()
+        assert any("unknown state: 'nope'" in e for e in err.value.validation_errors)
+
+    def test_terminal_markers_are_not_references(self):
+        wf = create_workflow("wf", "wf")
+        wf.with_initial_step(wait_event_step("w", "W", "e", success_step_id=""))
+        wf.validate_structure()
+        assert wf.get_terminal_states() == {"w"}
+
+    def test_unreachable_step_is_reported(self):
+        wf = create_workflow("wf", "wf")
+        wf.with_initial_step(auto_step("a", "A", next_step_id=""))
+        wf.with_step(auto_step("lonely", "Lonely", next_step_id=""))
+        with pytest.raises(WorkflowValidationError, match="not reachable"):
+            wf.validate_structure()
+
+
+class TestTimerEmptyNextState:
+    """F-WE-02 (plan 5ed71cf2 step 16): the validator accepts
+    ``TimerStep(next_step_id="")`` as a terminal step, like
+    ``wait_event_step(success_step_id="")``, but the engine used to run the
+    expiry through ``_transition_to_state`` and FAIL the instance with
+    ``Invalid next state``. An empty target now completes the workflow.
+    """
+
+    @staticmethod
+    def _engine(next_step_id: str, extra_steps: dict | None = None):
+        from fsm_llm.workflows.definitions import WorkflowDefinition
+        from fsm_llm.workflows.dsl import auto_step, timer_step
+
+        steps = {"w": timer_step("w", "w", 0.05, next_step_id)}
+        steps.update(extra_steps or {})
+        engine = WorkflowEngine()
+        engine.register_workflow(
+            WorkflowDefinition(
+                workflow_id="wf-timer",
+                name="Timer",
+                steps=steps,
+                initial_step_id="w",
+            )
+        )
+        return engine, auto_step
+
+    async def _wait_terminal(self, engine, iid):
+        from fsm_llm.workflows.models import WorkflowStatus
+
+        terminal = {
+            WorkflowStatus.COMPLETED,
+            WorkflowStatus.FAILED,
+            WorkflowStatus.CANCELLED,
+        }
+        for _ in range(200):
+            if engine.workflow_instances[iid].status in terminal:
+                return engine.workflow_instances[iid]
+            await asyncio.sleep(0.01)
+        raise AssertionError("instance never reached a terminal status")
+
+    async def test_empty_next_step_id_completes_after_expiry(self):
+        from fsm_llm.workflows.constants import (
+            CONTEXT_KEY_TIMER_EXPIRED,
+            CONTEXT_KEY_TIMER_INFO,
+        )
+        from fsm_llm.workflows.models import WorkflowStatus
+
+        engine, _ = self._engine("")
+        iid = await engine.start("wf-timer", wait=False)
+        instance = await self._wait_terminal(engine, iid)
+
+        assert instance.status == WorkflowStatus.COMPLETED
+        assert CONTEXT_KEY_TIMER_EXPIRED in instance.context
+        assert CONTEXT_KEY_TIMER_INFO not in instance.context
+        assert f"{iid}_timer" not in engine.timers
+        await engine.close()
+
+    async def test_valid_next_step_id_still_transitions(self):
+        from fsm_llm.workflows.dsl import auto_step
+        from fsm_llm.workflows.models import WorkflowStatus
+
+        engine, _ = self._engine(
+            "done", {"done": auto_step("done", "Done", "", lambda ctx: {"hit": 1})}
+        )
+        iid = await engine.start("wf-timer", wait=False)
+        instance = await self._wait_terminal(engine, iid)
+
+        assert instance.status == WorkflowStatus.COMPLETED
+        assert instance.context.get("hit") == 1
+        await engine.close()
+
+    async def test_invalid_non_empty_next_step_id_still_fails(self):
+        from fsm_llm.workflows.models import WorkflowStatus
+
+        # The validator rejects an unknown non-empty target at registration,
+        # so retarget the registered step to reach the engine-side guard.
+        engine, _ = self._engine("")
+        engine.workflow_definitions["wf-timer"].steps["w"].next_step_id = "nowhere"
+        iid = await engine.start("wf-timer", wait=False)
+        instance = await self._wait_terminal(engine, iid)
+
+        assert instance.status == WorkflowStatus.FAILED
+        await engine.close()

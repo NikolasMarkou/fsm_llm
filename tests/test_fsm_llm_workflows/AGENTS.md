@@ -23,7 +23,7 @@ flowchart LR
 
 - Async tests rely on `asyncio_mode = "auto"` (repo `pyproject.toml`); some older files still add `@pytest.mark.asyncio`, which is harmless.
 - Some engine tests bypass `start` and insert a `WorkflowInstance` straight into `engine.workflow_instances[...]`, then call private methods (`_execute_workflow_step`, `_fail`, `_purge_oldest_terminal_instances`, `_handle_timer_expiration`, `_get_instance_lock`).
-- Timing tests use real sleeps: 0.01 s and 0.05 s bodies that finish inside a timeout, 0.3 s and 0.5 s `_SlowStep`/mock delays, a 1 s step against a 0.05 s `max_seconds`, and 5.0 s bodies in the 8 `slow` tests (cut off by `timeout_seconds=0.1`). `_settle(seconds=0.05)` in `test_audit_2026_09_27.py` is the wait helper.
+- Timing tests use real sleeps: 0.01 s and 0.05 s bodies that finish inside a timeout, 0.3 s and 0.5 s `_SlowStep`/mock delays, a 1 s step against a 0.05 s `max_seconds`, and 5.0 s bodies in the 8 `slow` tests (cut off by `timeout_seconds=0.1`). `_settle(seconds=0.05)` in `support.py` is the wait helper.
 
 ## Key files
 
@@ -35,9 +35,8 @@ flowchart LR
 | `test_steps.py` | 25 | `AutoStep` (sync/async action, action error returns a failure result), `ConditionStep`, `APIStep` (exception gives failure to `failure_step_id`), `WaitEventStep` `_waiting_info`, `TimerStep` `_timer_info`, `ParallelStep` (default `step_<i>_<key>` aggregation, custom aggregation, context isolation), `ConversationStep` (needs exactly one of `fsm_file`/`fsm_definition`, mappings, `max_turns`) |
 | `test_new_steps.py` | 46 | `SwitchStep` (case, default, missing key, numeric value stringified, no default fails); `RetryStep` (retries failures and bare exceptions, re-raises original exception type on exhaustion); `AgentStep`; DSL `agent_step`, `retry_step`, `switch_step`; `remove_instance`, `max_completed_instances` purge |
 | `test_step_timeouts.py` | 21 (8 `slow`) | `timeout` default `None`; async actions/conditions over timeout return a failure whose `.error` says "timed out"; sync actions are not wrapped; `APIStep` and `ParallelStep` return failure instead; `_with_timeout` direct calls |
-| `test_audit_fixes.py` | 29 | F-001 parallel failure without `error_step_id`; F-002 `process_event` uses `.pop(` not `del self.event_listeners` (source inspection); F-004 `end_conversation` called on exception; F-007 missing template var gives failure; F-010 no `conversation_map`; F4 per-instance lock (no double execution, lock dropped on remove/purge); F5 terminal guards on `_fail` and `cancel`; F7 sub-second `max_seconds` reported as float |
-| `test_audit_2026_09_27.py` | 74 | 2026-09-27 audit: 21 classes grouped by finding id (H, M and L series) plus `TestReviewFollowUp` |
-| `test_audit_2026_11_05.py` | 42 | 2026-11-05 audit (plan 5980fbb7 step 19): raising Auto/Condition steps record hook, history and cause (F-WE-01); user `TimeoutError` kept (F-WE-06); async `aggregation_function` (F-WE-07); `schedule_timer` on a terminal instance (F-WE-10); initial `status_changed running` (F-WE-13); `llm_interface` validated (F-WE-15); referenced states of every step type (F-WE-05); timer keys, re-arm and fired-timer cleanup (F-WE-02); completing from a wait (F-WE-03); cancel releases everything (F-WE-04) |
+| `test_engine_lifecycle.py` | 49 | Engine lifecycle and resources: instance ids (a duplicate `instance_id` raises `WorkflowInstanceError`, cancelling `order` leaves `order_2_timer`), `max_seconds` deadlines, loops and the step budget, release of timers and listeners, definition pinning, the engine API (hooks, `wait=False`, `get_context` copy, `close()`, executor), `TestLoggingOffByDefault` (subprocess), raising steps recording hook, history and cause (F-WE-01), async `aggregation_function` (F-WE-07), the announced first RUNNING (F-WE-13), cancel releasing everything (F-WE-04), per-instance lock concurrency (F4), terminal guards on `_fail` and `cancel` (F5), float `max_seconds` (F7), cancel mid chain |
+| `test_wait_events.py` | 31 | Waits and timers: `process_event` isolation between instances, a re-wait keeps its timeout, wait timeouts and terminal waits, `correlation_key` and targeted events (buffered until the wait is reached), `TestReviewFollowUp`, `schedule_timer` on a terminal instance (F-WE-10), timer keys, re-arm and fired-timer cleanup (F-WE-02), completing from a wait (F-WE-03), the `process_event` `.pop(` source inspection (F-002) |
 | `test_removed_keywords.py` | 8 | Removed keywords raise instead of being dropped: `AutoStep(error_state=, timeout=)`, `SwitchStep(default_state=)`, `WaitEventConfig(timeout_state=, success_state=)`, `EventListener(success_state=)`, `WorkflowStepResult(next_state=)`, `WorkflowInstance(workflow_timeout=)`; the new spelling works |
 | `__init__.py` | 0 | Empty |
 
@@ -46,21 +45,20 @@ flowchart LR
 This directory exports nothing; its surface is the pytest entry points and the module-level helpers that tests share.
 
 - Run: `.venv/bin/python -m pytest tests/test_fsm_llm_workflows/` (330 tests); `-m "not slow"` skips the 8 `slow` tests in `test_step_timeouts.py`.
-- Helpers in `test_audit_2026_09_27.py`:
+- Helpers in `support.py` and the test files that own them:
   - `_wait_then_done(workflow_id: str, event_type: str = "go", **wait_kwargs) -> WorkflowDefinition`: a `wait_event_step("wait", ...)` routed to a terminal `auto_step("done", ..., next_step_id="")`.
   - `async _settle(seconds: float = 0.05) -> None`: `asyncio.sleep` wrapper used to let background work finish.
-  - `_two_waits_workflow(timing_factor=1.0) -> WorkflowDefinition`: `wa` (event `A`, `timeout_seconds=0.1 * timing_factor`, `timeout_step_id="wb"`) -> `slow` (`_SlowStep`, 0.3 s times the factor) -> `wb` (event `B`) -> `got_b` (terminal).
-- Class-local helpers: `TestConversationStep._mock_api(collected_data=None, responses=None)` in `test_steps.py` returns a `MagicMock` API (`start_conversation` gives `("conv-1", "Hello!")`, `converse` side effects, `has_conversation_ended` False, `get_data` default `{"name": "Alice"}`); `TestSwitchStep.switch` in `test_new_steps.py` is the only `@pytest.fixture` in the directory. `test_audit_fixes.py` builds counting and raising steps inside test classes (`_build_counting_terminal_step`, `_build_counting_waiting_step`, `_make_instance`).
+  - `_two_waits_workflow(timing_factor=1.0) -> WorkflowDefinition` (in `test_wait_events.py`): `wa` (event `A`, `timeout_seconds=0.1 * timing_factor`, `timeout_step_id="wb"`) -> `slow` (`_SlowStep`, 0.3 s times the factor) -> `wb` (event `B`) -> `got_b` (terminal).
+- Class-local helpers: `TestConversationStep._mock_api(collected_data=None, responses=None)` in `test_steps.py` returns a `MagicMock` API (`start_conversation` gives `("conv-1", "Hello!")`, `converse` side effects, `has_conversation_ended` False, `get_data` default `{"name": "Alice"}`); `TestSwitchStep.switch` in `test_new_steps.py` is the only `@pytest.fixture` in the directory. `test_engine_lifecycle.py` builds counting and raising steps inside test classes (`_build_counting_terminal_step`, `_build_counting_waiting_step`, `_make_instance`).
 - Library surface exercised: `WorkflowEngine` (`register_workflow`, `start`, `process_event`, `advance`, `cancel`, `remove_instance`, `get_context`, `add_hook`, `close`), step classes in `fsm_llm.workflows.steps`, DSL factories in `fsm_llm.workflows.dsl`, models in `fsm_llm.workflows.models`, exceptions in `fsm_llm.workflows.exceptions`.
 
 ## Data shapes
 
-Fakes defined at module level in `test_audit_2026_09_27.py` (`_SlowStep` sits just above `TestReviewFollowUp`, the rest at the top):
+Fakes defined at module level (`support.py` holds `_FakeLLMResponse` and `_CoreLikeLLM`; `_DynamicLoopStep` is in `test_engine_lifecycle.py`, `_SlowStep` in `test_wait_events.py` just above `TestReviewFollowUp`, `_AgentResult` and `_RecordingAgent` in `test_steps.py`):
 
 | Name | Shape |
 | --- | --- |
 | `_DynamicLoopStep(WorkflowStep)` | `execute` returns `success_result(next_step_id=self.step_id)` (runtime self-loop the static graph cannot see) |
-| `_TerminalStep(WorkflowStep)` | `execute` returns `success_result()` |
 | `_SlowStep(WorkflowStep)` | fields `next_step_id: str = ""`, `delay: float = 0.3`; sleeps `delay` then succeeds to `next_step_id` |
 | `_FakeLLMResponse` | `.message: str` |
 | `_CoreLikeLLM` | `reply`, `requests: list`; sync `generate_response(request)` records the request and returns `_FakeLLMResponse(reply)` (shape of core `LLMInterface`) |
@@ -76,7 +74,7 @@ Assertions read `WorkflowStepResult` fields `success`, `next_step_id`, `data`, `
 - Concurrency tests loop 5 or 20 times and accept either race winner but require: step body ran at most once, no call raised, final status consistent (`COMPLETED` implies `cancel` returned `False`).
 - Cancelling an already `COMPLETED`, `CANCELLED` or `FAILED` instance returns `False` without raising.
 
-Behaviour pinned by `test_audit_2026_09_27.py` (2026-09-27 audit findings in the H, M and L series):
+Behaviour pinned by the folded 2026-09-27 audit classes (findings in the H, M and L series), spread over the feature files named above:
 
 - Event delivery: one instance's expired deadline or non-`WAITING` status does not stop delivery to others; skipped instances are not mutated. `correlation_key` routes by payload value; `WorkflowEvent(instance_id=...)` targets one instance; an early targeted event is buffered until the wait is reached. An event never moves an instance that has moved to a different wait. Cancelling `process_event` mid-delivery restores undelivered listeners.
 - Waits: a follow-up wait on the same event keeps its timeout; timeout without `timeout_step_id` fails the instance and leaves `engine.timers == {}`; `success_step_id=""` completes; `WaitEventConfig` rejects `timeout_step_id` without `timeout_seconds` ("timeout_step_id requires") and empty `event_type`.
@@ -104,13 +102,13 @@ Behaviour pinned by `test_audit_2026_09_27.py` (2026-09-27 audit findings in the
 ## Failure modes
 
 - Timing-sensitive tests (`_settle(0.2)` after 0.05 s timeouts, 0.3 s slow steps) can flake on a heavily loaded machine.
-- `TestEventListenerRaceCondition.test_pop_instead_of_del_in_process_event` inspects `WorkflowEngine.process_event` source text; renaming or restructuring that method can break it without a behaviour change.
-- `TestLoggingOffByDefault` fails if the subprocess cannot import `fsm_llm` with `sys.executable`.
+- `TestEventListenerRaceCondition.test_pop_instead_of_del_in_process_event` (in `test_wait_events.py`) inspects `WorkflowEngine.process_event` source text; renaming or restructuring that method can break it without a behaviour change.
+- `TestLoggingOffByDefault` (in `test_engine_lifecycle.py`) fails if the subprocess cannot import `fsm_llm` with `sys.executable`.
 
 ## Working here
 
 - Run: `.venv/bin/python -m pytest tests/test_fsm_llm_workflows/` (about 10 s); `-m "not slow"` runs 322.
-- New audit regressions: add a class per finding in the matching audit file, or a new `test_audit_<date>.py`; put helpers at module top with a `_` prefix (`_wait_then_done`, `_settle`, `_CoreLikeLLM`, `_RecordingAgent`).
+- New regressions: add a class per finding to the feature file that owns the behaviour (`test_engine_lifecycle.py`, `test_wait_events.py`, `test_steps.py`, ...), never a new dated audit file; put helpers at module top with a `_` prefix (`_wait_then_done`, `_settle`, `_CoreLikeLLM`, `_RecordingAgent`).
 - Mark any test that sleeps near a second or more with `@pytest.mark.slow`.
 - Custom steps subclass `WorkflowStep` and implement `async def execute(self, context)`; extra pydantic fields are declared as class attributes (see `_SlowStep`).
 - Docstrings and comments cite `# DECISION` ids (D-003, D-005, D-010, D-011, D-013, D-015, D-018, D-020). D-018 is cited only as history: it narrowed the terminal check to `isinstance(step, SwitchStep)` and D-020 reverted it (`TestWideTerminalPredicateAfterD020Revert`). Read the matching anchors in `src/workflows/` before changing a pinned behaviour.

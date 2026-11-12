@@ -1,212 +1,531 @@
-"""
-Tests verifying fixes for audit findings in fsm_llm.workflows.
-Covers: F-001 (ParallelStep), F-002 (event race), F-004 (ConversationStep),
-        F-007 (LLMStep template), F-010 (dead code removal).
-"""
+"""Tests moved from dated audit files."""
 
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
+import sys
+import textwrap
 from datetime import UTC
-from unittest.mock import MagicMock, patch
+from typing import Any
 
 import pytest
 
-from fsm_llm.workflows.engine import WorkflowEngine
-from fsm_llm.workflows.exceptions import WorkflowTimeoutError
-from fsm_llm.workflows.models import WorkflowEvent
-from fsm_llm.workflows.steps import (
-    AutoStep,
-    ConversationStep,
-    LLMStep,
-    ParallelStep,
+from fsm_llm.workflows import (
+    WorkflowEngine,
+    WorkflowStatus,
+    auto_step,
+    condition_step,
+    create_workflow,
+    parallel_step,
+    retry_step,
+    timer_step,
+    wait_event_step,
 )
+from fsm_llm.workflows.exceptions import (
+    WorkflowInstanceError,
+    WorkflowResourceError,
+    WorkflowTimeoutError,
+    WorkflowValidationError,
+)
+from fsm_llm.workflows.models import WorkflowEvent, WorkflowStepResult
+from fsm_llm.workflows.steps import WorkflowStep
+from tests.test_fsm_llm_workflows.support import _settle, _single, _wait_then_done
 
-# ---------------------------------------------------------------------------
-# F-001: ParallelStep must return failure when substeps fail
-# ---------------------------------------------------------------------------
+
+class _DynamicLoopStep(WorkflowStep):
+    """A custom step that always routes back to itself at runtime (the
+    static graph cannot see it)."""
+
+    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
+        return WorkflowStepResult.success_result(next_step_id=self.step_id)
 
 
-class TestParallelStepErrorHandling:
-    """F-001: ParallelStep should report failure even without error_step_id."""
+class TestInstanceIds:
+    async def test_cancel_does_not_touch_timers_of_prefix_sharing_ids(self):
+        wf = create_workflow("t", "t")
+        wf.with_initial_step(timer_step("wait", "Wait", 60, "done"))
+        wf.with_step(auto_step("done", "Done", next_step_id=""))
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        await engine.start("t", instance_id="order")
+        await engine.start("t", instance_id="order_2")
 
-    async def test_parallel_step_fails_when_substeps_fail_no_error_step_id(self):
-        """ParallelStep with no error_step_id must still return failure if substeps fail."""
-        failing_step = AutoStep(
-            step_id="fail",
-            name="Failing",
-            next_step_id="done",
-            action=lambda ctx: (_ for _ in ()).throw(ValueError("boom")),
+        await engine.cancel("order")
+
+        assert "order_2_timer" in engine.timers
+        assert not engine.timers["order_2_timer"].task.cancelled()
+        await engine.close()
+
+    async def test_duplicate_instance_id_rejected(self):
+        engine = WorkflowEngine()
+        engine.register_workflow(_wait_then_done("wf"))
+        await engine.start("wf", instance_id="same")
+        with pytest.raises(WorkflowInstanceError, match="already in use"):
+            await engine.start("wf", instance_id="same")
+        assert engine.get_status("same") == WorkflowStatus.WAITING
+
+
+class TestWorkflowDeadline:
+    async def test_deadline_fails_waiting_instance(self, timing_factor):
+        engine = WorkflowEngine()
+        engine.register_workflow(_wait_then_done("wf"))
+        iid = await engine.start("wf", max_seconds=0.05 * timing_factor)
+        assert engine.get_status(iid) == WorkflowStatus.WAITING
+        await _settle(0.2 * timing_factor)
+
+        assert engine.get_status(iid) == WorkflowStatus.FAILED
+        assert engine.event_listeners["go"] == {}
+
+    async def test_timeout_error_names_instance(self, timing_factor):
+        class _Slow(WorkflowStep):
+            async def execute(self, context):
+                await asyncio.sleep(1 * timing_factor)
+                return WorkflowStepResult.success_result(next_step_id="")
+
+        wf = create_workflow("slow", "slow")
+        wf.with_initial_step(_Slow(step_id="s", name="S"))
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        with pytest.raises(WorkflowTimeoutError) as exc_info:
+            await engine.start("slow", max_seconds=0.05 * timing_factor)
+
+        iid = exc_info.value.instance_id
+        assert iid is not None
+        assert engine.get_status(iid) == WorkflowStatus.FAILED
+
+
+class TestLoopsAndStepBudget:
+    async def test_long_acyclic_chain_completes(self):
+        wf = create_workflow("long", "long")
+        n = 30
+        for i in range(n):
+            nxt = f"s{i + 1}" if i < n - 1 else ""
+            wf.with_step(
+                auto_step(f"s{i}", f"S{i}", next_step_id=nxt), is_initial=i == 0
+            )
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start("long")
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
+
+    async def test_polling_loop_through_timer_is_allowed(self, timing_factor):
+        polls = {"n": 0}
+
+        def poll(ctx):
+            polls["n"] += 1
+            return {"ready": polls["n"] >= 3}
+
+        wf = create_workflow("poll", "poll")
+        wf.with_initial_step(
+            auto_step("check", "Check", next_step_id="route", action=poll)
         )
-        ok_step = AutoStep(
-            step_id="ok",
-            name="OK",
-            next_step_id="done",
+        wf.with_step(
+            condition_step(
+                "route",
+                "Ready?",
+                condition=lambda ctx: ctx["ready"],
+                true_step_id="done",
+                false_step_id="sleep",
+            )
         )
+        wf.with_step(timer_step("sleep", "Sleep", 0, "check"))
+        wf.with_step(auto_step("done", "Done", next_step_id=""))
+        assert wf.has_cycles() is True
+        assert wf.has_synchronous_cycles() is False
 
-        parallel = ParallelStep(
-            step_id="par",
-            name="Parallel",
-            steps=[ok_step, failing_step],
-            next_step_id="next",
-            error_step_id=None,  # No error_step_id configured
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start("poll")
+        await _settle(0.2 * timing_factor)
+
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
+        assert polls["n"] == 3
+
+    def test_synchronous_cycle_rejected(self):
+        wf = create_workflow("cyc", "cyc")
+        wf.with_initial_step(auto_step("a", "A", next_step_id="b"))
+        wf.with_step(auto_step("b", "B", next_step_id="a"))
+        with pytest.raises(WorkflowValidationError, match="synchronous cycle"):
+            wf.validate_structure()
+
+    async def test_dynamic_loop_hits_step_budget(self):
+        wf = create_workflow("dyn", "dyn")
+        wf.with_initial_step(_DynamicLoopStep(step_id="loop", name="Loop"))
+        engine = WorkflowEngine(max_steps=5)
+        engine.register_workflow(wf)
+        iid = await engine.start("dyn")
+
+        inst = engine.workflow_instances[iid]
+        assert inst.status == WorkflowStatus.FAILED
+        assert "Step budget exceeded" in (inst.error or "")
+
+
+class TestResourceRelease:
+    async def test_fired_event_timeout_leaves_no_timer(self, timing_factor):
+        wf = create_workflow("wf", "wf")
+        wf.with_initial_step(
+            wait_event_step(
+                "wait",
+                "Wait",
+                "go",
+                success_step_id="done",
+                timeout_seconds=0.05 * timing_factor,
+                timeout_step_id="late",
+            )
         )
+        wf.with_step(auto_step("done", "Done", next_step_id=""))
+        wf.with_step(auto_step("late", "Late", next_step_id=""))
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start("wf")
+        await _settle(0.2 * timing_factor)
 
-        result = await parallel.execute({})
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
+        assert engine.timers == {}
+        assert engine.get_statistics()["active_timers"] == 0
 
-        # Must be failure, NOT success
-        assert result.success is False
+    def test_default_retention_is_bounded(self):
+        assert WorkflowEngine().max_completed_instances is not None
+
+    async def test_failed_instances_are_purged_too(self):
+        wf = create_workflow("f", "f")
+        wf.with_initial_step(
+            auto_step("boom", "Boom", next_step_id="", action=lambda ctx: 1 / 0)
+        )
+        engine = WorkflowEngine(max_completed_instances=2)
+        engine.register_workflow(wf)
+        ids = [await engine.start("f") for _ in range(4)]
+        assert all(engine.get_status(i) in (WorkflowStatus.FAILED, None) for i in ids)
+        assert len(engine.workflow_instances) == 2
+
+    def test_history_is_capped(self):
+        from fsm_llm.workflows.models import WorkflowInstance
+
+        inst = WorkflowInstance(
+            instance_id="i", workflow_id="w", current_step_id="s", max_history_entries=3
+        )
+        for i in range(10):
+            inst.add_history_entry(step_id="s", message=str(i))
+        assert [e.message for e in inst.history] == ["7", "8", "9"]
+
+
+class TestDefinitionPinning:
+    async def test_reregistration_does_not_affect_running_instance(self):
+        engine = WorkflowEngine()
+        engine.register_workflow(_wait_then_done("wf"))
+        iid = await engine.start("wf")
+
+        replacement = create_workflow("wf", "v2")
+        replacement.with_initial_step(auto_step("other", "Other", next_step_id=""))
+        engine.register_workflow(replacement)
+        await engine.process_event(WorkflowEvent(event_type="go"))
+
+        inst = engine.workflow_instances[iid]
+        assert inst.status == WorkflowStatus.COMPLETED
+        assert inst.current_step_id == "done"
+
+    def test_mutating_after_registration_does_not_change_registered(self):
+        engine = WorkflowEngine()
+        wf = _wait_then_done("wf")
+        engine.register_workflow(wf)
+        wf.with_step(auto_step("extra", "Extra", next_step_id=""))
+        assert "extra" not in engine.get_definition("wf").steps
+
+
+class TestEngineApi:
+    async def test_hooks_see_steps_and_status_changes(self):
+        seen: list[tuple[str, dict]] = []
+        engine = WorkflowEngine()
+        engine.add_hook(lambda name, inst, data: seen.append((name, data)))
+        engine.add_hook(lambda *a: 1 / 0)  # a broken hook must not matter
+        wf = create_workflow("h", "h")
+        wf.with_initial_step(auto_step("a", "A", next_step_id=""))
+        engine.register_workflow(wf)
+        iid = await engine.start("h")
+
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
+        names = [n for n, _ in seen]
+        assert names == [
+            "status_changed",
+            "step_started",
+            "step_completed",
+            "status_changed",
+        ]
+        assert seen[0][1]["status"] == "running"
+        assert seen[-1][1]["status"] == "completed"
+
+    async def test_user_input_removed_after_advance(self):
+        engine = WorkflowEngine()
+        engine.register_workflow(_wait_then_done("wf"))
+        iid = await engine.start("wf")
+        assert await engine.advance(iid, "hi") is True
+        assert "_user_input" not in engine.workflow_instances[iid].context
         assert (
-            "error" in result.message.lower() or "error" in (result.error or "").lower()
+            "auto_transition_states"
+            not in engine.workflow_instances[iid].context["_workflow_info"]
         )
 
-    async def test_parallel_step_fails_with_error_step_id(self):
-        """ParallelStep with error_step_id transitions to it on failure."""
-        failing_step = AutoStep(
-            step_id="fail",
-            name="Failing",
-            next_step_id="done",
-            action=lambda ctx: (_ for _ in ()).throw(RuntimeError("fail")),
-        )
-
-        parallel = ParallelStep(
-            step_id="par",
-            name="Parallel",
-            steps=[failing_step],
-            next_step_id="next",
-            error_step_id="error_handler",
-        )
-
-        result = await parallel.execute({})
-
-        assert result.success is False
-        assert result.next_step_id == "error_handler"
-
-    async def test_parallel_step_succeeds_when_all_ok(self):
-        """ParallelStep returns success when all substeps succeed."""
-        step_a = AutoStep(step_id="a", name="A", next_step_id="done")
-        step_b = AutoStep(step_id="b", name="B", next_step_id="done")
-
-        parallel = ParallelStep(
-            step_id="par",
-            name="Parallel",
-            steps=[step_a, step_b],
-            next_step_id="next",
-        )
-
-        result = await parallel.execute({})
-
-        assert result.success is True
-        assert result.next_step_id == "next"
-
-
-# ---------------------------------------------------------------------------
-# F-002: Event listener race condition — pop instead of del
-# ---------------------------------------------------------------------------
-
-
-class TestEventListenerRaceCondition:
-    """F-002: process_event must not crash if listener was already removed."""
-
-    def test_pop_instead_of_del_in_process_event(self):
-        """Verify engine uses .pop() for listener cleanup (race-safe)."""
-        import inspect
-
-        source = inspect.getsource(WorkflowEngine.process_event)
-        # Must NOT use bare del on event_listeners
-        assert "del self.event_listeners" not in source
-        # Should use .pop() for safe removal
-        assert ".pop(" in source
-
-    async def test_process_event_no_listeners(self):
-        """process_event with no matching listeners should return empty list."""
+    async def test_background_start(self):
         engine = WorkflowEngine()
-        event = WorkflowEvent(event_type="nonexistent_event", payload={})
-        result = await engine.process_event(event)
-        assert result == []
+        wf = create_workflow("bg", "bg")
+        wf.with_initial_step(auto_step("a", "A", next_step_id=""))
+        engine.register_workflow(wf)
+        iid = await engine.start("bg", wait=False)
+        await _settle()
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
 
-    async def test_process_event_empty_listener_dict(self):
-        """process_event with empty listener dict for event type should return empty."""
+    async def test_context_getter_returns_copy_and_initial_context_is_copied(self):
         engine = WorkflowEngine()
-        engine.event_listeners["test_event"] = {}
-        event = WorkflowEvent(event_type="test_event", payload={})
-        result = await engine.process_event(event)
-        assert result == []
+        engine.register_workflow(_wait_then_done("wf"))
+        initial = {"a": 1}
+        iid = await engine.start("wf", initial)
+        engine.get_context(iid)["a"] = 999
+        assert engine.workflow_instances[iid].context["a"] == 1
+        assert "_workflow_info" not in initial
+
+    async def test_close_refuses_new_starts_and_clears_listeners(self):
+        engine = WorkflowEngine()
+        engine.register_workflow(_wait_then_done("wf", timeout_seconds=60))
+        await engine.start("wf")
+        await engine.close()
+        assert engine.timers == {}
+        assert engine.event_listeners == {}
+        with pytest.raises(WorkflowResourceError):
+            await engine.start("wf")
 
 
-# ---------------------------------------------------------------------------
-# F-004: ConversationStep resource leak
-# ---------------------------------------------------------------------------
+class TestLoggingOffByDefault:
+    def test_workflow_logs_follow_library_logging_switch(self):
+        script = textwrap.dedent(
+            """
+            import asyncio
+            from loguru import logger
+            import fsm_llm.workflows as wfl
+            from fsm_llm.logging import enable_library_logging
 
+            lines = []
+            logger.add(lambda m: lines.append(str(m)), level="DEBUG")
 
-class TestConversationStepResourceCleanup:
-    """F-004: end_conversation must be called even on exception."""
+            async def run():
+                engine = wfl.WorkflowEngine()
+                wf = wfl.create_workflow("w", "w")
+                wf.with_initial_step(wfl.auto_step("a", "A", next_step_id=""))
+                engine.register_workflow(wf)
+                await engine.start("w")
 
-    async def test_end_conversation_called_on_exception(self):
-        """Verify end_conversation is called in finally block."""
-        step = ConversationStep(
-            step_id="conv",
-            name="Conv",
-            fsm_file="fake.json",
-            success_step_id="done",
-            auto_messages=["msg1"],
+            asyncio.run(run())
+            before = sum("Executing step" in line for line in lines)
+            enable_library_logging()
+            asyncio.run(run())
+            after = sum("Executing step" in line for line in lines)
+            print(before, after)
+            """
         )
-
-        mock_api = MagicMock()
-        mock_api.start_conversation.return_value = ("conv-1", "Hello")
-        mock_api.has_conversation_ended.return_value = False
-        mock_api.converse.side_effect = RuntimeError("LLM failed")
-        mock_api.end_conversation = MagicMock()
-
-        # API is imported inside execute(), so we patch it at the source module
-        mock_api_class = MagicMock()
-        mock_api_class.from_file.return_value = mock_api
-
-        with patch.dict("sys.modules", {}):
-            with patch("fsm_llm.workflows.steps.API", mock_api_class):
-                with patch("fsm_llm.api.API", mock_api_class):
-                    result = await step.execute({})
-
-        # end_conversation MUST be called despite the exception
-        mock_api.end_conversation.assert_called_once_with("conv-1")
-        # Result should be a failure
-        assert result.success is False
-
-
-# ---------------------------------------------------------------------------
-# F-007: LLMStep template KeyError
-# ---------------------------------------------------------------------------
-
-
-class TestLLMStepTemplateError:
-    """F-007: Missing template variables should raise WorkflowStepError, not KeyError."""
-
-    async def test_missing_template_variable_raises_step_error(self):
-        """Template with {missing_var} should raise WorkflowStepError."""
-        mock_llm = MagicMock()
-
-        step = LLMStep(
-            step_id="llm",
-            name="LLM Step",
-            llm_interface=mock_llm,
-            prompt_template="Hello {name}, your order {order_id} is ready",
-            context_mapping={"name": "user_name"},  # order_id not mapped
-            output_mapping={"result": ".*"},
-            next_step_id="done",
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=dict(os.environ),
         )
+        assert proc.returncode == 0, proc.stderr[-2000:]
+        assert proc.stdout.split() == ["0", "1"]
 
-        # Context has user_name but template needs order_id too
-        context = {"user_name": "Alice"}
 
-        result = await step.execute(context)
-        # Should fail gracefully instead of crashing with raw KeyError
+class TestStepExecutor:
+    async def test_sync_callables_run_on_engine_executor(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        wf = create_workflow("ex", "ex")
+        wf.with_initial_step(
+            auto_step(
+                "a",
+                "A",
+                next_step_id="",
+                action=lambda ctx: {"thread": threading.current_thread().name},
+            )
+        )
+        with ThreadPoolExecutor(thread_name_prefix="wf-exec") as pool:
+            engine = WorkflowEngine(executor=pool)
+            engine.register_workflow(wf)
+            iid = await engine.start("ex")
+        assert engine.get_context(iid)["thread"].startswith("wf-exec")
+
+
+def _record_hooks(engine: WorkflowEngine) -> list[tuple[str, dict[str, Any]]]:
+    seen: list[tuple[str, dict[str, Any]]] = []
+    engine.add_hook(lambda name, inst, data: seen.append((name, dict(data))))
+    return seen
+
+
+def _boom(_ctx: dict[str, Any]) -> Any:
+    return 1 / 0
+
+
+class TestRaisingStepsRecordTheFailureBehaviour:
+    @pytest.mark.parametrize(
+        "make_step",
+        [
+            lambda: auto_step("s", "S", next_step_id="", action=_boom),
+            lambda: condition_step("s", "S", _boom, true_step_id="", false_step_id=""),
+        ],
+        ids=["auto", "condition"],
+    )
+    async def test_hook_history_and_cause_text(self, make_step):
+        engine = WorkflowEngine()
+        seen = _record_hooks(engine)
+        engine.register_workflow(_single(make_step()))
+        iid = await engine.start("wf")
+
+        instance = engine.workflow_instances[iid]
+        assert instance.status == WorkflowStatus.FAILED
+        assert "division by zero" in (instance.error or "")
+        completed = [d for n, d in seen if n == "step_completed"]
+        assert len(completed) == 1
+        assert completed[0]["success"] is False
+        assert completed[0]["step_id"] == "s"
+        entries = [e for e in instance.history if e.step_id == "s" and e.error]
+        assert entries and "division by zero" in entries[0].error
+
+    async def test_execute_returns_a_failure_result_not_an_exception(self):
+        step = auto_step("s", "S", next_step_id="", action=_boom)
+        result = await step.execute({})
         assert result.success is False
-        assert "order_id" in result.error.lower() or "template" in result.error.lower()
+        assert result.next_step_id is None
+        assert result.error == "division by zero"
+
+    async def test_error_step_id_route_is_unchanged(self):
+        wf = create_workflow("wf", "wf")
+        wf.with_initial_step(
+            auto_step("s", "S", next_step_id="ok", action=_boom, error_step_id="bad")
+        )
+        wf.with_step(auto_step("ok", "Ok", next_step_id=""))
+        wf.with_step(auto_step("bad", "Bad", next_step_id=""))
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start("wf")
+        instance = engine.workflow_instances[iid]
+        assert instance.status == WorkflowStatus.COMPLETED
+        assert next(e.step_id for e in instance.history if e.error) == "s"
+        assert "bad" in {e.step_id for e in instance.history}
+
+    async def test_retry_still_retries_a_raising_step(self):
+        calls: list[int] = []
+
+        def flaky(ctx: dict[str, Any]) -> dict[str, Any]:
+            calls.append(1)
+            if len(calls) < 3:
+                raise RuntimeError("not yet")
+            return {"ok": True}
+
+        wf = _single(
+            retry_step(
+                "r",
+                "R",
+                auto_step("s", "S", next_step_id="", action=flaky),
+                max_retries=3,
+                backoff_factor=0,
+            )
+        )
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start("wf")
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
+        assert len(calls) == 3
 
 
-# ---------------------------------------------------------------------------
-# F-010: Dead conversation_map removed
-# ---------------------------------------------------------------------------
+class TestAsyncAggregationBehaviour:
+    @pytest.mark.parametrize("use_async", [True, False], ids=["async", "sync"])
+    async def test_aggregation_function(self, use_async):
+        if use_async:
+
+            async def agg(results: list[Any]) -> dict[str, Any]:
+                await asyncio.sleep(0)
+                return {"total": len(results)}
+
+        else:
+
+            def agg(results: list[Any]) -> dict[str, Any]:  # type: ignore[misc]
+                return {"total": len(results)}
+
+        children = [
+            auto_step("c1", "C1", next_step_id="", action=lambda c: {"x": 1}),
+            auto_step("c2", "C2", next_step_id="", action=lambda c: {"y": 2}),
+        ]
+        wf = _single(
+            parallel_step("p", "P", children, next_step_id="", aggregation_function=agg)
+        )
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start("wf")
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
+        assert engine.get_context(iid)["total"] == 2
+
+
+class TestInitialRunningIsAnnouncedBehaviour:
+    async def test_first_hook_event_is_running(self):
+        engine = WorkflowEngine()
+        seen: list[tuple[str, str | None, bool]] = []
+        engine.add_hook(
+            lambda name, inst, data: seen.append(
+                (
+                    name,
+                    data.get("status"),
+                    inst.instance_id in engine.workflow_instances,
+                )
+            )
+        )
+        engine.register_workflow(_single(auto_step("a", "A", next_step_id="")))
+        await engine.start("wf")
+
+        assert [n for n, _, _ in seen] == [
+            "status_changed",
+            "step_started",
+            "step_completed",
+            "status_changed",
+        ]
+        assert seen[0][1] == "running"
+        assert seen[0][2] is True  # the engine already holds the instance
+        assert seen[-1][1] == "completed"
+
+
+class TestCancelReleasesEverything:
+    async def test_cancel_a_waiting_instance(self):
+        wf = create_workflow("wf", "wf")
+        wf.with_initial_step(
+            wait_event_step("w", "W", "go", success_step_id="", timeout_seconds=60)
+        )
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start("wf", max_seconds=120)
+        assert engine.timers and engine.event_listeners["go"]
+
+        assert await engine.cancel(iid) is True
+        assert engine.get_status(iid) == WorkflowStatus.CANCELLED
+        assert engine.timers == {}
+        assert engine.event_listeners.get("go", {}) == {}
+
+    async def test_a_raised_transition_error_fails_the_instance_once(self):
+        # A step routing to an unknown state at run time FAILS the instance
+        # (the failure path both _execute_workflow_step sites share).
+        from fsm_llm.workflows.models import WorkflowStepResult
+        from fsm_llm.workflows.steps import WorkflowStep
+
+        class _Stray(WorkflowStep):
+            async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
+                return WorkflowStepResult.success_result(next_step_id="nowhere")
+
+        wf = create_workflow("wf", "wf")
+        wf.with_initial_step(_Stray(step_id="s", name="S"))
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start("wf")
+        instance = engine.workflow_instances[iid]
+        assert instance.status == WorkflowStatus.FAILED
+        assert "Invalid next state" in (instance.error or "")
 
 
 class TestDeadCodeRemoved:
@@ -216,11 +535,6 @@ class TestDeadCodeRemoved:
         """WorkflowEngine should not have conversation_map attribute."""
         engine = WorkflowEngine()
         assert not hasattr(engine, "conversation_map")
-
-
-# ---------------------------------------------------------------------------
-# F4: Per-instance lock for WorkflowInstance mutation
-# ---------------------------------------------------------------------------
 
 
 class TestInstanceLockConcurrency:
@@ -666,11 +980,6 @@ class TestFloatTimeoutSecondsEndToEnd:
         assert "0.5 seconds" in str(exc_info.value)
 
 
-# ---------------------------------------------------------------------------
-# F-WE-01: cancel must take effect on a RUNNING chain
-# ---------------------------------------------------------------------------
-
-
 class TestCancelMidChain:
     """F-WE-01 (plan 5ed71cf2 step 15, D-017): the entry point holds the
     instance lock across a whole chain of back-to-back steps, so a cancel
@@ -805,88 +1114,3 @@ class TestCancelMidChain:
         assert instance.status == WorkflowStatus.CANCELLED
         assert instance.context[CONTEXT_KEY_CANCELLATION_REASON] == "bye"
         assert engine._cancel_requests == {}
-
-
-class TestTimerEmptyNextState:
-    """F-WE-02 (plan 5ed71cf2 step 16): the validator accepts
-    ``TimerStep(next_step_id="")`` as a terminal step, like
-    ``wait_event_step(success_step_id="")``, but the engine used to run the
-    expiry through ``_transition_to_state`` and FAIL the instance with
-    ``Invalid next state``. An empty target now completes the workflow.
-    """
-
-    @staticmethod
-    def _engine(next_step_id: str, extra_steps: dict | None = None):
-        from fsm_llm.workflows.definitions import WorkflowDefinition
-        from fsm_llm.workflows.dsl import auto_step, timer_step
-
-        steps = {"w": timer_step("w", "w", 0.05, next_step_id)}
-        steps.update(extra_steps or {})
-        engine = WorkflowEngine()
-        engine.register_workflow(
-            WorkflowDefinition(
-                workflow_id="wf-timer",
-                name="Timer",
-                steps=steps,
-                initial_step_id="w",
-            )
-        )
-        return engine, auto_step
-
-    async def _wait_terminal(self, engine, iid):
-        from fsm_llm.workflows.models import WorkflowStatus
-
-        terminal = {
-            WorkflowStatus.COMPLETED,
-            WorkflowStatus.FAILED,
-            WorkflowStatus.CANCELLED,
-        }
-        for _ in range(200):
-            if engine.workflow_instances[iid].status in terminal:
-                return engine.workflow_instances[iid]
-            await asyncio.sleep(0.01)
-        raise AssertionError("instance never reached a terminal status")
-
-    async def test_empty_next_step_id_completes_after_expiry(self):
-        from fsm_llm.workflows.constants import (
-            CONTEXT_KEY_TIMER_EXPIRED,
-            CONTEXT_KEY_TIMER_INFO,
-        )
-        from fsm_llm.workflows.models import WorkflowStatus
-
-        engine, _ = self._engine("")
-        iid = await engine.start("wf-timer", wait=False)
-        instance = await self._wait_terminal(engine, iid)
-
-        assert instance.status == WorkflowStatus.COMPLETED
-        assert CONTEXT_KEY_TIMER_EXPIRED in instance.context
-        assert CONTEXT_KEY_TIMER_INFO not in instance.context
-        assert f"{iid}_timer" not in engine.timers
-        await engine.close()
-
-    async def test_valid_next_step_id_still_transitions(self):
-        from fsm_llm.workflows.dsl import auto_step
-        from fsm_llm.workflows.models import WorkflowStatus
-
-        engine, _ = self._engine(
-            "done", {"done": auto_step("done", "Done", "", lambda ctx: {"hit": 1})}
-        )
-        iid = await engine.start("wf-timer", wait=False)
-        instance = await self._wait_terminal(engine, iid)
-
-        assert instance.status == WorkflowStatus.COMPLETED
-        assert instance.context.get("hit") == 1
-        await engine.close()
-
-    async def test_invalid_non_empty_next_step_id_still_fails(self):
-        from fsm_llm.workflows.models import WorkflowStatus
-
-        # The validator rejects an unknown non-empty target at registration,
-        # so retarget the registered step to reach the engine-side guard.
-        engine, _ = self._engine("")
-        engine.workflow_definitions["wf-timer"].steps["w"].next_step_id = "nowhere"
-        iid = await engine.start("wf-timer", wait=False)
-        instance = await self._wait_terminal(engine, iid)
-
-        assert instance.status == WorkflowStatus.FAILED
-        await engine.close()

@@ -5,10 +5,14 @@ Tests cover: step-level timeout via _with_timeout() and timeout behavior
 for AutoStep, APIStep, ConditionStep, and ParallelStep.
 """
 
+from __future__ import annotations
+
 import asyncio
+from typing import Any
 
 import pytest
 
+from fsm_llm.workflows import api_step
 from fsm_llm.workflows.exceptions import WorkflowStepError
 from fsm_llm.workflows.steps import (
     APIStep,
@@ -475,3 +479,24 @@ class TestWithTimeoutMethod:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestUserTimeoutErrorBehaviour:
+    async def test_user_timeout_keeps_its_own_text(self):
+        def upstream() -> Any:
+            raise TimeoutError("upstream socket timed out")
+
+        step = api_step("s", "S", upstream, "", "", timeout_seconds=5)
+        result = await step.execute({})
+        assert result.success is False
+        assert "upstream socket timed out" in (result.error or "")
+        assert "Step timed out" not in (result.error or "")
+
+    async def test_the_step_limit_still_reports_the_step_timeout(self):
+        async def slow() -> Any:
+            await asyncio.sleep(5)
+
+        step = api_step("s", "S", slow, "", "", timeout_seconds=0.05)
+        result = await step.execute({})
+        assert result.success is False
+        assert "timed out after 0.05s" in (result.error or "")
