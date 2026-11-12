@@ -200,9 +200,9 @@ A hit is re-verified (G1 to G6a on the stored form) before it runs. A hit that f
 
 `ProcedureRunner(api, definition, synthesizer, *, trace_sink=None)` serves a host definition. Per conversation it settles three things as the host runs: it pops an ended child, aborts a child that spent `policy.max_turns` steps (it sets `procedure_abort`), and starts a pending synthesize state (write `running`, `obtain`, check that the procedure may run, push it as a child with no inherited context).
 
-- `run(conv_id, *, max_steps, max_seconds=None)` runs message-free on core `run_until_terminal`. A spent budget raises `RunBudgetExceededError`.
-- `converse(conv_id, message) -> str` is one user turn.
-- `end_conversation(conv_id)` closes the conversation and drops the runner's bookkeeping; use it instead of `API.end_conversation`.
+- `run(conversation_id, *, max_steps, max_seconds=None)` runs message-free on core `run_until_terminal`. A spent budget raises `RunBudgetExceededError`.
+- `converse(conversation_id, message) -> str` is one user turn.
+- `end_conversation(conversation_id)` closes the conversation and drops the runner's bookkeeping; use it instead of `API.end_conversation`.
 
 The child gets only the declared `inputs` and runs on the host's own interface. When it ends, only the declared `return_keys` come back, and only if every one is present and the child was not aborted. The result `synthesis_result` is `{status, procedure_id, version, reason}`: `status` is `ok`, `failed`, `aborted` or `running`, and `reason` is a fixed code or `None`, never exception text. The codes are `inputs_missing`, `return_keys_missing`, `provider_error`, `library_error`, `compile_failed`, `push_failed`, `approval_required`, `approval_denied`, `reviewer_error`, `depth_refused`, `completion_unsupported`, `lifecycle_too_low`, `not_simulated`, `budget_spent` and `unexpected_error`. Branch on the code, not on any message.
 

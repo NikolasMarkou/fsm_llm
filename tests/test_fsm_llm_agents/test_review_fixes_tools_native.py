@@ -70,14 +70,14 @@ class TestTimeoutBound:
     def test_definition_refuses_an_unwaitable_timeout(self, bad):
         with pytest.raises(pydantic.ValidationError):
             ToolDefinition(
-                name="t", description="d", execute_fn=lambda: 1, timeout_s=bad
+                name="t", description="d", execute_fn=lambda: 1, timeout_seconds=bad
             )
 
     @pytest.mark.parametrize("bad", [math.inf, 1e12])
     def test_register_function_refuses_it(self, bad):
         with pytest.raises(ValueError):
             ToolRegistry().register_function(
-                _counting_tool([]), name="slow", description="d", timeout_s=bad
+                _counting_tool([]), name="slow", description="d", timeout_seconds=bad
             )
 
     def test_the_largest_waitable_timeout_is_accepted(self):
@@ -85,9 +85,9 @@ class TestTimeoutBound:
             name="t",
             description="d",
             execute_fn=lambda: 1,
-            timeout_s=threading.TIMEOUT_MAX,
+            timeout_seconds=threading.TIMEOUT_MAX,
         )
-        assert definition.timeout_s == threading.TIMEOUT_MAX
+        assert definition.timeout_seconds == threading.TIMEOUT_MAX
 
     def test_a_timeout_set_after_registration_never_runs_the_tool(self):
         """Bypassing the field check is refused before the worker starts.
@@ -102,15 +102,15 @@ class TestTimeoutBound:
             _counting_tool(ran),
             name="slow",
             description="d",
-            timeout_s=1.0,
+            timeout_seconds=1.0,
             annotations=ToolAnnotations(idempotent=True),
         )
-        registry.get("slow").timeout_s = 1e12
+        registry.get("slow").timeout_seconds = 1e12
         result = registry.execute(ToolCall(tool_name="slow", parameters={"x": 1}))
         time.sleep(0.2)
         assert ran == []
         assert result.success is False
-        assert "invalid timeout_s" in (result.error or "")
+        assert "invalid timeout_seconds" in (result.error or "")
         assert result.timed_out is False
 
 
@@ -123,7 +123,11 @@ class TestTimedOutOutcomeIsUnknown:
 
         registry = ToolRegistry()
         registry.register_function(
-            pay, name="pay", description="d", requires_approval=True, timeout_s=0.1
+            pay,
+            name="pay",
+            description="d",
+            requires_approval=True,
+            timeout_seconds=0.1,
         )
         return registry
 
@@ -167,7 +171,9 @@ class TestTimedOutOutcomeIsUnknown:
             return var.get()
 
         registry = ToolRegistry()
-        registry.register_function(read, name="read", description="d", timeout_s=5.0)
+        registry.register_function(
+            read, name="read", description="d", timeout_seconds=5.0
+        )
         assert registry.execute(ToolCall(tool_name="read")).result == "caller"
 
 

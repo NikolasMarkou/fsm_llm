@@ -97,7 +97,7 @@ Tools:
 | TOOL-01 | TRUE (reproduced) | Fixed, step 7 |
 | TOOL-02 | TRUE (reproduced) | Fixed, step 7 |
 | TOOL-03 | TRUE (reproduced) | Fixed, step 7; fix 3.1: partials, callable objects, async callables and positional-only parameters |
-| TOOL-04 to TOOL-13 | NOT VERIFIED | ToolSpec code subset ported in plan 944e2692: TOOL-04 (exact schemas from `args_model`) and TOOL-07 (no retry of a granted call) fixed; tool annotations and an enforced `timeout_s` added; the rest stays in Track B |
+| TOOL-04 to TOOL-13 | NOT VERIFIED | ToolSpec code subset ported in plan 944e2692: TOOL-04 (exact schemas from `args_model`) and TOOL-07 (no retry of a granted call) fixed; tool annotations and an enforced `timeout_seconds` added; the rest stays in Track B |
 | TOOL-14 | TRUE | Fixed, step 8 |
 
 ReAct family:

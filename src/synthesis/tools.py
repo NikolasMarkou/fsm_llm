@@ -10,7 +10,7 @@ hands back only its return values. Approval stays inside the synthesizer (G7).
 # from a record, a goal or a model reply; every reply starts with the fixed label
 # and carries codes, ids and capped values only (never exception or generated
 # text). Do NOT flag a tool ``requires_approval`` (it raises on four agent
-# patterns), do NOT set ``timeout_s`` (a timed-out compile cannot be killed and
+# patterns), do NOT set ``timeout_seconds`` (a timed-out compile cannot be killed and
 # could still write the library), and do NOT size a reply from a flat number:
 # ``_room`` counts the echoed input like the agent loop does.
 """

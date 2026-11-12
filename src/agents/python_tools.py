@@ -59,14 +59,14 @@ class PythonToolDefinition:
     requires_approval: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
     annotations: ToolAnnotations = field(default_factory=ToolAnnotations)
-    timeout_s: float | None = None
+    timeout_seconds: float | None = None
     args_model: type[BaseModel] | None = None
 
     # DECISION plan-2026-11-05T134105-5ed71cf2/D-014: `annotations`,
-    # `timeout_s` and `args_model` ride along from a `@tool` function to the
+    # `timeout_seconds` and `args_model` ride along from a `@tool` function to the
     # registered ToolDefinition (defaults equal ToolDefinition's). Do NOT
     # rebuild a definition from name/description/schema at a conversion site:
-    # a loaded `@tool(timeout_s=...)` then ran with no timeout, no retry
+    # a loaded `@tool(timeout_seconds=...)` then ran with no timeout, no retry
     # safety and the coarse schema. `metadata` stays here only: ToolDefinition
     # has no such field, so there is nothing to carry it to.
     @classmethod
@@ -87,7 +87,7 @@ class PythonToolDefinition:
             requires_approval=tool_def.requires_approval,
             category=category,
             annotations=tool_def.annotations,
-            timeout_s=tool_def.timeout_s,
+            timeout_seconds=tool_def.timeout_seconds,
             args_model=tool_def.args_model,
         )
 
@@ -99,7 +99,7 @@ class PythonToolDefinition:
             parameter_schema=self.parameter_schema,
             requires_approval=self.requires_approval,
             annotations=self.annotations,
-            timeout_s=self.timeout_s,
+            timeout_seconds=self.timeout_seconds,
             args_model=self.args_model,
             execute_fn=self.execute,
         )

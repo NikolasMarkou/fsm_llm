@@ -140,13 +140,15 @@ class VerifiedReactAgent(ReactAgent):
         return self._stream_via_run(task, initial_context)
 
     # --- periodic reflection -------------------------------------------
-    def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
-        super()._on_loop_iteration(api, conv_id, iteration)
+    def _on_loop_iteration(
+        self, api: API, conversation_id: str, iteration: int
+    ) -> None:
+        super()._on_loop_iteration(api, conversation_id, iteration)
         n = self.config.reflect_every_n
         if n and iteration > 0 and iteration % n == 0:
-            self._inject_reflection(api, conv_id)
+            self._inject_reflection(api, conversation_id)
 
-    def _inject_reflection(self, api: API, conv_id: str) -> None:
+    def _inject_reflection(self, api: API, conversation_id: str) -> None:
         """Add a reflection note to ``agent_feedback`` for the next think turn.
 
         Not ``observations``: a note there is not a tool result, yet it would
@@ -159,11 +161,11 @@ class VerifiedReactAgent(ReactAgent):
         # sets `observation_count` from that list, and the conclude edge's
         # evidence guard (c1d5bfbc D-008) must count real tool results only.
         try:
-            data = api.get_data(conv_id)
+            data = api.get_data(conversation_id)
             pending = data.get(ContextKeys.AGENT_FEEDBACK)
             note = _REFLECTION_NOTE
             if isinstance(pending, str) and pending.strip():
                 note = f"{pending}\n{_REFLECTION_NOTE}"
-            api.update_context(conv_id, {ContextKeys.AGENT_FEEDBACK: note})
+            api.update_context(conversation_id, {ContextKeys.AGENT_FEEDBACK: note})
         except Exception as e:  # pragma: no cover - defensive
             logger.debug(f"Reflection injection skipped: {e}")

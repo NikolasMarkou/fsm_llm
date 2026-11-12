@@ -133,7 +133,7 @@ class TestConstants:
     def test_flags_and_annotations(self, valid_fsm, tmp_path):
         tools = {t.name: t for t in _rig(valid_fsm, tmp_path).registry.list_tools()}
         assert not any(t.requires_approval for t in tools.values())
-        assert all(t.timeout_s is None for t in tools.values())
+        assert all(t.timeout_seconds is None for t in tools.values())
         for tool in tools.values():
             assert tool.annotations.read_only is False
             assert tool.annotations.destructive is False

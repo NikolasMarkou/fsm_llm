@@ -674,7 +674,7 @@ class BaseAgent(ABC):
             self._end_run_conversation(api, conv_id)
 
     @staticmethod
-    def _last_turn_cut_off(api: API, conv_id: str) -> dict[str, Any]:
+    def _last_turn_cut_off(api: API, conversation_id: str) -> dict[str, Any]:
         """Core's cut-off record of the run's last turn, or ``{}``.
 
         Interface contract (caller: ``_run_conversation_loop``): reads
@@ -684,22 +684,22 @@ class BaseAgent(ABC):
         keys) and returns a copy. ``{}`` when the conversation is no longer
         active or the key is absent, empty or not a mapping.
         """
-        if conv_id not in api.list_active_conversations():
+        if conversation_id not in api.list_active_conversations():
             return {}
         raw = api.fsm_manager.copy_raw_context_data(
-            api.get_sub_conversation_id(conv_id)
+            api.get_sub_conversation_id(conversation_id)
         )
         record = raw.get(CONTEXT_KEY_CUT_OFF) if raw else None
         return dict(record) if isinstance(record, dict) else {}
 
     @staticmethod
-    def _end_run_conversation(api: API, conv_id: str) -> None:
+    def _end_run_conversation(api: API, conversation_id: str) -> None:
         """End the run's conversation unless something else already ended it.
 
         Interface contract (callers: the ``finally`` of
         ``_run_conversation_loop`` and ``_standard_run_stream``): calls
-        ``api.end_conversation(conv_id)``. A failure is re-raised unless
-        ``conv_id`` is no longer an active conversation (a hook, another
+        ``api.end_conversation(conversation_id)``. A failure is re-raised unless
+        ``conversation_id`` is no longer an active conversation (a hook, another
         thread or a monitor ended it during the run). A refused end
         (``ConversationBusyError``) leaves the conversation active, so it is
         re-raised.
@@ -710,20 +710,22 @@ class BaseAgent(ABC):
         # found". Do NOT catch every error here: only an end that failed
         # because the conversation is already gone is tolerated. See D-050.
         try:
-            api.end_conversation(conv_id)
+            api.end_conversation(conversation_id)
         except FSMError:
-            if conv_id in api.list_active_conversations():
+            if conversation_id in api.list_active_conversations():
                 raise
-            logger.debug(f"Conversation {conv_id} was already ended")
+            logger.debug(f"Conversation {conversation_id} was already ended")
 
-    def _on_loop_iteration(self, api: API, conv_id: str, iteration: int) -> None:
+    def _on_loop_iteration(
+        self, api: API, conversation_id: str, iteration: int
+    ) -> None:
         """Hook called before each step of the run (core's ``before_step``).
 
         ``iteration`` is the step number, from 1. Runs the HITL approval driver
         (a no-op for a pattern with no ``hitl``); override to add other
         between-step logic and call ``super()``.
         """
-        self._handle_hitl_approval(api, conv_id)
+        self._handle_hitl_approval(api, conversation_id)
 
     # ------------------------------------------------------------------
     # Context initialisation
@@ -995,7 +997,7 @@ class BaseAgent(ABC):
                 f"or register these tools without requires_approval."
             )
 
-    def _handle_hitl_approval(self, api: API, conv_id: str) -> None:
+    def _handle_hitl_approval(self, api: API, conversation_id: str) -> None:
         """Check and process HITL approval for the current context.
 
         Shared logic for agents that use synchronous HITL approval gates
@@ -1006,7 +1008,7 @@ class BaseAgent(ABC):
         if hitl is None:
             return
 
-        current_context = api.get_data(conv_id)
+        current_context = api.get_data(conversation_id)
         # DECISION plan-2026-09-24T091842-c1d5bfbc/D-023
         # Ask unless approval_granted is exactly True, and store a strict bool.
         # Do NOT test truthiness: await_approval routes on == True / == False
@@ -1029,13 +1031,16 @@ class BaseAgent(ABC):
         # view: a policy on a `_` key then never asks while the refusal blocks.
         gate = self._approval_predicate
         tools = getattr(self, "tools", None)
-        sub_id = api.get_sub_conversation_id(conv_id)
+        sub_id = api.get_sub_conversation_id(conversation_id)
         full = api.fsm_manager.get_complete_conversation(sub_id)["collected_data"]
         if not (tools and tool_name in tools and gate and gate(tool_call, full)):
             required = current_context.get(ContextKeys.APPROVAL_REQUIRED)
-            if required or api.get_current_state(conv_id) == AgentStates.AWAIT_APPROVAL:
+            if (
+                required
+                or api.get_current_state(conversation_id) == AgentStates.AWAIT_APPROVAL
+            ):
                 stray = (ContextKeys.APPROVAL_REQUIRED, ContextKeys.APPROVAL_GRANTED)
-                api.update_context(conv_id, dict.fromkeys(stray, False))
+                api.update_context(conversation_id, dict.fromkeys(stray, False))
             return
         if not current_context.get(ContextKeys.APPROVAL_REQUIRED):
             return
@@ -1047,7 +1052,7 @@ class BaseAgent(ABC):
         # and do NOT write it on denial: a grant must name its one call.
         grant = approval_grant(tool_name, tool_input) if approved else None
         api.update_context(
-            conv_id,
+            conversation_id,
             {
                 ContextKeys.APPROVAL_GRANTED: approved,
                 ContextKeys.APPROVAL_REQUIRED: False,
@@ -1089,7 +1094,7 @@ class BaseAgent(ABC):
             }
             if refused:
                 denial[ContextKeys.REFUSED_ACTIONS] = refused
-            api.update_context(conv_id, denial)
+            api.update_context(conversation_id, denial)
 
     # ------------------------------------------------------------------
     # Budget enforcement

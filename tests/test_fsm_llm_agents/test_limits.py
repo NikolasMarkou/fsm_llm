@@ -304,7 +304,7 @@ class TestBoundedRepr:
 
 class TestCheckTimeoutMessageIsBounded:
     """Sibling of the limits: ``check_timeout`` formatted the value in full, so
-    a 5000-digit ``timeout_s`` made the error path raise ``ValueError``."""
+    a 5000-digit ``timeout_seconds`` made the error path raise ``ValueError``."""
 
     @pytest.mark.parametrize(
         "bad",

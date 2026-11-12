@@ -366,7 +366,7 @@ _MODULE_TOOL_FIELDS = textwrap.dedent(
         slow = "slow"
 
 
-    @tool(timeout_s=5, annotations=ToolAnnotations(read_only=True))
+    @tool(timeout_seconds=5, annotations=ToolAnnotations(read_only=True))
     def lookup(query: str, mode: Mode = Mode.fast, limit: Optional[int] = None) -> str:
         \"\"\"Look something up.\"\"\"
         return query
@@ -375,12 +375,12 @@ _MODULE_TOOL_FIELDS = textwrap.dedent(
 
 
 class TestPythonToolCarriesToolFields:
-    """plan-2026-11-05T134105-5ed71cf2/D-014: timeout_s, annotations, args_model
+    """plan-2026-11-05T134105-5ed71cf2/D-014: timeout_seconds, annotations, args_model
     of a @tool function survive every conversion path."""
 
     @staticmethod
     def _check(definition) -> None:
-        assert definition.timeout_s == 5.0
+        assert definition.timeout_seconds == 5.0
         assert definition.annotations.read_only is True
         assert definition.args_model is not None
         props = definition.args_model.model_json_schema()["properties"]
@@ -411,6 +411,6 @@ class TestPythonToolCarriesToolFields:
         bare = PythonToolDefinition(name="x", description="d", execute=lambda: 1)
         built = bare.to_tool_definition()
         reference = ToolDefinition(name="x", description="d", execute_fn=lambda: 1)
-        assert built.timeout_s is reference.timeout_s is None
+        assert built.timeout_seconds is reference.timeout_seconds is None
         assert built.args_model is None
         assert built.annotations == reference.annotations

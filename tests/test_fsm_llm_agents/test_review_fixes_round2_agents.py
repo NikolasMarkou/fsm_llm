@@ -212,7 +212,7 @@ def _hanging_registry(
         name="pay",
         description="Pay an amount.",
         requires_approval=gated,
-        timeout_s=0.1,
+        timeout_seconds=0.1,
     )
     return registry
 
@@ -345,7 +345,7 @@ class TestTimedOutCallIsUnknown:
             _hanging_pay(release, ran),
             name="pay",
             description="Pay an amount.",
-            timeout_s=0.1,
+            timeout_seconds=0.1,
         )
         recorder = golden._Recorder(
             [golden._calls(("call_1", "pay", {"amount": "9"})), golden._final("x")]
@@ -420,7 +420,7 @@ class TestPlanExecuteNeverReRunsAnUnknownStep:
             return "paid " + amount
 
         registry.register_function(
-            pay, name="pay", description="Pay an amount.", timeout_s=0.1
+            pay, name="pay", description="Pay an amount.", timeout_seconds=0.1
         )
         llm = PromptGroundedLLM(
             facts={

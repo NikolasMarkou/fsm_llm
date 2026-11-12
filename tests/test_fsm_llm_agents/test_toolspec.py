@@ -1,11 +1,11 @@
 """ToolSpec layer (ported from 675b3cf, plan 944e2692 step 14, D-008).
 
-``ToolAnnotations``, ``ToolDefinition.timeout_s``/``args_model``, the exact
+``ToolAnnotations``, ``ToolDefinition.timeout_seconds``/``args_model``, the exact
 argument schema that ``get_json_schemas`` emits (TOOL-04), the annotation
 kwargs of ``@tool``/``register_function``, MCP annotation mapping, the
 ``RetryingToolRegistry`` rule (retry only idempotent/read-only tools, never a
 call executed with ``gated=True``, TOOL-07), the ``gated`` keyword on every
-``execute`` and the ``timeout_s`` enforced by ``ToolRegistry.execute``.
+``execute`` and the ``timeout_seconds`` enforced by ``ToolRegistry.execute``.
 """
 
 from __future__ import annotations
@@ -182,7 +182,7 @@ class TestArgsModel:
             "idempotent": None,
             "open_world": None,
         }
-        assert dump["timeout_s"] is None
+        assert dump["timeout_seconds"] is None
 
     def test_dict_style_tool_has_no_model_and_keeps_working(self):
         seen: list[dict[str, Any]] = []
@@ -258,7 +258,7 @@ class TestArgsModel:
 
 
 # ---------------------------------------------------------------------------
-# ToolAnnotations, timeout_s and the decorator/registration kwargs
+# ToolAnnotations, timeout_seconds and the decorator/registration kwargs
 # ---------------------------------------------------------------------------
 
 
@@ -299,14 +299,14 @@ class TestToolAnnotations:
         assert a.annotations == b.annotations == ToolAnnotations()
 
     def test_decorator_accepts_annotations_and_timeout(self):
-        @tool(annotations=ToolAnnotations(read_only=True), timeout_s=2.5)
+        @tool(annotations=ToolAnnotations(read_only=True), timeout_seconds=2.5)
         def look(q: str) -> str:
             """Look."""
             return q
 
         definition = look._tool_definition
         assert definition.annotations.read_only is True
-        assert definition.timeout_s == 2.5
+        assert definition.timeout_seconds == 2.5
 
     def test_register_function_accepts_annotations_and_timeout(self):
         registry = ToolRegistry()
@@ -315,16 +315,16 @@ class TestToolAnnotations:
             name="look",
             description="d",
             annotations=ToolAnnotations(idempotent=True),
-            timeout_s=1.0,
+            timeout_seconds=1.0,
         )
         definition = registry.get("look")
         assert definition.annotations.idempotent is True
-        assert definition.timeout_s == 1.0
+        assert definition.timeout_seconds == 1.0
 
     @pytest.mark.parametrize("bad", [0, -1.0])
     def test_timeout_must_be_positive(self, bad):
         with pytest.raises(pydantic.ValidationError):
-            ToolDefinition(name="a", description="d", timeout_s=bad)
+            ToolDefinition(name="a", description="d", timeout_seconds=bad)
 
 
 # ---------------------------------------------------------------------------
@@ -608,7 +608,7 @@ class TestGatedKeyword:
 
 
 # ---------------------------------------------------------------------------
-# timeout_s is enforced by ToolRegistry.execute
+# timeout_seconds is enforced by ToolRegistry.execute
 # ---------------------------------------------------------------------------
 
 
@@ -634,7 +634,9 @@ class TestTimeoutEnforced:
             return "done"
 
         registry = ToolRegistry()
-        registry.register_function(slow, name="slow", description="d", timeout_s=0.2)
+        registry.register_function(
+            slow, name="slow", description="d", timeout_seconds=0.2
+        )
         start = time.monotonic()
         result = registry.execute(ToolCall(tool_name="slow"))
         elapsed = time.monotonic() - start
@@ -647,7 +649,9 @@ class TestTimeoutEnforced:
             return q.upper()
 
         registry = ToolRegistry()
-        registry.register_function(fast, name="fast", description="d", timeout_s=5.0)
+        registry.register_function(
+            fast, name="fast", description="d", timeout_seconds=5.0
+        )
         result = registry.execute(ToolCall(tool_name="fast", parameters={"q": "a"}))
         assert result.success is True
         assert result.result == "A"
@@ -657,7 +661,9 @@ class TestTimeoutEnforced:
             raise ValueError("bad input")
 
         registry = ToolRegistry()
-        registry.register_function(boom, name="boom", description="d", timeout_s=5.0)
+        registry.register_function(
+            boom, name="boom", description="d", timeout_seconds=5.0
+        )
         start = time.monotonic()
         result = registry.execute(ToolCall(tool_name="boom"))
         assert time.monotonic() - start < 1.0
@@ -671,7 +677,7 @@ class TestTimeoutEnforced:
 
         registry = ToolRegistry()
         registry.register_function(
-            slow_async, name="slow_async", description="d", timeout_s=0.2
+            slow_async, name="slow_async", description="d", timeout_seconds=0.2
         )
         start = time.monotonic()
         result = registry.execute(ToolCall(tool_name="slow_async"))
@@ -689,7 +695,9 @@ class TestTimeoutEnforced:
             return "late value"
 
         registry = ToolRegistry()
-        registry.register_function(late, name="late", description="d", timeout_s=0.1)
+        registry.register_function(
+            late, name="late", description="d", timeout_seconds=0.1
+        )
         logger, captured, sink_id = _capture_warnings()
         try:
             result = registry.execute(ToolCall(tool_name="late"))
@@ -716,7 +724,9 @@ class TestTimeoutEnforced:
             return "ok"
 
         registry = ToolRegistry()
-        registry.register_function(hold, name="hold", description="d", timeout_s=5.0)
+        registry.register_function(
+            hold, name="hold", description="d", timeout_seconds=5.0
+        )
         results: list[Any] = []
         caller = threading.Thread(
             target=lambda: results.append(registry.execute(ToolCall(tool_name="hold")))

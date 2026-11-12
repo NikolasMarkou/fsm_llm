@@ -612,7 +612,7 @@ class Defaults:
     MCP_TIMEOUT_SECONDS = 30.0
     REMOTE_TOOL_TIMEOUT_SECONDS = 120.0  # RemoteAgentTool's HTTP call
     MAX_OBSERVATION_LENGTH = 2000
-    # Largest per-call tool ``timeout_s``: the most a thread wait accepts
+    # Largest per-call tool ``timeout_seconds``: the most a thread wait accepts
     # (``threading.TIMEOUT_MAX``; a larger wait raises OverflowError).
     MAX_TOOL_TIMEOUT_S = threading.TIMEOUT_MAX
     MAX_OBSERVATIONS = 20
@@ -1044,7 +1044,7 @@ class ErrorMessages:
         "assume it did not run"
     )
     TOOL_BAD_TIMEOUT = (
-        "Tool '{name}' has an invalid timeout_s {timeout}: it must be a "
+        "Tool '{name}' has an invalid timeout_seconds {timeout}: it must be a "
         "finite number above 0 and at most {limit} s; the tool was not run"
     )
     EXECUTE_WITHOUT_GATED = (

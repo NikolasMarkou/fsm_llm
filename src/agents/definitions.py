@@ -81,7 +81,7 @@ READ_ONLY_ANNOTATIONS = ToolAnnotations(
 class ToolDefinition(BaseModel):
     """Definition of a tool available to an agent.
 
-    ``timeout_s`` is the per-call limit ``ToolRegistry.execute`` enforces (a
+    ``timeout_seconds`` is the per-call limit ``ToolRegistry.execute`` enforces (a
     ``timed_out`` result past it; the tool itself keeps running, a Python
     thread cannot be killed). ``None`` means no limit; otherwise a finite
     number above 0 and at most ``Defaults.MAX_TOOL_TIMEOUT_S``
@@ -97,7 +97,7 @@ class ToolDefinition(BaseModel):
     parameter_schema: dict[str, Any] = Field(default_factory=dict)
     requires_approval: bool = False
     annotations: ToolAnnotations = Field(default_factory=ToolAnnotations)
-    timeout_s: float | None = Field(
+    timeout_seconds: float | None = Field(
         default=None, gt=0, le=Defaults.MAX_TOOL_TIMEOUT_S, allow_inf_nan=False
     )
 
@@ -132,7 +132,7 @@ class ToolCall(BaseModel):
 class ToolResult(BaseModel):
     """Result of a tool execution.
 
-    ``timed_out`` marks a call stopped waiting for at its ``timeout_s``
+    ``timed_out`` marks a call stopped waiting for at its ``timeout_seconds``
     (``success`` is False): its outcome is unknown, since the tool may still
     be running and its side effects may still happen.
     """

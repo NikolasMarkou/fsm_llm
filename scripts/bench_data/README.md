@@ -414,6 +414,10 @@ the model agreeing with itself. One run, one model.
   depends on (`SRC_PINS`) plus the fixture region. `run` refuses and `report`
   flags an edit to one of them, so registration is the last source-touching
   commit.
+  Plan 401d0471 step 16 edited five pinned files (`synthesis/runner.py` and
+  `agents/{base,constants,definitions,tools}.py`: `timeout_s` to
+  `timeout_seconds`, `conv_id` to `conversation_id`) after every manifest was
+  already void, so it voids nothing that still ran.
 - Preflight and per-trial guard: `smoke` and `run` refuse while another model is
   loaded, while another client used the server in the last 10 minutes, or when
   timing probes queue. During a run a changed loaded context or a second model

@@ -189,10 +189,10 @@ class ProcedureRunner:
         ``rounds`` is codes comma-joined, rounds semicolon-joined. A sink that
         raises is swallowed with a WARNING naming the event.
 
-        ``run(conv_id, *, max_steps, max_seconds=None)`` is
-        ``run_until_terminal`` with ``hook(conv_id)``; ``hook(conv_id)`` is the
+        ``run(conversation_id, *, max_steps, max_seconds=None)`` is
+        ``run_until_terminal`` with ``hook(conversation_id)``; ``hook(conversation_id)`` is the
         ``before_step`` callable for a host that drives core itself.
-        ``converse(conv_id, message)`` settles around ``API.converse`` and
+        ``converse(conversation_id, message)`` settles around ``API.converse`` and
         returns the replies of the turn, newline-joined. ``end_conversation``
         ends the conversation and drops the runner's entry for it.
 
@@ -240,70 +240,72 @@ class ProcedureRunner:
 
     # --- driving ----------------------------------------------------------
 
-    def hook(self, conv_id: str) -> Callable[[int], None]:
-        """The ``before_step`` callable of ``conv_id`` for ``run_until_terminal``."""
+    def hook(self, conversation_id: str) -> Callable[[int], None]:
+        """The ``before_step`` callable of ``conversation_id`` for ``run_until_terminal``."""
 
         def before_step(step: int) -> None:
-            self._count_child_step(conv_id)
-            self._tick(conv_id, step)
+            self._count_child_step(conversation_id)
+            self._tick(conversation_id, step)
 
         return before_step
 
     def run(
-        self, conv_id: str, *, max_steps: int, max_seconds: float | None = None
+        self, conversation_id: str, *, max_steps: int, max_seconds: float | None = None
     ) -> tuple[AdvanceResult, ...]:
         """``run_until_terminal`` with this runner's hook (its budgets and errors)."""
         return self.api.run_until_terminal(
-            conv_id,
+            conversation_id,
             max_steps=max_steps,
             max_seconds=max_seconds,
-            before_step=self.hook(conv_id),
+            before_step=self.hook(conversation_id),
         )
 
-    def converse(self, conv_id: str, message: str) -> str:
+    def converse(self, conversation_id: str, message: str) -> str:
         """One user turn: settle, ``API.converse``, settle again."""
-        replies = self._settle(conv_id)
-        runs = self._runs_of(conv_id)
-        replies.append(self.api.converse(message, conv_id))
+        replies = self._settle(conversation_id)
+        runs = self._runs_of(conversation_id)
+        replies.append(self.api.converse(message, conversation_id))
         if runs:
-            self._count(conv_id, runs[-1])  # a user turn is one step of the child
-        replies += self._settle(conv_id)
+            self._count(
+                conversation_id, runs[-1]
+            )  # a user turn is one step of the child
+        replies += self._settle(conversation_id)
         return "\n".join(r for r in replies if r)
 
-    def end_conversation(self, conv_id: str) -> None:
-        """End ``conv_id`` (every frame) and drop the runner's entry for it."""
-        self.api.end_conversation(conv_id)
-        self._runs.pop(conv_id, None)
+    def end_conversation(self, conversation_id: str) -> None:
+        """End ``conversation_id`` (every frame) and drop the runner's entry for it."""
+        self.api.end_conversation(conversation_id)
+        self._runs.pop(conversation_id, None)
 
     # --- one tick: the whole of the hook's work ---------------------------
 
-    def _runs_of(self, conv_id: str) -> list[_Run] | None:
-        """The runs of ``conv_id`` trimmed to the stack; ``None`` when the stack
+    def _runs_of(self, conversation_id: str) -> list[_Run] | None:
+        """The runs of ``conversation_id`` trimmed to the stack; ``None`` when the stack
         holds a frame this runner did not push."""
-        depth = self.api.get_stack_depth(conv_id)
-        runs = self._runs.setdefault(conv_id, [])
+        depth = self.api.get_stack_depth(conversation_id)
+        runs = self._runs.setdefault(conversation_id, [])
         del runs[depth - 1 :]
         return runs if len(runs) == depth - 1 else None
 
-    def _count_child_step(self, conv_id: str) -> None:
+    def _count_child_step(self, conversation_id: str) -> None:
         """Run mode: a hook call with a live child on top means it just had a step."""
-        runs = self._runs_of(conv_id)
-        if runs and not self.api.has_conversation_ended(conv_id):
-            self._count(conv_id, runs[-1])
+        runs = self._runs_of(conversation_id)
+        if runs and not self.api.has_conversation_ended(conversation_id):
+            self._count(conversation_id, runs[-1])
 
-    def _count(self, conv_id: str, run: _Run) -> None:
+    def _count(self, conversation_id: str, run: _Run) -> None:
         """Count one child step and trace it."""
         run.child_steps += 1
         self._emit(
             "stepped",
-            conv_id,
+            conversation_id,
             digest=run.procedure.digest,
             step=run.child_steps,
-            **self._view(conv_id, run),
+            **self._view(conversation_id, run),
         )
 
     def _view(
-        self, conv_id: str, run: _Run, *, outcome: bool = False
+        self, conversation_id: str, run: _Run, *, outcome: bool = False
     ) -> dict[str, Any]:
         """Value-free facts about the child on top for a trace event: its
         ``state``, the declared names present (``keys``), ``name:type`` for those
@@ -314,7 +316,7 @@ class ProcedureRunner:
             return {}
         try:
             definition, config = run.procedure.definition, run.config
-            data = self.api.get_data(conv_id)
+            data = self.api.get_data(conversation_id)
             gated = gate_reads(definition.states.values())
             seen = sorted(
                 k
@@ -326,7 +328,7 @@ class ProcedureRunner:
                 for k in seen
                 if k in gated
             )
-            state = self.api.get_current_state(conv_id)
+            state = self.api.get_current_state(conversation_id)
             view = {"state": state, "keys": ",".join(seen), "kinds": ",".join(kinds)}
             if outcome:
                 found = TransitionEvaluator().evaluate_transitions(
@@ -338,17 +340,17 @@ class ProcedureRunner:
             logger.warning(f"could not read the child for a trace: {type(e).__name__}")
             return {}
 
-    def _tick(self, conv_id: str, step: int | None) -> list[str]:
+    def _tick(self, conversation_id: str, step: int | None) -> list[str]:
         """Pop an ended child, abort one over budget, else start a pending
         synthesize state. ``step`` is core's next step number (run mode) or
         ``None`` (converse mode); it only labels trace events."""
-        runs = self._runs_of(conv_id)
+        runs = self._runs_of(conversation_id)
         if runs is None:
             return []
         if runs:
             run = runs[-1]
-            if self.api.has_conversation_ended(conv_id):
-                self._finish(conv_id, run, step)
+            if self.api.has_conversation_ended(conversation_id):
+                self._finish(conversation_id, run, step)
                 return []
             if run.aborting:
                 return []
@@ -357,53 +359,65 @@ class ProcedureRunner:
                 # DECISION plan-2026-11-10T194139-2cefeb61/D-044
                 # Read the outcome BEFORE the abort key is written: after it the
                 # abort edge passes and every outcome reads "deterministic".
-                view = self._view(conv_id, run, outcome=True)
-                self.api.update_context(conv_id, {ABORT_CONTEXT_KEY: True})
+                view = self._view(conversation_id, run, outcome=True)
+                self.api.update_context(conversation_id, {ABORT_CONTEXT_KEY: True})
                 self._emit(
-                    "aborted", conv_id, digest=run.procedure.digest, step=step, **view
+                    "aborted",
+                    conversation_id,
+                    digest=run.procedure.digest,
+                    step=step,
+                    **view,
                 )
                 return []
         definition = runs[-1].procedure.definition if runs else self._definition
-        state = definition.states.get(self.api.get_current_state(conv_id))
+        state = definition.states.get(self.api.get_current_state(conversation_id))
         config = state.synthesize if state else None
-        if config is None or config.result_key in self.api.get_data(conv_id):
+        if config is None or config.result_key in self.api.get_data(conversation_id):
             return []
-        started = self._start(conv_id, config, runs, step)
+        started = self._start(conversation_id, config, runs, step)
         # the pushed child may itself begin on a synthesize state (depth above 1)
-        return [*started, *self._tick(conv_id, step)] if started else []
+        return [*started, *self._tick(conversation_id, step)] if started else []
 
-    def _settle(self, conv_id: str) -> list[str]:
+    def _settle(self, conversation_id: str) -> list[str]:
         """converse mode: tick, take the abort edge if one was set, and step the
         parent once after a pop so it leaves its synthesize state."""
         api = self.api
-        depth = api.get_stack_depth(conv_id)
-        replies = self._tick(conv_id, None)
-        runs = self._runs_of(conv_id)
-        if runs and runs[-1].aborting and not api.has_conversation_ended(conv_id):
-            replies.append(api.advance(conv_id).response or "")  # the abort edge
-            replies += self._tick(conv_id, None)  # pops the aborted child
-        if api.get_stack_depth(conv_id) < depth and not api.has_conversation_ended(
-            conv_id
+        depth = api.get_stack_depth(conversation_id)
+        replies = self._tick(conversation_id, None)
+        runs = self._runs_of(conversation_id)
+        if (
+            runs
+            and runs[-1].aborting
+            and not api.has_conversation_ended(conversation_id)
         ):
-            replies.append(api.advance(conv_id).response or "")
+            replies.append(
+                api.advance(conversation_id).response or ""
+            )  # the abort edge
+            replies += self._tick(conversation_id, None)  # pops the aborted child
+        if api.get_stack_depth(
+            conversation_id
+        ) < depth and not api.has_conversation_ended(conversation_id):
+            replies.append(api.advance(conversation_id).response or "")
         return replies
 
     # --- start and finish a run -------------------------------------------
 
     def _start(
         self,
-        conv_id: str,
+        conversation_id: str,
         config: SynthesizeConfig,
         runs: list[_Run],
         step: int | None,
     ) -> list[str]:
         api, policy = self.api, self.synthesizer.policy
-        data = api.get_data(conv_id)
-        api.update_context(conv_id, {config.result_key: _result(STATUS_RUNNING)})
+        data = api.get_data(conversation_id)
+        api.update_context(
+            conversation_id, {config.result_key: _result(STATUS_RUNNING)}
+        )
         procedure: Procedure | None = None
         error: BaseException | None = None
         reply = ""
-        depth = api.get_stack_depth(conv_id)
+        depth = api.get_stack_depth(conversation_id)
         try:
             if len(runs) >= policy.max_synthesis_depth:
                 reason = REASON_DEPTH_REFUSED
@@ -422,7 +436,7 @@ class ProcedureRunner:
                 else:
                     self._emit(
                         "obtained",
-                        conv_id,
+                        conversation_id,
                         digest=procedure.digest,
                         version=procedure.record.version if procedure.record else None,
                         source=procedure.source,
@@ -433,27 +447,29 @@ class ProcedureRunner:
                         completion_tokens=procedure.usage.completion_tokens,
                     )
                     reason, reply = self._push(
-                        conv_id, config, procedure, data, step, runs
+                        conversation_id, config, procedure, data, step, runs
                     )
         except Exception as e:  # fail closed: the result must never stay `running`
             logger.warning(f"synthesis ended on an unexpected {type(e).__name__}")
             reason, reply, error = REASON_UNEXPECTED_ERROR, "", e
-            self._unwind(conv_id, depth)
+            self._unwind(conversation_id, depth)
         except BaseException as e:  # Ctrl-C, SystemExit: end the result, then let go
-            self._unwind(conv_id, depth)
+            self._unwind(conversation_id, depth)
             try:
-                self._fail(conv_id, config, REASON_UNEXPECTED_ERROR, procedure, step, e)
+                self._fail(
+                    conversation_id, config, REASON_UNEXPECTED_ERROR, procedure, step, e
+                )
             except Exception as e:  # never mask the interrupt being propagated
                 logger.warning(f"could not end the result: {type(e).__name__}")
             raise
         if reason:
-            self._fail(conv_id, config, reason, procedure, step, error)
+            self._fail(conversation_id, config, reason, procedure, step, error)
             return []
         return [reply]
 
     def _fail(
         self,
-        conv_id: str,
+        conversation_id: str,
         config: SynthesizeConfig,
         reason: str,
         procedure: Procedure | None,
@@ -463,11 +479,12 @@ class ProcedureRunner:
         """Write the final ``failed`` result (nothing obtains again) and trace it
         (``error``: the exception class name; ``rounds``: the compile's codes)."""
         self.api.update_context(
-            conv_id, {config.result_key: _result(STATUS_FAILED, reason, procedure)}
+            conversation_id,
+            {config.result_key: _result(STATUS_FAILED, reason, procedure)},
         )
         self._emit(
             "failed",
-            conv_id,
+            conversation_id,
             reason=reason,
             step=step,
             digest=procedure.digest if procedure else None,
@@ -475,17 +492,17 @@ class ProcedureRunner:
             rounds=_round_codes(error),
         )
 
-    def _unwind(self, conv_id: str, depth: int) -> None:
+    def _unwind(self, conversation_id: str, depth: int) -> None:
         """Pop frames a failed push left above ``depth`` (the trim heals ``_runs``)."""
         try:
-            while self.api.get_stack_depth(conv_id) > depth:
-                self.api.pop_fsm(conv_id)
+            while self.api.get_stack_depth(conversation_id) > depth:
+                self.api.pop_fsm(conversation_id)
         except Exception as e:
             logger.warning(f"could not unwind a failed push: {type(e).__name__}")
 
     def _push(
         self,
-        conv_id: str,
+        conversation_id: str,
         config: SynthesizeConfig,
         procedure: Procedure,
         data: dict[str, Any],
@@ -509,7 +526,7 @@ class ProcedureRunner:
             return reason, ""
         try:
             reply = self.api.push_fsm(
-                conv_id,
+                conversation_id,
                 # a compile may not set a persona (G5): the host's is injected here
                 definition.model_copy(update={"persona": self._definition.persona}),
                 inherit_context=False,
@@ -518,7 +535,7 @@ class ProcedureRunner:
         except (FSMError, ValueError):
             return REASON_PUSH_FAILED, ""
         runs.append(_Run(procedure, config, errors0=self._errors()))
-        self._emit("pushed", conv_id, digest=procedure.digest, step=step)
+        self._emit("pushed", conversation_id, digest=procedure.digest, step=step)
         return "", reply
 
     def _errors(self) -> int:
@@ -528,20 +545,22 @@ class ProcedureRunner:
         except Exception:
             return 0
 
-    def _finish(self, conv_id: str, run: _Run, step: int | None) -> None:
+    def _finish(self, conversation_id: str, run: _Run, step: int | None) -> None:
         """Pop the ended child on top, merge its return keys on success only,
         write the final result, count the run."""
         api, config, procedure = self.api, run.config, run.procedure
         # read the child's data before the pop: afterwards the top is the parent
-        child = api.get_data(conv_id)
-        aborted = run.aborting or api.get_current_state(conv_id) == ABORT_STATE_ID
+        child = api.get_data(conversation_id)
+        aborted = (
+            run.aborting or api.get_current_state(conversation_id) == ABORT_STATE_ID
+        )
         ok = not aborted and not any(is_missing(child, k) for k in config.return_keys)
         api.pop_fsm(
-            conv_id,
+            conversation_id,
             context_to_return={k: child[k] for k in config.return_keys} if ok else None,
             merge_strategy=ContextMergeStrategy.UPDATE,
         )
-        self._runs[conv_id].pop()
+        self._runs[conversation_id].pop()
         # DECISION plan-2026-11-10T194139-2cefeb61/D-061
         # Core swallows an extraction error, so an outage looks like a stuck
         # child; a run whose interface errored is `provider_error`, which
@@ -559,7 +578,7 @@ class ProcedureRunner:
             else REASON_RETURN_KEYS_MISSING
         )
         api.update_context(
-            conv_id, {config.result_key: _result(status, reason, procedure)}
+            conversation_id, {config.result_key: _result(status, reason, procedure)}
         )
         library = self.synthesizer.library
         if library is not None and procedure.record is not None:
@@ -573,7 +592,7 @@ class ProcedureRunner:
                 logger.warning(f"could not count the run of {procedure.digest[:12]}")
         self._emit(
             "popped",
-            conv_id,
+            conversation_id,
             digest=procedure.digest,
             status=status,
             reason=reason,

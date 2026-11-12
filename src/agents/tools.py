@@ -460,11 +460,11 @@ class ToolRegistry:
         requires_approval: bool = False,
         *,
         annotations: ToolAnnotations | None = None,
-        timeout_s: float | None = None,
+        timeout_seconds: float | None = None,
     ) -> ToolRegistry:
         """Register a function as a tool. Returns self for chaining.
 
-        ``annotations`` and ``timeout_s`` go to the ``ToolDefinition`` (see
+        ``annotations`` and ``timeout_seconds`` go to the ``ToolDefinition`` (see
         there). An inferred schema also gets an ``args_model``; an explicit
         ``parameter_schema`` does not.
         """
@@ -485,7 +485,7 @@ class ToolRegistry:
             parameter_schema=parameter_schema,
             requires_approval=requires_approval,
             annotations=annotations or ToolAnnotations(),
-            timeout_s=timeout_s,
+            timeout_seconds=timeout_seconds,
             execute_fn=fn,
             args_model=args_model,
         )
@@ -674,7 +674,7 @@ class ToolRegistry:
         executor). This registry runs it like any call; subclasses that
         re-run calls (``RetryingToolRegistry``) must never re-run a gated one.
 
-        A tool with ``timeout_s`` runs in a worker thread: past the limit the
+        A tool with ``timeout_seconds`` runs in a worker thread: past the limit the
         call returns a failed result with ``timed_out=True`` whose error says
         the outcome is unknown. A Python thread cannot be killed, so the tool
         keeps running and its side effects may still happen; its late result
@@ -702,7 +702,7 @@ class ToolRegistry:
                 )
 
             schema_props = self._validate_tool_params(tool, tool_call.parameters)
-            if tool.timeout_s is None:
+            if tool.timeout_seconds is None:
                 result = self._invoke_tool_fn(fn, tool_call.parameters, schema_props)
             else:
                 result = call_with_timeout(
@@ -710,7 +710,7 @@ class ToolRegistry:
                         self._invoke_tool_fn, fn, tool_call.parameters, schema_props
                     ),
                     tool.name,
-                    tool.timeout_s,
+                    tool.timeout_seconds,
                 )
             elapsed_ms = (time.monotonic() - start_time) * 1000
 
@@ -992,10 +992,10 @@ class ToolTimedOut(ToolExecutionError):
     """``call_with_timeout`` stopped waiting: the call's outcome is unknown."""
 
 
-# DECISION plan-2026-10-01T093600-944e2692/D-008: `timeout_s` is enforced
+# DECISION plan-2026-10-01T093600-944e2692/D-008: `timeout_seconds` is enforced
 # here, in the one execute path, with a daemon worker thread (supersedes D-026
 # of plan 65baa765, whose runtime enforcement point no longer exists). Do NOT
-# hold `_tools_lock` while waiting, do NOT run a tool without `timeout_s` in a
+# hold `_tools_lock` while waiting, do NOT run a tool without `timeout_seconds` in a
 # thread (every call would pay one), and do NOT claim the tool was stopped: a
 # Python thread cannot be killed, so a timed-out tool keeps running (one more
 # live thread per timed-out call; a tool that keeps hanging accumulates them).
@@ -1004,8 +1004,8 @@ class ToolTimedOut(ToolExecutionError):
 # never be reported as a plain failure, and a retry-safe one would be re-run),
 # and do NOT report a timeout as a failure: its outcome is unknown
 # (`ToolResult.timed_out`).
-def check_timeout(tool_name: str, timeout_s: Any) -> None:
-    """Raise ``ToolExecutionError`` (``TOOL_BAD_TIMEOUT``) unless *timeout_s* is
+def check_timeout(tool_name: str, timeout_seconds: Any) -> None:
+    """Raise ``ToolExecutionError`` (``TOOL_BAD_TIMEOUT``) unless *timeout_seconds* is
     a finite number in ``(0, Defaults.MAX_TOOL_TIMEOUT_S]`` (a bool is not one).
 
     Interface contract: the one timeout predicate, shared by
@@ -1018,12 +1018,13 @@ def check_timeout(tool_name: str, timeout_s: Any) -> None:
     refused, not an ``OverflowError``.
     """
     number = (
-        operator.index(timeout_s)
-        if isinstance(timeout_s, numbers.Integral) and not isinstance(timeout_s, bool)
-        else timeout_s
+        operator.index(timeout_seconds)
+        if isinstance(timeout_seconds, numbers.Integral)
+        and not isinstance(timeout_seconds, bool)
+        else timeout_seconds
     )
     if (
-        isinstance(timeout_s, bool)
+        isinstance(timeout_seconds, bool)
         or not isinstance(number, (int, float))
         or not (isinstance(number, int) or math.isfinite(number))
         or not 0 < number <= Defaults.MAX_TOOL_TIMEOUT_S
@@ -1031,20 +1032,22 @@ def check_timeout(tool_name: str, timeout_s: Any) -> None:
         raise ToolExecutionError(
             ErrorMessages.TOOL_BAD_TIMEOUT.format(
                 name=tool_name,
-                timeout=bounded_repr(timeout_s),
+                timeout=bounded_repr(timeout_seconds),
                 limit=Defaults.MAX_TOOL_TIMEOUT_S,
             ),
             tool_name=tool_name,
         )
 
 
-def call_with_timeout(call: Callable[[], Any], tool_name: str, timeout_s: float) -> Any:
-    """Run *call* in a daemon worker thread and wait at most *timeout_s* seconds.
+def call_with_timeout(
+    call: Callable[[], Any], tool_name: str, timeout_seconds: float
+) -> Any:
+    """Run *call* in a daemon worker thread and wait at most *timeout_seconds* seconds.
 
     Interface contract (callers: ``ToolRegistry.execute``, for a tool with
-    ``timeout_s``, and ``HumanInTheLoop.request_approval``):
+    ``timeout_seconds``, and ``HumanInTheLoop.request_approval``):
         - Raises ``ToolExecutionError`` (``TOOL_BAD_TIMEOUT``) without running
-          *call* when *timeout_s* is not a finite number in
+          *call* when *timeout_seconds* is not a finite number in
           ``(0, Defaults.MAX_TOOL_TIMEOUT_S]``.
         - Returns ``call()``'s value, or re-raises its exception, when it ends
           in time. The worker runs in a copy of the caller's context variables.
@@ -1057,14 +1060,14 @@ def call_with_timeout(call: Callable[[], Any], tool_name: str, timeout_s: float)
         - Also the timed wait of ``HumanInTheLoop.request_approval`` (the
           callback is the "tool"; a ``ToolTimedOut`` means denied).
     """
-    check_timeout(tool_name, timeout_s)
+    check_timeout(tool_name, timeout_seconds)
     timed_out_error = ToolTimedOut(
-        ErrorMessages.TOOL_TIMED_OUT.format(name=tool_name, timeout=timeout_s),
+        ErrorMessages.TOOL_TIMED_OUT.format(name=tool_name, timeout=timeout_seconds),
         tool_name=tool_name,
     )
     late_warning = {
         kind: LogMessages.TOOL_LATE_RESULT.format(
-            name=tool_name, timeout=timeout_s, outcome=kind
+            name=tool_name, timeout=timeout_seconds, outcome=kind
         )
         for kind in ("result", "error")
     }
@@ -1097,7 +1100,7 @@ def call_with_timeout(call: Callable[[], Any], tool_name: str, timeout_s: float)
         daemon=True,
     )
     thread.start()
-    finished.wait(timeout_s)
+    finished.wait(timeout_seconds)
     with state_lock:
         if "value" not in outcome and "error" not in outcome:
             outcome["abandoned"] = True
@@ -1300,7 +1303,7 @@ def tool(
     parameter_schema: dict[str, Any] | None = None,
     requires_approval: bool = False,
     annotations: ToolAnnotations | None = None,
-    timeout_s: float | None = None,
+    timeout_seconds: float | None = None,
 ) -> Any:
     """Decorator to mark a function as an agent tool.
 
@@ -1322,7 +1325,7 @@ def tool(
     Use ``typing.Annotated[str, "description"]`` for per-parameter descriptions.
     An inferred schema also gets an ``args_model`` (pydantic, from the
     signature) whose exact JSON schema ``get_json_schemas`` emits.
-    ``annotations`` (:class:`ToolAnnotations`) and ``timeout_s`` go to the
+    ``annotations`` (:class:`ToolAnnotations`) and ``timeout_seconds`` go to the
     ``ToolDefinition``.
 
     The decorated function gains a ``_tool_definition`` attribute
@@ -1350,7 +1353,7 @@ def tool(
             parameter_schema=schema,
             requires_approval=requires_approval,
             annotations=annotations or ToolAnnotations(),
-            timeout_s=timeout_s,
+            timeout_seconds=timeout_seconds,
             execute_fn=fn,
             args_model=args_model,
         )

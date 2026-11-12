@@ -551,7 +551,7 @@ class TestADaPTBudgetErrorsPropagate:
         llm = _DecomposeScriptLLM(["sub one", "sub two", "sub three"])
         agent = _adapt(llm)
 
-        def _before_step(api: object, conv_id: str, iteration: int) -> None:
+        def _before_step(api: object, conversation_id: str, iteration: int) -> None:
             # A subtask run exhausts its budget once its attempt was extracted.
             if llm.sub_tasks_seen:
                 raise error
