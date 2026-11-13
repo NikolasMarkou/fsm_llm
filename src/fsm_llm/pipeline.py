@@ -48,6 +48,8 @@ from .context import (
     record_cut_off,
     was_cut_off,
 )
+from .context.filtering import filter_context_tree
+from .core.coerce import coerce_float, coerce_int, parse_bool_word
 from .core.definitions import (
     CONTEXT_KEY_CUT_OFF,
     AdvanceResult,
@@ -86,12 +88,6 @@ from .prompts import (
     FieldExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
     sanitize_text_for_prompt,
-)
-from .utilities import (
-    coerce_float,
-    coerce_int,
-    filter_context_tree,
-    parse_bool_word,
 )
 
 # --- Type coercion dispatch for field extraction validation ---
@@ -1552,7 +1548,7 @@ class MessagePipeline:
         # a private method of ONE concrete implementation, called from
         # outside that class. Now goes through the public ABC surface
         # (`extract_bulk_data`, llm.py), which does its own parsing via the
-        # shared `strip_think_and_fences` helper (utilities.py) — the
+        # shared `strip_think_and_fences` helper (llm/text.py) — the
         # <think>-tag/fence-stripping regex that used to be hand-duplicated
         # here is gone, not reconciled. Do NOT reintroduce a cast+private-call
         # here; if a future LLMInterface subclass needs bulk extraction, it

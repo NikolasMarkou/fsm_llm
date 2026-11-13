@@ -104,6 +104,11 @@ from .core.definitions import (
 from .core.expressions import evaluate_logic
 
 # --------------------------------------------------------------
+# Utility Functions
+# --------------------------------------------------------------
+from .core.loaders import get_fsm_summary, load_fsm_definition, load_fsm_from_file
+
+# --------------------------------------------------------------
 # Transition Evaluation Components
 # --------------------------------------------------------------
 from .core.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
@@ -134,6 +139,7 @@ from .handlers import (
 # LLM Interface Components
 # --------------------------------------------------------------
 from .llm import LiteLLMEmbedder, LiteLLMInterface, LLMInterface, tool_exchange
+from .llm.json_extraction import extract_json_from_text
 from .logging import enable_debug_logging, setup_logging
 
 # --------------------------------------------------------------
@@ -168,16 +174,6 @@ from .prompts import (
 # Session Persistence
 # --------------------------------------------------------------
 from .session import FileSessionStore, SessionState, SessionStore
-
-# --------------------------------------------------------------
-# Utility Functions
-# --------------------------------------------------------------
-from .utilities import (
-    extract_json_from_text,
-    get_fsm_summary,
-    load_fsm_definition,
-    load_fsm_from_file,
-)
 
 # --------------------------------------------------------------
 # Validation Components

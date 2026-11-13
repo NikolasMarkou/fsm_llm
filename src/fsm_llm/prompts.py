@@ -36,6 +36,7 @@ from .constants import (
     has_internal_prefix,
     is_forbidden_context_entry,
 )
+from .context.filtering import redact_non_json_leaf
 from .core.definitions import (
     ClassificationPromptConfig,
     ClassificationSchema,
@@ -49,7 +50,6 @@ from .core.definitions import (
 # Local imports
 # --------------------------------------------------------------
 from .logging import logger
-from .utilities import redact_non_json_leaf
 
 # ============================================================================
 # SHARED CONFIGURATION AND UTILITIES
@@ -501,7 +501,7 @@ class BasePromptBuilder:
 
         # DECISION plan-2026-09-21T203800-8a03483a/D-010
         # Non-JSON leaves are REDACTED via the shared
-        # `utilities.redact_non_json_leaf`: `json.dumps(default=str)` would
+        # `context.filtering.redact_non_json_leaf`: `json.dumps(default=str)` would
         # otherwise print a pydantic model's / dataclass's fields, secrets
         # included, past every key check. Do NOT pass them through.
         # DECISION plan-2026-09-21T203800-8a03483a/D-011

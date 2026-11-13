@@ -92,7 +92,7 @@ finally:
         os.environ.pop("LITELLM_MODE", None)
 del _LITELLM_MODE_PREVIOUS
 
-from .constants import (
+from fsm_llm.constants import (
     DEFAULT_TEMPERATURE,
     EMPTY_USER_MESSAGE_TURN,
     ENV_LLM_MODEL,
@@ -106,7 +106,13 @@ from .constants import (
     USAGE_KIND_EMBED,
     USAGE_KIND_STREAM,
 )
-from .core.definitions import (
+from fsm_llm.core.coerce import (
+    coerce_confidence,
+    coerce_float,
+    coerce_int,
+    parse_bool_word,
+)
+from fsm_llm.core.definitions import (
     FINISH_REASON_LENGTH,
     RESPONSE_TEXT_MAX_LENGTH,
     BulkExtractionRequest,
@@ -127,24 +133,16 @@ from .core.definitions import (
 # --------------------------------------------------------------
 # Local imports
 # --------------------------------------------------------------
-from .logging import logger
-from .ollama import (
+from fsm_llm.logging import logger
+from fsm_llm.ollama import (
     apply_ollama_params,
     build_ollama_response_format,
     is_ollama_model,
     prepare_ollama_messages,
 )
-from .utilities import (
-    balanced_json_objects,
-    coerce_confidence,
-    coerce_float,
-    coerce_int,
-    extract_json_from_text,
-    parse_bool_word,
-    remove_think_blocks,
-    resolve_reasoning_trace,
-    strip_think_and_fences,
-)
+
+from .json_extraction import balanced_json_objects, extract_json_from_text
+from .text import remove_think_blocks, resolve_reasoning_trace, strip_think_and_fences
 
 # DECISION plan-2026-11-06T093029-0068b055/D-023: litellm prints a red "Give
 # Feedback / Get Help" banner to STDOUT on every mapped provider exception while

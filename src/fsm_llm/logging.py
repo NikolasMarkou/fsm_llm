@@ -238,7 +238,7 @@ def _log_json_default(obj: object) -> str:
     # credentials object, a request) went verbatim into shipped JSON logs (C7).
     # Do NOT make this log a WARNING (the CLI runner's former hook did): this
     # runs inside a log sink, so it would re-enter the logger. It differs from
-    # `utilities.redacting_json_default` on purpose: dates render as ISO-8601
+    # `context.filtering.redacting_json_default` on purpose: dates render as ISO-8601
     # and the placeholder spelling is the documented log-line one.
     if isinstance(obj, (datetime.datetime, datetime.date, datetime.time)):
         return obj.isoformat()

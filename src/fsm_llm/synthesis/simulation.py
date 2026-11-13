@@ -43,7 +43,7 @@ from fsm_llm.eval.cases import (
 from fsm_llm.eval.config import EvalConfig
 from fsm_llm.eval.stats import pass_rate
 from fsm_llm.llm import LLMInterface, implements_complete
-from fsm_llm.utilities import extract_json_from_text
+from fsm_llm.llm.json_extraction import extract_json_from_text
 
 from .constants import (
     ABORT_CONTEXT_KEY,

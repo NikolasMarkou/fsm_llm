@@ -7,6 +7,7 @@ from datetime import datetime
 
 import pytest
 
+from fsm_llm.context.filtering import redacting_json_default
 from fsm_llm.reasoning.definitions import (
     ConfidenceLevel,
     ProblemContext,
@@ -18,7 +19,6 @@ from fsm_llm.reasoning.definitions import (
     TimestampedModel,
     ValidationResult,
 )
-from fsm_llm.utilities import redacting_json_default
 
 
 class TestTimestampedModel:

@@ -2021,14 +2021,14 @@ class TestOneRawFsmJsonReader:
     """F-HV-08: one reader (UTF-8, object check) for loader, validator, visualizer."""
 
     def test_read_json_object_returns_the_object(self, tmp_path):
-        from fsm_llm.utilities import read_json_object
+        from fsm_llm.core.loaders import read_json_object
 
         path = tmp_path / "u.json"
         path.write_text(json.dumps({"name": "é"}, ensure_ascii=False), "utf-8")
         assert read_json_object(str(path)) == {"name": "é"}
 
     def test_read_json_object_refuses_a_list(self, tmp_path):
-        from fsm_llm.utilities import read_json_object
+        from fsm_llm.core.loaders import read_json_object
 
         with pytest.raises(ValueError, match="must be a JSON object"):
             read_json_object(_write(tmp_path, [1, 2]))

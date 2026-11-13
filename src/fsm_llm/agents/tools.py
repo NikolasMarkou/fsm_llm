@@ -24,8 +24,8 @@ from typing import Any, get_type_hints
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from fsm_llm.agents.constants import ContextKeys, Defaults, ErrorMessages, LogMessages
+from fsm_llm.context.filtering import redact_context
 from fsm_llm.logging import logger
-from fsm_llm.utilities import redact_context
 
 from .definitions import ToolAnnotations, ToolCall, ToolDefinition, ToolResult
 from .exceptions import (

@@ -3203,7 +3203,7 @@ class TestStep8LoadTimeValidation:
     def test_shipped_manual_mode_example_loads(self):
         from pathlib import Path
 
-        from fsm_llm.utilities import load_fsm_from_file
+        from fsm_llm.core.loaders import load_fsm_from_file
 
         path = (
             Path(__file__).resolve().parents[2]

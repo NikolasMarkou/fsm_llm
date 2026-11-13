@@ -31,6 +31,7 @@ from .constants import (
     has_internal_prefix,
 )
 from .context import commit_with_key_rollback
+from .context.filtering import filter_context_tree
 from .core.definitions import (
     AdvanceResult,
     Conversation,
@@ -42,6 +43,7 @@ from .core.definitions import (
     State,
     StateNotFoundError,
 )
+from .core.loaders import load_fsm_definition
 from .core.transition_evaluator import TransitionEvaluator
 from .executors import StateExecutor
 from .handlers import HandlerErrorMode, HandlerSystem, HandlerTiming
@@ -60,7 +62,6 @@ from .prompts import (
     ResponseGenerationPromptBuilder,
     ResponsePromptConfig,
 )
-from .utilities import filter_context_tree, load_fsm_definition
 
 # --------------------------------------------------------------
 # Caller-visible context filter
@@ -73,7 +74,7 @@ from .utilities import filter_context_tree, load_fsm_definition
 # claims this site redacts "by original design"; that claim is FALSE at HEAD
 # and was false before this change too (the pre-change body was a single
 # `{k: v ... if not has_internal_prefix(k)}` comprehension). The redact-don't-
-# drop site is `utilities.redact_context` (D-015/D-014), whose job is to show a
+# drop site is `context.filtering.redact_context` (D-015/D-014), whose job is to show a
 # CLI operator WHICH keys exist. This one feeds `API.get_data()`, whose return
 # value is application DATA: injecting the literal string "<redacted>" into it
 # would make a filtered key indistinguishable from a real value.
@@ -95,7 +96,7 @@ from .utilities import filter_context_tree, load_fsm_definition
 # DECISION plan-2026-09-12T135914-45a654de/D-016
 # The depth-bounded dict/list/tuple recursion itself (the part that was
 # byte-identical to `context.py`'s walker) now lives in ONE shared place,
-# `utilities.filter_context_tree`. This call site supplies ONLY the bare
+# `context.filtering.filter_context_tree`. This call site supplies ONLY the bare
 # predicate the D-010 comment above describes, plus a no-op `on_drop` -- it
 # does not, and must never, reference `None`, `remove_none_values`, or
 # `is_forbidden_context_entry`. See decisions.md D-016.

@@ -18,12 +18,12 @@ from fsm_llm.constants import (
     has_internal_prefix,
     is_forbidden_context_entry,
 )
-from fsm_llm.logging import logger
-from fsm_llm.utilities import (
+from fsm_llm.context.filtering import (
     filter_context_tree,
     redact_non_json_leaf,
     redacting_json_default,
 )
+from fsm_llm.logging import logger
 
 from .constants import (
     DEFAULT_MAX_EVENTS,

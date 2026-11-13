@@ -1,5 +1,7 @@
 """
-Unit tests for fsm_llm.utilities module.
+Unit tests for the helpers of the old fsm_llm.utilities module, split at step 72 into
+fsm_llm.llm.json_extraction, fsm_llm.llm.text, fsm_llm.core.coerce, fsm_llm.core.loaders and
+fsm_llm.context.filtering.
 
 Tests cover:
 - extract_json_from_text: multiple extraction strategies
@@ -17,12 +19,12 @@ import pytest
 
 from fsm_llm.core.definitions import FSMDefinition
 from fsm_llm.core.definitions.schema import SCHEMA_VERSION_DEFAULT
-from fsm_llm.utilities import (
-    extract_json_from_text,
+from fsm_llm.core.loaders import (
     get_fsm_summary,
     load_fsm_definition,
     load_fsm_from_file,
 )
+from fsm_llm.llm.json_extraction import extract_json_from_text
 from tests.conftest import cpu_timer
 
 # ------------------------------------------------------------------
@@ -400,7 +402,7 @@ class TestRedactingJsonDefault:
         import decimal
         import uuid
 
-        from fsm_llm.utilities import redacting_json_default
+        from fsm_llm.context.filtering import redacting_json_default
 
         moment = datetime.datetime(2026, 9, 22, 12, 0, 0)
         assert redacting_json_default(moment) == str(moment)
@@ -409,7 +411,7 @@ class TestRedactingJsonDefault:
         assert redacting_json_default(uid) == str(uid)
 
     def test_arbitrary_object_becomes_a_placeholder(self):
-        from fsm_llm.utilities import redacting_json_default
+        from fsm_llm.context.filtering import redacting_json_default
 
         class Creds:
             def __str__(self):  # pragma: no cover - must never be called
@@ -418,7 +420,7 @@ class TestRedactingJsonDefault:
         assert redacting_json_default(Creds()) == "<redacted:Creds>"
 
     def test_set_and_bytes_are_placeholders(self):
-        from fsm_llm.utilities import redacting_json_default
+        from fsm_llm.context.filtering import redacting_json_default
 
         assert redacting_json_default({1, 2}) == "<redacted:set>"
         assert redacting_json_default(b"x") == "<redacted:bytes>"
@@ -426,7 +428,7 @@ class TestRedactingJsonDefault:
     def test_json_dumps_never_leaks_an_objects_str(self):
         import json as _json
 
-        from fsm_llm.utilities import redacting_json_default
+        from fsm_llm.context.filtering import redacting_json_default
 
         class Leaky:
             def __str__(self):
@@ -439,14 +441,14 @@ class TestRedactingJsonDefault:
 
 class TestExtractJsonFencedNonDictAndDepth:
     def test_fenced_array_interior_object_is_not_returned(self):
-        from fsm_llm.utilities import extract_json_from_text
+        from fsm_llm.llm.json_extraction import extract_json_from_text
 
         # RA-04: the fence body is a top-level array, which is not a payload.
         # The brace scan must not recover the object inside it.
         assert extract_json_from_text('```json\n[{"a":1}]\n```') is None
 
     def test_fenced_array_then_real_object_returns_the_object(self):
-        from fsm_llm.utilities import extract_json_from_text
+        from fsm_llm.llm.json_extraction import extract_json_from_text
 
         text = '```json\n[1]\n```\n{"b":2}'
         assert extract_json_from_text(text) == {"b": 2}
@@ -455,27 +457,27 @@ class TestExtractJsonFencedNonDictAndDepth:
         assert extract_json_from_text(text) == {"b": 2}
 
     def test_fenced_object_and_undecodable_fence_unchanged(self):
-        from fsm_llm.utilities import extract_json_from_text
+        from fsm_llm.llm.json_extraction import extract_json_from_text
 
         assert extract_json_from_text('```json\n{"a":1}\n```') == {"a": 1}
         # an undecodable fence still falls through to the whole-text brace scan
         assert extract_json_from_text('```json\n{"a":\n``` {"c":3}') == {"c": 3}
 
     def test_deep_array_does_not_raise(self):
-        from fsm_llm.utilities import extract_json_from_text
+        from fsm_llm.llm.json_extraction import extract_json_from_text
 
         # RA-06: json.loads raises RecursionError on deeply nested input
         assert extract_json_from_text("[" * 100000) is None
 
     def test_deep_dict_does_not_raise(self):
-        from fsm_llm.utilities import extract_json_from_text
+        from fsm_llm.llm.json_extraction import extract_json_from_text
 
         deep = '{"a":' * 100000 + "1" + "}" * 100000
         result = extract_json_from_text(deep)
         assert result is None or isinstance(result, dict)
 
     def test_deep_fenced_body_does_not_raise(self):
-        from fsm_llm.utilities import extract_json_from_text
+        from fsm_llm.llm.json_extraction import extract_json_from_text
 
         deep = "```json\n" + "[" * 100000 + "\n```"
         assert extract_json_from_text(deep) is None

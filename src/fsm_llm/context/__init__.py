@@ -10,12 +10,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from .constants import (
+from fsm_llm.constants import (
     MAX_CONTEXT_FILTER_DEPTH,
     has_internal_prefix,
     is_forbidden_context_entry,
 )
-from .core.definitions import (
+from fsm_llm.core.definitions import (
     CONTEXT_KEY_CUT_OFF,
     CONVERSATION_SUMMARY_MAX_CHARS,
     FSMContext,
@@ -24,10 +24,11 @@ from .core.definitions import (
     checked_key_names,
     exchange_preview_lines,
 )
-from .handlers import clear_keys_delta
-from .llm import LLMInterface
-from .logging import logger
-from .utilities import filter_context_tree, redact_non_json_leaf
+from fsm_llm.handlers import clear_keys_delta
+from fsm_llm.llm import LLMInterface
+from fsm_llm.logging import logger
+
+from .filtering import filter_context_tree, redact_non_json_leaf
 
 
 class ContextCompactor:

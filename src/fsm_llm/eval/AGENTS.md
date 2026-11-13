@@ -110,7 +110,7 @@ Python:
 
 ## Dependencies
 
-- `fsm_llm`: `api.API` (cases), `llm.LLMInterface` (factory type), `llm.resolve_model`, `constants.ENV_LLM_MODEL`/`CLI_EXIT_INTERRUPTED`, `definitions.FSMError`, `utilities.redacting_json_default`, `logging.setup_cli_logging`.
+- `fsm_llm`: `api.API` (cases), `llm.LLMInterface` (factory type), `llm.resolve_model`, `constants.ENV_LLM_MODEL`/`CLI_EXIT_INTERRUPTED`, `definitions.FSMError`, `context.filtering.redacting_json_default`, `logging.setup_cli_logging`.
 - pydantic v2; stdlib `subprocess`, `concurrent.futures`, `argparse`, `fractions`, `math`. `git` binary optional (metadata only).
 
 ## Failure modes

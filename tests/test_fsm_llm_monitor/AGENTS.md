@@ -128,7 +128,7 @@ Payloads and records pinned elsewhere in the suite:
 
 ## Dependencies
 
-- `fsm_llm.monitor.*` (under test), `fsm_llm.handlers.HandlerTiming`, `fsm_llm.core.definitions.ConversationBusyError`, `fsm_llm.utilities.redacting_json_default`, `fsm_llm.logging.logger`.
+- `fsm_llm.monitor.*` (under test), `fsm_llm.handlers.HandlerTiming`, `fsm_llm.core.definitions.ConversationBusyError`, `fsm_llm.context.filtering.redacting_json_default`, `fsm_llm.logging.logger`.
 - Optional: `fsm_llm.workflows` (without it `TestWorkflowTracking` in `test_instance_manager.py` is skipped), `fsm_llm.agents` (`TestStubToolExecution`, `ToolCall`).
 - External: `pytest`, `fastapi` (`TestClient`, `HTTPException`), `starlette` (`Request`, `WebSocketDisconnect`), `loguru`. `opentelemetry` is not needed.
 - pytest config in `pyproject.toml`: `asyncio_mode = "auto"` (needed for the unmarked async tests).

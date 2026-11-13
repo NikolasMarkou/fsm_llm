@@ -33,7 +33,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.eval.stats import pass_rate
 from fsm_llm.llm import LLMInterface
-from fsm_llm.utilities import extract_json_from_text
+from fsm_llm.llm.json_extraction import extract_json_from_text
 
 from .constants import (
     ABORT_STATE_ID,

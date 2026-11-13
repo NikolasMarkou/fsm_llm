@@ -23,10 +23,11 @@ import contextlib
 from collections.abc import Callable
 from typing import Any
 
+from fsm_llm.core.coerce import coerce_confidence
 from fsm_llm.core.definitions import CompletionRequest
 from fsm_llm.llm import LiteLLMInterface
+from fsm_llm.llm.json_extraction import extract_json_from_text
 from fsm_llm.logging import logger
-from fsm_llm.utilities import coerce_confidence, extract_json_from_text
 
 from .definitions import (
     AgentConfig,
@@ -162,7 +163,7 @@ def default_llm_judge(
         # coerce_confidence reads NaN and +-inf as 0.0, so a malformed score
         # fails the judge; a bool is no score either (float(True) is 1.0).
         # Do NOT fold this back into a bare max(0.0, min(1.0, float(...))):
-        # min(1.0, nan) is 1.0 (see the anchor in utilities.coerce_confidence).
+        # min(1.0, nan) is 1.0 (see the anchor in core.coerce.coerce_confidence).
         score = 0.0
         raw_score = parsed.get("score", 0.0)
         if not isinstance(raw_score, bool):

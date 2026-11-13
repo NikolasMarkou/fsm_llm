@@ -16,6 +16,7 @@ from .constants import (
     MAX_MULTI_INTENTS,
     RESERVED_LLM_CALL_KWARGS,
 )
+from .core.coerce import coerce_confidence
 from .core.definitions import (
     ClassificationError,
     ClassificationPromptConfig,
@@ -39,15 +40,12 @@ from .llm import (
     interface_model,
     resolve_model,
 )
+from .llm.json_extraction import extract_json_from_text
 from .logging import logger
 from .prompts import (
     build_classification_context_block,
     build_classification_json_schema,
     build_classification_system_prompt,
-)
-from .utilities import (
-    coerce_confidence,
-    extract_json_from_text,
 )
 
 # Type alias for intent handler functions
@@ -68,7 +66,7 @@ def _confidence_of(raw: Any) -> float:
     """A model-supplied ``confidence`` as a clamped ``[0, 1]`` float.
 
     ``NaN`` / ``±inf`` become 0.0 (so ``is_low_confidence`` fires, never 1.0,
-    D-001 in ``utilities.coerce_confidence``); a value ``float()`` cannot read
+    D-001 in ``core.coerce.coerce_confidence``); a value ``float()`` cannot read
     (``{...}``, ``null``, text) is warned about and becomes 0.0. Never raises.
     """
     try:

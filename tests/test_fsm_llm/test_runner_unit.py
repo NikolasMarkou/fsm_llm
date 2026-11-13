@@ -159,7 +159,7 @@ class TestRedactContextRecurses:
     """
 
     def test_nested_secret_is_redacted_and_the_key_stays_visible(self):
-        from fsm_llm.utilities import REDACTED, redact_context
+        from fsm_llm.context.filtering import REDACTED, redact_context
 
         result = redact_context({"user": {"password": "hunter2", "name": "bob"}})
 
@@ -170,7 +170,7 @@ class TestRedactContextRecurses:
 
     def test_top_level_behavior_is_unchanged(self):
         """Control: the pre-existing D-015 semantics must survive the recursion."""
-        from fsm_llm.utilities import REDACTED, redact_context
+        from fsm_llm.context.filtering import REDACTED, redact_context
 
         result = redact_context({"api_key": "sk-live", "city": "Athens"})
 
@@ -179,7 +179,7 @@ class TestRedactContextRecurses:
     def test_secret_inside_a_list_of_dicts_is_redacted(self):
         """Same list-nesting scope as D-010: `{"users": [{"password": ...}]}`
         is the same leak as the nested-dict form."""
-        from fsm_llm.utilities import REDACTED, redact_context
+        from fsm_llm.context.filtering import REDACTED, redact_context
 
         result = redact_context({"users": [{"password": "p1"}, {"name": "bob"}]})
 
@@ -188,7 +188,7 @@ class TestRedactContextRecurses:
 
     def test_falsy_values_survive_at_every_depth(self):
         """The `[SOFT]` contract: `[]`/`""`/`0`/`False` are meaningful data."""
-        from fsm_llm.utilities import redact_context
+        from fsm_llm.context.filtering import redact_context
 
         payload = {"a": {"b": {"allergies": [], "count": 0, "ok": False, "s": ""}}}
 
@@ -199,7 +199,7 @@ class TestRedactContextRecurses:
         through unredacted would hand an attacker a one-line bypass: bury the
         secret 17 levels down and the CLI log prints it."""
         from fsm_llm.constants import MAX_CONTEXT_FILTER_DEPTH
-        from fsm_llm.utilities import REDACTED, redact_context
+        from fsm_llm.context.filtering import REDACTED, redact_context
 
         payload: dict = {}
         cursor = payload
@@ -217,7 +217,7 @@ class TestRedactContextRecurses:
         """Vacuity guard for the test above: a bound of 0 would satisfy it
         alone. This pins that legitimate depth is still walked, not truncated.
         """
-        from fsm_llm.utilities import REDACTED, redact_context
+        from fsm_llm.context.filtering import REDACTED, redact_context
 
         payload = {"l1": {"l2": {"l3": {"password": "p", "keep": "yes"}}}}
 
@@ -228,7 +228,7 @@ class TestRedactContextRecurses:
     def test_non_string_keys_do_not_crash_the_filter(self):
         """Recursing into arbitrary nested data makes an int-keyed dict
         reachable; `pattern.match(1)` raises `TypeError`."""
-        from fsm_llm.utilities import REDACTED, redact_context
+        from fsm_llm.context.filtering import REDACTED, redact_context
 
         assert redact_context({"a": {1: "x", "password": "y"}}) == {
             "a": {1: "x", "password": REDACTED}
@@ -240,11 +240,12 @@ class TestRedactContextRecurses:
         (re-exported by `constants.py`)."""
         import inspect
 
-        from fsm_llm import runner, utilities
+        from fsm_llm import runner
+        from fsm_llm.context import filtering
 
-        # The walk lives in utilities; the runner only calls it.
-        source = inspect.getsource(utilities.redact_context) + inspect.getsource(
-            utilities._redact_mapping
+        # The walk lives in context.filtering; the runner only calls it.
+        source = inspect.getsource(filtering.redact_context) + inspect.getsource(
+            filtering._redact_mapping
         )
         assert "redact_context" in inspect.getsource(runner)
         # D-019 routed all three call sites through the one shared decision
@@ -262,14 +263,14 @@ class TestRedactContextNonStringKeys:
     bypasses redaction entirely. Behaviour is unchanged -- but announced."""
 
     def test_non_string_key_value_still_recurses(self):
-        from fsm_llm.utilities import redact_context
+        from fsm_llm.context.filtering import redact_context
 
         result = redact_context({0: {"password": "hunter2"}, "name": "Alice"})
         assert result[0]["password"] == "<redacted>"
         assert result["name"] == "Alice"
 
     def test_bytes_key_bypass_is_logged_at_warning(self):
-        from fsm_llm.utilities import redact_context
+        from fsm_llm.context.filtering import redact_context
 
         with _library_records("WARNING") as records:
             result = redact_context({b"password": "BYTES-SECRET"})
@@ -279,7 +280,7 @@ class TestRedactContextNonStringKeys:
 
     def test_string_keys_are_not_warned_about(self):
         """Vacuity guard: the warning must be specific to non-str keys."""
-        from fsm_llm.utilities import redact_context
+        from fsm_llm.context.filtering import redact_context
 
         with _library_records("WARNING") as records:
             redact_context({"password": "p", "name": "Alice"})
@@ -613,7 +614,7 @@ def _redact_in_thread(payload: Any, timing_factor: float) -> tuple[bool, float, 
     the test at the join timeout (scaled by *timing_factor*) instead of hanging
     the suite."""
 
-    from fsm_llm.utilities import redact_context
+    from fsm_llm.context.filtering import redact_context
 
     box: dict[str, Any] = {}
 
@@ -637,7 +638,7 @@ class TestStep13RunnerRedaction:
     def test_three_way_aliased_depth_16_finishes_under_one_second(
         self, as_list, timing_factor
     ):
-        from fsm_llm.utilities import REDACTED
+        from fsm_llm.context.filtering import REDACTED
 
         payload = _aliased_tower(15, as_list=as_list)
         still_running, elapsed, result = _redact_in_thread(payload, timing_factor)
@@ -654,7 +655,7 @@ class TestStep13RunnerRedaction:
         assert node == {"leaf": "x", "password": REDACTED}
 
     def test_aliased_output_equals_unaliased_output(self):
-        from fsm_llm.utilities import redact_context
+        from fsm_llm.context.filtering import redact_context
 
         payload = _aliased_tower(6)
         unaliased = json.loads(json.dumps(payload))
@@ -664,7 +665,7 @@ class TestStep13RunnerRedaction:
         """The memo is keyed by (id, depth): a subtree reached at depth 1 and
         at depth 12 must be cut by the bound differently, exactly as its
         un-aliased copies are."""
-        from fsm_llm.utilities import REDACTED, redact_context
+        from fsm_llm.context.filtering import REDACTED, redact_context
 
         chain: dict = {"password": "deep-secret", "keep": "v"}
         for _ in range(8):
@@ -684,7 +685,7 @@ class TestStep13RunnerRedaction:
         assert REDACTED in rendered
 
     def test_self_cycle_terminates_with_the_placeholder(self, timing_factor):
-        from fsm_llm.utilities import CYCLE_PLACEHOLDER, REDACTED
+        from fsm_llm.context.filtering import CYCLE_PLACEHOLDER, REDACTED
 
         payload: dict = {"name": "Alice", "password": "p"}
         payload["self"] = payload
@@ -699,7 +700,7 @@ class TestStep13RunnerRedaction:
         json.dumps(result)  # no "Circular reference detected"
 
     def test_list_self_cycle_is_replaced_not_dropped(self):
-        from fsm_llm.utilities import CYCLE_PLACEHOLDER, redact_context
+        from fsm_llm.context.filtering import CYCLE_PLACEHOLDER, redact_context
 
         items: list = ["a"]
         items.append(items)
@@ -710,7 +711,11 @@ class TestStep13RunnerRedaction:
         root -> a -> shared, where its ``back`` edge closes a cycle to ``a``;
         then on root -> w -> shared, where ``a`` is NOT active and must be
         walked. Reusing the first result would print the wrong placeholder."""
-        from fsm_llm.utilities import CYCLE_PLACEHOLDER, REDACTED, redact_context
+        from fsm_llm.context.filtering import (
+            CYCLE_PLACEHOLDER,
+            REDACTED,
+            redact_context,
+        )
 
         a: dict = {}
         shared: dict = {"back": a, "password": "s"}

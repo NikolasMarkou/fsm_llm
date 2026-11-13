@@ -5,7 +5,7 @@ Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass 
 
 ## Scope
 
-In: tests of the core modules in `src/fsm_llm/` (`api.py`, `fsm.py`, `pipeline.py`, `core/transition_evaluator.py`, `core/expressions/`, `classification.py`, `context.py`, `prompts.py`, `llm.py`, `ollama.py`, `handlers.py`, `memory.py`, `session.py`, `validator.py`, `flow_analysis.py`, `visualizer.py`, `runner.py`, `utilities.py`, `logging.py`, `constants.py`), plus `fixtures/` (labelled secret-filter corpora).
+In: tests of the core modules in `src/fsm_llm/` (`api.py`, `fsm.py`, `pipeline.py`, `core/transition_evaluator.py`, `core/expressions/`, `classification.py`, `context/`, `prompts.py`, `llm/`, `ollama.py`, `handlers.py`, `memory.py`, `session.py`, `validator.py`, `flow_analysis.py`, `visualizer.py`, `runner.py`, `context/filtering.py`, `llm/text.py`, `llm/json_extraction.py`, `core/coerce.py`, `core/loaders.py`, `logging.py`, `constants.py`), plus `fixtures/` (labelled secret-filter corpora).
 
 Out: the subpackages `fsm_llm.agents`, `.reasoning`, `.workflows`, `.monitor`, `.eval`, `.synthesis` have their own suites under `tests/test_fsm_llm_<name>/`. A few tests here still import from them (see Dependencies).
 
@@ -101,7 +101,7 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_codes.py` | `fsm_llm.core.codes`: `Status`, `Reason`, `CompletionKind` equal the wire strings of the pinned synthesis, agents and `CompletionResponse` modules; the stop-reason, tool-status and approval mappers | reads the pinned modules, never edits them |
 | `test_kind_equality.py` | The state-kind registry safety net (plan d454fd62, group A4): the current code's `fsm_id`, dump hashes, validator, G3, G4, G6a findings, loader refusals and the request bytes of a plain, a completion and a synthesize-host turn against `fixtures/kind_equality_baseline.json`; corpus built by `kind_corpus.py` (not collected) | Compare only; regenerate by hand on the parent of a kind change (`python -m tests.test_fsm_llm.kind_corpus --write`), never to silence a failure |
 | `test_visualizer_unit.py` | ASCII visualizer, box alignment, truncation, CLI output | |
-| `test_runner_unit.py`, `test_utilities_unit.py` | runner redaction, `extract_json_from_text`, FSM loading | |
+| `test_runner_unit.py`, `test_utilities_unit.py` | runner redaction, `extract_json_from_text`, FSM loading (`test_utilities_unit.py` keeps its name: it tests the five modules the old `utilities.py` was split into) | |
 | `test_logging_unit.py`, `test_logging_structured.py` | logging helpers, `setup_logging`, JSON formatter, `replace_default_handler` | `TestDefaultHandlerIsReplacedNotDoubled` runs child processes (`sys.path` from `fsm_llm.__file__`, no `-I`) |
 | `test_logging_settings.py` | `setup_logging` level normalisation, JSON line identity fields, file-handler id, CLI entry points at INFO, one `enable_debug_logging` path, a bad env format or level | an autouse fixture resets the handlers and clears `FSM_LLM_LOG_LEVEL` and `FSM_LLM_LOG_FORMAT` around every test |
 | `test_okf.py`, `test_okf_cli.py` | Open Knowledge Format loader, writer, `capped_note`, `okf_bridge` (memory export, handler) and `fsm-llm-okf` | imports `fsm_llm.okf` and `fsm_llm.okf_bridge`; the shared helper `resolve_within` is tested in `test_okf.py`; `TestBridgeLayering` pins the bridge's imports |

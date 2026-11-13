@@ -121,8 +121,8 @@ class TestDocumentedEscapes:
 class TestSingleSite:
     def test_litellm_mode_is_named_only_in_the_llm_layer(self):
         users = sorted(
-            str(p.relative_to(_SRC))
+            p.relative_to(_SRC).as_posix()
             for p in _SRC.rglob("*.py")
             if "LITELLM_MODE" in p.read_text(encoding="utf-8")
         )
-        assert users == ["llm.py"]
+        assert users == ["llm/__init__.py"]

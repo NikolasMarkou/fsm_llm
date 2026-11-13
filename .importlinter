@@ -138,9 +138,48 @@ forbidden_modules =
     fsm_llm.session
     fsm_llm.synthesis
     fsm_llm.testing
-    fsm_llm.utilities
     fsm_llm.visualizer
     fsm_llm.workflows
 ignore_imports =
     # the package's own modules import each other
     fsm_llm.core.** -> fsm_llm.core.**
+
+# Step 72 (utilities split; `llm.py` and `context.py` became the packages `llm/` and `context/`):
+# the layer package `llm` (L1) reads the kernel (`constants`, `logging`), `core` (the models in
+# `core.definitions`, the number and bool coercions in `core.coerce`) and `fsm_llm.ollama` (placed
+# in `llm/` at step 73), and nothing above it. `fsm_llm.utilities` is gone from the core contract
+# above (the module no longer exists; its pieces are `llm.text`, `llm.json_extraction`,
+# `context.filtering`, `core.coerce`, `core.loaders`). The list is every module that is neither
+# `llm`, `core`, kernel nor `ollama` today; step 95 replaces it with the `layers` contract of D-016.
+[importlinter:contract:llm-imports-no-higher-layer]
+name = fsm_llm.llm imports no engine, context, okf, skills or subpackage module
+type = forbidden
+source_modules =
+    fsm_llm.llm
+forbidden_modules =
+    fsm_llm.agent_skills
+    fsm_llm.agent_skills_cli
+    fsm_llm.agents
+    fsm_llm.api
+    fsm_llm.builders
+    fsm_llm.classification
+    fsm_llm.cli_support
+    fsm_llm.context
+    fsm_llm.eval
+    fsm_llm.executors
+    fsm_llm.fsm
+    fsm_llm.handlers
+    fsm_llm.monitor
+    fsm_llm.okf
+    fsm_llm.okf_bridge
+    fsm_llm.okf_cli
+    fsm_llm.pipeline
+    fsm_llm.prompts
+    fsm_llm.reasoning
+    fsm_llm.runner
+    fsm_llm.session
+    fsm_llm.synthesis
+    fsm_llm.testing
+    fsm_llm.validator
+    fsm_llm.visualizer
+    fsm_llm.workflows

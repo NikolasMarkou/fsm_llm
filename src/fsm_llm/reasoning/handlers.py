@@ -319,7 +319,7 @@ class ReasoningHandlers:
         # size checks in `filter_context` below: the serialized text is only
         # measured with `len()` and never emitted, so no `__str__` reaches a
         # prompt, a file or a socket (the emitting writers use
-        # `utilities.redacting_json_default`).
+        # `context.filtering.redacting_json_default`).
         context_str = json.dumps(context, default=str)
         context_size = len(context_str)
 

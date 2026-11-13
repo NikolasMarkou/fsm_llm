@@ -19,7 +19,13 @@ The scanner reads the tests as text and the package as files, imports nothing:
   next segment is the attribute;
 - a problem is reported when that module is a package `__init__.py` and the
   attribute is bound there by an `import` or `from ... import` statement and
-  not defined there (no `def`, `class`, or assignment of that name).
+  not defined there (no `def`, `class`, or assignment of that name) and not
+  used by code the `__init__` itself holds (a name loaded inside one of its
+  functions or classes). The last clause is the transitional case: `fsm_llm.llm`
+  and `fsm_llm.context` became packages at step 72 of the layout plan while their
+  `__init__` is still the whole old module, so `patch("fsm_llm.llm.completion")`
+  patches the global that `LiteLLMInterface` really looks up; a package that only
+  re-exports (a facade) has no such code and stays flagged.
 
 f-string and computed targets are not read (none exist today; a new form would
 need its own rule). A name an `__init__` defines itself is a legitimate target.
@@ -116,6 +122,19 @@ def init_bindings(path: Path) -> tuple[set[str], set[str]]:
     return imported, defined
 
 
+def lookup_names(path: Path) -> set[str]:
+    """Names loaded inside a function, method or class body of the file: its own lookups."""
+    used: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            used.update(
+                n.id
+                for n in ast.walk(node)
+                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+            )
+    return used
+
+
 def split_target(target: str, modules: Mapping[str, Path]) -> tuple[str, str] | None:
     """`(module, attribute)` for the longest module prefix of `target`, else `None`."""
     parts = target.split(".")
@@ -147,7 +166,11 @@ def scan_patch_targets(root: Path, modules: Mapping[str, Path]) -> list[str]:
             if module not in cache:
                 cache[module] = init_bindings(modules[module])
             imported, defined = cache[module]
-            if attr in imported and attr not in defined:
+            if (
+                attr in imported
+                and attr not in defined
+                and attr not in lookup_names(modules[module])
+            ):
                 bad.append(
                     f"{path.relative_to(root)}:{line}: `{target}` aims at the package "
                     f"`{module}`, which only re-exports `{attr}`: patch the module "
@@ -172,6 +195,7 @@ def _tree(root: Path, files: dict[str, str]) -> dict[str, Path]:
         "pkg.mod": pkg / "mod.py",
         "pkg.sub": pkg / "sub" / "__init__.py",
         "pkg.sub.deep": pkg / "sub" / "deep.py",
+        "pkg.code": pkg / "code" / "__init__.py",
     }
 
 
@@ -183,6 +207,11 @@ PKG = {
         "try:\n    from pkg.sub.deep import E\nexcept ImportError:\n    E = None\n"
     ),
     "pkg/sub/deep.py": "D = 1\n",
+    # a package whose `__init__` is still a code module: `f` and `K.m` perform the lookup of `X`
+    "pkg/code/__init__.py": (
+        "from pkg.mod import X, Z\n\ndef f():\n    return X\n\n"
+        "class K:\n    def m(self):\n        return [X for _ in ()]\n"
+    ),
 }
 
 
@@ -226,6 +255,24 @@ class TestScanPatchTargets:
             "    pass\n"
         )
         assert self._scan(tmp_path, source) == []
+
+    def test_an_init_that_performs_the_lookup_itself_is_a_legitimate_target(
+        self, tmp_path: Path
+    ) -> None:
+        """A transitional `__init__` that still holds code (`fsm_llm.llm` until step 73) looks
+        the name up in its own globals, so a patch on it works."""
+        source = (
+            'from unittest.mock import patch\n\nwith patch("pkg.code.X"):\n    pass\n'
+        )
+        assert self._scan(tmp_path, source) == []
+
+    def test_a_name_the_code_init_imports_but_never_uses_is_still_a_reexport(
+        self, tmp_path: Path
+    ) -> None:
+        source = (
+            'from unittest.mock import patch\n\nwith patch("pkg.code.Z"):\n    pass\n'
+        )
+        assert len(self._scan(tmp_path, source)) == 1
 
     def test_a_reexport_inside_a_try_block_is_found(self, tmp_path: Path) -> None:
         source = (

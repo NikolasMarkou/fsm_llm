@@ -277,7 +277,7 @@ class TestADaPTJSONLeakFix:
 
     def test_envelope_detected_under_an_uppercase_fence(self):
         # F-AP-18: the check keeps its own case-insensitive fence strip
-        # (utilities.strip_think_and_fences only knows lowercase ```json).
+        # (llm.text.strip_think_and_fences only knows lowercase ```json).
         assert ADaPTAgent._is_extraction_envelope(
             '```JSON\n{"extracted_data": {"a": 1}}\n```'
         )

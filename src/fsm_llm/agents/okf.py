@@ -44,6 +44,7 @@ from fsm_llm.constants import (
     OKF_READ_PAGE_CHARS,
     OKF_SUMMARY_MAX_ITEMS,
 )
+from fsm_llm.context.filtering import redacting_json_default
 from fsm_llm.core.definitions import OKFError
 from fsm_llm.logging import logger
 from fsm_llm.okf import (
@@ -58,7 +59,6 @@ from fsm_llm.okf import (
 )
 from fsm_llm.okf_bridge import bundle_from_memory_entries
 from fsm_llm.prompts import sanitize_text_for_prompt
-from fsm_llm.utilities import redacting_json_default
 
 from .definitions import READ_ONLY_ANNOTATIONS, AgentResult
 from .semantic_memory import SemanticMemoryStore

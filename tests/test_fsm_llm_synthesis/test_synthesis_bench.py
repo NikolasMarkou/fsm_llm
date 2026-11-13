@@ -36,7 +36,12 @@ BAD = sb.bc.BenchDataError
 # hand-written branch `detail` instruction (the state's own question) changed the fixture region.
 # s0 was registered at bff1cbd1...a30349 (its manifests), s1 at f66a35b4...9d1b. Block s2 (step 14.2,
 # D-107): the hand-written route hint says to pick the value that fits what the user needs.
-FIXTURE_SHA = "60fb0b7a847fade49ab1baa6794bafb76fb04b897d6a39a3b4ac3d402f23a198"
+# Step 72 of plan d454fd62 changed ONE line of the region: the import of `extract_json_from_text` in
+# `react_values` now names its new module (`fsm_llm.llm.json_extraction`, was the removed
+# `fsm_llm.utilities`); the grader's behaviour is unchanged. The registered manifests carry the earlier
+# value `60fb0b7a847f...a23a198` and already differ in `src_sha256` (every pin moved at step 62), so run
+# and report of s0 to s2 were refused before this edit as well; it is recorded, not a new block.
+FIXTURE_SHA = "56176f4f282fe006f6403faf38648736eca060a097c2acfefafe05078210c659"
 TASKS = {t.id: t for t in sb.TASKS}
 FAMILIES = ("collect", "route", "branch", "retry")
 
@@ -1187,7 +1192,11 @@ REQUIRED_PINS = (
     "src/fsm_llm/eval/cases.py",
     "src/fsm_llm/eval/config.py",  # the EvalConfig of every G6b trial
     "src/fsm_llm/eval/stats.py",  # pass_rate judges G6b against min_pass_rate
-    "src/fsm_llm/utilities.py",  # extract_json_from_text: the R grader's first step
+    "src/fsm_llm/llm/json_extraction.py",  # extract_json_from_text: the R grader's first step
+    "src/fsm_llm/llm/text.py",  # the other half of the old utilities.py pin (split at step 72)
+    "src/fsm_llm/core/coerce.py",  # ... split at step 72
+    "src/fsm_llm/core/loaders.py",  # ... split at step 72: read_json_object, the FSM file reader
+    "src/fsm_llm/context/filtering.py",  # ... split at step 72: redaction and the context filter
     "src/fsm_llm/validator.py",  # FSMValidator is gate G2
     "src/fsm_llm/agents/__init__.py",  # create_agent, the R arm's factory
     "src/fsm_llm/agents/react.py",
@@ -1200,11 +1209,11 @@ UNPINNED_CORE = {
     "src/fsm_llm/synthesis/__init__.py": "re-export facade of the subpackage",
     "src/fsm_llm/api.py": "the engine all three arms run on (git_commit shows an edit)",
     "src/fsm_llm/constants.py": "the engine's defaults",
-    "src/fsm_llm/context.py": "the engine's context",
+    "src/fsm_llm/context/__init__.py": "the engine's context",
     "src/fsm_llm/core/definitions/__init__.py": "the engine's models (facade, read through what the pinned files import)",
     "src/fsm_llm/core/expressions/__init__.py": "the engine's JsonLogic (is_missing; facade, read through what the pinned files import)",
     "src/fsm_llm/handlers.py": "the engine's handlers",
-    "src/fsm_llm/llm.py": "the one LLM layer",
+    "src/fsm_llm/llm/__init__.py": "the one LLM layer",
     "src/fsm_llm/logging.py": "library logging",
     "src/fsm_llm/core/transition_evaluator.py": "the engine's transition rules",
     "src/fsm_llm/okf.py": "text caps shared with every package",

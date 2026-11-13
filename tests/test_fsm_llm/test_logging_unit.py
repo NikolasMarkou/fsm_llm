@@ -286,7 +286,7 @@ class TestJsonExtractionValidation:
 
     def test_regex_returns_none_for_only_auxiliary_keys(self):
         """Regex fallback should return None if only auxiliary keys found."""
-        from fsm_llm.utilities import extract_json_from_text
+        from fsm_llm.llm.json_extraction import extract_json_from_text
 
         # Text that only has auxiliary keys, no meaningful ones
         text = 'Some text "status": "ok" more text'
@@ -296,7 +296,7 @@ class TestJsonExtractionValidation:
 
     def test_regex_returns_data_with_extracted_data(self):
         """Regex fallback should return data when extracted_data is found."""
-        from fsm_llm.utilities import extract_json_from_text
+        from fsm_llm.llm.json_extraction import extract_json_from_text
 
         # Use text where brace matching fails but regex can find extracted_data
         text = 'Here is the data "extracted_data": {name: Alice} end'
@@ -308,7 +308,7 @@ class TestJsonExtractionValidation:
 
     def test_regex_returns_data_with_selected_transition(self):
         """Regex fallback should return data when selected_transition is found."""
-        from fsm_llm.utilities import extract_json_from_text
+        from fsm_llm.llm.json_extraction import extract_json_from_text
 
         text = 'blah "selected_transition": "next_state" blah'
         result = extract_json_from_text(text)

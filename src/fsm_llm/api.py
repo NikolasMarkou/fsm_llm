@@ -116,6 +116,7 @@ from .core.definitions import (
     RunBudgetExceededError,
     checked_key_names,
 )
+from .core.loaders import load_fsm_definition, load_fsm_from_file
 from .core.state_kinds import kind_of
 from .core.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 from .executors import StateExecutor
@@ -144,7 +145,6 @@ from .llm import (
 from .logging import logger
 from .memory import WorkingMemory
 from .session import SessionState, SessionStore
-from .utilities import load_fsm_definition, load_fsm_from_file
 
 # Result type of one `_read_or_ended` read.
 _ReadT = TypeVar("_ReadT")
@@ -2162,7 +2162,7 @@ class API:
         Starts a new conversation pre-populated with the saved context
         and conversation history. Note: the persisted JSON round-trip is
         lossy for non-JSON-native context values, per
-        ``utilities.redacting_json_default``: an exact stdlib scalar
+        ``context.filtering.redacting_json_default``: an exact stdlib scalar
         (datetime/date/time/timedelta/Decimal/UUID) comes back as its
         ``str()``, while anything else (set, bytes, Path, Enum, a custom
         object) comes back as the placeholder ``"<redacted:TypeName>"``,

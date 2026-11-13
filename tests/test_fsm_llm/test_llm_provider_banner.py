@@ -65,11 +65,11 @@ class TestSuppressDebugInfo:
 
     def test_only_the_llm_layer_configures_it(self):
         users = sorted(
-            str(p.relative_to(_SRC))
+            p.relative_to(_SRC).as_posix()
             for p in _SRC.rglob("*.py")
             if "suppress_debug_info" in p.read_text(encoding="utf-8")
         )
-        assert users == ["llm.py"]
+        assert users == ["llm/__init__.py"]
 
 
 class TestProviderFailurePrintsNoBanner:

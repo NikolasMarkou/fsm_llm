@@ -22,6 +22,7 @@ import os
 import tempfile
 from pathlib import Path
 
+from fsm_llm.context.filtering import redacting_json_default
 from fsm_llm.memory import WorkingMemory
 from fsm_llm.session import (
     SESSION_ID_RE,
@@ -29,7 +30,6 @@ from fsm_llm.session import (
     SessionState,
     SessionStore,
 )
-from fsm_llm.utilities import redacting_json_default
 
 
 def _check_id(session_id: str) -> None:
@@ -43,7 +43,7 @@ def _check_id(session_id: str) -> None:
 def save_working_memory(memory: WorkingMemory, path: str) -> None:
     """Atomically write a WorkingMemory snapshot to a JSON file.
 
-    Values are serialised through ``fsm_llm.utilities.redacting_json_default``:
+    Values are serialised through ``fsm_llm.context.filtering.redacting_json_default``:
     a non-JSON value outside its exact stdlib scalar keep-set is written as
     ``"<redacted:TypeName>"``, NOT as its ``str()`` (a ``set`` or a ``Path``
     does not survive the round trip as usable text).

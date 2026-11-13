@@ -60,7 +60,7 @@ class TestStep7FSMDefinitionNotFoundError:
 
     def test_id_branch_raises_typed_error_that_is_fsm_and_value_error(self):
         from fsm_llm import FSMDefinitionNotFoundError
-        from fsm_llm.utilities import load_fsm_definition
+        from fsm_llm.core.loaders import load_fsm_definition
 
         with pytest.raises(FSMDefinitionNotFoundError) as exc:
             load_fsm_definition("no-such-id")

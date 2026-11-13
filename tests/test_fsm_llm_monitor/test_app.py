@@ -1474,7 +1474,7 @@ class TestDashboardWebsocketRedaction:
     def test_payload_with_a_leaky_object_is_redacted(self):
         import json
 
-        from fsm_llm.utilities import redacting_json_default
+        from fsm_llm.context.filtering import redacting_json_default
 
         class Leaky:
             def __str__(self):

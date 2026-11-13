@@ -42,7 +42,8 @@ from fsm_llm.llm import (
     _GENERIC_FALLBACK_MESSAGE,
     LiteLLMInterface,
 )
-from fsm_llm.utilities import extract_json_from_text, strip_think_and_fences
+from fsm_llm.llm.json_extraction import extract_json_from_text
+from fsm_llm.llm.text import strip_think_and_fences
 from tests.conftest import cpu_timer
 from tests.test_fsm_llm.support import (
     OLLAMA_MODEL,
@@ -813,7 +814,7 @@ class _FakeThinkingMessage:
 class TestMultiJsonTieBreakDivergence:
     """D-023: the two embedded-JSON recovery helpers DISAGREE on multi-JSON text.
 
-    ``utilities.extract_json_from_text`` Strategy 3 returns the FIRST parsed
+    ``llm.json_extraction.extract_json_from_text`` Strategy 3 returns the FIRST parsed
     object; ``LiteLLMInterface._extract_content_from_thinking`` prefers the LAST
     (and so does Strategy 4, which makes Strategy 3 the outlier inside its own
     module). Which helper you hit depends only on whether the provider split the
@@ -828,7 +829,7 @@ class TestMultiJsonTieBreakDivergence:
     """
 
     def test_the_two_recovery_helpers_still_disagree(self):
-        from fsm_llm.utilities import extract_json_from_text
+        from fsm_llm.llm.json_extraction import extract_json_from_text
 
         via_utilities = extract_json_from_text(_DRAFT_THEN_FINAL)
         via_thinking = LiteLLMInterface._extract_content_from_thinking(
@@ -852,7 +853,7 @@ class TestMultiJsonTieBreakDivergence:
         unknown intent that ``classification.py`` silently degrades to
         ``fallback_intent``.
         """
-        from fsm_llm.utilities import extract_json_from_text
+        from fsm_llm.llm.json_extraction import extract_json_from_text
 
         text = (
             'The intent is {"intent": "buy", "confidence": 0.9}. '
@@ -888,7 +889,7 @@ class TestMultiJsonTieBreakDivergence:
     def test_existing_shapes_return_exactly_what_they_return_today(
         self, text, expected
     ):
-        from fsm_llm.utilities import extract_json_from_text
+        from fsm_llm.llm.json_extraction import extract_json_from_text
 
         assert extract_json_from_text(text) == expected
 
@@ -1576,7 +1577,7 @@ _PROSE_WITH_FENCE = "Use:\n```python\nprint(1)\n```\nok"
 
 class TestInlineCodeFenceIsKept:
     def test_inline_fence_in_prose_keeps_its_text(self):
-        from fsm_llm.utilities import strip_think_and_fences
+        from fsm_llm.llm.text import strip_think_and_fences
 
         assert strip_think_and_fences(_PROSE_WITH_FENCE) == _PROSE_WITH_FENCE
 
@@ -1589,7 +1590,7 @@ class TestInlineCodeFenceIsKept:
         ],
     )
     def test_a_reply_that_starts_with_a_fence_is_still_stripped(self, text, expected):
-        from fsm_llm.utilities import strip_think_and_fences
+        from fsm_llm.llm.text import strip_think_and_fences
 
         assert strip_think_and_fences(text) == expected
 
@@ -1687,14 +1688,14 @@ class TestPlainTextRungParsesBeforeReplacing:
 
 class TestClosingFenceNeedsALeadingFence:
     def test_prose_ending_in_a_code_block_keeps_both_fences(self):
-        from fsm_llm.utilities import strip_think_and_fences
+        from fsm_llm.llm.text import strip_think_and_fences
 
         text = "Here is the code:\n```python\nprint(1)\n```"
         assert strip_think_and_fences(text) == text
         assert strip_think_and_fences(text).count("```") == 2
 
     def test_two_fenced_blocks_in_prose_keep_all_four_markers(self):
-        from fsm_llm.utilities import strip_think_and_fences
+        from fsm_llm.llm.text import strip_think_and_fences
 
         text = "Two blocks:\n```py\na\n```\nand\n```py\nb\n```"
         assert strip_think_and_fences(text).count("```") == 4
@@ -1708,13 +1709,13 @@ class TestClosingFenceNeedsALeadingFence:
     )
     def test_a_fully_fenced_reply_is_still_unwrapped(self, text):
         """GUARD: green on HEAD and after."""
-        from fsm_llm.utilities import strip_think_and_fences
+        from fsm_llm.llm.text import strip_think_and_fences
 
         assert strip_think_and_fences(text) == '{"a": 1}'
 
     def test_a_stray_closing_fence_is_kept_by_the_helper(self):
         """D-048 trade-off: was `{"a": 1}` (the one authorised corpus rewrite)."""
-        from fsm_llm.utilities import strip_think_and_fences
+        from fsm_llm.llm.text import strip_think_and_fences
 
         assert strip_think_and_fences('{"a": 1}\n```') == '{"a": 1}\n```'
 
@@ -2452,18 +2453,18 @@ class TestBalancedJsonObjects:
     """The scanner behind the trace recovery (F-LL-01)."""
 
     def test_only_outermost_parsing_spans_are_returned_in_order(self):
-        from fsm_llm.utilities import balanced_json_objects
+        from fsm_llm.llm.json_extraction import balanced_json_objects
 
         text = 'a {"x": {"y": 1}} b {"z": "}"} c'
         assert balanced_json_objects(text) == ['{"x": {"y": 1}}', '{"z": "}"}']
 
     def test_an_unparseable_outer_span_hides_the_objects_inside_it(self):
-        from fsm_llm.utilities import balanced_json_objects
+        from fsm_llm.llm.json_extraction import balanced_json_objects
 
         assert balanced_json_objects('{ oops {"a": 1} }') == []
 
     @pytest.mark.parametrize("value", [None, 5, b"{}", ["{}"]])
     def test_a_non_str_gives_an_empty_list(self, value):
-        from fsm_llm.utilities import balanced_json_objects
+        from fsm_llm.llm.json_extraction import balanced_json_objects
 
         assert balanced_json_objects(value) == []

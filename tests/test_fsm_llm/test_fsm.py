@@ -42,14 +42,15 @@ from fsm_llm.core.definitions import (
     Transition,
     TransitionCondition,
 )
+from fsm_llm.core.loaders import load_fsm_from_file
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.fsm import FSMManager
 from fsm_llm.llm import LLMInterface
+from fsm_llm.llm.json_extraction import extract_json_from_text
 from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
 )
-from fsm_llm.utilities import extract_json_from_text, load_fsm_from_file
 from fsm_llm.validator import FSMValidator
 from fsm_llm.visualizer import visualize_fsm_ascii
 from tests.test_fsm_llm.support import (
@@ -799,7 +800,7 @@ class TestGetConversationDataNestedFiltering:
         assert manager.get_conversation_data("conv-1")["root"]["name"] == "bob"
 
     def test_matched_keys_are_dropped_not_redacted(self):
-        """This site DROPS; ``utilities.redact_context`` is the redactor (D-010)."""
+        """This site DROPS; ``context.filtering.redact_context`` is the redactor (D-010)."""
         manager = self._manager_with({"user": {"_internal_note": "secret"}})
 
         data = manager.get_conversation_data("conv-1")

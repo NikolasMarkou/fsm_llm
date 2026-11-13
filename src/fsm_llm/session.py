@@ -36,8 +36,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .context.filtering import redacting_json_default
 from .logging import logger
-from .utilities import redacting_json_default
 
 # One id rule for _path, list_sessions and ``MemorySessionStore``, matched with
 # ``fullmatch``: ``$`` in a ``re.match`` pattern also matches before a trailing
@@ -176,7 +176,7 @@ class FileSessionStore(SessionStore):
         written as its ``str()`` and loads back as that string. Anything else
         that is not JSON-native (set, bytes, a subclass of those scalars, a
         custom object) is written as ``"<redacted:TypeName>"``; its
-        ``str()`` is never called (see ``utilities.redacting_json_default``). The file
+        ``str()`` is never called (see ``context.filtering.redacting_json_default``). The file
         still holds the FULL context: secret-looking KEYS are removed only
         from LLM prompts. Keep the session directory as private as the data
         it stores.

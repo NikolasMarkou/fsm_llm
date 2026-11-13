@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import inspect
 import os
 import re
@@ -18,7 +19,7 @@ class TestJsonEscapeHandling:
 
     def test_escaped_quote_inside_json_string(self):
         """Escaped quotes within JSON string values must not break extraction."""
-        from fsm_llm.utilities import extract_json_from_text
+        from fsm_llm.llm.json_extraction import extract_json_from_text
 
         text = r'Here is JSON: {"msg": "He said \"hello\"", "count": 1}'
         result = extract_json_from_text(text)
@@ -28,7 +29,7 @@ class TestJsonEscapeHandling:
 
     def test_escaped_backslash_before_quote(self):
         """A double backslash before a quote should NOT escape the quote."""
-        from fsm_llm.utilities import extract_json_from_text
+        from fsm_llm.llm.json_extraction import extract_json_from_text
 
         # \\\" means: escaped backslash + closing quote
         text = r'{"path": "C:\\Users\\", "ok": true}'
@@ -38,7 +39,7 @@ class TestJsonEscapeHandling:
 
     def test_nested_json_with_escapes(self):
         """Nested braces with escaped characters."""
-        from fsm_llm.utilities import extract_json_from_text
+        from fsm_llm.llm.json_extraction import extract_json_from_text
 
         text = 'Some text {"outer": {"inner": "val\\"ue"}, "x": 1} trailing'
         result = extract_json_from_text(text)
@@ -727,16 +728,16 @@ class TestSoftEqualsBoolString:
 
 
 class TestDuplicateExtractJsonFunction:
-    """P3-B11: extract_json_from_text defined in both llm.py and utilities.py."""
+    """P3-B11: extract_json_from_text defined in both llm.py and the JSON-extraction module."""
 
     def test_no_extract_json_function_in_llm_module(self):
-        """llm.py should not define extract_json_from_text (it's in utilities.py)."""
+        """llm.py should not define extract_json_from_text (it's in llm/json_extraction.py)."""
         import fsm_llm.llm as llm_mod
 
         # Check that the function is not defined at module level in llm.py
         source = inspect.getsource(llm_mod)
         assert "\ndef extract_json_from_text" not in source, (
-            "extract_json_from_text should not be defined in llm.py (duplicate of utilities.py)"
+            "extract_json_from_text should not be defined in llm.py (duplicate of llm/json_extraction.py)"
         )
 
 
@@ -847,8 +848,15 @@ class TestNoDuplicateImportRe:
     def test_single_import_re(self):
         from fsm_llm import llm
 
-        source = inspect.getsource(llm)
-        count = source.count("import re")
+        # Count the `import re` STATEMENTS: a substring count also matched
+        # `from .text import remove_think_blocks` once the think helpers moved.
+        tree = ast.parse(inspect.getsource(llm))
+        count = sum(
+            alias.name == "re"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        )
         # re is no longer used after _parse_transition_response was removed
         assert count <= 1, f"Expected 0 or 1 'import re', found {count}"
 

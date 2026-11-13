@@ -46,10 +46,10 @@ from .core.definitions.schema import (
     newer_fields,
     parse_version,
 )
+from .core.loaders import read_json_object
 from .core.state_kinds import RawLintServices, raw_kinds
 from .flow_analysis import strongly_connected_components
 from .logging import enable_library_logging, logger, setup_cli_logging
-from .utilities import read_json_object
 
 # The result kinds a completion state can produce, read off the one model
 # that defines them: every kind with tools, all but ``calls`` without.

@@ -1340,7 +1340,7 @@ class TestStep14_2:
         assert conv_id not in api._ended_conversations
 
     def test_c12_pathological_cyclic_context_can_be_ended_and_swept(self):
-        from fsm_llm.utilities import ContextFilterError
+        from fsm_llm.context.filtering import ContextFilterError
 
         api, ends = _c12_api()
         ended_id, _ = api.start_conversation()

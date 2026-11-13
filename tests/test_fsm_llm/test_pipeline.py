@@ -41,6 +41,7 @@ from unittest.mock import patch
 
 from fsm_llm.api import API
 from fsm_llm.context import clean_context_keys
+from fsm_llm.core.coerce import coerce_confidence, coerce_float, coerce_int
 from fsm_llm.core.definitions import (
     ContextScope,
     FieldExtractionConfig,
@@ -63,7 +64,6 @@ from fsm_llm.prompts import (
     ResponseGenerationPromptBuilder,
 )
 from fsm_llm.testing import MockLLM2Interface
-from fsm_llm.utilities import coerce_confidence, coerce_float, coerce_int
 from tests.test_fsm_llm.support import _TWO_STATE
 
 # ── Helpers ───────────────────────────────────────────────────

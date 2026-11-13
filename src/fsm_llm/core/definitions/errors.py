@@ -128,7 +128,7 @@ class SkillError(FSMError):
 class FSMDefinitionNotFoundError(FSMError, ValueError):
     """No FSM definition is resolvable for a non-path id.
 
-    Raised by ``utilities.load_fsm_definition`` (and so by the ``API`` loader
+    Raised by ``core.loaders.load_fsm_definition`` (and so by the ``API`` loader
     fallback) for an id that is neither a file path nor cached: there is no
     FSM registry. Also a ``ValueError`` so existing handlers keep catching it.
     """

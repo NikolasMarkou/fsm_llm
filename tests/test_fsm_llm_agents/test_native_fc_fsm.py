@@ -46,8 +46,8 @@ from fsm_llm.agents.native_fc import (
 from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT
 from fsm_llm.core.definitions import CompletionResponse, FSMDefinition, LLMResponseError
 from fsm_llm.llm import check_tool_transcript
+from fsm_llm.llm.json_extraction import extract_json_from_text
 from fsm_llm.testing import final_reply, tool_call_reply
-from fsm_llm.utilities import extract_json_from_text
 from fsm_llm.validator import FSMValidator
 from fsm_llm.visualizer import build_fsm_graph, to_mermaid
 from tests.test_fsm_llm.test_completion_state import _ScriptedLLM

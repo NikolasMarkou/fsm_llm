@@ -5240,7 +5240,7 @@ class TestStep08_1:
         """Aliasing that also contains a cycle cannot be memoised: the data
         walkers raise ``ContextFilterError`` instead of returning a
         truncated value, and they do it fast."""
-        from fsm_llm.utilities import ContextFilterError
+        from fsm_llm.context.filtering import ContextFilterError
 
         cur: dict[str, Any] = {"leaf": 1}
         for _ in range(14):
@@ -5263,7 +5263,7 @@ class TestStep08_1:
         """The refusal joins the ``FSMError`` tree like ``BuildError`` and
         stays a ``ValueError``, so an ``except ValueError`` keeps catching it;
         the old name ``ContextFilterWorkError`` no longer exists."""
-        import fsm_llm.utilities as utilities
+        import fsm_llm.context.filtering as filtering
         from fsm_llm.core.definitions import FSMError
         from fsm_llm.fsm import _strip_internal_mapping
 
@@ -5271,11 +5271,11 @@ class TestStep08_1:
         for _ in range(14):
             cur = {"a": cur, "b": cur, "c": cur}
             cur["me"] = cur
-        with pytest.raises(utilities.ContextFilterError) as caught:
+        with pytest.raises(filtering.ContextFilterError) as caught:
             _strip_internal_mapping({"root": cur})
         assert isinstance(caught.value, FSMError)
         assert isinstance(caught.value, ValueError)
-        assert not hasattr(utilities, "ContextFilterWorkError")
+        assert not hasattr(filtering, "ContextFilterWorkError")
 
     def test_d3_shared_container_under_different_cycles_stays_correct(self):
         """Guard: a container reached once inside a cycle and once outside it
@@ -5411,7 +5411,7 @@ class TestStep08_2:
         assert isinstance(result, dict) and "rows" in result
 
     def test_d3_should_drop_once_per_distinct_acyclic_container(self):
-        from fsm_llm.utilities import filter_context_tree
+        from fsm_llm.context.filtering import filter_context_tree
 
         data, _ = _d3_2_cycle_elsewhere()
         calls = [0]
@@ -5741,7 +5741,7 @@ def _step14_run(
     source: dict[Any, Any], max_depth: int, *, raise_at: int = -1
 ) -> tuple[Any, list[tuple[str, Any]]]:
     """Run the walker with recording hooks; return (result-or-exc, events)."""
-    from fsm_llm.utilities import filter_context_tree
+    from fsm_llm.context.filtering import filter_context_tree
 
     events: list[tuple[str, Any]] = []
 
@@ -5775,14 +5775,14 @@ class TestStep14FastPath:
     """The flat-root fast path skips the Tarjan pre-scan with identical output."""
 
     def test_flat_root_skips_prescan(self):
-        from fsm_llm import utilities
+        from fsm_llm.context import filtering
 
         with patch.object(
-            utilities,
+            filtering,
             "_cycle_reaching_containers",
-            wraps=utilities._cycle_reaching_containers,
+            wraps=filtering._cycle_reaching_containers,
         ) as spy:
-            out = utilities.filter_context_tree(
+            out = filtering.filter_context_tree(
                 {"a": 1, "b": "x", 3: None}, 16, lambda k, v, f: None
             )
         assert out == {"a": 1, "b": "x", 3: None}
@@ -5800,18 +5800,18 @@ class TestStep14FastPath:
         ids=["nested-dict", "list", "tuple", "dict-subclass", "mapping-proxy"],
     )
     def test_non_flat_or_non_dict_root_keeps_prescan(self, source):
-        from fsm_llm import utilities
+        from fsm_llm.context import filtering
 
         with patch.object(
-            utilities,
+            filtering,
             "_cycle_reaching_containers",
-            wraps=utilities._cycle_reaching_containers,
+            wraps=filtering._cycle_reaching_containers,
         ) as spy:
-            utilities.filter_context_tree(source, 16, lambda k, v, f: None)
+            filtering.filter_context_tree(source, 16, lambda k, v, f: None)
         assert spy.call_count == 1
 
     def test_prescan_values_the_fast_path_substitutes_are_exact(self):
-        from fsm_llm.utilities import _cycle_reaching_containers
+        from fsm_llm.context.filtering import _cycle_reaching_containers
 
         for source in _step14_flat_inputs():
             assert _cycle_reaching_containers(source) == (set(), len(source))
@@ -5835,7 +5835,7 @@ class TestStep14FastPath:
 
     def test_predicate_rebinding_a_value_to_a_cycle_matches_full_path(self):
         def _run(source: dict[Any, Any]) -> tuple[Any, list[Any]]:
-            from fsm_llm.utilities import filter_context_tree
+            from fsm_llm.context.filtering import filter_context_tree
 
             drops: list[Any] = []
 
@@ -5953,7 +5953,7 @@ def _run_filter(name: str, ctx: dict) -> dict:
         )
     if name == "prompt":
         return BasePromptBuilder()._filter_context_for_security(ctx)
-    from fsm_llm.utilities import redact_context
+    from fsm_llm.context.filtering import redact_context
 
     return redact_context(ctx)
 

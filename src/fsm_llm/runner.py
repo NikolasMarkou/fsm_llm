@@ -17,10 +17,10 @@ from .constants import (
     ENV_LLM_MAX_TOKENS,
     ENV_LLM_TEMPERATURE,
 )
+from .context.filtering import redact_context, redacting_json_default
 from .env import load_env
 from .llm import DEFAULT_MAX_TOKENS, resolve_model
 from .logging import logger, setup_file_logging
-from .utilities import redact_context, redacting_json_default
 
 # --------------------------------------------------------------
 

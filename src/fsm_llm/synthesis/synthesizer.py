@@ -52,9 +52,9 @@ from fsm_llm.llm import (
     implements_complete,
     interface_model,
 )
+from fsm_llm.llm.json_extraction import extract_json_from_text
 from fsm_llm.logging import logger
 from fsm_llm.okf import capped_line, strip_unsafe_text
-from fsm_llm.utilities import extract_json_from_text
 from fsm_llm.visualizer import build_fsm_graph, to_mermaid
 
 from .constants import (
