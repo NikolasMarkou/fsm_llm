@@ -33,7 +33,7 @@ flowchart LR
 | `test_regression_core_bugs.py` | plan 6: VB1..VB25; iter-2 F-003 (`api_key` forbidden pattern), F-005 (LRU FSM cache), F-006 (`less` docstring) | 39 | Imports `_GENERIC_FALLBACK_MESSAGE` from `fsm_llm.llm` |
 | `test_regression_expressions_and_transitions.py` | plan 5: B1..B20 | 19 | `--version` exit code 0 via `fsm_llm.__main__.main_cli` |
 | `test_regression_handlers_and_state.py` | plan 4: B1..B7 | 8 | Spies on `HandlerSystem.execute_handlers` |
-| `test_regression_jsonlogic_and_merge.py` | plan 9: VB1..VB15 | 31 | Helper `_frame_definition(name)`; scans `src/*.py` for `"transition_decision"` |
+| `test_regression_jsonlogic_and_merge.py` | plan 9: VB1..VB15 | 31 | Helper `_frame_definition(name)`; scans `src/fsm_llm/*.py` for `"transition_decision"` |
 | `test_regression_logic_and_visualizer.py` | plan 7: VB1..VB4 | 9 | `build_state_boxes` width checks |
 | `test_regression_messages_and_operators.py` | plan 12: V1, V4, V5, V14, V15 | 10 | Reads `pyproject.toml` for `requires-python = ">=3.11"` |
 | `test_api_snapshot.py` | the public API snapshot `docs/api.txt` equals the output of `scripts/api_snapshot.py` | 3 | Runs the script in a child process; `importorskip("fastapi")`; fails with `make api-snapshot` as the fix; `TestMroAwareClassLines` and `TestSamePackageMixinRule` load the script by path and build fake classes with a claimed `__module__` (private and Mixin bases) |

@@ -614,7 +614,7 @@ Things to know:
 - The `fsm-llm` command needs `LLM_MODEL`. The Python `API` takes `model=`, then `LLM_MODEL`, and raises `ModelNotConfiguredError` when neither is set (there is no built-in default model). Importing `fsm_llm` loads no `.env` file; read one on purpose with `fsm_llm.load_env()` or the `--env-file PATH` flag of a CLI.
 - The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`; both also replace loguru's default handler, so a library record prints once.
 - One conversation handles one message at a time: a second `converse` on a conversation that is mid-turn raises `FSMError`.
-- Upgrading a clone from before the 2026-09-29 restructure: delete the old `src/fsm_llm_<sub>/` folders by hand (`make clean` does not remove them), then `pip install -e .`. A leftover folder breaks imports. After the later move of `src/fsm_llm/` to `src/`, run `pip install -e .` again.
+- Upgrading a clone from before the 2026-09-29 restructure: delete the old `src/fsm_llm_<sub>/` folders by hand (`make clean` does not remove them), then `pip install -e .`. A leftover folder breaks imports. After the package moved (back) to `src/fsm_llm/`, run `pip install -e .` again: the old editable install pointed at the flat `src/`; delete leftover `src/*.py` files and `__pycache__` directories of the flat layout by hand.
 - `constraints.txt` pins every direct dependency and the dev tools to exact versions so CI and local runs match.
 
 ---
