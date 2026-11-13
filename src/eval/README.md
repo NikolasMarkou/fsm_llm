@@ -99,7 +99,7 @@ report = run_dataset("cases.json", trials=2, checks=[polite])
 print(report.overall)   # {"k": ..., "n": ..., "rate": ..., "wilson_ci": [lo, hi]}
 ```
 
-`run_dataset(path, *, config=None, llm_interface_factory=None, checks=(), progress=None, **overrides)` layers settings like the CLI: `config` (a JSON file path, a dict or an `EvalConfig`) sits where `--config` does and `overrides` where the flags do. A check gets each finished trial and returns one message per failure. Pass `llm_interface_factory=lambda: MyFakeLLM()` to test offline without a model. The building blocks (`load_cases`, `merge_config`, `open_run_dir`, `run_cases`) are public too.
+`run_dataset(path, *, config=None, llm_interface_factory=None, checks=(), progress=None, **overrides)` layers settings like the CLI: `config` (a JSON file path, a dict or an `EvalConfig`) sits where `--config` does and `overrides` where the flags do. A check gets each finished trial and returns one message per failure. Pass `llm_interface_factory=lambda: MyFakeLLM()` to test offline without a model: no `LLM_MODEL` is needed, and the run is labelled by the factory's own `model` attribute, else the model the config or `LLM_MODEL` names, else `injected` (without a factory and without a model the runner raises `ModelNotConfiguredError` before anything is written). The building blocks (`load_cases`, `merge_config`, `open_run_dir`, `run_cases`) are public too.
 
 ## Things to know
 

@@ -24,6 +24,11 @@ UTC_TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 #: Recorded commit when ``git`` is missing or the directory is not a repo.
 GIT_UNKNOWN = "unknown"
 
+#: The model label of a conversation run whose LLM comes from an injected
+#: ``llm_interface_factory`` that names no model of its own (the run needs no
+#: ``LLM_MODEL``; the label only names the run directory and the report).
+INJECTED_MODEL_LABEL = "injected"
+
 # ---------------------------------------------------------------------------
 # CLI exit codes (0, 1 and 130 are core's ``CLI_EXIT_*``; a usage error exits 1)
 # ---------------------------------------------------------------------------

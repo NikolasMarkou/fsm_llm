@@ -660,6 +660,97 @@ class TestRunDataset:
             run_dataset(dataset, trails=2)
 
 
+class TestRunsNeedNoModelWithAFactory:
+    """Review gate 1, concern 2: an injected factory needs no ``LLM_MODEL``.
+
+    The root autouse fixture sets ``LLM_MODEL`` for every test, so each test
+    deletes it. ``run_cases`` and ``run_dataset`` label the run after the
+    factory's ``model`` attribute, else a named model, else ``injected``;
+    without a factory and without a model they raise ``ModelNotConfiguredError``
+    before anything is written.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("LLM_MODEL", raising=False)
+
+    def test_run_cases_labels_the_run_injected(self, tmp_path: Path):
+        report = run_cases(
+            [_case()],
+            EvalConfig(trials=1, workers=1),
+            tmp_path,
+            llm_interface_factory=_passing(),
+        )
+        assert report.model == "injected"
+        assert report.overall["k"] == 1
+        results = json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))
+        assert results["model"] == "injected"
+        assert "**Model**: injected" in (tmp_path / "summary.md").read_text(
+            encoding="utf-8"
+        )
+
+    def test_run_dataset_names_the_run_directory_injected(self, tmp_path: Path):
+        dataset = _write(tmp_path / "d.json", [_case().model_dump()])
+        report = run_dataset(
+            dataset,
+            llm_interface_factory=_passing(),
+            output_root=str(tmp_path / "out"),
+            trials=1,
+        )
+        assert report.model == "injected"
+        assert report.run_dir.parent == tmp_path / "out"
+        assert report.run_dir.name.endswith("_injected")
+
+    def test_the_factorys_own_model_attribute_is_the_label(self, tmp_path: Path):
+        factory = _passing()
+        factory.model = "provider/own"  # type: ignore[attr-defined]
+        report = run_cases(
+            [_case()],
+            EvalConfig(trials=1, workers=1),
+            tmp_path,
+            llm_interface_factory=factory,
+        )
+        assert report.model == "provider/own"
+
+    def test_a_blank_model_attribute_falls_through(self, tmp_path: Path):
+        factory = _passing()
+        factory.model = "  "  # type: ignore[attr-defined]
+        report = run_cases(
+            [_case()],
+            EvalConfig(trials=1, workers=1),
+            tmp_path,
+            llm_interface_factory=factory,
+        )
+        assert report.model == "injected"
+
+    def test_a_named_model_still_labels_a_factory_without_one(self, tmp_path: Path):
+        report = run_cases(
+            [_case()],
+            EvalConfig(trials=1, workers=1, model="file-model"),
+            tmp_path,
+            llm_interface_factory=_passing(),
+        )
+        assert report.model == "file-model"
+
+    def test_run_cases_without_a_factory_or_a_model_raises_first(self, tmp_path: Path):
+        from fsm_llm import ModelNotConfiguredError
+
+        with pytest.raises(ModelNotConfiguredError):
+            run_cases([_case()], EvalConfig(trials=1, workers=1), tmp_path)
+        assert not (tmp_path / "rows.jsonl").exists()
+
+    def test_run_dataset_without_a_factory_or_a_model_makes_no_directory(
+        self, tmp_path: Path
+    ):
+        from fsm_llm import ModelNotConfiguredError
+
+        dataset = _write(tmp_path / "d.json", [_case().model_dump()])
+        out = tmp_path / "out"
+        with pytest.raises(ModelNotConfiguredError):
+            run_dataset(dataset, output_root=str(out), trials=1)
+        assert not out.exists()
+
+
 class _CapturingAPI:
     """Stands in for ``fsm_llm.API``: records the constructor kwargs, then fails."""
 

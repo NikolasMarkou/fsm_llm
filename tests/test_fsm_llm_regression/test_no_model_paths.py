@@ -367,6 +367,8 @@ _NO_MODEL_NEEDED: dict[str, Any] = {
     "agents: ConfiguredAgentBuilder with an injected interface": (
         _agents_configured_builder
     ),
+    "eval: run_cases(llm_interface_factory=)": _eval_run_cases_factory,
+    "eval: run_dataset(llm_interface_factory=)": _eval_run_dataset_factory,
     "reasoning: ReasoningEngine(llm_interface=)": _reasoning_engine_injected,
     "workflows: AgentStep around an injected agent": _workflows_agent_step,
     "monitor: InstanceManager, attach_api, launch_workflow": _monitor_construction,

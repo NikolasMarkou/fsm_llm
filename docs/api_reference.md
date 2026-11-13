@@ -650,7 +650,7 @@ pass_rate(0, 0)                        # rate 0.0, wilson_ci [0.0, 1.0]
 `run_case_trial(case, config, trial, llm_interface_factory=None, *, checks=(), stop=None)`
 never raises: an exception (a raising check included) becomes a failed trial with `error`
 set. `stop`, a callable checked before every turn, ends the trial there when it
-returns true, like an ended conversation (`run_cases` does not pass it). `run_cases(..., checks=())` passes `checks` to every trial. Both runners return a
+returns true, like an ended conversation (`run_cases` does not pass it). `run_cases(..., checks=())` passes `checks` to every trial. With `llm_interface_factory` neither runner needs a model (the report and run directory are labelled by the factory's `model` attribute, else the named model, else `injected`); without a factory and without a model they raise `ModelNotConfiguredError` before any trial runs. Both runners return a
 report whose `interrupted` is `True` after Ctrl-C or SIGTERM (results then hold only finished
 work).
 Records helpers: `append_row`, `read_rows` (JSONL), `write_json` (indent 2, sorted

@@ -27,12 +27,18 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from fsm_llm.api import API
+from fsm_llm.definitions import ModelNotConfiguredError
 from fsm_llm.llm import LLMInterface
 from fsm_llm.utilities import redacting_json_default
 
 from ._pool import run_interruptible
 from .config import EvalConfig, load_config, merge_config, resolve_model
-from .constants import CASES_EVALUATOR_NAME, JSONL_SUFFIX, ROWS_FILENAME
+from .constants import (
+    CASES_EVALUATOR_NAME,
+    INJECTED_MODEL_LABEL,
+    JSONL_SUFFIX,
+    ROWS_FILENAME,
+)
 from .exceptions import EvalConfigError, EvalDatasetError
 from .records import append_row, git_short_hash, open_run_dir, utc_now, write_json
 from .stats import pass_rate
@@ -271,6 +277,38 @@ def check_expectations(expect: Expectations, trial: TrialResult) -> list[str]:
     return failures
 
 
+def _run_model_label(
+    config: EvalConfig, llm_interface_factory: LLMInterfaceFactory | None
+) -> str:
+    """The model name a conversation run is labelled with.
+
+    Interface contract (callers: :func:`run_cases`, :func:`run_dataset`):
+        - With an ``llm_interface_factory`` the injected interface owns the
+          model, so no ``LLM_MODEL`` is needed and this never raises: the
+          factory's own ``model`` attribute when it is a non-blank ``str`` (a
+          callable object or a function carrying one), else the model the
+          config or the environment names (``resolve_model``), else
+          ``INJECTED_MODEL_LABEL``. The label only names the run directory and
+          the report; the interface answers whatever it is.
+        - Without one, ``resolve_model(config)``: raises
+          ``ModelNotConfiguredError`` when no model is named.
+    """
+    # DECISION plan-2026-11-12T073150-d454fd62/D-025
+    # Do NOT let ``resolve_model`` raise when a factory is given: it did so for
+    # a caller who injects every interface and sets no ``LLM_MODEL`` (review
+    # gate 1, concern 2). Do NOT drop the named model either: a config or
+    # environment model still labels a factory run that states none.
+    if llm_interface_factory is None:
+        return resolve_model(config)
+    named = getattr(llm_interface_factory, "model", None)
+    if isinstance(named, str) and named.strip():
+        return named.strip()
+    try:
+        return resolve_model(config)
+    except ModelNotConfiguredError:
+        return INJECTED_MODEL_LABEL
+
+
 def _llm_kwargs(
     config: EvalConfig, llm_interface_factory: LLMInterfaceFactory | None
 ) -> dict[str, Any]:
@@ -406,13 +444,18 @@ def run_cases(
           (``interrupted=True``, finished trials only).
         - Writes ``results.json`` and ``summary.md`` (:func:`write_case_report`)
           and returns the report; ``dataset`` is recorded there when given.
+        - Model: with ``llm_interface_factory`` no model is needed; the report's
+          ``model`` is the factory's ``model`` attribute, else the model the
+          config or ``LLM_MODEL`` names, else ``"injected"``. Without a factory
+          the model is ``resolve_model(config)`` and a run with none named
+          raises ``ModelNotConfiguredError`` before any trial runs.
     """
     # DECISION plan-2026-09-29T061903-581c2634/D-004
     # Trials run on threads in this process. Do NOT move them to a subprocess
     # per trial to get a hard kill of a hung LLM call: that costs a fork per
     # trial and pickling of inline FSMs and factories; hung calls are bounded
     # by litellm's own request timeout instead. See decisions.md D-004.
-    model = resolve_model(config)
+    model = _run_model_label(config, llm_interface_factory)
     pairs = [(case, n) for case in cases for n in range(1, config.trials + 1)]
     rows_path = run_dir / ROWS_FILENAME
     trials: list[TrialResult] = []
@@ -460,7 +503,12 @@ def run_dataset(
           directory under ``output_root``); ``llm_interface_factory``,
           ``checks`` and ``progress`` are passed to :func:`run_cases`.
         - Raises ``EvalDatasetError``/``EvalConfigError`` for a bad dataset or
-          setting, ``EvalError`` when no run directory can be created.
+          setting, ``EvalError`` when no run directory can be created, and
+          ``ModelNotConfiguredError`` when there is no ``llm_interface_factory``
+          and no model is named (``model=``, the dataset or config file, or
+          ``LLM_MODEL``). With a factory no model is needed and the run
+          directory is labelled by the factory's ``model`` attribute, else the
+          named model, else ``injected``.
     """
     cases, embedded = load_cases(path)
     if isinstance(config, EvalConfig):
@@ -470,7 +518,9 @@ def run_dataset(
     else:
         layer = config
     merged = merge_config(embedded, layer, overrides)
-    run_dir = create_run_dir(merged, resolve_model(merged), path)
+    run_dir = create_run_dir(
+        merged, _run_model_label(merged, llm_interface_factory), path
+    )
     return run_cases(
         cases,
         merged,
