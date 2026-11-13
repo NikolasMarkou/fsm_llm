@@ -1,9 +1,9 @@
 """
 Agent Skills for agents: three read-only tools over a loaded ``SkillCatalog``.
 
-The format itself (parser, loader, catalog, confined reads) is core
-``fsm_llm.agent_skills``; this module only adapts it to agents and imports core
-and sibling agents modules, never litellm.
+The format itself (parser, loader, catalog, confined reads) is the layer package
+``fsm_llm.skills``; this module only adapts it to agents and imports that
+package, core and sibling agents modules, never litellm.
 
 Skill text is untrusted third-party prose. It reaches a model in exactly one
 way here: as the OUTPUT of a read-only tool, capped, control-stripped and under
@@ -18,12 +18,6 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-from fsm_llm.agent_skills import (
-    AgentSkill,
-    SkillCatalog,
-    incomplete_note,
-    skipped_note,
-)
 from fsm_llm.constants import (
     SKILL_CATALOG_DESCRIPTION_CHARS,
     SKILL_LIST_MAX_ITEMS,
@@ -32,7 +26,13 @@ from fsm_llm.constants import (
     SKILL_UNTRUSTED_LABEL,
 )
 from fsm_llm.core.definitions import SkillError
-from fsm_llm.okf import capped_line, strip_unsafe_text, text_page
+from fsm_llm.skills import (
+    AgentSkill,
+    SkillCatalog,
+    incomplete_note,
+    skipped_note,
+)
+from fsm_llm.text import capped_line, strip_unsafe_text, text_page
 
 from .definitions import ToolAnnotations
 from .okf import _budget, _finish, _fit, _int

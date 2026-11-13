@@ -9,11 +9,12 @@ Usage::
 
 Each PATH is a skills directory (child folders holding a ``SKILL.md``) or one
 skill folder. Reports go to stdout, diagnostics to stderr; every string printed
-passes ``okf.strip_unsafe_text``. Nothing in a skill is executed. Exit codes: 0
+passes ``text.strip_unsafe_text``. Nothing in a skill is executed. Exit codes: 0
 ok; 1 failure (an error issue under ``validate``, with ``--strict`` a warning;
 a missing path; an unknown skill; a refused read); 2 usage; 130 Ctrl-C.
 
-Imports core only (never a subpackage).
+Imports the kernel, ``core`` and the sibling ``catalog`` only (never ``okf``, the
+engine or a subpackage).
 """
 
 from __future__ import annotations
@@ -23,15 +24,14 @@ import sys
 from collections.abc import Callable, Sequence
 from typing import TextIO
 
-from .agent_skills import SkillCatalog, SkillLimits, incomplete_note, load_skills
-from .cli_support import (
+from fsm_llm.cli_support import (
     add_max_seconds,
     exit_main,
     report_error,
     report_issues,
     run_cli,
 )
-from .constants import (
+from fsm_llm.constants import (
     CLI_EXIT_FAILURE,
     CLI_EXIT_OK,
     SKILL_CATALOG_DESCRIPTION_CHARS,
@@ -39,8 +39,10 @@ from .constants import (
     SKILL_MAX_LOAD_SECONDS,
     SKILL_READ_PAGE_CHARS,
 )
-from .core.definitions import SkillError
-from .text import capped_line, strip_unsafe_text, text_page
+from fsm_llm.core.definitions import SkillError
+from fsm_llm.text import capped_line, strip_unsafe_text, text_page
+
+from .catalog import SkillCatalog, SkillLimits, incomplete_note, load_skills
 
 __all__ = ["main", "main_cli"]
 

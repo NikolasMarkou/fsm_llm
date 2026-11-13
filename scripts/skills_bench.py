@@ -58,12 +58,15 @@ ARMS = {
 BLOCKS = {"B0": ("hint_on", "hint_off"), "B1": ("native_4b", "native_4b_hint_off", "react_9b", "native_9b")}  # fmt: skip
 #: Pin name -> file now. The names are the keys of the frozen manifests in
 #: scripts/bench_data (written when the package lived in src/fsm_llm/). The
-#: package left that directory for src/ and came back (plan d454fd62 step 62),
-#: so name and path agree again; `src/fsm_llm/constants.py` was edited in
-#: between (plan d454fd62 step 15), so a `run` refuses by design for the
-#: manifests that pin it (the bench is registered and was never run).
+#: package left that directory for src/ and came back (plan d454fd62 step 62);
+#: step 84 moved the reader to `src/fsm_llm/skills/catalog.py`, so the first
+#: name no longer equals its path (the key stays, so the manifests still compare
+#: like with like; D-034). `src/fsm_llm/constants.py` was edited in between
+#: (plan d454fd62 step 15) and both skills files had their imports edited, so a
+#: `run` refuses by design for the manifests (the bench is registered and was
+#: never run).
 SRC_PINS = {
-    "src/fsm_llm/agent_skills.py": "src/fsm_llm/agent_skills.py",
+    "src/fsm_llm/agent_skills.py": "src/fsm_llm/skills/catalog.py",
     "src/fsm_llm/agents/agent_skills.py": "src/fsm_llm/agents/agent_skills.py",
     "src/fsm_llm/constants.py": "src/fsm_llm/constants.py",
 }
@@ -435,7 +438,7 @@ def build_manifest(bench_id: str, block: str, arm: str) -> dict[str, Any]:
 
 def fixture_catalog(root: Path) -> Any:
     """Build the skills under *root*, load them, refuse a broken fixture."""
-    from fsm_llm.agent_skills import load_skills
+    from fsm_llm.skills import load_skills
 
     build_skills(root)
     catalog = load_skills(root)

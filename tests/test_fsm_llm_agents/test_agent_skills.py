@@ -11,7 +11,6 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.agent_skills import SkillLimits, load_skills
 from fsm_llm.agents import AgentConfig, ToolRegistry, create_agent, create_skill_tools
 from fsm_llm.agents import __all__ as agents_all
 from fsm_llm.agents import okf as agents_okf
@@ -39,6 +38,7 @@ from fsm_llm.core.definitions import (
 from fsm_llm.frontmatter import split_frontmatter
 from fsm_llm.llm import LLMInterface
 from fsm_llm.okf import strip_unsafe_text
+from fsm_llm.skills import SkillLimits, load_skills
 from fsm_llm.testing import final_reply, tool_call_reply
 from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 
@@ -645,7 +645,7 @@ os.spawnl(0, 'x')""".splitlines():
 
     @pytest.mark.parametrize(
         "module",
-        "frontmatter agent_skills agent_skills_cli agents.agent_skills".split(),
+        "frontmatter skills skills.catalog skills.cli agents.agent_skills".split(),
     )
     def test_no_new_module_can_execute_anything(self, module: str):
         path = importlib.import_module(f"fsm_llm.{module}").__file__

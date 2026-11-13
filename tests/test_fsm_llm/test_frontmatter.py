@@ -22,7 +22,6 @@ import yaml
 import fsm_llm.frontmatter as frontmatter
 import fsm_llm.okf as okf_module
 import fsm_llm.okf.parser as okf_parser
-from fsm_llm.agent_skills import parse_skill_text
 from fsm_llm.constants import OKF_MAX_FRONTMATTER_BYTES, OKF_MAX_YAML_DEPTH
 from fsm_llm.core.definitions import OKFError
 from fsm_llm.frontmatter import (
@@ -32,6 +31,7 @@ from fsm_llm.frontmatter import (
     read_bytes,
     split_frontmatter,
 )
+from fsm_llm.skills import parse_skill_text
 from tests.conftest import symlink_or_skip
 
 _REPO = Path(__file__).resolve().parents[2]

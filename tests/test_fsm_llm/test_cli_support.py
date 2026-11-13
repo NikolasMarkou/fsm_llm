@@ -18,8 +18,8 @@ from typing import Any
 import pytest
 
 import fsm_llm
-import fsm_llm.agent_skills_cli as skills_cli
 import fsm_llm.okf.cli as okf_cli
+import fsm_llm.skills.cli as skills_cli
 from fsm_llm import cli_support
 from fsm_llm.constants import OKF_MAX_LOAD_SECONDS, SKILL_MAX_LOAD_SECONDS
 from fsm_llm.okf import OKFIssue

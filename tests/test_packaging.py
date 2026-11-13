@@ -119,7 +119,7 @@ _ON_DISK_PACKAGES: frozenset[str] = _packages_under(PACKAGE_DIRS["fsm_llm"])
 #: pins it to the disk, so a layer package with no entry here, or an entry with no
 #: package, fails.
 LAYER_PACKAGES: frozenset[str] = frozenset(
-    {"context", "core", "engine", "handlers", "llm", "okf", "security"}
+    {"context", "core", "engine", "handlers", "llm", "okf", "security", "skills"}
 )
 
 #: Every extras-backed subpackage of `fsm_llm` (they sit directly in `src/fsm_llm/`):

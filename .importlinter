@@ -116,8 +116,6 @@ type = forbidden
 source_modules =
     fsm_llm.core
 forbidden_modules =
-    fsm_llm.agent_skills
-    fsm_llm.agent_skills_cli
     fsm_llm.agents
     fsm_llm.context
     fsm_llm.engine
@@ -129,6 +127,7 @@ forbidden_modules =
     fsm_llm.okf
     fsm_llm.reasoning
     fsm_llm.runner
+    fsm_llm.skills
     fsm_llm.synthesis
     fsm_llm.testing
     fsm_llm.workflows
@@ -149,8 +148,6 @@ type = forbidden
 source_modules =
     fsm_llm.llm
 forbidden_modules =
-    fsm_llm.agent_skills
-    fsm_llm.agent_skills_cli
     fsm_llm.agents
     fsm_llm.context
     fsm_llm.engine
@@ -160,6 +157,7 @@ forbidden_modules =
     fsm_llm.okf
     fsm_llm.reasoning
     fsm_llm.runner
+    fsm_llm.skills
     fsm_llm.synthesis
     fsm_llm.testing
     fsm_llm.workflows
@@ -176,8 +174,6 @@ type = forbidden
 source_modules =
     fsm_llm.context
 forbidden_modules =
-    fsm_llm.agent_skills
-    fsm_llm.agent_skills_cli
     fsm_llm.agents
     fsm_llm.engine
     fsm_llm.eval
@@ -186,6 +182,7 @@ forbidden_modules =
     fsm_llm.okf
     fsm_llm.reasoning
     fsm_llm.runner
+    fsm_llm.skills
     fsm_llm.synthesis
     fsm_llm.testing
     fsm_llm.workflows
@@ -228,14 +225,13 @@ type = forbidden
 source_modules =
     fsm_llm.engine
 forbidden_modules =
-    fsm_llm.agent_skills
-    fsm_llm.agent_skills_cli
     fsm_llm.agents
     fsm_llm.eval
     fsm_llm.monitor
     fsm_llm.okf
     fsm_llm.reasoning
     fsm_llm.runner
+    fsm_llm.skills
     fsm_llm.synthesis
     fsm_llm.testing
     fsm_llm.workflows
@@ -335,8 +331,6 @@ type = forbidden
 source_modules =
     fsm_llm.okf
 forbidden_modules =
-    fsm_llm.agent_skills
-    fsm_llm.agent_skills_cli
     fsm_llm.agents
     fsm_llm.context
     fsm_llm.engine
@@ -346,6 +340,7 @@ forbidden_modules =
     fsm_llm.monitor
     fsm_llm.reasoning
     fsm_llm.runner
+    fsm_llm.skills
     fsm_llm.synthesis
     fsm_llm.testing
     fsm_llm.workflows
@@ -364,8 +359,6 @@ source_modules =
     fsm_llm.text
     fsm_llm.cli_support
 forbidden_modules =
-    fsm_llm.agent_skills
-    fsm_llm.agent_skills_cli
     fsm_llm.agents
     fsm_llm.context
     fsm_llm.core
@@ -377,6 +370,7 @@ forbidden_modules =
     fsm_llm.okf
     fsm_llm.reasoning
     fsm_llm.runner
+    fsm_llm.skills
     fsm_llm.synthesis
     fsm_llm.testing
     fsm_llm.workflows
@@ -412,3 +406,29 @@ source_modules =
     fsm_llm.engine.turn
 forbidden_modules =
     fsm_llm.engine.okf_bridge
+
+# Step 84 (agent_skills.py and agent_skills_cli.py became the layer package `skills/`, D-034).
+# `skills` (L3) reads the kernel (`constants`, `frontmatter`, `security`, `text`, `cli_support`)
+# and `core` (`SkillError`); it imports no okf module (a sibling in the Section 5.2 row; the text
+# helpers it shares with okf are the kernel module `text`), no engine, llm, context or handlers
+# module and no subpackage; the agents-side tools are `fsm_llm.agents.agent_skills`, which
+# imports this package, never the reverse. No debt: the CLI needs nothing above the kernel.
+[importlinter:contract:skills-imports-no-okf-engine-or-higher-layer]
+name = fsm_llm.skills imports no okf, engine, llm, context or subpackage module
+type = forbidden
+source_modules =
+    fsm_llm.skills
+forbidden_modules =
+    fsm_llm.agents
+    fsm_llm.context
+    fsm_llm.engine
+    fsm_llm.eval
+    fsm_llm.handlers
+    fsm_llm.llm
+    fsm_llm.monitor
+    fsm_llm.okf
+    fsm_llm.reasoning
+    fsm_llm.runner
+    fsm_llm.synthesis
+    fsm_llm.testing
+    fsm_llm.workflows

@@ -46,7 +46,7 @@ import typing
 
 MODULES = (
     "fsm_llm",
-    "fsm_llm.agent_skills",
+    "fsm_llm.skills",
     "fsm_llm.core.codes",
     "fsm_llm.core.verify.flow",
     "fsm_llm.frontmatter",

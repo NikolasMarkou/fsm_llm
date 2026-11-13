@@ -1,4 +1,4 @@
-"""Tests for ``fsm-llm-skills`` (``fsm_llm.agent_skills_cli``): commands, exit
+"""Tests for ``fsm-llm-skills`` (``fsm_llm.skills.cli``): commands, exit
 codes, output hygiene, wiring. Control, bidi and non-ASCII characters are built
 with ``chr`` or YAML escapes: this file stays pure ASCII."""
 
@@ -15,15 +15,15 @@ from typing import Any
 
 import pytest
 
-import fsm_llm.agent_skills_cli as skills_cli
-from fsm_llm.agent_skills import AgentSkill, SkillCatalog, SkillIssue
-from fsm_llm.agent_skills_cli import main
+import fsm_llm.skills.cli as skills_cli
 from fsm_llm.constants import (
     SKILL_CATALOG_DESCRIPTION_CHARS,
     SKILL_INCOMPLETE_NOTE,
     SKILL_LIST_MAX_ITEMS,
     SKILL_READ_PAGE_CHARS,
 )
+from fsm_llm.skills import AgentSkill, SkillCatalog, SkillIssue
+from fsm_llm.skills.cli import main
 from tests.conftest import symlink_or_skip
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -549,7 +549,7 @@ class TestExitCodes:
                 sys.executable,
                 "-I",
                 "-m",
-                "fsm_llm.agent_skills_cli",
+                "fsm_llm.skills.cli",
                 "list",
                 str(clean),
             ],
@@ -568,18 +568,20 @@ class TestWiring:
         with open(_REPO / "pyproject.toml", "rb") as handle:
             scripts = tomllib.load(handle)["project"]["scripts"]
 
-        assert scripts["fsm-llm-skills"] == "fsm_llm.agent_skills_cli:main_cli"
+        assert scripts["fsm-llm-skills"] == "fsm_llm.skills.cli:main_cli"
         module, attr = scripts["fsm-llm-skills"].split(":")
         assert callable(getattr(importlib.import_module(module), attr))
 
     def test_importing_the_cli_loads_no_subpackage(self) -> None:
         probe = (
             "import sys\n"
-            "import fsm_llm.agent_skills_cli\n"
+            "import fsm_llm.skills.cli\n"
             "subs = ('agents', 'reasoning', 'workflows', 'monitor', 'eval')\n"
             "bad = [m for m in sys.modules if m.split('.')[:2] in "
             "[['fsm_llm', s] for s in subs]]\n"
             "assert not bad, bad\n"
+            "for heavy in ('fsm_llm.okf', 'fsm_llm.okf.cli', 'fsm_llm.engine.okf_bridge'):\n"
+            "    assert heavy not in sys.modules, heavy\n"
         )
 
         result = subprocess.run(
@@ -593,7 +595,7 @@ class TestWiring:
         assert result.returncode == 0, result.stderr
 
     def test_the_program_name_is_its_own_and_the_source_is_ascii(self) -> None:
-        source = (_REPO / "src" / "fsm_llm" / "agent_skills_cli.py").read_text("utf-8")
+        source = (_REPO / "src" / "fsm_llm" / "skills" / "cli.py").read_text("utf-8")
 
         assert skills_cli._PROG == "fsm-llm-skills"
         assert source.isascii() and source.index('"""') < source.index(

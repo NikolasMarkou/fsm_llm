@@ -32,7 +32,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .constants import (
+from fsm_llm.constants import (
     SKILL_BODY_MAX_LINES,
     SKILL_CATALOG_DESCRIPTION_CHARS,
     SKILL_CATALOG_END,
@@ -59,10 +59,16 @@ from .constants import (
     SKILL_TEXT_MAX_CHARS,
     SKILL_UNTRUSTED_LABEL,
 )
-from .core.definitions import SkillError
-from .frontmatter import Note, load_yaml, read_bytes, split_frontmatter
-from .okf import capped_issues, capped_line, capped_note, strip_unsafe_text, text_page
-from .security import resolve_within
+from fsm_llm.core.definitions import SkillError
+from fsm_llm.frontmatter import Note, load_yaml, read_bytes, split_frontmatter
+from fsm_llm.security import resolve_within
+from fsm_llm.text import (
+    capped_issues,
+    capped_line,
+    capped_note,
+    strip_unsafe_text,
+    text_page,
+)
 
 __all__ = [
     "AgentSkill",

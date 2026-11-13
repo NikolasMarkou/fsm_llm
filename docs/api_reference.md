@@ -832,18 +832,18 @@ Accepted residuals of the OKF feature, in one place:
 - `main()` of the CLI changes the process's stdout and stderr error handling.
 - The old `okf.py` (about 1,350 lines) is the package `okf/` since step 83 (nine modules, the largest about 320 lines). The helpers the bridge and Agent Skills use are public in `okf`: `iso_utc`, `has_lone_surrogate`, `writes_within_caps` and `capped_note` (the one capped-warning helper of `okf.parse_concept_text` and `agent_skills.parse_skill_text`), beside `strip_unsafe_text`, `capped_line`, `text_page` and `capped_issues`; six of them (everything but `has_lone_surrogate` and `writes_within_caps`) are defined in `fsm_llm.text`.
 
-## Agent Skills (`fsm_llm.agent_skills`)
+## Agent Skills (`fsm_llm.skills`)
 
-An Agent Skill is a folder with a `SKILL.md` (YAML frontmatter with `name` and `description`, then a markdown body) and optional bundled files, conventionally under `scripts/`, `references/` and `assets/`. `fsm_llm.agent_skills` reads such folders, `fsm_llm.agents` exposes them to agents as three read-only tools, and `fsm-llm-skills` runs them from the shell. Support is read-only: there is no writer, exporter, memory backend or plain-FSM handler (scope choices, not oversights).
+An Agent Skill is a folder with a `SKILL.md` (YAML frontmatter with `name` and `description`, then a markdown body) and optional bundled files, conventionally under `scripts/`, `references/` and `assets/`. `fsm_llm.skills` reads such folders, `fsm_llm.agents` exposes them to agents as three read-only tools, and `fsm-llm-skills` runs them from the shell. Support is read-only: there is no writer, exporter, memory backend or plain-FSM handler (scope choices, not oversights).
 
 **Spec status.** This follows the open standard at agentskills.io, read on 2026-10-23 and re-checked the same day against the limits below. It is unversioned and mutable, so a later revision may change what is valid.
 
-`fsm_llm.agent_skills` is a core module: `import fsm_llm` does not load it, import it by name. It imports no subpackage and no litellm. The YAML frontmatter loader is `fsm_llm.frontmatter`, the one loader that OKF and Agent Skills share.
+`fsm_llm.skills` is a layer package (`catalog`, `cli`, a facade `__init__` that is the one import surface): `import fsm_llm` does not load it, import it by name. It imports the kernel and core only (never `okf`, the engine or a subpackage) and no litellm. The YAML frontmatter loader is `fsm_llm.frontmatter`, the one loader that OKF and Agent Skills share.
 
 ### Reading skills
 
 ```python
-from fsm_llm.agent_skills import SkillLimits, load_skills
+from fsm_llm.skills import SkillLimits, load_skills
 
 catalog = load_skills(["./skills", "./more_skills"], limits=SkillLimits(max_seconds=30))
 for issue in catalog.issues:
@@ -876,7 +876,7 @@ Each PATH is a skills directory or one skill folder. `validate` prints one line 
 ### Agents (`fsm_llm.agents`)
 
 ```python
-from fsm_llm.agent_skills import load_skills
+from fsm_llm.skills import load_skills
 from fsm_llm.agents import AgentConfig, create_agent, create_skill_tools
 
 catalog = load_skills("./skills")
@@ -1036,7 +1036,7 @@ FSMError
 ├── RunBudgetExceededError (run_until_terminal spent max_steps or max_seconds)
 ├── BuildError (also a ValueError: a builder's build() refused; .errors, cause chained)
 ├── OKFError (exported from fsm_llm; raised by fsm_llm.okf: missing or unreadable bundle root, a refused write (escape, replace unasked, encode failure, too deep, too large or cyclic extra values, frontmatter over 16,384 bytes, a file over 262,144 bytes), a refused handler-factory argument; bundle content never raises it)
-├── SkillError (exported from fsm_llm; raised by fsm_llm.agent_skills: caller misuse (no path, a root that is missing or not a directory) or a refused skill read (unknown name, unsafe path, symlink, directory, binary or oversize file); skill content never raises it)
+├── SkillError (exported from fsm_llm; raised by fsm_llm.skills: caller misuse (no path, a root that is missing or not a directory) or a refused skill read (unknown name, unsafe path, symlink, directory, binary or oversize file); skill content never raises it)
 ├── SynthesisError (fsm_llm.synthesis: a compile that never passed its gates, a provider outage during a compile, a bad limit; -> SynthesisRefusedError (a refusal with a reason code), PatchError (a patch refused whole), LibraryError (a corrupt, unreadable or unwritable library file))
 ├── HandlerSystemError (-> HandlerExecutionError)
 ├── ReasoningError (-> ReasoningExecutionError, ReasoningClassificationError)

@@ -116,7 +116,7 @@ class OKFError(FSMError):
 
 
 class SkillError(FSMError):
-    """An Agent Skills operation was refused (``fsm_llm.agent_skills``).
+    """An Agent Skills operation was refused (``fsm_llm.skills``).
 
     Raised for caller misuse: a missing or non-directory skills root, no path
     given, an unknown skill name, or a body or resource read that is refused

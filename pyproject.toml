@@ -37,7 +37,7 @@ dependencies = [
     # importlib.metadata.requires('litellm') on 1.82.6), so without this line `num_retries` is
     # accepted through **kwargs but silently non-functional. See decisions.md D-002.
     "tenacity>=8.0,<10",
-    # fsm_llm.frontmatter (shared by okf and agent_skills) parses YAML frontmatter
+    # fsm_llm.frontmatter (shared by okf and skills) parses YAML frontmatter
     # with a SafeLoader subclass. PyYAML was only installed transitively (litellm
     # -> tokenizers -> huggingface-hub), so it is declared here like tenacity.
     "pyyaml>=6.0,<7",
@@ -112,7 +112,7 @@ fsm-llm-monitor = "fsm_llm.monitor.__main__:main_cli"
 fsm-llm-meta = "fsm_llm.agents.meta_cli:main_cli"
 fsm-llm-eval = "fsm_llm.eval.__main__:run"
 fsm-llm-okf = "fsm_llm.okf.cli:main_cli"
-fsm-llm-skills = "fsm_llm.agent_skills_cli:main_cli"
+fsm-llm-skills = "fsm_llm.skills.cli:main_cli"
 
 # The import package `fsm_llm` is the directory `src/fsm_llm/` (src layout):
 # `packages.find` finds it and its subpackages by itself; nothing to list when one

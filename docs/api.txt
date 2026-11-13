@@ -538,8 +538,8 @@ fsm_llm.typed_field_extraction def(field_name: str, field_type: TypedFieldType, 
 fsm_llm.validate_fsm_from_file def(json_file: str) -> FSMValidationResult
 fsm_llm.visualize_fsm_ascii def(fsm_data: dict[str, Any], style: str = 'full') -> str
 fsm_llm.visualize_fsm_from_file def(json_file: str, style: str = 'full', *, output_format: str = 'ascii') -> str
-# fsm_llm.agent_skills
-fsm_llm.agent_skills.AgentSkill class(BaseModel)
+# fsm_llm.skills
+fsm_llm.skills.AgentSkill class(BaseModel)
   field name: str required
   field description: str required
   field directory: Path | None = None
@@ -551,7 +551,7 @@ fsm_llm.agent_skills.AgentSkill class(BaseModel)
   field extra_keys: tuple[str, ...] = ()
   field line_count: int = 0
   field resources: tuple[str, ...] = ()
-fsm_llm.agent_skills.SkillCatalog class
+fsm_llm.skills.SkillCatalog class
   def __init__(self, skills: Iterable[AgentSkill], *, issues: Iterable[SkillIssue] = (), max_file_bytes: int = 262144) -> None
   def closest(self, name: object, n: int = 5) -> list[str]
   def files_under(self, name: object, path: object) -> tuple[str, ...]
@@ -561,21 +561,21 @@ fsm_llm.agent_skills.SkillCatalog class
   def read_body(self, name: str, offset: Any = 0, *, size: int = 1500) -> tuple[str, int | None, int]
   def read_resource(self, name: str, path: Any, offset: Any = 0, *, size: int = 1500) -> tuple[str, int | None, int]
   def render_catalog(self, *, max_items: int = 50, description_chars: int = 250) -> str
-fsm_llm.agent_skills.SkillError class(FSMError)
-fsm_llm.agent_skills.SkillIssue class(BaseModel)
+fsm_llm.skills.SkillError class(FSMError)
+fsm_llm.skills.SkillIssue class(BaseModel)
   field severity: Literal['error', 'warning', 'info'] required
   field code: str required
   field message: str required
   field path: str | None = None
-fsm_llm.agent_skills.SkillLimits class(BaseModel)
+fsm_llm.skills.SkillLimits class(BaseModel)
   field max_skills: int = 500
   field max_file_bytes: int = 262144
   field max_resources_per_skill: int = 1000
   field max_seconds: float = 60.0
-fsm_llm.agent_skills.incomplete_note def(catalog: SkillCatalog) -> str
-fsm_llm.agent_skills.load_skills def(path_or_paths: str | os.PathLike[str] | Iterable[str | os.PathLike[str]], *, limits: SkillLimits | None = None) -> SkillCatalog
-fsm_llm.agent_skills.parse_skill_text def(text: str, folder_name: str, *, directory: Path | None = None, skill_md: str = 'SKILL.md', resources: tuple[str, ...] = ()) -> tuple[AgentSkill | None, list[SkillIssue]]
-fsm_llm.agent_skills.skipped_note def(catalog: SkillCatalog) -> str
+fsm_llm.skills.incomplete_note def(catalog: SkillCatalog) -> str
+fsm_llm.skills.load_skills def(path_or_paths: str | os.PathLike[str] | Iterable[str | os.PathLike[str]], *, limits: SkillLimits | None = None) -> SkillCatalog
+fsm_llm.skills.parse_skill_text def(text: str, folder_name: str, *, directory: Path | None = None, skill_md: str = 'SKILL.md', resources: tuple[str, ...] = ()) -> tuple[AgentSkill | None, list[SkillIssue]]
+fsm_llm.skills.skipped_note def(catalog: SkillCatalog) -> str
 # fsm_llm.core.codes
 fsm_llm.core.codes.CompletionKind class(str, Enum)
   CompletionKind.CALLS = 'calls'

@@ -1,4 +1,4 @@
-"""Tests for ``fsm_llm.agent_skills``: the parse and validate half.
+"""Tests for ``fsm_llm.skills.catalog``: the parse and validate half.
 
 Skill text is untrusted, so the parser is pinned as a total function: every
 frontmatter value shape and every YAML constructor tag gives ``(skill | None,
@@ -23,18 +23,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from fsm_llm import agent_skills as skills_module
 from fsm_llm import okf as okf_module
-from fsm_llm.agent_skills import (
-    AgentSkill,
-    SkillCatalog,
-    SkillIssue,
-    SkillLimits,
-    incomplete_note,
-    load_skills,
-    parse_skill_text,
-    skipped_note,
-)
 from fsm_llm.constants import (
     SKILL_CATALOG_END,
     SKILL_INCOMPLETE_NOTE,
@@ -50,9 +39,22 @@ from fsm_llm.constants import (
 from fsm_llm.context.layout import sanitize_text_for_prompt
 from fsm_llm.core.definitions import FSMError, SkillError
 from fsm_llm.okf import body_page, parse_concept_text, strip_unsafe_text, text_page
+from fsm_llm.skills import (
+    AgentSkill,
+    SkillCatalog,
+    SkillIssue,
+    SkillLimits,
+    incomplete_note,
+    load_skills,
+    parse_skill_text,
+    skipped_note,
+)
+from fsm_llm.skills import catalog as skills_module
 from tests.conftest import posix_only, skip_if_root, symlink_or_skip
 
 _SRC = Path(__file__).resolve().parents[2] / "src" / "fsm_llm"
+_SKILLS_DIR = _SRC / "skills"
+_CATALOG = _SKILLS_DIR / "catalog.py"
 _ESC, _BIDI, _ZWSP = chr(0x1B), chr(0x202E), chr(0x200B)
 _BOM, _LONE = chr(0xFEFF), chr(0xD800)
 _ANSI = _ESC + "[31m"
@@ -575,13 +577,20 @@ class TestConstantsAndError:
 
     def test_the_per_skill_warning_cap_is_the_one_function_okf_uses(self) -> None:
         assert skills_module.capped_note is okf_module.capped_note
-        assert "def note(" not in (_SRC / "agent_skills.py").read_text(encoding="utf-8")
+        assert "def note(" not in _CATALOG.read_text(encoding="utf-8")
 
     def test_the_source_is_pure_ascii_with_the_docstring_first(self) -> None:
-        text = (_SRC / "agent_skills.py").read_text(encoding="utf-8")
-        assert text.isascii()
-        assert text.index('"""') < text.index("from __future__ import annotations")
-        assert text.count("__all__ =") == 1
+        modules = sorted(_SKILLS_DIR.glob("*.py"))
+        assert {path.name for path in modules} == {
+            "__init__.py",
+            "catalog.py",
+            "cli.py",
+        }
+        for path in modules:  # the package is three modules: read every one
+            text = path.read_text(encoding="utf-8")
+            assert text.isascii(), path
+            assert text.index('"""') < text.index("from __future__ import annotations")
+            assert text.count("__all__ =") == 1, path
         assert Path(__file__).read_text(encoding="utf-8").isascii()
 
 
@@ -602,18 +611,21 @@ class TestLayering:
 
     def test_the_format_module_loads_no_subpackage(self) -> None:
         _isolated(
-            "import sys, fsm_llm.agent_skills\n"
+            "import sys, fsm_llm.skills\n"
             "subs = ('agents', 'reasoning', 'workflows', 'monitor', 'eval', 'synthesis')\n"
             "bad = [m for m in sys.modules if m.split('.')[:2] in "
             "[['fsm_llm', s] for s in subs]]\n"
             "assert not bad, bad\n"
+            "okf = [m for m in sys.modules if m.split('.')[:2] == ['fsm_llm', 'okf']]\n"
+            "assert not okf, okf\n"
+            "assert 'fsm_llm.engine.okf_bridge' not in sys.modules\n"
         )
 
     def test_importing_fsm_llm_loads_none_of_the_skills_or_okf_modules(self) -> None:
         _isolated(
             "import sys, fsm_llm\n"
             "mods = ('frontmatter', 'text', 'okf', 'okf.cli', 'engine.okf_bridge', "
-            "'agent_skills', 'agent_skills_cli', 'cli_support')\n"
+            "'skills', 'skills.catalog', 'skills.cli', 'cli_support')\n"
             "bad = [m for m in mods if f'fsm_llm.{m}' in sys.modules]\n"
             "assert not bad, bad\n"
         )
@@ -716,7 +728,7 @@ def _load_codes(catalog: SkillCatalog) -> dict[str, str]:
 
 
 class _FakeClock:
-    """Stand-in for the ``time`` module inside ``fsm_llm.agent_skills``."""
+    """Stand-in for the ``time`` module inside ``fsm_llm.skills.catalog``."""
 
     def __init__(self) -> None:
         self.now = 0.0

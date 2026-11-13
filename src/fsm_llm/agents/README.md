@@ -64,7 +64,7 @@ These are the 18 names `create_agent` accepts (`react`, `rewoo`, `reflexion`, `p
 - `handlers.py` - runs tools, enforces the iteration limit, and checks human approval. `hitl.py` - human approval before sensitive tools.
 - `memory_tools.py`, `semantic_memory.py`, `memory_persistence.py`, `summarization.py`, `truncation.py` - working-memory tools, long-term embedding memory, saving memory to disk, condensing old observations, shortening long tool output.
 - `okf.py` - Open Knowledge Format (OKF) for agents: `create_okf_tools(bundle)` gives four read-only tools (`okf_list`, `okf_read`, `okf_search`, `okf_links`), `OKFMemoryBackend` is a read-only memory backend for `AutoMemoryReactAgent`, and `export_semantic_memory` and `export_agent_result` write bundles. The format itself lives in core `fsm_llm.okf`.
-- `agent_skills.py` - Agent Skills for agents: `create_skill_tools(catalog)` gives three read-only tools (`skill_list`, `skill_load`, `skill_read`) over skills loaded by `fsm_llm.agent_skills`. Skill text is untrusted tool output under a fixed label; nothing in a skill is run.
+- `agent_skills.py` - Agent Skills for agents: `create_skill_tools(catalog)` gives three read-only tools (`skill_list`, `skill_load`, `skill_read`) over skills loaded by `fsm_llm.skills`. Skill text is untrusted tool output under a fixed label; nothing in a skill is run.
 - `composition.py` - use ReAct agents as orchestrator workers; an LLM judge for the evaluator-optimizer.
 - `python_tools.py`, `sop.py` - load tools from folders of Python files (`PythonToolLoader`; `load_directory` returns a `PythonToolLoadReport` of tools and per-file errors and `from_directory` warns once per failed file; it runs those files, so trusted sources only; this is not Agent Skills); reusable task templates (three built in).
 - `mcp.py` - load tools from an MCP (Model Context Protocol) server. `remote.py` - serve an agent over HTTP, or call a remote one as a tool.
@@ -123,7 +123,7 @@ print(agent("What is the maximum payload size of the gateway?").answer)
 Give an agent Agent Skills (folders with a `SKILL.md`, the open standard at agentskills.io as read on 2026-10-23, unversioned and mutable). You name the folders; nothing is scanned for you:
 
 ```python
-from fsm_llm.agent_skills import load_skills
+from fsm_llm.skills import load_skills
 from fsm_llm.agents import AgentConfig, create_agent, create_skill_tools
 
 catalog = load_skills("./skills")            # never raises on bad content; problems are in catalog.issues
