@@ -36,7 +36,7 @@ flowchart LR
 | `test_regression_jsonlogic_and_merge.py` | plan 9: VB1..VB15 | 31 | Helper `_frame_definition(name)`; scans `src/*.py` for `"transition_decision"` |
 | `test_regression_logic_and_visualizer.py` | plan 7: VB1..VB4 | 9 | `build_state_boxes` width checks |
 | `test_regression_messages_and_operators.py` | plan 12: V1, V4, V5, V14, V15 | 10 | Reads `pyproject.toml` for `requires-python = ">=3.11"` |
-| `test_api_snapshot.py` | the public API snapshot `docs/api.txt` equals the output of `scripts/api_snapshot.py` | 3 | Runs the script in a child process; `importorskip("fastapi")`; fails with `make api-snapshot` as the fix |
+| `test_api_snapshot.py` | the public API snapshot `docs/api.txt` equals the output of `scripts/api_snapshot.py` | 3 | Runs the script in a child process; `importorskip("fastapi")`; fails with `make api-snapshot` as the fix; `TestMroAwareClassLines` and `TestSamePackageMixinRule` load the script by path and build fake classes with a claimed `__module__` (private and Mixin bases) |
 | `test_regression_transition_eval.py` | plan 8: B1..B6 | 7 | Replaces pipeline methods with `MagicMock` |
 | `test_no_model_paths.py` | review gate 1 of plan d454fd62: the no-model sweep | 55 | Deletes `LLM_MODEL` itself (the root autouse fixture sets it); one row per public entry point that takes an injected interface, plus the paths that still raise `ModelNotConfiguredError` |
 

@@ -20,6 +20,15 @@ the working directory and the hash seed: types are rendered by one formatter,
 set defaults are sorted, classes are named by `__qualname__` only (so a later
 module split does not change the file), and nothing prints an address.
 
+A class is read through its MRO (`members`, `declared_bases`): the members of a
+base whose name starts with `_` (a private mixin, from any package) or of a
+`<Group>Mixin` of the same package (the first two dotted parts of `__module__`,
+`package_of`) are listed under the class, an override beats the mixin's
+version, and only the other bases are named in the class line. Any other base,
+even one of the same package, stays a named base with its own entry. The rule
+reads names only, so a mixin that moves to another module of its package
+leaves the text unchanged.
+
 Interface: `snapshot() -> str` (the whole text, ends with one newline) and
 `main(argv) -> int` (0, or 2 on a usage error). An unimportable module raises.
 Run it through the installed `fsm_llm`, never with `src/` on `sys.path`.
@@ -154,8 +163,75 @@ def is_pydantic(c) -> bool:
     )
 
 
+def package_of(module: str) -> str:
+    """The package of a dotted module name: its first two parts.
+
+    `fsm_llm.engine.api.conversation` and `fsm_llm.engine` are both
+    `fsm_llm.engine`; `fsm_llm.llm` is its own package. Pure string rule, so a
+    module that moves inside its package keeps its package.
+    """
+    return ".".join(module.split(".")[:2])
+
+
+def is_composition_base(base: type, cls: type) -> bool:
+    """Whether *base* is a part of *cls* (its members are *cls* members).
+
+    True for a base whose name starts with `_` (a private mixin, from any
+    package) and for a `<Group>Mixin` of the same package as *cls* (the shape
+    that splitting an oversized class produces). Such a base is not a declared
+    base: it is never named in the class line. Any other base is a declared
+    base and stays named, with its members under its own entry (a public
+    same-package base such as `TimestampedModel` is one: naming it keeps today's
+    text). Both rules read only names, so moving a mixin to another module of
+    its package leaves the snapshot unchanged.
+    """
+    if base.__name__.startswith("_"):
+        return True
+    return base.__name__.endswith("Mixin") and package_of(base.__module__) == (
+        package_of(cls.__module__)
+    )
+
+
+def declared_bases(cls: type, of: type | None = None) -> list[str]:
+    """The names printed in the class line: *cls*'s public bases, in MRO order.
+
+    A composition base is replaced by its own declared bases (recursively),
+    de-duplicated, first occurrence kept. `object` is never named.
+    """
+    of = of or cls
+    names: list[str] = []
+    for b in cls.__bases__:
+        if b is object:
+            continue
+        found = (
+            declared_bases(b, of) if is_composition_base(b, of) else [b.__qualname__]
+        )
+        names += [n for n in found if n not in names]
+    return names
+
+
+def members(cls: type) -> list[tuple[str, object]]:
+    """`(name, raw attribute)` pairs that count as *cls*'s own, sorted by name.
+
+    Walks the MRO: *cls* and its composition bases contribute their `vars()`,
+    the first class in MRO order that defines a name wins (an override beats
+    the mixin's version), and a name already defined by a declared base ahead
+    of a mixin in the MRO is not claimed, because that base has its own entry.
+    """
+    claimed: set[str] = set()
+    found: dict[str, object] = {}
+    for k in cls.__mro__:
+        own = k is cls or is_composition_base(k, cls)
+        for mname, raw in vars(k).items():
+            if mname not in claimed:
+                claimed.add(mname)
+                if own:
+                    found[mname] = raw
+    return sorted(found.items())
+
+
 def cls_lines(prefix: str, name: str, c: type) -> list[str]:
-    bases = [b.__qualname__ for b in c.__bases__ if b is not object]
+    bases = declared_bases(c)
     out = [
         f"{prefix}.{name} class({', '.join(bases)})"
         if bases
@@ -173,7 +249,7 @@ def cls_lines(prefix: str, name: str, c: type) -> list[str]:
                 else f"= {default(f.get_default(call_default_factory=False)) if f.default_factory is None else 'factory'}"
             )
             out.append(f"  field {fname}: {ann(f.annotation)} {req}")
-    for mname, raw in sorted(vars(c).items()):
+    for mname, raw in members(c):
         if mname.startswith("_") and mname != "__init__":
             continue
         if mname == "__init__" and is_pydantic(c):

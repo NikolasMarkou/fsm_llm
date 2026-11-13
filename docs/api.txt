@@ -266,13 +266,14 @@ fsm_llm.FieldExtractionPromptBuilder class(BasePromptBuilder)
   def build_field_extraction_prompt(self, instance: FSMInstance, field_config: FieldExtractionConfig, user_message: str | None, dynamic_context: dict[str, Any] | None = None) -> str
 fsm_llm.FieldExtractionPromptConfig class(BasePromptConfig)
   def __init__(self, max_history_messages: int = 5, max_token_budget: int = 3000, history_strategy: HistoryManagementStrategy = HistoryManagementStrategy.HYBRID, max_context_keys: int = 200, chars_per_token: float = 2.5, token_estimation_factor: float = 1.3, utf8_expansion_factor: float = 1.5, cdata_overhead_tokens: int = 50, include_conversation_history: bool = True, include_persona: bool = True, filter_internal_context: bool = True, internal_key_prefixes: list[str] = <factory>, deterministic_output: bool = True, verbose_logging: bool = False, include_context_data: bool = True) -> None
-fsm_llm.FieldExtractionRequest class(_PromptRequest)
+fsm_llm.FieldExtractionRequest class(BaseModel)
   field system_prompt: str required
   field user_message: str | None required
   field field_name: str required
   field field_type: Literal['str', 'int', 'float', 'bool', 'list', 'dict', 'any'] = 'str'
   field context: dict[str, Any] | None = None
   field validation_rules: dict[str, Any] | None = None
+  classmethod def checked(cls: type[_PromptRequestT], *, prompt_context: Mapping[str, Any] | None = None, **fields: Any) -> _PromptRequestT
 fsm_llm.FieldExtractionResponse class(BaseModel)
   field field_name: str required
   field value: Any = None
@@ -376,16 +377,20 @@ fsm_llm.LLMUsage class(LLMCallCounts)
   field completion_tokens: int = 0
   field total_tokens: int = 0
   field by_kind: dict[str, LLMCallCounts] = factory
-fsm_llm.LiteLLMEmbedder class(_Metered)
+fsm_llm.LiteLLMEmbedder class
   def __init__(self, model: str, *, api_key: str | None = None, timeout: float | None = 120.0, retries: int = 0, **kwargs: Any) -> None
   def embed(self, texts: Sequence[str]) -> list[list[float]]
-fsm_llm.LiteLLMInterface class(LLMInterface, _Metered)
+  def reset_usage(self) -> LLMUsage
+  def usage(self) -> LLMUsage
+fsm_llm.LiteLLMInterface class(LLMInterface)
   def __init__(self, model: str, api_key: str | None = None, temperature: float = 0.5, max_tokens: int = 1000, timeout: float | None = 120.0, retries: int = 0, **kwargs)
   def complete(self, request: CompletionRequest) -> CompletionResponse
   def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse
   def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse
   def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse
   def generate_response_stream(self, request: ResponseGenerationRequest) -> Iterator[str]
+  def reset_usage(self) -> LLMUsage
+  def usage(self) -> LLMUsage
 fsm_llm.ModelNotConfiguredError class(FSMError, ValueError)
   def __init__(self, message: str | None = None, details: dict[str, Any] | None = None)
 fsm_llm.ModelToolCall class(BaseModel)
@@ -400,12 +405,13 @@ fsm_llm.OKFError class(FSMError)
 fsm_llm.ResponseGenerationPromptBuilder class(BasePromptBuilder)
   def __init__(self, config: ResponsePromptConfig | None = None)
   def build_response_prompt(self, instance: FSMInstance, state: State, fsm_definition: FSMDefinition, extracted_data: dict[str, Any] | None = None, transition_occurred: bool = False, previous_state: str | None = None, user_message: str | None = '', plain_text_response: bool = False, context: dict[str, Any] | None = None, rejected_corrections: dict[str, Any] | None = None, extraction_failed: bool = False) -> str
-fsm_llm.ResponseGenerationRequest class(_PromptRequest)
+fsm_llm.ResponseGenerationRequest class(BaseModel)
   field system_prompt: str required
   field user_message: str | None required
   field transition_occurred: bool = False
   field response_format: dict[str, Any] | None = None
   field temperature: float | None = None
+  classmethod def checked(cls: type[_PromptRequestT], *, prompt_context: Mapping[str, Any] | None = None, **fields: Any) -> _PromptRequestT
 fsm_llm.ResponseGenerationResponse class(BaseModel)
   field message: str required
   field reasoning: str | None = None
@@ -1711,7 +1717,7 @@ fsm_llm.testing.PromptGroundedLLM class(LLMInterface)
   def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse
   def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse
   def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse
-fsm_llm.testing.ScriptedLLM class(_Metered, LLMInterface)
+fsm_llm.testing.ScriptedLLM class(LLMInterface)
   def __init__(self, replies: Iterable[ScriptedReply] = (), *, extraction_data: dict[str, object] | None = None, responses: dict[str, str] | None = None, default_response: str | None = None, stream_chunks: Iterable[str] = (), model: str | None = None) -> None
   def assert_exhausted(self) -> None
   def calls(self, method_name: str) -> list
@@ -1720,6 +1726,8 @@ fsm_llm.testing.ScriptedLLM class(_Metered, LLMInterface)
   def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse
   def generate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse
   def generate_response_stream(self, request: ResponseGenerationRequest) -> Iterator[str]
+  def reset_usage(self) -> LLMUsage
+  def usage(self) -> LLMUsage
 fsm_llm.testing.ScriptedUser class
   def __init__(self, messages: Sequence[str] = (), *, rules: Sequence[ScriptedRule] = (), fallback: str | None = None, max_turns: int = 25) -> None
   def run(self, api: API, *, initial_context: Mapping[str, Any] | None = None, close: bool = False) -> ConversationRun
