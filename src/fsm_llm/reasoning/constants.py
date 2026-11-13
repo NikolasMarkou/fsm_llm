@@ -26,7 +26,7 @@ class ReasoningType(str, Enum):
 class OrchestratorStates:
     """States in the main orchestrator FSM.
 
-    Note: These constants are also used as dict keys in reasoning_modes.py
+    Note: These constants are also used as dict keys in the reasoning_modes
     FSM definitions. Both locations must stay in sync when renaming states.
     """
 

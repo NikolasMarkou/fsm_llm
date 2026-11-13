@@ -1,5 +1,24 @@
 {
-  "moved": {},
+  "moved": {
+    "fsm_llm.reasoning.reasoning_modes": {
+      "ALL_REASONING_FSMS": "fsm_llm.reasoning.reasoning_modes.registry",
+      "_IMPORTANT_NO_QUESTIONS": "fsm_llm.reasoning.reasoning_modes._phrases",
+      "_NO_QUESTIONS": "fsm_llm.reasoning.reasoning_modes._phrases",
+      "_PRESENT_FINAL": "fsm_llm.reasoning.reasoning_modes._phrases",
+      "_PRESENT_FINDINGS": "fsm_llm.reasoning.reasoning_modes._phrases",
+      "abductive_fsm": "fsm_llm.reasoning.reasoning_modes.abductive",
+      "analogical_fsm": "fsm_llm.reasoning.reasoning_modes.analogical",
+      "analytical_fsm": "fsm_llm.reasoning.reasoning_modes.analytical",
+      "classifier_fsm": "fsm_llm.reasoning.reasoning_modes.classifier",
+      "creative_fsm": "fsm_llm.reasoning.reasoning_modes.creative",
+      "critical_fsm": "fsm_llm.reasoning.reasoning_modes.critical",
+      "deductive_fsm": "fsm_llm.reasoning.reasoning_modes.deductive",
+      "hybrid_fsm": "fsm_llm.reasoning.reasoning_modes.hybrid",
+      "inductive_fsm": "fsm_llm.reasoning.reasoning_modes.inductive",
+      "orchestrator_fsm": "fsm_llm.reasoning.reasoning_modes.orchestrator",
+      "simple_calculator_fsm": "fsm_llm.reasoning.reasoning_modes.simple_calculator"
+    }
+  },
   "unmoved": [
     "fsm_llm",
     "fsm_llm.__main__",
@@ -111,7 +130,6 @@
     "fsm_llm.reasoning.engine",
     "fsm_llm.reasoning.exceptions",
     "fsm_llm.reasoning.handlers",
-    "fsm_llm.reasoning.reasoning_modes",
     "fsm_llm.reasoning.utilities",
     "fsm_llm.runner",
     "fsm_llm.schema_registry",

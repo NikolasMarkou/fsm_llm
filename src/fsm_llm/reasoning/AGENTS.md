@@ -5,7 +5,7 @@ Purpose: Multi-strategy reasoning engine on top of core `fsm_llm`: an orchestrat
 
 ## Scope
 
-Subpackage of the `fsm-llm` distribution (core package `src`, which runs JSON-style FSM definitions through a 2-pass LLM pipeline: Pass 1 extracts data and evaluates transitions, Pass 2 writes the reply). Here: the `ReasoningEngine`, the 11 FSM definitions (as Python dicts in `reasoning_modes.py`, not JSON files), its handlers, Pydantic models, and the `python -m fsm_llm.reasoning` CLI. No third-party deps beyond core; the pyproject `reasoning` extra is empty. Version is `fsm_llm.__version__` (0.12.0), re-exported via `__version__.py`.
+Subpackage of the `fsm-llm` distribution (core package `src`, which runs JSON-style FSM definitions through a 2-pass LLM pipeline: Pass 1 extracts data and evaluates transitions, Pass 2 writes the reply). Here: the `ReasoningEngine`, the 11 FSM definitions (as Python dicts in the `reasoning_modes/` package, not JSON files), its handlers, Pydantic models, and the `python -m fsm_llm.reasoning` CLI. No third-party deps beyond core; the pyproject `reasoning` extra is empty. Version is `fsm_llm.__version__` (0.12.0), re-exported via `__version__.py`.
 
 Not here: the FSM runtime (`API`, handlers, stacking) lives in core `fsm_llm`. Consumers: `fsm_llm.agents.reasoning_react` (`ReasoningReactAgent`, imported conditionally), `fsm_llm.has_reasoning`/`get_reasoning`, and `examples/reasoning/math_tutor`.
 
@@ -66,10 +66,10 @@ Pushed strategy FSMs run through the same orchestrator `API` (same `FSMManager` 
 | File | Role | Notes |
 | --- | --- | --- |
 | `engine.py` | `ReasoningEngine` | `_solve_lock` (`threading.Lock`) serializes `solve_problem` per instance |
-| `reasoning_modes.py` | 11 FSM dicts + `ALL_REASONING_FSMS` | keys: `orchestrator`, `classifier`, and the 9 `ReasoningType` values |
+| `reasoning_modes/` | package, one module per FSM: 11 `<mode>_fsm` dicts (`orchestrator.py`, `classifier.py` and the 9 strategy modules named after their `ReasoningType` value), `registry.py` (`ALL_REASONING_FSMS`, fills each state's `id` from its key), `_phrases.py` (the shared no-questions sentences) | the package `__init__` re-exports the 11 dicts and `ALL_REASONING_FSMS` with a static `__all__`: import from `fsm_llm.reasoning.reasoning_modes`; keys: `orchestrator`, `classifier`, and the 9 `ReasoningType` values |
 | `handlers.py` | `ReasoningHandlers`, `ContextManager`, `OutputFormatter`, `_STOP_WORDS` | all static methods |
 | `definitions.py` | Pydantic models on `TimestampedModel` | computed fields; `extra="ignore"`, `validate_assignment=True`, `use_enum_values=True` |
-| `constants.py` | `ReasoningType`, `STRATEGIES` (one `StrategySpec` per type), `OrchestratorStates`, `ClassifierStates`, `ContextKeys`, `HandlerNames`, `Defaults`, `ErrorMessages`, `LogMessages` | state-name constants double as dict keys in `reasoning_modes.py` |
+| `constants.py` | `ReasoningType`, `STRATEGIES` (one `StrategySpec` per type), `OrchestratorStates`, `ClassifierStates`, `ContextKeys`, `HandlerNames`, `Defaults`, `ErrorMessages`, `LogMessages` | state-name constants double as dict keys in the `reasoning_modes/` modules |
 | `utilities.py` | `get_reasoning_fsm`, `map_reasoning_type`, `get_available_reasoning_types` | the last two read `STRATEGIES` |
 | `exceptions.py` | 3 exception classes | |
 | `__main__.py` | CLI | `python -m fsm_llm.reasoning` (no console script) |
@@ -121,7 +121,7 @@ Pushed strategy FSMs run through the same orchestrator `API` (same `FSMManager` 
 - Writers that emit context outside the process (CLI `--output json`, `--save` JSON) use `fsm_llm.utilities.redacting_json_default`. The three `default=str` uses in `handlers.py` only measure size with `len()` and never emit. `ReasoningTrace` serializes `reasoning_types_used` (a `set[str]`) as a sorted list through a `field_serializer`, so `model_dump()`, CLI JSON output and JSON save files carry a list; do not teach `redacting_json_default` about sets (D-002 of plan 0051e159).
 - The orchestrator conversation is ended in a `finally` after a successful solve; a failed solve goes through one `_failed_solve`, which reads `partial_context` from the top frame first (after `end_conversation` core answers only from its bounded ended-conversation cache), then ends the conversation and raises. The classifier conversation is ended in a `finally` as well.
 - The engine sends no user message and owns no loop over steps: no `converse(` and no "Continue reasoning" anywhere in `src/fsm_llm/reasoning` (pinned by `test_engine.py`). It never imports `fsm_llm.agents`.
-- State-name constants and `reasoning_modes.py` dict keys must stay in sync.
+- State-name constants and the `reasoning_modes/` dict keys must stay in sync.
 
 ## Dependencies
 
@@ -137,7 +137,7 @@ Pushed strategy FSMs run through the same orchestrator `API` (same `FSMManager` 
 
 ## Working here
 
-- New strategy: add an FSM dict in `reasoning_modes.py` and register it in `ALL_REASONING_FSMS` under the new value; add the `ReasoningType` member; add one `StrategySpec` to `STRATEGIES` in `constants.py` (description, aliases, result map, solution key: `map_reasoning_type`, `get_available_reasoning_types`, `merge_reasoning_results` and `extract_final_solution` all read it); any new keys go to `ContextKeys`. A state's `id` is filled from its key when the module loads, and the three no-questions sentences are the `_NO_QUESTIONS` family at the top of `reasoning_modes.py`; `test_golden_tables.py` pins the 11 FSM definitions and the strategy tables by hash. The CLI `--type` choices pick it up from the enum.
+- New strategy: add a `<value>.py` module with its FSM dict in `reasoning_modes/`, re-export it from the package `__init__` and register it in `registry.ALL_REASONING_FSMS` under the new value; add the `ReasoningType` member; add one `StrategySpec` to `STRATEGIES` in `constants.py` (description, aliases, result map, solution key: `map_reasoning_type`, `get_available_reasoning_types`, `merge_reasoning_results` and `extract_final_solution` all read it); any new keys go to `ContextKeys`. A state's `id` is filled from its key when the module loads, and the three no-questions sentences are the `_NO_QUESTIONS` family in `reasoning_modes/_phrases.py`; `test_golden_tables.py` pins the 11 FSM definitions and the strategy tables by hash. The CLI `--type` choices pick it up from the enum.
 - Use `ContextKeys` constants for context keys (`hybrid` uses `ContextKeys.NEEDS_REFINEMENT` and `HYBRID_LOOP_COUNT`). A key the model must never write goes into `handler_only_keys` of its FSM.
 - Read the `# DECISION` anchors before editing nearby: D-009 in `engine.py` (analytical-only fallback), D-004 [STALE] (preferred type applied after the chain), D-053 in `engine.py` (retry-key clear on `execute_reasoning` entry; sub-FSM step count from core's step number), D-054 (handler-only verdict and counters, `_check_retry_limit`, budget error), D-058 (critical handlers, `_failed_solve`), D-060 (`_classification_from`), D-014 in `constants.py` (do not re-add `SOLUTION_VALID`/`CONFIDENCE_LEVEL` aliases), D-016 in `__main__.py` (enable logging only on `--verbose`).
 - Tests: `pytest tests/test_fsm_llm_reasoning/` (232 collected; files `test_cli_logging.py`, `test_cli_output.py`, `test_constants.py`, `test_definitions.py`, `test_engine.py`, `test_engine_scripted.py`, `test_exceptions.py`, `test_handlers.py`). Tests mock the LLM; `test_engine_scripted.py` runs whole solves through core with a scripted `LLMInterface` and asserts every call; a real run needs a model, for example `python -m fsm_llm.reasoning "What is 2 + 2?" --model ollama_chat/qwen3.5:4b`.

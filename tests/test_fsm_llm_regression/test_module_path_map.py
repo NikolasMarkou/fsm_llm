@@ -10,9 +10,11 @@ of the `fsm_llm` package lives and where it moved from. Shape:
 `moved` names a module that left its path (a string: the whole module went
 to one place; a table: each public symbol of a split module went to the module
 that defines it). `unmoved` is every other module, packages (`__init__`)
-included. The map is written for the layout of steps 65 to 94 (nothing is moved
-yet, so `moved` is empty and `unmoved` lists every module); each of those steps
-adds its entries in the commit that does the move.
+included. A table key may stay on disk as the PACKAGE that replaced the module
+(P1: its `__init__` is the one import surface): the table entry is then that
+package's decision and it is NOT listed in `unmoved`. The map is written for the
+layout of steps 65 to 94 (each of those steps adds its entries in the commit
+that does the move).
 
 What the tests pin, in the project's no-shim rule (a moved path is gone, never
 re-exported):
@@ -115,9 +117,16 @@ def shape_problems(data: Any) -> list[str]:
     return bad
 
 
+def decided_modules(data: dict[str, Any]) -> set[str]:
+    """Modules the map decides: `unmoved`, every `moved` target, and every table key
+    (a split module whose path survives as the package that replaced it)."""
+    tables = {old for old, target in data["moved"].items() if isinstance(target, dict)}
+    return set(data["unmoved"]) | new_paths(data) | tables
+
+
 def coverage_problems(data: dict[str, Any], modules: set[str]) -> list[str]:
     """Every module on disk has a decision; nothing named is missing from disk."""
-    decided = set(data["unmoved"]) | new_paths(data)
+    decided = decided_modules(data)
     bad = [
         f"`{m}` has no decision: add it to `unmoved` or as a `moved` target"
         for m in sorted(modules - decided)
@@ -177,7 +186,7 @@ def import_problems(data: dict[str, Any]) -> list[str]:
 
 def _refresh(path: Path = FIXTURE) -> None:
     data = load(path) if path.exists() else {"moved": {}}
-    decided = new_paths(data)
+    decided = decided_modules({"moved": data["moved"], "unmoved": []})
     data["unmoved"] = sorted(set(source_modules()) - decided)
     path.write_text(render(data), encoding="utf-8", newline="\n")
 
@@ -320,6 +329,23 @@ class TestScratchTrees:
         repo = _scratch(tmp_path, ["__init__.py", "x/a.py", "x/__init__.py"])
         data = _data({"fsm_llm.a": "fsm_llm.x.a"}, ["fsm_llm", "fsm_llm.x"])
         assert coverage_problems(data, set(source_modules(repo))) == []
+
+    def test_a_table_key_that_became_a_package_is_decided_by_its_table(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _scratch(tmp_path, ["__init__.py", "m/__init__.py", "m/a.py"])
+        data = _data({"fsm_llm.m": {"X": "fsm_llm.m.a"}}, ["fsm_llm"])
+        assert shape_problems(data) == []
+        assert coverage_problems(data, set(source_modules(repo))) == []
+
+    def test_a_string_key_that_is_still_on_disk_has_no_decision(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _scratch(tmp_path, ["__init__.py", "m/__init__.py", "m/a.py"])
+        data = _data({"fsm_llm.m": "fsm_llm.m.a"}, ["fsm_llm"])
+        assert coverage_problems(data, set(source_modules(repo))) == [
+            "`fsm_llm.m` has no decision: add it to `unmoved` or as a `moved` target"
+        ]
 
     def test_a_moved_target_that_does_not_exist_fails(self, tmp_path: Path) -> None:
         repo = _scratch(tmp_path, ["__init__.py"])

@@ -1,7 +1,7 @@
 # Import contracts for the `fsm_llm` package, run by `make lint-imports`
 # (`lint-imports`, from import-linter; the engine is grimp).
 #
-# Plan d454fd62, step 61: only the contracts that hold on today's layout
+# Plan d454fd62, step 61 (and 65: reasoning): only the contracts that hold on today's layout
 # (source in `src/fsm_llm/`, imported as `fsm_llm`). Step 95 activates the layered
 # Section 5.2 contract (D-016) once the packages it names exist; every move
 # step (65 to 94) extends this file for the packages it places. A contract is
@@ -66,3 +66,17 @@ ignore_imports =
     # permanent: `python -m fsm_llm` is the one entry that hands over to the
     # runner (a lazy import inside `main_cli`); no other module may.
     fsm_llm.__main__ -> fsm_llm.runner
+
+[importlinter:contract:reasoning-is-imported-by-agents-only]
+name = no module outside fsm_llm.reasoning and fsm_llm.agents imports fsm_llm.reasoning
+type = forbidden
+source_modules =
+    fsm_llm.*
+forbidden_modules =
+    fsm_llm.reasoning
+ignore_imports =
+    # the package's own modules import each other
+    fsm_llm.reasoning.** -> fsm_llm.reasoning.**
+    # permanent (D-016 c): ReasoningReactAgent is the agents pattern built on the reasoning
+    # engine, and no roadmap row retires the edge; it is reported to the user as a decision.
+    fsm_llm.agents.reasoning_react -> fsm_llm.reasoning

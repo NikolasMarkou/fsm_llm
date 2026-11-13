@@ -443,7 +443,7 @@ class TestClassificationExceptionHandling:
 
 
 class TestDeadCodeRemoved:
-    """Unused utility functions in reasoning_modes.py should not exist."""
+    """Unused utility functions in the reasoning_modes package should not exist."""
 
     def test_no_get_fsm_by_name(self):
         from fsm_llm.reasoning import reasoning_modes

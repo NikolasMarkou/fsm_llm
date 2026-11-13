@@ -44,7 +44,7 @@ The nine strategies and their number of states:
 ## Files
 
 - `engine.py` - `ReasoningEngine`: builds the orchestrator and classifier, registers handlers, runs one solve through the hooks and handlers.
-- `reasoning_modes.py` - all 11 FSM definitions as Python dictionaries (orchestrator, classifier, nine strategies) and the `ALL_REASONING_FSMS` registry.
+- `reasoning_modes/` - all 11 FSM definitions as Python dictionaries, one module per FSM (orchestrator, classifier, nine strategies), and the `ALL_REASONING_FSMS` registry (`registry.py`); the package re-exports them.
 - `handlers.py` - answer validation, trace recording, context pruning, mapping strategy results back, picking the final answer.
 - `definitions.py` - Pydantic models for steps, traces, validation, classification, problems and solutions.
 - `constants.py` - reasoning types, state names, context key names, limits, and message text.

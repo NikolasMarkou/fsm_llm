@@ -8,9 +8,9 @@ import copy
 from typing import Any
 
 from fsm_llm.logging import logger
+from fsm_llm.reasoning.reasoning_modes import ALL_REASONING_FSMS
 
 from .constants import STRATEGIES, ErrorMessages, ReasoningType
-from .reasoning_modes import ALL_REASONING_FSMS
 
 
 def get_reasoning_fsm(fsm_name: str) -> dict[str, Any]:
