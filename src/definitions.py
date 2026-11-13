@@ -813,11 +813,12 @@ FINISH_REASON_LENGTH = "length"
 # Value: a JSON-native dict `{"reply": True}` (Pass 2 reply cut by max_tokens)
 # and/or `{"fields": [names]}` (extractions cut, in call order); the key is
 # ABSENT when nothing was cut. The pipeline removes it at the start of every
-# turn and writes it only through `MessagePipeline` (`_record_cut_off`), so it
-# describes the LAST turn only. Do NOT put it in the completion-state result
-# `{kind, text, calls}` (documented shape), do NOT re-inline the literal, and do
-# NOT add a second flag for the same fact. It lives here, not in `constants.py`
-# (a hash-pinned bench file). See decisions.md D-025.
+# turn and writes it only through `context.record_cut_off` (the pipeline and the
+# completion executor call it), so it describes the LAST turn only. Do NOT put
+# it in the completion-state result `{kind, text, calls}` (documented shape), do
+# NOT re-inline the literal, and do NOT add a second flag for the same fact. It
+# lives here, not in `constants.py` (a hash-pinned bench file). See decisions.md
+# D-025.
 CONTEXT_KEY_CUT_OFF = "_cut_off"
 
 

@@ -16,8 +16,10 @@ from .constants import (
     is_forbidden_context_entry,
 )
 from .definitions import (
+    CONTEXT_KEY_CUT_OFF,
     CONVERSATION_SUMMARY_MAX_CHARS,
     FSMContext,
+    FSMInstance,
     ResponseGenerationRequest,
     checked_key_names,
     exchange_preview_lines,
@@ -374,3 +376,43 @@ def commit_with_key_rollback(
             else:
                 context.data.pop(key, None)
         raise
+
+
+def was_cut_off(response: Any) -> bool:
+    """True when ``response.truncated`` is exactly ``True`` (a provider cut-off).
+
+    Contract: any object; a response without the attribute (a test double, a
+    third-party ``LLMInterface`` returning a duck-typed reply) is not cut off.
+    Never raises.
+    """
+    return getattr(response, "truncated", False) is True
+
+
+def record_cut_off(
+    instance: FSMInstance, *, reply: bool = False, field: str | None = None
+) -> None:
+    """Note in ``context.data[CONTEXT_KEY_CUT_OFF]`` that a model reply was cut.
+
+    Contract: ``reply=True`` records the Pass-2 reply; ``field`` appends the name
+    of an extraction (a field, or a completion state's result key) once. The
+    record is a new dict each call (copy-on-write: a snapshot a caller holds
+    never changes) holding JSON-native values only. Written straight into
+    ``context.data``: the key is internal, so it never reaches a prompt or
+    ``API.get_data``. The turn bodies (``_run_turn``, ``_stream_turn``) and the
+    greeting remove it before they start, so it describes the current turn only.
+    A streamed reply is never flagged (the stream carries no finish reason).
+    Callers: the Pass-2 reply and the field extractions in ``pipeline.py``, and
+    the completion executor in ``executors.py`` (it lives here so the executors
+    need no import of the pipeline).
+    """
+    # DECISION plan-2026-11-06T093029-0068b055/D-025: ONE key, set by the
+    # pipeline from the `truncated` flag the LLM layer puts on a response. Do
+    # NOT re-derive the cut in an agent from text (D-022 forbids a text-shape
+    # guess) and do NOT add a second key per kind of reply. See decisions.md D-025.
+    data = instance.context.data
+    record = dict(data.get(CONTEXT_KEY_CUT_OFF) or {})
+    if reply:
+        record["reply"] = True
+    if field is not None and field not in record.get("fields", []):
+        record["fields"] = [*record.get("fields", []), field]
+    data[CONTEXT_KEY_CUT_OFF] = record

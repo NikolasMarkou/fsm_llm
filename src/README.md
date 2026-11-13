@@ -91,6 +91,7 @@ flowchart TD
 - `session.py` - save and restore conversations to JSON files.
 - `validator.py`, `visualizer.py` - check an FSM file for problems; draw it as ASCII art, or as Mermaid or DOT through the graph data of `build_fsm_graph`.
 - `flow_analysis.py` - static analysis of an FSM graph: `strongly_connected_components` (shared with `validator.py`), and the data-flow and liveness checks `analyze_data_flow` and `analyze_liveness` that runtime synthesis uses as gates. It imports only `definitions` and `state_kinds`, never logs, and the validator does not call the two analyses.
+- `executors.py` - what a state's kind does in Pass 1 of a turn: `StateExecutor` (`extract`, `cleans_extracted`, `after_transition`), the conversation executor (the retained field, bulk and classification extraction; also the passive executor of `synthesize`) and the completion executor (one `complete` call over a consumer-owned transcript). The pipeline picks the executor with `executor_for(state)` at its one Pass-1 seam; the module never imports the pipeline and is internal.
 - `runner.py`, `__main__.py` - the interactive command-line chat.
 - `utilities.py` - JSON extraction from LLM text, FSM file loading, shared context walkers.
 - `security.py` - the two key checks every context filter uses: internal keys (`has_internal_prefix`) and secret-looking keys (`is_forbidden_context_entry`), and `resolve_within`, the shared check that a path stays inside a directory (used by the OKF loader and writer and the Agent Skills reads).
