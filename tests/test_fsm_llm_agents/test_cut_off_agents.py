@@ -15,7 +15,7 @@ from typing import Any
 
 from fsm_llm.agents import ReactAgent, REWOOAgent
 from fsm_llm.agents.constants import ContextKeys, ErrorMessages, StopReason
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     CONTEXT_KEY_CUT_OFF,
     FieldExtractionResponse,
     ResponseGenerationRequest,

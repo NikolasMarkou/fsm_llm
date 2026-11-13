@@ -14,7 +14,7 @@ from unittest.mock import Mock
 import pytest
 
 from fsm_llm.constants import ENV_LLM_MODEL
-from fsm_llm.definitions import FSMDefinition, ResponseGenerationResponse
+from fsm_llm.core.definitions import FSMDefinition, ResponseGenerationResponse
 from fsm_llm.llm import LLMInterface
 from fsm_llm.testing import MockLLM2Interface
 from tests.cputime import (  # noqa: F401  (re-exported: the one import path)
@@ -304,7 +304,7 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
     Call this on any mock LLM interface that may be used with the pipeline,
     since the pipeline now calls extract_field instead of extract_data.
     """
-    from fsm_llm.definitions import FieldExtractionResponse
+    from fsm_llm.core.definitions import FieldExtractionResponse
 
     data = mock_data or {"name": "TestUser", "email": "test@test.com", "age": "25"}
 

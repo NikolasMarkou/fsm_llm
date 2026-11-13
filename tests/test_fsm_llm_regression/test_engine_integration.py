@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.core.definitions import FSMDefinition
 from fsm_llm.reasoning.constants import ContextKeys, ReasoningType
 from fsm_llm.reasoning.handlers import OutputFormatter
 from fsm_llm.reasoning.utilities import map_reasoning_type

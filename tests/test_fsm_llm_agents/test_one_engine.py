@@ -24,7 +24,7 @@ from fsm_llm.agents import (
 from fsm_llm.agents.definitions import AgentResult
 from fsm_llm.agents.meta_builder import MetaBuilderResult
 from fsm_llm.agents.semantic_memory import SemanticMemoryStore
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     CompletionRequest,
     CompletionResponse,

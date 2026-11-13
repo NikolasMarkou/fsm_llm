@@ -25,7 +25,7 @@ from dataclasses import dataclass, replace
 from functools import partial
 from typing import Any
 
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     ASCII_IDENTIFIER_PATTERN,
     CompletionRequest,
     FSMDefinition,

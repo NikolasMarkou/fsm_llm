@@ -11,7 +11,7 @@ from fsm_llm.agents.meta_builders import (
     FSMArtifactBuilder,
     WorkflowArtifactBuilder,
 )
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     CompletionRequest,
     CompletionResponse,
     ResponseGenerationRequest,

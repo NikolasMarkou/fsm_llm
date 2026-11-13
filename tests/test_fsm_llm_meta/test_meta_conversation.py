@@ -45,7 +45,7 @@ from fsm_llm.agents.meta_builders import (
     WorkflowArtifactBuilder,
 )
 from fsm_llm.agents.meta_prompts import build_response_format, build_welcome_message
-from fsm_llm.definitions import FSMDefinition, LLMResponseError
+from fsm_llm.core.definitions import FSMDefinition, LLMResponseError
 
 from .conftest import SCRIPTED_REPLY, ScriptedMetaLLM
 
@@ -1296,7 +1296,7 @@ class TestBuildPromptNeverDoubled:
         assert out.count("build it") == 1
 
     def test_the_canned_fallback_ends_with_the_one_sentence(self):
-        from fsm_llm.definitions import LLMResponseError
+        from fsm_llm.core.definitions import LLMResponseError
 
         llm = ScriptedMetaLLM(intents=["workflow"], replies=[LLMResponseError("down")])
         reply = MetaBuilderAgent(llm_interface=llm).start("a data pipeline")

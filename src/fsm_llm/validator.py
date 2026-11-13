@@ -27,7 +27,7 @@ from .constants import (
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
     TRANSITION_CLASSIFICATION_THRESHOLD_KEY,
 )
-from .definitions import (
+from .core.definitions import (
     MAX_CLASSIFICATION_INTENTS,
     CompletionResponse,
     FSMDefinition,
@@ -356,7 +356,7 @@ class FSMValidator:
             #
             # The list is NOT the control. `test_constraint_sweep_validator_agrees_
             # with_loader` in tests/test_fsm_llm/test_validator_unit.py enumerates
-            # the constraints mechanically from `definitions.py` and asserts
+            # the constraints mechanically from `core/definitions/` and asserts
             # agreement as an IFF, so a future constraint that introduces an
             # unlisted type name fails loudly there instead of rotting silently.
             for error in e.errors():

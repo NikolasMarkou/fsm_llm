@@ -18,7 +18,11 @@ from fsm_llm.agents.definitions import ToolCall
 from fsm_llm.agents.handlers import record_tool_step
 from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.api import API
-from fsm_llm.definitions import CompletionStateConfig, FSMDefinition, LLMResponseError
+from fsm_llm.core.definitions import (
+    CompletionStateConfig,
+    FSMDefinition,
+    LLMResponseError,
+)
 from fsm_llm.synthesis import (
     FSMLibrary,
     FSMSynthesizer,
@@ -403,7 +407,7 @@ class TestRun:
             exclude_defaults=True
         )
         data["persona"] = "evil"  # a compile may not set one (G5)
-        from fsm_llm.definitions import FSMDefinition
+        from fsm_llm.core.definitions import FSMDefinition
 
         forged = FSMDefinition(**data)
         rig.library.put(

@@ -13,7 +13,7 @@ from fsm_llm.constants import has_internal_prefix
 from ._common import _edge, _is, _state, _when
 
 if TYPE_CHECKING:  # annotation only: core owns the name, agents keep no copy
-    from fsm_llm.definitions import TypedFieldType
+    from fsm_llm.core.definitions import TypedFieldType
 
 
 def _tool_selection_field_extractions(
@@ -67,7 +67,7 @@ def _tool_selection_field_extractions(
 # Short prose fields (feedback, critiques, reflections, plan step results,
 # ADaPT `attempt_result`, D-057) stay `str`. Answer paths serialise a
 # dict/list with base.artifact_text, which treats empty values as no answer.
-# (Field types: core `fsm_llm.definitions.TypedFieldType`; the builder is core
+# (Field types: core `fsm_llm.core.definitions.TypedFieldType`; the builder is core
 # `typed_field_extraction`.)
 
 # Context every loop-field prompt sees: the task and the tool observations.

@@ -100,7 +100,7 @@ from .constants import (
     ALLOWED_JSONLOGIC_OPERATIONS,
     MAX_JSONLOGIC_DEPTH,
 )
-from .definitions import TransitionEvaluationError
+from .core.definitions import TransitionEvaluationError
 
 # --------------------------------------------------------------
 # Local imports
@@ -859,7 +859,7 @@ def _op_context_length(values: list, data: dict[str, Any], _depth: int) -> int:
 #: Dispatch dict for operators that need direct data access. `var`, `missing`
 #: and `missing_some` never evaluate their arguments; that set is
 #: `constants.JSONLOGIC_RAW_ARGUMENT_OPERATIONS`, which the load-time walk in
-#: definitions.py reads. Keep them in step (pinned by the step-10 audit tests).
+#: core/definitions/transition.py reads. Keep them in step (pinned by the step-10 audit tests).
 _data_operators: dict[str, Any] = {
     "var": _op_var,
     "missing": _op_missing,

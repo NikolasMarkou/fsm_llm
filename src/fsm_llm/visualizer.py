@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict
 # local imports
 # --------------------------------------------------------------
 from .constants import CLI_EXIT_FAILURE, CLI_EXIT_OK
-from .definitions import FSMDefinition, Transition
+from .core.definitions import FSMDefinition, Transition
 from .logging import enable_library_logging, logger, setup_cli_logging
 from .utilities import read_json_object
 

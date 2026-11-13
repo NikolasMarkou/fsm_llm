@@ -30,7 +30,7 @@ from fsm_llm.constants import (
     DEFAULT_COMPLETION_MESSAGES_KEY,
     DEFAULT_COMPLETION_RESULT_KEY,
 )
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     CompletionResponse,
     FSMDefinition,
     FSMError,

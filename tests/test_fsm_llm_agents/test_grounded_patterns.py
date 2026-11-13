@@ -20,7 +20,7 @@ from fsm_llm.agents.debate import DebateAgent
 from fsm_llm.agents.fsm_definitions import loop_field_context_keys
 from fsm_llm.agents.handlers import make_fresh_keys_handler
 from fsm_llm.api import API
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     CompletionResponse,
     FieldExtractionConfig,
@@ -854,7 +854,7 @@ class _TurnAwareLLM(PromptGroundedLLM):
         fn = self.derived.get(request.field_name)
         if fn is None:
             return super().extract_field(request)
-        from fsm_llm.definitions import FieldExtractionResponse
+        from fsm_llm.core.definitions import FieldExtractionResponse
 
         self.requests.append(("extract_field", request))
         context = request.context or {}
@@ -1555,7 +1555,7 @@ class _SequenceLLM(PromptGroundedLLM):
 
     def generate_response(self, request: ResponseGenerationRequest):
         super().generate_response(request)
-        from fsm_llm.definitions import ResponseGenerationResponse
+        from fsm_llm.core.definitions import ResponseGenerationResponse
 
         return ResponseGenerationResponse(
             message=self.replies.pop(0), message_type="response", reasoning="seq"
@@ -3222,7 +3222,7 @@ class TestSuccessReflectsWhoConcluded:
         from types import SimpleNamespace
 
         from fsm_llm.agents import AgentConfig, ReactAgent
-        from fsm_llm.definitions import ClassificationResult
+        from fsm_llm.core.definitions import ClassificationResult
 
         def classify(message: object, context: object = None) -> ClassificationResult:
             return ClassificationResult(reasoning="m", intent="lookup", confidence=1)

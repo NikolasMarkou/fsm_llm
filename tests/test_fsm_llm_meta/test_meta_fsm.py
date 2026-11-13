@@ -45,7 +45,7 @@ from fsm_llm.agents.meta_prompts import (
     build_response_format,
 )
 from fsm_llm.constants import has_internal_prefix
-from fsm_llm.definitions import CompletionRequest, FSMContext, FSMDefinition
+from fsm_llm.core.definitions import CompletionRequest, FSMContext, FSMDefinition
 from fsm_llm.handlers import HandlerTiming, create_handler
 from fsm_llm.transition_evaluator import TransitionEvaluator
 from fsm_llm.validator import FSMValidator

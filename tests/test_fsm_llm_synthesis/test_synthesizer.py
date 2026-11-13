@@ -27,7 +27,7 @@ import synthesis_bench as sb  # read only: the 16 reference hand-written childre
 from fsm_llm import API
 from fsm_llm.agents import HumanInTheLoop
 from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     CompletionResponse,
     DataExtractionResponse,
     FSMDefinition,

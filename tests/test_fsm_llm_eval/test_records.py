@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from fsm_llm.definitions import FSMError
+from fsm_llm.core.definitions import FSMError
 from fsm_llm.eval import (
     EvalConfigError,
     EvalDatasetError,

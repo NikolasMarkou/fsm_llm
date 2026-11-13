@@ -23,7 +23,7 @@ import pytest
 import fsm_llm.testing as public
 import tests.conftest as conftest
 from fsm_llm import API
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     CompletionRequest,
     FieldExtractionRequest,
@@ -461,7 +461,7 @@ class TestNoNetworkNoPytest:
             "socket.socket.connect = refuse\n"
             "socket.create_connection = refuse\n"
             "from fsm_llm.testing import MockLLM2Interface, PromptGroundedLLM\n"
-            "from fsm_llm.definitions import ResponseGenerationRequest\n"
+            "from fsm_llm.core.definitions import ResponseGenerationRequest\n"
             "r = ResponseGenerationRequest(system_prompt='s', user_message='u')\n"
             "assert MockLLM2Interface().generate_response(r).message\n"
             "assert PromptGroundedLLM().generate_response(r).message == 'ok'\n"

@@ -16,8 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from fsm_llm import definitions, flow_analysis
-from fsm_llm.definitions import FSMDefinition, State
+from fsm_llm import flow_analysis
+from fsm_llm.core import definitions
+from fsm_llm.core.definitions import FSMDefinition, State
 from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.state_kinds import kind_of
 from fsm_llm.validator import FSMValidator

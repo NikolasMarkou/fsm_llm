@@ -1426,7 +1426,7 @@ import pydantic
 
 import fsm_llm
 from fsm_llm import visualizer
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.core.definitions import FSMDefinition
 from fsm_llm.visualizer import (
     OUTPUT_FORMATS,
     FSMGraph,

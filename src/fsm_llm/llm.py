@@ -106,7 +106,7 @@ from .constants import (
     USAGE_KIND_EMBED,
     USAGE_KIND_STREAM,
 )
-from .definitions import (
+from .core.definitions import (
     FINISH_REASON_LENGTH,
     RESPONSE_TEXT_MAX_LENGTH,
     BulkExtractionRequest,
@@ -2215,7 +2215,7 @@ class LiteLLMInterface(LLMInterface, _Metered):
         # ENVELOPE-SAFE (below).  Construct-safety alone is not enough, and
         # shipping only half of it caused a real user-facing regression:
         # D-016 capped `message` but not `reasoning`, which carries the SAME
-        # max_length=5000 (definitions.py:157).  So
+        # max_length=5000 (core/definitions/pass_models.py).  So
         # {"message": "Your booking is confirmed.", "reasoning": "R"*9000} failed
         # construction one rung up and landed here, and `content` was still the
         # whole serialized payload — the END USER was shown
@@ -2366,7 +2366,7 @@ class LiteLLMInterface(LLMInterface, _Metered):
                     # (D-016 drops exact 0.0). See decisions.md D-028.
                     confidence = 0.5
                 # D-020: `reasoning` carries max_length=5000 here too
-                # (definitions.py:347) — same trapdoor class as
+                # (core/definitions/pass_models.py) — same trapdoor class as
                 # ResponseGenerationResponse.reasoning.
                 reasoning = _safe_str(data.get("reasoning"))
 

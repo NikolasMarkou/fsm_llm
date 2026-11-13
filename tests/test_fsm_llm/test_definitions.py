@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from fsm_llm import API
-from fsm_llm.definitions import FieldExtractionConfig, FSMDefinition, FSMError
+from fsm_llm.core.definitions import FieldExtractionConfig, FSMDefinition, FSMError
 from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT
 from fsm_llm.validator import FSMValidator
 from tests.test_fsm_llm.support import _a2026_09_22_api, _fsm
@@ -23,7 +23,7 @@ class TestStep7HistorySizeZeroSummary:
     """P1-2: ``max_history_size=0`` digests exchanges before clearing them."""
 
     def test_p1_2_size_zero_summarises_before_clearing(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         conv = Conversation(max_history_size=0)
         conv.add_user_message("hello")
@@ -36,7 +36,7 @@ class TestStep7HistorySizeZeroSummary:
         assert "system: good" in conv.summary
 
     def test_p1_2_size_zero_keeps_the_summary_cap(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         conv = Conversation(max_history_size=0, summary="x" * 1990)
         conv.add_user_message("hello")
@@ -46,7 +46,7 @@ class TestStep7HistorySizeZeroSummary:
         assert conv.summary.startswith("x" * 1990 + " | user: ")
 
     def test_p1_2_summary_already_at_cap_stays_at_cap(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         conv = Conversation(max_history_size=0, summary="y" * 2000)
         conv.add_user_message("hello")
@@ -76,7 +76,7 @@ class TestStep7FSMDefinitionNotFoundError:
     def test_error_pickles_with_its_attributes(self):
         import pickle
 
-        from fsm_llm.definitions import FSMDefinitionNotFoundError
+        from fsm_llm.core.definitions import FSMDefinitionNotFoundError
 
         err = FSMDefinitionNotFoundError("abc123")
         clone = pickle.loads(pickle.dumps(err))
@@ -86,7 +86,7 @@ class TestStep7FSMDefinitionNotFoundError:
         assert clone.details == {"fsm_id": "abc123"}
 
     def test_api_loader_fallback_raises_the_typed_error(self):
-        from fsm_llm.definitions import FSMDefinitionNotFoundError
+        from fsm_llm.core.definitions import FSMDefinitionNotFoundError
 
         api = _a2026_09_22_api()
         with pytest.raises(FSMDefinitionNotFoundError):
@@ -102,7 +102,7 @@ class TestStep7SharedEntityCoercer:
     """Both entity validators delegate to one module-level coercer."""
 
     def test_both_validators_delegate_to_the_shared_function(self):
-        import fsm_llm.definitions as d
+        import fsm_llm.core.definitions.classification as d
 
         real = d._coerce_entity_values
         with patch.object(d, "_coerce_entity_values", wraps=real) as spy:
@@ -113,7 +113,7 @@ class TestStep7SharedEntityCoercer:
         assert [c.args for c in spy.call_args_list] == [({"k": 1},), ({"k": [1, 2]},)]
 
     def test_shared_function_behaviour(self):
-        from fsm_llm.definitions import _coerce_entity_values
+        from fsm_llm.core.definitions.classification import _coerce_entity_values
 
         assert _coerce_entity_values({"a": None, "b": 3, "c": ["x", 1]}) == {
             "a": None,
@@ -184,7 +184,7 @@ class TestFSMInstancePersonaDefault:
     (``prompts`` reads ``instance.persona or fsm_definition.persona``)."""
 
     def test_the_default_is_unset(self):
-        from fsm_llm.definitions import FSMInstance
+        from fsm_llm.core.definitions import FSMInstance
 
         assert FSMInstance(fsm_id="x", current_state="a").persona is None
 

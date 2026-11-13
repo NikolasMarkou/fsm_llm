@@ -18,7 +18,7 @@ from fsm_llm.cli_support import (
     escape_unencodable_output,
     report_error,
 )
-from fsm_llm.definitions import ModelNotConfiguredError
+from fsm_llm.core.definitions import ModelNotConfiguredError
 from fsm_llm.logging import logger, setup_cli_logging
 from fsm_llm.utilities import redacting_json_default
 

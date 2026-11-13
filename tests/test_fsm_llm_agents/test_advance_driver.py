@@ -81,7 +81,7 @@ from fsm_llm.agents.fsm_definitions import (
 from fsm_llm.agents.fsm_definitions._loop import _await_approval_state
 from fsm_llm.agents.handlers import AgentHandlers, approval_grant
 from fsm_llm.agents.verified_react import _REFLECTION_NOTE
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     ClassificationResult,
     ConversationBusyError,

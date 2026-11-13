@@ -24,7 +24,7 @@ from typing import Any
 import pytest
 
 from fsm_llm.classification import IntentRouter
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     ClassificationError,
     ClassificationResult,
     ClassificationSchema,
@@ -353,7 +353,7 @@ class TestSiblingCoercersAgree:
 
     `IntentScore.coerce_entity_values` and
     `ClassificationResult.coerce_entity_values` both delegate to the shared
-    `definitions._coerce_entity_values` (D-010 of plan-2026-09-22T080837-8b258a25,
+    `core/definitions/classification.py` `_coerce_entity_values` (D-010 of plan-2026-09-22T080837-8b258a25,
     pinned in test_definitions.py::TestStep7SharedEntityCoercer). The original defect was precisely
     their divergence.
     """
@@ -380,5 +380,5 @@ class TestSiblingCoercersAgree:
         )
         assert score.entities == single.entities, (
             "IntentScore and ClassificationResult entity coercion have DIVERGED; "
-            "both must delegate to definitions._coerce_entity_values"
+            "both must delegate to core/definitions/classification._coerce_entity_values"
         )

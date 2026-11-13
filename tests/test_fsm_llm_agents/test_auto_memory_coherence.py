@@ -16,7 +16,7 @@ from fsm_llm.agents.definitions import AgentConfig, ToolCall
 from fsm_llm.agents.prompts import build_conclude_response_instructions
 from fsm_llm.agents.semantic_memory import SemanticMemoryStore
 from fsm_llm.agents.tools import ToolRegistry, tool
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
     ResponseGenerationRequest,

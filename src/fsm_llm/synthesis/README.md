@@ -64,7 +64,7 @@ The package ships with `fsm-llm`; the `synthesis` extra adds no dependency. Impo
 
 ```python
 import json, tempfile
-from fsm_llm.definitions import CompletionResponse
+from fsm_llm.core.definitions import CompletionResponse
 from fsm_llm.llm import LLMInterface
 from fsm_llm.synthesis import FSMLibrary, FSMSynthesizer
 from fsm_llm.synthesis.prompts import EXAMPLE_FSM

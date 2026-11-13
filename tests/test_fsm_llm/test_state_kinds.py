@@ -24,7 +24,7 @@ from pydantic import BaseModel, ValidationError
 
 from fsm_llm import state_kinds as sk
 from fsm_llm.api import API
-from fsm_llm.definitions import FSMDefinition, State
+from fsm_llm.core.definitions import FSMDefinition, State
 from tests.test_fsm_llm import kind_corpus as kc
 
 _MODULE = Path(sk.__file__)
@@ -234,7 +234,7 @@ class TestHooks:
         assert sk.SYNTHESIZE.result_key(synth) == "synthesis_result"
 
     def test_result_key_agrees_with_handler_only_names_over_the_corpus(self):
-        from fsm_llm.definitions import handler_only_names
+        from fsm_llm.core.definitions import handler_only_names
 
         for name, (raw, _options) in _CORPUS.items():
             try:
@@ -350,7 +350,7 @@ class TestResultKeyReaders:
     def test_the_readers_equal_the_old_inline_rule_over_the_corpus(self):
         """Guards: the hook output is the rule the readers applied before the
         registry (`state.completion or state.synthesize`), for every corpus state."""
-        from fsm_llm.definitions import handler_only_names
+        from fsm_llm.core.definitions import handler_only_names
         from fsm_llm.flow_analysis import _result_key
 
         checked = 0
@@ -371,7 +371,7 @@ class TestResultKeyReaders:
     @pytest.mark.parametrize(
         ("path", "name", "owner"),
         [
-            ("definitions.py", "handler_only_names", None),
+            ("core/definitions/fsm.py", "handler_only_names", None),
             ("flow_analysis.py", "_result_key", None),
             ("api.py", "_build_push_context", "API"),
         ],
@@ -386,7 +386,7 @@ class TestResultKeyReaders:
         """Guards: `FSMDefinition._check_synthesize_states` builds `owned` from the
         registry; only the synthesize edge rules (step 50) still read `.synthesize`."""
         node = _function_node(
-            _MODULE.parent / "definitions.py",
+            _MODULE.parent / "core" / "definitions" / "fsm.py",
             "_check_synthesize_states",
             "FSMDefinition",
         )
@@ -575,7 +575,7 @@ class TestMintingHooks:
         assert checked > 300 and minting > 50  # the corpus holds both shapes
 
     def test_produced_keys_equal_the_old_flow_rule_over_the_corpus(self):
-        from fsm_llm.definitions import handler_only_names
+        from fsm_llm.core.definitions import handler_only_names
 
         checked = 0
         for name, loaded, state in self._states():
@@ -589,7 +589,7 @@ class TestMintingHooks:
     def test_a_kind_that_mints_nothing_gets_no_config_even_with_explicit_fields(self):
         """A completion state built around the loader (`model_construct`) with an
         explicit extraction still mints nothing: the kind decides, as before."""
-        from fsm_llm.definitions import FieldExtractionConfig
+        from fsm_llm.core.definitions import FieldExtractionConfig
         from fsm_llm.pipeline import MessagePipeline
 
         state = _plain_state(completion=_completion())
@@ -752,7 +752,9 @@ class TestStateValidationHooks:
         """Guards (D-015): `State._validate_extraction_configs` never reads
         `.completion` or `.synthesize` (a new kind would need an edit there)."""
         node = _function_node(
-            _MODULE.parent / "definitions.py", "_validate_extraction_configs", "State"
+            _MODULE.parent / "core" / "definitions" / "state.py",
+            "_validate_extraction_configs",
+            "State",
         )
         assert _config_attributes(node) == set()
 
@@ -1060,7 +1062,7 @@ class TestDefinitionCheckHooks:
         the sample constant; it calls `definition_problem` (a new kind with a
         cross-state rule needs no edit in the loader)."""
         node = _function_node(
-            _MODULE.parent / "definitions.py",
+            _MODULE.parent / "core" / "definitions" / "fsm.py",
             "_check_synthesize_states",
             "FSMDefinition",
         )
@@ -1104,8 +1106,8 @@ class TestDefinitionCheckHooks:
         """`test_codes` reads `definitions._SYNTHESIZE_SAMPLES`; the name stays and
         its value is the one tuple the hook returns (the leaf cannot import
         `codes.Status`, so test_codes pins the strings against the enum)."""
-        from fsm_llm import definitions
         from fsm_llm.codes import Status
+        from fsm_llm.core.definitions import fsm as definitions
 
         state = _plain_state(synthesize=_synthesize())
         assert definitions._SYNTHESIZE_SAMPLES is sk.SYNTHESIZE.sample_results(state)
@@ -1119,7 +1121,7 @@ class TestDefinitionCheckHooks:
     def test_the_evaluator_is_passed_in_and_nothing_else_runs_edges(self):
         """The hook module never imports the evaluator: the one handed to
         `definition_problem` is the one that judges the sample results."""
-        from fsm_llm.definitions import logic_referenced_keys
+        from fsm_llm.core.definitions import logic_referenced_keys
 
         raw = _host_scenarios()["valid"]
         definition = FSMDefinition(**copy.deepcopy(raw))
@@ -1170,7 +1172,7 @@ class TestDefinitionCheckHooks:
             transitions=[_edge("t")],
         )
         definition = SimpleNamespace(states={"s": both}, handler_only_keys=[], name="n")
-        from fsm_llm.definitions import logic_referenced_keys
+        from fsm_llm.core.definitions import logic_referenced_keys
         from fsm_llm.transition_evaluator import TransitionEvaluator
 
         problem = sk.definition_problem(
@@ -2022,19 +2024,19 @@ class TestToolAndProcedureHooks:
 
 
 def _completion_config():
-    from fsm_llm.definitions import CompletionStateConfig
+    from fsm_llm.core.definitions import CompletionStateConfig
 
     return CompletionStateConfig(**_completion())
 
 
 def _synthesize_config():
-    from fsm_llm.definitions import SynthesizeConfig
+    from fsm_llm.core.definitions import SynthesizeConfig
 
     return SynthesizeConfig(**_synthesize())
 
 
 def _edge(target: str):
-    from fsm_llm.definitions import Transition
+    from fsm_llm.core.definitions import Transition
 
     return Transition(target_state=target, description="go")
 
@@ -2107,7 +2109,7 @@ class TestMovedAnchorsStayAnchors:
         assert "Do NOT gate this in the transition evaluator (wrong layer)" in text
 
     def test_the_definitions_pointer_names_the_new_home_of_the_rule(self):
-        text = (_SRC / "definitions.py").read_text(encoding="utf-8")
+        text = (_SRC / "core" / "definitions" / "state.py").read_text(encoding="utf-8")
         assert "D-006 (pipeline.py)" not in text
         assert "_conversation_minted_keys" in text
 

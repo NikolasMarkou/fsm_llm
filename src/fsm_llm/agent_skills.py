@@ -59,7 +59,7 @@ from .constants import (
     SKILL_TEXT_MAX_CHARS,
     SKILL_UNTRUSTED_LABEL,
 )
-from .definitions import SkillError
+from .core.definitions import SkillError
 from .frontmatter import Note, load_yaml, read_bytes, split_frontmatter
 from .okf import capped_issues, capped_line, capped_note, strip_unsafe_text, text_page
 from .security import resolve_within

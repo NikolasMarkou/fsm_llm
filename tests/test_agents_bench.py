@@ -809,7 +809,7 @@ class TestCallMeter:
 
         import fsm_llm.llm
         from fsm_llm.classification import Classifier
-        from fsm_llm.definitions import ClassificationSchema, IntentDefinition
+        from fsm_llm.core.definitions import ClassificationSchema, IntentDefinition
 
         def fake_completion(**kw):
             message = SimpleNamespace(content='{"intent": "buy", "confidence": 0.9}')

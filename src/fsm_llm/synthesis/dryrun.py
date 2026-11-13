@@ -27,7 +27,7 @@ import math
 from collections.abc import Iterable
 from typing import Any
 
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FSMContext,
     FSMDefinition,
     State,

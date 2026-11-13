@@ -100,7 +100,7 @@ import json
 import tempfile
 
 from fsm_llm import API
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     CompletionResponse,
     FieldExtractionResponse,
     ResponseGenerationResponse,

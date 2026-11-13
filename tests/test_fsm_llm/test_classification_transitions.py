@@ -19,7 +19,7 @@ import pytest
 
 def configure_mock_extract_field(mock_llm, mock_data=None):
     """Configure a mock LLM with extract_field support."""
-    from fsm_llm.definitions import FieldExtractionResponse
+    from fsm_llm.core.definitions import FieldExtractionResponse
 
     data = mock_data or {}
 
@@ -48,7 +48,7 @@ from fsm_llm.constants import (
     METADATA_KEY_TRANSITION_CLASSIFICATION,
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
 )
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     ClassificationError,
     ClassificationExtractionConfig,
     ClassificationResponseError,
@@ -1658,7 +1658,7 @@ class _StayHarness:
         return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
 
     def run(self):
-        from fsm_llm.definitions import ClassificationResult
+        from fsm_llm.core.definitions import ClassificationResult
         from fsm_llm.handlers import HandlerTiming
 
         classifier = MagicMock()
@@ -1794,7 +1794,7 @@ class TestClassifierInheritsConnection:
         used to read those attributes)."""
         import threading
 
-        from fsm_llm.definitions import ClassificationSchema, IntentDefinition
+        from fsm_llm.core.definitions import ClassificationSchema, IntentDefinition
         from fsm_llm.llm import LiteLLMInterface, LLMInterface
         from fsm_llm.pipeline import MessagePipeline
 
@@ -1883,7 +1883,7 @@ class TestClassifierIgnoresReservedInterfaceKwargs:
         ``Classifier(...)`` (D-006 of plan 944e2692)."""
         from unittest.mock import MagicMock
 
-        from fsm_llm.definitions import ClassificationSchema, IntentDefinition
+        from fsm_llm.core.definitions import ClassificationSchema, IntentDefinition
         from fsm_llm.pipeline import MessagePipeline
 
         llm = MagicMock(spec=LLMInterface)
@@ -2228,7 +2228,7 @@ def _step12_manager():
 
 
 def _step12_result(confidence: float):
-    from fsm_llm.definitions import ClassificationResult
+    from fsm_llm.core.definitions import ClassificationResult
 
     return ClassificationResult(reasoning="r", intent="a", confidence=confidence)
 
@@ -2263,7 +2263,7 @@ class TestStep12Renames:
         import warnings
 
         from fsm_llm.classification import Classifier
-        from fsm_llm.definitions import ClassificationSchema, IntentDefinition
+        from fsm_llm.core.definitions import ClassificationSchema, IntentDefinition
 
         clf = Classifier(
             schema=ClassificationSchema(

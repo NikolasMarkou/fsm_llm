@@ -41,7 +41,7 @@ from fsm_llm.agents.exceptions import (
     BudgetExhaustedError,
 )
 from fsm_llm.agents.native_fc import _SYSTEM_PROMPT, NativeFCHandlers
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     CompletionResponse,
     LLMResponseError,
     ModelToolCall,

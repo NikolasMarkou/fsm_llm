@@ -24,11 +24,7 @@ import synthesis_bench as sb
 
 import fsm_llm.agents as agents_pkg
 from fsm_llm.agents import ToolCall
-from fsm_llm.definitions import (
-    DataExtractionResponse,
-    FSMDefinition,
-    LLMUsage,
-)
+from fsm_llm.core.definitions import DataExtractionResponse, FSMDefinition, LLMUsage
 from fsm_llm.synthesis import FSMLibrary, SynthesisPolicy, digest_of, run_gates
 from fsm_llm.synthesis.gates import GATES
 from fsm_llm.synthesis.synthesizer import normalise_extraction
@@ -913,7 +909,7 @@ class TestPreflight:
 
 
 def _request():
-    from fsm_llm.definitions import CompletionRequest
+    from fsm_llm.core.definitions import CompletionRequest
 
     return CompletionRequest(messages=[{"role": "user", "content": "hi"}])
 
@@ -1205,7 +1201,7 @@ UNPINNED_CORE = {
     "src/fsm_llm/api.py": "the engine all three arms run on (git_commit shows an edit)",
     "src/fsm_llm/constants.py": "the engine's defaults",
     "src/fsm_llm/context.py": "the engine's context",
-    "src/fsm_llm/definitions.py": "the engine's models",
+    "src/fsm_llm/core/definitions/__init__.py": "the engine's models (facade, read through what the pinned files import)",
     "src/fsm_llm/expressions.py": "the engine's JsonLogic (is_missing)",
     "src/fsm_llm/handlers.py": "the engine's handlers",
     "src/fsm_llm/llm.py": "the one LLM layer",

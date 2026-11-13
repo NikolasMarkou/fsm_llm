@@ -32,7 +32,7 @@ INTERNAL_KEY_PREFIXES = ["_", "system_", "internal_", "__"]
 # DECISION plan-2026-07-19T191147-4b664252/D-009 [STALE]
 # This helper exists because the identical `any(key.startswith(p) ...)`
 # expression was copy-pasted to FIVE call sites (context.py, fsm.py,
-# definitions.py x2, prompts.py) and NONE of them case-folded -- so
+# core/definitions x2, prompts.py) and NONE of them case-folded -- so
 # `SYSTEM_foo` bypassed the filter at every site at once (F-13).
 # Do NOT re-inline `key.startswith(...)` at a call site, and do NOT hardcode
 # the prefix list: five hand-maintained copies is what caused this defect.

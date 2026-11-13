@@ -18,7 +18,7 @@ from typing import Any, ClassVar
 
 import pytest
 
-from fsm_llm.definitions import FSMContext, FSMDefinition
+from fsm_llm.core.definitions import FSMContext, FSMDefinition
 from fsm_llm.expressions import evaluate_logic, is_missing
 from fsm_llm.flow_analysis import FlowFinding, analyze_liveness
 from fsm_llm.logging import logger
@@ -524,7 +524,7 @@ def _oracle(definition, plan, domains) -> set[tuple[str, str]]:
         live[sid] = [e[0] for i, e in enumerate(edges) if i in fired]
         found |= {("edge-unfireable", sid) for i in range(len(edges)) if i not in fired}
     allg = {sid: [e[0] for e in edges] for sid, edges in plan.items()}
-    from fsm_llm.definitions import reachable_from
+    from fsm_llm.core.definitions import reachable_from
 
     start = definition.initial_state
     structural, firing = reachable_from(allg, [start]), reachable_from(live, [start])

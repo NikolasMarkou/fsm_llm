@@ -25,7 +25,7 @@ from fsm_llm.constants import (
     CLI_EXIT_OK,
     ENV_LLM_MODEL,
 )
-from fsm_llm.definitions import ModelNotConfiguredError
+from fsm_llm.core.definitions import ModelNotConfiguredError
 
 from .definitions import MetaBuilderConfig
 from .exceptions import MetaBuilderError

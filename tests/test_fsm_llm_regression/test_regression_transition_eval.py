@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     DataExtractionResponse,
     State,
     Transition,
@@ -172,7 +172,7 @@ class TestContextCleaningEmptyHandlers:
 
     def test_handlers_not_called_after_cleaning_empties_data(self):
         """If clean_context_keys removes all keys, CONTEXT_UPDATE handlers should not fire."""
-        from fsm_llm.definitions import FSMContext, FSMDefinition, FSMInstance
+        from fsm_llm.core.definitions import FSMContext, FSMDefinition, FSMInstance
         from fsm_llm.fsm import FSMManager
         from fsm_llm.handlers import HandlerSystem, HandlerTiming
 
@@ -274,7 +274,7 @@ class TestPopFsmStackOrder:
     def test_stack_preserved_when_end_conversation_fails(self):
         """If end_conversation raises, the stack frame should still be present."""
         from fsm_llm.api import API, FSMStackFrame
-        from fsm_llm.definitions import FSMDefinition, FSMError
+        from fsm_llm.core.definitions import FSMDefinition, FSMError
 
         fsm_def = FSMDefinition.model_validate(
             {

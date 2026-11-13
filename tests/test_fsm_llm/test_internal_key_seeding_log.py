@@ -26,7 +26,7 @@ from loguru import logger
 
 from fsm_llm import API
 from fsm_llm.constants import RESERVED_CONTEXT_KEYS
-from fsm_llm.definitions import FSMContext
+from fsm_llm.core.definitions import FSMContext
 from fsm_llm.handlers import HandlerTiming, create_handler
 from fsm_llm.testing import MockLLM2Interface
 

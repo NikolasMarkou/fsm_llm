@@ -23,7 +23,7 @@ import fsm_llm.frontmatter as frontmatter
 import fsm_llm.okf as okf_module
 from fsm_llm.agent_skills import parse_skill_text
 from fsm_llm.constants import OKF_MAX_FRONTMATTER_BYTES, OKF_MAX_YAML_DEPTH
-from fsm_llm.definitions import OKFError
+from fsm_llm.core.definitions import OKFError
 from fsm_llm.frontmatter import (
     SURROGATE_RE,
     load_yaml,

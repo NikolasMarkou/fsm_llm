@@ -28,7 +28,7 @@ from .constants import (
     OKF_SUMMARY_MAX_ITEMS,
     RESERVED_CONTEXT_KEYS,
 )
-from .definitions import OKFError
+from .core.definitions import OKFError
 from .frontmatter import SURROGATE_RE
 from .handlers import BaseHandler, HandlerTiming, create_handler
 from .okf import (

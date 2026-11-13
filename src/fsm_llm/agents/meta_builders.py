@@ -18,7 +18,7 @@ from typing import Any, ClassVar
 from pydantic import ValidationError
 
 from fsm_llm.agents.constants import MetaDefaults
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     BuildError,
     FSMDefinition,
     ModelNotConfiguredError,

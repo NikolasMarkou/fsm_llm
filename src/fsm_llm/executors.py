@@ -70,7 +70,7 @@ from pydantic import ValidationError
 
 from .constants import COMPLETION_TOOL_CHOICE_KEYWORDS
 from .context import record_cut_off, was_cut_off
-from .definitions import (
+from .core.definitions import (
     CompletionRequest,
     CompletionStateConfig,
     DataExtractionResponse,

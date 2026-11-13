@@ -48,7 +48,7 @@ from .context import (
     record_cut_off,
     was_cut_off,
 )
-from .definitions import (
+from .core.definitions import (
     CONTEXT_KEY_CUT_OFF,
     AdvanceResult,
     BulkExtractionRequest,

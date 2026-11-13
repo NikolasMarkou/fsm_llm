@@ -29,7 +29,7 @@ import re
 import pytest
 
 from fsm_llm.api import API
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FieldExtractionConfig,
     FSMContext,
     FSMDefinition,

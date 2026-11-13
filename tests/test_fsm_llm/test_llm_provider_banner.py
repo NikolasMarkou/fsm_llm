@@ -21,7 +21,7 @@ _SRC = Path(__file__).resolve().parents[2] / "src" / "fsm_llm"
 
 # A provider call that fails fast and offline: nothing listens on 127.0.0.1:1.
 _FAILING_CALL = """
-from fsm_llm.definitions import CompletionRequest, LLMResponseError
+from fsm_llm.core.definitions import CompletionRequest, LLMResponseError
 from fsm_llm.llm import LiteLLMInterface
 
 llm = LiteLLMInterface(

@@ -26,7 +26,7 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS, SKILL_DEFANG
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.core.definitions import FSMDefinition
 from fsm_llm.flow_analysis import analyze_data_flow, analyze_liveness
 from fsm_llm.okf import capped_line
 from fsm_llm.validator import FSMValidator
@@ -145,7 +145,7 @@ def safe_text(text: str, cap: int = _MESSAGE_CHARS) -> str:
 # ASCII. Do NOT defang the note, do NOT keep the loader's tail (cut mid-list by the
 # 300 character cap anyway), do NOT hand-copy the list, and do NOT key on the
 # `Allowed: [` tail alone (another loader message ends the same way).
-#: The loader's own phrase (definitions.py); a test over a real message pins it.
+#: The loader's own phrase (core/definitions/fsm.py); a test over a real message pins it.
 _OPERATOR_FINDING = "Unsupported JsonLogic operator"
 _ALLOWED_TAIL = "Allowed: ["
 

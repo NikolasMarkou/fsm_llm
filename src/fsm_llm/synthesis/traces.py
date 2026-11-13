@@ -20,7 +20,11 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from fsm_llm.definitions import State, TransitionEvaluationResult, logic_referenced_keys
+from fsm_llm.core.definitions import (
+    State,
+    TransitionEvaluationResult,
+    logic_referenced_keys,
+)
 from fsm_llm.okf import capped_line
 
 from .constants import (

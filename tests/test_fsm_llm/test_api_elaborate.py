@@ -15,7 +15,7 @@ import pytest
 
 def configure_mock_extract_field(mock_llm, mock_data=None):
     """Configure a mock LLM with extract_field support."""
-    from fsm_llm.definitions import FieldExtractionResponse
+    from fsm_llm.core.definitions import FieldExtractionResponse
 
     data = mock_data or {}
 
@@ -34,7 +34,7 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 
 
 from fsm_llm.api import API, ContextMergeStrategy
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FSMDefinition,
     FSMError,
     ResponseGenerationResponse,

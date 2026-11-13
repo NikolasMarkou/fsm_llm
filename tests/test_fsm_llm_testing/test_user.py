@@ -20,7 +20,7 @@ import pytest
 import fsm_llm
 import fsm_llm.testing as public
 from fsm_llm import API
-from fsm_llm.definitions import FSMError, RunBudgetExceededError
+from fsm_llm.core.definitions import FSMError, RunBudgetExceededError
 from fsm_llm.eval import ConversationCase, EvalConfig, run_case_trial
 from fsm_llm.eval.cases import Expectations
 from fsm_llm.testing import (

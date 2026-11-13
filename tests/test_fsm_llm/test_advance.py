@@ -18,7 +18,7 @@ from pydantic import ValidationError
 
 import fsm_llm
 from fsm_llm import API, AdvanceResult, FSMError, HandlerTiming, create_handler
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     ClassificationResult,
     DataExtractionResponse,

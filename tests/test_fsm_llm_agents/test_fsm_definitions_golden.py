@@ -39,7 +39,7 @@ from fsm_llm.agents.constants import ContextKeys
 from fsm_llm.agents.definitions import ChainStep
 from fsm_llm.agents.fsm_definitions import _common, _loop, native_fc
 from fsm_llm.agents.tools import ToolRegistry
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.core.definitions import FSMDefinition
 
 
 class _Out(BaseModel):

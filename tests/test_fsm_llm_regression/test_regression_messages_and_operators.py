@@ -10,7 +10,7 @@ class TestV1MessageTruncation:
 
     def test_truncated_message_respects_limit(self):
         """Truncated message (including suffix) must be <= max_message_length."""
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         max_len = 100
         conv = Conversation(max_message_length=max_len)
@@ -25,7 +25,7 @@ class TestV1MessageTruncation:
 
     def test_truncated_system_message_respects_limit(self):
         """System message truncation also respects limit."""
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         max_len = 50
         conv = Conversation(max_message_length=max_len)
@@ -35,7 +35,7 @@ class TestV1MessageTruncation:
 
     def test_exact_length_message_not_truncated(self):
         """Message exactly at max_message_length is NOT truncated."""
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         max_len = 100
         conv = Conversation(max_message_length=max_len)
@@ -48,7 +48,7 @@ class TestV1MessageTruncation:
 
     def test_short_message_not_truncated(self):
         """Message shorter than limit is stored verbatim."""
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         conv = Conversation(max_message_length=1000)
         msg = "Hello world"

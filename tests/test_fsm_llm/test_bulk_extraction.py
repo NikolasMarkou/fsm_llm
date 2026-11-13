@@ -9,7 +9,7 @@ import pytest
 
 from fsm_llm import FileSessionStore
 from fsm_llm.api import API
-from fsm_llm.definitions import BulkExtractionRequest
+from fsm_llm.core.definitions import BulkExtractionRequest
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import LiteLLMInterface
 from tests.test_fsm_llm.support import (
@@ -950,7 +950,7 @@ def _no_config_fsm() -> dict:
 class TestFailedBulkIsSurfacedToPassTwo:
     def test_the_response_field_defaults_to_false(self):
         """GUARD."""
-        from fsm_llm.definitions import DataExtractionResponse
+        from fsm_llm.core.definitions import DataExtractionResponse
 
         assert DataExtractionResponse().extraction_failed is False
 

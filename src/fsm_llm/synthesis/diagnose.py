@@ -20,7 +20,7 @@ from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.core.definitions import FSMDefinition
 
 from .constants import (
     CODE_ABANDONMENT,

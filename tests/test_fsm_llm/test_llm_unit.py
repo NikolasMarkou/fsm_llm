@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fsm_llm.api import API
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FieldExtractionConfig,
     FieldExtractionRequest,
     FieldExtractionResponse,
@@ -961,7 +961,7 @@ class TestDefaultModel:
         from fsm_llm import API, ModelNotConfiguredError
         from fsm_llm.classification import Classifier
         from fsm_llm.constants import ENV_LLM_MODEL
-        from fsm_llm.definitions import ClassificationSchema, IntentDefinition
+        from fsm_llm.core.definitions import ClassificationSchema, IntentDefinition
 
         monkeypatch.delenv(ENV_LLM_MODEL, raising=False)
         fsm = {
@@ -1235,7 +1235,7 @@ class TestStep14LLM:
         ]
 
     def test_p1_7_apology_retry_is_counted(self):
-        from fsm_llm.definitions import ResponseGenerationRequest
+        from fsm_llm.core.definitions import ResponseGenerationRequest
         from fsm_llm.llm import LiteLLMInterface
 
         llm = LiteLLMInterface(model="gpt-4o-mini")
@@ -1256,7 +1256,7 @@ class TestStep14LLM:
         assert llm.apology_retry_count == 1
 
     def test_no_retry_leaves_counter_at_zero(self):
-        from fsm_llm.definitions import ResponseGenerationRequest
+        from fsm_llm.core.definitions import ResponseGenerationRequest
         from fsm_llm.llm import LiteLLMInterface
 
         llm = LiteLLMInterface(model="gpt-4o-mini")

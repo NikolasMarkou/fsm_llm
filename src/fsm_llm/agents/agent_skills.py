@@ -31,7 +31,7 @@ from fsm_llm.constants import (
     SKILL_READ_PAGE_CHARS,
     SKILL_UNTRUSTED_LABEL,
 )
-from fsm_llm.definitions import SkillError
+from fsm_llm.core.definitions import SkillError
 from fsm_llm.okf import capped_line, strip_unsafe_text, text_page
 
 from .definitions import ToolAnnotations

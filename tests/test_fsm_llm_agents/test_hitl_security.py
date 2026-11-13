@@ -45,7 +45,7 @@ from fsm_llm.agents.react import ReactAgent
 from fsm_llm.agents.reflexion import ReflexionAgent
 from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.constants import RESERVED_CONTEXT_KEYS, has_internal_prefix
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     ClassificationResult,
     DataExtractionResponse,
     FieldExtractionRequest,

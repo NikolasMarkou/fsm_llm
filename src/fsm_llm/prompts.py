@@ -36,7 +36,7 @@ from .constants import (
     has_internal_prefix,
     is_forbidden_context_entry,
 )
-from .definitions import (
+from .core.definitions import (
     ClassificationPromptConfig,
     ClassificationSchema,
     FieldExtractionConfig,

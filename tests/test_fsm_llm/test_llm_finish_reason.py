@@ -18,7 +18,7 @@ import pytest
 from litellm.types.utils import Choices, Message, ModelResponse
 
 from fsm_llm.classification import Classifier
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     ClassificationResponseError,
     CompletionRequest,

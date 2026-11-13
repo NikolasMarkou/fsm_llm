@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 import fsm_llm.llm as llm_module
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     DataExtractionResponse,
     LLMUsage,
     ResponseGenerationRequest,

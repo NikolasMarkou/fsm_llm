@@ -15,7 +15,7 @@ from fsm_llm.agents.definitions import AgentConfig, ChainStep
 from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.fsm_definitions import build_prompt_chain_fsm
 from fsm_llm.agents.prompt_chain import PromptChainAgent
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
     FSMDefinition,

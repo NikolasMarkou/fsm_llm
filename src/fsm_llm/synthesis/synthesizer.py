@@ -33,7 +33,7 @@ from fsm_llm.agents.definitions import ToolCall
 from fsm_llm.agents.hitl import HumanInTheLoop
 from fsm_llm.agents.semantic_tools import EmbedTextsFn
 from fsm_llm.constants import SKILL_DEFANG
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     ASCII_IDENTIFIER_PATTERN,
     CompletionRequest,
     CompletionResponse,

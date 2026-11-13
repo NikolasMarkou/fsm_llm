@@ -4,7 +4,7 @@ Exception hierarchy for fsm_llm.monitor package.
 
 from __future__ import annotations
 
-from fsm_llm.definitions import FSMError
+from fsm_llm.core.definitions import FSMError
 
 
 class MonitorError(FSMError):

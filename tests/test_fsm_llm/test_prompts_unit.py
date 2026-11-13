@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from fsm_llm.api import API
 from fsm_llm.constants import MAX_CONTEXT_FILTER_DEPTH
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     ContextScope,
     Conversation,
     FieldExtractionConfig,
@@ -1138,7 +1138,7 @@ class TestClassificationPromptWithoutUserMessage:
     user message) changes their wording."""
 
     def _schema(self):
-        from fsm_llm.definitions import ClassificationSchema, IntentDefinition
+        from fsm_llm.core.definitions import ClassificationSchema, IntentDefinition
 
         return ClassificationSchema(
             intents=[
@@ -1546,7 +1546,7 @@ class TestExtractedDataSectionIsFiltered:
     def test_datetime_value_no_longer_drops_the_extracted_data_section(self):
         import datetime
 
-        from fsm_llm.definitions import FSMContext, FSMDefinition, FSMInstance
+        from fsm_llm.core.definitions import FSMContext, FSMDefinition, FSMInstance
         from fsm_llm.prompts import ResponseGenerationPromptBuilder
 
         fsm = FSMDefinition(**_correction_fsm())
@@ -1613,7 +1613,7 @@ def _a6_fsm() -> FSMDefinition:
     """One looping ``chat`` state that owns a field extraction (so every turn
     builds a per-field prompt) and a Pass-2 response; its edge to ``done`` is
     gated on a key nobody sets."""
-    from fsm_llm.definitions import FieldExtractionConfig
+    from fsm_llm.core.definitions import FieldExtractionConfig
 
     never = TransitionCondition(
         description="never set", logic={"==": [{"var": "never_set_flag"}, True]}
@@ -1795,7 +1795,7 @@ class TestStep06A6:
 
 
 def _step14_history_instance(length: int) -> Any:
-    from fsm_llm.definitions import FSMInstance
+    from fsm_llm.core.definitions import FSMInstance
 
     instance = FSMInstance(fsm_id="f", current_state="s")
     instance.context.conversation.exchanges = [

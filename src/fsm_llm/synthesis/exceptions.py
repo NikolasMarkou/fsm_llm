@@ -1,7 +1,7 @@
 """
 Exception hierarchy for the fsm_llm.synthesis package.
 
-Rooted at ``fsm_llm.definitions.FSMError`` so a caller catching the framework's
+Rooted at ``fsm_llm.core.definitions.FSMError`` so a caller catching the framework's
 base error also catches every synthesis failure.
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fsm_llm.definitions import FSMError
+from fsm_llm.core.definitions import FSMError
 
 
 class SynthesisError(FSMError):

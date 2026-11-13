@@ -108,7 +108,7 @@ from .constants import (
     DEFAULT_TEMPERATURE,
     FSM_ID_HASH_LENGTH,
 )
-from .definitions import (
+from .core.definitions import (
     AdvanceResult,
     ConversationBusyError,
     FSMDefinition,

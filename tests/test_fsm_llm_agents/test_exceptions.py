@@ -12,7 +12,7 @@ from fsm_llm.agents.exceptions import (
     ToolExecutionError,
     ToolNotFoundError,
 )
-from fsm_llm.definitions import FSMError
+from fsm_llm.core.definitions import FSMError
 
 
 class TestExceptionHierarchy:

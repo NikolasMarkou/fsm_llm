@@ -84,7 +84,7 @@ from typing import Any, Protocol
 # Local imports
 # --------------------------------------------------------------
 from .constants import MAX_TIMED_HANDLER_STRAGGLERS
-from .definitions import BuildError, FSMError, checked_key_names
+from .core.definitions import BuildError, FSMError, checked_key_names
 from .logging import logger
 
 # --------------------------------------------------------------

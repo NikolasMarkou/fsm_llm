@@ -9,7 +9,7 @@ import operator
 from typing import Any
 
 from fsm_llm.agents.constants import Defaults
-from fsm_llm.definitions import BuildError, FSMError
+from fsm_llm.core.definitions import BuildError, FSMError
 
 
 class AgentError(FSMError):

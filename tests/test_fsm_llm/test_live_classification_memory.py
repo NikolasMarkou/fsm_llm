@@ -31,7 +31,7 @@ import litellm
 
 from fsm_llm import API, FileSessionStore
 from fsm_llm.classification import Classifier, HierarchicalClassifier
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     ClassificationSchema,
     HierarchicalSchema,
     IntentDefinition,

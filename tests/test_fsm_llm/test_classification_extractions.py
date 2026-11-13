@@ -16,7 +16,7 @@ from fsm_llm.constants import (
     MAX_MULTI_INTENTS,
     METADATA_KEY_CLASSIFICATION_RESULTS,
 )
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     ClassificationError,
     ClassificationExtractionConfig,
     ClassificationResponseError,
@@ -1183,7 +1183,7 @@ class _ClassifiedHarness:
         return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
 
     def run(self):
-        from fsm_llm.definitions import ClassificationResult
+        from fsm_llm.core.definitions import ClassificationResult
 
         classifier = MagicMock()
         classifier.classify.return_value = ClassificationResult(

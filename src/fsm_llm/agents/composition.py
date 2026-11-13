@@ -23,7 +23,7 @@ import contextlib
 from collections.abc import Callable
 from typing import Any
 
-from fsm_llm.definitions import CompletionRequest
+from fsm_llm.core.definitions import CompletionRequest
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.logging import logger
 from fsm_llm.utilities import coerce_confidence, extract_json_from_text

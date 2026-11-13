@@ -13,7 +13,7 @@ import pytest
 
 import fsm_llm
 from fsm_llm import API, FSMManager
-from fsm_llm.definitions import ClassificationResult
+from fsm_llm.core.definitions import ClassificationResult
 from fsm_llm.handlers import HandlerSystem
 from fsm_llm.transition_evaluator import TransitionEvaluatorConfig
 
@@ -69,7 +69,7 @@ class TestRemovedCoreNames:
         with pytest.raises(ImportError):
             from fsm_llm import SchemaValidationError
         with pytest.raises(ImportError):
-            from fsm_llm.definitions import SchemaValidationError  # noqa: F401
+            from fsm_llm.core.definitions import SchemaValidationError  # noqa: F401
 
     @pytest.mark.parametrize(
         "field",
@@ -141,7 +141,7 @@ class TestRemovedCoreNames:
         with pytest.raises(ImportError):
             from fsm_llm.classification import IntentDefinition  # noqa: F401
         from fsm_llm import IntentDefinition as public
-        from fsm_llm.definitions import IntentDefinition as home
+        from fsm_llm.core.definitions import IntentDefinition as home
 
         assert public is home
 
@@ -249,7 +249,7 @@ class TestStep9LeafDeadCode:
         assert "Where:" in lines
 
     def test_additional_info_needed_is_gone(self):
-        from fsm_llm.definitions import DataExtractionResponse
+        from fsm_llm.core.definitions import DataExtractionResponse
 
         assert "additional_info_needed" not in DataExtractionResponse.model_fields
         # Pydantic's default extra="ignore": an old payload still validates.

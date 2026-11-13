@@ -16,7 +16,7 @@ from fsm_llm.agents import (
     tool,
 )
 from fsm_llm.agents.constants import ContextKeys
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
     ResponseGenerationRequest,

@@ -17,7 +17,7 @@ Covers these source modules (all under `src/fsm_llm/agents/`):
 - `exceptions.py` (`MetaBuilderError`, `BuilderError`, `MetaValidationError`, `OutputError`, `AgentError`)
 - `constants.py` (`MetaDefaults`, `MetaBuilderStates`, `MetaContextKeys`, `MetaBuildOutcome`, `META_*` keyword tables and key lists)
 
-Not covered here: `meta_cli.py` (the `fsm-llm-meta` console script), other agent patterns, core FSM runtime (only `fsm_llm.definitions.FSMDefinition` is used to check that `FSMArtifactBuilder.to_dict()` output is valid).
+Not covered here: `meta_cli.py` (the `fsm-llm-meta` console script), other agent patterns, core FSM runtime (only `fsm_llm.core.definitions.FSMDefinition` is used to check that `FSMArtifactBuilder.to_dict()` output is valid).
 
 ## Architecture
 
@@ -123,7 +123,7 @@ Agent:
 
 ## Dependencies
 
-- Internal: `fsm_llm.agents` (modules listed in Scope), `fsm_llm.definitions` (`FSMDefinition`, `CompletionRequest`, `CompletionResponse`, request models), `fsm_llm.llm.LLMInterface`, core `API`.
+- Internal: `fsm_llm.agents` (modules listed in Scope), `fsm_llm.core.definitions` (`FSMDefinition`, `CompletionRequest`, `CompletionResponse`, request models), `fsm_llm.llm.LLMInterface`, core `API`.
 - External: `pytest`; `litellm` only for `litellm.llms.ollama.chat.transformation.OllamaChatConfig` in `TestWorkflowStepTypeEnum` (the meta-builder itself never imports litellm).
 
 ## Failure modes

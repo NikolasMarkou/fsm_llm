@@ -16,7 +16,7 @@ from fsm_llm.agents.definitions import AgentConfig, AgentResult
 from fsm_llm.agents.fsm_definitions import build_orchestrator_fsm
 from fsm_llm.agents.orchestrator import OrchestratorAgent
 from fsm_llm.agents.tools import ToolRegistry
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,

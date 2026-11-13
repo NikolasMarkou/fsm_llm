@@ -38,7 +38,7 @@ from fsm_llm.agents.react import ReactAgent
 from fsm_llm.agents.self_consistency import SelfConsistencyAgent
 from fsm_llm.agents.swarm import SwarmAgent
 from fsm_llm.agents.tools import ToolRegistry
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     CompletionResponse,
     DataExtractionResponse,
     FieldExtractionRequest,

@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from fsm_llm.api import API
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     CompletionResponse,
     FieldExtractionResponse,
     FSMDefinition,

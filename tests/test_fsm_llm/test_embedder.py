@@ -16,7 +16,7 @@ from litellm.types.utils import EmbeddingResponse, Usage
 
 import fsm_llm
 from fsm_llm.constants import RESERVED_EMBEDDING_CALL_KWARGS, USAGE_KIND_EMBED
-from fsm_llm.definitions import LLMResponseError, LLMUsage
+from fsm_llm.core.definitions import LLMResponseError, LLMUsage
 from fsm_llm.llm import LiteLLMEmbedder, LiteLLMInterface
 from fsm_llm.logging import logger
 

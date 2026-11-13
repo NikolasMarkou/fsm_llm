@@ -335,7 +335,8 @@ class TestCoreOwnsTypedFieldsAndKeyClearing:
 
     def test_core_names_exported(self):
         import fsm_llm
-        from fsm_llm import definitions, handlers
+        from fsm_llm import handlers
+        from fsm_llm.core import definitions
 
         assert fsm_llm.typed_field_extraction is definitions.typed_field_extraction
         assert fsm_llm.clear_keys_on_entry is handlers.clear_keys_on_entry
@@ -387,7 +388,7 @@ class TestConfiguredAgentBuilder:
             assert call() is b
 
     def test_default_build_matches_create_agent(self):
-        from fsm_llm.definitions import BuildError  # noqa: F401
+        from fsm_llm.core.definitions import BuildError  # noqa: F401
 
         built = self._builder().add_tool(_search).build()
         direct = create_agent("react", [_search])
@@ -411,7 +412,7 @@ class TestConfiguredAgentBuilder:
         assert (c.max_iterations, c.timeout_seconds) == (4, 9.0)
 
     def test_set_option_model_is_not_filtered(self):
-        from fsm_llm.definitions import BuildError
+        from fsm_llm.core.definitions import BuildError
 
         with pytest.raises(BuildError) as info:
             self._builder().set_option("model", "x").build()
@@ -422,7 +423,7 @@ class TestConfiguredAgentBuilder:
         assert agent._api_kwargs["seed"] == 3
 
     def test_system_prompt_conflict_is_wrapped(self):
-        from fsm_llm.definitions import BuildError
+        from fsm_llm.core.definitions import BuildError
 
         b = (
             self._builder()
@@ -485,7 +486,7 @@ class TestConfiguredAgentBuilder:
     def test_set_option_naming_a_create_agent_parameter_is_refused(
         self, name, value, method
     ):
-        from fsm_llm.definitions import BuildError
+        from fsm_llm.core.definitions import BuildError
 
         with pytest.raises(BuildError) as info:
             self._builder().set_option(name, value).build()
@@ -493,7 +494,7 @@ class TestConfiguredAgentBuilder:
         assert any(repr(name) in e for e in info.value.errors)
 
     def test_set_option_beside_typed_setter_is_refused_by_name(self):
-        from fsm_llm.definitions import BuildError
+        from fsm_llm.core.definitions import BuildError
 
         b = self._builder().set_pattern("debate").set_option("pattern", "react")
         with pytest.raises(BuildError) as info:
@@ -519,7 +520,7 @@ class TestConfiguredAgentBuilder:
         assert agent.tools.tool_names == ["lookup"]
 
     def test_add_tool_with_registry_errors(self):
-        from fsm_llm.definitions import BuildError
+        from fsm_llm.core.definitions import BuildError
 
         b = self._builder().add_tool(_search).set_tool_registry(_registry())
         with pytest.raises(BuildError):
@@ -531,14 +532,14 @@ class TestConfiguredAgentBuilder:
         assert agent.tools is reg
 
     def test_bad_config_option_wraps_validation_error(self):
-        from fsm_llm.definitions import BuildError
+        from fsm_llm.core.definitions import BuildError
 
         with pytest.raises(BuildError) as info:
             self._builder().set_config_option("bogus", 1).build()
         assert isinstance(info.value.__cause__, ValidationError)
 
     def test_toolless_pattern_with_tool_errors(self):
-        from fsm_llm.definitions import BuildError
+        from fsm_llm.core.definitions import BuildError
 
         with pytest.raises(BuildError) as info:
             self._builder().set_pattern("debate").add_tool(_search).build()

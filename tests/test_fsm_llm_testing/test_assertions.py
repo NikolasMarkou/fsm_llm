@@ -22,7 +22,7 @@ import fsm_llm
 import fsm_llm.testing as public
 from fsm_llm import API
 from fsm_llm.codes import CompletionKind, Reason, Status
-from fsm_llm.definitions import CompletionResponse
+from fsm_llm.core.definitions import CompletionResponse
 from fsm_llm.handlers import BaseHandler, HandlerTiming
 from fsm_llm.synthesis.runner import _result as synthesis_result
 from fsm_llm.testing import (

@@ -38,7 +38,7 @@ from .context import ContextCompactor
 # --------------------------------------------------------------
 # Core Definitions and Models
 # --------------------------------------------------------------
-from .definitions import (
+from .core.definitions import (
     # Message-free step result
     AdvanceResult,
     # Exception classes

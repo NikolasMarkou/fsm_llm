@@ -41,7 +41,7 @@ from typing import Any
 
 from fsm_llm.agents.exceptions import require_int_limit
 from fsm_llm.constants import CONTEXT_KEY_AGENT_TRACE, RESERVED_CONTEXT_KEYS
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FSMDefinition,
     State,
     checked_key_names,

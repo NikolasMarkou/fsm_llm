@@ -25,7 +25,7 @@ from .constants import (
     MAX_CONTEXT_FILTER_NODES,
     is_forbidden_context_entry,
 )
-from .definitions import FSMDefinition, FSMDefinitionNotFoundError, FSMError
+from .core.definitions import FSMDefinition, FSMDefinitionNotFoundError, FSMError
 
 # --------------------------------------------------------------
 # Local imports

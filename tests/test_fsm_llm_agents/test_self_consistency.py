@@ -16,7 +16,7 @@ from fsm_llm.agents.definitions import AgentConfig
 from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.fsm_definitions import build_self_consistency_fsm
 from fsm_llm.agents.self_consistency import SelfConsistencyAgent, _majority_vote
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.core.definitions import FSMDefinition
 from fsm_llm.testing import PromptGroundedLLM
 from tests.test_fsm_llm.test_llm_complete import _Provider, _reply
 

@@ -42,7 +42,7 @@ from fsm_llm.agents.constants import (
 from fsm_llm.api import llm_settings_for
 from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT, has_internal_prefix
 from fsm_llm.context import ContextCompactor
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     CONTEXT_KEY_CUT_OFF,
     FSMError,
     RunBudgetExceededError,

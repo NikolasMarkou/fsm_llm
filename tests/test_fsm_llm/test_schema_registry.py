@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     ClassificationExtractionConfig,
     CompletionStateConfig,
     ContextScope,
@@ -595,7 +595,7 @@ class TestLoaderWarnsOncePerDefinitionObject:
     def test_a_collected_definition_leaves_no_entry_behind(self):
         import gc
 
-        from fsm_llm import definitions
+        from fsm_llm.core.definitions import fsm as definitions
 
         definition = FSMDefinition(**self._body())
         key = id(definition)

@@ -23,7 +23,7 @@ from fsm_llm.agents.exceptions import (
 )
 from fsm_llm.agents.fsm_definitions import build_adapt_fsm
 from fsm_llm.agents.tools import ToolRegistry
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,

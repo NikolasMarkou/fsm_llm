@@ -42,7 +42,7 @@ from fsm_llm.constants import (
     OKF_SUMMARY_FIELD_CHARS,
     OKF_SUMMARY_MAX_ITEMS,
 )
-from fsm_llm.definitions import FSMError, OKFError
+from fsm_llm.core.definitions import FSMError, OKFError
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.okf import (
     OKFBundle,

@@ -17,7 +17,12 @@ import pytest
 from fsm_llm.api import API
 from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
 from fsm_llm.context import ContextCompactor, clean_context_keys
-from fsm_llm.definitions import FSMDefinition, State, Transition, TransitionCondition
+from fsm_llm.core.definitions import (
+    FSMDefinition,
+    State,
+    Transition,
+    TransitionCondition,
+)
 from fsm_llm.prompts import BasePromptBuilder
 from fsm_llm.security.names import _token_value_is_credential
 from fsm_llm.security.shapes import _looks_like_credential_value
@@ -278,7 +283,7 @@ class TestConversationSearch:
     """Tests for Conversation.search()."""
 
     def _make_conversation(self, exchanges=None):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         conv = Conversation(max_history_size=100)
         for ex in exchanges or []:
@@ -322,7 +327,7 @@ class TestConversationSearch:
         assert "Second" in results[0]["user"]
 
     def test_search_empty_conversation(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         conv = Conversation()
         assert conv.search("anything") == []
@@ -337,13 +342,13 @@ class TestConversationSummary:
     """Tests for Conversation.summary and _maintain_history_size."""
 
     def test_summary_none_by_default(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         conv = Conversation()
         assert conv.summary is None
 
     def test_summary_populated_on_trim(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         conv = Conversation(max_history_size=2)
         for i in range(5):
@@ -354,7 +359,7 @@ class TestConversationSummary:
         assert len(conv.summary) > 0
 
     def test_summary_contains_trimmed_content(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         conv = Conversation(max_history_size=1)
         conv.add_user_message("My name is Alice and I like pizza")
@@ -366,7 +371,7 @@ class TestConversationSummary:
         assert "Alice" in conv.summary
 
     def test_summary_capped_at_2000_chars(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         conv = Conversation(max_history_size=1)
         # Generate enough messages to exceed 2000 chars in summary
@@ -377,7 +382,7 @@ class TestConversationSummary:
         assert len(conv.summary) <= 2000
 
     def test_get_summary_and_recent(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         conv = Conversation(max_history_size=1)
         conv.add_user_message("Old message")
@@ -390,7 +395,7 @@ class TestConversationSummary:
         assert len(recent) == 2  # 1 exchange = 2 messages
 
     def test_no_summary_when_not_trimmed(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         conv = Conversation(max_history_size=10)
         conv.add_user_message("Hello")
@@ -407,7 +412,7 @@ class TestContextCompactorSummarize:
     """Tests for ContextCompactor.summarize()."""
 
     def test_summarize_without_llm(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         compactor = ContextCompactor()
         conv = Conversation(max_history_size=100)
@@ -420,7 +425,7 @@ class TestContextCompactorSummarize:
         assert conv.summary == result
 
     def test_summarize_empty_conversation(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         compactor = ContextCompactor()
         conv = Conversation()
@@ -431,7 +436,7 @@ class TestContextCompactorSummarize:
         assert compactor.summarize(None) is None
 
     def test_summarize_caps_at_2000_chars(self):
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         compactor = ContextCompactor()
         conv = Conversation(max_history_size=1000)
@@ -446,7 +451,7 @@ class TestContextCompactorSummarize:
     def test_summarize_with_mock_llm(self):
         from unittest.mock import MagicMock
 
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         compactor = ContextCompactor()
         conv = Conversation(max_history_size=100)
@@ -465,7 +470,7 @@ class TestContextCompactorSummarize:
     def test_summarize_llm_failure_falls_back(self):
         from unittest.mock import MagicMock
 
-        from fsm_llm.definitions import Conversation
+        from fsm_llm.core.definitions import Conversation
 
         compactor = ContextCompactor()
         conv = Conversation(max_history_size=100)
@@ -856,7 +861,7 @@ class TestInternalPrefixCaseInsensitivity:
         import threading
         from unittest.mock import Mock
 
-        from fsm_llm.definitions import FSMContext, FSMInstance
+        from fsm_llm.core.definitions import FSMContext, FSMInstance
         from fsm_llm.fsm import FSMManager
         from fsm_llm.llm import LLMInterface
 
@@ -874,13 +879,13 @@ class TestInternalPrefixCaseInsensitivity:
         assert manager.get_conversation_data("conv-1") == {"name": "Alice"}
 
     def test_site_3_fsm_context_update_is_quiet(self):
-        """definitions.py -- FSMContext.update no longer warns on internal prefixes.
+        """core/definitions/fsm.py -- FSMContext.update no longer warns on internal prefixes.
 
         Plan 0068b055 step 12.29 (D-026): every caller that reaches ``update``
         writes the key by name through a public path (agents seed
         ``_max_iterations`` on every run), and the accidental paths (extraction,
         handler delta) never reach it. The site is gone; the keys are stored."""
-        from fsm_llm.definitions import FSMContext
+        from fsm_llm.core.definitions import FSMContext
         from fsm_llm.logging import logger
 
         records: list[str] = []
@@ -899,8 +904,8 @@ class TestInternalPrefixCaseInsensitivity:
         assert context.data["SYSTEM_foo"] == "v"
 
     def test_site_4_get_user_visible_data(self):
-        """definitions.py:991 -- FSMContext.get_user_visible_data."""
-        from fsm_llm.definitions import FSMContext
+        """core/definitions/fsm.py -- FSMContext.get_user_visible_data."""
+        from fsm_llm.core.definitions import FSMContext
 
         context = FSMContext()
         context.data.update(dict.fromkeys(MIXED_CASE_INTERNAL_KEYS, "v"))
@@ -5046,7 +5051,7 @@ class TestUserVisibleData:
     """
 
     def test_bare_system_key_is_visible_like_any_key(self):
-        from fsm_llm.definitions import FSMContext
+        from fsm_llm.core.definitions import FSMContext
 
         context = FSMContext()
         context.data.update(
@@ -5259,7 +5264,7 @@ class TestStep08_1:
         stays a ``ValueError``, so an ``except ValueError`` keeps catching it;
         the old name ``ContextFilterWorkError`` no longer exists."""
         import fsm_llm.utilities as utilities
-        from fsm_llm.definitions import FSMError
+        from fsm_llm.core.definitions import FSMError
         from fsm_llm.fsm import _strip_internal_mapping
 
         cur: dict[str, Any] = {"leaf": 1}
@@ -5510,7 +5515,10 @@ class TestStep08_2:
 def _snapshot_fsm(context_keys: list[str]) -> FSMDefinition:
     """``triage`` owns one classification field whose record snapshots
     ``context_keys``; ``browse`` is the fallback, so the turn stays put."""
-    from fsm_llm.definitions import ClassificationExtractionConfig, IntentDefinition
+    from fsm_llm.core.definitions import (
+        ClassificationExtractionConfig,
+        IntentDefinition,
+    )
 
     triage = State(
         id="triage",

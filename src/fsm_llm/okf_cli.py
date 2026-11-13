@@ -48,7 +48,7 @@ from .constants import (
     OKF_MAX_LOAD_SECONDS,
     OKF_READ_PAGE_CHARS,
 )
-from .definitions import OKFError
+from .core.definitions import OKFError
 from .okf import (
     OKFBundle,
     OKFLimits,

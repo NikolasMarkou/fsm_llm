@@ -20,7 +20,7 @@ import pytest
 from fsm_llm.api import API
 from fsm_llm.constants import PROVENANCE_METADATA_KEY
 from fsm_llm.context import ContextCompactor
-from fsm_llm.definitions import FieldExtractionConfig, FSMError, LLMResponseError
+from fsm_llm.core.definitions import FieldExtractionConfig, FSMError, LLMResponseError
 from fsm_llm.handlers import HandlerExecutionError, HandlerTiming, create_handler
 from fsm_llm.logging import logger
 from fsm_llm.prompts import (

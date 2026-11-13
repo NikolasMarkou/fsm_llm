@@ -24,7 +24,7 @@ from fsm_llm.agents import (
 )
 from fsm_llm.agents.meta_builders import AgentArtifactBuilder
 from fsm_llm.constants import ENV_LLM_MODEL
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     ClassificationSchema,
     HierarchicalSchema,
     IntentDefinition,

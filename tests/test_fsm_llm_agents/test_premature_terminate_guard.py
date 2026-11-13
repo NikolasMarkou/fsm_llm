@@ -23,7 +23,7 @@ from fsm_llm.agents.definitions import AgentConfig
 from fsm_llm.agents.fsm_definitions import build_react_fsm
 from fsm_llm.agents.react import ReactAgent
 from fsm_llm.agents.tools import ToolRegistry
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
     ResponseGenerationRequest,

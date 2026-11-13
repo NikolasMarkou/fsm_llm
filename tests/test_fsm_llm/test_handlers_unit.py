@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fsm_llm import API
-from fsm_llm.definitions import FSMDefinition, FSMError, State, Transition
+from fsm_llm.core.definitions import FSMDefinition, FSMError, State, Transition
 from fsm_llm.handlers import (
     BaseHandler,
     HandlerBuilder,
@@ -1536,7 +1536,7 @@ class TestErrorHandlersFireForFSMErrorAndStream:
     """ERROR handlers run for LLMResponseError and on the stream path only."""
 
     def test_converse_llm_outage_fires_error_handler_once_and_reraises_fsmerror(self):
-        from fsm_llm.definitions import FSMError, LLMResponseError
+        from fsm_llm.core.definitions import FSMError, LLMResponseError
 
         h = _ErrorHandlerHarness("sync")
         p1, p2 = h.patches()
@@ -1551,7 +1551,7 @@ class TestErrorHandlersFireForFSMErrorAndStream:
         assert "_traceback" in h.error_ctxs[0]
 
     def test_converse_failure_still_rolls_back_the_user_message(self):
-        from fsm_llm.definitions import FSMError
+        from fsm_llm.core.definitions import FSMError
 
         h = _ErrorHandlerHarness("sync")
         p1, p2 = h.patches()
@@ -1564,7 +1564,7 @@ class TestErrorHandlersFireForFSMErrorAndStream:
             assert len(api.get_conversation_history(cid)) == before
 
     def test_critical_handler_failure_replaces_fsmerror_with_original_as_cause(self):
-        from fsm_llm.definitions import LLMResponseError
+        from fsm_llm.core.definitions import LLMResponseError
         from fsm_llm.handlers import HandlerExecutionError
 
         h = _ErrorHandlerHarness("sync")
@@ -1579,7 +1579,7 @@ class TestErrorHandlersFireForFSMErrorAndStream:
         assert isinstance(ei.value.__cause__, LLMResponseError)
 
     def test_stream_failure_at_first_token_fires_error_handler(self):
-        from fsm_llm.definitions import FSMError
+        from fsm_llm.core.definitions import FSMError
 
         h = _ErrorHandlerHarness("first")
         p1, p2 = h.patches()
@@ -1728,7 +1728,7 @@ def _collect_fsm() -> dict:
 class TestErrorHandlerReturnIsNotMerged:
     def test_returned_delta_from_error_handler_is_dropped_sync_and_stream(self):
         """ra05 port: Pass-2 failure after a committed Pass 1."""
-        from fsm_llm.definitions import FSMError
+        from fsm_llm.core.definitions import FSMError
 
         fired: list[int] = []
         with _Session(_collect_fsm()) as s:
@@ -1946,7 +1946,7 @@ class _DuckHandlerSystem:
 
 
 def _manager_with(handler_system):
-    from fsm_llm.definitions import FSMDefinition
+    from fsm_llm.core.definitions import FSMDefinition
     from fsm_llm.fsm import FSMManager
 
     definition = FSMDefinition(**_DUCK_FSM)

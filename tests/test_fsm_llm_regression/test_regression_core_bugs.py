@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FSMContext,
     FSMDefinition,
     ResponseGenerationResponse,
@@ -743,7 +743,7 @@ class TestFSMCacheLRU:
 
     def test_lru_eviction_keeps_recently_accessed(self):
         """Accessing a cached entry should protect it from eviction."""
-        from fsm_llm.definitions import FSMDefinition
+        from fsm_llm.core.definitions import FSMDefinition
         from fsm_llm.fsm import FSMManager
 
         def make_def(name):

@@ -14,7 +14,7 @@ from typing import ClassVar, get_args
 
 import pytest
 
-from fsm_llm import codes, definitions
+from fsm_llm import codes
 from fsm_llm.agents.constants import StopReason, ToolRunStatus
 from fsm_llm.codes import (
     CompletionKind,
@@ -24,7 +24,8 @@ from fsm_llm.codes import (
     status_of_stop_reason,
     status_of_tool_status,
 )
-from fsm_llm.definitions import CompletionResponse
+from fsm_llm.core.definitions import CompletionResponse
+from fsm_llm.core.definitions import fsm as definitions
 from fsm_llm.synthesis import constants as synth_constants
 from fsm_llm.synthesis import tools as synth_tools
 

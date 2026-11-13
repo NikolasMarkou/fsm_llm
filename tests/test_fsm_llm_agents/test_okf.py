@@ -47,7 +47,7 @@ from fsm_llm.constants import (
     OKF_READ_PAGE_CHARS,
     OKF_SUMMARY_MAX_ITEMS,
 )
-from fsm_llm.definitions import OKFError
+from fsm_llm.core.definitions import OKFError
 from fsm_llm.logging import logger
 from fsm_llm.okf import (
     OKFBundle,

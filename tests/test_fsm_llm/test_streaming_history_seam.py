@@ -31,7 +31,7 @@ from unittest.mock import patch
 import pytest
 
 from fsm_llm.api import API
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FieldExtractionResponse,
     FSMError,
     ResponseGenerationRequest,

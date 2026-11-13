@@ -39,7 +39,7 @@ from .constants import (
     SKILL_MAX_LOAD_SECONDS,
     SKILL_READ_PAGE_CHARS,
 )
-from .definitions import SkillError
+from .core.definitions import SkillError
 from .okf import capped_line, strip_unsafe_text, text_page
 
 __all__ = ["main", "main_cli"]

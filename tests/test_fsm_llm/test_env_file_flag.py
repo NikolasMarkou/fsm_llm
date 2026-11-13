@@ -40,7 +40,7 @@ import pytest
 
 import fsm_llm
 from fsm_llm import cli_support
-from fsm_llm.definitions import ModelNotConfiguredError
+from fsm_llm.core.definitions import ModelNotConfiguredError
 
 _REPO = Path(fsm_llm.__file__).resolve().parents[2]
 _DATASET = _REPO / "evaluation" / "datasets" / "simple_greeting_cases.json"

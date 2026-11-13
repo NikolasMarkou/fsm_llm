@@ -27,7 +27,7 @@ from pydantic import BaseModel
 from fsm_llm import API
 from fsm_llm import executors as ex
 from fsm_llm import state_kinds as sk
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     DataExtractionResponse,
     FSMDefinition,
     FSMInstance,

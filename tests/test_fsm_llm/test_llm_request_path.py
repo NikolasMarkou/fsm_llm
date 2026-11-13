@@ -15,7 +15,7 @@ import fsm_llm.classification as classification_module
 from fsm_llm import constants
 from fsm_llm.api import API
 from fsm_llm.classification import Classifier
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     ClassificationError,
     ClassificationSchema,

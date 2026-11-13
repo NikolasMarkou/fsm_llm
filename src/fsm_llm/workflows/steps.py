@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # --------------------------------------------------------------
 from fsm_llm import API
 from fsm_llm.constants import has_internal_prefix
-from fsm_llm.definitions import USER_MESSAGE_MAX_CHARS, ResponseGenerationRequest
+from fsm_llm.core.definitions import USER_MESSAGE_MAX_CHARS, ResponseGenerationRequest
 from fsm_llm.logging import logger
 
 from .constants import (

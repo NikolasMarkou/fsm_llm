@@ -22,7 +22,7 @@ from fsm_llm.agents.constants import (
     StopReason,
 )
 from fsm_llm.agents.fsm_definitions.rewoo import build_rewoo_fsm
-from fsm_llm.definitions import CONTEXT_KEY_CUT_OFF
+from fsm_llm.core.definitions import CONTEXT_KEY_CUT_OFF
 from fsm_llm.logging import logger
 
 from .base import BaseAgent, caller_prompt_keys

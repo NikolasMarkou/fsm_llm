@@ -30,7 +30,7 @@ from fsm_llm.constants import (
     SKILL_SKIPPED_NOTE,
     SKILL_UNTRUSTED_LABEL,
 )
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
     ResponseGenerationRequest,

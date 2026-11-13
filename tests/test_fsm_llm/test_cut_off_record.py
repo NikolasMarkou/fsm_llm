@@ -18,7 +18,7 @@ import pytest
 from litellm.types.utils import Choices, Message, ModelResponse
 
 from fsm_llm import API
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     CONTEXT_KEY_CUT_OFF,
     FieldExtractionRequest,
     ResponseGenerationRequest,
@@ -254,7 +254,7 @@ class TestKeyStaysInternal:
 class TestCompletionStateRecordsTheCut:
     def test_a_cut_completion_turn_names_its_result_key(self):
         """The documented result shape ``{kind, text, calls}`` is unchanged."""
-        from fsm_llm.definitions import CompletionResponse
+        from fsm_llm.core.definitions import CompletionResponse
         from tests.test_fsm_llm.test_completion_state import (
             _RESULT,
             _start,
@@ -278,7 +278,7 @@ class TestCompletionStateRecordsTheCut:
         assert set(_raw(api, cid)[_RESULT]) == {"kind", "text", "calls"}
 
     def test_a_whole_completion_turn_records_nothing(self):
-        from fsm_llm.definitions import CompletionResponse
+        from fsm_llm.core.definitions import CompletionResponse
         from tests.test_fsm_llm.test_completion_state import (
             _start,
             _to_call_model,

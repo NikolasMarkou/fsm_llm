@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import Any, TypeVar
 
 from .api import API
-from .definitions import BuildError, FSMDefinition
+from .core.definitions import BuildError, FSMDefinition
 from .fsm import FSMManager
 from .handlers import HandlerErrorMode
 

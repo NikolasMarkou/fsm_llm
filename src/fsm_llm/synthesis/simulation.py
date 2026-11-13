@@ -27,7 +27,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     CompletionRequest,
     FSMDefinition,
     LLMResponseError,

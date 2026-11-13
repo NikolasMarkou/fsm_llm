@@ -13,7 +13,7 @@ from typing import Any, ClassVar
 
 import pytest
 
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.core.definitions import FSMDefinition
 from fsm_llm.synthesis import Diagnosis, RunTrace, SynthesisPolicy, diagnose
 from fsm_llm.synthesis.constants import (
     DIAGNOSIS_CODES,

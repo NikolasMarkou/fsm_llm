@@ -45,7 +45,7 @@ from fsm_llm.agents.composition import default_llm_judge
 from fsm_llm.agents.definitions import default_agent_config
 from fsm_llm.agents.meta_builders import AgentArtifactBuilder
 from fsm_llm.constants import ENV_LLM_MODEL
-from fsm_llm.definitions import ClassificationSchema, IntentDefinition
+from fsm_llm.core.definitions import ClassificationSchema, IntentDefinition
 from fsm_llm.eval import ConversationCase, EvalConfig, run_cases, run_dataset
 from fsm_llm.llm import resolve_model
 from fsm_llm.monitor import InstanceManager
@@ -146,7 +146,7 @@ def _core_api(tmp_path: Path) -> None:
 
 
 def _core_fsm_manager(tmp_path: Path) -> None:
-    from fsm_llm.definitions import FSMDefinition
+    from fsm_llm.core.definitions import FSMDefinition
 
     definition = FSMDefinition.model_validate(_FSM)
     manager = FSMManager(fsm_loader=lambda _id: definition, llm_interface=_double())

@@ -13,10 +13,7 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.definitions import (
-    FieldExtractionResponse,
-    FSMDefinition,
-)
+from fsm_llm.core.definitions import FieldExtractionResponse, FSMDefinition
 from fsm_llm.synthesis import Simulator, SynthesisPolicy, run_gates, simulation
 from fsm_llm.synthesis.dryrun import edge_witnesses
 from fsm_llm.testing import ScriptedLLM

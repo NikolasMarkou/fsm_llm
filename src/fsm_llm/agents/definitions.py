@@ -19,7 +19,7 @@ from fsm_llm.agents.constants import (
     ToolObservationPrefix,
     ToolRunStatus,
 )
-from fsm_llm.definitions import ModelNotConfiguredError
+from fsm_llm.core.definitions import ModelNotConfiguredError
 from fsm_llm.llm import PLACEHOLDER_MODEL, interface_model, resolve_model
 from fsm_llm.logging import logger
 
@@ -33,7 +33,7 @@ from .truncation import smart_truncate
 #      `str.isalnum()` is Unicode-aware, so that check ACCEPTED `検索`, `café_lookup`
 #      and fullwidth digits (U+FF11 U+FF12 U+FF13) — all measured, G-09. No provider
 #      function-calling API will accept.
-#   2. Do NOT swap in core's `fsm_llm.definitions.ASCII_IDENTIFIER_PATTERN`. It forbids
+#   2. Do NOT swap in core's `fsm_llm.core.definitions.ASCII_IDENTIFIER_PATTERN`. It forbids
 #      hyphens, which provider function-calling APIs legitimately allow and tool authors
 #      use (`web-search`). Core's pattern governs FSM state/context identifiers, which is
 #      a different contract; the two are deliberately not shared.

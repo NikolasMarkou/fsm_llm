@@ -31,7 +31,7 @@ from .constants import (
     has_internal_prefix,
 )
 from .context import commit_with_key_rollback
-from .definitions import (
+from .core.definitions import (
     AdvanceResult,
     Conversation,
     ConversationBusyError,

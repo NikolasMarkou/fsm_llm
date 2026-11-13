@@ -23,7 +23,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import fsm_llm
-from fsm_llm.definitions import ModelNotConfiguredError
+from fsm_llm.core.definitions import ModelNotConfiguredError
 
 _SRC = Path(fsm_llm.__file__).resolve().parent
 _MESSAGE = ModelNotConfiguredError.DEFAULT_MESSAGE

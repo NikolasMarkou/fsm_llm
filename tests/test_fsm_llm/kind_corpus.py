@@ -760,7 +760,7 @@ def describe(
 ) -> dict[str, Any]:
     """The unpacked record of one case (see the module docstring)."""
     from fsm_llm import API
-    from fsm_llm.definitions import FSMDefinition, handler_only_names
+    from fsm_llm.core.definitions import FSMDefinition, handler_only_names
     from fsm_llm.flow_analysis import (
         analyze_data_flow,
         analyze_liveness,
@@ -1090,7 +1090,7 @@ def scenarios() -> dict[str, dict[str, Any]]:
 
 
 def _schema_facts() -> dict[str, Any]:
-    from fsm_llm.definitions import FSMDefinition, State
+    from fsm_llm.core.definitions import FSMDefinition, State
 
     return {
         "state_fields": sorted(State.model_fields),

@@ -25,7 +25,7 @@ import fsm_llm.llm as llm_module
 from fsm_llm import constants
 from fsm_llm.classification import Classifier
 from fsm_llm.constants import RESERVED_LLM_CALL_KWARGS
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     CompletionRequest,
     CompletionResponse,
     FieldExtractionRequest,

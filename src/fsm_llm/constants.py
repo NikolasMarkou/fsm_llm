@@ -132,7 +132,7 @@ EMPTY_USER_MESSAGE_TURN = "(empty message)"
 DEFAULT_MAX_HISTORY_SIZE = 5
 DEFAULT_MAX_MESSAGE_LENGTH = 1000
 
-# Upper bound on `persona` (FSMDefinition and FSMInstance, definitions.py).
+# Upper bound on `persona` (FSMDefinition and FSMInstance, core/definitions/fsm.py).
 # Single source for both pydantic caps. Persona is rendered only in the Pass-2
 # response prompt, through the sanitizer; it never reaches Pass-1 field prompts.
 MAX_PERSONA_LENGTH = 4000
@@ -241,7 +241,7 @@ COMPLETION_TOOL_CHOICE_KEYWORDS: frozenset[str] = frozenset(
 CLASSIFIER_HISTORY_EXCHANGES = 3
 
 # Upper bound on intents in one multi-intent classification. Single source for
-# the `MultiClassificationResult.intents` pydantic cap (definitions.py), the
+# the `MultiClassificationResult.intents` pydantic cap (core/definitions/classification.py), the
 # `ClassificationPromptConfig.max_intents` bound (prompts.py) and the
 # truncation in `Classifier.classify_multi` (classification.py).
 MAX_MULTI_INTENTS = 5
@@ -291,7 +291,7 @@ MAX_JSONLOGIC_DEPTH = 50
 
 #: JsonLogic operators whose arguments `evaluate_logic` reads as raw DATA (a
 #: var name and default, key names) and never evaluates as logic. The load-time
-#: walk in definitions.py skips their arguments for the same reason.
+#: walk in core/definitions/transition.py skips their arguments for the same reason.
 JSONLOGIC_RAW_ARGUMENT_OPERATIONS: frozenset[str] = frozenset(
     {"var", "missing", "missing_some"}
 )

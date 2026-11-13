@@ -20,7 +20,7 @@ class TestPostTransitionCurrentState:
 
     def test_post_transition_handler_sees_new_state(self):
         """After transition A->B, POST_TRANSITION should pass current_state=B."""
-        from fsm_llm.definitions import FSMContext, FSMInstance
+        from fsm_llm.core.definitions import FSMContext, FSMInstance
         from fsm_llm.fsm import FSMManager
 
         # Track what current_state POST_TRANSITION receives
@@ -77,7 +77,7 @@ class TestHandlerErrorModeRespected:
 
     def test_raise_mode_propagates_exception(self):
         """When handler_error_mode='raise', handler exceptions should propagate."""
-        from fsm_llm.definitions import FSMContext, FSMInstance
+        from fsm_llm.core.definitions import FSMContext, FSMInstance
         from fsm_llm.fsm import FSMManager
 
         handler_system = HandlerSystem(handler_error_mode="raise")
@@ -108,7 +108,7 @@ class TestHandlerErrorModeRespected:
 
     def test_continue_mode_swallows_exception(self):
         """When handler_error_mode='continue', handler exceptions should be swallowed."""
-        from fsm_llm.definitions import FSMContext, FSMInstance
+        from fsm_llm.core.definitions import FSMContext, FSMInstance
         from fsm_llm.fsm import FSMManager
 
         handler_system = HandlerSystem(handler_error_mode="continue")

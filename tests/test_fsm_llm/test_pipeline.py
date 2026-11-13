@@ -15,7 +15,7 @@ import pytest
 
 def configure_mock_extract_field(mock_llm, mock_data=None):
     """Configure a mock LLM with extract_field support."""
-    from fsm_llm.definitions import FieldExtractionResponse
+    from fsm_llm.core.definitions import FieldExtractionResponse
 
     data = mock_data or {}
 
@@ -41,7 +41,7 @@ from unittest.mock import patch
 
 from fsm_llm.api import API
 from fsm_llm.context import clean_context_keys
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     ContextScope,
     FieldExtractionConfig,
     FieldExtractionResponse,
@@ -782,7 +782,7 @@ class TestProcessPass2FailureIsAtomic:
     """
 
     def _transition_fsm(self):
-        from fsm_llm.definitions import TransitionCondition
+        from fsm_llm.core.definitions import TransitionCondition
 
         return _make_fsm_definition(
             {
@@ -910,7 +910,7 @@ class TestProcessStreamPass2FailureIsAtomic:
     """
 
     def _transition_fsm(self):
-        from fsm_llm.definitions import TransitionCondition
+        from fsm_llm.core.definitions import TransitionCondition
 
         return _make_fsm_definition(
             {
@@ -1263,7 +1263,7 @@ def _mock_bulk_extract_data(extracted: dict):
     ``LiteLLMInterface._make_llm_call`` directly, so these tests mock at the
     new call site.
     """
-    from fsm_llm.definitions import DataExtractionResponse
+    from fsm_llm.core.definitions import DataExtractionResponse
 
     return MagicMock(
         return_value=DataExtractionResponse(extracted_data=extracted, confidence=0.9)
@@ -1529,7 +1529,7 @@ class _RecordingBulk:
     """``extract_bulk_data`` stand-in that keeps every request."""
 
     def __init__(self, extracted=None):
-        from fsm_llm.definitions import DataExtractionResponse
+        from fsm_llm.core.definitions import DataExtractionResponse
 
         self.requests = []
         self._response = DataExtractionResponse(
@@ -1800,7 +1800,7 @@ class TestPromptTooLargeError:
         return API.from_definition(fsm, llm_interface=llm, **kwargs), llm
 
     def test_oversized_context_value_names_key_and_cap(self):
-        from fsm_llm.definitions import FSMError, LLMResponseError
+        from fsm_llm.core.definitions import FSMError, LLMResponseError
 
         api, _ = self._api(_cap_fsm())
         conv, _ = api.start_conversation()
@@ -1819,7 +1819,7 @@ class TestPromptTooLargeError:
         assert "pydantic" not in text.lower()
 
     def test_oversized_message_names_max_message_length(self):
-        from fsm_llm.definitions import FSMError
+        from fsm_llm.core.definitions import FSMError
 
         api, _ = self._api(_cap_fsm(), max_message_length=50000)
         conv, _ = api.start_conversation()
@@ -1859,7 +1859,7 @@ class TestPromptTooLargeError:
         assert warned and "big_notes" in warned[0] and "30000" in warned[0]
 
     def test_failed_turn_rolls_back_and_next_turn_works(self):
-        from fsm_llm.definitions import FSMError
+        from fsm_llm.core.definitions import FSMError
 
         api, _ = self._api(_cap_fsm())
         conv, _ = api.start_conversation()
@@ -1882,7 +1882,7 @@ class TestPromptTooLargeError:
         assert any(value in p for p in prompts)
 
     def test_internal_and_secret_keys_are_never_named(self):
-        from fsm_llm.definitions import LLMResponseError, ResponseGenerationRequest
+        from fsm_llm.core.definitions import LLMResponseError, ResponseGenerationRequest
 
         # The helper is reached directly: update_context refuses these keys.
         with pytest.raises(LLMResponseError) as info:
@@ -1907,7 +1907,7 @@ class TestPromptTooLargeError:
         """PIN (steps 1 and 2): a bare ``system`` entry is public and reaches
         the prompt, so the step-1 error names it; ``system_x`` (internal
         prefix) never reaches a prompt and a secret-looking key is never named."""
-        from fsm_llm.definitions import FSMError, LLMResponseError
+        from fsm_llm.core.definitions import FSMError, LLMResponseError
 
         api, _ = self._api(_cap_fsm())
         conv, _ = api.start_conversation()
@@ -1925,7 +1925,7 @@ class TestPromptTooLargeError:
         # And through the helper, a prompt that is over the cap for another
         # reason never names ``system_x`` or a secret-looking key.
         with pytest.raises(LLMResponseError) as direct:
-            from fsm_llm.definitions import ResponseGenerationRequest
+            from fsm_llm.core.definitions import ResponseGenerationRequest
 
             ResponseGenerationRequest.checked(
                 prompt_context={
@@ -1948,7 +1948,7 @@ class TestPromptTooLargeError:
         the 40,000-char ``big_notes`` context entry, not from the wider history
         window (the history holds no long message), so this pins that a larger
         window changes neither the cap nor the error, not a history overflow."""
-        from fsm_llm.definitions import FSMError, LLMResponseError
+        from fsm_llm.core.definitions import FSMError, LLMResponseError
 
         api, _ = self._api(_cap_fsm(), max_history_size=20)
         conv, _ = api.start_conversation()
@@ -1968,7 +1968,7 @@ class TestPromptTooLargeError:
         """A call with no ``prompt_context`` (a workflow prompt, a long user
         message folded into the prompt) names no entries, so the advice about
         context entries is not given."""
-        from fsm_llm.definitions import LLMResponseError, ResponseGenerationRequest
+        from fsm_llm.core.definitions import LLMResponseError, ResponseGenerationRequest
 
         with pytest.raises(LLMResponseError) as info:
             ResponseGenerationRequest.checked(
@@ -1981,7 +1981,7 @@ class TestPromptTooLargeError:
         assert "largest context entries" not in text
 
     def test_keys_named_keeps_the_context_entry_advice(self):
-        from fsm_llm.definitions import LLMResponseError, ResponseGenerationRequest
+        from fsm_llm.core.definitions import LLMResponseError, ResponseGenerationRequest
 
         with pytest.raises(LLMResponseError) as info:
             ResponseGenerationRequest.checked(
@@ -1995,7 +1995,7 @@ class TestPromptTooLargeError:
         assert "context_scope read_keys, or shorten the history" in text
 
     def test_user_message_branch_wording_is_unchanged(self):
-        from fsm_llm.definitions import LLMResponseError, ResponseGenerationRequest
+        from fsm_llm.core.definitions import LLMResponseError, ResponseGenerationRequest
 
         with pytest.raises(LLMResponseError) as info:
             ResponseGenerationRequest.checked(
@@ -2135,7 +2135,7 @@ class _RecordingLLM(LLMInterface):
         self.stream_requests: list[Any] = []
 
     def generate_response(self, request):
-        from fsm_llm.definitions import ResponseGenerationResponse
+        from fsm_llm.core.definitions import ResponseGenerationResponse
 
         self.requests.append(request)
         return ResponseGenerationResponse(message="real reply")
@@ -2173,7 +2173,7 @@ def _step11_fsm(initial_instructions: str) -> FSMDefinition:
 
 
 def _step11_request(**overrides: Any) -> Any:
-    from fsm_llm.definitions import ResponseGenerationRequest
+    from fsm_llm.core.definitions import ResponseGenerationRequest
 
     fields: dict[str, Any] = {"system_prompt": "A real prompt", "user_message": "hi"}
     fields.update(overrides)
@@ -2216,7 +2216,7 @@ class TestSilentStateMakesNoInterfaceCall:
         ]
 
     def test_request_has_no_skip_field(self):
-        from fsm_llm.definitions import ResponseGenerationRequest
+        from fsm_llm.core.definitions import ResponseGenerationRequest
 
         assert "skip_generation" not in ResponseGenerationRequest.model_fields
         # The model refuses unknown keywords (07ad3f8c/D-044): an old caller's
@@ -2253,7 +2253,7 @@ class TestSilentStateMakesNoInterfaceCall:
         assert completion.call_count == 1
 
     def test_write_only_fields_are_gone_and_old_kwargs_are_refused(self):
-        from fsm_llm.definitions import ResponseGenerationRequest
+        from fsm_llm.core.definitions import ResponseGenerationRequest
 
         for name in ("extracted_data", "context", "previous_state"):
             assert name not in ResponseGenerationRequest.model_fields
@@ -2511,7 +2511,7 @@ class TestOtherFloatSitesDoNotOverflow:
 
     @pytest.mark.parametrize("huge", [10**400, -(10**400)], ids=["pos", "neg"])
     def test_an_embedding_with_a_huge_integer_is_a_refused_reply(self, huge):
-        from fsm_llm.definitions import LLMResponseError
+        from fsm_llm.core.definitions import LLMResponseError
 
         reply = {"data": [{"index": 0, "embedding": [0.5, huge]}]}
         with pytest.raises(LLMResponseError, match="non-finite"):

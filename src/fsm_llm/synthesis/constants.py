@@ -8,7 +8,7 @@ read from there, never copied.
 
 from __future__ import annotations
 
-from fsm_llm.definitions import DEFAULT_SYNTHESIS_RESULT_KEY
+from fsm_llm.core.definitions import DEFAULT_SYNTHESIS_RESULT_KEY
 
 # --- Reserved names (a compiled procedure may never declare or write these) ---
 ABORT_STATE_ID = "abort"

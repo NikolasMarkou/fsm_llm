@@ -237,7 +237,7 @@ class TestLLMInterfaceDirect:
 
     def test_generate_response_returns_message(self):
         """generate_response should return a ResponseGenerationResponse with a message."""
-        from fsm_llm.definitions import (
+        from fsm_llm.core.definitions import (
             ResponseGenerationRequest,
             ResponseGenerationResponse,
         )
@@ -279,7 +279,7 @@ class TestThreadSafety:
         """
         import threading
 
-        from fsm_llm.definitions import FSMError
+        from fsm_llm.core.definitions import FSMError
 
         api = API.from_file(
             SIMPLE_GREETING_FSM,

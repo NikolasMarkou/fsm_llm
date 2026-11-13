@@ -1,13 +1,13 @@
 """
 Exception hierarchy for the fsm_llm.eval package.
 
-Rooted at ``fsm_llm.definitions.FSMError`` so a caller catching the framework's
+Rooted at ``fsm_llm.core.definitions.FSMError`` so a caller catching the framework's
 base error also catches every evaluation failure.
 """
 
 from __future__ import annotations
 
-from fsm_llm.definitions import FSMError
+from fsm_llm.core.definitions import FSMError
 
 
 class EvalError(FSMError):

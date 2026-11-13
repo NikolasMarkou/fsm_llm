@@ -15,7 +15,7 @@ import pytest
 
 from fsm_llm import API, FieldExtractionConfig, typed_field_extraction
 from fsm_llm.constants import EXTRACTION_ENVELOPE_KEYS, FIELD_PROMPT_CONTEXT_LABEL
-from fsm_llm.definitions import TypedFieldType
+from fsm_llm.core.definitions import TypedFieldType
 from fsm_llm.testing import PromptGroundedLLM
 from tests.test_fsm_llm.support import _color_fsm, _fake_response
 
@@ -276,7 +276,10 @@ class TestStrictBoolCoercion:
 
     @staticmethod
     def _validate(value):
-        from fsm_llm.definitions import FieldExtractionConfig, FieldExtractionResponse
+        from fsm_llm.core.definitions import (
+            FieldExtractionConfig,
+            FieldExtractionResponse,
+        )
         from fsm_llm.pipeline import MessagePipeline
 
         return MessagePipeline._validate_field_extraction(
@@ -295,7 +298,7 @@ class TestStrictBoolCoercion:
     def _rung(text):
         from unittest.mock import MagicMock
 
-        from fsm_llm.definitions import FieldExtractionRequest
+        from fsm_llm.core.definitions import FieldExtractionRequest
         from fsm_llm.llm import LiteLLMInterface
 
         response = MagicMock()

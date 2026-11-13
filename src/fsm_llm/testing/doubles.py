@@ -30,7 +30,7 @@ from fsm_llm.constants import (
     USAGE_KIND_COMPLETE,
     USAGE_KIND_STREAM,
 )
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     CompletionRequest,
     CompletionResponse,

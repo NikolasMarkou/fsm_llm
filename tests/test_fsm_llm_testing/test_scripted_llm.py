@@ -21,7 +21,7 @@ import pytest
 
 from fsm_llm import API
 from fsm_llm.codes import CompletionKind
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     CompletionRequest,
     CompletionResponse,

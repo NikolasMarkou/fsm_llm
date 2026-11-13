@@ -21,7 +21,7 @@ from fsm_llm.agents.exceptions import (
 )
 from fsm_llm.agents.meta_builder import MetaBuilderAgent, _normalize_message
 from fsm_llm.agents.meta_prompts import artifact_schema
-from fsm_llm.definitions import CompletionResponse, LLMResponseError
+from fsm_llm.core.definitions import CompletionResponse, LLMResponseError
 
 from .conftest import ScriptedMetaLLM
 
@@ -343,7 +343,7 @@ class TestFewShotFSMExample:
     def test_copied_example_builds_a_loadable_fsm(self):
         import re
 
-        from fsm_llm.definitions import FSMDefinition
+        from fsm_llm.core.definitions import FSMDefinition
 
         class _EchoExample(ScriptedMetaLLM):
             def complete(self, request):
@@ -692,7 +692,7 @@ class TestMetaBuilderThroughCreateAgent:
 
     def test_builder_other_patterns_still_reject_max_turns(self):
         from fsm_llm.agents import ConfiguredAgentBuilder
-        from fsm_llm.definitions import BuildError
+        from fsm_llm.core.definitions import BuildError
 
         with pytest.raises(BuildError):
             (

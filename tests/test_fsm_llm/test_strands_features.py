@@ -19,7 +19,10 @@ from fsm_llm import (
     SessionState,
     WorkingMemory,
 )
-from fsm_llm.definitions import ResponseGenerationRequest, ResponseGenerationResponse
+from fsm_llm.core.definitions import (
+    ResponseGenerationRequest,
+    ResponseGenerationResponse,
+)
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.logging import logger as _fsm_logger
 from fsm_llm.memory import BUFFER_METADATA, DEFAULT_HIDDEN_BUFFERS
@@ -86,7 +89,7 @@ class MockLLM(LLMInterface):
             yield word + " "
 
     def extract_field(self, request):
-        from fsm_llm.definitions import FieldExtractionResponse
+        from fsm_llm.core.definitions import FieldExtractionResponse
 
         return FieldExtractionResponse(
             field_name=request.field_name,

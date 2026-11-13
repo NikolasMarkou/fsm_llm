@@ -28,7 +28,7 @@ from fsm_llm.agents.native_fc import NativeFunctionCallingReactAgent
 from fsm_llm.agents.parallel_react import ParallelReactAgent
 from fsm_llm.agents.rewoo import REWOOAgent
 from fsm_llm.agents.tools import ToolRegistry, redact_secret_entries
-from fsm_llm.definitions import CompletionResponse, ModelToolCall
+from fsm_llm.core.definitions import CompletionResponse, ModelToolCall
 from fsm_llm.logging import logger
 from fsm_llm.memory import BUFFER_CORE, BUFFER_METADATA, WorkingMemory
 from tests.test_fsm_llm.test_completion_state import _ScriptedLLM

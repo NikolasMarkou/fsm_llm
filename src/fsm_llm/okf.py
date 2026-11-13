@@ -48,7 +48,7 @@ from .constants import (
     OKF_MAX_YAML_DEPTH,
     OKF_SUMMARY_FIELD_CHARS,
 )
-from .definitions import OKFError
+from .core.definitions import OKFError
 from .logging import logger
 from .security import resolve_within
 

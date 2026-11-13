@@ -15,7 +15,7 @@ import pytest
 
 from fsm_llm import expressions
 from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FSMContext,
     Transition,
     TransitionCondition,
@@ -356,7 +356,7 @@ class TestExpressionEvaluator:
         # Unsupported operator raises TransitionEvaluationError
         import pytest
 
-        from fsm_llm.definitions import TransitionEvaluationError
+        from fsm_llm.core.definitions import TransitionEvaluationError
 
         with pytest.raises(
             TransitionEvaluationError, match="Disallowed JsonLogic operation"
@@ -732,7 +732,7 @@ class TestFailedArithmeticIsUndefined:
     def test_division_by_zero_still_raises(self):
         import pytest
 
-        from fsm_llm.definitions import TransitionEvaluationError
+        from fsm_llm.core.definitions import TransitionEvaluationError
 
         with pytest.raises(TransitionEvaluationError):
             evaluate_logic({"/": [1, 0]})

@@ -26,7 +26,7 @@ import pytest
 from fsm_llm import FileSessionStore
 from fsm_llm import api as api_module
 from fsm_llm.api import API
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.core.definitions import FSMDefinition
 from fsm_llm.testing import MockLLM2Interface
 from tests.test_fsm_llm.support import _blocked_fsm, _correction_fsm, _Prov
 
@@ -193,7 +193,7 @@ class TestSingleThreadedStackNonRegression:
         assert _frame_ids(api, conv_id) == [conv_id]
 
     def test_pop_with_only_root_frame_still_raises(self, api):
-        from fsm_llm.definitions import FSMError
+        from fsm_llm.core.definitions import FSMError
 
         conv_id, _ = api.start_conversation()
         with pytest.raises(FSMError, match="only one FSM remaining"):

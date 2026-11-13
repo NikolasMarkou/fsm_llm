@@ -10,7 +10,7 @@ from typing import Any
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-from fsm_llm.definitions import BuildError
+from fsm_llm.core.definitions import BuildError
 
 from .definitions import WorkflowDefinition
 from .exceptions import WorkflowDefinitionError, WorkflowValidationError

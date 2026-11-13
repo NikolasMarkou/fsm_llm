@@ -4,7 +4,7 @@ Custom exception hierarchy for the reasoning engine.
 
 from __future__ import annotations
 
-from fsm_llm.definitions import FSMError
+from fsm_llm.core.definitions import FSMError
 
 
 class ReasoningError(FSMError):

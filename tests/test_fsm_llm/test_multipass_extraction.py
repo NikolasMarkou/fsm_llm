@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FieldExtractionResponse,
     FSMContext,
     FSMDefinition,
@@ -118,7 +118,7 @@ def _make_mock_llm():
 
 def _make_pipeline(fsm_def=None, llm=None):
     if fsm_def is None:
-        from fsm_llm.definitions import Transition
+        from fsm_llm.core.definitions import Transition
 
         fsm_def = _make_fsm_definition(
             {

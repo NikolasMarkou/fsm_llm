@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.definitions import CompletionResponse, FSMDefinition, LLMResponseError
+from fsm_llm.core.definitions import CompletionResponse, FSMDefinition, LLMResponseError
 from fsm_llm.synthesis import (
     Diagnosis,
     FSMLibrary,

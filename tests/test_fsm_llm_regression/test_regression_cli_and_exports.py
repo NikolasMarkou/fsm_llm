@@ -299,7 +299,7 @@ class TestConsolidatedAll:
 
     def test_okf_and_skill_errors_are_exported_with_the_other_exceptions(self):
         import fsm_llm
-        from fsm_llm import definitions
+        from fsm_llm.core import definitions
 
         for name in ("OKFError", "SkillError"):
             assert name in fsm_llm.__all__

@@ -160,7 +160,7 @@ class TestBfsPerformance:
         builders share) should use collections.deque for BFS."""
         import inspect
 
-        from fsm_llm.definitions import reachable_from
+        from fsm_llm.core.definitions import reachable_from
 
         source = inspect.getsource(reachable_from)
         assert "deque" in source, "reachable_from should use deque, not list.pop(0)"
@@ -237,7 +237,7 @@ class TestTransitionEvaluatorLowConfidence:
         When there is only one valid transition path, blocking it based on an
         arbitrary confidence formula is incorrect — it's the only option.
         """
-        from fsm_llm.definitions import (
+        from fsm_llm.core.definitions import (
             State,
             Transition,
             TransitionCondition,
@@ -455,7 +455,7 @@ class TestConversationMemoryLeak:
     def test_end_conversation_cleans_up_stacks(self):
         """end_conversation should remove entries from conversation_stacks."""
         from fsm_llm.api import API, FSMStackFrame
-        from fsm_llm.definitions import FSMDefinition, State
+        from fsm_llm.core.definitions import FSMDefinition, State
 
         api = API.__new__(API)
         api.conversation_stacks = {

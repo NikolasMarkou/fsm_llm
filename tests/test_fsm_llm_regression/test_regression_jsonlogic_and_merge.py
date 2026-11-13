@@ -4,11 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm.definitions import (
-    FSMContext,
-    FSMDefinition,
-    State,
-)
+from fsm_llm.core.definitions import FSMContext, FSMDefinition, State
 from fsm_llm.expressions import (
     evaluate_logic,
     greater,
@@ -35,7 +31,7 @@ class TestEvaluateLogicMultiKey:
 
     def test_multi_key_dict_raises(self):
         """A dict with >1 key should raise TransitionEvaluationError."""
-        from fsm_llm.definitions import TransitionEvaluationError
+        from fsm_llm.core.definitions import TransitionEvaluationError
 
         with pytest.raises(TransitionEvaluationError, match="multiple keys"):
             evaluate_logic({">": [5, 3], "<": [5, 3]}, {})
@@ -258,7 +254,7 @@ class TestExceptionChaining:
     def test_handle_conversation_errors_chains_exception(self):
         """The handle_conversation_errors decorator should use `from e`."""
         from fsm_llm.api import handle_conversation_errors
-        from fsm_llm.definitions import FSMError
+        from fsm_llm.core.definitions import FSMError
 
         @handle_conversation_errors
         def failing_method(self, conversation_id):
@@ -398,7 +394,7 @@ class TestHistoryRoleHandling:
         """user stays user, any-case system stays system, an unknown role is system."""
         import json
 
-        from fsm_llm.definitions import FSMInstance
+        from fsm_llm.core.definitions import FSMInstance
 
         instance = FSMInstance(fsm_id="f", current_state="s")
         instance.context.conversation.exchanges = [

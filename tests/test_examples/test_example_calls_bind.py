@@ -440,7 +440,7 @@ class TestExampleCallsBind:
                 "missing a required argument: 'path'",
             ),
             (
-                "from fsm_llm.definitions import State\nState(id='a', bogus=1)\n",
+                "from fsm_llm.core.definitions import State\nState(id='a', bogus=1)\n",
                 "unknown fields ['bogus']",
             ),
             (

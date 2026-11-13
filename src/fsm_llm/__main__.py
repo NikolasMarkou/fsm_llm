@@ -34,7 +34,7 @@ Positional / required arguments
 
 ``--fsm, -f``
     Path to a *JSON* file containing a Finite-State-Machine definition
-    (see :pyfile:`definitions.py` for the concrete schema).
+    (see :pyfile:`core/definitions/` for the concrete schema).
 
 Optional switches
 ^^^^^^^^^^^^^^^^^
@@ -87,7 +87,7 @@ from .constants import (
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
 )
-from .definitions import ModelNotConfiguredError
+from .core.definitions import ModelNotConfiguredError
 
 # --------------------------------------------------------------
 

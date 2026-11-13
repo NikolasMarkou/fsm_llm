@@ -27,7 +27,7 @@ from fsm_llm import (
     create_handler,
 )
 from fsm_llm.classification import Classifier
-from fsm_llm.definitions import FieldExtractionRequest, FieldExtractionResponse
+from fsm_llm.core.definitions import FieldExtractionRequest, FieldExtractionResponse
 from fsm_llm.llm import LiteLLMInterface
 from tests.test_fsm_llm.test_advance import (
     _CHUNKS,

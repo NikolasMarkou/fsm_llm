@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fsm_llm.api import API, ContextMergeStrategy
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     AdvanceResult,
     FSMContext,
     FSMDefinition,

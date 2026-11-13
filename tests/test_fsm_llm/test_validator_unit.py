@@ -30,7 +30,7 @@ from pydantic import BaseModel, ValidationError
 import fsm_llm.logging as fsm_llm_logging
 from fsm_llm.api import API
 from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     ContextScope,
     FieldExtractionConfig,
     FSMContext,
@@ -757,7 +757,7 @@ class TestValidatorAgreesWithFSMDefinition:
         Do NOT re-invert this test to "restore" coercion leniency. Doing so
         reintroduces the false green AND puts the suite back in contradiction
         with `test_constraint_sweep_validator_agrees_with_loader`, which derives
-        the same conclusion mechanically from `definitions.py`. If deliberate
+        the same conclusion mechanically from `core/definitions/`. If deliberate
         coercion leniency is ever genuinely wanted, it has to be implemented in
         the LOADER first -- the validator only ever mirrors the loader.
         """
@@ -876,7 +876,7 @@ class TestValidatorAgreesWithFSMDefinition:
 # false greens.
 #
 # So this sweep does NOT enumerate type names or fields by hand. It walks
-# `definitions.py` reflectively from `FSMDefinition`, derives one violating
+# `core/definitions/` reflectively from `FSMDefinition`, derives one violating
 # fixture per declared constraint, and asserts agreement as an IFF. A future
 # `Field(...)` constraint that introduces an unlisted pydantic type name fails
 # HERE, loudly, on the commit that adds it.
@@ -888,13 +888,22 @@ class TestValidatorAgreesWithFSMDefinition:
 
 
 def _definitions_namespace():
-    import fsm_llm.definitions as definitions_module
+    """The names of every module of the `fsm_llm.core.definitions` package, merged:
+    a model's annotation is a string resolved in its own module's namespace."""
+    import importlib
+    import pkgutil
 
-    return vars(definitions_module)
+    import fsm_llm.core.definitions as definitions_package
+
+    namespace: dict = {}
+    for info in pkgutil.iter_modules(definitions_package.__path__):
+        module = importlib.import_module(f"{definitions_package.__name__}.{info.name}")
+        namespace.update(vars(module))
+    return namespace
 
 
 def _resolve_annotation(annotation):
-    """Resolve str / `ForwardRef` annotations against `fsm_llm.definitions`.
+    """Resolve str / `ForwardRef` annotations against `fsm_llm.core.definitions`.
 
     Load-bearing, not defensive: `ClassificationExtractionConfig.intents` is
     stored by pydantic as an UNRESOLVED `ForwardRef('list[IntentDefinition]')`.
@@ -1106,7 +1115,7 @@ def _maximal_fsm_data():
 
 # Where an instance of each reachable model lives inside `_maximal_fsm_data()`.
 # Coverage is asserted against the reflective walk, so a NEW model added to
-# definitions.py fails the suite until it is anchored here.
+# core/definitions/ fails the suite until it is anchored here.
 _MODEL_ANCHORS = {
     "FSMDefinition": (),
     "State": ("states", "start"),
@@ -1135,7 +1144,7 @@ _MODEL_ANCHORS = {
 # One violating mutation per `model_validator`/`field_validator`. These cannot be
 # derived reflectively -- the rule lives in the function body -- so they are
 # hand-authored, and `test_every_validator_has_a_violating_fixture` fails the
-# moment definitions.py grows a validator with no entry here.
+# moment core/definitions/ grows a validator with no entry here.
 _VALIDATOR_VIOLATIONS = {
     ("FSMDefinition", "validate_fsm_structure"): (
         ("initial_state",),
@@ -1286,7 +1295,7 @@ def _all_agreement_cases():
 
 class TestConstraintSweepAgreement:
     """SC-1: `fsm-llm-validate` agrees with `API.from_file` on EVERY constraint
-    mechanically enumerated from `definitions.py`, in BOTH directions."""
+    mechanically enumerated from `core/definitions/`, in BOTH directions."""
 
     def test_maximal_fixture_is_accepted_by_both_layers(self):
         """Precondition. If the base fixture were already invalid, every case
@@ -1295,9 +1304,9 @@ class TestConstraintSweepAgreement:
         assert FSMValidator(_maximal_fsm_data()).validate().is_valid is True
 
     def test_every_reachable_model_is_anchored(self):
-        """A new model in definitions.py must fail HERE, not slip through.
+        """A new model in core/definitions/ must fail HERE, not slip through.
 
-        Without this, a model added to `definitions.py` and wired into
+        Without this, a model added to `core/definitions/` and wired into
         `FSMDefinition` would simply never be swept -- its constraints would be
         silently unmeasured, which is precisely how the previous false-green
         surface stayed invisible across three plans.
@@ -1827,7 +1836,7 @@ class TestValidateCliEmitsOutput:
 
 def _dumped_fsm_with_required_keys() -> dict:
     """model_dump() writes explicit None for absent Optional containers."""
-    from fsm_llm.definitions import FSMDefinition
+    from fsm_llm.core.definitions import FSMDefinition
 
     definition = FSMDefinition(
         **{
@@ -2273,7 +2282,7 @@ class TestHandlerOnlyKeys:
         assert data["other"] == 1
 
     def test_the_field_defaults_to_empty_and_v41_json_without_it_loads(self):
-        from fsm_llm.definitions import FSMDefinition
+        from fsm_llm.core.definitions import FSMDefinition
 
         without = _xstate_fsm()
         assert "handler_only_keys" not in without
@@ -2283,7 +2292,7 @@ class TestHandlerOnlyKeys:
         ]
 
     def test_the_validator_and_the_cli_accept_the_field(self, tmp_path):
-        from fsm_llm.definitions import FSMDefinition
+        from fsm_llm.core.definitions import FSMDefinition
         from fsm_llm.validator import FSMValidator, validate_fsm_from_file
 
         listed = _xstate_fsm(["is_admin"])
@@ -2337,7 +2346,7 @@ class TestHandlerOnlyKeysValidatorWarnings:
             build_react_fsm,
         )
         from fsm_llm.agents.tools import ToolRegistry
-        from fsm_llm.definitions import FSMDefinition
+        from fsm_llm.core.definitions import FSMDefinition
 
         built = (
             build_react_fsm(ToolRegistry()),
@@ -2609,7 +2618,7 @@ class TestStep10B5B6B9B10:
     @pytest.mark.parametrize("levels", [49, 50, 51, 52])
     def test_b5_load_acceptance_agrees_with_evaluate_logic(self, levels):
         """The load-time depth bound is exactly the runtime one."""
-        from fsm_llm.definitions import TransitionEvaluationError
+        from fsm_llm.core.definitions import TransitionEvaluationError
         from fsm_llm.expressions import evaluate_logic
 
         logic = _b5_chain(levels)
@@ -2656,7 +2665,7 @@ class TestStep10B5B6B9B10:
         """Per operator: an unknown operator in its argument position is
         rejected at load iff ``evaluate_logic`` evaluates that argument as logic
         (so ``JSONLOGIC_RAW_ARGUMENT_OPERATIONS`` matches the runtime)."""
-        from fsm_llm.definitions import TransitionEvaluationError
+        from fsm_llm.core.definitions import TransitionEvaluationError
         from fsm_llm.expressions import evaluate_logic
 
         logic = {operator: [{"bogus": 1}, {"bogus": 1}]}
@@ -2894,7 +2903,7 @@ class TestStep11B7B11B12B13:
     def test_b11_dead_branch_removed(self):
         import inspect
 
-        from fsm_llm import definitions
+        from fsm_llm.core import definitions
 
         source = inspect.getsource(definitions.FSMDefinition)
         assert "unreachable_terminals" not in source
@@ -3321,7 +3330,7 @@ class TestSharedGraphWalkAndSchema:
     """F-DV-14 / F-DV-05: the one reachability walk and the one cap."""
 
     def test_reachable_from_follows_edges_and_tolerates_unknown_nodes(self):
-        from fsm_llm.definitions import reachable_from
+        from fsm_llm.core.definitions import reachable_from
 
         adjacency = {"a": ["b", "ghost"], "b": ["a", "c"], "c": [], "d": ["a"]}
         assert reachable_from(adjacency, ["a"]) == {"a", "b", "c", "ghost"}
@@ -3329,7 +3338,7 @@ class TestSharedGraphWalkAndSchema:
         assert reachable_from(adjacency, ["c", "d"]) == {"a", "b", "c", "d", "ghost"}
 
     def test_the_config_inherits_the_schema_and_its_cap(self):
-        from fsm_llm.definitions import (
+        from fsm_llm.core.definitions import (
             MAX_CLASSIFICATION_INTENTS,
             ClassificationExtractionConfig,
             ClassificationSchema,

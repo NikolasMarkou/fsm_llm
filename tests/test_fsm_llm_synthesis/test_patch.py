@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.definitions import FSMError
+from fsm_llm.core.definitions import FSMError
 from fsm_llm.synthesis import (
     PatchError,
     SynthesisError,

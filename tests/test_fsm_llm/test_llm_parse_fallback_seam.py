@@ -24,7 +24,7 @@ from litellm.types.utils import Message
 
 from fsm_llm.api import API
 from fsm_llm.classification import Classifier
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     RESPONSE_TEXT_MAX_LENGTH,
     BulkExtractionRequest,
     ClassificationResponseError,
@@ -1599,7 +1599,7 @@ class TestInlineCodeFenceIsKept:
 
     def test_json_inside_a_mid_text_fence_is_still_recovered(self):
         """D-030: fences in mid-text are not stripped, extract_json_from_text finds the JSON."""
-        from fsm_llm.definitions import BulkExtractionRequest
+        from fsm_llm.core.definitions import BulkExtractionRequest
 
         wrapped = 'text\n```json\n{"message": "hi"}\n```\nmore'
         assert _generate(wrapped) == "hi"
@@ -1724,7 +1724,7 @@ class TestClosingFenceNeedsALeadingFence:
         """GUARD: the JSON ladder recovers the object; the trade-off costs nothing."""
         from unittest.mock import patch
 
-        from fsm_llm.definitions import FieldExtractionRequest
+        from fsm_llm.core.definitions import FieldExtractionRequest
         from fsm_llm.llm import LiteLLMInterface
         from tests.test_fsm_llm.support import _fake_response
 
@@ -1751,7 +1751,7 @@ class TestClosingFenceNeedsALeadingFence:
         """GUARD: same, through extract_bulk_data."""
         from unittest.mock import patch
 
-        from fsm_llm.definitions import BulkExtractionRequest
+        from fsm_llm.core.definitions import BulkExtractionRequest
         from fsm_llm.llm import LiteLLMInterface
         from tests.test_fsm_llm.support import _fake_response
 
@@ -1978,7 +1978,7 @@ class TestStep08D1D5:
     # -- D4 --------------------------------------------------------------
 
     def test_d4_flat_reply_envelope_keys_dropped(self):
-        from fsm_llm.definitions import BulkExtractionRequest
+        from fsm_llm.core.definitions import BulkExtractionRequest
         from fsm_llm.llm import LiteLLMInterface
 
         llm = LiteLLMInterface(model="test", api_key="test")
@@ -2062,7 +2062,7 @@ def _d_llm() -> Any:
 
 
 def _d_field_request(name: str = "email") -> Any:
-    from fsm_llm.definitions import FieldExtractionRequest
+    from fsm_llm.core.definitions import FieldExtractionRequest
 
     return FieldExtractionRequest(
         system_prompt="extract", user_message="mail me", field_name=name
@@ -2363,7 +2363,7 @@ class TestStep15D6D12B8:
     # -- B8 ---------------------------------------------------------------
     @pytest.mark.parametrize("bad", ["not-an-int", None, True, 1.5, [1]])
     def test_b8_missing_some_non_int_min_is_a_clean_error(self, bad):
-        from fsm_llm.definitions import TransitionEvaluationError
+        from fsm_llm.core.definitions import TransitionEvaluationError
         from fsm_llm.expressions import evaluate_logic
 
         with pytest.raises(TransitionEvaluationError, match="missing_some"):

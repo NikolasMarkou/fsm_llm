@@ -8,7 +8,7 @@ from fsm_llm.agents.constants import ContextKeys, Defaults, EvalOptStates, Handl
 from fsm_llm.agents.definitions import AgentConfig, EvaluationResult
 from fsm_llm.agents.evaluator_optimizer import EvaluatorOptimizerAgent
 from fsm_llm.agents.fsm_definitions import build_evalopt_fsm
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
     FSMDefinition,

@@ -36,7 +36,7 @@ from typing import Any
 
 from fsm_llm.api import API
 from fsm_llm.codes import CompletionKind, Reason, Status
-from fsm_llm.definitions import AdvanceResult, CompletionResponse, FSMError
+from fsm_llm.core.definitions import AdvanceResult, CompletionResponse, FSMError
 from fsm_llm.handlers import BaseHandler, HandlerTiming
 
 from .user import ConversationRun

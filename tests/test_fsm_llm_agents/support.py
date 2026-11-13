@@ -7,7 +7,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from fsm_llm.agents.tools import ToolRegistry
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
     ResponseGenerationRequest,

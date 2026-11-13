@@ -21,7 +21,7 @@ import pytest
 
 from fsm_llm import APIBuilder
 from fsm_llm.api import API
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     ConversationBusyError,
     FSMDefinition,
     FSMError,
@@ -246,7 +246,7 @@ def complex_fsm():
 @pytest.fixture
 def mock_llm_interface():
     """Fixture for a mocked LLM interface using the new 2-pass architecture."""
-    from fsm_llm.definitions import FieldExtractionResponse
+    from fsm_llm.core.definitions import FieldExtractionResponse
 
     mock_interface = Mock(spec=LLMInterface)
 
@@ -763,7 +763,7 @@ class TestFSMDefinitionEquivalence:
     ):
         """Test that FSM dict and FSMDefinition object produce equivalent APIs."""
         # Create FSMDefinition from dict
-        from fsm_llm.definitions import FSMDefinition
+        from fsm_llm.core.definitions import FSMDefinition
 
         fsm_obj = FSMDefinition(**complete_simple_fsm_dict)
 
@@ -1047,7 +1047,7 @@ class TestPerformanceAndIntegration:
 class TestSameConversationReentrancyIsBounded:
     def test_error_handler_reentering_converse_does_not_recurse(self):
         """repro1 port: RED on HEAD, the ERROR handler recursed 99 deep."""
-        from fsm_llm.definitions import FSMError
+        from fsm_llm.core.definitions import FSMError
 
         depth = {"n": 0, "max": 0}
         raised: list[BaseException] = []
@@ -1076,7 +1076,7 @@ class TestSameConversationReentrancyIsBounded:
             assert "already being processed" in str(raised[0])
 
     def test_error_handler_reentering_converse_stream_does_not_recurse(self):
-        from fsm_llm.definitions import FSMError
+        from fsm_llm.core.definitions import FSMError
 
         depth = {"max": 0, "n": 0}
         with _Session(_reentry_fsm()) as s:
@@ -1102,7 +1102,7 @@ class TestSameConversationReentrancyIsBounded:
             assert s.provider.calls <= 3
 
     def test_pre_processing_handler_calling_converse_raises_not_nests(self):
-        from fsm_llm.definitions import FSMError
+        from fsm_llm.core.definitions import FSMError
 
         seen: list[BaseException] = []
         with _Session(_reentry_fsm()) as s:
@@ -1128,7 +1128,7 @@ class TestSameConversationReentrancyIsBounded:
             assert users == ["hello"]
 
     def test_error_handler_can_still_write_via_update_context(self):
-        from fsm_llm.definitions import FSMError
+        from fsm_llm.core.definitions import FSMError
 
         with _Session(_reentry_fsm()) as s:
             s.on(
@@ -1141,7 +1141,7 @@ class TestSameConversationReentrancyIsBounded:
             assert s.api.get_data(s.cid).get("error_seen") is True
 
     def test_guard_is_released_after_a_failed_turn(self):
-        from fsm_llm.definitions import FSMError
+        from fsm_llm.core.definitions import FSMError
 
         with _Session(_reentry_fsm()) as s:
             s.provider.down = True
@@ -1169,7 +1169,7 @@ class TestSameConversationReentrancyIsBounded:
 
     def test_converse_between_stream_iterations_raises(self):
         """Documented D-018 cost: an open stream owns its conversation."""
-        from fsm_llm.definitions import FSMError
+        from fsm_llm.core.definitions import FSMError
 
         with _Session(_reentry_fsm()) as s:
             gen = s.api.converse_stream("hello", s.cid)

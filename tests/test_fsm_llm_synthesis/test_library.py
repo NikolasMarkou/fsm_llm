@@ -15,7 +15,7 @@ from typing import Any, ClassVar
 import pytest
 
 from fsm_llm import API
-from fsm_llm.definitions import FSMDefinition
+from fsm_llm.core.definitions import FSMDefinition
 from fsm_llm.synthesis import RunTrace, SynthesisError, library
 from fsm_llm.synthesis.constants import DEFAULT_MAX_TRACES
 from fsm_llm.synthesis.exceptions import LibraryError

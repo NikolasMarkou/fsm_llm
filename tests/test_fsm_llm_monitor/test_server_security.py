@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from fsm_llm.definitions import ConversationBusyError
+from fsm_llm.core.definitions import ConversationBusyError
 from fsm_llm.monitor import server as server_module
 from fsm_llm.monitor.definitions import MonitorConfig
 from fsm_llm.monitor.exceptions import MonitorCapacityError

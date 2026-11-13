@@ -16,7 +16,7 @@ from .constants import (
     MAX_MULTI_INTENTS,
     RESERVED_LLM_CALL_KWARGS,
 )
-from .definitions import (
+from .core.definitions import (
     ClassificationError,
     ClassificationPromptConfig,
     ClassificationResponseError,

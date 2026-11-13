@@ -89,7 +89,7 @@ Run dir name: `YYYY-MM-DD_HH-MM_<short hash or "unknown">_<model_slug>`, collisi
 ## Dependencies
 
 - `fsm_llm.eval` and its submodules (`__main__`, `cases`, `examples`, `stats`, `records`, `constants`).
-- `fsm_llm.constants` (`ENV_LLM_MODEL`), `fsm_llm.definitions.FSMError` (root of `EvalError`), `fsm_llm.logging`.
+- `fsm_llm.constants` (`ENV_LLM_MODEL`), `fsm_llm.core.definitions.FSMError` (root of `EvalError`), `fsm_llm.logging`.
 - `fsm_llm.testing.MockLLM2Interface`.
 - Repository files: `evaluation/datasets/simple_greeting_cases.json` (config `{"trials": 3}`, includes case `name_is_extracted`, passes fully with extraction `{"user_name": "Alex"}`), the historical `results.json` above, `scripts/bench_common.py`, `examples/` (listing must include `basic/simple_greeting` and `classification/classified_transitions_manual`), and a git checkout.
 - pytest only; no network.

@@ -17,7 +17,7 @@ from pydantic import ValidationError
 
 from fsm_llm import API
 from fsm_llm.api import ContextMergeStrategy
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FSMDefinition,
     State,
     SynthesizeConfig,

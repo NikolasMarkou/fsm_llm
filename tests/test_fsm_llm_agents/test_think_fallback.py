@@ -23,7 +23,7 @@ from fsm_llm.agents.parallel_react import ParallelReactAgent
 from fsm_llm.agents.react import ReactAgent
 from fsm_llm.agents.reflexion import ReflexionAgent
 from fsm_llm.agents.tools import ToolRegistry
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,

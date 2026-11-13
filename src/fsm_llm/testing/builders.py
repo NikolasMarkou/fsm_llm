@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from fsm_llm.codes import CompletionKind
-from fsm_llm.definitions import CompletionResponse, ModelToolCall
+from fsm_llm.core.definitions import CompletionResponse, ModelToolCall
 
 
 def final_reply(

@@ -51,7 +51,7 @@ Scoring (`classify_result`, checked in order): score 0 when `exit_code == -1`, o
 | `stats.py` | `wilson_ci`, `fisher_exact_two_sided`, `pass_rate`, `below_percent` | stdlib only; `below_percent` is the exact `--fail-under` test (not exported from `__init__`) |
 | `_pool.py` | `run_interruptible(work, items, workers, on_done) -> bool`, `sigterm_as_interrupt()`, `run_tracked(args, *, cwd, env, input, timeout)`, `PoolInterrupted` | returns `True` when interrupted; SIGTERM raises `KeyboardInterrupt` for the run only (main thread, not over `SIG_IGN`), the old handler is restored. `run_tracked` is `subprocess.run` (captured utf-8 text, the same `TimeoutExpired` partial output) over `Popen`: on POSIX each child starts in its own session, a timeout kills its process group, and inside a `run_interruptible` worker the child is registered with that run's `_ChildScope`, which an interrupt terminates (SIGTERM to the group, `CHILD_TERMINATE_GRACE_SECONDS` = 2.0, then SIGKILL; D-028 of plan 0068b055). A child spawned after the interrupt is refused with `PoolInterrupted`. The registry is per `run_interruptible` call (a thread-local), never a module global |
 | `constants.py` | defaults, exit codes, `SCORE_LABELS`, `EXAMPLE_INPUTS`, `EXAMPLE_TIMEOUTS`, `CATEGORY_TIMEOUTS`, `EXAMPLE_SCRIPT_NAMES` | tables moved verbatim from `scripts/eval.py` (`0facf56`) |
-| `exceptions.py` | `EvalError`, `EvalConfigError`, `EvalDatasetError` | rooted at `fsm_llm.definitions.FSMError` |
+| `exceptions.py` | `EvalError`, `EvalConfigError`, `EvalDatasetError` | rooted at `fsm_llm.core.definitions.FSMError` |
 | `__init__.py`, `__version__.py` | static `__all__`, version re-export | |
 
 ## Public interface

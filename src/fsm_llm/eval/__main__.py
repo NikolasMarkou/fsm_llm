@@ -32,7 +32,7 @@ from typing import Any
 
 from fsm_llm.cli_support import add_env_file, apply_env_file
 from fsm_llm.constants import CLI_EXIT_FAILURE, CLI_EXIT_INTERRUPTED, CLI_EXIT_OK
-from fsm_llm.definitions import ModelNotConfiguredError
+from fsm_llm.core.definitions import ModelNotConfiguredError
 
 from .cases import TrialResult, create_run_dir, load_cases, run_cases
 from .config import EvalConfig, load_config, merge_config, resolve_model

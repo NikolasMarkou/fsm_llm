@@ -8,7 +8,7 @@ import pytest
 
 def configure_mock_extract_field(mock_llm, mock_data=None):
     """Configure a mock LLM with extract_field support."""
-    from fsm_llm.definitions import FieldExtractionResponse
+    from fsm_llm.core.definitions import FieldExtractionResponse
 
     data = mock_data or {}
 
@@ -30,7 +30,7 @@ import threading
 from typing import Any
 
 from fsm_llm.api import API
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     ClassificationResult,
     DataExtractionResponse,
     FSMContext,
@@ -667,7 +667,7 @@ class TestGetConversationDataNestedFiltering:
         import threading
         from unittest.mock import Mock
 
-        from fsm_llm.definitions import FSMContext, FSMInstance
+        from fsm_llm.core.definitions import FSMContext, FSMInstance
 
         manager = FSMManager(llm_interface=Mock(spec=LLMInterface))
         context = FSMContext()

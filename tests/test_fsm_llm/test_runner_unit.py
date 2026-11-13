@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm.definitions import ModelNotConfiguredError
+from fsm_llm.core.definitions import ModelNotConfiguredError
 from tests.conftest import cpu_timer
 from tests.test_fsm_llm.support import _JOIN_TIMEOUT_S
 

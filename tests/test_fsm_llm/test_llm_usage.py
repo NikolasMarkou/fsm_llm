@@ -19,7 +19,7 @@ from pydantic import ValidationError
 
 import fsm_llm
 import fsm_llm.llm as llm_module
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     CompletionRequest,
     FieldExtractionRequest,

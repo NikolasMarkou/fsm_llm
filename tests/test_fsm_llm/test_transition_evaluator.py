@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     FSMContext,
     State,
     Transition,
@@ -624,7 +624,7 @@ def _step10_state(priorities: list[int], passing: list[bool]) -> State:
 
 
 def _step10_evaluate(state: State, config: Any = None) -> Any:
-    from fsm_llm.definitions import FSMContext
+    from fsm_llm.core.definitions import FSMContext
     from fsm_llm.transition_evaluator import TransitionEvaluator
 
     return TransitionEvaluator(config).evaluate_transitions(
@@ -647,7 +647,7 @@ class TestStep10ConfidenceRemoved:
         assert not hasattr(constants, name)
 
     def test_transition_evaluation_has_no_confidence_field(self):
-        from fsm_llm.definitions import TransitionEvaluation
+        from fsm_llm.core.definitions import TransitionEvaluation
 
         assert "confidence" not in TransitionEvaluation.model_fields
         ev = _step10_evaluate(_step10_state([100], [True]))
@@ -669,7 +669,7 @@ class TestStep10ConfidenceRemoved:
         assert "confidence_factor" not in cond
 
     def test_priority_outcomes_unchanged(self):
-        from fsm_llm.definitions import TransitionEvaluationResult as R
+        from fsm_llm.core.definitions import TransitionEvaluationResult as R
 
         det = _step10_evaluate(_step10_state([200, 100], [True, True]))
         assert det.result_type == R.DETERMINISTIC

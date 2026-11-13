@@ -52,7 +52,7 @@ from fsm_llm.agents.constants import (
 )
 from fsm_llm.agents.fsm_definitions.meta_builder import build_meta_builder_fsm
 from fsm_llm.api import llm_settings_for
-from fsm_llm.definitions import LLMResponseError
+from fsm_llm.core.definitions import LLMResponseError
 from fsm_llm.handlers import HandlerExecutionError, clear_keys_delta
 from fsm_llm.logging import logger
 from fsm_llm.utilities import extract_json_from_text

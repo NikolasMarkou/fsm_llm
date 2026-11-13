@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from fsm_llm.definitions import FieldExtractionRequest
+from fsm_llm.core.definitions import FieldExtractionRequest
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.ollama import (
     EXTRACTION_JSON_SCHEMA,
@@ -318,7 +318,7 @@ class TestOllamaNullExtractionMemo:
         from unittest.mock import Mock
 
         from fsm_llm import API
-        from fsm_llm.definitions import (
+        from fsm_llm.core.definitions import (
             FieldExtractionResponse,
             ResponseGenerationResponse,
         )
@@ -339,7 +339,7 @@ class TestOllamaNullExtractionMemo:
                 )
 
             def extract_bulk_data(self, request):
-                from fsm_llm.definitions import DataExtractionResponse
+                from fsm_llm.core.definitions import DataExtractionResponse
 
                 return DataExtractionResponse(extracted_data={}, confidence=0.0)
 

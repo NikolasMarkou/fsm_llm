@@ -242,7 +242,7 @@ Pass your own `llm_interface` (a subclass of `LLMInterface`) and nothing touches
 
 ```python
 from fsm_llm import API, LLMInterface
-from fsm_llm.definitions import FieldExtractionResponse, ResponseGenerationResponse
+from fsm_llm.core.definitions import FieldExtractionResponse, ResponseGenerationResponse
 
 
 class FakeLLM(LLMInterface):
@@ -532,7 +532,7 @@ fsm_llm/
 ├── src/fsm_llm/      # THE LIBRARY (the import package)
 │   ├── api.py, fsm.py,        # API, FSMManager, MessagePipeline (the 2-pass turn)
 │   │   pipeline.py
-│   ├── definitions.py         # Pydantic FSM models and core exceptions
+│   ├── core/definitions/      # Pydantic FSM models and core exceptions (a package)
 │   ├── transition_evaluator.py, expressions.py   # JsonLogic evaluation, no LLM
 │   ├── flow_analysis.py       # Data-flow and liveness analysis of an FSM
 │   ├── llm.py                 # The only module that imports litellm
@@ -572,7 +572,7 @@ make test           # Run full test suite (14,043 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy on the fsm_llm package (src/fsm_llm/)
-make lint-imports   # import contracts in .importlinter (litellm, testing, pytest, entry modules)
+make lint-imports   # import contracts in .importlinter (litellm, testing, pytest, entry modules, core)
 make audit          # scan site-packages for malicious .pth files
 make counts         # fail when a test count written in a .md file differs from a collection
 make build          # wheel and sdist

@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from fsm_llm.definitions import reachable_from
+from fsm_llm.core.definitions import reachable_from
 from fsm_llm.logging import logger
 
 # --------------------------------------------------------------

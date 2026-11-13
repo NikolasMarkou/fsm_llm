@@ -194,7 +194,7 @@ class TestFSMBuilderSerialization:
         self, populated_fsm_builder: FSMArtifactBuilder
     ):
         """Verify the populated builder produces a valid FSMDefinition."""
-        from fsm_llm.definitions import FSMDefinition
+        from fsm_llm.core.definitions import FSMDefinition
 
         d = populated_fsm_builder.to_dict()
         # Should not raise

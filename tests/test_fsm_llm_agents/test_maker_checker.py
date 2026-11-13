@@ -15,7 +15,7 @@ from fsm_llm.agents.constants import (
 from fsm_llm.agents.definitions import AgentConfig
 from fsm_llm.agents.fsm_definitions import build_maker_checker_fsm
 from fsm_llm.agents.maker_checker import MakerCheckerAgent
-from fsm_llm.definitions import (
+from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     DataExtractionResponse,
     FieldExtractionRequest,

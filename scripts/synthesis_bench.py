@@ -373,7 +373,7 @@ def check_fixture() -> list[str]:
     """Register-time problems (empty = runnable): every hand child passes the
     compiler's gates and every host loads."""
     import fsm_llm.synthesis as syn
-    from fsm_llm.definitions import FSMDefinition
+    from fsm_llm.core.definitions import FSMDefinition
 
     policy, problems = syn.SynthesisPolicy(**POLICY), []
     problems += ["a task id repeats"] * (len({t.id for t in TASKS}) != len(TASKS))
@@ -407,7 +407,7 @@ def make_llm(role: str, model: str = MODEL) -> Any:
 
 def wire_disclosure() -> dict[str, Any]:
     """The request settings of each role, taken at the wire with the provider refused."""
-    from fsm_llm.definitions import CompletionRequest
+    from fsm_llm.core.definitions import CompletionRequest
 
     out = {}
     for role in ("compile", "run"):
