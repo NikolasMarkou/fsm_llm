@@ -64,7 +64,7 @@ flowchart TD
 ```
 
 - Import it by name: `from fsm_llm.testing import ...`. `import fsm_llm` never loads it and no library module imports it.
-- It imports the core and `fsm_llm.codes` only. It never imports `pytest` (an opt-in pytest plugin module may, later, and is imported only by name), `litellm` or another subpackage.
+- It imports the core and `fsm_llm.core.codes` only. It never imports `pytest` (an opt-in pytest plugin module may, later, and is imported only by name), `litellm` or another subpackage.
 - The `testing` extra in `pyproject.toml` is `[]` (no third-party dependency); `all`, `make install-dev`, tox and CI request it.
 - Importing it has no side effect: no clock, no randomness, no socket.
 

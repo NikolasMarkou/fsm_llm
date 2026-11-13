@@ -16,7 +16,7 @@ import json
 import pytest
 
 from fsm_llm.core.definitions import FSMDefinition
-from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT
+from fsm_llm.core.definitions.schema import SCHEMA_VERSION_DEFAULT
 from fsm_llm.utilities import (
     extract_json_from_text,
     get_fsm_summary,

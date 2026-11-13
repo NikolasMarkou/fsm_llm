@@ -32,7 +32,7 @@ API(
 )
 ```
 
-`executors` (keyword-only, internal until the kind extension point is public, roadmap C10; not exported from `fsm_llm`) is a `{kind_name: StateExecutor}` map for this `API` only. `StateExecutor` is `fsm_llm.executors.StateExecutor`. A kind named in it runs its Pass 1 through that executor instead of the module table of `fsm_llm.executors`; another `API` and the module table are never affected. The map is validated at construction and copied read-only: a value that is not a mapping of `StateExecutor` raises `TypeError`, and a name that no registered `KindSpec` carries (the spec registry `fsm_llm.state_kinds.KINDS` stays process-wide) raises `ValueError`. `FSMManager(executors=...)` and `MessagePipeline(executors=...)` take the same keyword-only argument; `APIBuilder` and `FSMManagerBuilder` have no setter for it yet.
+`executors` (keyword-only, internal until the kind extension point is public, roadmap C10; not exported from `fsm_llm`) is a `{kind_name: StateExecutor}` map for this `API` only. `StateExecutor` is `fsm_llm.executors.StateExecutor`. A kind named in it runs its Pass 1 through that executor instead of the module table of `fsm_llm.executors`; another `API` and the module table are never affected. The map is validated at construction and copied read-only: a value that is not a mapping of `StateExecutor` raises `TypeError`, and a name that no registered `KindSpec` carries (the spec registry `fsm_llm.core.state_kinds.KINDS` stays process-wide) raises `ValueError`. `FSMManager(executors=...)` and `MessagePipeline(executors=...)` take the same keyword-only argument; `APIBuilder` and `FSMManagerBuilder` have no setter for it yet.
 
 `handler_error_mode` is a `HandlerErrorMode` (`CONTINUE` or `RAISE`) or its string value, coerced once in `HandlerSystem`; any other value raises `ValueError`. `handler_timeout` (seconds, `None` disables it) goes to the API's single `HandlerSystem`, so the cap of 4 still-running timed-out handler threads (`constants.MAX_TIMED_HANDLER_STRAGGLERS`) is shared by every conversation of that `API`. `max_fsm_cache_size` bounds `FSMManager`'s FSM definition cache and must be at least 1 (`ValueError` otherwise). The prompt builders and the FSM loader are not configurable through `API`; construct `FSMManager` directly for those.
 
@@ -392,12 +392,10 @@ print(visualize_fsm_ascii(fsm_dict, style="compact"))
 
 `FSMGraphNode{id, description, purpose, is_initial, is_terminal}`, `FSMGraphEdge{source, target, description, priority}`. `build_fsm_graph` accepts an `FSMDefinition` or a dict and raises `ValueError` for a definition whose initial state or a transition target is missing, or whose shape is malformed. CLI: `fsm-llm-visualize --fsm F --format ascii|mermaid|dot` (`--style` applies to ASCII only; `fsm-llm --mode visualize` prints ASCII). The monitor's FSM graphs read the same function.
 
-## Definition versions and `fsm-llm-validate` (`fsm_llm.schema_registry`)
+## Definition versions and `fsm-llm-validate` (`fsm_llm.core.definitions.schema`)
 
 ```python
-from fsm_llm.schema_registry import (
-    FIELD_VERSIONS, SCHEMA_VERSION_DEFAULT, SCHEMA_VERSION_OLDEST, newer_fields,
-    parse_version)
+from fsm_llm.core.definitions.schema import FIELD_VERSIONS, SCHEMA_VERSION_DEFAULT, SCHEMA_VERSION_OLDEST, newer_fields, parse_version
 
 SCHEMA_VERSION_DEFAULT              # "4.2": the version a definition without `version` takes
 SCHEMA_VERSION_OLDEST               # "4.0": the oldest version whose shape the registry knows
@@ -417,12 +415,10 @@ fsm-llm-validate --fsm path.json [--upgrade]
 
 `--upgrade` validates the file first and rewrites it in place to `SCHEMA_VERSION_DEFAULT` only when it loads as an FSM definition and declares a `version` of the form `N.M` from `SCHEMA_VERSION_OLDEST` (`"4.0"`) up to, but not including, the default (`"4.0"`, `"4.1"`). Everything else is left byte-identical: a file that is not valid UTF-8 JSON, not a JSON object (a `package.json`, say), not an FSM definition, with duplicate keys (a rewrite would drop one), with a non-string `version`, with a version below 4.0 or not of the form `N.M` (`"3.0"`, `"1.3.0"`, `"v4.1"`, which may be the author's own revision string), or with a current or newer (`"5.0"`) version, so it never downgrades. An omitted `version` already means the default, so it is left omitted. A refused or failed upgrade (every case above except the current, newer or omitted version, plus an I/O failure) is logged and the command exits 1 although the JSON report is still printed; a current, newer or omitted version is nothing to do and the exit code is the validation's. A file declaring `"3.0"` (six of the shipped examples do) must have its `version` edited by hand, because the registry does not know the shape below 4.0. A deeply nested file is a refusal, never a traceback. A second run changes nothing (no write, mtime kept). The write is atomic (a same-directory temp file, fsync, `os.replace`), keeps the file mode and follows a symlink to its target. Rewriting normalises the file: indent 2, LF line endings, numbers re-serialised (`1e2` becomes `100.0`), key order and non-ASCII text kept. The new version is the default, so the file's `fsm_id` and library digest change. stdout stays the JSON report only. `fsm-llm --mode validate` does not take `--upgrade`.
 
-## Status, reason and completion-kind vocabulary (`fsm_llm.codes`)
+## Status, reason and completion-kind vocabulary (`fsm_llm.core.codes`)
 
 ```python
-from fsm_llm.codes import (
-    CompletionKind, Reason, Status,
-    approval_code, status_of_stop_reason, status_of_tool_status)
+from fsm_llm.core.codes import CompletionKind, Reason, Status, approval_code, status_of_stop_reason, status_of_tool_status
 
 Status.from_string("ok")            # Status.OK; "bogus", "", None raise ValueError naming the values
 Status.OK == "ok"                   # True: a str, Enum, so == , hashing, `in` and json.dumps work as for the string
@@ -986,7 +982,7 @@ runner.end_conversation(conv_id)
 
 ## Testing (`fsm_llm.testing`)
 
-Public test doubles, a scripted user and assertions for code built on FSM-LLM. Import by name; `import fsm_llm` never loads it and no library module imports it. It imports the core and `fsm_llm.codes` only (never `pytest`, `litellm` or another subpackage), makes no network call and has no import side effect. Guide with runnable examples: [`docs/testing.md`](testing.md). The signatures are in the generated `docs/api.txt`.
+Public test doubles, a scripted user and assertions for code built on FSM-LLM. Import by name; `import fsm_llm` never loads it and no library module imports it. It imports the core and `fsm_llm.core.codes` only (never `pytest`, `litellm` or another subpackage), makes no network call and has no import side effect. Guide with runnable examples: [`docs/testing.md`](testing.md). The signatures are in the generated `docs/api.txt`.
 
 ```python
 from fsm_llm import API
@@ -1020,7 +1016,7 @@ The doubles are plain classes with public attributes, not `unittest.mock` object
 
 ### Assertions
 
-`assert_state(source, state_id)` (read live), `assert_context(source, **expected)` (a subset check), `assert_path(source, expected, *, exact=True)` (`exact=False` accepts an ordered subsequence), `assert_result(result, *, kind=None, status=None, reason=...)` (a completion state's `{kind, text, calls}`, a synthesis state's `{status, procedure_id, version, reason}` or a `CompletionResponse`). `source` is a `ConversationRun` or an `(api, conversation_id)` pair. They raise `AssertionError` explicitly (never `assert`, so `python -O` changes nothing), hide their frames from the pytest traceback and print the first divergence. Expected `kind`, `status` and `reason` go through the `fsm_llm.codes` `from_string` methods: a typo raises `ValueError` listing the vocabulary; `reason=None` asserts no reason, leaving it out checks nothing.
+`assert_state(source, state_id)` (read live), `assert_context(source, **expected)` (a subset check), `assert_path(source, expected, *, exact=True)` (`exact=False` accepts an ordered subsequence), `assert_result(result, *, kind=None, status=None, reason=...)` (a completion state's `{kind, text, calls}`, a synthesis state's `{status, procedure_id, version, reason}` or a `CompletionResponse`). `source` is a `ConversationRun` or an `(api, conversation_id)` pair. They raise `AssertionError` explicitly (never `assert`, so `python -O` changes nothing), hide their frames from the pytest traceback and print the first divergence. Expected `kind`, `status` and `reason` go through the `fsm_llm.core.codes` `from_string` methods: a typo raises `ValueError` listing the vocabulary; `reason=None` asserts no reason, leaving it out checks nothing.
 
 ### `PathRecorder`
 

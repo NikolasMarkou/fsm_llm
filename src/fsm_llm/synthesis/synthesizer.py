@@ -45,6 +45,7 @@ from fsm_llm.core.definitions import (
     SynthesizeConfig,
     logic_referenced_keys,
 )
+from fsm_llm.core.state_kinds import declared_tool_names
 from fsm_llm.llm import (
     LiteLLMInterface,
     LLMInterface,
@@ -53,7 +54,6 @@ from fsm_llm.llm import (
 )
 from fsm_llm.logging import logger
 from fsm_llm.okf import capped_line, strip_unsafe_text
-from fsm_llm.state_kinds import declared_tool_names
 from fsm_llm.utilities import extract_json_from_text
 from fsm_llm.visualizer import build_fsm_graph, to_mermaid
 

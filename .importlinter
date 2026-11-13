@@ -98,12 +98,13 @@ ignore_imports =
     # the package's own modules import each other
     fsm_llm.security.** -> fsm_llm.security.**
 
-# Step 69 (definitions split): the layer package `core` (L0). `core.definitions` reads only the
-# kernel (`constants`, `logging`, `security`) and the core modules that have not moved yet
-# (`schema_registry`, `state_kinds`, and the one lazy `transition_evaluator` import inside
-# `FSMDefinition._check_synthesize_states`); it never reaches a higher layer or a subpackage.
-# The list is every module that is not core and not kernel today; step 95 replaces it with the
-# `layers` contract of D-016.
+# Steps 69 and 70 (definitions split, then `codes`, `schema`, `state_kinds` and
+# `transition_evaluator` placed): the layer package `core` (L0). It reads only the kernel
+# (`constants`, `logging`, `security`) and `fsm_llm.expressions`, which has not moved yet
+# (`core.transition_evaluator`, until step 71); it never reaches a higher layer or a subpackage
+# (`FSMDefinition._check_synthesize_states` imports `core.transition_evaluator` lazily, a core
+# edge). The list is every module that is not core and not kernel today; step 95 replaces it
+# with the `layers` contract of D-016.
 [importlinter:contract:core-imports-no-higher-layer]
 name = fsm_llm.core imports no engine, llm, context, okf, skills or subpackage module
 type = forbidden

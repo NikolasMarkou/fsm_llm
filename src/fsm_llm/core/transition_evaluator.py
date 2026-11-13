@@ -50,7 +50,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .core.definitions import (
+from fsm_llm.expressions import evaluate_logic, is_missing
+from fsm_llm.logging import logger
+
+# --------------------------------------------------------------
+# local imports
+# --------------------------------------------------------------
+from .definitions import (
     FSMContext,
     State,
     Transition,
@@ -60,12 +66,6 @@ from .core.definitions import (
     TransitionEvaluationResult,
     TransitionOption,
 )
-from .expressions import evaluate_logic, is_missing
-
-# --------------------------------------------------------------
-# local imports
-# --------------------------------------------------------------
-from .logging import logger
 
 # --------------------------------------------------------------
 # Evaluation Configuration

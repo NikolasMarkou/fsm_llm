@@ -53,6 +53,7 @@ from fsm_llm.core.definitions import (
     StateNotFoundError,
     Transition,
 )
+from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.handlers import BaseHandler, HandlerSystem, HandlerTiming
 from fsm_llm.llm import LLMInterface, _embedding_vectors
 from fsm_llm.logging import logger
@@ -62,7 +63,6 @@ from fsm_llm.prompts import (
     ResponseGenerationPromptBuilder,
 )
 from fsm_llm.testing import MockLLM2Interface
-from fsm_llm.transition_evaluator import TransitionEvaluator
 from fsm_llm.utilities import coerce_confidence, coerce_float, coerce_int
 from tests.test_fsm_llm.support import _TWO_STATE
 

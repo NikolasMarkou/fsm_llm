@@ -22,9 +22,9 @@ from fsm_llm.core.definitions import (
     TransitionEvaluation,
     TransitionEvaluationResult,
 )
+from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.expressions import evaluate_logic, hard_equals, soft_equals
 from fsm_llm.logging import logger
-from fsm_llm.transition_evaluator import TransitionEvaluator
 from tests.test_fsm_llm.support import _a2_state, _gate_fsm, _Prov
 
 
@@ -985,7 +985,8 @@ class TestStep09B1B4:
         """Guard: one predicate, not three copies of the sentinel idiom."""
         import inspect
 
-        from fsm_llm import expressions, transition_evaluator
+        from fsm_llm import expressions
+        from fsm_llm.core import transition_evaluator
 
         assert transition_evaluator.is_missing is expressions.is_missing
         source = inspect.getsource(expressions) + inspect.getsource(

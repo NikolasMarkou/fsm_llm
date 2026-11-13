@@ -74,6 +74,7 @@ from fsm_llm.core.definitions import (
     TransitionEvaluationResult,
     TransitionOption,
 )
+from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.handlers import HandlerSystem, HandlerTiming
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.pipeline import MessagePipeline
@@ -84,7 +85,6 @@ from fsm_llm.prompts import (
     build_classification_system_prompt,
 )
 from fsm_llm.testing import MockLLM2Interface
-from fsm_llm.transition_evaluator import TransitionEvaluator
 from tests.test_fsm_llm.support import (
     _A4_TRANSITION_KEY,
     _INTENTS,

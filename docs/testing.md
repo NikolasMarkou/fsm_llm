@@ -27,7 +27,7 @@ from fsm_llm.testing import (
 )
 ```
 
-It imports the core and `fsm_llm.codes` only, never `pytest`, `litellm` or another subpackage, so it works under pytest, unittest or a plain script. Importing it has no side effect: no clock, no randomness, no socket.
+It imports the core and `fsm_llm.core.codes` only, never `pytest`, `litellm` or another subpackage, so it works under pytest, unittest or a plain script. Importing it has no side effect: no clock, no randomness, no socket.
 
 ## A first test
 
@@ -244,7 +244,7 @@ Four plain functions. Each raises `AssertionError` explicitly (never an `assert`
 | `assert_path(source, expected, *, exact=True)` | The route matters: a `ConversationRun`, a list of state ids or a sequence of `AdvanceResult`. `exact=False` accepts an ordered subsequence | A path of a conversation nobody recorded: add a `PathRecorder` |
 | `assert_result(result, *, kind=None, status=None, reason=...)` | A completion state's `{kind, text, calls}`, a synthesis state's `{status, procedure_id, version, reason}` or a `CompletionResponse` | Plain FSM states |
 
-Expected values may be `fsm_llm.codes` members or their strings; a typo raises `ValueError` listing the vocabulary instead of passing as a wrong guess. `reason=None` asserts the result carries no reason; leaving `reason` out checks nothing.
+Expected values may be `fsm_llm.core.codes` members or their strings; a typo raises `ValueError` listing the vocabulary instead of passing as a wrong guess. `reason=None` asserts the result carries no reason; leaving `reason` out checks nothing.
 
 ```python
 llm, api = make_bot()

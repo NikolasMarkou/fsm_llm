@@ -1,6 +1,6 @@
 """The state-kind registry (plan d454fd62 step 46, D-004, D-015).
 
-`fsm_llm.state_kinds` names the kinds a state can have (conversation,
+`fsm_llm.core.state_kinds` names the kinds a state can have (conversation,
 completion, synthesize) and the declarative rules each kind owns. `State.kind`
 is a plain property that reads it. These tests pin the registry against the
 `State` model (a new kind field without a spec fails), against the rules the
@@ -22,12 +22,13 @@ from typing import Any, ClassVar, get_args, get_origin
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from fsm_llm import state_kinds as sk
 from fsm_llm.api import API
+from fsm_llm.core import state_kinds as sk
 from fsm_llm.core.definitions import FSMDefinition, State
 from tests.test_fsm_llm import kind_corpus as kc
 
 _MODULE = Path(sk.__file__)
+_PKG = _MODULE.parent.parent  # src/fsm_llm (the module sits in core/)
 # State fields typed `Model | None` that are not a state kind.
 _NOT_KIND_FIELDS = {"context_scope"}
 _CORPUS = kc.corpus()
@@ -379,14 +380,14 @@ class TestResultKeyReaders:
     def test_no_reader_branches_on_a_kind_config(self, path, name, owner):
         """Guards (D-015): these readers ask the kind registry, never
         `.completion` or `.synthesize` (a new kind would need an edit in each)."""
-        node = _function_node(_MODULE.parent / path, name, owner)
+        node = _function_node(_PKG / path, name, owner)
         assert _config_attributes(node) == set(), (path, name)
 
     def test_the_result_key_collision_check_asks_the_registry_for_completion(self):
         """Guards: `FSMDefinition._check_synthesize_states` builds `owned` from the
         registry; only the synthesize edge rules (step 50) still read `.synthesize`."""
         node = _function_node(
-            _MODULE.parent / "core" / "definitions" / "fsm.py",
+            _PKG / "core" / "definitions" / "fsm.py",
             "_check_synthesize_states",
             "FSMDefinition",
         )
@@ -630,7 +631,7 @@ class TestMintingHooks:
     def test_no_reader_branches_on_a_kind_config(self, path, name, owner):
         """Guards (D-015): the minting and arrival rules ask the registry, never
         `.completion` or `.synthesize`."""
-        node = _function_node(_MODULE.parent / path, name, owner)
+        node = _function_node(_PKG / path, name, owner)
         assert _config_attributes(node) == set(), (path, name)
 
     @pytest.mark.parametrize(
@@ -646,7 +647,7 @@ class TestMintingHooks:
     ):
         """Guards (plan 2cefeb61 D-017 item 7): the rule's inputs are read in
         `state_kinds.py` only, so there is no second spelling to keep in step."""
-        node = _function_node(_MODULE.parent / path, name, owner)
+        node = _function_node(_PKG / path, name, owner)
         read = {
             n.attr
             for n in ast.walk(node)
@@ -752,7 +753,7 @@ class TestStateValidationHooks:
         """Guards (D-015): `State._validate_extraction_configs` never reads
         `.completion` or `.synthesize` (a new kind would need an edit there)."""
         node = _function_node(
-            _MODULE.parent / "core" / "definitions" / "state.py",
+            _PKG / "core" / "definitions" / "state.py",
             "_validate_extraction_configs",
             "State",
         )
@@ -1062,7 +1063,7 @@ class TestDefinitionCheckHooks:
         the sample constant; it calls `definition_problem` (a new kind with a
         cross-state rule needs no edit in the loader)."""
         node = _function_node(
-            _MODULE.parent / "core" / "definitions" / "fsm.py",
+            _PKG / "core" / "definitions" / "fsm.py",
             "_check_synthesize_states",
             "FSMDefinition",
         )
@@ -1106,7 +1107,7 @@ class TestDefinitionCheckHooks:
         """`test_codes` reads `definitions._SYNTHESIZE_SAMPLES`; the name stays and
         its value is the one tuple the hook returns (the leaf cannot import
         `codes.Status`, so test_codes pins the strings against the enum)."""
-        from fsm_llm.codes import Status
+        from fsm_llm.core.codes import Status
         from fsm_llm.core.definitions import fsm as definitions
 
         state = _plain_state(synthesize=_synthesize())
@@ -1173,7 +1174,7 @@ class TestDefinitionCheckHooks:
         )
         definition = SimpleNamespace(states={"s": both}, handler_only_keys=[], name="n")
         from fsm_llm.core.definitions import logic_referenced_keys
-        from fsm_llm.transition_evaluator import TransitionEvaluator
+        from fsm_llm.core.transition_evaluator import TransitionEvaluator
 
         problem = sk.definition_problem(
             definition, both, TransitionEvaluator(), logic_referenced_keys
@@ -1194,7 +1195,7 @@ class TestVerifierHooks:
     and the raw-dict lint of the validator read the registry, so a new kind needs
     no edit in them; every verdict is equal to the parent's."""
 
-    _ROOT = _MODULE.parent
+    _ROOT = _PKG
 
     @staticmethod
     def _old_mentions(state: State) -> list[str]:
@@ -1738,7 +1739,7 @@ class TestToolAndProcedureHooks:
     "a procedure cannot hold this kind" rule read the registry; every answer is
     equal to the parent's."""
 
-    _ROOT = _MODULE.parent / "synthesis"
+    _ROOT = _PKG / "synthesis"
 
     # Frozen oracles of the three parent copies.
     @staticmethod
@@ -2065,7 +2066,7 @@ class TestLeafModule:
             assert name.split(".")[0] in stdlib, name
 
     def test_it_is_not_loaded_by_the_package_init(self):
-        tree = ast.parse((_MODULE.parent / "__init__.py").read_text(encoding="utf-8"))
+        tree = ast.parse((_PKG / "__init__.py").read_text(encoding="utf-8"))
         names = {
             (node.module or "")
             for node in ast.walk(tree)
@@ -2079,9 +2080,10 @@ class TestLeafModule:
         assert typing.get_type_hints(sk.KindSpec)
 
 
-_SRC = _MODULE.parent
+_SRC = _PKG
 _D006 = "plan-2026-09-19T175721-21cd7f8e/D-006"
 _D022 = "plan-2026-11-12T073150-d454fd62/D-022"
+_SOURCES = {"api.py": _SRC / "api.py", "state_kinds.py": _MODULE}
 
 
 def _anchor_lines(path: Path, token: str) -> list[str]:
@@ -2103,9 +2105,9 @@ class TestMovedAnchorsStayAnchors:
         """Guards: the full D-006 anchor ("Do NOT gate this in the transition
         evaluator") lived in the pipeline before the minting rule moved to the
         registry; it survived only as prose, which no anchor grep finds."""
-        lines = _anchor_lines(_SRC / "state_kinds.py", _D006)
+        lines = _anchor_lines(_MODULE, _D006)
         assert len(lines) == 1
-        text = (_SRC / "state_kinds.py").read_text(encoding="utf-8")
+        text = _MODULE.read_text(encoding="utf-8")
         assert "Do NOT gate this in the transition evaluator (wrong layer)" in text
 
     def test_the_definitions_pointer_names_the_new_home_of_the_rule(self):
@@ -2115,13 +2117,13 @@ class TestMovedAnchorsStayAnchors:
 
     @pytest.mark.parametrize("name", ["api.py", "state_kinds.py"])
     def test_the_synthesize_drop_on_push_carries_the_d022_anchor(self, name):
-        assert _anchor_lines(_SRC / name, _D022)
+        assert _anchor_lines(_SOURCES[name], _D022)
 
     @pytest.mark.parametrize("name", ["api.py", "state_kinds.py"])
     def test_no_comment_claims_the_child_skips_its_own_run(self, name):
         """Guards: the refuted reason of step 55 (the runner never serves a
         user-pushed child); the real defect is routing on the stale result."""
-        text = (_SRC / name).read_text(encoding="utf-8")
+        text = _SOURCES[name].read_text(encoding="utf-8")
         assert "skip its own run" not in text
         assert "skip itself" not in text
         assert "stale" in text

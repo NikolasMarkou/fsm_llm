@@ -11,7 +11,7 @@ spec per kind: those places now read the spec instead of testing
 ``state.completion`` or ``state.synthesize`` (an AST test bans the reads in the
 engine and the analyses).
 
-A leaf core module, like ``schema_registry`` and ``codes``: it imports only the
+A leaf core module, like ``definitions.schema`` and ``codes``: it imports only the
 standard library, never logs and never raises on a loaded state. A state is read
 through ``getattr`` (its kind config by field name), so this module needs no
 ``State`` import and ``definitions`` can import it. ``fsm_llm/__init__.py`` does

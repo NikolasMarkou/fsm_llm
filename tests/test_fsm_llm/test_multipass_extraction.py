@@ -18,6 +18,7 @@ from fsm_llm.core.definitions import (
     ResponseGenerationResponse,
     State,
 )
+from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.handlers import HandlerSystem
 from fsm_llm.llm import LLMInterface
 from fsm_llm.pipeline import MessagePipeline
@@ -25,7 +26,6 @@ from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
 )
-from fsm_llm.transition_evaluator import TransitionEvaluator
 
 
 def configure_mock_extract_field(mock_llm, mock_data=None, confidence=1.0):

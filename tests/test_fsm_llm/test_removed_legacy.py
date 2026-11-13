@@ -14,8 +14,8 @@ import pytest
 import fsm_llm
 from fsm_llm import API, FSMManager
 from fsm_llm.core.definitions import ClassificationResult
+from fsm_llm.core.transition_evaluator import TransitionEvaluatorConfig
 from fsm_llm.handlers import HandlerSystem
-from fsm_llm.transition_evaluator import TransitionEvaluatorConfig
 
 _FSM: dict[str, Any] = {
     "name": "two_way",

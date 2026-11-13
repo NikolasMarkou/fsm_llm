@@ -1,5 +1,5 @@
 """
-Tests for ``fsm_llm.schema_registry``: the field-introduction registry.
+Tests for ``fsm_llm.core.definitions.schema``: the field-introduction registry.
 
 The registry is proven complete by WALKING the annotations reachable from
 ``FSMDefinition`` (not by a hand list), so a new field or a new nested model
@@ -31,7 +31,7 @@ from fsm_llm.core.definitions import (
     Transition,
     TransitionCondition,
 )
-from fsm_llm.schema_registry import (
+from fsm_llm.core.definitions.schema import (
     FIELD_VERSIONS,
     SCHEMA_VERSION_DEFAULT,
     SchemaFinding,

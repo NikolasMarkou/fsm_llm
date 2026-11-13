@@ -37,11 +37,11 @@ from fsm_llm.core.definitions import (
     ResponseGenerationResponse,
     TransitionCondition,
 )
+from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.llm import (
     _GENERIC_FALLBACK_MESSAGE,
     LiteLLMInterface,
 )
-from fsm_llm.transition_evaluator import TransitionEvaluator
 from fsm_llm.utilities import extract_json_from_text, strip_think_and_fences
 from tests.conftest import cpu_timer
 from tests.test_fsm_llm.support import (

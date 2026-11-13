@@ -5,7 +5,7 @@ exception to raise), the field answers (`extraction_data`) and the Pass-2 reply
 per state (`responses`). A call nothing scripted is recorded in `unexpected`,
 raises `UnscriptedCallError` and is counted as an error; because the pipeline
 swallows a raised extraction error, `assert_exhausted()` is what fails the test.
-Expected status and kind values come from `fsm_llm.codes`.
+Expected status and kind values come from `fsm_llm.core.codes`.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import textwrap
 import pytest
 
 from fsm_llm import API
-from fsm_llm.codes import CompletionKind
+from fsm_llm.core.codes import CompletionKind
 from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     CompletionRequest,

@@ -24,7 +24,7 @@ from .core.definitions import (
     logic_referenced_keys,
     reachable_from,
 )
-from .state_kinds import kind_of
+from .core.state_kinds import kind_of
 
 
 def strongly_connected_components(

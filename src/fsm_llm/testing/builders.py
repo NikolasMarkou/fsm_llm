@@ -4,14 +4,14 @@ Reply builders: the three ``CompletionResponse`` shapes a scripted double return
 A model turn is a final text, a request for tool calls or a malformed tool-call
 turn; these three functions build each one so a test does not spell out a
 ``CompletionResponse`` and its ``ModelToolCall`` tuple by hand. The ``kind``
-strings come from ``fsm_llm.codes.CompletionKind``.
+strings come from ``fsm_llm.core.codes.CompletionKind``.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from fsm_llm.codes import CompletionKind
+from fsm_llm.core.codes import CompletionKind
 from fsm_llm.core.definitions import CompletionResponse, ModelToolCall
 
 

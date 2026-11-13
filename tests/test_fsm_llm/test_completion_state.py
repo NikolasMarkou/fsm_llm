@@ -37,10 +37,10 @@ from fsm_llm.core.definitions import (
     LLMResponseError,
     ModelToolCall,
 )
+from fsm_llm.core.definitions.schema import SCHEMA_VERSION_DEFAULT
 from fsm_llm.handlers import create_handler
 from fsm_llm.llm import LiteLLMInterface, LLMInterface, check_tool_transcript
 from fsm_llm.pipeline import MessagePipeline
-from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT
 from fsm_llm.testing import (
     MockLLM2Interface,
     ScriptedLLM,

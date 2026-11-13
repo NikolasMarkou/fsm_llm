@@ -10,7 +10,7 @@ from fsm_llm.constants import (
     TRANSITION_CLASSIFICATION_THRESHOLD_KEY,
     has_internal_prefix,
 )
-from fsm_llm.state_kinds import kind_of, state_problem
+from fsm_llm.core.state_kinds import kind_of, state_problem
 
 from .classification import ClassificationExtractionConfig
 from .extraction import FieldExtractionConfig
@@ -228,7 +228,7 @@ class State(BaseModel):
         # classification_extractions: one explicit extraction named like a
         # classification field is the supported below-threshold fallback of
         # plan-2026-09-19T175721-21cd7f8e/D-006 (now enforced in
-        # `_conversation_minted_keys`, src/fsm_llm/state_kinds.py). See decisions.md
+        # `_conversation_minted_keys`, src/fsm_llm/core/state_kinds.py). See decisions.md
         # D-016, D-033.
         """
         for channel, configs in (
@@ -269,6 +269,6 @@ class State(BaseModel):
     @property
     def kind(self) -> str:
         """The state's kind name: ``conversation``, ``completion`` or
-        ``synthesize`` (see ``fsm_llm.state_kinds``). Derived from the config
+        ``synthesize`` (see ``fsm_llm.core.state_kinds``). Derived from the config
         fields; not part of the definition, its dump or its ``fsm_id``."""
         return kind_of(self).name

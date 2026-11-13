@@ -34,6 +34,7 @@ from fsm_llm.core.definitions import (
     Transition,
     TransitionCondition,
 )
+from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.handlers import HandlerSystem
 from fsm_llm.llm import LiteLLMInterface, LLMInterface, _completion_response
 from fsm_llm.logging import logger
@@ -44,7 +45,6 @@ from fsm_llm.prompts import (
     FieldExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
 )
-from fsm_llm.transition_evaluator import TransitionEvaluator
 from tests.test_fsm_llm.support import (
     _A4_TRANSITION_KEY,
     _a3_api,

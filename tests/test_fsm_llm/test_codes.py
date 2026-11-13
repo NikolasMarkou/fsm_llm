@@ -1,4 +1,4 @@
-"""Tests for ``fsm_llm.codes``: the status, reason and completion-kind vocabulary.
+"""Tests for ``fsm_llm.core.codes``: the status, reason and completion-kind vocabulary.
 
 The pinned modules (``synthesis.constants``, ``agents.constants``) are only
 read here, never edited: a bench manifest pins their hashes. This file is what
@@ -14,9 +14,9 @@ from typing import ClassVar, get_args
 
 import pytest
 
-from fsm_llm import codes
 from fsm_llm.agents.constants import StopReason, ToolRunStatus
-from fsm_llm.codes import (
+from fsm_llm.core import codes
+from fsm_llm.core.codes import (
     CompletionKind,
     Reason,
     Status,
@@ -136,7 +136,7 @@ class TestAgainstThePinnedVocabularies:
         """The samples live in the `state_kinds` leaf, which cannot import
         `codes.Status`; the loader's name for them is the same tuple, and the
         one status the hook compares against is the enum's value."""
-        from fsm_llm import state_kinds
+        from fsm_llm.core import state_kinds
 
         assert definitions._SYNTHESIZE_SAMPLES is state_kinds.SYNTHESIZE_SAMPLES
         assert state_kinds._RUNNING == Status.RUNNING.value

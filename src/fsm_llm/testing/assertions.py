@@ -23,7 +23,7 @@ conversations driven by code under test (an agent, a runner) where no
 ``ConversationRun`` exists. It is opt-in because registering any handler changes
 how the pipeline copies the context (see its docstring).
 
-Expected codes pass through ``fsm_llm.codes`` (``CompletionKind``, ``Status``,
+Expected codes pass through ``fsm_llm.core.codes`` (``CompletionKind``, ``Status``,
 ``Reason`` ``from_string``), so a typo raises ``ValueError`` listing the
 vocabulary instead of failing a comparison that could never pass.
 """
@@ -35,7 +35,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from fsm_llm.api import API
-from fsm_llm.codes import CompletionKind, Reason, Status
+from fsm_llm.core.codes import CompletionKind, Reason, Status
 from fsm_llm.core.definitions import AdvanceResult, CompletionResponse, FSMError
 from fsm_llm.handlers import BaseHandler, HandlerTiming
 

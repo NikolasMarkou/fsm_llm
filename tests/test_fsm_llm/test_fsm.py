@@ -42,13 +42,13 @@ from fsm_llm.core.definitions import (
     Transition,
     TransitionCondition,
 )
+from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.fsm import FSMManager
 from fsm_llm.llm import LLMInterface
 from fsm_llm.prompts import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
 )
-from fsm_llm.transition_evaluator import TransitionEvaluator
 from fsm_llm.utilities import extract_json_from_text, load_fsm_from_file
 from fsm_llm.validator import FSMValidator
 from fsm_llm.visualizer import visualize_fsm_ascii
@@ -283,7 +283,7 @@ def test_conversation_context_missing_keys():
 
 def test_transition_evaluator():
     """Test the transition evaluator with deterministic transitions."""
-    from fsm_llm.transition_evaluator import (
+    from fsm_llm.core.transition_evaluator import (
         TransitionEvaluator,
         TransitionEvaluatorConfig,
     )

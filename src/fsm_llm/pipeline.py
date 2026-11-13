@@ -74,6 +74,8 @@ from .core.definitions import (
     TransitionOption,
     handler_only_names,
 )
+from .core.state_kinds import kind_of
+from .core.transition_evaluator import TransitionEvaluator
 from .executors import StateExecutor, check_executors, executor_for
 from .handlers import HandlerExecutionError, HandlerSystem, HandlerTiming
 from .llm import LLMInterface, implements_complete
@@ -85,8 +87,6 @@ from .prompts import (
     ResponseGenerationPromptBuilder,
     sanitize_text_for_prompt,
 )
-from .state_kinds import kind_of
-from .transition_evaluator import TransitionEvaluator
 from .utilities import (
     coerce_float,
     coerce_int,
@@ -1620,7 +1620,7 @@ class MessagePipeline:
         """
         # The minting rule (which keys, in which order, minus classification-owned
         # keys, explicit field_extractions winning) lives in ONE place:
-        # `KindSpec.minted_keys` in src/fsm_llm/state_kinds.py, which also carries the
+        # `KindSpec.minted_keys` in src/fsm_llm/core/state_kinds.py, which also carries the
         # D-017 (item 7) anchor. The flow analyses read the same hook. Do NOT
         # re-spell the rule here.
         names = kind_of(state).minted_keys(state)

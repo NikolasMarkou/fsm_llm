@@ -57,7 +57,7 @@ class TestHighPriorityTransition:
 
     def test_single_transition_priority_600_is_deterministic(self):
         from fsm_llm.core.definitions import State, Transition
-        from fsm_llm.transition_evaluator import (
+        from fsm_llm.core.transition_evaluator import (
             TransitionEvaluator,
             TransitionEvaluatorConfig,
         )
@@ -80,7 +80,7 @@ class TestHighPriorityTransition:
 
     def test_single_transition_priority_900_is_deterministic(self):
         from fsm_llm.core.definitions import State, Transition
-        from fsm_llm.transition_evaluator import (
+        from fsm_llm.core.transition_evaluator import (
             TransitionEvaluator,
             TransitionEvaluatorConfig,
         )

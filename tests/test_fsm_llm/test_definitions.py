@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from fsm_llm import API
 from fsm_llm.core.definitions import FieldExtractionConfig, FSMDefinition, FSMError
-from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT
+from fsm_llm.core.definitions.schema import SCHEMA_VERSION_DEFAULT
 from fsm_llm.validator import FSMValidator
 from tests.test_fsm_llm.support import _a2026_09_22_api, _fsm
 from tests.test_fsm_llm.test_completion_state import _RESULT, _tool_fsm

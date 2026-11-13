@@ -17,7 +17,7 @@ from fsm_llm.agents.meta_builders import (
 )
 from fsm_llm.agents.meta_tools import create_fsm_tools
 from fsm_llm.core.definitions import FSMDefinition
-from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT
+from fsm_llm.core.definitions.schema import SCHEMA_VERSION_DEFAULT
 
 # ---- FSMArtifactBuilder Edge Cases -------------------------------------------
 

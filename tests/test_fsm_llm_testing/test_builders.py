@@ -3,7 +3,7 @@
 The builders make the three `CompletionResponse` shapes a scripted double
 returns; `state_in_prompt` reads the one tag the response prompt carries, with a
 drift test against the real prompt builder; `hash_embed` is a pure embedder.
-Expected `kind` values come from `fsm_llm.codes`, never from literals.
+Expected `kind` values come from `fsm_llm.core.codes`, never from literals.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import pytest
 
 import fsm_llm.testing as public
 from fsm_llm import API
-from fsm_llm.codes import CompletionKind
+from fsm_llm.core.codes import CompletionKind
 from fsm_llm.core.definitions import CompletionResponse, ModelToolCall
 from fsm_llm.prompts import ResponseGenerationPromptBuilder
 from fsm_llm.testing import (

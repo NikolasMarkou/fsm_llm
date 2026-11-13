@@ -19,7 +19,10 @@ from fsm_llm.core.definitions import (
     TransitionEvaluation,
     TransitionEvaluationResult,
 )
-from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+from fsm_llm.core.transition_evaluator import (
+    TransitionEvaluator,
+    TransitionEvaluatorConfig,
+)
 from tests.test_fsm_llm.support import _a2_state
 
 # ---------------------------------------------------------------------------
@@ -625,7 +628,7 @@ def _step10_state(priorities: list[int], passing: list[bool]) -> State:
 
 def _step10_evaluate(state: State, config: Any = None) -> Any:
     from fsm_llm.core.definitions import FSMContext
-    from fsm_llm.transition_evaluator import TransitionEvaluator
+    from fsm_llm.core.transition_evaluator import TransitionEvaluator
 
     return TransitionEvaluator(config).evaluate_transitions(
         state, FSMContext(data={"go": True})
@@ -655,7 +658,7 @@ class TestStep10ConfidenceRemoved:
         assert "confidence" not in ev.model_dump()
 
     def test_per_transition_scores_carry_no_confidence(self):
-        from fsm_llm.transition_evaluator import TransitionEvaluator
+        from fsm_llm.core.transition_evaluator import TransitionEvaluator
 
         evaluator = TransitionEvaluator()
         state = _step10_state([100, 200], [True, False])

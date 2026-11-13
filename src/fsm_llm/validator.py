@@ -40,15 +40,15 @@ from .core.definitions import (
     reachable_from,
     unknown_initial_state_message,
 )
-from .flow_analysis import strongly_connected_components
-from .logging import enable_library_logging, logger, setup_cli_logging
-from .schema_registry import (
+from .core.definitions.schema import (
     SCHEMA_VERSION_DEFAULT,
     SCHEMA_VERSION_OLDEST,
     newer_fields,
     parse_version,
 )
-from .state_kinds import RawLintServices, raw_kinds
+from .core.state_kinds import RawLintServices, raw_kinds
+from .flow_analysis import strongly_connected_components
+from .logging import enable_library_logging, logger, setup_cli_logging
 from .utilities import read_json_object
 
 # The result kinds a completion state can produce, read off the one model

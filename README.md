@@ -533,7 +533,7 @@ fsm_llm/
 │   ├── api.py, fsm.py,        # API, FSMManager, MessagePipeline (the 2-pass turn)
 │   │   pipeline.py
 │   ├── core/definitions/      # Pydantic FSM models and core exceptions (a package)
-│   ├── transition_evaluator.py, expressions.py   # JsonLogic evaluation, no LLM
+│   ├── core/transition_evaluator.py, expressions.py   # JsonLogic evaluation, no LLM
 │   ├── flow_analysis.py       # Data-flow and liveness analysis of an FSM
 │   ├── llm.py                 # The only module that imports litellm
 │   ├── classification.py      # Classifier, intent routing

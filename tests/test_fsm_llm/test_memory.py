@@ -11,6 +11,7 @@ import pytest
 import fsm_llm.memory
 from fsm_llm.api import API
 from fsm_llm.core.definitions import FSMContext
+from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.memory import (
     BUFFER_CORE,
     BUFFER_ENVIRONMENT,
@@ -21,7 +22,6 @@ from fsm_llm.memory import (
     DEFAULT_HIDDEN_BUFFERS,
     WorkingMemory,
 )
-from fsm_llm.transition_evaluator import TransitionEvaluator
 from tests.test_fsm_llm.support import _a6_last_prompt, _a7_fsm, _a2026_09_22_api, _api
 
 

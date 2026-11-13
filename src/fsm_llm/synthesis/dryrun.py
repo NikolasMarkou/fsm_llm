@@ -37,9 +37,9 @@ from fsm_llm.core.definitions import (
     handler_only_names,
     reachable_from,
 )
+from fsm_llm.core.state_kinds import kind_of
+from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.flow_analysis import FlowFinding
-from fsm_llm.state_kinds import kind_of
-from fsm_llm.transition_evaluator import TransitionEvaluator
 
 from .constants import MAX_ASSIGNMENTS
 

@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 
 from fsm_llm import executors as ex
-from fsm_llm import state_kinds as sk
+from fsm_llm.core import state_kinds as sk
 from fsm_llm.core.definitions import DataExtractionResponse, State
 from fsm_llm.testing import final_reply
 from tests.test_fsm_llm.test_completion_state import (
@@ -206,7 +206,7 @@ class TestExecutorModule:
             "core.definitions",
             "llm",
             "logging",
-            "state_kinds",
+            "core.state_kinds",
         }
         for name in self._imports():
             if name.startswith("."):

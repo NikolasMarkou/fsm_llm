@@ -79,9 +79,9 @@ from .core.definitions import (
     LLMResponseError,
     State,
 )
+from .core.state_kinds import get_kind, kind_of
 from .llm import LLMInterface, check_tool_transcript
 from .logging import logger
-from .state_kinds import get_kind, kind_of
 
 __all__ = [
     "CompletionExecutor",

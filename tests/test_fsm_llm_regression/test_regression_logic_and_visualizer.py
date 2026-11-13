@@ -147,7 +147,7 @@ class TestEarlyTerminationRemoved:
 
     def test_early_termination_config_removed(self):
         """TransitionEvaluatorConfig should not have early_termination field."""
-        from fsm_llm.transition_evaluator import TransitionEvaluatorConfig
+        from fsm_llm.core.transition_evaluator import TransitionEvaluatorConfig
 
         config = TransitionEvaluatorConfig()
         assert not hasattr(config, "early_termination"), (
@@ -162,7 +162,7 @@ class TestEarlyTerminationRemoved:
             Transition,
             TransitionCondition,
         )
-        from fsm_llm.transition_evaluator import TransitionEvaluator
+        from fsm_llm.core.transition_evaluator import TransitionEvaluator
 
         # Create a state with 2 transitions, all with conditions that pass.
         # Distinct priorities: the unique lowest value wins (D-003).

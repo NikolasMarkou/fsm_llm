@@ -24,7 +24,7 @@ visits.
 
 Import it by name, ``from fsm_llm.testing import ...``; ``import fsm_llm`` never
 loads it and no library module imports it. It imports the core and
-``fsm_llm.codes`` only, never ``pytest``, ``litellm`` or another subpackage,
+``fsm_llm.core.codes`` only, never ``pytest``, ``litellm`` or another subpackage,
 and importing it has no side effect (no clock, no randomness, no socket).
 
 Install:

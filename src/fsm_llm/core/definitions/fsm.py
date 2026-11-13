@@ -16,13 +16,13 @@ from fsm_llm.constants import (
     MESSAGE_TRUNCATION_SUFFIX,
     has_internal_prefix,
 )
+from fsm_llm.core.state_kinds import SYNTHESIZE_SAMPLES, definition_problem, kind_of
 from fsm_llm.logging import logger
-from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT, newer_fields
-from fsm_llm.state_kinds import SYNTHESIZE_SAMPLES, definition_problem, kind_of
 
 from .classification import ClassificationResult
 from .limits import CONVERSATION_SUMMARY_MAX_CHARS
 from .pass_models import DataExtractionResponse, ResponseGenerationResponse
+from .schema import SCHEMA_VERSION_DEFAULT, newer_fields
 from .state import State
 from .transition import logic_referenced_keys
 
@@ -269,7 +269,7 @@ class FSMDefinition(BaseModel):
         """Cross-state rules of the state kinds (a synthesize state's edges and
         host keys), each asked of the kind registry; see
         ``state_kinds.definition_problem``."""
-        from fsm_llm.transition_evaluator import (
+        from fsm_llm.core.transition_evaluator import (
             TransitionEvaluator,  # circular at import
         )
 

@@ -243,7 +243,7 @@ class TestTransitionEvaluatorLowConfidence:
             TransitionCondition,
             TransitionEvaluationResult,
         )
-        from fsm_llm.transition_evaluator import (
+        from fsm_llm.core.transition_evaluator import (
             TransitionEvaluator,
             TransitionEvaluatorConfig,
         )
@@ -300,7 +300,7 @@ class TestEvaluationLoggingLevel:
         """_evaluate_single_transition should not log evaluation_result at INFO level."""
         import inspect
 
-        from fsm_llm.transition_evaluator import TransitionEvaluator
+        from fsm_llm.core.transition_evaluator import TransitionEvaluator
 
         source = inspect.getsource(TransitionEvaluator._evaluate_single_transition)
         # The problematic line is: logger.info("evaluation_result : ...")
@@ -602,7 +602,7 @@ class TestRedundantTransitionLogging:
 
     def test_no_unconditional_evaluation_result_logging(self):
         """_evaluate_single_transition should not log evaluation_result unconditionally."""
-        from fsm_llm.transition_evaluator import TransitionEvaluator
+        from fsm_llm.core.transition_evaluator import TransitionEvaluator
 
         source = inspect.getsource(TransitionEvaluator._evaluate_single_transition)
         # After fix, there should be no unconditional logger.debug with "evaluation_result"
@@ -619,7 +619,7 @@ class TestRedundantTransitionLogging:
 
     def test_no_unconditional_condition_result_logging(self):
         """_evaluate_transition_conditions should not log unconditionally."""
-        from fsm_llm.transition_evaluator import TransitionEvaluator
+        from fsm_llm.core.transition_evaluator import TransitionEvaluator
 
         source = inspect.getsource(TransitionEvaluator._evaluate_transition_conditions)
         lines = source.split("\n")

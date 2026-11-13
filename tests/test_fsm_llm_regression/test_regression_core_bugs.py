@@ -30,11 +30,11 @@ class TestVB1SelfTransitionSuppressed:
 
     def test_self_transition_returns_true(self):
         """A self-transition should return (True, previous_state_id), not (False, None)."""
-        from fsm_llm.fsm import FSMManager
-        from fsm_llm.transition_evaluator import (
+        from fsm_llm.core.transition_evaluator import (
             TransitionEvaluation,
             TransitionEvaluationResult,
         )
+        from fsm_llm.fsm import FSMManager
 
         fsm_def = FSMDefinition(
             name="self_loop_test",
@@ -489,7 +489,7 @@ class TestVB14cDotNotationContextKeys:
     """VB14c: requires_context_keys should support dot-notation like JsonLogic var."""
 
     def test_dot_notation_key_found_in_nested_context(self):
-        from fsm_llm.transition_evaluator import TransitionEvaluator
+        from fsm_llm.core.transition_evaluator import TransitionEvaluator
 
         evaluator = TransitionEvaluator()
         context = FSMContext()
@@ -542,7 +542,7 @@ class TestVB14eConfidenceSaturation:
     """
 
     def test_wide_priority_gap_is_deterministic(self):
-        from fsm_llm.transition_evaluator import (
+        from fsm_llm.core.transition_evaluator import (
             TransitionEvaluationResult,
             TransitionEvaluator,
         )

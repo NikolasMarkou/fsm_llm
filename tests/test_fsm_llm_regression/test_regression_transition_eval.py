@@ -12,8 +12,11 @@ from fsm_llm.core.definitions import (
     TransitionCondition,
     TransitionEvaluationResult,
 )
+from fsm_llm.core.transition_evaluator import (
+    TransitionEvaluator,
+    TransitionEvaluatorConfig,
+)
 from fsm_llm.executors import ConversationExecutor
-from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 
 # ── B5: strict_condition_matching exception doesn't break ────
 

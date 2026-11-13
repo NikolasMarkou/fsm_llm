@@ -11,7 +11,7 @@ from fsm_llm.agents.meta_builders import (
     FSMArtifactBuilder,
     WorkflowArtifactBuilder,
 )
-from fsm_llm.schema_registry import SCHEMA_VERSION_DEFAULT
+from fsm_llm.core.definitions.schema import SCHEMA_VERSION_DEFAULT
 
 # ===================================================================
 # FSMArtifactBuilder Tests

@@ -75,8 +75,8 @@ class TestApiSnapshot:
         assert "__version__" not in text
         for header in (
             "# fsm_llm",
-            "# fsm_llm.schema_registry",
-            "# fsm_llm.codes",
+            "# fsm_llm.core.definitions.schema",
+            "# fsm_llm.core.codes",
             "# fsm_llm.flow_analysis",
             "# fsm_llm.synthesis",
         ):

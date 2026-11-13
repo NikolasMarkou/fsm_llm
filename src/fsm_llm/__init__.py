@@ -99,6 +99,11 @@ from .core.definitions import (
 )
 
 # --------------------------------------------------------------
+# Transition Evaluation Components
+# --------------------------------------------------------------
+from .core.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
+
+# --------------------------------------------------------------
 # Explicit .env loading (opt-in; importing fsm_llm reads no .env file)
 # --------------------------------------------------------------
 from .env import load_env
@@ -163,11 +168,6 @@ from .prompts import (
 # Session Persistence
 # --------------------------------------------------------------
 from .session import FileSessionStore, SessionState, SessionStore
-
-# --------------------------------------------------------------
-# Transition Evaluation Components
-# --------------------------------------------------------------
-from .transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 
 # --------------------------------------------------------------
 # Utility Functions

@@ -79,7 +79,7 @@ flowchart TD
 - `pipeline.py` - `MessagePipeline`: the two-pass processing for each message.
 - `core/definitions/` - Pydantic data models (states, transitions, FSM definition, context, classification results) and the error classes, including `BuildError`.
 - `builders.py` - `APIBuilder` and `FSMManagerBuilder`: fluent builders over `API` and `FSMManager` (see "Builders" below).
-- `transition_evaluator.py` - decides whether a transition is certain, ambiguous, or blocked.
+- `core/transition_evaluator.py` - decides whether a transition is certain, ambiguous, or blocked.
 - `expressions.py` - the JsonLogic rule evaluator.
 - `classification.py` - intent classification with an LLM (`Classifier`, `HierarchicalClassifier`, `IntentRouter`). Inside a conversation the classifier uses the conversation's own LLM interface, so a custom `llm_interface` is honoured.
 - `handlers.py` - the handler system and its fluent builder.
@@ -91,7 +91,7 @@ flowchart TD
 - `session.py` - save and restore conversations to JSON files.
 - `validator.py`, `visualizer.py` - check an FSM file for problems; draw it as ASCII art, or as Mermaid or DOT through the graph data of `build_fsm_graph`.
 - `flow_analysis.py` - static analysis of an FSM graph: `strongly_connected_components` (shared with `validator.py`), and the data-flow and liveness checks `analyze_data_flow` and `analyze_liveness` that runtime synthesis uses as gates. It imports only `definitions` and `state_kinds`, never logs, and the validator does not call the two analyses.
-- `state_kinds.py` - the registry of state kinds: one frozen `KindSpec` per kind (`conversation`, `completion`, `synthesize`) holding the rules the loader, the validator, the data-flow and liveness analyses, the dry-run gate and the pipeline read instead of testing `state.completion` or `state.synthesize`, plus `kind_of(state)`, `get_kind` and `State.kind`, a plain property that is never serialised. A leaf (standard library only) and internal: it is not exported from `fsm_llm`.
+- `core/state_kinds.py` - the registry of state kinds: one frozen `KindSpec` per kind (`conversation`, `completion`, `synthesize`) holding the rules the loader, the validator, the data-flow and liveness analyses, the dry-run gate and the pipeline read instead of testing `state.completion` or `state.synthesize`, plus `kind_of(state)`, `get_kind` and `State.kind`, a plain property that is never serialised. A leaf (standard library only) and internal: it is not exported from `fsm_llm`.
 - `executors.py` - what a state's kind does in Pass 1 of a turn: `StateExecutor` (`extract`, `cleans_extracted`, `after_transition`), the conversation executor (the retained field, bulk and classification extraction; also the passive executor of `synthesize`) and the completion executor (one `complete` call over a consumer-owned transcript). The conversation extraction methods stay on `MessagePipeline` until the layout split (roadmap 0.4); the conversation executor calls them. The pipeline picks the executor with `executor_for(state, self._executors)` at its one Pass-1 seam (a keyword-only per-instance `executors={kind_name: StateExecutor}` on `API`, `FSMManager` and `MessagePipeline` wins over the module table); the module never imports the pipeline and is internal.
 - `runner.py`, `__main__.py` - the interactive command-line chat.
 - `utilities.py` - JSON extraction from LLM text, FSM file loading, shared context walkers.

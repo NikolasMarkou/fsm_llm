@@ -20,7 +20,7 @@ and fails when one drifts from the vocabulary here.
 Do not format a member with an f-string or ``str()``: that differs between
 Python versions for a ``str`` mixin enum. Use ``.value``.
 
-Imported by name (``from fsm_llm.codes import Status``); ``fsm_llm/__init__.py``
+Imported by name (``from fsm_llm.core.codes import Status``); ``fsm_llm/__init__.py``
 does not import it. Standard library only.
 """
 

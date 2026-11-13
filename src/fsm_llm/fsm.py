@@ -42,6 +42,7 @@ from .core.definitions import (
     State,
     StateNotFoundError,
 )
+from .core.transition_evaluator import TransitionEvaluator
 from .executors import StateExecutor
 from .handlers import HandlerErrorMode, HandlerSystem, HandlerTiming
 
@@ -59,7 +60,6 @@ from .prompts import (
     ResponseGenerationPromptBuilder,
     ResponsePromptConfig,
 )
-from .transition_evaluator import TransitionEvaluator
 from .utilities import filter_context_tree, load_fsm_definition
 
 # --------------------------------------------------------------

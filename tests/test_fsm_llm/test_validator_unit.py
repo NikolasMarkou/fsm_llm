@@ -40,8 +40,11 @@ from fsm_llm.core.definitions import (
     TransitionCondition,
     TransitionEvaluationResult,
 )
+from fsm_llm.core.transition_evaluator import (
+    TransitionEvaluator,
+    TransitionEvaluatorConfig,
+)
 from fsm_llm.handlers import HandlerTiming
-from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 from fsm_llm.validator import (
     FSMValidationResult,
     FSMValidator,
@@ -3041,7 +3044,7 @@ class TestStep11B7B11B12B13:
     def test_b13_flag_documented_as_diagnostics_only(self):
         import inspect
 
-        from fsm_llm import transition_evaluator
+        from fsm_llm.core import transition_evaluator
 
         source = inspect.getsource(transition_evaluator.TransitionEvaluatorConfig)
         assert "diagnostic" in source.lower()

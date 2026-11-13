@@ -47,9 +47,9 @@ from fsm_llm.core.definitions import (
     checked_key_names,
     logic_referenced_keys,
 )
+from fsm_llm.core.state_kinds import raw_kinds
 from fsm_llm.okf import capped_line, has_lone_surrogate, strip_unsafe_text
 from fsm_llm.security import has_internal_prefix, is_forbidden_context_entry
-from fsm_llm.state_kinds import raw_kinds
 
 from .constants import (
     ABORT_CONTEXT_KEY,
@@ -301,7 +301,7 @@ def _extracted_names(state: dict[str, Any]) -> set[str]:
     """The distinct names a state's extractions cover, read from the raw dict.
 
     A superset of the keys the pipeline mints an extraction for (the superset
-    of ``KindSpec.minted_keys`` in src/state_kinds.py, which replaced the hand
+    of ``KindSpec.minted_keys`` in src/fsm_llm/core/state_kinds.py, which replaced the hand
     mirror ``flow_analysis._minted_keys``; plan 2cefeb61 D-017 item 7): the
     explicit ``field_extractions``, the ``classification_extractions`` fields,
     ``required_context_keys`` and the keys the state's own edges require.

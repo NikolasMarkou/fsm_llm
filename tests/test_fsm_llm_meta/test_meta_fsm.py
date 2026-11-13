@@ -46,8 +46,8 @@ from fsm_llm.agents.meta_prompts import (
 )
 from fsm_llm.constants import has_internal_prefix
 from fsm_llm.core.definitions import CompletionRequest, FSMContext, FSMDefinition
+from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.handlers import HandlerTiming, create_handler
-from fsm_llm.transition_evaluator import TransitionEvaluator
 from fsm_llm.validator import FSMValidator
 from fsm_llm.validator import main as validate_main
 from fsm_llm.visualizer import build_fsm_graph, to_mermaid

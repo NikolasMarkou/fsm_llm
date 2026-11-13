@@ -9,7 +9,7 @@ import pytest
 
 from fsm_llm.api import API
 from fsm_llm.core.definitions import FSMDefinition, FSMError, TransitionEvaluationResult
-from fsm_llm.transition_evaluator import TransitionEvaluator
+from fsm_llm.core.transition_evaluator import TransitionEvaluator
 
 # ── Fixtures ────────────────────────────────────────────────────
 
