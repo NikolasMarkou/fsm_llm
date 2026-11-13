@@ -12,7 +12,6 @@ import itertools
 import json
 import re
 import sys
-import time
 import types
 from pathlib import Path
 from typing import Any
@@ -71,6 +70,7 @@ from fsm_llm.synthesis.synthesizer import (
     reviewer_from_hitl,
 )
 from fsm_llm.testing import ScriptedLLM, UnscriptedCallError, final_reply
+from tests.conftest import cpu_timer
 from tests.test_fsm_llm_synthesis.conftest import ByTurn, ScriptedRunnerLLM, stuck_fsm
 
 RET = ("answer",)
@@ -384,9 +384,9 @@ class TestBracketRepair:
         ],
     )
     def test_a_bomb_gives_none_fast(self, bomb, timing_factor):
-        started = time.monotonic()
-        assert _repair_brackets(bomb) is None
-        assert time.monotonic() - started < 2 * timing_factor
+        with cpu_timer() as timer:
+            assert _repair_brackets(bomb) is None
+        assert timer.elapsed < 2 * timing_factor
 
     def test_a_logged_slip_is_one_compile_call(self, valid_fsm):
         synth, llm = _synth([_slipped(valid_fsm)])

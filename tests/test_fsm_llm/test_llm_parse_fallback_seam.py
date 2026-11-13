@@ -15,7 +15,6 @@ read from.
 from __future__ import annotations
 
 import json
-import time
 from contextlib import ExitStack
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -44,6 +43,7 @@ from fsm_llm.llm import (
 )
 from fsm_llm.transition_evaluator import TransitionEvaluator
 from fsm_llm.utilities import extract_json_from_text, strip_think_and_fences
+from tests.conftest import cpu_timer
 from tests.test_fsm_llm.support import (
     OLLAMA_MODEL,
     _a6_last_prompt,
@@ -1133,9 +1133,9 @@ _LINEAR_BUDGET_S = 1.0
 
 
 def _elapsed(fn, arg: str) -> float:
-    start = time.perf_counter()
-    fn(arg)
-    return time.perf_counter() - start
+    with cpu_timer() as timer:
+        fn(arg)
+    return timer.elapsed
 
 
 class TestLinearFenceAndThink:
@@ -1150,27 +1150,27 @@ class TestLinearFenceAndThink:
 
     def test_extract_json_unclosed_fence_then_spaces_is_linear(self, timing_factor):
         text = "```json" + " " * _LINEAR_N
-        start = time.perf_counter()
-        assert extract_json_from_text(text) is None
-        assert time.perf_counter() - start < _LINEAR_BUDGET_S * timing_factor
+        with cpu_timer() as timer:
+            assert extract_json_from_text(text) is None
+        assert timer.elapsed < _LINEAR_BUDGET_S * timing_factor
 
     def test_extract_json_unclosed_fence_then_newlines_is_linear(self, timing_factor):
         text = "```" + "\n" * _LINEAR_N
-        start = time.perf_counter()
-        assert extract_json_from_text(text) is None
-        assert time.perf_counter() - start < _LINEAR_BUDGET_S * timing_factor
+        with cpu_timer() as timer:
+            assert extract_json_from_text(text) is None
+        assert timer.elapsed < _LINEAR_BUDGET_S * timing_factor
 
     def test_strip_think_repeated_unterminated_open_tags_is_linear(self, timing_factor):
         text = "<think>a" * _LINEAR_N
-        start = time.perf_counter()
-        assert strip_think_and_fences(text) == text
-        assert time.perf_counter() - start < _LINEAR_BUDGET_S * timing_factor
+        with cpu_timer() as timer:
+            assert strip_think_and_fences(text) == text
+        assert timer.elapsed < _LINEAR_BUDGET_S * timing_factor
 
     def test_strip_think_many_closed_blocks_is_linear(self, timing_factor):
         text = "<think>a</think>b" * _LINEAR_N
-        start = time.perf_counter()
-        assert strip_think_and_fences(text) == "b" * _LINEAR_N
-        assert time.perf_counter() - start < _LINEAR_BUDGET_S * timing_factor
+        with cpu_timer() as timer:
+            assert strip_think_and_fences(text) == "b" * _LINEAR_N
+        assert timer.elapsed < _LINEAR_BUDGET_S * timing_factor
 
     @pytest.mark.parametrize(
         "text",
@@ -1191,10 +1191,10 @@ class TestLinearFenceAndThink:
         hostile = "<think>a" * _LINEAR_N
         request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
         with patch("fsm_llm.llm.completion", return_value=_fake_response(hostile)):
-            start = time.perf_counter()
-            with pytest.raises(LLMResponseError):
-                llm.extract_bulk_data(request)
-            assert time.perf_counter() - start < _LINEAR_BUDGET_S * timing_factor
+            with cpu_timer() as timer:
+                with pytest.raises(LLMResponseError):
+                    llm.extract_bulk_data(request)
+            assert timer.elapsed < _LINEAR_BUDGET_S * timing_factor
 
 
 class TestDictOnlyJsonContract:
@@ -1938,7 +1938,8 @@ class TestStep08D1D5:
         for name, walker in _d3_walkers().items():
             finished, result = _d3_run_bounded(walker, data, budget)
             assert finished, (
-                f"{name}: 3-way aliasing at 14 levels did not finish in {budget:g}s"
+                f"{name}: 3-way aliasing at 14 levels did not finish "
+                f"within {budget:g}s of CPU time"
             )
             assert isinstance(result, dict)
 
@@ -2203,12 +2204,11 @@ class TestStep15D6D12B8:
 
     def test_d9_linear_on_pathological_input(self, timing_factor):
         import html
-        import time
 
         for payload in ("<a" * 10000, "</a" * 10000, "<!" * 10000, "<_" * 10000):
-            start = time.perf_counter()
-            out = _d9_sanitize(payload)
-            elapsed = time.perf_counter() - start
+            with cpu_timer() as timer:
+                out = _d9_sanitize(payload)
+            elapsed = timer.elapsed
             assert elapsed < 0.5 * timing_factor, (payload[:4], elapsed)
             assert html.unescape(out) == payload
 

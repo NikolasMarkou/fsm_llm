@@ -12,7 +12,6 @@ Tests cover:
 from __future__ import annotations
 
 import json
-import time
 
 import pytest
 
@@ -24,6 +23,7 @@ from fsm_llm.utilities import (
     load_fsm_definition,
     load_fsm_from_file,
 )
+from tests.conftest import cpu_timer
 
 # ------------------------------------------------------------------
 # Helpers
@@ -120,9 +120,9 @@ class TestExtractJsonFromText:
 
     def test_unbalanced_braces_do_not_scale_quadratically(self, timing_factor):
         """20k bare `{` must not stall the caller (was 18.2s, O(n^2))."""
-        start = time.perf_counter()
-        result = extract_json_from_text("{" * 20_000)
-        elapsed = time.perf_counter() - start
+        with cpu_timer() as timer:
+            result = extract_json_from_text("{" * 20_000)
+        elapsed = timer.elapsed
         assert result is None
         assert elapsed < 0.5 * timing_factor, (
             f"took {elapsed:.2f}s — Strategy 3 regressed to O(n^2)"

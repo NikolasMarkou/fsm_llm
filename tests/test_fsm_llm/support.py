@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import threading
 from contextlib import ExitStack, contextmanager
-from typing import Any
+from typing import Any, NamedTuple
 from unittest.mock import MagicMock, patch
 
 from fsm_llm import API
@@ -283,19 +283,73 @@ def _d3_walkers() -> dict[str, Any]:
     }
 
 
-def _d3_run_bounded(fn: Any, data: Any, seconds: float) -> tuple[bool, Any]:
-    """Run ``fn(data)`` in a daemon thread; ``(finished, result)``."""
+#: Wall-clock kill switch for a worker that must finish: about 70x the plain CPU
+#: cost of the slowest d3 walk (0.85 s). Only a hang or an exponential walk
+#: reaches it; the BUDGET a test asserts is CPU seconds (``_D3Run.cpu_seconds``).
+_D3_HANG_S = 60.0
+
+
+class _D3Run(NamedTuple):
+    """Outcome of one ``fn(data)`` run in a daemon thread.
+
+    ``finished``: the worker ended inside the wall kill switch. ``result`` /
+    ``error``: what ``fn`` returned or raised (``None`` when unfinished or not
+    applicable). ``cpu_seconds``: CPU time of that thread only (``inf`` when it
+    did not finish): CPU time does not inflate while a loaded host schedules
+    another process, so it is the right measure of a CPU-bound walk.
+    """
+
+    finished: bool
+    result: Any
+    error: BaseException | None
+    cpu_seconds: float
+
+
+def _d3_run_in_thread(fn: Any, data: Any, hang_seconds: float = _D3_HANG_S) -> _D3Run:
+    """Run ``fn(data)`` in a daemon thread, join for at most *hang_seconds* of
+    wall time (a kill switch, never the budget) and report the thread's CPU time.
+
+    Interface contract: never raises for what ``fn`` raises (any ``BaseException``
+    lands in ``error``); a worker still running at the join is left behind as a
+    daemon thread and reported ``finished=False``.
+    """
     import threading
+
+    from tests.conftest import cpu_timer
 
     box: dict[str, Any] = {}
 
     def _target() -> None:
-        box["result"] = fn(data)
+        with cpu_timer(thread=True) as timer:
+            try:
+                box["result"] = fn(data)
+            except BaseException as exc:
+                box["error"] = exc
+        box["cpu"] = timer.elapsed
 
     worker = threading.Thread(target=_target, daemon=True)
     worker.start()
-    worker.join(seconds)
-    return (not worker.is_alive(), box.get("result"))
+    worker.join(hang_seconds)
+    finished = not worker.is_alive()
+    return _D3Run(
+        finished,
+        box.get("result"),
+        box.get("error"),
+        box.get("cpu", float("inf")) if finished else float("inf"),
+    )
+
+
+def _d3_run_bounded(
+    fn: Any, data: Any, cpu_seconds: float, hang_seconds: float = _D3_HANG_S
+) -> tuple[bool, Any]:
+    """Run ``fn(data)`` in a daemon thread; ``(finished, result)``.
+
+    ``finished`` means the worker ended AND used at most *cpu_seconds* of CPU
+    time (callers multiply the budget by ``timing_factor``); the wall clock only
+    guards against a hang (*hang_seconds*).
+    """
+    run = _d3_run_in_thread(fn, data, hang_seconds)
+    return (run.finished and run.cpu_seconds <= cpu_seconds, run.result)
 
 
 def _c3_fsm() -> FSMDefinition:

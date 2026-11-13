@@ -25,7 +25,6 @@ from __future__ import annotations
 import html
 import itertools
 import re
-import time
 
 import pytest
 
@@ -44,6 +43,7 @@ from fsm_llm.prompts import (
     FieldExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
 )
+from tests.conftest import cpu_timer
 from tests.test_fsm_llm.support import _PromptSpy
 
 # ----------------------------------------------------------------------
@@ -572,9 +572,9 @@ class TestWhitespaceBeforeSlashClosingTagsCannotBypassTheAllowlist:
         non-matching `<` followed by a long run of spaces -- 3229ms vs 1.8ms on
         the same input. This runs on user-controlled message text.
         """
-        start = time.perf_counter()
-        BasePromptBuilder()._sanitize_text_for_prompt(("<" + " " * 4000) * 20)
-        elapsed = time.perf_counter() - start
+        with cpu_timer() as timer:
+            BasePromptBuilder()._sanitize_text_for_prompt(("<" + " " * 4000) * 20)
+        elapsed = timer.elapsed
 
         assert elapsed < 1.0 * timing_factor, (
             f"sanitizing whitespace runs took {elapsed:.2f}s -- the tag pattern has "
@@ -690,14 +690,12 @@ class TestSanitizerTagBypass:
 
 class TestTagSanitizerIsLinear:
     def test_repeated_open_angle_finishes_fast(self, timing_factor):
-        import time
-
         from fsm_llm.prompts import DataExtractionPromptBuilder
 
         builder = DataExtractionPromptBuilder()
-        start = time.perf_counter()
-        out = builder._sanitize_text_for_prompt("<a" * 10000)
-        elapsed = time.perf_counter() - start
+        with cpu_timer() as timer:
+            out = builder._sanitize_text_for_prompt("<a" * 10000)
+        elapsed = timer.elapsed
         # D-047 trade-off (a): the bounded-tail pattern escapes an overflowing
         # `<a...` opener, so the exact output is no longer the input. What
         # matters: fast, no raw structural closing tag, nothing lost.
@@ -795,9 +793,9 @@ class TestNestedClosingTagIsEscaped:
         ids=["repeat-open-angle", "long-name", "spaces-after-name", "spaces-first"],
     )
     def test_hostile_shapes_stay_linear(self, text, timing_factor):
-        start = time.perf_counter()
-        out = _sanitize(text)
-        elapsed = time.perf_counter() - start
+        with cpu_timer() as timer:
+            out = _sanitize(text)
+        elapsed = timer.elapsed
         nothing_lost = html.unescape(out) == text  # bool: no giant assert diff
         assert elapsed < 0.5 * timing_factor
         assert nothing_lost
@@ -927,9 +925,9 @@ class TestOverflowArmLeavesBenignProseAlone:
         assert out.startswith("&lt;task ")
 
     def test_repeated_open_angle_finishes_fast(self, timing_factor):
-        start = time.perf_counter()
-        out = _sanitize("<a" * 10000)
-        elapsed = time.perf_counter() - start
+        with cpu_timer() as timer:
+            out = _sanitize("<a" * 10000)
+        elapsed = timer.elapsed
         nothing_lost = html.unescape(out) == "<a" * 10000
         assert elapsed < 0.5 * timing_factor
         assert nothing_lost
@@ -1024,18 +1022,18 @@ class TestPaddedOpenerIsEscapedAgain:
         assert _sanitize(text) == "&lt;" + text[1:]
 
     def test_repeated_open_angle_stays_fast(self, timing_factor):
-        start = time.perf_counter()
-        out = _sanitize("<a" * 10000)
-        elapsed = time.perf_counter() - start
+        with cpu_timer() as timer:
+            out = _sanitize("<a" * 10000)
+        elapsed = timer.elapsed
         nothing_lost = html.unescape(out) == "<a" * 10000
         assert elapsed < 0.5 * timing_factor
         assert nothing_lost
 
     def test_repeated_padded_openers_stay_fast(self, timing_factor):
         text = ("< t " + "p" * 300 + ">") * 300
-        start = time.perf_counter()
-        out = _sanitize(text)
-        elapsed = time.perf_counter() - start
+        with cpu_timer() as timer:
+            out = _sanitize(text)
+        elapsed = timer.elapsed
         nothing_lost = html.unescape(out) == text
         assert elapsed < 0.5 * timing_factor
         assert nothing_lost

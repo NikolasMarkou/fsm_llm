@@ -17,6 +17,10 @@ from fsm_llm.constants import ENV_LLM_MODEL
 from fsm_llm.definitions import FSMDefinition, ResponseGenerationResponse
 from fsm_llm.llm import LLMInterface
 from fsm_llm.testing import MockLLM2Interface
+from tests.cputime import (  # noqa: F401  (re-exported: the one import path)
+    CpuTimer,
+    cpu_timer,
+)
 
 #: Ollama tag the live suites expect to be pulled (a model name without its
 #: ``ollama_chat/`` provider prefix). The package has no default model: live

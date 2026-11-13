@@ -66,6 +66,7 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_strands_features.py` - schema-enforced output, invocation state, streaming, session save and restore.
 - `test_streaming_history_seam.py` - history stays consistent when a stream fails or is abandoned.
 - `test_stack_lifecycle_seam.py` - races in `push_fsm`/`pop_fsm` and stale-conversation cleanup.
+- `test_cpu_timer.py` - the `cpu_timer` helper: budgets about computation are measured in CPU time, not wall time (a loaded host inflates wall time).
 - `test_timing_factor.py` - the `timing_factor` fixture that scales wall-clock budgets under a tracer or load.
 - `test_turn_guard_deterministic.py` - a second `converse` on a busy conversation raises `FSMError`.
 - `test_bulk_extraction.py` - bulk extraction through `API.converse`: correction overwrite, provenance, coercion and validation, rejected corrections, back-edge re-extraction, grounding, and a failed bulk surfaced to Pass 2.

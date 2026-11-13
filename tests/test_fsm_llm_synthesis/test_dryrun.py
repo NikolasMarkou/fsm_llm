@@ -12,7 +12,6 @@ import itertools
 import json
 import math
 import random
-import time
 from collections import Counter
 from pathlib import Path
 from typing import Any, ClassVar
@@ -27,6 +26,7 @@ from fsm_llm.synthesis import dryrun
 from fsm_llm.synthesis.dryrun import analyze_dryrun
 from fsm_llm.transition_evaluator import TransitionEvaluator
 from fsm_llm.validator import FSMValidator
+from tests.conftest import cpu_timer
 
 from .conftest import good_fsm
 
@@ -868,12 +868,11 @@ class TestSpeed:
         was_on = dict(logger._core.activation_list).get("fsm_llm.", False)  # type: ignore[attr-defined]
         logger.disable("fsm_llm")
         try:
-            start = time.perf_counter()
-            analyze_dryrun(definition)
-            took = time.perf_counter() - start
+            with cpu_timer() as timer:
+                analyze_dryrun(definition)
         finally:
             (logger.enable if was_on else logger.disable)("fsm_llm")
-        assert took < 2.0 * timing_factor
+        assert timer.elapsed < 2.0 * timing_factor
 
 
 # ------------------------------------------------------------- examples probe

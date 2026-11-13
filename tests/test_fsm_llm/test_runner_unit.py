@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fsm_llm.definitions import ModelNotConfiguredError
+from tests.conftest import cpu_timer
 from tests.test_fsm_llm.support import _JOIN_TIMEOUT_S
 
 
@@ -611,16 +612,15 @@ def _redact_in_thread(payload: Any, timing_factor: float) -> tuple[bool, float, 
     """Run ``redact_context`` in a daemon thread so a super-linear walk FAILS
     the test at the join timeout (scaled by *timing_factor*) instead of hanging
     the suite."""
-    import time
 
     from fsm_llm.utilities import redact_context
 
     box: dict[str, Any] = {}
 
     def _work() -> None:
-        started = time.perf_counter()
-        box["result"] = redact_context(payload)
-        box["elapsed"] = time.perf_counter() - started
+        with cpu_timer(thread=True) as timer:
+            box["result"] = redact_context(payload)
+        box["elapsed"] = timer.elapsed
 
     worker = threading.Thread(target=_work, daemon=True)
     worker.start()

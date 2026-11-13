@@ -62,7 +62,7 @@ from fsm_llm.okf_cli import main as okf_cli_main
 from fsm_llm.prompts import ResponseGenerationPromptBuilder
 from fsm_llm.security import resolve_within
 from fsm_llm.testing import MockLLM2Interface
-from tests.conftest import symlink_or_skip
+from tests.conftest import cpu_timer, symlink_or_skip
 
 
 class TestResolveWithin:
@@ -324,11 +324,11 @@ class TestYamlSafety:
         )
         text = f"type: T\na: &a [x, x, x, x, x, x, x, x, x]\n{levels}j: [{refs}]\n"
 
-        started = time.perf_counter()
-        concept, codes = _parse(text)
+        with cpu_timer() as timer:
+            concept, codes = _parse(text)
 
         # smoke bound, deliberately loose: decisions.md D-017 item 6
-        assert time.perf_counter() - started < 5.0 * timing_factor
+        assert timer.elapsed < 5.0 * timing_factor
         assert codes[0] == "frontmatter-invalid"
         assert concept.extra == {}
 
@@ -342,22 +342,22 @@ class TestYamlSafety:
     ) -> None:
         text = "type: T\nk: " + "[" * 5000 + "]" * 5000 + "\n"
 
-        started = time.perf_counter()
-        concept, codes = _parse(text)
+        with cpu_timer() as timer:
+            concept, codes = _parse(text)
 
         # smoke bound, deliberately loose: decisions.md D-017 item 6
-        assert time.perf_counter() - started < 5.0 * timing_factor
+        assert timer.elapsed < 5.0 * timing_factor
         assert codes[0] == "frontmatter-too-deep"
         assert concept.body == "body\n"
 
     def test_an_unclosed_deep_flow_sequence_gives_an_issue_quickly(
         self, timing_factor
     ) -> None:
-        started = time.perf_counter()
-        _, codes = _parse("type: T\nk: " + "{a: [" * 2500 + "\n")
+        with cpu_timer() as timer:
+            _, codes = _parse("type: T\nk: " + "{a: [" * 2500 + "\n")
 
         # smoke bound, deliberately loose: decisions.md D-017 item 6
-        assert time.perf_counter() - started < 5.0 * timing_factor
+        assert timer.elapsed < 5.0 * timing_factor
         assert codes[0] == "frontmatter-too-deep"
 
     def test_deep_block_nesting_gives_an_issue_not_a_recursion_error(
@@ -365,11 +365,11 @@ class TestYamlSafety:
     ) -> None:
         lines = "".join(" " * i + f"k{i}:\n" for i in range(700))
 
-        started = time.perf_counter()
-        _, codes = _parse("type: T\n" + lines + " " * 700 + "v: 1\n")
+        with cpu_timer() as timer:
+            _, codes = _parse("type: T\n" + lines + " " * 700 + "v: 1\n")
 
         # smoke bound, deliberately loose: decisions.md D-017 item 6
-        assert time.perf_counter() - started < 5.0 * timing_factor
+        assert timer.elapsed < 5.0 * timing_factor
         # Block nesting deep enough to recurse is far above the frontmatter size
         # bound, so that bound is what stops it.
         assert "frontmatter-too-large" in codes
@@ -843,11 +843,11 @@ class TestFrontmatterSizeBound:
         raw = "".join(f"k{i:05d}: v\n" for i in range(2_100))
         assert len(raw) > 20_000
 
-        started = time.perf_counter()
-        concept, issues = parse_concept_text("a", f"---\ntype: T\n{raw}---\nbody\n")
+        with cpu_timer() as timer:
+            concept, issues = parse_concept_text("a", f"---\ntype: T\n{raw}---\nbody\n")
 
         # smoke bound, deliberately loose: decisions.md D-017 item 6
-        assert time.perf_counter() - started < 5.0 * timing_factor
+        assert timer.elapsed < 5.0 * timing_factor
         assert concept.type == ""
         assert concept.body == "body\n"
         errors = {i.code: i.severity for i in issues}
@@ -1135,11 +1135,11 @@ class TestLoader:
                 },
             )
 
-        started = time.perf_counter()
-        bundle = load_bundle(tmp_path)
+        with cpu_timer() as timer:
+            bundle = load_bundle(tmp_path)
 
         # smoke bound, deliberately loose: decisions.md D-017 item 6
-        assert time.perf_counter() - started < 5.0 * timing_factor
+        assert timer.elapsed < 5.0 * timing_factor
         assert len(bundle) == 500
         assert bundle.issues == []
 
@@ -1296,11 +1296,11 @@ class TestSymlink:
         symlink_or_skip(tmp_path / "d" / "loop", tmp_path / "d")
         symlink_or_skip(tmp_path / "up", tmp_path)
 
-        started = time.perf_counter()
-        bundle = load_bundle(tmp_path)
+        with cpu_timer() as timer:
+            bundle = load_bundle(tmp_path)
 
         # smoke bound, deliberately loose: decisions.md D-017 item 6
-        assert time.perf_counter() - started < 5.0 * timing_factor
+        assert timer.elapsed < 5.0 * timing_factor
         assert [c.id for c in bundle] == ["d/a"]
         assert _codes(bundle).count("symlink-skipped") == 2
 
@@ -1547,12 +1547,12 @@ class TestOutgoingAndBacklinks:
 
     def test_a_hostile_body_is_scanned_in_linear_time(self, timing_factor) -> None:
         bodies = ["[](" * 60_000, "[" * 200_000, "](" * 100_000, "[a](" + "b" * 200_000]
-        started = time.perf_counter()
-        for body in bodies:
-            _mem(a=body).outgoing("a")
+        with cpu_timer() as timer:
+            for body in bodies:
+                _mem(a=body).outgoing("a")
 
         # smoke bound, deliberately loose: decisions.md D-017 item 6
-        assert time.perf_counter() - started < 5.0 * timing_factor
+        assert timer.elapsed < 5.0 * timing_factor
 
     def test_the_number_of_links_read_from_one_body_is_capped(self) -> None:
         body = " ".join(f"[l](/c{i}.md)" for i in range(1_500))
@@ -1673,11 +1673,11 @@ class TestListAndSearch:
         assert len(bundle.search("orders", limit=1_000)) == 3
 
     def test_a_huge_query_is_bounded(self, bundle: OKFBundle, timing_factor) -> None:
-        started = time.perf_counter()
-        bundle.search("orders " * 100_000)
+        with cpu_timer() as timer:
+            bundle.search("orders " * 100_000)
 
         # smoke bound, deliberately loose: decisions.md D-017 item 6
-        assert time.perf_counter() - started < 5.0 * timing_factor
+        assert timer.elapsed < 5.0 * timing_factor
 
     def test_put_refreshes_the_search_index(self, bundle: OKFBundle) -> None:
         assert bundle.search("zebra") == []
@@ -3259,10 +3259,10 @@ class TestCreateOkfHandlerQuery:
 
     def test_huge_query_is_capped_and_does_not_hang(self, timing_factor) -> None:
         handler = create_okf_handler(self._bundle(), query_key="q")
-        started = time.monotonic()
-        ids = self._ids(handler, {"q": "pricing " + "x" * 5_000_000})
+        with cpu_timer() as timer:
+            ids = self._ids(handler, {"q": "pricing " + "x" * 5_000_000})
         # smoke bound, deliberately loose: decisions.md D-017 item 6
-        assert time.monotonic() - started < 5 * timing_factor
+        assert timer.elapsed < 5 * timing_factor
         assert ids[0] in ("a", "c")
 
     def test_query_does_not_return_deprecated_by_default(self) -> None:
@@ -4407,12 +4407,12 @@ class TestExportOfHostileMetadataNeverRaises:
         self, tmp_path: Path, timing_factor
     ) -> None:
         long = "\ud800" * 40_000
-        started = time.perf_counter()
-        bundle = bundle_from_memory_entries(
-            [{"id": long, "text": "hi " + long, "metadata": {"title": long}}]
-        )
+        with cpu_timer() as timer:
+            bundle = bundle_from_memory_entries(
+                [{"id": long, "text": "hi " + long, "metadata": {"title": long}}]
+            )
         # wall-clock bound loosened on purpose, see decisions.md D-017 item 6
-        assert time.perf_counter() - started < 5.0 * timing_factor
+        assert timer.elapsed < 5.0 * timing_factor
 
         (concept,) = list(bundle)
         assert len(concept.id) <= len("memory/") + 80
@@ -4426,12 +4426,12 @@ class TestExportOfHostileMetadataNeverRaises:
 
     def test_a_wide_structure_is_fast_and_cut(self, timing_factor) -> None:
         wide = {"items": list(range(200_000)), **{f"k{i}": i for i in range(50_000)}}
-        started = time.perf_counter()
-        bundle = bundle_from_memory_entries(
-            [{"id": "a", "text": "hi", "metadata": wide}]
-        )
+        with cpu_timer() as timer:
+            bundle = bundle_from_memory_entries(
+                [{"id": "a", "text": "hi", "metadata": wide}]
+            )
         # wall-clock bound loosened on purpose, see decisions.md D-017 item 6
-        assert time.perf_counter() - started < 5.0 * timing_factor
+        assert timer.elapsed < 5.0 * timing_factor
 
         assert len(bundle) == 1
         assert len(bundle.get("memory/a").extra["metadata"]["items"]) <= 100
@@ -4461,12 +4461,11 @@ class TestWriteRefusesHostileFrontmatterValues:
             ]
         )
         out = tmp_path / "out"
-        started = time.perf_counter()
-
-        with pytest.raises(OKFError, match="evil"):
-            write_bundle(bundle, out)
+        with cpu_timer() as timer:
+            with pytest.raises(OKFError, match="evil"):
+                write_bundle(bundle, out)
         # wall-clock bound loosened on purpose, see decisions.md D-017 item 6
-        assert time.perf_counter() - started < 5.0 * timing_factor
+        assert timer.elapsed < 5.0 * timing_factor
 
         assert not out.exists() or list(out.rglob("*")) == []
 
@@ -4561,13 +4560,12 @@ class TestCheckBundleIsCheapOnLinkFloods:
 
     def test_the_link_flood_finishes_fast_at_scale(self, timing_factor) -> None:
         bundle = _link_flood(400)
-        started = time.perf_counter()
-
-        issues = check_bundle(bundle)
-        bundle.backlinks("d0/c0")
+        with cpu_timer() as timer:
+            issues = check_bundle(bundle)
+            bundle.backlinks("d0/c0")
 
         # smoke bound, see decisions.md D-017 item 6: HEAD took about 9 s here
-        assert time.perf_counter() - started < 5.0 * timing_factor
+        assert timer.elapsed < 5.0 * timing_factor
         assert len(issues) <= 401
 
 

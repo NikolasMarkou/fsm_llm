@@ -7,7 +7,6 @@ import decimal
 import math
 import pathlib
 import re
-import threading
 import types
 from functools import partial
 from typing import Any
@@ -22,6 +21,7 @@ from fsm_llm.definitions import FSMDefinition, State, Transition, TransitionCond
 from fsm_llm.prompts import BasePromptBuilder
 from fsm_llm.security.names import _token_value_is_credential
 from fsm_llm.security.shapes import _looks_like_credential_value
+from tests.conftest import cpu_timer
 from tests.test_fsm_llm.fixtures.context_key_corpus import (
     CARVE_OUT_CREDENTIAL_ENTRIES,
     CARVE_OUT_KNOWN_FAIL_OPEN,
@@ -53,6 +53,7 @@ from tests.test_fsm_llm.support import (
     _api,
     _d3_aliased,
     _d3_run_bounded,
+    _d3_run_in_thread,
     _d3_walkers,
     _mock_llm,
     _PromptSpy,
@@ -611,7 +612,6 @@ class TestForbiddenPatternMatching:
 
     def test_patterns_are_linear_on_adversarial_input(self, timing_factor):
         """No catastrophic backtracking: a nearly-matching long key is fast."""
-        import time
 
         from fsm_llm.constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS
 
@@ -626,11 +626,9 @@ class TestForbiddenPatternMatching:
             "x_" * 20000 + "access_tokenizer",
         )
         for probe in probes:
-            start = time.perf_counter()
-            any(p.match(probe) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
-            assert time.perf_counter() - start < 0.5 * timing_factor, (
-                f"slow on {probe[:16]!r}..."
-            )
+            with cpu_timer() as timer:
+                any(p.match(probe) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
+            assert timer.elapsed < 0.5 * timing_factor, f"slow on {probe[:16]!r}..."
 
 
 # --------------------------------------------------------------
@@ -4985,23 +4983,21 @@ class TestContainerValuesUnderAmbiguousKeyNames:
     def test_the_budget_depth_and_cycles_fail_closed_in_bounded_time(
         self, timing_factor
     ):
-        import time
-
         deep: list = ["ordinary"]
         for _ in range(40):
             deep = [deep]
         cyclic: list = ["ordinary"]
         cyclic.append(cyclic)
         shared = ["ordinary"]
-        start = time.perf_counter()
-        results = {
-            "wide": is_forbidden_context_entry("order_key", ["w"] * 10_000),
-            "deep": is_forbidden_context_entry("order_key", deep),
-            "cycle": is_forbidden_context_entry("order_key", cyclic),
-            "shared": is_forbidden_context_entry("order_key", [shared, shared]),
-            "big_bytes": is_forbidden_context_entry("order_key", b"x" * 5_000_000),
-        }
-        assert time.perf_counter() - start < 1.0 * timing_factor
+        with cpu_timer() as timer:
+            results = {
+                "wide": is_forbidden_context_entry("order_key", ["w"] * 10_000),
+                "deep": is_forbidden_context_entry("order_key", deep),
+                "cycle": is_forbidden_context_entry("order_key", cyclic),
+                "shared": is_forbidden_context_entry("order_key", [shared, shared]),
+                "big_bytes": is_forbidden_context_entry("order_key", b"x" * 5_000_000),
+            }
+        assert timer.elapsed < 1.0 * timing_factor
         assert results == {
             "wide": True,
             "deep": True,
@@ -5036,12 +5032,10 @@ class TestContainerValuesUnderAmbiguousKeyNames:
         assert is_forbidden_context_entry("billed_tokens", 137) is False
 
     def test_the_long_crypto_flood_stays_under_the_timing_pin(self, timing_factor):
-        import time
-
         name = "ssh_" * 5000
-        start = time.perf_counter()
-        is_forbidden_context_entry(name, [_AUDIT_STRIPE])
-        assert time.perf_counter() - start < 0.5 * timing_factor
+        with cpu_timer() as timer:
+            is_forbidden_context_entry(name, [_AUDIT_STRIPE])
+        assert timer.elapsed < 0.5 * timing_factor
 
 
 class TestUserVisibleData:
@@ -5222,15 +5216,15 @@ class TestStep08_1:
         data = _d3_1_large_context()
         assert clean_context_keys(data, "conv-d3-1") == _d3_1_expected()
 
-    def test_d3_acyclic_aliasing_is_exact_and_fast(self):
+    def test_d3_acyclic_aliasing_is_exact_and_fast(self, timing_factor):
         """3-way aliasing at 14 levels (acyclic): the data walkers finish fast
         AND keep every path, including the last-visited one."""
         data = {"root": _d3_aliased(14), "z_last": 1}
         walkers = _d3_walkers()
         walkers.pop("prompt")  # the prompt walker keeps its node budget
         for name, walker in walkers.items():
-            finished, result = _d3_run_bounded(walker, data, 2.0)
-            assert finished, f"{name}: did not finish in 2s"
+            finished, result = _d3_run_bounded(walker, data, 2.0 * timing_factor)
+            assert finished, f"{name}: did not finish in 2s of CPU time"
             node = result["root"]
             for _ in range(14):
                 node = node["c"]
@@ -5251,19 +5245,14 @@ class TestStep08_1:
         walkers = _d3_walkers()
         walkers.pop("prompt")
         for name, walker in walkers.items():
-            box: dict[str, Any] = {}
-
-            def _target(walker=walker, box=box) -> None:
-                try:
-                    box["result"] = walker(data)
-                except ContextFilterError as exc:
-                    box["error"] = exc
-
-            worker = threading.Thread(target=_target, daemon=True)
-            worker.start()
-            worker.join(10.0 * timing_factor)
-            assert not worker.is_alive(), f"{name}: did not finish in time"
-            assert "error" in box, f"{name}: returned {type(box.get('result'))}"
+            run = _d3_run_in_thread(walker, data)
+            assert run.finished, f"{name}: did not finish (hung)"
+            assert run.cpu_seconds < 10.0 * timing_factor, (
+                f"{name}: used {run.cpu_seconds:.2f}s of CPU"
+            )
+            assert isinstance(run.error, ContextFilterError), (
+                f"{name}: returned {type(run.result)}, raised {run.error!r}"
+            )
 
     def test_d3_work_refusal_is_an_fsm_error_and_a_value_error(self):
         """The refusal joins the ``FSMError`` tree like ``BuildError`` and
@@ -5394,12 +5383,12 @@ class TestStep08_2:
 
     # -- D3 --------------------------------------------------------------
 
-    def test_d3_cycle_elsewhere_does_not_disable_memoisation(self):
+    def test_d3_cycle_elsewhere_does_not_disable_memoisation(self, timing_factor):
         data, row = _d3_2_cycle_elsewhere()
         walkers = _d3_walkers()
         walkers.pop("prompt")
         for name, walker in walkers.items():
-            finished, result = _d3_run_bounded(walker, data, 10.0)
+            finished, result = _d3_run_bounded(walker, data, 10.0 * timing_factor)
             assert finished, name
             assert result is not None, name
             assert len(result["rows"]) == 1000, name
