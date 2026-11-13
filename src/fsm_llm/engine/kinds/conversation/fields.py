@@ -2,8 +2,10 @@
 field configs of a state, the per-field extraction calls, the validation and the type
 coercers.
 
-Layer ``engine`` (plan d454fd62, step 79): split out of the old ``fsm_llm.pipeline``; the
-method and function bodies are unchanged.
+Layer ``engine`` (plan d454fd62): split out of the old ``fsm_llm.pipeline`` at step 79 and moved
+here at step 80 (D-030), where the conversation executor owns it. The method and function bodies
+are unchanged except that a service of the pipeline is read as ``self._services.<name>`` (the
+``_PipelineServices`` protocol, ``engine/kinds/services.py``) instead of ``self.<name>``.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from fsm_llm.core.definitions import (
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.logging import logger
 
-from .surface import _PipelineSurface
+from .surface import _ConversationSurface
 
 
 # --- Type coercion dispatch for field extraction validation ---
@@ -127,7 +129,7 @@ _TYPE_COERCERS: dict[str, Callable[[Any], Any]] = {
 }
 
 
-class ConversationFieldsMixin(_PipelineSurface):
+class ConversationFieldsMixin(_ConversationSurface):
     """Per-field extraction of the conversation kind."""
 
     @staticmethod
@@ -220,8 +222,8 @@ class ConversationFieldsMixin(_PipelineSurface):
                 }
             else:
                 # Apply state-level context_scope as default filter
-                current_state = self.get_state(instance, conversation_id)
-                dynamic_context = self._apply_context_scope(
+                current_state = self._services.get_state(instance, conversation_id)
+                dynamic_context = self._services._apply_context_scope(
                     instance.context.get_user_visible_data(),
                     current_state,
                     conversation_id,
@@ -232,13 +234,11 @@ class ConversationFieldsMixin(_PipelineSurface):
                 dynamic_context.update(extracted_so_far)
 
             # Build prompt
-            system_prompt = (
-                self.field_extraction_prompt_builder.build_field_extraction_prompt(
-                    instance=instance,
-                    field_config=field_config,
-                    user_message=user_message,
-                    dynamic_context=dynamic_context,
-                )
+            system_prompt = self._services.field_extraction_prompt_builder.build_field_extraction_prompt(
+                instance=instance,
+                field_config=field_config,
+                user_message=user_message,
+                dynamic_context=dynamic_context,
             )
 
             # Build request. None (no user message) stays None on the request:
@@ -262,7 +262,7 @@ class ConversationFieldsMixin(_PipelineSurface):
                 if memo is not None and memo_key in memo:
                     response = memo[memo_key]
                 else:
-                    response = self.llm_interface.extract_field(request)
+                    response = self._services.llm_interface.extract_field(request)
                     if memo is not None and response.value is None:
                         memo[memo_key] = response
             except Exception as e:

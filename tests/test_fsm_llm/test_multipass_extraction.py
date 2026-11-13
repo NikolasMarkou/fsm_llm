@@ -23,6 +23,7 @@ from fsm_llm.core.definitions import (
     State,
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.handlers import HandlerSystem
 from fsm_llm.llm import LLMInterface
@@ -157,23 +158,23 @@ def _make_pipeline(fsm_def=None, llm=None):
 
 
 class TestBuildFieldConfigsFromState:
-    """Tests for MessagePipeline._build_field_configs_from_state."""
+    """Tests for ConversationPass1._build_field_configs_from_state."""
 
     def test_no_configs_when_no_required_keys(self):
         state = _make_state("s")
-        configs = MessagePipeline._build_field_configs_from_state(state)
+        configs = ConversationPass1._build_field_configs_from_state(state)
         assert configs == []
 
     def test_creates_one_config_per_required_key(self):
         state = _make_state("s", required_context_keys=["name", "email"])
-        configs = MessagePipeline._build_field_configs_from_state(state)
+        configs = ConversationPass1._build_field_configs_from_state(state)
         assert len(configs) == 2
         names = {c.field_name for c in configs}
         assert names == {"name", "email"}
 
     def test_configs_are_required(self):
         state = _make_state("s", required_context_keys=["name"])
-        configs = MessagePipeline._build_field_configs_from_state(state)
+        configs = ConversationPass1._build_field_configs_from_state(state)
         assert configs[0].required is True
 
     def test_configs_use_extraction_instructions(self):
@@ -182,7 +183,7 @@ class TestBuildFieldConfigsFromState:
             required_context_keys=["name"],
             extraction_instructions="Get the user's full name",
         )
-        configs = MessagePipeline._build_field_configs_from_state(state)
+        configs = ConversationPass1._build_field_configs_from_state(state)
         assert "Get the user's full name" in configs[0].extraction_instructions
 
     def test_configs_use_confidence_threshold(self):
@@ -191,12 +192,12 @@ class TestBuildFieldConfigsFromState:
             required_context_keys=["name"],
             extraction_confidence_threshold=0.8,
         )
-        configs = MessagePipeline._build_field_configs_from_state(state)
+        configs = ConversationPass1._build_field_configs_from_state(state)
         assert configs[0].confidence_threshold == 0.8
 
     def test_default_field_type_is_any(self):
         state = _make_state("s", required_context_keys=["name"])
-        configs = MessagePipeline._build_field_configs_from_state(state)
+        configs = ConversationPass1._build_field_configs_from_state(state)
         assert configs[0].field_type == "any"
 
 
@@ -221,7 +222,9 @@ class TestMultiPassExtraction:
         pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
         instance = _make_instance()
 
-        result = pipeline._execute_data_extraction(instance, "hello", "conv1")
+        result = ConversationPass1(pipeline)._execute_data_extraction(
+            instance, "hello", "conv1"
+        )
         llm.extract_field.assert_not_called()
         assert result.extracted_data == {}
 
@@ -241,7 +244,9 @@ class TestMultiPassExtraction:
         pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
         instance = _make_instance()
 
-        result = pipeline._execute_data_extraction(instance, "I'm Alice", "conv1")
+        result = ConversationPass1(pipeline)._execute_data_extraction(
+            instance, "I'm Alice", "conv1"
+        )
         # 2 fields extracted in pass 1, no retry needed
         assert llm.extract_field.call_count == 2
         assert result.extracted_data == {"name": "Alice", "email": "a@b.com"}
@@ -262,7 +267,9 @@ class TestMultiPassExtraction:
         pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
         instance = _make_instance()
 
-        result = pipeline._execute_data_extraction(instance, "hello", "conv1")
+        result = ConversationPass1(pipeline)._execute_data_extraction(
+            instance, "hello", "conv1"
+        )
         # 2 fields attempted in pass 1, no retry pass
         assert llm.extract_field.call_count == 2
         assert result.extracted_data == {"name": "Alice"}
@@ -321,7 +328,9 @@ class TestMultiPassExtraction:
         pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
         instance = _make_instance()
 
-        result = pipeline._execute_data_extraction(instance, "I'm Alice", "conv1")
+        result = ConversationPass1(pipeline)._execute_data_extraction(
+            instance, "I'm Alice", "conv1"
+        )
         # Pass 1: name + email (2 calls), retry: email only (1 call) = 3 total
         assert llm.extract_field.call_count == 3
         assert result.extracted_data == {"name": "Alice", "email": "alice@example.com"}
@@ -343,7 +352,9 @@ class TestMultiPassExtraction:
         # email already in context
         instance = _make_instance(context_data={"email": "a@b.com"})
 
-        result = pipeline._execute_data_extraction(instance, "hello", "conv1")
+        result = ConversationPass1(pipeline)._execute_data_extraction(
+            instance, "hello", "conv1"
+        )
         # email already in context -> skip extraction, only extract name
         assert llm.extract_field.call_count == 1
         assert result.extracted_data["name"] == "Alice"
@@ -410,7 +421,9 @@ class TestMultiPassExtraction:
         pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
         instance = _make_instance()
 
-        result = pipeline._execute_data_extraction(instance, "test", "conv1")
+        result = ConversationPass1(pipeline)._execute_data_extraction(
+            instance, "test", "conv1"
+        )
         assert result.extracted_data == {"a": "1", "b": "2", "c": "3"}
 
     def test_max_retries_respected(self):
@@ -430,7 +443,7 @@ class TestMultiPassExtraction:
         pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
         instance = _make_instance()
 
-        pipeline._execute_data_extraction(instance, "test", "conv1")
+        ConversationPass1(pipeline)._execute_data_extraction(instance, "test", "conv1")
         # 1 initial call + 2 retry calls = 3 total extract_field calls
         assert llm.extract_field.call_count == 3
 
@@ -450,7 +463,9 @@ class TestMultiPassExtraction:
         pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
         instance = _make_instance()
 
-        result = pipeline._execute_data_extraction(instance, "test", "conv1")
+        result = ConversationPass1(pipeline)._execute_data_extraction(
+            instance, "test", "conv1"
+        )
         # Only pass 1: 2 fields, no retries
         assert llm.extract_field.call_count == 2
         assert result.extracted_data == {"name": "Alice", "email": "a@b.com"}

@@ -107,9 +107,9 @@ def record_cut_off(
     ``API.get_data``. The turn bodies (``_run_turn``, ``_stream_turn``) and the
     greeting remove it before they start, so it describes the current turn only.
     A streamed reply is never flagged (the stream carries no finish reason).
-    Callers: the Pass-2 reply and the bulk and field extractions in ``engine/turn/``, and
-    the completion executor in ``executors.py`` (it lives here so the executors
-    need no import of the pipeline).
+    Callers: the Pass-2 reply and the bulk and field extractions in ``engine/kinds/conversation/``, and
+    the completion executor in ``engine/kinds/completion.py`` (it lives here so the
+    executors need no import of the pipeline).
     """
     # DECISION plan-2026-11-06T093029-0068b055/D-025: ONE key, set by the
     # pipeline from the `truncated` flag the LLM layer puts on a response. Do

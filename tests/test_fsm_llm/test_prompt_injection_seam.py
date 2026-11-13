@@ -1,7 +1,7 @@
 """Integration-seam regression tests for field-extraction prompt injection (S2).
 
 These tests drive an adversarial ``user_message`` and conversation history all
-the way through ``API.converse`` -> ``MessagePipeline._execute_field_extractions``
+the way through ``API.converse`` -> ``ConversationPass1._execute_field_extractions``
 -> ``FieldExtractionPromptBuilder.build_field_extraction_prompt`` and capture the
 prompt at the LLM boundary (``LLMInterface.extract_field``).  That seam is the
 point of this file: the sanitizer tests (``TestSanitizeText...``) only
@@ -88,7 +88,7 @@ def _fsm_definition():
 
     ``required_context_keys`` is what makes the pipeline build a
     ``FieldExtractionConfig`` and therefore reach the builder under test
-    (``MessagePipeline._build_field_configs_from_state``).
+    (``ConversationPass1._build_field_configs_from_state``).
     """
     return FSMDefinition.model_validate(
         {

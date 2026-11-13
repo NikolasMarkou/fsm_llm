@@ -1,8 +1,10 @@
 """Bulk extraction of the conversation kind (``ConversationBulkMixin``): the one call that
 extracts every field of a state from its extraction instructions.
 
-Layer ``engine`` (plan d454fd62, step 79): split out of the old ``fsm_llm.pipeline``; the
-method and function bodies are unchanged.
+Layer ``engine`` (plan d454fd62): split out of the old ``fsm_llm.pipeline`` at step 79 and moved
+here at step 80 (D-030), where the conversation executor owns it. The method and function bodies
+are unchanged except that a service of the pipeline is read as ``self._services.<name>`` (the
+``_PipelineServices`` protocol, ``engine/kinds/services.py``) instead of ``self.<name>``.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from fsm_llm.context.layout import sanitize_text_for_prompt
 from fsm_llm.core.definitions import BulkExtractionRequest, FSMInstance, State
 from fsm_llm.logging import logger
 
-from .surface import _PipelineSurface
+from .surface import _ConversationSurface
 
 
 class _BulkFailed(dict):
@@ -31,7 +33,7 @@ class _BulkFailed(dict):
     """
 
 
-class ConversationBulkMixin(_PipelineSurface):
+class ConversationBulkMixin(_ConversationSurface):
     """Bulk extraction of the conversation kind."""
 
     # ----------------------------------------------------------
@@ -81,15 +83,13 @@ class ConversationBulkMixin(_PipelineSurface):
             # gates <current_context> has in Pass 2. Do NOT skip the bulk call
             # on a message-free turn either: a bulk-only state would then
             # never extract anything. See decisions.md D-023.
-            prompt_context = self._apply_context_scope(
+            prompt_context = self._services._apply_context_scope(
                 instance.context.get_user_visible_data(),
                 state,
                 conversation_id,
             )
-            source_sections = (
-                self.data_extraction_prompt_builder.build_extraction_source_sections(
-                    instance, prompt_context
-                )
+            source_sections = self._services.data_extraction_prompt_builder.build_extraction_source_sections(
+                instance, prompt_context
             )
             source = "\n".join(source_sections).rstrip() or "(no context available)"
             subject = "the current context and the recent conversation below"
@@ -114,7 +114,7 @@ class ConversationBulkMixin(_PipelineSurface):
 
         # DECISION plan-2026-09-12T135914-45a654de/D-015
         # Previously reached past the LLMInterface ABC via
-        # `cast(LiteLLMInterface, self.llm_interface)._make_llm_call(...)` —
+        # `cast(LiteLLMInterface, self._services.llm_interface)._make_llm_call(...)` —
         # a private method of ONE concrete implementation, called from
         # outside that class. Now goes through the public ABC surface
         # (`extract_bulk_data`, llm.py), which does its own parsing via the
@@ -130,7 +130,7 @@ class ConversationBulkMixin(_PipelineSurface):
                 user_message=user_message,
                 prompt_context=prompt_context,
             )
-            response = self.llm_interface.extract_bulk_data(request)
+            response = self._services.llm_interface.extract_bulk_data(request)
             # Filter out None/empty values — extract_bulk_data returns the
             # extraction verbatim; this merge-time filtering is this
             # caller's own concern, not the LLM interface's.

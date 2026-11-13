@@ -1,8 +1,10 @@
 """Classification extraction of the conversation kind (``ConversationClassificationMixin``):
 the ``classification_extractions`` of a state, one classifier call per entry.
 
-Layer ``engine`` (plan d454fd62, step 79): split out of the old ``fsm_llm.pipeline``; the
-method and function bodies are unchanged.
+Layer ``engine`` (plan d454fd62): split out of the old ``fsm_llm.pipeline`` at step 79 and moved
+here at step 80 (D-030), where the conversation executor owns it. The method and function bodies
+are unchanged except that a service of the pipeline is read as ``self._services.<name>`` (the
+``_PipelineServices`` protocol, ``engine/kinds/services.py``) instead of ``self.<name>``.
 """
 
 from __future__ import annotations
@@ -20,16 +22,16 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.logging import logger
 
-from .records import (
+from ..records import (
     _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS,
     _classification_record,
     _json_native_values,
     _record_classification_result,
 )
-from .surface import _PipelineSurface
+from .surface import _ConversationSurface
 
 
-class ConversationClassificationMixin(_PipelineSurface):
+class ConversationClassificationMixin(_ConversationSurface):
     """Classification extraction of the conversation kind."""
 
     def _execute_classification_extractions(
@@ -90,13 +92,13 @@ class ConversationClassificationMixin(_PipelineSurface):
                 if config.prompt_config:
                     prompt_config = ClassificationPromptConfig(**config.prompt_config)
 
-                classifier = self._get_classifier(
+                classifier = self._services._get_classifier(
                     schema, prompt_config, model=config.model
                 )
 
                 result: ClassificationResult = classifier.classify(
                     user_message,
-                    context=self._build_classifier_context(
+                    context=self._services._build_classifier_context(
                         instance,
                         current_state,
                         conversation_id,

@@ -1761,12 +1761,26 @@ class TestStep12Accessors:
         import importlib
         import pkgutil
 
+        import fsm_llm.engine.kinds as kinds
         import fsm_llm.engine.turn as turn
 
-        # The pipeline is a package of modules (step 79): read every one of them,
-        # and see a few (a facade alone would pass vacuously).
-        names = [m.name for m in pkgutil.iter_modules(turn.__path__)]
-        assert len(names) >= 12
+        # The pipeline is a package of modules (step 79) and its conversation Pass 1 lives
+        # in the kinds package, nested (step 80): read every module of both, and see a few
+        # (a facade alone would pass vacuously).
+        names = [
+            name
+            for package in (turn, kinds)
+            for name in (
+                package.__name__,
+                *(
+                    m.name
+                    for m in pkgutil.walk_packages(
+                        package.__path__, prefix=f"{package.__name__}."
+                    )
+                ),
+            )
+        ]
+        assert len(names) >= 22
         for name in names:
-            module = importlib.import_module(f"{turn.__name__}.{name}")
+            module = importlib.import_module(name)
             assert "._sanitize_text_for_prompt" not in _module_source(module), name

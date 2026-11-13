@@ -124,7 +124,7 @@ from .core.transition_evaluator import TransitionEvaluator, TransitionEvaluatorC
 # local imports
 # --------------------------------------------------------------
 from .engine.fsm.manager import FSMManager
-from .executors import StateExecutor
+from .engine.kinds import StateExecutor
 from .handlers import (
     BaseHandler,
     FSMHandler,
@@ -654,7 +654,7 @@ class API:
             max_fsm_cache_size: Bound of the FSM definition LRU cache
                 (at least 1; a smaller value raises ``ValueError``)
             executors: Optional ``{kind_name: StateExecutor}`` map for this
-                ``API`` only: it overrides the module table of ``executors.py``
+                ``API`` only: it overrides the module table of ``engine/kinds/registry.py``
                 and never changes another ``API``. ``TypeError`` for a value
                 that is not a mapping of ``StateExecutor``, ``ValueError`` for
                 a kind name no ``KindSpec`` carries. Internal until the kind

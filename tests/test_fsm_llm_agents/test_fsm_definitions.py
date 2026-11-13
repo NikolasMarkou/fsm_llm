@@ -11,7 +11,7 @@ from fsm_llm.agents.fsm_definitions import (
 )
 from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.core.definitions import FSMDefinition, State
-from fsm_llm.engine.turn.message_pipeline import MessagePipeline
+from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.llm.ollama import build_ollama_response_format
 
 
@@ -154,7 +154,8 @@ def _think_configs(fsm: dict) -> dict:
     """Per-field configs the pipeline derives for the think state, by name."""
     state = State(**fsm["states"]["think"])
     return {
-        c.field_name: c for c in MessagePipeline._build_field_configs_from_state(state)
+        c.field_name: c
+        for c in ConversationPass1._build_field_configs_from_state(state)
     }
 
 

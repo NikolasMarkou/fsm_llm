@@ -17,7 +17,7 @@ from fsm_llm.core.definitions import (
     LLMResponseError,
     ResponseGenerationRequest,
 )
-from fsm_llm.engine.turn.message_pipeline import MessagePipeline
+from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from tests.test_fsm_llm.support import (
     OLLAMA_MODEL,
@@ -1134,7 +1134,7 @@ class TestFieldExtractionUncoercibleConfidence:
         out = _extract_field(
             f'{{"field_name": "name", "value": "Bob", "confidence": {bad}}}'
         )
-        checked = MessagePipeline._validate_field_extraction(
+        checked = ConversationPass1._validate_field_extraction(
             out,
             FieldExtractionConfig(
                 field_name="name",

@@ -21,7 +21,7 @@ from fsm_llm.core.definitions import FSMDefinition, State
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.core.verify import FSMValidator
 from fsm_llm.core.verify import flow as flow_analysis
-from fsm_llm.engine.turn.message_pipeline import MessagePipeline
+from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -745,7 +745,7 @@ _HAND_STATES = {
 
 def _pipeline_keys(state: State) -> set[str]:
     return {
-        c.field_name for c in MessagePipeline._build_field_configs_from_state(state)
+        c.field_name for c in ConversationPass1._build_field_configs_from_state(state)
     }
 
 

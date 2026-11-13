@@ -1,8 +1,10 @@
 """Data extraction of the conversation kind (``ConversationExtractionMixin``): the bulk-then-
 field-based Pass 1 extraction and the handler-only key set.
 
-Layer ``engine`` (plan d454fd62, step 79): split out of the old ``fsm_llm.pipeline``; the
-method and function bodies are unchanged.
+Layer ``engine`` (plan d454fd62): split out of the old ``fsm_llm.pipeline`` at step 79 and moved
+here at step 80 (D-030), where the conversation executor owns it. The method and function bodies
+are unchanged except that a service of the pipeline is read as ``self._services.<name>`` (the
+``_PipelineServices`` protocol, ``engine/kinds/services.py``) instead of ``self.<name>``.
 """
 
 from __future__ import annotations
@@ -21,12 +23,12 @@ from fsm_llm.core.definitions import (
 from fsm_llm.llm.ollama import is_ollama_model
 from fsm_llm.logging import logger
 
-from .conversation_bulk import _BulkFailed
-from .records import _is_agent_managed, _value_digest
-from .surface import _PipelineSurface
+from ..records import _is_agent_managed, _value_digest
+from .bulk import _BulkFailed
+from .surface import _ConversationSurface
 
 
-class ConversationExtractionMixin(_PipelineSurface):
+class ConversationExtractionMixin(_ConversationSurface):
     """Pass 1 data extraction of the conversation kind."""
 
     def _handler_only_keys(self, instance: FSMInstance) -> frozenset[str]:
@@ -39,7 +41,7 @@ class ConversationExtractionMixin(_PipelineSurface):
         Resolved per instance through ``fsm_resolver`` so a stacked child uses
         its own list, not the root's. Returns an empty set for the default.
         """
-        return handler_only_names(self.fsm_resolver(instance.fsm_id))
+        return handler_only_names(self._services.fsm_resolver(instance.fsm_id))
 
     def _execute_data_extraction(
         self, instance: FSMInstance, user_message: str | None, conversation_id: str
@@ -56,7 +58,7 @@ class ConversationExtractionMixin(_PipelineSurface):
         log = logger.bind(conversation_id=conversation_id)
         log.debug("Executing field-based data extraction")
 
-        current_state = self.get_state(instance, conversation_id)
+        current_state = self._services.get_state(instance, conversation_id)
 
         # Build unified field configs. DECISION
         # plan-2026-09-19T175721-21cd7f8e/D-033: a `handler_only_keys` name
@@ -130,7 +132,7 @@ class ConversationExtractionMixin(_PipelineSurface):
             # widen this to every provider, and do NOT memoise a success. The
             # `isinstance(str)` test is load-bearing: a Mock interface's
             # `.model` is truthy and must not enable it.
-            model = getattr(self.llm_interface, "model", None)
+            model = getattr(self._services.llm_interface, "model", None)
             memo = {} if isinstance(model, str) and is_ollama_model(model) else None
             existing = instance.context.data
             # DECISION plan-2026-09-19T175721-21cd7f8e/D-046: for an agent FSM an

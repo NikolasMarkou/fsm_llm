@@ -24,7 +24,7 @@ from fsm_llm.core.definitions import (
     handler_only_names,
 )
 from fsm_llm.core.verify import FSMValidator
-from fsm_llm.engine.turn.message_pipeline import MessagePipeline
+from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.testing import MockLLM2Interface
 
 # fsm_id of ``_golden()``, captured on the parent commit before the field existed.
@@ -530,7 +530,7 @@ class TestValidatorKnowsTheField:
 class TestPipelineMintsNothing:
     def test_no_field_configs(self):
         state = FSMDefinition(**_parent()).states["solve"]
-        assert MessagePipeline._build_field_configs_from_state(state) == []
+        assert ConversationPass1._build_field_configs_from_state(state) == []
 
     @pytest.mark.parametrize("result_key", ["synthesis_result", "proc_status"])
     def test_a_mock_cannot_forge_the_result(self, result_key):

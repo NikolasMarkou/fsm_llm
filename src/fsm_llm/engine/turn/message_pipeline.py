@@ -10,8 +10,9 @@ The pipeline does not own instances or locks — those remain in FSMManager.
 
 Layer ``engine`` (plan d454fd62, step 79): the shell of the old ``fsm_llm.pipeline``: the
 constructor, ``get_state`` and the handler bridge ``execute_handlers``. Everything else is a
-mixin (``driver``, ``pass1``, ``transitions``, ``pass2`` and the ``conversation_*`` modules); the
-method bodies are unchanged.
+mixin (``driver``, ``pass1``, ``transitions`` and ``pass2``); the method bodies are unchanged. The
+conversation kind's Pass-1 methods are not here since step 80: the conversation executor
+(``engine/kinds/conversation/``) owns them and reads this class through ``_PipelineServices``.
 """
 
 from __future__ import annotations
@@ -39,16 +40,11 @@ from fsm_llm.core.definitions import (
     StateNotFoundError,
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
-from fsm_llm.executors import StateExecutor, check_executors
+from fsm_llm.engine.kinds import StateExecutor, check_executors
 from fsm_llm.handlers import HandlerSystem, HandlerTiming
 from fsm_llm.llm import LLMInterface
 from fsm_llm.logging import logger
 
-from .conversation_bulk import ConversationBulkMixin
-from .conversation_classification import ConversationClassificationMixin
-from .conversation_extraction import ConversationExtractionMixin
-from .conversation_fields import ConversationFieldsMixin
-from .conversation_post_transition import ConversationPostTransitionMixin
 from .driver import DriverMixin
 from .pass1 import Pass1Mixin
 from .pass2 import Pass2Mixin
@@ -60,11 +56,6 @@ class MessagePipeline(
     Pass1Mixin,
     TransitionsMixin,
     Pass2Mixin,
-    ConversationPostTransitionMixin,
-    ConversationExtractionMixin,
-    ConversationBulkMixin,
-    ConversationFieldsMixin,
-    ConversationClassificationMixin,
 ):
     """2-pass message processing pipeline.
 
@@ -99,7 +90,7 @@ class MessagePipeline(
         self._classifier_cache: dict[str, Classifier] = {}
         self._classifier_cache_lock = threading.Lock()
         # Per-pipeline executors by kind name (read-only after this line, so any
-        # thread may read it); they override the module table of `executors.py`
+        # thread may read it); they override the module table of `engine/kinds/registry.py`
         # for this pipeline only. See `executors.check_executors`.
         self._executors = check_executors(executors)
 

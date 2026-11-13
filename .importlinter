@@ -126,7 +126,6 @@ forbidden_modules =
     fsm_llm.context
     fsm_llm.engine
     fsm_llm.eval
-    fsm_llm.executors
     fsm_llm.handlers
     fsm_llm.llm
     fsm_llm.memory
@@ -174,7 +173,6 @@ forbidden_modules =
     fsm_llm.context
     fsm_llm.engine
     fsm_llm.eval
-    fsm_llm.executors
     fsm_llm.handlers
     fsm_llm.monitor
     fsm_llm.okf
@@ -208,7 +206,6 @@ forbidden_modules =
     fsm_llm.cli_support
     fsm_llm.engine
     fsm_llm.eval
-    fsm_llm.executors
     fsm_llm.handlers
     fsm_llm.monitor
     fsm_llm.okf
@@ -226,7 +223,7 @@ forbidden_modules =
 # handlers`, peers that import neither each other nor anything above them). Today it reads the
 # kernel (`constants`, `logging`), `core` (the errors' base, `BuildError`, `checked_key_names`) and
 # `context.commit` (`clear_keys_delta`). It imports no engine peer (`api`, `engine` and
-# `executors` import it, never the reverse) and no subpackage; the list is those peers plus every
+# `engine` (with `engine.kinds`, the old `executors`) import it, never the reverse) and no subpackage; the list is those peers plus every
 # module above the engine layer. Step 95 replaces it with the `layers` contract of D-016.
 [importlinter:contract:handlers-import-no-engine-peer-or-higher-layer]
 name = fsm_llm.handlers imports no engine peer or subpackage module
@@ -241,7 +238,6 @@ forbidden_modules =
     fsm_llm.cli_support
     fsm_llm.engine
     fsm_llm.eval
-    fsm_llm.executors
     fsm_llm.monitor
     fsm_llm.okf_bridge
     fsm_llm.reasoning
@@ -253,8 +249,8 @@ forbidden_modules =
 
 # Step 78 (fsm.py split into the layer package `engine/fsm/`, the first module of the `engine`
 # layer, L4 of D-016): `engine` reads the kernel (`constants`, `logging`, `security`), `core`, `llm`,
-# `context` and `handlers`, plus the modules that move into it later (`executors`,
-# `classification`, `session`, `builders`, `api`: still top-level until steps 80 to 82). It imports
+# `context` and `handlers`, plus the modules that move into it later (`classification`,
+# `session`, `builders`, `api`: still top-level until steps 81 and 82). It imports
 # no subpackage, no okf or skills module and no entry module. The `core`, `llm`, `context` and
 # `handlers` contracts above forbid `fsm_llm.engine`, so the lower layers never import it. What
 # waits for step 95: the `layers` contract replaces these lists, and `engine -> okf_bridge` (a
@@ -293,4 +289,24 @@ forbidden_modules =
     fsm_llm.api
     fsm_llm.builders
     fsm_llm.engine.fsm
+    fsm_llm.session
+
+# Step 80 (executors.py became the layer package `engine/kinds/`; the conversation Pass-1
+# machinery moved out of `engine/turn/` into it): the kind executors sit BELOW the turn pipeline
+# (the pipeline imports them, never the reverse) and below the manager, the API, the builders
+# and the session store. They reach the pipeline only through the `_PipelineServices` protocol
+# of `engine/kinds/services.py`. The contract does not see an import under `TYPE_CHECKING`
+# (`exclude_type_checking_imports`); `test_executors.py` scans every module of the package for
+# one. The `engine-turn` contract above does not forbid `engine.kinds` (the turn calls it).
+# Step 95 replaces this with the `layers` contract of D-016, where it is an intra-engine edge.
+[importlinter:contract:engine-kinds-imports-no-turn-or-manager-or-api]
+name = fsm_llm.engine.kinds imports no turn, manager, API, builder or session module
+type = forbidden
+source_modules =
+    fsm_llm.engine.kinds
+forbidden_modules =
+    fsm_llm.api
+    fsm_llm.builders
+    fsm_llm.engine.fsm
+    fsm_llm.engine.turn
     fsm_llm.session

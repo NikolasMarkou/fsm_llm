@@ -12,11 +12,13 @@ this package; the old dotted path is gone. Modules:
 - ``transitions.py``: ``TransitionsMixin``, rule evaluation, the classifier tie-break and cache,
   the state transition.
 - ``pass2.py``: ``Pass2Mixin``, the reply generation, the greeting and the stream variant.
-- ``conversation_*.py``: the conversation kind's Pass-1 machinery (post-transition extraction,
-  data extraction, bulk extraction, per-field extraction, classification extraction); step 80
-  of the layout plan moves these into the kind executor.
 - ``records.py``: the turn snapshot and record and the small module-level helpers.
 - ``surface.py``: ``_PipelineSurface``, the mypy-only declarations the mixins share.
+
+The conversation kind's Pass-1 machinery (post-transition, data, bulk, per-field and
+classification extraction) is NOT here: since step 80 the conversation executor owns it
+(``fsm_llm.engine.kinds.conversation``) and reaches this package's pipeline only through the
+``_PipelineServices`` protocol; this package imports ``fsm_llm.engine.kinds``, never the reverse.
 
 A private name is imported from its defining module and a patch aims at the module that performs
 the lookup (``fsm_llm.engine.turn.transitions.Classifier``), never at this package.

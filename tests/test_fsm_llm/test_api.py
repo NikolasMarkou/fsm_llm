@@ -34,7 +34,7 @@ from fsm_llm.core.definitions import (
 from fsm_llm.core.definitions.schema import SCHEMA_VERSION_DEFAULT
 from fsm_llm.core.transition_evaluator import TransitionEvaluatorConfig
 from fsm_llm.engine.fsm.manager import FSMManager
-from fsm_llm.executors import ConversationExecutor
+from fsm_llm.engine.kinds import ConversationExecutor
 from fsm_llm.handlers import HandlerErrorMode, HandlerTiming, create_handler
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.logging import logger

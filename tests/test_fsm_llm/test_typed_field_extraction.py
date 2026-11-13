@@ -16,6 +16,7 @@ import pytest
 from fsm_llm import API, FieldExtractionConfig, typed_field_extraction
 from fsm_llm.constants import EXTRACTION_ENVELOPE_KEYS, FIELD_PROMPT_CONTEXT_LABEL
 from fsm_llm.core.definitions import TypedFieldType
+from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.testing import PromptGroundedLLM
 from tests.test_fsm_llm.support import _color_fsm, _fake_response
 
@@ -281,9 +282,8 @@ class TestStrictBoolCoercion:
             FieldExtractionConfig,
             FieldExtractionResponse,
         )
-        from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 
-        return MessagePipeline._validate_field_extraction(
+        return ConversationPass1._validate_field_extraction(
             FieldExtractionResponse(
                 field_name="agree", value=value, confidence=1.0, is_valid=True
             ),

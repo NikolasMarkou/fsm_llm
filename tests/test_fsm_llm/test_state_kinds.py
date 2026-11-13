@@ -25,6 +25,7 @@ from pydantic import BaseModel, ValidationError
 from fsm_llm.api import API
 from fsm_llm.core import state_kinds as sk
 from fsm_llm.core.definitions import FSMDefinition, State
+from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from tests.test_fsm_llm import kind_corpus as kc
 
 _MODULE = Path(sk.__file__)
@@ -514,7 +515,7 @@ class TestMintingHooks:
 
     @staticmethod
     def _old_minted(state: State) -> list[str]:
-        """Frozen oracle: the rule `MessagePipeline._build_field_configs_from_state`
+        """Frozen oracle: the rule `ConversationPass1._build_field_configs_from_state`
         spelled before the hook (ordered list of the config field names)."""
         if state.completion is not None or state.synthesize is not None:
             return []
@@ -563,14 +564,13 @@ class TestMintingHooks:
                 yield name, loaded, state
 
     def test_minted_keys_equal_the_old_pipeline_rule_over_the_corpus(self):
-        from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 
         checked = minting = 0
         for name, _loaded, state in self._states():
             checked += 1
             hook = list(sk.kind_of(state).minted_keys(state))
             assert hook == self._old_minted(state), (name, state.id)
-            configs = MessagePipeline._build_field_configs_from_state(state)
+            configs = ConversationPass1._build_field_configs_from_state(state)
             assert [c.field_name for c in configs] == hook, (name, state.id)
             minting += bool(hook)
         assert checked > 300 and minting > 50  # the corpus holds both shapes
@@ -591,7 +591,6 @@ class TestMintingHooks:
         """A completion state built around the loader (`model_construct`) with an
         explicit extraction still mints nothing: the kind decides, as before."""
         from fsm_llm.core.definitions import FieldExtractionConfig
-        from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 
         state = _plain_state(completion=_completion())
         bypass = state.model_copy(
@@ -608,7 +607,7 @@ class TestMintingHooks:
         )
         assert sk.kind_of(bypass).name == "completion"
         assert sk.kind_of(bypass).minted_keys(bypass) == ()
-        assert MessagePipeline._build_field_configs_from_state(bypass) == []
+        assert ConversationPass1._build_field_configs_from_state(bypass) == []
 
     def test_the_hooks_of_a_new_kind_default_to_minting_nothing(self):
         spec = sk.KindSpec(name="probe", config_field="probe")
@@ -624,7 +623,7 @@ class TestMintingHooks:
         ("path", "name", "owner"),
         [
             (
-                "engine/turn/conversation_fields.py",
+                "engine/kinds/conversation/fields.py",
                 "_build_field_configs_from_state",
                 "ConversationFieldsMixin",
             ),
@@ -642,7 +641,7 @@ class TestMintingHooks:
         ("path", "name", "owner"),
         [
             (
-                "engine/turn/conversation_fields.py",
+                "engine/kinds/conversation/fields.py",
                 "_build_field_configs_from_state",
                 "ConversationFieldsMixin",
             ),

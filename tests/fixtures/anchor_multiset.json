@@ -494,5 +494,11 @@
     "plan_2026-05-31_f08da86d/D-001": 1,
     "plan_2026-05-31_f08da86d/D-003": 1
   },
-  "reasons": []
+  "reasons": [
+    {
+      "delta": 1,
+      "reason": "step 80 of plan d454fd62: new anchor at ConversationExecutor (engine/kinds/conversation/executor.py): the conversation Pass 1 is bound to one pipeline's services per call, the executor is a shared singleton and engine/kinds never imports engine/turn; no other token was added or lost",
+      "token": "plan-2026-11-12T073150-d454fd62/D-030"
+    }
+  ]
 }

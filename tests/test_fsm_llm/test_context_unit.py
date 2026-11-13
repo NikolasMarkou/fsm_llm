@@ -5675,7 +5675,9 @@ class TestStep5NamedConstants:
     def test_provenance_constant_is_shared(self):
         from fsm_llm.constants import PROVENANCE_METADATA_KEY
         from fsm_llm.engine.fsm import snapshots
-        from fsm_llm.engine.turn import conversation_extraction
+        from fsm_llm.engine.kinds.conversation import (
+            extraction as conversation_extraction,
+        )
 
         assert PROVENANCE_METADATA_KEY == "_pipeline_extracted"
         assert (

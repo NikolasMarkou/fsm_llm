@@ -81,6 +81,7 @@ from fsm_llm.core.definitions import (
     TransitionOption,
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.handlers import HandlerSystem, HandlerTiming
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
@@ -832,8 +833,12 @@ class TestClassifierCache:
             mock_cls.return_value.classify.return_value = ClassificationResult(
                 reasoning="mock", intent="yes", confidence=0.9
             )
-            pipeline._execute_classification_extractions(state, "yes", instance, "c")
-            pipeline._execute_classification_extractions(state, "yes", instance, "c")
+            ConversationPass1(pipeline)._execute_classification_extractions(
+                state, "yes", instance, "c"
+            )
+            ConversationPass1(pipeline)._execute_classification_extractions(
+                state, "yes", instance, "c"
+            )
 
         assert mock_cls.call_count == 2
         # The entry without an override sends through the conversation's
@@ -1250,7 +1255,7 @@ class TestClassificationExtractionWithoutUserMessage:
         instance.context.data["task"] = "sum 2 and 3"
 
         with _StructuredProvider("act") as provider:
-            data = pipeline._execute_classification_extractions(
+            data = ConversationPass1(pipeline)._execute_classification_extractions(
                 state, None, instance, "conv-1"
             )
 

@@ -1,7 +1,9 @@
 """The declarations the mixins of ``MessagePipeline`` share (mypy only).
 
 Layer ``engine`` (plan d454fd62, step 79): split out of the old ``fsm_llm.pipeline``; the
-method and function bodies are unchanged.
+method and function bodies are unchanged. Step 80 moved the declarations of the conversation
+Pass-1 methods to ``engine/kinds/conversation/surface.py``; what is left is what the turn mixins
+share, which is also what ``engine/kinds/services.py`` (``_PipelineServices``) needs of this class.
 """
 
 from __future__ import annotations
@@ -17,18 +19,15 @@ from fsm_llm.context.layout import (
     ResponseGenerationPromptBuilder,
 )
 from fsm_llm.core.definitions import (
-    ClassificationExtractionConfig,
     ClassificationPromptConfig,
     ClassificationSchema,
     DataExtractionResponse,
-    FieldExtractionConfig,
-    FieldExtractionResponse,
     FSMDefinition,
     FSMInstance,
     State,
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
-from fsm_llm.executors import StateExecutor
+from fsm_llm.engine.kinds import StateExecutor
 from fsm_llm.handlers import HandlerSystem, HandlerTiming
 from fsm_llm.llm import LLMInterface
 
@@ -70,33 +69,6 @@ class _PipelineSurface:
             user_message: str | None,
         ) -> dict[str, Any]: ...
 
-        @staticmethod
-        def _build_field_configs_from_state(
-            state: State,
-        ) -> list[FieldExtractionConfig]: ...
-
-        def _bulk_extract_from_instructions(
-            self,
-            instance: FSMInstance,
-            user_message: str | None,
-            state: State,
-            conversation_id: str,
-        ) -> dict[str, Any]: ...
-
-        def _execute_classification_extractions(
-            self,
-            current_state: State,
-            user_message: str | None,
-            instance: FSMInstance,
-            conversation_id: str,
-            *,
-            configs_override: list[ClassificationExtractionConfig] | None = None,
-        ) -> dict[str, Any]: ...
-
-        def _execute_data_extraction(
-            self, instance: FSMInstance, user_message: str | None, conversation_id: str
-        ) -> DataExtractionResponse: ...
-
         def _execute_extraction_and_transition_pass(
             self,
             instance: FSMInstance,
@@ -105,15 +77,6 @@ class _PipelineSurface:
             *,
             turn: _TurnRecord | None = None,
         ) -> tuple[DataExtractionResponse, bool, str | None]: ...
-
-        def _execute_field_extractions(
-            self,
-            instance: FSMInstance,
-            user_message: str | None,
-            field_configs: list[FieldExtractionConfig],
-            conversation_id: str,
-            memo: dict[tuple[str, str], FieldExtractionResponse] | None = None,
-        ) -> list[FieldExtractionResponse]: ...
 
         def _execute_response_generation_pass(
             self,
@@ -142,8 +105,6 @@ class _PipelineSurface:
             model: str | None = None,
         ) -> Classifier: ...
 
-        def _handler_only_keys(self, instance: FSMInstance) -> frozenset[str]: ...
-
         def _stream_response_generation_pass(
             self,
             instance: FSMInstance,
@@ -153,12 +114,6 @@ class _PipelineSurface:
             previous_state: str | None,
             conversation_id: str,
         ) -> Iterator[str]: ...
-
-        @staticmethod
-        def _validate_field_extraction(
-            response: FieldExtractionResponse,
-            config: FieldExtractionConfig,
-        ) -> FieldExtractionResponse: ...
 
         def execute_handlers(
             self,

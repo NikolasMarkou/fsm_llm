@@ -66,7 +66,7 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_api.py`, `test_api_elaborate.py` | `API` loading, conversations, stacking | `test_api_elaborate.py` holds `TestBaseExceptionRollsBackUserMessage` |
 | `test_fsm.py`, `test_fsm_elaborate.py` | `FSMManager` data filtering, stacking | nested filtering of `get_conversation_data` |
 | `test_pipeline.py` | `MessagePipeline` 2-pass `process()` | Pass 2 failure is atomic (sync and stream) |
-| `test_multipass_extraction.py` | field-level retry and merge | `_build_field_configs_from_state` |
+| `test_multipass_extraction.py` | field-level retry and merge | `ConversationPass1._build_field_configs_from_state` (the machinery is built over a pipeline: `ConversationPass1(pipeline)`) |
 | `test_transition_evaluator.py` | `TransitionEvaluator` outcomes, priority | |
 | `test_classification_extractions.py`, `test_classification_transitions.py` | classification extraction, AMBIGUOUS resolution via `Classifier` | classifier cache, NaN confidence |
 | `test_expressions.py` | JsonLogic evaluator | short-circuit, arity, soft equality |
@@ -167,7 +167,7 @@ Seam files fake the backend with `patch("fsm_llm.llm.providers.litellm.completio
 - `-m "not slow"` deselects 14 tests (7 handler timeout, 7 live).
 - `test_context_unit.py` holds an `xfail(strict=True)` bound test: the key arm fails open above the 5% bound. An XPASS after a reporting-only change means the measurement changed; revert, do not celebrate. Do not change bound denominators in the same edit as a disclosure change.
 - fixtures invariants (enforced by `test_context_unit.py`): corpora must not import `fsm_llm.constants`; holdout and regression corpora share no names and exactly one value (`True`); census names appear in neither sibling; census numbers (341 rows, 196 distinct values, 124 in both arms) and banner strings are asserted verbatim; known-wrong sets are two-sided pins; credential values are synthetic (real vendor prefixes keep `NOTAREALTOKEN`-style bodies; census uses invented prefixes like `xk_live_`).
-- `test_pipeline.py::TestDecisionAnchorsArePlacedAndQualified` asserts `# DECISION plan-2026-09-19T175721-21cd7f8e/D-016` in `fsm_llm.engine.turn.conversation_fields` and `/D-011` in `fsm_llm.core.verify.structure`. Moving or rewording those anchors fails it.
+- `test_pipeline.py::TestDecisionAnchorsArePlacedAndQualified` asserts `# DECISION plan-2026-09-19T175721-21cd7f8e/D-016` in `fsm_llm.engine.kinds.conversation.fields` and `/D-011` in `fsm_llm.core.verify.structure`. Moving or rewording those anchors fails it.
 - Audit tests pin behaviour that was deliberately fixed. Treat a failure as a regression in `src/`, not a stale test, unless the plan decision it cites was reversed.
 
 ## Dependencies

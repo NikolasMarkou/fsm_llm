@@ -41,6 +41,7 @@ from fsm_llm.core.definitions import (
     TransitionCondition,
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.handlers import HandlerSystem
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
@@ -226,7 +227,7 @@ class TestIntentsCapMatchesRuntimeSibling:
     """F-09 / SC-13.
 
     `ClassificationExtractionConfig.intents` had no upper bound while the
-    `ClassificationSchema` that `MessagePipeline._execute_classification_extractions`
+    `ClassificationSchema` that `ConversationPass1._execute_classification_extractions`
     builds FROM it at runtime caps at 15. A 16-intent state therefore loaded
     clean and failed on first ENTRY to the state.
     """
@@ -342,7 +343,7 @@ class TestExecuteClassificationExtractions:
         result = _mock_classify_result("negative", 0.9)
 
         with patch.object(Classifier, "classify", return_value=result):
-            data = pipeline._execute_classification_extractions(
+            data = ConversationPass1(pipeline)._execute_classification_extractions(
                 state, "I'm so frustrated!", instance, "conv1"
             )
 
@@ -362,7 +363,7 @@ class TestExecuteClassificationExtractions:
         result = _mock_classify_result("negative", 0.5)
 
         with patch.object(Classifier, "classify", return_value=result):
-            data = pipeline._execute_classification_extractions(
+            data = ConversationPass1(pipeline)._execute_classification_extractions(
                 state, "hmm", instance, "conv1"
             )
 
@@ -378,7 +379,7 @@ class TestExecuteClassificationExtractions:
         result = _mock_classify_result("neutral", 0.95)  # neutral is fallback
 
         with patch.object(Classifier, "classify", return_value=result):
-            data = pipeline._execute_classification_extractions(
+            data = ConversationPass1(pipeline)._execute_classification_extractions(
                 state, "what time is it", instance, "conv1"
             )
 
@@ -393,7 +394,7 @@ class TestExecuteClassificationExtractions:
         with patch.object(
             Classifier, "classify", side_effect=ClassificationError("boom")
         ):
-            data = pipeline._execute_classification_extractions(
+            data = ConversationPass1(pipeline)._execute_classification_extractions(
                 state, "test", instance, "conv1"
             )
 
@@ -414,7 +415,7 @@ class TestExecuteClassificationExtractions:
             patch.object(Classifier, "classify", side_effect=error),
             pytest.raises(type(error)),
         ):
-            pipeline._execute_classification_extractions(
+            ConversationPass1(pipeline)._execute_classification_extractions(
                 state, "test", instance, "conv1"
             )
 
@@ -437,12 +438,12 @@ class TestExecuteClassificationExtractions:
         with patch("fsm_llm.llm.providers.litellm.completion") as provider:
             if required:
                 with pytest.raises(ClassificationError, match="complete"):
-                    pipeline._execute_classification_extractions(
+                    ConversationPass1(pipeline)._execute_classification_extractions(
                         state, "test", instance, "conv1"
                     )
             else:
                 assert (
-                    pipeline._execute_classification_extractions(
+                    ConversationPass1(pipeline)._execute_classification_extractions(
                         state, "test", instance, "conv1"
                     )
                     == {}
@@ -462,7 +463,7 @@ class TestExecuteClassificationExtractions:
             with patch.object(Classifier, "classify", return_value=result):
                 # Need to set up the mock so __init__ doesn't fail
                 mock_init.return_value = None
-                pipeline._execute_classification_extractions(
+                ConversationPass1(pipeline)._execute_classification_extractions(
                     state, "test", instance, "conv1"
                 )
 
@@ -482,7 +483,7 @@ class TestExecuteClassificationExtractions:
         result = _mock_classify_result("positive", 0.9)
 
         with patch.object(Classifier, "classify", return_value=result):
-            data = pipeline._execute_classification_extractions(
+            data = ConversationPass1(pipeline)._execute_classification_extractions(
                 state, "test", instance, "conv1"
             )
 
@@ -513,7 +514,7 @@ class TestExecuteClassificationExtractions:
         with patch.object(
             Classifier, "classify", side_effect=lambda msg, context=None: next(results)
         ):
-            data = pipeline._execute_classification_extractions(
+            data = ConversationPass1(pipeline)._execute_classification_extractions(
                 state, "urgent complaint", instance, "conv1"
             )
 
@@ -525,7 +526,7 @@ class TestExecuteClassificationExtractions:
         pipeline = _make_pipeline()
         instance = _make_instance()
 
-        data = pipeline._execute_classification_extractions(
+        data = ConversationPass1(pipeline)._execute_classification_extractions(
             state, "test", instance, "conv1"
         )
         assert data == {}
@@ -547,7 +548,7 @@ class TestDataExtractionIntegration:
         result = _mock_classify_result("negative", 0.9)
 
         with patch.object(Classifier, "classify", return_value=result):
-            response = pipeline._execute_data_extraction(
+            response = ConversationPass1(pipeline)._execute_data_extraction(
                 instance, "I'm frustrated!", "conv1"
             )
 
@@ -559,7 +560,9 @@ class TestDataExtractionIntegration:
         pipeline = _make_pipeline(fsm)
         instance = _make_instance()
 
-        response = pipeline._execute_data_extraction(instance, "hello", "conv1")
+        response = ConversationPass1(pipeline)._execute_data_extraction(
+            instance, "hello", "conv1"
+        )
         assert response.extracted_data == {}
         assert response.confidence == 1.0
 
@@ -725,7 +728,7 @@ class TestClassifierLLMBoundary:
         with patch(
             "fsm_llm.llm.providers.litellm.completion", side_effect=_rate_limit_error()
         ):
-            data = pipeline._execute_classification_extractions(
+            data = ConversationPass1(pipeline)._execute_classification_extractions(
                 state, "test", instance, "conv1"
             )
 
@@ -1397,6 +1400,31 @@ class TestStep04A4:
         record = _a4_metadata(api, conv_id)[_A4_RESULTS_KEY]["intent"]
         assert record["context_snapshot"] == {"topic": "running shoes"}
         json.dumps(record)
+
+    def test_a4_context_snapshot_drops_secret_shaped_entries_at_every_depth(self):
+        """D-031 of plan 8b258a25 (step 80 pins it: a scratch mutant that returned the
+        unfiltered copy survived every test): the stored snapshot is filtered with the
+        never-truncating data walker, so a secret-looking entry never reaches
+        ``metadata``, which ``get_complete_conversation`` and the session file expose."""
+        api = API.from_definition(
+            _a3_extraction_fsm(context_keys=["topic", "profile", "api_key"]),
+            llm_interface=_mock_llm(),
+        )
+        conv_id, _ = api.start_conversation(
+            initial_context={
+                "topic": "running shoes",
+                "profile": {"name": "Ada", "password": "hunter2hunter2"},
+                "api_key": "sk-abcdefghijklmnopqrstuvwxyz123456",
+            }
+        )
+        with _ClassifierCapture("browse", 0.95):
+            api.converse("just looking", conv_id)
+
+        record = _a4_metadata(api, conv_id)[_A4_RESULTS_KEY]["intent"]
+        assert record["context_snapshot"] == {
+            "topic": "running shoes",
+            "profile": {"name": "Ada"},
+        }
 
     def test_a4_transition_record_in_metadata(self):
         api, conv_id, _ = _api(_ambiguous_then_blocked_fsm())

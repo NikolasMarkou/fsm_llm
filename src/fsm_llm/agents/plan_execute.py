@@ -164,7 +164,7 @@ class PlanExecuteAgent(BaseAgent):
                 # ending as `success=False`. Do NOT remove it (iteration 3 did,
                 # D-036). The seed is still extractable: the pipeline's
                 # skip-if-set filter reads an empty container as unset for
-                # agent-managed FSMs (D-046 in engine/turn/conversation_extraction.py), so the plan is
+                # agent-managed FSMs (D-046 in engine/kinds/conversation/extraction.py), so the plan is
                 # asked for. Readers keep using `context.get(PLAN_STEPS, [])`.
                 ContextKeys.PLAN_STEPS: [],
                 ContextKeys.CURRENT_STEP_INDEX: 0,

@@ -59,6 +59,7 @@ from fsm_llm.core.definitions import (
     Transition,
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.handlers import BaseHandler, HandlerSystem, HandlerTiming
 from fsm_llm.llm import LLMInterface
@@ -1302,7 +1303,9 @@ class TestAdditiveBulkExtraction:
         pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
         instance = _make_instance(current_state="start")
 
-        resp = pipeline._execute_data_extraction(instance, "...", "conv-1")
+        resp = ConversationPass1(pipeline)._execute_data_extraction(
+            instance, "...", "conv-1"
+        )
 
         # Per-field config field captured AND instruction-only field merged in.
         assert resp.extracted_data.get("policyholder_name") == "David Wilson"
@@ -1321,7 +1324,9 @@ class TestAdditiveBulkExtraction:
         pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
         instance = _make_instance(current_state="start")
 
-        resp = pipeline._execute_data_extraction(instance, "...", "conv-1")
+        resp = ConversationPass1(pipeline)._execute_data_extraction(
+            instance, "...", "conv-1"
+        )
 
         assert resp.extracted_data["policyholder_name"] == "David Wilson"
         assert resp.extracted_data["policy_number"] == "GS-1"
@@ -1339,7 +1344,9 @@ class TestAdditiveBulkExtraction:
             current_state="start", context_data={"policy_number": "PRESET"}
         )
 
-        resp = pipeline._execute_data_extraction(instance, "...", "conv-1")
+        resp = ConversationPass1(pipeline)._execute_data_extraction(
+            instance, "...", "conv-1"
+        )
 
         assert resp.extracted_data.get("policy_number") != "BULK"
 
@@ -1362,7 +1369,9 @@ class TestAdditiveBulkExtraction:
         pipeline = _make_pipeline(fsm_def=fsm_def, llm=llm)
         instance = _make_instance(current_state="start")
 
-        resp = pipeline._execute_data_extraction(instance, "...", "conv-1")
+        resp = ConversationPass1(pipeline)._execute_data_extraction(
+            instance, "...", "conv-1"
+        )
 
         assert "policy_number" not in resp.extracted_data
         llm.extract_bulk_data.assert_not_called()
@@ -1383,7 +1392,7 @@ class TestAdditiveBulkExtraction:
 
         overlong_message = "y" * 10001
 
-        result = pipeline._bulk_extract_from_instructions(
+        result = ConversationPass1(pipeline)._bulk_extract_from_instructions(
             instance, overlong_message, state, "conv-1"
         )
 
@@ -1404,7 +1413,7 @@ class TestFieldTypeCoercionRejectsWrongTypes:
     @staticmethod
     def _validate(field_type: str, value):
         """Drive the real validation seam the pipeline uses for every extracted field."""
-        return MessagePipeline._validate_field_extraction(
+        return ConversationPass1._validate_field_extraction(
             FieldExtractionResponse(
                 field_name="items",
                 value=value,
@@ -1557,7 +1566,7 @@ class TestBulkPromptWithoutUserMessage:
                 instance.context.conversation.add_user_message(text)
             else:
                 instance.context.conversation.add_system_message(text)
-        result = pipeline._bulk_extract_from_instructions(
+        result = ConversationPass1(pipeline)._bulk_extract_from_instructions(
             instance, message, research, "conv-1"
         )
         (request,) = llm.extract_bulk_data.requests
@@ -1684,7 +1693,7 @@ class TestFieldExtractionWithoutUserMessage:
             extraction_instructions="Extract the next action.",
         )
 
-        results = pipeline._execute_field_extractions(
+        results = ConversationPass1(pipeline)._execute_field_extractions(
             instance, None, [config], "conv-1"
         )
 
@@ -1697,12 +1706,47 @@ class TestFieldExtractionWithoutUserMessage:
         assert "hunter2" not in request.system_prompt
 
 
+class TestValueDigestIsStable:
+    """The provenance digest of a context value (step 80 pins it: a scratch mutant that cut
+    it to 15 characters survived every test). Digests are persisted by ``save_session`` and
+    compared by equality after ``restore_session``, so the recipe is a wire format: the first
+    16 hex characters of the sha256 of the sorted-key JSON, or of ``repr`` when the value has
+    no JSON form."""
+
+    def test_the_recipe_is_the_documented_one(self):
+        import hashlib
+
+        from fsm_llm.engine.kinds.records import _value_digest
+
+        value = {"b": [1, "x"], "a": None}
+        payload = '{"a": null, "b": [1, "x"]}'
+        expected = hashlib.sha256(payload.encode()).hexdigest()[:16]
+        assert _value_digest(value) == expected
+        assert len(expected) == 16
+
+    def test_key_order_does_not_change_it(self):
+        from fsm_llm.engine.kinds.records import _value_digest
+
+        assert _value_digest({"a": 1, "b": 2}) == _value_digest({"b": 2, "a": 1})
+
+    def test_a_value_with_no_json_form_digests_its_repr(self):
+        import hashlib
+
+        from fsm_llm.engine.kinds.records import _value_digest
+
+        value = {1: "a", "b": 2}  # keys that cannot be sorted
+        assert (
+            _value_digest(value)
+            == hashlib.sha256(repr(value).encode()).hexdigest()[:16]
+        )
+
+
 class TestNoCorrectionWithoutUserMessage:
     """A correction is something a user message asks for: a message-free
     turn neither overwrites a set key nor reports a rejected correction."""
 
     def _setup(self, *, with_provenance):
-        from fsm_llm.engine.turn.records import _record_provenance
+        from fsm_llm.engine.kinds.records import _record_provenance
 
         fsm_def, _ = _research_fsm(required=["findings"])
         llm = _make_mock_llm()
@@ -1717,23 +1761,27 @@ class TestNoCorrectionWithoutUserMessage:
 
     def test_message_turn_reports_a_grounded_rejected_correction(self):
         pipeline, instance = self._setup(with_provenance=False)
-        resp = pipeline._execute_data_extraction(instance, "make it navy", "c")
+        resp = ConversationPass1(pipeline)._execute_data_extraction(
+            instance, "make it navy", "c"
+        )
         assert resp.rejected_corrections == {"findings": "navy"}
 
     def test_no_message_produces_no_rejected_correction(self):
         pipeline, instance = self._setup(with_provenance=False)
-        resp = pipeline._execute_data_extraction(instance, None, "c")
+        resp = ConversationPass1(pipeline)._execute_data_extraction(instance, None, "c")
         assert resp.rejected_corrections == {}
         assert "findings" not in resp.extracted_data
 
     def test_message_turn_corrects_a_pipeline_extracted_value(self):
         pipeline, instance = self._setup(with_provenance=True)
-        resp = pipeline._execute_data_extraction(instance, "make it navy", "c")
+        resp = ConversationPass1(pipeline)._execute_data_extraction(
+            instance, "make it navy", "c"
+        )
         assert resp.extracted_data == {"findings": "navy"}
 
     def test_no_message_does_not_overwrite_a_pipeline_extracted_value(self):
         pipeline, instance = self._setup(with_provenance=True)
-        resp = pipeline._execute_data_extraction(instance, None, "c")
+        resp = ConversationPass1(pipeline)._execute_data_extraction(instance, None, "c")
         assert resp.extracted_data == {}
         assert resp.rejected_corrections == {}
 
@@ -1741,7 +1789,7 @@ class TestNoCorrectionWithoutUserMessage:
         pipeline, instance = self._setup(with_provenance=False)
         instance.context.data.pop("findings")
         configure_mock_extract_field(pipeline.llm_interface, {})
-        resp = pipeline._execute_data_extraction(instance, None, "c")
+        resp = ConversationPass1(pipeline)._execute_data_extraction(instance, None, "c")
         assert resp.extracted_data == {"findings": "navy"}
 
 
@@ -1833,7 +1881,7 @@ class TestPromptTooLargeError:
     def test_bulk_site_warning_names_the_key(self):
         from loguru import logger
 
-        from fsm_llm.engine.turn.conversation_bulk import _BulkFailed
+        from fsm_llm.engine.kinds.conversation.bulk import _BulkFailed
 
         state = State(
             id="start",
@@ -1849,7 +1897,7 @@ class TestPromptTooLargeError:
         logger.enable("fsm_llm")
         try:
             # A message-free turn builds the bulk prompt from the context.
-            result = pipeline._bulk_extract_from_instructions(
+            result = ConversationPass1(pipeline)._bulk_extract_from_instructions(
                 instance, None, state, "conv-1"
             )
         finally:
@@ -2071,7 +2119,7 @@ class TestDecisionAnchorsArePlacedAndQualified:
     @pytest.mark.parametrize(
         ("module", "decision"),
         [
-            ("fsm_llm.engine.turn.conversation_fields", "D-016"),
+            ("fsm_llm.engine.kinds.conversation.fields", "D-016"),
             ("fsm_llm.core.verify.structure", "D-011"),
         ],
     )
@@ -2304,7 +2352,7 @@ def _debug_records():
 
 
 def _validate(field_type: str, value: Any) -> FieldExtractionResponse:
-    return MessagePipeline._validate_field_extraction(
+    return ConversationPass1._validate_field_extraction(
         FieldExtractionResponse(
             field_name="n", value=value, confidence=1.0, is_valid=True
         ),
@@ -2376,7 +2424,7 @@ class TestNumericCoercionRejectsWhatIsNotANumber:
 def _validate_with_rules(
     field_type: str, value: Any, rules: dict[str, Any]
 ) -> FieldExtractionResponse:
-    return MessagePipeline._validate_field_extraction(
+    return ConversationPass1._validate_field_extraction(
         FieldExtractionResponse(
             field_name="n", value=value, confidence=1.0, is_valid=True
         ),

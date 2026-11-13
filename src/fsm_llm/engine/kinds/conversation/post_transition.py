@@ -1,8 +1,10 @@
 """The post-transition extraction of the conversation kind (``ConversationPostTransitionMixin``):
 what the NEW state's conversation executor runs after a transition.
 
-Layer ``engine`` (plan d454fd62, step 79): split out of the old ``fsm_llm.pipeline``; the
-method and function bodies are unchanged.
+Layer ``engine`` (plan d454fd62): split out of the old ``fsm_llm.pipeline`` at step 79 and moved
+here at step 80 (D-030), where the conversation executor owns it. The method and function bodies
+are unchanged except that a service of the pipeline is read as ``self._services.<name>`` (the
+``_PipelineServices`` protocol, ``engine/kinds/services.py``) instead of ``self.<name>``.
 """
 
 from __future__ import annotations
@@ -15,11 +17,11 @@ from fsm_llm.core.definitions import DataExtractionResponse, FSMInstance, State
 from fsm_llm.handlers import HandlerExecutionError, HandlerTiming
 from fsm_llm.logging import logger
 
-from .records import _record_provenance
-from .surface import _PipelineSurface
+from ..records import _record_provenance
+from .surface import _ConversationSurface
 
 
-class ConversationPostTransitionMixin(_PipelineSurface):
+class ConversationPostTransitionMixin(_ConversationSurface):
     """The extraction the conversation executor runs after a transition."""
 
     def _extract_after_transition(
@@ -154,7 +156,7 @@ class ConversationPostTransitionMixin(_PipelineSurface):
                         # DECISION plan-2026-09-19T175721-21cd7f8e/D-015
                         _record_provenance(instance, post_data)
                         extraction_response.extracted_data.update(post_data)
-                        self.execute_handlers(
+                        self._services.execute_handlers(
                             instance,
                             HandlerTiming.CONTEXT_UPDATE,
                             current_state=instance.current_state,

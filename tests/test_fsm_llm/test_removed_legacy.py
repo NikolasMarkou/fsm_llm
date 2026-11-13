@@ -19,12 +19,26 @@ from fsm_llm.handlers import HandlerSystem
 
 
 def _turn_module_names() -> list[str]:
-    """Every module of the turn pipeline package, found on disk (not by import)."""
+    """Every module of the turn pipeline package and of the kind executors package (the
+    conversation Pass-1 code moved there at step 80), found on disk (not by import)."""
     import pkgutil
 
+    import fsm_llm.engine.kinds as kinds
     import fsm_llm.engine.turn as turn
 
-    return [f"{turn.__name__}.{m.name}" for m in pkgutil.iter_modules(turn.__path__)]
+    return [
+        name
+        for package in (turn, kinds)
+        for name in (
+            package.__name__,
+            *(
+                m.name
+                for m in pkgutil.walk_packages(
+                    package.__path__, prefix=f"{package.__name__}."
+                )
+            ),
+        )
+    ]
 
 
 _FSM: dict[str, Any] = {
@@ -144,9 +158,10 @@ class TestRemovedCoreNames:
         )
 
     def test_pipeline_provenance_alias_is_gone(self):
-        # The pipeline is a package of modules (step 79): the alias must be in none.
+        # The pipeline is a package of modules (step 79) and its conversation Pass 1 lives in
+        # the kinds package (step 80): the alias must be in none of them.
         names = _turn_module_names()
-        assert len(names) >= 12
+        assert len(names) >= 22
         for name in names:
             assert not hasattr(importlib.import_module(name), "_PROVENANCE_KEY"), name
 

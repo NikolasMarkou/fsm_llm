@@ -30,7 +30,7 @@ Interface contract:
   kind.
 - ``get_kind(name)``: the spec with that name, ``KeyError`` for an unknown one.
 - ``KindSpec`` fields (declarative rules and verifier hooks; what a kind does
-  in Pass 1 of a turn is the engine's, in ``fsm_llm.executors``):
+  in Pass 1 of a turn is the engine's, in ``fsm_llm.engine.kinds``):
 
   - ``name``: the kind name, the value of ``State.kind``.
   - ``config_field``: the ``State`` field holding the kind's config model, or

@@ -10,6 +10,7 @@ import pytest
 from fsm_llm import FileSessionStore
 from fsm_llm.api import API
 from fsm_llm.core.definitions import BulkExtractionRequest
+from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import LiteLLMInterface
 from tests.test_fsm_llm.support import (
@@ -1052,7 +1053,9 @@ class TestFailedBulkIsSurfacedToPassTwo:
         pipe.llm_interface = MagicMock()
         pipe.llm_interface.extract_bulk_data.side_effect = RuntimeError("down")
         state = MagicMock(extraction_instructions="anything")
-        out = pipe._bulk_extract_from_instructions(MagicMock(), "hi", state, "cid")
+        out = ConversationPass1(pipe)._bulk_extract_from_instructions(
+            MagicMock(), "hi", state, "cid"
+        )
         assert out == {}
         assert not out
 

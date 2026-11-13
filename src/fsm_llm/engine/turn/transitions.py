@@ -36,13 +36,15 @@ from fsm_llm.core.definitions import (
     TransitionEvaluationResult,
     TransitionOption,
 )
+from fsm_llm.engine.kinds.records import (
+    _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS,
+    _classification_record,
+)
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import implements_complete
 from fsm_llm.logging import logger
 
 from .records import (
-    _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS,
-    _classification_record,
     _record_transition_classification,
     _TurnRecord,
     _TurnSnapshot,

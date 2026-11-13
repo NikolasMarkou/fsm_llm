@@ -1,9 +1,10 @@
-"""State executors and kind dispatch in the turn pipeline (plan d454fd62 step 53).
+"""State executors and kind dispatch in the turn pipeline (plan d454fd62 steps 53 and 80).
 
 Row 0.14: the turn pipeline has no kind-specific branch. At the one Pass-1 seam
-it asks ``fsm_llm.executors.executor_for(state)`` for the executor of the
+it asks ``fsm_llm.engine.kinds.executor_for(state)`` for the executor of the
 state's kind. These tests pin the AST ban (no kind config read in the engine
-files), the executor table (``synthesize`` is passive: the conversation
+files, and since step 80 no conversation extraction config read in
+``engine/turn/``), the executor table (``synthesize`` is passive: the conversation
 executor), the three hooks (``extract``, ``cleans_extracted``,
 ``after_transition``) and the dispatch through a real turn. The byte equality of
 every request and result is held by ``test_kind_equality.py`` and
@@ -19,9 +20,11 @@ from typing import Any
 
 import pytest
 
-from fsm_llm import executors as ex
+import fsm_llm
 from fsm_llm.core import state_kinds as sk
 from fsm_llm.core.definitions import DataExtractionResponse, State
+from fsm_llm.engine import kinds
+from fsm_llm.engine.kinds import registry as ex
 from fsm_llm.testing import final_reply
 from tests.test_fsm_llm.test_completion_state import (
     _RESULT,
@@ -33,7 +36,7 @@ from tests.test_fsm_llm.test_completion_state import (
     _tool_fsm,
 )
 
-_SRC = Path(ex.__file__).parent
+_SRC = Path(fsm_llm.__file__).parent
 # Every module of the turn pipeline package (step 79 split the old pipeline.py), found on
 # disk so a module added later is scanned too; ``test_the_turn_scan_sees_the_whole_package``
 # pins that the list is not a facade alone.
@@ -42,8 +45,18 @@ _TURN_FILES = tuple(
         p.relative_to(_SRC).as_posix() for p in (_SRC / "engine" / "turn").glob("*.py")
     )
 )
+# Every module of the kind executors package (step 80), found on disk.
+_KINDS_FILES = tuple(
+    sorted(
+        p.relative_to(_SRC).as_posix()
+        for p in (_SRC / "engine" / "kinds").rglob("*.py")
+    )
+)
 _ENGINE_FILES = (
     *_TURN_FILES,
+    # the kind executors package, except the completion executor, which IS the completion
+    # kind's code (the conversation machinery was under this ban while it sat in engine/turn/)
+    *(name for name in _KINDS_FILES if name != "engine/kinds/completion.py"),
     "api.py",
     "engine/fsm/helpers.py",
     "engine/fsm/manager.py",
@@ -95,16 +108,18 @@ class TestNoKindBranchInTheEngine:
 
     def test_the_turn_scan_sees_the_whole_package(self):
         """Guards the derivation: an empty or facade-only list would make the scan
-        above vacuous (the pipeline is 13 modules, the facade holds none of the code)."""
+        above vacuous (the pipeline is 8 modules since step 80 moved the conversation
+        machinery out, the facade holds none of the code)."""
         names = {Path(n).name for n in _TURN_FILES}
-        assert len(_TURN_FILES) >= 13
+        assert len(_TURN_FILES) >= 8
         assert {
             "message_pipeline.py",
             "driver.py",
             "pass1.py",
             "transitions.py",
             "pass2.py",
-            "conversation_fields.py",
+            "records.py",
+            "surface.py",
         } <= names
 
     def test_the_scan_sees_a_violation(self):
@@ -124,12 +139,12 @@ class TestNoKindBranchInTheEngine:
         assert hasattr(ex.CompletionExecutor, "turn")
 
 
-# The retained conversation Pass-1 machinery of ``MessagePipeline`` (step 56,
-# D-015): not delegates but the real bodies the conversation executor wraps; they
-# move into ``engine/kinds/conversation/`` with the layout split (step 80). Until
-# then ONE path reaches them: ``ConversationExecutor``. Do NOT call one from the
-# kind-agnostic part of the pipeline: that re-introduces a conversation branch at
-# the seam the executors exist to own.
+# The conversation Pass-1 machinery (step 56, D-015; moved into
+# ``engine/kinds/conversation/`` at step 80, D-030): the real bodies the conversation
+# executor owns, bound to one pipeline's services by ``ConversationPass1``. ONE path reaches
+# them: ``ConversationExecutor`` (``conversation/executor.py``). Do NOT call one from the
+# kind-agnostic part of the pipeline: that re-introduces a conversation branch at the seam
+# the executors exist to own.
 _CONVERSATION_PASS_1 = frozenset(
     {
         "_extract_after_transition",
@@ -142,6 +157,12 @@ _CONVERSATION_PASS_1 = frozenset(
         "_handler_only_keys",
     }
 )
+_CONVERSATION_DIR = "engine/kinds/conversation/"
+_EXTRACTION_CONFIG = {
+    "field_extractions",
+    "classification_extractions",
+    "extraction_instructions",
+}
 
 
 def _readers_of(source: str, names: frozenset[str]) -> dict[str, set[str]]:
@@ -164,6 +185,61 @@ def _readers_of(source: str, names: frozenset[str]) -> dict[str, set[str]]:
     return found
 
 
+def _extraction_config_mentions(source: str) -> list[str]:
+    """Every read of a conversation extraction config in *source*: an attribute or a name
+    ``field_extractions``, ``classification_extractions`` or ``extraction_instructions``."""
+    found: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Attribute) and node.attr in _EXTRACTION_CONFIG:
+            found.append(f"line {node.lineno}: .{node.attr}")
+        elif isinstance(node, ast.Name) and node.id in _EXTRACTION_CONFIG:
+            found.append(f"line {node.lineno}: {node.id}")
+    return found
+
+
+class TestNoConversationExtractionInTheTurn:
+    """Step 80 (D-004 stage 2): the conversation executor OWNS its Pass 1, so the turn
+    pipeline holds no conversation extraction method and reads no extraction config."""
+
+    @pytest.mark.parametrize("name", _TURN_FILES)
+    def test_the_turn_module_reads_no_extraction_config(self, name: str):
+        source = (_SRC / name).read_text(encoding="utf-8")
+        assert _extraction_config_mentions(source) == []
+
+    def test_the_turn_defines_no_conversation_pass_1_method(self):
+        defined: dict[str, list[str]] = {}
+        for name in _TURN_FILES:
+            tree = ast.parse((_SRC / name).read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if (
+                    isinstance(node, ast.FunctionDef)
+                    and node.name in _CONVERSATION_PASS_1
+                ):
+                    defined.setdefault(name, []).append(node.name)
+        assert defined == {}
+
+    def test_the_machinery_is_defined_in_the_conversation_package(self):
+        defined = set()
+        for name in _KINDS_FILES:
+            if not name.startswith(_CONVERSATION_DIR):
+                continue
+            tree = ast.parse((_SRC / name).read_text(encoding="utf-8"))
+            defined |= {
+                node.name
+                for node in ast.walk(tree)
+                if isinstance(node, ast.FunctionDef)
+            }
+        assert _CONVERSATION_PASS_1 <= defined
+
+    def test_the_scan_sees_a_violation(self):
+        snippet = (
+            "a = state.field_extractions\n"
+            "b = x.classification_extractions\n"
+            "c = extraction_instructions\n"
+        )
+        assert len(_extraction_config_mentions(snippet)) == 3
+
+
 class TestConversationMachineryIsReachedThroughTheExecutor:
     def test_the_kind_agnostic_pipeline_never_calls_it(self):
         outside = {}
@@ -171,9 +247,8 @@ class TestConversationMachineryIsReachedThroughTheExecutor:
             readers = _readers_of(
                 (_SRC / name).read_text(encoding="utf-8"), _CONVERSATION_PASS_1
             )
-            for owner, names in readers.items():
-                if owner not in _CONVERSATION_PASS_1:
-                    outside[f"{name}:{owner}"] = sorted(names)
+            if readers:
+                outside[name] = {owner: sorted(n) for owner, n in readers.items()}
         assert outside == {}
 
     def test_no_other_module_reads_it(self):
@@ -182,14 +257,14 @@ class TestConversationMachineryIsReachedThroughTheExecutor:
                 p.read_text(encoding="utf-8"), _CONVERSATION_PASS_1
             )
             for p in _SRC.rglob("*.py")
-            if p.name != "executors.py"
-            and p.relative_to(_SRC).as_posix() not in _TURN_FILES
+            if not p.relative_to(_SRC).as_posix().startswith(_CONVERSATION_DIR)
         }
         assert {path: found for path, found in readers.items() if found} == {}
 
     def test_the_conversation_executor_is_the_reader(self):
         readers = _readers_of(
-            (_SRC / "executors.py").read_text(encoding="utf-8"), _CONVERSATION_PASS_1
+            (_SRC / _CONVERSATION_DIR / "executor.py").read_text(encoding="utf-8"),
+            _CONVERSATION_PASS_1,
         )
         assert readers == {
             "<module>": {"_execute_data_extraction", "_extract_after_transition"}
@@ -225,10 +300,19 @@ class TestConversationMachineryIsReachedThroughTheExecutor:
             "_bulk_extract_from_instructions": {"_handler_only_keys"},
         }
 
+    def test_the_executor_is_bound_to_the_services_of_the_calling_pipeline(self):
+        """``ConversationExecutor`` is a shared singleton: each call builds the machinery
+        over the ``pipeline`` it was given (two pipelines never share services)."""
+        from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
+
+        first, second = SimpleNamespace(name="a"), SimpleNamespace(name="b")
+        assert ConversationPass1(first)._services is first  # type: ignore[arg-type]
+        assert ConversationPass1(second)._services is second  # type: ignore[arg-type]
+
 
 class TestExecutorModule:
-    def _imports(self) -> list[str]:
-        tree = ast.parse((_SRC / "executors.py").read_text(encoding="utf-8"))
+    def _imports(self, name: str) -> list[str]:
+        tree = ast.parse((_SRC / name).read_text(encoding="utf-8"))
         found: list[str] = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -237,26 +321,41 @@ class TestExecutorModule:
                 found.append(("." * node.level) + (node.module or ""))
         return found
 
-    def test_it_never_imports_the_pipeline(self):
-        """The pipeline imports the executors; an import back is a cycle."""
-        for name in self._imports():
-            assert name.split(".")[-1] != "pipeline", name
+    def test_the_package_holds_the_expected_modules(self):
+        assert {
+            "engine/kinds/__init__.py",
+            "engine/kinds/base.py",
+            "engine/kinds/completion.py",
+            "engine/kinds/records.py",
+            "engine/kinds/registry.py",
+            "engine/kinds/services.py",
+            "engine/kinds/conversation/__init__.py",
+            "engine/kinds/conversation/executor.py",
+            "engine/kinds/conversation/bulk.py",
+            "engine/kinds/conversation/extraction.py",
+            "engine/kinds/conversation/fields.py",
+            "engine/kinds/conversation/classification.py",
+            "engine/kinds/conversation/post_transition.py",
+        } <= set(_KINDS_FILES)
 
-    def test_it_imports_core_modules_only(self):
-        stdlib = set(__import__("sys").stdlib_module_names)
-        core = {
-            "constants",
-            "context",
-            "core.definitions",
-            "llm",
-            "logging",
-            "core.state_kinds",
+    @pytest.mark.parametrize("name", _KINDS_FILES)
+    def test_it_never_imports_the_turn_or_anything_above_it(self, name: str):
+        """The pipeline imports the executors; an import back (even under
+        ``TYPE_CHECKING``, which the import-linter contract does not see) is a cycle."""
+        forbidden = {
+            "turn",
+            "pipeline",
+            "api",
+            "builders",
+            "session",
+            "fsm",
         }
-        for name in self._imports():
-            if name.startswith("."):
-                assert name.lstrip(".") in core, name
-            else:
-                assert name.split(".")[0] in stdlib | {"pydantic"}, name
+        for imported in self._imports(name):
+            parts = imported.lstrip(".").split(".")
+            assert not (set(parts) & forbidden), (name, imported)
+            assert imported.split(".")[0] in {"", "fsm_llm"} | set(
+                __import__("sys").stdlib_module_names
+            ) | {"pydantic"} or imported.startswith("."), (name, imported)
 
     def test_the_package_init_does_not_load_it(self):
         tree = ast.parse((_SRC / "__init__.py").read_text(encoding="utf-8"))
@@ -265,11 +364,17 @@ class TestExecutorModule:
             for node in ast.walk(tree)
             if isinstance(node, ast.ImportFrom)
         }
-        assert not any("executors" in n for n in names)
+        assert not any("executors" in n or "kinds" in n for n in names)
 
     def test_every_name_in_all_exists(self):
-        for name in ex.__all__:
-            assert hasattr(ex, name), name
+        for name in kinds.__all__:
+            assert hasattr(kinds, name), name
+
+    def test_the_old_module_is_gone(self):
+        import importlib
+
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("fsm_llm.executors")
 
 
 class TestExecutorTable:
@@ -428,8 +533,9 @@ class TestCompletionExecutorNeedsACompletionConfig:
             )
         assert instance.last_extraction_response == "untouched"
 
-    def test_the_module_has_no_assert_statement(self):
-        tree = ast.parse((_SRC / "executors.py").read_text(encoding="utf-8"))
+    @pytest.mark.parametrize("name", _KINDS_FILES)
+    def test_the_module_has_no_assert_statement(self, name: str):
+        tree = ast.parse((_SRC / name).read_text(encoding="utf-8"))
         assert [n.lineno for n in ast.walk(tree) if isinstance(n, ast.Assert)] == []
 
 

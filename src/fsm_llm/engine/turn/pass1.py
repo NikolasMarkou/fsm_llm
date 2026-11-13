@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from fsm_llm.context import clean_context_keys, commit_with_key_rollback
 from fsm_llm.core.definitions import DataExtractionResponse, FSMInstance
-from fsm_llm.executors import executor_for
+from fsm_llm.engine.kinds import executor_for
+from fsm_llm.engine.kinds.records import _is_agent_managed, _record_provenance
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
-from .records import _is_agent_managed, _record_provenance, _TurnRecord
+from .records import _TurnRecord
 from .surface import _PipelineSurface
 
 
@@ -43,7 +44,7 @@ class Pass1Mixin(_PipelineSurface):
         # executor (the one dispatch seam of both turn paths): a conversation
         # state runs the unified field-based extraction (converts
         # required_context_keys and merges with explicit field_extractions), a
-        # completion state its one completion call (executors.py).
+        # completion state its one completion call (engine/kinds/completion.py).
         source_state = self.get_state(instance, conversation_id)
         executor = executor_for(source_state, self._executors)
         extraction_response = executor.extract(

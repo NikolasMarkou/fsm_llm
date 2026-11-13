@@ -48,8 +48,8 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.loaders import load_fsm_definition
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.kinds import StateExecutor
 from fsm_llm.engine.turn import MessagePipeline
-from fsm_llm.executors import StateExecutor
 from fsm_llm.handlers import HandlerErrorMode, HandlerSystem, HandlerTiming
 from fsm_llm.llm import LLMInterface
 from fsm_llm.logging import logger
@@ -86,8 +86,8 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         """Create the manager.
 
         ``executors`` is a ``{kind_name: StateExecutor}`` map for THIS manager's
-        pipeline only (it overrides the module table of ``executors.py``; see
-        ``executors.check_executors``: ``TypeError`` for a bad value,
+        pipeline only (it overrides the module table of ``engine/kinds/registry.py``; see
+        ``engine.kinds.check_executors``: ``TypeError`` for a bad value,
         ``ValueError`` for an unknown kind name). Keyword-only, internal until
         the kind extension point is public.
         """

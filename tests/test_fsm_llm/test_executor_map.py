@@ -3,7 +3,7 @@
 Row 0.14: a state kind is a ``KindSpec`` (static registry) plus an executor
 (per instance). ``API(executors={kind_name: StateExecutor})``, passed through
 ``FSMManager`` to ``MessagePipeline``, adds or replaces the executor of a kind
-for that one ``API`` and never touches the module table of ``executors.py``.
+for that one ``API`` and never touches the module table of ``engine/kinds/registry.py``.
 The tests below build a test-only kind, ``reply_marker``, with no edit in core:
 a ``State`` subclass carries its config field, a ``KindSpec`` is appended to the
 registry for the length of one test, and a small executor writes a context key
@@ -25,7 +25,6 @@ import pytest
 from pydantic import BaseModel
 
 from fsm_llm import API
-from fsm_llm import executors as ex
 from fsm_llm.core import state_kinds as sk
 from fsm_llm.core.definitions import (
     DataExtractionResponse,
@@ -34,6 +33,7 @@ from fsm_llm.core.definitions import (
     State,
 )
 from fsm_llm.engine.fsm.manager import FSMManager
+from fsm_llm.engine.kinds import registry as ex
 from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.testing import MockLLM2Interface
 

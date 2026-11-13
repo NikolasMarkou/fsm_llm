@@ -40,7 +40,7 @@ from fsm_llm.core.definitions import (
 from fsm_llm.core.definitions.schema import SCHEMA_VERSION_DEFAULT
 from fsm_llm.core.verify import FSMValidator
 from fsm_llm.core.visualize import build_fsm_graph, visualize_fsm_ascii
-from fsm_llm.engine.turn.message_pipeline import MessagePipeline
+from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.handlers import create_handler
 from fsm_llm.llm import LiteLLMInterface, LLMInterface, check_tool_transcript
 from fsm_llm.testing import (
@@ -694,7 +694,7 @@ class TestStructuredTurn:
 class TestOwnedKeysAreNeverMinted:
     def test_completion_state_gets_no_field_configs(self):
         state = FSMDefinition(**_tool_fsm()).states["call_model"]
-        assert MessagePipeline._build_field_configs_from_state(state) == []
+        assert ConversationPass1._build_field_configs_from_state(state) == []
 
     def test_result_key_is_handler_only_for_every_state(self):
         """A plain state gated on the result key must not ask the extractor
