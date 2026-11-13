@@ -34,6 +34,11 @@ def clean_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """An empty working directory and no ``LLM_*`` variable in the process."""
     for name in ("LLM_MODEL", "LLM_TEMPERATURE", "LLM_MAX_TOKENS", "LOAD_ENV_PROBE"):
         monkeypatch.delenv(name, raising=False)
+    # Variables a test makes ``load_env`` set: record "unset" as the value to
+    # restore, so a later ``monkeypatch.setenv`` cannot restore a loaded value.
+    for name in ("LOAD_ENV_A", "LOAD_ENV_B", "LOAD_ENV_KEEP", "LOAD_ENV_NOWHERE"):
+        monkeypatch.setenv(name, "x")
+        monkeypatch.delenv(name)
     monkeypatch.chdir(tmp_path)
     return tmp_path
 
@@ -103,6 +108,56 @@ class TestLoadEnv:
         assert os.environ["LLM_MODEL"] == ""
         assert os.environ["LOAD_ENV_PROBE"] == " "
         assert os.environ["OTHER_PROBE"] == "1"
+
+    @pytest.mark.parametrize("blank", ["", "   "])
+    def test_a_blank_variable_resolves_an_interpolated_entry_like_an_unset_one(
+        self, clean_env, monkeypatch, blank
+    ):
+        """Re-review of the gate 1 fixes, concern 1: ``B=${A}`` resolves with the
+        PROCESS value of ``A`` first. A blank ``B`` must get what an unset ``B``
+        gets, never a value built from the file's own ``A`` that the process
+        overrode."""
+        env_file = clean_env / "my.env"
+        env_file.write_text("LOAD_ENV_A=fromfile\nLOAD_ENV_B=${LOAD_ENV_A}\n")
+        monkeypatch.setenv("LOAD_ENV_A", "proc")
+        monkeypatch.delenv("LOAD_ENV_B", raising=False)
+        fsm_llm.load_env(env_file)
+        unset_result = os.environ["LOAD_ENV_B"]
+        assert unset_result == "proc"
+
+        monkeypatch.setenv("LOAD_ENV_B", blank)
+        fsm_llm.load_env(env_file)
+        assert os.environ["LOAD_ENV_B"] == unset_result
+        assert os.environ["LOAD_ENV_A"] == "proc"
+
+    def test_a_blank_variable_the_file_resolves_to_blank_stays_as_it_is(
+        self, clean_env, monkeypatch
+    ):
+        env_file = clean_env / "my.env"
+        env_file.write_text("LOAD_ENV_B=${LOAD_ENV_NOWHERE}\n")
+        monkeypatch.delenv("LOAD_ENV_NOWHERE", raising=False)
+        monkeypatch.setenv("LOAD_ENV_B", "   ")
+        fsm_llm.load_env(env_file)
+        assert os.environ["LOAD_ENV_B"] == "   "
+
+    def test_a_blank_variable_the_file_does_not_name_stays_as_it_is(
+        self, clean_env, monkeypatch
+    ):
+        env_file = clean_env / "my.env"
+        env_file.write_text("LOAD_ENV_PROBE=1\n")
+        monkeypatch.setenv("LOAD_ENV_KEEP", "")
+        fsm_llm.load_env(env_file)
+        assert os.environ["LOAD_ENV_KEEP"] == ""
+        assert os.environ["LOAD_ENV_PROBE"] == "1"
+
+    def test_override_true_is_unchanged_for_a_blank_variable(
+        self, clean_env, monkeypatch
+    ):
+        env_file = clean_env / "my.env"
+        env_file.write_text("LOAD_ENV_PROBE=fromfile\n")
+        monkeypatch.setenv("LOAD_ENV_PROBE", "")
+        fsm_llm.load_env(env_file, override=True)
+        assert os.environ["LOAD_ENV_PROBE"] == "fromfile"
 
     def test_a_non_blank_variable_still_wins_over_the_file(
         self, clean_env, monkeypatch

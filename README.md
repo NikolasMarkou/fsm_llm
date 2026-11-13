@@ -157,7 +157,7 @@ Do not use it for open-ended chat with no structure (a plain LLM call is simpler
     ```bash
     export LLM_MODEL=ollama_chat/qwen3.5:4b      # or openai/gpt-4o-mini with OPENAI_API_KEY set
     ```
-    The model is the `model=` argument, then `LLM_MODEL`; there is no built-in default, and with neither set the call raises `ModelNotConfiguredError` (a CLI prints its message and exits 1). No `.env` file is read unless you ask: call `fsm_llm.load_env()` (or `fsm_llm.load_env("path/to/.env")`) in Python, or pass `--env-file PATH` to a CLI that needs a model (`fsm-llm`, `fsm-llm-eval`, `fsm-llm-meta`, `python -m fsm_llm.reasoning`, `fsm-llm-monitor`); a variable already in the environment is never replaced (see `.env.example`).
+    The model is the `model=` argument, then `LLM_MODEL`; there is no built-in default, and with neither set the call raises `ModelNotConfiguredError` (a CLI prints its message and exits 1). No `.env` file is read unless you ask: call `fsm_llm.load_env()` (or `fsm_llm.load_env("path/to/.env")`) in Python, or pass `--env-file PATH` to a CLI that needs a model (`fsm-llm`, `fsm-llm-eval`, `fsm-llm-meta`, `python -m fsm_llm.reasoning`, `fsm-llm-monitor`); a variable the process already has is not replaced unless `override=True`, except an empty or whitespace-only one, which counts as unset and is filled when the file gives it a value (to keep one empty on purpose, do not name it in the file; see `.env.example`).
 
 5.  **Verify the installation:**
     ```bash

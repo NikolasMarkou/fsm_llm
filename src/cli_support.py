@@ -92,7 +92,8 @@ def add_env_file(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="PATH",
         help="read this .env file into the environment first (a variable the "
-        "process already has wins, a blank one counts as unset; no .env file is "
+        "process already has wins, a blank one counts as unset (to keep one "
+        "empty on purpose, do not name it in the file); no .env file is "
         "read without this flag)",
     )
 

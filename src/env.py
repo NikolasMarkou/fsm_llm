@@ -31,8 +31,11 @@ def load_env(
           variable the process holds as an empty or whitespace-only string
           counts as NOT set, the rule ``llm.resolve_model`` applies to
           ``LLM_MODEL`` (a blank value carries nothing): the file fills it
-          when the file gives it a non-blank value, and leaves it as it is
-          otherwise.
+          when the file gives it a non-blank value (a ``${VAR}`` in that value
+          resolves as for an unset variable) and leaves it as it is otherwise.
+          To keep a variable deliberately empty (``HTTP_PROXY=`` to switch a
+          proxy off for one run), do not name it in the file: the file cannot
+          tell a deliberate empty value from an unset one.
         - Returns the ``Path`` read, or ``None`` when *path* is ``None`` and no
           file was found (nothing is set then).
         - Raises ``FileNotFoundError`` when an explicit *path* is not an
@@ -62,10 +65,26 @@ def load_env(
     # while ``resolve_model`` treats that blank as unset (review gate 1,
     # concern 8). Do NOT special-case ``LLM_MODEL`` (one rule for every
     # variable), and do NOT drop a blank variable the file gives no value.
+    # Re-review of the fixes, concern 1: the blank variables the file names are
+    # removed from the environment BEFORE ``load_dotenv`` runs, so a ``${VAR}``
+    # in the file resolves with the process values first, exactly as for an
+    # unset variable. Do NOT fill them from a separate ``dotenv_values`` read:
+    # that read resolves ``${VAR}`` with the file's own values first and gave
+    # a blanked variable a value the process had overridden.
+    held_blank: dict[str, str] = {}
     if not override:
-        for name, value in dotenv.dotenv_values(target, encoding="utf-8").items():
+        for name in dotenv.dotenv_values(target, encoding="utf-8"):
             held = os.environ.get(name)
-            if held is not None and not held.strip() and value and value.strip():
-                os.environ[name] = value
-    dotenv.load_dotenv(dotenv_path=target, override=override, encoding="utf-8")
+            if held is not None and not held.strip():
+                held_blank[name] = held
+                del os.environ[name]
+    try:
+        dotenv.load_dotenv(dotenv_path=target, override=override, encoding="utf-8")
+    finally:
+        # Only a non-blank file value replaces a blank variable: a blank,
+        # valueless or blank-resolving entry leaves the variable as it was.
+        for name, held in held_blank.items():
+            filled = os.environ.get(name)
+            if filled is None or not filled.strip():
+                os.environ[name] = held
     return target
