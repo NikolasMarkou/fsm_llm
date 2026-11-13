@@ -521,3 +521,28 @@ class TestAgentGraph:
         graph = AgentGraphBuilder().add_node("a", a).set_entry("a").build()
         result = graph.run("test")
         assert not result.success
+
+
+class TestSwarmNeedsNoModel:
+    """Review gate 1 sweep: a swarm builds no API, so it owns no model.
+
+    The root autouse fixture sets ``LLM_MODEL``; this test deletes it. The
+    swarm reads its own config for ``timeout_seconds`` only, and its members
+    hold their own interfaces.
+    """
+
+    def test_a_swarm_of_mock_members_builds_and_runs_without_llm_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.delenv("LLM_MODEL", raising=False)
+        swarm = SwarmAgent(agents={"a": _agent("hello")}, entry_agent="a")
+        assert swarm.config.timeout_seconds > 0
+        assert swarm.run("task").answer == "hello"
+
+    def test_a_given_config_is_kept_as_is(self, monkeypatch: pytest.MonkeyPatch):
+        from fsm_llm.agents import AgentConfig
+
+        monkeypatch.delenv("LLM_MODEL", raising=False)
+        config = AgentConfig(model="provider/own", timeout_seconds=7.0)
+        swarm = SwarmAgent(agents={"a": _agent()}, entry_agent="a", config=config)
+        assert swarm.config is config

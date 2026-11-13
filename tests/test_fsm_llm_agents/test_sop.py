@@ -234,3 +234,80 @@ class TestSOPRegistry:
         assert registry.remove("temp")
         assert not registry.has("temp")
         assert not registry.remove("temp")  # Already removed
+
+
+class TestSOPsNeedNoModel:
+    """Review gate 1, concern 1: a template registry needs no ``LLM_MODEL``.
+
+    The root autouse fixture sets ``LLM_MODEL`` for every test, so each test
+    here deletes it. ``tests/test_fsm_llm_regression/test_no_model_paths.py``
+    sweeps the other public entry points the same way.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("LLM_MODEL", raising=False)
+
+    def test_register_a_sop_that_names_no_model(self):
+        from fsm_llm.agents.sop import SOPDefinition
+
+        registry = SOPRegistry()
+        registry.register(
+            SOPDefinition(name="s", config_overrides={"temperature": 0.3})
+        )
+        assert registry.get("s").config_overrides == {"temperature": 0.3}
+
+    def test_the_placeholder_never_reaches_the_stored_sop(self):
+        from fsm_llm.agents.sop import SOPDefinition
+
+        registry = SOPRegistry()
+        sop = SOPDefinition(name="s", config_overrides={"temperature": 0.3})
+        registry.register(sop)
+        assert "model" not in registry.get("s").config_overrides
+        assert "model" not in sop.to_dict()["config_overrides"]
+
+    def test_the_builtin_sops_load(self):
+        from fsm_llm.agents.sop import load_builtin_sops
+
+        assert set(load_builtin_sops().list_names()) >= {"code-review", "summarize"}
+
+    def test_a_bad_key_is_still_refused_without_a_model(self):
+        from fsm_llm.agents.sop import SOPDefinition
+
+        with pytest.raises(
+            ValueError, match=r"(?s)invalid config_overrides.*max_iteration"
+        ):
+            SOPRegistry().register(
+                SOPDefinition(name="s", config_overrides={"max_iteration": 3})
+            )
+
+    def test_a_bad_value_is_still_refused_without_a_model(self):
+        from fsm_llm.agents.sop import SOPDefinition
+
+        with pytest.raises(ValueError, match="invalid config_overrides"):
+            SOPRegistry().register(
+                SOPDefinition(name="s", config_overrides={"temperature": 9.0})
+            )
+
+    def test_to_agent_config_takes_the_injected_interface_as_the_model(self):
+        from fsm_llm.agents.sop import SOPDefinition
+        from fsm_llm.testing import ScriptedLLM
+
+        double = ScriptedLLM()
+        double.model = "provider/own"
+        sop = SOPDefinition(name="s", config_overrides={"temperature": 0.3})
+        config = sop.to_agent_config(llm_interface=double)
+        assert (config.model, config.temperature) == ("provider/own", 0.3)
+
+    def test_to_agent_config_with_a_named_model_needs_nothing_else(self):
+        from fsm_llm.agents.sop import SOPDefinition
+
+        sop = SOPDefinition(name="s", config_overrides={"model": "provider/own"})
+        assert sop.to_agent_config().model == "provider/own"
+
+    def test_to_agent_config_for_running_still_needs_a_model(self):
+        from fsm_llm import ModelNotConfiguredError
+        from fsm_llm.agents.sop import SOPDefinition
+
+        with pytest.raises(ModelNotConfiguredError):
+            SOPDefinition(name="s").to_agent_config()

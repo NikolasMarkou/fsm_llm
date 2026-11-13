@@ -17,7 +17,11 @@ import yaml
 
 from fsm_llm.logging import logger
 
-from .definitions import AgentConfig
+from .definitions import (
+    PLACEHOLDER_MODEL,
+    AgentConfig,
+    default_agent_config,
+)
 
 
 class SOPDefinition:
@@ -76,13 +80,26 @@ class SOPDefinition:
                 f"SOP '{self.name}' task template is malformed: {e}"
             ) from e
 
-    def to_agent_config(self, **overrides: Any) -> AgentConfig:
-        """Create an AgentConfig from SOP settings.
+    def to_agent_config(
+        self, *, llm_interface: Any = None, **overrides: Any
+    ) -> AgentConfig:
+        """Create an AgentConfig from SOP settings, to build an agent with.
 
         Args:
+            llm_interface: The interface the agent will hold, when injected.
+                It supplies the model: its own ``model``, else ``LLM_MODEL``,
+                else a placeholder that is never sent (``default_agent_config``).
             **overrides: Additional overrides applied after SOP defaults.
+
+        Raises:
+            ModelNotConfiguredError: No ``model`` in the SOP or the overrides,
+                no ``llm_interface`` and no ``LLM_MODEL``: the config would
+                run an agent, and the library has no built-in model.
+            pydantic.ValidationError: A bad key or value.
         """
         config_dict = {**self.config_overrides, **overrides}
+        if "model" not in config_dict and llm_interface is not None:
+            config_dict["model"] = default_agent_config(llm_interface).model
         return AgentConfig(**config_dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -133,10 +150,18 @@ class SOPRegistry:
         """Register an SOP. Returns self for chaining.
 
         Validates config_overrides by attempting AgentConfig construction.
+        A registry holds templates, not agents, so it needs no model: the
+        validation names a placeholder one (never stored or returned) unless
+        the overrides name a model themselves.
         """
         if sop.config_overrides:
             try:
-                AgentConfig(**sop.config_overrides)
+                # DECISION plan-2026-11-12T073150-d454fd62/D-025
+                # Do NOT validate with a bare ``AgentConfig(**overrides)``:
+                # its ``model`` default raises ``ModelNotConfiguredError``
+                # without ``LLM_MODEL``, so no SOP (the built-in ones
+                # included) could be registered in a process with no model.
+                AgentConfig(**{"model": PLACEHOLDER_MODEL, **sop.config_overrides})
             except Exception as e:
                 raise ValueError(
                     f"SOP '{sop.name}' has invalid config_overrides: {e}"

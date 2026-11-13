@@ -17,7 +17,7 @@ from fsm_llm.memory import WorkingMemory
 
 from .base import BaseAgent, pattern_run_output_keys, strip_caller_context
 from .constants import StopReason
-from .definitions import AgentConfig, AgentResult, AgentTrace
+from .definitions import AgentConfig, AgentResult, AgentTrace, model_or_placeholder
 from .exceptions import AgentTimeoutError, BudgetExhaustedError, require_int_limit
 
 # DECISION plan-2026-09-29T103145-06a5ec0a/D-045: per-hop routing outputs.
@@ -77,7 +77,13 @@ class SwarmAgent(BaseAgent):
         # builds no API (its members own theirs), so forwarded kwargs such as
         # llm_interface= or even bogus=1 were accepted and inert. Do NOT add them
         # back, an alias or a raising stub; a mistyped name is a plain TypeError.
-        super().__init__(config=config)
+        # DECISION plan-2026-11-12T073150-d454fd62/D-025
+        # A swarm owns no model: it builds no API and its members hold their
+        # own interfaces and configs. Do NOT build ``AgentConfig()`` here when
+        # no config is given: it would raise ``ModelNotConfiguredError`` for a
+        # swarm of members that each have an injected interface (review gate
+        # 1 sweep). The config is read for ``timeout_seconds`` only.
+        super().__init__(config=config or AgentConfig(model=model_or_placeholder()))
         if not agents:
             raise ValueError("SwarmAgent requires at least one agent")
         if entry_agent not in agents:

@@ -30,6 +30,7 @@ Tests fall into four styles:
 - `test_regression_messages_and_operators.py` - plan 12: message truncation length, allowed JsonLogic operator names, validator output without emoji, Python 3.11 floor, no `HANDLER_ERROR_SKIP`.
 - `test_api_snapshot.py` - the public API snapshot: `docs/api.txt` must equal the output of `scripts/api_snapshot.py` (3 tests); regenerate it with `make api-snapshot` after a deliberate public change.
 - `test_regression_transition_eval.py` - plan 8: strict condition matching stops on error, priority tie-break, dict content in response parsing, no CONTEXT_UPDATE handlers for empty data, `pop_fsm` failure path.
+- `test_no_model_paths.py` - review gate 1 of plan d454fd62: with `LLM_MODEL` deleted by the test itself (the root autouse fixture sets it for every test), every public constructor and runner that takes an injected `llm_interface` or needs no LLM builds and runs (agents, SOPs, patterns, eval, reasoning, workflows, monitor, synthesis, meta), and every path that has nothing injected still raises `ModelNotConfiguredError`.
 
 ## How to use it
 

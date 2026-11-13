@@ -1034,7 +1034,7 @@ fsm_llm.agents.SOPDefinition class
   def __init__(self, name: str, description: str = '', agent_pattern: str = 'react', task_template: str = '', required_tools: list[str] | None = None, output_schema: dict[str, Any] | None = None, config_overrides: dict[str, Any] | None = None, metadata: dict[str, Any] | None = None) -> None
   classmethod def from_dict(cls, data: dict[str, Any]) -> SOPDefinition
   def render_task(self, **kwargs: Any) -> str
-  def to_agent_config(self, **overrides: Any) -> AgentConfig
+  def to_agent_config(self, *, llm_interface: Any = None, **overrides: Any) -> AgentConfig
   def to_dict(self) -> dict[str, Any]
 fsm_llm.agents.SOPRegistry class
   def __init__(self) -> None

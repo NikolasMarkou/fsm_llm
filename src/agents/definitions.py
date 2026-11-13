@@ -238,6 +238,24 @@ interface owns the model), and the second validation pass of
 ``AgentArtifactBuilder._config_problems``."""
 
 
+def model_or_placeholder(model: str | None = None) -> str:
+    """*model*, else env ``LLM_MODEL``, else ``PLACEHOLDER_MODEL``; never raises.
+
+    Interface contract (callers: ``default_agent_config``,
+    ``composition.default_llm_judge``, ``SwarmAgent``, ``SOPRegistry``): for a
+    config that must hold a model string although the model is owned elsewhere
+    (an injected interface, a custom backend, member agents) or is not used at
+    all (validating a template). Where an agent is really built from a
+    config, ``AgentConfig()`` and ``resolve_agent_model`` keep raising
+    ``ModelNotConfiguredError``. The placeholder names nothing and is never
+    sent to a provider.
+    """
+    try:
+        return resolve_agent_model(model)
+    except ModelNotConfiguredError:
+        return PLACEHOLDER_MODEL
+
+
 class AgentConfig(BaseModel):
     """Configuration for an agent.
 
@@ -475,13 +493,7 @@ def default_agent_config(
     # way than ``interface_model`` (a mock attribute is not a model).
     if llm_interface is None:
         return config_cls()
-    model = interface_model(llm_interface)
-    if model is None:
-        try:
-            model = resolve_model()
-        except ModelNotConfiguredError:
-            model = PLACEHOLDER_MODEL
-    return config_cls(model=model)
+    return config_cls(model=interface_model(llm_interface) or model_or_placeholder())
 
 
 def config_with(base: AgentConfig, **updates: Any) -> AgentConfig:

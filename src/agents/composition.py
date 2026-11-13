@@ -23,16 +23,16 @@ import contextlib
 from collections.abc import Callable
 from typing import Any
 
-from fsm_llm.definitions import CompletionRequest, ModelNotConfiguredError
+from fsm_llm.definitions import CompletionRequest
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.logging import logger
 from fsm_llm.utilities import coerce_confidence, extract_json_from_text
 
 from .definitions import (
-    PLACEHOLDER_MODEL,
     AgentConfig,
     AgentResult,
     EvaluationResult,
+    model_or_placeholder,
     resolve_agent_model,
 )
 from .exceptions import EvaluationError
@@ -141,10 +141,7 @@ def default_llm_judge(
     else:
         # A custom backend owns the model: the name is only handed to it, so
         # no model set is not an error (the default judge needs one).
-        try:
-            model = resolve_agent_model(model)
-        except ModelNotConfiguredError:
-            model = PLACEHOLDER_MODEL
+        model = model_or_placeholder(model)
 
     def judge(output: str, context: dict[str, Any] | None = None) -> EvaluationResult:
         task = ""
