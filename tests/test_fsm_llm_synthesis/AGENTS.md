@@ -66,7 +66,7 @@ The package exports (`fsm_llm.synthesis.__all__`), the reason codes (`constants.
 
 ## Dependencies
 
-- `fsm_llm.synthesis` and its submodules, core (`definitions`, `api`, `core.verify` (the validator and `flow`), `transition_evaluator`), `fsm_llm.agents` (`ToolRegistry`, `ToolCall`), `fsm_llm.eval`.
+- `fsm_llm.synthesis` and its submodules, core (`definitions`, `engine.api`, `core.verify` (the validator and `flow`), `transition_evaluator`), `fsm_llm.agents` (`ToolRegistry`, `ToolCall`), `fsm_llm.eval`.
 - `tests.conftest` (`block_network`), `fsm_llm.testing` (`MockLLM2Interface`, `ScriptedLLM`, `state_in_prompt`), `scripts/synthesis_bench.py`, `scripts/bench_common.py`.
 - pytest only; no network.
 

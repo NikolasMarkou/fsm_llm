@@ -67,9 +67,9 @@ class SessionState(BaseModel):
     # "_hidden_buffers" list INSIDE that dict alongside the real buffer-name
     # keys (never a buffer's own contents itself -- see memory.py D-026,
     # which makes that name unusable as a real buffer name). The outer
-    # sibling "hidden_buffers" key (api.py's save_session) carries the exact
+    # sibling "hidden_buffers" key (engine/api/sessions.py's save_session) carries the exact
     # same list explicitly, so the two are redundant on this specific path
-    # (api.py always passes hidden_buffers= explicitly to
+    # (engine/api/sessions.py always passes hidden_buffers= explicitly to
     # WorkingMemory.from_dict on restore, so the embedded copy inside
     # "buffers" is read but never relied on here) -- see decisions.md D-021
     # for why the embedded key exists at all (a DIFFERENT caller,

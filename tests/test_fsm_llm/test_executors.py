@@ -52,12 +52,18 @@ _KINDS_FILES = tuple(
         for p in (_SRC / "engine" / "kinds").rglob("*.py")
     )
 )
+# Every module of the API package (step 81 split the old api.py), found on disk.
+_API_FILES = tuple(
+    sorted(
+        p.relative_to(_SRC).as_posix() for p in (_SRC / "engine" / "api").glob("*.py")
+    )
+)
 _ENGINE_FILES = (
     *_TURN_FILES,
     # the kind executors package, except the completion executor, which IS the completion
     # kind's code (the conversation machinery was under this ban while it sat in engine/turn/)
     *(name for name in _KINDS_FILES if name != "engine/kinds/completion.py"),
-    "api.py",
+    *_API_FILES,
     "engine/fsm/helpers.py",
     "engine/fsm/manager.py",
     "engine/fsm/snapshots.py",
@@ -119,6 +125,21 @@ class TestNoKindBranchInTheEngine:
             "transitions.py",
             "pass2.py",
             "records.py",
+            "surface.py",
+        } <= names
+
+    def test_the_api_scan_sees_the_whole_package(self):
+        """Guards the derivation: the API is 8 modules since step 81 (the facade holds
+        none of the code), so a facade-only list would make the scan vacuous."""
+        names = {Path(n).name for n in _API_FILES}
+        assert len(_API_FILES) >= 8
+        assert {
+            "conversation.py",
+            "run.py",
+            "stack.py",
+            "lifecycle.py",
+            "sessions.py",
+            "helpers.py",
             "surface.py",
         } <= names
 

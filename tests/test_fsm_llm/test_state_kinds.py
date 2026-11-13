@@ -22,9 +22,9 @@ from typing import Any, ClassVar, get_args, get_origin
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from fsm_llm.api import API
 from fsm_llm.core import state_kinds as sk
 from fsm_llm.core.definitions import FSMDefinition, State
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from tests.test_fsm_llm import kind_corpus as kc
 
@@ -375,7 +375,7 @@ class TestResultKeyReaders:
         [
             ("core/definitions/fsm.py", "handler_only_names", None),
             ("core/verify/flow.py", "_result_key", None),
-            ("api.py", "_build_push_context", "API"),
+            ("engine/api/stack.py", "_build_push_context", "StackMixin"),
         ],
     )
     def test_no_reader_branches_on_a_kind_config(self, path, name, owner):
@@ -2102,7 +2102,10 @@ class TestLeafModule:
 _SRC = _PKG
 _D006 = "plan-2026-09-19T175721-21cd7f8e/D-006"
 _D022 = "plan-2026-11-12T073150-d454fd62/D-022"
-_SOURCES = {"api.py": _SRC / "api.py", "state_kinds.py": _MODULE}
+_SOURCES = {
+    "stack.py": _SRC / "engine" / "api" / "stack.py",
+    "state_kinds.py": _MODULE,
+}
 
 
 def _anchor_lines(path: Path, token: str) -> list[str]:
@@ -2134,11 +2137,11 @@ class TestMovedAnchorsStayAnchors:
         assert "D-006 (pipeline.py)" not in text
         assert "_conversation_minted_keys" in text
 
-    @pytest.mark.parametrize("name", ["api.py", "state_kinds.py"])
+    @pytest.mark.parametrize("name", ["stack.py", "state_kinds.py"])
     def test_the_synthesize_drop_on_push_carries_the_d022_anchor(self, name):
         assert _anchor_lines(_SOURCES[name], _D022)
 
-    @pytest.mark.parametrize("name", ["api.py", "state_kinds.py"])
+    @pytest.mark.parametrize("name", ["stack.py", "state_kinds.py"])
     def test_no_comment_claims_the_child_skips_its_own_run(self, name):
         """Guards: the refuted reason of step 55 (the runner never serves a
         user-pushed child); the real defect is routing on the stale result."""
@@ -2148,7 +2151,7 @@ class TestMovedAnchorsStayAnchors:
         assert "stale" in text
 
     def test_the_d029_text_of_944e2692_is_unchanged(self):
-        lines = (_SRC / "api.py").read_text(encoding="utf-8").splitlines()
+        lines = _SOURCES["stack.py"].read_text(encoding="utf-8").splitlines()
         i = next(
             n for n, line in enumerate(lines) if "944e2692/D-029: an inherited" in line
         )

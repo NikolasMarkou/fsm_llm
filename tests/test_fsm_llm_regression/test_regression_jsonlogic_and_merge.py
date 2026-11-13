@@ -169,7 +169,8 @@ class TestUpdateMergeReturnContext:
 
     def test_update_includes_return_context_keys(self):
         """return_context keys should pass through UPDATE merge even if not in shared_keys."""
-        from fsm_llm.api import API, ContextMergeStrategy, FSMStackFrame
+        from fsm_llm.engine.api.conversation import API
+        from fsm_llm.engine.api.stack import ContextMergeStrategy, FSMStackFrame
 
         api = MagicMock(spec=API)
         api.conversation_stacks = {
@@ -215,7 +216,7 @@ class TestEndConversationStackOrder:
 
     def test_teardown_is_lifo(self, sample_fsm_definition_v2, mock_llm2_interface):
         """Real API: frames are ended top-to-bottom, the root frame last."""
-        from fsm_llm.api import API
+        from fsm_llm.engine.api.conversation import API
 
         api = API(
             fsm_definition=sample_fsm_definition_v2, llm_interface=mock_llm2_interface
@@ -253,8 +254,8 @@ class TestExceptionChaining:
 
     def test_handle_conversation_errors_chains_exception(self):
         """The handle_conversation_errors decorator should use `from e`."""
-        from fsm_llm.api import handle_conversation_errors
         from fsm_llm.core.definitions import FSMError
+        from fsm_llm.engine.api.helpers import handle_conversation_errors
 
         @handle_conversation_errors
         def failing_method(self, conversation_id):

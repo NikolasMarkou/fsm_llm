@@ -162,7 +162,7 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         # model never sees a larger window. Pass the VALIDATED value (the one
         # `Conversation` coerced above), never the raw argument: 2.0 or "5" would
         # reach the slice or comparison in the prompt builder as a float or str.
-        # api.py builds no builders of its own so this stays the one site.
+        # engine/api builds no builders of its own so this stays the one site.
         self.data_extraction_prompt_builder = (
             data_extraction_prompt_builder
             or DataExtractionPromptBuilder(

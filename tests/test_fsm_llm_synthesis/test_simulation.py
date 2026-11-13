@@ -13,13 +13,13 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.api import API
 from fsm_llm.core.definitions import (
     CompletionResponse,
     FieldExtractionResponse,
     FSMDefinition,
     LLMResponseError,
 )
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.eval.cases import ConversationCase, Expectations, run_case_trial
 from fsm_llm.eval.config import EvalConfig
 from fsm_llm.synthesis import (

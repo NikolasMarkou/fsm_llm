@@ -14,7 +14,7 @@ class TestConverseValueErrorCatchAll:
 
     def test_internal_valueerror_preserved(self):
         """A ValueError from process_message should propagate with original message."""
-        from fsm_llm.api import API
+        from fsm_llm.engine.api.conversation import API
 
         api = API.__new__(API)
         api._stack_lock = __import__("threading").Lock()

@@ -20,7 +20,6 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-import fsm_llm.api as api_module
 from fsm_llm.agents import (
     AgentConfig,
     NativeFunctionCallingReactAgent,
@@ -48,6 +47,7 @@ from fsm_llm.core.definitions import (
     RunBudgetExceededError,
 )
 from fsm_llm.testing import final_reply
+from tests.conftest import bind_api_clock
 from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 from tests.test_fsm_llm_agents import test_native_fc_golden as golden
 
@@ -846,7 +846,7 @@ _SECRET = "sk-test-0123456789abcdef0123456789abcdef"
 
 
 class _FakeClock:
-    """Stands in for ``fsm_llm.api``'s ``time``; each model call costs time."""
+    """Stands in for the ``time`` of ``fsm_llm.engine.api``; each model call costs time."""
 
     def __init__(self) -> None:
         self.now = 1000.0
@@ -862,7 +862,7 @@ def _timed_recorder(
     monkeypatch: pytest.MonkeyPatch, script: list[Any], seconds: float
 ) -> golden._Recorder:
     clock = _FakeClock()
-    monkeypatch.setattr(api_module, "time", clock)
+    bind_api_clock(monkeypatch, clock)
     recorder = golden._Recorder(script)
 
     def call(**kwargs: Any) -> Any:

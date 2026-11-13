@@ -26,9 +26,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from fsm_llm.api import API
 from fsm_llm.context.filtering import redacting_json_default
 from fsm_llm.core.definitions import ModelNotConfiguredError
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.llm import LLMInterface
 
 from ._pool import run_interruptible

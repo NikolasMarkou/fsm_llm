@@ -214,7 +214,7 @@ class SnapshotsMixin:
         """
         # DECISION plan-2026-07-21T045419-9925aa3a/D-004
         # A validated, locked setter belongs in the manager (which owns FSM-def
-        # access), NOT as a raw `instance.current_state = ...` poke in api.py:
+        # access), NOT as a raw `instance.current_state = ...` poke in engine/api/:
         # the FSM-def membership check is the invariant that turns a corrupted or
         # foreign session naming a nonexistent state into a loud FSMError instead
         # of silent corruption. Do NOT inline this back into restore_session, and

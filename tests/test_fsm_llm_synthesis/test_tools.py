@@ -17,12 +17,12 @@ from fsm_llm.agents.constants import OBSERVATION_ENTRY, Defaults
 from fsm_llm.agents.definitions import ToolCall
 from fsm_llm.agents.handlers import record_tool_step
 from fsm_llm.agents.tools import ToolRegistry
-from fsm_llm.api import API
 from fsm_llm.core.definitions import (
     CompletionStateConfig,
     FSMDefinition,
     LLMResponseError,
 )
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.synthesis import (
     FSMLibrary,
     FSMSynthesizer,

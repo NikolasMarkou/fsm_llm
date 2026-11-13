@@ -605,7 +605,7 @@ class TestLoaderWarnsOncePerDefinitionObject:
         assert key not in definitions._REPORTED_DEFINITIONS
 
     def test_the_flag_changes_neither_dump_nor_equality_nor_id(self):
-        from fsm_llm.api import API
+        from fsm_llm.engine.api.conversation import API
 
         reported = FSMDefinition(**self._body())
         fresh = FSMDefinition(**self._body())

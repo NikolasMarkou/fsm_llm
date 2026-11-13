@@ -51,7 +51,7 @@ At the time of writing, 268 tests are collected: 266 pass and 2 are skipped (the
 
 - `test_regression_cli_and_exports.py` pins the package version to `"0.12.0"` (`TestVersionAlignment`). Update it on every release.
 - Many tests call private methods (for example `TransitionEvaluator._determine_evaluation_result`, `LiteLLMInterface._parse_response_generation_response`, `manager._pipeline._execute_state_transition`). Renaming them breaks these tests.
-- Source checks fail on text, not behavior: reintroducing the string `md5` in `src/fsm_llm/api.py` or `import asyncio` in the `handlers` package fails a test even if unused.
+- Source checks fail on text, not behavior: reintroducing the string `md5` in any module of `src/fsm_llm/engine/api/` or `import asyncio` in the `handlers` package fails a test even if unused.
 - Tests that build `API.__new__(API)` must set every attribute the method reads (`_stack_lock`, `_last_accessed`, `_pending_push_ids`, `_ended_conversations`, `_MAX_ENDED_CACHE`, `_temp_fsm_definitions`). A new attribute in `API.__init__` may need adding here.
 - The fixtures `mock_llm2_interface` and `sample_fsm_definition_v2` come from `tests/conftest.py`.
 - Async tests in `test_engine_integration.py` have no marker and rely on `asyncio_mode = "auto"` in `pyproject.toml`.

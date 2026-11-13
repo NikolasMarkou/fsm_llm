@@ -9,9 +9,9 @@ from unittest.mock import MagicMock
 import pytest
 
 import fsm_llm.memory
-from fsm_llm.api import API
 from fsm_llm.core.definitions import FSMContext
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.memory import (
     BUFFER_CORE,
     BUFFER_ENVIRONMENT,
@@ -494,7 +494,7 @@ class TestWorkingMemoryHiddenBuffersRoundTrip:
 
     def test_explicit_kwarg_still_overrides_the_embedded_default(self):
         """Back-compat: an explicit hidden_buffers= kwarg wins over whatever
-        to_dict() embedded, matching api.py's existing restore_session call
+        to_dict() embedded, matching the restore_session call of `engine/api/sessions.py`
         shape (it always passes hidden_buffers= explicitly)."""
         memory = WorkingMemory(hidden_buffers={"metadata"})
         restored = WorkingMemory.from_dict(
@@ -593,7 +593,7 @@ class TestWorkingMemoryFromDictValidation:
     ):
         """Public path: a hand-corrupted session file (``buffers.core`` is a
         string) makes ``API.restore_session`` raise with ``'core'`` in the
-        message, and the D-003 teardown (api.py) leaves no half-restored
+        message, and the D-003 teardown (`engine/api/sessions.py`) leaves no half-restored
         conversation registered. ``restore_session`` re-raises the original
         exception unwrapped (``except Exception: ...; raise``), so the type
         is the ``ValueError`` from ``from_dict``."""

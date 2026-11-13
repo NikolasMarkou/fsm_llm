@@ -14,7 +14,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
-from fsm_llm.api import API
 from fsm_llm.constants import MAX_CONTEXT_FILTER_DEPTH
 from fsm_llm.context.layout import (
     BasePromptBuilder,
@@ -37,6 +36,7 @@ from fsm_llm.core.definitions import (
     Transition,
     TransitionCondition,
 )
+from fsm_llm.engine.api.conversation import API
 from tests.test_fsm_llm.support import (
     _a3_api,
     _a3_extraction_fsm,

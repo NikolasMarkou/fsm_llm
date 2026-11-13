@@ -33,7 +33,7 @@ Conversation state lives in in-memory dicts by default. Attaching a `SessionStor
 
 ## Core Components
 
-### API (`api.py`)
+### API (`engine/api/`)
 
 User-facing entry point. Manages FSM definition processing, component wiring, conversation lifecycle, and FSM stacking.
 

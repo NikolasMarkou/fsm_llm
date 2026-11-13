@@ -8,6 +8,7 @@ to ensure tests match real-world usage scenarios with complex stacking and workf
 import json
 import tempfile
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
@@ -33,7 +34,6 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
     return mock_llm
 
 
-from fsm_llm.api import API, ContextMergeStrategy
 from fsm_llm.core.definitions import (
     FSMDefinition,
     FSMError,
@@ -42,6 +42,8 @@ from fsm_llm.core.definitions import (
     Transition,
     TransitionCondition,
 )
+from fsm_llm.engine.api.conversation import API
+from fsm_llm.engine.api.stack import ContextMergeStrategy
 from fsm_llm.llm import LLMInterface
 
 # ======================================================================
@@ -1062,6 +1064,50 @@ class TestAdvancedFSMStacking:
         assert data["user_id"] == "original_user123"
         assert data["existing_data"] == "should_remain"  # Should remain unchanged
         assert data["new_field"] == "new_value"  # Should be added
+
+
+class TestPopMergeStrategies:
+    """What ``pop_fsm`` does with the context a popped frame hands back. Found by a step-81
+    mutant (every pop merged as ``UPDATE``) that no unit test killed: only the 200-program
+    differential did."""
+
+    @staticmethod
+    def _popped(
+        strategy: Any, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+    ) -> dict[str, Any]:
+        api = API(fsm_definition=multi_step_form_fsm, llm_interface=mock_llm_interface)
+        conv_id, _ = api.start_conversation({"kept": "parent"})
+        api.push_fsm(conversation_id=conv_id, new_fsm_definition=sub_form_fsm)
+        api.pop_fsm(
+            conversation_id=conv_id,
+            context_to_return={"kept": "child", "added": "child"},
+            merge_strategy=strategy,
+        )
+        return api.get_data(conv_id)
+
+    @pytest.mark.parametrize("strategy", ["update", ContextMergeStrategy.UPDATE])
+    def test_update_overwrites_a_key_the_parent_already_has(
+        self, strategy, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+    ):
+        data = self._popped(
+            strategy, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+        )
+
+        assert data["kept"] == "child"
+        assert data["added"] == "child"
+
+    @pytest.mark.parametrize(
+        "strategy", ["preserve", " PRESERVE ", ContextMergeStrategy.PRESERVE]
+    )
+    def test_preserve_keeps_the_parents_key_and_adds_a_new_one(
+        self, strategy, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+    ):
+        data = self._popped(
+            strategy, multi_step_form_fsm, sub_form_fsm, mock_llm_interface
+        )
+
+        assert data["kept"] == "parent"
+        assert data["added"] == "child"
 
 
 # ======================================================================

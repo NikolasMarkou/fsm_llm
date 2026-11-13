@@ -16,7 +16,6 @@ import pytest
 from pydantic import ValidationError
 
 from fsm_llm import API
-from fsm_llm.api import ContextMergeStrategy
 from fsm_llm.core.definitions import (
     FSMDefinition,
     State,
@@ -24,6 +23,7 @@ from fsm_llm.core.definitions import (
     handler_only_names,
 )
 from fsm_llm.core.verify import FSMValidator
+from fsm_llm.engine.api.stack import ContextMergeStrategy
 from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.testing import MockLLM2Interface
 

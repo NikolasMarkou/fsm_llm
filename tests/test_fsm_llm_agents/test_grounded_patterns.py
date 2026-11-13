@@ -19,7 +19,6 @@ from fsm_llm.agents.constants import ContextKeys
 from fsm_llm.agents.debate import DebateAgent
 from fsm_llm.agents.fsm_definitions import loop_field_context_keys
 from fsm_llm.agents.handlers import make_fresh_keys_handler
-from fsm_llm.api import API
 from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     CompletionResponse,
@@ -28,6 +27,7 @@ from fsm_llm.core.definitions import (
     ModelToolCall,
     ResponseGenerationRequest,
 )
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.testing import PromptGroundedLLM, state_in_prompt
 from tests.conftest import network_exempt
 from tests.test_fsm_llm.test_completion_state import _ScriptedLLM

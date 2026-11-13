@@ -31,7 +31,6 @@ import yaml
 import fsm_llm
 import fsm_llm.okf as okf_module
 import fsm_llm.okf_bridge as okf_bridge
-from fsm_llm.api import API
 from fsm_llm.constants import (
     OKF_MAX_DEPTH,
     OKF_MAX_FILE_BYTES,
@@ -44,6 +43,7 @@ from fsm_llm.constants import (
 )
 from fsm_llm.context.layout import ResponseGenerationPromptBuilder
 from fsm_llm.core.definitions import FSMError, OKFError
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.okf import (
     OKFBundle,

@@ -28,7 +28,6 @@ import re
 
 import pytest
 
-from fsm_llm.api import API
 from fsm_llm.context.layout import (
     BasePromptBuilder,
     DataExtractionPromptBuilder,
@@ -43,6 +42,7 @@ from fsm_llm.core.definitions import (
     State,
     Transition,
 )
+from fsm_llm.engine.api.conversation import API
 from tests.conftest import cpu_timer
 from tests.test_fsm_llm.support import _PromptSpy
 

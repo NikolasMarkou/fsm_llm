@@ -34,9 +34,9 @@ import threading
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from fsm_llm.api import API
 from fsm_llm.core.codes import CompletionKind, Reason, Status
 from fsm_llm.core.definitions import AdvanceResult, CompletionResponse, FSMError
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.handlers import BaseHandler, HandlerTiming
 
 from .user import ConversationRun

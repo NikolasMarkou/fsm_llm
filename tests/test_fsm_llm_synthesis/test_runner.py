@@ -16,7 +16,6 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.api import API
 from fsm_llm.core.definitions import (
     CompletionStateConfig,
     FSMDefinition,
@@ -25,6 +24,7 @@ from fsm_llm.core.definitions import (
     LLMUsage,
     RunBudgetExceededError,
 )
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.logging import logger
 from fsm_llm.synthesis import (
     FSMLibrary,

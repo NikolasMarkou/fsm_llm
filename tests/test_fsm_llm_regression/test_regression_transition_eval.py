@@ -276,8 +276,9 @@ class TestPopFsmStackOrder:
 
     def test_stack_preserved_when_end_conversation_fails(self):
         """If end_conversation raises, the stack frame should still be present."""
-        from fsm_llm.api import API, FSMStackFrame
         from fsm_llm.core.definitions import FSMDefinition, FSMError
+        from fsm_llm.engine.api.conversation import API
+        from fsm_llm.engine.api.stack import FSMStackFrame
 
         fsm_def = FSMDefinition.model_validate(
             {

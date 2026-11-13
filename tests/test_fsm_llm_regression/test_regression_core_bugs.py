@@ -167,8 +167,8 @@ class TestVB3DoubleWrappedFSMError:
     """VB3: api.py should re-raise FSMError directly, not double-wrap."""
 
     def test_start_conversation_no_double_wrap(self):
-        from fsm_llm.api import API
         from fsm_llm.core.definitions import FSMError
+        from fsm_llm.engine.api.conversation import API
 
         api = API.__new__(API)
         api._stack_lock = __import__("threading").Lock()
@@ -190,8 +190,8 @@ class TestVB3DoubleWrappedFSMError:
         assert msg.count("Failed to start conversation") == 1, f"Double-wrapped: {msg}"
 
     def test_converse_no_double_wrap(self):
-        from fsm_llm.api import API
         from fsm_llm.core.definitions import FSMError
+        from fsm_llm.engine.api.conversation import API
 
         api = API.__new__(API)
         api._stack_lock = __import__("threading").Lock()
@@ -350,7 +350,8 @@ class TestVB11MergeTriggersAllKeys:
     """VB11: _merge_context_with_strategy should only pass changed keys."""
 
     def test_update_only_passes_diff(self):
-        from fsm_llm.api import API, ContextMergeStrategy
+        from fsm_llm.engine.api.conversation import API
+        from fsm_llm.engine.api.stack import ContextMergeStrategy
 
         api = API.__new__(API)
         api._stack_lock = __import__("threading").Lock()

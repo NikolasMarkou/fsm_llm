@@ -14,7 +14,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm.api import API
 from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
 from fsm_llm.context import ContextCompactor, clean_context_keys
 from fsm_llm.context.layout import BasePromptBuilder
@@ -24,6 +23,7 @@ from fsm_llm.core.definitions import (
     Transition,
     TransitionCondition,
 )
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.security.names import _token_value_is_credential
 from fsm_llm.security.shapes import _looks_like_credential_value
 from tests.conftest import cpu_timer

@@ -119,7 +119,7 @@ class WorkingMemory:
         # sequence (`[]` / `()`) means NO buffers. Do NOT "simplify" this to
         # `buffers or DEFAULT_BUFFERS` -- that silently coerced `[]` back to
         # the defaults (finding memory #8) and made `from_dict({})` lie.
-        # Callers that want "no signal -> defaults" pass None (api.py N8).
+        # Callers that want "no signal -> defaults" pass None (engine/api/sessions.py N8).
         buffer_names = buffers if buffers is not None else DEFAULT_BUFFERS
         if self._HIDDEN_BUFFERS_DICT_KEY in buffer_names:
             raise ValueError(
@@ -612,7 +612,7 @@ class WorkingMemory:
         # `dict[str, dict[str, Any]]`-typed return was used positionally (no
         # existing caller unpacks a nested "buffers" key). `from_dict()` MUST
         # pop this key out before treating the rest of `data` as buffer names
-        # -- see its own comment below. `api.py`'s `save_session`/
+        # -- see its own comment below. `engine/api/sessions.py`'s `save_session`/
         # `restore_session` already hand-carry `hidden_buffers` as a SIBLING
         # `SessionState.working_memory["hidden_buffers"]` key (engine/fsm/snapshots.py's
         # `get_conversation_snapshot`) and pass it explicitly to `from_dict`,

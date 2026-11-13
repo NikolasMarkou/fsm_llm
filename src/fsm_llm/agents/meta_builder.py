@@ -51,8 +51,8 @@ from fsm_llm.agents.constants import (
     MetaLogMessages,
 )
 from fsm_llm.agents.fsm_definitions.meta_builder import build_meta_builder_fsm
-from fsm_llm.api import llm_settings_for
 from fsm_llm.core.definitions import LLMResponseError
+from fsm_llm.engine.api.helpers import llm_settings_for
 from fsm_llm.handlers import HandlerExecutionError, clear_keys_delta
 from fsm_llm.llm.json_extraction import extract_json_from_text
 from fsm_llm.logging import logger

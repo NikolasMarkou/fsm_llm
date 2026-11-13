@@ -37,7 +37,6 @@ OVERSIZED: dict[str, int] = {
     "fsm_llm.agents.meta_builder": 1101,
     "fsm_llm.agents.meta_builders": 1158,
     "fsm_llm.agents.tools": 1399,
-    "fsm_llm.api": 2335,
     "fsm_llm.monitor.instance_manager": 1974,
     "fsm_llm.monitor.server": 1677,
     "fsm_llm.okf": 1350,

@@ -1213,7 +1213,9 @@ REQUIRED_PINS = (
 UNPINNED_CORE = {
     "src/fsm_llm/__init__.py": "re-export facade of the core",
     "src/fsm_llm/synthesis/__init__.py": "re-export facade of the subpackage",
-    "src/fsm_llm/api.py": "the engine all three arms run on (git_commit shows an edit)",
+    "src/fsm_llm/engine/api/conversation.py": "API, the engine all three arms run on (git_commit shows an edit; step 81 of plan d454fd62 split the old api.py, D-031)",
+    "src/fsm_llm/engine/api/helpers.py": "llm_settings_for, which the pinned agents/base.py calls (the old api.py, split at step 81, D-031)",
+    "src/fsm_llm/engine/api/stack.py": "ContextMergeStrategy, which the pinned synthesis/runner.py names (the old api.py, split at step 81, D-031)",
     "src/fsm_llm/constants.py": "the engine's defaults",
     "src/fsm_llm/context/__init__.py": "the engine's context",
     "src/fsm_llm/context/commit.py": "clear_keys_delta, the one clear rule the pinned agents/handlers.py calls (moved down from handlers.py at step 74 of plan d454fd62; core imports only)",

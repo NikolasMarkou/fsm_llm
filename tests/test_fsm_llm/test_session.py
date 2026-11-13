@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from fsm_llm.api import API
+from fsm_llm.engine.api.conversation import API
 from tests.test_fsm_llm.support import _blocked_fsm, _mock_llm
 
 

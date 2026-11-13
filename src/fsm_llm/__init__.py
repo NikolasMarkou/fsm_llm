@@ -13,11 +13,6 @@ import warnings
 from functools import lru_cache
 
 from .__version__ import __version__
-
-# --------------------------------------------------------------
-# Main API Components
-# --------------------------------------------------------------
-from .api import API, ContextMergeStrategy
 from .builders import APIBuilder, FSMManagerBuilder
 
 # --------------------------------------------------------------
@@ -145,6 +140,12 @@ from .core.visualize import (
     visualize_fsm_ascii,
     visualize_fsm_from_file,
 )
+
+# --------------------------------------------------------------
+# Main API Components
+# --------------------------------------------------------------
+from .engine.api.conversation import API
+from .engine.api.stack import ContextMergeStrategy
 from .engine.fsm.manager import FSMManager
 
 # --------------------------------------------------------------

@@ -30,13 +30,13 @@ from unittest.mock import patch
 
 import pytest
 
-from fsm_llm.api import API
 from fsm_llm.core.definitions import (
     FieldExtractionResponse,
     FSMError,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from tests.test_fsm_llm.support import _fake_response, _greeter_fsm, _stream_chunk
 

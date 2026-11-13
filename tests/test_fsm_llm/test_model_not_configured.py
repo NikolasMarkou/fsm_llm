@@ -117,7 +117,9 @@ class TestTheRootFixture:
 class TestApiRaisesBeforeAnyNetwork:
     def test_unset_raises_before_the_definition_is_read(self, unset, monkeypatch):
         interface = Mock()
-        monkeypatch.setattr("fsm_llm.api.LiteLLMInterface", interface)
+        monkeypatch.setattr(
+            "fsm_llm.engine.api.conversation.LiteLLMInterface", interface
+        )
         # A broken definition would raise a validation error if the FSM were
         # processed first: the model message comes first.
         with pytest.raises(ModelNotConfiguredError):

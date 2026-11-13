@@ -20,7 +20,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from fsm_llm.api import API
+from fsm_llm.engine.api.conversation import API
 
 #: A rule's trigger: a regex (``str`` or compiled, searched in the last reply) or
 #: a predicate that takes the last reply and returns whether the rule fires.

@@ -214,7 +214,7 @@ class TestTheRealMap:
         modules = source_modules()
         assert {
             "fsm_llm",
-            "fsm_llm.api",
+            "fsm_llm.engine.api.conversation",
             "fsm_llm.agents",
             "fsm_llm.agents.base",
         } <= set(modules)
@@ -359,8 +359,12 @@ class TestImportProblems:
     """The no-shim and resolves-for-real checks, over synthetic moves of today's tree."""
 
     def test_an_old_path_that_still_imports_is_a_shim(self) -> None:
-        bad = import_problems(_data({"fsm_llm.api": "fsm_llm.engine.fsm.manager"}))
-        assert bad == ["old path `fsm_llm.api` is still importable (no shim allowed)"]
+        bad = import_problems(
+            _data({"fsm_llm.engine.api.conversation": "fsm_llm.engine.fsm.manager"})
+        )
+        assert bad == [
+            "old path `fsm_llm.engine.api.conversation` is still importable (no shim allowed)"
+        ]
 
     def test_an_old_path_that_is_gone_and_a_new_one_that_imports_is_clean(self) -> None:
         assert (
@@ -389,18 +393,33 @@ class TestImportProblems:
     def test_a_reexport_is_not_a_move(self) -> None:
         bad = import_problems(_data({"fsm_llm.gone": {"API": "fsm_llm"}}))
         assert (
-            len(bad) == 1 and "`API` in `fsm_llm` is defined in `fsm_llm.api`" in bad[0]
+            len(bad) == 1
+            and "`API` in `fsm_llm` is defined in `fsm_llm.engine.api.conversation`"
+            in bad[0]
         )
 
     def test_a_symbol_defined_in_the_new_module_is_clean(self) -> None:
-        assert import_problems(_data({"fsm_llm.gone": {"API": "fsm_llm.api"}})) == []
+        assert (
+            import_problems(
+                _data({"fsm_llm.gone": {"API": "fsm_llm.engine.api.conversation"}})
+            )
+            == []
+        )
 
     def test_a_split_module_may_stay_importable_only_as_a_package(self) -> None:
         ok = import_problems(
             _data({"fsm_llm.agents": {"BaseAgent": "fsm_llm.agents.base"}})
         )
         assert ok == []
-        bad = import_problems(_data({"fsm_llm.api": {"API": "fsm_llm.api"}}))
+        bad = import_problems(
+            _data(
+                {
+                    "fsm_llm.engine.api.conversation": {
+                        "API": "fsm_llm.engine.api.conversation"
+                    }
+                }
+            )
+        )
         assert any("still a plain module" in p for p in bad)
 
     def test_a_package_whose_parent_is_missing_counts_as_gone(self) -> None:
@@ -416,13 +435,14 @@ class TestRefresh:
     def test_refresh_keeps_moved_and_lists_the_rest(self, tmp_path: Path) -> None:
         path = tmp_path / "map.json"
         path.write_text(
-            render(_data({"fsm_llm.zz_old": "fsm_llm.api"})), encoding="utf-8"
+            render(_data({"fsm_llm.zz_old": "fsm_llm.engine.api.conversation"})),
+            encoding="utf-8",
         )
         _refresh(path)
         data = load(path)
-        assert data["moved"] == {"fsm_llm.zz_old": "fsm_llm.api"}
+        assert data["moved"] == {"fsm_llm.zz_old": "fsm_llm.engine.api.conversation"}
         assert (
-            "fsm_llm.api" not in data["unmoved"]
+            "fsm_llm.engine.api.conversation" not in data["unmoved"]
             and "fsm_llm.engine.fsm.manager" in data["unmoved"]
         )
         assert path.read_text(encoding="utf-8") == render(data)

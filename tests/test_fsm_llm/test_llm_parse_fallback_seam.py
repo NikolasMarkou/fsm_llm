@@ -22,7 +22,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from litellm.types.utils import Message
 
-from fsm_llm.api import API
 from fsm_llm.classification import Classifier
 from fsm_llm.core.definitions import (
     RESPONSE_TEXT_MAX_LENGTH,
@@ -38,6 +37,7 @@ from fsm_llm.core.definitions import (
     TransitionCondition,
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.llm.json_extraction import extract_json_from_text
 from fsm_llm.llm.parsing import _GENERIC_FALLBACK_MESSAGE

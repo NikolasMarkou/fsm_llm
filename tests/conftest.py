@@ -7,8 +7,9 @@ import math
 import os
 import socket
 import sys
+import time
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 from unittest.mock import Mock
 
 import pytest
@@ -176,6 +177,33 @@ def timing_factor() -> float:
     ``current_timing_factor`` for the rules and the env override.
     """
     return current_timing_factor()
+
+
+def bind_api_clock(monkeypatch: pytest.MonkeyPatch, fake: Any) -> list[str]:
+    """Bind *fake* as the ``time`` of every ``fsm_llm.engine.api`` module that reads one.
+
+    Interface contract (4 call sites: the budget and idle-sweep tests of core and of the
+    agents suite): replaces the module attribute ``time`` through *monkeypatch* (undone at
+    teardown) in each module of the package that did ``import time``, found by walking the
+    package (the old ``fsm_llm.api`` was one module; a module of the package that reads the
+    clock and is not bound would mix real and fake readings, e.g. ``_last_accessed`` written by
+    one module against the idle sweep of another). Never touches the global ``time`` module.
+    Returns the dotted names bound; fails when none is found.
+    """
+    import importlib
+    import pkgutil
+
+    import fsm_llm.engine.api as package
+
+    bound: list[str] = []
+    for info in pkgutil.iter_modules(package.__path__):
+        name = f"{package.__name__}.{info.name}"
+        module = importlib.import_module(name)
+        if getattr(module, "time", None) is time:
+            monkeypatch.setattr(module, "time", fake)
+            bound.append(name)
+    assert bound, "no module of fsm_llm.engine.api reads the clock"
+    return bound
 
 
 #: Markers whose tests may open real TCP connections under ``block_network``.

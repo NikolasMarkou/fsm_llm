@@ -39,7 +39,6 @@ from decimal import Decimal
 from typing import Any, ClassVar
 from unittest.mock import patch
 
-from fsm_llm.api import API
 from fsm_llm.context import clean_context_keys
 from fsm_llm.context.layout import (
     DataExtractionPromptBuilder,
@@ -59,6 +58,7 @@ from fsm_llm.core.definitions import (
     Transition,
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.handlers import BaseHandler, HandlerSystem, HandlerTiming
@@ -525,7 +525,7 @@ class TestSilentGreetingLeavesHistoryEmpty:
     user exchange only, returns no text and makes no Pass-2 call."""
 
     def test_silent_initial_state_appends_nothing(self):
-        from fsm_llm.api import API
+        from fsm_llm.engine.api.conversation import API
 
         api = API(
             fsm_definition=_think_initial_fsm_dict(""), llm_interface=_make_mock_llm()
@@ -536,7 +536,7 @@ class TestSilentGreetingLeavesHistoryEmpty:
         assert api.get_conversation_history(conv_id) == []
 
     def test_speaking_initial_state_still_records_its_greeting(self):
-        from fsm_llm.api import API
+        from fsm_llm.engine.api.conversation import API
 
         api = API(
             fsm_definition=_think_initial_fsm_dict("Greet the user"),
@@ -548,7 +548,7 @@ class TestSilentGreetingLeavesHistoryEmpty:
         assert api.get_conversation_history(conv_id) == [{"system": greeting}]
 
     def test_converse_on_a_silent_state_appends_the_user_exchange_only(self):
-        from fsm_llm.api import API
+        from fsm_llm.engine.api.conversation import API
 
         llm = _make_mock_llm()
         api = API(fsm_definition=_think_initial_fsm_dict(""), llm_interface=llm)
@@ -568,7 +568,7 @@ class TestGenerateInitialResponseSkipsEmptyInstructions:
     tool runs. Plan 07ad3f8c step 16 (D-037): no LLM interface call at all."""
 
     def test_empty_instructions_make_no_call_and_return_no_text(self):
-        from fsm_llm.api import API
+        from fsm_llm.engine.api.conversation import API
 
         llm = _make_mock_llm()
         api = API(fsm_definition=_think_initial_fsm_dict(""), llm_interface=llm)
@@ -580,7 +580,7 @@ class TestGenerateInitialResponseSkipsEmptyInstructions:
         assert api.get_conversation_history(conv_id) == []
 
     def test_none_instructions_still_builds_full_prompt(self):
-        from fsm_llm.api import API
+        from fsm_llm.engine.api.conversation import API
 
         llm = _make_mock_llm()
         api = API(fsm_definition=_think_initial_fsm_dict(None), llm_interface=llm)

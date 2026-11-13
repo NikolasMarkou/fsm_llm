@@ -29,7 +29,6 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 import threading
 from typing import Any
 
-from fsm_llm.api import API
 from fsm_llm.context.layout import (
     DataExtractionPromptBuilder,
     ResponseGenerationPromptBuilder,
@@ -50,6 +49,7 @@ from fsm_llm.core.loaders import load_fsm_from_file
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.core.verify import FSMValidator
 from fsm_llm.core.visualize import visualize_fsm_ascii
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.engine.fsm.manager import FSMManager
 from fsm_llm.llm import LLMInterface
 from fsm_llm.llm.json_extraction import extract_json_from_text

@@ -151,7 +151,7 @@ class TestPydanticConfig:
 
     def test_no_deprecated_config_class(self):
         """FSMStackFrame should use model_config, not class Config."""
-        from fsm_llm.api import FSMStackFrame
+        from fsm_llm.engine.api.stack import FSMStackFrame
 
         # Check that there's no inner Config class (deprecated in Pydantic v2)
         assert not hasattr(FSMStackFrame, "Config") or not hasattr(
@@ -167,11 +167,12 @@ class TestMd5Usage:
 
     def test_process_fsm_definition_no_md5(self):
         """process_fsm_definition should not use md5 for hashing."""
-        import fsm_llm.api as api_mod
-
-        source = open(api_mod.__file__, encoding="utf-8").read()
-        # After the fix, md5 should not appear in the source
-        assert "md5" not in source, "api.py should not use md5 — use sha256 instead"
+        # The API is a package: read every module of it, not its facade.
+        sources = _package_sources("fsm_llm.engine.api")
+        assert len(sources) >= 8
+        for name, source in sources.items():
+            # After the fix, md5 should not appear in the source
+            assert "md5" not in source, f"{name} should not use md5: use sha256"
 
 
 # ── B7: BFS pop(0) performance ───────────────────────────────
@@ -202,7 +203,7 @@ class TestUnnecessaryHasattr:
         """API.__init__ should not guard handler_system assignment with hasattr."""
         import inspect
 
-        from fsm_llm.api import API
+        from fsm_llm.engine.api.conversation import API
 
         source = inspect.getsource(API.__init__)
         assert "hasattr(self.fsm_manager, 'handler_system')" not in source, (
@@ -348,7 +349,9 @@ class TestApiInitOrder:
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             "src",
             "fsm_llm",
-            "api.py",
+            "engine",
+            "api",
+            "conversation.py",
         )
         with open(api_path, encoding="utf-8") as f:
             source = f.read()
@@ -479,8 +482,9 @@ class TestConversationMemoryLeak:
 
     def test_end_conversation_cleans_up_stacks(self):
         """end_conversation should remove entries from conversation_stacks."""
-        from fsm_llm.api import API, FSMStackFrame
         from fsm_llm.core.definitions import FSMDefinition, State
+        from fsm_llm.engine.api.conversation import API
+        from fsm_llm.engine.api.stack import FSMStackFrame
 
         api = API.__new__(API)
         api.conversation_stacks = {
@@ -524,7 +528,7 @@ class TestHandleConversationErrorsMasking:
 
     def test_non_conversation_valueerror_not_masked(self):
         """A ValueError about invalid state should NOT become 'Conversation not found'."""
-        from fsm_llm.api import handle_conversation_errors
+        from fsm_llm.engine.api.helpers import handle_conversation_errors
 
         @handle_conversation_errors
         def method_that_raises_state_error(self, conversation_id):

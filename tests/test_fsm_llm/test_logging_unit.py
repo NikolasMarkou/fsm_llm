@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from fsm_llm.api import handle_conversation_errors
+from fsm_llm.engine.api.helpers import handle_conversation_errors
 from fsm_llm.engine.fsm.helpers import with_conversation_context
 
 

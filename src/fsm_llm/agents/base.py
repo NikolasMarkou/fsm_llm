@@ -39,7 +39,6 @@ from fsm_llm.agents.constants import (
     LogMessages,
     StopReason,
 )
-from fsm_llm.api import llm_settings_for
 from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT, has_internal_prefix
 from fsm_llm.context import ContextCompactor
 from fsm_llm.core.definitions import (
@@ -47,6 +46,7 @@ from fsm_llm.core.definitions import (
     FSMError,
     RunBudgetExceededError,
 )
+from fsm_llm.engine.api.helpers import llm_settings_for
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm.json_extraction import extract_json_from_text
 from fsm_llm.logging import logger

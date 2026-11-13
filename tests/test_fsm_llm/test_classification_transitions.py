@@ -40,7 +40,6 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 from loguru import logger
 
 import fsm_llm.classification as classification_module
-from fsm_llm.api import API
 from fsm_llm.classification import Classifier, HierarchicalClassifier
 from fsm_llm.constants import (
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
@@ -81,6 +80,7 @@ from fsm_llm.core.definitions import (
     TransitionOption,
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.handlers import HandlerSystem, HandlerTiming

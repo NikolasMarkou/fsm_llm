@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from fsm_llm.agents.definitions import ToolCall
-from fsm_llm.api import API
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.synthesis import (
     FSMLibrary,
     FSMSynthesizer,

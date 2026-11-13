@@ -17,7 +17,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import fsm_llm
-import fsm_llm.api as api_module
 from fsm_llm import (
     API,
     FSMError,
@@ -29,6 +28,7 @@ from fsm_llm import (
 from fsm_llm.classification import Classifier
 from fsm_llm.core.definitions import FieldExtractionRequest, FieldExtractionResponse
 from fsm_llm.llm import LiteLLMInterface
+from tests.conftest import bind_api_clock
 from tests.test_fsm_llm.test_advance import (
     _CHUNKS,
     _REPLY,
@@ -87,8 +87,8 @@ def _path(results: tuple[fsm_llm.AdvanceResult, ...]) -> list[tuple[str, str]]:
 
 
 class _FakeClock:
-    """Stands in for ``fsm_llm.api``'s ``time`` binding only (never the global
-    ``time`` module); ``monotonic`` moves only when a test advances it."""
+    """Stands in for the ``time`` binding of every ``fsm_llm.engine.api`` module only (never the
+    global ``time`` module); ``monotonic`` moves only when a test advances it."""
 
     def __init__(self, start: float = 1000.0) -> None:
         self.now = start
@@ -106,7 +106,7 @@ class _FakeClock:
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> _FakeClock:
     fake = _FakeClock()
-    monkeypatch.setattr(api_module, "time", fake)
+    bind_api_clock(monkeypatch, fake)
     return fake
 
 
@@ -759,6 +759,33 @@ class TestEndedFrameHookPushes:
         ]
         assert api.get_stack_depth(conv_id) == 3
         assert api.get_current_state(conv_id) == "sub_done"
+
+    @_RUNNERS
+    def test_a_run_pops_every_ended_frame_stacked_on_the_root(self, run):
+        """The contract of ``_hook_popped_ended_frame``: a pop that leaves another ended
+        frame on top is still a pop (the stack got shallower), so the run offers that
+        frame to the hook too and only returns when the hook stops popping. Three deep:
+        root, an ended sub and an ended leaf pushed on it. Found by a step-81 mutant
+        (``depth - 1``) that no test and no 200-program differential killed: the two-deep
+        cases cannot tell it from the contract."""
+        api, conv_id = self._api()
+        run(
+            api,
+            conv_id,
+            _PushOnEndedFrame(api, conv_id, _leaf_fsm(), pop_first=False),
+        )
+        assert api.get_stack_depth(conv_id) == 3
+        hook = _PopEndedSub(api, conv_id)
+
+        run(api, conv_id, hook)
+
+        assert hook.calls == [
+            (1, "leaf_done", 3),
+            (1, "sub_done", 2),
+            (1, "plan", 1),
+        ]
+        assert api.get_stack_depth(conv_id) == 1
+        assert api.get_current_state(conv_id) == "done"
 
 
 class TestRunEnded:

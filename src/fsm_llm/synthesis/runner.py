@@ -26,7 +26,6 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from fsm_llm.api import API, ContextMergeStrategy
 from fsm_llm.core.definitions import (
     AdvanceResult,
     FSMContext,
@@ -38,6 +37,8 @@ from fsm_llm.core.definitions import (
 from fsm_llm.core.expressions import is_missing
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.api.conversation import API
+from fsm_llm.engine.api.stack import ContextMergeStrategy
 from fsm_llm.logging import logger
 
 from .constants import (

@@ -119,7 +119,6 @@ forbidden_modules =
     fsm_llm.agent_skills
     fsm_llm.agent_skills_cli
     fsm_llm.agents
-    fsm_llm.api
     fsm_llm.builders
     fsm_llm.classification
     fsm_llm.cli_support
@@ -166,7 +165,6 @@ forbidden_modules =
     fsm_llm.agent_skills
     fsm_llm.agent_skills_cli
     fsm_llm.agents
-    fsm_llm.api
     fsm_llm.builders
     fsm_llm.classification
     fsm_llm.cli_support
@@ -200,7 +198,6 @@ forbidden_modules =
     fsm_llm.agent_skills
     fsm_llm.agent_skills_cli
     fsm_llm.agents
-    fsm_llm.api
     fsm_llm.builders
     fsm_llm.classification
     fsm_llm.cli_support
@@ -232,7 +229,6 @@ source_modules =
     fsm_llm.handlers
 forbidden_modules =
     fsm_llm.agents
-    fsm_llm.api
     fsm_llm.builders
     fsm_llm.classification
     fsm_llm.cli_support
@@ -250,7 +246,7 @@ forbidden_modules =
 # Step 78 (fsm.py split into the layer package `engine/fsm/`, the first module of the `engine`
 # layer, L4 of D-016): `engine` reads the kernel (`constants`, `logging`, `security`), `core`, `llm`,
 # `context` and `handlers`, plus the modules that move into it later (`classification`,
-# `session`, `builders`, `api`: still top-level until steps 81 and 82). It imports
+# `session`, `builders`: still top-level until step 82; `api` is `engine/api/` since step 81). It imports
 # no subpackage, no okf or skills module and no entry module. The `core`, `llm`, `context` and
 # `handlers` contracts above forbid `fsm_llm.engine`, so the lower layers never import it. What
 # waits for step 95: the `layers` contract replaces these lists, and `engine -> okf_bridge` (a
@@ -286,8 +282,8 @@ type = forbidden
 source_modules =
     fsm_llm.engine.turn
 forbidden_modules =
-    fsm_llm.api
     fsm_llm.builders
+    fsm_llm.engine.api
     fsm_llm.engine.fsm
     fsm_llm.session
 
@@ -305,8 +301,33 @@ type = forbidden
 source_modules =
     fsm_llm.engine.kinds
 forbidden_modules =
-    fsm_llm.api
     fsm_llm.builders
+    fsm_llm.engine.api
     fsm_llm.engine.fsm
     fsm_llm.engine.turn
     fsm_llm.session
+
+# Step 81 (api.py split into the layer package `engine/api/`): the API is the top of the engine
+# layer. It sits ABOVE the manager (`engine/fsm`), the turn (`engine/turn`) and the kinds
+# (`engine/kinds`), which it reaches through `FSMManager` and the per-API `executors` map, and
+# below the builders (`builders.py` builds an `API`). So the three lower engine packages import it
+# nowhere (the turn and the kinds contracts above name it; this contract holds the manager), and it
+# imports no builder. The `core`, `llm`, `context` and `handlers` contracts forbid `fsm_llm.engine`
+# as a whole, so the lower layers never import it either. Step 95 replaces these with the `layers`
+# contract of D-016, where they are intra-engine edges.
+[importlinter:contract:engine-fsm-imports-no-api-or-builder]
+name = fsm_llm.engine.fsm imports no API or builder module
+type = forbidden
+source_modules =
+    fsm_llm.engine.fsm
+forbidden_modules =
+    fsm_llm.builders
+    fsm_llm.engine.api
+
+[importlinter:contract:engine-api-imports-no-builder]
+name = fsm_llm.engine.api imports no builder module
+type = forbidden
+source_modules =
+    fsm_llm.engine.api
+forbidden_modules =
+    fsm_llm.builders

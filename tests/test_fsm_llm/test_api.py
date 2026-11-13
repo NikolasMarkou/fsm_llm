@@ -20,7 +20,6 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from fsm_llm import APIBuilder
-from fsm_llm.api import API
 from fsm_llm.core.definitions import (
     ConversationBusyError,
     FSMDefinition,
@@ -33,6 +32,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.definitions.schema import SCHEMA_VERSION_DEFAULT
 from fsm_llm.core.transition_evaluator import TransitionEvaluatorConfig
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.engine.fsm.manager import FSMManager
 from fsm_llm.engine.kinds import ConversationExecutor
 from fsm_llm.handlers import HandlerErrorMode, HandlerTiming, create_handler
@@ -1468,6 +1468,20 @@ class TestStep2EndedCacheRace:
         assert next(iter(cache)) in ids
         assert api.list_active_conversations() == []
 
+    def test_the_ended_cache_keeps_exactly_its_bound_and_evicts_the_oldest(self):
+        """The bound is inclusive: at ``_MAX_ENDED_CACHE`` entries nothing is evicted, one
+        more drops the oldest. Found by a step-81 mutant (``>=``) that no test killed."""
+        api = _a2026_09_22_api()
+        api._MAX_ENDED_CACHE = 2
+        ids = [api.start_conversation()[0] for _ in range(3)]
+
+        api.end_conversation(ids[0])
+        api.end_conversation(ids[1])
+        assert list(api._ended_conversations) == ids[:2]
+
+        api.end_conversation(ids[2])
+        assert list(api._ended_conversations) == ids[1:]
+
 
 class TestStep2GetterFallbacks:
     """P1-4 / P1-5: all four conversation getters share one fallback rule
@@ -1747,14 +1761,25 @@ class TestStep3RestoreLockOrder:
 
     def test_p0_3_api_has_no_manager_lock_reach_in(self):
         import ast
+        import importlib
         import inspect
+        import pkgutil
 
-        from fsm_llm import api as api_module
+        import fsm_llm.engine.api as api_package
 
-        tree = ast.parse(inspect.getsource(api_module))
+        # The API is a package since step 81: read every module, the facade included.
+        modules = [
+            api_package,
+            *(
+                importlib.import_module(f"{api_package.__name__}.{info.name}")
+                for info in pkgutil.iter_modules(api_package.__path__)
+            ),
+        ]
+        assert len(modules) >= 8
         reach_ins = [
-            f"{node.lineno}: fsm_manager.{node.attr}"
-            for node in ast.walk(tree)
+            f"{module.__name__}:{node.lineno}: fsm_manager.{node.attr}"
+            for module in modules
+            for node in ast.walk(ast.parse(inspect.getsource(module)))
             if isinstance(node, ast.Attribute)
             and node.attr in {"_lock", "_conversation_locks", "instances"}
             and isinstance(node.value, ast.Attribute)
@@ -1995,7 +2020,7 @@ class TestConfigReachability:
         "option", sorted(_REACHABLE), ids=lambda o: f"{o[0]}.{o[1]}"
     )
     def test_reachable_option_round_trips(self, option):
-        from fsm_llm.api import API
+        from fsm_llm.engine.api.conversation import API
         from fsm_llm.llm import LLMInterface
 
         api_kw, make, read_back = _REACHABLE[option]
@@ -2211,3 +2236,50 @@ class TestApiRefusesEverySettingBesideAnInterface:
             _tool_fsm(), llm_interface=injected, model="ollama_chat/qwen3.5:4b"
         )
         assert api.llm_interface is injected
+
+
+class TestApiSurfaceIsBacked:
+    """``_ApiSurface`` (``engine/api/surface.py``, step 81) declares for mypy only what the
+    mixins and helpers of ``API`` share. mypy cannot tell that a declaration is backed by
+    nothing (a step-81 mutant that declared a member no class defines passed ``make
+    type-check``), so this reads it: every declared attribute or method is defined by a class
+    of the ``API`` MRO (class level) or assigned as ``self.<name>`` in one of them."""
+
+    def test_every_declaration_is_defined_by_the_api(self):
+        import ast
+
+        from fsm_llm.engine.api import surface
+
+        tree = ast.parse(inspect.getsource(surface))
+        surface_class = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "_ApiSurface"
+        )
+        declared: set[str] = set()
+        for node in surface_class.body:
+            if not isinstance(node, ast.If):  # the TYPE_CHECKING block
+                continue
+            for member in node.body:
+                if isinstance(member, ast.AnnAssign) and isinstance(
+                    member.target, ast.Name
+                ):
+                    declared.add(member.target.id)
+                elif isinstance(member, ast.FunctionDef):
+                    declared.add(member.name)
+        assert len(declared) >= 20  # an empty scan would pass vacuously
+
+        defined: set[str] = set()
+        for klass in API.__mro__:
+            if klass in (surface._ApiSurface, object):
+                continue
+            defined |= set(vars(klass))
+            for node in ast.walk(ast.parse(inspect.getsource(klass))):
+                if (
+                    isinstance(node, ast.Attribute)
+                    and isinstance(node.ctx, ast.Store)
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id == "self"
+                ):
+                    defined.add(node.attr)
+        assert declared - defined == set()

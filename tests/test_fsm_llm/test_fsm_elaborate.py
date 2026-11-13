@@ -23,7 +23,6 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
     return mock_llm
 
 
-from fsm_llm.api import API, ContextMergeStrategy
 from fsm_llm.core.definitions import (
     FSMDefinition,
     FSMError,
@@ -32,6 +31,8 @@ from fsm_llm.core.definitions import (
     Transition,
     TransitionCondition,
 )
+from fsm_llm.engine.api.conversation import API
+from fsm_llm.engine.api.stack import ContextMergeStrategy
 from fsm_llm.llm import LLMInterface
 
 

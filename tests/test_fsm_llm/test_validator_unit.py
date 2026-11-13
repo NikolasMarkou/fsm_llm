@@ -28,7 +28,6 @@ from loguru import logger
 from pydantic import BaseModel, ValidationError
 
 import fsm_llm.logging as fsm_llm_logging
-from fsm_llm.api import API
 from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS
 from fsm_llm.core.definitions import (
     ContextScope,
@@ -50,6 +49,7 @@ from fsm_llm.core.verify import (
     validate_fsm_from_file,
 )
 from fsm_llm.core.verify.cli import main_cli
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.handlers import HandlerTiming
 from tests.test_fsm_llm.support import _fsm, _Prov, _typed_fsm
 from tests.test_fsm_llm.test_completion_state import _RESULT, _tool_fsm

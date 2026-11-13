@@ -525,12 +525,12 @@ The examples are evaluation baselines: `fsm-llm-eval examples` runs them in para
 
 ## Project Structure
 
-The repository is one distribution (`fsm-llm`, setuptools, src layout). The directory `src/fsm_llm/` is the import package `fsm_llm` (found by `packages.find` in `pyproject.toml`), so `src/fsm_llm/api.py` is `fsm_llm.api`, and a subpackage is imported by name, for example `from fsm_llm.agents import create_agent`.
+The repository is one distribution (`fsm-llm`, setuptools, src layout). The directory `src/fsm_llm/` is the import package `fsm_llm` (found by `packages.find` in `pyproject.toml`), so `src/fsm_llm/engine/api/conversation.py` is `fsm_llm.engine.api.conversation`, and a subpackage is imported by name, for example `from fsm_llm.agents import create_agent`.
 
 ```
 fsm_llm/
 ├── src/fsm_llm/      # THE LIBRARY (the import package)
-│   ├── api.py, engine/fsm/,   # API, FSMManager, MessagePipeline (the 2-pass turn)
+│   ├── engine/api/, engine/fsm/,   # API, FSMManager, MessagePipeline (the 2-pass turn)
 │   │   engine/turn/
 │   ├── core/definitions/      # Pydantic FSM models and core exceptions (a package)
 │   ├── core/transition_evaluator.py, core/expressions/   # JsonLogic evaluation, no LLM

@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from litellm.exceptions import RateLimitError
 
-from fsm_llm.api import API
 from fsm_llm.classification import Classifier, HierarchicalClassifier
 from fsm_llm.constants import (
     MAX_MULTI_INTENTS,
@@ -41,6 +40,7 @@ from fsm_llm.core.definitions import (
     TransitionCondition,
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.handlers import HandlerSystem

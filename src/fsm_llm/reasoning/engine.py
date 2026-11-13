@@ -19,7 +19,7 @@ from fsm_llm import (
     RunBudgetExceededError,
     clear_keys_on_entry,
 )
-from fsm_llm.api import llm_settings_for
+from fsm_llm.engine.api.helpers import llm_settings_for
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import interface_model, resolve_model
 from fsm_llm.logging import logger

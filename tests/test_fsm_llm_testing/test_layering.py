@@ -166,7 +166,7 @@ class TestSourceLayering:
     def test_the_library_scan_sees_files(self) -> None:
         # Guards the derivation: an empty list would make the scan below vacuous.
         names = {p.name for p in _library_files()}
-        assert {"api.py", "message_pipeline.py", "__init__.py"} <= names
+        assert {"conversation.py", "message_pipeline.py", "__init__.py"} <= names
 
     def test_no_library_module_imports_testing(self) -> None:
         offenders = [

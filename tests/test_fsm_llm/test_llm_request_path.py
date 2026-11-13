@@ -13,7 +13,6 @@ from pydantic import ValidationError
 
 import fsm_llm.classification as classification_module
 from fsm_llm import constants
-from fsm_llm.api import API
 from fsm_llm.classification import Classifier
 from fsm_llm.core.definitions import (
     BulkExtractionRequest,
@@ -24,6 +23,7 @@ from fsm_llm.core.definitions import (
     IntentDefinition,
     ResponseGenerationRequest,
 )
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.llm import LiteLLMInterface
 
 OLLAMA_MODEL = "ollama_chat/qwen3.5:4b"

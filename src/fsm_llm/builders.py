@@ -15,8 +15,8 @@ import os
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, TypeVar
 
-from .api import API
 from .core.definitions import BuildError, FSMDefinition
+from .engine.api.conversation import API
 from .engine.fsm.manager import FSMManager
 from .handlers import HandlerErrorMode
 

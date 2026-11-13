@@ -1053,7 +1053,7 @@ class TestConversationStepResourceCleanup:
 
         with patch.dict("sys.modules", {}):
             with patch("fsm_llm.workflows.steps.API", mock_api_class):
-                with patch("fsm_llm.api.API", mock_api_class):
+                with patch("fsm_llm.engine.api.conversation.API", mock_api_class):
                     result = await step.execute({})
 
         # end_conversation MUST be called despite the exception

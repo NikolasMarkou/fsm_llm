@@ -8,8 +8,8 @@ from unittest.mock import patch
 import pytest
 
 from fsm_llm import FileSessionStore
-from fsm_llm.api import API
 from fsm_llm.core.definitions import BulkExtractionRequest
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import LiteLLMInterface

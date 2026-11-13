@@ -4,7 +4,7 @@ The `fsm_llm` package at `src` is the whole FSM-LLM framework. Its top level is 
 
 ## Where it lives
 
-This directory is the Python package `fsm_llm` (the standard `src/` layout): `pyproject.toml` finds it with `[tool.setuptools.packages.find]`, so the file `src/fsm_llm/api.py` is imported as `fsm_llm.api`. Install with `pip install -e .` (re-run it after pulling the change that moved the package back to `src/fsm_llm/`). The generated `src/fsm_llm.egg-info/` is ignored by git and is removed by `make clean`. Do not add this directory to `sys.path` by hand: it holds modules named like standard-library ones, such as `logging.py`.
+This directory is the Python package `fsm_llm` (the standard `src/` layout): `pyproject.toml` finds it with `[tool.setuptools.packages.find]`, so the file `src/fsm_llm/engine/api/conversation.py` is imported as `fsm_llm.engine.api.conversation`. Install with `pip install -e .` (re-run it after pulling the change that moved the package back to `src/fsm_llm/`). The generated `src/fsm_llm.egg-info/` is ignored by git and is removed by `make clean`. Do not add this directory to `sys.path` by hand: it holds modules named like standard-library ones, such as `logging.py`.
 
 ## What it is for
 
@@ -74,7 +74,7 @@ flowchart TD
 
 ## Files
 
-- `api.py` - `API`, the class you use: start conversations, send messages, read data, push and pop FSMs, save and restore sessions.
+- `engine/api/` - `API`, the class you use (the old `api.py`, split into a package at step 81): start conversations, send messages, read data, push and pop FSMs, save and restore sessions.
 - `engine/fsm/` - `FSMManager`: keeps conversations, their locks, and a cache of FSM definitions (`manager.py` the class, `turns.py` the turn path, `snapshots.py` the reads and snapshots, `helpers.py`).
 - `engine/turn/` - `MessagePipeline`: the two-pass processing for each message (`message_pipeline.py` the class, `driver.py` the turn drivers, `pass1.py` the Pass-1 seam, `transitions.py` the transition evaluation, `pass2.py` the reply, `records.py`, `surface.py`). The conversation kind's extraction is in `engine/kinds/conversation/` since step 80.
 - `core/definitions/` - Pydantic data models (states, transitions, FSM definition, context, classification results) and the error classes, including `BuildError`.

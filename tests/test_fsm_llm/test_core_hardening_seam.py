@@ -17,7 +17,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm.api import API
 from fsm_llm.constants import PROVENANCE_METADATA_KEY
 from fsm_llm.context import ContextCompactor
 from fsm_llm.context.layout import (
@@ -27,6 +26,7 @@ from fsm_llm.context.layout import (
     ResponsePromptConfig,
 )
 from fsm_llm.core.definitions import FieldExtractionConfig, FSMError, LLMResponseError
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.handlers import HandlerExecutionError, HandlerTiming, create_handler
 from fsm_llm.logging import logger
 from fsm_llm.session import FileSessionStore, SessionState
@@ -1118,7 +1118,7 @@ class TestSaveSessionTornSnapshot:
             # point-in-time snapshot. No sleep required.
             window_open = threading.Barrier(2, timeout=self.WAIT_TIMEOUT)
             turn_done = threading.Event()
-            # ``converse()`` auto-saves the session itself (api.py ~450-455)
+            # ``converse()`` auto-saves the session itself (`engine/api/conversation.py`)
             # whenever a session store is configured, so the concurrent
             # turn's own ``converse()`` call re-enters this SAME patched
             # method for its own (unrelated, and by then correct) auto-save.
@@ -1214,7 +1214,7 @@ def _old_shape_snapshot_reads(fsm_manager, conversation_id: str) -> dict:
     tears (not merely that *some* torn-looking shape exists), and to feed
     ``API.save_session`` every key it expects when the composition is
     injected as a stand-in for ``get_conversation_snapshot``. Never call
-    this from production code -- see api.py:1247's D-005 comment.
+    this from production code -- see the D-005 comment in `engine/api/sessions.py`.
     """
     current_state = fsm_manager.get_conversation_state(conversation_id)
     context_data = fsm_manager.get_conversation_data(conversation_id)
@@ -1654,7 +1654,7 @@ class TestContextCompactorPruneClearsProvenance:
 
             # The persisted-file half of the same claim: a pruned key's
             # digest must not reach `SessionState.metadata["pipeline_extracted"]`
-            # either (api.py:1308), not just the live in-memory instance.
+            # either (`engine/api/sessions.py`), not just the live in-memory instance.
             api.save_session(conv_id)
             persisted = store.load(conv_id)
             assert persisted is not None, "save_session did not persist a session"

@@ -50,8 +50,8 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm.api import API
 from fsm_llm.core.definitions import FSMDefinition
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.handlers import BaseHandler, HandlerExecutionError, HandlerTiming
 from fsm_llm.testing import MockLLM2Interface
 from tests.test_fsm_llm.support import _TWO_STATE

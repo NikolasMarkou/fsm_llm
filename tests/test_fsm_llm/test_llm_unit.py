@@ -9,7 +9,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from fsm_llm.api import API
 from fsm_llm.core.definitions import (
     FieldExtractionConfig,
     FieldExtractionRequest,
@@ -17,6 +16,7 @@ from fsm_llm.core.definitions import (
     LLMResponseError,
     ResponseGenerationRequest,
 )
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from tests.test_fsm_llm.support import (
@@ -1158,8 +1158,8 @@ class TestFieldExtractionUncoercibleConfidence:
 
 class TestStep9DefaultTemperature:
     def test_api_default_temperature_comes_from_constant(self, monkeypatch):
-        from fsm_llm import api as api_module
         from fsm_llm.constants import DEFAULT_TEMPERATURE
+        from fsm_llm.engine.api import conversation as api_module
 
         api = API(fsm_definition=_step9_fsm_dict(), model="gpt-4o-mini")
         assert api.llm_interface.temperature == DEFAULT_TEMPERATURE

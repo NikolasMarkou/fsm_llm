@@ -2,7 +2,7 @@
 
 T1 (DECISION plan-2026-07-18-80b0bd4d/D-013): `pop_fsm` calls the blocking
 `fsm_manager.end_conversation` with `_stack_lock` DELIBERATELY released (see the D-001 narrow-lock
-comment in `api.py`), then re-acquires the lock to remove the frame. The old removal predicate was
+comment in `engine/api/stack.py`), then re-acquires the lock to remove the frame. The old removal predicate was
 positional (`inner_stack[-1].conversation_id == current_frame.conversation_id`), so a concurrent
 `push_fsm` on the same root id during that window appended a new top frame, the predicate went
 False, and the already-ended frame was stranded in the stack forever — permanently bricking the
@@ -24,10 +24,10 @@ import time as _real_time
 import pytest
 
 from fsm_llm import FileSessionStore
-from fsm_llm import api as api_module
-from fsm_llm.api import API
 from fsm_llm.core.definitions import FSMDefinition
+from fsm_llm.engine.api.conversation import API
 from fsm_llm.testing import MockLLM2Interface
+from tests.conftest import bind_api_clock
 from tests.test_fsm_llm.support import _blocked_fsm, _correction_fsm, _Prov
 
 # Generous relative to the work being done (all in-process, mocked LLM); small enough that a
@@ -395,14 +395,15 @@ MAX_IDLE = 0.05
 
 
 class _FakeClock:
-    """Stand-in for the `time` module inside `fsm_llm.api` only.
+    """Stand-in for the `time` module inside `fsm_llm.engine.api` only.
 
     `cleanup_stale_conversations` decides eviction by pure arithmetic on `time.monotonic()`
-    reads (`api.py`: `now - last_access > max_idle_seconds`), so a controllable clock makes the
-    decision FULLY deterministic — no `time.sleep()`, no wall-clock race, no flake surface.
-    Every other attribute delegates to the real module, so nothing else in `api.py` changes
-    behaviour, and only `fsm_llm.api`'s own `time` binding is replaced (never the global
-    `time` module, which would leak into unrelated tests).
+    reads (`engine/api/lifecycle.py`: `now - last_access > max_idle_seconds`), so a controllable
+    clock makes the decision FULLY deterministic — no `time.sleep()`, no wall-clock race, no
+    flake surface. Every other attribute delegates to the real module, so nothing else in the
+    package changes behaviour, and only the `time` binding of each module of `fsm_llm.engine.api`
+    that reads the clock is replaced (`tests.conftest.bind_api_clock`; never the global `time`
+    module, which would leak into unrelated tests).
     """
 
     def __init__(self, start: float = 1000.0) -> None:
@@ -421,7 +422,7 @@ class _FakeClock:
 @pytest.fixture
 def clock(monkeypatch):
     fake = _FakeClock()
-    monkeypatch.setattr(api_module, "time", fake)
+    bind_api_clock(monkeypatch, fake)
     return fake
 
 
@@ -656,13 +657,13 @@ class TestStep7StackFrameNarrowing:
     def test_raw_string_definition_is_rejected(self):
         from pydantic import ValidationError
 
-        from fsm_llm.api import FSMStackFrame
+        from fsm_llm.engine.api.stack import FSMStackFrame
 
         with pytest.raises(ValidationError):
             FSMStackFrame(fsm_definition="some-id", conversation_id="c1")
 
     def test_definition_object_is_accepted(self):
-        from fsm_llm.api import FSMStackFrame
+        from fsm_llm.engine.api.stack import FSMStackFrame
 
         frame = FSMStackFrame(fsm_definition=_blocked_fsm(), conversation_id="c1")
         assert isinstance(frame.fsm_definition, FSMDefinition)

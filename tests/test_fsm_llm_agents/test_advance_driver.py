@@ -90,6 +90,7 @@ from fsm_llm.core.definitions import (
     RunBudgetExceededError,
 )
 from fsm_llm.testing import PromptGroundedLLM, state_in_prompt
+from tests.conftest import bind_api_clock
 from tests.test_fsm_llm_agents.test_grounded_patterns import _TurnAwareLLM
 
 _TASK = "What is the capital of France?"
@@ -353,9 +354,9 @@ def _endless_fsm() -> dict[str, Any]:
 class _FakeClock:
     """A monotonic clock that moves only when a test advances it.
 
-    Stands in for the ``time`` binding of ``fsm_llm.api`` and
-    ``fsm_llm.agents.base`` (the two modules that read the run budget); every
-    other attribute is the real ``time`` module's. A budget test built on it
+    Stands in for the ``time`` binding of ``fsm_llm.engine.api`` (every module
+    of it that reads the clock) and ``fsm_llm.agents.base`` (the modules that
+    read the run budget); every other attribute is the real ``time`` module's. A budget test built on it
     cannot flake on a loaded or traced machine: no real second passes into it.
     """
 
@@ -374,12 +375,11 @@ class _FakeClock:
 
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> _FakeClock:
-    """The fake clock, bound as ``time`` in core's api and the agents base."""
+    """The fake clock, bound as ``time`` in core's api package and the agents base."""
     import fsm_llm.agents.base as agents_base
-    import fsm_llm.api as core_api
 
     fake = _FakeClock()
-    monkeypatch.setattr(core_api, "time", fake)
+    bind_api_clock(monkeypatch, fake)
     monkeypatch.setattr(agents_base, "time", fake)
     return fake
 
