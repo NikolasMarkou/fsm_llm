@@ -515,8 +515,9 @@ def implements_complete(llm: Any) -> bool:
 def resolve_model(model: str | None = None) -> str:
     """The model name to use: *model*, else env ``LLM_MODEL``; never a default.
 
-    Interface contract (callers: ``API``, ``agents.resolve_agent_model`` and
-    ``eval.resolve_model``):
+    Interface contract (callers: ``API`` and ``Classifier`` (each only when no
+    ``llm_interface`` is injected), ``ReasoningEngine``, ``agents.resolve_agent_model``,
+    ``eval.resolve_model``, the ``fsm-llm`` runner and the monitor launch routes):
         - *model*: an explicit name or ``None``.
         - Returns the first non-blank candidate, stripped: *model*, then
           ``$LLM_MODEL`` (read now, never at import). A blank value (``""`` or
@@ -525,9 +526,9 @@ def resolve_model(model: str | None = None) -> str:
         - Raises ``ModelNotConfiguredError`` (an ``FSMError`` and a
           ``ValueError``) when both are unset: the library has no built-in
           model, so a fresh install fails with a message that says how to set
-          one. A caller that holds an injected interface does not call this.
-        - ``Classifier`` does not call it yet: it ignores the environment (it
-          uses the conversation's own interface).
+          one. A caller that holds an injected interface does not call this: the
+          ``Classifier`` and ``API`` take the model from that interface and read
+          no environment.
     """
     # DECISION plan-2026-11-12T073150-d454fd62/D-005
     # Do NOT fall back to a built-in model here (the old built-in default): a

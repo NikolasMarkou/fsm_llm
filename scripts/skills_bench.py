@@ -57,8 +57,10 @@ ARMS = {
 }  # fmt: skip
 BLOCKS = {"B0": ("hint_on", "hint_off"), "B1": ("native_4b", "native_4b_hint_off", "react_9b", "native_9b")}  # fmt: skip
 #: Pin name -> file now. The names are the keys of the frozen manifests in
-#: scripts/bench_data (written before src/fsm_llm/ moved to src/); the files
-#: moved without a byte changed, so the recorded sha256 values still match.
+#: scripts/bench_data (written before src/fsm_llm/ moved to src/). The files
+#: moved, and `src/constants.py` was edited afterwards (plan d454fd62 step 15),
+#: so a `run` refuses by design for the manifests that pin it (the bench is
+#: registered and was never run).
 SRC_PINS = {
     "src/fsm_llm/agent_skills.py": "src/agent_skills.py",
     "src/fsm_llm/agents/agent_skills.py": "src/agents/agent_skills.py",
