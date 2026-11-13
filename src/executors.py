@@ -124,9 +124,12 @@ class StateExecutor:
 class ConversationExecutor(StateExecutor):
     """The conversation kind: field, bulk and classification extraction.
 
-    Wraps the retained methods of ``MessagePipeline`` (they move out of the
-    pipeline with the layout split, roadmap 0.4); also the passive executor of
-    ``synthesize``.
+    Wraps the retained methods of ``MessagePipeline`` (they are the real bodies,
+    not delegates: they share module helpers and collaborators with Pass 2 and
+    the transition code, so they move out of the pipeline as one cluster with the
+    layout split, roadmap 0.4, plan d454fd62 step 80, D-015). Until then this
+    executor is the ONLY reader of them (``test_executors.py`` holds it); also
+    the passive executor of ``synthesize``.
     """
 
     def extract(

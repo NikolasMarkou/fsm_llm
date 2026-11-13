@@ -99,6 +99,89 @@ class TestNoKindBranchInTheEngine:
         assert hasattr(ex.CompletionExecutor, "turn")
 
 
+# The retained conversation Pass-1 machinery of ``MessagePipeline`` (step 56,
+# D-015): not delegates but the real bodies the conversation executor wraps; they
+# move into ``engine/kinds/conversation/`` with the layout split (step 80). Until
+# then ONE path reaches them: ``ConversationExecutor``. Do NOT call one from the
+# kind-agnostic part of the pipeline: that re-introduces a conversation branch at
+# the seam the executors exist to own.
+_CONVERSATION_PASS_1 = frozenset(
+    {
+        "_extract_after_transition",
+        "_execute_data_extraction",
+        "_build_field_configs_from_state",
+        "_bulk_extract_from_instructions",
+        "_execute_field_extractions",
+        "_validate_field_extraction",
+        "_execute_classification_extractions",
+        "_handler_only_keys",
+    }
+)
+
+
+def _readers_of(source: str, names: frozenset[str]) -> dict[str, set[str]]:
+    """``{method: names it reads}``: every ``MessagePipeline`` method of *source*
+    that reaches one of *names* through ``self.<name>``; a read at module level
+    or in another class is keyed ``"<module>"``."""
+    found: dict[str, set[str]] = {}
+    tree = ast.parse(source)
+    for top in tree.body:
+        owners = (
+            [(f.name, f) for f in top.body if isinstance(f, ast.FunctionDef)]
+            if isinstance(top, ast.ClassDef) and top.name == "MessagePipeline"
+            else [("<module>", top)]
+        )
+        for owner, node in owners:
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Attribute) and sub.attr in names:
+                    found.setdefault(owner, set()).add(sub.attr)
+    return found
+
+
+class TestConversationMachineryIsReachedThroughTheExecutor:
+    def test_the_kind_agnostic_pipeline_never_calls_it(self):
+        readers = _readers_of(
+            (_SRC / "pipeline.py").read_text(encoding="utf-8"), _CONVERSATION_PASS_1
+        )
+        outside = {
+            owner: sorted(names)
+            for owner, names in readers.items()
+            if owner not in _CONVERSATION_PASS_1
+        }
+        assert outside == {}
+
+    def test_no_other_module_reads_it(self):
+        readers = {
+            str(p.relative_to(_SRC)): _readers_of(
+                p.read_text(encoding="utf-8"), _CONVERSATION_PASS_1
+            )
+            for p in _SRC.rglob("*.py")
+            if p.name not in {"pipeline.py", "executors.py"}
+        }
+        assert {path: found for path, found in readers.items() if found} == {}
+
+    def test_the_conversation_executor_is_the_reader(self):
+        readers = _readers_of(
+            (_SRC / "executors.py").read_text(encoding="utf-8"), _CONVERSATION_PASS_1
+        )
+        assert readers == {
+            "<module>": {"_execute_data_extraction", "_extract_after_transition"}
+        }
+
+    def test_the_scan_sees_a_violation(self):
+        snippet = (
+            "class MessagePipeline:\n"
+            "    def _run_turn(self):\n"
+            "        return self._execute_data_extraction()\n"
+            "    def _execute_data_extraction(self):\n"
+            "        return self._bulk_extract_from_instructions()\n"
+        )
+        assert _readers_of(snippet, _CONVERSATION_PASS_1) == {
+            "_run_turn": {"_execute_data_extraction"},
+            "_execute_data_extraction": {"_bulk_extract_from_instructions"},
+        }
+
+
 class TestExecutorModule:
     def _imports(self) -> list[str]:
         tree = ast.parse((_SRC / "executors.py").read_text(encoding="utf-8"))

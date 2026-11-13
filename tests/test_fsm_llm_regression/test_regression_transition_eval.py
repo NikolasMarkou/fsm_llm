@@ -1,7 +1,7 @@
 """Regression tests for plan 8 verified bugs in fsm_llm."""
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -12,6 +12,7 @@ from fsm_llm.definitions import (
     TransitionCondition,
     TransitionEvaluationResult,
 )
+from fsm_llm.executors import ConversationExecutor
 from fsm_llm.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 
 # ── B5: strict_condition_matching exception doesn't break ────
@@ -233,9 +234,10 @@ class TestContextCleaningEmptyHandlers:
             reasoning="test",
         )
 
-        # Mock _execute_data_extraction to return our response
-        manager._pipeline._execute_data_extraction = MagicMock(
-            return_value=extraction_response
+        # The conversation executor's Pass-1 extraction returns our response (the
+        # seam of the kind registry, not a private method of the pipeline).
+        extract = patch.object(
+            ConversationExecutor, "extract", return_value=extraction_response
         )
         # Mock transition evaluation to return no transition
         manager._pipeline._execute_transition_evaluation_and_execution = MagicMock(
@@ -245,9 +247,12 @@ class TestContextCleaningEmptyHandlers:
         handler_calls.clear()
 
         # Call the actual code path that has the bug
-        manager._pipeline._execute_extraction_and_transition_pass(
-            instance, "hello", "conv1"
-        )
+        with extract as spy:
+            manager._pipeline._execute_extraction_and_transition_pass(
+                instance, "hello", "conv1"
+            )
+        spy.assert_called_once()
+        assert spy.call_args.args[1:4] == (instance, "hello", "conv1")
 
         # BUG: Without fix, CONTEXT_UPDATE handler fires with empty updated_keys
         # With fix: handler should NOT fire because all extracted data was cleaned away
