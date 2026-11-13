@@ -330,3 +330,95 @@ class TestRefusals:
         with pytest.raises(ValueError):
             _build_api({"nope": ex.ConversationExecutor()})
         assert ex._EXECUTORS == before
+
+
+class _RecordingConversation(ex.ConversationExecutor):
+    """The conversation executor, recording the id of each state it extracts for."""
+
+    def __init__(self) -> None:
+        self.states: list[str] = []
+
+    def extract(self, pipeline, instance, user_message, conversation_id, state):
+        self.states.append(state.id)
+        return super().extract(pipeline, instance, user_message, conversation_id, state)
+
+
+def _synthesize_state() -> State:
+    return State(
+        id="solve",
+        description="d",
+        purpose="p",
+        synthesize={"goal": "g", "return_keys": ["k"], "on_failure": "t"},
+        transitions=[{"target_state": "t", "description": "go"}],
+    )
+
+
+class TestPassiveKindsRunAsTheInstancesConversation:
+    """Review gate 1, concern 11: a kind with no executor of its own (``synthesize``,
+    a runtime kind nobody registered) runs as ``conversation``, so an
+    ``executors={"conversation": X}`` override reaches it too. Resolution order:
+    the per-instance map for the kind, the module table for the kind, the
+    per-instance ``conversation`` entry, the module ``conversation`` entry."""
+
+    def test_a_synthesize_state_follows_the_per_api_conversation_entry(self):
+        mine = ex.ConversationExecutor()
+        assert ex.executor_for(_synthesize_state(), {"conversation": mine}) is mine
+
+    def test_an_unregistered_runtime_kind_follows_it_too(self, marker_kind):
+        marker = _definition().states["marker"]
+        assert marker.kind == _KIND
+        mine = ex.ConversationExecutor()
+        assert ex.executor_for(marker, {"conversation": mine}) is mine
+
+    def test_without_a_map_both_fall_back_to_the_module_conversation_entry(
+        self, marker_kind
+    ):
+        module_conversation = ex._EXECUTORS["conversation"]
+        assert ex.executor_for(_synthesize_state()) is module_conversation
+        assert ex.executor_for(_definition().states["marker"]) is module_conversation
+
+    def test_a_map_without_conversation_does_not_hide_the_module_entry(self):
+        other = ex.CompletionExecutor()
+        assert (
+            ex.executor_for(_synthesize_state(), {"completion": other})
+            is (ex._EXECUTORS["conversation"])
+        )
+
+    def test_the_per_api_entry_of_the_kind_itself_still_wins(self):
+        own, conversation = ex.ConversationExecutor(), ex.ConversationExecutor()
+        mapping = {"synthesize": own, "conversation": conversation}
+        assert ex.executor_for(_synthesize_state(), mapping) is own
+
+    def test_a_module_executor_of_the_kind_beats_the_per_api_conversation_entry(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(ex, "_EXECUTORS", dict(ex._EXECUTORS))
+        registered = ex.ConversationExecutor()
+        ex.register_executor("synthesize", registered)
+        mine = ex.ConversationExecutor()
+        assert (
+            ex.executor_for(_synthesize_state(), {"conversation": mine}) is registered
+        )
+
+    def test_a_per_api_conversation_override_reaches_a_synthesize_state_in_a_turn(self):
+        from tests.test_fsm_llm.kind_corpus import _synth_fsm
+
+        recorder = _RecordingConversation()
+        api = API.from_definition(
+            _synth_fsm(), llm_interface=_llm(), executors={"conversation": recorder}
+        )
+        conversation_id, _ = api.start_conversation()
+        api.converse("hello", conversation_id)  # welcome -> solve
+        assert api.get_current_state(conversation_id) == "solve"
+        api.converse("anything", conversation_id)  # a bare converse on solve
+        assert recorder.states == ["welcome", "solve"]
+
+    def test_a_per_api_conversation_override_reaches_an_unregistered_kind_in_a_turn(
+        self, marker_kind
+    ):
+        recorder = _RecordingConversation()
+        api = API.from_definition(
+            _definition(), llm_interface=_llm(), executors={"conversation": recorder}
+        )
+        _run(api)
+        assert recorder.states[0] == "marker"

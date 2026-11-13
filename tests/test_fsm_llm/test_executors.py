@@ -350,3 +350,96 @@ class TestDispatchThroughATurn:
         )
         api.advance(conv_id)
         assert _context(api, conv_id)["_cut_off"] == {"fields": [_RESULT]}
+
+
+class TestCompletionExecutorNeedsACompletionConfig:
+    """Review gate 1, concern 15: an explicit error, never ``assert`` (which
+    ``python -O`` strips and which would then fail one line later with an
+    ``AttributeError``)."""
+
+    def test_a_state_without_a_completion_config_raises_fsm_error(self):
+        from fsm_llm.definitions import FSMError
+
+        with pytest.raises(FSMError, match="state 's' has none"):
+            ex.CompletionExecutor().extract(
+                SimpleNamespace(llm_interface=None),
+                None,  # type: ignore[arg-type]
+                "m",
+                "c",
+                _state(),
+            )
+
+    def test_the_failure_makes_no_call_and_writes_nothing(self):
+        from fsm_llm.definitions import FSMError
+
+        instance = SimpleNamespace(last_extraction_response="untouched")
+        pipeline = SimpleNamespace(llm_interface=None)
+        with pytest.raises(FSMError):
+            ex.CompletionExecutor().extract(
+                pipeline,
+                instance,  # type: ignore[arg-type]
+                "m",
+                "c",
+                _state(),
+            )
+        assert instance.last_extraction_response == "untouched"
+
+    def test_the_module_has_no_assert_statement(self):
+        tree = ast.parse((_SRC / "executors.py").read_text(encoding="utf-8"))
+        assert [n.lineno for n in ast.walk(tree) if isinstance(n, ast.Assert)] == []
+
+
+def _completion_into_a_field_extracting_conversation_state() -> dict[str, Any]:
+    fsm = _tool_fsm()
+    fsm["states"]["done"] = {
+        **fsm["states"]["done"],
+        "response_instructions": "Tell the user the answer.",
+        "field_extractions": [
+            {
+                "field_name": "city",
+                "field_type": "str",
+                "extraction_instructions": "The city the user lives in",
+            }
+        ],
+    }
+    return fsm
+
+
+class TestPostTransitionExtractionBelongsToTheTargetKind:
+    """Review gate 1, concern 14: ``after_transition`` is the TARGET state's
+    executor's. A completion state that transitions into a conversation state
+    hands the same user message to that state's extraction; dispatching by the
+    SOURCE state's executor (the completion one, a no-op here) would leave
+    ``city`` unset while 500 other tests still pass."""
+
+    def test_a_completion_state_into_a_conversation_state_extracts_for_the_target(
+        self,
+    ):
+        from fsm_llm.testing import ScriptedLLM
+
+        llm = ScriptedLLM(
+            [final_reply("Noted.")],
+            default_response="Thanks.",
+            extraction_data={"city": "Paris"},
+        )
+        api = _api(_completion_into_a_field_extracting_conversation_state(), llm)
+        conv_id = _start(api)
+        _to_call_model(api, conv_id)
+        api.converse("I live in Paris", conv_id)
+        assert api.get_current_state(conv_id) == "done"
+        assert _context(api, conv_id)["city"] == "Paris"
+        extraction = llm.calls("extract_field") + llm.calls("extract_bulk_data")
+        assert len(extraction) >= 1
+        llm.assert_exhausted()
+
+    def test_the_source_completion_state_runs_no_field_extraction_itself(self):
+        from fsm_llm.testing import ScriptedLLM
+
+        llm = ScriptedLLM([final_reply("Noted.")], default_response="Thanks.")
+        api = _api(_completion_into_a_field_extracting_conversation_state(), llm)
+        conv_id = _start(api)
+        _to_call_model(api, conv_id)
+        api.converse("I live in Paris", conv_id)
+        # no extraction was scripted: the only extraction is the target's, and
+        # it fails softly (logged, swallowed), so the city stays unset
+        assert "city" not in _context(api, conv_id)

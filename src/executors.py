@@ -12,13 +12,13 @@ d454fd62, D-004, D-015):
   (the conversation kind re-extracts what the same message holds for the new
   state; the other kinds do nothing).
 
-Three kinds, three registrations: ``conversation`` (the retained field, bulk
+Three kinds, two registrations: ``conversation`` (the retained field, bulk
 and classification extraction of ``MessagePipeline``), ``completion`` (one
 ``LLMInterface.complete`` call over a consumer-owned transcript, moved here from
-the pipeline unchanged) and ``synthesize`` (passive: the conversation executor,
-because a runner outside core pushes the compiled procedure and a bare
-``converse`` on such a state stays BLOCKED, D-002 of plan 2cefeb61; a later
-synthesize executor replaces it).
+the pipeline unchanged) and ``synthesize`` (passive, no registration: it runs as
+conversation, because a runner outside core pushes the compiled procedure and a
+bare ``converse`` on such a state stays BLOCKED, D-002 of plan 2cefeb61; a later
+synthesize executor registers under its own name and replaces the fallback).
 
 Interface contract:
 
@@ -36,7 +36,10 @@ Interface contract:
   FSM); may update ``extraction_response`` and the context; returns ``None``.
 - ``executor_for(state, executors=None)``: the executor of
   ``kind_of(state).name``: the per-instance ``executors`` map first, then the
-  module table; a kind with neither runs as ``conversation`` (a passive kind).
+  module table; a kind with neither runs as ``conversation`` (a passive kind),
+  resolved through the per-instance ``conversation`` entry first, then the
+  module's, so an override of ``conversation`` covers ``synthesize`` and a
+  runtime kind nobody registered.
 - ``register_executor(kind_name, executor)``: add or replace the executor of a
   kind in the MODULE table, which every pipeline in the process reads (a test
   kind registers its own beside its ``KindSpec``; the caller removes it again).
@@ -71,6 +74,7 @@ from .definitions import (
     CompletionRequest,
     CompletionStateConfig,
     DataExtractionResponse,
+    FSMError,
     FSMInstance,
     LLMResponseError,
     State,
@@ -188,7 +192,14 @@ class CompletionExecutor(StateExecutor):
     ) -> DataExtractionResponse:
         # A completion state's Pass-1 work is its one completion call (D-003);
         # no field, bulk or classification extraction runs beside it.
-        assert state.completion is not None
+        # An explicit error, never ``assert`` (stripped under ``python -O``): the
+        # dispatch picks this executor only for a state with a ``completion``
+        # config, so a state without one is a mis-registered or hand-built case.
+        if state.completion is None:
+            raise FSMError(
+                f"CompletionExecutor.extract needs a state with a completion "
+                f"config; state '{state.id}' has none"
+            )
         response = self.turn(
             pipeline.llm_interface, instance, state.completion, conversation_id
         )
@@ -320,12 +331,15 @@ class CompletionExecutor(StateExecutor):
 
 _CONVERSATION = ConversationExecutor()
 
-# Kind name -> executor. ``synthesize`` is passive: it shares the conversation
-# executor (a bare ``converse`` on it stays BLOCKED, D-002 of plan 2cefeb61).
+_CONVERSATION_KIND = "conversation"
+
+# Kind name -> executor. ``synthesize`` is passive and has no entry: it runs as
+# conversation through ``executor_for``'s fallback (a bare ``converse`` on it
+# stays BLOCKED, D-002 of plan 2cefeb61), which also honours a per-instance
+# override of ``conversation``.
 _EXECUTORS: dict[str, StateExecutor] = {
-    "conversation": _CONVERSATION,
+    _CONVERSATION_KIND: _CONVERSATION,
     "completion": CompletionExecutor(),
-    "synthesize": _CONVERSATION,
 }
 
 
@@ -376,9 +390,31 @@ def check_executors(
 def executor_for(
     state: State, executors: Mapping[str, StateExecutor] | None = None
 ) -> StateExecutor:
-    """The executor of ``state``'s kind: ``executors`` (a pipeline's own map)
-    first, then the module table, else ``conversation`` for a kind with none."""
+    """The executor of ``state``'s kind.
+
+    Interface contract (callers: the turn pipeline, three sites):
+        - Resolution order: the pipeline's own ``executors`` map for the
+          kind's name, then the module table for it, then the ``conversation``
+          entry of the same two tables in the same order (a kind with no
+          executor of its own, ``synthesize`` or a runtime kind nobody
+          registered, runs as conversation, so an override of ``conversation``
+          in the per-instance map applies to it too), then the built-in
+          conversation executor.
+        - Never raises for a kind name; ``kind_of`` raises nothing for a
+          state.
+    """
+    # DECISION plan-2026-11-12T073150-d454fd62/D-026
+    # A passive kind falls back through the per-instance "conversation" entry.
+    # Do NOT register ``synthesize`` in the module table as an alias of the
+    # built-in conversation executor (it was one): the alias bypassed an
+    # ``API(executors={"conversation": X})`` override for a synthesize state
+    # (review gate 1, concern 11). A real synthesize executor registers under
+    # its own name and then wins.
     name = kind_of(state).name
-    if executors is not None and name in executors:
-        return executors[name]
-    return _EXECUTORS.get(name, _CONVERSATION)
+    for table in (executors, _EXECUTORS):
+        if table is not None and name in table:
+            return table[name]
+    for table in (executors, _EXECUTORS):
+        if table is not None and _CONVERSATION_KIND in table:
+            return table[_CONVERSATION_KIND]
+    return _CONVERSATION
