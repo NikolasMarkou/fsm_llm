@@ -104,7 +104,7 @@ ignore_imports =
 # (`constants`, `logging`, `security`); step 71 moved `expressions` into it as `core.expressions`,
 # a package whose modules import each other and `core.definitions` and are read by
 # `core.transition_evaluator`; step 75 added `core.verify` (the validator split into modules and
-# `flow`, which read the kernel and `core` only, so this contract covers them with no new line and
+# `flow`, which read the kernel and `core` only, so this contract covers them with no new line (step 76 added `core.visualize`, the old `visualizer`, with one named debt below: `core.visualize.cli -> cli_support`) and
 # `fsm_llm.validator` left the lists of the `llm` and `context` contracts below: the module is
 # gone and both layers may import `core`); it never reaches a higher layer or a subpackage
 # (`FSMDefinition._check_synthesize_states` imports `core.transition_evaluator` lazily, a core
@@ -140,11 +140,17 @@ forbidden_modules =
     fsm_llm.session
     fsm_llm.synthesis
     fsm_llm.testing
-    fsm_llm.visualizer
     fsm_llm.workflows
 ignore_imports =
     # the package's own modules import each other
     fsm_llm.core.** -> fsm_llm.core.**
+    # step 76 debt: the old `visualizer.main` imported `cli_support.escape_unencodable_output` lazily; the
+    # moved `core.visualize.cli.main` still does. `cli_support` is a top-level helper beside the entry
+    # modules (D-014), not a layer, and the CLIs inside layer packages import it by design; it reads
+    # `okf` only for `capped_line` and `strip_unsafe_text`, which step 83 moves to `text.py`.
+    # retired by: step 83 (cli_support stops importing okf) and step 95 (the `layers` contract does not
+    # constrain `cli_support`)
+    fsm_llm.core.visualize.cli -> fsm_llm.cli_support
 
 # Step 72 (utilities split; `llm.py` and `context.py` became the packages `llm/` and `context/`):
 # the layer package `llm` (L1) reads the kernel (`constants`, `logging`), `core` (the models in
@@ -181,7 +187,6 @@ forbidden_modules =
     fsm_llm.session
     fsm_llm.synthesis
     fsm_llm.testing
-    fsm_llm.visualizer
     fsm_llm.workflows
 
 # Step 74 (prompts split into `context/layout/`, `clear_keys_delta` moved down from `handlers`
@@ -217,5 +222,4 @@ forbidden_modules =
     fsm_llm.session
     fsm_llm.synthesis
     fsm_llm.testing
-    fsm_llm.visualizer
     fsm_llm.workflows

@@ -19,7 +19,7 @@ class TestCLIEntryPoints:
 
     def test_visualizer_has_main_cli(self):
         """H-1: fsm-llm-visualize entry point requires main_cli."""
-        from fsm_llm.visualizer import main_cli
+        from fsm_llm.core.visualize.cli import main_cli
 
         assert callable(main_cli)
 
@@ -37,7 +37,7 @@ class TestCLIEntryPoints:
 
     def test_visualizer_main_still_exists(self):
         """Ensure adding main_cli didn't break existing main()."""
-        from fsm_llm.visualizer import main
+        from fsm_llm.core.visualize.cli import main
 
         assert callable(main)
 

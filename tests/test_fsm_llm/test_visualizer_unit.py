@@ -1,5 +1,5 @@
 """
-Unit tests for fsm_llm.visualizer module.
+Unit tests for the fsm_llm.core.visualize package (the old fsm_llm.visualizer).
 
 Tests cover:
 - visualize_fsm_ascii: basic FSM, multi-state FSM, different styles
@@ -23,17 +23,18 @@ from unittest.mock import patch
 import pytest
 from loguru import logger
 
-from fsm_llm.visualizer import (
+from fsm_llm.core.visualize import visualize_fsm_ascii, visualize_fsm_from_file
+from fsm_llm.core.visualize.ascii_layout import (
     ICONS,
-    build_fancy_header,
     build_graph_representation,
     build_state_boxes,
-    generate_enhanced_ascii_diagram,
-    main_cli,
     sort_states_logically,
-    visualize_fsm_ascii,
-    visualize_fsm_from_file,
 )
+from fsm_llm.core.visualize.ascii_render import (
+    build_fancy_header,
+    generate_enhanced_ascii_diagram,
+)
+from fsm_llm.core.visualize.cli import main_cli
 
 # ------------------------------------------------------------------
 # Helpers
@@ -389,7 +390,7 @@ _RENDER_PROBE = """
 import json, sys
 sys.path.insert(0, sys.argv[1])
 from test_visualizer_unit import _unsorted_terminal_fsm_data
-from fsm_llm.visualizer import visualize_fsm_ascii
+from fsm_llm.core.visualize import visualize_fsm_ascii
 
 data = _unsorted_terminal_fsm_data()
 sys.stdout.write(
@@ -529,7 +530,7 @@ class TestVisualizeSurvivesAnUnencodableStdout:
         stream = io.TextIOWrapper(raw, encoding=encoding, errors="strict")
         monkeypatch.setattr(sys, "stdout", stream)
 
-        from fsm_llm.visualizer import main
+        from fsm_llm.core.visualize.cli import main
 
         assert main(str(path)) == 0
 
@@ -1152,7 +1153,7 @@ class TestTruncationIsVisibleAndUnambiguous:
 
     def test_fit_is_exact_and_keeps_both_ends(self):
         """Unit-level pin on the helper, including the degenerate widths."""
-        from fsm_llm.visualizer import _fit
+        from fsm_llm.core.visualize.ascii_layout import _fit
 
         assert _fit("short", 10) == "short"
         assert _fit("exactfit!!", 10) == "exactfit!!"
@@ -1425,18 +1426,18 @@ import re
 import pydantic
 
 import fsm_llm
-from fsm_llm import visualizer
+from fsm_llm.core import visualize as visualizer
 from fsm_llm.core.definitions import FSMDefinition
-from fsm_llm.visualizer import (
+from fsm_llm.core.visualize import (
     OUTPUT_FORMATS,
     FSMGraph,
     FSMGraphEdge,
     FSMGraphNode,
     build_fsm_graph,
-    main,
     to_dot,
     to_mermaid,
 )
+from fsm_llm.core.visualize.cli import main
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -1656,7 +1657,7 @@ class TestFsmGraph:
             "to_dot",
         ):
             assert name in fsm_llm.__all__
-            assert getattr(fsm_llm, name) is getattr(fsm_llm.visualizer, name)
+            assert getattr(fsm_llm, name) is getattr(visualizer, name)
 
 
 class TestMermaidExport:

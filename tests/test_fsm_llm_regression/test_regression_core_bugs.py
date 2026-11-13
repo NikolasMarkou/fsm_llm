@@ -381,7 +381,7 @@ class TestVB12VisualizerDuplicatesTerminal:
     """VB12: sort_states_logically should not duplicate terminal states."""
 
     def test_no_duplicate_terminal_states(self):
-        from fsm_llm.visualizer import sort_states_logically
+        from fsm_llm.core.visualize.ascii_layout import sort_states_logically
 
         states = {"start": {}, "middle": {}, "end": {}}
         terminal_states = {"end"}
@@ -402,7 +402,7 @@ class TestVB13VisualizerDepthsWrongInitial:
     """VB13: calculate_depths should use correct initial state even with inbound transitions."""
 
     def test_depths_correct_when_initial_has_inbound(self):
-        from fsm_llm.visualizer import calculate_depths
+        from fsm_llm.core.visualize.ascii_layout import calculate_depths
 
         # Graph where initial state "start" has an inbound edge from "middle"
         graph = {
@@ -424,7 +424,7 @@ class TestVB13VisualizerDepthsWrongInitial:
 
     def test_depths_wrong_without_initial_hint(self):
         """Without initial_state parameter, function picks wrong state when all have inbound."""
-        from fsm_llm.visualizer import calculate_depths
+        from fsm_llm.core.visualize.ascii_layout import calculate_depths
 
         graph = {
             "start": [("middle", "go", None)],

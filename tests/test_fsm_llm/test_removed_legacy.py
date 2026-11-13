@@ -237,7 +237,7 @@ class TestStep9LeafDeadCode:
         assert ollama.build_ollama_response_format("transition_decision") is None
 
     def test_visualizer_unused_glyphs_are_gone(self):
-        from fsm_llm.visualizer import ARROW_STYLES, BOX_STYLES, ICONS
+        from fsm_llm.core.visualize.ascii_layout import ARROW_STYLES, BOX_STYLES, ICONS
 
         assert "note" not in ICONS
         assert "section" not in BOX_STYLES

@@ -1229,7 +1229,7 @@ UNPINNED_CORE = {
     "src/fsm_llm/core/definitions/schema.py": "leaf core module read by the pinned core/verify modules",
     "src/fsm_llm/core/state_kinds.py": "the engine's kind registry (leaf, read by the pinned core/verify/flow.py)",
     "src/fsm_llm/security/__init__.py": "key filters shared with every package (facade)",
-    "src/fsm_llm/visualizer.py": "the mermaid of the approval summary (G7 never runs here)",
+    "src/fsm_llm/core/visualize/__init__.py": "the mermaid of the approval summary (facade, read through what the pinned files import; G7 never runs here)",
     "src/fsm_llm/agents/semantic_tools.py": "embedding lookup, the bench library has no embedder",
     "src/fsm_llm/synthesis/diagnose.py": "repair, never called by the bench",
     "src/fsm_llm/synthesis/patch.py": "repair, never called by the bench",

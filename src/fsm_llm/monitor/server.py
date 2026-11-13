@@ -31,10 +31,10 @@ from starlette.requests import Request
 from fsm_llm import __version__ as core_version
 from fsm_llm.context.filtering import redacting_json_default
 from fsm_llm.core.definitions import ConversationBusyError, ModelNotConfiguredError
+from fsm_llm.core.visualize import build_fsm_graph
 from fsm_llm.llm import resolve_model
 from fsm_llm.logging import logger
 from fsm_llm.security import api_key_matches, checked_api_key, presented_api_key
-from fsm_llm.visualizer import build_fsm_graph
 
 from .__version__ import __version__
 from .constants import (

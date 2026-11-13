@@ -504,7 +504,7 @@ class TestFSMVisualizeReadsTheCoreGraph:
         self.client = TestClient(app)
 
     def test_payload_equals_the_core_graph(self):
-        from fsm_llm.visualizer import build_fsm_graph
+        from fsm_llm.core.visualize import build_fsm_graph
 
         fsm = _branching_fsm_dict()
         graph = build_fsm_graph(fsm)
@@ -536,8 +536,8 @@ class TestFSMVisualizeReadsTheCoreGraph:
 
     def test_endpoint_follows_build_fsm_graph(self, monkeypatch):
         """Fails if the monitor builds nodes and edges from the definition."""
+        from fsm_llm.core.visualize import FSMGraph, FSMGraphEdge, FSMGraphNode
         from fsm_llm.monitor import server
-        from fsm_llm.visualizer import FSMGraph, FSMGraphEdge, FSMGraphNode
 
         seen = []
 
@@ -590,8 +590,8 @@ class TestFSMVisualizeReadsTheCoreGraph:
         ]
 
     def test_preset_route_follows_build_fsm_graph(self, monkeypatch):
+        from fsm_llm.core.visualize import build_fsm_graph
         from fsm_llm.monitor import server
-        from fsm_llm.visualizer import build_fsm_graph
 
         calls = []
 

@@ -2564,7 +2564,7 @@ class TestStep14C6C12:
         assert report["fsm_name"] == "C9"
 
     def test_c8_visualize_diagram_on_stdout(self, tmp_path, capsys):
-        from fsm_llm.visualizer import main
+        from fsm_llm.core.visualize.cli import main
 
         path = tmp_path / "c8.json"
         path.write_text(
@@ -2577,7 +2577,7 @@ class TestStep14C6C12:
     # -- C9 ---------------------------------------------------------------
     @pytest.mark.parametrize("style", ["full", "compact", "minimal"])
     def test_c9_null_transitions_render(self, style):
-        from fsm_llm.visualizer import visualize_fsm_ascii
+        from fsm_llm.core.visualize import visualize_fsm_ascii
 
         output = visualize_fsm_ascii(_c9_fsm_data(), style)
         assert "Could not generate diagram" not in output
@@ -2585,7 +2585,7 @@ class TestStep14C6C12:
 
     @pytest.mark.parametrize("style", ["full", "compact", "minimal"])
     def test_c9_newline_in_name_keeps_header_one_line(self, style):
-        from fsm_llm.visualizer import visualize_fsm_ascii
+        from fsm_llm.core.visualize import visualize_fsm_ascii
 
         output = visualize_fsm_ascii(
             _c9_fsm_data(name="Evil\nName\r\x0bX", end_transitions=[]), style

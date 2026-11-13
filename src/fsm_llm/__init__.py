@@ -133,6 +133,20 @@ from .core.transition_evaluator import TransitionEvaluator, TransitionEvaluatorC
 from .core.verify import FSMValidationResult, FSMValidator, validate_fsm_from_file
 
 # --------------------------------------------------------------
+# Visualization Components
+# --------------------------------------------------------------
+from .core.visualize import (
+    FSMGraph,
+    FSMGraphEdge,
+    FSMGraphNode,
+    build_fsm_graph,
+    to_dot,
+    to_mermaid,
+    visualize_fsm_ascii,
+    visualize_fsm_from_file,
+)
+
+# --------------------------------------------------------------
 # Explicit .env loading (opt-in; importing fsm_llm reads no .env file)
 # --------------------------------------------------------------
 from .env import load_env
@@ -179,20 +193,6 @@ from .memory import (
 # Session Persistence
 # --------------------------------------------------------------
 from .session import FileSessionStore, SessionState, SessionStore
-
-# --------------------------------------------------------------
-# Visualization Components
-# --------------------------------------------------------------
-from .visualizer import (
-    FSMGraph,
-    FSMGraphEdge,
-    FSMGraphNode,
-    build_fsm_graph,
-    to_dot,
-    to_mermaid,
-    visualize_fsm_ascii,
-    visualize_fsm_from_file,
-)
 
 # --------------------------------------------------------------
 # Public API Definition

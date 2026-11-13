@@ -273,7 +273,7 @@ class TestCliEntryPointsLogAtInfo:
         proc = _stderr_of(
             [
                 "-c",
-                "import sys; from fsm_llm.visualizer import main_cli; "
+                "import sys; from fsm_llm.core.visualize.cli import main_cli; "
                 f"sys.argv=['x','--fsm',{str(_FSM)!r}]; main_cli()",
             ]
         )
@@ -328,7 +328,7 @@ class TestUnknownEnvFormatDoesNotCrashTheCommands:
             ],
             [
                 "-c",
-                "import sys; from fsm_llm.visualizer import main_cli; "
+                "import sys; from fsm_llm.core.visualize.cli import main_cli; "
                 f"sys.argv=['x','--fsm',{str(_FSM)!r}]; main_cli()",
             ],
             ["-c", "from fsm_llm.eval.__main__ import run; run(['--help'])"],

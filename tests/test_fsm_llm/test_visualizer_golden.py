@@ -21,14 +21,14 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.visualizer import (
+from fsm_llm.core.visualize import (
     ASCII_STYLES,
     build_fsm_graph,
-    find_longest_path,
     to_dot,
     to_mermaid,
     visualize_fsm_ascii,
 )
+from fsm_llm.core.visualize.ascii_layout import find_longest_path
 
 
 def _state(
@@ -148,7 +148,7 @@ class TestRenderersAreGolden:
     def test_the_merge_icon_and_terminal_glyph_are_in_the_output(self):
         """Readable anchors next to the hashes: the two things the dedup
         helpers decide."""
-        from fsm_llm.visualizer import ICONS
+        from fsm_llm.core.visualize.ascii_layout import ICONS
 
         full = visualize_fsm_ascii(_MERGE, "full")
         assert ICONS["merge"] in full

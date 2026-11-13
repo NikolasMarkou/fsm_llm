@@ -49,8 +49,8 @@ from fsm_llm.core.definitions import CompletionRequest, FSMContext, FSMDefinitio
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.core.verify import FSMValidator
 from fsm_llm.core.verify.cli import main as validate_main
+from fsm_llm.core.visualize import build_fsm_graph, to_mermaid
 from fsm_llm.handlers import HandlerTiming, create_handler
-from fsm_llm.visualizer import build_fsm_graph, to_mermaid
 
 from .conftest import ScriptedMetaLLM
 

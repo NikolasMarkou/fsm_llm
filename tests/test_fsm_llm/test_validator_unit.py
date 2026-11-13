@@ -1929,7 +1929,7 @@ class TestNullSafeValidatorAndVisualizer:
 
     @pytest.mark.parametrize("style", ["full", "compact", "minimal"])
     def test_dumped_fsm_renders_in_every_style(self, tmp_path, style):
-        from fsm_llm.visualizer import visualize_fsm_from_file
+        from fsm_llm.core.visualize import visualize_fsm_from_file
 
         path = tmp_path / "dumped.json"
         path.write_text(json.dumps(_dumped_fsm_with_required_keys()), encoding="utf-8")
@@ -1939,7 +1939,7 @@ class TestNullSafeValidatorAndVisualizer:
 
     @pytest.mark.parametrize("style", ["full", "compact", "minimal"])
     def test_explicit_null_containers_render(self, tmp_path, style):
-        from fsm_llm.visualizer import visualize_fsm_from_file
+        from fsm_llm.core.visualize import visualize_fsm_from_file
 
         data = _dumped_fsm_with_required_keys()
         for state in data["states"].values():
