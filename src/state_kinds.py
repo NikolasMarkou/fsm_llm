@@ -6,9 +6,10 @@ one model completion over a consumer-owned transcript) and ``synthesize`` (a
 runner outside core pushes a compiled procedure). Until this module the rules
 of the two non-default kinds were spelled out in the State validator, the
 definition loader, the data-flow and liveness analyses, the dry-run gate, the
-pipeline and ``API.push_fsm``. Row 0.14 of the roadmap gathers them here, one
-spec per kind, and each later step of plan d454fd62 moves one rule family to
-read its spec instead of testing ``state.completion`` or ``state.synthesize``.
+pipeline and ``API.push_fsm``. Row 0.14 of the roadmap gathered them here, one
+spec per kind: those places now read the spec instead of testing
+``state.completion`` or ``state.synthesize`` (an AST test bans the reads in the
+engine and the analyses).
 
 A leaf core module, like ``schema_registry`` and ``codes``: it imports only the
 standard library, never logs and never raises on a loaded state. A state is read
@@ -28,9 +29,8 @@ Interface contract:
   attributes. Never raises; an object without a config attribute is the default
   kind.
 - ``get_kind(name)``: the spec with that name, ``KeyError`` for an unknown one.
-- ``KindSpec`` fields (all declarative; the engine's executors are a separate
-  module, the verifier hooks that need the evaluator are added with the steps
-  that move them):
+- ``KindSpec`` fields (declarative rules and verifier hooks; what a kind does
+  in Pass 1 of a turn is the engine's, in ``fsm_llm.executors``):
 
   - ``name``: the kind name, the value of ``State.kind``.
   - ``config_field``: the ``State`` field holding the kind's config model, or

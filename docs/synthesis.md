@@ -208,7 +208,7 @@ The child gets only the declared `inputs` and runs on the host's own interface. 
 
 Things to know when you run one:
 
-- The result key is skip-if-set: a state that must run again on re-entry has to clear `synthesis_result` on entry (core `clear_keys_on_entry`). A child FSM you push yourself with `API.push_fsm` does not inherit the parent's value of its own synthesize `result_key` (it would make the child's state skip its run); pass it in `context_to_pass` if you want it.
+- The result key is skip-if-set: a state that must run again on re-entry has to clear `synthesis_result` on entry (core `clear_keys_on_entry`). A child FSM you push yourself with `API.push_fsm` does not inherit the parent's value of its own synthesize `result_key` (the child's edges, which must read it, would route on the stale result before any run wrote one); pass it in `context_to_pass` if you want it.
 - One thread per conversation, like `API.converse`. The runner holds no lock.
 - A nested synthesize state (depth 2) works only for a procedure that returns one of its inputs.
 - `policy.max_turns` is the only turn bound. Core has none.

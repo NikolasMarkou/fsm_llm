@@ -151,6 +151,19 @@ State with "synthesize": {goal, inputs, return_keys, on_failure, result_key, min
 
 Core only loads the field and checks the host FSM with the real evaluator (every edge reads the result, none fires before the runner has written one, the failure edge passes for `failed` and `aborted`). The runner is a consumer of the public step driver, as the reasoning engine is: it adds no seam to core. A bare `API.converse` on a synthesize state stays in it. See [synthesis.md](./synthesis.md).
 
+### State Kinds and Executors
+
+A state has exactly one kind, derived from the config it carries: `conversation` (the default: field, bulk and classification extraction, then a reply), `completion` (a `completion` config) or `synthesize` (a `synthesize` config). `State.kind` returns the name. It is a plain read-only property, not a field: it is absent from `model_dump`, `model_fields` and the JSON schema, so a definition cannot declare it and no `fsm_id` or library digest moves.
+
+The extension point has two halves, and a new kind needs both:
+
+- **Declaration** (core). A frozen `KindSpec` in `fsm_llm.state_kinds` names the kind, the `State` field that carries its config (`config_field`) and the rules the rest of core reads: `result_key`, `inherits_result_on_push`, `forbidden_declarations`, `check_state`, `check_definition` and `sample_results` (the loader), `dryrun_judged`, `mentioned_keys` and `typed_keys` (gate G6a), `minted_keys` and `produced_keys` (the pipeline, G3 and G4), `lint_raw` and `raw_result_key` (the validator, which reads raw dicts), `declared_tools`, `raw_declared_tools` and `supported_in_procedure` (synthesis). The registry (`KINDS`, `kind_of`, `get_kind`) is static and process-wide; `state_kinds` is a leaf that imports only the standard library.
+- **Execution** (engine). A `StateExecutor` in `fsm_llm.executors` says what the kind does in Pass 1: `extract(...)` produces the turn's extraction result, `cleans_extracted` says whether the data goes through `clean_context_keys`, and `after_transition(...)` runs when a transition lands in a state of the kind. The pipeline picks the executor with `executor_for(state, executors)` at the one Pass-1 seam that the sync and the stream path share. The executor table is per instance: `API(..., executors={kind_name: executor})`, passed down to `FSMManager` and `MessagePipeline`, is validated, copied read-only and visible to that `API` only. A kind with no executor falls back to the conversation executor, which is also the passive executor of `synthesize` (a bare `converse` on a synthesize state stays in it, as before).
+
+What the engine guarantees to an executor: `process()` takes the one snapshot of the turn and restores it on a failure (see Turn atomicity in `src/AGENTS.md`), so an executor takes none of its own; handler-only keys (a kind's `result_key`) are never minted as extraction targets; Pass 2 stays shared and kind-agnostic. What it does not: the conversation Pass-1 methods (`_extract_after_transition`, `_execute_data_extraction` and their field, bulk and classification helpers) still live on `MessagePipeline` and the conversation executor calls them; they move with the module layout split (roadmap 0.4), they were not deleted. A test-only kind registered at runtime runs a full conversation with no edit in core (`tests/test_fsm_llm/test_executor_map.py`).
+
+Nothing here is public yet: `fsm_llm/__init__.py` exports neither module, `executors=` is not on the builders, and the entry-point group for third-party kinds arrives with the plugin work (roadmap C10, row 5.5). Until then both modules are internal.
+
 ### Conversation Start
 
 ```
@@ -290,3 +303,7 @@ class DatabaseHandler(BaseHandler):
         database.save(context["_conversation_id"], context)
         return {"saved_to_db": True}
 ```
+
+### State Kinds (internal)
+
+A new state kind is a `KindSpec` in `fsm_llm.state_kinds` plus a `StateExecutor` supplied with `executors={kind_name: executor}` on `API`, `FSMManager` or `MessagePipeline`; see State Kinds and Executors above. It is not a public extension point yet: no export from `fsm_llm`, no builder setter, no entry-point group before roadmap row 5.5.
