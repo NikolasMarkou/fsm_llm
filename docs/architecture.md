@@ -162,7 +162,7 @@ The extension point has two halves, and a new kind needs both:
 
 What the engine guarantees to an executor: `process()` takes the one snapshot of the turn and restores it on a failure (see Turn atomicity in `src/AGENTS.md`), so an executor takes none of its own; handler-only keys (a kind's `result_key`) are never minted as extraction targets; Pass 2 stays shared and kind-agnostic. What it does not: the conversation Pass-1 methods (`_extract_after_transition`, `_execute_data_extraction` and their field, bulk and classification helpers) still live on `MessagePipeline` and the conversation executor calls them; they move with the module layout split (roadmap 0.4), they were not deleted. A test-only kind registered at runtime runs a full conversation with no edit in core (`tests/test_fsm_llm/test_executor_map.py`).
 
-Nothing here is public yet: `fsm_llm/__init__.py` exports neither module, `executors=` is not on the builders, and the entry-point group for third-party kinds arrives with the plugin work (roadmap C10, row 5.5). Until then both modules are internal.
+Nothing here is public yet: `fsm_llm/__init__.py` exports neither module, `executors=` is not on the builders, and the entry-point group for third-party kinds arrives with the plugin work (roadmap C10, row 5.5). Until then both modules are internal. The `executors` keyword of `API`, `FSMManager` and `MessagePipeline` shows in `docs/api.txt` as `Mapping[str, StateExecutor] | None`: `StateExecutor` is imported from `fsm_llm.executors` (not from `fsm_llm`) and is internal until the kind registry is exported, so the annotation names a class the package does not export, on purpose.
 
 ### Conversation Start
 

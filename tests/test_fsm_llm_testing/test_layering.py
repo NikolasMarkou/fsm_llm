@@ -159,6 +159,29 @@ class TestSourceLayering:
 
         assert offenders == []
 
+    def test_the_private_imports_of_testing_are_exactly_the_recorded_debt(
+        self,
+    ) -> None:
+        """`doubles.py` reuses the usage meter of `fsm_llm.llm` (`_Metered`,
+        `_meter_of`) so `ScriptedLLM.usage()` is the real meter, not a copy. That
+        is recorded debt (review gate 1 concern 12, plan d454fd62 step 58.1; to be
+        retired when `llm.py` is split at step 73 and the seam gets a public
+        name). This pins it: no third private name may be imported from the
+        package into `testing/`."""
+        found = set()
+        for path in sorted(_TESTING_DIR.rglob("*.py")):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if isinstance(node, ast.ImportFrom) and node.level == 0:
+                    if (node.module or "").split(".")[0] == "fsm_llm":
+                        found |= {
+                            (node.module, alias.name)
+                            for alias in node.names
+                            if alias.name.startswith("_")
+                            and not alias.name.startswith("__")
+                        }
+
+        assert found == {("fsm_llm.llm", "_Metered"), ("fsm_llm.llm", "_meter_of")}
+
     def test_testing_imports_no_other_subpackage(self) -> None:
         offenders = []
         for path in sorted(_TESTING_DIR.rglob("*.py")):
