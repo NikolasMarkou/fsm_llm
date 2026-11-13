@@ -1458,3 +1458,63 @@ class TestTraceEvents:
         monkeypatch.setattr(runner_module, "TransitionEvaluator", boom)
         quiet.run(rig.conv, max_steps=20)
         assert rig.result["status"] == "aborted"
+
+
+_STALE = {"status": "ok", "procedure_id": "stale", "version": "1.0", "reason": None}
+
+
+class TestPushedChildOwnsItsSynthesisResult:
+    """A pushed child inherited the parent's ``synthesis_result`` (step 55 of plan
+    d454fd62): its synthesize state saw the key already set (a state runs only
+    while it is unset) and its edges routed on the stale result before any run
+    wrote one. The drop is on the child's initial context only. (The runner itself
+    pushes with ``inherit_context=False`` and serves no frame it did not push.)"""
+
+    def _pushed_child(self, valid_fsm: dict[str, Any]) -> _Rig:
+        rig = _rig(valid_fsm, context={**CONTEXT, "synthesis_result": _STALE})
+        rig.api.push_fsm(rig.conv, _host())  # inherit_context defaults to True
+        return rig
+
+    def test_the_child_waits_for_its_own_result_instead_of_routing_on_the_stale_one(
+        self, valid_fsm
+    ):
+        rig = self._pushed_child(valid_fsm)
+        assert rig.depth == 2
+        rig.to_solve()  # the child's start -> solve
+
+        rig.api.advance(rig.conv)
+
+        # no edge passes before a run wrote a result: the stale `ok` would have
+        # taken the child on to `booked` without any procedure ever running
+        assert rig.state == "solve"
+        assert rig.names == []
+
+    def test_the_child_does_not_see_the_inherited_result(self, valid_fsm):
+        rig = self._pushed_child(valid_fsm)
+        assert "synthesis_result" not in rig.data
+        assert rig.data["topic"] == "tables"  # the rest is inherited as before
+
+    def test_an_explicitly_passed_result_is_kept(self, valid_fsm):
+        rig = _rig(valid_fsm, context={**CONTEXT, "synthesis_result": _STALE})
+        handed = {**_STALE, "procedure_id": "handed"}
+        rig.api.push_fsm(
+            rig.conv, _host(), context_to_pass={"synthesis_result": handed}
+        )
+        assert rig.data["synthesis_result"] == handed
+
+    def test_a_result_key_the_child_does_not_own_is_still_inherited(self, valid_fsm):
+        rig = _rig(valid_fsm, context={**CONTEXT, "synthesis_result": _STALE})
+        other = json.loads(
+            json.dumps(_host(result_key="other_result")).replace(
+                "synthesis_result", "other_result"
+            )
+        )
+        rig.api.push_fsm(rig.conv, other)
+        assert rig.data["synthesis_result"] == _STALE
+
+    def test_the_parent_keeps_its_own_result_through_a_push_and_a_pop(self, valid_fsm):
+        rig = self._pushed_child(valid_fsm)
+        rig.api.pop_fsm(rig.conv, context_to_return={"from_child": 1})
+        assert rig.depth == 1
+        assert rig.data["synthesis_result"] == _STALE
+        assert rig.data["from_child"] == 1

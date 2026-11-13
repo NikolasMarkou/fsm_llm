@@ -1405,9 +1405,10 @@ class API:
     ) -> dict[str, Any]:
         """Build initial context for pushed FSM from inheritance and passed context.
 
-        The inherited part never carries the ``result_key`` of a completion
-        state of ``child_definition``: that key belongs to the child's own
-        completion calls. ``context_to_pass`` is applied after and may set it.
+        The inherited part never carries the ``result_key`` of a completion or
+        synthesize state of ``child_definition``: that key belongs to the
+        child's own calls or run. ``context_to_pass`` is applied after and may
+        set it.
         """
         initial_context: dict[str, Any] = {}
 
@@ -1422,7 +1423,10 @@ class API:
             # completion result made the child's completion state skip its
             # call (skip-if-set) and "answer" with the parent's reply. Do NOT
             # inherit a key a child completion state owns (D-021), and do NOT
-            # drop it from an explicit `context_to_pass`. See D-029.
+            # drop it from an explicit `context_to_pass`. See D-029. The same
+            # holds for a synthesize state's result key: the runner starts a run
+            # only while the key is unset, so an inherited `synthesis_result`
+            # made the child skip its own run (plan d454fd62 step 55).
             for state in child_definition.states.values():
                 spec = kind_of(state)
                 if not spec.inherits_result_on_push:

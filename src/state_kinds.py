@@ -599,14 +599,14 @@ COMPLETION = KindSpec(
     supported_in_procedure=False,
 )
 
-# The synthesize result key is NOT dropped on push today (an inherited
-# `synthesis_result` makes a nested synthesize state skip itself): the flag
-# keeps that behaviour until its own fix (plan d454fd62 step 55).
 SYNTHESIZE = KindSpec(
     name=CompletionStateKind.SYNTHESIZE.value,
     config_field="synthesize",
     result_key=_result_key_of("synthesize"),
-    inherits_result_on_push=True,
+    # An inherited `synthesis_result` made a pushed child's synthesize state
+    # skip itself (the runner starts a run only while the key is unset), so the
+    # key is dropped on push like the completion one (plan d454fd62 step 55).
+    inherits_result_on_push=False,
     forbidden_declarations=("completion", *_EXTRACTION_DECLARATIONS),
     dryrun_judged=False,
     check_state=_synthesize_check_state,

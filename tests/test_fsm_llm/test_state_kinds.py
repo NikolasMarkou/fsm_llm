@@ -248,11 +248,11 @@ class TestHooks:
             }
             assert via_kinds == handler_only_names(loaded), name
 
-    def test_inherits_result_on_push_keeps_the_parent_asymmetry(self):
-        """Preserved here, fixed at step 55 (api.py drops only the completion key)."""
+    def test_a_result_owning_kind_drops_its_inherited_result_on_push(self):
+        """Both result-owning kinds drop the key (the step 55 fix of the old asymmetry)."""
         assert sk.CONVERSATION.inherits_result_on_push is True
         assert sk.COMPLETION.inherits_result_on_push is False
-        assert sk.SYNTHESIZE.inherits_result_on_push is True
+        assert sk.SYNTHESIZE.inherits_result_on_push is False
 
     @pytest.mark.parametrize("spec_name", ["completion", "synthesize"])
     def test_each_forbidden_declaration_is_refused_by_the_state_validator(
@@ -439,10 +439,10 @@ class TestResultKeyReaders:
                 states={"ask": done, "work": work, "end": end},
             )
 
-    def test_push_drops_only_the_kinds_that_do_not_inherit_their_result(self):
-        """Behaviour kept (the asymmetry is fixed at step 55): the parent's
-        completion result key is dropped from a pushed child's inherited context,
-        the synthesize one is not, and the registry flag decides."""
+    def test_push_drops_the_result_key_of_each_kind_that_does_not_inherit_it(self):
+        """The parent's completion and synthesize result keys are both dropped
+        from a pushed child's inherited context (step 55 fixed the old asymmetry
+        that kept the synthesize one), and the registry flag decides."""
         calls = {
             "completion": {"kind": "final", "text": "parent", "calls": []},
             "synthesis": {"status": "ok"},
@@ -503,7 +503,7 @@ class TestResultKeyReaders:
         context = api._build_push_context(
             "conv", None, False, True, child_definition=child
         )
-        assert context == {"synthesis_result": {"status": "ok"}, "other": 1}
+        assert context == {"other": 1}
 
 
 class TestMintingHooks:
