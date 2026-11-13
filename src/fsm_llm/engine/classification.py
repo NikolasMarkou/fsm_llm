@@ -12,17 +12,17 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
-from .constants import (
+from fsm_llm.constants import (
     MAX_MULTI_INTENTS,
     RESERVED_LLM_CALL_KWARGS,
 )
-from .context.layout import (
+from fsm_llm.context.layout import (
     build_classification_context_block,
     build_classification_json_schema,
     build_classification_system_prompt,
 )
-from .core.coerce import coerce_confidence
-from .core.definitions import (
+from fsm_llm.core.coerce import coerce_confidence
+from fsm_llm.core.definitions import (
     ClassificationError,
     ClassificationPromptConfig,
     ClassificationResponseError,
@@ -36,7 +36,7 @@ from .core.definitions import (
     LLMResponseError,
     MultiClassificationResult,
 )
-from .llm import (
+from fsm_llm.llm import (
     DEFAULT_LLM_TIMEOUT_SECONDS,
     LiteLLMInterface,
     LLMInterface,
@@ -45,8 +45,8 @@ from .llm import (
     interface_model,
     resolve_model,
 )
-from .llm.json_extraction import extract_json_from_text
-from .logging import logger
+from fsm_llm.llm.json_extraction import extract_json_from_text
+from fsm_llm.logging import logger
 
 # Type alias for intent handler functions
 HandlerFn = Callable[[str, dict[str, str | None]], Any]

@@ -23,7 +23,6 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.classification import IntentRouter
 from fsm_llm.core.definitions import (
     ClassificationError,
     ClassificationResult,
@@ -32,6 +31,7 @@ from fsm_llm.core.definitions import (
     IntentScore,
     MultiClassificationResult,
 )
+from fsm_llm.engine.classification import IntentRouter
 
 # ---------------------------------------------------------------------------
 # Helpers

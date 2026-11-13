@@ -30,12 +30,12 @@ from typing import Any
 import litellm
 
 from fsm_llm import API, FileSessionStore
-from fsm_llm.classification import Classifier, HierarchicalClassifier
 from fsm_llm.core.definitions import (
     ClassificationSchema,
     HierarchicalSchema,
     IntentDefinition,
 )
+from fsm_llm.engine.classification import Classifier, HierarchicalClassifier
 from fsm_llm.memory import BUFFER_CORE, WorkingMemory
 from tests.conftest import ollama_available
 

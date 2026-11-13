@@ -16,7 +16,7 @@ from tests.test_fsm_llm.support import _blocked_fsm, _mock_llm
 
 
 def _c4_state(conv_id: str = "c") -> Any:
-    from fsm_llm.session import SessionState
+    from fsm_llm.engine.session import SessionState
 
     return SessionState(conversation_id=conv_id, fsm_id="f", current_state="s")
 
@@ -54,7 +54,7 @@ def _c5_clean_logging():
 
 class TestStep13C4C5:
     def test_c4_trailing_newline_id_rejected(self, tmp_path):
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.engine.session import FileSessionStore
 
         store = FileSessionStore(tmp_path)
         with pytest.raises(ValueError):
@@ -62,7 +62,7 @@ class TestStep13C4C5:
         assert list(tmp_path.iterdir()) == []
 
     def test_c4_enametoolong_load_exists_delete_soft(self, tmp_path):
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.engine.session import FileSessionStore
 
         store = FileSessionStore(tmp_path)
         long_id = "a" * 5000  # regex-valid, but the path is ENAMETOOLONG
@@ -71,7 +71,7 @@ class TestStep13C4C5:
         assert store.delete(long_id) is False
 
     def test_c4_list_sessions_filters_invalid_stems(self, tmp_path):
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.engine.session import FileSessionStore
 
         store = FileSessionStore(tmp_path)
         store.save("good", _c4_state("good"))
@@ -86,7 +86,7 @@ class TestStep13C4C5:
         # The file vanishes between an existence check and unlink (TOCTOU).
         from pathlib import Path
 
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.engine.session import FileSessionStore
 
         store = FileSessionStore(tmp_path)
         assert store.delete("never_saved") is False
@@ -99,7 +99,7 @@ class TestStep13C4C5:
     def test_c4_save_fsyncs_before_replace(self, tmp_path):
         import os as _os
 
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.engine.session import FileSessionStore
 
         store = FileSessionStore(tmp_path)
         calls: list[str] = []
@@ -114,8 +114,8 @@ class TestStep13C4C5:
             return real_replace(src, dst)
 
         with (
-            patch("fsm_llm.session.os.fsync", side_effect=_fsync),
-            patch("fsm_llm.session.os.replace", side_effect=_replace),
+            patch("fsm_llm.engine.session.os.fsync", side_effect=_fsync),
+            patch("fsm_llm.engine.session.os.replace", side_effect=_replace),
         ):
             store.save("durable", _c4_state("durable"))
         assert calls == ["fsync", "replace"]
@@ -194,7 +194,7 @@ class _SubDatetime(datetime.datetime):
 
 def _save_with(tmp_path: Any, values: dict[str, Any]) -> tuple[API, str, str]:
     """Start a conversation, put *values* into its context, save to disk."""
-    from fsm_llm.session import FileSessionStore
+    from fsm_llm.engine.session import FileSessionStore
 
     store = FileSessionStore(tmp_path)
     api = API.from_definition(
@@ -237,7 +237,7 @@ class TestStep6SessionSaveDefaultHook:
         assert saved["sub"] == "<redacted:_SubDatetime>"
 
     def test_exact_value_scalars_byte_identical_to_default_str(self, tmp_path):
-        from fsm_llm.session import SessionState
+        from fsm_llm.engine.session import SessionState
 
         scalars = {
             "when": datetime.datetime(2026, 1, 2, 3, 4, 5),
@@ -256,7 +256,7 @@ class TestStep6SessionSaveDefaultHook:
         assert text == old_bytes
 
     def test_restore_round_trip(self, tmp_path):
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.engine.session import FileSessionStore
 
         when = datetime.datetime(2026, 1, 2, 3, 4, 5)
         uid = uuid.UUID("12345678-1234-5678-1234-567812345678")

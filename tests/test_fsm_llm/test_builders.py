@@ -208,7 +208,7 @@ class TestAPIBuilder:
         assert "max_tokens" in exc.value.errors[1]
 
     def test_refuse_named_options_helper_on_toy_signature(self):
-        from fsm_llm.builders import refuse_named_options
+        from fsm_llm.engine.builders import refuse_named_options
 
         class Owner:
             def set_alpha(self):
@@ -317,7 +317,7 @@ class TestAPIBuilder:
             received.update(kwargs)
             return object()
 
-        monkeypatch.setattr("fsm_llm.builders.API", recorder)
+        monkeypatch.setattr("fsm_llm.engine.builders.API", recorder)
         d = _definition_dict()
         APIBuilder().set_definition(d).set_llm_interface(_mock_llm()).build()
         seen = received["fsm_definition"]
@@ -345,7 +345,7 @@ class TestAPIBuilder:
     def test_builders_module_does_not_import_litellm(self):
         import re
 
-        import fsm_llm.builders as mod
+        import fsm_llm.engine.builders as mod
 
         with open(mod.__file__, encoding="utf-8") as fh:
             assert not re.search(r"import litellm|from litellm", fh.read())

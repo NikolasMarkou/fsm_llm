@@ -27,9 +27,9 @@ from fsm_llm.context.layout import (
 )
 from fsm_llm.core.definitions import FieldExtractionConfig, FSMError, LLMResponseError
 from fsm_llm.engine.api.conversation import API
+from fsm_llm.engine.session import FileSessionStore, SessionState
 from fsm_llm.handlers import HandlerExecutionError, HandlerTiming, create_handler
 from fsm_llm.logging import logger
-from fsm_llm.session import FileSessionStore, SessionState
 from fsm_llm.testing import MockLLM2Interface
 
 # Deliberate reuse: ``test_pipeline_handler_contract`` already owns the minimal

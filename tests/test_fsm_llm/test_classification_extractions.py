@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from litellm.exceptions import RateLimitError
 
-from fsm_llm.classification import Classifier, HierarchicalClassifier
 from fsm_llm.constants import (
     MAX_MULTI_INTENTS,
     METADATA_KEY_CLASSIFICATION_RESULTS,
@@ -41,6 +40,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.engine.api.conversation import API
+from fsm_llm.engine.classification import Classifier, HierarchicalClassifier
 from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.handlers import HandlerSystem
@@ -1460,7 +1460,7 @@ class TestStep04A4:
         assert mirrored == {"error": "down", "fallback": True}
 
     def test_a4_session_save_restore_unaffected(self, tmp_path):
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.engine.session import FileSessionStore
 
         api = API.from_definition(
             _a3_extraction_fsm(),

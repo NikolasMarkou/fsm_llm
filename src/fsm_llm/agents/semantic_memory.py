@@ -379,7 +379,7 @@ class SemanticMemoryStore:
         # open the same temp path and the first os.replace consumes it out from
         # under the second. Measured at 1190/1200 (99.2%) FileNotFoundError in
         # the finding's probe, 196/400 (49%) in the pinned test below.
-        # `fsm_llm.session.FileSessionStore.save` is the REFERENCE
+        # `fsm_llm.engine.session.FileSessionStore.save` is the REFERENCE
         # implementation (D-011); `memory_persistence.save_working_memory` is
         # the second transplant (D-008). Do NOT "DRY this up" into a shared
         # cross-package helper without a maintainer decision -- D-001 declined

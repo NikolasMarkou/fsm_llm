@@ -15,7 +15,6 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from fsm_llm.classification import Classifier
 from fsm_llm.constants import (
     CLASSIFIER_HISTORY_EXCHANGES,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
@@ -36,6 +35,7 @@ from fsm_llm.core.definitions import (
     TransitionEvaluationResult,
     TransitionOption,
 )
+from fsm_llm.engine.classification import Classifier
 from fsm_llm.engine.kinds.records import (
     _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS,
     _classification_record,

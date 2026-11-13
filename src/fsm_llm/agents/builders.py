@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fsm_llm.builders import refuse_named_options
 from fsm_llm.core.definitions import BuildError
+from fsm_llm.engine.builders import refuse_named_options
 
 from . import create_agent
 from .definitions import (

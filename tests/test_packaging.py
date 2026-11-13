@@ -1225,7 +1225,7 @@ class TestExplicitEncodings:
         assert _unencoded_text_calls(good) == []
 
     def test_a_utf8_session_file_loads_under_the_c_locale(self, tmp_path):
-        """src/fsm_llm/session.py `load` read the file with the locale encoding."""
+        """src/fsm_llm/engine/session.py `load` read the file with the locale encoding."""
         session = {
             "conversation_id": "c1",
             "fsm_id": "f1",
@@ -1237,7 +1237,7 @@ class TestExplicitEncodings:
         )
         script = (
             "import locale, sys\n"
-            "from fsm_llm.session import FileSessionStore\n"
+            "from fsm_llm.engine.session import FileSessionStore\n"
             "assert sys.flags.utf8_mode == 0, 'UTF-8 mode is on'\n"
             "print(locale.getpreferredencoding(False))\n"
             "state = FileSessionStore(sys.argv[1]).load('s1')\n"

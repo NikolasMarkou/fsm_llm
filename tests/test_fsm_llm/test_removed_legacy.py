@@ -167,7 +167,7 @@ class TestRemovedCoreNames:
 
     def test_classification_module_does_not_reexport_intent_definition(self):
         with pytest.raises(ImportError):
-            from fsm_llm.classification import IntentDefinition  # noqa: F401
+            from fsm_llm.engine.classification import IntentDefinition  # noqa: F401
         from fsm_llm import IntentDefinition as public
         from fsm_llm.core.definitions import IntentDefinition as home
 

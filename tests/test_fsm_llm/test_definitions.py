@@ -130,7 +130,7 @@ class TestStep7VersionAndSessionDocs:
         assert get_version_info()["architecture"] == "2-pass"
 
     def test_p1_6_stack_depth_documented_as_advisory(self):
-        from fsm_llm.session import SessionState
+        from fsm_llm.engine.session import SessionState
 
         description = SessionState.model_fields["stack_depth"].description or ""
         assert "advisory" in description

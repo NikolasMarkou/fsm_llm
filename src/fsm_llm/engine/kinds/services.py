@@ -19,7 +19,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from fsm_llm.classification import Classifier
 from fsm_llm.context.layout import (
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
@@ -31,6 +30,7 @@ from fsm_llm.core.definitions import (
     FSMInstance,
     State,
 )
+from fsm_llm.engine.classification import Classifier
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import LLMInterface
 

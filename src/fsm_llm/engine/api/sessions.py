@@ -11,9 +11,9 @@ from __future__ import annotations
 from typing import Any
 
 from fsm_llm.core.definitions import FSMError
+from fsm_llm.engine.session import SessionState
 from fsm_llm.logging import logger
 from fsm_llm.memory import WorkingMemory
-from fsm_llm.session import SessionState
 
 from .surface import _ApiSurface
 

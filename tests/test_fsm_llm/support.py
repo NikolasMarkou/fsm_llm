@@ -9,7 +9,6 @@ from typing import Any, NamedTuple
 from unittest.mock import MagicMock, patch
 
 from fsm_llm import API
-from fsm_llm.classification import Classifier
 from fsm_llm.core.definitions import (
     ClassificationExtractionConfig,
     ClassificationResult,
@@ -25,6 +24,7 @@ from fsm_llm.core.definitions import (
     Transition,
     TransitionCondition,
 )
+from fsm_llm.engine.classification import Classifier
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 

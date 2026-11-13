@@ -29,9 +29,9 @@ from fsm_llm.core.definitions import (
     ResponseGenerationResponse,
     TransitionEvaluationResult,
 )
+from fsm_llm.engine.session import FileSessionStore
 from fsm_llm.llm import LLMInterface
 from fsm_llm.memory import WorkingMemory
-from fsm_llm.session import FileSessionStore
 from fsm_llm.testing import MockLLM2Interface
 from tests.test_fsm_llm.support import _TWO_STATE
 

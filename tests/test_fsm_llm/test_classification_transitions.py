@@ -2,7 +2,7 @@
 Tests for classification-aware transition resolution.
 
 Tests that when a State has ``transition_classification`` enabled, the
-MessagePipeline uses Classifier (from fsm_llm.classification) to resolve
+MessagePipeline uses Classifier (from fsm_llm.engine.classification) to resolve
 AMBIGUOUS transitions instead of the raw LLM prompt.
 """
 
@@ -39,8 +39,7 @@ def configure_mock_extract_field(mock_llm, mock_data=None):
 
 from loguru import logger
 
-import fsm_llm.classification as classification_module
-from fsm_llm.classification import Classifier, HierarchicalClassifier
+import fsm_llm.engine.classification as classification_module
 from fsm_llm.constants import (
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
     MAX_CLASSIFIER_CACHE_SIZE,
@@ -81,6 +80,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.engine.api.conversation import API
+from fsm_llm.engine.classification import Classifier, HierarchicalClassifier
 from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.handlers import HandlerSystem, HandlerTiming
@@ -1213,7 +1213,7 @@ class TestClassificationExtractionWithoutUserMessage:
     """``classification_extractions`` on a turn with no user message."""
 
     def test_context_only_prompt_and_cached_message_prompt_untouched(self):
-        from fsm_llm.classification import Classifier
+        from fsm_llm.engine.classification import Classifier
 
         schema = _schema("act", "done")
         with _StructuredProvider("act") as provider:
@@ -2273,8 +2273,8 @@ class TestStep12Renames:
     def test_classifier_method_keeps_its_name_without_warning(self):
         import warnings
 
-        from fsm_llm.classification import Classifier
         from fsm_llm.core.definitions import ClassificationSchema, IntentDefinition
+        from fsm_llm.engine.classification import Classifier
 
         clf = Classifier(
             schema=ClassificationSchema(

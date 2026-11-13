@@ -13,17 +13,6 @@ import warnings
 from functools import lru_cache
 
 from .__version__ import __version__
-from .builders import APIBuilder, FSMManagerBuilder
-
-# --------------------------------------------------------------
-# Core Definitions and Models
-# --------------------------------------------------------------
-from .classification import (
-    Classifier,
-    HandlerFn,
-    HierarchicalClassifier,
-    IntentRouter,
-)
 
 # --------------------------------------------------------------
 # Context Utilities
@@ -146,7 +135,23 @@ from .core.visualize import (
 # --------------------------------------------------------------
 from .engine.api.conversation import API
 from .engine.api.stack import ContextMergeStrategy
+from .engine.builders import APIBuilder, FSMManagerBuilder
+
+# --------------------------------------------------------------
+# Intent Classification
+# --------------------------------------------------------------
+from .engine.classification import (
+    Classifier,
+    HandlerFn,
+    HierarchicalClassifier,
+    IntentRouter,
+)
 from .engine.fsm.manager import FSMManager
+
+# --------------------------------------------------------------
+# Session Persistence
+# --------------------------------------------------------------
+from .engine.session import FileSessionStore, SessionState, SessionStore
 
 # --------------------------------------------------------------
 # Explicit .env loading (opt-in; importing fsm_llm reads no .env file)
@@ -189,11 +194,6 @@ from .memory import (
     DEFAULT_HIDDEN_BUFFERS,
     WorkingMemory,
 )
-
-# --------------------------------------------------------------
-# Session Persistence
-# --------------------------------------------------------------
-from .session import FileSessionStore, SessionState, SessionStore
 
 # --------------------------------------------------------------
 # Public API Definition

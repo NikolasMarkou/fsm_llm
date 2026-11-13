@@ -117,6 +117,7 @@ from fsm_llm.core.transition_evaluator import (
 )
 from fsm_llm.engine.fsm.manager import FSMManager
 from fsm_llm.engine.kinds import StateExecutor
+from fsm_llm.engine.session import SessionStore
 from fsm_llm.handlers import (
     BaseHandler,
     FSMHandler,
@@ -134,7 +135,6 @@ from fsm_llm.llm import (
     resolve_model,
 )
 from fsm_llm.logging import logger
-from fsm_llm.session import SessionStore
 
 from .helpers import _require_classifier_interface, _unexpected_error
 from .lifecycle import MAX_ENDED_CONVERSATIONS_CACHE, LifecycleMixin

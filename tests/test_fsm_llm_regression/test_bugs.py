@@ -469,7 +469,7 @@ class TestTransitionSubstringMatching:
 
     def test_classification_replaces_raw_llm_transition(self):
         """Classification is now the only path for ambiguous transitions."""
-        from fsm_llm.classification import Classifier
+        from fsm_llm.engine.classification import Classifier
 
         assert hasattr(Classifier, "classify")
 

@@ -18,9 +18,9 @@ if TYPE_CHECKING:
 
     from fsm_llm.core.definitions import AdvanceResult, FSMDefinition
     from fsm_llm.engine.fsm.manager import FSMManager
+    from fsm_llm.engine.session import SessionStore
     from fsm_llm.handlers import HandlerSystem
     from fsm_llm.llm import LLMInterface
-    from fsm_llm.session import SessionStore
 
     from .stack import FSMStackFrame
 

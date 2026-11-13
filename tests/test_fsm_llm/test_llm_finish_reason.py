@@ -17,7 +17,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from litellm.types.utils import Choices, Message, ModelResponse
 
-from fsm_llm.classification import Classifier
 from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     ClassificationResponseError,
@@ -27,6 +26,7 @@ from fsm_llm.core.definitions import (
     LLMResponseError,
     ResponseGenerationRequest,
 )
+from fsm_llm.engine.classification import Classifier
 from fsm_llm.llm import LiteLLMInterface, cut_off_note
 from fsm_llm.llm.parsing import _finish_reason
 from fsm_llm.logging import logger

@@ -983,9 +983,9 @@ class TestDefaultModel:
 
     def test_model_less_api_and_classifier_raise(self, monkeypatch):
         from fsm_llm import API, ModelNotConfiguredError
-        from fsm_llm.classification import Classifier
         from fsm_llm.constants import ENV_LLM_MODEL
         from fsm_llm.core.definitions import ClassificationSchema, IntentDefinition
+        from fsm_llm.engine.classification import Classifier
 
         monkeypatch.delenv(ENV_LLM_MODEL, raising=False)
         fsm = {

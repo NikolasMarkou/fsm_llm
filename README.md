@@ -537,7 +537,7 @@ fsm_llm/
 │   ├── core/verify/flow.py    # Data-flow and liveness analysis of an FSM
 │   ├── llm/                   # The only module that imports litellm (`__init__.py`), reply-text helpers
 │   ├── context/               # Context cleaning, compaction, filtering and redaction
-│   ├── classification.py      # Classifier, intent routing
+│   ├── engine/classification.py, session.py, builders.py   # Classifier, session store, API/FSMManager builders
 │   ├── security/, constants.py   # Key filtering, path confinement, limits
 │   ├── okf.py, okf_bridge.py, okf_cli.py   # Open Knowledge Format
 │   ├── agent_skills.py, agent_skills_cli.py   # Agent Skills (read-only)

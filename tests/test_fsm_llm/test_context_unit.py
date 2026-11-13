@@ -5197,7 +5197,7 @@ class TestStep08_1:
         assert api.get_data(conv_id) == _d3_1_expected()
 
     def test_d3_save_session_round_trips_large_context(self, tmp_path):
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.engine.session import FileSessionStore
 
         api = API.from_definition(
             _a7_fsm(),
@@ -5425,7 +5425,7 @@ class TestStep08_2:
         assert calls[0] < 1000, calls[0]
 
     def test_d3_cycle_elsewhere_api_surface(self, tmp_path):
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.engine.session import FileSessionStore
 
         api = API.from_definition(
             _a7_fsm(),

@@ -1,7 +1,7 @@
 """
 Persistence for agent WorkingMemory.
 
-``fsm_llm.session.FileSessionStore`` persists FSM conversation state but NOT an
+``fsm_llm.engine.session.FileSessionStore`` persists FSM conversation state but NOT an
 agent's :class:`~fsm_llm.memory.WorkingMemory` (only the flat ``context_data``
 dict is saved). So even when an agent correctly calls ``remember``, those facts
 are lost on process restart. This module closes that gap additively:
@@ -23,13 +23,13 @@ import tempfile
 from pathlib import Path
 
 from fsm_llm.context.filtering import redacting_json_default
-from fsm_llm.memory import WorkingMemory
-from fsm_llm.session import (
+from fsm_llm.engine.session import (
     SESSION_ID_RE,
     FileSessionStore,
     SessionState,
     SessionStore,
 )
+from fsm_llm.memory import WorkingMemory
 
 
 def _check_id(session_id: str) -> None:
@@ -56,7 +56,7 @@ def save_working_memory(memory: WorkingMemory, path: str) -> None:
     # Do NOT collapse this back to a fixed `f"{target}.tmp"` name. That shape
     # was measured at 562/1200 (47%) FileNotFoundError under 4 threads saving
     # one session: two writers share the temp path, and the first os.replace
-    # consumes it out from under the second. `fsm_llm.session.FileSessionStore.
+    # consumes it out from under the second. `fsm_llm.engine.session.FileSessionStore.
     # save` is the reference implementation — keep the two in lockstep; this
     # file already regressed that fix once. The finally-with-exists-check (not
     # `except OSError`) is what cleans up on ANY failure, not just OSError.

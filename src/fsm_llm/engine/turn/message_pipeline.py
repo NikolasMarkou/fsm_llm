@@ -22,7 +22,6 @@ import threading
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from fsm_llm.classification import Classifier
 from fsm_llm.constants import (
     PROVENANCE_METADATA_KEY,
     RESERVED_CONTEXT_KEYS,
@@ -40,6 +39,7 @@ from fsm_llm.core.definitions import (
     StateNotFoundError,
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.classification import Classifier
 from fsm_llm.engine.kinds import StateExecutor, check_executors
 from fsm_llm.handlers import HandlerSystem, HandlerTiming
 from fsm_llm.llm import LLMInterface

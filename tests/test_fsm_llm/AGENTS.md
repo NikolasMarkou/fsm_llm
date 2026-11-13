@@ -5,7 +5,7 @@ Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass 
 
 ## Scope
 
-In: tests of the core modules in `src/fsm_llm/` (`engine/api/`, `engine/fsm/`, `engine/turn/` (the old `pipeline.py`), `core/transition_evaluator.py`, `core/expressions/`, `classification.py`, `context/` (`context/layout/` is the old `prompts.py`), `llm/`, `ollama.py`, `handlers/`, `memory.py`, `session.py`, `core/verify/` (the validator, `flow.py`), `core/visualize/` (the visualizer), `runner.py`, `context/filtering.py`, `llm/text.py`, `llm/json_extraction.py`, `core/coerce.py`, `core/loaders.py`, `logging.py`, `constants.py`), plus `fixtures/` (labelled secret-filter corpora).
+In: tests of the core modules in `src/fsm_llm/` (`engine/api/`, `engine/fsm/`, `engine/turn/` (the old `pipeline.py`), `core/transition_evaluator.py`, `core/expressions/`, `engine/classification.py`, `context/` (`context/layout/` is the old `prompts.py`), `llm/`, `ollama.py`, `handlers/`, `memory.py`, `engine/session.py`, `core/verify/` (the validator, `flow.py`), `core/visualize/` (the visualizer), `runner.py`, `context/filtering.py`, `llm/text.py`, `llm/json_extraction.py`, `core/coerce.py`, `core/loaders.py`, `logging.py`, `constants.py`), plus `fixtures/` (labelled secret-filter corpora).
 
 Out: the subpackages `fsm_llm.agents`, `.reasoning`, `.workflows`, `.monitor`, `.eval`, `.synthesis` have their own suites under `tests/test_fsm_llm_<name>/`. A few tests here still import from them (see Dependencies).
 

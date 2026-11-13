@@ -12,7 +12,6 @@ import threading
 from collections.abc import Callable, Iterator, Mapping
 from typing import TYPE_CHECKING, Any
 
-from fsm_llm.classification import Classifier
 from fsm_llm.context.layout import (
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,
@@ -27,6 +26,7 @@ from fsm_llm.core.definitions import (
     State,
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.classification import Classifier
 from fsm_llm.engine.kinds import StateExecutor
 from fsm_llm.handlers import HandlerSystem, HandlerTiming
 from fsm_llm.llm import LLMInterface

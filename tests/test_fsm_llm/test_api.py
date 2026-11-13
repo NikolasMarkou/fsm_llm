@@ -1696,7 +1696,7 @@ class _OneSessionStore:
 
 
 def _saved_state(api: API, **overrides: Any) -> Any:
-    from fsm_llm.session import SessionState
+    from fsm_llm.engine.session import SessionState
 
     fields: dict[str, Any] = {
         "conversation_id": "saved",

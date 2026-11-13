@@ -24,7 +24,6 @@ from pydantic import ValidationError
 import fsm_llm
 import fsm_llm.llm as llm_module
 from fsm_llm import constants
-from fsm_llm.classification import Classifier
 from fsm_llm.constants import RESERVED_LLM_CALL_KWARGS
 from fsm_llm.core.definitions import (
     CompletionRequest,
@@ -36,6 +35,7 @@ from fsm_llm.core.definitions import (
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
+from fsm_llm.engine.classification import Classifier
 from fsm_llm.llm import (
     LiteLLMInterface,
     LLMInterface,

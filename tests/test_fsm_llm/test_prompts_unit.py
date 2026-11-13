@@ -1711,7 +1711,7 @@ class TestStep06A6:
             assert prompt.count("</conversation_summary>") == 1
 
     def test_a6_session_round_trip_keeps_summary(self, tmp_path):
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.engine.session import FileSessionStore
 
         api, conv_id, llm = _a6_api(FileSessionStore(tmp_path))
         api.converse("my secret word is pineapple", conv_id)
@@ -1735,7 +1735,7 @@ class TestStep06A6:
         assert "pineapple" in _a6_block(_a6_last_prompt(llm.generate_response))
 
     def test_a6_legacy_session_without_summary_restores(self, tmp_path):
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.engine.session import FileSessionStore
 
         api, conv_id, _ = _a6_api(FileSessionStore(tmp_path))
         api.converse("hello", conv_id)
@@ -1758,7 +1758,7 @@ class TestStep06A6:
     def test_a6_restore_into_smaller_history_keeps_both_digests(self, tmp_path):
         """D-029: the saved summary is seeded before replay, so exchanges the
         replay trims (smaller ``max_history_size``) are appended after it."""
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.engine.session import FileSessionStore
 
         store = FileSessionStore(tmp_path)
         saver = API.from_definition(

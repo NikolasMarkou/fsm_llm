@@ -15,10 +15,11 @@ import os
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, TypeVar
 
-from .core.definitions import BuildError, FSMDefinition
-from .engine.api.conversation import API
-from .engine.fsm.manager import FSMManager
-from .handlers import HandlerErrorMode
+from fsm_llm.core.definitions import BuildError, FSMDefinition
+from fsm_llm.handlers import HandlerErrorMode
+
+from .api.conversation import API
+from .fsm.manager import FSMManager
 
 _T = TypeVar("_T")
 

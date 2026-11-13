@@ -115,6 +115,8 @@
       "handle_conversation_errors": "fsm_llm.engine.api.helpers",
       "llm_settings_for": "fsm_llm.engine.api.helpers"
     },
+    "fsm_llm.builders": "fsm_llm.engine.builders",
+    "fsm_llm.classification": "fsm_llm.engine.classification",
     "fsm_llm.codes": "fsm_llm.core.codes",
     "fsm_llm.context": {
       "ContextCompactor": "fsm_llm.context.compactor",
@@ -475,6 +477,7 @@
       "presented_api_key": "fsm_llm.security.api_keys",
       "resolve_within": "fsm_llm.security.paths"
     },
+    "fsm_llm.session": "fsm_llm.engine.session",
     "fsm_llm.state_kinds": "fsm_llm.core.state_kinds",
     "fsm_llm.transition_evaluator": "fsm_llm.core.transition_evaluator",
     "fsm_llm.utilities": {
@@ -643,8 +646,6 @@
     "fsm_llm.agents.tools",
     "fsm_llm.agents.truncation",
     "fsm_llm.agents.verified_react",
-    "fsm_llm.builders",
-    "fsm_llm.classification",
     "fsm_llm.cli_support",
     "fsm_llm.constants",
     "fsm_llm.context.layout",
@@ -712,7 +713,6 @@
     "fsm_llm.reasoning.handlers",
     "fsm_llm.reasoning.utilities",
     "fsm_llm.runner",
-    "fsm_llm.session",
     "fsm_llm.synthesis",
     "fsm_llm.synthesis.__version__",
     "fsm_llm.synthesis.constants",

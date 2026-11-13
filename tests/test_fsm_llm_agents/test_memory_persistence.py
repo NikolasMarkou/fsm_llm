@@ -12,8 +12,8 @@ from fsm_llm.agents import (
     load_working_memory,
     save_working_memory,
 )
+from fsm_llm.engine.session import SessionState
 from fsm_llm.memory import BUFFER_CORE, WorkingMemory
-from fsm_llm.session import SessionState
 
 
 def _memory():
@@ -76,7 +76,7 @@ class _SecretBearing:
 
 class TestSaveNeverStrsArbitraryObjects:
     """plan-2026-09-22T080837-8b258a25 D-039: the WorkingMemory file writer
-    shares ``fsm_llm.session``'s default hook instead of ``default=str``."""
+    shares ``fsm_llm.engine.session``'s default hook instead of ``default=str``."""
 
     def test_object_is_written_as_a_type_placeholder(self, tmp_path):
         import datetime
@@ -149,7 +149,7 @@ class TestSessionIdAndDurabilityParityWithFileSessionStore:
 
     @pytest.mark.parametrize("bad", ["abc\n", "abc\n\n", "\n"])
     def test_a_trailing_newline_is_refused_like_the_file_store(self, tmp_path, bad):
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.engine.session import FileSessionStore
 
         with pytest.raises(ValueError):
             FileSessionStore(str(tmp_path))._path(bad)
@@ -244,7 +244,7 @@ class TestSessionPathValidation:
         """Valid session IDs are accepted."""
         import tempfile
 
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.engine.session import FileSessionStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileSessionStore(tmpdir)
@@ -257,7 +257,7 @@ class TestSessionPathValidation:
         """Session IDs with path traversal patterns are rejected."""
         import tempfile
 
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.engine.session import FileSessionStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileSessionStore(tmpdir)
@@ -268,7 +268,7 @@ class TestSessionPathValidation:
         """Session IDs with slashes are rejected."""
         import tempfile
 
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.engine.session import FileSessionStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileSessionStore(tmpdir)
@@ -279,7 +279,7 @@ class TestSessionPathValidation:
         """Session IDs with null bytes are rejected."""
         import tempfile
 
-        from fsm_llm.session import FileSessionStore
+        from fsm_llm.engine.session import FileSessionStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileSessionStore(tmpdir)
