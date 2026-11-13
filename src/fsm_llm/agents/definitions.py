@@ -367,15 +367,6 @@ class AgentResult(BaseModel):
         return self.answer
 
 
-class ApprovalRequest(BaseModel):
-    """A request for human approval before an action."""
-
-    tool_name: str
-    parameters: dict[str, Any] = Field(default_factory=dict)
-    reasoning: str = ""
-    context_summary: dict[str, Any] = Field(default_factory=dict)
-
-
 # ---------------------------------------------------------------------------
 # Pattern-specific models
 # ---------------------------------------------------------------------------

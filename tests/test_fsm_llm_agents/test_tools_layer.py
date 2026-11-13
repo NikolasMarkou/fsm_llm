@@ -179,6 +179,7 @@ class TestOldPathsAreGone:
         assert defined == {
             "normalize_tool_input",
             "tool_call_from_context",
+            "make_hitl_checker",  # step 86: the agent-side approval gate, D-037
             "refuse_execute_without_gated",
             "register_agent",
         }

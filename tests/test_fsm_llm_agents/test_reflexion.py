@@ -123,7 +123,7 @@ class TestReflexionAgentCreation:
         assert agent.max_reflections == Defaults.MAX_REFLECTIONS
 
     def test_create_with_hitl(self):
-        from fsm_llm.agents.hitl import HumanInTheLoop
+        from fsm_llm.policy import HumanInTheLoop
 
         registry = _make_registry()
         hitl = HumanInTheLoop(

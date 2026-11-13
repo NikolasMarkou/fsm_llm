@@ -126,6 +126,7 @@ LAYER_PACKAGES: frozenset[str] = frozenset(
         "handlers",
         "llm",
         "okf",
+        "policy",
         "security",
         "skills",
         "tools",

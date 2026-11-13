@@ -21,14 +21,6 @@ class BudgetExhaustedError(AgentError):
         self.limit = limit
 
 
-class ApprovalDeniedError(AgentError):
-    """Human denied approval for an agent action."""
-
-    def __init__(self, action_description: str):
-        super().__init__(f"Approval denied for action: {action_description}")
-        self.action_description = action_description
-
-
 class AgentTimeoutError(AgentError):
     """Agent exceeded its time budget."""
 

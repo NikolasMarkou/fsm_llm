@@ -542,6 +542,7 @@ fsm_llm/
 │   ├── okf/, text.py                       # Open Knowledge Format, text helpers (okf_bridge is engine/okf_bridge.py)
 │   ├── skills/                # Agent Skills (read-only), the fsm-llm-skills command
 │   ├── tools/                 # Tool registry, tool models and the @tool decorator (re-exported by agents)
+│   ├── policy/                # Approval policy and the human-in-the-loop manager (re-exported by agents)
 │   ├── frontmatter.py         # The one YAML frontmatter loader
 │   ├── reasoning/             # 9 strategies as stacked FSMs
 │   ├── workflows/             # Async workflow engine, 11 step types, DSL

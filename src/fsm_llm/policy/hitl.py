@@ -1,8 +1,10 @@
 """
-Human-in-the-Loop (HITL) support for agent patterns.
+Human-in-the-Loop (HITL) manager of the policy layer.
 
 Provides approval gates, confidence-based escalation, and human override
-mechanisms that integrate with the agent FSM via handlers and context.
+mechanisms: ``HumanInTheLoop`` decides whether a tool call needs approval, asks a
+human and escalates. Agents wire it into their FSM through handlers and context
+(``fsm_llm.agents``); this module knows nothing about an agent run.
 """
 
 from __future__ import annotations
@@ -10,7 +12,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from fsm_llm.agents.constants import ContextKeys, Defaults, LogMessages
 from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
 from fsm_llm.logging import logger
 from fsm_llm.tools import (
@@ -21,14 +22,16 @@ from fsm_llm.tools import (
     redact_secret_entries,
 )
 
-from .definitions import ApprovalRequest
-from .exceptions import ApprovalDeniedError
-from .tools import tool_call_from_context
+from .approval import (
+    ApprovalCallback,
+    ApprovalDeniedError,
+    ApprovalPolicy,
+    ApprovalRequest,
+)
+from .constants import Defaults, LogMessages
 
 # Type aliases
-ApprovalCallback = Callable[[ApprovalRequest], bool]
 EscalationCallback = Callable[[str, dict[str, Any]], None]
-ApprovalPolicy = Callable[[ToolCall, dict[str, Any]], bool]
 
 
 class HumanInTheLoop:
@@ -182,30 +185,3 @@ class HumanInTheLoop:
     def has_approval_callback(self) -> bool:
         """Whether an approval callback is configured."""
         return self._approval_callback is not None
-
-
-def make_hitl_checker(
-    hitl: HumanInTheLoop,
-    policy: ApprovalPolicy | None = None,
-) -> Callable[[dict[str, Any]], dict[str, Any]]:
-    """Create a reusable HITL approval checker handler.
-
-    Returns a handler function that checks whether the current tool call
-    requires human approval based on *policy* (default: the HITL policy,
-    ``hitl.requires_approval``).  Agents pass their shared approval predicate
-    so the gate, the ``await_approval`` state and the refusal agree.  Intended
-    to be registered as a ``CONTEXT_UPDATE`` handler on the ``TOOL_NAME`` key.
-    """
-    decide: ApprovalPolicy = policy if policy is not None else hitl.requires_approval
-
-    def check_approval(context: dict[str, Any]) -> dict[str, Any]:
-        tool_name = context.get(ContextKeys.TOOL_NAME)
-        if not tool_name or tool_name == ContextKeys.NO_TOOL:
-            return {}
-
-        if decide(tool_call_from_context(context), context):
-            return {ContextKeys.APPROVAL_REQUIRED: True}
-
-        return {ContextKeys.APPROVAL_REQUIRED: False}
-
-    return check_approval

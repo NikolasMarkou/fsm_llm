@@ -18,8 +18,9 @@ from unittest.mock import patch
 import pytest
 
 from fsm_llm.agents.constants import ContextKeys, Defaults
-from fsm_llm.agents.definitions import ApprovalRequest, EvaluationResult
+from fsm_llm.agents.definitions import EvaluationResult
 from fsm_llm.logging import enable_library_logging, logger
+from fsm_llm.policy import ApprovalRequest
 from fsm_llm.tools import ToolCall, ToolDefinition, ToolRegistry
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "fsm_llm"
@@ -141,7 +142,7 @@ class TestTimedApprovalRunsLikeATimedTool:
         return ToolCall(tool_name="send", parameters={})
 
     def test_a_context_variable_reaches_the_callback(self):
-        from fsm_llm.agents.hitl import HumanInTheLoop
+        from fsm_llm.policy import HumanInTheLoop
 
         request_id = contextvars.ContextVar("request_id", default="unset")
         seen: list[str] = []
@@ -156,7 +157,7 @@ class TestTimedApprovalRunsLikeATimedTool:
         assert seen == ["request-42"]
 
     def test_system_exit_is_raised_not_a_false_timeout(self):
-        from fsm_llm.agents.hitl import HumanInTheLoop
+        from fsm_llm.policy import HumanInTheLoop
 
         def closed(_request: ApprovalRequest) -> bool:
             raise SystemExit(0)
@@ -171,7 +172,7 @@ class TestTimedApprovalRunsLikeATimedTool:
     def test_a_bad_timeout_is_refused_at_construction(self, timeout):
         """REVIEW-C9: a misconfiguration fails when the object is built, with
         the predicate ``call_with_timeout`` uses, not at the first gated call."""
-        from fsm_llm.agents.hitl import HumanInTheLoop
+        from fsm_llm.policy import HumanInTheLoop
         from fsm_llm.tools import ToolExecutionError
 
         with pytest.raises(ToolExecutionError):
@@ -180,7 +181,7 @@ class TestTimedApprovalRunsLikeATimedTool:
             )
 
     def test_a_timeout_set_later_is_still_refused_not_a_silent_denial(self):
-        from fsm_llm.agents.hitl import HumanInTheLoop
+        from fsm_llm.policy import HumanInTheLoop
         from fsm_llm.tools import ToolExecutionError
 
         hitl = HumanInTheLoop(
@@ -192,7 +193,7 @@ class TestTimedApprovalRunsLikeATimedTool:
 
     @pytest.mark.parametrize("timeout", [None, 0.5, 5, 60.0])
     def test_a_good_timeout_or_none_constructs(self, timeout):
-        from fsm_llm.agents.hitl import HumanInTheLoop
+        from fsm_llm.policy import HumanInTheLoop
 
         HumanInTheLoop(approval_timeout=timeout)
 
@@ -221,7 +222,7 @@ class TestTimedApprovalRunsLikeATimedTool:
     def test_an_integer_like_timeout_that_the_old_code_took_constructs(self):
         """REVIEW2-C3: pre-plan ``thread.join(timeout=np.int64(5))`` worked;
         the shared predicate refused it. ``float`` and ``Integral`` pass."""
-        from fsm_llm.agents.hitl import HumanInTheLoop
+        from fsm_llm.policy import HumanInTheLoop
         from fsm_llm.tools import check_timeout
 
         check_timeout("t", self._integer_like(5))
@@ -233,7 +234,7 @@ class TestTimedApprovalRunsLikeATimedTool:
 
     def test_a_real_numpy_scalar_timeout_constructs_when_numpy_is_installed(self):
         np = pytest.importorskip("numpy")
-        from fsm_llm.agents.hitl import HumanInTheLoop
+        from fsm_llm.policy import HumanInTheLoop
 
         for value in (np.int64(5), np.float64(5.0)):
             HumanInTheLoop(approval_timeout=value)
@@ -260,7 +261,7 @@ class TestTimedApprovalRunsLikeATimedTool:
         import decimal
         import fractions
 
-        from fsm_llm.agents.hitl import HumanInTheLoop
+        from fsm_llm.policy import HumanInTheLoop
         from fsm_llm.tools import ToolExecutionError
 
         value = decimal.Decimal(5) if kind == "decimal" else fractions.Fraction(5)

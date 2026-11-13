@@ -24,6 +24,7 @@ from fsm_llm.agents.constants import (
 )
 from fsm_llm.agents.fsm_definitions.reflexion import build_reflexion_fsm
 from fsm_llm.logging import logger
+from fsm_llm.policy import HumanInTheLoop
 from fsm_llm.tools import ToolRegistry, require_int_limit
 
 from .base import BaseAgent, caller_prompt_keys
@@ -34,7 +35,6 @@ from .definitions import (
     ReflexionMemory,
 )
 from .handlers import AgentHandlers, make_fresh_keys_handler, run_evaluation_fn
-from .hitl import HumanInTheLoop
 
 # The verdict keys evaluate produces (cleared on evaluate entry).
 _EVALUATION_KEYS = (

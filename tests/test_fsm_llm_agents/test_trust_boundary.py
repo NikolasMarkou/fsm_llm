@@ -25,7 +25,6 @@ from fsm_llm.agents.constants import RUN_OUTPUT_KEYS, ContextKeys
 from fsm_llm.agents.debate import DebateAgent
 from fsm_llm.agents.definitions import AgentConfig, AgentResult, EvaluationResult
 from fsm_llm.agents.evaluator_optimizer import EvaluatorOptimizerAgent
-from fsm_llm.agents.hitl import HumanInTheLoop
 from fsm_llm.agents.maker_checker import MakerCheckerAgent
 from fsm_llm.agents.native_fc import NativeFunctionCallingReactAgent
 from fsm_llm.agents.react import ReactAgent
@@ -41,6 +40,7 @@ from fsm_llm.core.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
+from fsm_llm.policy import HumanInTheLoop
 from fsm_llm.tools import ToolCall, ToolRegistry
 from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 

@@ -58,7 +58,7 @@ from fsm_llm.agents import (
 from fsm_llm.agents import constants as agent_constants
 from fsm_llm.agents.base import BaseAgent
 from fsm_llm.agents.constants import RUN_OUTPUT_KEYS, ContextKeys, StopReason
-from fsm_llm.agents.definitions import AgentResult, ApprovalRequest, EvaluationResult
+from fsm_llm.agents.definitions import AgentResult, EvaluationResult
 from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
 from fsm_llm.agents.fsm_definitions import (
     build_adapt_fsm,
@@ -86,6 +86,7 @@ from fsm_llm.core.definitions import (
     FSMDefinition,
     RunBudgetExceededError,
 )
+from fsm_llm.policy import ApprovalRequest
 from fsm_llm.testing import PromptGroundedLLM, state_in_prompt
 from tests.conftest import bind_api_clock
 from tests.test_fsm_llm_agents.test_grounded_patterns import _TurnAwareLLM

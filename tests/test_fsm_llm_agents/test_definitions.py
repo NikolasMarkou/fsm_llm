@@ -5,13 +5,8 @@ from __future__ import annotations
 import pytest
 
 from fsm_llm.agents.constants import Defaults
-from fsm_llm.agents.definitions import (
-    AgentConfig,
-    AgentResult,
-    AgentStep,
-    AgentTrace,
-    ApprovalRequest,
-)
+from fsm_llm.agents.definitions import AgentConfig, AgentResult, AgentStep, AgentTrace
+from fsm_llm.policy import ApprovalRequest
 from fsm_llm.tools import ToolCall, ToolDefinition, ToolResult
 
 

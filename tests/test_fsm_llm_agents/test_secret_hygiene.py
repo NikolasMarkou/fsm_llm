@@ -20,9 +20,8 @@ from unittest.mock import patch
 import pytest
 
 from fsm_llm.agents.constants import ContextKeys
-from fsm_llm.agents.definitions import AgentConfig, ApprovalRequest
+from fsm_llm.agents.definitions import AgentConfig
 from fsm_llm.agents.handlers import AgentHandlers
-from fsm_llm.agents.hitl import HumanInTheLoop
 from fsm_llm.agents.memory_tools import create_memory_tools
 from fsm_llm.agents.native_fc import NativeFunctionCallingReactAgent
 from fsm_llm.agents.parallel_react import ParallelReactAgent
@@ -30,6 +29,7 @@ from fsm_llm.agents.rewoo import REWOOAgent
 from fsm_llm.core.definitions import CompletionResponse, ModelToolCall
 from fsm_llm.logging import logger
 from fsm_llm.memory import BUFFER_CORE, BUFFER_METADATA, WorkingMemory
+from fsm_llm.policy import ApprovalRequest, HumanInTheLoop
 from fsm_llm.tools import ToolCall, ToolRegistry, redact_secret_entries
 from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 

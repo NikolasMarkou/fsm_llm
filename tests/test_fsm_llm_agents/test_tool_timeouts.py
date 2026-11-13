@@ -24,9 +24,9 @@ from fsm_llm.agents import (
 )
 from fsm_llm.agents.constants import ContextKeys, StopReason, ToolRunStatus
 from fsm_llm.agents.handlers import AgentHandlers
-from fsm_llm.agents.hitl import HumanInTheLoop
 from fsm_llm.agents.parallel_react import ParallelReactAgent
 from fsm_llm.agents.tool_registries import RetryingToolRegistry
+from fsm_llm.policy import HumanInTheLoop
 from fsm_llm.testing import PromptGroundedLLM
 from fsm_llm.tools import ToolCall, ToolDefinition, ToolRegistry, ToolResult
 from tests.test_fsm_llm_agents import test_native_fc_golden as golden

@@ -51,6 +51,7 @@ from fsm_llm.engine.api.helpers import llm_settings_for
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm.json_extraction import extract_json_from_text
 from fsm_llm.logging import logger
+from fsm_llm.policy import ApprovalPolicy, HumanInTheLoop
 from fsm_llm.tools import ToolCall, ToolRegistry
 
 from .definitions import AgentConfig, AgentResult, AgentTrace, default_agent_config
@@ -64,9 +65,8 @@ from .handlers import (
     recorded_forced_reason,
     refusal_record,
 )
-from .hitl import ApprovalPolicy, HumanInTheLoop, make_hitl_checker
 from .summarization import make_observation_summarizer
-from .tools import tool_call_from_context
+from .tools import make_hitl_checker, tool_call_from_context
 
 
 def _with_instructions(

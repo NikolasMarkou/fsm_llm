@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-"""Tests for fsm_llm.agents.hitl module."""
+"""Tests for fsm_llm.policy.hitl module."""
 
 from unittest.mock import MagicMock
 
 from fsm_llm.agents import ReactAgent, SelfConsistencyAgent
-from fsm_llm.agents.definitions import ApprovalRequest
-from fsm_llm.agents.hitl import HumanInTheLoop
+from fsm_llm.policy import ApprovalRequest, HumanInTheLoop
 from fsm_llm.testing import PromptGroundedLLM
 from fsm_llm.tools import ToolCall
 

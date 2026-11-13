@@ -31,6 +31,14 @@ from __future__ import annotations
 from fsm_llm.agents.constants import StopReason
 from fsm_llm.agents.fsm_definitions.parallel_react import build_parallel_react_fsm
 from fsm_llm.core.definitions import AgentError
+from fsm_llm.policy import (
+    ApprovalCallback,
+    ApprovalDeniedError,
+    ApprovalPolicy,
+    ApprovalRequest,
+    EscalationCallback,
+    HumanInTheLoop,
+)
 from fsm_llm.tools import (
     ToolAnnotations,
     ToolCall,
@@ -61,7 +69,6 @@ from .definitions import (
     AgentResult,
     AgentStep,
     AgentTrace,
-    ApprovalRequest,
     ArtifactType,
     BuildProgress,
     ChainStep,
@@ -78,19 +85,12 @@ from .definitions import (
 from .evaluator_optimizer import EvaluatorOptimizerAgent
 from .exceptions import (
     AgentTimeoutError,
-    ApprovalDeniedError,
     BudgetExhaustedError,
     BuilderError,
     EvaluationError,
     MetaBuilderError,
     MetaValidationError,
     OutputError,
-)
-from .hitl import (
-    ApprovalCallback,
-    ApprovalPolicy,
-    EscalationCallback,
-    HumanInTheLoop,
 )
 from .maker_checker import MakerCheckerAgent
 from .mcp import MCPToolProvider

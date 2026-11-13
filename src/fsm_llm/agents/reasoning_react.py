@@ -24,6 +24,7 @@ from fsm_llm.agents.constants import (
 )
 from fsm_llm.agents.fsm_definitions.react import build_react_fsm
 from fsm_llm.logging import logger
+from fsm_llm.policy import HumanInTheLoop
 from fsm_llm.reasoning import ReasoningEngine
 from fsm_llm.tools import (
     ToolCall,
@@ -40,7 +41,6 @@ from .handlers import (
     forced_stop_skip,
     record_tool_step,
 )
-from .hitl import HumanInTheLoop
 from .tools import refuse_execute_without_gated
 
 

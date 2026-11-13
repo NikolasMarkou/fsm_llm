@@ -105,6 +105,7 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_trust_boundary.py` - caller context cannot forge approval or a finished run (also through `AgentServer`, graph edges and swarm hand-offs), constructor kwargs checks, gated tools refused where there is no approval step, flagged tools with no approver fail closed.
 - `test_tools.py` - `ToolRegistry`, `@tool`, thread safety, `normalize_tool_input`, list and dict parameters, `register_function` shapes.
 - `test_tools_layer.py` - the tool layer `fsm_llm.tools`: the agents constants keep every attribute and share the tool-layer objects, `fsm_llm.agents` re-exports them, the old modules define none of the moved names, `AgentError` lives in core, importing the layer loads no subpackage.
+- `test_policy_layer.py` - the policy layer `fsm_llm.policy`: the agents constants share the policy-layer objects, `fsm_llm.agents` re-exports the approval names, the old modules define none of them, importing the layer loads no agents module, the manager logs under `fsm_llm.policy.hitl`, and the `make_hitl_checker` gate handler is pinned.
 - `test_otel_exporter.py` - `OTELExporter` (monitor code, tested from this suite): thread-safe span handling and the exporter lifecycle.
 - `test_dependency_resolver.py` - `DependencyResolver` of `fsm_llm.workflows` (kept here to keep the pinned ids).
 - `test_truncation.py` - `smart_truncate`.

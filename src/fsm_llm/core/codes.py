@@ -199,7 +199,7 @@ def approval_code(
     ``None`` (no approver to ask) is ``failed`` with ``approval_required``;
     ``errored=True`` (the reviewer raised) is ``failed`` with
     ``reviewer_error`` whatever ``approved`` says. Lossy: an approval timeout
-    is folded into denied, as ``agents/hitl.py`` does today, and no
+    is folded into denied, as ``policy/hitl.py`` does today, and no
     ``approval_timeout`` reason exists.
     """
     if errored:

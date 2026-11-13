@@ -21,11 +21,11 @@ from fsm_llm.agents.constants import (
 )
 from fsm_llm.context.commit import clear_keys_delta
 from fsm_llm.logging import logger
+from fsm_llm.policy import ApprovalPolicy
 from fsm_llm.tools import ToolCall, ToolRegistry, redact_secret_entries, smart_truncate
 
 from .definitions import AgentStep, EvaluationResult
 from .exceptions import AgentTimeoutError, BudgetExhaustedError
-from .hitl import ApprovalPolicy
 from .tools import (
     normalize_tool_input,
     refuse_execute_without_gated,

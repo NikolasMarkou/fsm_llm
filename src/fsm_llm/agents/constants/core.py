@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from fsm_llm.constants import CONTEXT_KEY_AGENT_TRACE, DEFAULT_TEMPERATURE
 from fsm_llm.llm import DEFAULT_MAX_TOKENS
+from fsm_llm.policy.constants import Defaults as _PolicyDefaults
+from fsm_llm.policy.constants import LogMessages as _PolicyLogMessages
 from fsm_llm.tools.constants import ContextKeys as _ToolContextKeys
 from fsm_llm.tools.constants import Defaults as _ToolDefaults
 from fsm_llm.tools.constants import ErrorMessages as _ToolErrorMessages
@@ -198,7 +200,8 @@ class Defaults:
     # (``threading.TIMEOUT_MAX``; a larger wait raises OverflowError).
     MAX_TOOL_TIMEOUT_S = _ToolDefaults.MAX_TOOL_TIMEOUT_S
     MAX_OBSERVATIONS = 20
-    CONFIDENCE_THRESHOLD = 0.3
+    # Escalate below this confidence (defined by the policy layer).
+    CONFIDENCE_THRESHOLD = _PolicyDefaults.CONFIDENCE_THRESHOLD
     # Tool-selection classification threshold (``to_classification_schema``).
     TOOL_CONFIDENCE_THRESHOLD = _ToolDefaults.TOOL_CONFIDENCE_THRESHOLD
     MAX_TASK_PREVIEW_LENGTH = 200
@@ -312,9 +315,9 @@ class LogMessages:
     TOOL_LATE_RESULT = _ToolLogMessages.TOOL_LATE_RESULT
     ITERATION = "Iteration {current}/{max}"
     AGENT_COMPLETE = "Agent completed in {iterations} iterations"
-    APPROVAL_REQUESTED = "Requesting approval for: {action}"
-    APPROVAL_RESULT = "Approval {result} for: {action}"
-    ESCALATION = "Escalating to human: {reason}"
+    APPROVAL_REQUESTED = _PolicyLogMessages.APPROVAL_REQUESTED
+    APPROVAL_RESULT = _PolicyLogMessages.APPROVAL_RESULT
+    ESCALATION = _PolicyLogMessages.ESCALATION
     REFLECTION = "Reflection {current}/{max}: {summary}"
     PLAN_STEP = "Executing plan step {current}/{total}: {description}"
     EVALUATION = "Evaluation {result}: score={score}"

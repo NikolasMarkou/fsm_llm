@@ -63,7 +63,7 @@ class TestReactAgentCreation:
             ReactAgent(tools=registry)
 
     def test_create_with_hitl(self):
-        from fsm_llm.agents.hitl import HumanInTheLoop
+        from fsm_llm.policy import HumanInTheLoop
 
         registry = _make_registry()
         hitl = HumanInTheLoop(
@@ -85,7 +85,7 @@ class TestReactAgentHitlGating:
 
     @staticmethod
     def _policy_only_hitl():
-        from fsm_llm.agents.hitl import HumanInTheLoop
+        from fsm_llm.policy import HumanInTheLoop
 
         # Tools from _make_registry() default to requires_approval=False.
         return HumanInTheLoop(
@@ -102,7 +102,7 @@ class TestReactAgentHitlGating:
         assert agent._hitl_active is False
 
     def test_hitl_inactive_without_policy(self):
-        from fsm_llm.agents.hitl import HumanInTheLoop
+        from fsm_llm.policy import HumanInTheLoop
 
         hitl = HumanInTheLoop(approval_callback=lambda req: True)  # no policy
         agent = ReactAgent(tools=_make_registry(), hitl=hitl)
@@ -304,8 +304,8 @@ class TestReactAgentApprovalIsSingleUse:
 
     @staticmethod
     def _run(decide):
-        from fsm_llm.agents.hitl import HumanInTheLoop
         from fsm_llm.core.definitions import AgentError
+        from fsm_llm.policy import HumanInTheLoop
 
         executions: list[dict] = []
         asks: list[bool] = []

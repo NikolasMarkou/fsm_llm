@@ -87,6 +87,7 @@
       "ToolRunStatus": "fsm_llm.tools.constants"
     },
     "fsm_llm.agents.definitions": {
+      "ApprovalRequest": "fsm_llm.policy.approval",
       "READ_ONLY_ANNOTATIONS": "fsm_llm.tools.models",
       "ToolAnnotations": "fsm_llm.tools.models",
       "ToolCall": "fsm_llm.tools.models",
@@ -96,6 +97,7 @@
     },
     "fsm_llm.agents.exceptions": {
       "AgentError": "fsm_llm.core.definitions.errors",
+      "ApprovalDeniedError": "fsm_llm.policy.approval",
       "ToolExecutionError": "fsm_llm.tools.errors",
       "ToolNotFoundError": "fsm_llm.tools.errors",
       "bounded_repr": "fsm_llm.tools.limits",
@@ -139,6 +141,13 @@
       "build_self_consistency_fsm": "fsm_llm.agents.fsm_definitions.self_consistency",
       "conclude_on_evidence_logic": "fsm_llm.agents.fsm_definitions._loop",
       "loop_field_context_keys": "fsm_llm.agents.fsm_definitions._loop"
+    },
+    "fsm_llm.agents.hitl": {
+      "ApprovalCallback": "fsm_llm.policy.approval",
+      "ApprovalPolicy": "fsm_llm.policy.approval",
+      "EscalationCallback": "fsm_llm.policy.hitl",
+      "HumanInTheLoop": "fsm_llm.policy.hitl",
+      "make_hitl_checker": "fsm_llm.agents.tools"
     },
     "fsm_llm.agents.tools": {
       "ToolRegistry": "fsm_llm.tools.registry",
@@ -765,7 +774,6 @@
     "fsm_llm.agents.debate",
     "fsm_llm.agents.evaluator_optimizer",
     "fsm_llm.agents.handlers",
-    "fsm_llm.agents.hitl",
     "fsm_llm.agents.maker_checker",
     "fsm_llm.agents.mcp",
     "fsm_llm.agents.memory_persistence",
@@ -851,6 +859,8 @@
     "fsm_llm.monitor.instance_manager",
     "fsm_llm.monitor.otel",
     "fsm_llm.monitor.server",
+    "fsm_llm.policy",
+    "fsm_llm.policy.constants",
     "fsm_llm.reasoning",
     "fsm_llm.reasoning.__main__",
     "fsm_llm.reasoning.__version__",

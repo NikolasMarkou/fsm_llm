@@ -1,6 +1,7 @@
 """
 Tool helpers that belong to the agents package: reading a tool call out of a run's
-context, the ``gated=`` contract of a registry and registering an agent as a tool.
+context, the approval gate handler that reads it, the ``gated=`` contract of a
+registry and registering an agent as a tool.
 
 The registry, the tool models and the decorator live in ``fsm_llm.tools``.
 """
@@ -9,11 +10,12 @@ from __future__ import annotations
 
 import inspect
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from fsm_llm.agents.constants import ContextKeys, ErrorMessages
 from fsm_llm.core.definitions import AgentError
+from fsm_llm.policy import ApprovalPolicy, HumanInTheLoop
 from fsm_llm.tools.models import ToolCall
 
 if TYPE_CHECKING:
@@ -67,7 +69,7 @@ def tool_call_from_context(context: Mapping[str, Any]) -> ToolCall:
     """The tool call a context holds: ``tool_name``, ``tool_input`` (normalized by
     :func:`normalize_tool_input`) and ``reasoning``.
 
-    Shared by the approval gate (``hitl.make_hitl_checker``), the approval
+    Shared by the approval gate (:func:`make_hitl_checker`), the approval
     driver and ``AgentHandlers.approval_refusal``, so all three judge the same
     call. A missing name is ``""``. Never raises for a missing key.
     """
@@ -76,6 +78,33 @@ def tool_call_from_context(context: Mapping[str, Any]) -> ToolCall:
         parameters=normalize_tool_input(context.get(ContextKeys.TOOL_INPUT)),
         reasoning=context.get(ContextKeys.REASONING, ""),
     )
+
+
+def make_hitl_checker(
+    hitl: HumanInTheLoop,
+    policy: ApprovalPolicy | None = None,
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Create a reusable HITL approval checker handler.
+
+    Returns a handler function that checks whether the current tool call
+    requires human approval based on *policy* (default: the HITL policy,
+    ``hitl.requires_approval``).  Agents pass their shared approval predicate
+    so the gate, the ``await_approval`` state and the refusal agree.  Intended
+    to be registered as a ``CONTEXT_UPDATE`` handler on the ``TOOL_NAME`` key.
+    """
+    decide: ApprovalPolicy = policy if policy is not None else hitl.requires_approval
+
+    def check_approval(context: dict[str, Any]) -> dict[str, Any]:
+        tool_name = context.get(ContextKeys.TOOL_NAME)
+        if not tool_name or tool_name == ContextKeys.NO_TOOL:
+            return {}
+
+        if decide(tool_call_from_context(context), context):
+            return {ContextKeys.APPROVAL_REQUIRED: True}
+
+        return {ContextKeys.APPROVAL_REQUIRED: False}
+
+    return check_approval
 
 
 def refuse_execute_without_gated(tools: Any) -> None:

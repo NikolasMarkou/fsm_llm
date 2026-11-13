@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm.agents.exceptions import (
-    AgentTimeoutError,
-    ApprovalDeniedError,
-    BudgetExhaustedError,
-)
+from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
 from fsm_llm.core.definitions import AgentError, FSMError
+from fsm_llm.policy import ApprovalDeniedError
 from fsm_llm.tools import ToolExecutionError, ToolNotFoundError
 
 
