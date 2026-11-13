@@ -201,10 +201,7 @@ def _sop_to_agent_config_named(tmp_path: Path) -> None:
 
 def _every_pattern(pattern: str) -> Any:
     def build(tmp_path: Path) -> None:
-        if pattern == "swarm":
-            member = create_agent("debate", llm_interface=_double())
-            SwarmAgent(agents={"m": member}, entry_agent="m")
-        elif pattern in _TOOL_PATTERNS:
+        if pattern in _TOOL_PATTERNS:
             create_agent(pattern, [_echo], llm_interface=_double())
         else:
             create_agent(
@@ -405,9 +402,32 @@ _PATTERNS = [
     "reasoning_react",
 ]
 for _pattern in _PATTERNS:
+    if _pattern == "swarm":
+        continue  # takes no llm_interface: its own rows below
     _NO_MODEL_NEEDED[f"agents: create_agent({_pattern!r}, llm_interface=)"] = (
         _every_pattern(_pattern)
     )
+
+
+def _swarm_direct(tmp_path: Path) -> None:
+    """The members hold their own interfaces; the swarm owns no model (D-025)."""
+    member = create_agent("debate", llm_interface=_double())
+    SwarmAgent(agents={"m": member}, entry_agent="m")
+
+
+def _swarm_through_create_agent(tmp_path: Path) -> None:
+    member = create_agent("debate", llm_interface=_double())
+    assert isinstance(
+        create_agent("swarm", agents={"m": member}, entry_agent="m"), SwarmAgent
+    )
+
+
+_NO_MODEL_NEEDED["agents: SwarmAgent(agents=, entry_agent=) over injected members"] = (
+    _swarm_direct
+)
+_NO_MODEL_NEEDED["agents: create_agent('swarm', agents=, entry_agent=)"] = (
+    _swarm_through_create_agent
+)
 
 
 class TestNoModelNeeded:
@@ -421,6 +441,23 @@ class TestNoModelNeeded:
         from fsm_llm.agents import _PATTERNS as registered
 
         assert set(_PATTERNS) == set(registered)
+        for pattern in set(_PATTERNS) - {"swarm"}:
+            assert f"agents: create_agent({pattern!r}, llm_interface=)" in (
+                _NO_MODEL_NEEDED
+            ), pattern
+        assert any("create_agent('swarm'" in name for name in _NO_MODEL_NEEDED)
+
+    def test_create_agent_swarm_takes_no_llm_interface_by_design(self) -> None:
+        """Plan 0068b055 D-012 (anchor in ``swarm.py``): ``SwarmAgent`` builds no
+        API (its members own theirs) and has no ``**api_kwargs``, so
+        ``create_agent('swarm', llm_interface=...)`` is a plain ``TypeError``,
+        not an accepted-and-inert keyword. The row for the other patterns is
+        ``create_agent(<pattern>, llm_interface=)``; a swarm has none."""
+        member = create_agent("debate", llm_interface=_double())
+        with pytest.raises(TypeError, match="llm_interface"):
+            create_agent(
+                "swarm", agents={"m": member}, entry_agent="m", llm_interface=_double()
+            )
 
     def test_the_variable_is_really_unset(self) -> None:
         import os
