@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from fsm_llm.core.definitions import FSMDefinition
-from fsm_llm.validator import FSMValidator
+from fsm_llm.core.verify import FSMValidator
 
 pytestmark = pytest.mark.examples
 

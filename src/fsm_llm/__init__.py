@@ -128,6 +128,11 @@ from .core.loaders import get_fsm_summary, load_fsm_definition, load_fsm_from_fi
 from .core.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
 
 # --------------------------------------------------------------
+# Validation Components
+# --------------------------------------------------------------
+from .core.verify import FSMValidationResult, FSMValidator, validate_fsm_from_file
+
+# --------------------------------------------------------------
 # Explicit .env loading (opt-in; importing fsm_llm reads no .env file)
 # --------------------------------------------------------------
 from .env import load_env
@@ -174,11 +179,6 @@ from .memory import (
 # Session Persistence
 # --------------------------------------------------------------
 from .session import FileSessionStore, SessionState, SessionStore
-
-# --------------------------------------------------------------
-# Validation Components
-# --------------------------------------------------------------
-from .validator import FSMValidationResult, FSMValidator, validate_fsm_from_file
 
 # --------------------------------------------------------------
 # Visualization Components

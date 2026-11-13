@@ -2070,7 +2070,7 @@ class TestDecisionAnchorsArePlacedAndQualified:
 
     @pytest.mark.parametrize(
         ("module", "decision"),
-        [("fsm_llm.pipeline", "D-016"), ("fsm_llm.validator", "D-011")],
+        [("fsm_llm.pipeline", "D-016"), ("fsm_llm.core.verify.structure", "D-011")],
     )
     def test_qualified_anchor_present(self, module, decision):
         import importlib

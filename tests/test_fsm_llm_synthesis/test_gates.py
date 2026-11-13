@@ -15,6 +15,7 @@ import pytest
 
 from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS
 from fsm_llm.core.definitions import FSMDefinition
+from fsm_llm.core.verify import FSMValidator
 from fsm_llm.synthesis import gates
 from fsm_llm.synthesis.gates import (
     GateFinding,
@@ -24,7 +25,6 @@ from fsm_llm.synthesis.gates import (
     verify_stored,
 )
 from fsm_llm.synthesis.policy import SynthesisPolicy, inject_abort
-from fsm_llm.validator import FSMValidator
 
 POLICY = SynthesisPolicy()
 RET = ("answer",)

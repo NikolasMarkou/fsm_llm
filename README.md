@@ -534,7 +534,7 @@ fsm_llm/
 │   │   pipeline.py
 │   ├── core/definitions/      # Pydantic FSM models and core exceptions (a package)
 │   ├── core/transition_evaluator.py, core/expressions/   # JsonLogic evaluation, no LLM
-│   ├── flow_analysis.py       # Data-flow and liveness analysis of an FSM
+│   ├── core/verify/flow.py    # Data-flow and liveness analysis of an FSM
 │   ├── llm/                   # The only module that imports litellm (`__init__.py`), reply-text helpers
 │   ├── context/               # Context cleaning, compaction, filtering and redaction
 │   ├── classification.py      # Classifier, intent routing

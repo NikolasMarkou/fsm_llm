@@ -1,5 +1,5 @@
 """
-Unit tests for fsm_llm.validator module.
+Unit tests for the fsm_llm.core.verify validator (FSMValidator and its CLI).
 
 Tests cover:
 - FSMValidationResult: error/warning/info accumulation, is_valid property
@@ -44,13 +44,13 @@ from fsm_llm.core.transition_evaluator import (
     TransitionEvaluator,
     TransitionEvaluatorConfig,
 )
-from fsm_llm.handlers import HandlerTiming
-from fsm_llm.validator import (
+from fsm_llm.core.verify import (
     FSMValidationResult,
     FSMValidator,
-    main_cli,
     validate_fsm_from_file,
 )
+from fsm_llm.core.verify.cli import main_cli
+from fsm_llm.handlers import HandlerTiming
 from tests.test_fsm_llm.support import _fsm, _Prov, _typed_fsm
 from tests.test_fsm_llm.test_completion_state import _RESULT, _tool_fsm
 
@@ -806,7 +806,7 @@ class TestValidatorAgreesWithFSMDefinition:
         """
         validator = FSMValidator(_valid_fsm_data())
         fake = _unknown_type_validation_error()
-        with patch("fsm_llm.validator.FSMDefinition", side_effect=fake):
+        with patch("fsm_llm.core.verify.validator.FSMDefinition", side_effect=fake):
             validator._validate_pydantic_schema()
         assert validator.result.errors == []
         assert validator.result.is_valid is True
@@ -842,7 +842,7 @@ class TestValidatorAgreesWithFSMDefinition:
                 "FSMDefinition",
                 [{"type": type_name, "loc": ("name",), "input": "x", "ctx": ctx}],
             )
-            with patch("fsm_llm.validator.FSMDefinition", side_effect=fake):
+            with patch("fsm_llm.core.verify.validator.FSMDefinition", side_effect=fake):
                 validator._validate_pydantic_schema()
             assert validator.result.errors, (
                 f"{type_name} stayed a warning; the loader hard-refuses this "
@@ -854,7 +854,7 @@ class TestValidatorAgreesWithFSMDefinition:
         for impostor in ("too_short_for_comfort", "string_too_wide", "not_missing"):
             validator = FSMValidator(_valid_fsm_data())
             with patch(
-                "fsm_llm.validator.FSMDefinition",
+                "fsm_llm.core.verify.validator.FSMDefinition",
                 side_effect=_unknown_type_validation_error(impostor),
             ):
                 validator._validate_pydantic_schema()
@@ -1386,7 +1386,8 @@ class TestConstraintSweepAgreement:
             f"{len(disagreements)} validator/loader disagreement(s). Each is a "
             f"file fsm-llm-validate green-lights and API.from_file crashes on "
             f"(or the reverse). If the type name is new, add it to the allow-list "
-            f"in validator.py::_validate_pydantic_schema:\n" + "\n".join(disagreements)
+            f"in core/verify/validator.py::_validate_pydantic_schema:\n"
+            + "\n".join(disagreements)
         )
 
     @pytest.mark.parametrize("declared", ["3.0", "4.0", "4.1", "4.2", "v4.1", "5.0"])
@@ -1894,7 +1895,7 @@ class TestNullSafeValidatorAndVisualizer:
         assert any(nulls)
 
     def test_dumped_fsm_validates_from_file(self, tmp_path):
-        from fsm_llm.validator import validate_fsm_from_file
+        from fsm_llm.core.verify import validate_fsm_from_file
 
         path = tmp_path / "dumped.json"
         path.write_text(json.dumps(_dumped_fsm_with_required_keys()), encoding="utf-8")
@@ -1902,7 +1903,7 @@ class TestNullSafeValidatorAndVisualizer:
         assert result.is_valid, result.errors
 
     def test_explicit_null_containers_validate(self, tmp_path):
-        from fsm_llm.validator import validate_fsm_from_file
+        from fsm_llm.core.verify import validate_fsm_from_file
 
         data = _dumped_fsm_with_required_keys()
         for state in data["states"].values():
@@ -1915,7 +1916,7 @@ class TestNullSafeValidatorAndVisualizer:
         assert result.is_valid, result.errors
 
     def test_null_requires_context_keys_in_condition_validates(self, tmp_path):
-        from fsm_llm.validator import validate_fsm_from_file
+        from fsm_llm.core.verify import validate_fsm_from_file
 
         data = _dumped_fsm_with_required_keys()
         data["states"]["start"]["transitions"][0]["conditions"][0][
@@ -2007,7 +2008,7 @@ class TestValidationRulesAreTypedAtLoad:
 
     @pytest.mark.parametrize("rules", _BAD_RULES)
     def test_validator_and_loader_agree_on_a_bad_rule(self, rules):
-        from fsm_llm.validator import FSMValidator
+        from fsm_llm.core.verify import FSMValidator
 
         result = FSMValidator(_rules_fsm(rules)).validate()
         assert result.is_valid is False
@@ -2296,7 +2297,7 @@ class TestHandlerOnlyKeys:
 
     def test_the_validator_and_the_cli_accept_the_field(self, tmp_path):
         from fsm_llm.core.definitions import FSMDefinition
-        from fsm_llm.validator import FSMValidator, validate_fsm_from_file
+        from fsm_llm.core.verify import FSMValidator, validate_fsm_from_file
 
         listed = _xstate_fsm(["is_admin"])
         assert FSMValidator(listed).validate().is_valid
@@ -2310,7 +2311,7 @@ class TestHandlerOnlyKeys:
 
 
 def _handler_only_warnings(fsm: dict) -> list[str]:
-    from fsm_llm.validator import FSMValidator
+    from fsm_llm.core.verify import FSMValidator
 
     result = FSMValidator(fsm).validate()
     assert result.is_valid, result.errors
@@ -2329,7 +2330,7 @@ class TestHandlerOnlyKeysValidatorWarnings:
     def test_a_key_no_state_references_gets_one_info_line_naming_it(self):
         """An unreferenced listed key is what a handler-written key looks
         like, so it is an INFO line, not a WARNING (07ad3f8c/D-044)."""
-        from fsm_llm.validator import FSMValidator
+        from fsm_llm.core.verify import FSMValidator
 
         fsm = _fsm_with_handler_only(["is_admn"])
         assert _handler_only_warnings(fsm) == []
@@ -2425,7 +2426,7 @@ class TestHandlerOnlyKeysValidatorWarnings:
             build_plan_execute_fsm,
             build_react_fsm,
         )
-        from fsm_llm.validator import FSMValidator
+        from fsm_llm.core.verify import FSMValidator
 
         root = Path(__file__).resolve().parents[2]
         checked = 0
@@ -2571,7 +2572,7 @@ def _b5_chain(levels: int) -> dict[str, Any]:
 def _assert_loader_and_validator_reject(data: dict[str, Any]) -> None:
     from pydantic import ValidationError
 
-    from fsm_llm.validator import FSMValidator
+    from fsm_llm.core.verify import FSMValidator
 
     with pytest.raises(ValidationError):
         FSMDefinition(**data)
@@ -2579,7 +2580,7 @@ def _assert_loader_and_validator_reject(data: dict[str, Any]) -> None:
 
 
 def _assert_loader_and_validator_accept(data: dict[str, Any]) -> FSMDefinition:
-    from fsm_llm.validator import FSMValidator
+    from fsm_llm.core.verify import FSMValidator
 
     fsm_def = FSMDefinition(**data)
     assert FSMValidator(data).validate().is_valid is True
@@ -2826,7 +2827,7 @@ def _b7_fsm_data(edges: dict[str, tuple[str, ...]]) -> dict[str, Any]:
 
 
 def _b7_trap_warnings(data: dict[str, Any]) -> list[str]:
-    from fsm_llm.validator import FSMValidator
+    from fsm_llm.core.verify import FSMValidator
 
     result = FSMValidator(data).validate()
     assert result.is_valid is True, result.errors
@@ -2834,7 +2835,7 @@ def _b7_trap_warnings(data: dict[str, Any]) -> list[str]:
 
 
 def _b12_warnings(data: dict[str, Any], needle: str) -> list[str]:
-    from fsm_llm.validator import FSMValidator
+    from fsm_llm.core.verify import FSMValidator
 
     result = FSMValidator(data).validate()
     assert result.is_valid is True, result.errors
@@ -2937,7 +2938,7 @@ class TestStep11B7B11B12B13:
     def test_b12_type_invalid_states_returns_result_not_raises(self, mutate):
         from pydantic import ValidationError
 
-        from fsm_llm.validator import FSMValidationResult, FSMValidator
+        from fsm_llm.core.verify import FSMValidationResult, FSMValidator
 
         data = _b10_fsm_data()
         mutate(data)
@@ -2949,7 +2950,7 @@ class TestStep11B7B11B12B13:
         assert result.errors
 
     def test_b12_non_validation_error_is_error(self):
-        from fsm_llm.validator import FSMValidator
+        from fsm_llm.core.verify import FSMValidator
 
         data: dict[Any, Any] = _b10_fsm_data()
         data[1] = "non-string key"
@@ -3000,7 +3001,7 @@ class TestStep11B7B11B12B13:
         ]
         # Reported as INFO, not WARNING (07ad3f8c/D-044): an unreferenced
         # listed key is what a handler-written key looks like.
-        from fsm_llm.validator import FSMValidator
+        from fsm_llm.core.verify import FSMValidator
 
         assert _b12_warnings(data, "handler_only_keys") == []
         info = FSMValidator(data).validate().info
@@ -3098,7 +3099,7 @@ def _loader_rejects(data: dict[str, Any]) -> bool:
 
 
 def _validator_rejects(data: dict[str, Any]) -> bool:
-    from fsm_llm.validator import FSMValidator
+    from fsm_llm.core.verify import FSMValidator
 
     return FSMValidator(data).validate().is_valid is False
 

@@ -593,7 +593,7 @@ class TestVB15ValidatorCascadingErrors:
     """VB15: Invalid initial_state should not cascade into orphan errors."""
 
     def test_invalid_initial_state_no_cascade(self):
-        from fsm_llm.validator import FSMValidator
+        from fsm_llm.core.verify import FSMValidator
 
         fsm_data = {
             "name": "test",

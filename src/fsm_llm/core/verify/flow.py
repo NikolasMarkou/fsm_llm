@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
-from .core.definitions import (
+from fsm_llm.core.definitions import (
     FSMDefinition,
     State,
     Transition,
@@ -24,7 +24,7 @@ from .core.definitions import (
     logic_referenced_keys,
     reachable_from,
 )
-from .core.state_kinds import kind_of
+from fsm_llm.core.state_kinds import kind_of
 
 
 def strongly_connected_components(

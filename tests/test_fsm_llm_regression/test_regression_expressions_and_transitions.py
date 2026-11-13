@@ -214,7 +214,7 @@ class TestCycleNormalization:
 
     def test_cycle_dedup_from_different_starts(self):
         from fsm_llm.core.definitions import FSMDefinition, State, Transition
-        from fsm_llm.validator import FSMValidator
+        from fsm_llm.core.verify import FSMValidator
 
         # Create a simple cycle: A -> B -> C -> A
         fsm_def = FSMDefinition(

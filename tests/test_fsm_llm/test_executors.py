@@ -38,7 +38,7 @@ _ENGINE_FILES = (
     "pipeline.py",
     "api.py",
     "fsm.py",
-    "flow_analysis.py",
+    "core/verify/flow.py",
     "synthesis/dryrun.py",
 )
 _BANNED_ATTRIBUTES = {"completion", "synthesize"}

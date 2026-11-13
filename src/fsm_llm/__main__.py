@@ -11,7 +11,7 @@ package:
 * **visualize** - produce an ASCII diagram of an FSM
 
 All heavy-lifting is delegated to the corresponding ``main`` functions in
-:pyfile:`runner.py`, :pyfile:`validator.py`, and :pyfile:`visualizer.py`.  That
+:pyfile:`runner.py`, :pyfile:`core/verify/cli.py`, and :pyfile:`visualizer.py`.  That
 keeps this file small while still allowing users to
 invoke the framework with the canonical
 
@@ -94,9 +94,9 @@ from .core.definitions import ModelNotConfiguredError
 
 def main_cli():
     """Entry point for the CLI."""
+    from .core.verify.cli import main as main_validator
     from .logging import setup_cli_logging
     from .runner import main as main_runner
-    from .validator import main as main_validator
     from .visualizer import ASCII_STYLES
     from .visualizer import main as main_visualizer
 

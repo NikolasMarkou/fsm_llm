@@ -2,7 +2,7 @@
 Synthesis gates: G1 to G5 and G6a composed into one report, and stored-form checks.
 
 G1 loads the compile as an ``FSMDefinition``, G2 is ``FSMValidator``, G3 and G4
-are ``fsm_llm.flow_analysis``, G5 is ``policy.check_policy`` and G6a is the
+are ``fsm_llm.core.verify.flow``, G5 is ``policy.check_policy`` and G6a is the
 dead-edge dry run of ``dryrun``. Every finding
 becomes one ``GateFinding`` (converted, no shared base class). Nothing here
 raises on a hostile compile, logs or does I/O.
@@ -27,9 +27,9 @@ from pydantic import BaseModel, ValidationError
 
 from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS, SKILL_DEFANG
 from fsm_llm.core.definitions import FSMDefinition
-from fsm_llm.flow_analysis import analyze_data_flow, analyze_liveness
+from fsm_llm.core.verify import FSMValidator
+from fsm_llm.core.verify.flow import analyze_data_flow, analyze_liveness
 from fsm_llm.okf import capped_line
-from fsm_llm.validator import FSMValidator
 
 from .constants import GATE_SIMULATION
 from .dryrun import analyze_dryrun

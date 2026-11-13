@@ -249,7 +249,7 @@ class TestCliEntryPointsLogAtInfo:
             ["-m", "fsm_llm", "--mode", "validate", "--fsm", str(_FSM)],
             [
                 "-c",
-                "import sys; from fsm_llm.validator import main_cli; "
+                "import sys; from fsm_llm.core.verify.cli import main_cli; "
                 f"sys.argv=['x','--fsm',{str(_FSM)!r}]; main_cli()",
             ],
         ],
@@ -323,7 +323,7 @@ class TestUnknownEnvFormatDoesNotCrashTheCommands:
             ["-m", "fsm_llm", "--mode", "visualize", "--fsm", str(_FSM)],
             [
                 "-c",
-                "import sys; from fsm_llm.validator import main_cli; "
+                "import sys; from fsm_llm.core.verify.cli import main_cli; "
                 f"sys.argv=['x','--fsm',{str(_FSM)!r}]; main_cli()",
             ],
             [

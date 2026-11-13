@@ -1012,7 +1012,7 @@ class TestBlocks:
         with pytest.raises(BAD, match="ONCE"):
             sb.run_block("s0", client=client, sleep=lambda s: None)
         (bench / "s0" / "rows_react.jsonl").unlink()
-        for key, value in (("src_sha256", {"src/fsm_llm/flow_analysis.py": "0" * 64}), ("fixture_hash", "0")):  # fmt: skip
+        for key, value in (("src_sha256", {"src/fsm_llm/core/verify/flow.py": "0" * 64}), ("fixture_hash", "0")):  # fmt: skip
             path = bench / "s0" / "manifest_synth-fsm.json"
             saved = path.read_text(encoding="utf-8")
             manifest = json.loads(saved)
@@ -1197,7 +1197,13 @@ REQUIRED_PINS = (
     "src/fsm_llm/core/coerce.py",  # ... split at step 72
     "src/fsm_llm/core/loaders.py",  # ... split at step 72: read_json_object, the FSM file reader
     "src/fsm_llm/context/filtering.py",  # ... split at step 72: redaction and the context filter
-    "src/fsm_llm/validator.py",  # FSMValidator is gate G2
+    "src/fsm_llm/core/verify/validator.py",  # FSMValidator is gate G2 (the shell; split at step 75 of plan d454fd62)
+    "src/fsm_llm/core/verify/structure.py",  # ... StructureMixin, the structure and key checks
+    "src/fsm_llm/core/verify/graph.py",  # ... GraphMixin, the graph analysis
+    "src/fsm_llm/core/verify/result.py",  # ... FSMValidationResult
+    "src/fsm_llm/core/verify/upgrade.py",  # ... upgrade_fsm_file (the rest of the old validator.py)
+    "src/fsm_llm/core/verify/cli.py",  # ... main and main_cli (the rest of the old validator.py)
+    "src/fsm_llm/core/verify/flow.py",  # G3 and G4, the old flow_analysis.py
     "src/fsm_llm/agents/__init__.py",  # create_agent, the R arm's factory
     "src/fsm_llm/agents/react.py",
 )
@@ -1212,6 +1218,7 @@ UNPINNED_CORE = {
     "src/fsm_llm/context/__init__.py": "the engine's context",
     "src/fsm_llm/context/commit.py": "clear_keys_delta, the one clear rule the pinned agents/handlers.py calls (moved down from handlers.py at step 74 of plan d454fd62; core imports only)",
     "src/fsm_llm/core/definitions/__init__.py": "the engine's models (facade, read through what the pinned files import)",
+    "src/fsm_llm/core/verify/__init__.py": "the validator's import surface (facade, read through what the pinned files import)",
     "src/fsm_llm/core/expressions/__init__.py": "the engine's JsonLogic (is_missing; facade, read through what the pinned files import)",
     "src/fsm_llm/handlers.py": "the engine's handlers",
     "src/fsm_llm/llm/__init__.py": "the one LLM layer",
@@ -1219,8 +1226,8 @@ UNPINNED_CORE = {
     "src/fsm_llm/logging.py": "library logging",
     "src/fsm_llm/core/transition_evaluator.py": "the engine's transition rules",
     "src/fsm_llm/okf.py": "text caps shared with every package",
-    "src/fsm_llm/core/definitions/schema.py": "leaf core module read by the pinned validator.py",
-    "src/fsm_llm/core/state_kinds.py": "the engine's kind registry (leaf, read by the pinned flow_analysis.py)",
+    "src/fsm_llm/core/definitions/schema.py": "leaf core module read by the pinned core/verify modules",
+    "src/fsm_llm/core/state_kinds.py": "the engine's kind registry (leaf, read by the pinned core/verify/flow.py)",
     "src/fsm_llm/security/__init__.py": "key filters shared with every package (facade)",
     "src/fsm_llm/visualizer.py": "the mermaid of the approval summary (G7 never runs here)",
     "src/fsm_llm/agents/semantic_tools.py": "embedding lookup, the bench library has no embedder",

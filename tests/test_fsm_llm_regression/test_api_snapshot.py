@@ -2,7 +2,7 @@
 
 `scripts/api_snapshot.py` prints every public name (the static `__all__` of
 the eight packages and four core modules, plus `schema_registry`, `codes` and
-`flow_analysis`) with its signature. A removed, renamed or retyped public
+`core.verify.flow`) with its signature. A removed, renamed or retyped public
 parameter changes that output, so this test fails until the snapshot is
 regenerated (`make api-snapshot`) and reviewed in the same commit.
 
@@ -77,7 +77,7 @@ class TestApiSnapshot:
             "# fsm_llm",
             "# fsm_llm.core.definitions.schema",
             "# fsm_llm.core.codes",
-            "# fsm_llm.flow_analysis",
+            "# fsm_llm.core.verify.flow",
             "# fsm_llm.synthesis",
         ):
             assert header in text.splitlines(), header

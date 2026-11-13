@@ -61,7 +61,7 @@ Interface contract:
     arrival or while the conversation sits in it: ``minted_keys`` plus its
     classification fields, minus ``handler_only``, plus its own ``result_key``
     (only that state writes it). A ``frozenset``. The one arrival rule of G3
-    and G4 (``flow_analysis.declared_available``).
+    and G4 (``core.verify.flow.declared_available``).
   - ``sample_results(state)``: the sample results the loader runs the state's
     edges on, a tuple of ``(label, result)`` (``None`` is "no result yet");
     empty for a kind that has none. Shaped as the kind's runner writes its

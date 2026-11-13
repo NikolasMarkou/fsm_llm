@@ -332,8 +332,8 @@ class TestNoModelClisHaveNoFlag:
     @staticmethod
     def _help(module: str, argv: list[str], monkeypatch, capsys) -> str:
         import fsm_llm.agent_skills_cli as skills
+        import fsm_llm.core.verify.cli as validator
         import fsm_llm.okf_cli as okf
-        import fsm_llm.validator as validator
         import fsm_llm.visualizer as visualizer
 
         with pytest.raises(SystemExit) as stop:

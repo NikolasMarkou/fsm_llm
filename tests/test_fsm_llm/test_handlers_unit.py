@@ -2554,7 +2554,7 @@ class TestStep14C6C12:
             assert main_cli() == 130
 
     def test_c8_validate_report_on_stdout(self, tmp_path, capsys):
-        from fsm_llm.validator import main
+        from fsm_llm.core.verify.cli import main
 
         path = tmp_path / "c8.json"
         path.write_text(json.dumps(_c9_fsm_data(end_transitions=[])), encoding="utf-8")

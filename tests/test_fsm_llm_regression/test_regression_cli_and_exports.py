@@ -25,7 +25,7 @@ class TestCLIEntryPoints:
 
     def test_validator_has_main_cli(self):
         """H-1: fsm-llm-validate entry point requires main_cli."""
-        from fsm_llm.validator import main_cli
+        from fsm_llm.core.verify.cli import main_cli
 
         assert callable(main_cli)
 
@@ -43,7 +43,7 @@ class TestCLIEntryPoints:
 
     def test_validator_main_still_exists(self):
         """Ensure adding main_cli didn't break existing main()."""
-        from fsm_llm.validator import main
+        from fsm_llm.core.verify.cli import main
 
         assert callable(main)
 

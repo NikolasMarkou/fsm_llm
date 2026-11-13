@@ -38,6 +38,7 @@ from fsm_llm.core.definitions import (
     ModelToolCall,
 )
 from fsm_llm.core.definitions.schema import SCHEMA_VERSION_DEFAULT
+from fsm_llm.core.verify import FSMValidator
 from fsm_llm.handlers import create_handler
 from fsm_llm.llm import LiteLLMInterface, LLMInterface, check_tool_transcript
 from fsm_llm.pipeline import MessagePipeline
@@ -47,7 +48,6 @@ from fsm_llm.testing import (
     final_reply,
     tool_call_reply,
 )
-from fsm_llm.validator import FSMValidator
 from fsm_llm.visualizer import build_fsm_graph, visualize_fsm_ascii
 from tests.test_fsm_llm.support import _state
 from tests.test_fsm_llm.test_llm_complete import _call, _Provider, _reply

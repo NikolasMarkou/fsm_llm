@@ -5,7 +5,7 @@ Purpose: Offline pytest suite for `fsm_llm.synthesis` (gates G1 to G7, library, 
 
 ## Scope
 
-Covers `fsm_llm.synthesis` (`policy`, `gates`, `dryrun`, `simulation`, `synthesizer`, `prompts`, `library`, `runner`, `tools`, `traces`, `diagnose`, `patch`, `repair`, `constants`, `exceptions`) and the bench script. Core pieces it relies on are tested elsewhere: `State.synthesize` and `SynthesizeConfig` in `tests/test_fsm_llm/test_synthesize_field.py`, `fsm_llm.flow_analysis` in `tests/test_fsm_llm/test_flow_analysis.py`, the `stop` hook of `eval.cases.run_case_trial` in `tests/test_fsm_llm_eval/test_cases.py`.
+Covers `fsm_llm.synthesis` (`policy`, `gates`, `dryrun`, `simulation`, `synthesizer`, `prompts`, `library`, `runner`, `tools`, `traces`, `diagnose`, `patch`, `repair`, `constants`, `exceptions`) and the bench script. Core pieces it relies on are tested elsewhere: `State.synthesize` and `SynthesizeConfig` in `tests/test_fsm_llm/test_synthesize_field.py`, `fsm_llm.core.verify.flow` in `tests/test_fsm_llm/test_flow_analysis.py`, the `stop` hook of `eval.cases.run_case_trial` in `tests/test_fsm_llm_eval/test_cases.py`.
 
 No test calls a real LLM, a model server or the network. Not covered here: a live run of the bench (blocks s0 to s2 were run by hand, all INCONCLUSIVE), the rest of `fsm_llm`.
 
@@ -66,7 +66,7 @@ The package exports (`fsm_llm.synthesis.__all__`), the reason codes (`constants.
 
 ## Dependencies
 
-- `fsm_llm.synthesis` and its submodules, core (`definitions`, `api`, `validator`, `flow_analysis`, `transition_evaluator`), `fsm_llm.agents` (`ToolRegistry`, `ToolCall`), `fsm_llm.eval`.
+- `fsm_llm.synthesis` and its submodules, core (`definitions`, `api`, `core.verify` (the validator and `flow`), `transition_evaluator`), `fsm_llm.agents` (`ToolRegistry`, `ToolCall`), `fsm_llm.eval`.
 - `tests.conftest` (`block_network`), `fsm_llm.testing` (`MockLLM2Interface`, `ScriptedLLM`, `state_in_prompt`), `scripts/synthesis_bench.py`, `scripts/bench_common.py`.
 - pytest only; no network.
 

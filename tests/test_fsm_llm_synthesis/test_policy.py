@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from fsm_llm import API
 from fsm_llm.core.definitions import ClassificationExtractionConfig, FSMDefinition
+from fsm_llm.core.verify import FSMValidator
 from fsm_llm.security import is_forbidden_context_entry
 from fsm_llm.synthesis import SynthesisError, run_gates
 from fsm_llm.synthesis import policy as policy_module
@@ -30,7 +31,6 @@ from fsm_llm.synthesis.policy import (
     strip_abort,
 )
 from fsm_llm.testing import MockLLM2Interface
-from fsm_llm.validator import FSMValidator
 from tests.test_fsm_llm_synthesis.conftest import good_fsm as _good
 
 

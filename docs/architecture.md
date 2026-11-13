@@ -248,7 +248,7 @@ fsm_llm (core, includes classification)
 ├── fsm_llm.synthesis  -- Uses API (push_fsm/pop_fsm, run_until_terminal's before_step hook), agents
 │                          (tools, human approval) and eval (scripted trials for simulation); core
 │                          loads its `synthesize` state field and runs the data-flow and liveness
-│                          analyses (`flow_analysis`)
+│                          analyses (`core/verify/flow.py`)
 └── fsm_llm.testing    -- Public test doubles, scripted user and assertions; imports core only
 ```
 
@@ -263,7 +263,7 @@ import time; each one imports core (`from fsm_llm import API`).
 | Agents | Auto-generated FSMs + handlers, driven by core `run_until_terminal` | `build_react_fsm()` generates FSM; handlers execute tools on state entry; core owns the step and time budgets; no synthetic message is sent. `native_fc` runs on core completion states (native tool calls); the meta-builder is an FSM driven with `converse`/`advance`. Also covers multi-agent graph/swarm orchestration, MCP tools, A2A remote agents, and semantic tool retrieval |
 | Monitor | Observer handlers + loguru sink + core graph data | Registers observer handlers (priority 9999; not POST_TRANSITION), never modifies state; FSM graphs come from `build_fsm_graph` |
 | Eval | Subprocesses + public API only | `fsm-llm-eval examples` scores example output with a 0-4 heuristic; `fsm-llm-eval run` sends each case's turns through a fresh `API`, reads `get_current_state`/`get_data`/`has_conversation_ended`, and checks declared expectations over N trials. No handlers, no core changes |
-| Synthesis | A silent `synthesize` state + a runner on the core step driver | A model compiles a goal into an FSM, gates G1 to G7 judge it, a content-addressed library stores it, and `ProcedureRunner` pushes it as a child (no inherited context), runs it on the host model and merges back only the declared return keys. Core adds the `synthesize` state field, the loader checks of its edges and `flow_analysis`; no handler and no second engine |
+| Synthesis | A silent `synthesize` state + a runner on the core step driver | A model compiles a goal into an FSM, gates G1 to G7 judge it, a content-addressed library stores it, and `ProcedureRunner` pushes it as a child (no inherited context), runs it on the host model and merges back only the declared return keys. Core adds the `synthesize` state field, the loader checks of its edges and `core/verify/flow.py`; no handler and no second engine |
 
 ## Extension Points
 

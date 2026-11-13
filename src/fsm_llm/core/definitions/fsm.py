@@ -261,7 +261,7 @@ class FSMDefinition(BaseModel):
 
     # The edge rules of a synthesize state stay in the LOADER (they need the whole
     # FSM and `FSMValidator` may never be stricter than the loader: do NOT move
-    # this call to validator.py). They are the `check_definition` hook of the
+    # this call to core/verify/). They are the `check_definition` hook of the
     # synthesize kind in state_kinds.py; its D-034/D-035 anchor says what the
     # rules must keep. The real evaluator and `logic_referenced_keys` are handed
     # in because that leaf module cannot import them.

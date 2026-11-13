@@ -79,7 +79,7 @@ class TestV14NoEmojiInValidator:
 
     def test_valid_fsm_output_no_emoji(self):
         """Valid FSM validation output should use text markers, not emoji."""
-        from fsm_llm.validator import FSMValidationResult
+        from fsm_llm.core.verify import FSMValidationResult
 
         result = FSMValidationResult("test_fsm")
         output = str(result)
@@ -89,7 +89,7 @@ class TestV14NoEmojiInValidator:
 
     def test_invalid_fsm_output_no_emoji(self):
         """Invalid FSM validation output should use text markers, not emoji."""
-        from fsm_llm.validator import FSMValidationResult
+        from fsm_llm.core.verify import FSMValidationResult
 
         result = FSMValidationResult("test_fsm")
         result.add_error("test error")

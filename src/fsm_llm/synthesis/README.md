@@ -26,8 +26,8 @@ The gates, in the order they run on a compile:
 
 - G1: the JSON loads as a core `FSMDefinition`, the same load `API` does.
 - G2: the core `FSMValidator` reports no error (its warnings never fail a compile).
-- G3: data flow (`fsm_llm.flow_analysis`). A key an edge reads must be extracted earlier on every path or be an input; each return key must be guaranteed at the end.
-- G4: liveness (`fsm_llm.flow_analysis`). No trap, no loop without a firing exit, no edge hidden by an unconditional edge of lower priority number, no permanent tie, no path longer than `max_turns`.
+- G3: data flow (`fsm_llm.core.verify.flow`). A key an edge reads must be extracted earlier on every path or be an input; each return key must be guaranteed at the end.
+- G4: liveness (`fsm_llm.core.verify.flow`). No trap, no loop without a firing exit, no edge hidden by an unconditional edge of lower priority number, no permanent tie, no path longer than `max_turns`.
 - G5: the policy (`policy.check_policy`). Limits on states, edges, fields and text, reserved names, no persona, no secret-looking or internal key names, no model settings on a classification entry, no regex in a validation rule, completion tools only from an allow-list, no nested `synthesize` at depth 1.
 - G6a: dead edges (`dryrun.py`). It tries a small pool of values per key through the real `TransitionEvaluator` and reports an edge no assignment can fire. No model call.
 - G6b: simulation (`simulation.py`). A `Simulator` plays scripted users against the procedure on the interface it was given: a happy path built from the definition, plus scenarios of four kinds written by one model call (missing info, correction, off topic, adversarial). It passes when the happy-path rate and the overall pass rate both reach `policy.min_pass_rate` (default 0.5) and the happy path moves past the first state.

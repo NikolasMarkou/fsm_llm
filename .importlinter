@@ -103,7 +103,10 @@ ignore_imports =
 # `transition_evaluator` placed): the layer package `core` (L0). It reads only the kernel
 # (`constants`, `logging`, `security`); step 71 moved `expressions` into it as `core.expressions`,
 # a package whose modules import each other and `core.definitions` and are read by
-# `core.transition_evaluator`; it never reaches a higher layer or a subpackage
+# `core.transition_evaluator`; step 75 added `core.verify` (the validator split into modules and
+# `flow`, which read the kernel and `core` only, so this contract covers them with no new line and
+# `fsm_llm.validator` left the lists of the `llm` and `context` contracts below: the module is
+# gone and both layers may import `core`); it never reaches a higher layer or a subpackage
 # (`FSMDefinition._check_synthesize_states` imports `core.transition_evaluator` lazily, a core
 # edge). The list is every module that is not core and not kernel today; step 95 replaces it
 # with the `layers` contract of D-016.
@@ -178,7 +181,6 @@ forbidden_modules =
     fsm_llm.session
     fsm_llm.synthesis
     fsm_llm.testing
-    fsm_llm.validator
     fsm_llm.visualizer
     fsm_llm.workflows
 
@@ -215,6 +217,5 @@ forbidden_modules =
     fsm_llm.session
     fsm_llm.synthesis
     fsm_llm.testing
-    fsm_llm.validator
     fsm_llm.visualizer
     fsm_llm.workflows

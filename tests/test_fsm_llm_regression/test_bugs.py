@@ -11,6 +11,26 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
+def _llm_package_sources() -> dict[str, str]:
+    """The source of every module of the `fsm_llm.llm` package, by dotted name.
+
+    `fsm_llm.llm` is a package whose `__init__` re-exports the public names
+    (step 73 of plan d454fd62): `inspect.getsource(fsm_llm.llm)` returns only
+    that facade, so a test about "the llm code" must read each module.
+    """
+    import importlib
+    import pkgutil
+
+    import fsm_llm.llm as llm_pkg
+
+    sources = {llm_pkg.__name__: inspect.getsource(llm_pkg)}
+    for info in pkgutil.walk_packages(llm_pkg.__path__, f"{llm_pkg.__name__}."):
+        module = importlib.import_module(info.name)
+        sources[info.name] = inspect.getsource(module)
+    return sources
+
+
 # ── B1: JSON escape handling ──────────────────────────────────
 
 
@@ -736,13 +756,19 @@ class TestDuplicateExtractJsonFunction:
     """P3-B11: extract_json_from_text defined in both llm.py and the JSON-extraction module."""
 
     def test_no_extract_json_function_in_llm_module(self):
-        """llm.py should not define extract_json_from_text (it's in llm/json_extraction.py)."""
-        import fsm_llm.llm as llm_mod
-
-        # Check that the function is not defined at module level in llm.py
-        source = inspect.getsource(llm_mod)
-        assert "\ndef extract_json_from_text" not in source, (
-            "extract_json_from_text should not be defined in llm.py (duplicate of llm/json_extraction.py)"
+        """Only llm/json_extraction.py defines extract_json_from_text; no other module of the llm package does."""
+        # `fsm_llm.llm` is a facade over its modules since step 73 of plan d454fd62:
+        # reading `inspect.getsource(fsm_llm.llm)` alone saw only the re-exports and
+        # passed whatever the other modules held, so read every module.
+        sources = _llm_package_sources()
+        assert len(sources) >= 8, sorted(sources)
+        defining = [
+            name
+            for name, source in sources.items()
+            if "\ndef extract_json_from_text" in source
+        ]
+        assert defining == ["fsm_llm.llm.json_extraction"], (
+            "extract_json_from_text must be defined once, in llm/json_extraction.py"
         )
 
 
@@ -858,22 +884,23 @@ class TestLLMTimeout:
 
 
 class TestNoDuplicateImportRe:
-    """H2: llm.py should not have duplicate 'import re'."""
+    """H2: no module of the llm package should have a duplicate 'import re'."""
 
     def test_single_import_re(self):
-        from fsm_llm import llm
-
         # Count the `import re` STATEMENTS: a substring count also matched
         # `from .text import remove_think_blocks` once the think helpers moved.
-        tree = ast.parse(inspect.getsource(llm))
-        count = sum(
-            alias.name == "re"
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Import)
-            for alias in node.names
-        )
-        # re is no longer used after _parse_transition_response was removed
-        assert count <= 1, f"Expected 0 or 1 'import re', found {count}"
+        # `fsm_llm.llm` is a facade since step 73 of plan d454fd62: read every module.
+        sources = _llm_package_sources()
+        assert len(sources) >= 8, sorted(sources)
+        for name, source in sources.items():
+            count = sum(
+                alias.name == "re"
+                for node in ast.walk(ast.parse(source))
+                if isinstance(node, ast.Import)
+                for alias in node.names
+            )
+            # re is no longer used after _parse_transition_response was removed
+            assert count <= 1, f"{name}: expected 0 or 1 'import re', found {count}"
 
 
 class TestNoAsyncHandlers:

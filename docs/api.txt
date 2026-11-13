@@ -607,13 +607,13 @@ fsm_llm.core.codes.Status class(str, Enum)
 fsm_llm.core.codes.approval_code def(approved: bool | None, *, errored: bool = False) -> tuple[Status, Reason | None]
 fsm_llm.core.codes.status_of_stop_reason def(stop_reason: str) -> tuple[Status, Reason | None]
 fsm_llm.core.codes.status_of_tool_status def(tool_status: str) -> tuple[Status, Reason | None]
-# fsm_llm.flow_analysis
-fsm_llm.flow_analysis.FlowFinding class
+# fsm_llm.core.verify.flow
+fsm_llm.core.verify.flow.FlowFinding class
   def __init__(self, analysis: str, code: str, state: str, message: str) -> None
-fsm_llm.flow_analysis.analyze_data_flow def(definition: FSMDefinition, *, inputs: Iterable[str] = (), return_keys: Iterable[str] = (), require_guaranteed_return_keys: bool = True) -> list[FlowFinding]
-fsm_llm.flow_analysis.analyze_liveness def(definition: FSMDefinition, *, inputs: Iterable[str] = (), max_turns: int = 40) -> list[FlowFinding]
-fsm_llm.flow_analysis.declared_available def(definition: FSMDefinition, inputs: Iterable[str] = ()) -> dict[str, frozenset[str]]
-fsm_llm.flow_analysis.strongly_connected_components def(successors: Mapping[str, Sequence[str]], order: Mapping[str, int]) -> list[list[str]]
+fsm_llm.core.verify.flow.analyze_data_flow def(definition: FSMDefinition, *, inputs: Iterable[str] = (), return_keys: Iterable[str] = (), require_guaranteed_return_keys: bool = True) -> list[FlowFinding]
+fsm_llm.core.verify.flow.analyze_liveness def(definition: FSMDefinition, *, inputs: Iterable[str] = (), max_turns: int = 40) -> list[FlowFinding]
+fsm_llm.core.verify.flow.declared_available def(definition: FSMDefinition, inputs: Iterable[str] = ()) -> dict[str, frozenset[str]]
+fsm_llm.core.verify.flow.strongly_connected_components def(successors: Mapping[str, Sequence[str]], order: Mapping[str, int]) -> list[list[str]]
 # fsm_llm.frontmatter
 fsm_llm.frontmatter.Note alias Callable[[Literal['error', 'warning', 'info'], str, str], None]
 fsm_llm.frontmatter.SURROGATE_RE Pattern

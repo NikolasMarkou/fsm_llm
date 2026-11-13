@@ -13,7 +13,7 @@ property types.
 
 Public means the names in the static `__all__` of the modules in `MODULES`,
 plus the names listed in `EXPLICIT` for a module that has no `__all__`
-(`flow_analysis`, public by the AGENTS.md key-files row). `__version__` is left
+(`core.verify.flow`, public by the AGENTS.md key-files row). `__version__` is left
 out: the release version is pinned elsewhere and would force a regeneration
 every release. The text is stable across Python 3.10 to 3.12, the environment,
 the working directory and the hash seed: types are rendered by one formatter,
@@ -48,7 +48,7 @@ MODULES = (
     "fsm_llm",
     "fsm_llm.agent_skills",
     "fsm_llm.core.codes",
-    "fsm_llm.flow_analysis",
+    "fsm_llm.core.verify.flow",
     "fsm_llm.frontmatter",
     "fsm_llm.okf",
     "fsm_llm.okf_bridge",
@@ -64,7 +64,7 @@ MODULES = (
 
 # Modules with no `__all__`: the public names are listed here.
 EXPLICIT = {
-    "fsm_llm.flow_analysis": (
+    "fsm_llm.core.verify.flow": (
         "FlowFinding",
         "analyze_data_flow",
         "analyze_liveness",

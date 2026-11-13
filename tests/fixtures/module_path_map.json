@@ -228,6 +228,7 @@
       "operations": "fsm_llm.core.expressions.registry",
       "soft_equals": "fsm_llm.core.expressions.comparison"
     },
+    "fsm_llm.flow_analysis": "fsm_llm.core.verify.flow",
     "fsm_llm.llm": {
       "DEFAULT_EMBEDDING_MODEL": "fsm_llm.llm.interface",
       "DEFAULT_LLM_TIMEOUT_SECONDS": "fsm_llm.llm.interface",
@@ -429,6 +430,20 @@
       "remove_think_blocks": "fsm_llm.llm.text",
       "resolve_reasoning_trace": "fsm_llm.llm.text",
       "strip_think_and_fences": "fsm_llm.llm.text"
+    },
+    "fsm_llm.validator": {
+      "FSMValidationResult": "fsm_llm.core.verify.result",
+      "FSMValidator": "fsm_llm.core.verify.validator",
+      "UpgradeResult": "fsm_llm.core.verify.upgrade",
+      "_RESULT_KINDS": "fsm_llm.core.verify.structure",
+      "_condition_keys": "fsm_llm.core.verify.structure",
+      "_no_duplicate_keys": "fsm_llm.core.verify.upgrade",
+      "_refuse": "fsm_llm.core.verify.upgrade",
+      "_string_literals": "fsm_llm.core.verify.structure",
+      "main": "fsm_llm.core.verify.cli",
+      "main_cli": "fsm_llm.core.verify.cli",
+      "upgrade_fsm_file": "fsm_llm.core.verify.upgrade",
+      "validate_fsm_from_file": "fsm_llm.core.verify.validator"
     }
   },
   "unmoved": [
@@ -495,6 +510,8 @@
     "fsm_llm.core",
     "fsm_llm.core.definitions",
     "fsm_llm.core.expressions",
+    "fsm_llm.core.verify",
+    "fsm_llm.core.verify.graph",
     "fsm_llm.env",
     "fsm_llm.eval",
     "fsm_llm.eval.__main__",
@@ -509,7 +526,6 @@
     "fsm_llm.eval.scoring",
     "fsm_llm.eval.stats",
     "fsm_llm.executors",
-    "fsm_llm.flow_analysis",
     "fsm_llm.frontmatter",
     "fsm_llm.fsm",
     "fsm_llm.handlers",
@@ -564,7 +580,6 @@
     "fsm_llm.testing.builders",
     "fsm_llm.testing.doubles",
     "fsm_llm.testing.user",
-    "fsm_llm.validator",
     "fsm_llm.visualizer",
     "fsm_llm.workflows",
     "fsm_llm.workflows.__version__",

@@ -39,7 +39,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
-from fsm_llm.flow_analysis import FlowFinding
+from fsm_llm.core.verify.flow import FlowFinding
 
 from .constants import MAX_ASSIGNMENTS
 

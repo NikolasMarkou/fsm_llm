@@ -352,7 +352,7 @@ class TestResultKeyReaders:
         """Guards: the hook output is the rule the readers applied before the
         registry (`state.completion or state.synthesize`), for every corpus state."""
         from fsm_llm.core.definitions import handler_only_names
-        from fsm_llm.flow_analysis import _result_key
+        from fsm_llm.core.verify.flow import _result_key
 
         checked = 0
         for name, loaded in self._loaded():
@@ -373,7 +373,7 @@ class TestResultKeyReaders:
         ("path", "name", "owner"),
         [
             ("core/definitions/fsm.py", "handler_only_names", None),
-            ("flow_analysis.py", "_result_key", None),
+            ("core/verify/flow.py", "_result_key", None),
             ("api.py", "_build_push_context", "API"),
         ],
     )
@@ -616,7 +616,7 @@ class TestMintingHooks:
         assert spec.minted_keys(state) == ()
 
     def test_the_mirror_in_flow_analysis_is_gone(self):
-        from fsm_llm import flow_analysis
+        from fsm_llm.core.verify import flow as flow_analysis
 
         assert not hasattr(flow_analysis, "_minted_keys")
 
@@ -624,8 +624,8 @@ class TestMintingHooks:
         ("path", "name", "owner"),
         [
             ("pipeline.py", "_build_field_configs_from_state", "MessagePipeline"),
-            ("flow_analysis.py", "_produced", None),
-            ("flow_analysis.py", "declared_available", None),
+            ("core/verify/flow.py", "_produced", None),
+            ("core/verify/flow.py", "declared_available", None),
         ],
     )
     def test_no_reader_branches_on_a_kind_config(self, path, name, owner):
@@ -638,8 +638,8 @@ class TestMintingHooks:
         ("path", "name", "owner"),
         [
             ("pipeline.py", "_build_field_configs_from_state", "MessagePipeline"),
-            ("flow_analysis.py", "_produced", None),
-            ("flow_analysis.py", "declared_available", None),
+            ("core/verify/flow.py", "_produced", None),
+            ("core/verify/flow.py", "declared_available", None),
         ],
     )
     def test_the_minting_rule_is_not_spelled_outside_the_registry(
@@ -1295,7 +1295,7 @@ class TestVerifierHooks:
         """The warnings of the validator's kind stage alone (raw shapes that never
         load reach it too): `_validate_kind_states`, which the parent spelled
         `_validate_completion_states`."""
-        from fsm_llm.validator import FSMValidator
+        from fsm_llm.core.verify import FSMValidator
 
         validator = FSMValidator(copy.deepcopy(fsm_data))
         validator._validate_kind_states()
@@ -1304,7 +1304,7 @@ class TestVerifierHooks:
     @staticmethod
     def _kind_warnings(fsm_data: dict[str, Any]) -> list[str]:
         """The kind warnings of a whole `validate()` run."""
-        from fsm_llm.validator import FSMValidator
+        from fsm_llm.core.verify import FSMValidator
 
         warnings = FSMValidator(copy.deepcopy(fsm_data)).validate().warnings
         return [w for w in warnings if any(p in w for p in TestVerifierHooks._WANTED)]
@@ -1344,19 +1344,31 @@ class TestVerifierHooks:
 
     @pytest.mark.parametrize("name", ["analyze_data_flow", "analyze_liveness"])
     def test_the_flow_analyses_read_no_kind_config(self, name):
-        node = _function_node(self._ROOT / "flow_analysis.py", name)
+        node = _function_node(self._ROOT / "core" / "verify" / "flow.py", name)
         assert _config_attributes(node) == set(), name
 
     def test_the_validator_asks_the_kinds_for_its_raw_rules(self):
         """`FSMValidator` never names a kind config: no `.get("completion")`."""
-        tree = ast.parse((self._ROOT / "validator.py").read_text(encoding="utf-8"))
-        cls = next(
-            n
-            for n in ast.walk(tree)
-            if isinstance(n, ast.ClassDef) and n.name == "FSMValidator"
-        )
+        # `FSMValidator` is a shell over two mixins (step 75 of plan d454fd62):
+        # read the three classes, or the check would see only the shell.
+        verify = self._ROOT / "core" / "verify"
+        classes = {
+            "validator.py": "FSMValidator",
+            "structure.py": "StructureMixin",
+            "graph.py": "GraphMixin",
+        }
+        found = []
+        for module, class_name in classes.items():
+            tree = ast.parse((verify / module).read_text(encoding="utf-8"))
+            found += [
+                n
+                for n in ast.walk(tree)
+                if isinstance(n, ast.ClassDef) and n.name == class_name
+            ]
+        assert len(found) == len(classes)
         named = {
             call.args[0].value
+            for cls in found
             for call in ast.walk(cls)
             if isinstance(call, ast.Call)
             and isinstance(call.func, ast.Attribute)
@@ -1425,7 +1437,7 @@ class TestVerifierHooks:
     def test_the_raw_lint_equals_the_old_validator_rule_over_the_corpus(self):
         """Through `validate()`: a definition the structure stage refuses never
         reaches the lint (no warning), every other one says what it said."""
-        from fsm_llm.validator import FSMValidator
+        from fsm_llm.core.verify import FSMValidator
 
         checked = warned = 0
         for name, (raw, _options) in _CORPUS.items():
@@ -1609,7 +1621,7 @@ class TestVerifierHooks:
         """G4 counts a gate read as satisfiable through `produced_keys`: the same
         loop is fine while the kind produces `k`, and `cycle-no-exit` when it
         produces nothing."""
-        from fsm_llm.flow_analysis import analyze_liveness
+        from fsm_llm.core.verify.flow import analyze_liveness
 
         loop = {"target_state": "a", "description": "again", "priority": 2}
         leave = {
@@ -1683,7 +1695,7 @@ class TestVerifierHooks:
                 },
             },
         }
-        from fsm_llm.validator import FSMValidator
+        from fsm_llm.core.verify import FSMValidator
 
         monkeypatch.setattr(sk, "KINDS", (*sk.KINDS, marker))
         warnings = FSMValidator(raw).validate().warnings
@@ -1706,7 +1718,7 @@ class TestVerifierHooks:
         """`analyze_data_flow` asks the kind (its forbidden declarations) instead of
         testing `.completion`: a state built around the loader with both is silent
         for the kinds that refuse the declaration, and flagged for the default."""
-        from fsm_llm.flow_analysis import analyze_data_flow
+        from fsm_llm.core.verify.flow import analyze_data_flow
 
         def definition(**extra):
             return FSMDefinition(

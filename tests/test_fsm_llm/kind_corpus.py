@@ -761,13 +761,13 @@ def describe(
     """The unpacked record of one case (see the module docstring)."""
     from fsm_llm import API
     from fsm_llm.core.definitions import FSMDefinition, handler_only_names
-    from fsm_llm.flow_analysis import (
+    from fsm_llm.core.verify import FSMValidator
+    from fsm_llm.core.verify.flow import (
         analyze_data_flow,
         analyze_liveness,
         declared_available,
     )
     from fsm_llm.synthesis.dryrun import analyze_dryrun, edge_witnesses
-    from fsm_llm.validator import FSMValidator
 
     options = options or {}
     inputs = tuple(options.get("inputs", ()))
