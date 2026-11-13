@@ -102,7 +102,7 @@ class TestReplayHistoryGuard:
     def test_missing_instance_raises_typed_error(self):
         """The seed raises FSMError, not KeyError, for an unknown fsm_id."""
         from fsm_llm.core.definitions import FSMError
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.engine.fsm.manager import FSMManager
 
         manager = FSMManager(llm_interface=Mock())
 

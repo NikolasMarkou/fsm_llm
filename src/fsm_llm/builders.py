@@ -17,7 +17,7 @@ from typing import Any, TypeVar
 
 from .api import API
 from .core.definitions import BuildError, FSMDefinition
-from .fsm import FSMManager
+from .engine.fsm.manager import FSMManager
 from .handlers import HandlerErrorMode
 
 _T = TypeVar("_T")

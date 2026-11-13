@@ -176,7 +176,7 @@ class TestContextCleaningEmptyHandlers:
     def test_handlers_not_called_after_cleaning_empties_data(self):
         """If clean_context_keys removes all keys, CONTEXT_UPDATE handlers should not fire."""
         from fsm_llm.core.definitions import FSMContext, FSMDefinition, FSMInstance
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.engine.fsm.manager import FSMManager
         from fsm_llm.handlers import HandlerSystem, HandlerTiming
 
         handler_system = HandlerSystem(handler_error_mode="continue")

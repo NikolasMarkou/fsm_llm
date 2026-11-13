@@ -124,9 +124,9 @@ forbidden_modules =
     fsm_llm.classification
     fsm_llm.cli_support
     fsm_llm.context
+    fsm_llm.engine
     fsm_llm.eval
     fsm_llm.executors
-    fsm_llm.fsm
     fsm_llm.handlers
     fsm_llm.llm
     fsm_llm.memory
@@ -173,9 +173,9 @@ forbidden_modules =
     fsm_llm.classification
     fsm_llm.cli_support
     fsm_llm.context
+    fsm_llm.engine
     fsm_llm.eval
     fsm_llm.executors
-    fsm_llm.fsm
     fsm_llm.handlers
     fsm_llm.monitor
     fsm_llm.okf
@@ -208,9 +208,9 @@ forbidden_modules =
     fsm_llm.builders
     fsm_llm.classification
     fsm_llm.cli_support
+    fsm_llm.engine
     fsm_llm.eval
     fsm_llm.executors
-    fsm_llm.fsm
     fsm_llm.handlers
     fsm_llm.monitor
     fsm_llm.okf
@@ -242,15 +242,43 @@ forbidden_modules =
     fsm_llm.builders
     fsm_llm.classification
     fsm_llm.cli_support
+    fsm_llm.engine
     fsm_llm.eval
     fsm_llm.executors
-    fsm_llm.fsm
     fsm_llm.monitor
     fsm_llm.okf_bridge
     fsm_llm.pipeline
     fsm_llm.reasoning
     fsm_llm.runner
     fsm_llm.session
+    fsm_llm.synthesis
+    fsm_llm.testing
+    fsm_llm.workflows
+
+# Step 78 (fsm.py split into the layer package `engine/fsm/`, the first module of the `engine`
+# layer, L4 of D-016): `engine` reads the kernel (`constants`, `logging`, `security`), `core`, `llm`,
+# `context` and `handlers`, plus the modules that move into it later (`pipeline`, `executors`,
+# `classification`, `session`, `builders`, `api`: still top-level until steps 79 to 82). It imports
+# no subpackage, no okf or skills module and no entry module. The `core`, `llm`, `context` and
+# `handlers` contracts above forbid `fsm_llm.engine`, so the lower layers never import it. What
+# waits for step 95: the `layers` contract replaces these lists, and `engine -> okf_bridge` (a
+# later move into `engine/`) is not an edge yet.
+[importlinter:contract:engine-imports-no-subpackage-or-okf-or-skills]
+name = fsm_llm.engine imports no subpackage, okf, skills or entry module
+type = forbidden
+source_modules =
+    fsm_llm.engine
+forbidden_modules =
+    fsm_llm.agent_skills
+    fsm_llm.agent_skills_cli
+    fsm_llm.agents
+    fsm_llm.cli_support
+    fsm_llm.eval
+    fsm_llm.monitor
+    fsm_llm.okf
+    fsm_llm.okf_cli
+    fsm_llm.reasoning
+    fsm_llm.runner
     fsm_llm.synthesis
     fsm_llm.testing
     fsm_llm.workflows

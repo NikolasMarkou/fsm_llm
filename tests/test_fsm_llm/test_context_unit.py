@@ -857,12 +857,12 @@ class TestInternalPrefixCaseInsensitivity:
         assert result == {"name": "Alice"}
 
     def test_site_2_fsm_get_conversation_data(self):
-        """fsm.py -- FSMManager.get_conversation_data."""
+        """engine/fsm/snapshots.py -- FSMManager.get_conversation_data."""
         import threading
         from unittest.mock import Mock
 
         from fsm_llm.core.definitions import FSMContext, FSMInstance
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.engine.fsm.manager import FSMManager
         from fsm_llm.llm import LLMInterface
 
         manager = FSMManager(llm_interface=Mock(spec=LLMInterface))
@@ -5265,7 +5265,7 @@ class TestStep08_1:
         the old name ``ContextFilterWorkError`` no longer exists."""
         import fsm_llm.context.filtering as filtering
         from fsm_llm.core.definitions import FSMError
-        from fsm_llm.fsm import _strip_internal_mapping
+        from fsm_llm.engine.fsm.helpers import _strip_internal_mapping
 
         cur: dict[str, Any] = {"leaf": 1}
         for _ in range(14):
@@ -5673,12 +5673,13 @@ class TestStep5NamedConstants:
         assert CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT == "_output_response_format"
 
     def test_provenance_constant_is_shared(self):
-        from fsm_llm import fsm, pipeline
+        from fsm_llm import pipeline
         from fsm_llm.constants import PROVENANCE_METADATA_KEY
+        from fsm_llm.engine.fsm import snapshots
 
         assert PROVENANCE_METADATA_KEY == "_pipeline_extracted"
         assert pipeline.PROVENANCE_METADATA_KEY is PROVENANCE_METADATA_KEY
-        assert fsm.PROVENANCE_METADATA_KEY is PROVENANCE_METADATA_KEY
+        assert snapshots.PROVENANCE_METADATA_KEY is PROVENANCE_METADATA_KEY
 
 
 class _Step14Opaque:
@@ -5907,7 +5908,7 @@ KEPT, DROPPED, REDACTED = "kept", "dropped", "redacted"
 
 
 # filter -> verdict per class. The differences are the documented contracts
-# (fsm.py D-010, context.py strip_forbidden_keys, runner.py D-014/D-015).
+# (engine/fsm/helpers.py D-010, context.py strip_forbidden_keys, runner.py D-014/D-015).
 _EXPECTED = {
     "strip_internal": {
         "forbidden": KEPT,
@@ -5944,7 +5945,7 @@ _EXPECTED = {
 
 def _run_filter(name: str, ctx: dict) -> dict:
     if name == "strip_internal":
-        from fsm_llm.fsm import _strip_internal_mapping
+        from fsm_llm.engine.fsm.helpers import _strip_internal_mapping
 
         return _strip_internal_mapping(ctx)
     if name in ("clean_default", "clean_strict"):

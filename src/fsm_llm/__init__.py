@@ -145,12 +145,12 @@ from .core.visualize import (
     visualize_fsm_ascii,
     visualize_fsm_from_file,
 )
+from .engine.fsm.manager import FSMManager
 
 # --------------------------------------------------------------
 # Explicit .env loading (opt-in; importing fsm_llm reads no .env file)
 # --------------------------------------------------------------
 from .env import load_env
-from .fsm import FSMManager
 
 # --------------------------------------------------------------
 # Handler System Components

@@ -1632,9 +1632,19 @@ class TestStep12Accessors:
         assert snapshot["hidden_buffers"] == []
 
     def test_fsm_source_has_no_hidden_buffers_reach_in(self):
-        import fsm_llm.fsm as fsm_module
+        import importlib
+        import pkgutil
 
-        assert "_hidden_buffers" not in _module_source(fsm_module)
+        import fsm_llm.engine.fsm as fsm_package
+
+        # The package `__init__` only re-exports: read every module of it.
+        modules = [
+            importlib.import_module(f"{fsm_package.__name__}.{info.name}")
+            for info in pkgutil.iter_modules(fsm_package.__path__)
+        ]
+        assert len(modules) >= 4
+        for module in modules:
+            assert "_hidden_buffers" not in _module_source(module), module.__name__
 
     def test_reset_handlers_drops_library_state_and_keeps_user_handlers(self):
         import io

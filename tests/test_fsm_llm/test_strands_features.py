@@ -678,7 +678,7 @@ class TestSessionRestoreRoundTrip:
     def test_restore_failure_fires_end_conversation_once(self):
         """Behavior pin (reviewer C2): the NC1 teardown fires END_CONVERSATION
         handlers EXACTLY ONCE on a failed restore. This is intentional and
-        consistent with fsm.py:_cleanup_after_failed_start (prior plan D-006):
+        consistent with engine/fsm/manager.py:_cleanup_after_failed_start (prior plan D-006):
         any failed conversation setup fires END on teardown. Pinning it here so a
         future change that silently stops firing END handlers -- or double-fires
         them -- on the restore-failure path is caught. Also re-asserts no leak and

@@ -11,7 +11,7 @@ The contract under test:
   identical synchronous failure — no truncated assistant turn, and the user turn
   rolled back;
 * **client abandonment** (``GeneratorExit``) must keep its existing, deliberately
-  documented behaviour (``fsm.py:329-338``) — the partial reply the user actually
+  documented behaviour (``engine/fsm/turns.py``, ``_open_locked_stream``) — the partial reply the user actually
   saw IS persisted, and the user turn stays.
 
 No ``time.sleep`` anywhere.  The mock stream is fully deterministic, and every
@@ -209,7 +209,7 @@ class TestMidStreamBackendError:
 
 
 class TestClientAbandonment:
-    """SC-6: the ``GeneratorExit`` contract (``fsm.py:329-338``) is unchanged.
+    """SC-6: the ``GeneratorExit`` contract (``engine/fsm/turns.py``, ``_open_locked_stream``) is unchanged.
 
     This is the guard against over-broadening the D-015 fix: if
     ``except BaseException`` had been written before ``except GeneratorExit``,

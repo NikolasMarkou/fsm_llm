@@ -34,7 +34,7 @@ class TestVB1SelfTransitionSuppressed:
             TransitionEvaluation,
             TransitionEvaluationResult,
         )
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.engine.fsm.manager import FSMManager
 
         fsm_def = FSMDefinition(
             name="self_loop_test",
@@ -168,7 +168,7 @@ class TestVB3DoubleWrappedFSMError:
 
     def test_start_conversation_no_double_wrap(self):
         from fsm_llm.api import API
-        from fsm_llm.fsm import FSMError
+        from fsm_llm.core.definitions import FSMError
 
         api = API.__new__(API)
         api._stack_lock = __import__("threading").Lock()
@@ -191,7 +191,7 @@ class TestVB3DoubleWrappedFSMError:
 
     def test_converse_no_double_wrap(self):
         from fsm_llm.api import API
-        from fsm_llm.fsm import FSMError
+        from fsm_llm.core.definitions import FSMError
 
         api = API.__new__(API)
         api._stack_lock = __import__("threading").Lock()
@@ -217,7 +217,8 @@ class TestVB4FSMErrorSubclassWrapping:
     """VB4: FSMError subclasses should propagate with original type."""
 
     def test_fsmerror_subclass_preserved(self):
-        from fsm_llm.fsm import FSMError, FSMManager
+        from fsm_llm.core.definitions import FSMError
+        from fsm_llm.engine.fsm.manager import FSMManager
 
         fsm_def = FSMDefinition(
             name="test",
@@ -262,7 +263,8 @@ class TestVB7NoTerminalStateCheck:
     """VB7: process_message should fail early for terminal states."""
 
     def test_terminal_state_rejects_message(self):
-        from fsm_llm.fsm import FSMError, FSMManager
+        from fsm_llm.core.definitions import FSMError
+        from fsm_llm.engine.fsm.manager import FSMManager
 
         fsm_def = FSMDefinition(
             name="test",
@@ -736,7 +738,7 @@ class TestFSMCacheLRU:
 
     def test_cache_is_ordered_dict(self):
         """FSMManager.fsm_cache must be OrderedDict for LRU behavior."""
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.engine.fsm.manager import FSMManager
 
         mock_llm = MagicMock()
         mgr = FSMManager(llm_interface=mock_llm, max_fsm_cache_size=3)
@@ -745,7 +747,7 @@ class TestFSMCacheLRU:
     def test_lru_eviction_keeps_recently_accessed(self):
         """Accessing a cached entry should protect it from eviction."""
         from fsm_llm.core.definitions import FSMDefinition
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.engine.fsm.manager import FSMManager
 
         def make_def(name):
             return FSMDefinition(

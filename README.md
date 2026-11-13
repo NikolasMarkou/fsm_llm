@@ -530,7 +530,7 @@ The repository is one distribution (`fsm-llm`, setuptools, src layout). The dire
 ```
 fsm_llm/
 ├── src/fsm_llm/      # THE LIBRARY (the import package)
-│   ├── api.py, fsm.py,        # API, FSMManager, MessagePipeline (the 2-pass turn)
+│   ├── api.py, engine/fsm/,   # API, FSMManager, MessagePipeline (the 2-pass turn)
 │   │   pipeline.py
 │   ├── core/definitions/      # Pydantic FSM models and core exceptions (a package)
 │   ├── core/transition_evaluator.py, core/expressions/   # JsonLogic evaluation, no LLM

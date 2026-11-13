@@ -33,8 +33,8 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.definitions.schema import SCHEMA_VERSION_DEFAULT
 from fsm_llm.core.transition_evaluator import TransitionEvaluatorConfig
+from fsm_llm.engine.fsm.manager import FSMManager
 from fsm_llm.executors import ConversationExecutor
-from fsm_llm.fsm import FSMManager
 from fsm_llm.handlers import HandlerErrorMode, HandlerTiming, create_handler
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.logging import logger
@@ -1219,7 +1219,9 @@ def _c12_api() -> tuple[API, list[str]]:
 
 @pytest.fixture
 def _c12_short_lock_timeout():
-    with patch("fsm_llm.fsm.END_CONVERSATION_LOCK_TIMEOUT_SECONDS", 0.2):
+    with patch(
+        "fsm_llm.engine.fsm.snapshots.END_CONVERSATION_LOCK_TIMEOUT_SECONDS", 0.2
+    ):
         yield
 
 
@@ -1871,7 +1873,7 @@ class TestStep4ConfigPassthrough:
 
     def test_p0_4_default_fsm_cache_size_is_unchanged(self):
         from fsm_llm.constants import DEFAULT_MAX_FSM_CACHE_SIZE
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.engine.fsm.manager import FSMManager
 
         api = _a2026_09_22_api()
         assert api.fsm_manager._max_fsm_cache_size == 64
@@ -1973,7 +1975,7 @@ def _sweep_fsm() -> dict[str, Any]:
 
 class TestConfigReachability:
     def test_every_option_is_classified(self):
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.engine.fsm.manager import FSMManager
         from fsm_llm.handlers import HandlerSystem
 
         declared = {

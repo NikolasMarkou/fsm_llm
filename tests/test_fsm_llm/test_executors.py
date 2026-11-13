@@ -37,7 +37,10 @@ _SRC = Path(ex.__file__).parent
 _ENGINE_FILES = (
     "pipeline.py",
     "api.py",
-    "fsm.py",
+    "engine/fsm/helpers.py",
+    "engine/fsm/manager.py",
+    "engine/fsm/snapshots.py",
+    "engine/fsm/turns.py",
     "core/verify/flow.py",
     "synthesis/dryrun.py",
 )

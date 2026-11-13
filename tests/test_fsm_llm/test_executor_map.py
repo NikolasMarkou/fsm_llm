@@ -33,7 +33,7 @@ from fsm_llm.core.definitions import (
     FSMInstance,
     State,
 )
-from fsm_llm.fsm import FSMManager
+from fsm_llm.engine.fsm.manager import FSMManager
 from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.testing import MockLLM2Interface
 

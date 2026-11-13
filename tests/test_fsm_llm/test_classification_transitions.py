@@ -666,7 +666,7 @@ class TestAmbiguousTransitionExceptionDiscipline:
     )
     def test_programming_errors_propagate_out_of_converse(self, exc):
         """Not swallowed into a stay. ``FSMManager.process_message`` wraps any
-        non-FSMError into ``FSMError`` (``fsm.py`` ``raise FSMError(...) from e``),
+        non-FSMError into ``FSMError`` (``engine/fsm/turns.py`` ``raise FSMError(...) from e``),
         so the public surface is an ``FSMError`` whose ``__cause__`` is the
         original programming error.
         """
@@ -2222,7 +2222,7 @@ class TestStep03A3:
 
 
 def _step12_manager():
-    from fsm_llm.fsm import FSMManager
+    from fsm_llm.engine.fsm.manager import FSMManager
 
     manager = FSMManager(llm_interface=_mock_llm(), fsm_loader=lambda x: None)
     manager._conversation_locks["orphan"] = threading.Lock()

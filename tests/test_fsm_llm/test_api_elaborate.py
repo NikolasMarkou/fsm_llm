@@ -1293,7 +1293,7 @@ class TestHistoryWindowFollowsMaxHistorySize:
         assert "<conversation_summary>" not in prompt
 
     def test_fsm_manager_default_builders_follow_size(self):
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.engine.fsm.manager import FSMManager
 
         manager = FSMManager(
             fsm_loader=lambda fsm_id: FSMDefinition.model_validate(_LOOP_FSM),

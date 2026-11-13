@@ -91,7 +91,7 @@ class TestStartConversationHandlerCleanup:
     def test_handler_failure_cleans_up_instance(self):
         """When START_CONVERSATION handler fails (handler_error_mode=raise), instance must not leak."""
         from fsm_llm.core.definitions import FSMDefinition
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.engine.fsm.manager import FSMManager
         from fsm_llm.handlers import HandlerSystem, HandlerTiming, create_handler
 
         fsm_def = FSMDefinition(

@@ -574,7 +574,7 @@ class WorkingMemory:
         VALUES are shared by reference with the live memory, so mutating a
         nested list/dict inside the returned structure mutates the buffer
         (and vice versa). Mirrors the caveat on
-        ``FSMManager.get_conversation_snapshot`` in ``fsm.py``; deep-copy
+        ``FSMManager.get_conversation_snapshot`` in ``engine/fsm/snapshots.py``; deep-copy
         the result if you need isolation.
 
         Returns:
@@ -614,7 +614,7 @@ class WorkingMemory:
         # pop this key out before treating the rest of `data` as buffer names
         # -- see its own comment below. `api.py`'s `save_session`/
         # `restore_session` already hand-carry `hidden_buffers` as a SIBLING
-        # `SessionState.working_memory["hidden_buffers"]` key (fsm.py's
+        # `SessionState.working_memory["hidden_buffers"]` key (engine/fsm/snapshots.py's
         # `get_conversation_snapshot`) and pass it explicitly to `from_dict`,
         # so the explicit kwarg there always wins over this embedded default
         # (see decisions.md D-021 for why that path is left unchanged rather

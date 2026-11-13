@@ -75,7 +75,7 @@ flowchart TD
 ## Files
 
 - `api.py` - `API`, the class you use: start conversations, send messages, read data, push and pop FSMs, save and restore sessions.
-- `fsm.py` - `FSMManager`: keeps conversations, their locks, and a cache of FSM definitions.
+- `engine/fsm/` - `FSMManager`: keeps conversations, their locks, and a cache of FSM definitions (`manager.py` the class, `turns.py` the turn path, `snapshots.py` the reads and snapshots, `helpers.py`).
 - `pipeline.py` - `MessagePipeline`: the two-pass processing for each message.
 - `core/definitions/` - Pydantic data models (states, transitions, FSM definition, context, classification results) and the error classes, including `BuildError`.
 - `builders.py` - `APIBuilder` and `FSMManagerBuilder`: fluent builders over `API` and `FSMManager` (see "Builders" below).

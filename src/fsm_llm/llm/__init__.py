@@ -49,7 +49,7 @@ Integration with FSM System
 ---------------------------
 This module integrates with the broader fsm-llm system:
 
-- **FSMManager** (`fsm.py`) orchestrates the overall FSM execution and calls these
+- **FSMManager** (`engine/fsm/`) orchestrates the overall FSM execution and calls these
   methods at appropriate points in the conversation flow.
 - **PromptBuilder** (`context/layout/`) constructs the specialized prompts for each pass
   based on current FSM state, context, and conversation history.

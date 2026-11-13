@@ -50,7 +50,7 @@ from fsm_llm.core.loaders import load_fsm_from_file
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.core.verify import FSMValidator
 from fsm_llm.core.visualize import visualize_fsm_ascii
-from fsm_llm.fsm import FSMManager
+from fsm_llm.engine.fsm.manager import FSMManager
 from fsm_llm.llm import LLMInterface
 from fsm_llm.llm.json_extraction import extract_json_from_text
 from tests.test_fsm_llm.support import (
@@ -746,7 +746,7 @@ class TestGetConversationDataNestedFiltering:
         """A container past the bound is DROPPED, never returned unfiltered.
 
         The bound is pinned against ``clean_context_keys`` rather than against a
-        hardcoded number, so re-declaring a local depth limit in ``fsm.py``
+        hardcoded number, so re-declaring a local depth limit in ``engine/fsm/helpers.py``
         fails this test (D-011: one bound for every context filter).
         """
         from fsm_llm.constants import MAX_CONTEXT_FILTER_DEPTH
@@ -810,7 +810,7 @@ class TestGetConversationDataNestedFiltering:
 
 
 class TestFsmHandlerContractTwins:
-    """A ``critical=True`` handler's raise must not vanish inside ``fsm.py``.
+    """A ``critical=True`` handler's raise must not vanish inside ``engine/fsm/``.
 
     Two sites, one contract (D-009 of plan-2026-07-20T040150-876e7164):
 
@@ -1014,7 +1014,7 @@ class TestStep4CacheSizeValidation:
 
     @pytest.mark.parametrize("size", [0, -1])
     def test_step_4_1_manager_rejects_cache_size_below_one(self, size):
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.engine.fsm.manager import FSMManager
 
         with pytest.raises(ValueError, match="max_fsm_cache_size"):
             FSMManager(llm_interface=_mock_llm(), max_fsm_cache_size=size)

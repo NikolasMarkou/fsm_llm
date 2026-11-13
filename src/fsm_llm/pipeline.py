@@ -1067,7 +1067,7 @@ class MessagePipeline:
         # the whole mechanism.
         #   * GeneratorExit (the consumer stopped iterating / the generator was
         #     closed or GC'd) keeps `persist = True`, so the partial reply the user
-        #     ACTUALLY SAW is written to history.  fsm.py:329-338 documents that
+        #     ACTUALLY SAW is written to history.  engine/fsm/turns.py (`_open_locked_stream`) documents that
         #     contract and depends on it: its _rollback_user_message call then sees
         #     a trailing {"system": partial} entry and correctly no-ops, leaving the
         #     user turn in place.  Do NOT "simplify" this clause away.
@@ -1078,7 +1078,7 @@ class MessagePipeline:
         # BaseException, not Exception: KeyboardInterrupt/SystemExit must not
         # silently persist a truncated turn either.  Both clauses bare-`raise`, so
         # nothing is swallowed.  Writing `except BaseException` FIRST would swallow
-        # the abandonment semantics and silently flip the fsm.py contract.
+        # the abandonment semantics and silently flip the engine/fsm/turns.py contract.
         #
         # SCOPE OF THE PARITY CLAIM — corrected in step 8; measure, do not assume.
         # Full parity with the synchronous path (_execute_response_generation_pass,
@@ -1086,11 +1086,11 @@ class MessagePipeline:
         # for **Exception subclasses only**.  For a true BaseException
         # (KeyboardInterrupt / SystemExit) this clause suppresses the partial reply
         # correctly, but the orphaned user turn SURVIVES: the rollback lives in
-        # fsm.py:326-341, whose clauses are FSMError / GeneratorExit / Exception —
+        # engine/fsm/turns.py (`_open_locked_stream`), whose clauses are FSMError / GeneratorExit / Exception —
         # there is no BaseException clause, so _rollback_user_message never runs.
         # Probed on this tree: ^C mid-stream leaves
         # [{'system': 'Greetings!'}, {'user': 'hi'}].  Do NOT "fix" this by
-        # widening fsm.py's clause — whether a KeyboardInterrupt should roll back
+        # widening the engine/fsm/turns.py clause — whether a KeyboardInterrupt should roll back
         # is a design call, not a defect fix.  Open item, recorded in
         # verification.md § Not Verified.
         #
@@ -1120,7 +1120,7 @@ class MessagePipeline:
             #     persisted permanently. Test on the JOINED content, never on the
             #     chunk list.
             # Do NOT collapse these into one flag: a GeneratorExit carrying a
-            # GENUINE partial must still persist (that is the fsm.py contract),
+            # GENUINE partial must still persist (that is the engine/fsm/turns.py contract),
             # and only the empty-content case is suppressed here.
             full_message = "".join(chunks)
             if full_message and persist:

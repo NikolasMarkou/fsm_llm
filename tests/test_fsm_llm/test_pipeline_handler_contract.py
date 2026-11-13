@@ -544,7 +544,7 @@ class TestPreTransitionContextUpdateRollback:
 
     ``instance.context.update(extracted_data)`` runs one statement before this
     handler fires.  Without the scoped rollback the LLM-extracted field stayed in
-    context permanently while ``fsm.py``'s ``except FSMError`` popped the user
+    context permanently while ``engine/fsm/turns.py``'s ``except FSMError`` popped the user
     message out of history -- so ``get_data()`` and ``get_conversation_history()``
     disagreed, and the extraction skip-guard meant a retry never re-extracted.
     """

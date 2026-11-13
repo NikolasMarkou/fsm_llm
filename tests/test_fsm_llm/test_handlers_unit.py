@@ -1949,7 +1949,7 @@ class _DuckHandlerSystem:
 
 def _manager_with(handler_system):
     from fsm_llm.core.definitions import FSMDefinition
-    from fsm_llm.fsm import FSMManager
+    from fsm_llm.engine.fsm.manager import FSMManager
 
     definition = FSMDefinition(**_DUCK_FSM)
     with (

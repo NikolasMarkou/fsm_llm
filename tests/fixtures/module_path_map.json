@@ -229,6 +229,15 @@
       "soft_equals": "fsm_llm.core.expressions.comparison"
     },
     "fsm_llm.flow_analysis": "fsm_llm.core.verify.flow",
+    "fsm_llm.fsm": {
+      "FSMManager": "fsm_llm.engine.fsm.manager",
+      "_SnapshotT": "fsm_llm.engine.fsm.snapshots",
+      "_TurnT": "fsm_llm.engine.fsm.turns",
+      "_conversation_entry": "fsm_llm.engine.fsm.helpers",
+      "_strip_internal_mapping": "fsm_llm.engine.fsm.helpers",
+      "_unexpected_turn_failure": "fsm_llm.engine.fsm.helpers",
+      "with_conversation_context": "fsm_llm.engine.fsm.helpers"
+    },
     "fsm_llm.handlers": {
       "BaseHandler": "fsm_llm.handlers.base",
       "ConditionLambda": "fsm_llm.handlers.protocol",
@@ -590,6 +599,8 @@
     "fsm_llm.core.verify",
     "fsm_llm.core.verify.graph",
     "fsm_llm.core.visualize",
+    "fsm_llm.engine",
+    "fsm_llm.engine.fsm",
     "fsm_llm.env",
     "fsm_llm.eval",
     "fsm_llm.eval.__main__",
@@ -605,7 +616,6 @@
     "fsm_llm.eval.stats",
     "fsm_llm.executors",
     "fsm_llm.frontmatter",
-    "fsm_llm.fsm",
     "fsm_llm.llm.providers",
     "fsm_llm.logging",
     "fsm_llm.memory",

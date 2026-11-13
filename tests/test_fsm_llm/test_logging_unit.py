@@ -7,7 +7,7 @@ import json
 import pytest
 
 from fsm_llm.api import handle_conversation_errors
-from fsm_llm.fsm import with_conversation_context
+from fsm_llm.engine.fsm.helpers import with_conversation_context
 
 
 class TestWithConversationContext:
@@ -248,7 +248,7 @@ class TestConversationLockCleanup:
         import threading
         from unittest.mock import MagicMock
 
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.engine.fsm.manager import FSMManager
 
         mock_llm = MagicMock()
         manager = FSMManager(llm_interface=mock_llm, fsm_loader=lambda x: None)
@@ -267,7 +267,7 @@ class TestConversationLockCleanup:
         import threading
         from unittest.mock import MagicMock
 
-        from fsm_llm.fsm import FSMManager
+        from fsm_llm.engine.fsm.manager import FSMManager
 
         mock_llm = MagicMock()
         manager = FSMManager(llm_interface=mock_llm, fsm_loader=lambda x: None)

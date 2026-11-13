@@ -805,7 +805,7 @@ class TestReadConcurrency:
     ``merge_delta`` + the extraction commit). A reader iterating the dict then
     raises ``RuntimeError: dictionary changed size during iteration``.
 
-    This test was authored RED-first: run against the unfixed ``fsm.py`` it
+    This test was authored RED-first: run against the unfixed ``fsm.py`` (now ``engine/fsm/``) it
     reliably surfaces that ``RuntimeError`` in the reader threads. Against the
     fixed code (reads snapshot under ``conv_lock``) it must pass with zero
     ``RuntimeError`` and structurally intact reads.
@@ -1545,8 +1545,8 @@ def _prune_provenance_fsm_nonterminal_middle() -> dict:
     ``middle`` is deliberately NON-terminal (it carries a transitions list
     whose condition never fires in this test) so a SECOND turn is legal:
     ``has_conversation_ended``/``_process_message_locked`` reject a turn
-    once ``current_state.transitions`` is empty (``fsm.py:733``,
-    ``fsm.py:559``), so the two-state ``done``-terminal fixture cannot be
+    once ``current_state.transitions`` is empty (``engine/fsm/turns.py``,
+    ``engine/fsm/manager.py``), so the two-state ``done``-terminal fixture cannot be
     reused here.
     """
     return {

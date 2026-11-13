@@ -359,11 +359,16 @@ class TestImportProblems:
     """The no-shim and resolves-for-real checks, over synthetic moves of today's tree."""
 
     def test_an_old_path_that_still_imports_is_a_shim(self) -> None:
-        bad = import_problems(_data({"fsm_llm.api": "fsm_llm.fsm"}))
+        bad = import_problems(_data({"fsm_llm.api": "fsm_llm.engine.fsm.manager"}))
         assert bad == ["old path `fsm_llm.api` is still importable (no shim allowed)"]
 
     def test_an_old_path_that_is_gone_and_a_new_one_that_imports_is_clean(self) -> None:
-        assert import_problems(_data({"fsm_llm.gone_module": "fsm_llm.fsm"})) == []
+        assert (
+            import_problems(
+                _data({"fsm_llm.gone_module": "fsm_llm.engine.fsm.manager"})
+            )
+            == []
+        )
 
     def test_a_new_path_that_does_not_import_fails(self) -> None:
         bad = import_problems(_data({"fsm_llm.gone_module": "fsm_llm.not_there"}))
@@ -374,8 +379,12 @@ class TestImportProblems:
         )
 
     def test_a_symbol_must_exist_in_the_new_module(self) -> None:
-        bad = import_problems(_data({"fsm_llm.gone": {"NoSuchName": "fsm_llm.fsm"}}))
-        assert bad == ["`fsm_llm.fsm` has no `NoSuchName` (moved from `fsm_llm.gone`)"]
+        bad = import_problems(
+            _data({"fsm_llm.gone": {"NoSuchName": "fsm_llm.engine.fsm.manager"}})
+        )
+        assert bad == [
+            "`fsm_llm.engine.fsm.manager` has no `NoSuchName` (moved from `fsm_llm.gone`)"
+        ]
 
     def test_a_reexport_is_not_a_move(self) -> None:
         bad = import_problems(_data({"fsm_llm.gone": {"API": "fsm_llm"}}))
@@ -395,7 +404,12 @@ class TestImportProblems:
         assert any("still a plain module" in p for p in bad)
 
     def test_a_package_whose_parent_is_missing_counts_as_gone(self) -> None:
-        assert import_problems(_data({"fsm_llm.nope.deeper": "fsm_llm.fsm"})) == []
+        assert (
+            import_problems(
+                _data({"fsm_llm.nope.deeper": "fsm_llm.engine.fsm.manager"})
+            )
+            == []
+        )
 
 
 class TestRefresh:
@@ -407,7 +421,10 @@ class TestRefresh:
         _refresh(path)
         data = load(path)
         assert data["moved"] == {"fsm_llm.zz_old": "fsm_llm.api"}
-        assert "fsm_llm.api" not in data["unmoved"] and "fsm_llm.fsm" in data["unmoved"]
+        assert (
+            "fsm_llm.api" not in data["unmoved"]
+            and "fsm_llm.engine.fsm.manager" in data["unmoved"]
+        )
         assert path.read_text(encoding="utf-8") == render(data)
 
 

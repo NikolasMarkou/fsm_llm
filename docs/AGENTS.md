@@ -41,7 +41,7 @@ Other files read or point to these docs:
 - `tests/test_fsm_llm/test_docs_snippets.py`: `_REFERENCE_DOCS` holds `docs/api_reference.md`, `docs/architecture.md`, `docs/fsm_design.md`, `docs/handlers.md`, `docs/synthesis.md`, `docs/testing.md`. `docs/quickstart.md` is in `_FULL_FSM_DOCS`. The test regex is ```` ```(json|python)\n(.*?)``` ````. Any block that contains `"initial_state"` must load through `FSMDefinition(**definition)`. For JSON the whole block is parsed. For Python it takes the first dict literal with `initial_state`, found through `ast`, so the dict must be a pure literal. `quickstart.md` must yield at least one such snippet. Every `_REFERENCE_DOCS` file must exist.
 - `tests/test_fsm_llm_testing/test_guide.py`: executes every ```` ```python ```` block of `docs/testing.md` in document order in one namespace (a later block uses the names of an earlier one), offline, and checks that every name in `fsm_llm.testing.__all__` appears in the guide.
 - `tests/test_fsm_llm_regression/test_regression_cli_and_exports.py` (`TestQuickstartReferences`): `quickstart.md` must not contain `examples/basic/quiz`, `examples/intermediate/customer_service` or `python main.py`.
-- `src/fsm_llm/fsm.py`: the module docstring points to `docs/architecture.md`. A comment near line 617 quotes `docs/handlers.md` on ERROR handlers.
+- `src/fsm_llm/engine/fsm/manager.py`: the module docstring points to `docs/architecture.md`. A comment in `engine/fsm/turns.py` (`_process_message_locked`) quotes `docs/handlers.md` on ERROR handlers.
 
 ## Data shapes
 
@@ -77,5 +77,5 @@ No known mismatches between these docs and the code. When one is found, list it 
 - After any edit, run:
   `.venv/bin/python -m pytest tests/test_fsm_llm/test_docs_snippets.py tests/test_fsm_llm_regression/test_regression_cli_and_exports.py`
 - A new full FSM example must include `description` on the FSM and on every state, `id` and `purpose` on every state, and a reachable terminal state.
-- Renaming or deleting a current guide means updating `_REFERENCE_DOCS` or `_FULL_FSM_DOCS` in `test_docs_snippets.py` and the pointers in `src/fsm_llm/fsm.py`.
+- Renaming or deleting a current guide means updating `_REFERENCE_DOCS` or `_FULL_FSM_DOCS` in `test_docs_snippets.py` and the pointers in `src/fsm_llm/engine/fsm/manager.py`.
 - Example paths cited here must exist under `examples/`. Do not edit `examples/` to fit the docs: they are evaluation baselines.

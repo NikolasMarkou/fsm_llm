@@ -136,7 +136,7 @@ Test-writing constraints:
 
 ## Dependencies
 
-- Internal: `fsm_llm.agents` (all modules), `fsm_llm.core.definitions` (request/response models, `FSMDefinition`, `State`, `FSMError`), `fsm_llm.llm.LLMInterface`, `fsm_llm.pipeline.MessagePipeline` (`_build_field_configs_from_state`, patched `Classifier`), `fsm_llm.llm.ollama`, `fsm_llm.core.expressions`, `fsm_llm.memory`, `fsm_llm.session`, `fsm_llm.constants`, `fsm_llm.logging`, `fsm_llm.fsm`, `fsm_llm.monitor`, `fsm_llm.workflows`.
+- Internal: `fsm_llm.agents` (all modules), `fsm_llm.core.definitions` (request/response models, `FSMDefinition`, `State`, `FSMError`), `fsm_llm.llm.LLMInterface`, `fsm_llm.pipeline.MessagePipeline` (`_build_field_configs_from_state`, patched `Classifier`), `fsm_llm.llm.ollama`, `fsm_llm.core.expressions`, `fsm_llm.memory`, `fsm_llm.session`, `fsm_llm.constants`, `fsm_llm.logging`, `fsm_llm.engine.fsm`, `fsm_llm.monitor`, `fsm_llm.workflows`.
 - Optional, skip-gated: `mcp` (`importorskip`), `fastapi` + `httpx` (`importorskip` or `find_spec` skipif), opentelemetry SDK (`_has_otel()` checks `fsm_llm.monitor.otel._HAS_OTEL`), `fsm_llm.reasoning` (`importorskip` or try/skip), `fsm_llm.workflows` (`importorskip` in one test).
 - Not gated: `test_dependency_resolver.py` and `test_public_api.py::TestPhase2Exports` import `fsm_llm.workflows` and `fsm_llm.monitor` directly.
 - No agents module imports litellm; tests stub core's send binding `fsm_llm.llm.providers.litellm.completion` (also `litellm.completion` where a test proves it is never reached: `test_one_engine.py`, `test_native_fc.py`, `test_composition.py`) or inject a scripted `LLMInterface`. No network call happens.

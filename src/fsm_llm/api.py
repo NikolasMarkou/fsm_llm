@@ -119,12 +119,12 @@ from .core.definitions import (
 from .core.loaders import load_fsm_definition, load_fsm_from_file
 from .core.state_kinds import kind_of
 from .core.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
-from .executors import StateExecutor
 
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
-from .fsm import FSMManager
+from .engine.fsm.manager import FSMManager
+from .executors import StateExecutor
 from .handlers import (
     BaseHandler,
     FSMHandler,
@@ -720,7 +720,7 @@ class API:
 
         # DECISION plan-2026-11-06T093029-0068b055/D-004
         # No prompt builders are built here: FSMManager builds the defaults with
-        # `max_history_messages=max_history_size` (one site, see fsm.py). Do NOT
+        # `max_history_messages=max_history_size` (one site, see engine/fsm/manager.py). Do NOT
         # construct config-less builders here again: they would pin the window
         # to 5 messages and make `max_history_size` inert for the model.
 
@@ -2238,7 +2238,7 @@ class API:
         # the original error — swallow-and-log, then re-raise the original.
         # NOTE (intentional): end_conversation fires END_CONVERSATION handlers on
         # this teardown even though START was suppressed. This is DELIBERATE and
-        # consistent with fsm.py:_cleanup_after_failed_start (prior plan D-006):
+        # consistent with engine/fsm/manager.py:_cleanup_after_failed_start (prior plan D-006):
         # any failed conversation setup fires END on teardown. Do NOT suppress END
         # handlers here — that would diverge from the failed-start precedent.
         try:

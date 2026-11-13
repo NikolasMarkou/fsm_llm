@@ -190,13 +190,13 @@ class ContextCompactor:
 #
 # DECISION plan-2026-09-12T135914-45a654de/D-016
 # The depth-bounded dict/list/tuple recursion itself (byte-identical to
-# `fsm.py`'s walker) now lives in ONE shared place,
+# `engine/fsm/helpers.py`'s walker) now lives in ONE shared place,
 # `utilities.filter_context_tree`. This call site supplies its OWN 5-reason
 # predicate and its OWN logging/`removed_keys`/`warned_keys` tracking via the
 # `should_drop`/`on_drop` closures below -- every behavior documented in this
 # function's docstring (None-stripping, forbidden-pattern check, WARNING
 # logging) is reproduced exactly as before, just relocated into the closures.
-# `fsm.py`'s call site does NOT get any of this richer policy (see its own
+# `engine/fsm/helpers.py`'s call site does NOT get any of this richer policy (see its own
 # D-010 comment). See decisions.md D-016.
 
 
