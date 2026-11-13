@@ -1828,7 +1828,8 @@ class State(BaseModel):
         # per list. Do NOT extend the check ACROSS field_extractions and
         # classification_extractions: one explicit extraction named like a
         # classification field is the supported below-threshold fallback of
-        # plan-2026-09-19T175721-21cd7f8e/D-006 (pipeline.py). See decisions.md
+        # plan-2026-09-19T175721-21cd7f8e/D-006 (now enforced in
+        # `_conversation_minted_keys`, src/state_kinds.py). See decisions.md
         # D-016, D-033.
         """
         for channel, configs in (

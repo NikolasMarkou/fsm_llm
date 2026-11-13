@@ -1423,10 +1423,16 @@ class API:
             # completion result made the child's completion state skip its
             # call (skip-if-set) and "answer" with the parent's reply. Do NOT
             # inherit a key a child completion state owns (D-021), and do NOT
-            # drop it from an explicit `context_to_pass`. See D-029. The same
-            # holds for a synthesize state's result key: the runner starts a run
-            # only while the key is unset, so an inherited `synthesis_result`
-            # made the child skip its own run (plan d454fd62 step 55).
+            # drop it from an explicit `context_to_pass`. See D-029.
+            # DECISION plan-2026-11-12T073150-d454fd62/D-022: the same drop for
+            # a synthesize state's result key, for a different reason. A child
+            # pushed here with `inherit_context=True` routed on the parent's
+            # stale `synthesis_result` (its edges must read that key) before
+            # any run wrote one. It is NOT that a runner skips the child: the
+            # runner pushes its own children with `inherit_context=False` and
+            # never serves a child pushed by a user. Do NOT restore that
+            # "skips its own run" reason, and do NOT drop the key from an
+            # explicit `context_to_pass`.
             for state in child_definition.states.values():
                 spec = kind_of(state)
                 if not spec.inherits_result_on_push:

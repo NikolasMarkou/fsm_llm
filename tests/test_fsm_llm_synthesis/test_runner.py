@@ -1465,10 +1465,10 @@ _STALE = {"status": "ok", "procedure_id": "stale", "version": "1.0", "reason": N
 
 class TestPushedChildOwnsItsSynthesisResult:
     """A pushed child inherited the parent's ``synthesis_result`` (step 55 of plan
-    d454fd62): its synthesize state saw the key already set (a state runs only
-    while it is unset) and its edges routed on the stale result before any run
-    wrote one. The drop is on the child's initial context only. (The runner itself
-    pushes with ``inherit_context=False`` and serves no frame it did not push.)"""
+    d454fd62, D-022): its synthesize state's edges read the key, so they routed
+    on the stale result before any run wrote one. The drop is on the child's
+    initial context only. (The runner itself pushes with
+    ``inherit_context=False`` and serves no frame it did not push.)"""
 
     def _pushed_child(self, valid_fsm: dict[str, Any]) -> _Rig:
         rig = _rig(valid_fsm, context={**CONTEXT, "synthesis_result": _STALE})

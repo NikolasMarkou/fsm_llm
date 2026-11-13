@@ -204,8 +204,9 @@ def _no_result_key(state: Any) -> str | None:
 # flow_analysis.py, kept equal by a parity test); both now read it through
 # `KindSpec.minted_keys`. Do NOT re-spell it in either place and do NOT change
 # it without the corpus: the completion/synthesize exclusion (those kinds use
-# `_no_minted_keys`), the classification-owned filter (plan 21cd7f8e D-006)
-# and explicit `field_extractions` winning over an auto-minted key.
+# `_no_minted_keys`), the classification-owned filter (anchored below, D-006 of
+# plan 21cd7f8e) and explicit `field_extractions` winning over an auto-minted
+# key.
 def _conversation_minted_keys(state: Any) -> tuple[str, ...]:
     """The conversation kind's ``minted_keys`` (see the module contract)."""
     auto: list[str] = list(getattr(state, "required_context_keys", None) or [])
@@ -214,6 +215,13 @@ def _conversation_minted_keys(state: Any) -> tuple[str, ...]:
             for key in getattr(condition, "requires_context_keys", None) or []:
                 if key not in auto:
                     auto.append(key)
+    # DECISION plan-2026-09-19T175721-21cd7f8e/D-006: a key owned by a
+    # classification_extractions entry is NOT auto-minted as a plain
+    # extraction. Minting it let the plain extractor fill a key the
+    # classifier had just rejected below its confidence threshold (the
+    # gated transition then fired anyway) and cost one wasted LLM call per
+    # turn. Do NOT gate this in the transition evaluator (wrong layer).
+    # Explicit ``field_extractions`` with the same name still win below.
     owned = {
         c.field_name for c in getattr(state, "classification_extractions", None) or []
     }
@@ -603,9 +611,12 @@ SYNTHESIZE = KindSpec(
     name=CompletionStateKind.SYNTHESIZE.value,
     config_field="synthesize",
     result_key=_result_key_of("synthesize"),
-    # An inherited `synthesis_result` made a pushed child's synthesize state
-    # skip itself (the runner starts a run only while the key is unset), so the
-    # key is dropped on push like the completion one (plan d454fd62 step 55).
+    # DECISION plan-2026-11-12T073150-d454fd62/D-022: a child pushed with
+    # `inherit_context=True` routed on the parent's stale `synthesis_result`
+    # (its edges must read that key) before any run wrote one, so the key is
+    # dropped on push like the completion one. The runner is not the reason: it
+    # pushes its own children with `inherit_context=False` and never serves a
+    # user-pushed child. The rule is anchored in `API._build_push_context`.
     inherits_result_on_push=False,
     forbidden_declarations=("completion", *_EXTRACTION_DECLARATIONS),
     dryrun_judged=False,

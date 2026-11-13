@@ -2075,3 +2075,60 @@ class TestLeafModule:
         for name in sk.__all__:
             assert hasattr(sk, name), name
         assert typing.get_type_hints(sk.KindSpec)
+
+
+_SRC = _MODULE.parent
+_D006 = "plan-2026-09-19T175721-21cd7f8e/D-006"
+_D022 = "plan-2026-11-12T073150-d454fd62/D-022"
+
+
+def _anchor_lines(path: Path, token: str) -> list[str]:
+    """The `# DECISION <token>` comment lines of one source file."""
+    prefix = f"# DECISION {token}"
+    return [
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith(prefix)
+    ]
+
+
+class TestMovedAnchorsStayAnchors:
+    """Review gate 1 (plan d454fd62 step 58.1, concerns 3 and 4): an anchor may
+    move with the code it governs, never vanish or turn into prose, and a comment
+    must give the verified reason."""
+
+    def test_the_classification_owned_filter_keeps_its_d006_anchor(self):
+        """Guards: the full D-006 anchor ("Do NOT gate this in the transition
+        evaluator") lived in the pipeline before the minting rule moved to the
+        registry; it survived only as prose, which no anchor grep finds."""
+        lines = _anchor_lines(_SRC / "state_kinds.py", _D006)
+        assert len(lines) == 1
+        text = (_SRC / "state_kinds.py").read_text(encoding="utf-8")
+        assert "Do NOT gate this in the transition evaluator (wrong layer)" in text
+
+    def test_the_definitions_pointer_names_the_new_home_of_the_rule(self):
+        text = (_SRC / "definitions.py").read_text(encoding="utf-8")
+        assert "D-006 (pipeline.py)" not in text
+        assert "_conversation_minted_keys" in text
+
+    @pytest.mark.parametrize("name", ["api.py", "state_kinds.py"])
+    def test_the_synthesize_drop_on_push_carries_the_d022_anchor(self, name):
+        assert _anchor_lines(_SRC / name, _D022)
+
+    @pytest.mark.parametrize("name", ["api.py", "state_kinds.py"])
+    def test_no_comment_claims_the_child_skips_its_own_run(self, name):
+        """Guards: the refuted reason of step 55 (the runner never serves a
+        user-pushed child); the real defect is routing on the stale result."""
+        text = (_SRC / name).read_text(encoding="utf-8")
+        assert "skip its own run" not in text
+        assert "skip itself" not in text
+        assert "stale" in text
+
+    def test_the_d029_text_of_944e2692_is_unchanged(self):
+        lines = (_SRC / "api.py").read_text(encoding="utf-8").splitlines()
+        i = next(
+            n for n, line in enumerate(lines) if "944e2692/D-029: an inherited" in line
+        )
+        block = " ".join(line.strip().lstrip("# ") for line in lines[i : i + 5])
+        assert block.startswith("DECISION plan-2026-10-01T093600-944e2692/D-029")
+        assert block.endswith("drop it from an explicit `context_to_pass`. See D-029.")
