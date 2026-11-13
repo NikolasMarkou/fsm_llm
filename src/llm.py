@@ -512,6 +512,16 @@ def implements_complete(llm: Any) -> bool:
     return getattr(method, "__func__", None) is not LLMInterface.complete
 
 
+PLACEHOLDER_MODEL = "unset/placeholder"
+"""A model id that names nothing and is never sent to a provider.
+
+A config that must hold a model string although an injected interface owns the
+model (``agents.AgentConfig`` for an agent given only ``llm_interface=``) holds
+this one. :func:`resolve_model` counts it as unset, so a config that outlives its
+interface fails with the no-model error where a model is needed, never with the
+provider's "LLM Provider NOT provided"."""
+
+
 def resolve_model(model: str | None = None) -> str:
     """The model name to use: *model*, else env ``LLM_MODEL``; never a default.
 
@@ -519,10 +529,11 @@ def resolve_model(model: str | None = None) -> str:
     ``llm_interface`` is injected), ``ReasoningEngine``, ``agents.resolve_agent_model``,
     ``eval.resolve_model``, the ``fsm-llm`` runner and the monitor launch routes):
         - *model*: an explicit name or ``None``.
-        - Returns the first non-blank candidate, stripped: *model*, then
+        - Returns the first usable candidate, stripped: *model*, then
           ``$LLM_MODEL`` (read now, never at import). A blank value (``""`` or
-          only whitespace, e.g. an empty ``LLM_MODEL=`` line in a ``.env``)
-          counts as unset at either tier. Always a non-empty ``str``.
+          only whitespace, e.g. an empty ``LLM_MODEL=`` line in a ``.env``) and
+          ``PLACEHOLDER_MODEL`` count as unset at either tier. Always a
+          non-empty ``str``.
         - Raises ``ModelNotConfiguredError`` (an ``FSMError`` and a
           ``ValueError``) when both are unset: the library has no built-in
           model, so a fresh install fails with a message that says how to set
@@ -533,9 +544,16 @@ def resolve_model(model: str | None = None) -> str:
     # DECISION plan-2026-11-12T073150-d454fd62/D-005
     # Do NOT fall back to a built-in model here (the old built-in default): a
     # silent default sent a fresh install to a 27B local model it never chose.
+    # DECISION plan-2026-11-12T073150-d454fd62/D-028
+    # The placeholder is not a model: a config built for an injected interface
+    # keeps working until it is used without one, then says "no model" (it used
+    # to reach litellm with ``unset/placeholder``). Do NOT send it to a provider
+    # and do NOT keep a second copy of the string in ``agents``.
     for candidate in (model, os.environ.get(ENV_LLM_MODEL)):
-        if candidate is not None and candidate.strip():
-            return candidate.strip()
+        if candidate is not None:
+            name = candidate.strip()
+            if name and name != PLACEHOLDER_MODEL:
+                return name
     raise ModelNotConfiguredError()
 
 

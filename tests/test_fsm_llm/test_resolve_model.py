@@ -10,6 +10,7 @@ from fsm_llm.llm import (
     DEFAULT_EMBEDDING_MODEL,
     DEFAULT_LLM_TIMEOUT_SECONDS,
     DEFAULT_MAX_TOKENS,
+    PLACEHOLDER_MODEL,
     LiteLLMEmbedder,
     LiteLLMInterface,
     resolve_model,
@@ -50,6 +51,41 @@ class TestResolveModel:
             monkeypatch.setenv(ENV_LLM_MODEL, env)
         with pytest.raises(ModelNotConfiguredError):
             resolve_model(explicit)
+
+
+class TestThePlaceholderIsNotAModel:
+    """Re-review of the gate-1 fixes, concern 8: ``PLACEHOLDER_MODEL`` is the
+    sentinel an agent config holds when its model is owned by an injected
+    interface. Used where a model is resolved it counts as unset, so a config
+    that outlived its interface fails with the no-model error, not with the
+    provider's "LLM Provider NOT provided"."""
+
+    def test_the_sentinel_names_itself_as_a_placeholder(self):
+        assert "placeholder" in PLACEHOLDER_MODEL
+
+    def test_as_an_argument_it_counts_as_unset(self, monkeypatch):
+        monkeypatch.delenv(ENV_LLM_MODEL, raising=False)
+        with pytest.raises(ModelNotConfiguredError):
+            resolve_model(PLACEHOLDER_MODEL)
+
+    def test_as_an_argument_it_falls_back_to_the_environment(self, monkeypatch):
+        monkeypatch.setenv(ENV_LLM_MODEL, "env-model")
+        assert resolve_model(PLACEHOLDER_MODEL) == "env-model"
+
+    def test_in_the_environment_it_counts_as_unset(self, monkeypatch):
+        monkeypatch.setenv(ENV_LLM_MODEL, f" {PLACEHOLDER_MODEL} ")
+        with pytest.raises(ModelNotConfiguredError):
+            resolve_model()
+
+    def test_api_refuses_it_as_a_model(self, monkeypatch):
+        monkeypatch.delenv(ENV_LLM_MODEL, raising=False)
+        with pytest.raises(ModelNotConfiguredError):
+            API.from_definition(_FSM, model=PLACEHOLDER_MODEL)
+
+    def test_the_agents_constant_is_this_one(self):
+        from fsm_llm.agents import definitions
+
+        assert definitions.PLACEHOLDER_MODEL is PLACEHOLDER_MODEL
 
 
 class TestApiBlankEnvModel:

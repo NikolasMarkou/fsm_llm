@@ -29,6 +29,7 @@ import pytest
 from fsm_llm import API, Classifier, FSMManager, ModelNotConfiguredError
 from fsm_llm.agents import (
     AgentConfig,
+    AgentError,
     AgentGraphBuilder,
     ChainStep,
     ConfiguredAgentBuilder,
@@ -490,6 +491,18 @@ def _need_sop_to_agent_config(tmp_path: Path) -> None:
     sop_module.SOPDefinition(name="s").to_agent_config()
 
 
+def _need_sop_config_outliving_its_interface(tmp_path: Path) -> None:
+    """A config made for an injected interface holds the placeholder; run on its
+    own (no interface) the agent must say "no model", not reach a provider."""
+    sop = sop_module.SOPDefinition(name="s", config_overrides={"temperature": 0.3})
+    config = sop.to_agent_config(llm_interface=_double())
+    agent = create_agent("react", [_echo], config=config)
+    try:
+        agent.run("hi")
+    except AgentError as exc:
+        raise exc.__cause__ or exc from None
+
+
 def _need_reasoning_engine(tmp_path: Path) -> None:
     ReasoningEngine()
 
@@ -522,6 +535,9 @@ _MODEL_REQUIRED: dict[str, Any] = {
     "agents: AgentConfig()": _need_agent_config,
     "agents: create_agent without an interface": _need_create_agent,
     "agents: SOPDefinition.to_agent_config() for running": (_need_sop_to_agent_config),
+    "agents: to_agent_config(llm_interface=) config used without the interface": (
+        _need_sop_config_outliving_its_interface
+    ),
     "reasoning: ReasoningEngine()": _need_reasoning_engine,
     "eval: run_cases without a factory": _need_eval_run_cases,
     "eval: run_dataset without a factory": _need_eval_run_dataset,

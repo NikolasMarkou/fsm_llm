@@ -14,7 +14,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from fsm_llm.definitions import ModelNotConfiguredError
-from fsm_llm.llm import interface_model, resolve_model
+from fsm_llm.llm import PLACEHOLDER_MODEL, interface_model, resolve_model
 from fsm_llm.logging import logger
 
 from .constants import Defaults, MetaDefaults, ToolObservationPrefix, ToolRunStatus
@@ -229,13 +229,11 @@ def resolve_agent_model(model: str | None = None) -> str:
     return resolve_model(model)
 
 
-PLACEHOLDER_MODEL = "unset/placeholder"
-"""A model id that names nothing and is never sent to a provider.
-
-Used where ``AgentConfig.model`` must hold a string but no model was chosen:
-an agent with an injected ``llm_interface`` that states no ``model`` (the
-interface owns the model), and the second validation pass of
-``AgentArtifactBuilder._config_problems``."""
+# ``PLACEHOLDER_MODEL`` (imported above from ``fsm_llm.llm``, its one home) is
+# what ``AgentConfig.model`` holds where no model was chosen: an agent with an
+# injected ``llm_interface`` that states no ``model`` (the interface owns the
+# model), and the second validation pass of ``AgentArtifactBuilder._config_problems``.
+# ``resolve_model`` counts it as unset.
 
 
 def model_or_placeholder(model: str | None = None) -> str:

@@ -88,7 +88,12 @@ class SOPDefinition:
         Args:
             llm_interface: The interface the agent will hold, when injected.
                 It supplies the model: its own ``model``, else ``LLM_MODEL``,
-                else a placeholder that is never sent (``default_agent_config``).
+                else ``PLACEHOLDER_MODEL`` (``default_agent_config``). A config
+                that holds the placeholder is valid only next to that interface:
+                ``llm.resolve_model`` counts it as unset, so an agent built from
+                it WITHOUT the interface (or ``API``, ``Classifier``) raises
+                ``ModelNotConfiguredError`` where it needs a model (or uses
+                ``LLM_MODEL`` if one is set by then), never a provider error.
             **overrides: Additional overrides applied after SOP defaults.
 
         Raises:
