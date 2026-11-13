@@ -118,7 +118,9 @@ class TestLoadEnv:
         gets, never a value built from the file's own ``A`` that the process
         overrode."""
         env_file = clean_env / "my.env"
-        env_file.write_text("LOAD_ENV_A=fromfile\nLOAD_ENV_B=${LOAD_ENV_A}\n")
+        env_file.write_text(
+            "LOAD_ENV_A=fromfile\nLOAD_ENV_B=${LOAD_ENV_A}\n", encoding="utf-8"
+        )
         monkeypatch.setenv("LOAD_ENV_A", "proc")
         monkeypatch.delenv("LOAD_ENV_B", raising=False)
         fsm_llm.load_env(env_file)
@@ -134,7 +136,7 @@ class TestLoadEnv:
         self, clean_env, monkeypatch
     ):
         env_file = clean_env / "my.env"
-        env_file.write_text("LOAD_ENV_B=${LOAD_ENV_NOWHERE}\n")
+        env_file.write_text("LOAD_ENV_B=${LOAD_ENV_NOWHERE}\n", encoding="utf-8")
         monkeypatch.delenv("LOAD_ENV_NOWHERE", raising=False)
         monkeypatch.setenv("LOAD_ENV_B", "   ")
         fsm_llm.load_env(env_file)
@@ -144,7 +146,7 @@ class TestLoadEnv:
         self, clean_env, monkeypatch
     ):
         env_file = clean_env / "my.env"
-        env_file.write_text("LOAD_ENV_PROBE=1\n")
+        env_file.write_text("LOAD_ENV_PROBE=1\n", encoding="utf-8")
         monkeypatch.setenv("LOAD_ENV_KEEP", "")
         fsm_llm.load_env(env_file)
         assert os.environ["LOAD_ENV_KEEP"] == ""
@@ -154,7 +156,7 @@ class TestLoadEnv:
         self, clean_env, monkeypatch
     ):
         env_file = clean_env / "my.env"
-        env_file.write_text("LOAD_ENV_PROBE=fromfile\n")
+        env_file.write_text("LOAD_ENV_PROBE=fromfile\n", encoding="utf-8")
         monkeypatch.setenv("LOAD_ENV_PROBE", "")
         fsm_llm.load_env(env_file, override=True)
         assert os.environ["LOAD_ENV_PROBE"] == "fromfile"
