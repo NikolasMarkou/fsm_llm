@@ -12,6 +12,7 @@ from collections.abc import Sequence
 
 from pydantic import ValidationError
 
+from fsm_llm.agents.constants import MetaDefaults
 from fsm_llm.cli_support import (
     add_env_file,
     apply_env_file,
@@ -26,7 +27,6 @@ from fsm_llm.constants import (
 )
 from fsm_llm.definitions import ModelNotConfiguredError
 
-from .constants import MetaDefaults
 from .definitions import MetaBuilderConfig
 from .exceptions import MetaBuilderError
 from .meta_builder import MetaBuilderAgent

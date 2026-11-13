@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from fsm_llm.__version__ import __version__
+from fsm_llm.agents.constants import OBSERVATION_ENTRY, Defaults
 from fsm_llm.constants import (
     OKF_LIST_MAX_ITEMS,
     OKF_READ_PAGE_CHARS,
@@ -59,7 +60,6 @@ from fsm_llm.okf_bridge import bundle_from_memory_entries
 from fsm_llm.prompts import sanitize_text_for_prompt
 from fsm_llm.utilities import redacting_json_default
 
-from .constants import OBSERVATION_ENTRY, Defaults
 from .definitions import READ_ONLY_ANNOTATIONS, AgentResult
 from .semantic_memory import SemanticMemoryStore
 from .tools import ToolRegistry, redact_secret_entries

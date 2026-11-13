@@ -20,7 +20,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from .constants import ContextKeys, Defaults
+from fsm_llm.agents.constants import ContextKeys, Defaults
+
 from .truncation import smart_truncate
 
 SummarizeFn = Callable[[list[str]], str]

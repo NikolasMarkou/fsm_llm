@@ -12,10 +12,7 @@ from collections.abc import Callable
 from typing import Any
 
 from fsm_llm import API
-from fsm_llm.logging import logger
-
-from .base import BaseAgent, artifact_text
-from .constants import (
+from fsm_llm.agents.constants import (
     ContextKeys,
     Defaults,
     EvalOptStates,
@@ -24,6 +21,9 @@ from .constants import (
     LogMessages,
     StopReason,
 )
+from fsm_llm.logging import logger
+
+from .base import BaseAgent, artifact_text
 from .definitions import AgentConfig, AgentResult, EvaluationResult
 from .exceptions import require_int_limit
 from .fsm_definitions import build_evalopt_fsm

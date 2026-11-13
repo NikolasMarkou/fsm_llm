@@ -12,10 +12,7 @@ from collections.abc import Callable
 from typing import Any
 
 from fsm_llm import API
-from fsm_llm.logging import logger
-
-from .base import BaseAgent, caller_prompt_keys
-from .constants import (
+from fsm_llm.agents.constants import (
     REACT_THINK_FRESH_KEYS,
     ContextKeys,
     Defaults,
@@ -25,6 +22,9 @@ from .constants import (
     ReflexionStates,
     StopReason,
 )
+from fsm_llm.logging import logger
+
+from .base import BaseAgent, caller_prompt_keys
 from .definitions import (
     AgentConfig,
     AgentResult,

@@ -11,15 +11,15 @@ from collections.abc import Iterator
 from typing import Any
 
 from fsm_llm import API
-from fsm_llm.logging import logger
-
-from .base import BaseAgent, caller_prompt_keys
-from .constants import (
+from fsm_llm.agents.constants import (
     REACT_THINK_FRESH_KEYS,
     AgentStates,
     Defaults,
     LogMessages,
 )
+from fsm_llm.logging import logger
+
+from .base import BaseAgent, caller_prompt_keys
 from .definitions import AgentConfig, AgentResult
 from .fsm_definitions import build_react_fsm
 from .handlers import AgentHandlers

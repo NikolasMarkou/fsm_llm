@@ -1250,14 +1250,22 @@ def _fsm_llm_imports(path):
 
 
 def _module_imports(path):
-    """The sibling modules a file of src/fsm_llm/agents imports at module level."""
+    """The sibling modules a file of src/fsm_llm/agents (or of a package below it) imports at module level.
+
+    A sibling is a plain module or, for a split module, the ``__init__.py`` of its package.
+    """
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    return {
-        f"src/fsm_llm/agents/{alias.name if node.module is None else node.module.split('.')[0]}.py"
-        for node in tree.body
-        if isinstance(node, ast.ImportFrom) and node.level == 1
-        for alias in (node.names if node.module is None else node.names[:1])
-    }
+    here = path.parent
+    found = set()
+    for node in tree.body:
+        if not (isinstance(node, ast.ImportFrom) and node.level == 1):
+            continue
+        for alias in node.names if node.module is None else node.names[:1]:
+            stem = alias.name if node.module is None else node.module.split(".")[0]
+            plain, package = here / f"{stem}.py", here / stem / "__init__.py"
+            hit = plain if plain.is_file() or not package.is_file() else package
+            found.add(hit.relative_to(ROOT).as_posix())
+    return found
 
 
 class TestPins:

@@ -72,7 +72,7 @@ LIMITS = {"temperature": 0.5, "run_max_tokens": 1000, "max_user_turns": 14, "rea
 # Do NOT hash only the fixture region and do NOT keep a second source of what is hashed in the
 # tests: REQUIRED_PINS is the floor SRC_PINS may not drop below, UNPINNED_CORE the declared exclusions (D-075).
 _SYNTH = "dryrun simulation traces gates policy synthesizer runner library prompts repair constants exceptions"  # fmt: skip
-_AGENTS = "__init__ react base constants definitions exceptions fsm_definitions handlers hitl meta_builders meta_prompts prompts summarization tools truncation"  # fmt: skip
+_AGENTS = "__init__ react base constants/__init__ constants/core constants/handler_names constants/keys constants/meta constants/outcomes constants/states definitions exceptions fsm_definitions handlers hitl meta_builders meta_prompts prompts summarization tools truncation"  # fmt: skip
 _CORE = "flow_analysis utilities validator eval/cases eval/config eval/stats"
 SRC_PINS = (
     "scripts/synthesis_bench.py",

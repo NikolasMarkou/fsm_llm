@@ -8,9 +8,8 @@ import numbers
 import operator
 from typing import Any
 
+from fsm_llm.agents.constants import Defaults
 from fsm_llm.definitions import BuildError, FSMError
-
-from .constants import Defaults
 
 
 class AgentError(FSMError):

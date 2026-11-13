@@ -38,9 +38,9 @@ from collections.abc import Iterator
 from typing import Any
 
 from fsm_llm import API
+from fsm_llm.agents.constants import ContextKeys, StopReason
 from fsm_llm.logging import logger
 
-from .constants import ContextKeys, StopReason
 from .definitions import AgentResult
 from .exceptions import require_int_limit
 from .react import ReactAgent

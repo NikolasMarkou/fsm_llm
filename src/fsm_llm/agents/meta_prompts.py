@@ -14,11 +14,12 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from .constants import (
+from fsm_llm.agents.constants import (
     META_AGENT_PATTERN_INTENTS,
     META_BUILD_PROMPT,
     MetaContextKeys,
 )
+
 from .definitions import ArtifactType
 from .meta_builders import (
     AgentArtifactBuilder,

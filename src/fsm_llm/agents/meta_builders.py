@@ -17,6 +17,7 @@ from typing import Any, ClassVar
 
 from pydantic import ValidationError
 
+from fsm_llm.agents.constants import MetaDefaults
 from fsm_llm.definitions import (
     BuildError,
     FSMDefinition,
@@ -25,7 +26,6 @@ from fsm_llm.definitions import (
 )
 from fsm_llm.logging import logger
 
-from .constants import MetaDefaults
 from .definitions import (
     PLACEHOLDER_MODEL,
     AgentConfig,

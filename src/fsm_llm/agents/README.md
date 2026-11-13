@@ -70,7 +70,7 @@ These are the 18 names `create_agent` accepts (`react`, `rewoo`, `reflexion`, `p
 - `mcp.py` - load tools from an MCP (Model Context Protocol) server. `remote.py` - serve an agent over HTTP, or call a remote one as a tool.
 - `meta_builder.py`, `meta_builders.py`, `meta_tools.py`, `meta_prompts.py`, `meta_output.py`, `meta_cli.py` - the meta-builder, its artifact builders (`FSMArtifactBuilder`, `WorkflowArtifactBuilder`, `AgentArtifactBuilder`: calls chain, `take_warnings()` returns and clears the warnings, `build()` validates) and its `fsm-llm-meta` command.
 - `builders.py` - `ConfiguredAgentBuilder`.
-- `definitions.py`, `constants.py`, `exceptions.py` - data models, names and defaults, errors.
+- `definitions.py`, `constants/`, `exceptions.py` - data models, names and defaults (a package, one module per group: `core`, `states`, `keys`, `outcomes`, `handler_names`, `meta`; `fsm_llm.agents.constants` re-exports every name), errors.
 - `__init__.py`, `__main__.py`, `__version__.py` - exports and `create_agent()`, `python -m fsm_llm.agents --info`, version.
 
 ## How to use it

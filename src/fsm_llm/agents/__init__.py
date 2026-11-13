@@ -28,6 +28,8 @@ With HITL:
 
 from __future__ import annotations
 
+from fsm_llm.agents.constants import StopReason
+
 from .__version__ import __version__
 from .adapt import ADaPTAgent
 from .agent_graph import AgentGraph, AgentGraphBuilder
@@ -40,7 +42,6 @@ from .auto_memory import (
 )
 from .base import BaseAgent, accepts_tools
 from .composition import default_llm_judge, react_worker_factory
-from .constants import StopReason
 from .debate import DebateAgent
 from .definitions import (
     AgentConfig,

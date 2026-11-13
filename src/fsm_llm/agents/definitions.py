@@ -13,11 +13,16 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from fsm_llm.agents.constants import (
+    Defaults,
+    MetaDefaults,
+    ToolObservationPrefix,
+    ToolRunStatus,
+)
 from fsm_llm.definitions import ModelNotConfiguredError
 from fsm_llm.llm import PLACEHOLDER_MODEL, interface_model, resolve_model
 from fsm_llm.logging import logger
 
-from .constants import Defaults, MetaDefaults, ToolObservationPrefix, ToolRunStatus
 from .truncation import smart_truncate
 
 # DECISION plan-2026-07-20T040150-876e7164/D-008 [STALE]

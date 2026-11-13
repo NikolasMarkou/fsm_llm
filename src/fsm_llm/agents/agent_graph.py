@@ -13,11 +13,11 @@ from collections import defaultdict, deque
 from collections.abc import Callable
 from typing import Any
 
+from fsm_llm.agents.constants import StopReason
 from fsm_llm.definitions import BuildError
 from fsm_llm.logging import logger
 
 from .base import BaseAgent, pattern_run_output_keys, strip_caller_context
-from .constants import StopReason
 from .definitions import AgentResult, AgentTrace
 from .exceptions import AgentTimeoutError, BudgetExhaustedError
 

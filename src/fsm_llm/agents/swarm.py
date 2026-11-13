@@ -12,11 +12,11 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
+from fsm_llm.agents.constants import StopReason
 from fsm_llm.logging import logger
 from fsm_llm.memory import WorkingMemory
 
 from .base import BaseAgent, pattern_run_output_keys, strip_caller_context
-from .constants import StopReason
 from .definitions import AgentConfig, AgentResult, AgentTrace, model_or_placeholder
 from .exceptions import AgentTimeoutError, BudgetExhaustedError, require_int_limit
 
