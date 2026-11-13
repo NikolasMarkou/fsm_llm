@@ -26,9 +26,13 @@ API(
     session_store: SessionStore | None = None,
     handler_timeout: float | None = None,
     max_fsm_cache_size: int = 64,
+    *,
+    executors: Mapping[str, StateExecutor] | None = None,
     **llm_kwargs,
 )
 ```
+
+`executors` (keyword-only, internal until the kind extension point is public, roadmap C10; not exported from `fsm_llm`) is a `{kind_name: StateExecutor}` map for this `API` only. `StateExecutor` is `fsm_llm.executors.StateExecutor`. A kind named in it runs its Pass 1 through that executor instead of the module table of `fsm_llm.executors`; another `API` and the module table are never affected. The map is validated at construction and copied read-only: a value that is not a mapping of `StateExecutor` raises `TypeError`, and a name that no registered `KindSpec` carries (the spec registry `fsm_llm.state_kinds.KINDS` stays process-wide) raises `ValueError`. `FSMManager(executors=...)` and `MessagePipeline(executors=...)` take the same keyword-only argument; `APIBuilder` and `FSMManagerBuilder` have no setter for it yet.
 
 `handler_error_mode` is a `HandlerErrorMode` (`CONTINUE` or `RAISE`) or its string value, coerced once in `HandlerSystem`; any other value raises `ValueError`. `handler_timeout` (seconds, `None` disables it) goes to the API's single `HandlerSystem`, so the cap of 4 still-running timed-out handler threads (`constants.MAX_TIMED_HANDLER_STRAGGLERS`) is shared by every conversation of that `API`. `max_fsm_cache_size` bounds `FSMManager`'s FSM definition cache and must be at least 1 (`ValueError` otherwise). The prompt builders and the FSM loader are not configurable through `API`; construct `FSMManager` directly for those.
 

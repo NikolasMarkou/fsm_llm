@@ -11,6 +11,7 @@ import inspect
 import json
 import tempfile
 import threading
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ from fsm_llm.definitions import (
     Transition,
     TransitionCondition,
 )
+from fsm_llm.executors import ConversationExecutor
 from fsm_llm.fsm import FSMManager
 from fsm_llm.handlers import HandlerErrorMode, HandlerTiming, create_handler
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
@@ -1919,6 +1921,13 @@ _REACHABLE = {
         TransitionEvaluatorConfig,
         lambda api: api.fsm_manager.transition_evaluator.config,
     ),
+    # a mapping is checked, then copied read-only: the read-back is equal, not
+    # the same object (see the Mapping branch of the round-trip test)
+    ("FSMManager", "executors"): (
+        "executors",
+        lambda: {"conversation": ConversationExecutor()},
+        lambda api: api.fsm_manager._pipeline._executors,
+    ),
 }
 
 
@@ -1992,7 +2001,11 @@ class TestConfigReachability:
         llm = MagicMock(spec=LLMInterface)
         value = llm if make is None else make()
         kwargs = {"fsm_definition": _sweep_fsm(), "llm_interface": llm, api_kw: value}
-        assert read_back(API(**kwargs)) is value
+        held = read_back(API(**kwargs))
+        if isinstance(value, Mapping):
+            assert dict(held) == dict(value)
+        else:
+            assert held is value
 
 
 class TestHistoryAndLengthLimitsAreValidatedAtConstruction:

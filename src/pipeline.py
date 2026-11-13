@@ -19,7 +19,7 @@ import json
 import re
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
 from pydantic import ValidationError
@@ -74,7 +74,7 @@ from .definitions import (
     TransitionOption,
     handler_only_names,
 )
-from .executors import executor_for
+from .executors import StateExecutor, check_executors, executor_for
 from .handlers import HandlerExecutionError, HandlerSystem, HandlerTiming
 from .llm import LLMInterface, implements_complete
 from .logging import logger
@@ -453,6 +453,8 @@ class MessagePipeline:
         handler_system: HandlerSystem,
         fsm_resolver: Callable[[str], FSMDefinition],
         field_extraction_prompt_builder: FieldExtractionPromptBuilder | None = None,
+        *,
+        executors: Mapping[str, StateExecutor] | None = None,
     ):
         self.llm_interface = llm_interface
         self.data_extraction_prompt_builder = data_extraction_prompt_builder
@@ -467,6 +469,10 @@ class MessagePipeline:
         # check/construct/evict/insert as one unit (review W2, step 2).
         self._classifier_cache: dict[str, Classifier] = {}
         self._classifier_cache_lock = threading.Lock()
+        # Per-pipeline executors by kind name (read-only after this line, so any
+        # thread may read it); they override the module table of `executors.py`
+        # for this pipeline only. See `executors.check_executors`.
+        self._executors = check_executors(executors)
 
     def get_state(
         self, instance: FSMInstance, conversation_id: str | None = None
@@ -1191,7 +1197,7 @@ class MessagePipeline:
         # required_context_keys and merges with explicit field_extractions), a
         # completion state its one completion call (executors.py).
         source_state = self.get_state(instance, conversation_id)
-        executor = executor_for(source_state)
+        executor = executor_for(source_state, self._executors)
         extraction_response = executor.extract(
             self, instance, user_message, conversation_id, source_state
         )
@@ -1206,7 +1212,9 @@ class MessagePipeline:
             # tool argument such as `{"_id": 1}` or `{"x": None}` would be
             # silently removed from the calls the consumer runs. Every other
             # state's model-extracted data is still cleaned. See D-021.
-            if executor_for(self.get_state(instance, conversation_id)).cleans_extracted:
+            if executor_for(
+                self.get_state(instance, conversation_id), self._executors
+            ).cleans_extracted:
                 extraction_response.extracted_data = clean_context_keys(
                     extraction_response.extracted_data, conversation_id
                 )
@@ -1269,7 +1277,7 @@ class MessagePipeline:
         is_agent_fsm = _is_agent_managed(instance.context.data)
         if transition_occurred and not is_agent_fsm:
             new_state = self.get_state(instance, conversation_id)
-            executor_for(new_state).after_transition(
+            executor_for(new_state, self._executors).after_transition(
                 self,
                 instance,
                 user_message,

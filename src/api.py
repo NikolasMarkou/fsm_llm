@@ -116,6 +116,7 @@ from .definitions import (
     RunBudgetExceededError,
     checked_key_names,
 )
+from .executors import StateExecutor
 
 # --------------------------------------------------------------
 # local imports
@@ -623,6 +624,8 @@ class API:
         session_store: SessionStore | None = None,
         handler_timeout: float | None = None,
         max_fsm_cache_size: int = DEFAULT_MAX_FSM_CACHE_SIZE,
+        *,
+        executors: Mapping[str, StateExecutor] | None = None,
         **llm_kwargs,
     ):
         """
@@ -650,6 +653,12 @@ class API:
                 every conversation of this API (one ``HandlerSystem``).
             max_fsm_cache_size: Bound of the FSM definition LRU cache
                 (at least 1; a smaller value raises ``ValueError``)
+            executors: Optional ``{kind_name: StateExecutor}`` map for this
+                ``API`` only: it overrides the module table of ``executors.py``
+                and never changes another ``API``. ``TypeError`` for a value
+                that is not a mapping of ``StateExecutor``, ``ValueError`` for
+                a kind name no ``KindSpec`` carries. Internal until the kind
+                extension point is public.
             **llm_kwargs: Additional LLM parameters
         """
         # Handle LLM interface initialization
@@ -757,6 +766,7 @@ class API:
             max_message_length=max_message_length,
             handler_system=self.handler_system,
             max_fsm_cache_size=max_fsm_cache_size,
+            executors=executors,
         )
 
         # Register provided handlers

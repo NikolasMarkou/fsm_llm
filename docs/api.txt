@@ -1,6 +1,6 @@
 # fsm_llm
 fsm_llm.API class
-  def __init__(self, fsm_definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str], llm_interface: LLMInterface | None = None, model: str | None = None, api_key: str | None = None, temperature: float | None = None, max_tokens: int | None = None, max_history_size: int = 5, max_message_length: int = 1000, handlers: list[FSMHandler] | None = None, handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE, transition_config: TransitionEvaluatorConfig | None = None, session_store: SessionStore | None = None, handler_timeout: float | None = None, max_fsm_cache_size: int = 64, **llm_kwargs)
+  def __init__(self, fsm_definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str], llm_interface: LLMInterface | None = None, model: str | None = None, api_key: str | None = None, temperature: float | None = None, max_tokens: int | None = None, max_history_size: int = 5, max_message_length: int = 1000, handlers: list[FSMHandler] | None = None, handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE, transition_config: TransitionEvaluatorConfig | None = None, session_store: SessionStore | None = None, handler_timeout: float | None = None, max_fsm_cache_size: int = 64, *, executors: Mapping[str, StateExecutor] | None = None, **llm_kwargs)
   def advance(self, conversation_id: str) -> AdvanceResult
   def advance_stream(self, conversation_id: str) -> Iterator[str]
   def cleanup_stale_conversations(self, max_idle_seconds: float = 3600.0) -> list[str]
@@ -206,7 +206,7 @@ fsm_llm.FSMInstance class(BaseModel)
   field last_transition_decision: ClassificationResult | None = None
   field last_response_generation: ResponseGenerationResponse | None = None
 fsm_llm.FSMManager class
-  def __init__(self, fsm_loader: Callable[[str], FSMDefinition] = load_fsm_definition, llm_interface: LLMInterface | None = None, data_extraction_prompt_builder: DataExtractionPromptBuilder | None = None, response_generation_prompt_builder: ResponseGenerationPromptBuilder | None = None, field_extraction_prompt_builder: FieldExtractionPromptBuilder | None = None, transition_evaluator: TransitionEvaluator | None = None, max_history_size: int = 5, max_message_length: int = 1000, handler_system: HandlerSystem | None = None, handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE, max_fsm_cache_size: int = 64)
+  def __init__(self, fsm_loader: Callable[[str], FSMDefinition] = load_fsm_definition, llm_interface: LLMInterface | None = None, data_extraction_prompt_builder: DataExtractionPromptBuilder | None = None, response_generation_prompt_builder: ResponseGenerationPromptBuilder | None = None, field_extraction_prompt_builder: FieldExtractionPromptBuilder | None = None, transition_evaluator: TransitionEvaluator | None = None, max_history_size: int = 5, max_message_length: int = 1000, handler_system: HandlerSystem | None = None, handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE, max_fsm_cache_size: int = 64, *, executors: Mapping[str, StateExecutor] | None = None)
   def advance(self, conversation_id: str, log: Any = None) -> AdvanceResult
   def advance_stream(self, conversation_id: str, log: Any = None) -> Iterator[str]
   def copy_raw_context_data(self, conversation_id: str) -> dict[str, Any] | None

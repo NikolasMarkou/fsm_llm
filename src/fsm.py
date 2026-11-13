@@ -14,7 +14,7 @@ import time
 import traceback
 import uuid
 from collections import OrderedDict
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from datetime import datetime
 from functools import wraps
 from typing import Any, Literal, TypeVar, overload
@@ -42,6 +42,7 @@ from .definitions import (
     State,
     StateNotFoundError,
 )
+from .executors import StateExecutor
 from .handlers import HandlerErrorMode, HandlerSystem, HandlerTiming
 
 # --------------------------------------------------------------
@@ -226,7 +227,17 @@ class FSMManager:
         handler_system: HandlerSystem | None = None,
         handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE,
         max_fsm_cache_size: int = DEFAULT_MAX_FSM_CACHE_SIZE,
+        *,
+        executors: Mapping[str, StateExecutor] | None = None,
     ):
+        """Create the manager.
+
+        ``executors`` is a ``{kind_name: StateExecutor}`` map for THIS manager's
+        pipeline only (it overrides the module table of ``executors.py``; see
+        ``executors.check_executors``: ``TypeError`` for a bad value,
+        ``ValueError`` for an unknown kind name). Keyword-only, internal until
+        the kind extension point is public.
+        """
         if llm_interface is None:
             raise ValueError("llm_interface is required and cannot be None")
         # DECISION plan-2026-09-22T080837-8b258a25/D-041
@@ -330,6 +341,7 @@ class FSMManager:
             handler_system=self.handler_system,
             fsm_resolver=self.get_fsm_definition,
             field_extraction_prompt_builder=self.field_extraction_prompt_builder,
+            executors=executors,
         )
 
         logger.info(

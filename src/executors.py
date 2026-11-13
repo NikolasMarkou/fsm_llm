@@ -34,10 +34,21 @@ Interface contract:
   conversation_id, extraction_response, previous_state, new_state)``: called
   once after a transition that ended in ``new_state`` (not for an agent-managed
   FSM); may update ``extraction_response`` and the context; returns ``None``.
-- ``executor_for(state)``: the executor of ``kind_of(state).name``; a kind with
-  no registered executor runs as ``conversation`` (a passive kind).
+- ``executor_for(state, executors=None)``: the executor of
+  ``kind_of(state).name``: the per-instance ``executors`` map first, then the
+  module table; a kind with neither runs as ``conversation`` (a passive kind).
 - ``register_executor(kind_name, executor)``: add or replace the executor of a
-  kind (a test kind registers its own beside its ``KindSpec``).
+  kind in the MODULE table, which every pipeline in the process reads (a test
+  kind registers its own beside its ``KindSpec``; the caller removes it again).
+- ``check_executors(executors)``: validate the ``executors=`` argument of
+  ``MessagePipeline``, ``FSMManager`` and ``API`` and return a read-only copy.
+  A ``{kind_name: StateExecutor}`` mapping, or ``None`` (empty). ``TypeError``
+  for a value that is not a mapping or a mapping value that is not a
+  ``StateExecutor``; ``ValueError`` for a name no registered ``KindSpec``
+  carries (a typo would otherwise be a silent no-op). The map belongs to one
+  pipeline, is never written after construction (safe to read from any
+  thread) and overrides the module table for that pipeline only; the spec
+  registry (``state_kinds.KINDS``) stays static and process-wide.
 
 This is an engine module: it imports core modules and never ``pipeline.py``
 (the pipeline imports it; the one helper both need, the cut-off record, lives in
@@ -48,6 +59,8 @@ internal until the kind extension point is public (roadmap C10).
 from __future__ import annotations
 
 import copy
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any
 
 from pydantic import ValidationError
@@ -64,12 +77,13 @@ from .definitions import (
 )
 from .llm import LLMInterface, check_tool_transcript
 from .logging import logger
-from .state_kinds import kind_of
+from .state_kinds import get_kind, kind_of
 
 __all__ = [
     "CompletionExecutor",
     "ConversationExecutor",
     "StateExecutor",
+    "check_executors",
     "executor_for",
     "register_executor",
 ]
@@ -317,6 +331,51 @@ def register_executor(kind_name: str, executor: StateExecutor) -> None:
     _EXECUTORS[kind_name] = executor
 
 
-def executor_for(state: State) -> StateExecutor:
-    """The executor of ``state``'s kind (``conversation`` for a kind with none)."""
-    return _EXECUTORS.get(kind_of(state).name, _CONVERSATION)
+def check_executors(
+    executors: Mapping[str, StateExecutor] | None,
+) -> Mapping[str, StateExecutor]:
+    """Validate an ``executors=`` argument and return a read-only copy.
+
+    Raises:
+        TypeError: ``executors`` is not a mapping, a key is not a ``str``, or a
+            value is not a ``StateExecutor``.
+        ValueError: a key names no registered state kind.
+    """
+    if executors is None:
+        return MappingProxyType({})
+    if not isinstance(executors, Mapping):
+        raise TypeError(
+            "executors must be a mapping of kind name to StateExecutor, got "
+            f"{type(executors).__name__}"
+        )
+    checked: dict[str, StateExecutor] = {}
+    for name, executor in executors.items():
+        if not isinstance(name, str):
+            raise TypeError(
+                f"executors keys must be kind names (str), got {type(name).__name__}"
+            )
+        if not isinstance(executor, StateExecutor):
+            raise TypeError(
+                f"executors[{name!r}] must be a StateExecutor, got "
+                f"{type(executor).__name__}"
+            )
+        try:
+            get_kind(name)
+        except KeyError:
+            raise ValueError(
+                f"executors names unknown state kind {name!r}: register its "
+                "KindSpec first"
+            ) from None
+        checked[name] = executor
+    return MappingProxyType(checked)
+
+
+def executor_for(
+    state: State, executors: Mapping[str, StateExecutor] | None = None
+) -> StateExecutor:
+    """The executor of ``state``'s kind: ``executors`` (a pipeline's own map)
+    first, then the module table, else ``conversation`` for a kind with none."""
+    name = kind_of(state).name
+    if executors is not None and name in executors:
+        return executors[name]
+    return _EXECUTORS.get(name, _CONVERSATION)
