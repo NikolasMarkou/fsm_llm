@@ -386,18 +386,41 @@ class TestModuleDocstringsAreReal:
 #: process name is refused and the class goes into a feature file. Scope: every
 #: `.py` file and every folder under `tests/` (`__pycache__` skipped); data files
 #: (JSON, text) are out of scope, so a year inside a fixture name is not matched.
-#: Today nothing legitimate matches (`test_okf*.py`, `test_removed_*.py`,
-#: `test_regression_*.py` and the version pins in `test_regression_*` are clean);
-#: `20\d\d` is the year of a dated file, `iter\d` and `round\d` need the digit so
-#: `iter` and `round` in a feature name stay allowed. No allowlist.
-_DATED_TEST_NAME = re.compile(
-    r"audit|review|iter\d|round\d|_fixes|phase\d|20\d\d", re.IGNORECASE
+#:
+#: The rule works on WHOLE name segments (the stem split on `_`, `-` and `.`), so a
+#: word that only contains a refused word is clean (`preview`, `rfc2045`,
+#: `reviewer`, `prefixes`, `round_robin`). A segment is refused when it is
+#: `review`, `fixes`, `round<N>`, `iter<N>`, `phase<N>` (the digit is required, so
+#: `iter`, `round` and `phase` in a feature name stay allowed) or a four-digit
+#: year `20NN`. `audit` is refused unless the next segment names a feature
+#: (`audit_log`, `audit_trail`, `audit_event(s)`, `audit_hook(s)`, `audit_record(s)`,
+#: `audit_logging`): `test_audit_sweeps`, `test_audit_fixes`, `test_audit_2026_09_21`
+#: and `test_security_audit` are refused. Review gate 1 concern 16 (plan d454fd62
+#: step 58.1) replaced the substring regex that refused `test_preview.py`. The
+#: accept and refuse tables below and the 38 historical names pin the rule.
+_DATED_SEGMENT = re.compile(r"review|fixes|round\d+|iter\d+|phase\d+|20\d\d")
+_AUDIT_FEATURE_WORDS = frozenset(
+    {"log", "logs", "logging", "trail", "event", "events", "hook", "hooks"}
+    | {"record", "records"}
 )
+
+
+def _is_dated_name(name: str) -> bool:
+    """True when a file or folder name carries a dated or process segment."""
+    segments = [s for s in re.split(r"[_.\-]+", name.lower()) if s]
+    for position, segment in enumerate(segments):
+        if _DATED_SEGMENT.fullmatch(segment):
+            return True
+        if segment == "audit":
+            following = segments[position + 1 : position + 2]
+            if not following or following[0] not in _AUDIT_FEATURE_WORDS:
+                return True
+    return False
 
 
 def _dated_test_names(names: list[str]) -> list[str]:
     """The repo-relative `tests/` paths (posix) whose file or folder name is dated."""
-    return [n for n in names if _DATED_TEST_NAME.search(n.rsplit("/", 1)[-1])]
+    return [n for n in names if _is_dated_name(n.rsplit("/", 1)[-1])]
 
 
 class TestNoDatedTestFiles:
@@ -438,6 +461,102 @@ class TestNoDatedTestFiles:
     )
     def test_the_pattern_keeps_a_behaviour_name(self, name):
         assert _dated_test_names([name]) == []
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            # Review gate 1 concern 16: the refuse table of the segment rule.
+            "tests/test_fsm_llm/test_review_round2_core.py",
+            "tests/test_fsm_llm/test_audit_2026_09_21.py",
+            "tests/test_fsm_llm/test_okf_cli_frontmatter_fixes.py",
+            "tests/test_fsm_llm/test_audit_sweeps.py",
+            "tests/test_fsm_llm/test_security_audit.py",
+            "tests/test_fsm_llm/test_audit.py",
+            "tests/test_fsm_llm/test_regression_iter12.py",
+            "tests/test_fsm_llm/test_strands_phase10.py",
+            "tests/test_fsm_llm/test_round3.py",
+            "tests/test_fsm_llm/test_fixes.py",
+            "tests/test_fsm_llm/test_notes-2026-review.py",
+            "tests/test_fsm_llm/test_cleanup.2026.py",
+            "tests/test_fsm_llm_audit_2026_09",
+        ],
+    )
+    def test_the_segment_rule_refuses(self, name):
+        assert _dated_test_names([name]) == [name]
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            # The accept table: a word that merely CONTAINS a refused word, or a
+            # feature that is called an audit log, is a behaviour name.
+            "tests/test_fsm_llm/test_preview.py",
+            "tests/test_fsm_llm/test_previews_of_states.py",
+            "tests/test_fsm_llm/test_rfc2045.py",
+            "tests/test_fsm_llm/test_http2020s.py",
+            "tests/test_fsm_llm/test_audit_log.py",
+            "tests/test_fsm_llm/test_audit_trail_handler.py",
+            "tests/test_fsm_llm/test_audit_events.py",
+            "tests/test_fsm_llm/test_prefixes.py",
+            "tests/test_fsm_llm/test_round_robin.py",
+            "tests/test_fsm_llm/test_iterable_tools.py",
+            "tests/test_fsm_llm/test_phase_shift.py",
+            "tests/test_fsm_llm/test_reviewer_agent.py",
+            "tests/test_fsm_llm/test_sha2562.py",
+            "tests/test_fsm_llm_audit_log",
+        ],
+    )
+    def test_the_segment_rule_accepts(self, name):
+        assert _dated_test_names([name]) == []
+
+    #: The distinct basenames of the 41 dated files that step 33 to 42 folded away
+    #: (41 files, 38 distinct names: `test_audit_2026_11_05.py` and
+    #: `test_audit_fixes.py` existed in two folders), read from `git ls-tree
+    #: 4b24387d -r tests`. The segment rule must keep refusing every one.
+    _HISTORICAL_DATED_NAMES = (
+        "test_audit_2026_09_21.py",
+        "test_audit_2026_09_22.py",
+        "test_audit_2026_09_27.py",
+        "test_audit_2026_09_28.py",
+        "test_audit_2026_11_05.py",
+        "test_audit_fixes.py",
+        "test_audit_iter1_seam.py",
+        "test_audit_iter2_seam.py",
+        "test_audit_iter3_seam.py",
+        "test_audit_iter4_seam.py",
+        "test_audit_sweeps.py",
+        "test_bug_fixes.py",
+        "test_core_behaviour_fixes.py",
+        "test_definitions_behaviour_fixes.py",
+        "test_epistemic_fixes.py",
+        "test_handlers_visualizer_fixes.py",
+        "test_instance_manager_fixes.py",
+        "test_integrations_fixes.py",
+        "test_llm_layer_behaviour_fixes.py",
+        "test_logging_behaviour_fixes.py",
+        "test_meta_cleanup_fixes.py",
+        "test_okf_cli_frontmatter_fixes.py",
+        "test_patterns_fixes.py",
+        "test_regression_iter2.py",
+        "test_regression_review.py",
+        "test_review_fixes.py",
+        "test_review_fixes_core.py",
+        "test_review_fixes_core_round2.py",
+        "test_review_fixes_meta.py",
+        "test_review_fixes_round2_agents.py",
+        "test_review_fixes_tools_native.py",
+        "test_review_round1_agents.py",
+        "test_review_round1_core.py",
+        "test_review_round2_agents.py",
+        "test_review_round2_callers.py",
+        "test_review_round2_core.py",
+        "test_security_review_fixes.py",
+        "test_strands_phase2.py",
+    )
+
+    def test_the_segment_rule_still_refuses_every_historical_dated_name(self):
+        assert len(self._HISTORICAL_DATED_NAMES) == 38
+        names = [f"tests/x/{n}" for n in self._HISTORICAL_DATED_NAMES]
+        assert _dated_test_names(names) == names
 
     def test_no_test_file_or_folder_under_tests_has_a_dated_name(self):
         tests = _REPO_ROOT / "tests"
