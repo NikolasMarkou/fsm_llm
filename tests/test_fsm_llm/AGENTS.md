@@ -26,7 +26,7 @@ Three test styles:
 | Style | Files | How they drive code |
 | --- | --- | --- |
 | Unit | `*_unit.py`, `test_pipeline.py`, `test_fsm.py`, `test_expressions.py`, `test_memory.py`, ... | call one module directly |
-| Seam | `*_seam.py`, `test_pipeline_handler_contract.py`, `test_turn_guard_deterministic.py` | go through `API.converse` / `converse_stream` / `push_fsm` / `pop_fsm`, or `LiteLLMInterface` with `patch("fsm_llm.llm.completion")` |
+| Seam | `*_seam.py`, `test_pipeline_handler_contract.py`, `test_turn_guard_deterministic.py` | go through `API.converse` / `converse_stream` / `push_fsm` / `pop_fsm`, or `LiteLLMInterface` with `patch("fsm_llm.llm.providers.litellm.completion")` |
 | Audit regression | classes named `TestStepNN...` and tests named after the audit id (`test_a1_*`, `test_p0_1_*`) inside the feature files | one class per plan step, each run RED before its fix; no `test_audit_*.py` file remains |
 
 ```mermaid
@@ -72,7 +72,7 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_expressions.py` | JsonLogic evaluator | short-circuit, arity, soft equality |
 | `test_context_unit.py` | context cleaning/compaction/search, secret filter | largest file; holds the strict xfail |
 | `test_prompts_unit.py` | prompt builders, `sanitize`, CDATA escape, token estimate | helpers reused by `test_core_hardening_seam.py` |
-| `test_llm_unit.py`, `test_ollama.py` | `LiteLLMInterface`, `fsm_llm.ollama` | stream guards, reasoning-content recovery |
+| `test_llm_unit.py`, `test_ollama.py` | `LiteLLMInterface`, `fsm_llm.llm.ollama` | stream guards, reasoning-content recovery |
 | `test_llm_parse_fallback_seam.py` | parse ladder JSON -> embedded JSON -> raw text never raises | |
 | `test_llm_finish_reason.py` | `CompletionResponse.finish_reason` / `truncated`, the one `length` WARNING in `_send`, cut-off text in bulk-extraction, field-extraction and classifier errors, the cut-envelope fallback message | a cut brace-opening reply is replaced, a cut prose reply and a `stop` reply are untouched; a partial `message` salvaged from a cut envelope is shipped and flagged `truncated` |
 | `test_cut_off_record.py` | the turn's cut-off record `definitions.CONTEXT_KEY_CUT_OFF` (D-025) | `{"reply": True}` / `{"fields": [...]}` written from `truncated=True` responses (`MockLLM2Interface(cut_reply=, cut_fields=)`), absent when nothing was cut, cleared every turn, restored on rollback, never in `get_data`, prompts or a saved session, a completion state's `result_key`, `llm.py` setting the flag |
@@ -148,7 +148,7 @@ Helpers imported across files in this directory (module path `tests.test_fsm_llm
 
 A helper that two or more files need lives once in `support.py`; the rows above are the existing cross-file imports from a feature file (keep those names stable, or move the helper to `support.py` and update both sides).
 
-Seam files fake the backend with `patch("fsm_llm.llm.completion", ...)` returning `MagicMock` responses built by `_fake_response`.
+Seam files fake the backend with `patch("fsm_llm.llm.providers.litellm.completion", ...)` returning `MagicMock` responses built by `_fake_response`.
 
 `test_docs_snippets.py` scans ```` ```json ```` and ```` ```python ```` fences naming `"initial_state"` in `README.md`, `docs/quickstart.md`, `src/fsm_llm/README.md`, `AGENTS.md` (repo root; must each contribute a snippet) and `docs/api_reference.md`, `docs/architecture.md`, `docs/fsm_design.md`, `docs/handlers.md`, `docs/synthesis.md` and `docs/testing.md` (must exist). Python blocks are parsed with `ast`, never executed. Test ids look like `test_doc_fsm_snippet_loads[<file>#block<n>]`.
 
@@ -185,7 +185,7 @@ Seam files fake the backend with `patch("fsm_llm.llm.completion", ...)` returnin
 ## Working here
 
 - Name files `test_<module>.py` / `test_<module>_elaborate.py`, classes `Test<Feature>`, helpers with a `_` prefix.
-- New regression for a public-path bug: add a seam test that drives `API.converse` or patched `fsm_llm.llm.completion`, not only a helper-level test.
+- New regression for a public-path bug: add a seam test that drives `API.converse` or patched `fsm_llm.llm.providers.litellm.completion`, not only a helper-level test.
 - Reuse a helper by import (see the helper table) rather than copying it. Name a new test file for the behaviour it pins, never for an audit, review round or plan step: `TestNoDatedTestFiles` in `tests/test_packaging.py` refuses such names.
 - Do not relabel, delete or regenerate corpus rows to improve a rate; do not add filter words to catch one corpus entry. Add names from real vocabulary without reading `constants.py` first.
 - After adding or removing tests, re-measure with the first command below. The suite count (6,237) is pinned by `tests/test_packaging.py::test_per_suite_table` (marked slow), which compares a measured `--collect-only` count per suite against a documented literal of the form `pytest tests/test_fsm_llm/  # ... (N tests)`; run that test after changing the count. The counts stated in this file (72 test files, 6,237 tests, 14 slow) are not pinned by any test and must be updated by hand.

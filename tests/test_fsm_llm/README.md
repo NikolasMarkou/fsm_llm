@@ -13,7 +13,7 @@ Almost every test uses a fake LLM, so the suite runs offline and fast. Only one 
 There are three kinds of test files.
 
 - Unit tests (`*_unit.py` and plain module names such as `test_pipeline.py`) call one module directly.
-- Seam tests (`*_seam.py`, `test_pipeline_handler_contract.py`) go through a public entry point, usually `API.converse` or `LiteLLMInterface` with `fsm_llm.llm.completion` patched. A "seam" here means the boundary where two parts meet; these tests exist because some bugs were invisible to tests that call helpers directly.
+- Seam tests (`*_seam.py`, `test_pipeline_handler_contract.py`) go through a public entry point, usually `API.converse` or `LiteLLMInterface` with `fsm_llm.llm.providers.litellm.completion` patched. A "seam" here means the boundary where two parts meet; these tests exist because some bugs were invisible to tests that call helpers directly.
 - Audit regression tests (classes `TestStepNN...`, tests named after the audit id) pin fixes from past code audits and live in the feature files; no `test_audit_*.py` file remains. Each was run failing before its fix landed.
 
 ```mermaid

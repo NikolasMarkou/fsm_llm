@@ -630,7 +630,7 @@ class NativeFunctionCallingReactAgent(BaseAgent):
         # run by core (`_standard_run`); its model turns are completion states.
         # Do NOT bring back a loop over model turns, a provider call, a
         # request builder or an injectable completion function here: every
-        # request rule lives once in core's `llm.py` (D-027) and the test
+        # request rule lives once in core's `llm` package (D-027) and the test
         # seam is `llm_interface=`. See decisions.md D-009, D-028.
         self._refuse_flagged_tools()
         context = self._init_context(task, initial_context)

@@ -184,8 +184,13 @@ class TestNoneContentHandling:
         mock_response.choices[0].message.content = None
 
         with (
-            patch("fsm_llm.llm.completion", return_value=mock_response),
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=None),
+            patch(
+                "fsm_llm.llm.providers.litellm.completion", return_value=mock_response
+            ),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=None,
+            ),
         ):
             with pytest.raises(LLMResponseError):
                 interface._make_llm_call(

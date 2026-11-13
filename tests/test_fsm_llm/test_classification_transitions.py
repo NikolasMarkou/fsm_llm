@@ -1058,7 +1058,7 @@ def _route_fsm() -> tuple[FSMDefinition, State]:
 
 
 class _StructuredProvider:
-    """Scripted ``fsm_llm.llm.completion`` that records each request."""
+    """Scripted ``fsm_llm.llm.providers.litellm.completion`` that records each request."""
 
     def __init__(self, intent: str):
         self.calls: list[dict[str, Any]] = []
@@ -1078,9 +1078,11 @@ class _StructuredProvider:
 
     def __enter__(self) -> _StructuredProvider:
         self._patches = [
-            patch("fsm_llm.llm.completion", side_effect=self.completion),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.completion", side_effect=self.completion
+            ),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
         ]
@@ -1348,7 +1350,7 @@ def _injected_run(
 ) -> tuple[API, str, list]:
     """Two turns on ``fsm``: into ``route``, then one turn in ``route``. A
     POST_TRANSITION handler records each transition; ``provider`` is the
-    side effect of the patched ``fsm_llm.llm.completion``."""
+    side effect of the patched ``fsm_llm.llm.providers.litellm.completion``."""
     transitions: list[tuple[str, str]] = []
     api = API.from_definition(fsm, llm_interface=llm)
     api.register_handler(
@@ -1364,9 +1366,9 @@ def _injected_run(
         )
     )
     with (
-        patch("fsm_llm.llm.completion", side_effect=provider),
+        patch("fsm_llm.llm.providers.litellm.completion", side_effect=provider),
         patch(
-            "fsm_llm.llm.get_supported_openai_params",
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params",
             return_value=["response_format"],
         ),
     ):
@@ -1678,9 +1680,11 @@ class _StayHarness:
             return {}
 
         with (
-            patch("fsm_llm.llm.completion", side_effect=self._completion),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.completion", side_effect=self._completion
+            ),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
             patch("fsm_llm.pipeline.Classifier", return_value=classifier),

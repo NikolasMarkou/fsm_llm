@@ -296,9 +296,9 @@ def hint_ablation(hint_on: bool) -> Iterator[None]:
 @contextmanager
 def wire_spy() -> Iterator[list[dict[str, Any]]]:
     """Record every request and response at core's one send binding
-    (``fsm_llm.llm.completion``, the binding ``bc.captured_wire`` replaces)
+    (``fsm_llm.llm.providers.litellm.completion``, the binding ``bc.captured_wire`` replaces)
     while still sending. Yields the list; restores the binding on exit."""
-    import fsm_llm.llm as core_llm
+    import fsm_llm.llm.providers.litellm as core_llm
 
     seen: list[dict[str, Any]] = []
     original = core_llm.completion

@@ -1406,9 +1406,9 @@ class _ScopeHarness:
 
     def _patches(self):
         return (
-            patch("fsm_llm.llm.completion", side_effect=self._fake),
+            patch("fsm_llm.llm.providers.litellm.completion", side_effect=self._fake),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
         )

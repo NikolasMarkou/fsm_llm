@@ -4,7 +4,7 @@ The agent is an FSM run by core (plan 944e2692 step 16, D-009, D-028): every
 model turn is a core completion state. The loop tests inject a scripted
 ``LLMInterface`` through ``llm_interface=`` (the seam that replaced
 ``complete_fn``); the argument-shape tests stub the one provider binding
-``fsm_llm.llm.completion`` under the agent's own ``LiteLLMInterface``. The
+``fsm_llm.llm.providers.litellm.completion`` under the agent's own ``LiteLLMInterface``. The
 request rules (tools XOR response_format, Ollama preparation, seed, reply
 normalisation) are core's and tested in ``tests/test_fsm_llm/test_llm_complete.py``;
 the request bytes are pinned by ``test_native_fc_golden.py``.
@@ -117,9 +117,9 @@ def _stub_provider(
         sent.append(kwargs)
         return queue.pop(0)
 
-    monkeypatch.setattr("fsm_llm.llm.completion", fake)
+    monkeypatch.setattr("fsm_llm.llm.providers.litellm.completion", fake)
     monkeypatch.setattr(
-        "fsm_llm.llm.get_supported_openai_params",
+        "fsm_llm.llm.providers.litellm.get_supported_openai_params",
         lambda **_: ["response_format", "tools", "tool_choice"],
     )
     return sent
@@ -654,7 +654,7 @@ class TestRunsOnCore:
         def refuse(**kwargs: Any) -> Any:
             raise AssertionError("a provider binding was called")
 
-        monkeypatch.setattr("fsm_llm.llm.completion", refuse)
+        monkeypatch.setattr("fsm_llm.llm.providers.litellm.completion", refuse)
         monkeypatch.setattr("litellm.completion", refuse)
         llm = _ScriptedLLM(
             _calls(("weather", {"city": "Oslo"})),

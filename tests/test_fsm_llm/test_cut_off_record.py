@@ -310,8 +310,11 @@ class TestLlmLayerFlagsTheResponse:
             choices=[Choices(message=Message(content=content), finish_reason=finish)]
         )
         return (
-            patch("fsm_llm.llm.completion", return_value=reply),
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+            patch("fsm_llm.llm.providers.litellm.completion", return_value=reply),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=[],
+            ),
         )
 
     def _generate(self, content: str, finish: str | None):
@@ -381,8 +384,13 @@ class TestLlmLayerFlagsTheResponse:
             ]
         )
         with (
-            patch("fsm_llm.llm.completion", side_effect=[first, second]),
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+            patch(
+                "fsm_llm.llm.providers.litellm.completion", side_effect=[first, second]
+            ),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=[],
+            ),
         ):
             out = LiteLLMInterface("gpt-4o", max_tokens=1000).generate_response(
                 ResponseGenerationRequest(system_prompt="s", user_message="u")

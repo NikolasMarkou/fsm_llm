@@ -110,11 +110,11 @@ def offline_llm(monkeypatch):
     """Make every LLM call from MetaBuilderAgent fail at once, with no network.
 
     Every call of the agent goes through core's LLM layer, whose one send
-    binding is ``fsm_llm.llm.completion`` (bound at import, so patching
+    binding is ``fsm_llm.llm.providers.litellm.completion`` (bound at import, so patching
     ``litellm.completion`` would not reach it). The agent then takes its
     keyword type (``_detect_type_fallback``) and canned collect replies.
     """
-    monkeypatch.setattr("fsm_llm.llm.completion", _offline_completion)
+    monkeypatch.setattr("fsm_llm.llm.providers.litellm.completion", _offline_completion)
 
 
 @pytest.fixture

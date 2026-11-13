@@ -922,7 +922,7 @@ def _request():
 class TestWireSpy:
     def test_it_stamps_timeout_seconds_and_tokens_and_restores(self, monkeypatch):
         """Guards: a latency meter that loses the timeout, or a binding left replaced."""
-        import fsm_llm.llm as core_llm
+        import fsm_llm.llm.providers.litellm as core_llm
 
         reply = SimpleNamespace(
             usage=SimpleNamespace(prompt_tokens=11, completion_tokens=3)
@@ -1214,6 +1214,7 @@ UNPINNED_CORE = {
     "src/fsm_llm/core/expressions/__init__.py": "the engine's JsonLogic (is_missing; facade, read through what the pinned files import)",
     "src/fsm_llm/handlers.py": "the engine's handlers",
     "src/fsm_llm/llm/__init__.py": "the one LLM layer",
+    "src/fsm_llm/llm/providers/litellm.py": "the one module that imports litellm: `wire_spy` of the bench script wraps its `completion` binding (step 73 of plan d454fd62 moved it out of `llm/__init__.py`)",
     "src/fsm_llm/logging.py": "library logging",
     "src/fsm_llm/core/transition_evaluator.py": "the engine's transition rules",
     "src/fsm_llm/okf.py": "text caps shared with every package",

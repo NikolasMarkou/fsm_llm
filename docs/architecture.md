@@ -61,7 +61,7 @@ Security: XML tag sanitization, CDATA wrapping for JSON, token budget management
 
 Plugin architecture with 8 timing points. Handlers self-determine execution via state/context conditions, execute in priority order, with configurable error isolation (`"continue"` or `"raise"`). Critical handlers always raise on error.
 
-### LLM Interface (`llm.py`)
+### LLM Interface (`llm/`)
 
 `LLMInterface` ABC with the methods:
 - `generate_response(request)` -- Generate user-facing response (Pass 2)
@@ -70,7 +70,7 @@ Plugin architecture with 8 timing points. Handlers self-determine execution via 
 - `extract_bulk_data(request)` -- Bulk extraction for states with `extraction_instructions`
 - `complete(request: CompletionRequest) -> CompletionResponse` -- The one primitive for tool calling, plain and structured completion (classifier, completion states, the agents' LLM judge). Not abstract: the base method raises `NotImplementedError`
 
-`LiteLLMInterface` provides the built-in implementation supporting 100+ providers. It is the one place a provider request is built (`_build_call_params`) and sent (one send path that counts every call on the instance: `usage()`), for every call kind; `LiteLLMEmbedder` is the one embedding path. `litellm` is imported only in `llm.py`; nothing else in the package (agents, reasoning, meta-builder) calls a provider by itself. The classifier of a conversation sends its `complete` requests through the conversation's own `llm_interface`. Request models carry `user_message: str | None`; the request builder sends `None` (no user message) as the fixed `NEUTRAL_USER_TURN` and an empty or whitespace message as `EMPTY_USER_MESSAGE_TURN`, so the provider never sees an empty user turn and never reads an empty message as an instruction.
+`LiteLLMInterface` provides the built-in implementation supporting 100+ providers. It is the one place a provider request is built (`_build_call_params`) and sent (one send path that counts every call on the instance: `usage()`), for every call kind; `LiteLLMEmbedder` is the one embedding path. `litellm` is imported in exactly one module, `llm/providers/litellm.py`; nothing else in the package (agents, reasoning, meta-builder) calls a provider by itself. The classifier of a conversation sends its `complete` requests through the conversation's own `llm_interface`. Request models carry `user_message: str | None`; the request builder sends `None` (no user message) as the fixed `NEUTRAL_USER_TURN` and an empty or whitespace message as `EMPTY_USER_MESSAGE_TURN`, so the provider never sees an empty user turn and never reads an empty message as an instruction.
 
 ### TransitionEvaluator (`core/transition_evaluator.py`)
 

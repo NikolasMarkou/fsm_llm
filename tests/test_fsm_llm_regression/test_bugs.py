@@ -677,8 +677,13 @@ class TestGetSupportedParamsNone:
         mock_response.choices[0].message.content = '{"message": "hello"}'
 
         with (
-            patch("fsm_llm.llm.completion", return_value=mock_response),
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=None),
+            patch(
+                "fsm_llm.llm.providers.litellm.completion", return_value=mock_response
+            ),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=None,
+            ),
         ):
             # Should not raise TypeError
             result = interface._make_llm_call(
@@ -813,8 +818,13 @@ class TestLLMTimeout:
         mock_response.choices[0].message.content = '{"message": "hello"}'
 
         with (
-            patch("fsm_llm.llm.completion", return_value=mock_response) as mock_comp,
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=None),
+            patch(
+                "fsm_llm.llm.providers.litellm.completion", return_value=mock_response
+            ) as mock_comp,
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=None,
+            ),
         ):
             interface._make_llm_call(
                 [{"role": "user", "content": "test"}], "response_generation"
@@ -832,8 +842,13 @@ class TestLLMTimeout:
         mock_response.choices[0].message.content = '{"message": "hello"}'
 
         with (
-            patch("fsm_llm.llm.completion", return_value=mock_response) as mock_comp,
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=None),
+            patch(
+                "fsm_llm.llm.providers.litellm.completion", return_value=mock_response
+            ) as mock_comp,
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=None,
+            ),
         ):
             interface._make_llm_call(
                 [{"role": "user", "content": "test"}], "response_generation"

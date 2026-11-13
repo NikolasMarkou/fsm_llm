@@ -36,7 +36,8 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.handlers import HandlerSystem
-from fsm_llm.llm import LiteLLMInterface, LLMInterface, _completion_response
+from fsm_llm.llm import LiteLLMInterface, LLMInterface
+from fsm_llm.llm.interface import _completion_response
 from fsm_llm.logging import logger
 from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.prompts import (
@@ -433,7 +434,7 @@ class TestExecuteClassificationExtractions:
         pipeline.llm_interface = MagicMock(spec=[])  # no .model, no .complete
         instance = _make_instance()
 
-        with patch("fsm_llm.llm.completion") as provider:
+        with patch("fsm_llm.llm.providers.litellm.completion") as provider:
             if required:
                 with pytest.raises(ClassificationError, match="complete"):
                     pipeline._execute_classification_extractions(
@@ -691,7 +692,7 @@ class TestClassifierLLMBoundary:
         conv_id, _ = api.start_conversation()
 
         with patch(
-            "fsm_llm.llm.completion", side_effect=_rate_limit_error()
+            "fsm_llm.llm.providers.litellm.completion", side_effect=_rate_limit_error()
         ) as mock_completion:
             response = api.converse("I am furious", conv_id)
 
@@ -702,7 +703,9 @@ class TestClassifierLLMBoundary:
         assert "sentiment" not in api.get_data(conv_id)
 
     def test_litellm_exception_is_wrapped_into_the_fsmerror_hierarchy(self):
-        with patch("fsm_llm.llm.completion", side_effect=_rate_limit_error()):
+        with patch(
+            "fsm_llm.llm.providers.litellm.completion", side_effect=_rate_limit_error()
+        ):
             with pytest.raises(ClassificationError) as exc:
                 _classifier().classify("hello")
 
@@ -719,7 +722,9 @@ class TestClassifierLLMBoundary:
         pipeline = _make_pipeline()
         instance = _make_instance()
 
-        with patch("fsm_llm.llm.completion", side_effect=_rate_limit_error()):
+        with patch(
+            "fsm_llm.llm.providers.litellm.completion", side_effect=_rate_limit_error()
+        ):
             data = pipeline._execute_classification_extractions(
                 state, "test", instance, "conv1"
             )
@@ -728,12 +733,16 @@ class TestClassifierLLMBoundary:
 
     def test_keyboard_interrupt_still_propagates_bare(self):
         """BaseException must never be wrapped -- HARD system invariant."""
-        with patch("fsm_llm.llm.completion", side_effect=KeyboardInterrupt()):
+        with patch(
+            "fsm_llm.llm.providers.litellm.completion", side_effect=KeyboardInterrupt()
+        ):
             with pytest.raises(KeyboardInterrupt):
                 _classifier().classify("hello")
 
     def test_system_exit_still_propagates_bare(self):
-        with patch("fsm_llm.llm.completion", side_effect=SystemExit()):
+        with patch(
+            "fsm_llm.llm.providers.litellm.completion", side_effect=SystemExit()
+        ):
             with pytest.raises(SystemExit):
                 _classifier().classify("hello")
 
@@ -756,7 +765,9 @@ class TestClassifierLLMBoundary:
             model="gpt-4o",
         )
 
-        with patch("fsm_llm.llm.completion", side_effect=_rate_limit_error()):
+        with patch(
+            "fsm_llm.llm.providers.litellm.completion", side_effect=_rate_limit_error()
+        ):
             with pytest.raises(ClassificationError):
                 hier.classify("where is my refund")
 
@@ -786,7 +797,7 @@ class TestClassifierMalformedResponseShape:
     def test_choice_without_message_raises_classification_error(self):
         """RED on the N10 code: AttributeError('... no attribute message')."""
         response = types.SimpleNamespace(choices=[types.SimpleNamespace()])
-        with patch("fsm_llm.llm.completion", return_value=response):
+        with patch("fsm_llm.llm.providers.litellm.completion", return_value=response):
             with pytest.raises(ClassificationError, match="Malformed") as exc:
                 _classifier().classify("x")
 
@@ -797,14 +808,14 @@ class TestClassifierMalformedResponseShape:
         response = types.SimpleNamespace(
             choices=[types.SimpleNamespace(message=types.SimpleNamespace())]
         )
-        with patch("fsm_llm.llm.completion", return_value=response):
+        with patch("fsm_llm.llm.providers.litellm.completion", return_value=response):
             with pytest.raises(ClassificationError, match="Malformed"):
                 _classifier().classify("x")
 
     def test_empty_choices_guard_keeps_its_original_message(self):
         """The empty-reply guard keeps its wording, now in the LLM layer."""
         response = types.SimpleNamespace(choices=[])
-        with patch("fsm_llm.llm.completion", return_value=response):
+        with patch("fsm_llm.llm.providers.litellm.completion", return_value=response):
             with pytest.raises(ClassificationError, match="Empty response"):
                 _classifier().classify("x")
 
@@ -816,7 +827,7 @@ class TestClassifierMalformedResponseShape:
                 types.SimpleNamespace(message=types.SimpleNamespace(content="not json"))
             ]
         )
-        with patch("fsm_llm.llm.completion", return_value=response):
+        with patch("fsm_llm.llm.providers.litellm.completion", return_value=response):
             with pytest.raises(ClassificationResponseError, match="Failed to parse"):
                 _classifier().classify("x")
 
@@ -826,7 +837,7 @@ class TestClassifierMalformedResponseShape:
         escape the classifier bare and was caught only because `KeyError` is
         in the pipeline's soft-fail tuple)."""
         response = types.SimpleNamespace(choices={"a": 1})
-        with patch("fsm_llm.llm.completion", return_value=response):
+        with patch("fsm_llm.llm.providers.litellm.completion", return_value=response):
             with pytest.raises(ClassificationError, match="Malformed") as exc:
                 _classifier().classify("x")
 
@@ -969,7 +980,7 @@ class TestClassificationPromptConfigValidation:
         conv_id, _ = api.start_conversation()
 
         with (
-            patch("fsm_llm.llm.completion") as mock_completion,
+            patch("fsm_llm.llm.providers.litellm.completion") as mock_completion,
             pytest.raises(FSMError, match="max_intents"),
         ):
             api.converse("I am furious", conv_id)
@@ -1098,7 +1109,9 @@ class TestClassifierReasoningContentRecovery:
         response = MagicMock()
         response.choices = [choice]
 
-        with patch("fsm_llm.llm.completion", return_value=response) as mock_completion:
+        with patch(
+            "fsm_llm.llm.providers.litellm.completion", return_value=response
+        ) as mock_completion:
             result = _classifier().classify("I am thrilled")
 
         assert mock_completion.called
@@ -1190,9 +1203,11 @@ class _ClassifiedHarness:
             reasoning="r", intent=self.intent, confidence=self.confidence
         )
         with (
-            patch("fsm_llm.llm.completion", side_effect=self._completion),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.completion", side_effect=self._completion
+            ),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
             patch("fsm_llm.pipeline.Classifier", return_value=classifier),

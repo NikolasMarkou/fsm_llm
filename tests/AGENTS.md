@@ -22,7 +22,7 @@ flowchart TD
     tsy[test_fsm_llm_synthesis/test_synthesis_bench.py] -->|sys.path += scripts/| syb[scripts/synthesis_bench.py]
 ```
 
-Test styles used across suites: unit (call one module), seam (drive a public entry point such as `API.converse` with `fsm_llm.llm.completion` patched), loop (run an agent end to end with a scripted fake LLM), structure (build an FSM dict and check states, edges, priorities, JsonLogic gates), source-text checks (`inspect.getsource`, `ast`, file reads), and regression classes (one class per finding id, each run failing before its fix, in the feature file that owns the behaviour).
+Test styles used across suites: unit (call one module), seam (drive a public entry point such as `API.converse` with `fsm_llm.llm.providers.litellm.completion` patched), loop (run an agent end to end with a scripted fake LLM), structure (build an FSM dict and check states, edges, priorities, JsonLogic gates), source-text checks (`inspect.getsource`, `ast`, file reads), and regression classes (one class per finding id, each run failing before its fix, in the feature file that owns the behaviour).
 
 ## Key files
 
@@ -129,7 +129,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 
 - Put a test in the suite folder that matches the source subpackage; repo-wide checks go at this level.
 - Conventions: files `test_<module>.py` / `test_<module>_elaborate.py`, classes `Test<Feature>`, helpers prefixed `_`; a regression is a class in the feature file for its behaviour, with the bug or audit id and the fixed behaviour in its docstring; never a new file named for an audit, review round, iteration or date (`TestNoDatedTestFiles` in `test_packaging.py` refuses, per whole name segment (the stem split on `_`, `-`, `.`), `fixes`, `iter<N>`, `round<N>`, `phase<N>`, `step<N>`, `gate<N>`, a counted word and a number (`round_2`), a year from 2020 to 2030 or a segment starting with one (`2026nov`), a date-like 8-digit run, the compounds `reviewfixes` and `auditfixes`, a trailing or bare `review`, a bare `audit` and `audit` before `sweep(s)`; `review` before a feature word (`review_queue`), a trailing `audit` (`policy_audit`), `audit_log`, `year_2038`, `preview`, `rfc2045` and `round_robin` are clean).
-- Use a double from `fsm_llm.testing` (`MockLLM2Interface`, `ScriptedLLM`, ...) or `configure_mock_extract_field` instead of a real model; patch `fsm_llm.llm.completion` (core's one send binding; nothing else calls litellm) for seam tests, or inject a scripted `LLMInterface` with `llm_interface=` (implement `complete` when the FSM classifies or has a completion state).
+- Use a double from `fsm_llm.testing` (`MockLLM2Interface`, `ScriptedLLM`, ...) or `configure_mock_extract_field` instead of a real model; patch `fsm_llm.llm.providers.litellm.completion` (core's one send binding, looked up in the one module that imports litellm; nothing else calls litellm) for seam tests, or inject a scripted `LLMInterface` with `llm_interface=` (implement `complete` when the FSM classifies or has a completion state).
 - Mark anything sleeping about a second or more, or needing a model, `slow`; live tests also get `integration` and `real_llm`.
 - A new suite folder or root test file must be added to the root `AGENTS.md` Testing block (per-suite line or root-file list) or `test_per_suite_table` / `test_root_file_breakdown` fail.
 - A new subpackage under `src/` must be added to `_EXPECTED_SUBPACKAGES` in `test_packaging.py`, given an extra, and requested by every install list.

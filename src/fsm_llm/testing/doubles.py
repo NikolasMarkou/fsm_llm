@@ -41,7 +41,8 @@ from fsm_llm.core.definitions import (
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
-from fsm_llm.llm import LLMInterface, _meter_of, _Metered
+from fsm_llm.llm import LLMInterface
+from fsm_llm.llm.usage import _meter_of, _Metered
 
 from .builders import final_reply
 

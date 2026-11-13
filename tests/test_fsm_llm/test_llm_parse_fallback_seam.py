@@ -38,11 +38,9 @@ from fsm_llm.core.definitions import (
     TransitionCondition,
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
-from fsm_llm.llm import (
-    _GENERIC_FALLBACK_MESSAGE,
-    LiteLLMInterface,
-)
+from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.llm.json_extraction import extract_json_from_text
+from fsm_llm.llm.parsing import _GENERIC_FALLBACK_MESSAGE
 from fsm_llm.llm.text import strip_think_and_fences
 from tests.conftest import cpu_timer
 from tests.test_fsm_llm.support import (
@@ -1191,7 +1189,10 @@ class TestLinearFenceAndThink:
         llm = LiteLLMInterface(model=OLLAMA_MODEL)
         hostile = "<think>a" * _LINEAR_N
         request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
-        with patch("fsm_llm.llm.completion", return_value=_fake_response(hostile)):
+        with patch(
+            "fsm_llm.llm.providers.litellm.completion",
+            return_value=_fake_response(hostile),
+        ):
             with cpu_timer() as timer:
                 with pytest.raises(LLMResponseError):
                     llm.extract_bulk_data(request)
@@ -1223,11 +1224,11 @@ class TestDictOnlyJsonContract:
         clf = _classifier()
         with (
             patch(
-                "fsm_llm.llm.completion",
+                "fsm_llm.llm.providers.litellm.completion",
                 return_value=_fake_response(content),
             ),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=[],
             ),
             pytest.raises(ClassificationResponseError),
@@ -1238,7 +1239,10 @@ class TestDictOnlyJsonContract:
     def test_extract_bulk_data_non_dict_json_returns_empty(self, content):
         llm = LiteLLMInterface(model=OLLAMA_MODEL)
         request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
-        with patch("fsm_llm.llm.completion", return_value=_fake_response(content)):
+        with patch(
+            "fsm_llm.llm.providers.litellm.completion",
+            return_value=_fake_response(content),
+        ):
             result = llm.extract_bulk_data(request)
         assert result.extracted_data == {}
 
@@ -1246,7 +1250,7 @@ class TestDictOnlyJsonContract:
         llm = LiteLLMInterface(model=OLLAMA_MODEL)
         request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
         with patch(
-            "fsm_llm.llm.completion",
+            "fsm_llm.llm.providers.litellm.completion",
             return_value=_fake_response('Sure! {"a": 1}'),
         ):
             result = llm.extract_bulk_data(request)
@@ -1256,7 +1260,10 @@ class TestDictOnlyJsonContract:
         llm = LiteLLMInterface(model=OLLAMA_MODEL)
         request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
         reply = 'Here you go: {"extracted_data": {"name": "Ann"}, "confidence": 0.5}'
-        with patch("fsm_llm.llm.completion", return_value=_fake_response(reply)):
+        with patch(
+            "fsm_llm.llm.providers.litellm.completion",
+            return_value=_fake_response(reply),
+        ):
             result = llm.extract_bulk_data(request)
         assert result.extracted_data == {"name": "Ann"}
         assert result.confidence == 0.5
@@ -1266,7 +1273,10 @@ class TestDictOnlyJsonContract:
         llm = LiteLLMInterface(model=OLLAMA_MODEL)
         request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
         with (
-            patch("fsm_llm.llm.completion", return_value=_fake_response(content)),
+            patch(
+                "fsm_llm.llm.providers.litellm.completion",
+                return_value=_fake_response(content),
+            ),
             pytest.raises(LLMResponseError),
         ):
             llm.extract_bulk_data(request)
@@ -1383,11 +1393,13 @@ class _ReplyProv:
 
     def __enter__(self):
         self._stack.enter_context(
-            patch("fsm_llm.llm.completion", side_effect=self._completion)
+            patch(
+                "fsm_llm.llm.providers.litellm.completion", side_effect=self._completion
+            )
         )
         self._stack.enter_context(
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             )
         )
@@ -1503,7 +1515,7 @@ class TestEmptyReplyIsRetriedOnce:
                     raise RuntimeError("provider down")
                 return real(**kwargs)
 
-            with patch("fsm_llm.llm.completion", side_effect=flaky):
+            with patch("fsm_llm.llm.providers.litellm.completion", side_effect=flaky):
                 _, greeting = p.api.start_conversation()
         assert greeting == _APOLOGY
 
@@ -1522,9 +1534,9 @@ def _generate(content: str, response_format=None):
         response_format=response_format,
     )
     with (
-        patch("fsm_llm.llm.completion") as mock_comp,
+        patch("fsm_llm.llm.providers.litellm.completion") as mock_comp,
         patch(
-            "fsm_llm.llm.get_supported_openai_params",
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params",
             return_value=["response_format"],
         ),
     ):
@@ -1550,7 +1562,7 @@ class TestStructuredReplyWithReasoningKey:
     def test_unstructured_reasoning_only_reply_is_not_shown(self):
         # Re-baselined by plan-2026-09-21T203800-8a03483a/D-039 (audit D6):
         # `reasoning` is internal and never becomes the user-facing reply.
-        from fsm_llm.llm import _GENERIC_FALLBACK_MESSAGE
+        from fsm_llm.llm.parsing import _GENERIC_FALLBACK_MESSAGE
 
         body = json.dumps({"reasoning": "because x"})
         assert _generate(body, None) == _GENERIC_FALLBACK_MESSAGE
@@ -1612,7 +1624,7 @@ class TestInlineCodeFenceIsKept:
         llm = LiteLLMInterface(model="ollama_chat/qwen3.5:4b")
         request = BulkExtractionRequest(system_prompt="e", user_message="hi")
         with patch(
-            "fsm_llm.llm.completion",
+            "fsm_llm.llm.providers.litellm.completion",
             return_value=_fake_response('text\n```json\n{"name": "Bob"}\n```\nmore'),
         ):
             assert llm.extract_bulk_data(request).extracted_data == {"name": "Bob"}
@@ -1626,9 +1638,9 @@ def _generate_counted(content: str):
         transition_occurred=False,
     )
     with (
-        patch("fsm_llm.llm.completion") as mock_comp,
+        patch("fsm_llm.llm.providers.litellm.completion") as mock_comp,
         patch(
-            "fsm_llm.llm.get_supported_openai_params",
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params",
             return_value=["response_format"],
         ),
     ):
@@ -1737,11 +1749,11 @@ class TestClosingFenceNeedsALeadingFence:
         )
         with (
             patch(
-                "fsm_llm.llm.completion",
+                "fsm_llm.llm.providers.litellm.completion",
                 return_value=_fake_response('{"a": 1}\n```'),
             ),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
         ):
@@ -1759,11 +1771,11 @@ class TestClosingFenceNeedsALeadingFence:
         req = BulkExtractionRequest(system_prompt="extract", user_message="hi")
         with (
             patch(
-                "fsm_llm.llm.completion",
+                "fsm_llm.llm.providers.litellm.completion",
                 return_value=_fake_response('{"a": 1}\n```'),
             ),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
         ):
@@ -1985,7 +1997,9 @@ class TestStep08D1D5:
         llm = LiteLLMInterface(model="test", api_key="test")
         request = BulkExtractionRequest(system_prompt="extract", user_message="hi")
         flat = '{"name": "Ann", "confidence": 0.8, "reasoning": "user said Ann"}'
-        with patch("fsm_llm.llm.completion", return_value=_D1Response(flat)):
+        with patch(
+            "fsm_llm.llm.providers.litellm.completion", return_value=_D1Response(flat)
+        ):
             result = llm.extract_bulk_data(request)
         assert result.extracted_data == {"name": "Ann"}
         assert result.confidence == 0.8
@@ -1994,7 +2008,10 @@ class TestStep08D1D5:
             '{"extracted_data": {"confidence": "high", "reasoning": "r"}, '
             '"confidence": 0.4, "reasoning": "x"}'
         )
-        with patch("fsm_llm.llm.completion", return_value=_D1Response(wrapped)):
+        with patch(
+            "fsm_llm.llm.providers.litellm.completion",
+            return_value=_D1Response(wrapped),
+        ):
             result = llm.extract_bulk_data(request)
         assert result.extracted_data == {"confidence": "high", "reasoning": "r"}
         assert result.confidence == 0.4
@@ -2096,7 +2113,7 @@ class TestStep15D6D12B8:
         ids=["empty-message", "null-message", "no-message"],
     )
     def test_d6_reasoning_never_shown_as_the_reply(self, payload):
-        from fsm_llm.llm import _GENERIC_FALLBACK_MESSAGE
+        from fsm_llm.llm.parsing import _GENERIC_FALLBACK_MESSAGE
 
         result = _d_llm()._parse_response_generation_response(
             _d_response(json.dumps(payload))
@@ -2311,7 +2328,9 @@ class TestStep15D6D12B8:
         llm = LiteLLMInterface(
             model="gpt-4o", stream=True, response_format={"type": "text"}, top_p=0.3
         )
-        with patch("fsm_llm.llm.get_supported_openai_params", return_value=[]):
+        with patch(
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[]
+        ):
             params = llm._build_call_params(
                 [{"role": "user", "content": "hi"}], call_type, stream=stream
             )
@@ -2323,7 +2342,9 @@ class TestStep15D6D12B8:
         from fsm_llm.llm import LiteLLMInterface
 
         llm = LiteLLMInterface(model="gpt-4o", stream=False)
-        with patch("fsm_llm.llm.get_supported_openai_params", return_value=[]):
+        with patch(
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[]
+        ):
             params = llm._build_call_params(
                 [{"role": "user", "content": "hi"}], "response_generation", stream=True
             )
@@ -2347,8 +2368,11 @@ class TestStep15D6D12B8:
             return _d_response(json.dumps({"intent": "buy", "confidence": 0.9}))
 
         with (
-            patch("fsm_llm.llm.completion", _fake_completion),
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+            patch("fsm_llm.llm.providers.litellm.completion", _fake_completion),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=[],
+            ),
         ):
             clf.classify("I want it")
         assert "stream" not in captured

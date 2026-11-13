@@ -11,7 +11,7 @@ from fsm_llm.agents.fsm_definitions import (
 )
 from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.core.definitions import FSMDefinition, State
-from fsm_llm.ollama import build_ollama_response_format
+from fsm_llm.llm.ollama import build_ollama_response_format
 from fsm_llm.pipeline import MessagePipeline
 
 

@@ -21,7 +21,7 @@ from __future__ import annotations
 import copy
 import json
 
-from .logging import logger
+from fsm_llm.logging import logger
 
 # ------------------------------------------------------------------
 # JSON Schema constants for structured output

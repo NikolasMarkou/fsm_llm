@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Unit tests for llm.py — LiteLLMInterface with mocked litellm."""
+"""Unit tests for the llm package: LiteLLMInterface with mocked litellm."""
 
 import json
 from types import SimpleNamespace
@@ -77,8 +77,8 @@ def _mock_llm_response(content: str) -> MagicMock:
 class TestGenerateResponse:
     """Test response generation via LLM."""
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm.llm.providers.litellm.completion")
+    @patch("fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[])
     def test_generate_response_returns_message(self, mock_params, mock_completion):
         mock_completion.return_value = _mock_llm_response("Hello! How can I help you?")
 
@@ -91,8 +91,8 @@ class TestGenerateResponse:
         response = llm.generate_response(request)
         assert response.message == "Hello! How can I help you?"
 
-    @patch("fsm_llm.llm.completion", side_effect=Exception("timeout"))
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm.llm.providers.litellm.completion", side_effect=Exception("timeout"))
+    @patch("fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[])
     def test_generate_response_raises_on_error(self, mock_params, mock_completion):
         llm = LiteLLMInterface(model="test-model")
         request = ResponseGenerationRequest(
@@ -107,8 +107,8 @@ class TestGenerateResponse:
 class TestMakeLLMCall:
     """Test the _make_llm_call method."""
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm.llm.providers.litellm.completion")
+    @patch("fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[])
     def test_invalid_response_structure_raises(self, mock_params, mock_completion):
         mock_completion.return_value = MagicMock(choices=[])
 
@@ -116,8 +116,8 @@ class TestMakeLLMCall:
         with pytest.raises(LLMResponseError, match="Invalid response"):
             llm._make_llm_call([{"role": "user", "content": "hi"}], "test")
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm.llm.providers.litellm.completion")
+    @patch("fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[])
     def test_none_response_raises(self, mock_params, mock_completion):
         mock_completion.return_value = None
 
@@ -125,8 +125,11 @@ class TestMakeLLMCall:
         with pytest.raises(LLMResponseError):
             llm._make_llm_call([{"role": "user", "content": "hi"}], "test")
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
+    @patch("fsm_llm.llm.providers.litellm.completion")
+    @patch(
+        "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+        return_value=["response_format"],
+    )
     def test_json_object_for_non_ollama_extraction(self, mock_params, mock_completion):
         """Non-Ollama models use json_object format for extraction."""
         mock_completion.return_value = _mock_llm_response("{}")
@@ -137,8 +140,11 @@ class TestMakeLLMCall:
         call_kwargs = mock_completion.call_args.kwargs
         assert call_kwargs.get("response_format") == {"type": "json_object"}
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
+    @patch("fsm_llm.llm.providers.litellm.completion")
+    @patch(
+        "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+        return_value=["response_format"],
+    )
     def test_no_json_mode_for_response_generation(self, mock_params, mock_completion):
         mock_completion.return_value = _mock_llm_response("Hello!")
 
@@ -165,8 +171,8 @@ class TestStructuralPresenceChecks:
     case a naive conversion would have broken.
     """
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm.llm.providers.litellm.completion")
+    @patch("fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[])
     def test_response_missing_choices_attribute_entirely_raises(
         self, mock_params, mock_completion
     ):
@@ -181,8 +187,8 @@ class TestStructuralPresenceChecks:
         with pytest.raises(LLMResponseError, match="Invalid response"):
             llm._make_llm_call([{"role": "user", "content": "hi"}], "test")
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm.llm.providers.litellm.completion")
+    @patch("fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[])
     def test_choice_missing_message_attribute_entirely_raises(
         self, mock_params, mock_completion
     ):
@@ -192,8 +198,8 @@ class TestStructuralPresenceChecks:
         with pytest.raises(LLMResponseError, match="missing message content"):
             llm._make_llm_call([{"role": "user", "content": "hi"}], "test")
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm.llm.providers.litellm.completion")
+    @patch("fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[])
     def test_message_missing_content_attribute_entirely_raises(
         self, mock_params, mock_completion
     ):
@@ -208,8 +214,8 @@ class TestStructuralPresenceChecks:
         with pytest.raises(LLMResponseError, match="missing message content"):
             llm._make_llm_call([{"role": "user", "content": "hi"}], "test")
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm.llm.providers.litellm.completion")
+    @patch("fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[])
     def test_message_content_present_but_none_does_not_raise_missing_content(
         self, mock_params, mock_completion
     ):
@@ -246,8 +252,11 @@ class TestStructuralPresenceChecks:
 class TestOllamaLLMCallParams:
     """Test Ollama-specific parameter handling in _make_llm_call."""
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
+    @patch("fsm_llm.llm.providers.litellm.completion")
+    @patch(
+        "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+        return_value=["response_format"],
+    )
     def test_ollama_uses_json_schema_for_extraction(self, mock_params, mock_completion):
         """Ollama models use json_schema format (not json_object) for extraction."""
         mock_completion.return_value = _mock_llm_response(
@@ -263,8 +272,11 @@ class TestOllamaLLMCallParams:
         assert rf["type"] == "json_schema"
         assert rf["json_schema"]["name"] == "data_extraction"
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
+    @patch("fsm_llm.llm.providers.litellm.completion")
+    @patch(
+        "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+        return_value=["response_format"],
+    )
     def test_ollama_sets_reasoning_effort_none(self, mock_params, mock_completion):
         """Ollama models set reasoning_effort=none to disable thinking."""
         mock_completion.return_value = _mock_llm_response(
@@ -277,8 +289,11 @@ class TestOllamaLLMCallParams:
         call_kwargs = mock_completion.call_args.kwargs
         assert call_kwargs.get("reasoning_effort") == "none"
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=["response_format"])
+    @patch("fsm_llm.llm.providers.litellm.completion")
+    @patch(
+        "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+        return_value=["response_format"],
+    )
     def test_ollama_forces_temperature_zero_for_structured(
         self, mock_params, mock_completion
     ):
@@ -293,8 +308,8 @@ class TestOllamaLLMCallParams:
         call_kwargs = mock_completion.call_args.kwargs
         assert call_kwargs["temperature"] == 0
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm.llm.providers.litellm.completion")
+    @patch("fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[])
     def test_ollama_preserves_temperature_for_response_generation(
         self, mock_params, mock_completion
     ):
@@ -311,7 +326,7 @@ class TestOllamaLLMCallParams:
 class TestRetryWiring:
     """Opt-in `retries` wiring, tested against a REAL local HTTP provider.
 
-    These tests deliberately do NOT patch `fsm_llm.llm.completion` (that would
+    These tests deliberately do NOT patch `fsm_llm.llm.providers.litellm.completion` (that would
     replace the very retry machinery under test) AND deliberately do NOT use a
     `litellm.CustomLLM` provider either. An earlier version of this class used
     `CustomLLM`, and that choice is precisely what hid a defect: the `CustomLLM`
@@ -507,8 +522,8 @@ class TestRetryWiring:
 
         assert http_provider["n"] == 1
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm.llm.providers.litellm.completion")
+    @patch("fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[])
     def test_retries_zero_omits_the_retry_key_entirely(
         self, mock_params, mock_completion
     ):
@@ -527,8 +542,8 @@ class TestRetryWiring:
         assert "max_retries" not in mock_completion.call_args.kwargs
         assert "num_retries" not in mock_completion.call_args.kwargs
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm.llm.providers.litellm.completion")
+    @patch("fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[])
     def test_non_positive_retries_omits_the_retry_key(
         self, mock_params, mock_completion
     ):
@@ -541,8 +556,8 @@ class TestRetryWiring:
         assert "max_retries" not in mock_completion.call_args.kwargs
         assert "num_retries" not in mock_completion.call_args.kwargs
 
-    @patch("fsm_llm.llm.completion")
-    @patch("fsm_llm.llm.get_supported_openai_params", return_value=[])
+    @patch("fsm_llm.llm.providers.litellm.completion")
+    @patch("fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[])
     def test_positive_retries_emits_max_retries_not_num_retries(
         self, mock_params, mock_completion
     ):
@@ -584,8 +599,10 @@ class TestStreamEmptyContentGuard:
         )
 
     def _stream(self, chunks):
-        return patch("fsm_llm.llm.completion", return_value=iter(chunks)), patch(
-            "fsm_llm.llm.get_supported_openai_params", return_value=[]
+        return patch(
+            "fsm_llm.llm.providers.litellm.completion", return_value=iter(chunks)
+        ), patch(
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[]
         )
 
     def test_thinking_field_is_recovered_when_every_delta_content_is_empty(self):
@@ -656,8 +673,10 @@ class TestStreamMalformedChunksSkipped:
         )
 
     def _stream(self, chunks):
-        return patch("fsm_llm.llm.completion", return_value=iter(chunks)), patch(
-            "fsm_llm.llm.get_supported_openai_params", return_value=[]
+        return patch(
+            "fsm_llm.llm.providers.litellm.completion", return_value=iter(chunks)
+        ), patch(
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[]
         )
 
     def test_chunk_missing_choices_attribute_entirely_is_skipped(self):
@@ -749,8 +768,10 @@ class TestStreamReasoningFragmentAccumulation:
         )
 
     def _stream(self, chunks):
-        return patch("fsm_llm.llm.completion", return_value=iter(chunks)), patch(
-            "fsm_llm.llm.get_supported_openai_params", return_value=[]
+        return patch(
+            "fsm_llm.llm.providers.litellm.completion", return_value=iter(chunks)
+        ), patch(
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[]
         )
 
     def test_stream_recovers_reasoning_split_across_multiple_fragments(self):
@@ -840,8 +861,11 @@ class TestReasoningContentRecovery:
         response.choices = [choice]
 
         with (
-            patch("fsm_llm.llm.completion", return_value=response),
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+            patch("fsm_llm.llm.providers.litellm.completion", return_value=response),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=[],
+            ),
         ):
             llm = LiteLLMInterface(model="test-model")
             out = llm._make_llm_call([{"role": "user", "content": "hi"}], "test")
@@ -1009,9 +1033,9 @@ class TestFieldExtractionTypedSchemaOnTheWire:
     def _run(model: str, field_type: str):
         interface = LiteLLMInterface(model=model, api_key="test")
         with (
-            patch("fsm_llm.llm.completion") as mock_comp,
+            patch("fsm_llm.llm.providers.litellm.completion") as mock_comp,
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
         ):
@@ -1060,9 +1084,9 @@ class TestZeroConfidenceValueIsNotAccepted:
             return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
 
         with (
-            patch("fsm_llm.llm.completion", side_effect=fake),
+            patch("fsm_llm.llm.providers.litellm.completion", side_effect=fake),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
         ):
@@ -1185,7 +1209,8 @@ class TestStep14LLM:
         llm = LiteLLMInterface(model="gpt-4o-mini")
         msgs = [{"role": "user", "content": "hi"}]
         with patch(
-            "fsm_llm.llm.get_supported_openai_params", return_value=["response_format"]
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+            return_value=["response_format"],
         ) as spy:
             first = llm._build_call_params(msgs, "response_generation")
             second = llm._build_call_params(msgs, "data_extraction")
@@ -1197,7 +1222,10 @@ class TestStep14LLM:
 
         llm = LiteLLMInterface(model="unknown-model-xyz")
         msgs = [{"role": "user", "content": "hi"}]
-        with patch("fsm_llm.llm.get_supported_openai_params", return_value=None) as spy:
+        with patch(
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+            return_value=None,
+        ) as spy:
             llm._build_call_params(msgs, "response_generation")
             llm._build_call_params(msgs, "response_generation")
         assert spy.call_count == 1
@@ -1208,7 +1236,7 @@ class TestStep14LLM:
         llm = LiteLLMInterface(model="gpt-4o-mini")
         msgs = [{"role": "user", "content": "hi"}]
         with patch(
-            "fsm_llm.llm.get_supported_openai_params",
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params",
             side_effect=[RuntimeError("boom"), ["response_format"]],
         ) as spy:
             with pytest.raises(RuntimeError):
@@ -1223,7 +1251,9 @@ class TestStep14LLM:
         a = LiteLLMInterface(model="gpt-4o-mini")
         b = LiteLLMInterface(model="gpt-4o-mini")
         msgs = [{"role": "user", "content": "hi"}]
-        with patch("fsm_llm.llm.get_supported_openai_params", return_value=[]) as spy:
+        with patch(
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[]
+        ) as spy:
             a._build_call_params(msgs, "response_generation")
             b._build_call_params(msgs, "response_generation")
             a.model = "gpt-4o"
@@ -1242,13 +1272,16 @@ class TestStep14LLM:
         request = ResponseGenerationRequest(system_prompt="sys", user_message="hi")
         with (
             patch(
-                "fsm_llm.llm.completion",
+                "fsm_llm.llm.providers.litellm.completion",
                 side_effect=[
                     self._completion('{"message": ""}'),
                     self._completion('{"message": "hello"}'),
                 ],
             ) as comp,
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=[],
+            ),
         ):
             result = llm.generate_response(request)
         assert comp.call_count == 2
@@ -1263,10 +1296,13 @@ class TestStep14LLM:
         request = ResponseGenerationRequest(system_prompt="sys", user_message="hi")
         with (
             patch(
-                "fsm_llm.llm.completion",
+                "fsm_llm.llm.providers.litellm.completion",
                 return_value=self._completion('{"message": "hello"}'),
             ),
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=[],
+            ),
         ):
             assert llm.generate_response(request).message == "hello"
         assert llm.apology_retry_count == 0

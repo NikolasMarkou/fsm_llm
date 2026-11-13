@@ -8,7 +8,7 @@ module pins every model-visible key of every request it sends, captured at
 e1f63a9, so the rebuild is proven to send the same requests.
 
 The recording stub replaces BOTH ``litellm.completion`` (today's call site) and
-``fsm_llm.llm.completion`` (core's one binding, where the rebuilt agent sends),
+``fsm_llm.llm.providers.litellm.completion`` (core's one binding, where the rebuilt agent sends),
 so the test survives the move unchanged. Only the transport keys in
 ``_TRANSPORT_KEYS`` are left out of the comparison: they never reach the model.
 
@@ -41,7 +41,7 @@ _FIXTURE = Path(__file__).parent / "fixtures" / "native_fc_golden_requests.json"
 _TRANSPORT_KEYS = frozenset({"timeout", "max_retries", "api_key", "api_base"})
 
 #: Both completion bindings the stub replaces (today's and core's).
-_BINDINGS = ("litellm.completion", "fsm_llm.llm.completion")
+_BINDINGS = ("litellm.completion", "fsm_llm.llm.providers.litellm.completion")
 
 _MODELS = {"ollama": "ollama_chat/qwen3.5:4b", "openai": "gpt-4o-mini"}
 

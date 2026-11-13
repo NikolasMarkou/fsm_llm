@@ -66,9 +66,11 @@ class _CorrectionHarness:
 
         snapshots = []
         with (
-            patch("fsm_llm.llm.completion", side_effect=self._completion),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.completion", side_effect=self._completion
+            ),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
         ):
@@ -437,9 +439,9 @@ class TestBulkExtractionIsSanitizedAndFiltered:
 def _bulk(reply: str):
     req = BulkExtractionRequest(system_prompt="extract", user_message="hi")
     with (
-        patch("fsm_llm.llm.completion") as mock_comp,
+        patch("fsm_llm.llm.providers.litellm.completion") as mock_comp,
         patch(
-            "fsm_llm.llm.get_supported_openai_params",
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params",
             return_value=["response_format"],
         ),
     ):

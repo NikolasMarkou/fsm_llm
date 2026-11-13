@@ -1133,9 +1133,11 @@ class _ClassifierProvider:
 
     def __enter__(self) -> _ClassifierProvider:
         self._patches = [
-            patch("fsm_llm.llm.completion", side_effect=self._completion),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.completion", side_effect=self._completion
+            ),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
         ]
@@ -1297,8 +1299,13 @@ class TestNoMessageSiblingSites:
             )
         )
         with (
-            patch("fsm_llm.llm.completion", return_value=reply) as completion,
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+            patch(
+                "fsm_llm.llm.providers.litellm.completion", return_value=reply
+            ) as completion,
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=[],
+            ),
         ):
             result = Classifier(_schema(), model="gpt-4o").classify_multi(
                 None, context={"data": {"cart": "phone"}}

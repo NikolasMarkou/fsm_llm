@@ -8,7 +8,7 @@ The meta-builder (`MetaBuilderAgent`, CLI `fsm-llm-meta`) helps a user build one
 
 ## How it works
 
-Most tests work on plain builder objects with no LLM at all. The meta-builder itself is an FSM run by the core engine (classify the artifact type, collect requirements, build), so tests that touch the LLM give the agent a scripted LLM interface (`ScriptedMetaLLM` in `conftest.py`, passed as `llm_interface=`) that answers the classifier, the build call and the replies from prepared lists, or make core's one LLM call (`fsm_llm.llm.completion`) fail and check the agent's keyword and canned-text fallback.
+Most tests work on plain builder objects with no LLM at all. The meta-builder itself is an FSM run by the core engine (classify the artifact type, collect requirements, build), so tests that touch the LLM give the agent a scripted LLM interface (`ScriptedMetaLLM` in `conftest.py`, passed as `llm_interface=`) that answers the classifier, the build call and the replies from prepared lists, or make core's one LLM call (`fsm_llm.llm.providers.litellm.completion`) fail and check the agent's keyword and canned-text fallback.
 
 ```mermaid
 flowchart LR

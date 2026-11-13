@@ -1104,7 +1104,7 @@ def _completion_targets() -> list[tuple[Any, str]]:
     """Every binding an agent can reach litellm's completion through (the
     "1" meter's targets).
 
-    ``fsm_llm.llm`` binds ``completion`` by name at import (every
+    ``fsm_llm.llm.providers.litellm`` binds ``completion`` by name at import (every
     ``LiteLLMInterface`` request, the classifier's included, is one count
     there); a caller off core's path (B0's native_fc had one) would look
     ``litellm.completion`` up at call time. Loaded here, BEFORE any arm
@@ -1112,7 +1112,7 @@ def _completion_targets() -> list[tuple[Any, str]]:
     """
     import litellm
 
-    import fsm_llm.llm as llm
+    import fsm_llm.llm.providers.litellm as llm
 
     return [
         (litellm, "completion"),

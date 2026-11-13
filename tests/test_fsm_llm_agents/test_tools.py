@@ -851,9 +851,9 @@ def _patch_embedding(monkeypatch, provider: _EmbeddingProvider) -> None:
     """Route core's binding and litellm's module function to ``provider``."""
     import litellm
 
-    import fsm_llm.llm
+    import fsm_llm.llm.providers.embedder
 
-    monkeypatch.setattr(fsm_llm.llm, "embedding", provider)
+    monkeypatch.setattr(fsm_llm.llm.providers.embedder, "embedding", provider)
     monkeypatch.setattr(litellm, "embedding", provider)
 
 

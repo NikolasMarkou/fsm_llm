@@ -33,8 +33,8 @@ LLM isolation methods used:
 | Method | Where |
 | --- | --- |
 | `ScriptedMetaLLM(intents=, builds=, replies=)` (conftest), passed as `llm_interface=`: classifier calls (`call_type == "classification"`), build calls and collect replies (Pass 2) answered from queues, every request recorded | `test_meta_conversation.py`, `test_meta_fsm.py`, most of `test_agent.py` |
-| `monkeypatch.setattr("fsm_llm.llm.completion", ...)` (core's one send binding) raising or returning a fake response | `TestLlmCallProviderFailure`, `TestWorkflowStepTypeEnum` |
-| `offline_llm` fixture (conftest): `fsm_llm.llm.completion` raises `RuntimeError("offline")`, so the keyword type (`_detect_type_fallback`) and the canned collect reply are asserted with no network call | `TestTypeDetection`, `TestStartSendFlow` |
+| `monkeypatch.setattr("fsm_llm.llm.providers.litellm.completion", ...)` (core's one send binding) raising or returning a fake response | `TestLlmCallProviderFailure`, `TestWorkflowStepTypeEnum` |
+| `offline_llm` fixture (conftest): `fsm_llm.llm.providers.litellm.completion` raises `RuntimeError("offline")`, so the keyword type (`_detect_type_fallback`) and the canned collect reply are asserted with no network call | `TestTypeDetection`, `TestStartSendFlow` |
 
 ## Key files
 
@@ -68,7 +68,7 @@ Fixtures in `conftest.py` (all function-scoped):
 | `agent_builder` | `AgentArtifactBuilder()` (empty) |
 | `populated_fsm_builder` | `FSMArtifactBuilder` with 3 states and 2 transitions (shape below) |
 | `meta_config` | `MetaBuilderConfig` with test values (shape below) |
-| `offline_llm` | `None`; monkeypatches `fsm_llm.llm.completion` (core's send binding, which every meta-builder call goes through) to raise at once. Apply with `@pytest.mark.usefixtures("offline_llm")` |
+| `offline_llm` | `None`; monkeypatches `fsm_llm.llm.providers.litellm.completion` (core's send binding, which every meta-builder call goes through) to raise at once. Apply with `@pytest.mark.usefixtures("offline_llm")` |
 
 Also in `conftest.py`: `ScriptedMetaLLM` (class, contract in its docstring) and `SCRIPTED_REPLY` (its default collect reply, ending with the build sentence).
 
@@ -129,7 +129,7 @@ Agent:
 ## Failure modes
 
 - A litellm upgrade that moves `OllamaChatConfig` or changes `map_openai_params` breaks `test_enum_reaches_response_format_and_ollama_format`.
-- Every meta-builder call goes through `fsm_llm.llm.completion`, a name bound at import, so patching `litellm.completion` reaches nothing; patch `fsm_llm.llm.completion` or inject `ScriptedMetaLLM`.
+- Every meta-builder call goes through `fsm_llm.llm.providers.litellm.completion`, a name bound at import, so patching `litellm.completion` reaches nothing; patch `fsm_llm.llm.providers.litellm.completion` or inject `ScriptedMetaLLM`.
 - An exhausted `ScriptedMetaLLM.builds` queue raises `IndexError`: a test that sees it made a build call it did not expect.
 - Changing `populated_fsm_builder` breaks many exact-string assertions.
 
@@ -137,6 +137,6 @@ Agent:
 
 - Run: `.venv/bin/python -m pytest tests/test_fsm_llm_meta/ -q` from the repo root.
 - Use the conftest fixtures instead of building builders inline; for new tool tests use `_make_call` in `test_tools.py`.
-- Inject `ScriptedMetaLLM` with `llm_interface=` (or patch `fsm_llm.llm.completion`); do not add tests that need a live provider.
+- Inject `ScriptedMetaLLM` with `llm_interface=` (or patch `fsm_llm.llm.providers.litellm.completion`); do not add tests that need a live provider.
 - Read the DECISION notes in `TestSchemaEchoRejection`, `TestLlmCallProviderFailure`, `TestWorkflowStepTypeEnum` and the D-0xx references of plan 944e2692 in `test_meta_fsm.py`, `test_meta_conversation.py` before changing the behavior they pin.
 - Adding or removing tests changes the suite count (515) stated in this file and the README here. Re-measure with `.venv/bin/python -m pytest tests/test_fsm_llm_meta --collect-only -q | tail -1`.

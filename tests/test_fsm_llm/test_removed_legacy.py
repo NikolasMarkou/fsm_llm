@@ -230,7 +230,7 @@ class TestStep9LeafDeadCode:
             assert not hasattr(module, "if_condition"), module.__name__
 
     def test_ollama_transition_schema_is_gone(self):
-        import fsm_llm.ollama as ollama
+        import fsm_llm.llm.ollama as ollama
 
         assert not hasattr(ollama, "TRANSITION_JSON_SCHEMA")
         assert "transition_decision" not in ollama._CALL_TYPE_SCHEMAS

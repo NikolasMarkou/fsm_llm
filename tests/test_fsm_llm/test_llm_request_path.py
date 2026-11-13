@@ -97,7 +97,7 @@ def _shop_fsm() -> dict:
 
 
 class _Provider:
-    """Scripted ``fsm_llm.llm.completion``: records every request's kwargs."""
+    """Scripted ``fsm_llm.llm.providers.litellm.completion``: records every request's kwargs."""
 
     def __init__(self, supported: list[str] | None = None):
         self.calls: list[dict[str, Any]] = []
@@ -115,9 +115,11 @@ class _Provider:
 
     def __enter__(self) -> _Provider:
         self._patches = [
-            patch("fsm_llm.llm.completion", side_effect=self.completion),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.completion", side_effect=self.completion
+            ),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=self._supported,
             ),
             # The parent commit's classifier binding: reaching it is a failure.
@@ -231,8 +233,14 @@ class TestClassifierUsesTheLLMLayer:
 
     def test_provider_failure_is_a_classification_error(self):
         with (
-            patch("fsm_llm.llm.completion", side_effect=RuntimeError("down")),
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+            patch(
+                "fsm_llm.llm.providers.litellm.completion",
+                side_effect=RuntimeError("down"),
+            ),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=[],
+            ),
             pytest.raises(ClassificationError, match="Classification LLM call failed"),
         ):
             Classifier(_schema(), model="gpt-4o").classify("hi")
@@ -244,8 +252,11 @@ class TestClassifierUsesTheLLMLayer:
         response = MagicMock()
         response.choices = [object()]  # a choice without .message
         with (
-            patch("fsm_llm.llm.completion", return_value=response),
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+            patch("fsm_llm.llm.providers.litellm.completion", return_value=response),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=[],
+            ),
             pytest.raises(ClassificationError, match="Malformed"),
         ):
             Classifier(_schema(), model="gpt-4o").classify("hi")
@@ -327,8 +338,13 @@ class TestNeverAnEmptyUserTurn:
             system_prompt="Greet.", user_message=message
         )
         with (
-            patch("fsm_llm.llm.completion", return_value=iter([chunk])) as completion,
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+            patch(
+                "fsm_llm.llm.providers.litellm.completion", return_value=iter([chunk])
+            ) as completion,
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=[],
+            ),
         ):
             assert list(llm.generate_response_stream(request)) == ["Hi"]
         assert completion.call_args.kwargs["messages"][1] == {
@@ -385,7 +401,7 @@ class TestNeverAnEmptyUserTurn:
         assert provider.user_turns()[1:] == ["I would like to buy a phone"] * 2
 
     def test_fill_does_not_mutate_the_callers_messages(self):
-        from fsm_llm.llm import _fill_empty_user_turns
+        from fsm_llm.llm.providers.request import _fill_empty_user_turns
 
         messages = [
             {"role": "system", "content": ""},
@@ -429,7 +445,7 @@ def _chunks(text: str) -> list[MagicMock]:
 
 
 class _TaggedProvider:
-    """``fsm_llm.llm.completion`` recording ``(LLMInterface method, user
+    """``fsm_llm.llm.providers.litellm.completion`` recording ``(LLMInterface method, user
     turn)`` per request; the method is tagged by wrapping the interface's
     four request methods."""
 
@@ -539,9 +555,11 @@ def _run(ask: dict[str, Any], mode: str, message: str | None) -> _TaggedProvider
     llm = LiteLLMInterface(model="gpt-4o", api_key="sk-x")
     provider = _TaggedProvider(llm)
     with (
-        patch("fsm_llm.llm.completion", side_effect=provider.completion),
         patch(
-            "fsm_llm.llm.get_supported_openai_params",
+            "fsm_llm.llm.providers.litellm.completion", side_effect=provider.completion
+        ),
+        patch(
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params",
             return_value=["response_format"],
         ),
     ):

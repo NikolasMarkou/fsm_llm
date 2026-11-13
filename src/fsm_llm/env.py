@@ -1,6 +1,6 @@
 """Explicit ``.env`` loading: the one place the library reads a dotenv file.
 
-Importing ``fsm_llm`` reads no ``.env`` file (``llm.py`` stops litellm doing
+Importing ``fsm_llm`` reads no ``.env`` file (``llm/providers/litellm.py`` stops litellm doing
 it). A host or a CLI that wants one calls :func:`load_env` on purpose, or the
 CLIs take ``--env-file PATH``, which calls it.
 """

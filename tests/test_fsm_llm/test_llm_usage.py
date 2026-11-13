@@ -2,7 +2,7 @@
 
 Every provider request goes through the one send path (``_send``), which
 counts it once on the interface instance, per call kind. The provider is the
-``fsm_llm.llm.completion`` binding, patched; replies are real litellm
+``fsm_llm.llm.providers.litellm.completion`` binding, patched; replies are real litellm
 ``ModelResponse`` objects unless a test needs another usage shape.
 """
 
@@ -18,7 +18,7 @@ from litellm.types.utils import Choices, Message, ModelResponse
 from pydantic import ValidationError
 
 import fsm_llm
-import fsm_llm.llm as llm_module
+import fsm_llm.llm.usage as usage_module
 from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     CompletionRequest,
@@ -61,8 +61,10 @@ def _usage(prompt: int, completion: int) -> dict[str, int]:
 def _patched(provider: Any):
     """Patch the provider binding and the supported-params lookup."""
     return (
-        patch("fsm_llm.llm.completion", side_effect=provider),
-        patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+        patch("fsm_llm.llm.providers.litellm.completion", side_effect=provider),
+        patch(
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[]
+        ),
     )
 
 
@@ -436,7 +438,7 @@ class TestUsageMeterLocks:
         built: list[Any] = []
         first_inside = threading.Event()
         second_built = threading.Event()
-        original = llm_module._UsageMeter.__init__
+        original = usage_module._UsageMeter.__init__
 
         def init(meter: Any) -> None:
             original(meter)
@@ -449,13 +451,13 @@ class TestUsageMeterLocks:
             else:
                 second_built.set()
 
-        monkeypatch.setattr(llm_module._UsageMeter, "__init__", init)
+        monkeypatch.setattr(usage_module._UsageMeter, "__init__", init)
         meters: list[Any] = []
         first = threading.Thread(
-            target=lambda: meters.append(llm_module._meter_of(llm))
+            target=lambda: meters.append(usage_module._meter_of(llm))
         )
         second = threading.Thread(
-            target=lambda: meters.append(llm_module._meter_of(llm))
+            target=lambda: meters.append(usage_module._meter_of(llm))
         )
         first.start()
         assert first_inside.wait(5)
@@ -467,7 +469,7 @@ class TestUsageMeterLocks:
         assert len(meters) == 2 and meters[0] is meters[1] is llm._usage_meter
 
     def test_a_reset_during_a_count_loses_nothing(self):
-        meter = llm_module._UsageMeter()
+        meter = usage_module._UsageMeter()
         inside = threading.Event()
         release = threading.Event()
         pause = self.PAUSE
@@ -486,7 +488,7 @@ class TestUsageMeterLocks:
                 return super().__getitem__(key)
 
         meter._counts["complete"] = _PausingCounts(
-            dict.fromkeys(llm_module._COUNTER_FIELDS, 0)
+            dict.fromkeys(usage_module._COUNTER_FIELDS, 0)
         )
         harvested: list[int] = []
         bump = threading.Thread(target=lambda: meter._bump("complete", calls=1))
@@ -514,7 +516,7 @@ class TestMeterResetClearsInsideTheLock:
     exists to kill M5 deterministically (no timing)."""
 
     def test_a_count_made_as_the_reset_releases_its_lock_is_kept(self):
-        meter = llm_module._UsageMeter()
+        meter = usage_module._UsageMeter()
         meter._bump("complete", calls=3)
         real = meter._lock
         armed = [True]

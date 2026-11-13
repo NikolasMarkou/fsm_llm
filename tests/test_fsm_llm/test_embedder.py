@@ -1,7 +1,7 @@
 """``LiteLLMEmbedder`` (plan 944e2692, step 4, D-005).
 
 The embedder owns the one ``embedding`` binding of fsm_llm. The provider is
-the ``fsm_llm.llm.embedding`` binding, patched; replies are real litellm
+the ``fsm_llm.llm.providers.embedder.embedding`` binding, patched; replies are real litellm
 ``EmbeddingResponse`` objects unless a test needs another shape.
 """
 
@@ -44,7 +44,7 @@ def _vectors_reply(
 
 
 def _patched(provider: Any):
-    return patch("fsm_llm.llm.embedding", provider)
+    return patch("fsm_llm.llm.providers.embedder.embedding", provider)
 
 
 def _echo_provider(dims: int = 3) -> MagicMock:
@@ -300,7 +300,10 @@ class TestEmbedderUsage:
 
     def test_embedding_never_touches_the_completion_binding(self):
         completion = MagicMock()
-        with _patched(_echo_provider()), patch("fsm_llm.llm.completion", completion):
+        with (
+            _patched(_echo_provider()),
+            patch("fsm_llm.llm.providers.litellm.completion", completion),
+        ):
             LiteLLMEmbedder(_MODEL).embed(["a"])
         completion.assert_not_called()
 
@@ -318,7 +321,9 @@ class TestEmbedder:
             )
 
         embedder = LiteLLMEmbedder("ollama/qwen3-embedding:0.6b")
-        with patch("fsm_llm.llm.embedding", side_effect=provider) as sent:
+        with patch(
+            "fsm_llm.llm.providers.embedder.embedding", side_effect=provider
+        ) as sent:
             vectors = embedder.embed(t for t in ["hello", "world"])
         assert vectors == [[1.0, 0.0], [1.0, 1.0]]
         assert sent.call_args.kwargs["input"] == ["hello", "world"]
@@ -348,7 +353,7 @@ class TestEmbedder:
         )
         embedder = LiteLLMEmbedder("ollama/qwen3-embedding:0.6b")
         with (
-            patch("fsm_llm.llm.embedding", return_value=reply),
+            patch("fsm_llm.llm.providers.embedder.embedding", return_value=reply),
             pytest.raises(LLMResponseError, match=message),
         ):
             embedder.embed(["a", "b"])

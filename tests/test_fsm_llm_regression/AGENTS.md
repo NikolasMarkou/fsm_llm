@@ -30,7 +30,7 @@ flowchart LR
 | `test_engine_integration.py` | reasoning + workflow engine integration, iter-2 F-002 (`solve_problem` leaves the caller's context unchanged) and F-004 (WaitEventStep validation), ED-001 to ED-003 (falsy solutions, event and timer auto-registration, type aliases), review C2, C3, H4 (reasoning context pruning, `ContextKeys`, no `MergeStrategy` alias) | 51 | Unmarked `async def` tests (need `asyncio_mode = "auto"`); timer test sleeps 0.1 s; reasoning solves run through core on `_ScriptedLLM` and `_VALID_SCRIPT` imported from `tests/test_fsm_llm_reasoning/test_engine_scripted.py` (the calls are asserted, not a vacuous `"Processing..."` stub); workflow tests use `@pytest.mark.asyncio` |
 | `test_functional.py` | functional lifecycle | 24 | Uses `mock_llm2_interface`, `sample_fsm_definition_v2`; local fixtures `greeting_fsm_dict`, `sub_fsm_dict` |
 | `test_regression_cli_and_exports.py` | plan 13: H-1..3, M-1..3, M-5, L-3; review C1 (version pin), H5, M3, M6 | 24 | Reads `README.md`, `docs/quickstart.md`, `src/fsm_llm/py.typed`, `pyproject.toml`, `tox.ini`; version pin `"0.12.0"`; 2 skipped `requirements.txt` tests; needs `packaging` and `tomllib` |
-| `test_regression_core_bugs.py` | plan 6: VB1..VB25; iter-2 F-003 (`api_key` forbidden pattern), F-005 (LRU FSM cache), F-006 (`less` docstring) | 39 | Imports `_GENERIC_FALLBACK_MESSAGE` from `fsm_llm.llm` |
+| `test_regression_core_bugs.py` | plan 6: VB1..VB25; iter-2 F-003 (`api_key` forbidden pattern), F-005 (LRU FSM cache), F-006 (`less` docstring) | 39 | Imports `_GENERIC_FALLBACK_MESSAGE` from `fsm_llm.llm.parsing` |
 | `test_regression_expressions_and_transitions.py` | plan 5: B1..B20 | 19 | `--version` exit code 0 via `fsm_llm.__main__.main_cli` |
 | `test_regression_handlers_and_state.py` | plan 4: B1..B7 | 8 | Spies on `HandlerSystem.execute_handlers` |
 | `test_regression_jsonlogic_and_merge.py` | plan 9: VB1..VB15 | 31 | Helper `_frame_definition(name)`; scans `src/fsm_llm/*.py` for `"transition_decision"` |
@@ -72,7 +72,7 @@ Behaviors pinned, grouped by area (the assertion, not the history):
 
 ## Invariants and constraints
 
-- No test may hit a real LLM or network. Patch `fsm_llm.llm.completion` and `fsm_llm.llm.get_supported_openai_params` when driving `_make_llm_call`.
+- No test may hit a real LLM or network. Patch `fsm_llm.llm.providers.litellm.completion` and `fsm_llm.llm.providers.litellm.get_supported_openai_params` when driving `_make_llm_call`.
 - Hand-built `API.__new__(API)` objects must mirror `__init__` attributes the method reads: `_stack_lock` (a `threading.Lock`), `conversation_stacks`, `fsm_manager`, `_last_accessed`, `_temp_fsm_definitions`, `_pending_push_ids`, `_ended_conversations`, `_MAX_ENDED_CACHE`. `end_conversation` is called through `.__wrapped__` to skip its decorator.
 - Tests that change global state restore it: cwd (`os.chdir` in `finally`), `OPENAI_API_KEY`, `fsm_llm.logging._file_handler_initialized`.
 - Code comments cite decision ids (`D-003`, `D-010`, `D-013`, `D-019`, `D-039`, `D-041`, `D-050`); they explain why a test was re-baselined. Do not revert those re-baselines.

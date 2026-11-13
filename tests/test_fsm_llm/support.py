@@ -50,7 +50,7 @@ def _mock_llm() -> MagicMock:
     llm.generate_response_stream.side_effect = lambda request: iter(["o", "k"])
     # The classifier sends through the conversation's own interface (D-006 of
     # plan 944e2692): forward `complete` to a real LiteLLMInterface for the
-    # same model, so a patched `fsm_llm.llm.completion` still receives the
+    # same model, so a patched `fsm_llm.llm.providers.litellm.completion` still receives the
     # classifier's provider request.
     llm.complete.side_effect = LiteLLMInterface(model="gpt-4").complete
     return llm
@@ -138,8 +138,11 @@ class _ClassifierCapture:
         self.intent, self.confidence = intent, confidence
         self.calls: list[list[dict[str, str]]] = []
         self._patches = [
-            patch("fsm_llm.llm.completion", side_effect=self._reply),
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+            patch("fsm_llm.llm.providers.litellm.completion", side_effect=self._reply),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=[],
+            ),
         ]
 
     def _reply(self, **kwargs):
@@ -706,7 +709,7 @@ def _aiter1_ambiguous_fsm(self_loop: bool = False) -> dict:
 def _is_classifier_call(kwargs: dict) -> bool:
     """True for a provider request the ``Classifier`` issued.
 
-    Every core call goes through ``fsm_llm.llm.completion``; a classifier
+    Every core call goes through ``fsm_llm.llm.providers.litellm.completion``; a classifier
     request is the one carrying the ``intent_classification`` schema (sent
     when the model supports ``response_format``).
     """
@@ -716,7 +719,7 @@ def _is_classifier_call(kwargs: dict) -> bool:
 
 class _ConnectionHarness:
     """`API.converse` with the REAL Classifier over a scripted
-    ``fsm_llm.llm.completion`` (the one binding every core call uses);
+    ``fsm_llm.llm.providers.litellm.completion`` (the one binding every core call uses);
     records the kwargs of every classifier call, fakes Pass 1 / Pass 2."""
 
     def __init__(self, fsm: dict, intent: str, **api_kwargs):
@@ -738,9 +741,12 @@ class _ConnectionHarness:
 
     def run(self):
         with (
-            patch("fsm_llm.llm.completion", side_effect=self._llm_completion),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.completion",
+                side_effect=self._llm_completion,
+            ),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
         ):
@@ -797,11 +803,13 @@ class _Prov:
 
     def __enter__(self):
         self._stack.enter_context(
-            patch("fsm_llm.llm.completion", side_effect=self._completion)
+            patch(
+                "fsm_llm.llm.providers.litellm.completion", side_effect=self._completion
+            )
         )
         self._stack.enter_context(
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             )
         )
@@ -1017,11 +1025,14 @@ class _Session:
 
     def __enter__(self):
         self._stack.enter_context(
-            patch("fsm_llm.llm.completion", side_effect=self.provider.completion)
+            patch(
+                "fsm_llm.llm.providers.litellm.completion",
+                side_effect=self.provider.completion,
+            )
         )
         self._stack.enter_context(
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             )
         )
@@ -1048,10 +1059,14 @@ class _PromptSpy:
             return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
 
         with ExitStack() as stack:
-            stack.enter_context(patch("fsm_llm.llm.completion", side_effect=completion))
             stack.enter_context(
                 patch(
-                    "fsm_llm.llm.get_supported_openai_params",
+                    "fsm_llm.llm.providers.litellm.completion", side_effect=completion
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                     return_value=["response_format"],
                 )
             )
@@ -1110,7 +1125,7 @@ class _BulkProv(_Prov):
 
 class _ClassBulkProv(_BulkProv):
     """``_BulkProv`` with the REAL Classifier over a scripted
-    ``fsm_llm.llm.completion`` (fixed intent and confidence)."""
+    ``fsm_llm.llm.providers.litellm.completion`` (fixed intent and confidence)."""
 
     def __init__(
         self,
@@ -1158,9 +1173,9 @@ def _extract_field(reply: str, field_type: str = "str"):
         field_type=field_type,  # type: ignore[arg-type]
     )
     with (
-        patch("fsm_llm.llm.completion") as mock_comp,
+        patch("fsm_llm.llm.providers.litellm.completion") as mock_comp,
         patch(
-            "fsm_llm.llm.get_supported_openai_params",
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params",
             return_value=["response_format"],
         ),
     ):

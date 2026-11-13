@@ -186,10 +186,10 @@ def provider(monkeypatch) -> _EmbeddingProvider:
     """Route core's embedding binding and litellm's module function to a fake."""
     import litellm
 
-    import fsm_llm.llm
+    import fsm_llm.llm.providers.embedder
 
     fake = _EmbeddingProvider()
-    monkeypatch.setattr(fsm_llm.llm, "embedding", fake)
+    monkeypatch.setattr(fsm_llm.llm.providers.embedder, "embedding", fake)
     monkeypatch.setattr(litellm, "embedding", fake)
     return fake
 

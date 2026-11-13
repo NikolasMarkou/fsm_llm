@@ -4,7 +4,7 @@ Covers the request model (``CompletionRequest``), the reply model
 (``CompletionResponse``), the request rules held once in
 ``LiteLLMInterface._build_call_params`` and the reply normaliser
 (plan 944e2692, step 2, D-002). Provider replies are real litellm
-``ModelResponse`` objects; the provider is ``fsm_llm.llm.completion``,
+``ModelResponse`` objects; the provider is ``fsm_llm.llm.providers.litellm.completion``,
 patched.
 """
 
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -148,9 +149,11 @@ class _Provider:
 
     def __enter__(self) -> _Provider:
         self._patches = [
-            patch("fsm_llm.llm.completion", side_effect=self._completion),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.completion", side_effect=self._completion
+            ),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=self.supported,
             ),
         ]
@@ -185,7 +188,9 @@ class TestBuilderKeepsToolMessagesAndRequestScopedKeys:
         """Parent: ``_fill_empty_user_turns`` turned ``content: None`` into
         ``""`` for every role, so a tool-call message lost its provider shape."""
         interface = LiteLLMInterface("gpt-4o")
-        with patch("fsm_llm.llm.get_supported_openai_params", return_value=[]):
+        with patch(
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params", return_value=[]
+        ):
             params = interface._build_call_params(_TRANSCRIPT, "completion")
         assert params["messages"] == _TRANSCRIPT
         assert params["messages"][2]["content"] is None
@@ -616,16 +621,19 @@ class TestInterfaceSurface:
 
     def test_one_send_path(self):
         """Every provider request goes through ``_send``: one ``completion``
-        call in llm.py, and no per-kind completion method."""
-        source = inspect.getsource(llm_module)
+        call in the whole ``llm`` package (in ``providers/litellm.py``), and no
+        per-kind completion method."""
+        package_dir = Path(llm_module.__file__).parent
         sends = [
-            node
-            for node in ast.walk(ast.parse(source))
+            (path.relative_to(package_dir).as_posix(), node.lineno)
+            for path in sorted(package_dir.rglob("*.py"))
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
             and node.func.id == "completion"
         ]
         assert len(sends) == 1
+        assert sends[0][0] == "providers/litellm.py"
         assert [n for n in vars(LiteLLMInterface) if n.startswith("complete")] == [
             "complete"
         ]
@@ -755,10 +763,10 @@ class TestCompleteBuildsInsideItsErrorBoundary:
         llm = LiteLLMInterface("gpt-4o")
         with (
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 side_effect=ConnectionError("registry down"),
             ),
-            patch("fsm_llm.llm.completion") as provider,
+            patch("fsm_llm.llm.providers.litellm.completion") as provider,
             pytest.raises(LLMResponseError, match="registry down") as caught,
         ):
             llm.complete(CompletionRequest(messages=_USER))

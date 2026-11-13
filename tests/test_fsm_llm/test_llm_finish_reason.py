@@ -5,7 +5,7 @@ The provider's ``finish_reason`` is read once: it lands on
 name it in their errors, and an unreadable half JSON envelope is never
 shipped as the reply (a readable but partial ``message`` is, flagged cut). A cut PROSE reply and every ``stop`` reply behave as before. Provider
 replies are real litellm ``ModelResponse`` objects; the provider is
-``fsm_llm.llm.completion``, patched.
+``fsm_llm.llm.providers.litellm.completion``, patched.
 """
 
 from __future__ import annotations
@@ -27,7 +27,8 @@ from fsm_llm.core.definitions import (
     LLMResponseError,
     ResponseGenerationRequest,
 )
-from fsm_llm.llm import LiteLLMInterface, _finish_reason, cut_off_note
+from fsm_llm.llm import LiteLLMInterface, cut_off_note
+from fsm_llm.llm.parsing import _finish_reason
 from fsm_llm.logging import logger
 
 _CUT_ENVELOPE = '{ "message": "CONSOLIDATED LEGAL RISK ASSESSMENT. Recommend'
@@ -54,8 +55,13 @@ class _Provider:
 
     def __enter__(self) -> _Provider:
         self._patches = [
-            patch("fsm_llm.llm.completion", side_effect=self._completion),
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+            patch(
+                "fsm_llm.llm.providers.litellm.completion", side_effect=self._completion
+            ),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=[],
+            ),
         ]
         for p in self._patches:
             p.start()

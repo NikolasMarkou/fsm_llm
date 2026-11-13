@@ -56,7 +56,8 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.handlers import BaseHandler, HandlerSystem, HandlerTiming
-from fsm_llm.llm import LLMInterface, _embedding_vectors
+from fsm_llm.llm import LLMInterface
+from fsm_llm.llm.providers.embedder import _embedding_vectors
 from fsm_llm.logging import logger
 from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.prompts import (
@@ -2113,9 +2114,9 @@ class TestEmptyContainerIsSetForNonAgentFsms:
             return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
 
         with (
-            patch("fsm_llm.llm.completion", side_effect=completion),
+            patch("fsm_llm.llm.providers.litellm.completion", side_effect=completion),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
         ):
@@ -2237,8 +2238,13 @@ class TestSilentStateMakesNoInterfaceCall:
         llm = LiteLLMInterface(model="gpt-4o-mini")
         request = _step11_request(system_prompt=".")
         with (
-            patch("fsm_llm.llm.completion", return_value=reply) as completion,
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+            patch(
+                "fsm_llm.llm.providers.litellm.completion", return_value=reply
+            ) as completion,
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=[],
+            ),
         ):
             response = llm.generate_response(request)
         assert completion.call_count == 1
@@ -2246,8 +2252,13 @@ class TestSilentStateMakesNoInterfaceCall:
         assert sent[0] == {"role": "system", "content": "."}
         assert response.message == "Hello"
         with (
-            patch("fsm_llm.llm.completion", return_value=iter([chunk])) as completion,
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+            patch(
+                "fsm_llm.llm.providers.litellm.completion", return_value=iter([chunk])
+            ) as completion,
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=[],
+            ),
         ):
             assert list(llm.generate_response_stream(request)) == ["Hi"]
         assert completion.call_count == 1

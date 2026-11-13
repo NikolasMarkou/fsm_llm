@@ -81,8 +81,8 @@ from .core.transition_evaluator import TransitionEvaluator
 from .executors import StateExecutor, check_executors, executor_for
 from .handlers import HandlerExecutionError, HandlerSystem, HandlerTiming
 from .llm import LLMInterface, implements_complete
+from .llm.ollama import is_ollama_model
 from .logging import logger
-from .ollama import is_ollama_model
 from .prompts import (
     DataExtractionPromptBuilder,
     FieldExtractionPromptBuilder,

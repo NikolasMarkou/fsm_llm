@@ -94,7 +94,7 @@ The library is organized into five pillars. Each one is a collapsible section.
 <summary><b>5. One LLM Layer, Security and Reliability</b></summary>
 <p>
 
-- **One LLM layer**: `src/fsm_llm/llm/__init__.py` is the only module that imports litellm. `LLMInterface.complete(CompletionRequest)` is the single primitive for tool calling, plain and structured completion, with per-interface call and token counters (`usage()`) and an embedder (`LiteLLMEmbedder`). Any litellm model string works.
+- **One LLM layer**: litellm is imported in exactly one module, `src/fsm_llm/llm/providers/litellm.py`. `LLMInterface.complete(CompletionRequest)` is the single primitive for tool calling, plain and structured completion, with per-interface call and token counters (`usage()`) and an embedder (`LiteLLMEmbedder`). Any litellm model string works.
 - **Cut-off replies are visible**: a reply that stops at `max_tokens` is flagged (`truncated`, a WARNING, a named cause in extraction errors) and never shown as an unreadable half envelope.
 - **Context security**: internal keys (prefixes `_`, `system_`, `internal_`, `__`) and secret-looking entries are kept out of prompts. The compromised litellm 1.82.7 and 1.82.8 are below the required version, and `make audit` scans for malicious `.pth` files.
 - **Assured reliability**: an offline-by-default suite (a fake model, no network) covering the core, every subpackage, packaging, regressions, and the 100 examples.
@@ -587,7 +587,7 @@ The default test run needs no network and no model. `pytest -m "not slow"` skips
 - Add an entry under `Unreleased` in `CHANGELOG.md` for any public removal or rename.
 - Do not edit `examples/` unless asked: they are evaluation baselines.
 - Naming for new code (ids, units, constants, exceptions, verbs) follows the `Naming conventions` section of [AGENTS.md](AGENTS.md).
-- litellm is imported only in `src/fsm_llm/llm/__init__.py`. Do not add a second request builder or provider call elsewhere.
+- litellm is imported in exactly one module, `src/fsm_llm/llm/providers/litellm.py`. Do not add a second request builder or provider call elsewhere.
 - Internal-key and secret-key checks go through `fsm_llm.constants.has_internal_prefix` and `is_forbidden_context_entry`. Do not re-inline them.
 - Anything new that is configured with many settings gets a step-by-step builder that follows the convention in [src/fsm_llm/AGENTS.md](src/fsm_llm/AGENTS.md): setters only record, `build()` is the only validator.
 - Read `# DECISION plan-<id>/D-NNN` comments before editing nearby code: they say what not to do and why.

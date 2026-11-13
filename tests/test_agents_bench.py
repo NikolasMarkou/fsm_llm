@@ -436,12 +436,12 @@ class TestManifestDisclosure:
     def two_tasks(self, monkeypatch):
         """Two tasks (one with the order_total schema step 14 changed), a
         stub digest, and a provider that fails the test if anything is sent."""
-        import fsm_llm.llm
+        import fsm_llm.llm.providers.litellm
 
         def no_send(**kw):
             raise AssertionError("the disclosure probe sent a provider request")
 
-        monkeypatch.setattr(fsm_llm.llm, "completion", no_send)
+        monkeypatch.setattr(fsm_llm.llm.providers.litellm, "completion", no_send)
         monkeypatch.setattr(bc, "_model_digest", lambda tag: dict(_DIGEST))
         two = tuple(t for t in ab.TASKS if t.id in _TWO_IDS)
         monkeypatch.setattr(ab, "TASKS", two)
@@ -793,13 +793,13 @@ class TestCallMeter:
         completion` in llm.py), so legacy calls go uncounted."""
         import litellm
 
-        import fsm_llm.llm
+        import fsm_llm.llm.providers.litellm
 
         targets = {(mod.__name__, attr) for mod, attr in ab._completion_targets()}
         assert targets == {
             (litellm.__name__, "completion"),
             (litellm.__name__, "acompletion"),
-            (fsm_llm.llm.__name__, "completion"),
+            (fsm_llm.llm.providers.litellm.__name__, "completion"),
         }
 
     def test_one_classifier_call_is_one_count(self, monkeypatch):
@@ -807,7 +807,7 @@ class TestCallMeter:
         binding, going uncounted or counted twice by the real target list."""
         import litellm
 
-        import fsm_llm.llm
+        import fsm_llm.llm.providers.litellm
         from fsm_llm.classification import Classifier
         from fsm_llm.core.definitions import ClassificationSchema, IntentDefinition
 
@@ -819,9 +819,13 @@ class TestCallMeter:
             )
 
         monkeypatch.setattr(litellm, "completion", fake_completion)
-        monkeypatch.setattr(fsm_llm.llm, "completion", fake_completion)
         monkeypatch.setattr(
-            fsm_llm.llm, "get_supported_openai_params", lambda model: []
+            fsm_llm.llm.providers.litellm, "completion", fake_completion
+        )
+        monkeypatch.setattr(
+            fsm_llm.llm.providers.litellm,
+            "get_supported_openai_params",
+            lambda model: [],
         )
         schema = ClassificationSchema(
             intents=[
@@ -878,14 +882,14 @@ class TestRunEndToEnd:
     def offline(self, tmp_path, monkeypatch):
         """BENCH_DATA in tmp, a stub digest/commit, a scripted provider
         behind core's one send binding."""
-        import fsm_llm.llm
+        import fsm_llm.llm.providers.litellm
 
         monkeypatch.setattr(ab, "BENCH_DATA", tmp_path)
         monkeypatch.setattr(bc, "_model_digest", lambda tag: dict(_DIGEST))
         monkeypatch.setattr(bc, "_git_commit", lambda: "cafebabe")
         monkeypatch.setattr(bc, "_git_dirty", lambda: False)
         monkeypatch.setattr(
-            fsm_llm.llm,
+            fsm_llm.llm.providers.litellm,
             "completion",
             lambda **kw: _provider_reply(
                 "ok", {"prompt_tokens": 10, "completion_tokens": 2}
@@ -1020,12 +1024,14 @@ class TestMeterV2:
     @pytest.fixture
     def provider(self, monkeypatch):
         """The scripted react provider behind core's one send binding."""
-        import fsm_llm.llm
+        import fsm_llm.llm.providers.litellm
 
         completion, calls = _scripted_react_provider()
-        monkeypatch.setattr(fsm_llm.llm, "completion", completion)
+        monkeypatch.setattr(fsm_llm.llm.providers.litellm, "completion", completion)
         monkeypatch.setattr(
-            fsm_llm.llm, "get_supported_openai_params", lambda model: []
+            fsm_llm.llm.providers.litellm,
+            "get_supported_openai_params",
+            lambda model: [],
         )
         return calls
 
@@ -1251,12 +1257,14 @@ class TestFsmToolcallArm:
 
     @pytest.fixture
     def provider(self, monkeypatch):
-        import fsm_llm.llm
+        import fsm_llm.llm.providers.litellm
 
         completion, calls = _scripted_native_provider()
-        monkeypatch.setattr(fsm_llm.llm, "completion", completion)
+        monkeypatch.setattr(fsm_llm.llm.providers.litellm, "completion", completion)
         monkeypatch.setattr(
-            fsm_llm.llm, "get_supported_openai_params", lambda model: []
+            fsm_llm.llm.providers.litellm,
+            "get_supported_openai_params",
+            lambda model: [],
         )
         return calls
 
@@ -1264,12 +1272,12 @@ class TestFsmToolcallArm:
         """Defect guarded: a B2 arm registered with other limits, tasks,
         trials or model than the B0 ``native_fc`` block it is paired with,
         or under B0's label or meter."""
-        import fsm_llm.llm
+        import fsm_llm.llm.providers.litellm
 
         def no_send(**kw):
             raise AssertionError("the disclosure probe sent a provider request")
 
-        monkeypatch.setattr(fsm_llm.llm, "completion", no_send)
+        monkeypatch.setattr(fsm_llm.llm.providers.litellm, "completion", no_send)
         monkeypatch.setattr(bc, "_model_digest", lambda tag: dict(_DIGEST))
         b0 = json.loads(
             (
@@ -1386,12 +1394,12 @@ class TestWireDisclosure:
     def native_two(self, monkeypatch):
         """Two tasks, a stub digest/commit, and a provider that fails the
         test if anything is sent (the native arm is ``fsm_toolcall``)."""
-        import fsm_llm.llm
+        import fsm_llm.llm.providers.litellm
 
         def no_send(**kw):
             raise AssertionError("the disclosure probe sent a provider request")
 
-        monkeypatch.setattr(fsm_llm.llm, "completion", no_send)
+        monkeypatch.setattr(fsm_llm.llm.providers.litellm, "completion", no_send)
         monkeypatch.setattr(bc, "_model_digest", lambda tag: dict(_DIGEST))
         monkeypatch.setattr(bc, "_git_commit", lambda: "cafebabe")
         two = tuple(t for t in ab.TASKS if t.id in _TWO_IDS)
@@ -1430,11 +1438,13 @@ class TestWireDisclosure:
     ):
         """Defect guarded: core's Ollama message preparation (``/nothink`` on
         the last user turn) going unrecorded."""
-        import fsm_llm.llm
+        import fsm_llm.llm.providers.request
 
         before = ab.request_disclosure("fsm_toolcall", ab.MODEL)
         monkeypatch.setattr(
-            fsm_llm.llm, "prepare_ollama_messages", lambda messages, *a: messages
+            fsm_llm.llm.providers.request,
+            "prepare_ollama_messages",
+            lambda messages, *a: messages,
         )
         after = ab.request_disclosure("fsm_toolcall", ab.MODEL)
         for task_id in _TWO_IDS:

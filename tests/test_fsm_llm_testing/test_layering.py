@@ -206,18 +206,22 @@ class TestSourceLayering:
     def test_the_private_imports_of_testing_are_exactly_the_recorded_debt(
         self,
     ) -> None:
-        """`doubles.py` reuses the usage meter of `fsm_llm.llm` (`_Metered`,
+        """`doubles.py` reuses the usage meter of `fsm_llm.llm.usage` (`_Metered`,
         `_meter_of`) so `ScriptedLLM.usage()` is the real meter, not a copy. That
-        is recorded debt (review gate 1 concern 12, plan d454fd62 step 58.1; to be
-        retired when `llm.py` is split at step 73 and the seam gets a public
-        name). This pins it: no third private name may be imported from the
-        package into `testing/`, absolute or relative (re-review concern 9)."""
+        is recorded debt (review gate 1 concern 12, plan d454fd62 step 58.1). Step 73
+        split `llm.py` and retargeted the two names to their defining module,
+        `fsm_llm.llm.usage`; it did not give the seam a public name. This pins it: no
+        third private name may be imported from the package into `testing/`,
+        absolute or relative (re-review concern 9)."""
         found = set()
         for path in sorted(_TESTING_DIR.rglob("*.py")):
             package = _package_of(path)
             found |= _private_imports(path.read_text(encoding="utf-8"), package)
 
-        assert found == {("fsm_llm.llm", "_Metered"), ("fsm_llm.llm", "_meter_of")}
+        assert found == {
+            ("fsm_llm.llm.usage", "_Metered"),
+            ("fsm_llm.llm.usage", "_meter_of"),
+        }
 
     @pytest.mark.parametrize(
         ("source", "expected"),

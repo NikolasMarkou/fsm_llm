@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 import fsm_llm.llm as llm_module
+import fsm_llm.llm.providers.litellm as provider_module
 from fsm_llm.core.definitions import (
     DataExtractionResponse,
     LLMUsage,
@@ -31,7 +32,7 @@ def foreign_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     Each one is a foreign interface: the tests inject their own doubles, so a
     real interface appears only when a compile steers the pipeline to a model
-    of its own. The constructor and ``fsm_llm.llm.completion`` raise as well,
+    of its own. The constructor and ``fsm_llm.llm.providers.litellm.completion`` raise as well,
     but a pipeline may swallow that, so the test asserts the list is empty.
     """
     seen: list[str] = []
@@ -45,7 +46,7 @@ def foreign_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         raise AssertionError("a provider call was made")
 
     monkeypatch.setattr(llm_module.LiteLLMInterface, "__init__", built)
-    monkeypatch.setattr(llm_module, "completion", sent)
+    monkeypatch.setattr(provider_module, "completion", sent)
     return seen
 
 

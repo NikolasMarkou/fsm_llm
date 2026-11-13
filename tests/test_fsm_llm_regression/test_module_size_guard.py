@@ -40,7 +40,6 @@ OVERSIZED: dict[str, int] = {
     "fsm_llm.api": 2335,
     "fsm_llm.fsm": 1551,
     "fsm_llm.handlers": 1288,
-    "fsm_llm.llm": 2715,
     "fsm_llm.monitor.instance_manager": 1974,
     "fsm_llm.monitor.server": 1677,
     "fsm_llm.okf": 1350,

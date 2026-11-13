@@ -2,8 +2,8 @@
 step 12.20, D-023).
 
 litellm prints a red banner to stdout on every mapped provider exception while
-``litellm.suppress_debug_info`` is False. ``fsm_llm.llm`` (the one module that
-imports litellm) sets it once at import.
+``litellm.suppress_debug_info`` is False. ``fsm_llm.llm.providers.litellm`` (the one module that
+imports litellm, loaded by ``import fsm_llm.llm``) sets it once at import.
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ class TestSuppressDebugInfo:
             for p in _SRC.rglob("*.py")
             if "suppress_debug_info" in p.read_text(encoding="utf-8")
         )
-        assert users == ["llm/__init__.py"]
+        assert users == ["llm/providers/litellm.py"]
 
 
 class TestProviderFailurePrintsNoBanner:

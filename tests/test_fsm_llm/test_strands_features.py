@@ -156,9 +156,9 @@ class TestSchemaEnforcedOutput:
 
         fmt = {"type": "json_object"}
         with (
-            patch("fsm_llm.llm.completion") as mock_comp,
+            patch("fsm_llm.llm.providers.litellm.completion") as mock_comp,
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
         ):
@@ -181,8 +181,11 @@ class TestSchemaEnforcedOutput:
         llm = LiteLLMInterface(model="some-model", api_key="test")
 
         with (
-            patch("fsm_llm.llm.completion") as mock_comp,
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+            patch("fsm_llm.llm.providers.litellm.completion") as mock_comp,
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=[],
+            ),
         ):
             mock_resp = MagicMock()
             mock_resp.choices = [MagicMock()]

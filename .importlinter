@@ -27,15 +27,16 @@ include_external_packages = True
 exclude_type_checking_imports = True
 
 [importlinter:contract:litellm-one-module]
-name = litellm is imported by one module, fsm_llm.llm
+name = litellm is imported by one module, fsm_llm.llm.providers.litellm
 type = forbidden
 source_modules =
     fsm_llm
 forbidden_modules =
     litellm
 ignore_imports =
-    # permanent: the one LLM layer. Step 73 moves it to fsm_llm.llm.providers.litellm.
-    fsm_llm.llm -> litellm
+    # permanent: the one LLM layer (step 73: the old `llm.py`, split into the `llm/` package,
+    # keeps the one `import litellm` in `llm/providers/litellm.py`).
+    fsm_llm.llm.providers.litellm -> litellm
 
 [importlinter:contract:testing-is-never-imported]
 name = no library module imports fsm_llm.testing
@@ -130,7 +131,6 @@ forbidden_modules =
     fsm_llm.okf
     fsm_llm.okf_bridge
     fsm_llm.okf_cli
-    fsm_llm.ollama
     fsm_llm.pipeline
     fsm_llm.prompts
     fsm_llm.reasoning
@@ -146,11 +146,11 @@ ignore_imports =
 
 # Step 72 (utilities split; `llm.py` and `context.py` became the packages `llm/` and `context/`):
 # the layer package `llm` (L1) reads the kernel (`constants`, `logging`), `core` (the models in
-# `core.definitions`, the number and bool coercions in `core.coerce`) and `fsm_llm.ollama` (placed
-# in `llm/` at step 73), and nothing above it. `fsm_llm.utilities` is gone from the core contract
+# `core.definitions`, the number and bool coercions in `core.coerce`) and `fsm_llm.llm.ollama` (placed
+# in `llm/` at step 73, so it is inside the package now), and nothing above it. `fsm_llm.utilities` is gone from the core contract
 # above (the module no longer exists; its pieces are `llm.text`, `llm.json_extraction`,
 # `context.filtering`, `core.coerce`, `core.loaders`). The list is every module that is neither
-# `llm`, `core`, kernel nor `ollama` today; step 95 replaces it with the `layers` contract of D-016.
+# `llm`, `core` or kernel today; step 95 replaces it with the `layers` contract of D-016.
 [importlinter:contract:llm-imports-no-higher-layer]
 name = fsm_llm.llm imports no engine, context, okf, skills or subpackage module
 type = forbidden

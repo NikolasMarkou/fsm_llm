@@ -421,7 +421,7 @@ def wire_disclosure() -> dict[str, Any]:
 def wire_spy() -> Iterator[list[dict[str, Any]]]:
     """Record every request at core's one send binding while still sending: the
     request's timeout, seconds, tokens, raw params and response."""
-    import fsm_llm.llm as core_llm
+    import fsm_llm.llm.providers.litellm as core_llm
 
     seen: list[dict[str, Any]] = []
     original = core_llm.completion

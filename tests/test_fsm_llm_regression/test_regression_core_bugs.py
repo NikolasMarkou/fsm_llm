@@ -107,7 +107,8 @@ class TestVB2EmptyMessageLeaksReasoning:
         Re-baselined by plan-2026-09-21T203800-8a03483a/D-039 (audit D6): the
         reply degrades to the generic apology instead of internal reasoning.
         """
-        from fsm_llm.llm import _GENERIC_FALLBACK_MESSAGE, LiteLLMInterface
+        from fsm_llm.llm import LiteLLMInterface
+        from fsm_llm.llm.parsing import _GENERIC_FALLBACK_MESSAGE
 
         llm = LiteLLMInterface.__new__(LiteLLMInterface)
 

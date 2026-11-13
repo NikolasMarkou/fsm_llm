@@ -125,4 +125,4 @@ class TestSingleSite:
             for p in _SRC.rglob("*.py")
             if "LITELLM_MODE" in p.read_text(encoding="utf-8")
         )
-        assert users == ["llm/__init__.py"]
+        assert users == ["llm/providers/litellm.py"]

@@ -208,10 +208,11 @@ class TestDictValueForStrFieldIsRejected:
     def _converse(self, field_payload: str):
         with (
             patch(
-                "fsm_llm.llm.completion", side_effect=self._completion(field_payload)
+                "fsm_llm.llm.providers.litellm.completion",
+                side_effect=self._completion(field_payload),
             ),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
         ):

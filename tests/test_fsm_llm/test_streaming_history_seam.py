@@ -282,8 +282,11 @@ class _ThinkingStreamLLM(_ScriptedStreamLLM):
         ]
         real = LiteLLMInterface(model="test-model")
         with (
-            patch("fsm_llm.llm.completion", return_value=iter(raw)),
-            patch("fsm_llm.llm.get_supported_openai_params", return_value=[]),
+            patch("fsm_llm.llm.providers.litellm.completion", return_value=iter(raw)),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
+                return_value=[],
+            ),
         ):
             yield from real.generate_response_stream(request)
 
@@ -482,9 +485,9 @@ class _StreamHarness:
 
     def run(self, mode: str, context: dict | None = None):
         with (
-            patch("fsm_llm.llm.completion", side_effect=self._fake),
+            patch("fsm_llm.llm.providers.litellm.completion", side_effect=self._fake),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
         ):

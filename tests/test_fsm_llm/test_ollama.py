@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Unit tests for fsm_llm.ollama — Ollama-specific helpers."""
+"""Unit tests for fsm_llm.llm.ollama: Ollama-specific helpers."""
 
 import copy
 import json
@@ -10,7 +10,7 @@ import pytest
 
 from fsm_llm.core.definitions import FieldExtractionRequest
 from fsm_llm.llm import LiteLLMInterface
-from fsm_llm.ollama import (
+from fsm_llm.llm.ollama import (
     EXTRACTION_JSON_SCHEMA,
     FIELD_EXTRACTION_JSON_SCHEMA,
     apply_ollama_params,
@@ -203,9 +203,9 @@ class TestIsOllamaModelPrefix:
         formats: dict[str, dict] = {}
         for model in ("azure/gpt-4o-not-ollama", "ollama_chat/qwen3.5:9b-q8_0"):
             with (
-                patch("fsm_llm.llm.completion") as mock_comp,
+                patch("fsm_llm.llm.providers.litellm.completion") as mock_comp,
                 patch(
-                    "fsm_llm.llm.get_supported_openai_params",
+                    "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                     return_value=["response_format"],
                 ),
             ):
@@ -280,9 +280,9 @@ def _field_calls(model: str, retries: int, succeed: str | None = None):
         return _fake_response(json.dumps({"message": "ok", "reasoning": ""}))
 
     with (
-        patch("fsm_llm.llm.completion", side_effect=comp),
+        patch("fsm_llm.llm.providers.litellm.completion", side_effect=comp),
         patch(
-            "fsm_llm.llm.get_supported_openai_params",
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params",
             return_value=["response_format"],
         ),
     ):
@@ -372,9 +372,9 @@ class TestOllamaNullExtractionMemo:
         fsm = _memo_fsm(0)
         fsm["states"]["a"]["required_context_keys"] = ["k1"]
         with (
-            patch("fsm_llm.llm.completion", side_effect=comp),
+            patch("fsm_llm.llm.providers.litellm.completion", side_effect=comp),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
         ):

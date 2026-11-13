@@ -188,8 +188,8 @@ class TestEveryPatternUsesItsInterface:
             return refuse
 
         for name in (
-            "fsm_llm.llm.completion",
-            "fsm_llm.llm.embedding",
+            "fsm_llm.llm.providers.litellm.completion",
+            "fsm_llm.llm.providers.embedder.embedding",
             "litellm.completion",
             "litellm.embedding",
         ):

@@ -9,7 +9,7 @@ They keep no copy: this file is the one source (plan 65baa765, D-002), and
 helpers equal to their ``fsm_llm.eval`` twins.
 
 Import hygiene: the top level imports the standard library only; anything
-else (``fsm_llm.llm``, ``fsm_llm.agents.tools``) is imported LAZILY inside the
+else (``fsm_llm.llm.providers.litellm``, ``fsm_llm.agents.tools``) is imported LAZILY inside the
 function that needs it, so importing this module opens no socket. Pinned by a
 socket-disabled subprocess import in the tests.
 """
@@ -142,7 +142,7 @@ def captured_wire() -> Iterator[list[dict[str, Any]]]:
 
     Interface contract (callers: ``request_disclosure`` in agents_bench;
     the tests):
-        - Replaces ``fsm_llm.llm.completion`` (the binding every
+        - Replaces ``fsm_llm.llm.providers.litellm.completion`` (the binding every
           ``LiteLLMInterface`` request goes through, ``_send``) for the
           duration of the block with a stub that appends a deep copy of the
           request kwargs to the yielded list and raises ``WireCaptured``, so
@@ -158,7 +158,7 @@ def captured_wire() -> Iterator[list[dict[str, Any]]]:
     # the request objects an agent hands its interface (core's request
     # preparation, temperature 0 rules, /nothink and max_tokens then move no
     # manifest field), and do NOT call a provider. See decisions.md D-040.
-    import fsm_llm.llm as core_llm
+    import fsm_llm.llm.providers.litellm as core_llm
 
     captured: list[dict[str, Any]] = []
 

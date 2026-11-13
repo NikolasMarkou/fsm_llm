@@ -395,7 +395,7 @@ class TestLlmCallProviderFailure:
             raise provider_error
 
         # The one send binding of core's LLM layer: classifier and build call.
-        monkeypatch.setattr("fsm_llm.llm.completion", _explode)
+        monkeypatch.setattr("fsm_llm.llm.providers.litellm.completion", _explode)
         agent = MetaBuilderAgent(config=MetaBuilderConfig(model="gpt-4o-mini"))
         with pytest.raises(BuilderError) as excinfo:
             agent.run("design an FSM")
@@ -489,7 +489,7 @@ class TestWorkflowStepTypeEnum:
                 raise RuntimeError("classifier offline: keyword type is used")
             return _Resp()
 
-        monkeypatch.setattr("fsm_llm.llm.completion", _completion)
+        monkeypatch.setattr("fsm_llm.llm.providers.litellm.completion", _completion)
         agent = MetaBuilderAgent(
             config=MetaBuilderConfig(model="ollama_chat/qwen3.5:4b")
         )
@@ -547,7 +547,7 @@ class TestRunsThroughCore:
             raise RuntimeError("no provider call expected")
 
         monkeypatch.setattr("litellm.completion", _record)
-        monkeypatch.setattr("fsm_llm.llm.completion", _record)
+        monkeypatch.setattr("fsm_llm.llm.providers.litellm.completion", _record)
         return calls
 
     def test_run_sends_every_call_to_the_injected_interface(self, provider_calls):

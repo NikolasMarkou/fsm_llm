@@ -159,7 +159,7 @@ class Classifier:
         # request per call and reads the typed reply. Do NOT import the
         # provider SDK here, rebuild call params (model kwargs, timeout,
         # response_format, Ollama preparation, the neutral user turn) or read
-        # provider objects: llm.py is the one request path and the one reply
+        # provider objects: the llm package is the one request path and the one reply
         # reader. The 120s default bounds a stalled provider so it cannot hold
         # the conversation thread and its conv_lock (CA3-003). See decisions.md
         # D-002.

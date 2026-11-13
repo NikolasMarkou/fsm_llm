@@ -21,10 +21,13 @@ The scanner reads the tests as text and the package as files, imports nothing:
   attribute is bound there by an `import` or `from ... import` statement and
   not defined there (no `def`, `class`, or assignment of that name) and not
   used by code the `__init__` itself holds (a name loaded inside one of its
-  functions or classes). The last clause is the transitional case: `fsm_llm.llm`
-  and `fsm_llm.context` became packages at step 72 of the layout plan while their
-  `__init__` is still the whole old module, so `patch("fsm_llm.llm.completion")`
-  patches the global that `LiteLLMInterface` really looks up; a package that only
+  functions or classes). The last clause was the transitional case of step 72 of
+  the layout plan: `fsm_llm.llm` and `fsm_llm.context` became packages while their
+  `__init__` was still the whole old module, so `patch("fsm_llm.llm.completion")`
+  patched the global that `LiteLLMInterface` really looked up. Step 73 moved that
+  code out of `llm/__init__.py` (the lookups are in `llm/providers/litellm.py`
+  and `llm/providers/embedder.py`), so on the real tree the clause no longer
+  applies and every patch of `fsm_llm.llm.<name>` is flagged; a package that only
   re-exports (a facade) has no such code and stays flagged.
 
 f-string and computed targets are not read (none exist today; a new form would

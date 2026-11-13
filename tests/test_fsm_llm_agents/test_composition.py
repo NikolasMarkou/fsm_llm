@@ -166,7 +166,7 @@ class _ProviderStub:
 def _install(monkeypatch, stub):
     # Both bindings: the core send path and the provider module, so a judge
     # that bypassed core would still be caught (and never reach the network).
-    monkeypatch.setattr("fsm_llm.llm.completion", stub)
+    monkeypatch.setattr("fsm_llm.llm.providers.litellm.completion", stub)
     monkeypatch.setattr("litellm.completion", stub)
 
 

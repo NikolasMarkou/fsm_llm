@@ -95,9 +95,9 @@ class TestTransitionDecisionExcludedFromJsonMode:
 
         interface = LiteLLMInterface(model=model, api_key="test")
         with (
-            patch("fsm_llm.llm.completion") as mock_comp,
+            patch("fsm_llm.llm.providers.litellm.completion") as mock_comp,
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
         ):
@@ -137,7 +137,7 @@ class TestTransitionDecisionExcludedFromJsonMode:
         """The helper treats transition_decision as an unknown call type and
         returns the documented fallback, ``None``. Mirrors
         `test_ollama.py::test_transition_decision_has_no_schema`."""
-        from fsm_llm.ollama import build_ollama_response_format
+        from fsm_llm.llm.ollama import build_ollama_response_format
 
         assert build_ollama_response_format("transition_decision") is None
 

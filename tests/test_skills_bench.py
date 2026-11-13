@@ -21,7 +21,7 @@ import skills_bench as sb
 
 import fsm_llm.agents as agents_pkg
 import fsm_llm.agents.agent_skills as adapter
-import fsm_llm.llm as core_llm
+import fsm_llm.llm.providers.litellm as core_llm
 from fsm_llm.agents import ToolCall
 from fsm_llm.agents.agent_skills import create_skill_tools
 from fsm_llm.constants import SKILL_READ_HINT

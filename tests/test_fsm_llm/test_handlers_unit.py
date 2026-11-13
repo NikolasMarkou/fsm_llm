@@ -1524,9 +1524,11 @@ class _ErrorHandlerHarness:
 
     def patches(self):
         return (
-            patch("fsm_llm.llm.completion", side_effect=self._completion),
             patch(
-                "fsm_llm.llm.get_supported_openai_params",
+                "fsm_llm.llm.providers.litellm.completion", side_effect=self._completion
+            ),
+            patch(
+                "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
         )
@@ -1952,11 +1954,11 @@ def _manager_with(handler_system):
     definition = FSMDefinition(**_DUCK_FSM)
     with (
         patch(
-            "fsm_llm.llm.completion",
+            "fsm_llm.llm.providers.litellm.completion",
             return_value=_fake_response(json.dumps({"message": "ok"})),
         ),
         patch(
-            "fsm_llm.llm.get_supported_openai_params",
+            "fsm_llm.llm.providers.litellm.get_supported_openai_params",
             return_value=["response_format"],
         ),
     ):
