@@ -22,6 +22,7 @@ from fsm_llm.agents.constants import (
     ToolObservationPrefix,
     ToolRunStatus,
 )
+from fsm_llm.agents.fsm_definitions.react import build_react_fsm
 from fsm_llm.logging import logger
 from fsm_llm.reasoning import ReasoningEngine
 
@@ -33,7 +34,6 @@ from .definitions import (
     ToolDefinition,
     ToolResult,
 )
-from .fsm_definitions import build_react_fsm
 from .handlers import (
     AgentHandlers,
     forced_stop_skip,

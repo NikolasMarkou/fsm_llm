@@ -20,12 +20,12 @@ from fsm_llm.agents.constants import (
     PromptChainStates,
     StopReason,
 )
+from fsm_llm.agents.fsm_definitions.prompt_chain import build_prompt_chain_fsm
 from fsm_llm.logging import logger
 
 from .base import BaseAgent, artifact_text
 from .definitions import AgentConfig, AgentResult, ChainStep
 from .exceptions import AgentError
-from .fsm_definitions import build_prompt_chain_fsm
 from .handlers import make_fresh_keys_handler, make_iteration_limiter
 
 

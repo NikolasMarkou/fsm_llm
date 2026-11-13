@@ -20,13 +20,13 @@ from fsm_llm.agents.constants import (
     MakerCheckerStates,
     StopReason,
 )
+from fsm_llm.agents.fsm_definitions.maker_checker import build_maker_checker_fsm
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .base import BaseAgent
 from .definitions import AgentConfig, AgentResult
 from .exceptions import require_int_limit
-from .fsm_definitions import build_maker_checker_fsm
 from .handlers import make_iteration_limiter, make_redraft_handlers
 
 

@@ -29,6 +29,7 @@ With HITL:
 from __future__ import annotations
 
 from fsm_llm.agents.constants import StopReason
+from fsm_llm.agents.fsm_definitions.parallel_react import build_parallel_react_fsm
 
 from .__version__ import __version__
 from .adapt import ADaPTAgent
@@ -80,7 +81,6 @@ from .exceptions import (
     ToolExecutionError,
     ToolNotFoundError,
 )
-from .fsm_definitions import build_parallel_react_fsm
 from .hitl import (
     ApprovalCallback,
     ApprovalPolicy,

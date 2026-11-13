@@ -65,7 +65,6 @@ from fsm_llm.agents.exceptions import (
     BudgetExhaustedError,
 )
 from fsm_llm.agents.fsm_definitions import (
-    _await_approval_state,
     build_adapt_fsm,
     build_debate_fsm,
     build_evalopt_fsm,
@@ -79,6 +78,7 @@ from fsm_llm.agents.fsm_definitions import (
     build_rewoo_fsm,
     build_self_consistency_fsm,
 )
+from fsm_llm.agents.fsm_definitions._loop import _await_approval_state
 from fsm_llm.agents.handlers import AgentHandlers, approval_grant
 from fsm_llm.agents.verified_react import _REFLECTION_NOTE
 from fsm_llm.definitions import (

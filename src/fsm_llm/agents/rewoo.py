@@ -21,12 +21,12 @@ from fsm_llm.agents.constants import (
     REWOOStates,
     StopReason,
 )
+from fsm_llm.agents.fsm_definitions.rewoo import build_rewoo_fsm
 from fsm_llm.definitions import CONTEXT_KEY_CUT_OFF
 from fsm_llm.logging import logger
 
 from .base import BaseAgent, caller_prompt_keys
 from .definitions import AgentConfig, AgentResult, ToolCall
-from .fsm_definitions import build_rewoo_fsm
 from .handlers import make_iteration_limiter
 from .tools import ToolRegistry, redact_secret_entries
 

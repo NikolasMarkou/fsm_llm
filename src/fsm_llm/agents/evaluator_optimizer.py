@@ -21,12 +21,12 @@ from fsm_llm.agents.constants import (
     LogMessages,
     StopReason,
 )
+from fsm_llm.agents.fsm_definitions.evalopt import build_evalopt_fsm
 from fsm_llm.logging import logger
 
 from .base import BaseAgent, artifact_text
 from .definitions import AgentConfig, AgentResult, EvaluationResult
 from .exceptions import require_int_limit
-from .fsm_definitions import build_evalopt_fsm
 from .handlers import (
     make_iteration_limiter,
     make_redraft_handlers,

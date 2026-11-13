@@ -344,9 +344,11 @@ class TestCoreOwnsTypedFieldsAndKeyClearing:
     def test_agents_build_with_the_core_builder(self):
         import fsm_llm
         import fsm_llm.agents as agents
-        import fsm_llm.agents.fsm_definitions as fsm_definitions
+        from fsm_llm.agents.fsm_definitions import _loop
 
-        assert fsm_definitions.typed_field_extraction is fsm_llm.typed_field_extraction
+        # the typed-field helper `_field` lives in `_loop`, the one module that
+        # builds typed fields; it holds the core builder, not a copy
+        assert _loop.typed_field_extraction is fsm_llm.typed_field_extraction
         assert "typed_field_extraction" not in agents.__all__
         assert "clear_keys_on_entry" not in agents.__all__
 

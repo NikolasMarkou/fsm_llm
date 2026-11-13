@@ -23,13 +23,13 @@ from fsm_llm.agents.constants import (
     LogMessages,
     StopReason,
 )
+from fsm_llm.agents.fsm_definitions.adapt import build_adapt_fsm
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .base import BaseAgent, caller_prompt_keys
 from .definitions import AgentConfig, AgentResult
 from .exceptions import AgentError, require_int_limit
-from .fsm_definitions import build_adapt_fsm
 from .handlers import RunEndingErrorHolder, make_iteration_limiter
 from .tools import ToolRegistry
 

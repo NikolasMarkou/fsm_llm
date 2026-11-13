@@ -22,6 +22,7 @@ from fsm_llm.agents.constants import (
     ReflexionStates,
     StopReason,
 )
+from fsm_llm.agents.fsm_definitions.reflexion import build_reflexion_fsm
 from fsm_llm.logging import logger
 
 from .base import BaseAgent, caller_prompt_keys
@@ -32,7 +33,6 @@ from .definitions import (
     ReflexionMemory,
 )
 from .exceptions import require_int_limit
-from .fsm_definitions import build_reflexion_fsm
 from .handlers import AgentHandlers, make_fresh_keys_handler, run_evaluation_fn
 from .hitl import HumanInTheLoop
 from .tools import ToolRegistry

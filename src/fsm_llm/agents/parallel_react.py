@@ -36,12 +36,12 @@ from fsm_llm.agents.constants import (
     LogMessages,
     ToolRunStatus,
 )
+from fsm_llm.agents.fsm_definitions.parallel_react import build_parallel_react_fsm
 from fsm_llm.logging import logger
 
 from .base import BaseAgent, caller_prompt_keys
 from .definitions import AgentConfig, AgentResult, ToolCall
 from .exceptions import require_int_limit
-from .fsm_definitions import build_parallel_react_fsm
 from .handlers import (
     ThinkTurnLimiter,
     call_label,

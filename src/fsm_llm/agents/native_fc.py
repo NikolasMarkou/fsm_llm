@@ -8,7 +8,7 @@ registry's tools to the provider (``tools=registry.get_json_schemas()``) and
 reads the structured ``tool_calls`` the model returns, through core's
 completion state (``State.completion``, ``LLMInterface.complete``).
 
-``build_native_fc_fsm`` (``fsm_definitions.py``) is the FSM: ``call_model``
+``build_native_fc_fsm`` (``fsm_definitions/native_fc.py``) is the FSM: ``call_model``
 (one model turn with the tools) -> ``run_tools`` (``NativeFCHandlers`` run
 each call through ``ToolRegistry.execute``) -> ``call_model``, then at most
 one forced final-tool turn, at most one ``output_schema`` repair turn, and
@@ -51,6 +51,7 @@ from fsm_llm.agents.constants import (
     NativeLoopEnd,
     StopReason,
 )
+from fsm_llm.agents.fsm_definitions.native_fc import build_native_fc_fsm
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import tool_exchange
 from fsm_llm.logging import logger
@@ -58,7 +59,6 @@ from fsm_llm.logging import logger
 from .base import BaseAgent
 from .definitions import AgentConfig, AgentResult, AgentStep, ToolCall, ToolResult
 from .exceptions import AgentError
-from .fsm_definitions import build_native_fc_fsm
 from .handlers import call_label, next_step_number
 from .tools import ToolRegistry, redact_secret_entries
 

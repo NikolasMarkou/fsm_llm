@@ -59,7 +59,7 @@ These are the 18 names `create_agent` accepts (`react`, `rewoo`, `reflexion`, `p
 
 - `base.py` - `BaseAgent`: the shared loop, limits, answer extraction, trace, structured output.
 - `react.py`, `rewoo.py`, `reflexion.py`, `plan_execute.py`, `prompt_chain.py`, `self_consistency.py`, `debate.py`, `orchestrator.py`, `adapt.py`, `evaluator_optimizer.py`, `maker_checker.py`, `reasoning_react.py`, `parallel_react.py`, `verified_react.py`, `auto_memory.py`, `native_fc.py`, `swarm.py`, `agent_graph.py` - one pattern each.
-- `fsm_definitions.py` - builds the FSM for each pattern, `native_fc` and the meta-builder included. `prompts.py` - the instructions each state gives the LLM.
+- `fsm_definitions/` - builds the FSM for each pattern, one module each, `native_fc` and the meta-builder included. `prompts.py` - the instructions each state gives the LLM.
 - `tools.py` - `ToolRegistry` and the `@tool` decorator (tool annotations, exact schemas, enforced timeouts). `tool_registries.py` - caching and retrying registries. `semantic_tools.py` - picks relevant tools by embedding similarity.
 - `handlers.py` - runs tools, enforces the iteration limit, and checks human approval. `hitl.py` - human approval before sensitive tools.
 - `memory_tools.py`, `semantic_memory.py`, `memory_persistence.py`, `summarization.py`, `truncation.py` - working-memory tools, long-term embedding memory, saving memory to disk, condensing old observations, shortening long tool output.

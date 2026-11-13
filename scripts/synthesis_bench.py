@@ -72,7 +72,7 @@ LIMITS = {"temperature": 0.5, "run_max_tokens": 1000, "max_user_turns": 14, "rea
 # Do NOT hash only the fixture region and do NOT keep a second source of what is hashed in the
 # tests: REQUIRED_PINS is the floor SRC_PINS may not drop below, UNPINNED_CORE the declared exclusions (D-075).
 _SYNTH = "dryrun simulation traces gates policy synthesizer runner library prompts repair constants exceptions"  # fmt: skip
-_AGENTS = "__init__ react base constants/__init__ constants/core constants/handler_names constants/keys constants/meta constants/outcomes constants/states definitions exceptions fsm_definitions handlers hitl meta_builders meta_prompts prompts summarization tools truncation"  # fmt: skip
+_AGENTS = "__init__ react base constants/__init__ constants/core constants/handler_names constants/keys constants/meta constants/outcomes constants/states definitions exceptions fsm_definitions/__init__ fsm_definitions/_common fsm_definitions/_loop fsm_definitions/adapt fsm_definitions/debate fsm_definitions/evalopt fsm_definitions/maker_checker fsm_definitions/meta_builder fsm_definitions/native_fc fsm_definitions/orchestrator fsm_definitions/parallel_react fsm_definitions/plan_execute fsm_definitions/prompt_chain fsm_definitions/react fsm_definitions/reflexion fsm_definitions/rewoo fsm_definitions/self_consistency handlers hitl meta_builders meta_prompts prompts summarization tools truncation"  # fmt: skip
 _CORE = "flow_analysis utilities validator eval/cases eval/config eval/stats"
 SRC_PINS = (
     "scripts/synthesis_bench.py",

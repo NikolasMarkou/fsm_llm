@@ -20,13 +20,13 @@ from fsm_llm.agents.constants import (
     LogMessages,
     StopReason,
 )
+from fsm_llm.agents.fsm_definitions.debate import build_debate_fsm
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .base import BaseAgent, artifact_text
 from .definitions import AgentConfig, AgentResult, DebateRound
 from .exceptions import require_int_limit
-from .fsm_definitions import build_debate_fsm
 from .handlers import (
     make_fresh_keys_handler,
     make_iteration_limiter,

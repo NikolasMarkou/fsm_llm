@@ -23,12 +23,12 @@ from fsm_llm.agents.constants import (
     StopReason,
     ToolRunStatus,
 )
+from fsm_llm.agents.fsm_definitions.plan_execute import build_plan_execute_fsm
 from fsm_llm.logging import logger
 
 from .base import BaseAgent
 from .definitions import AgentConfig, AgentResult
 from .exceptions import require_int_limit
-from .fsm_definitions import build_plan_execute_fsm
 from .handlers import AgentHandlers, make_fresh_keys_handler
 from .tools import ToolRegistry
 

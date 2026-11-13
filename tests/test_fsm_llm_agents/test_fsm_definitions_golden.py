@@ -1,4 +1,4 @@
-"""Golden hashes of every FSM builder in ``agents/fsm_definitions.py``.
+"""Golden hashes of every FSM builder in ``agents/fsm_definitions/``.
 
 Each case calls a builder with one representative argument set and pins the
 canonical JSON (``json.dumps(d, sort_keys=True)``) sha256 and, for a full FSM,
@@ -37,6 +37,7 @@ from fsm_llm.agents import build_parallel_react_fsm
 from fsm_llm.agents import fsm_definitions as fd
 from fsm_llm.agents.constants import ContextKeys
 from fsm_llm.agents.definitions import ChainStep
+from fsm_llm.agents.fsm_definitions import _common, _loop, native_fc
 from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.definitions import FSMDefinition
 
@@ -215,18 +216,18 @@ _CASES: dict[str, tuple[Callable[[], Any], bool]] = {
         False,
     ),
     "tool_selection": (
-        lambda: fd._tool_selection_field_extractions("pick", context_keys=("k",)),
+        lambda: _loop._tool_selection_field_extractions("pick", context_keys=("k",)),
         False,
     ),
     "tool_selection_no_name": (
-        lambda: fd._tool_selection_field_extractions(
+        lambda: _loop._tool_selection_field_extractions(
             "pick", include_tool_name=False, context_keys=()
         ),
         False,
     ),
-    "think_fields": (lambda: fd._think_field_extractions("pick"), False),
+    "think_fields": (lambda: _loop._think_field_extractions("pick"), False),
     "think_fields_no_name": (
-        lambda: fd._think_field_extractions(
+        lambda: _loop._think_field_extractions(
             "pick", include_tool_name=False, context_keys=("k",)
         ),
         False,
@@ -236,15 +237,15 @@ _CASES: dict[str, tuple[Callable[[], Any], bool]] = {
         lambda: fd.conclude_on_evidence_logic(ContextKeys.EVALUATION_PASSED),
         False,
     ),
-    "await_approval_state": (lambda: fd._await_approval_state(), False),
-    "flag_condition": (lambda: fd._flag_condition("flag", "A flag"), False),
-    "reply_kind_condition": (lambda: fd._reply_kind_condition("calls"), False),
+    "await_approval_state": (lambda: _loop._await_approval_state(), False),
+    "flag_condition": (lambda: _common._flag_condition("flag", "A flag"), False),
+    "reply_kind_condition": (lambda: native_fc._reply_kind_condition("calls"), False),
     "finalize": (
-        lambda: fd._finalize_fsm("n", "d" * 400, "dflt", "s", "p", {"s": {}}),
+        lambda: _common._finalize_fsm("n", "d" * 400, "dflt", "s", "p", {"s": {}}),
         False,
     ),
     "finalize_default_description": (
-        lambda: fd._finalize_fsm("n", "", "dflt", "s", "p", {}),
+        lambda: _common._finalize_fsm("n", "", "dflt", "s", "p", {}),
         False,
     ),
 }

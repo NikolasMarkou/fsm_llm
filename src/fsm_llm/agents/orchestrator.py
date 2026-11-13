@@ -21,12 +21,12 @@ from fsm_llm.agents.constants import (
     HandlerPriorities,
     OrchestratorStates,
 )
+from fsm_llm.agents.fsm_definitions.orchestrator import build_orchestrator_fsm
 from fsm_llm.logging import logger
 
 from .base import BaseAgent, caller_prompt_keys
 from .definitions import AgentConfig, AgentResult
 from .exceptions import require_int_limit
-from .fsm_definitions import build_orchestrator_fsm
 from .handlers import RunEndingErrorHolder, make_iteration_limiter
 from .tools import ToolRegistry
 

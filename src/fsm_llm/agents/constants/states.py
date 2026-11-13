@@ -6,7 +6,7 @@ from __future__ import annotations
 # Agent FSM state names
 # ---------------------------------------------------------------------------
 # DECISION plan-2026-09-30T062855-07ad3f8c/D-047: each class names every state
-# of its pattern's FSM, and the builders (`fsm_definitions.py`,
+# of its pattern's FSM, and the builders (`fsm_definitions/`,
 # `parallel_react.py`), the per-state prompt maps and the handler
 # registrations all read these names. Do NOT write a state id as a string
 # literal in a builder or a handler registration, and do NOT drop a member

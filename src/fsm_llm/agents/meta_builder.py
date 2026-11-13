@@ -50,6 +50,7 @@ from fsm_llm.agents.constants import (
     MetaHandlerNames,
     MetaLogMessages,
 )
+from fsm_llm.agents.fsm_definitions.meta_builder import build_meta_builder_fsm
 from fsm_llm.api import llm_settings_for
 from fsm_llm.definitions import LLMResponseError
 from fsm_llm.handlers import HandlerExecutionError, clear_keys_delta
@@ -65,7 +66,6 @@ from .definitions import (
     default_agent_config,
 )
 from .exceptions import BuilderError, MetaBuilderError, MetaValidationError
-from .fsm_definitions import build_meta_builder_fsm
 from .meta_builders import (
     AgentArtifactBuilder,
     ArtifactBuilder,
