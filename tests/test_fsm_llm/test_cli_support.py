@@ -19,7 +19,7 @@ import pytest
 
 import fsm_llm
 import fsm_llm.agent_skills_cli as skills_cli
-import fsm_llm.okf_cli as okf_cli
+import fsm_llm.okf.cli as okf_cli
 from fsm_llm import cli_support
 from fsm_llm.constants import OKF_MAX_LOAD_SECONDS, SKILL_MAX_LOAD_SECONDS
 from fsm_llm.okf import OKFIssue
@@ -83,7 +83,8 @@ class TestBothClisUseTheSharedCode:
         assert [n for n in needles if n in source] == []
 
     def test_the_skills_cli_imports_nothing_from_the_okf_cli(self) -> None:
-        assert "okf_cli" not in inspect.getsource(skills_cli)
+        source = inspect.getsource(skills_cli)
+        assert "okf_cli" not in source and "okf.cli" not in source
 
     def test_importing_it_loads_no_subpackage_and_fsm_llm_does_not_load_it(
         self, tmp_path: Path
@@ -97,6 +98,8 @@ class TestBothClisUseTheSharedCode:
             "bad = [m for m in sys.modules if m.split('.')[:2] in "
             "[['fsm_llm', s] for s in subs]]\n"
             "assert not bad, bad\n"
+            "for heavy in ('fsm_llm.okf', 'fsm_llm.engine.okf_bridge'):\n"
+            "    assert heavy not in sys.modules, heavy\n"
         )
 
         done = subprocess.run(

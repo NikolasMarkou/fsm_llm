@@ -1,4 +1,4 @@
-"""Tests for ``fsm-llm-okf`` (``fsm_llm.okf_cli``): commands, exit codes, wiring."""
+"""Tests for ``fsm-llm-okf`` (``fsm_llm.okf.cli``): commands, exit codes, wiring."""
 
 from __future__ import annotations
 
@@ -15,7 +15,9 @@ from typing import Any
 
 import pytest
 
-import fsm_llm.okf_cli as okf_cli
+import fsm_llm.okf.cli as okf_cli
+import fsm_llm.okf.links as links_module
+import fsm_llm.okf.loader as loader_module
 from fsm_llm import okf as okf_module
 from fsm_llm.constants import (
     OKF_LIST_MAX_ITEMS,
@@ -23,14 +25,19 @@ from fsm_llm.constants import (
     OKF_MAX_LOAD_SECONDS,
     OKF_READ_PAGE_CHARS,
 )
+from fsm_llm.engine.okf_bridge import bundle_from_memory_entries
 from fsm_llm.okf import (
     load_bundle,
     strip_unsafe_text,
     write_bundle,
 )
-from fsm_llm.okf_bridge import bundle_from_memory_entries
-from fsm_llm.okf_cli import main
-from tests.test_fsm_llm.test_okf import _FakeClock
+from fsm_llm.okf.cli import main
+from tests.test_fsm_llm.test_okf import (
+    _LINK_RESOLVERS,
+    _FakeClock,
+    _patch_in,
+    _use_clock,
+)
 
 _REPO = Path(__file__).resolve().parents[2]
 _ESC = "\x1b"
@@ -682,7 +689,7 @@ class TestUsageAndExit:
 
     def test_python_dash_m_runs_the_tool(self, clean_bundle: Path) -> None:
         result = subprocess.run(
-            [sys.executable, "-I", "-m", "fsm_llm.okf_cli", "list", str(clean_bundle)],
+            [sys.executable, "-I", "-m", "fsm_llm.okf.cli", "list", str(clean_bundle)],
             capture_output=True,
             text=True,
             timeout=60,
@@ -720,14 +727,14 @@ class TestWiring:
     def test_the_console_script_is_declared_and_its_target_imports(self) -> None:
         scripts = _pyproject()["project"]["scripts"]
 
-        assert scripts["fsm-llm-okf"] == "fsm_llm.okf_cli:main_cli"
+        assert scripts["fsm-llm-okf"] == "fsm_llm.okf.cli:main_cli"
         module, attr = scripts["fsm-llm-okf"].split(":")
         assert callable(getattr(importlib.import_module(module), attr))
 
     def test_importing_the_cli_loads_no_subpackage_and_no_litellm(self) -> None:
         probe = (
             "import sys\n"
-            "import fsm_llm.okf_cli\n"
+            "import fsm_llm.okf.cli\n"
             "bad = [m for m in sys.modules if m.split('.')[:2] in "
             "(['fsm_llm', 'agents'], ['fsm_llm', 'reasoning'], "
             "['fsm_llm', 'workflows'], ['fsm_llm', 'monitor'], ['fsm_llm', 'eval'])]\n"
@@ -746,7 +753,9 @@ class TestWiring:
         assert result.stdout.strip() == "ok"
 
     def test_the_cli_source_imports_no_subpackage(self) -> None:
-        source = (_REPO / "src" / "fsm_llm" / "okf_cli.py").read_text(encoding="utf-8")
+        source = (_REPO / "src" / "fsm_llm" / "okf" / "cli.py").read_text(
+            encoding="utf-8"
+        )
 
         assert not re.search(
             r"(?m)^\s*(from|import)\s+(fsm_llm\.|\.)(agents|reasoning|"
@@ -901,8 +910,8 @@ class TestMaxSeconds:
             clock.now += 1.0  # every parsed concept costs one fake second
             return real(cid, text)
 
-        monkeypatch.setattr(okf_module, "time", clock)
-        monkeypatch.setattr(okf_module, "parse_concept_text", slow)
+        _use_clock(monkeypatch, clock)
+        monkeypatch.setattr(loader_module, "parse_concept_text", slow)
 
         code, out, err = _run(capsys, "validate", root, "--max-seconds", "2.5")
 
@@ -932,14 +941,14 @@ class TestCheckPhaseAndExportWarnings:
         body = "[](/gone.md)\n"
         root = _write(tmp_path / "kb", {f"{n}.md": _doc(body=body) for n in "abcdef"})
         clock = _FakeClock()
-        real = okf_module._link_candidates
+        real = links_module._link_candidates
 
         def slow(*args: Any) -> Any:
             clock.now += 3.0  # the load costs no fake time, every link check 3 s
             return real(*args)
 
-        monkeypatch.setattr(okf_module, "time", clock)
-        monkeypatch.setattr(okf_module, "_link_candidates", slow)
+        _use_clock(monkeypatch, clock)
+        _patch_in(monkeypatch, _LINK_RESOLVERS, "_link_candidates", slow)
 
         code, out, err = _run(capsys, "validate", root, "--max-seconds", "5")
 
@@ -996,8 +1005,8 @@ class TestIncompleteBundleNote:
             clock.now += 1.0
             return real(cid, text)
 
-        monkeypatch.setattr(okf_module, "time", clock)
-        monkeypatch.setattr(okf_module, "parse_concept_text", slow)
+        _use_clock(monkeypatch, clock)
+        monkeypatch.setattr(loader_module, "parse_concept_text", slow)
         return root
 
     @pytest.mark.parametrize(
@@ -1069,7 +1078,7 @@ class TestOutputEncodingNeverFails:
             [
                 sys.executable,
                 "-m",
-                "fsm_llm.okf_cli",
+                "fsm_llm.okf.cli",
                 argv[0],
                 str(cjk_bundle),
                 *argv[1:],

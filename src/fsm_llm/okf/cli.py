@@ -14,7 +14,7 @@ is a ``load-deadline`` error issue, so ``validate`` exits 1.
 
 The primary report goes to stdout, diagnostics and summaries to stderr. This
 tool prints directly and does not depend on library logging (off by default).
-Every string taken from a bundle passes ``okf.strip_unsafe_text`` first, so a
+Every string taken from a bundle passes ``text.strip_unsafe_text`` first, so a
 bundle cannot drive the terminal with escape sequences.
 
 **Exit codes.** ``0`` success; ``1`` failure (a bundle error under ``validate``,
@@ -22,7 +22,8 @@ with ``--strict`` also a warning; an unreadable bundle or memory file; an
 unknown concept id; a refused export); ``2`` usage error (argparse);
 ``130`` interrupted by Ctrl-C.
 
-Imports core only (never a subpackage, never litellm).
+Imports core only (never a subpackage, never litellm); the one engine import is
+``engine.okf_bridge`` for ``export`` (a named debt of ``.importlinter``, D-033).
 """
 
 from __future__ import annotations
@@ -34,33 +35,30 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from .cli_support import (
+from fsm_llm.cli_support import (
     add_max_seconds,
     exit_main,
     report_error,
     report_issues,
     run_cli,
 )
-from .constants import (
+from fsm_llm.constants import (
     CLI_EXIT_FAILURE,
     CLI_EXIT_OK,
     OKF_LIST_MAX_ITEMS,
     OKF_MAX_LOAD_SECONDS,
     OKF_READ_PAGE_CHARS,
 )
-from .core.definitions import OKFError
-from .okf import (
-    OKFBundle,
-    OKFLimits,
-    body_page,
-    capped_line,
-    check_bundle,
-    close_ids,
-    incomplete_note,
-    load_bundle,
-    write_bundle,
-)
-from .okf_bridge import bundle_from_memory_entries
+from fsm_llm.core.definitions import OKFError
+from fsm_llm.engine.okf_bridge import bundle_from_memory_entries
+from fsm_llm.text import capped_line
+
+from .bundle import OKFBundle, incomplete_note
+from .checker import check_bundle
+from .loader import load_bundle
+from .models import OKFLimits
+from .reading import body_page, close_ids
+from .writer import write_bundle
 
 __all__ = ["main", "main_cli"]
 

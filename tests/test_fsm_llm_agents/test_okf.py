@@ -17,7 +17,6 @@ from typing import Any
 
 import pytest
 
-from fsm_llm import okf_cli
 from fsm_llm.__version__ import __version__
 from fsm_llm.agents import (
     AgentConfig,
@@ -60,6 +59,7 @@ from fsm_llm.okf import (
     strip_unsafe_text,
     write_bundle,
 )
+from fsm_llm.okf import cli as okf_cli
 from fsm_llm.testing import final_reply, tool_call_reply
 from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 
@@ -1279,9 +1279,11 @@ class TestIncompleteBundleSignal:
     def test_okf_list_keeps_the_note_when_errors_outnumber_the_issue_cap(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        import fsm_llm.okf as okf_module
+        import fsm_llm.okf.checker as checker_module
+        import fsm_llm.okf.models as models_module
 
-        monkeypatch.setattr(okf_module, "OKF_MAX_ISSUES", 10)
+        monkeypatch.setattr(models_module, "OKF_MAX_ISSUES", 10)
+        monkeypatch.setattr(checker_module, "OKF_MAX_ISSUES", 10)
         root = tmp_path / "kb"
         root.mkdir()
         for n in range(60):

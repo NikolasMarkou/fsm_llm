@@ -4,12 +4,14 @@ Bridges between memory/plain FSMs and Open Knowledge Format bundles.
 ``bundle_from_memory_entries`` turns memory entries (plain mappings) into an
 in-memory ``OKFBundle``; ``create_okf_handler`` puts capped concept summaries of a
 bundle into a plain FSM's context. The format itself (models, parser, loader,
-writer, ``strip_unsafe_text``) is core ``fsm_llm.okf``, which this module imports
-by public names only. OKF text is untrusted third-party prose: summaries are
-control-stripped and capped, and nothing a bundle names is executed.
+writer) is ``fsm_llm.okf``, which this module imports by public names only; the text
+helpers (``strip_unsafe_text``, ``capped_line``, ``iso_utc``) are in ``fsm_llm.text``.
+OKF text is untrusted third-party prose: summaries are control-stripped and capped,
+and nothing a bundle names is executed.
 
-A core module: it imports no subpackage and no provider SDK, and ``fsm_llm/__init__.py``
-does not load it. Import it by name: ``from fsm_llm.okf_bridge import ...``.
+An engine module (the one engine module on OKF): it imports no subpackage, no provider
+SDK and no other engine module, and ``fsm_llm/__init__.py`` does not load it. Import it
+by name: ``from fsm_llm.engine.okf_bridge import ...``.
 """
 
 from __future__ import annotations
@@ -21,27 +23,25 @@ from datetime import UTC, datetime
 from itertools import islice
 from typing import Any
 
-from .__version__ import __version__
-from .constants import (
+from fsm_llm.__version__ import __version__
+from fsm_llm.constants import (
     OKF_EXPORT_TEXT_MAX_CHARS,
     OKF_MAX_FRONTMATTER_BYTES,
     OKF_SUMMARY_MAX_ITEMS,
     RESERVED_CONTEXT_KEYS,
 )
-from .core.definitions import OKFError
-from .frontmatter import SURROGATE_RE
-from .handlers import BaseHandler, HandlerTiming, create_handler
-from .okf import (
+from fsm_llm.core.definitions import OKFError
+from fsm_llm.frontmatter import SURROGATE_RE
+from fsm_llm.handlers import BaseHandler, HandlerTiming, create_handler
+from fsm_llm.okf import (
     OKFBundle,
     OKFConcept,
     OKFIssue,
-    capped_line,
     has_lone_surrogate,
-    iso_utc,
-    strip_unsafe_text,
     writes_within_caps,
 )
-from .security import has_internal_prefix, is_forbidden_context_entry
+from fsm_llm.security import has_internal_prefix, is_forbidden_context_entry
+from fsm_llm.text import capped_line, iso_utc, strip_unsafe_text
 
 __all__ = ["bundle_from_memory_entries", "create_okf_handler"]
 

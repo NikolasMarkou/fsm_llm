@@ -51,7 +51,7 @@ MODULES = (
     "fsm_llm.core.verify.flow",
     "fsm_llm.frontmatter",
     "fsm_llm.okf",
-    "fsm_llm.okf_bridge",
+    "fsm_llm.engine.okf_bridge",
     "fsm_llm.core.definitions.schema",
     "fsm_llm.agents",
     "fsm_llm.eval",

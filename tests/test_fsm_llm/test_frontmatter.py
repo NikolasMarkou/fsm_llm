@@ -3,7 +3,7 @@
 The seam was extracted from ``okf.py`` (plan 4c2042f3, D-003) and is shared by
 OKF and Agent Skills, so it is pinned here on its own: split, bounded load
 (limits are parameters), the no-follow read, the surrogate walk, layering, and
-the wiring ``okf.py`` keeps to it.
+the wiring ``okf/parser.py`` keeps to it.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ import yaml
 
 import fsm_llm.frontmatter as frontmatter
 import fsm_llm.okf as okf_module
+import fsm_llm.okf.parser as okf_parser
 from fsm_llm.agent_skills import parse_skill_text
 from fsm_llm.constants import OKF_MAX_FRONTMATTER_BYTES, OKF_MAX_YAML_DEPTH
 from fsm_llm.core.definitions import OKFError
@@ -448,12 +449,13 @@ class TestLayering:
             "import sys\n"
             "import fsm_llm.frontmatter\n"
             "bad = [m for m in sys.modules if m.split('.')[:2] in "
-            "(['fsm_llm', 'okf'], ['fsm_llm', 'okf_cli'], ['fsm_llm', 'okf_bridge'], "
+            "(['fsm_llm', 'okf'], ['fsm_llm', 'text'], "
             "['fsm_llm', 'cli_support'], "
             "['fsm_llm', 'agents'], "
             "['fsm_llm', 'reasoning'], "
             "['fsm_llm', 'workflows'], ['fsm_llm', 'monitor'], ['fsm_llm', 'eval'])]\n"
             "assert not bad, bad\n"
+            "assert 'fsm_llm.engine.okf_bridge' not in sys.modules\n"
             "print('ok')\n"
         )
         result = subprocess.run(
@@ -545,15 +547,15 @@ class TestOneYamlLoader:
 
 
 class TestOkfKeepsItsWiring:
-    """``okf.py`` keeps three private names of the seam (monkeypatch targets of
+    """``okf/parser.py`` keeps three private names of the seam (monkeypatch targets of
     the OKF tests) and hands it the OKF limits."""
 
     def test_the_private_names_are_the_shared_functions(self) -> None:
-        assert okf_module._split_frontmatter is split_frontmatter
-        assert okf_module._read_bytes is read_bytes
+        assert okf_parser._split_frontmatter is split_frontmatter
+        assert okf_parser._read_bytes is read_bytes
 
     def test_okf_passes_its_own_limits(self) -> None:
-        load = okf_module._load_yaml
+        load = okf_parser._load_yaml
         assert load.func is load_yaml  # type: ignore[attr-defined]
         assert load.keywords == {  # type: ignore[attr-defined]
             "max_bytes": OKF_MAX_FRONTMATTER_BYTES,
@@ -569,8 +571,9 @@ class TestOkfKeepsItsWiring:
             okf_module.has_lone_surrogate(loop)
 
     def test_okf_has_no_loader_class_of_its_own(self) -> None:
-        assert not hasattr(okf_module, "_OKFLoader")
-        assert not hasattr(okf_module, "_flow_depth_exceeded")
+        for module in (okf_module, okf_parser):
+            assert not hasattr(module, "_OKFLoader")
+            assert not hasattr(module, "_flow_depth_exceeded")
 
 
 class TestQuotedBracketsAreNotNesting:

@@ -111,7 +111,7 @@ fsm-llm-validate = "fsm_llm.core.verify.cli:main_cli"
 fsm-llm-monitor = "fsm_llm.monitor.__main__:main_cli"
 fsm-llm-meta = "fsm_llm.agents.meta_cli:main_cli"
 fsm-llm-eval = "fsm_llm.eval.__main__:run"
-fsm-llm-okf = "fsm_llm.okf_cli:main_cli"
+fsm-llm-okf = "fsm_llm.okf.cli:main_cli"
 fsm-llm-skills = "fsm_llm.agent_skills_cli:main_cli"
 
 # The import package `fsm_llm` is the directory `src/fsm_llm/` (src layout):

@@ -40,7 +40,7 @@ from .constants import (
     SKILL_READ_PAGE_CHARS,
 )
 from .core.definitions import SkillError
-from .okf import capped_line, strip_unsafe_text, text_page
+from .text import capped_line, strip_unsafe_text, text_page
 
 __all__ = ["main", "main_cli"]
 

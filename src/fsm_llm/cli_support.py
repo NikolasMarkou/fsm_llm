@@ -9,8 +9,8 @@ program name. It also holds the ``--env-file`` flag of the CLIs that need a mode
 and never get it. Interface contract: ``run_cli`` returns 0, 1 or 130 and lets a
 ``BrokenPipeError`` and a usage ``SystemExit`` through; ``exit_main`` never
 returns; ``report_issues`` prints and returns 0 or 1. Imports stdlib,
-``constants``, ``env.load_env`` and ``okf.capped_line`` / ``okf.strip_unsafe_text``
-only; not imported by ``fsm_llm/__init__.py``.
+``constants``, ``env.load_env`` and ``text.capped_line`` / ``text.strip_unsafe_text``
+only (a kernel module, held by an import contract); not imported by ``fsm_llm/__init__.py``.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from typing import Any, NoReturn
 
 from .constants import CLI_EXIT_FAILURE, CLI_EXIT_INTERRUPTED, CLI_EXIT_OK
 from .env import load_env
-from .okf import capped_line, strip_unsafe_text
+from .text import capped_line, strip_unsafe_text
 
 __all__ = [
     "add_env_file",

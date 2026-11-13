@@ -29,8 +29,16 @@ import pytest
 import yaml
 
 import fsm_llm
+import fsm_llm.engine.okf_bridge as okf_bridge
 import fsm_llm.okf as okf_module
-import fsm_llm.okf_bridge as okf_bridge
+import fsm_llm.okf.bundle as bundle_module
+import fsm_llm.okf.checker as checker_module
+import fsm_llm.okf.links as links_module
+import fsm_llm.okf.loader as loader_module
+import fsm_llm.okf.models as models_module
+import fsm_llm.okf.parser as parser_module
+import fsm_llm.okf.reading as reading_module
+import fsm_llm.okf.writer as writer_module
 from fsm_llm.constants import (
     OKF_MAX_DEPTH,
     OKF_MAX_FILE_BYTES,
@@ -44,6 +52,7 @@ from fsm_llm.constants import (
 from fsm_llm.context.layout import ResponseGenerationPromptBuilder
 from fsm_llm.core.definitions import FSMError, OKFError
 from fsm_llm.engine.api.conversation import API
+from fsm_llm.engine.okf_bridge import bundle_from_memory_entries, create_okf_handler
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.okf import (
     OKFBundle,
@@ -58,8 +67,7 @@ from fsm_llm.okf import (
     strip_unsafe_text,
     write_bundle,
 )
-from fsm_llm.okf_bridge import bundle_from_memory_entries, create_okf_handler
-from fsm_llm.okf_cli import main as okf_cli_main
+from fsm_llm.okf.cli import main as okf_cli_main
 from fsm_llm.security import resolve_within
 from fsm_llm.testing import MockLLM2Interface
 from tests.conftest import cpu_timer, symlink_or_skip
@@ -793,11 +801,14 @@ class TestModelsAndErrors:
         assert OKFError("x", details={"k": 1}).details == {"k": 1}
 
     def test_the_module_does_not_import_litellm(self) -> None:
-        source = (Path(__file__).parents[2] / "src" / "fsm_llm" / "okf.py").read_text(
-            encoding="utf-8"
+        root = Path(__file__).parents[2] / "src" / "fsm_llm"
+        # the old single module; cli.py has its own import test in test_okf_cli.py
+        paths = [p for p in (root / "okf").glob("*.py") if p.name != "cli.py"]
+        source = "".join(
+            p.read_text(encoding="utf-8") for p in [*paths, root / "text.py"]
         )
 
-        assert "litellm" not in source
+        assert len(paths) >= 9 and "litellm" not in source
 
 
 # --------------------------------------------------------------
@@ -1186,7 +1197,7 @@ class TestLimits:
     ) -> None:
         _write(tmp_path, {"a.md": _doc()})
         monkeypatch.setattr(
-            okf_module, "_read_bytes", lambda path, limit: b"x" * (limit + 1)
+            loader_module, "_read_bytes", lambda path, limit: b"x" * (limit + 1)
         )
 
         bundle = load_bundle(tmp_path)
@@ -1239,7 +1250,7 @@ class TestLimits:
     def test_the_issue_list_is_capped_errors_first(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(okf_module, "OKF_MAX_ISSUES", 5)
+        _cap_issues(monkeypatch, 5)
         _write(
             tmp_path, {f"w{i}.md": "---\ntype: T\nstatus: odd\n---\n" for i in range(8)}
         )
@@ -1316,7 +1327,7 @@ class TestSymlink:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _write(tmp_path, {"a.md": _doc()})
-        monkeypatch.setattr(okf_module, "resolve_within", lambda root, rel: None)
+        monkeypatch.setattr(loader_module, "resolve_within", lambda root, rel: None)
 
         bundle = load_bundle(tmp_path)
 
@@ -1331,7 +1342,7 @@ class TestSymlink:
         def boom(root: Path, rel: str) -> Path:
             raise RuntimeError("symlink loop")
 
-        monkeypatch.setattr(okf_module, "resolve_within", boom)
+        monkeypatch.setattr(loader_module, "resolve_within", boom)
 
         bundle = load_bundle(tmp_path)
 
@@ -1810,7 +1821,7 @@ class TestCheckBundle:
         assert isinstance(check_bundle(bundle), list)
 
     def test_the_result_is_capped(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(okf_module, "OKF_MAX_ISSUES", 3)
+        _cap_issues(monkeypatch, 3)
         bundle = OKFBundle(OKFConcept(id=f"c{i}", type="") for i in range(10))
 
         issues = check_bundle(bundle)
@@ -2017,6 +2028,8 @@ class TestLayering:
             "(['fsm_llm', 'agents'], ['fsm_llm', 'reasoning'], "
             "['fsm_llm', 'workflows'], ['fsm_llm', 'monitor'], ['fsm_llm', 'eval'])]\n"
             "assert not bad, bad\n"
+            "for lazy in ('fsm_llm.okf.cli', 'fsm_llm.cli_support', 'fsm_llm.engine.okf_bridge'):\n"
+            "    assert lazy not in sys.modules, lazy\n"
             "print('ok')\n"
         )
         result = subprocess.run(
@@ -2047,13 +2060,14 @@ def _imported_from_okf(tree: ast.AST) -> list[tuple[str, int]]:
     return found
 
 
+_BRIDGE = _SRC_ROOT / "engine" / "okf_bridge.py"
+
+
 class TestBridgeLayering:
-    """``okf_bridge`` sits on top of ``okf`` and obeys the same core-module rules."""
+    """``engine.okf_bridge`` sits on top of ``okf`` and obeys the same core-module rules."""
 
     def test_the_bridge_does_not_import_litellm(self) -> None:
-        assert "litellm" not in (_SRC_ROOT / "okf_bridge.py").read_text(
-            encoding="utf-8"
-        )
+        assert "litellm" not in _BRIDGE.read_text(encoding="utf-8")
 
     def test_the_bridge_loads_no_subpackage_and_is_loaded_by_nothing_eager(
         self, tmp_path: Path
@@ -2062,10 +2076,10 @@ class TestBridgeLayering:
         probe = (
             f"import sys; sys.path.insert(0, {src!r})\n"
             "import fsm_llm\n"
-            "assert 'fsm_llm.okf_bridge' not in sys.modules, 'core imports it'\n"
+            "assert 'fsm_llm.engine.okf_bridge' not in sys.modules, 'core imports it'\n"
             "import fsm_llm.okf\n"
-            "assert 'fsm_llm.okf_bridge' not in sys.modules, 'okf imports its bridge'\n"
-            "import fsm_llm.okf_bridge\n"
+            "assert 'fsm_llm.engine.okf_bridge' not in sys.modules, 'okf imports its bridge'\n"
+            "import fsm_llm.engine.okf_bridge\n"
             "subs = ('agents', 'reasoning', 'workflows', 'monitor', 'eval')\n"
             "bad = [m for m in sys.modules if m.split('.')[:2] in "
             "[['fsm_llm', s] for s in subs]]\n"
@@ -2085,7 +2099,9 @@ class TestBridgeLayering:
 
     def test_the_public_surface_is_exactly_the_two_moved_functions(self) -> None:
         assert set(okf_bridge.__all__) == _MOVED
-        assert not _MOVED & set(dir(okf_module)), "okf must not re-export them"
+        assert not [n for m in _OKF_MODULES for n in _MOVED if hasattr(m, n)], (
+            "okf must not re-export them"
+        )
 
     def test_no_module_under_src_imports_a_moved_name_from_okf(self) -> None:
         stale = {
@@ -2100,7 +2116,7 @@ class TestBridgeLayering:
         assert stale == set()
 
     def test_no_private_name_crosses_the_bridge_boundary(self) -> None:
-        tree = ast.parse((_SRC_ROOT / "okf_bridge.py").read_text(encoding="utf-8"))
+        tree = ast.parse(_BRIDGE.read_text(encoding="utf-8"))
 
         assert [n for n, _ in _imported_from_okf(tree) if n.startswith("_")] == []
 
@@ -3462,7 +3478,7 @@ class TestMalformedBuiltInTags:
         def broken(*_: Any) -> list[str]:
             raise ZeroDivisionError("boom")
 
-        monkeypatch.setattr(okf_module, "_tags", broken)
+        monkeypatch.setattr(parser_module, "_tags", broken)
 
         concept, issues = parse_concept_text("a", "---\ntype: T\ntags: [x]\n---\nb\n")
 
@@ -3688,8 +3704,50 @@ class TestTimestampNonstandard:
             assert isinstance(concept.flags(), list)
 
 
+# Every module of the package (not `cli`, which has its own tests): a "this name must not exist"
+# check reads all of them, because the package facade alone would pass vacuously.
+_OKF_MODULES = (
+    okf_module,
+    models_module,
+    parser_module,
+    links_module,
+    bundle_module,
+    loader_module,
+    checker_module,
+    writer_module,
+    reading_module,
+)
+
+# A patch aims at the module that performs the lookup, never at the package facade:
+# `fsm_llm.okf` is a package of modules (step 83), so a name read by several modules is
+# patched in each of them. Each tuple holds the modules whose lookup a test observes, and
+# every entry is mutation-proved live (drop one and a test fails); `_check_timestamps` is
+# read by `parser` too, but no test sees that lookup, so it is patched in `checker` only.
+_CLOCK_READERS = (bundle_module, loader_module, checker_module)  # `time`
+_ISSUE_CAP_READERS = (models_module, checker_module)  # `OKF_MAX_ISSUES`
+_LINK_RESOLVERS = (bundle_module, checker_module)  # `_link_candidates`
+
+
+def _patch_in(
+    monkeypatch: pytest.MonkeyPatch, modules: Any, name: str, value: Any
+) -> None:
+    """Set *name* in every one of *modules* (the modules that look it up)."""
+    for module in modules:
+        monkeypatch.setattr(module, name, value)
+
+
+def _use_clock(monkeypatch: pytest.MonkeyPatch, clock: Any) -> None:
+    """Stand in for ``time`` in every okf module that reads it."""
+    _patch_in(monkeypatch, _CLOCK_READERS, "time", clock)
+
+
+def _cap_issues(monkeypatch: pytest.MonkeyPatch, cap: int) -> None:
+    """Lower ``OKF_MAX_ISSUES`` where it is read: the issue cap and the link total."""
+    _patch_in(monkeypatch, _ISSUE_CAP_READERS, "OKF_MAX_ISSUES", cap)
+
+
 class _FakeClock:
-    """Stand-in for the ``time`` module inside ``fsm_llm.okf``.
+    """Stand-in for the ``time`` module inside the okf modules (``_use_clock``).
 
     Time moves only when ``tick`` is called, so a deadline test never depends
     on the speed of the machine.
@@ -3716,8 +3774,8 @@ class TestLoadDeadline:
             clock.now += cost
             return real(cid, text)
 
-        monkeypatch.setattr(okf_module, "time", clock)
-        monkeypatch.setattr(okf_module, "parse_concept_text", slow)
+        _use_clock(monkeypatch, clock)
+        monkeypatch.setattr(loader_module, "parse_concept_text", slow)
         return clock
 
     def test_the_default_comes_from_the_constant(self) -> None:
@@ -3796,7 +3854,7 @@ class TestPerFileCatchAll:
                 raise RuntimeError("secret internal detail")
             return real(cid, text)
 
-        monkeypatch.setattr(okf_module, "parse_concept_text", flaky)
+        monkeypatch.setattr(loader_module, "parse_concept_text", flaky)
 
         bundle = load_bundle(tmp_path)
 
@@ -3809,14 +3867,14 @@ class TestPerFileCatchAll:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _write(tmp_path, {"a.md": _doc(), "log.md": "BOOM\n", "z.md": _doc()})
-        real = okf_module._split_frontmatter
+        real = parser_module._split_frontmatter
 
         def flaky(text: str) -> Any:
             if text.startswith("BOOM"):
                 raise KeyError("x")
             return real(text)
 
-        monkeypatch.setattr(okf_module, "_split_frontmatter", flaky)
+        monkeypatch.setattr(loader_module, "_split_frontmatter", flaky)
 
         bundle = load_bundle(tmp_path)
 
@@ -3938,7 +3996,7 @@ class TestReservedAndSafeNames:
         assert _codes(bundle) == ["id-unsafe"]
 
     def test_the_loader_and_the_writer_share_one_id_rule(self, tmp_path: Path) -> None:
-        okf_module_rule = okf_module._id_problem
+        okf_module_rule = links_module._id_problem
         for cid in ("..", ".", "a/../b", "x" * 250, "a\x1bb", ".h"):
             assert okf_module_rule(cid, allow_reserved=True) is not None
         assert okf_module_rule("Index", allow_reserved=True) is None
@@ -4066,7 +4124,7 @@ class TestLoaderTrims:
         assert not hasattr(OKFBundle, "resolve_resource")
 
     def test_the_search_scale_is_derived_from_the_field_weights(self) -> None:
-        assert okf_module._HAY_WEIGHT == 6
+        assert bundle_module._HAY_WEIGHT == 6
         bundle = OKFBundle(
             [
                 OKFConcept(
@@ -4296,7 +4354,7 @@ class TestSharedCoreHelpers:
         assert capped("x" * 500, 10) == "x" * 10
         assert len(capped("x" * 500)) == OKF_SUMMARY_FIELD_CHARS
         assert capped(None) == "" and capped(5) == ""
-        assert not hasattr(okf_module, "_line")
+        assert not any(hasattr(m, "_line") for m in _OKF_MODULES)
 
     def test_body_page_pages_add_up_and_clamp_the_offset(self) -> None:
         concept = OKFConcept(id="a", type="Note", body="0123456789\x1b[1m" * 3)
@@ -4507,31 +4565,37 @@ class TestCheckBundleIsCheapOnLinkFloods:
                 built.append(1)
                 super().__init__(**data)
 
-        monkeypatch.setattr(okf_module, "OKFIssue", Counting)
+        monkeypatch.setattr(checker_module, "OKFIssue", Counting)
 
         issues = check_bundle(bundle)
 
         assert [i.code for i in issues].count("link-broken") == 40
-        assert len(built) <= 200  # one per concept, not one per repeated link
+        assert 40 <= len(built) <= 200  # one per concept, not one per repeated link
 
     def test_a_repeated_link_is_resolved_once_per_body(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         bundle = _link_flood(10)
         calls: list[int] = []
-        real = okf_module._link_candidates
+        real = links_module._link_candidates
 
         def counting(target: object, from_id: str) -> Any:
             calls.append(1)
             return real(target, from_id)
 
-        monkeypatch.setattr(okf_module, "_link_candidates", counting)
+        _patch_in(monkeypatch, _LINK_RESOLVERS, "_link_candidates", counting)
 
         check_bundle(bundle)
+        checked = len(calls)
         for cid in [c.id for c in bundle]:
             bundle.outgoing(cid)
 
-        assert len(calls) <= 40  # not 10 bodies x 1,000 links x 2 passes
+        # Both lower bounds make the patches live: the check resolves once per body, and
+        # `outgoing` (bundle.py) resolves too; a patch aimed at the wrong module counts 0.
+        assert 10 <= checked <= 20
+        assert (
+            checked + 10 <= len(calls) <= 40
+        )  # not 10 bodies x 1,000 links x 2 passes
 
     def test_distinct_broken_links_are_capped_per_concept_with_one_note(self) -> None:
         body = " ".join(f"[](gone{i}.md)" for i in range(200))
@@ -4548,7 +4612,15 @@ class TestCheckBundleIsCheapOnLinkFloods:
     def test_link_issues_are_capped_in_total_at_a_small_multiple(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(okf_module, "OKF_MAX_ISSUES", 30)
+        _cap_issues(monkeypatch, 30)
+        built: list[int] = []
+
+        class Counting(OKFIssue):
+            def __init__(self, **data: Any) -> None:
+                built.append(1)
+                super().__init__(**data)
+
+        _patch_in(monkeypatch, (checker_module,), "OKFIssue", Counting)
         body = " ".join(f"[](gone{i}.md)" for i in range(20))
         bundle = _mem(**{f"c{i:03d}": body for i in range(100)})
 
@@ -4557,6 +4629,9 @@ class TestCheckBundleIsCheapOnLinkFloods:
         assert len([i for i in issues if i.code == "link-broken"]) <= 30
         assert len(issues) <= 32  # the result cap is unchanged, plus its note
         assert "issues-truncated" in [i.code for i in issues]
+        # the work bound of the check itself (checker.py): twice the cap, not twice the
+        # real OKF_MAX_ISSUES (202 issues would be built), so that patch is live too
+        assert len(built) <= 2 * 30 + 4
 
     def test_the_link_flood_finishes_fast_at_scale(self, timing_factor) -> None:
         bundle = _link_flood(400)
@@ -4574,14 +4649,14 @@ class TestCheckPhaseDeadline:
 
     def _slow(self, monkeypatch: pytest.MonkeyPatch, cost: float) -> _FakeClock:
         clock = _FakeClock()
-        real = okf_module._check_timestamps
+        real = parser_module._check_timestamps
 
         def tick(*args: Any, **kwargs: Any) -> Any:
             clock.now += cost
             return real(*args, **kwargs)
 
-        monkeypatch.setattr(okf_module, "time", clock)
-        monkeypatch.setattr(okf_module, "_check_timestamps", tick)
+        _use_clock(monkeypatch, clock)
+        monkeypatch.setattr(checker_module, "_check_timestamps", tick)
         return clock
 
     def test_the_loaded_limit_travels_with_the_bundle(self, tmp_path: Path) -> None:
@@ -4638,7 +4713,7 @@ class TestCheckPhaseDeadline:
             clock.now += 4.0
             return real(self, cid)
 
-        monkeypatch.setattr(okf_module, "time", clock)
+        _use_clock(monkeypatch, clock)
         monkeypatch.setattr(OKFBundle, "outgoing", slow)
 
         first = bundle.backlinks("a")
@@ -4877,8 +4952,8 @@ class TestIncompleteBundle:
             clock.now += 1.0
             return real(cid, text)
 
-        monkeypatch.setattr(okf_module, "time", clock)
-        monkeypatch.setattr(okf_module, "parse_concept_text", slow)
+        _use_clock(monkeypatch, clock)
+        monkeypatch.setattr(loader_module, "parse_concept_text", slow)
 
         bundle = load_bundle(self._five(tmp_path), limits=OKFLimits(max_seconds=2.5))
 
@@ -4896,7 +4971,7 @@ class TestIncompleteBundle:
             clock.now += 4.0
             return real(self, cid)
 
-        monkeypatch.setattr(okf_module, "time", clock)
+        _use_clock(monkeypatch, clock)
         monkeypatch.setattr(OKFBundle, "outgoing", slow)
         assert bundle.incomplete == ()
 
@@ -4915,9 +4990,9 @@ class TestIncompleteBundle:
 
     def test_every_code_is_a_real_error_issue_code_of_the_loader(self) -> None:
         for code in okf_module.INCOMPLETE_CODES:
-            assert code == "check-deadline" or okf_module._LOAD_PROBLEMS[code][0] == (
-                "error"
-            )
+            assert code == "check-deadline" or loader_module._LOAD_PROBLEMS[code][
+                0
+            ] == ("error")
 
     def test_the_note_names_codes_only_never_messages_or_paths(self) -> None:
         issue = OKFIssue(
@@ -5077,7 +5152,7 @@ class TestWrittenImpliesLoadable:
     ) -> None:
         def front_bytes(n: int) -> int:
             concept = OKFConcept(id="c", type="Note", extra={"p": "y" * n})
-            data = okf_module._render_concept(concept)
+            data = writer_module._render_concept(concept)
             return len(data.split(b"\n---\n", 1)[0]) - len(b"---\n") + 1
 
         n = OKF_MAX_FRONTMATTER_BYTES - front_bytes(1) + 1
@@ -5095,7 +5170,7 @@ class TestWrittenImpliesLoadable:
     def test_a_file_of_exactly_the_file_cap_writes_and_loads_one_more_is_refused(
         self, tmp_path: Path
     ) -> None:
-        head = len(okf_module._render_concept(OKFConcept(id="c", type="Note")))
+        head = len(writer_module._render_concept(OKFConcept(id="c", type="Note")))
         body = "b" * (OKF_MAX_FILE_BYTES - head - 1) + "\n"
         bundle = OKFBundle([OKFConcept(id="c", type="Note", body=body)])
 
@@ -5149,7 +5224,7 @@ class TestStopIssueSurvivesTheIssueCap:
         limits: OKFLimits,
         code: str,
     ) -> None:
-        monkeypatch.setattr(okf_module, "OKF_MAX_ISSUES", 10)
+        _cap_issues(monkeypatch, 10)
 
         bundle = load_bundle(self._plain_files(tmp_path, 60), limits=limits)
 
@@ -5169,9 +5244,9 @@ class TestStopIssueSurvivesTheIssueCap:
             clock.now += 1.0
             return real(cid, text)
 
-        monkeypatch.setattr(okf_module, "time", clock)
-        monkeypatch.setattr(okf_module, "parse_concept_text", slow)
-        monkeypatch.setattr(okf_module, "OKF_MAX_ISSUES", 10)
+        _use_clock(monkeypatch, clock)
+        monkeypatch.setattr(loader_module, "parse_concept_text", slow)
+        _cap_issues(monkeypatch, 10)
 
         bundle = load_bundle(
             self._plain_files(tmp_path, 60), limits=OKFLimits(max_seconds=25)
@@ -5182,7 +5257,7 @@ class TestStopIssueSurvivesTheIssueCap:
     def test_capped_keeps_stops_first_then_errors_warnings_info(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(okf_module, "OKF_MAX_ISSUES", 4)
+        _cap_issues(monkeypatch, 4)
 
         def make(severity: Any, code: str, n: int = 1) -> list[OKFIssue]:
             return [
@@ -5198,7 +5273,7 @@ class TestStopIssueSurvivesTheIssueCap:
             *make("error", "load-deadline"),
         ]
 
-        kept = okf_module._capped(issues)
+        kept = models_module._capped(issues)
 
         assert [i.code for i in kept] == [
             "check-deadline",
@@ -5211,18 +5286,18 @@ class TestStopIssueSurvivesTheIssueCap:
     def test_check_bundle_keeps_its_own_check_deadline_under_the_cap(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(okf_module, "OKF_MAX_ISSUES", 5)
+        _cap_issues(monkeypatch, 5)
         concepts = [OKFConcept(id=f"c{i:02d}", type="") for i in range(40)]
         bundle = OKFBundle(concepts, max_seconds=100)
         clock = _FakeClock()
-        real = okf_module._check_timestamps
+        real = parser_module._check_timestamps
 
         def tick(*args: Any, **kwargs: Any) -> Any:
             clock.now += 1.0
             return real(*args, **kwargs)
 
-        monkeypatch.setattr(okf_module, "time", clock)
-        monkeypatch.setattr(okf_module, "_check_timestamps", tick)
+        _use_clock(monkeypatch, clock)
+        monkeypatch.setattr(checker_module, "_check_timestamps", tick)
         monkeypatch.setattr(OKFBundle, "_deadline", lambda self: 20.0)
 
         codes = [i.code for i in check_bundle(bundle)]
@@ -5233,9 +5308,14 @@ class TestStopIssueSurvivesTheIssueCap:
 
 class TestNoModuleGlobalCache:
     def test_no_function_of_the_module_is_cached(self) -> None:
-        cached = [n for n, v in vars(okf_module).items() if hasattr(v, "cache_info")]
+        cached = [
+            f"{m.__name__}.{n}"
+            for m in _OKF_MODULES
+            for n, v in vars(m).items()
+            if hasattr(v, "cache_info")
+        ]
         assert cached == []
-        assert not hasattr(okf_module._link_candidates, "cache_clear")
+        assert not hasattr(links_module._link_candidates, "cache_clear")
 
     def test_resolving_links_keeps_no_text_alive_after_the_bundle_is_dropped(
         self,
@@ -5280,7 +5360,7 @@ class TestIndexIsBounded:
     def test_a_long_bundle_ends_the_index_with_an_and_n_more_line(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(okf_module, "_INDEX_BUDGET", 2_000)
+        monkeypatch.setattr(writer_module, "_INDEX_BUDGET", 2_000)
         bundle = self._many(100)
 
         write_bundle(bundle, tmp_path / "kb")
@@ -5300,14 +5380,14 @@ class TestIndexIsBounded:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         bundle = self._many(10)
-        whole = okf_module._render_index(bundle)
+        whole = writer_module._render_index(bundle)
         assert "more concepts" not in whole
 
-        monkeypatch.setattr(okf_module, "_INDEX_BUDGET", len(whole.encode()))
-        assert okf_module._render_index(bundle) == whole
+        monkeypatch.setattr(writer_module, "_INDEX_BUDGET", len(whole.encode()))
+        assert writer_module._render_index(bundle) == whole
 
-        monkeypatch.setattr(okf_module, "_INDEX_BUDGET", len(whole.encode()) - 1)
-        cut = okf_module._render_index(bundle)
+        monkeypatch.setattr(writer_module, "_INDEX_BUDGET", len(whole.encode()) - 1)
+        cut = writer_module._render_index(bundle)
         assert cut != whole and cut.endswith("* ... and 1 more concepts\n")
         assert len(self._rows(cut)) == 9
 
@@ -5315,12 +5395,12 @@ class TestIndexIsBounded:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         bundle = self._many(10)
-        row = len(self._rows(okf_module._render_index(bundle))[0].encode()) + 1
-        head = len(okf_module._render_index(OKFBundle()).encode())
+        row = len(self._rows(writer_module._render_index(bundle))[0].encode()) + 1
+        head = len(writer_module._render_index(OKFBundle()).encode())
         # the Idea heading and its first rows fit, the Note heading does not
-        monkeypatch.setattr(okf_module, "_INDEX_BUDGET", head + 8 + 5 * row)
+        monkeypatch.setattr(writer_module, "_INDEX_BUDGET", head + 8 + 5 * row)
 
-        text = okf_module._render_index(bundle)
+        text = writer_module._render_index(bundle)
 
         assert "# Idea" in text and "# Note" not in text
         assert text.endswith("* ... and 5 more concepts\n")
@@ -5500,7 +5580,9 @@ class TestDepthIsCheckedBesideASurrogate:
         front["nested"] = deep
 
         with pytest.raises(OKFError, match="deep"):
-            okf_module._render_concept(OKFConcept(id="c", type="X", extra=dict(front)))
+            writer_module._render_concept(
+                OKFConcept(id="c", type="X", extra=dict(front))
+            )
 
 
 class TestBacklinkDeadlineClearsWhenTheBuildFinishes:
@@ -5517,7 +5599,7 @@ class TestBacklinkDeadlineClearsWhenTheBuildFinishes:
             clock.now += state["cost"]
             return real(self, cid)
 
-        monkeypatch.setattr(okf_module, "time", clock)
+        _use_clock(monkeypatch, clock)
         monkeypatch.setattr(OKFBundle, "outgoing", slow)
         bundle.backlinks("a")
         assert bundle.incomplete == ("check-deadline",)
@@ -5551,7 +5633,7 @@ class TestWriterNamesWhatItCannotRender:
 
 
 class _Clock:
-    """Stand-in for ``time`` inside ``fsm_llm.okf``: moves only when ticked."""
+    """Stand-in for ``time`` inside the okf modules: moves only when ticked."""
 
     def __init__(self) -> None:
         self.now = 0.0
@@ -5571,7 +5653,7 @@ class TestCheckBundleReportsTheDeadlineOnce:
             max_seconds=10,
         )
         clock = _Clock()
-        monkeypatch.setattr(okf_module, "time", clock)
+        _use_clock(monkeypatch, clock)
         real = OKFBundle.outgoing
 
         def slow(self: OKFBundle, cid: str) -> Any:
@@ -5583,13 +5665,13 @@ class TestCheckBundleReportsTheDeadlineOnce:
         assert [i.code for i in bundle.issues] == ["check-deadline"]
 
         clock.now = 0.0
-        stamps = okf_module._check_timestamps
+        stamps = parser_module._check_timestamps
 
         def tick(*args: Any, **kwargs: Any) -> Any:
             clock.now += 4.0  # the check itself runs past the budget too
             return stamps(*args, **kwargs)
 
-        monkeypatch.setattr(okf_module, "_check_timestamps", tick)
+        monkeypatch.setattr(checker_module, "_check_timestamps", tick)
         monkeypatch.setattr(OKFBundle, "outgoing", real)
 
         issues = check_bundle(bundle)
@@ -5608,6 +5690,25 @@ class TestOkfModuleSurface:
         for needed in ("load_bundle", "check_bundle", "strip_unsafe_text", "iso_utc"):
             assert needed in names
 
+    def test_the_text_helpers_are_the_objects_of_the_kernel_module(self) -> None:
+        # D-032: six helpers live in `fsm_llm.text` and `fsm_llm.okf` re-exports them as
+        # documented public names; a copy or a wrapper in the facade would pass every
+        # behaviour test and still be a second implementation.
+        import fsm_llm.text as text_module
+
+        names = (
+            "strip_unsafe_text",
+            "capped_line",
+            "capped_issues",
+            "capped_note",
+            "text_page",
+            "iso_utc",
+        )
+        for name in names:
+            assert getattr(okf_module, name) is getattr(text_module, name), name
+            assert getattr(text_module, name).__module__ == "fsm_llm.text", name
+        assert sorted(text_module.__all__) == sorted(names)
+
     def test_no_private_alias_of_the_frontmatter_seam_is_left(self) -> None:
-        assert not hasattr(okf_module, "_Note")
-        assert not hasattr(okf_module, "_SURROGATE_RE")
+        for name in ("_Note", "_SURROGATE_RE"):
+            assert not any(hasattr(m, name) for m in _OKF_MODULES), name

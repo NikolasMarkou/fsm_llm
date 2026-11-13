@@ -686,9 +686,9 @@ fsm_llm.okf.strip_unsafe_text def(text: str, *, multiline: bool = False) -> str
 fsm_llm.okf.text_page def(text: str, offset: Any, size: int) -> tuple[str, int | None, int]
 fsm_llm.okf.write_bundle def(bundle: OKFBundle, path: str | os.PathLike[str], *, overwrite: bool = False, write_index: bool = True) -> list[Path]
 fsm_llm.okf.writes_within_caps def(concept: OKFConcept) -> bool
-# fsm_llm.okf_bridge
-fsm_llm.okf_bridge.bundle_from_memory_entries def(entries: Iterable[Any], *, generated_by: str | None = None, now: datetime | str | None = None) -> OKFBundle
-fsm_llm.okf_bridge.create_okf_handler def(bundle: OKFBundle, *, context_key: str = 'okf_concepts', timing: HandlerTiming = HandlerTiming.PRE_PROCESSING, states: Iterable[str] = (), query_key: str | None = None, max_items: int = 20, include_deprecated: bool = False, name: str = 'OKFContext') -> BaseHandler
+# fsm_llm.engine.okf_bridge
+fsm_llm.engine.okf_bridge.bundle_from_memory_entries def(entries: Iterable[Any], *, generated_by: str | None = None, now: datetime | str | None = None) -> OKFBundle
+fsm_llm.engine.okf_bridge.create_okf_handler def(bundle: OKFBundle, *, context_key: str = 'okf_concepts', timing: HandlerTiming = HandlerTiming.PRE_PROCESSING, states: Iterable[str] = (), query_key: str | None = None, max_items: int = 20, include_deprecated: bool = False, name: str = 'OKFContext') -> BaseHandler
 # fsm_llm.core.definitions.schema
 fsm_llm.core.definitions.schema.FIELD_VERSIONS dict
 fsm_llm.core.definitions.schema.SCHEMA_VERSION_DEFAULT = '4.2'

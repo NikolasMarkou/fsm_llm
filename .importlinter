@@ -104,7 +104,7 @@ ignore_imports =
 # (`constants`, `logging`, `security`); step 71 moved `expressions` into it as `core.expressions`,
 # a package whose modules import each other and `core.definitions` and are read by
 # `core.transition_evaluator`; step 75 added `core.verify` (the validator split into modules and
-# `flow`, which read the kernel and `core` only, so this contract covers them with no new line (step 76 added `core.visualize`, the old `visualizer`, with one named debt below: `core.visualize.cli -> cli_support`) and
+# `flow`, which read the kernel and `core` only, so this contract covers them with no new line (step 76 added `core.visualize`, the old `visualizer`; its one named debt, `core.visualize.cli -> cli_support`, was retired at step 83: `cli_support` is a kernel leaf now, D-033) and
 # `fsm_llm.validator` left the lists of the `llm` and `context` contracts below: the module is
 # gone and both layers may import `core`); it never reaches a higher layer or a subpackage
 # (`FSMDefinition._check_synthesize_states` imports `core.transition_evaluator` lazily, a core
@@ -119,7 +119,6 @@ forbidden_modules =
     fsm_llm.agent_skills
     fsm_llm.agent_skills_cli
     fsm_llm.agents
-    fsm_llm.cli_support
     fsm_llm.context
     fsm_llm.engine
     fsm_llm.eval
@@ -128,8 +127,6 @@ forbidden_modules =
     fsm_llm.memory
     fsm_llm.monitor
     fsm_llm.okf
-    fsm_llm.okf_bridge
-    fsm_llm.okf_cli
     fsm_llm.reasoning
     fsm_llm.runner
     fsm_llm.synthesis
@@ -138,13 +135,6 @@ forbidden_modules =
 ignore_imports =
     # the package's own modules import each other
     fsm_llm.core.** -> fsm_llm.core.**
-    # step 76 debt: the old `visualizer.main` imported `cli_support.escape_unencodable_output` lazily; the
-    # moved `core.visualize.cli.main` still does. `cli_support` is a top-level helper beside the entry
-    # modules (D-014), not a layer, and the CLIs inside layer packages import it by design; it reads
-    # `okf` only for `capped_line` and `strip_unsafe_text`, which step 83 moves to `text.py`.
-    # retired by: step 83 (cli_support stops importing okf) and step 95 (the `layers` contract does not
-    # constrain `cli_support`)
-    fsm_llm.core.visualize.cli -> fsm_llm.cli_support
 
 # Step 72 (utilities split; `llm.py` and `context.py` became the packages `llm/` and `context/`):
 # the layer package `llm` (L1) reads the kernel (`constants`, `logging`), `core` (the models in
@@ -162,15 +152,12 @@ forbidden_modules =
     fsm_llm.agent_skills
     fsm_llm.agent_skills_cli
     fsm_llm.agents
-    fsm_llm.cli_support
     fsm_llm.context
     fsm_llm.engine
     fsm_llm.eval
     fsm_llm.handlers
     fsm_llm.monitor
     fsm_llm.okf
-    fsm_llm.okf_bridge
-    fsm_llm.okf_cli
     fsm_llm.reasoning
     fsm_llm.runner
     fsm_llm.synthesis
@@ -192,14 +179,11 @@ forbidden_modules =
     fsm_llm.agent_skills
     fsm_llm.agent_skills_cli
     fsm_llm.agents
-    fsm_llm.cli_support
     fsm_llm.engine
     fsm_llm.eval
     fsm_llm.handlers
     fsm_llm.monitor
     fsm_llm.okf
-    fsm_llm.okf_bridge
-    fsm_llm.okf_cli
     fsm_llm.reasoning
     fsm_llm.runner
     fsm_llm.synthesis
@@ -220,11 +204,9 @@ source_modules =
     fsm_llm.handlers
 forbidden_modules =
     fsm_llm.agents
-    fsm_llm.cli_support
     fsm_llm.engine
     fsm_llm.eval
     fsm_llm.monitor
-    fsm_llm.okf_bridge
     fsm_llm.reasoning
     fsm_llm.runner
     fsm_llm.synthesis
@@ -236,9 +218,10 @@ forbidden_modules =
 # `context` and `handlers`, plus the modules that moved into it (`api` is `engine/api/` since
 # step 81; `classification`, `session` and `builders` are `engine/*.py` since step 82). It imports
 # no subpackage, no okf or skills module and no entry module. The `core`, `llm`, `context` and
-# `handlers` contracts above forbid `fsm_llm.engine`, so the lower layers never import it. What
-# waits for step 95: the `layers` contract replaces these lists, and `engine -> okf_bridge` (a
-# later move into `engine/`) is not an edge yet.
+# `handlers` contracts above forbid `fsm_llm.engine`, so the lower layers never import it. Step 83
+# moved `okf_bridge` into `engine/`: it is the engine's one module on `okf` (one ignore line below),
+# and two contracts at the end of this file keep it isolated both ways. What waits for step 95: the
+# `layers` contract replaces these lists.
 [importlinter:contract:engine-imports-no-subpackage-or-okf-or-skills]
 name = fsm_llm.engine imports no subpackage, okf, skills or entry module
 type = forbidden
@@ -248,16 +231,18 @@ forbidden_modules =
     fsm_llm.agent_skills
     fsm_llm.agent_skills_cli
     fsm_llm.agents
-    fsm_llm.cli_support
     fsm_llm.eval
     fsm_llm.monitor
     fsm_llm.okf
-    fsm_llm.okf_cli
     fsm_llm.reasoning
     fsm_llm.runner
     fsm_llm.synthesis
     fsm_llm.testing
     fsm_llm.workflows
+ignore_imports =
+    # permanent (D-033): the bridge between memory, plain FSMs and OKF is the one engine module
+    # that reads `okf` (the engine layer sits above it); every other engine module stays forbidden.
+    fsm_llm.engine.okf_bridge -> fsm_llm.okf
 
 # Step 79 (pipeline.py split into the layer package `engine/turn/`): the per-turn engine sits
 # below the conversation manager (`engine/fsm`, which builds a `MessagePipeline`), the `API`
@@ -338,3 +323,92 @@ forbidden_modules =
     fsm_llm.engine.fsm
     fsm_llm.engine.kinds
     fsm_llm.engine.turn
+
+# Step 83 (okf.py became the layer package `okf/`, `okf_bridge.py` moved into `engine/`, the okf
+# text helpers moved to the kernel module `text.py`; D-032, D-033). `okf` (L3) reads the kernel,
+# `core` (`OKFError`) and `security`; it imports no engine, llm, context or handlers module, no
+# peer layer (`skills`) and no subpackage. ONE named debt: the `export` subcommand of the CLI calls
+# `bundle_from_memory_entries`, which lives in `engine/okf_bridge.py` (it needs `handlers`).
+[importlinter:contract:okf-imports-no-engine-or-higher-layer]
+name = fsm_llm.okf imports no engine, llm, context, skills or subpackage module
+type = forbidden
+source_modules =
+    fsm_llm.okf
+forbidden_modules =
+    fsm_llm.agent_skills
+    fsm_llm.agent_skills_cli
+    fsm_llm.agents
+    fsm_llm.context
+    fsm_llm.engine
+    fsm_llm.eval
+    fsm_llm.handlers
+    fsm_llm.llm
+    fsm_llm.monitor
+    fsm_llm.reasoning
+    fsm_llm.runner
+    fsm_llm.synthesis
+    fsm_llm.testing
+    fsm_llm.workflows
+ignore_imports =
+    # retired by: step 95 (the `layers` contract decides: exempt the `*.cli` entry modules, or move
+    # `bundle_from_memory_entries` down into `okf/`); the CLI is an entry point that composes layers.
+    fsm_llm.okf.cli -> fsm_llm.engine.okf_bridge
+
+# Step 83: `text` and `cli_support` are kernel leaves: they read the standard library, `constants`
+# and (`cli_support` only) `env`, never a layer package, a subpackage or an entry module. This is
+# why `cli_support` left the forbidden lists of the layer contracts above (D-033).
+[importlinter:contract:kernel-leaves-import-no-layer]
+name = fsm_llm.text and fsm_llm.cli_support import no layer package, subpackage or entry module
+type = forbidden
+source_modules =
+    fsm_llm.text
+    fsm_llm.cli_support
+forbidden_modules =
+    fsm_llm.agent_skills
+    fsm_llm.agent_skills_cli
+    fsm_llm.agents
+    fsm_llm.context
+    fsm_llm.core
+    fsm_llm.engine
+    fsm_llm.eval
+    fsm_llm.handlers
+    fsm_llm.llm
+    fsm_llm.monitor
+    fsm_llm.okf
+    fsm_llm.reasoning
+    fsm_llm.runner
+    fsm_llm.synthesis
+    fsm_llm.testing
+    fsm_llm.workflows
+
+# Step 83: the OKF bridge sits in the engine layer (it needs `handlers`) but is isolated from the
+# rest of the engine in both directions: it imports no engine peer, and no engine peer imports it.
+# The second contract is what keeps the engine off `okf` (the ignore line of the engine contract
+# above hides the bridge's own `okf` edge, so a chain through the bridge would otherwise be missed).
+[importlinter:contract:engine-okf-bridge-imports-no-engine-peer]
+name = fsm_llm.engine.okf_bridge imports no engine peer
+type = forbidden
+source_modules =
+    fsm_llm.engine.okf_bridge
+forbidden_modules =
+    fsm_llm.engine.api
+    fsm_llm.engine.builders
+    fsm_llm.engine.classification
+    fsm_llm.engine.fsm
+    fsm_llm.engine.kinds
+    fsm_llm.engine.session
+    fsm_llm.engine.turn
+
+[importlinter:contract:engine-imports-no-okf-bridge]
+name = no engine peer imports fsm_llm.engine.okf_bridge
+type = forbidden
+source_modules =
+    fsm_llm.engine.api
+    fsm_llm.engine.builders
+    fsm_llm.engine.classification
+    fsm_llm.engine.fsm
+    fsm_llm.engine.kinds
+    fsm_llm.engine.session
+    fsm_llm.engine.turn
+forbidden_modules =
+    fsm_llm.engine.okf_bridge

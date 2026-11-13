@@ -74,7 +74,7 @@ The library is organized into five pillars. Each one is a collapsible section.
 <summary><b>3. Knowledge Bundles and Agent Skills</b></summary>
 <p>
 
-- **Open Knowledge Format (OKF)**: `fsm_llm.okf` reads, searches, validates and writes OKF bundles (a directory of markdown files with YAML frontmatter). `fsm_llm.okf_bridge.create_okf_handler()` puts capped concept summaries into a plain FSM's context. `fsm_llm.agents` adds read-only OKF tools, a read-only memory backend and bundle exporters. `fsm-llm-okf` runs it from the shell. This follows OKF v0.2 (SPEC.md at commit ad30107, pre-1.0 and mutable).
+- **Open Knowledge Format (OKF)**: `fsm_llm.okf` reads, searches, validates and writes OKF bundles (a directory of markdown files with YAML frontmatter). `fsm_llm.engine.okf_bridge.create_okf_handler()` puts capped concept summaries into a plain FSM's context. `fsm_llm.agents` adds read-only OKF tools, a read-only memory backend and bundle exporters. `fsm-llm-okf` runs it from the shell. This follows OKF v0.2 (SPEC.md at commit ad30107, pre-1.0 and mutable).
 - **Agent Skills**: `fsm_llm.agent_skills` reads folders with a `SKILL.md` from the paths you name (the open standard at agentskills.io as read on 2026-10-23, unversioned and mutable). `fsm_llm.agents.create_skill_tools` gives an agent three read-only tools (`skill_list`, `skill_load`, `skill_read`), and `fsm-llm-skills` validates, lists and shows them.
 - **Untrusted by design**: bundle and skill text reaches a model only as capped, control-stripped tool output (or labelled summaries), never as a tool description, instruction or persona. Nothing in a bundle or skill folder is executed, and `allowed-tools` is reported, not enforced.
 </p>
@@ -539,7 +539,7 @@ fsm_llm/
 │   ├── context/               # Context cleaning, compaction, filtering and redaction
 │   ├── engine/classification.py, session.py, builders.py   # Classifier, session store, API/FSMManager builders
 │   ├── security/, constants.py   # Key filtering, path confinement, limits
-│   ├── okf.py, okf_bridge.py, okf_cli.py   # Open Knowledge Format
+│   ├── okf/, text.py                       # Open Knowledge Format, text helpers (okf_bridge is engine/okf_bridge.py)
 │   ├── agent_skills.py, agent_skills_cli.py   # Agent Skills (read-only)
 │   ├── frontmatter.py         # The one YAML frontmatter loader
 │   ├── reasoning/             # 9 strategies as stacked FSMs

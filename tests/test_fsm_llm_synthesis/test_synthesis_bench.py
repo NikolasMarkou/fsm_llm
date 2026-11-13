@@ -1227,7 +1227,7 @@ UNPINNED_CORE = {
     "src/fsm_llm/llm/providers/litellm.py": "the one module that imports litellm: `wire_spy` of the bench script wraps its `completion` binding (step 73 of plan d454fd62 moved it out of `llm/__init__.py`)",
     "src/fsm_llm/logging.py": "library logging",
     "src/fsm_llm/core/transition_evaluator.py": "the engine's transition rules",
-    "src/fsm_llm/okf.py": "text caps shared with every package",
+    "src/fsm_llm/okf/__init__.py": "text caps and the OKF helpers shared with every package (facade, read through what the pinned files import; step 83 of plan d454fd62 made it a package, D-032)",
     "src/fsm_llm/core/definitions/schema.py": "leaf core module read by the pinned core/verify modules",
     "src/fsm_llm/core/state_kinds.py": "the engine's kind registry (leaf, read by the pinned core/verify/flow.py)",
     "src/fsm_llm/security/__init__.py": "key filters shared with every package (facade)",

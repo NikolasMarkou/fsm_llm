@@ -612,8 +612,8 @@ class TestLayering:
     def test_importing_fsm_llm_loads_none_of_the_skills_or_okf_modules(self) -> None:
         _isolated(
             "import sys, fsm_llm\n"
-            "mods = ('frontmatter', 'okf', 'okf_cli', 'okf_bridge', 'agent_skills', "
-            "'agent_skills_cli', 'cli_support')\n"
+            "mods = ('frontmatter', 'text', 'okf', 'okf.cli', 'engine.okf_bridge', "
+            "'agent_skills', 'agent_skills_cli', 'cli_support')\n"
             "bad = [m for m in mods if f'fsm_llm.{m}' in sys.modules]\n"
             "assert not bad, bad\n"
         )
