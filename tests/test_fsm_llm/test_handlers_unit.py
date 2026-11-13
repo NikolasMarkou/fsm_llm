@@ -302,7 +302,7 @@ class TestExecuteHandlersDeepCopyDeferral:
         hs.register_handler(NeverRunHandler(name="never1", priority=10))
         hs.register_handler(NeverRunHandler(name="never2", priority=20))
 
-        with patch("fsm_llm.handlers.copy.deepcopy", wraps=copy.deepcopy) as spy:
+        with patch("fsm_llm.handlers.system.copy.deepcopy", wraps=copy.deepcopy) as spy:
             result = hs.execute_handlers(
                 HandlerTiming.PRE_PROCESSING, "s1", None, {"existing": True}
             )
@@ -319,7 +319,7 @@ class TestExecuteHandlersDeepCopyDeferral:
         guard), vs. handlers registered but all failing their own filter."""
         hs = HandlerSystem()
 
-        with patch("fsm_llm.handlers.copy.deepcopy", wraps=copy.deepcopy) as spy:
+        with patch("fsm_llm.handlers.system.copy.deepcopy", wraps=copy.deepcopy) as spy:
             result = hs.execute_handlers(
                 HandlerTiming.PRE_PROCESSING, "s1", None, {"existing": True}
             )
@@ -335,7 +335,7 @@ class TestExecuteHandlersDeepCopyDeferral:
         hs.register_handler(NeverRunHandler(name="never", priority=10))
         hs.register_handler(AlwaysRunHandler(name="runs", priority=20, result={"x": 1}))
 
-        with patch("fsm_llm.handlers.copy.deepcopy", wraps=copy.deepcopy) as spy:
+        with patch("fsm_llm.handlers.system.copy.deepcopy", wraps=copy.deepcopy) as spy:
             result = hs.execute_handlers(
                 HandlerTiming.PRE_PROCESSING, "s1", None, {"existing": True}
             )

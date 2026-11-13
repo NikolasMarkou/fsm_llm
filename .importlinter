@@ -223,3 +223,34 @@ forbidden_modules =
     fsm_llm.synthesis
     fsm_llm.testing
     fsm_llm.workflows
+
+# Step 77 (handlers split into the package `handlers/`, at the same dotted path because 13 examples
+# import `fsm_llm.handlers.HandlerTiming`): `handlers` sits in the engine layer (D-016: `engine :
+# handlers`, peers that import neither each other nor anything above them). Today it reads the
+# kernel (`constants`, `logging`), `core` (the errors' base, `BuildError`, `checked_key_names`) and
+# `context.commit` (`clear_keys_delta`). It imports no engine peer (`api`, `fsm`, `pipeline` and
+# `executors` import it, never the reverse) and no subpackage; the list is those peers plus every
+# module above the engine layer. Step 95 replaces it with the `layers` contract of D-016.
+[importlinter:contract:handlers-import-no-engine-peer-or-higher-layer]
+name = fsm_llm.handlers imports no engine peer or subpackage module
+type = forbidden
+source_modules =
+    fsm_llm.handlers
+forbidden_modules =
+    fsm_llm.agents
+    fsm_llm.api
+    fsm_llm.builders
+    fsm_llm.classification
+    fsm_llm.cli_support
+    fsm_llm.eval
+    fsm_llm.executors
+    fsm_llm.fsm
+    fsm_llm.monitor
+    fsm_llm.okf_bridge
+    fsm_llm.pipeline
+    fsm_llm.reasoning
+    fsm_llm.runner
+    fsm_llm.session
+    fsm_llm.synthesis
+    fsm_llm.testing
+    fsm_llm.workflows

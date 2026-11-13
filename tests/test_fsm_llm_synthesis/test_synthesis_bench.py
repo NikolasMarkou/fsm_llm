@@ -1220,7 +1220,7 @@ UNPINNED_CORE = {
     "src/fsm_llm/core/definitions/__init__.py": "the engine's models (facade, read through what the pinned files import)",
     "src/fsm_llm/core/verify/__init__.py": "the validator's import surface (facade, read through what the pinned files import)",
     "src/fsm_llm/core/expressions/__init__.py": "the engine's JsonLogic (is_missing; facade, read through what the pinned files import)",
-    "src/fsm_llm/handlers.py": "the engine's handlers",
+    "src/fsm_llm/handlers/__init__.py": "the engine's handlers (facade, read through what the pinned files import; step 77 of plan d454fd62 made it a package)",
     "src/fsm_llm/llm/__init__.py": "the one LLM layer",
     "src/fsm_llm/llm/providers/litellm.py": "the one module that imports litellm: `wire_spy` of the bench script wraps its `completion` binding (step 73 of plan d454fd62 moved it out of `llm/__init__.py`)",
     "src/fsm_llm/logging.py": "library logging",

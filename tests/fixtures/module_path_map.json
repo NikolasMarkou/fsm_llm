@@ -229,6 +229,22 @@
       "soft_equals": "fsm_llm.core.expressions.comparison"
     },
     "fsm_llm.flow_analysis": "fsm_llm.core.verify.flow",
+    "fsm_llm.handlers": {
+      "BaseHandler": "fsm_llm.handlers.base",
+      "ConditionLambda": "fsm_llm.handlers.protocol",
+      "ExecutionLambda": "fsm_llm.handlers.protocol",
+      "FSMHandler": "fsm_llm.handlers.protocol",
+      "HandlerBuilder": "fsm_llm.handlers.builder",
+      "HandlerErrorMode": "fsm_llm.handlers.protocol",
+      "HandlerExecutionError": "fsm_llm.handlers.errors",
+      "HandlerSystem": "fsm_llm.handlers.system",
+      "HandlerSystemError": "fsm_llm.handlers.errors",
+      "HandlerTiming": "fsm_llm.handlers.protocol",
+      "LambdaHandler": "fsm_llm.handlers.lambda_handler",
+      "_as_set": "fsm_llm.handlers.lambda_handler",
+      "clear_keys_on_entry": "fsm_llm.handlers.helpers",
+      "create_handler": "fsm_llm.handlers.builder"
+    },
     "fsm_llm.llm": {
       "DEFAULT_EMBEDDING_MODEL": "fsm_llm.llm.interface",
       "DEFAULT_LLM_TIMEOUT_SECONDS": "fsm_llm.llm.interface",
@@ -590,7 +606,6 @@
     "fsm_llm.executors",
     "fsm_llm.frontmatter",
     "fsm_llm.fsm",
-    "fsm_llm.handlers",
     "fsm_llm.llm.providers",
     "fsm_llm.logging",
     "fsm_llm.memory",

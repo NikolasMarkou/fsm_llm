@@ -12,23 +12,27 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-def _llm_package_sources() -> dict[str, str]:
-    """The source of every module of the `fsm_llm.llm` package, by dotted name.
+def _package_sources(package: str) -> dict[str, str]:
+    """The source of every module of the package `package`, by dotted name.
 
-    `fsm_llm.llm` is a package whose `__init__` re-exports the public names
-    (step 73 of plan d454fd62): `inspect.getsource(fsm_llm.llm)` returns only
-    that facade, so a test about "the llm code" must read each module.
+    A package whose `__init__` re-exports its public names (`fsm_llm.llm`, step 73 of
+    plan d454fd62; `fsm_llm.handlers`, step 77): `inspect.getsource(package)` returns
+    only that facade, so a test about "the code of the package" must read each module.
     """
     import importlib
     import pkgutil
 
-    import fsm_llm.llm as llm_pkg
-
-    sources = {llm_pkg.__name__: inspect.getsource(llm_pkg)}
-    for info in pkgutil.walk_packages(llm_pkg.__path__, f"{llm_pkg.__name__}."):
+    pkg = importlib.import_module(package)
+    sources = {pkg.__name__: inspect.getsource(pkg)}
+    for info in pkgutil.walk_packages(pkg.__path__, f"{pkg.__name__}."):
         module = importlib.import_module(info.name)
         sources[info.name] = inspect.getsource(module)
     return sources
+
+
+def _llm_package_sources() -> dict[str, str]:
+    """The source of every module of the `fsm_llm.llm` package, by dotted name."""
+    return _package_sources("fsm_llm.llm")
 
 
 # ── B1: JSON escape handling ──────────────────────────────────
@@ -907,16 +911,20 @@ class TestNoAsyncHandlers:
     """M1: Handler system should not have async support."""
 
     def test_no_asyncio_import(self):
-        from fsm_llm import handlers
-
-        source = inspect.getsource(handlers)
-        # asyncio should not be imported
-        assert "import asyncio" not in source
+        sources = _package_sources("fsm_llm.handlers")
+        # the package is read module by module: its facade alone holds no code
+        assert len(sources) >= 8
+        for name, source in sources.items():
+            # asyncio should not be imported
+            assert "import asyncio" not in source, name
 
     def test_no_async_execution_lambda_type(self):
-        from fsm_llm import handlers
+        import importlib
 
-        assert not hasattr(handlers, "AsyncExecutionLambda")
+        sources = _package_sources("fsm_llm.handlers")
+        assert len(sources) >= 8
+        for name in sources:
+            assert not hasattr(importlib.import_module(name), "AsyncExecutionLambda")
 
     def test_lambda_handler_no_is_async(self):
         from fsm_llm.handlers import create_handler

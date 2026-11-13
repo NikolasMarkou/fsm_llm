@@ -271,7 +271,7 @@ class TestLambdaHandlerSingleWrapSite:
     def test_one_failure_emits_one_error_record_from_handlers(
         self, mock_llm2_interface
     ):
-        """``handlers.py`` used to log the SAME failure twice.
+        """The handler system (the old ``handlers.py``) used to log the SAME failure twice.
 
         Scoped to ``fsm_llm.handlers`` on purpose: ``pipeline.py`` also logs the
         escaping error at its own layer, and that record is not this step's
@@ -298,9 +298,9 @@ class TestLambdaHandlerSingleWrapSite:
             logger.disable("fsm_llm")
             logger.remove(sink_id)
 
-        from_handlers = [r for r in records if r["name"] == "fsm_llm.handlers"]
+        from_handlers = [r for r in records if r["name"].startswith("fsm_llm.handlers")]
         assert len(from_handlers) == 1, (
-            f"expected exactly 1 handlers.py error record for 1 failure, got "
+            f"expected exactly 1 handlers error record for 1 failure, got "
             f"{len(from_handlers)}:\n"
             + "\n---\n".join(str(r["message"]) for r in from_handlers)
         )

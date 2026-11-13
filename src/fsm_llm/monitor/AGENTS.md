@@ -103,7 +103,7 @@ Error mapping (`_raise_http`, used by the FSM, workflow, and agent routes): `Key
 - `validate_preset_id` rejects `..`, absolute paths, and anything resolving outside `examples/`. `find_examples_dir` looks at `Path(__file__).resolve().parents[3] / "examples"`; None in a wheel install.
 - `OTELExporter` must not register a global tracer provider. Callers must hold a reference to it while enabled.
 - `__main__` enables library logging; a library object (manager, server import) must never flip global loguru state (D-008). Embedders running `uvicorn fsm_llm.monitor.server:app` call `setup_logging()` themselves.
-- Core interaction: an attached monitor handler makes the core deep-copy the context at each handled timing, so a context value that cannot be deep-copied raises `TypeError` (core `handlers.py` D-025) only when the monitor is attached.
+- Core interaction: an attached monitor handler makes the core deep-copy the context at each handled timing, so a context value that cannot be deep-copied raises `TypeError` (core `handlers/system.py` D-025) only when the monitor is attached.
 - Frontend: build HTML with `esc()` on every interpolated value; element ids and `data-action` names must match across `templates/index.html`, `static/app.js`, and `static/pages/`; the API key lives only in `sessionStorage` or memory, never in URLs. `flows.json` is hand-maintained.
 
 ## Dependencies

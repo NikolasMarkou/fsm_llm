@@ -57,7 +57,7 @@ Two builders produce structured XML-like prompts, plus the Pass-1 builder slot:
 
 Security: XML tag sanitization, CDATA wrapping for JSON, token budget management.
 
-### Handler System (`handlers.py`)
+### Handler System (`handlers/`)
 
 Plugin architecture with 8 timing points. Handlers self-determine execution via state/context conditions, execute in priority order, with configurable error isolation (`"continue"` or `"raise"`). Critical handlers always raise on error.
 
