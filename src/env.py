@@ -28,7 +28,11 @@ def load_env(
         - *override*: ``False`` (default) sets only the variables the process
           does not have, so the process environment always wins over the file;
           ``True`` lets the file replace a variable that is already set. A
-          variable that is set to an empty string counts as set.
+          variable the process holds as an empty or whitespace-only string
+          counts as NOT set, the rule ``llm.resolve_model`` applies to
+          ``LLM_MODEL`` (a blank value carries nothing): the file fills it
+          when the file gives it a non-blank value, and leaves it as it is
+          otherwise.
         - Returns the ``Path`` read, or ``None`` when *path* is ``None`` and no
           file was found (nothing is set then).
         - Raises ``FileNotFoundError`` when an explicit *path* is not an
@@ -51,5 +55,17 @@ def load_env(
         target = Path(os.fspath(path))
         if not target.is_file():
             raise FileNotFoundError(f"No .env file at {target}")
+    # DECISION plan-2026-11-12T073150-d454fd62/D-024
+    # A blank process variable does not block the file. python-dotenv's
+    # ``override=False`` keeps an empty value, so ``LLM_MODEL=""`` in the shell
+    # plus ``--env-file`` naming a model failed with "No LLM model is set"
+    # while ``resolve_model`` treats that blank as unset (review gate 1,
+    # concern 8). Do NOT special-case ``LLM_MODEL`` (one rule for every
+    # variable), and do NOT drop a blank variable the file gives no value.
+    if not override:
+        for name, value in dotenv.dotenv_values(target, encoding="utf-8").items():
+            held = os.environ.get(name)
+            if held is not None and not held.strip() and value and value.strip():
+                os.environ[name] = value
     dotenv.load_dotenv(dotenv_path=target, override=override, encoding="utf-8")
     return target

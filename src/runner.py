@@ -56,7 +56,8 @@ def main(
     Interface contract: *model* is the ``--model`` flag (``None``: use env
     ``LLM_MODEL``); *env_file* is the ``--env-file`` path (``None``: read no
     file). The model is *model*, then the process environment (which an
-    *env_file* fills only where the process has no value), else
+    *env_file* fills only where the process has no value; a blank value
+    counts as none), else
     ``ModelNotConfiguredError``. Raises ``FileNotFoundError`` for a missing
     *env_file*. Returns the exit code.
     """

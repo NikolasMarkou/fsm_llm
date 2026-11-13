@@ -92,7 +92,8 @@ def add_env_file(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="PATH",
         help="read this .env file into the environment first (a variable the "
-        "process already has wins; no .env file is read without this flag)",
+        "process already has wins, a blank one counts as unset; no .env file is "
+        "read without this flag)",
     )
 
 
@@ -100,8 +101,9 @@ def apply_env_file(args: argparse.Namespace) -> None:
     """Read ``args.env_file`` (when given) with ``fsm_llm.load_env``.
 
     Interface contract: a no-op when the flag is absent or ``None``. The file
-    fills only variables the process has not set, so the model precedence is the
-    ``--model`` flag, the process environment, the file, then
+    fills only variables the process has not set (an empty or whitespace-only
+    one counts as not set, as for ``resolve_model``), so the model precedence
+    is the ``--model`` flag, the process environment, the file, then
     ``ModelNotConfiguredError``. Raises ``FileNotFoundError`` for a path that is
     not a file; every caller turns it into one stderr line and exit 1.
     """

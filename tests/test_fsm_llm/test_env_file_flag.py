@@ -239,6 +239,18 @@ class TestModelFromTheFile:
         assert code == 0, err
         assert _model_line(out) == "MODEL=from-process"
 
+    @pytest.mark.parametrize("blank", ["", "  "])
+    def test_a_blank_process_model_does_not_block_the_file(
+        self, cli, tmp_path, monkeypatch, capsys, blank
+    ):
+        env_file = _write_env(tmp_path)
+        monkeypatch.setenv("LLM_MODEL", blank)
+        code, out, err = _call(
+            cli, ["--env-file", str(env_file)], monkeypatch, capsys, probe=True
+        )
+        assert code == 0, err
+        assert _model_line(out) == "MODEL=from-file"
+
     def test_the_model_flag_beats_the_file(self, cli, tmp_path, monkeypatch, capsys):
         env_file = _write_env(tmp_path)
         code, out, err = _call(

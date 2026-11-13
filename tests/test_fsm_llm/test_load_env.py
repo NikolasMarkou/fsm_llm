@@ -75,6 +75,44 @@ class TestLoadEnv:
         fsm_llm.load_env(env_file, override=True)
         assert os.environ["LLM_MODEL"] == "from-file"
 
+    @pytest.mark.parametrize("blank", ["", "   ", "\t"])
+    def test_a_blank_variable_counts_as_unset_and_the_file_fills_it(
+        self, clean_env, monkeypatch, blank
+    ):
+        """Review gate 1, concern 8: ``resolve_model`` treats a blank ``LLM_MODEL``
+        as unset, so ``load_env`` must not let one block the file."""
+        env_file = clean_env / "my.env"
+        env_file.write_text("LLM_MODEL=from-file\nLOAD_ENV_PROBE=1\n", encoding="utf-8")
+        monkeypatch.setenv("LLM_MODEL", blank)
+        monkeypatch.setenv("LOAD_ENV_PROBE", blank)
+        fsm_llm.load_env(env_file)
+        assert os.environ["LLM_MODEL"] == "from-file"
+        assert os.environ["LOAD_ENV_PROBE"] == "1"
+
+    def test_a_blank_variable_stays_when_the_file_gives_it_no_value(
+        self, clean_env, monkeypatch
+    ):
+        env_file = clean_env / "my.env"
+        env_file.write_text(
+            "LLM_MODEL=\nLOAD_ENV_PROBE\nOTHER_PROBE=1\n", encoding="utf-8"
+        )
+        monkeypatch.setenv("LLM_MODEL", "")
+        monkeypatch.setenv("LOAD_ENV_PROBE", " ")
+        monkeypatch.delenv("OTHER_PROBE", raising=False)
+        fsm_llm.load_env(env_file)
+        assert os.environ["LLM_MODEL"] == ""
+        assert os.environ["LOAD_ENV_PROBE"] == " "
+        assert os.environ["OTHER_PROBE"] == "1"
+
+    def test_a_non_blank_variable_still_wins_over_the_file(
+        self, clean_env, monkeypatch
+    ):
+        env_file = clean_env / "my.env"
+        env_file.write_text("LLM_MODEL=from-file\n", encoding="utf-8")
+        monkeypatch.setenv("LLM_MODEL", " keep ")
+        fsm_llm.load_env(env_file)
+        assert os.environ["LLM_MODEL"] == " keep "
+
     def test_override_is_keyword_only(self, clean_env):
         env_file = clean_env / "my.env"
         env_file.write_text("LLM_MODEL=from-file\n", encoding="utf-8")
@@ -231,6 +269,15 @@ class TestRunnerModelAndEnvFile:
         _, from_file = _run_main(env_file=str(env_file))
         assert from_file.call_args.kwargs["model"] == "env-model"
 
+    def test_a_blank_process_model_does_not_block_the_env_file(
+        self, clean_env, monkeypatch
+    ):
+        env_file = clean_env / "my.env"
+        env_file.write_text("LLM_MODEL=file-model\n", encoding="utf-8")
+        monkeypatch.setenv("LLM_MODEL", "")
+        _, from_file = _run_main(env_file=str(env_file))
+        assert from_file.call_args.kwargs["model"] == "file-model"
+
     def test_the_model_argument_beats_the_env_file(self, clean_env):
         env_file = clean_env / "my.env"
         env_file.write_text("LLM_MODEL=file-model\n", encoding="utf-8")
@@ -351,6 +398,20 @@ class TestFsmLlmCommand:
         )
         assert proc.returncode == 1, proc.stderr
         assert _MESSAGE not in proc.stderr
+
+    def test_a_blank_shell_model_does_not_block_the_env_file(self, tmp_path):
+        """``LLM_MODEL=""`` in the shell plus ``--env-file`` naming a model: the
+        run reaches the missing FSM file instead of 'No LLM model is set'."""
+        env_file = tmp_path / "my.env"
+        env_file.write_text("LLM_MODEL=ollama_chat/never-called\n", encoding="utf-8")
+        proc = _cli(
+            ["--fsm", str(tmp_path / "missing.json"), "--env-file", str(env_file)],
+            tmp_path,
+            LLM_MODEL="",
+        )
+        assert proc.returncode == 1, proc.stderr
+        assert _MESSAGE not in proc.stderr
+        assert "missing.json" in proc.stderr
 
     def test_a_missing_env_file_exits_1_with_one_line(self, tmp_path):
         proc = _cli(

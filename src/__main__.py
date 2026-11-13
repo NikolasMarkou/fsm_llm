@@ -54,8 +54,8 @@ Optional switches
 
 ``--env-file`` *(run only)*
     Read this ``.env`` file into the environment first (``fsm_llm.load_env``).
-    A variable the process already has is not replaced. No ``.env`` file is
-    read unless you pass this flag.
+    A variable the process already has is not replaced (a blank one counts
+    as unset). No ``.env`` file is read unless you pass this flag.
 
 ``--history-size, -n``
     Circular buffer length for conversation memory
