@@ -247,7 +247,7 @@ class TestStep9LeafDeadCode:
     def test_prompt_helper_params_are_gone(self):
         import inspect
 
-        from fsm_llm.prompts import BasePromptBuilder
+        from fsm_llm.context.layout import BasePromptBuilder
 
         est = inspect.signature(BasePromptBuilder._estimate_token_count).parameters
         assert list(est) == ["self", "text"]

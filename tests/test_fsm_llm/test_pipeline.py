@@ -41,6 +41,10 @@ from unittest.mock import patch
 
 from fsm_llm.api import API
 from fsm_llm.context import clean_context_keys
+from fsm_llm.context.layout import (
+    DataExtractionPromptBuilder,
+    ResponseGenerationPromptBuilder,
+)
 from fsm_llm.core.coerce import coerce_confidence, coerce_float, coerce_int
 from fsm_llm.core.definitions import (
     ContextScope,
@@ -60,10 +64,6 @@ from fsm_llm.llm import LLMInterface
 from fsm_llm.llm.providers.embedder import _embedding_vectors
 from fsm_llm.logging import logger
 from fsm_llm.pipeline import MessagePipeline
-from fsm_llm.prompts import (
-    DataExtractionPromptBuilder,
-    ResponseGenerationPromptBuilder,
-)
 from fsm_llm.testing import MockLLM2Interface
 from tests.test_fsm_llm.support import _TWO_STATE
 

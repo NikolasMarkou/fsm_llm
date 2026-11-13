@@ -18,13 +18,13 @@ from fsm_llm.classification import Classifier
 from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     ClassificationError,
+    ClassificationPromptConfig,
     ClassificationSchema,
     FieldExtractionRequest,
     IntentDefinition,
     ResponseGenerationRequest,
 )
 from fsm_llm.llm import LiteLLMInterface
-from fsm_llm.prompts import ClassificationPromptConfig
 
 OLLAMA_MODEL = "ollama_chat/qwen3.5:4b"
 

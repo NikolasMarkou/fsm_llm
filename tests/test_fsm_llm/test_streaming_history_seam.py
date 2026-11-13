@@ -579,7 +579,7 @@ class TestStreamPromptIsPlainText:
         )
 
     def test_builder_default_matches_explicit_json_variant(self):
-        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+        from fsm_llm.context.layout import ResponseGenerationPromptBuilder
 
         b = ResponseGenerationPromptBuilder()
         assert b._build_response_format_section() == b._build_response_format_section(

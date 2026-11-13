@@ -16,6 +16,16 @@ from pydantic import ValidationError
 
 from fsm_llm.api import API
 from fsm_llm.constants import MAX_CONTEXT_FILTER_DEPTH
+from fsm_llm.context.layout import (
+    BasePromptBuilder,
+    BasePromptConfig,
+    DataExtractionPromptBuilder,
+    FieldExtractionPromptBuilder,
+    FieldExtractionPromptConfig,
+    HistoryManagementStrategy,
+    ResponseGenerationPromptBuilder,
+    ResponsePromptConfig,
+)
 from fsm_llm.core.definitions import (
     ContextScope,
     Conversation,
@@ -26,16 +36,6 @@ from fsm_llm.core.definitions import (
     State,
     Transition,
     TransitionCondition,
-)
-from fsm_llm.prompts import (
-    BasePromptBuilder,
-    BasePromptConfig,
-    DataExtractionPromptBuilder,
-    FieldExtractionPromptBuilder,
-    FieldExtractionPromptConfig,
-    HistoryManagementStrategy,
-    ResponseGenerationPromptBuilder,
-    ResponsePromptConfig,
 )
 from tests.test_fsm_llm.support import (
     _a3_api,
@@ -1085,7 +1085,7 @@ class TestExtractionSourceSections:
     the context and history a message-free bulk extraction reads."""
 
     def _sections(self, context, *, instance_data=None, exchanges=None):
-        from fsm_llm.prompts import DataExtractionPromptBuilder
+        from fsm_llm.context.layout import DataExtractionPromptBuilder
 
         instance = _make_instance(context_data=instance_data, exchanges=exchanges)
         return "\n".join(
@@ -1149,7 +1149,7 @@ class TestClassificationPromptWithoutUserMessage:
         )
 
     def test_system_prompt_asks_for_a_classification_of_the_context(self):
-        from fsm_llm.prompts import build_classification_system_prompt
+        from fsm_llm.context.layout import build_classification_system_prompt
 
         prompt = build_classification_system_prompt(self._schema(), user_message=None)
         assert "Analyze the user's message" not in prompt
@@ -1158,10 +1158,8 @@ class TestClassificationPromptWithoutUserMessage:
         assert "- act: A tool call is needed" in prompt
 
     def test_multi_intent_rule_does_not_mention_a_message(self):
-        from fsm_llm.prompts import (
-            ClassificationPromptConfig,
-            build_classification_system_prompt,
-        )
+        from fsm_llm.context.layout import build_classification_system_prompt
+        from fsm_llm.core.definitions import ClassificationPromptConfig
 
         config = ClassificationPromptConfig(multi_intent=True)
         prompt = build_classification_system_prompt(
@@ -1172,7 +1170,7 @@ class TestClassificationPromptWithoutUserMessage:
 
     @pytest.mark.parametrize("message", ["", "hello"])
     def test_a_string_message_keeps_the_default_prompt(self, message):
-        from fsm_llm.prompts import build_classification_system_prompt
+        from fsm_llm.context.layout import build_classification_system_prompt
 
         default = build_classification_system_prompt(self._schema())
         assert (
@@ -1182,7 +1180,7 @@ class TestClassificationPromptWithoutUserMessage:
         assert "Analyze the user's message and classify it" in default
 
     def test_context_block_lead_line(self):
-        from fsm_llm.prompts import build_classification_context_block
+        from fsm_llm.context.layout import build_classification_context_block
 
         context = {"purpose": "Decide the next step", "data": {"task": "sum"}}
         block = build_classification_context_block(context, user_message=None)
@@ -1194,7 +1192,7 @@ class TestClassificationPromptWithoutUserMessage:
         assert build_classification_context_block(context, user_message="") == default
 
     def test_context_block_still_filters_secrets(self):
-        from fsm_llm.prompts import build_classification_context_block
+        from fsm_llm.context.layout import build_classification_context_block
 
         block = build_classification_context_block(
             {"data": {"task": "sum", "password": "hunter2", "_grant": "g"}},
@@ -1478,7 +1476,7 @@ class TestContextScopeReachesPass2Prompt:
     def test_builder_context_arg_is_optional_and_defaults_to_none(self):
         import inspect
 
-        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+        from fsm_llm.context.layout import ResponseGenerationPromptBuilder
 
         param = inspect.signature(
             ResponseGenerationPromptBuilder.build_response_prompt
@@ -1546,8 +1544,8 @@ class TestExtractedDataSectionIsFiltered:
     def test_datetime_value_no_longer_drops_the_extracted_data_section(self):
         import datetime
 
+        from fsm_llm.context.layout import ResponseGenerationPromptBuilder
         from fsm_llm.core.definitions import FSMContext, FSMDefinition, FSMInstance
-        from fsm_llm.prompts import ResponseGenerationPromptBuilder
 
         fsm = FSMDefinition(**_correction_fsm())
         state = fsm.states["profile"]
@@ -1591,7 +1589,7 @@ class TestStep03_1:
         assert "running shoes" not in cap.system()
 
     def test_a3_history_lines_are_capped(self):
-        from fsm_llm.prompts import build_classification_context_block
+        from fsm_llm.context.layout import build_classification_context_block
 
         long_turn = "q" * 400 + "TAILMARK"
         api, conv_id = _a3_api(_a3_extraction_fsm())
@@ -1812,7 +1810,7 @@ class TestStep14HistoryUnit:
     @pytest.mark.parametrize("max_messages", [0, 1, 2, 3, 5, 10])
     @pytest.mark.parametrize("length", [0, 1, 4, 11])
     def test_fetch_window_is_max_history_messages_exchanges(self, max_messages, length):
-        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+        from fsm_llm.context.layout import ResponseGenerationPromptBuilder
 
         instance = _step14_history_instance(length)
         conversation = instance.context.conversation
@@ -1832,7 +1830,7 @@ class TestStep14HistoryUnit:
     def test_token_budget_renders_more_than_an_exchange_window_would(self):
         import math
 
-        from fsm_llm.prompts import (
+        from fsm_llm.context.layout import (
             HistoryManagementStrategy,
             ResponseGenerationPromptBuilder,
             ResponsePromptConfig,

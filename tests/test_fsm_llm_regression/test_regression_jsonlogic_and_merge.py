@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from fsm_llm.context.layout import BasePromptBuilder, BasePromptConfig
 from fsm_llm.core.definitions import FSMContext, FSMDefinition, State
 from fsm_llm.core.expressions import (
     evaluate_logic,
@@ -12,7 +13,6 @@ from fsm_llm.core.expressions import (
     less,
     less_or_equal,
 )
-from fsm_llm.prompts import BasePromptBuilder, BasePromptConfig
 
 
 def _frame_definition(name: str) -> FSMDefinition:

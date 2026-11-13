@@ -206,7 +206,7 @@ class TestDoublePeriodinPrompt:
 
     def test_no_double_period_in_response_task(self):
         """_build_response_task_section should not contain '..'."""
-        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+        from fsm_llm.context.layout import ResponseGenerationPromptBuilder
 
         builder = ResponseGenerationPromptBuilder()
         sections = builder._build_response_task_section()

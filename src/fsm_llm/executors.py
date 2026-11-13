@@ -55,7 +55,7 @@ Interface contract:
 
 This is an engine module: it imports core modules and never ``pipeline.py``
 (the pipeline imports it; the one helper both need, the cut-off record, lives in
-``context.py``). ``fsm_llm/__init__.py`` does not import it; the registry is
+``context/commit.py``). ``fsm_llm/__init__.py`` does not import it; the registry is
 internal until the kind extension point is public (roadmap C10).
 """
 

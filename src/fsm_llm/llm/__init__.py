@@ -51,7 +51,7 @@ This module integrates with the broader fsm-llm system:
 
 - **FSMManager** (`fsm.py`) orchestrates the overall FSM execution and calls these
   methods at appropriate points in the conversation flow.
-- **PromptBuilder** (`prompts.py`) constructs the specialized prompts for each pass
+- **PromptBuilder** (`context/layout/`) constructs the specialized prompts for each pass
   based on current FSM state, context, and conversation history.
 - **API** (`api.py`) provides the high-level interface that developers use, internally
   coordinating between FSM management and LLM communication.

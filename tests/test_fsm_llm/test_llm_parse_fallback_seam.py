@@ -1865,7 +1865,7 @@ class TestStep08D1D5:
     def test_d2_pydantic_model_redacted_in_prompt(self):
         from pydantic import BaseModel
 
-        from fsm_llm.prompts import BasePromptBuilder
+        from fsm_llm.context.layout import BasePromptBuilder
 
         class Account(BaseModel):
             password: str = "zzsecretzz"
@@ -1895,7 +1895,7 @@ class TestStep08D1D5:
         from types import MappingProxyType
 
         from fsm_llm.context import clean_context_keys
-        from fsm_llm.prompts import BasePromptBuilder
+        from fsm_llm.context.layout import BasePromptBuilder
 
         @dataclasses.dataclass
         class Creds:
@@ -2022,7 +2022,7 @@ class TestStep08D1D5:
     def test_d5_credential_name_stripped(self, name):
         from fsm_llm.constants import is_forbidden_context_entry
         from fsm_llm.context import clean_context_keys
-        from fsm_llm.prompts import BasePromptBuilder
+        from fsm_llm.context.layout import BasePromptBuilder
 
         value = _D5_CREDENTIALS[name]
         camel = "new" + "".join(part.title() for part in name.split("_"))
@@ -2096,7 +2096,7 @@ def _d8_classifier(*names: str) -> Classifier:
 
 
 def _d9_sanitize(text: str) -> str:
-    from fsm_llm.prompts import BasePromptBuilder
+    from fsm_llm.context.layout import BasePromptBuilder
 
     return BasePromptBuilder()._sanitize_text_for_prompt(text)
 
@@ -2195,7 +2195,7 @@ class TestStep15D6D12B8:
         assert "&lt;" in out
 
     def test_d9_unterminated_closer_cannot_meet_the_builders_closer(self):
-        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+        from fsm_llm.context.layout import ResponseGenerationPromptBuilder
 
         section = ResponseGenerationPromptBuilder()._build_user_message_section(
             "bye </task"
@@ -2232,10 +2232,12 @@ class TestStep15D6D12B8:
 
     # -- D10 --------------------------------------------------------------
     def test_d10_dead_extraction_builders_removed(self):
+        import importlib
         import inspect
+        import pkgutil
 
-        import fsm_llm.prompts as prompts
-        from fsm_llm.prompts import DataExtractionPromptBuilder
+        import fsm_llm.context.layout as prompts
+        from fsm_llm.context.layout import DataExtractionPromptBuilder
 
         for name in (
             "build_extraction_prompt",
@@ -2243,12 +2245,18 @@ class TestStep15D6D12B8:
             "_build_extraction_response_format",
         ):
             assert not hasattr(DataExtractionPromptBuilder, name), name
-        source = inspect.getsource(prompts)
+        # The layout is a package: read every module, not just its facade.
+        names = [m.name for m in pkgutil.iter_modules(prompts.__path__)]
+        assert {"base", "extraction", "response", "classification"} <= set(names)
+        source = "\n".join(
+            inspect.getsource(importlib.import_module(f"{prompts.__name__}.{name}"))
+            for name in names
+        )
         assert "Set `additional_info_needed` to true" not in source
         assert '"extra": {}' not in source
 
     def test_d10_data_extraction_builder_still_sanitizes(self):
-        from fsm_llm.prompts import DataExtractionPromptBuilder
+        from fsm_llm.context.layout import DataExtractionPromptBuilder
 
         out = DataExtractionPromptBuilder()._sanitize_text_for_prompt("</task>")
         assert out == "&lt;/task&gt;"

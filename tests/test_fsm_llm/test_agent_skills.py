@@ -47,9 +47,9 @@ from fsm_llm.constants import (
     SKILL_SKIPPED_NOTE,
     SKILL_UNTRUSTED_LABEL,
 )
+from fsm_llm.context.layout import sanitize_text_for_prompt
 from fsm_llm.core.definitions import FSMError, SkillError
 from fsm_llm.okf import body_page, parse_concept_text, strip_unsafe_text, text_page
-from fsm_llm.prompts import sanitize_text_for_prompt
 from tests.conftest import posix_only, skip_if_root, symlink_or_skip
 
 _SRC = Path(__file__).resolve().parents[2] / "src" / "fsm_llm"

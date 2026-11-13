@@ -20,15 +20,15 @@ import pytest
 from fsm_llm.api import API
 from fsm_llm.constants import PROVENANCE_METADATA_KEY
 from fsm_llm.context import ContextCompactor
-from fsm_llm.core.definitions import FieldExtractionConfig, FSMError, LLMResponseError
-from fsm_llm.handlers import HandlerExecutionError, HandlerTiming, create_handler
-from fsm_llm.logging import logger
-from fsm_llm.prompts import (
+from fsm_llm.context.layout import (
     FieldExtractionPromptBuilder,
     FieldExtractionPromptConfig,
     ResponseGenerationPromptBuilder,
     ResponsePromptConfig,
 )
+from fsm_llm.core.definitions import FieldExtractionConfig, FSMError, LLMResponseError
+from fsm_llm.handlers import HandlerExecutionError, HandlerTiming, create_handler
+from fsm_llm.logging import logger
 from fsm_llm.session import FileSessionStore, SessionState
 from fsm_llm.testing import MockLLM2Interface
 

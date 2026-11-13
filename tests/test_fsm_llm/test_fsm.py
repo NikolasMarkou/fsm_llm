@@ -30,6 +30,10 @@ import threading
 from typing import Any
 
 from fsm_llm.api import API
+from fsm_llm.context.layout import (
+    DataExtractionPromptBuilder,
+    ResponseGenerationPromptBuilder,
+)
 from fsm_llm.core.definitions import (
     ClassificationResult,
     DataExtractionResponse,
@@ -47,10 +51,6 @@ from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.fsm import FSMManager
 from fsm_llm.llm import LLMInterface
 from fsm_llm.llm.json_extraction import extract_json_from_text
-from fsm_llm.prompts import (
-    DataExtractionPromptBuilder,
-    ResponseGenerationPromptBuilder,
-)
 from fsm_llm.validator import FSMValidator
 from fsm_llm.visualizer import visualize_fsm_ascii
 from tests.test_fsm_llm.support import (

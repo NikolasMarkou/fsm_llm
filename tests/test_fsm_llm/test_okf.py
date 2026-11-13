@@ -42,6 +42,7 @@ from fsm_llm.constants import (
     OKF_SUMMARY_FIELD_CHARS,
     OKF_SUMMARY_MAX_ITEMS,
 )
+from fsm_llm.context.layout import ResponseGenerationPromptBuilder
 from fsm_llm.core.definitions import FSMError, OKFError
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.okf import (
@@ -59,7 +60,6 @@ from fsm_llm.okf import (
 )
 from fsm_llm.okf_bridge import bundle_from_memory_entries, create_okf_handler
 from fsm_llm.okf_cli import main as okf_cli_main
-from fsm_llm.prompts import ResponseGenerationPromptBuilder
 from fsm_llm.security import resolve_within
 from fsm_llm.testing import MockLLM2Interface
 from tests.conftest import cpu_timer, symlink_or_skip

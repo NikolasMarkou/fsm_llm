@@ -95,6 +95,13 @@
       "loop_field_context_keys": "fsm_llm.agents.fsm_definitions._loop"
     },
     "fsm_llm.codes": "fsm_llm.core.codes",
+    "fsm_llm.context": {
+      "ContextCompactor": "fsm_llm.context.compactor",
+      "clean_context_keys": "fsm_llm.context.compactor",
+      "commit_with_key_rollback": "fsm_llm.context.commit",
+      "record_cut_off": "fsm_llm.context.commit",
+      "was_cut_off": "fsm_llm.context.commit"
+    },
     "fsm_llm.definitions": {
       "ASCII_IDENTIFIER_PATTERN": "fsm_llm.core.definitions.limits",
       "AdvanceResult": "fsm_llm.core.definitions.results",
@@ -272,6 +279,29 @@
       "tool_exchange": "fsm_llm.llm.interface"
     },
     "fsm_llm.ollama": "fsm_llm.llm.ollama",
+    "fsm_llm.prompts": {
+      "BasePromptBuilder": "fsm_llm.context.layout.base",
+      "BasePromptConfig": "fsm_llm.context.layout.base",
+      "DataExtractionPromptBuilder": "fsm_llm.context.layout.extraction",
+      "DataExtractionPromptConfig": "fsm_llm.context.layout.extraction",
+      "FieldExtractionPromptBuilder": "fsm_llm.context.layout.extraction",
+      "FieldExtractionPromptConfig": "fsm_llm.context.layout.extraction",
+      "HistoryManagementStrategy": "fsm_llm.context.layout.base",
+      "ResponseGenerationPromptBuilder": "fsm_llm.context.layout.response",
+      "ResponsePromptConfig": "fsm_llm.context.layout.response",
+      "_CLASSIFICATION_CONTEXT_BUILDER": "fsm_llm.context.layout.classification",
+      "_HISTORY_LINE_CHARS": "fsm_llm.context.layout.base",
+      "_OVER_BUDGET": "fsm_llm.context.layout.base",
+      "_TOO_DEEP": "fsm_llm.context.layout.base",
+      "_cap_history_line": "fsm_llm.context.layout.base",
+      "_confidence_property": "fsm_llm.context.layout.classification",
+      "_history_messages": "fsm_llm.context.layout.base",
+      "_reasoning_property": "fsm_llm.context.layout.classification",
+      "build_classification_context_block": "fsm_llm.context.layout.classification",
+      "build_classification_json_schema": "fsm_llm.context.layout.classification",
+      "build_classification_system_prompt": "fsm_llm.context.layout.classification",
+      "sanitize_text_for_prompt": "fsm_llm.context.layout.classification"
+    },
     "fsm_llm.reasoning.reasoning_modes": {
       "ALL_REASONING_FSMS": "fsm_llm.reasoning.reasoning_modes.registry",
       "_IMPORTANT_NO_QUESTIONS": "fsm_llm.reasoning.reasoning_modes._phrases",
@@ -461,7 +491,7 @@
     "fsm_llm.classification",
     "fsm_llm.cli_support",
     "fsm_llm.constants",
-    "fsm_llm.context",
+    "fsm_llm.context.layout",
     "fsm_llm.core",
     "fsm_llm.core.definitions",
     "fsm_llm.core.expressions",
@@ -500,7 +530,6 @@
     "fsm_llm.okf_bridge",
     "fsm_llm.okf_cli",
     "fsm_llm.pipeline",
-    "fsm_llm.prompts",
     "fsm_llm.reasoning",
     "fsm_llm.reasoning.__main__",
     "fsm_llm.reasoning.__version__",

@@ -16,9 +16,15 @@ from fsm_llm.constants import (
     MAX_MULTI_INTENTS,
     METADATA_KEY_CLASSIFICATION_RESULTS,
 )
+from fsm_llm.context.layout import (
+    DataExtractionPromptBuilder,
+    FieldExtractionPromptBuilder,
+    ResponseGenerationPromptBuilder,
+)
 from fsm_llm.core.definitions import (
     ClassificationError,
     ClassificationExtractionConfig,
+    ClassificationPromptConfig,
     ClassificationResponseError,
     ClassificationResult,
     ClassificationSchema,
@@ -40,12 +46,6 @@ from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.llm.interface import _completion_response
 from fsm_llm.logging import logger
 from fsm_llm.pipeline import MessagePipeline
-from fsm_llm.prompts import (
-    ClassificationPromptConfig,
-    DataExtractionPromptBuilder,
-    FieldExtractionPromptBuilder,
-    ResponseGenerationPromptBuilder,
-)
 from tests.test_fsm_llm.support import (
     _A4_TRANSITION_KEY,
     _a3_api,

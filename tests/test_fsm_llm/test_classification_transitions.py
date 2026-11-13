@@ -48,9 +48,15 @@ from fsm_llm.constants import (
     METADATA_KEY_TRANSITION_CLASSIFICATION,
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
 )
+from fsm_llm.context.layout import (
+    DataExtractionPromptBuilder,
+    ResponseGenerationPromptBuilder,
+    build_classification_system_prompt,
+)
 from fsm_llm.core.definitions import (
     ClassificationError,
     ClassificationExtractionConfig,
+    ClassificationPromptConfig,
     ClassificationResponseError,
     ClassificationResult,
     ClassificationSchema,
@@ -78,12 +84,6 @@ from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.handlers import HandlerSystem, HandlerTiming
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.pipeline import MessagePipeline
-from fsm_llm.prompts import (
-    ClassificationPromptConfig,
-    DataExtractionPromptBuilder,
-    ResponseGenerationPromptBuilder,
-    build_classification_system_prompt,
-)
 from fsm_llm.testing import MockLLM2Interface
 from tests.test_fsm_llm.support import (
     _A4_TRANSITION_KEY,

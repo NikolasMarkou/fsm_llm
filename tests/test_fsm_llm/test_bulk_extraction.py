@@ -638,7 +638,7 @@ class TestRejectedCorrectionsReachPassTwo:
         )
 
     def test_a_forbidden_name_key_is_filtered_out_of_the_block(self):
-        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+        from fsm_llm.context.layout import ResponseGenerationPromptBuilder
 
         with _PassTwoSpy(_correction_fsm()) as p:
             instance = p.api.fsm_manager.instances[p.cid]
@@ -659,7 +659,7 @@ class TestRejectedCorrectionsReachPassTwo:
         assert "favorite_color" in block
 
     def test_a_block_holding_only_forbidden_keys_is_omitted(self):
-        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+        from fsm_llm.context.layout import ResponseGenerationPromptBuilder
 
         with _PassTwoSpy(_correction_fsm()) as p:
             instance = p.api.fsm_manager.instances[p.cid]
@@ -671,7 +671,7 @@ class TestRejectedCorrectionsReachPassTwo:
         assert _BLOCK not in prompt
 
     def test_a_value_cannot_break_out_of_the_block(self):
-        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+        from fsm_llm.context.layout import ResponseGenerationPromptBuilder
 
         with _PassTwoSpy(_correction_fsm()) as p:
             instance = p.api.fsm_manager.instances[p.cid]
@@ -691,7 +691,7 @@ class TestRejectedCorrectionsReachPassTwo:
         previous_state, user_message, plain_text_response, context) still binds."""
         import inspect
 
-        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+        from fsm_llm.context.layout import ResponseGenerationPromptBuilder
 
         params = list(
             inspect.signature(
@@ -1011,7 +1011,7 @@ class TestFailedBulkIsSurfacedToPassTwo:
         """The prompt builder renders the failure line AND the refused block
         when both hold (the builder-level combination; a single scripted turn
         cannot refuse a value in one bulk call and fail in another)."""
-        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+        from fsm_llm.context.layout import ResponseGenerationPromptBuilder
         from tests.test_fsm_llm.support import _correction_fsm, _PassTwoSpy
 
         with _PassTwoSpy(_correction_fsm()) as p:

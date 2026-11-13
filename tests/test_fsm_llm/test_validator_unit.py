@@ -3190,7 +3190,7 @@ class TestStep8LoadTimeValidation:
     )
     def test_load_verdict_equals_extraction_time_verdict(self, prompt_config):
         """Single source: load rejects exactly what the dataclass rejects."""
-        from fsm_llm.prompts import ClassificationPromptConfig
+        from fsm_llm.core.definitions import ClassificationPromptConfig
 
         try:
             ClassificationPromptConfig(**prompt_config)

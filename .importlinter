@@ -132,7 +132,6 @@ forbidden_modules =
     fsm_llm.okf_bridge
     fsm_llm.okf_cli
     fsm_llm.pipeline
-    fsm_llm.prompts
     fsm_llm.reasoning
     fsm_llm.runner
     fsm_llm.session
@@ -174,7 +173,43 @@ forbidden_modules =
     fsm_llm.okf_bridge
     fsm_llm.okf_cli
     fsm_llm.pipeline
-    fsm_llm.prompts
+    fsm_llm.reasoning
+    fsm_llm.runner
+    fsm_llm.session
+    fsm_llm.synthesis
+    fsm_llm.testing
+    fsm_llm.validator
+    fsm_llm.visualizer
+    fsm_llm.workflows
+
+# Step 74 (prompts split into `context/layout/`, `clear_keys_delta` moved down from `handlers`
+# into `context/commit.py`): the layer package `context` (L3) reads the kernel (`constants`,
+# `logging`), `core` and `llm` (the compactor's summary call) and nothing above it: it imports no
+# engine module (`handlers` was the one edge, retired by the move), no peer layer (`okf`,
+# `skills`) and no subpackage. Same module list as the `llm` contract above, which step 95
+# replaces together with this one by the `layers` contract of D-016.
+[importlinter:contract:context-imports-no-higher-layer]
+name = fsm_llm.context imports no engine, okf, skills or subpackage module
+type = forbidden
+source_modules =
+    fsm_llm.context
+forbidden_modules =
+    fsm_llm.agent_skills
+    fsm_llm.agent_skills_cli
+    fsm_llm.agents
+    fsm_llm.api
+    fsm_llm.builders
+    fsm_llm.classification
+    fsm_llm.cli_support
+    fsm_llm.eval
+    fsm_llm.executors
+    fsm_llm.fsm
+    fsm_llm.handlers
+    fsm_llm.monitor
+    fsm_llm.okf
+    fsm_llm.okf_bridge
+    fsm_llm.okf_cli
+    fsm_llm.pipeline
     fsm_llm.reasoning
     fsm_llm.runner
     fsm_llm.session

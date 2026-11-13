@@ -76,7 +76,7 @@ import math
 import numbers
 import threading
 import traceback
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable
 from enum import Enum
 from typing import Any, Protocol
 
@@ -84,6 +84,7 @@ from typing import Any, Protocol
 # Local imports
 # --------------------------------------------------------------
 from .constants import MAX_TIMED_HANDLER_STRAGGLERS
+from .context.commit import clear_keys_delta
 from .core.definitions import BuildError, FSMError, checked_key_names
 from .logging import logger
 
@@ -1021,27 +1022,6 @@ def create_handler(name: str = "LambdaHandler") -> HandlerBuilder:
     :rtype: HandlerBuilder
     """
     return HandlerBuilder(name)
-
-
-# DECISION plan-2026-10-01T093600-944e2692/D-051
-# Do NOT put a key that is already unset (absent or None) in the delta: a round
-# with nothing to clear must return an empty delta, which agents'
-# make_fresh_keys_handler relies on (an older stash survives a round that
-# produced nothing). Do NOT add a "keep" predicate here: the forced-verdict
-# rule is agent semantics and stays in agents.
-def clear_keys_delta(keys: Iterable[str], context: Mapping[str, Any]) -> dict[str, Any]:
-    """The handler delta that clears ``keys`` from ``context``.
-
-    Contract (callers: :func:`clear_keys_on_entry`, ``ContextCompactor``,
-    agents ``make_fresh_keys_handler`` and the meta-builder): returns ``{key: None}``
-    (core deletes the key) for each key in ``keys``, in order, whose value in
-    ``context`` is not None; a key that is absent or None is left out, so
-    nothing to clear gives ``{}``. Raises ``ValueError`` when ``keys`` is not
-    a collection of ``str`` names (``None`` or a bare ``str``,
-    ``definitions.checked_key_names``).
-    """
-    names = checked_key_names(keys, argument="keys")
-    return {key: None for key in names if context.get(key) is not None}
 
 
 def clear_keys_on_entry(

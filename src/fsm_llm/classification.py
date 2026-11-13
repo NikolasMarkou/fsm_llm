@@ -16,6 +16,11 @@ from .constants import (
     MAX_MULTI_INTENTS,
     RESERVED_LLM_CALL_KWARGS,
 )
+from .context.layout import (
+    build_classification_context_block,
+    build_classification_json_schema,
+    build_classification_system_prompt,
+)
 from .core.coerce import coerce_confidence
 from .core.definitions import (
     ClassificationError,
@@ -42,11 +47,6 @@ from .llm import (
 )
 from .llm.json_extraction import extract_json_from_text
 from .logging import logger
-from .prompts import (
-    build_classification_context_block,
-    build_classification_json_schema,
-    build_classification_system_prompt,
-)
 
 # Type alias for intent handler functions
 HandlerFn = Callable[[str, dict[str, str | None]], Any]
@@ -322,7 +322,7 @@ class Classifier:
         # classifier cache key: one Classifier serves every turn of a state, so
         # a constructor input would either go stale or bust the content-keyed
         # cache on every turn. Do NOT render context text without the shared
-        # prompts.py sanitizer/filter: history and data are user-controlled.
+        # context/layout sanitizer/filter: history and data are user-controlled.
         if user_message is None:
             # Built per call: the cached prompts are the message wording, and
             # a message-free call is the rarer path.

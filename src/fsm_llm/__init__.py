@@ -36,6 +36,20 @@ from .classification import (
 from .context import ContextCompactor
 
 # --------------------------------------------------------------
+# Enhanced Prompt Building Components
+# --------------------------------------------------------------
+from .context.layout import (
+    DataExtractionPromptBuilder,
+    DataExtractionPromptConfig,
+    FieldExtractionPromptBuilder,
+    FieldExtractionPromptConfig,
+    ResponseGenerationPromptBuilder,
+    ResponsePromptConfig,
+    build_classification_json_schema,
+    build_classification_system_prompt,
+)
+
+# --------------------------------------------------------------
 # Core Definitions and Models
 # --------------------------------------------------------------
 from .core.definitions import (
@@ -154,20 +168,6 @@ from .memory import (
     DEFAULT_BUFFERS,
     DEFAULT_HIDDEN_BUFFERS,
     WorkingMemory,
-)
-
-# --------------------------------------------------------------
-# Enhanced Prompt Building Components
-# --------------------------------------------------------------
-from .prompts import (
-    DataExtractionPromptBuilder,
-    DataExtractionPromptConfig,
-    FieldExtractionPromptBuilder,
-    FieldExtractionPromptConfig,
-    ResponseGenerationPromptBuilder,
-    ResponsePromptConfig,
-    build_classification_json_schema,
-    build_classification_system_prompt,
 )
 
 # --------------------------------------------------------------

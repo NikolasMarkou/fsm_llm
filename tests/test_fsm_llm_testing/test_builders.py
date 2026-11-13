@@ -16,9 +16,9 @@ import pytest
 
 import fsm_llm.testing as public
 from fsm_llm import API
+from fsm_llm.context.layout import ResponseGenerationPromptBuilder
 from fsm_llm.core.codes import CompletionKind
 from fsm_llm.core.definitions import CompletionResponse, ModelToolCall
-from fsm_llm.prompts import ResponseGenerationPromptBuilder
 from fsm_llm.testing import (
     ScriptedLLM,
     final_reply,

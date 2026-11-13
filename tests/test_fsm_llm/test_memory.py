@@ -1734,7 +1734,7 @@ class TestStep12Accessors:
         ],
     )
     def test_sanitize_text_for_prompt_matches_the_builder(self, text):
-        from fsm_llm.prompts import (
+        from fsm_llm.context.layout import (
             DataExtractionPromptBuilder,
             ResponseGenerationPromptBuilder,
             sanitize_text_for_prompt,

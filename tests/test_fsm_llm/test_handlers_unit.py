@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fsm_llm import API
+from fsm_llm.context.commit import clear_keys_delta
 from fsm_llm.core.definitions import FSMDefinition, FSMError, State, Transition
 from fsm_llm.handlers import (
     BaseHandler,
@@ -27,7 +28,6 @@ from fsm_llm.handlers import (
     HandlerSystemError,
     HandlerTiming,
     LambdaHandler,
-    clear_keys_delta,
     clear_keys_on_entry,
     create_handler,
 )

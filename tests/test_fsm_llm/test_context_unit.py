@@ -17,13 +17,13 @@ import pytest
 from fsm_llm.api import API
 from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
 from fsm_llm.context import ContextCompactor, clean_context_keys
+from fsm_llm.context.layout import BasePromptBuilder
 from fsm_llm.core.definitions import (
     FSMDefinition,
     State,
     Transition,
     TransitionCondition,
 )
-from fsm_llm.prompts import BasePromptBuilder
 from fsm_llm.security.names import _token_value_is_credential
 from fsm_llm.security.shapes import _looks_like_credential_value
 from tests.conftest import cpu_timer
@@ -824,7 +824,7 @@ class TestPasswordKeySpace:
         whose `strip_forbidden_keys` defaults to False), so it is the surface
         where the step-8 under-match actually leaked.
         """
-        from fsm_llm.prompts import BasePromptBuilder
+        from fsm_llm.context.layout import BasePromptBuilder
 
         builder = BasePromptBuilder()
         context = {
@@ -919,7 +919,7 @@ class TestInternalPrefixCaseInsensitivity:
         This one is prompt-affecting: an unfiltered internal key leaks
         straight into the LLM prompt.
         """
-        from fsm_llm.prompts import DataExtractionPromptBuilder
+        from fsm_llm.context.layout import DataExtractionPromptBuilder
 
         builder = DataExtractionPromptBuilder()
         data = dict.fromkeys(MIXED_CASE_INTERNAL_KEYS, "v")
@@ -1028,7 +1028,7 @@ class TestNestedContextCleaning:
 
     def test_container_past_the_depth_bound_is_dropped_not_passed_through(self):
         """Fail-CLOSED at the limit: burying a secret must not bypass the filter."""
-        from fsm_llm.context import MAX_CONTEXT_FILTER_DEPTH
+        from fsm_llm.constants import MAX_CONTEXT_FILTER_DEPTH
 
         data: dict = {"password": "leaf-secret"}
         for _ in range(MAX_CONTEXT_FILTER_DEPTH + 2):
@@ -1039,7 +1039,7 @@ class TestNestedContextCleaning:
     def test_payload_just_inside_the_depth_bound_is_still_filtered(self):
         """Vacuity guard for the test above: the bound is not so tight that
         everything is dropped."""
-        from fsm_llm.context import MAX_CONTEXT_FILTER_DEPTH
+        from fsm_llm.constants import MAX_CONTEXT_FILTER_DEPTH
 
         data: dict = {"password": "leaf-secret", "keep": "yes"}
         for _ in range(MAX_CONTEXT_FILTER_DEPTH - 2):
@@ -1079,7 +1079,7 @@ class TestNestedContextCleaning:
     def test_falsy_non_string_keys_agree_with_the_prompt_filter(self):
         """The two filters disagreed on exactly this input: `clean_context_keys`
         dropped `0`, `_filter_context_for_security` kept it."""
-        from fsm_llm.prompts import BasePromptBuilder
+        from fsm_llm.context.layout import BasePromptBuilder
 
         data = {0: "zero-key-val", "name": "Alice"}
         cleaned = clean_context_keys(dict(data), "test-conv", strip_forbidden_keys=True)
@@ -4855,7 +4855,7 @@ class TestDigitSuffixedCredentialNames:
         assert is_forbidden_context_entry("order_key_2", "ORD-1") is False
 
     def test_every_filter_path_drops_the_digit_suffixed_entries(self):
-        from fsm_llm.prompts import DataExtractionPromptBuilder
+        from fsm_llm.context.layout import DataExtractionPromptBuilder
 
         data = {
             "private_key2": _AUDIT_PEM,
@@ -4968,7 +4968,7 @@ class TestContainerValuesUnderAmbiguousKeyNames:
         assert is_forbidden_context_entry("order_key", value) is False
 
     def test_every_filter_path_drops_the_container_entries(self):
-        from fsm_llm.prompts import DataExtractionPromptBuilder
+        from fsm_llm.context.layout import DataExtractionPromptBuilder
 
         data = {
             "partner_key": [_AUDIT_STRIPE],
@@ -5311,7 +5311,7 @@ class TestStep08_1:
     )
     def test_d5_new_credential_name_shapes_stripped(self, key, value):
         from fsm_llm.constants import is_forbidden_context_entry
-        from fsm_llm.prompts import BasePromptBuilder
+        from fsm_llm.context.layout import BasePromptBuilder
 
         assert is_forbidden_context_entry(key, value), key
         assert is_forbidden_context_entry(key), f"{key} (name-only caller)"
@@ -5404,7 +5404,7 @@ class TestStep08_2:
     def test_d3_cycle_elsewhere_prompt_filter_returns(self):
         """Guard (passes on the pre-step source): the prompt walker keeps its
         own truncating node budget and returns normally (a bounded view)."""
-        from fsm_llm.prompts import BasePromptBuilder
+        from fsm_llm.context.layout import BasePromptBuilder
 
         data, _ = _d3_2_cycle_elsewhere()
         result = BasePromptBuilder()._filter_context_for_security(data)
@@ -5501,7 +5501,7 @@ class TestStep08_2:
 
     def test_d5_policy_tail_container_recursed_inner_keys_filtered(self):
         from fsm_llm.context import clean_context_keys
-        from fsm_llm.prompts import BasePromptBuilder
+        from fsm_llm.context.layout import BasePromptBuilder
 
         data = {
             "cookie_settings": {"analytics": True},

@@ -49,6 +49,12 @@ from .context import (
     was_cut_off,
 )
 from .context.filtering import filter_context_tree
+from .context.layout import (
+    DataExtractionPromptBuilder,
+    FieldExtractionPromptBuilder,
+    ResponseGenerationPromptBuilder,
+    sanitize_text_for_prompt,
+)
 from .core.coerce import coerce_float, coerce_int, parse_bool_word
 from .core.definitions import (
     CONTEXT_KEY_CUT_OFF,
@@ -83,12 +89,6 @@ from .handlers import HandlerExecutionError, HandlerSystem, HandlerTiming
 from .llm import LLMInterface, implements_complete
 from .llm.ollama import is_ollama_model
 from .logging import logger
-from .prompts import (
-    DataExtractionPromptBuilder,
-    FieldExtractionPromptBuilder,
-    ResponseGenerationPromptBuilder,
-    sanitize_text_for_prompt,
-)
 
 # --- Type coercion dispatch for field extraction validation ---
 
@@ -1236,7 +1236,7 @@ class MessagePipeline:
                 # skip-guard below meant a retry never re-ran. Precedence note: if a
                 # handler delta touched one of `committed`'s keys, the rollback wins.
                 # The snapshot is SHALLOW on purpose: see `commit_with_key_rollback`
-                # (context.py), which holds the BOUNDARY note and does the commit.
+                # (context/commit.py), which holds the BOUNDARY note and does the commit.
                 commit_with_key_rollback(
                     instance.context,
                     committed,

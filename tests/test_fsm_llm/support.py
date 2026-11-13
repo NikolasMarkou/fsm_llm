@@ -275,8 +275,8 @@ def _d3_aliased(levels: int) -> dict[str, Any]:
 def _d3_walkers() -> dict[str, Any]:
     """The three context filters, each as ``data -> filtered``."""
     from fsm_llm.context import clean_context_keys
+    from fsm_llm.context.layout import BasePromptBuilder
     from fsm_llm.fsm import _strip_internal_mapping
-    from fsm_llm.prompts import BasePromptBuilder
 
     builder = BasePromptBuilder()
     return {

@@ -200,7 +200,7 @@ class TestMissingCommasInPrompts:
         Retargeted to the live Pass-2 format: the Pass-1 builder this pinned
         was dead code and was deleted (plan-2026-09-21T203800-8a03483a/D-041).
         """
-        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+        from fsm_llm.context.layout import ResponseGenerationPromptBuilder
 
         sections = ResponseGenerationPromptBuilder()._build_response_format_section()
 
@@ -212,7 +212,7 @@ class TestMissingCommasInPrompts:
 
     def test_response_format_closing_tag_standalone(self):
         """The </response_format> closing tag should be its own list element."""
-        from fsm_llm.prompts import ResponseGenerationPromptBuilder
+        from fsm_llm.context.layout import ResponseGenerationPromptBuilder
 
         sections = ResponseGenerationPromptBuilder()._build_response_format_section()
 
@@ -558,7 +558,7 @@ class TestGetRecentOverRetrieval:
 
     def test_get_recent_not_double_multiplied(self):
         """_build_enhanced_history_section should not pass max_history_messages * 2 to get_recent."""
-        from fsm_llm.prompts import BasePromptBuilder
+        from fsm_llm.context.layout import BasePromptBuilder
 
         source = inspect.getsource(BasePromptBuilder._build_enhanced_history_section)
         assert "max_history_messages * 2" not in source, (
@@ -754,14 +754,14 @@ class TestForbiddenContextPatterns:
 
     def test_forbidden_patterns_are_imported_outside_constants(self):
         """FORBIDDEN_CONTEXT_PATTERNS must be used somewhere outside constants.py."""
-        import fsm_llm.context as ctx_mod
+        import fsm_llm.context.compactor as ctx_mod
 
         source = inspect.getsource(ctx_mod)
         # D-019: the shared decision point is now `is_forbidden_context_entry`,
         # which wraps COMPILED_FORBIDDEN_CONTEXT_PATTERNS and adds the value
-        # layer. The intent is unchanged -- context.py must not re-implement it.
+        # layer. The intent is unchanged -- compactor.py must not re-implement it.
         assert "is_forbidden_context_entry" in source, (
-            "is_forbidden_context_entry must be imported and used in context.py"
+            "is_forbidden_context_entry must be imported and used in context/compactor.py"
         )
 
     def test_forbidden_patterns_warn_on_sensitive_keys(self):

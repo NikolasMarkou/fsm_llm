@@ -19,7 +19,7 @@ from fsm_llm.agents.constants import (
     StopReason,
     ToolRunStatus,
 )
-from fsm_llm.handlers import clear_keys_delta
+from fsm_llm.context.commit import clear_keys_delta
 from fsm_llm.logging import logger
 
 from .definitions import AgentStep, EvaluationResult, ToolCall

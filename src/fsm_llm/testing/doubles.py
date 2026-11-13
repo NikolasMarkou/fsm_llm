@@ -46,7 +46,7 @@ from fsm_llm.llm.usage import _meter_of, _Metered
 
 from .builders import final_reply
 
-#: Where the response prompt names the state it answers for (``prompts.py``).
+#: Where the response prompt names the state it answers for (``context/layout/response.py``).
 _CURRENT_STATE_TAG = re.compile(r"<current_state>([^<]+)</current_state>")
 
 #: One item of the ``ScriptedLLM`` reply queue: text, a response or an exception to raise.
@@ -62,7 +62,7 @@ def state_in_prompt(prompt: str) -> str | None:
     """The state id a response prompt was written for, or ``None``.
 
     Interface contract (the one reader of the ``current_state`` tag; the
-    response prompt builder in ``fsm_llm.prompts`` writes it, a drift test
+    response prompt builder in ``fsm_llm.context.layout.response`` writes it, a drift test
     pins the two together):
         - ``prompt``: the ``system_prompt`` of a ``ResponseGenerationRequest``
           (any text is accepted).

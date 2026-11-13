@@ -32,6 +32,14 @@ from .constants import (
 )
 from .context import commit_with_key_rollback
 from .context.filtering import filter_context_tree
+from .context.layout import (
+    DataExtractionPromptBuilder,
+    DataExtractionPromptConfig,
+    FieldExtractionPromptBuilder,
+    FieldExtractionPromptConfig,
+    ResponseGenerationPromptBuilder,
+    ResponsePromptConfig,
+)
 from .core.definitions import (
     AdvanceResult,
     Conversation,
@@ -54,14 +62,6 @@ from .handlers import HandlerErrorMode, HandlerSystem, HandlerTiming
 from .llm import LLMInterface
 from .logging import logger
 from .pipeline import MessagePipeline
-from .prompts import (
-    DataExtractionPromptBuilder,
-    DataExtractionPromptConfig,
-    FieldExtractionPromptBuilder,
-    FieldExtractionPromptConfig,
-    ResponseGenerationPromptBuilder,
-    ResponsePromptConfig,
-)
 
 # --------------------------------------------------------------
 # Caller-visible context filter
@@ -1369,7 +1369,7 @@ class FSMManager:
                 # point. Precedence note: if a handler delta touched one of
                 # `context_update`'s own keys, the rollback wins.
                 # The snapshot is SHALLOW on purpose: see
-                # `commit_with_key_rollback` (context.py), which holds the
+                # `commit_with_key_rollback` (context/commit.py), which holds the
                 # BOUNDARY note and does the commit.
                 commit_with_key_rollback(
                     instance.context,

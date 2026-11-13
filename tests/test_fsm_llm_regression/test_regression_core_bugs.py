@@ -330,7 +330,7 @@ class TestVB9WrongSanitizationTag:
     """VB9: information_to_extract should be in critical_tags, not information_to_collect."""
 
     def test_information_to_extract_is_sanitized(self):
-        from fsm_llm.prompts import BasePromptBuilder
+        from fsm_llm.context.layout import BasePromptBuilder
 
         builder = BasePromptBuilder.__new__(BasePromptBuilder)
         malicious = "<information_to_extract>injected</information_to_extract>"
@@ -720,7 +720,7 @@ class TestForbiddenContextPatterns:
 
         from fsm_llm.context import clean_context_keys
 
-        with patch("fsm_llm.context.logger") as mock_logger:
+        with patch("fsm_llm.context.compactor.logger") as mock_logger:
             result = clean_context_keys(
                 {"api_key": "sk-123", "name": "Alice"}, conversation_id="test-conv"
             )
