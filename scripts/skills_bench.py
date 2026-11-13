@@ -57,14 +57,15 @@ ARMS = {
 }  # fmt: skip
 BLOCKS = {"B0": ("hint_on", "hint_off"), "B1": ("native_4b", "native_4b_hint_off", "react_9b", "native_9b")}  # fmt: skip
 #: Pin name -> file now. The names are the keys of the frozen manifests in
-#: scripts/bench_data (written before src/fsm_llm/ moved to src/). The files
-#: moved, and `src/constants.py` was edited afterwards (plan d454fd62 step 15),
-#: so a `run` refuses by design for the manifests that pin it (the bench is
-#: registered and was never run).
+#: scripts/bench_data (written when the package lived in src/fsm_llm/). The
+#: package left that directory for src/ and came back (plan d454fd62 step 62),
+#: so name and path agree again; `src/fsm_llm/constants.py` was edited in
+#: between (plan d454fd62 step 15), so a `run` refuses by design for the
+#: manifests that pin it (the bench is registered and was never run).
 SRC_PINS = {
-    "src/fsm_llm/agent_skills.py": "src/agent_skills.py",
-    "src/fsm_llm/agents/agent_skills.py": "src/agents/agent_skills.py",
-    "src/fsm_llm/constants.py": "src/constants.py",
+    "src/fsm_llm/agent_skills.py": "src/fsm_llm/agent_skills.py",
+    "src/fsm_llm/agents/agent_skills.py": "src/fsm_llm/agents/agent_skills.py",
+    "src/fsm_llm/constants.py": "src/fsm_llm/constants.py",
 }
 PINNED_AT_RUN = ("fixture_hash", "trials", "model", "limits", "src_sha256", "arm")
 PRIMARY_N = 10  # read-needed questions per arm

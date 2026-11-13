@@ -145,7 +145,7 @@ class TestPyTypedFiles:
     @pytest.mark.parametrize("package", ["fsm_llm"])
     def test_py_typed_exists(self, package):
         """M-3: py.typed must exist in the top-level package."""
-        src_dir = os.path.join(os.path.dirname(__file__), "..", "..", "src")
+        src_dir = os.path.join(os.path.dirname(__file__), "..", "..", "src", "fsm_llm")
         py_typed = os.path.join(src_dir, "py.typed")
         assert os.path.exists(py_typed), f"Missing py.typed in {package}"
 
@@ -280,7 +280,9 @@ class TestConsolidatedAll:
     def test_no_dynamic_all_extension(self):
         import pathlib
 
-        init_path = pathlib.Path(__file__).parents[2] / "src" / "__init__.py"
+        init_path = (
+            pathlib.Path(__file__).parents[2] / "src" / "fsm_llm" / "__init__.py"
+        )
         source = init_path.read_text(encoding="utf-8")
         assert source.count("__all__.extend") == 0, (
             "__all__ should not be extended dynamically"

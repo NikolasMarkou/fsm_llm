@@ -34,7 +34,7 @@ from fsm_llm.frontmatter import (
 from tests.conftest import symlink_or_skip
 
 _REPO = Path(__file__).resolve().parents[2]
-_SRC = _REPO / "src"
+_SRC = _REPO / "src" / "fsm_llm"
 _BIG = 1_000_000  # a limit that never trips
 
 

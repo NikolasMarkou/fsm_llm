@@ -40,7 +40,7 @@ from fsm_llm.testing import (
 )
 from fsm_llm.testing import assertions as assertions_module
 
-_ROOT = Path(fsm_llm.__file__).resolve().parent.parent
+_ROOT = Path(fsm_llm.__file__).resolve().parents[2]
 _GREETER = _ROOT / "examples" / "basic" / "simple_greeting" / "fsm.json"
 _GREETER_REPLIES = {
     "greeting": "Hi! How are you?",

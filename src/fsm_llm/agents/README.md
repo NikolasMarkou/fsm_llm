@@ -1,0 +1,180 @@
+# fsm_llm.agents
+
+Ready-made AI agent patterns for FSM-LLM, found at `src/fsm_llm/agents`: agents that call tools, plan, reflect, debate, vote, or hand work to other agents. It also includes a "meta-builder" that turns a plain description into an FSM, workflow, or agent definition.
+
+## What it is for
+
+An agent is an LLM that works on a task over several steps, often calling tools (your Python functions) along the way. Each pattern here is a known way to organise those steps. ReAct is the main one: think, call a tool, look at the result, repeat. Most patterns are built as an FSM-LLM finite state machine (FSM): a fixed set of states such as `think`, `act` and `conclude`, with rules for moving between them. That keeps the loop structured and bounded, which matters most with small local models. Every pattern has the same `agent.run(task)` call, which returns an answer, a success flag, a trace of tool calls, and the final context.
+
+## How it works
+
+```mermaid
+flowchart TD
+    T[agent.run task] --> B[Build an FSM for this pattern]
+    B --> A[Create an FSM-LLM API and register handlers]
+    A --> L{Loop: advance one step}
+    L --> TH[think: LLM picks a tool and its input]
+    TH --> AC[act: handler runs the tool, stores the observation]
+    AC --> L
+    TH -- done, and a tool has run --> C[conclude: LLM writes the final answer]
+    C --> R[AgentResult: answer, success, trace, final_context]
+```
+
+- The agent advances the FSM one step at a time, with no user message, until it reaches a final state (`API.run_until_terminal`). Each of these steps is message-free: no stand-in user text is added to the prompt or the history. A state with no reply instructions makes no reply call and leaves nothing in the history; only the final state speaks.
+- Tools run inside handlers (hooks that FSM-LLM calls at fixed points), not inside the LLM. A tool failure is shown to the model as an observation marked `[TOOL FAILED]` instead of crashing the run. A tool can declare a timeout (`@tool(timeout_seconds=5)`); a call that runs longer is reported as `[TOOL OUTCOME UNKNOWN]` with `tool_status` `unknown`, because the Python function keeps running in its thread and its effect may still happen.
+- Every model call goes through core FSM-LLM's LLM layer; nothing in this package talks to litellm directly. Pass `llm_interface=` to an agent and every call of the run goes to that interface (useful for tests and for metering with `usage()`).
+- Limits stop runaway loops: `max_iterations` (default 10) and `timeout_seconds` (default 300, raises `AgentTimeoutError`). In the ReAct family `max_iterations=N` counts think turns: for N >= 2 a run that never concludes gets N think turns and N - 1 tool calls (N = 1 behaves like N = 2); when it is reached the run is forced to conclude and no further tool runs. The model is still asked on the last think turn, and its own conclusion there, backed by a tool result, counts as success. The hard ceiling is three times `max_iterations` in FSM steps, enforced by core's run loop, which raises `BudgetExhaustedError`.
+- Each loop value the model produces (the tool and its input, a draft, a critique, a verdict, a plan) is asked for in its own prompt that shows the task and the results so far, and is cleared before the next round, so later rounds do not reuse the first round's text. Intermediate states write no reply; only the final state speaks.
+- The ReAct family cannot conclude before a tool has run unless the loop was forced to stop, so a small model cannot answer from memory on turn one.
+- `success` is `True` only when the run reached its goal: a real answer or at least one tool run. Planner patterns (orchestrator, ReWOO, plan and execute) must also show real executed work. A run that was forced to stop (iteration budget, three turns with no tool, a failing evaluator/checker verdict overridden at its limit, Reflexion's `max_reflections` reached without a passing evaluation, a Debate consensus forced by `num_rounds`, a final reply or extraction cut off by `max_tokens`) still returns its last answer but reports `success=False`; a genuine pass on the limit's last round is a success. `result.stop_reason` says why the run ended: `answered`, `evidence`, `max_iterations`, `forced_pass`, `stalled`, `verification_failed`, `no_result`, `gate_failed`, `ended` (the conversation was closed from outside before the run finished) or `truncated` (the last turn's reply was cut off at `max_tokens`; REWOO also reports it for a cut plan, which ran no tool). Cuts in `SelfConsistencyAgent` samples, the meta-builder artifacts, a `native_fc` tool call, a streamed reply or an earlier turn are not flagged.
+
+## Patterns
+
+| Pattern | Class | Idea |
+| --- | --- | --- |
+| ReAct | `ReactAgent` | Think, call a tool, observe, repeat, then answer |
+| ReWOO | `REWOOAgent` | Plan every tool call first (`#E1`, `#E2` refer to earlier results), run them, then answer |
+| Reflexion | `ReflexionAgent` | ReAct plus self-evaluation, reflection and retry |
+| Plan and execute | `PlanExecuteAgent` | Break the task into steps, run each, replan on failure |
+| Prompt chain | `PromptChainAgent` | A fixed series of prompts, with optional validation gates |
+| Self-consistency | `SelfConsistencyAgent` | Answer several times at different temperatures, take the majority |
+| Debate | `DebateAgent` | Proposer and critic argue, a judge decides |
+| Orchestrator | `OrchestratorAgent` | Split into subtasks and hand them to workers |
+| ADaPT | `ADaPTAgent` | Try directly; if that fails, break the task down and recurse |
+| Evaluator-optimizer | `EvaluatorOptimizerAgent` | Generate, score with your function, refine |
+| Maker-checker | `MakerCheckerAgent` | One role drafts, another reviews, revise until good |
+| Reasoning ReAct | `ReasoningReactAgent` | ReAct plus a built-in `reason` tool that runs the structured reasoning engine from `fsm_llm.reasoning` |
+| Parallel ReAct | `ParallelReactAgent` | Several tool calls per step, run in a thread pool |
+| Verified ReAct | `VerifiedReactAgent` | Check the answer with your function and retry |
+| Auto-memory ReAct | `AutoMemoryReactAgent` | Recall related memories before a run, save the exchange after |
+| Native function calling | `NativeFunctionCallingReactAgent` | Uses the provider's own tool-calling API: an FSM whose model turns are core tool-calling states |
+| Swarm | `SwarmAgent` | Agents pass the task to each other |
+| Meta-builder | `MetaBuilderAgent` | Chat about what you need, then get a validated FSM, workflow or agent definition (see the meta-builder note below) |
+
+These are the 18 names `create_agent` accepts (`react`, `rewoo`, `reflexion`, `plan_execute`, `prompt_chain`, `self_consistency`, `debate`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reasoning_react`, `parallel_react`, `verified_react`, `auto_memory`, `native_fc`, `swarm`, `meta_builder`). `AgentGraph` is not one of them: it wires agents you built into a graph with conditional edges and no cycles, and it is built with `AgentGraphBuilder().add_node(name, agent).add_edge(src, dst, condition=None).set_entry(name).build()`.
+
+`ConfiguredAgentBuilder` builds any pattern step by step instead of one wide `create_agent(...)` call: `ConfiguredAgentBuilder().set_pattern("react").add_tool(fn).set_model("ollama_chat/qwen3.5:4b").set_max_iterations(8).build()`. Setters only record and return the builder; `build()` raises `BuildError` (a `ValueError`, with `.errors` and the cause chained) for anything `create_agent` refuses. `set_option(name, value)` passes any other `create_agent` keyword; a name that repeats a named parameter (`pattern`, `tools`, `config`, `system_prompt`, ...) is refused at `build()` with the typed setter named. The `AgentConfig` is copied shallowly, so callables inside it stay shared. `AgentGraphBuilder.build()` raises `BuildError` too, and a repeated node name is an error.
+
+## Files
+
+- `base.py` - `BaseAgent`: the shared loop, limits, answer extraction, trace, structured output.
+- `react.py`, `rewoo.py`, `reflexion.py`, `plan_execute.py`, `prompt_chain.py`, `self_consistency.py`, `debate.py`, `orchestrator.py`, `adapt.py`, `evaluator_optimizer.py`, `maker_checker.py`, `reasoning_react.py`, `parallel_react.py`, `verified_react.py`, `auto_memory.py`, `native_fc.py`, `swarm.py`, `agent_graph.py` - one pattern each.
+- `fsm_definitions.py` - builds the FSM for each pattern, `native_fc` and the meta-builder included. `prompts.py` - the instructions each state gives the LLM.
+- `tools.py` - `ToolRegistry` and the `@tool` decorator (tool annotations, exact schemas, enforced timeouts). `tool_registries.py` - caching and retrying registries. `semantic_tools.py` - picks relevant tools by embedding similarity.
+- `handlers.py` - runs tools, enforces the iteration limit, and checks human approval. `hitl.py` - human approval before sensitive tools.
+- `memory_tools.py`, `semantic_memory.py`, `memory_persistence.py`, `summarization.py`, `truncation.py` - working-memory tools, long-term embedding memory, saving memory to disk, condensing old observations, shortening long tool output.
+- `okf.py` - Open Knowledge Format (OKF) for agents: `create_okf_tools(bundle)` gives four read-only tools (`okf_list`, `okf_read`, `okf_search`, `okf_links`), `OKFMemoryBackend` is a read-only memory backend for `AutoMemoryReactAgent`, and `export_semantic_memory` and `export_agent_result` write bundles. The format itself lives in core `fsm_llm.okf`.
+- `agent_skills.py` - Agent Skills for agents: `create_skill_tools(catalog)` gives three read-only tools (`skill_list`, `skill_load`, `skill_read`) over skills loaded by `fsm_llm.agent_skills`. Skill text is untrusted tool output under a fixed label; nothing in a skill is run.
+- `composition.py` - use ReAct agents as orchestrator workers; an LLM judge for the evaluator-optimizer.
+- `python_tools.py`, `sop.py` - load tools from folders of Python files (`PythonToolLoader`; `load_directory` returns a `PythonToolLoadReport` of tools and per-file errors and `from_directory` warns once per failed file; it runs those files, so trusted sources only; this is not Agent Skills); reusable task templates (three built in).
+- `mcp.py` - load tools from an MCP (Model Context Protocol) server. `remote.py` - serve an agent over HTTP, or call a remote one as a tool.
+- `meta_builder.py`, `meta_builders.py`, `meta_tools.py`, `meta_prompts.py`, `meta_output.py`, `meta_cli.py` - the meta-builder, its artifact builders (`FSMArtifactBuilder`, `WorkflowArtifactBuilder`, `AgentArtifactBuilder`: calls chain, `take_warnings()` returns and clears the warnings, `build()` validates) and its `fsm-llm-meta` command.
+- `builders.py` - `ConfiguredAgentBuilder`.
+- `definitions.py`, `constants.py`, `exceptions.py` - data models, names and defaults, errors.
+- `__init__.py`, `__main__.py`, `__version__.py` - exports and `create_agent()`, `python -m fsm_llm.agents --info`, version.
+
+## How to use it
+
+Install from a clone with `pip install -e .` (the `fsm-llm` name on PyPI belongs to a different project; the `agents` extra adds no packages). The examples below need a model: they use a local Ollama model, or set `LLM_MODEL` to any litellm model name.
+
+```python
+from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry, tool
+
+@tool
+def add(a: int, b: int) -> int:
+    """Add two numbers."""
+    return a + b
+
+registry = ToolRegistry()
+registry.register(add._tool_definition)
+
+agent = ReactAgent(tools=registry, config=AgentConfig(model="ollama_chat/qwen3.5:4b"))
+result = agent.run("What is 17 + 25?")
+print(result.answer, result.success, [c.tool_name for c in result.trace.tool_calls])
+```
+
+Or with the factory. The pattern comes first, tools can be a list of `@tool` functions, and `system_prompt` gives the agent standing instructions:
+
+```python
+from fsm_llm.agents import AgentConfig, create_agent
+agent = create_agent("react", [add], config=AgentConfig(model="ollama_chat/qwen3.5:4b"),
+                     system_prompt="Always show the sum you computed.")
+print(agent("What is 2 + 3?").answer)
+
+for chunk in agent.run_stream("What is 4 + 5?"):  # only the model's text
+    print(chunk, end="")
+```
+
+The first argument must name a pattern (matched after `strip().lower()`); anything else, such as `"debat"` or the removed form `create_agent("You are ...", tools)`, raises `ValueError` listing the patterns. Pass standing instructions as `system_prompt=`.
+
+Give an agent a knowledge bundle (a directory of markdown files with YAML frontmatter, the Open Knowledge Format, OKF v0.2, SPEC.md at commit ad30107, pre-1.0 and mutable). The four tools only read it:
+
+```python
+from fsm_llm.agents import AgentConfig, create_agent, create_okf_tools
+from fsm_llm.okf import load_bundle
+
+bundle = load_bundle("./my_bundle")          # never raises on bad content; problems are in bundle.issues
+agent = create_agent("react", create_okf_tools(bundle), config=AgentConfig(model="ollama_chat/qwen3.5:4b"))
+print(agent("What is the maximum payload size of the gateway?").answer)
+```
+
+`okf_read` returns the body in pages of at most 1,500 characters and ends a page with `next offset: N` when more follows; the model passes that number back as `offset`. Pages are sized to fit the agent loop's 2,000-character observation entry: the cap minus the wrapper built from the call's arguments minus a 24-character step allowance minus a 300-character margin for keys the model adds to its input (floor 1,000). The loop may still cut an entry when the echoed input is long (extra keys, escape-heavy ids), visible as the loop's `...[truncated` marker; `next offset` never points past what the page contains. Every tool reply starts with a fixed line saying the content is untrusted data, followed by one more fixed note when the bundle was loaded incompletely (a spent time or size limit; `OKFMemoryBackend.incomplete` shows the codes, but its recalled lines carry no note), and bundle text is never put in a tool description or in the agent's instructions. To recall from a bundle on every run, pass `OKFMemoryBackend(bundle)` as `memory=` to `AutoMemoryReactAgent`; it is read-only, so `auto_remember=True` stores nothing in it (use `export_agent_result` to write a run). Each recalled line starts with `OKF_SUMMARY_LABEL` and is concatenated into the task string; `AutoMemoryReactAgent` has no header setting, so that label is the protection (a caller of `augment_task_with_memories` should pass an untrusted `header`). The bundle's trust label (`verified[].by`) is shown as `trust (claimed by bundle)`: a claim, not proof.
+
+Give an agent Agent Skills (folders with a `SKILL.md`, the open standard at agentskills.io as read on 2026-10-23, unversioned and mutable). You name the folders; nothing is scanned for you:
+
+```python
+from fsm_llm.agent_skills import load_skills
+from fsm_llm.agents import AgentConfig, create_agent, create_skill_tools
+
+catalog = load_skills("./skills")            # never raises on bad content; problems are in catalog.issues
+agent = create_agent("react", create_skill_tools(catalog), config=AgentConfig(model="ollama_chat/qwen3.5:4b"))
+print(agent(catalog.render_catalog() + "\n\nFill in the form.").answer)
+```
+
+`skill_list` shows the skills, `skill_load` the instructions of one a page at a time, and `skill_read` a bundled text file (or the list of files in a directory). The catalog is not put in the system prompt for you: hand the model `catalog.render_catalog()` in the task, as above, or it has to call `skill_list` first, which a small model may not do. Scripts in a skill are only readable as text, never run.
+
+Build a new FSM by chatting (say "build it" when ready):
+
+```bash
+fsm-llm-meta --model ollama_chat/qwen3.5:4b --output my_bot.json
+fsm-llm-meta --env-file .env --output my_bot.json    # model from LLM_MODEL in the file
+```
+
+## Where to go next
+
+- `examples/agents/` and `examples/meta/`: runnable programs for the patterns and the meta-builder.
+- `docs/agents_roadmap.md`: the audit record and the work that is still open.
+- `src/fsm_llm/README.md`: the core engine these agents run on (message-free steps, handlers, the LLM layer).
+
+## Things to know
+
+- Agent Skills text is untrusted. `create_skill_tools` replies start with the fixed label `SKILL_UNTRUSTED_LABEL`, are capped to fit the 2,000-character observation entry and are control-stripped; skill text is never a tool description or an instruction, nothing in a skill folder is executed, and `allowed-tools` is shown as a claim, not enforced. Long bodies take many calls (the 50 KB `iterative-planner` skill takes 37 `skill_load` pages).
+- OKF bundle text is untrusted. `create_okf_tools` replies fit the agent loop's 2,000-character observation entry and are control-stripped, `OKFMemoryBackend` returns one-line summaries (never bodies) that start with `OKF_SUMMARY_LABEL` and enter the task string, and the exporters are plain functions, not tools, because a write tool would need human approval.
+- The `agents` extra adds no dependencies. `mcp.py` needs the `mcp` extra; `RemoteAgentTool` needs the `a2a` extra (httpx); `AgentServer` needs fastapi (for example via the `monitor` extra). Install extras from a clone: `pip install -e ".[mcp]"`. `ReasoningReactAgent` uses `fsm_llm.reasoning`, which ships in every install.
+- `AgentConfig` rejects unknown fields (a typo raises). `model` defaults to the `LLM_MODEL` environment variable, read when the config is built; with neither a `model=` nor `LLM_MODEL`, `AgentConfig()` raises `ModelNotConfiguredError` (an agent given an `llm_interface` needs no model). Importing `fsm_llm` loads no `.env` file, so only the process environment sets `LLM_MODEL`. A numeric field refuses a `bool`, NaN and infinity (`temperature=True` raises instead of running as 1.0), `timeout_seconds` must be finite and positive, and `model` must not be blank. `instructions` (at most 2,000 characters; `create_agent(system_prompt=...)` sets it) is added to every non-empty state and per-field instruction (not to `classification_extractions`, the core transition classifier or ReasoningReact's reasoning engine). Together with a large tool catalogue it can overflow core's 5,000-character instruction slot; that raises `AgentError` at `run()` naming the slot, the instructions length and the tool count; `NativeFunctionCallingReactAgent` uses it as its system policy. Swarm and the meta-builder do not use it.
+- Constructor mistakes raise `TypeError` instead of being passed to the LLM provider: `hitl=`, `tools=` or a `HumanInTheLoop` argument (`approval_policy=`, `approval_callback=`, `on_escalation=`, ...) on a pattern that cannot use them, and `model=`, `temperature=` or `max_tokens=` as keyword arguments (put them in `AgentConfig`). Other keyword arguments, such as `seed=`, `timeout=` or `llm_interface=`, still pass through.
+- `ReactAgent`, `REWOOAgent`, `ReflexionAgent`, `ParallelReactAgent` and `NativeFunctionCallingReactAgent` refuse an empty tool registry.
+- Every `max_*` / `num_*` limit of a pattern goes through one check: it must be an `int` (a numpy integer is fine) from its minimum up to 2**63-1. A `bool`, a float (also `1.0`, NaN, inf), a string, `None`, a value below the minimum or a larger int raises `AgentError` (`ValueError` for `AgentServer`, the tool registries and `SemanticMemoryStore`) and the message shows only a short prefix of the value. Minimum 1: `max_reflections`, `max_parallel`, `num_rounds` (`DebateAgent(num_rounds=0)` raises, it used to be clamped to 1), `num_samples`, `max_workers`, and `CachingToolRegistry(max_entries=)`. Minimum 0: `max_replans`, `max_refinements`, `max_revisions`, `max_depth`, `max_handoffs`, `max_verify_retries` (0 means none of that work).
+- A `@tool` function with one `dict` parameter takes the whole arguments object as that dict (the model sees an empty object schema). A keyword-only `dict` parameter (`*, payload: dict[str, Any]`) is a named property of type `object` and is called by keyword; so is a `dict[...]` parameter that sits beside other parameters, and a `Mapping[...]`, `MutableMapping[...]` or `TypedDict` parameter (also `object`, not `string`). If a model sends a flat object for a keyword-only mapping parameter, the call fails with a message naming the parameter instead of running the tool with a scalar.
+- With `llm_interface=`, the interface owns the model settings: `AgentConfig.model`, `temperature` and `max_tokens` are not applied to it, any other LLM keyword beside it is refused by core, and `enable_prompt_cache=True` raises `AgentError`.
+- Tool annotations (`@tool(annotations=ToolAnnotations(idempotent=True))`, also read from MCP servers) say whether a tool is read-only, destructive, idempotent or reaches outside. `RetryingToolRegistry` re-runs a failed call only for a tool marked `idempotent` or `read_only`, never an approved call and never a `requires_approval` tool, so unannotated tools are not retried. A custom registry's `execute` must accept the keyword `gated` (the approval step passes it).
+- Each `run()` makes many LLM calls. Small models can hit the iteration limit and fail with `BudgetExhaustedError`.
+- If the model names a tool that does not exist, it is told which tools exist and the turn counts as a turn without a tool call, not as evidence of work. The bad name is cleared so the next turn can pick a real tool. After three turns in a row with no tool, the run is forced to conclude.
+- Human approval works in `ReactAgent`, `ReflexionAgent` and `ReasoningReactAgent` with `HumanInTheLoop(approval_policy=..., approval_callback=...)`. A tool the policy gates runs only after the callback approved that exact call, and each approval covers one call. With a callback and no policy, the tools marked `@tool(requires_approval=True)` are the ones that need approval. The model cannot approve a call itself, and neither can a caller: the grant is stored under an internal key that the model cannot write and that `initial_context` cannot set. A denial is shown to the model on its next turn, and the final answer prompt lists each refused call that did not run (`final_context["refused_actions"]`), so the answer says it was not performed. A call approved on a later ask and run has no such entry. The approval state itself asks the model nothing. If a `requires_approval` tool exists and nobody can decide on it (`hitl=None`, or a `HumanInTheLoop` with neither a callback nor a policy), the agent raises `AgentError` at construction and again when `run()` starts. With a policy and no callback the policy decides: a call it gates fails with `ApprovalDeniedError` (reported as `AgentError`), and a warning at construction says so. `RetryingToolRegistry` never retries a `requires_approval` tool, so one approval covers one execution. `ParallelReactAgent`, `REWOOAgent`, `PlanExecuteAgent` and `NativeFunctionCallingReactAgent` have no approval step, so they refuse a registry that holds a `requires_approval` tool (`AgentError`, at construction and again when `run()` starts). Known gaps: with a policy set, `requires_approval` adds nothing (the policy decides, so a flagged tool it does not gate runs unasked); the policy sees the call before an empty input is filled from the task text.
+- Keys a run writes itself (`final_answer`, `should_terminate`, `observation_count`, tool selection and results, approval keys, and each pattern's own drafts, verdicts and answers such as `draft_output`, `generated_output` or `proposition`) are removed from `initial_context` with a warning, so a caller cannot fake a finished run. An `AgentGraph` node or a `SwarmAgent` hand-off target never receives its own pattern's outputs from an earlier agent. `AgentServer` also drops every internal key from the request context.
+- Tool arguments that look like secrets (by the same filter the core uses) show as `<redacted>` in observations, traces, logs and the approval summary; the tool itself gets the real value, and the approver sees the exact call. The memory tools never list or change the hidden `metadata` buffer.
+- A tool function runs at most once per call. If its arguments match its signature, a `TypeError` raised inside it is reported as a failed call, not retried with guessed arguments. `register_function` accepts plain and async functions, bound methods, `functools.partial` objects and callable instances; a positional-only parameter is filled from the value sent under its name.
+- `AgentServer` is unauthenticated by default. Pass `api_key=` to require `Authorization: Bearer <key>` or `X-API-Key` on `/invoke` and `/stream`; `RemoteAgentTool(api_key=...)` sends it. Input over `max_input_chars` (default 100,000) gets 413. At most `max_concurrent` runs (default 8) are in flight; more get 503. A failing run returns a generic error with an `error_id`; the exception is only logged. There is no per-client rate limiting. `RemoteAgentTool` raises `ToolExecutionError` when the server reports `success: false`. `/stream` sends one event after the run finishes; it does not stream tokens.
+- Keys in the returned `final_context` that look internal (starting with `_`, `system_`, `internal_` or `__`) are removed by the FSM-based patterns. `SwarmAgent` and `AgentGraph` add their own `_swarm_*` and `_graph_*` keys on top of the last agent's result.
+- `EvaluatorOptimizerAgent` and `MakerCheckerAgent` need arguments `create_agent` cannot guess (an evaluation function; maker and checker instructions). Pass them yourself.
+- Maker and checker instructions and the three `DebateAgent` personas go into the prompts as written, with no sanitizing. Write them yourself; put user input in the task.
+- `MakerCheckerAgent` and `EvaluatorOptimizerAgent` judge every new draft. While the model rewrites, the old draft is kept under `previous_draft` / `previous_output`, which later prompts can see but which is dropped from `final_context`. When the pass is forced (the quality score reaches the threshold, the revision limit is hit, or the iteration budget runs out), the draft that was just judged is the one returned.
+- `OrchestratorAgent` without a `worker_factory` only records placeholder results, so it always reports `success=False`. `PlanExecuteAgent` without tools cannot mark a step as executed, so it also reports `success=False`. Subtasks beyond `max_workers` are not run: they are listed in `final_context["skipped_subtasks"]`, with a warning, and kept out of `worker_results`.
+- `BudgetExhaustedError` and `AgentTimeoutError` raised by a sub-run of `ADaPTAgent` or a worker of `OrchestratorAgent` end the whole run and are re-raised by its `run()`. ADaPT runs at most 8 subtasks per decomposition.
+- `SelfConsistencyAgent` votes on each sample's last `Answer:` line (case and spacing ignored). `DebateAgent` returns the conclusion written after the last round. A failed `PromptChainAgent` validation gate stops the chain (`stop_reason="gate_failed"`). `PlanExecuteAgent` replans when a step's tool fails, at most `max_replans` times. `AgentGraph` runs nodes in dependency order, each once; a node that fails takes no outgoing edge. `SwarmAgent` gives every agent the original task and allows exactly `max_handoffs` handoffs (a handoff to an unknown agent ends the run with `success=False, stop_reason="no_result"`); it hands off only when an agent writes `next_agent`, which nothing shipped does.
+- `VerifiedReactAgent` reports `success=False, stop_reason="verification_failed"` when the answer is still rejected after the retries; a verifier that raises counts as a rejection.
+- `SemanticToolRegistry` returns every tool when fewer than 10 are registered. It and `SemanticMemoryStore` embed through core's `LiteLLMEmbedder` (default `ollama/embeddinggemma-2:740m`), or through your own `embed_fn(text) -> vector`. `SemanticMemoryStore(embedding_model=None, persist_path=..., ...)` adopts the model recorded in the store file when you omit `embedding_model`, as `SemanticMemoryStore.load(path)` does, so a reopened store keeps its vector space; an explicit `embedding_model=` wins. Only a legacy file with no recorded `embedding_model` falls to the current 768-dimensional default: its older vectors are a different length, `cosine_similarity` scores them 0.0 (one WARNING, which library logging hides until `setup_logging()`), so `search`/`recall` rank all those old entries at score 0.00 with no error and the ranking by meaning is lost (substring matches still rank, and entries added after the reload do score). Pass `embedding_model=` of the model that produced the old vectors, or the new one and re-embed the entries.
+- `NativeFunctionCallingReactAgent(tools, config=None, system_policy=None, *, seed=None)` sends the provider's native tool calls and runs them; `config.force_final_tool` adds one forced final tool turn and `output_schema` one repair turn. Each request has a 120-second timeout by default. Its `initial_context` keys are kept out of the model's view.
+- MCP servers get a 30-second timeout per tool discovery and per tool call by default (`timeout=None` turns it off). Each call starts a new connection to the server, and that start counts toward the timeout.
+- The meta-builder is itself an FSM run by core: it classifies the artifact type, writes a reply per message until you say "build it", then makes one structured LLM call that returns the whole design, which is assembled and validated in Python (an agent's pattern comes from that same call). Every reply while collecting ends with "Say 'build it' when you're ready." A design the model returns in the wrong shape is reported as validation errors (`send`) or `MetaValidationError` (`run`). For workflows and agents, `is_valid` means the spec is complete, not that it loads as a runnable object; you still wire in the Python functions. `fsm-llm-meta` exits 130 on Ctrl-C.
+- `save_artifact` writes wherever it is told; check paths that come from untrusted input.

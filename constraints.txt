@@ -57,7 +57,7 @@ setuptools==84.2.1
 # tools receive no upstream fixes until a human does this):
 #   1. Raise the version(s) below.
 #   2. .venv/bin/python -m pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis]" mcp
-#   3. Run the full local gate: pytest, mypy src/, ruff check, ruff format --check.
+#   3. Run the full local gate: pytest, mypy -p fsm_llm, ruff check, ruff format --check.
 #   4. Push and confirm a green GitHub Actions run on all three matrix legs.
 # One PR that raises all six at once, with CI as the acceptance test, is the
 # intended cadence.

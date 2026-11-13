@@ -673,8 +673,8 @@ class TestActivitySnapshots:
 
 class TestFindExamplesDir:
     def test_examples_dir_resolves_to_repo_examples(self):
-        # instance_manager.py sits one level deeper since the move under
-        # src/monitor/; a wrong depth silently returns None.
+        # instance_manager.py is src/fsm_llm/monitor/instance_manager.py, three
+        # directories below the repo root; a wrong depth silently returns None.
         from pathlib import Path
 
         from fsm_llm.monitor.instance_manager import find_examples_dir

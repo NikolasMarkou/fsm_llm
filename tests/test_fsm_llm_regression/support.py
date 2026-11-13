@@ -13,7 +13,7 @@ Interface:
   holds before and after that move.
 - `source_modules(repo=REPO) -> dict[str, Path]`: every `.py` file of the package
   as `{dotted module: path}`, in sorted order; a package `__init__.py` is named
-  by its package (`fsm_llm.agents`) and `src/__init__.py` by `fsm_llm`. Reads the
+  by its package (`fsm_llm.agents`) and the root `__init__.py` by `fsm_llm`. Reads the
   file system only, imports nothing. `__pycache__` and dot directories are
   skipped. Never raises for a missing package: returns `{}`.
 """

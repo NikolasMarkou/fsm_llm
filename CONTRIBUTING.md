@@ -10,7 +10,7 @@ source .venv/bin/activate
 make install-dev    # pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis,testing]" + pre-commit install
 ```
 
-Upgrading a clone from before the 2026-09-29 restructure (extensions moved under `fsm_llm/`): delete the old `src/fsm_llm_<sub>/` directories by hand (`make clean` no longer removes them), then reinstall with `pip install -e .`. After `src/fsm_llm/` was flattened into `src/`, reinstall with `pip install -e .` again. A leftover directory imports as a namespace package.
+Upgrading a clone from before the 2026-09-29 restructure (extensions moved under `fsm_llm/`): delete the old `src/fsm_llm_<sub>/` directories by hand (`make clean` no longer removes them), then reinstall with `pip install -e .`. After the package moved back to `src/fsm_llm/` (plan d454fd62, step 62), reinstall with `pip install -e .` again; the old editable install pointed at the flat `src/`. A leftover directory imports as a namespace package.
 
 `constraints.txt` pins every direct dependency to one exact version, litellm to a verified-safe release (1.82.7 and 1.82.8 were compromised; `pyproject.toml` excludes them too). Run `make audit` after installing new packages; it scans site-packages for suspicious `.pth` files.
 

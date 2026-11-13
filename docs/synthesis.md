@@ -284,7 +284,7 @@ How to read this:
 - The hand-written arm and the ReAct arm are not comparable across blocks: the grader (s1) and two hand-written hints (s1, s2) changed between blocks, each disclosed in the pre-registration of the block that first used it.
 - Single trials of this model are noisy: S r2 passed trial 1 and failed trials 2 and 3 of s1 on the same stored procedure; the ReAct arm (r1, two trials) and the hand-written arm (y2, one trial) ran out of turns re-asking in s2.
 
-What each round changed (generic changes under `src/synthesis/`, no task text there; a hygiene test checks it):
+What each round changed (generic changes under `src/fsm_llm/synthesis/`, no task text there; a hygiene test checks it):
 
 - s0 to s1 (D-091 to D-105): a compile-time instruction that names the key a gated state extracts; deterministic repair of a mismatched closing bracket in a compile reply; the loader's allowed JsonLogic operators in the compile prompt and in plain ASCII in the repair text; a note on what a key name is when a gate reads a computed one. Harness v2 (one grader for all arms, hand-written branch detail from the state's own question).
 - s1 to s2 (D-106, D-107): a compile prompt rule that a key the goal says to decide needs a value gate over the allowed values; the hand-written route hint says to pick the label that fits the need.
@@ -311,4 +311,4 @@ Which rows predate which fix: every s0 row predates all of the above; s1 rows pr
 - The runner marks a provider outage from the host interface's error counter (`usage().errors`). A host that calls `reset_usage()` during a run, or an interface with no meter, gets the outage recorded as `budget_spent`, which `diagnose` reads as a procedure fault. A shared interface can give a false outage mark, which fails closed.
 - Importing the package loads `fsm_llm.agents`, `fsm_llm.reasoning` and `fsm_llm.eval`.
 
-See `src/synthesis/README.md` and `src/synthesis/AGENTS.md` for the file list and the contracts, and `docs/api_reference.md` for signatures.
+See `src/fsm_llm/synthesis/README.md` and `src/fsm_llm/synthesis/AGENTS.md` for the file list and the contracts, and `docs/api_reference.md` for signatures.

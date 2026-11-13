@@ -1,4 +1,4 @@
-"""Repo-wide packaging invariants: one package in `src/`, wired into every slot.
+"""Repo-wide packaging invariants: one package in `src/fsm_llm/`, wired into every slot.
 
 Five hand-maintained files name the package: `pyproject.toml`, `Makefile`,
 `tox.ini`, `.github/workflows/python-package.yml` and `MANIFEST.in`. A miss is
@@ -7,10 +7,10 @@ in coverage, or stops shipping in the sdist. Nothing errors.
 
 This file is that missing check. The package list is derived from the
 filesystem and `pyproject.toml`, never hardcoded, so it cannot go stale. The
-layout is ONE top-level package, `fsm_llm`, whose directory is `src/` itself
-(`package-dir = {"fsm_llm" = "src"}`), with seven subpackages
-(`src/*/__init__.py`); both sets are derived and pinned exactly, so a stray
-second top-level package fails here.
+layout is ONE top-level package, `fsm_llm`, the directory `src/fsm_llm/` (found by
+`[tool.setuptools.packages.find]`), with seven subpackages
+(`src/fsm_llm/*/__init__.py`); both sets are derived and pinned exactly, so a
+stray second top-level package fails here.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from __future__ import annotations
 import ast
 import collections
 import configparser
+import fnmatch
 import importlib
 import json
 import os
@@ -75,28 +76,37 @@ def _packages_under(root: pathlib.Path) -> frozenset[str]:
 
 
 def _package_dirs() -> dict[str, pathlib.Path]:
-    """Import name -> source directory, from `package-dir` in pyproject.toml."""
-    body = _section("pyproject.toml", "[tool.setuptools]")
-    line = re.search(r"^package-dir = \{(.*)\}$", body, re.MULTILINE)
-    assert line is not None, "package-dir not found in [tool.setuptools]"
-    pairs = re.findall(r'"([a-z_]+)" = "([^"]+)"', line.group(1))
-    assert pairs, "package-dir maps no package"
-    return {name: _REPO_ROOT / directory for name, directory in pairs}
+    """Import name -> source directory, from `packages.find` in pyproject.toml.
+
+    The top-level packages `setuptools` finds: a directory under a `where` entry
+    that has an `__init__.py` and matches an `include` pattern.
+    """
+    find = tomllib.loads(_read("pyproject.toml"))["tool"]["setuptools"]["packages"][
+        "find"
+    ]
+    found: dict[str, pathlib.Path] = {}
+    for where in find["where"]:
+        for child in sorted((_REPO_ROOT / where).iterdir()):
+            if (
+                child.is_dir()
+                and (child / "__init__.py").is_file()
+                and any(fnmatch.fnmatchcase(child.name, p) for p in find["include"])
+            ):
+                found[child.name] = child
+    assert found, "packages.find finds no package"
+    return found
 
 
 #: Import name -> directory of every top-level package, from pyproject.toml.
-#: A mapped directory without an `__init__.py` is not a package; the stale
-#: `*.egg-info/` and any stray directory are excluded by construction.
-PACKAGE_DIRS: dict[str, pathlib.Path] = {
-    name: path
-    for name, path in _package_dirs().items()
-    if (path / "__init__.py").is_file()
-}
+#: A directory without an `__init__.py` is not a package; the `*.egg-info/` that
+#: an editable install leaves in `src/` and any stray directory are excluded by
+#: construction.
+PACKAGE_DIRS: dict[str, pathlib.Path] = _package_dirs()
 
 #: Every importable top-level package name.
 SRC_PACKAGES: frozenset[str] = frozenset(PACKAGE_DIRS)
 
-#: Every subpackage of `fsm_llm`, derived from disk (they sit directly in `src/`).
+#: Every subpackage of `fsm_llm`, derived from disk (they sit directly in `src/fsm_llm/`).
 SUBPACKAGES: frozenset[str] = _packages_under(PACKAGE_DIRS["fsm_llm"])
 
 #: The four former sibling packages that now live under `fsm_llm`, plus `eval`
@@ -135,20 +145,13 @@ def _slot_pyproject_isort() -> set[str]:
     return set(re.findall(rf'"{_PKG}"', line))
 
 
-def _type_check_packages() -> set[str]:
-    """Packages `scripts/type_check.py` exposes to mypy (the symlink names)."""
-    return set(re.findall(rf'Path\(tmp\) / "{_PKG}"', _read("scripts/type_check.py")))
-
-
 def _slot_type_check(rel: str, needle: str) -> set[str]:
-    """Packages type-checked by a build file: it must call the shared runner."""
-    if "scripts/type_check.py" not in _one_line(rel, needle):
-        return set()
-    return _type_check_packages()
+    """Packages type-checked by a build file: the `-p` names of its mypy line."""
+    return set(re.findall(rf"\bmypy\b.*?-p {_PKG}\b", _one_line(rel, needle)))
 
 
 def _slot_makefile_type_check() -> set[str]:
-    return _slot_type_check("Makefile", "type_check.py")
+    return _slot_type_check("Makefile", "-m mypy")
 
 
 def _slot_makefile_coverage() -> set[str]:
@@ -160,15 +163,15 @@ def _slot_tox_coverage() -> set[str]:
 
 
 def _slot_tox_type() -> set[str]:
-    return _slot_type_check("tox.ini", "type_check.py")
+    return _slot_type_check("tox.ini", "-m mypy")
 
 
 def _slot_ci_mypy() -> set[str]:
-    return _slot_type_check(".github/workflows/python-package.yml", "type_check.py")
+    return _slot_type_check(".github/workflows/python-package.yml", "-m mypy")
 
 
 def _slot_manifest() -> set[str]:
-    # `src` is the one package directory; the line names it, not the package.
+    # `src` is the directory holding the one package; the line names it, not the package.
     if re.search(r"^recursive-include src \*\.py$", _read("MANIFEST.in"), re.M):
         return set(SRC_PACKAGES)
     return set()
@@ -219,18 +222,34 @@ class TestEveryPackageIsWired:
         ]
         assert not missing, f"packages without a py.typed marker: {missing}"
 
-    def test_packages_list_matches_disk(self):
-        # `packages` in pyproject.toml is an explicit list (the flat layout
-        # cannot use `packages.find`, which would name the subpackages
-        # `agents`, `eval`, ...). A subpackage missing from it silently
-        # ships nothing, so pin it to the directories on disk.
-        body = _section("pyproject.toml", "[tool.setuptools]")
-        match = re.search(r"^packages = \[(.*?)\]", body, re.MULTILINE | re.DOTALL)
-        assert match is not None, "explicit `packages` list not found"
-        listed = set(re.findall(r'"([a-z_.]+)"', match.group(1)))
-        expected = set(SRC_PACKAGES) | {f"fsm_llm.{sub}" for sub in SUBPACKAGES}
-        assert listed == expected, (
-            f"missing {sorted(expected - listed)}, stale {sorted(listed - expected)}"
+    def test_packages_find_matches_disk(self):
+        # `[tool.setuptools.packages.find]` replaces an explicit package list: a
+        # new subpackage ships without a pyproject edit. Pin that wiring (no
+        # `package-dir`, no `packages` list, `include` narrowed to `fsm_llm*`,
+        # `src` as the one search root) and let setuptools itself name what it
+        # finds, so a subpackage missing an `__init__.py` fails here.
+        from setuptools import find_packages
+
+        setuptools_table = _pyproject()["tool"]["setuptools"]
+        assert "package-dir" not in setuptools_table
+        assert "packages" not in setuptools_table or isinstance(
+            setuptools_table["packages"], dict
+        )
+        find = setuptools_table["packages"]["find"]
+        assert find["where"] == ["src"]
+        assert find["include"] == ["fsm_llm*"]
+        assert find["namespaces"] is False
+        found = set(
+            find_packages(where=str(_REPO_ROOT / "src"), include=find["include"])
+        )
+        root = PACKAGE_DIRS["fsm_llm"]
+        expected = {"fsm_llm"} | {
+            "fsm_llm." + init.parent.relative_to(root).as_posix().replace("/", ".")
+            for init in root.rglob("__init__.py")
+            if init.parent != root and "__pycache__" not in init.parts
+        }
+        assert found == expected, (
+            f"missing {sorted(expected - found)}, stale {sorted(found - expected)}"
         )
 
 
@@ -258,7 +277,7 @@ class TestMonitorPackageData:
     `pages/`, `services/` and `utils/` subdirectories)."""
 
     def test_monitor_package_data_covers_every_static_file(self):
-        monitor = _REPO_ROOT / "src" / "monitor"
+        monitor = PACKAGE_DIRS["fsm_llm"] / "monitor"
         covered = {
             path
             for pattern in _monitor_package_data_globs()
@@ -835,8 +854,8 @@ class TestDeclaredRangesMatchPins:
 # Wheel content (step 61 of plan d454fd62): the wheel ships the package and
 # its package data, under `fsm_llm/`, and nothing from the rest of the repo.
 # Every path below is relative to the PACKAGE ROOT (`package_dir`, which is
-# `src/` while the layout is flat and `src/fsm_llm/` after the move), so the
-# check holds on both sides of that move.
+# `src/fsm_llm/`; it was `src/` while the layout was flat), so the check held on
+# both sides of that move.
 # ══════════════════════════════════════════════════════════════
 
 #: Non-`.py` files the wheel carries, relative to the package root. Written out
@@ -1168,7 +1187,7 @@ class TestExplicitEncodings:
         assert _unencoded_text_calls(good) == []
 
     def test_a_utf8_session_file_loads_under_the_c_locale(self, tmp_path):
-        """src/session.py `load` read the file with the locale encoding."""
+        """src/fsm_llm/session.py `load` read the file with the locale encoding."""
         session = {
             "conversation_id": "c1",
             "fsm_id": "f1",
@@ -1751,31 +1770,42 @@ def test_doc_counts_checks_the_per_file_rows(md, lines, want):
 
 
 # ══════════════════════════════════════════════════════════════
-# scripts/audit_pth.py lets the setuptools editable hook through, nothing else
+# scripts/audit_pth.py has no allowlist: the editable install is a plain path
 # ══════════════════════════════════════════════════════════════
 
 
-class TestAuditPthEditableFinder:
-    """`pip install -e .` writes a code-bearing `.pth` for the flat layout
-    (`src` is imported as `fsm_llm`); the audit must not flag exactly that."""
+class TestAuditPthNeedsNoAllowlist:
+    """`pip install -e .` of the src layout writes a `.pth` with one directory
+    path, which the audit passes on its own merits; the code-bearing finder hook
+    of the old flat layout is code like any other and is flagged."""
 
-    _HOOK = (
+    _FINDER_HOOK = (
         "import __editable___fsm_llm_0_12_0_finder; "
-        "__editable___fsm_llm_0_12_0_finder.install()"
+        "__editable___fsm_llm_0_12_0_finder.install()\n"
     )
 
-    def test_the_one_line_setuptools_hook_is_let_through(self):
-        assert audit_pth.is_editable_finder(
-            "__editable__.fsm_llm-0.12.0.pth", self._HOOK
+    def _audit(self, tmp_path, monkeypatch, name: str, text: str) -> int:
+        (tmp_path / name).write_text(text, encoding="utf-8")
+        monkeypatch.setattr(audit_pth.site, "getsitepackages", lambda: [str(tmp_path)])
+        return audit_pth.audit()
+
+    def test_the_audit_carries_no_editable_finder_allowlist(self):
+        assert not hasattr(audit_pth, "EDITABLE_FINDER")
+        assert not hasattr(audit_pth, "is_editable_finder")
+
+    def test_the_plain_path_pth_of_an_editable_install_passes(
+        self, tmp_path, monkeypatch
+    ):
+        text = str(_REPO_ROOT / "src") + "\n"
+        assert (
+            self._audit(tmp_path, monkeypatch, "__editable__.fsm_llm-0.12.0.pth", text)
+            == 0
         )
 
-    def test_any_other_code_in_a_pth_is_still_flagged(self):
+    def test_the_old_finder_hook_is_flagged(self, tmp_path, monkeypatch, capsys):
         name = "__editable__.fsm_llm-0.12.0.pth"
-        assert not audit_pth.is_editable_finder("evil.pth", self._HOOK)
-        assert not audit_pth.is_editable_finder(
-            name, self._HOOK + "\nimport os; os.system('x')"
-        )
-        assert not audit_pth.is_editable_finder(name, "import os; os.system('x')")
+        assert self._audit(tmp_path, monkeypatch, name, self._FINDER_HOOK) == 1
+        assert name in capsys.readouterr().err
 
 
 class TestAuditPthReadsWhatSiteReads:

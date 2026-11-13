@@ -6,7 +6,7 @@ Purpose: The full pytest tree of FSM-LLM (14,043 collected tests): ten suite fol
 ## Scope
 
 - In: `conftest.py`, `__init__.py` (empty), `test_packaging.py`, `test_bench_common.py`, `test_agents_bench.py`, `test_skills_bench.py`, `test_coverage_ratchet.py`, `test_integration_ollama.py`, `fixtures/test_fsm_definitions/minimal_fsm.json`, `fixtures/module_path_map.json`, `fixtures/anchor_multiset.json`, `test_examples/`, and the nine `test_fsm_llm*` suite folders.
-- Package under test: one top-level package `fsm_llm` (`src/`) with subpackages `agents`, `reasoning`, `workflows`, `monitor`, `eval`, `synthesis`, `testing`. The old top-level names (`fsm_llm_agents`, ...) no longer exist (no test checks for a leftover directory any more).
+- Package under test: one top-level package `fsm_llm` (`src/fsm_llm/`) with subpackages `agents`, `reasoning`, `workflows`, `monitor`, `eval`, `synthesis`, `testing`. The old top-level names (`fsm_llm_agents`, ...) no longer exist (no test checks for a leftover directory any more).
 - Out: the bench data under `scripts/bench_data/`, the examples themselves (`examples/`, evaluation baselines, never edit unless asked).
 
 ## Architecture
@@ -54,7 +54,7 @@ Suite folders (test counts from full collection) and root files at this level.
 
 `test_packaging.py` classes:
 
-- `TestEveryPackageIsWired`: the package named by `package-dir` in `pyproject.toml` must be exactly `{"fsm_llm"}` (directory `src/`); `src/*/__init__.py` exactly the seven subpackages; each of 8 slots names `fsm_llm` (the three type-check slots by calling `scripts/type_check.py`, the manifest slot by `recursive-include src *.py`) (`pyproject:package-data`, `pyproject:ruff-isort-known-first-party`, `makefile:type-check`, `makefile:coverage`, `tox:testenv-coverage`, `tox:testenv-type`, `ci:mypy`, `manifest.in:recursive-include`); `src/py.typed` exists; the explicit `packages` list in `[tool.setuptools]` equals `fsm_llm` plus `fsm_llm.<sub>` for every subpackage on disk.
+- `TestEveryPackageIsWired`: the package found by `[tool.setuptools.packages.find]` in `pyproject.toml` must be exactly `{"fsm_llm"}` (directory `src/fsm_llm/`); `src/fsm_llm/*/__init__.py` exactly the seven subpackages; each of 8 slots names `fsm_llm` (the three type-check slots by their `mypy -p fsm_llm` line, the manifest slot by `recursive-include src *.py`) (`pyproject:package-data`, `pyproject:ruff-isort-known-first-party`, `makefile:type-check`, `makefile:coverage`, `tox:testenv-coverage`, `tox:testenv-type`, `ci:mypy`, `manifest.in:recursive-include`); `src/fsm_llm/py.typed` exists; `setuptools.find_packages` over `src` with the `include` of `packages.find` returns `fsm_llm` plus `fsm_llm.<sub>` for every subpackage on disk, and `package-dir` and an explicit `packages` list are absent.
 - `TestSubpackagesImport`: `fsm_llm.<sub>` importable (monitor needs `fastapi`).
 - `TestMonitorPackageData`: `"fsm_llm.monitor"` package-data globs cover every file under `static/` and `templates/`.
 - `TestPackageBackedExtrasAreInstalled`: each subpackage name is an extra, requested by `pyproject` `all`, `make install-dev`, tox `extras = dev,...` and the CI install line.

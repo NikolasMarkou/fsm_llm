@@ -42,7 +42,7 @@ import fsm_llm
 from fsm_llm import cli_support
 from fsm_llm.definitions import ModelNotConfiguredError
 
-_REPO = Path(fsm_llm.__file__).resolve().parent.parent
+_REPO = Path(fsm_llm.__file__).resolve().parents[2]
 _DATASET = _REPO / "evaluation" / "datasets" / "simple_greeting_cases.json"
 _MESSAGE = ModelNotConfiguredError.DEFAULT_MESSAGE
 _NEEDS_A_MODEL = ("reasoning", "eval", "meta")
@@ -364,7 +364,7 @@ class TestNoModelClisHaveNoFlag:
         assert "--env-file" not in out
 
     def test_only_the_model_clis_import_the_helper(self):
-        src = _REPO / "src"
+        src = _REPO / "src" / "fsm_llm"
         users = sorted(
             str(path.relative_to(src))
             for path in src.rglob("*.py")

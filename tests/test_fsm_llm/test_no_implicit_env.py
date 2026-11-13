@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 _REPO = Path(__file__).resolve().parents[2]
-_SRC = _REPO / "src"
+_SRC = _REPO / "src" / "fsm_llm"
 
 _STALE = "stale-model-from-dotenv"
 

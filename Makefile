@@ -14,7 +14,7 @@ format: ## Format code with ruff
 	python -m ruff format src/ tests/
 
 type-check: ## Run type checker (mypy)
-	python scripts/type_check.py
+	python -m mypy -p fsm_llm
 
 lint-imports: ## Check the import contracts in .importlinter (import-linter)
 	lint-imports
@@ -28,12 +28,12 @@ build: ## Build wheel and sdist
 
 clean: ## Remove build artifacts and caches
 	@echo "Cleaning artifacts..."
-	rm -rf build/ dist/ *.egg-info/ logs/
+	rm -rf build/ dist/ *.egg-info/ src/*.egg-info/ logs/
 	rm -rf .pytest_cache/ .ruff_cache/ .mypy_cache/
 	rm -rf tests/__pycache__
 	rm -rf tests/test_fsm_llm/__pycache__
-	rm -rf src/logs*
-	rm -rf src/__pycache__
+	rm -rf src/logs* src/fsm_llm/logs*
+	rm -rf src/fsm_llm/__pycache__
 	rm -rf htmlcov/ .coverage
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true

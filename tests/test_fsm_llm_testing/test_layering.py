@@ -18,7 +18,7 @@ import pytest
 
 import fsm_llm
 
-#: The directory of the import package (`src/` today); derived, so it survives a layout move.
+#: The directory of the import package (`src/fsm_llm/`); derived, so it survives a layout move.
 _PKG_ROOT = Path(fsm_llm.__file__).resolve().parent
 _TESTING_DIR = _PKG_ROOT / "testing"
 _OTHER_SUBPACKAGES = (

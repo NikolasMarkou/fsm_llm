@@ -1,8 +1,8 @@
 # Import contracts for the `fsm_llm` package, run by `make lint-imports`
 # (`lint-imports`, from import-linter; the engine is grimp).
 #
-# Plan d454fd62, step 61: only the contracts that hold on today's flat layout
-# (source in `src/`, imported as `fsm_llm`). Step 95 activates the layered
+# Plan d454fd62, step 61: only the contracts that hold on today's layout
+# (source in `src/fsm_llm/`, imported as `fsm_llm`). Step 95 activates the layered
 # Section 5.2 contract (D-016) once the packages it names exist; every move
 # step (65 to 94) extends this file for the packages it places. A contract is
 # never weakened to pass: a debt is an `ignore_imports` line that names the row

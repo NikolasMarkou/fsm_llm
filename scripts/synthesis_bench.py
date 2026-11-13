@@ -77,9 +77,9 @@ _CORE = "flow_analysis utilities validator eval/cases eval/config eval/stats"
 SRC_PINS = (
     "scripts/synthesis_bench.py",
     "scripts/bench_common.py",
-    *(f"src/{m}.py" for m in _CORE.split()),
-    *(f"src/synthesis/{m}.py" for m in _SYNTH.split()),
-    *(f"src/agents/{m}.py" for m in _AGENTS.split()),
+    *(f"src/fsm_llm/{m}.py" for m in _CORE.split()),
+    *(f"src/fsm_llm/synthesis/{m}.py" for m in _SYNTH.split()),
+    *(f"src/fsm_llm/agents/{m}.py" for m in _AGENTS.split()),
 )
 PINNED_AT_RUN = (
     "fixture_hash",

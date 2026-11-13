@@ -25,7 +25,7 @@ from fsm_llm import ModelNotConfiguredError
 from fsm_llm.constants import ENV_LLM_MODEL
 
 REPO = Path(__file__).resolve().parents[2]
-SRC = REPO / "src"
+SRC = REPO / "src" / "fsm_llm"
 MESSAGE = ModelNotConfiguredError.DEFAULT_MESSAGE
 
 

@@ -322,6 +322,7 @@ class TestApiInitOrder:
         api_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             "src",
+            "fsm_llm",
             "api.py",
         )
         with open(api_path, encoding="utf-8") as f:
@@ -398,6 +399,7 @@ class TestPythonVersionCheck:
         init_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             "src",
+            "fsm_llm",
             "__init__.py",
         )
         with open(init_path, encoding="utf-8") as f:
@@ -574,6 +576,7 @@ class TestDisableWarningsModule:
         source_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             "src",
+            "fsm_llm",
             "__init__.py",
         )
         with open(source_path, encoding="utf-8") as f:

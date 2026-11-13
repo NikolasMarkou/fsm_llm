@@ -5,7 +5,7 @@ Purpose: Long-form Markdown guides for FSM-LLM v0.12.0 (quickstart, FSM design, 
 
 ## Scope
 
-- In scope: 9 Markdown files and one generated text file (`api.txt`, the public API snapshot written by `scripts/api_snapshot.py`; never edit it by hand, run `make api-snapshot`) at `docs/` with no subdirectories. FSM-LLM is one distribution (`fsm-llm`). The code lives in `src/`, and the extensions are subpackages: `fsm_llm.reasoning`, `fsm_llm.workflows`, `fsm_llm.agents`, `fsm_llm.monitor`, `fsm_llm.eval`, `fsm_llm.synthesis`.
+- In scope: 9 Markdown files and one generated text file (`api.txt`, the public API snapshot written by `scripts/api_snapshot.py`; never edit it by hand, run `make api-snapshot`) at `docs/` with no subdirectories. FSM-LLM is one distribution (`fsm-llm`). The code lives in `src/fsm_llm/`, and the extensions are subpackages: `fsm_llm.reasoning`, `fsm_llm.workflows`, `fsm_llm.agents`, `fsm_llm.monitor`, `fsm_llm.eval`, `fsm_llm.synthesis`.
 - Out of scope: runnable code, per-package READMEs, `CHANGELOG.md`, `EVALUATE.md`, planning artifacts under `plans/`. By user preference, monitor docs belong in `api_reference.md`. Do not create a separate `docs/monitor.md`.
 
 ## Architecture
@@ -14,7 +14,7 @@ Two groups of files:
 
 | Group | Files | Header | Status |
 | --- | --- | --- | --- |
-| Current guides | `quickstart.md`, `fsm_design.md`, `handlers.md`, `architecture.md`, `api_reference.md`, `synthesis.md`, `testing.md` | `> Covers FSM-LLM v0.12.0` (matches `src/__version__.py`) | Must match the code |
+| Current guides | `quickstart.md`, `fsm_design.md`, `handlers.md`, `architecture.md`, `api_reference.md`, `synthesis.md`, `testing.md` | `> Covers FSM-LLM v0.12.0` (matches `src/fsm_llm/__version__.py`) | Must match the code |
 | Historical records | `strands_features.md`, `strands_features_phase_1.md`, `strands_features_phase_2.md` | `> **Historical design record.** ...` blockquote | Frozen snapshots. The blockquote says the counts are from the time of writing |
 
 Links between the docs: `fsm_design.md` ends with `**Next:** [Handler Development](./handlers.md)`. Each Strands file links to `api_reference.md`.
@@ -28,8 +28,8 @@ Links between the docs: `fsm_design.md` ends with `**Next:** [Handler Developmen
 | `handlers.md` | Handler guide | 8 timings, `HandlerBuilder` table including `.critical()`, `handler_error_mode`, `HandlerSystem.handlers_at` fast path, ERROR-handler rules (return dict not merged, re-entry raises `FSMError`) |
 | `architecture.md` | System design | Layer diagram, component list, message, message-free step, start and stream flows, `FSMContext` fields, special `_` keys, stacked-FSM merge, extension table, extension points |
 | `api_reference.md` | Reference | `API(...)` signature, steps without a user message (`advance`, `run_until_terminal`), session, query, stacking methods, visualization, `LLMInterface`, `WorkingMemory`, `TransitionEvaluatorConfig`, classification, reasoning, agents, workflows, eval (CLI flags, exit codes, `EvalConfig` table, dataset schema, output layout), monitor, Open Knowledge Format (core API, `fsm-llm-okf`, agents API, safety model), Agent Skills (core API, `fsm-llm-skills`, agents tools, safety model, known limits), the `State.synthesize` field, Synthesis (compile and reuse, library, runner, agent tools, traces and repair, safety model, known limits), Testing (`fsm_llm.testing`: doubles, scripted user, assertions, `PathRecorder`), exception tree, constants |
-| `synthesis.md` | Guide | Runtime FSM synthesis: concierge pattern, `FSMSynthesizer`, gates G1 to G7, `FSMLibrary`, `ProcedureRunner`, agent tools, approval, traces and repair, limits, safety model, known limits. Holds the one full JSON FSM of the reference docs (a `json` block with `"initial_state"`, loaded by the snippet test) and a Python block that reads it from `concierge.json`. Holds the live results of blocks s0 to s2 (all INCONCLUSIVE, one model) and claims no win for synthesis; update it together with `src/synthesis/*.md` and `scripts/bench_data/README.md` when the bench runs |
-| `testing.md` | Guide | `fsm_llm.testing` for users: the doubles and when each fits, `ScriptedUser`, the four assertions, `PathRecorder` (deep-copy caveat), pytest notes, migration from a copied `tests/conftest.py`. Holds two small FSMs as Python dict literals (loaded by the snippet test) and every `python` block is executed in order, in one namespace, offline by `tests/test_fsm_llm_testing/test_guide.py`; a block that must not run is fenced `python notest`. Update it together with `src/testing/README.md` and `docs/api_reference.md` |
+| `synthesis.md` | Guide | Runtime FSM synthesis: concierge pattern, `FSMSynthesizer`, gates G1 to G7, `FSMLibrary`, `ProcedureRunner`, agent tools, approval, traces and repair, limits, safety model, known limits. Holds the one full JSON FSM of the reference docs (a `json` block with `"initial_state"`, loaded by the snippet test) and a Python block that reads it from `concierge.json`. Holds the live results of blocks s0 to s2 (all INCONCLUSIVE, one model) and claims no win for synthesis; update it together with `src/fsm_llm/synthesis/*.md` and `scripts/bench_data/README.md` when the bench runs |
+| `testing.md` | Guide | `fsm_llm.testing` for users: the doubles and when each fits, `ScriptedUser`, the four assertions, `PathRecorder` (deep-copy caveat), pytest notes, migration from a copied `tests/conftest.py`. Holds two small FSMs as Python dict literals (loaded by the snippet test) and every `python` block is executed in order, in one namespace, offline by `tests/test_fsm_llm_testing/test_guide.py`; a block that must not run is fenced `python notest`. Update it together with `src/fsm_llm/testing/README.md` and `docs/api_reference.md` |
 | `strands_features.md` | Historical | 12 features to adapt, plus "Features NOT Recommended" |
 | `strands_features_phase_1.md` | Historical | 4 delivered features, commit `a7e3d88`, test counts from that time |
 | `strands_features_phase_2.md` | Historical | 8 features with estimated LOC and "Not yet implemented" notes from that time |
@@ -41,7 +41,7 @@ Other files read or point to these docs:
 - `tests/test_fsm_llm/test_docs_snippets.py`: `_REFERENCE_DOCS` holds `docs/api_reference.md`, `docs/architecture.md`, `docs/fsm_design.md`, `docs/handlers.md`, `docs/synthesis.md`, `docs/testing.md`. `docs/quickstart.md` is in `_FULL_FSM_DOCS`. The test regex is ```` ```(json|python)\n(.*?)``` ````. Any block that contains `"initial_state"` must load through `FSMDefinition(**definition)`. For JSON the whole block is parsed. For Python it takes the first dict literal with `initial_state`, found through `ast`, so the dict must be a pure literal. `quickstart.md` must yield at least one such snippet. Every `_REFERENCE_DOCS` file must exist.
 - `tests/test_fsm_llm_testing/test_guide.py`: executes every ```` ```python ```` block of `docs/testing.md` in document order in one namespace (a later block uses the names of an earlier one), offline, and checks that every name in `fsm_llm.testing.__all__` appears in the guide.
 - `tests/test_fsm_llm_regression/test_regression_cli_and_exports.py` (`TestQuickstartReferences`): `quickstart.md` must not contain `examples/basic/quiz`, `examples/intermediate/customer_service` or `python main.py`.
-- `src/fsm.py`: the module docstring points to `docs/architecture.md`. A comment near line 617 quotes `docs/handlers.md` on ERROR handlers.
+- `src/fsm_llm/fsm.py`: the module docstring points to `docs/architecture.md`. A comment near line 617 quotes `docs/handlers.md` on ERROR handlers.
 
 ## Data shapes
 
@@ -73,9 +73,9 @@ No known mismatches between these docs and the code. When one is found, list it 
 
 ## Working here
 
-- Before stating a count, signature or default, check it against `src/` (for example `.venv/bin/python -c "import fsm_llm.eval as e; print(len(e.__all__))"`).
+- Before stating a count, signature or default, check it against `src/fsm_llm/` (for example `.venv/bin/python -c "import fsm_llm.eval as e; print(len(e.__all__))"`).
 - After any edit, run:
   `.venv/bin/python -m pytest tests/test_fsm_llm/test_docs_snippets.py tests/test_fsm_llm_regression/test_regression_cli_and_exports.py`
 - A new full FSM example must include `description` on the FSM and on every state, `id` and `purpose` on every state, and a reachable terminal state.
-- Renaming or deleting a current guide means updating `_REFERENCE_DOCS` or `_FULL_FSM_DOCS` in `test_docs_snippets.py` and the pointers in `src/fsm.py`.
+- Renaming or deleting a current guide means updating `_REFERENCE_DOCS` or `_FULL_FSM_DOCS` in `test_docs_snippets.py` and the pointers in `src/fsm_llm/fsm.py`.
 - Example paths cited here must exist under `examples/`. Do not edit `examples/` to fit the docs: they are evaluation baselines.

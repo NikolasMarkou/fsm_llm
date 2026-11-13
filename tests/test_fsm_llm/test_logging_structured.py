@@ -371,7 +371,7 @@ class TestJsonFormatter:
 # write time, so the host's own records keep printing exactly once. Capturing
 # needs a child process (process-global handlers). The child imports the
 # editable install, which is the tree under test; it needs no ``sys.path`` entry
-# (``src/`` holds ``logging.py`` and must never be put on ``sys.path``).
+# (``src/fsm_llm/`` holds ``logging.py`` and must never be put on ``sys.path``).
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _CHILD = """
 import sys

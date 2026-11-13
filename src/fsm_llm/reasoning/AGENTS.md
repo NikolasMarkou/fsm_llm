@@ -1,0 +1,144 @@
+# fsm_llm.reasoning
+
+Path: `src/fsm_llm/reasoning`
+Purpose: Multi-strategy reasoning engine on top of core `fsm_llm`: an orchestrator FSM analyses a problem, a classifier FSM recommends a strategy, one of 9 strategy FSMs is pushed and driven, the solution is validated with up to 3 retries, and `solve_problem` returns `(solution, trace_info)`.
+
+## Scope
+
+Subpackage of the `fsm-llm` distribution (core package `src`, which runs JSON-style FSM definitions through a 2-pass LLM pipeline: Pass 1 extracts data and evaluates transitions, Pass 2 writes the reply). Here: the `ReasoningEngine`, the 11 FSM definitions (as Python dicts in `reasoning_modes.py`, not JSON files), its handlers, Pydantic models, and the `python -m fsm_llm.reasoning` CLI. No third-party deps beyond core; the pyproject `reasoning` extra is empty. Version is `fsm_llm.__version__` (0.12.0), re-exported via `__version__.py`.
+
+Not here: the FSM runtime (`API`, handlers, stacking) lives in core `fsm_llm`. Consumers: `fsm_llm.agents.reasoning_react` (`ReasoningReactAgent`, imported conditionally), `fsm_llm.has_reasoning`/`get_reasoning`, and `examples/reasoning/math_tutor`.
+
+## Architecture
+
+```mermaid
+sequenceDiagram
+    participant C as caller
+    participant E as ReasoningEngine
+    participant O as orchestrator API
+    participant K as classifier API
+    C->>E: solve_problem(problem, ctx)
+    E->>O: start_conversation({...ctx, problem_statement, reasoning_trace: [], retry_count: 0})
+    E->>O: run_until_terminal(max_steps=170, before_step=hook), message-free
+    loop each round (core)
+        alt top is an ended strategy FSM, or one past 30 steps
+            E->>O: hook: get_data, pop_fsm(context_to_return=merge_reasoning_results(...), UPDATE)
+        else reasoning_push_pending set
+            E->>O: hook: update_context(reasoning_push_pending=None), push_fsm(reasoning_fsms[type], inherit_context=False, context_to_pass=subset)
+        end
+        O->>O: advance (top of the stack)
+    end
+    Note over O,K: CONTEXT_UPDATE on problem_type runs the classifier FSM (run_until_terminal, max 10 steps)
+    E->>O: get_data, then end_conversation in finally
+    E-->>C: (solution, {reasoning_trace, summary, final_context, all_responses})
+```
+
+The engine sends no user message: the classifier and the orchestrator run on core `run_until_terminal` (message-free steps; the problem reaches the model through context), and one orchestrator run drives every strategy FSM through its `before_step` hook (`_StrategyStack`, D-053 of plan 944e2692). The engine owns no loop over steps.
+
+Orchestrator (`reasoning_orchestrator`) state flow: `problem_analysis -> strategy_selection -> execute_reasoning -> synthesize_solution -> validate_refine -> final_answer` (terminal). `problem_analysis` leaves only once `problem_type` and `problem_components` are present (condition with `requires_context_keys`). `validate_refine` has two transitions: priority 1 to `final_answer` when `validation_result == true` or `max_retries_reached == true`; priority 2 back to `execute_reasoning` when `validation_result == false` and `max_retries_reached != true`. Other transitions are unconditional.
+
+Classifier (`problem_classifier`): `analyze_domain -> analyze_structure -> identify_reasoning_needs -> recommend_strategy` (terminal), producing `recommended_reasoning_type`, `strategy_justification`, `alternative_approaches`, `problem_domain`.
+
+Handler-only keys (core `handler_only_keys`, no extraction may write them): the orchestrator lists `ORCHESTRATOR_HANDLER_ONLY_KEYS` (`validation_result`, `validation_checks`, `max_retries_reached`, `retry_count`, `solution_confidence`, `reasoning_type_selected`, `classified_problem_type`, `reasoning_push_pending`), so a model reply cannot open the validation gate or pick the strategy; `validate_refine` and `final_answer` ask the model for none of them. The hybrid FSM lists `hybrid_loop_count`.
+
+Strategy FSMs are linear chains ending in a terminal state, except `hybrid`, whose `critical_evaluation` state loops back to `identify_components` (priority 2) when `needs_refinement == true` and `hybrid_loop_count < 2`, else goes on (priority 1). State counts: `simple_calculator` 2, `analytical` 4, `deductive` 3, `inductive` 4, `creative` 4, `critical` 5, `abductive` 4, `analogical` 5, `hybrid` 7.
+
+Handlers registered in `ReasoningEngine._register_handlers`:
+
+| Name (`HandlerNames`) | Timing | Trigger | Action |
+| --- | --- | --- | --- |
+| `OrchestratorProblemClassifier` | CONTEXT_UPDATE | `problem_type` updated | `_classify_problem`: skips if `classified_problem_type` set; runs classifier FSM on `problem_statement`, `problem_type`, `problem_components`; returns `classified_problem_type`, `classification_justification`, `problem_domain`, `alternative_approaches`, normalised by `_classification_from` (a missing, non-`str` or blank recommended type becomes `analytical`; a non-`str` justification or domain becomes `""`; alternatives keep their non-blank `str` items, a bare `str` becomes a one-item list; WARNING per replaced value) |
+| `OrchestratorStrategyExecutor` | state entry | `execute_reasoning` | `_prepare_reasoning_execution`: sets `reasoning_push_pending` (True), `reasoning_type_selected`, `classification_justification` |
+| `RetryKeyClearer` | state entry | `execute_reasoning` | core `clear_keys_on_entry`: clears `proposed_solution`, `key_insights`, `validation_result` |
+| `HybridKeyClearer` | state entry | `identify_components` (only the hybrid FSM has it; the `critical_evaluation` back edge re-enters it) | core `clear_keys_on_entry`: clears `HYBRID_CLEARED_KEYS` (the nine body keys plus `needs_refinement`, not `hybrid_loop_count`) so each refinement pass re-extracts |
+| `OrchestratorSolutionValidator` | CONTEXT_UPDATE | `proposed_solution` updated | `ReasoningHandlers.validate_solution` |
+| `ContextPruner` | PRE_TRANSITION | always | `ReasoningHandlers.prune_context` |
+| `ReasoningTracer` | POST_TRANSITION | always; orchestrator API only (the classifier's own trace was never read) | `ReasoningHandlers.update_reasoning_trace` |
+| `RetryLimiter` | state entry | `validate_refine` | `_check_retry_limit`: when the attempt has no `validation_result` (no solution was proposed) it runs `validate_solution` first, so that attempt counts as failed; then `max_retries_reached = retry_count >= 3` |
+| `HybridLoopCounter` | state exit | `critical_evaluation` (only the hybrid FSM has it; strategy FSMs run on the orchestrator API) | `ReasoningHandlers.count_hybrid_loop`: `hybrid_loop_count + 1` |
+
+The classifier, strategy executor, validator, retry limiter and hybrid loop counter are registered `.critical()` (D-058 of plan 944e2692): their failure raises through the step even under core's default `handler_error_mode="continue"`. `ContextPruner` and `ReasoningTracer` are best-effort (a failure is logged and skipped).
+
+Pushed strategy FSMs run through the same orchestrator `API` (same `FSMManager` and handler system), so the unfiltered `ContextPruner` and `ReasoningTracer` also fire on strategy-FSM transitions. Trace entries written in a strategy FSM's context are not merged back; only the keys from `merge_reasoning_results` return.
+
+## Key files
+
+| File | Role | Notes |
+| --- | --- | --- |
+| `engine.py` | `ReasoningEngine` | `_solve_lock` (`threading.Lock`) serializes `solve_problem` per instance |
+| `reasoning_modes.py` | 11 FSM dicts + `ALL_REASONING_FSMS` | keys: `orchestrator`, `classifier`, and the 9 `ReasoningType` values |
+| `handlers.py` | `ReasoningHandlers`, `ContextManager`, `OutputFormatter`, `_STOP_WORDS` | all static methods |
+| `definitions.py` | Pydantic models on `TimestampedModel` | computed fields; `extra="ignore"`, `validate_assignment=True`, `use_enum_values=True` |
+| `constants.py` | `ReasoningType`, `STRATEGIES` (one `StrategySpec` per type), `OrchestratorStates`, `ClassifierStates`, `ContextKeys`, `HandlerNames`, `Defaults`, `ErrorMessages`, `LogMessages` | state-name constants double as dict keys in `reasoning_modes.py` |
+| `utilities.py` | `get_reasoning_fsm`, `map_reasoning_type`, `get_available_reasoning_types` | the last two read `STRATEGIES` |
+| `exceptions.py` | 3 exception classes | |
+| `__main__.py` | CLI | `python -m fsm_llm.reasoning` (no console script) |
+| `__init__.py`, `__version__.py` | exports, version | one static `__all__` |
+
+## Public interface
+
+`__all__`: `ReasoningEngine`, `ReasoningType`, `ReasoningStep`, `ReasoningTrace`, `ValidationResult`, `ReasoningClassificationResult`, `ProblemContext`, `SolutionResult`, `ReasoningError`, `ReasoningExecutionError`, `ReasoningClassificationError`, `get_available_reasoning_types`, `__version__`.
+
+- `ReasoningEngine(model: str | None = None, **kwargs)`. `model` goes through core `llm.resolve_model` (argument, then env `LLM_MODEL`; neither raises `ModelNotConfiguredError`; with an injected `llm_interface` no model is needed). Builds `self.orchestrator` and `self.classifier` with `API.from_definition(fsm, **llm_settings_for(kwargs, model=model), **kwargs)`: `model` is passed only when no `llm_interface` is injected (core refuses a model beside an interface). Loads every FSM at construction (`get_reasoning_fsm`); one missing from the package is a packaging bug and raises `KeyError`.
+- `solve_problem(problem: str, initial_context: dict[str, Any] | None = None) -> tuple[str, dict[str, Any]]`. Copies `initial_context`, drops the engine's strategy keys `reasoning_push_pending`, `reasoning_type_selected` and `classified_problem_type` (`SOLVE_DRIVER_KEYS`, WARNING), then sets `problem_statement`, `reasoning_trace = []`, `retry_count = 0` (these override caller values). Returned dict: `reasoning_trace` (`ReasoningTrace.model_dump()`, with `execution_time_seconds` the wall-clock seconds of the solve), `summary` (`OutputFormatter.format_reasoning_summary`), `final_context`, `all_responses` (list of every reply string). Raises `ReasoningExecutionError` chained from the run's error, with `details={"conversation_id", "responses_so_far", "partial_context"}` (`partial_context` is `get_data` of the frame on top, read before the conversation is ended; `None` if the read raises `FSMError` or `ValueError`; the conversation is ended either way), for a spent budget and for any other exception in the run.
+- `get_reasoning_fsm(fsm_name: str) -> dict` (deep copy; `KeyError` with `FSM definition not found: <name>` if unknown; not the core `fsm_llm.load_fsm_definition`).
+- `map_reasoning_type(type_str: str) -> str`: lowercases and strips, maps the 9 values plus aliases (`math`, `arithmetic`, `direct computation`, `logic`, `pattern`, `brainstorm`, `critique`, `mixed`, `explain`, `diagnose`, `analogy`, `compare`, ...). Unknown -> `analytical` with a WARNING.
+- `get_available_reasoning_types() -> dict[str, str]`: value -> one-line description, 9 entries.
+- CLI: `python -m fsm_llm.reasoning [PROBLEM] [--type/-t TYPE] [--context/-c JSON] [--model/-m MODEL] [--env-file PATH] [--output/-o text|json|detailed] [--save/-s FILE] [--verbose/-v] [--quiet/-q] [--list-types] [--version]`. `--type` choices are the 9 values and set `preferred_reasoning_type`. `--context` must be a JSON object (else logs and `sys.exit(1)`). `--quiet` with `--verbose` is an error (exit 1). `--env-file PATH` (`cli_support.add_env_file`) is applied right after the arguments are validated, before the model is resolved; a missing file and a missing model are each one stderr line `python -m fsm_llm.reasoning: error: ...`, exit 1. `--verbose` calls `fsm_llm.logging.setup_cli_logging("INFO")`. `--save` creates parent dirs; `.json` suffix or `--output json` writes JSON (`problem`, `solution`, `trace_info`, `timestamp`), otherwise text; suffixes other than `.json`, `.txt`, `.md` only warn. `--list-types` logs through the module's own logger (named `__main__`, so core's `logger.disable("fsm_llm")` does not cover it) and therefore prints to stderr without `--verbose`. `main()` returns 0 on success, 1 on any error or Ctrl-C; it first calls `cli_support.escape_unencodable_output()`, so text the console cannot encode is written as `\uXXXX` and `--save` still runs. The output is `format_solution_output` printed once (`--quiet` prints the stripped solution); `detailed` and `text` show the summary's steps, types and confidence once. `--output detailed` shows at most 10 trace steps.
+
+## Data shapes
+
+- `ReasoningType(str, Enum)`: `simple_calculator`, `analytical`, `deductive`, `inductive`, `abductive`, `analogical`, `creative`, `critical`, `hybrid`.
+- Orchestrator states (`OrchestratorStates`): `problem_analysis`, `strategy_selection`, `execute_reasoning`, `synthesize_solution`, `validate_refine`, `final_answer`. Classifier states (`ClassifierStates`): `analyze_domain`, `analyze_structure`, `identify_reasoning_needs`, `recommend_strategy`.
+- Context passed to a pushed strategy FSM: non-None `problem_statement`, `problem_components`, `constraints`, `problem_type` (no size cap is passed to `extract_relevant_context`).
+- `merge_reasoning_results(orchestrator_context, sub_fsm_context, reasoning_type) -> dict` maps sub-FSM keys to orchestrator keys, drops None values, and always adds `<reasoning_type>_reasoning_completed: True`:
+
+| Type | Sub-FSM key -> orchestrator key |
+| --- | --- |
+| `analytical` | `key_insights`, `integrated_analysis` (same names) |
+| `deductive` | `conclusion` -> `deductive_conclusion`; `logical_validity` |
+| `inductive` | `hypothesis` -> `inductive_hypothesis`; `generalization_strength` |
+| `creative` | `best_creative_solution`, `innovation_rating` |
+| `critical` | `critical_assessment`; `confidence_rating` -> `assessment_confidence` |
+| `simple_calculator` | `calculation_result` -> `calculation_result` and `proposed_solution`; `calculation_error` -> `calculation_error_details` |
+| `hybrid` | `final_hybrid_solution`; `reasoning_synthesis` -> `hybrid_synthesis_summary` |
+| `abductive` | `best_hypothesis` -> `best_explanation`; `confidence_in_explanation` -> `explanation_confidence` |
+| `analogical` | `adapted_solution_or_understanding` -> `analogical_solution`; `analogy_confidence_rating` -> `analogy_confidence` |
+
+- Trace step dict (from `update_reasoning_trace`): `{"from": previous_state, "to": current_state, "context_snapshot": {subset of problem_type, reasoning_strategy, reasoning_type_selected, validation_result, retry_count}}`, read from `_previous_state`/`_current_state`.
+- Models: `ReasoningStep{step_type: ReasoningStepType, content (1-10000, stripped), confidence 0-1, evidence (max 50), context_keys_used: set, execution_time_ms}`; `ReasoningTrace{steps: list[dict], reasoning_types_used: set[str] (dumped as a sorted list), final_confidence 0-1, execution_time_seconds, context_evolution, decision_points}` with computed `total_steps`, `unique_states_visited`, `reasoning_complexity`, `average_step_time` (computed names are stripped from input); `ValidationResult{is_valid, confidence, checks, issues, recommendations, validation_criteria}` with computed `passed_checks`, `total_checks`, `pass_rate`, `has_issues`, `validation_summary`; `ReasoningClassificationResult{recommended_type, justification, domain, alternatives (deduplicated), confidence, complexity_assessment, domain_indicators}`; `ProblemContext{problem_statement (3-50000 after strip), domain, constraints, initial_context, priority, expected_solution_type, user_preferences}`; `SolutionResult{solution, confidence, reasoning_summary (min 10), trace, execution_time_seconds, validation_result, alternative_solutions, key_insights, used_context_keys}`. All carry `timestamp` (UTC) and computed `age_seconds`. Enums: `ConfidenceLevel` (4), `ReasoningStepType` (10), `ProblemDomain` (8). The engine itself only builds `ReasoningTrace`, `ValidationResult` and `ReasoningClassificationResult`.
+- `Defaults`: `TEMPERATURE 0.7`, `MAX_TOKENS 2000` (neither is passed to `API` by the engine), `MAX_RETRIES 3`, `MAX_TRACE_STEPS 50`, `TRACE_KEEP_START 5`, `CONTEXT_PRUNE_THRESHOLD 8000`, `MIN_SOLUTION_LENGTH 20`, `PRUNE_LIST_MAX_LENGTH 10`, `PRUNE_STRING_MAX_LENGTH 1000`, `MAX_SUB_FSM_STEPS 30`, `MAX_CLASSIFICATION_STEPS 10`, `MAX_TOTAL_STEPS 50`, `MAX_SOLVE_STEPS 170` (= 50 + (3 + 1) * 30, D-013).
+
+## Invariants and constraints
+
+- Strategy choice in `_prepare_reasoning_execution` (a non-`str` `reasoning_strategy` counts as absent): mapped `classified_problem_type`; else mapped `reasoning_strategy`; else `analytical`. Then a `preferred_reasoning_type` whose mapped value is a valid `ReasoningType` overrides (invalid ones log and are ignored). A missing strategy FSM falls back ONLY to `analytical` (DECISION D-009: never substitute another loaded type); if that is missing too, `ReasoningExecutionError`.
+- `validate_solution` (a non-`str` `problem_type` reads as `""`): "simple" when `problem_type` contains `arithmetic` or `calculation`, or `reasoning_strategy` is `simple_calculator`, or `reasoning_type_selected == simple_calculator`. Checks `has_solution` (anything but `None` or `""`: a `0` or `False` answer is a solution, the same rule as `extract_final_solution`), `has_insights` (true for simple), `sufficient_detail` (stripped length > 20, or just `has_solution` for simple), `addresses_problem` (content-word overlap after `_STOP_WORDS` removal; true if the problem has no content words; just `has_solution` for simple). On failure with `retry_count < 3` it increments `retry_count`; `max_retries_reached = retry_count >= 3` after the increment. Returns `retry_count`, `validation_checks`, `validation_result`, `solution_confidence` (fraction of checks passed), `max_retries_reached`.
+- `prune_context`: no-op while `json.dumps(context, default=str)` is at most 8000 chars; above that, `reasoning_trace`, `logical_steps`, `observations`, `creative_ideas` lists are cut to their last 10 items and strings over 1000 chars to 1000 + core's `MESSAGE_TRUNCATION_SUFFIX` (`... [truncated]`).
+- `update_reasoning_trace`: over 50 entries, keeps the first `Defaults.TRACE_KEEP_START` (5) and last 45, then appends the new step.
+- Strategy FSM: pushed by the hook before the step after `execute_reasoning` was entered; popped by the hook when it has ended (core offers an ended pushed frame to `before_step`, D-052) or when 30 steps have run since its push (step number arithmetic, no engine loop). Both pops read the sub-FSM context with `get_data` and pop with `context_to_return=merge_reasoning_results(...)`, `ContextMergeStrategy.UPDATE`; a failing pop propagates.
+- `extract_final_solution` order: `final_solution`, `proposed_solution`, `calculation_result`, `integrated_analysis`, `deductive_conclusion`, `inductive_hypothesis`, `best_creative_solution`, `critical_assessment`, `final_hybrid_solution`, `best_explanation`, `analogical_solution`; the first non-None, non-empty value is returned as `str`. Else `Maximum retry attempts exceeded` if `max_retries_reached`, else `Solution process completed, but no explicit solution found.`
+- Reasoning types in the trace come from `reasoning_type_selected` in the final context and in trace snapshots; empty -> `["unknown"]`. `final_confidence` is `solution_confidence` (default 0.0).
+- Writers that emit context outside the process (CLI `--output json`, `--save` JSON) use `fsm_llm.utilities.redacting_json_default`. The three `default=str` uses in `handlers.py` only measure size with `len()` and never emit. `ReasoningTrace` serializes `reasoning_types_used` (a `set[str]`) as a sorted list through a `field_serializer`, so `model_dump()`, CLI JSON output and JSON save files carry a list; do not teach `redacting_json_default` about sets (D-002 of plan 0051e159).
+- The orchestrator conversation is ended in a `finally` after a successful solve; a failed solve goes through one `_failed_solve`, which reads `partial_context` from the top frame first (after `end_conversation` core answers only from its bounded ended-conversation cache), then ends the conversation and raises. The classifier conversation is ended in a `finally` as well.
+- The engine sends no user message and owns no loop over steps: no `converse(` and no "Continue reasoning" anywhere in `src/fsm_llm/reasoning` (pinned by `test_engine.py`). It never imports `fsm_llm.agents`.
+- State-name constants and `reasoning_modes.py` dict keys must stay in sync.
+
+## Dependencies
+
+- Core `fsm_llm`: `API` (`from_definition`, `start_conversation`, `run_until_terminal`, `get_data`, `update_context`, `push_fsm`, `pop_fsm`, `get_stack_depth`, `has_conversation_ended`, `end_conversation`, `register_handler`, `create_handler`), `ContextMergeStrategy`, `handlers.HandlerTiming`, `definitions.FSMError`, `logging.logger` and `setup_cli_logging`, `utilities.redacting_json_default`, `llm.resolve_model`.
+- pydantic v2 for the models. Stdlib `argparse`, `json`, `threading`, `copy`.
+
+## Failure modes
+
+- Exceptions: `FSMError` -> `ReasoningError(message, details=None)` -> `ReasoningExecutionError(message, reasoning_type=None, **kwargs)`, `ReasoningClassificationError`.
+- `ReasoningClassificationError`: classifier did not end within 10 steps, or any classifier exception (wrapped once). It is raised inside a critical CONTEXT_UPDATE handler, so core raises it as `HandlerExecutionError` through the orchestrator step and `solve_problem` re-wraps that as `ReasoningExecutionError` (the classification error is in the `__cause__` chain). The same holds for D-009's `ReasoningExecutionError("No reasoning FSM definitions available")` from the executor and for an exception in the validator, retry limiter or hybrid loop counter: each stops the solve at once.
+- A spent run budget (`Defaults.MAX_SOLVE_STEPS` = 170 steps) raises `RunBudgetExceededError` from core, which `solve_problem` wraps as `ReasoningExecutionError`; a spent classifier budget (10 steps) raises `ReasoningClassificationError` chained from it.
+- Unknown reasoning type strings degrade to `analytical` with a warning (`map_reasoning_type`, `_prepare_reasoning_execution`).
+
+## Working here
+
+- New strategy: add an FSM dict in `reasoning_modes.py` and register it in `ALL_REASONING_FSMS` under the new value; add the `ReasoningType` member; add one `StrategySpec` to `STRATEGIES` in `constants.py` (description, aliases, result map, solution key: `map_reasoning_type`, `get_available_reasoning_types`, `merge_reasoning_results` and `extract_final_solution` all read it); any new keys go to `ContextKeys`. A state's `id` is filled from its key when the module loads, and the three no-questions sentences are the `_NO_QUESTIONS` family at the top of `reasoning_modes.py`; `test_golden_tables.py` pins the 11 FSM definitions and the strategy tables by hash. The CLI `--type` choices pick it up from the enum.
+- Use `ContextKeys` constants for context keys (`hybrid` uses `ContextKeys.NEEDS_REFINEMENT` and `HYBRID_LOOP_COUNT`). A key the model must never write goes into `handler_only_keys` of its FSM.
+- Read the `# DECISION` anchors before editing nearby: D-009 in `engine.py` (analytical-only fallback), D-004 [STALE] (preferred type applied after the chain), D-053 in `engine.py` (retry-key clear on `execute_reasoning` entry; sub-FSM step count from core's step number), D-054 (handler-only verdict and counters, `_check_retry_limit`, budget error), D-058 (critical handlers, `_failed_solve`), D-060 (`_classification_from`), D-014 in `constants.py` (do not re-add `SOLUTION_VALID`/`CONFIDENCE_LEVEL` aliases), D-016 in `__main__.py` (enable logging only on `--verbose`).
+- Tests: `pytest tests/test_fsm_llm_reasoning/` (232 collected; files `test_cli_logging.py`, `test_cli_output.py`, `test_constants.py`, `test_definitions.py`, `test_engine.py`, `test_engine_scripted.py`, `test_exceptions.py`, `test_handlers.py`). Tests mock the LLM; `test_engine_scripted.py` runs whole solves through core with a scripted `LLMInterface` and asserts every call; a real run needs a model, for example `python -m fsm_llm.reasoning "What is 2 + 2?" --model ollama_chat/qwen3.5:4b`.
+- Lint and types: `make lint`, `make type-check` (ruff py311, line length 88; mypy).

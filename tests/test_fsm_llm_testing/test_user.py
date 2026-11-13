@@ -30,7 +30,7 @@ from fsm_llm.testing import (
     advance_until_terminal,
 )
 
-_EXAMPLES = Path(fsm_llm.__file__).resolve().parent.parent / "examples" / "basic"
+_EXAMPLES = Path(fsm_llm.__file__).resolve().parents[2] / "examples" / "basic"
 _GREETER = _EXAMPLES / "simple_greeting" / "fsm.json"
 _FORM = _EXAMPLES / "form_filling" / "fsm.json"
 

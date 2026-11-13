@@ -114,21 +114,14 @@ fsm-llm-eval = "fsm_llm.eval.__main__:run"
 fsm-llm-okf = "fsm_llm.okf_cli:main_cli"
 fsm-llm-skills = "fsm_llm.agent_skills_cli:main_cli"
 
-# The import package `fsm_llm` lives directly in `src/` (flat layout): `src` is
-# mapped to the name `fsm_llm`. `packages.find` would name the subpackages
-# `agents`, `eval`, ... so the list is explicit; add a new subpackage here.
-[tool.setuptools]
-package-dir = {"fsm_llm" = "src"}
-packages = [
-    "fsm_llm",
-    "fsm_llm.agents",
-    "fsm_llm.eval",
-    "fsm_llm.monitor",
-    "fsm_llm.reasoning",
-    "fsm_llm.synthesis",
-    "fsm_llm.testing",
-    "fsm_llm.workflows",
-]
+# The import package `fsm_llm` is the directory `src/fsm_llm/` (src layout):
+# `packages.find` finds it and its subpackages by itself; nothing to list when one
+# is added. `include` keeps the search to `fsm_llm*` (a stray top-level directory
+# under `src/` would otherwise ship).
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["fsm_llm*"]
+namespaces = false
 
 [tool.setuptools.package-data]
 fsm_llm = ["py.typed"]
@@ -210,13 +203,15 @@ ignore = [
     "B017",  # tests may use assert True/False and assertRaises
 ]
 "examples/*" = ["E501"]
-"src/monitor/*" = ["RUF012"]
+"src/fsm_llm/monitor/*" = ["RUF012"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["fsm_llm"]
 
 [tool.mypy]
 python_version = "3.11"
+# The package is src/fsm_llm/: `mypy -p fsm_llm` finds it through this path.
+mypy_path = "src"
 warn_return_any = true
 warn_unused_configs = true
 warn_unused_ignores = true

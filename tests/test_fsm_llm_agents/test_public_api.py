@@ -267,7 +267,13 @@ class TestWithInstructions:
 class TestStaticAll:
     """Step 25 (API-05): ``fsm_llm.agents.__all__`` is one static list."""
 
-    _INIT = Path(__file__).resolve().parents[2] / "src" / "agents" / "__init__.py"
+    _INIT = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "fsm_llm"
+        / "agents"
+        / "__init__.py"
+    )
 
     def _all_bindings(self) -> list[ast.stmt]:
         tree = ast.parse(self._INIT.read_text(encoding="utf-8"))
@@ -347,7 +353,7 @@ class TestCoreOwnsTypedFieldsAndKeyClearing:
     def test_no_agents_module_defines_a_key_clearing_copy(self):
         # make_fresh_keys_handler and the meta-builder build their plain clear
         # with core clear_keys_delta (D-051); no agents module re-implements it.
-        src = Path(__file__).resolve().parents[2] / "src" / "agents"
+        src = Path(__file__).resolve().parents[2] / "src" / "fsm_llm" / "agents"
         for path in ("handlers.py", "meta_builder.py"):
             assert "clear_keys_delta(" in (src / path).read_text(encoding="utf-8"), path
 

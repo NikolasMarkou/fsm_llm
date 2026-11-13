@@ -1011,7 +1011,7 @@ class TestBlocks:
         with pytest.raises(BAD, match="ONCE"):
             sb.run_block("s0", client=client, sleep=lambda s: None)
         (bench / "s0" / "rows_react.jsonl").unlink()
-        for key, value in (("src_sha256", {"src/flow_analysis.py": "0" * 64}), ("fixture_hash", "0")):  # fmt: skip
+        for key, value in (("src_sha256", {"src/fsm_llm/flow_analysis.py": "0" * 64}), ("fixture_hash", "0")):  # fmt: skip
             path = bench / "s0" / "manifest_synth-fsm.json"
             saved = path.read_text(encoding="utf-8")
             manifest = json.loads(saved)
@@ -1186,50 +1186,52 @@ class TestBlocks:
 REQUIRED_PINS = (
     "scripts/synthesis_bench.py",
     "scripts/bench_common.py",
-    "src/synthesis/constants.py",
-    "src/synthesis/exceptions.py",  # reason_of maps its classes to a phase (D-075)
-    "src/eval/cases.py",
-    "src/eval/config.py",  # the EvalConfig of every G6b trial
-    "src/eval/stats.py",  # pass_rate judges G6b against min_pass_rate
-    "src/utilities.py",  # extract_json_from_text: the R grader's first step
-    "src/validator.py",  # FSMValidator is gate G2
-    "src/agents/__init__.py",  # create_agent, the R arm's factory
-    "src/agents/react.py",
+    "src/fsm_llm/synthesis/constants.py",
+    "src/fsm_llm/synthesis/exceptions.py",  # reason_of maps its classes to a phase (D-075)
+    "src/fsm_llm/eval/cases.py",
+    "src/fsm_llm/eval/config.py",  # the EvalConfig of every G6b trial
+    "src/fsm_llm/eval/stats.py",  # pass_rate judges G6b against min_pass_rate
+    "src/fsm_llm/utilities.py",  # extract_json_from_text: the R grader's first step
+    "src/fsm_llm/validator.py",  # FSMValidator is gate G2
+    "src/fsm_llm/agents/__init__.py",  # create_agent, the R arm's factory
+    "src/fsm_llm/agents/react.py",
 )
 # What the pinned files import and the pins leave out, each with the reason (D-075, D-067
 # item 3): the engine every arm shares, or code the bench never calls. Anything else a pinned
 # file imports must be pinned; an entry nothing imports any more is stale and fails too.
 UNPINNED_CORE = {
-    "src/__init__.py": "re-export facade of the core",
-    "src/synthesis/__init__.py": "re-export facade of the subpackage",
-    "src/api.py": "the engine all three arms run on (git_commit shows an edit)",
-    "src/constants.py": "the engine's defaults",
-    "src/context.py": "the engine's context",
-    "src/definitions.py": "the engine's models",
-    "src/expressions.py": "the engine's JsonLogic (is_missing)",
-    "src/handlers.py": "the engine's handlers",
-    "src/llm.py": "the one LLM layer",
-    "src/logging.py": "library logging",
-    "src/transition_evaluator.py": "the engine's transition rules",
-    "src/okf.py": "text caps shared with every package",
-    "src/schema_registry.py": "leaf core module read by the pinned validator.py",
-    "src/state_kinds.py": "the engine's kind registry (leaf, read by the pinned flow_analysis.py)",
-    "src/security.py": "key filters shared with every package",
-    "src/visualizer.py": "the mermaid of the approval summary (G7 never runs here)",
-    "src/agents/semantic_tools.py": "embedding lookup, the bench library has no embedder",
-    "src/synthesis/diagnose.py": "repair, never called by the bench",
-    "src/synthesis/patch.py": "repair, never called by the bench",
-    "src/eval/_pool.py": "run-directory plumbing, run_case_trial calls none",
-    "src/eval/constants.py": "run-directory plumbing, run_case_trial calls none",
-    "src/eval/exceptions.py": "run-directory plumbing, run_case_trial calls none",
-    "src/eval/records.py": "run-directory plumbing, run_case_trial calls none",
+    "src/fsm_llm/__init__.py": "re-export facade of the core",
+    "src/fsm_llm/synthesis/__init__.py": "re-export facade of the subpackage",
+    "src/fsm_llm/api.py": "the engine all three arms run on (git_commit shows an edit)",
+    "src/fsm_llm/constants.py": "the engine's defaults",
+    "src/fsm_llm/context.py": "the engine's context",
+    "src/fsm_llm/definitions.py": "the engine's models",
+    "src/fsm_llm/expressions.py": "the engine's JsonLogic (is_missing)",
+    "src/fsm_llm/handlers.py": "the engine's handlers",
+    "src/fsm_llm/llm.py": "the one LLM layer",
+    "src/fsm_llm/logging.py": "library logging",
+    "src/fsm_llm/transition_evaluator.py": "the engine's transition rules",
+    "src/fsm_llm/okf.py": "text caps shared with every package",
+    "src/fsm_llm/schema_registry.py": "leaf core module read by the pinned validator.py",
+    "src/fsm_llm/state_kinds.py": "the engine's kind registry (leaf, read by the pinned flow_analysis.py)",
+    "src/fsm_llm/security.py": "key filters shared with every package",
+    "src/fsm_llm/visualizer.py": "the mermaid of the approval summary (G7 never runs here)",
+    "src/fsm_llm/agents/semantic_tools.py": "embedding lookup, the bench library has no embedder",
+    "src/fsm_llm/synthesis/diagnose.py": "repair, never called by the bench",
+    "src/fsm_llm/synthesis/patch.py": "repair, never called by the bench",
+    "src/fsm_llm/eval/_pool.py": "run-directory plumbing, run_case_trial calls none",
+    "src/fsm_llm/eval/constants.py": "run-directory plumbing, run_case_trial calls none",
+    "src/fsm_llm/eval/exceptions.py": "run-directory plumbing, run_case_trial calls none",
+    "src/fsm_llm/eval/records.py": "run-directory plumbing, run_case_trial calls none",
 }
 
 
 def _fsm_llm_imports(path):
     """The src files *path* imports from ``fsm_llm``, at module level or in a function."""
     rel = path.relative_to(ROOT).with_suffix("")
-    package = ["fsm_llm", *rel.parts[1:-1]] if rel.parts[0] == "src" else []
+    package = (
+        ["fsm_llm", *rel.parts[2:-1]] if rel.parts[:2] == ("src", "fsm_llm") else []
+    )
     found = set()
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         if isinstance(node, ast.ImportFrom):
@@ -1241,17 +1243,17 @@ def _fsm_llm_imports(path):
         else:
             continue
         for mod in (m for m in mods if m[:1] == ["fsm_llm"]):
-            stem = ROOT.joinpath("src", *mod[1:])
+            stem = ROOT.joinpath("src", "fsm_llm", *mod[1:])
             hit = next((c for c in (stem.with_suffix(".py"), stem / "__init__.py") if c.is_file()), None)  # fmt: skip
             found |= {hit.relative_to(ROOT).as_posix()} if hit else set()
     return found
 
 
 def _module_imports(path):
-    """The sibling modules a file of src/agents imports at module level."""
+    """The sibling modules a file of src/fsm_llm/agents imports at module level."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     return {
-        f"src/agents/{alias.name if node.module is None else node.module.split('.')[0]}.py"
+        f"src/fsm_llm/agents/{alias.name if node.module is None else node.module.split('.')[0]}.py"
         for node in tree.body
         if isinstance(node, ast.ImportFrom) and node.level == 1
         for alias in (node.names if node.module is None else node.names[:1])
@@ -1287,7 +1289,7 @@ class TestPins:
 
     def test_every_module_the_react_loop_imports_is_pinned(self):
         """Guards: the R arm's agent code changing under a registered block."""
-        todo, seen = ["src/agents/react.py"], set()
+        todo, seen = ["src/fsm_llm/agents/react.py"], set()
         while todo:
             name = todo.pop()
             if name not in seen:
@@ -1381,7 +1383,7 @@ class TestHygiene:
         # a label is the spec, "double" is an English word the repair code uses, a short number is not a literal
         distinctive = {g for g in golds if g.lower() not in labels | {"double"} and not (g.isdigit() and len(g) < 4)}  # fmt: skip
         assert len(distinctive) >= 14, distinctive
-        files = [p for p in (ROOT / "src" / "synthesis").rglob("*") if p.is_file() and p.suffix in (".py", ".md")]  # fmt: skip
+        files = [p for p in (ROOT / "src" / "fsm_llm" / "synthesis").rglob("*") if p.is_file() and p.suffix in (".py", ".md")]  # fmt: skip
         assert len(files) > 10
         text = "\n".join(p.read_text(encoding="utf-8").lower() for p in files)
         found = {g for g in distinctive | {t.goal for t in sb.TASKS} if g.lower() in text}  # fmt: skip

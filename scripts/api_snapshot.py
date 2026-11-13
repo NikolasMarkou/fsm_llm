@@ -31,7 +31,7 @@ leaves the text unchanged.
 
 Interface: `snapshot() -> str` (the whole text, ends with one newline) and
 `main(argv) -> int` (0, or 2 on a usage error). An unimportable module raises.
-Run it through the installed `fsm_llm`, never with `src/` on `sys.path`.
+Run it through the installed `fsm_llm` (an editable install is enough).
 """
 
 from __future__ import annotations
