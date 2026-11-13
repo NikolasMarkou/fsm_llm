@@ -55,6 +55,50 @@ def _imported_modules(tree: ast.AST) -> list[tuple[str, int, int]]:
     return found
 
 
+def _package_of(path: Path) -> str:
+    """The dotted package a file of the package belongs to (`fsm_llm.testing` for
+    `testing/user.py`; a package's own `__init__.py` is that package)."""
+    parts = path.resolve().relative_to(_PKG_ROOT).with_suffix("").parts
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(("fsm_llm", *parts[:-1]))
+
+
+def _private_imports(source: str, package: str) -> set[tuple[str, str]]:
+    """`(module, name)` of every `from <module> import _name` in *source* that
+    reaches into the package `fsm_llm` from outside `package` itself.
+
+    Interface contract: *package* is the dotted package of the file the source
+    belongs to (`fsm_llm.testing`). A relative import (`level` above 0) is
+    resolved against it, so `from ..llm import _x` is `("fsm_llm.llm", "_x")`;
+    one that climbs above `fsm_llm` is ignored. Dunder names are not private,
+    names imported from inside *package* are its own business, and a plain
+    `import x` binds no name of its own. Pure, never raises on a parseable source.
+    """
+    found: set[tuple[str, str]] = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if node.level:
+            base = package.split(".")
+            if node.level - 1 >= len(base):
+                continue
+            base = base[: len(base) - (node.level - 1)]
+            module = ".".join([*base, *([node.module] if node.module else [])])
+        else:
+            module = node.module or ""
+        if module.split(".")[0] != "fsm_llm":
+            continue
+        if module == package or module.startswith(package + "."):
+            continue
+        found |= {
+            (module, alias.name)
+            for alias in node.names
+            if alias.name.startswith("_") and not alias.name.startswith("__")
+        }
+    return found
+
+
 def _names_testing(module: str, level: int) -> bool:
     """True when an import target is `fsm_llm.testing` (or inside it)."""
     parts = module.split(".")
@@ -167,20 +211,45 @@ class TestSourceLayering:
         is recorded debt (review gate 1 concern 12, plan d454fd62 step 58.1; to be
         retired when `llm.py` is split at step 73 and the seam gets a public
         name). This pins it: no third private name may be imported from the
-        package into `testing/`."""
+        package into `testing/`, absolute or relative (re-review concern 9)."""
         found = set()
         for path in sorted(_TESTING_DIR.rglob("*.py")):
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-                if isinstance(node, ast.ImportFrom) and node.level == 0:
-                    if (node.module or "").split(".")[0] == "fsm_llm":
-                        found |= {
-                            (node.module, alias.name)
-                            for alias in node.names
-                            if alias.name.startswith("_")
-                            and not alias.name.startswith("__")
-                        }
+            package = _package_of(path)
+            found |= _private_imports(path.read_text(encoding="utf-8"), package)
 
         assert found == {("fsm_llm.llm", "_Metered"), ("fsm_llm.llm", "_meter_of")}
+
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            ("from fsm_llm.llm import _x", {("fsm_llm.llm", "_x")}),
+            ("from ..llm import _x", {("fsm_llm.llm", "_x")}),
+            ("from ..llm import _x, y, __z__", {("fsm_llm.llm", "_x")}),
+            ("from .. import _x", {("fsm_llm", "_x")}),
+            ("from ...fsm_llm.llm import _x", set()),  # beyond the top: not ours
+            ("from . import llm", set()),
+            ("from .llm import _x", set()),  # inside `testing` itself
+            ("from .doubles import _x", set()),
+            ("from fsm_llm.testing.doubles import _x", set()),
+            ("from ..agents.base import _x", {("fsm_llm.agents.base", "_x")}),
+            ("from json import _x", set()),
+            ("import fsm_llm.llm", set()),
+        ],
+    )
+    def test_the_scan_resolves_relative_and_absolute_private_imports(
+        self, source: str, expected: set[tuple[str, str]]
+    ) -> None:
+        assert _private_imports(source, "fsm_llm.testing") == expected
+
+    def test_a_relative_private_import_added_to_testing_is_caught(self) -> None:
+        """The scratch mutant of the re-review: `from ..llm import _UsageMeter`
+        appended to `testing/doubles.py` adds a third private name."""
+        doubles = _TESTING_DIR / "doubles.py"
+        mutant = (
+            doubles.read_text(encoding="utf-8") + "\nfrom ..llm import _UsageMeter\n"
+        )
+        found = _private_imports(mutant, _package_of(doubles))
+        assert ("fsm_llm.llm", "_UsageMeter") in found
 
     def test_testing_imports_no_other_subpackage(self) -> None:
         offenders = []
