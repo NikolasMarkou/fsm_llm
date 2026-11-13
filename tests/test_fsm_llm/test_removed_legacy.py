@@ -17,6 +17,16 @@ from fsm_llm.core.definitions import ClassificationResult
 from fsm_llm.core.transition_evaluator import TransitionEvaluatorConfig
 from fsm_llm.handlers import HandlerSystem
 
+
+def _turn_module_names() -> list[str]:
+    """Every module of the turn pipeline package, found on disk (not by import)."""
+    import pkgutil
+
+    import fsm_llm.engine.turn as turn
+
+    return [f"{turn.__name__}.{m.name}" for m in pkgutil.iter_modules(turn.__path__)]
+
+
 _FSM: dict[str, Any] = {
     "name": "two_way",
     "description": "Start state with two unconditional exits of equal priority",
@@ -134,8 +144,11 @@ class TestRemovedCoreNames:
         )
 
     def test_pipeline_provenance_alias_is_gone(self):
-        pipeline = importlib.import_module("fsm_llm.pipeline")
-        assert not hasattr(pipeline, "_PROVENANCE_KEY")
+        # The pipeline is a package of modules (step 79): the alias must be in none.
+        names = _turn_module_names()
+        assert len(names) >= 12
+        for name in names:
+            assert not hasattr(importlib.import_module(name), "_PROVENANCE_KEY"), name
 
     def test_classification_module_does_not_reexport_intent_definition(self):
         with pytest.raises(ImportError):
@@ -155,7 +168,7 @@ class TestRemovedCoreNames:
         mock_llm2_interface.model = "gpt-4"
         api = API.from_definition(_FSM, llm_interface=mock_llm2_interface)
         conv_id, _ = api.start_conversation()
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.return_value.classify.return_value = ClassificationResult(
                 reasoning="picked a", intent="a", confidence=0.95
             )

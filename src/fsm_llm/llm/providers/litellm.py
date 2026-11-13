@@ -445,7 +445,7 @@ class LiteLLMInterface(RequestMixin, ParseMixin, LLMInterface, _Metered):
             - Any actual failure (unparseable text, transport/parsing error)
               raises ``LLMResponseError``, wrapping the underlying cause.
             - Filtering of ``None``/empty-string/empty-dict values out of
-              ``extracted_data`` is the CALLER's job (``pipeline.py``'s merge
+              ``extracted_data`` is the CALLER's job (``engine/turn/conversation_extraction.py``'s merge
               logic), not this method's — this method returns the extraction
               verbatim, except that a FLAT reply (no ``extracted_data``
               wrapper) loses its top-level ``confidence``/``reasoning``

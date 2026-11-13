@@ -21,7 +21,7 @@ from fsm_llm.core.definitions import FSMDefinition, State
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.core.verify import FSMValidator
 from fsm_llm.core.verify import flow as flow_analysis
-from fsm_llm.pipeline import MessagePipeline
+from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 
 _REPO = Path(__file__).resolve().parents[2]
 

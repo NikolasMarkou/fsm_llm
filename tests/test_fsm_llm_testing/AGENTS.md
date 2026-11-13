@@ -31,5 +31,5 @@ Covers `fsm_llm.testing` as a leaf of the package: imported by name, loaded by n
 ## Invariants and constraints
 
 - A probe that fails to import `fsm_llm.testing` must fail the test, never skip it.
-- The library scan asserts it saw files (`api.py`, `pipeline.py`) so an empty derivation cannot pass vacuously.
+- The library scan asserts it saw files (`api.py`, `message_pipeline.py`) so an empty derivation cannot pass vacuously.
 - No test reaches a model, a network or a clock.

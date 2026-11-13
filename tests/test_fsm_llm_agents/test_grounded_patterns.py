@@ -3228,7 +3228,7 @@ class TestSuccessReflectsWhoConcluded:
             return ClassificationResult(reasoning="m", intent="lookup", confidence=1)
 
         monkeypatch.setattr(
-            "fsm_llm.pipeline.Classifier",
+            "fsm_llm.engine.turn.transitions.Classifier",
             lambda **_: SimpleNamespace(classify=classify),
         )
         runs: list[str] = []

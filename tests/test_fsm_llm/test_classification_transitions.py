@@ -81,9 +81,9 @@ from fsm_llm.core.definitions import (
     TransitionOption,
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.handlers import HandlerSystem, HandlerTiming
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
-from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.testing import MockLLM2Interface
 from tests.test_fsm_llm.support import (
     _A4_TRANSITION_KEY,
@@ -320,7 +320,7 @@ class TestClassificationAutoMode:
         evaluation = _make_ambiguous_evaluation("billing", "support")
         mock_result = _mock_classifier_result("billing", 0.92)
 
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls_cls:
             mock_classifier_instance = MagicMock()
             mock_classifier_instance.classify.return_value = mock_result
             mock_cls_cls.return_value = mock_classifier_instance
@@ -505,7 +505,7 @@ class TestClassificationFallbackBehavior:
         evaluation = _make_ambiguous_evaluation("a", "b")
         mock_result = _mock_classifier_result("a", 0.9)
 
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_classifier_instance = MagicMock()
             mock_classifier_instance.classify.return_value = mock_result
             mock_cls.return_value = mock_classifier_instance
@@ -548,7 +548,7 @@ class TestClassificationContextStorage:
         evaluation = _make_ambiguous_evaluation("billing", "support")
         mock_result = _mock_classifier_result("billing", 0.95)
 
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_classifier_instance = MagicMock()
             mock_classifier_instance.classify.return_value = mock_result
             mock_cls.return_value = mock_classifier_instance
@@ -613,7 +613,7 @@ def _api_with_failing_classifier(exc: BaseException):
     )
     api = API.from_definition(_ambiguous_fsm(), llm_interface=mock_llm)
     conv_id, _ = api.start_conversation()
-    patcher = patch("fsm_llm.pipeline.Classifier")
+    patcher = patch("fsm_llm.engine.turn.transitions.Classifier")
     return api, conv_id, patcher, exc
 
 
@@ -772,7 +772,7 @@ class TestClassifierCache:
 
     def test_same_state_over_two_turns_constructs_once(self):
         api, conv_id = _api_on(_ambiguous_fsm())
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.return_value.classify.return_value = _stay_result()
             api.converse("first", conv_id)
             api.converse("second", conv_id)
@@ -788,7 +788,7 @@ class TestClassifierCache:
         pipeline = _make_pipeline(mock_llm, fsm_def)
         instance = _make_instance(current_state="start")
 
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.return_value.classify.return_value = _stay_result()
             for evaluation in (
                 _make_ambiguous_evaluation("a", "b"),
@@ -828,7 +828,7 @@ class TestClassifierCache:
         pipeline = _make_pipeline(mock_llm, fsm_def)
         instance = _make_instance(current_state="start")
 
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.return_value.classify.return_value = ClassificationResult(
                 reasoning="mock", intent="yes", confidence=0.9
             )
@@ -850,7 +850,7 @@ class TestClassifierCache:
         pipeline = _make_pipeline(mock_llm, _ambiguous_fsm())
         assert MAX_CLASSIFIER_CACHE_SIZE == 64
 
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.side_effect = lambda **kwargs: MagicMock(name="clf")
             first = pipeline._get_classifier(_schema("i0", "j0"), None)
             first_key = next(iter(pipeline._classifier_cache))
@@ -885,7 +885,7 @@ class TestClassifierCache:
 
         old_interval = sys.getswitchinterval()
         try:
-            with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+            with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
                 mock_cls.side_effect = lambda **kwargs: object()
                 for n in range(MAX_CLASSIFIER_CACHE_SIZE):
                     pipeline._get_classifier(_schema(f"p{n}", f"q{n}"), None)
@@ -932,7 +932,7 @@ class TestClassifierCache:
             classification_extractions=[extraction],
         )
         api, conv_id = _api_on(_make_fsm_definition({"start": state}))
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.return_value.classify.return_value = _stay_result()
             api.converse("which one?", conv_id)
 
@@ -948,7 +948,7 @@ class TestClassifierCache:
         pipeline = _make_pipeline(mock_llm, _ambiguous_fsm())
         schema = _schema("a", "b")
 
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.side_effect = lambda **kwargs: MagicMock(name="clf")
             first = pipeline._get_classifier(schema, None)
             second = pipeline._get_classifier(schema, None)
@@ -971,7 +971,7 @@ class TestClassifierCache:
         pipeline = _make_pipeline(mock_llm, _ambiguous_fsm())
         schema = _schema("a", "b")
 
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.side_effect = lambda **kwargs: MagicMock(name="clf")
             first = pipeline._get_classifier(
                 schema, ClassificationPromptConfig(temperature=0.1)
@@ -1000,7 +1000,7 @@ class TestClassifierCache:
         pipeline = _make_pipeline(old_llm, _ambiguous_fsm())
         schema = _schema("a", "b")
 
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.side_effect = lambda **kwargs: MagicMock(name="clf")
             first = pipeline._get_classifier(schema, None)
             other_first = pipeline._get_classifier(schema, None, model="gpt-4o")
@@ -1025,7 +1025,7 @@ class TestClassifierCache:
         pipeline = _make_pipeline(mock_llm, _ambiguous_fsm())
         schema = _schema("a", "b")
 
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.side_effect = lambda **kwargs: MagicMock(name="clf")
             first = pipeline._get_classifier(schema, None, model="gpt-4")
             second = pipeline._get_classifier(schema, None)
@@ -1128,7 +1128,7 @@ class TestAmbiguousTransitionWithoutUserMessage:
         pipeline = _make_pipeline(mock_llm, fsm_def)
         instance = self._instance()
 
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls_cls:
             classifier = MagicMock()
             classifier.classify.return_value = _mock_classifier_result("billing")
             mock_cls_cls.return_value = classifier
@@ -1687,7 +1687,9 @@ class _StayHarness:
                 "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
-            patch("fsm_llm.pipeline.Classifier", return_value=classifier),
+            patch(
+                "fsm_llm.engine.turn.transitions.Classifier", return_value=classifier
+            ),
         ):
             api = API.from_definition(self.fsm, model="gpt-4o", api_key="test")
             api.create_handler("pre", HandlerTiming.PRE_TRANSITION, _pre)
@@ -1799,8 +1801,8 @@ class TestClassifierInheritsConnection:
         import threading
 
         from fsm_llm.core.definitions import ClassificationSchema, IntentDefinition
+        from fsm_llm.engine.turn.message_pipeline import MessagePipeline
         from fsm_llm.llm import LiteLLMInterface, LLMInterface
-        from fsm_llm.pipeline import MessagePipeline
 
         schema = ClassificationSchema(
             intents=[
@@ -1888,7 +1890,7 @@ class TestClassifierIgnoresReservedInterfaceKwargs:
         from unittest.mock import MagicMock
 
         from fsm_llm.core.definitions import ClassificationSchema, IntentDefinition
-        from fsm_llm.pipeline import MessagePipeline
+        from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 
         llm = MagicMock(spec=LLMInterface)
         llm.model = "gpt-4o"
@@ -1998,7 +2000,7 @@ class TestStep01A1A8:
             lambda ctx: pre_transition_calls.append(dict(ctx)) or {},
         )
 
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.return_value.classify.return_value = _classification("a", 0.05)
             response = api.converse("maybe a?", conv_id)
 
@@ -2015,7 +2017,7 @@ class TestStep01A1A8:
         api, conv_id, _ = _api(
             _ambiguous_then_blocked_fsm({"confidence_threshold": 0.9})
         )
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.return_value.classify.return_value = _classification("a", 0.9)
             api.converse("a please", conv_id)
 
@@ -2027,7 +2029,7 @@ class TestStep01A1A8:
     def test_a1_default_threshold_applies_without_config(self):
         below = DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE - 0.1
         api, conv_id, _ = _api(_ambiguous_then_blocked_fsm(None))
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.return_value.classify.return_value = _classification("a", below)
             api.converse("maybe a?", conv_id)
 
@@ -2037,14 +2039,14 @@ class TestStep01A1A8:
 
     def test_a8_stale_result_absent_after_deterministic_turn(self):
         api, conv_id, _ = _api(_ambiguous_then_blocked_fsm())
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.return_value.classify.return_value = _classification("a", 0.95)
             api.converse("a please", conv_id)
         assert api.get_current_state(conv_id) == "a"
         assert _A4_TRANSITION_KEY in _raw_metadata(api, conv_id)
 
         # Turn 2 in "a" is BLOCKED: no classifier runs, so no record may remain.
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             api.converse("still here", conv_id)
             assert not mock_cls.return_value.classify.called
 
@@ -2053,7 +2055,7 @@ class TestStep01A1A8:
 
     def test_a8_rollback_restores_prior_result(self):
         api, conv_id, llm = _api(_ambiguous_then_blocked_fsm())
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.return_value.classify.return_value = _classification("a", 0.95)
             api.converse("a please", conv_id)
         prior = dict(_raw_metadata(api, conv_id)[_A4_TRANSITION_KEY])
@@ -2080,7 +2082,7 @@ class TestStep01A1A8:
 
     def test_a8_stream_path_clears_too(self):
         api, conv_id, _ = _api(_ambiguous_then_blocked_fsm())
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.return_value.classify.return_value = _classification("a", 0.95)
             "".join(api.converse_stream("a please", conv_id))
         assert api.get_current_state(conv_id) == "a"

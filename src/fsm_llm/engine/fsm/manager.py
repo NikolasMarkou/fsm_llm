@@ -48,11 +48,11 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.loaders import load_fsm_definition
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.turn import MessagePipeline
 from fsm_llm.executors import StateExecutor
 from fsm_llm.handlers import HandlerErrorMode, HandlerSystem, HandlerTiming
 from fsm_llm.llm import LLMInterface
 from fsm_llm.logging import logger
-from fsm_llm.pipeline import MessagePipeline
 
 from .helpers import _conversation_entry, with_conversation_context
 from .snapshots import SnapshotsMixin
@@ -469,7 +469,7 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
                 log.info(f"Updating context with keys: {list(context_update.keys())}")
 
                 # DECISION plan-2026-07-20T040150-876e7164/D-009 [STALE]
-                # Scoped rollback — shape (c) of `pipeline.py`'s three different
+                # Scoped rollback - shape (c) of the turn pipeline's (`engine/turn/`) three different
                 # partial-commit contracts (D-005 of
                 # plan-2026-07-19T191147-4b664252). Snapshot EXACTLY the keys this
                 # call is about to write, commit, and restore only those keys if

@@ -1044,7 +1044,7 @@ class TestFailedBulkIsSurfacedToPassTwo:
         failure still compares equal to the empty dict."""
         from unittest.mock import MagicMock
 
-        from fsm_llm.pipeline import MessagePipeline
+        from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 
         pipe = MessagePipeline.__new__(MessagePipeline)
         pipe.data_extraction_prompt_builder = MagicMock()

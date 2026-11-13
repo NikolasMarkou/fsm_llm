@@ -281,7 +281,7 @@ class TestStrictBoolCoercion:
             FieldExtractionConfig,
             FieldExtractionResponse,
         )
-        from fsm_llm.pipeline import MessagePipeline
+        from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 
         return MessagePipeline._validate_field_extraction(
             FieldExtractionResponse(

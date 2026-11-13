@@ -24,7 +24,7 @@ from fsm_llm.core.definitions import (
     handler_only_names,
 )
 from fsm_llm.core.verify import FSMValidator
-from fsm_llm.pipeline import MessagePipeline
+from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.testing import MockLLM2Interface
 
 # fsm_id of ``_golden()``, captured on the parent commit before the field existed.

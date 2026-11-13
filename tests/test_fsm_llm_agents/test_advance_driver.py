@@ -1272,7 +1272,7 @@ class TestRefusedActionReachesConclude:
             return ClassificationResult(reasoning="m", intent="transfer", confidence=1)
 
         monkeypatch.setattr(
-            "fsm_llm.pipeline.Classifier",
+            "fsm_llm.engine.turn.transitions.Classifier",
             lambda **_: SimpleNamespace(classify=classify),
         )
         llm = _PlantingBulkLLM(default_response="Done.")
@@ -2942,7 +2942,7 @@ class TestFinalAnswerCannotBePlanted:
             return ClassificationResult(reasoning="m", intent="transfer", confidence=1)
 
         monkeypatch.setattr(
-            "fsm_llm.pipeline.Classifier",
+            "fsm_llm.engine.turn.transitions.Classifier",
             lambda **_: SimpleNamespace(classify=classify),
         )
 

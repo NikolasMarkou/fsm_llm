@@ -1104,7 +1104,8 @@ class TestBaseExceptionRollsBackUserMessage:
         before = list(api.get_conversation_history(conv_id))
 
         with patch(
-            "fsm_llm.pipeline.MessagePipeline.process", side_effect=signal_type()
+            "fsm_llm.engine.turn.message_pipeline.MessagePipeline.process",
+            side_effect=signal_type(),
         ):
             with pytest.raises(BaseException) as exc_info:
                 api.converse("this is my real user turn", conv_id)
@@ -1123,7 +1124,8 @@ class TestBaseExceptionRollsBackUserMessage:
         before = list(api.get_conversation_history(conv_id))
 
         with patch(
-            "fsm_llm.pipeline.MessagePipeline.process_stream", side_effect=signal_type()
+            "fsm_llm.engine.turn.message_pipeline.MessagePipeline.process_stream",
+            side_effect=signal_type(),
         ):
             with pytest.raises(BaseException) as exc_info:
                 list(api.converse_stream("this is my real user turn", conv_id))
@@ -1139,7 +1141,7 @@ class TestBaseExceptionRollsBackUserMessage:
         api, conv_id = api_and_conv
 
         with patch(
-            "fsm_llm.pipeline.MessagePipeline.process",
+            "fsm_llm.engine.turn.message_pipeline.MessagePipeline.process",
             side_effect=RuntimeError("boom"),
         ):
             with pytest.raises(FSMError):

@@ -448,7 +448,7 @@ class BasePromptBuilder:
     # DECISION plan-2026-07-19T191147-4b664252/D-011 [STALE]
     # This filter is the LAST line of defense before context text reaches the
     # LLM. `clean_context_keys` does NOT cover it: that function has exactly one
-    # first-party caller (`pipeline.py`, with strip_forbidden_keys=False) and is
+    # first-party callers (`engine/turn/`, with strip_forbidden_keys=False) and is
     # not on the path for `initial_context` or `API.update_context` writes --
     # for those two entry points nothing else filters before this. So it MUST
     # recurse: while it only walked `context_data.items()`, a nested

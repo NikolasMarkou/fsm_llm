@@ -84,7 +84,7 @@ class ContextCompactor:
 
         The actual deletion (and, since D-018, the matching provenance
         digest cleanup) happens in ``MessagePipeline.execute_handlers``'s
-        ``merge_delta`` (``pipeline.py``) -- this method only returns the
+        ``merge_delta`` (``engine/turn/message_pipeline.py``) -- this method only returns the
         delta dict, it never touches ``context.data``/``context.metadata``
         directly. See decisions.md D-018.
         """
@@ -102,7 +102,7 @@ class ContextCompactor:
 
         See ``compact()``'s docstring above: the actual deletion (and, since
         D-018, the matching provenance digest cleanup) happens in
-        ``pipeline.py``'s ``merge_delta``, not here.
+        ``engine/turn/message_pipeline.py``'s ``merge_delta``, not here.
         """
         target = context.get("_current_state", "")
         removals = clear_keys_delta(self.prune_on_entry.get(target, set()), context)

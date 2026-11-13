@@ -34,7 +34,7 @@ from fsm_llm.core.definitions import (
     State,
 )
 from fsm_llm.engine.fsm.manager import FSMManager
-from fsm_llm.pipeline import MessagePipeline
+from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.testing import MockLLM2Interface
 
 _KIND = "reply_marker"

@@ -59,11 +59,11 @@ from fsm_llm.core.definitions import (
     Transition,
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.handlers import BaseHandler, HandlerSystem, HandlerTiming
 from fsm_llm.llm import LLMInterface
 from fsm_llm.llm.providers.embedder import _embedding_vectors
 from fsm_llm.logging import logger
-from fsm_llm.pipeline import MessagePipeline
 from fsm_llm.testing import MockLLM2Interface
 from tests.test_fsm_llm.support import _TWO_STATE
 
@@ -1258,7 +1258,7 @@ def _mock_bulk_extract_data(extracted: dict):
     """Build a MagicMock ``extract_bulk_data`` returning a bulk-extraction
     response.
 
-    Post-D-015 (Step D dedup): pipeline.py now calls
+    Post-D-015 (Step D dedup): the turn pipeline (engine/turn/) now calls
     ``self.llm_interface.extract_bulk_data(request)`` through the public
     ``LLMInterface`` ABC surface instead of reaching into
     ``LiteLLMInterface._make_llm_call`` directly, so these tests mock at the
@@ -1702,7 +1702,7 @@ class TestNoCorrectionWithoutUserMessage:
     turn neither overwrites a set key nor reports a rejected correction."""
 
     def _setup(self, *, with_provenance):
-        from fsm_llm.pipeline import _record_provenance
+        from fsm_llm.engine.turn.records import _record_provenance
 
         fsm_def, _ = _research_fsm(required=["findings"])
         llm = _make_mock_llm()
@@ -1833,7 +1833,7 @@ class TestPromptTooLargeError:
     def test_bulk_site_warning_names_the_key(self):
         from loguru import logger
 
-        from fsm_llm.pipeline import _BulkFailed
+        from fsm_llm.engine.turn.conversation_bulk import _BulkFailed
 
         state = State(
             id="start",
@@ -2070,7 +2070,10 @@ class TestDecisionAnchorsArePlacedAndQualified:
 
     @pytest.mark.parametrize(
         ("module", "decision"),
-        [("fsm_llm.pipeline", "D-016"), ("fsm_llm.core.verify.structure", "D-011")],
+        [
+            ("fsm_llm.engine.turn.conversation_fields", "D-016"),
+            ("fsm_llm.core.verify.structure", "D-011"),
+        ],
     )
     def test_qualified_anchor_present(self, module, decision):
         import importlib

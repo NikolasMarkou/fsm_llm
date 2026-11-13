@@ -1,6 +1,6 @@
 """State executors: what a state's kind does in Pass 1 of a turn.
 
-The turn pipeline (``pipeline.py``) is kind-agnostic: at the one Pass-1 seam it
+The turn pipeline (``engine/turn/``) is kind-agnostic: at the one Pass-1 seam it
 asks ``executor_for(state)`` for the state's executor and calls it. An executor
 owns the three things that differ between kinds (roadmap row 0.14, plan
 d454fd62, D-004, D-015):
@@ -28,7 +28,7 @@ Interface contract:
   ``pipeline.llm_interface``); ``state`` is the instance's current state. Must
   set ``instance.last_extraction_response`` to what it returns, take no snapshot
   of its own (Pass 1 runs outside the PRE and POST atomicity blocks of the turn
-  body; the anchors in ``pipeline.py`` hold the rule) and may raise
+  body; the anchors in ``engine/turn/driver.py`` hold the rule) and may raise
   ``LLMResponseError``.
 - ``StateExecutor.after_transition(pipeline, instance, user_message,
   conversation_id, extraction_response, previous_state, new_state)``: called
@@ -53,7 +53,7 @@ Interface contract:
   thread) and overrides the module table for that pipeline only; the spec
   registry (``state_kinds.KINDS``) stays static and process-wide.
 
-This is an engine module: it imports core modules and never ``pipeline.py``
+This is an engine module: it imports core modules and never ``engine/turn/``
 (the pipeline imports it; the one helper both need, the cut-off record, lives in
 ``context/commit.py``). ``fsm_llm/__init__.py`` does not import it; the registry is
 internal until the kind extension point is public (roadmap C10).
@@ -175,7 +175,7 @@ class CompletionExecutor(StateExecutor):
     arriving in a completion state runs no call until the next turn."""
 
     # Why False: a completion state's data is its one typed result and is
-    # committed as is (the D-021 anchor at the call site in ``pipeline.py``,
+    # committed as is (the D-021 anchor at the call site in ``engine/turn/pass1.py``,
     # ``_execute_extraction_and_transition_pass``, holds the rule). Do NOT set it
     # to True and do NOT clean the data elsewhere: ``clean_context_keys`` would
     # drop ``text: None`` and a tool argument such as ``{"_id": 1}`` from the

@@ -41,11 +41,11 @@ from fsm_llm.core.definitions import (
     TransitionCondition,
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.handlers import HandlerSystem
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.llm.interface import _completion_response
 from fsm_llm.logging import logger
-from fsm_llm.pipeline import MessagePipeline
 from tests.test_fsm_llm.support import (
     _A4_TRANSITION_KEY,
     _a3_api,
@@ -1210,7 +1210,9 @@ class _ClassifiedHarness:
                 "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=["response_format"],
             ),
-            patch("fsm_llm.pipeline.Classifier", return_value=classifier),
+            patch(
+                "fsm_llm.engine.turn.transitions.Classifier", return_value=classifier
+            ),
         ):
             api = API.from_definition(self.fsm, model="gpt-4o", api_key="test")
             cid, _ = api.start_conversation()
@@ -1398,7 +1400,7 @@ class TestStep04A4:
 
     def test_a4_transition_record_in_metadata(self):
         api, conv_id, _ = _api(_ambiguous_then_blocked_fsm())
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.return_value.classify.return_value = _classification("a", 0.95)
             api.converse("a please", conv_id)
 
@@ -1418,7 +1420,7 @@ class TestStep04A4:
             _ambiguous_then_blocked_fsm({"confidence_threshold": 0.9})
         )
         # One patch for both turns: the pipeline caches the classifier.
-        with patch("fsm_llm.pipeline.Classifier") as mock_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:
             mock_cls.return_value.classify.side_effect = [
                 _classification("a", 0.05),
                 ClassificationError("down"),

@@ -2720,7 +2720,7 @@ class TestStep10B5B6B9B10:
         _assert_loader_and_validator_reject(_b10_fsm_data(context_scope="name"))
 
     def test_b6_dict_scope_still_loads(self):
-        from fsm_llm.pipeline import MessagePipeline
+        from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 
         fsm_def = _assert_loader_and_validator_accept(
             _b10_fsm_data(context_scope={"read_keys": ["name"], "write_keys": ["o"]})

@@ -17,8 +17,8 @@ from fsm_llm.core.definitions import (
     LLMResponseError,
     ResponseGenerationRequest,
 )
+from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
-from fsm_llm.pipeline import MessagePipeline
 from tests.test_fsm_llm.support import (
     OLLAMA_MODEL,
     _color_fsm,

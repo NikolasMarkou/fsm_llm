@@ -49,7 +49,7 @@ def commit_with_key_rollback(
     keys if ``notify`` raises.
 
     Interface contract (callers: the Pass-1 extraction commit in
-    ``pipeline.py`` and ``FSMManager.update_conversation_context``):
+    ``engine/turn/pass1.py`` and ``FSMManager.update_conversation_context``):
     ``committed`` is the delta to write (``FSMContext.update`` writes exactly
     its keys). ``notify`` fires the CONTEXT_UPDATE handlers and takes no
     argument. On an ``Exception`` from ``notify``, ``on_failure(error)`` is
@@ -107,7 +107,7 @@ def record_cut_off(
     ``API.get_data``. The turn bodies (``_run_turn``, ``_stream_turn``) and the
     greeting remove it before they start, so it describes the current turn only.
     A streamed reply is never flagged (the stream carries no finish reason).
-    Callers: the Pass-2 reply and the field extractions in ``pipeline.py``, and
+    Callers: the Pass-2 reply and the bulk and field extractions in ``engine/turn/``, and
     the completion executor in ``executors.py`` (it lives here so the executors
     need no import of the pipeline).
     """

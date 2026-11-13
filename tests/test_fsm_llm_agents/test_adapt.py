@@ -861,7 +861,10 @@ class TestADaPTSubtaskExecution:
             classifier_instance.classify.side_effect = _classify
             return classifier_instance
 
-        with patch("fsm_llm.pipeline.Classifier", side_effect=_make_mock_classifier):
+        with patch(
+            "fsm_llm.engine.turn.transitions.Classifier",
+            side_effect=_make_mock_classifier,
+        ):
             result = agent.run("Explain how neural networks learn")
 
         # The critical assertion: _execute_subtasks was called
@@ -924,7 +927,10 @@ class TestADaPTSubtaskExecution:
             classifier_instance.classify.side_effect = _classify
             return classifier_instance
 
-        with patch("fsm_llm.pipeline.Classifier", side_effect=_make_mock_classifier):
+        with patch(
+            "fsm_llm.engine.turn.transitions.Classifier",
+            side_effect=_make_mock_classifier,
+        ):
             result = agent.run("Simple question")
 
         # _execute_subtasks should NOT have been called

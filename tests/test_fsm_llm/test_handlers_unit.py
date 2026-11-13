@@ -2627,7 +2627,7 @@ class TestStep14C6C12:
             # (fsm_llm_contrib) must still not be (no prefix bleed).
             for module in (
                 "fsm_llm",
-                "fsm_llm.pipeline",
+                "fsm_llm.engine.turn.driver",
                 "fsm_llm.agents.react",
                 "fsm_llm_contrib.x",
             ):

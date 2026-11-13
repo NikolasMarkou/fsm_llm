@@ -23,9 +23,9 @@ from fsm_llm.core.definitions import (
     State,
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
+from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.handlers import HandlerSystem
 from fsm_llm.llm import LLMInterface
-from fsm_llm.pipeline import MessagePipeline
 
 
 def configure_mock_extract_field(mock_llm, mock_data=None, confidence=1.0):

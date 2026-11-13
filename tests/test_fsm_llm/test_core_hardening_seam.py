@@ -273,7 +273,7 @@ class TestLambdaHandlerSingleWrapSite:
     ):
         """The handler system (the old ``handlers.py``) used to log the SAME failure twice.
 
-        Scoped to ``fsm_llm.handlers`` on purpose: ``pipeline.py`` also logs the
+        Scoped to ``fsm_llm.handlers`` on purpose: the turn pipeline (``engine/turn/``) also logs the
         escaping error at its own layer, and that record is not this step's
         business. Counting every ERROR record would make the assertion depend on
         an unrelated module.
@@ -824,7 +824,7 @@ class TestReadConcurrency:
             llm_interface=_SlowMockLLM2(delay=0.01),
         )
         # PRE_PROCESSING handler that GROWS context.data every turn. Each unique
-        # key is merged one-by-one via merge_delta (pipeline.py), so a single
+        # key is merged one-by-one via merge_delta (engine/turn/message_pipeline.py), so a single
         # turn resizes the dict _GROWTH_PER_TURN times, spread across its ~10ms
         # window — maximizing the chance a resize lands while a reader is
         # mid-iteration over the (already large, seeded) dict.
@@ -1723,7 +1723,7 @@ class TestPostTransitionRollbackRestoresMetadata:
     of ``context.metadata[PROVENANCE_METADATA_KEY]`` on a None-delta deletion (the
     fix in ``TestContextCompactorPruneClearsProvenance`` above). But
     ``_execute_state_transition``'s POST_TRANSITION rollback
-    (``pipeline.py``) snapshotted and restored ONLY ``context.data``, never
+    (``engine/turn/``) snapshotted and restored ONLY ``context.data``, never
     ``context.metadata`` -- a gap D-018's OWN fix introduced (pre-D-018,
     ``merge_delta`` never touched metadata, so the data-only snapshot was
     safe).

@@ -179,7 +179,7 @@ def react_bulk(monkeypatch: pytest.MonkeyPatch) -> Callable[..., ReactAgent]:
             )
 
         monkeypatch.setattr(
-            "fsm_llm.pipeline.Classifier",
+            "fsm_llm.engine.turn.transitions.Classifier",
             lambda **_: SimpleNamespace(classify=classify),
         )
         return ReactAgent(use_classification=True, **kwargs)

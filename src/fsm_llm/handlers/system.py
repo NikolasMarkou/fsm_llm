@@ -160,7 +160,7 @@ class HandlerSystem:
         # `context` a zero-registered-handler timing already skips entirely
         # via the `candidates` guard above (which complements, and does not
         # replace, the caller-side D-022 optimization in
-        # `MessagePipeline.execute_handlers`, `pipeline.py`). Do NOT
+        # `MessagePipeline.execute_handlers`, `engine/turn/message_pipeline.py`). Do NOT
         # deep-copy per-candidate inside this probe loop -- that would
         # reintroduce the exact cost removed here, just paid earlier and
         # more often.

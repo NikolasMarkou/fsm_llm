@@ -291,7 +291,7 @@ class TestAdvanceHandlerParity:
         assert "PRE_TRANSITION" not in step
 
     def test_ambiguous(self):
-        with patch("fsm_llm.pipeline.Classifier") as classifier_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as classifier_cls:
             classifier_cls.return_value = _classifier_choosing("billing")
             step, step_state = self._events(_ambiguous_fsm(), {}, step=True)
             turn, turn_state = self._events(_ambiguous_fsm(), {}, step=False)
@@ -306,7 +306,7 @@ class TestAdvanceHandlerParity:
 
     def test_ambiguous_outcome_and_message_free_classifier_call(self):
         api, conv_id = _start(_ambiguous_fsm(), _ScriptedLLM())
-        with patch("fsm_llm.pipeline.Classifier") as classifier_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as classifier_cls:
             classifier = _classifier_choosing("support")
             classifier_cls.return_value = classifier
             result = api.advance(conv_id)
@@ -629,7 +629,7 @@ class TestAdvanceStack:
         assert api.get_current_state(conv_id) == "plan"
 
         api.push_fsm(conv_id, _ambiguous_fsm())
-        with patch("fsm_llm.pipeline.Classifier") as classifier_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as classifier_cls:
             classifier_cls.return_value = _classifier_choosing("billing")
             result = api.advance(conv_id)
 
@@ -1232,7 +1232,7 @@ class TestAdvanceStream:
         api.advance(conv_id)
         api.push_fsm(conv_id, _ambiguous_fsm())
 
-        with patch("fsm_llm.pipeline.Classifier") as classifier_cls:
+        with patch("fsm_llm.engine.turn.transitions.Classifier") as classifier_cls:
             classifier_cls.return_value = _classifier_choosing("support")
             chunks = list(api.advance_stream(conv_id))
 

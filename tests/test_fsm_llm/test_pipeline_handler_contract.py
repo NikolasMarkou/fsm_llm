@@ -33,7 +33,7 @@ pins a THIRD boundary: guarantee 2 also does NOT extend across a PRE_PROCESSING
 (or POST_PROCESSING) handler failure any more, because ``MessagePipeline.process()``/
 ``process_stream()`` now wrap those handler calls in the same turn-atomicity
 restore used for Pass 2. See the updated ``D-006`` comment in
-``pipeline.py::execute_handlers`` for the full rationale.
+``engine/turn/message_pipeline.py::execute_handlers`` for the full rationale.
 
 As of the D-002/D-017 completion-fix (step 1.1, same plan),
 ``TestPostProcessingHandlerFailureRollsBackTransition`` pins a FOURTH,
@@ -217,7 +217,7 @@ class TestPartialHandlerResultsPreserved:
         handler's partial delta is wiped along with everything else before
         the exception reaches ``API.converse``'s caller.  This is a
         deliberate narrowing of the previously-documented survival window
-        (see the updated D-006 comment in ``pipeline.py::execute_handlers``),
+        (see the updated D-006 comment in ``engine/turn/message_pipeline.py::execute_handlers``),
         not a relaxation of this test: the partial merge still happens one
         statement earlier (as ``TestPartialHandlerResultsPreserved`` docs
         above still describe at the ``execute_handlers`` layer), it just no

@@ -41,7 +41,6 @@ OVERSIZED: dict[str, int] = {
     "fsm_llm.monitor.instance_manager": 1974,
     "fsm_llm.monitor.server": 1677,
     "fsm_llm.okf": 1350,
-    "fsm_llm.pipeline": 3025,
     "fsm_llm.workflows.engine": 1570,
     "fsm_llm.workflows.steps": 1208,
 }

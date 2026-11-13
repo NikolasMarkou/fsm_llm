@@ -34,8 +34,16 @@ from tests.test_fsm_llm.test_completion_state import (
 )
 
 _SRC = Path(ex.__file__).parent
+# Every module of the turn pipeline package (step 79 split the old pipeline.py), found on
+# disk so a module added later is scanned too; ``test_the_turn_scan_sees_the_whole_package``
+# pins that the list is not a facade alone.
+_TURN_FILES = tuple(
+    sorted(
+        p.relative_to(_SRC).as_posix() for p in (_SRC / "engine" / "turn").glob("*.py")
+    )
+)
 _ENGINE_FILES = (
-    "pipeline.py",
+    *_TURN_FILES,
     "api.py",
     "engine/fsm/helpers.py",
     "engine/fsm/manager.py",
@@ -85,6 +93,20 @@ class TestNoKindBranchInTheEngine:
         source = (_SRC / name).read_text(encoding="utf-8")
         assert _kind_config_mentions(source) == []
 
+    def test_the_turn_scan_sees_the_whole_package(self):
+        """Guards the derivation: an empty or facade-only list would make the scan
+        above vacuous (the pipeline is 13 modules, the facade holds none of the code)."""
+        names = {Path(n).name for n in _TURN_FILES}
+        assert len(_TURN_FILES) >= 13
+        assert {
+            "message_pipeline.py",
+            "driver.py",
+            "pass1.py",
+            "transitions.py",
+            "pass2.py",
+            "conversation_fields.py",
+        } <= names
+
     def test_the_scan_sees_a_violation(self):
         """Guards the guard: each banned shape is found in a snippet."""
         snippet = (
@@ -96,7 +118,7 @@ class TestNoKindBranchInTheEngine:
         assert len(_kind_config_mentions(snippet)) == 4
 
     def test_the_completion_turn_left_the_pipeline(self):
-        from fsm_llm.pipeline import MessagePipeline
+        from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 
         assert not hasattr(MessagePipeline, "_execute_completion_turn")
         assert hasattr(ex.CompletionExecutor, "turn")
@@ -123,15 +145,16 @@ _CONVERSATION_PASS_1 = frozenset(
 
 
 def _readers_of(source: str, names: frozenset[str]) -> dict[str, set[str]]:
-    """``{method: names it reads}``: every ``MessagePipeline`` method of *source*
-    that reaches one of *names* through ``self.<name>``; a read at module level
-    or in another class is keyed ``"<module>"``."""
+    """``{method: names it reads}``: every method of ``MessagePipeline`` or of one of its
+    mixins (``<Group>Mixin``, step 79) in *source* that reaches one of *names* through
+    ``self.<name>``; a read at module level or in another class is keyed ``"<module>"``."""
     found: dict[str, set[str]] = {}
     tree = ast.parse(source)
     for top in tree.body:
         owners = (
             [(f.name, f) for f in top.body if isinstance(f, ast.FunctionDef)]
-            if isinstance(top, ast.ClassDef) and top.name == "MessagePipeline"
+            if isinstance(top, ast.ClassDef)
+            and (top.name == "MessagePipeline" or top.name.endswith("Mixin"))
             else [("<module>", top)]
         )
         for owner, node in owners:
@@ -143,14 +166,14 @@ def _readers_of(source: str, names: frozenset[str]) -> dict[str, set[str]]:
 
 class TestConversationMachineryIsReachedThroughTheExecutor:
     def test_the_kind_agnostic_pipeline_never_calls_it(self):
-        readers = _readers_of(
-            (_SRC / "pipeline.py").read_text(encoding="utf-8"), _CONVERSATION_PASS_1
-        )
-        outside = {
-            owner: sorted(names)
-            for owner, names in readers.items()
-            if owner not in _CONVERSATION_PASS_1
-        }
+        outside = {}
+        for name in _TURN_FILES:
+            readers = _readers_of(
+                (_SRC / name).read_text(encoding="utf-8"), _CONVERSATION_PASS_1
+            )
+            for owner, names in readers.items():
+                if owner not in _CONVERSATION_PASS_1:
+                    outside[f"{name}:{owner}"] = sorted(names)
         assert outside == {}
 
     def test_no_other_module_reads_it(self):
@@ -159,7 +182,8 @@ class TestConversationMachineryIsReachedThroughTheExecutor:
                 p.read_text(encoding="utf-8"), _CONVERSATION_PASS_1
             )
             for p in _SRC.rglob("*.py")
-            if p.name not in {"pipeline.py", "executors.py"}
+            if p.name != "executors.py"
+            and p.relative_to(_SRC).as_posix() not in _TURN_FILES
         }
         assert {path: found for path, found in readers.items() if found} == {}
 
@@ -182,6 +206,23 @@ class TestConversationMachineryIsReachedThroughTheExecutor:
         assert _readers_of(snippet, _CONVERSATION_PASS_1) == {
             "_run_turn": {"_execute_data_extraction"},
             "_execute_data_extraction": {"_bulk_extract_from_instructions"},
+        }
+
+    def test_the_scan_reads_the_mixins_of_the_pipeline(self):
+        """The turn pipeline is mixins (step 79): a method of a ``<Group>Mixin`` class is
+        keyed by its own name, so a kind-agnostic mixin method that calls the
+        conversation machinery is reported (not hidden under ``<module>``)."""
+        snippet = (
+            "class DriverMixin:\n"
+            "    def _run_turn(self):\n"
+            "        return self._execute_data_extraction()\n"
+            "class ConversationBulkMixin:\n"
+            "    def _bulk_extract_from_instructions(self):\n"
+            "        return self._handler_only_keys()\n"
+        )
+        assert _readers_of(snippet, _CONVERSATION_PASS_1) == {
+            "_run_turn": {"_execute_data_extraction"},
+            "_bulk_extract_from_instructions": {"_handler_only_keys"},
         }
 
 

@@ -127,10 +127,10 @@ class TestJsonLineIdentity:
         assert "package" not in entry
 
     def test_library_record_is_labelled(self):
-        lib = logger.patch(lambda r: r.update(name="fsm_llm.pipeline"))
+        lib = logger.patch(lambda r: r.update(name="fsm_llm.engine.turn.driver"))
         (entry,) = _json_lines(lambda: lib.info("lib line"))
         assert entry["package"] == "fsm_llm"
-        assert entry["module"] == "fsm_llm.pipeline"
+        assert entry["module"] == "fsm_llm.engine.turn.driver"
 
     def test_explicit_package_extra_is_kept(self):
         (entry,) = _json_lines(lambda: logger.bind(package="mine").info("x"))

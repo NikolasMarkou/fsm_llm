@@ -1758,6 +1758,15 @@ class TestStep12Accessors:
         )
 
     def test_pipeline_source_has_no_private_sanitiser_reach_in(self):
-        import fsm_llm.pipeline as pipeline_module
+        import importlib
+        import pkgutil
 
-        assert "._sanitize_text_for_prompt" not in _module_source(pipeline_module)
+        import fsm_llm.engine.turn as turn
+
+        # The pipeline is a package of modules (step 79): read every one of them,
+        # and see a few (a facade alone would pass vacuously).
+        names = [m.name for m in pkgutil.iter_modules(turn.__path__)]
+        assert len(names) >= 12
+        for name in names:
+            module = importlib.import_module(f"{turn.__name__}.{name}")
+            assert "._sanitize_text_for_prompt" not in _module_source(module), name

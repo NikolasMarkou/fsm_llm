@@ -6,7 +6,7 @@ Purpose: pytest regression suite that pins fixed bugs in the `fsm_llm` package (
 ## Scope
 
 - In scope: 12 test modules plus an empty `__init__.py`. 268 tests collected; 266 pass, 2 skip (as of this writing).
-- Code under test: `fsm_llm` core modules (`api`, `fsm`, `pipeline` via `FSMManager._pipeline`, `transition_evaluator`, `expressions`, `definitions`, `llm`, `ollama`, `prompts`, `context`, `constants`, `handlers`, `logging`, `validator`, `core/visualize`, `runner`, `utilities`, `__main__`), plus `fsm_llm.reasoning` and `fsm_llm.workflows` subpackages.
+- Code under test: `fsm_llm` core modules (`api`, `engine/fsm`, `engine/turn` via `FSMManager._pipeline`, `transition_evaluator`, `expressions`, `definitions`, `llm`, `ollama`, `prompts`, `context`, `constants`, `handlers`, `logging`, `validator`, `core/visualize`, `runner`, `utilities`, `__main__`), plus `fsm_llm.reasoning` and `fsm_llm.workflows` subpackages.
 - Also reads repo files: `README.md`, `docs/quickstart.md`, `pyproject.toml`, `tox.ini`, `src/fsm_llm/__init__.py`, `src/fsm_llm/api.py`, `src/fsm_llm/py.typed`.
 - Not in scope: live LLM calls (none here), agents, monitor, eval. No fixtures or conftest live in this folder.
 

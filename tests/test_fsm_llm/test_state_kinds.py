@@ -563,7 +563,7 @@ class TestMintingHooks:
                 yield name, loaded, state
 
     def test_minted_keys_equal_the_old_pipeline_rule_over_the_corpus(self):
-        from fsm_llm.pipeline import MessagePipeline
+        from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 
         checked = minting = 0
         for name, _loaded, state in self._states():
@@ -591,7 +591,7 @@ class TestMintingHooks:
         """A completion state built around the loader (`model_construct`) with an
         explicit extraction still mints nothing: the kind decides, as before."""
         from fsm_llm.core.definitions import FieldExtractionConfig
-        from fsm_llm.pipeline import MessagePipeline
+        from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 
         state = _plain_state(completion=_completion())
         bypass = state.model_copy(
@@ -623,7 +623,11 @@ class TestMintingHooks:
     @pytest.mark.parametrize(
         ("path", "name", "owner"),
         [
-            ("pipeline.py", "_build_field_configs_from_state", "MessagePipeline"),
+            (
+                "engine/turn/conversation_fields.py",
+                "_build_field_configs_from_state",
+                "ConversationFieldsMixin",
+            ),
             ("core/verify/flow.py", "_produced", None),
             ("core/verify/flow.py", "declared_available", None),
         ],
@@ -637,7 +641,11 @@ class TestMintingHooks:
     @pytest.mark.parametrize(
         ("path", "name", "owner"),
         [
-            ("pipeline.py", "_build_field_configs_from_state", "MessagePipeline"),
+            (
+                "engine/turn/conversation_fields.py",
+                "_build_field_configs_from_state",
+                "ConversationFieldsMixin",
+            ),
             ("core/verify/flow.py", "_produced", None),
             ("core/verify/flow.py", "declared_available", None),
         ],

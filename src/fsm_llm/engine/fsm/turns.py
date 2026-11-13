@@ -24,7 +24,7 @@ from .helpers import (
 
 if TYPE_CHECKING:
     from fsm_llm.core.definitions import State
-    from fsm_llm.pipeline import MessagePipeline
+    from fsm_llm.engine.turn import MessagePipeline
 
 
 # Return type of one sync turn: ``str`` for a message, ``AdvanceResult`` for a step.

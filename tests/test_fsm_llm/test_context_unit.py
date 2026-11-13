@@ -5673,12 +5673,14 @@ class TestStep5NamedConstants:
         assert CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT == "_output_response_format"
 
     def test_provenance_constant_is_shared(self):
-        from fsm_llm import pipeline
         from fsm_llm.constants import PROVENANCE_METADATA_KEY
         from fsm_llm.engine.fsm import snapshots
+        from fsm_llm.engine.turn import conversation_extraction
 
         assert PROVENANCE_METADATA_KEY == "_pipeline_extracted"
-        assert pipeline.PROVENANCE_METADATA_KEY is PROVENANCE_METADATA_KEY
+        assert (
+            conversation_extraction.PROVENANCE_METADATA_KEY is PROVENANCE_METADATA_KEY
+        )
         assert snapshots.PROVENANCE_METADATA_KEY is PROVENANCE_METADATA_KEY
 
 

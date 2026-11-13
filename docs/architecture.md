@@ -37,7 +37,7 @@ Conversation state lives in in-memory dicts by default. Attaching a `SessionStor
 
 User-facing entry point. Manages FSM definition processing, component wiring, conversation lifecycle, and FSM stacking.
 
-### FSMManager (`engine/fsm/`) + MessagePipeline (`pipeline.py`)
+### FSMManager (`engine/fsm/`) + MessagePipeline (`engine/turn/`)
 
 FSMManager handles FSM instance lifecycle with per-conversation thread locks and LRU FSM cache. MessagePipeline implements the 2-pass processing:
 
