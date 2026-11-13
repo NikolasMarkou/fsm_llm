@@ -678,6 +678,14 @@ class TestClassifiersMatchFloor:
         ]
         assert floors and floors[0] >= 77, requires
 
+    def test_the_build_requires_holds_only_the_backend(self):
+        """Review gate 1 concern 17: `wheel` was listed without a bound. setuptools
+        77 builds wheels, editable wheels and sdists itself (`bdist_wheel` has
+        been part of it since 70.1), so a second build dependency is one more
+        unbounded name to pin and keep."""
+        requires = _pyproject()["build-system"]["requires"]
+        assert [_normalized(Requirement(r).name) for r in requires] == ["setuptools"]
+
 
 def _normalized(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
