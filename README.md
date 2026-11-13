@@ -537,7 +537,7 @@ fsm_llm/
 │   ├── flow_analysis.py       # Data-flow and liveness analysis of an FSM
 │   ├── llm.py                 # The only module that imports litellm
 │   ├── classification.py      # Classifier, intent routing
-│   ├── security.py, constants.py   # Key filtering, path confinement, limits
+│   ├── security/, constants.py   # Key filtering, path confinement, limits
 │   ├── okf.py, okf_bridge.py, okf_cli.py   # Open Knowledge Format
 │   ├── agent_skills.py, agent_skills_cli.py   # Agent Skills (read-only)
 │   ├── frontmatter.py         # The one YAML frontmatter loader

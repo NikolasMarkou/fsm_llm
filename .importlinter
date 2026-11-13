@@ -80,3 +80,20 @@ ignore_imports =
     # permanent (D-016 c): ReasoningReactAgent is the agents pattern built on the reasoning
     # engine, and no roadmap row retires the edge; it is reported to the user as a decision.
     fsm_llm.agents.reasoning_react -> fsm_llm.reasoning
+
+# Step 67 (security split): the first layer package. `security` is a KERNEL module (D-014,
+# D-016): it imports the standard library only, today and by contract, which is stricter
+# than the kernel rule of step 95 (kernel modules import no layer package). The forbidden
+# set is `fsm_llm.*` (every direct child), not the bare root: with the root as the
+# forbidden module and a source inside it, import-linter reports nothing (measured at
+# step 67: a planted `from fsm_llm.constants import ...` in `security/paths.py` was missed).
+[importlinter:contract:security-is-a-leaf]
+name = fsm_llm.security imports no other fsm_llm module (standard library only)
+type = forbidden
+source_modules =
+    fsm_llm.security
+forbidden_modules =
+    fsm_llm.*
+ignore_imports =
+    # the package's own modules import each other
+    fsm_llm.security.** -> fsm_llm.security.**

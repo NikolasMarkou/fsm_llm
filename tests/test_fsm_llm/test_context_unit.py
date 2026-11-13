@@ -20,7 +20,8 @@ from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
 from fsm_llm.context import ContextCompactor, clean_context_keys
 from fsm_llm.definitions import FSMDefinition, State, Transition, TransitionCondition
 from fsm_llm.prompts import BasePromptBuilder
-from fsm_llm.security import _looks_like_credential_value, _token_value_is_credential
+from fsm_llm.security.names import _token_value_is_credential
+from fsm_llm.security.shapes import _looks_like_credential_value
 from tests.test_fsm_llm.fixtures.context_key_corpus import (
     CARVE_OUT_CREDENTIAL_ENTRIES,
     CARVE_OUT_KNOWN_FAIL_OPEN,
@@ -1217,7 +1218,8 @@ def _shipped_vocabulary_union() -> set[str]:
     Returns: a set of lowercased vocabulary words, drawn from all SEVEN shipped
     lists. Never raises; never mutates `constants`.
     """
-    from fsm_llm import security as c
+    from fsm_llm.security import patterns as c
+    from fsm_llm.security import shape_data as v
 
     words: set[str] = set()
     for blob in (
@@ -1235,7 +1237,7 @@ def _shipped_vocabulary_union() -> set[str]:
     # D-003's identifier nouns gate the UUID/ULID carve-out. A frozenset rather
     # than an alternation blob, but still a list of words this codebase's author
     # enumerated. Omitting it inflates the key arm from 0.858 to 0.925.
-    words |= set(c._IDENTIFIER_NOUN_VOCABULARY)
+    words |= set(v._IDENTIFIER_NOUN_VOCABULARY)
     # D-005's HTTP scheme words are the SEVENTH list and the newest. They are
     # value-side rather than name-side, which is the argument for leaving them
     # out -- and they are included anyway, because the stricter reading of the
@@ -1244,7 +1246,7 @@ def _shipped_vocabulary_union() -> set[str]:
     # `jwt`, `hmac`, `oauth`, `digest`, `basic`, `signature`, were already in
     # the union via the name lists). Recorded so a future reader does not
     # re-derive it: it is a no-op TODAY, not by construction.
-    words |= set(c._AUTH_SCHEME_WORDS)
+    words |= set(v._AUTH_SCHEME_WORDS)
     return words
 
 
@@ -1338,7 +1340,7 @@ class TestCryptoKeyAndTokenTriggers:
         future edit from inverting a polarity unnoticed -- the exact defect
         D-015 exists to correct.
         """
-        from fsm_llm import security as c
+        from fsm_llm.security import patterns as c
 
         return {
             "key/crypto-denylist": (c._CRYPTO_KEY_QUALIFIERS, "deny"),
@@ -1366,10 +1368,8 @@ class TestCryptoKeyAndTokenTriggers:
         neutralising it has the OPPOSITE effect of neutralising a shipped
         pattern: it removes a referral, not a strip.
         """
-        from fsm_llm.security import (
-            _TOKEN_VALUE_SCAN_NAME_RE,
-            FORBIDDEN_CONTEXT_PATTERNS,
-        )
+        from fsm_llm.security import FORBIDDEN_CONTEXT_PATTERNS
+        from fsm_llm.security.names import _TOKEN_VALUE_SCAN_NAME_RE
 
         return [*FORBIDDEN_CONTEXT_PATTERNS, _TOKEN_VALUE_SCAN_NAME_RE.pattern]
 
@@ -1396,7 +1396,7 @@ class TestCryptoKeyAndTokenTriggers:
         """
         import re
 
-        from fsm_llm.security import _token_value_is_credential
+        from fsm_llm.security.names import _token_value_is_credential
 
         *strip_sources, referral_source = sources
         strip = [re.compile(p, re.IGNORECASE) for p in strip_sources]
@@ -1467,7 +1467,7 @@ class TestCryptoKeyAndTokenTriggers:
         three consecutive times on this exact seam."""
         import pathlib
 
-        from fsm_llm import security as c
+        from fsm_llm.security import patterns as c
         from tests.test_fsm_llm.fixtures import context_key_corpus
 
         source = pathlib.Path(context_key_corpus.__file__).read_text(encoding="utf-8")
@@ -2233,7 +2233,7 @@ class TestCryptoKeyAndTokenTriggers:
         gap makes the `key` pattern QUADRATIC on inputs like `"ssh_"*n` -- a
         denial of service on the prompt path, where this runs with the
         per-conversation lock held."""
-        from fsm_llm import security as c
+        from fsm_llm.security import patterns as c
 
         assert "{0,192}?" in c._CRYPTO_GAP, (
             "the crypto gap lost its bound; an unbounded lazy gap is quadratic "
@@ -2401,10 +2401,12 @@ class TestValueShapeLayer:
         argument in the D-019 block has become false and the block must be
         rewritten before the filter is.
 
-        Patches `fsm_llm.security`, the module whose globals the function
-        reads; assigning on the `constants` re-export would not reach it.
+        Patches `fsm_llm.security.shapes`, the module whose globals the function
+        reads (it binds `_CREDENTIAL_VALUE_PREFIXES` from `shape_data`, so
+        assigning on `shape_data` or on the `constants` re-export would not reach
+        it).
         """
-        from fsm_llm import security as c
+        from fsm_llm.security import shapes as c
 
         credentials: list[tuple[str, object]] = []
         credentials += list(CRYPTO_KEY_SECRET_VALUES.items())
@@ -2524,7 +2526,7 @@ class TestValueShapeLayer:
         token -- so these survive only because their qualifier is allowlisted.
         The assertion pairs each cursor with a bearer credential carrying a
         value of the SAME shape, to show the name is doing all the work."""
-        from fsm_llm.security import _looks_like_credential_value
+        from fsm_llm.security.shapes import _looks_like_credential_value
 
         cursor = "DXF1ZXJ5QW5kRmV0Y2gBAAAAAAAAB1ZaW5kZXgtMjAyNC0wNy0xOQ=="
         assert _looks_like_credential_value(cursor), (
@@ -2765,7 +2767,7 @@ class TestValueShapeLayer:
         credential is 13 characters and any floor reaching it puts holdout
         over-strip at 18-22%, past the 15% bound. The safe side below is what
         that would have destroyed."""
-        from fsm_llm.security import _MIN_CREDENTIAL_VALUE_LENGTH
+        from fsm_llm.security.shape_data import _MIN_CREDENTIAL_VALUE_LENGTH
 
         assert _MIN_CREDENTIAL_VALUE_LENGTH == 24, (
             "the length floor moved. Re-run the two-axis floor sweep before "
@@ -2829,14 +2831,14 @@ class TestValueShapeLayer:
         import inspect
         import re as _re
 
-        from fsm_llm import security as c
+        from fsm_llm.security import names, shapes
 
         for function in (
-            c._looks_like_credential_value,
-            c._token_value_is_credential,
-            c._colon_composite_tail,
-            c._shannon_entropy,
-            c.is_forbidden_context_entry,
+            shapes._looks_like_credential_value,
+            names._token_value_is_credential,
+            shapes._colon_composite_tail,
+            shapes._shannon_entropy,
+            names.is_forbidden_context_entry,
         ):
             source = inspect.getsource(function)
             offenders = _re.findall(
@@ -5043,7 +5045,7 @@ class TestContainerValuesUnderAmbiguousKeyNames:
 
 
 class TestUserVisibleData:
-    """D-003 (plan 0068b055): key policy is `security.py` only.
+    """D-003 (plan 0068b055): key policy is `security/` only.
 
     A user key named ``system`` is an ordinary key; ``_``/``system_``/
     ``internal_`` keys stay hidden.

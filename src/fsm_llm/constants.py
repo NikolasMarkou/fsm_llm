@@ -7,8 +7,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from types import MappingProxyType
 
-# The context-key security filters live in `security.py`. Only its public names
-# are importable from here; private helpers are imported from `security`.
+# The context-key security filters live in the package `security/`. Only its
+# public names are importable from here; a private helper is imported from the
+# `security` module that defines it.
 from .security import (  # noqa: F401
     COMPILED_FORBIDDEN_CONTEXT_PATTERNS,
     FORBIDDEN_CONTEXT_PATTERNS,

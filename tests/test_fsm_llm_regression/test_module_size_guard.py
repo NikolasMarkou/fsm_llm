@@ -49,7 +49,6 @@ OVERSIZED: dict[str, int] = {
     "fsm_llm.okf": 1350,
     "fsm_llm.pipeline": 3025,
     "fsm_llm.prompts": 1747,
-    "fsm_llm.security": 1947,
     "fsm_llm.utilities": 1298,
     "fsm_llm.validator": 1306,
     "fsm_llm.visualizer": 1734,

@@ -5,7 +5,7 @@ Purpose: Runtime FSM synthesis inside the core `fsm_llm` package: a model compil
 
 ## Scope
 
-- All synthesis code of the `fsm-llm` distribution. Extra `synthesis = []` in `pyproject.toml` (no deps), package `fsm_llm.synthesis` in its explicit `packages` list and in `_EXPECTED_SUBPACKAGES` of `tests/test_packaging.py`. Version comes from `fsm_llm.__version__` via `__version__.py`.
+- All synthesis code of the `fsm-llm` distribution. Extra `synthesis = []` in `pyproject.toml` (no deps), package `fsm_llm.synthesis` found by `packages.find` and listed in `_EXPECTED_SUBPACKAGES` of `tests/test_packaging.py`. Version comes from `fsm_llm.__version__` via `__version__.py`.
 - Core pieces it relies on, outside this folder: `State.synthesize` and `SynthesizeConfig` in `src/fsm_llm/definitions.py` (core only loads and validates the field; its checks run the real evaluator on four sample results), `src/fsm_llm/flow_analysis.py` (`analyze_data_flow` is G3, `analyze_liveness` is G4), `API.push_fsm`/`pop_fsm`/`run_until_terminal(before_step=)`, `eval.cases.run_case_trial(stop=)`. The pipeline gives a synthesize state no extraction and makes its `result_key` handler-only.
 - Layering: this package imports core, `fsm_llm.agents` and `fsm_llm.eval`. None of them import it (`src/fsm_llm/definitions.py` mentions it in a comment only). `fsm_llm/__init__.py` loads no synthesis module; import by name (`from fsm_llm.synthesis import FSMSynthesizer`).
 - Not here: the bench `scripts/synthesis_bench.py` and its tests `tests/test_fsm_llm_synthesis/test_synthesis_bench.py`; no CLI; no persistence of conversations; no provider call (every request goes through an `LLMInterface`).

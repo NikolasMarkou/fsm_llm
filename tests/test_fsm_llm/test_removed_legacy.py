@@ -109,20 +109,24 @@ class TestRemovedCoreNames:
         assert conv_id not in api.conversation_stacks
 
     @pytest.mark.parametrize(
-        "name",
+        "name,module",
         [
-            "_looks_like_credential_value",
-            "_token_value_is_credential",
-            "_TOKEN_VALUE_SCAN_NAME_RE",
-            "_CREDENTIAL_VALUE_PREFIXES",
-            "_shannon_entropy",
+            ("_looks_like_credential_value", "shapes"),
+            ("_token_value_is_credential", "names"),
+            ("_TOKEN_VALUE_SCAN_NAME_RE", "names"),
+            ("_CREDENTIAL_VALUE_PREFIXES", "shape_data"),
+            ("_shannon_entropy", "shapes"),
         ],
     )
-    def test_private_security_helper_not_importable_from_constants(self, name):
+    def test_private_security_helper_not_importable_from_constants(self, name, module):
         constants = importlib.import_module("fsm_llm.constants")
         security = importlib.import_module("fsm_llm.security")
+        defining = importlib.import_module(f"fsm_llm.security.{module}")
         assert not hasattr(constants, name)
-        assert hasattr(security, name)
+        # A private helper is imported from the module that defines it, not from
+        # the package `__init__`, which re-exports the public names only.
+        assert hasattr(defining, name)
+        assert not hasattr(security, name)
         # The documented public path stays.
         assert constants.has_internal_prefix is security.has_internal_prefix
         assert (

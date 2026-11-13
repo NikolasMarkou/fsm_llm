@@ -1271,7 +1271,7 @@ class TestApiKeyGate:
         test pins that `compare_digest` is actually the mechanism used, so a
         regression back to a plain `!=` comparison would be caught if this
         spy is ever tightened to assert call counts."""
-        import fsm_llm.security as security_module
+        import fsm_llm.security.api_keys as security_module
 
         calls: list[tuple[bytes, bytes]] = []
         original = security_module.hmac.compare_digest

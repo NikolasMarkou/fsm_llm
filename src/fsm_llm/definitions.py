@@ -2401,7 +2401,7 @@ class FSMContext(BaseModel):
     def get_user_visible_data(self) -> dict[str, Any]:
         """``get_merged_data()`` without internal-prefix keys."""
         # DECISION plan-2026-11-06T093029-0068b055/D-003: key policy lives in
-        # security.py (has_internal_prefix). Do NOT re-add a literal key such
+        # security/ (has_internal_prefix). Do NOT re-add a literal key such
         # as "system" here: a user key named ``system`` is an ordinary key,
         # shown to extraction prompts as it already is in Pass 2 and get_data.
         return {

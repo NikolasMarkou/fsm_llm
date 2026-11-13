@@ -8,9 +8,10 @@ in coverage, or stops shipping in the sdist. Nothing errors.
 This file is that missing check. The package list is derived from the
 filesystem and `pyproject.toml`, never hardcoded, so it cannot go stale. The
 layout is ONE top-level package, `fsm_llm`, the directory `src/fsm_llm/` (found by
-`[tool.setuptools.packages.find]`), with seven subpackages
-(`src/fsm_llm/*/__init__.py`); both sets are derived and pinned exactly, so a
-stray second top-level package fails here.
+`[tool.setuptools.packages.find]`), with seven extras-backed subpackages and the
+layer packages that ship with the core (`LAYER_PACKAGES`, `security` first;
+`src/fsm_llm/*/__init__.py`); the sets are derived and pinned exactly, so a
+stray second top-level package or an unlisted directory package fails here.
 """
 
 from __future__ import annotations
@@ -106,8 +107,21 @@ PACKAGE_DIRS: dict[str, pathlib.Path] = _package_dirs()
 #: Every importable top-level package name.
 SRC_PACKAGES: frozenset[str] = frozenset(PACKAGE_DIRS)
 
-#: Every subpackage of `fsm_llm`, derived from disk (they sit directly in `src/fsm_llm/`).
-SUBPACKAGES: frozenset[str] = _packages_under(PACKAGE_DIRS["fsm_llm"])
+#: Every package directly under `src/fsm_llm/`, derived from disk.
+_ON_DISK_PACKAGES: frozenset[str] = _packages_under(PACKAGE_DIRS["fsm_llm"])
+
+#: The layer packages of the 0.4 layout (plan d454fd62, D-014): they ship with the core,
+#: need no extra and have no per-suite test folder. The set is the layer packages that
+#: exist NOW; each split step adds the name of the package it creates (security at step
+#: 67), up to the target `security, core, llm, context, engine, tools, policy, okf,
+#: skills, handlers`. `test_layer_packages_are_exactly_the_non_extra_packages_on_disk`
+#: pins it to the disk, so a layer package with no entry here, or an entry with no
+#: package, fails.
+LAYER_PACKAGES: frozenset[str] = frozenset({"security"})
+
+#: Every extras-backed subpackage of `fsm_llm` (they sit directly in `src/fsm_llm/`):
+#: the on-disk packages that are not layer packages.
+SUBPACKAGES: frozenset[str] = _ON_DISK_PACKAGES - LAYER_PACKAGES
 
 #: The four former sibling packages that now live under `fsm_llm`, plus `eval`
 #: (added in plan-2026-09-29T061903-581c2634) and `synthesis`
@@ -201,6 +215,25 @@ class TestEveryPackageIsWired:
 
     def test_subpackage_list_is_exactly_the_seven(self):
         assert SUBPACKAGES == _EXPECTED_SUBPACKAGES, SUBPACKAGES
+
+    def test_layer_packages_are_exactly_the_non_extra_packages_on_disk(self):
+        # A directory package that is neither one of the seven extras-backed
+        # subpackages nor a layer package is a miss in this file; a layer package
+        # that is listed but absent is a stale entry.
+        on_disk_layers = _ON_DISK_PACKAGES - _EXPECTED_SUBPACKAGES
+        assert on_disk_layers == LAYER_PACKAGES, (
+            f"on disk, not listed: {sorted(on_disk_layers - LAYER_PACKAGES)}; "
+            f"listed, not on disk: {sorted(LAYER_PACKAGES - on_disk_layers)}"
+        )
+        assert not LAYER_PACKAGES & _EXPECTED_SUBPACKAGES
+
+    @pytest.mark.parametrize("layer", sorted(LAYER_PACKAGES))
+    def test_a_layer_package_needs_no_extra(self, layer: str):
+        # It ships with the core: no extra of its name, so `pip install fsm-llm` has it.
+        body = _section("pyproject.toml", "[project.optional-dependencies]")
+        declared = set(re.findall(r"^([a-z0-9_]+) = ", body, re.MULTILINE))
+        assert layer not in declared
+        assert (PACKAGE_DIRS["fsm_llm"] / layer / "__init__.py").is_file()
 
     @pytest.mark.parametrize("slot_id", sorted(_SLOTS))
     def test_slot_enumerates_every_package(self, slot_id: str):
@@ -1025,7 +1058,9 @@ class TestPackageInitImportsNoSubpackage:
 
     def test_the_package_init_has_no_subpackage_import(self):
         root = package_dir(_REPO_ROOT)
-        subpackages = {p.name for p in root.iterdir() if (p / "__init__.py").is_file()}
+        # The extras-backed subpackages only: a layer package ships with the core, so the
+        # package `__init__` may import it.
+        subpackages = SUBPACKAGES
         assert subpackages >= _EXPECTED_SUBPACKAGES  # non-vacuous
         tree = ast.parse((root / "__init__.py").read_text(encoding="utf-8"))
         named: list[str] = []

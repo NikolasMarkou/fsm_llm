@@ -184,7 +184,7 @@ class TestSecurityHelpers:
         assert presented_api_key({}) is None
 
     def test_api_key_matches_is_constant_time_on_bytes(self, monkeypatch):
-        import fsm_llm.security as security
+        import fsm_llm.security.api_keys as security
 
         calls = []
         real = security.hmac.compare_digest

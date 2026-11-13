@@ -1214,7 +1214,7 @@ UNPINNED_CORE = {
     "src/fsm_llm/okf.py": "text caps shared with every package",
     "src/fsm_llm/schema_registry.py": "leaf core module read by the pinned validator.py",
     "src/fsm_llm/state_kinds.py": "the engine's kind registry (leaf, read by the pinned flow_analysis.py)",
-    "src/fsm_llm/security.py": "key filters shared with every package",
+    "src/fsm_llm/security/__init__.py": "key filters shared with every package (facade)",
     "src/fsm_llm/visualizer.py": "the mermaid of the approval summary (G7 never runs here)",
     "src/fsm_llm/agents/semantic_tools.py": "embedding lookup, the bench library has no embedder",
     "src/fsm_llm/synthesis/diagnose.py": "repair, never called by the bench",
