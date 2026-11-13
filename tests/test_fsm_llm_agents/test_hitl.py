@@ -5,9 +5,10 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from fsm_llm.agents import ReactAgent, SelfConsistencyAgent
-from fsm_llm.agents.definitions import ApprovalRequest, ToolCall
+from fsm_llm.agents.definitions import ApprovalRequest
 from fsm_llm.agents.hitl import HumanInTheLoop
 from fsm_llm.testing import PromptGroundedLLM
+from fsm_llm.tools import ToolCall
 
 
 def _always_approve(request: ApprovalRequest) -> bool:
@@ -56,7 +57,7 @@ class TestHumanInTheLoop:
         """No callback raises AgentError instead of silently auto-approving."""
         import pytest
 
-        from fsm_llm.agents.exceptions import AgentError
+        from fsm_llm.core.definitions import AgentError
 
         hitl = HumanInTheLoop()
         call = ToolCall(tool_name="search", parameters={})

@@ -5,14 +5,12 @@ from __future__ import annotations
 import pytest
 
 from fsm_llm.agents.exceptions import (
-    AgentError,
     AgentTimeoutError,
     ApprovalDeniedError,
     BudgetExhaustedError,
-    ToolExecutionError,
-    ToolNotFoundError,
 )
-from fsm_llm.core.definitions import FSMError
+from fsm_llm.core.definitions import AgentError, FSMError
+from fsm_llm.tools import ToolExecutionError, ToolNotFoundError
 
 
 class TestExceptionHierarchy:

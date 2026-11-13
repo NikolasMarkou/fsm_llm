@@ -16,7 +16,6 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.agents.definitions import ToolCall
 from fsm_llm.engine.api.conversation import API
 from fsm_llm.synthesis import (
     FSMLibrary,
@@ -27,6 +26,7 @@ from fsm_llm.synthesis import (
 )
 from fsm_llm.synthesis.constants import PROCEDURE_UNTRUSTED_LABEL as LABEL
 from fsm_llm.testing import ScriptedLLM
+from fsm_llm.tools import ToolCall
 from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, host_fsm
 
 GOAL = "collect visa application data"

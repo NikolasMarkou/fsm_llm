@@ -168,7 +168,7 @@ class TestMemoryToolsWithRegistry:
     """Test memory tools work with ToolRegistry."""
 
     def test_register_memory_tools(self):
-        from fsm_llm.agents.tools import ToolRegistry
+        from fsm_llm.tools import ToolRegistry
 
         memory = WorkingMemory()
         tools = create_memory_tools(memory)
@@ -180,8 +180,7 @@ class TestMemoryToolsWithRegistry:
         assert "recall" in registry
 
     def test_execute_through_registry(self):
-        from fsm_llm.agents.definitions import ToolCall
-        from fsm_llm.agents.tools import ToolRegistry
+        from fsm_llm.tools import ToolCall, ToolRegistry
 
         memory = WorkingMemory()
         tools = create_memory_tools(memory)

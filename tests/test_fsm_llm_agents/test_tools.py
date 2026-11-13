@@ -14,12 +14,12 @@ from typing import Annotated, Any
 import pytest
 from pydantic import BaseModel
 
-from fsm_llm.agents.definitions import ToolCall, ToolDefinition
-from fsm_llm.agents.exceptions import ToolNotFoundError
-from fsm_llm.agents.tools import (
+from fsm_llm.agents.tools import normalize_tool_input, register_agent
+from fsm_llm.tools import (
+    ToolCall,
+    ToolDefinition,
+    ToolNotFoundError,
     ToolRegistry,
-    normalize_tool_input,
-    register_agent,
     tool,
 )
 

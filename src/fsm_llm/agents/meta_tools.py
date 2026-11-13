@@ -12,6 +12,8 @@ import threading
 import weakref
 from typing import Any
 
+from fsm_llm.tools import ToolRegistry, tool
+
 from .definitions import ArtifactType
 from .exceptions import BuilderError
 from .meta_builders import (
@@ -19,7 +21,6 @@ from .meta_builders import (
     FSMArtifactBuilder,
     WorkflowArtifactBuilder,
 )
-from .tools import ToolRegistry, tool
 
 # ------------------------------------------------------------------
 # Helpers

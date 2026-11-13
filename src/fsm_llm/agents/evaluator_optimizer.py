@@ -23,10 +23,10 @@ from fsm_llm.agents.constants import (
 )
 from fsm_llm.agents.fsm_definitions.evalopt import build_evalopt_fsm
 from fsm_llm.logging import logger
+from fsm_llm.tools import require_int_limit
 
 from .base import BaseAgent, artifact_text
 from .definitions import AgentConfig, AgentResult, EvaluationResult
-from .exceptions import require_int_limit
 from .handlers import (
     make_iteration_limiter,
     make_redraft_handlers,

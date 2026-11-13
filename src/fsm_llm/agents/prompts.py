@@ -17,8 +17,7 @@ from fsm_llm.agents.constants import (
     EvalOptStates,
     MakerCheckerStates,
 )
-
-from .tools import ToolRegistry, schema_types, tool_parameters_schema
+from fsm_llm.tools import ToolRegistry, schema_types, tool_parameters_schema
 
 if TYPE_CHECKING:
     from .semantic_tools import SemanticToolRegistry

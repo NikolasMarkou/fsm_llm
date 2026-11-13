@@ -12,7 +12,11 @@ to one place; a table: each public symbol of a split module went to the module
 that defines it). `unmoved` is every other module, packages (`__init__`)
 included. A table key may stay on disk as the PACKAGE that replaced the module
 (P1: its `__init__` is the one import surface): the table entry is then that
-package's decision and it is NOT listed in `unmoved`. The map is written for the
+package's decision and it is NOT listed in `unmoved`. A table key may also stay
+on disk as a PLAIN module that keeps its other definitions (a partial move, step
+85: `fsm_llm.agents.tools` kept `register_agent` and gave the registry to
+`fsm_llm.tools`): the entry lists only what left, it is that module's decision
+too (NOT listed in `unmoved`), and no listed symbol may still be defined there. The map is written for the
 layout of steps 65 to 94 (each of those steps adds its entries in the commit
 that does the move).
 
@@ -20,8 +24,10 @@ What the tests pin, in the project's no-shim rule (a moved path is gone, never
 re-exported):
 
 - every old path of `moved` is not importable (a table entry may leave the old
-  path importable only as a package, the P3 `__init__` re-export surface, and
-  then each symbol must be DEFINED in its new module: `__module__` says where);
+  path importable as a package, the P3 `__init__` re-export surface, and then
+  each symbol must be DEFINED in its new module: `__module__` says where; or as
+  a plain module that keeps other definitions, and then no listed symbol is
+  still DEFINED in its file: `still_defined` reads the top-level statements);
 - every new path imports, and every symbol resolves in it;
 - every module found by walking the package is a value of `moved` or listed in
   `unmoved` (a new module without a decision fails), no module is in both, no
@@ -41,6 +47,7 @@ below drive them with synthetic maps and scratch directories. To refresh
 
 from __future__ import annotations
 
+import ast
 import importlib
 import importlib.util
 import inspect
@@ -142,6 +149,27 @@ def coverage_problems(data: dict[str, Any], modules: set[str]) -> list[str]:
     return bad
 
 
+def still_defined(source: Path, symbols: Any) -> list[str]:
+    """The listed symbols that the file at *source* still defines at top level.
+
+    A definition is a `def`, an `async def`, a `class` or an assignment at module
+    level; a name that is only imported (a binding for a pydantic annotation, say)
+    is not one. Reads the text, never imports the module.
+    """
+    defined: set[str] = set()
+    for node in ast.parse(source.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            defined.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                defined.update(
+                    n.id for n in ast.walk(target) if isinstance(n, ast.Name)
+                )
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            defined.add(node.target.id)
+    return sorted(set(symbols) & defined)
+
+
 def _spec(name: str) -> Any:
     try:
         return importlib.util.find_spec(name)
@@ -160,9 +188,13 @@ def import_problems(data: dict[str, Any]) -> list[str]:
             targets: dict[str | None, str] = {None: target}
         else:
             if spec is not None and spec.submodule_search_locations is None:
-                bad.append(
-                    f"old path `{old}` is still a plain module: a split module is gone or a package"
-                )
+                origin = spec.origin
+                for symbol in (
+                    still_defined(Path(origin), target) if origin else sorted(target)
+                ):
+                    bad.append(
+                        f"`{symbol}` moved from `{old}` but is still defined there"
+                    )
             targets = dict(target)
         for symbol, new in targets.items():
             try:
@@ -420,7 +452,19 @@ class TestImportProblems:
                 }
             )
         )
-        assert any("still a plain module" in p for p in bad)
+        assert bad == [
+            "`API` moved from `fsm_llm.engine.api.conversation` but is still defined there"
+        ]
+
+    def test_a_plain_module_that_kept_other_definitions_may_stay(self) -> None:
+        assert (
+            import_problems(
+                _data(
+                    {"fsm_llm.agents.tools": {"ToolRegistry": "fsm_llm.tools.registry"}}
+                )
+            )
+            == []
+        )
 
     def test_a_package_whose_parent_is_missing_counts_as_gone(self) -> None:
         assert (
@@ -429,6 +473,41 @@ class TestImportProblems:
             )
             == []
         )
+
+
+class TestStillDefined:
+    """`still_defined`: what a plain module that gave symbols away may not keep."""
+
+    SOURCE = (
+        "import os\n"
+        "from elsewhere import Imported\n"
+        "class Klass: ...\n"
+        "def func(): ...\n"
+        "async def coro(): ...\n"
+        "CONST = 1\n"
+        "ann: int = 2\n"
+        "left, right = 1, 2\n"
+        "if True:\n"
+        "    nested = 3\n"
+    )
+
+    def test_each_kind_of_top_level_definition_is_found(self, tmp_path: Path) -> None:
+        path = tmp_path / "m.py"
+        path.write_text(self.SOURCE, encoding="utf-8")
+        names = ["Klass", "func", "coro", "CONST", "ann", "left", "right"]
+        assert still_defined(path, names) == sorted(names)
+
+    def test_an_import_or_a_nested_name_is_not_a_definition(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "m.py"
+        path.write_text(self.SOURCE, encoding="utf-8")
+        assert still_defined(path, ["os", "Imported", "nested", "absent"]) == []
+
+    def test_only_the_listed_symbols_are_reported(self, tmp_path: Path) -> None:
+        path = tmp_path / "m.py"
+        path.write_text(self.SOURCE, encoding="utf-8")
+        assert still_defined(path, ["func", "Imported"]) == ["func"]
 
 
 class TestRefresh:

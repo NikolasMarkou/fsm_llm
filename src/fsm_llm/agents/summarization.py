@@ -21,8 +21,7 @@ from collections.abc import Callable
 from typing import Any
 
 from fsm_llm.agents.constants import ContextKeys, Defaults
-
-from .truncation import smart_truncate
+from fsm_llm.tools import smart_truncate
 
 SummarizeFn = Callable[[list[str]], str]
 

@@ -17,11 +17,10 @@ from fsm_llm.agents.definitions import (
     EvaluationResult,
     ReflexionMemory,
 )
-from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.fsm_definitions import build_reflexion_fsm
 from fsm_llm.agents.reflexion import ReflexionAgent
-from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.core.definitions import (
+    AgentError,
     DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
@@ -31,6 +30,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.expressions import evaluate_logic
 from fsm_llm.llm import LLMInterface
+from fsm_llm.tools import ToolRegistry
 from tests.test_fsm_llm_agents.support import (
     SequenceMockLLM,
     _bug_fixes_make_registry,

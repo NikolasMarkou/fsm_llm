@@ -10,7 +10,7 @@ from fsm_llm.agents.prompts import (
     build_conclude_response_instructions,
     build_think_terminate_instructions,
 )
-from fsm_llm.agents.tools import ToolRegistry
+from fsm_llm.tools import ToolRegistry
 
 from ._common import _by_id, _finalize_fsm, _state
 from ._loop import (

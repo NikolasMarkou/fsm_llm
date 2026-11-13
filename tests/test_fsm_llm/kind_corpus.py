@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import datetime
 import hashlib
 import importlib.util
 import json
@@ -55,6 +56,7 @@ import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from pydantic import BaseModel, ValidationError
 
@@ -335,7 +337,7 @@ class _Report(BaseModel):
 
 def _registry() -> Any:
     from fsm_llm.agents import ToolRegistry
-    from fsm_llm.agents.definitions import ToolDefinition
+    from fsm_llm.tools import ToolDefinition
 
     def _weather(city: str) -> str:
         return f"sunny in {city}"
@@ -1070,10 +1072,32 @@ def _scenario_synthesize_host(*, silent: bool) -> dict[str, Any]:
     }
 
 
+#: The day the baseline was recorded. The extraction prompt of a plain state says
+#: "Today's date: <day>" (``context.layout.extraction``), so the scenarios run with
+#: the clock frozen here; without it ``test_scenario_matches[plain]`` failed on every
+#: other day (found at step 85 of plan d454fd62: the parent code failed it too).
+RECORDED_DAY = (2026, 11, 13)
+
+
+@contextlib.contextmanager
+def _frozen_today() -> Iterator[None]:
+    """``datetime.date.today()`` answers ``RECORDED_DAY`` inside the block."""
+    real = datetime.date
+
+    class _RecordedDay(real):  # type: ignore[misc, valid-type]
+        @classmethod
+        def today(cls) -> datetime.date:
+            return real(*RECORDED_DAY)
+
+    with mock.patch("datetime.date", _RecordedDay):
+        yield
+
+
 def scenarios() -> dict[str, dict[str, Any]]:
     """The recorded turns: plain, completion, and the synthesize host (silent and speaking).
 
-    A turn that raises is recorded as ``{"raised": ...}``, never propagated.
+    A turn that raises is recorded as ``{"raised": ...}``, never propagated. The clock is
+    frozen at ``RECORDED_DAY`` (the prompt of a plain extraction names the day).
     """
     runs: dict[str, Callable[[], dict[str, Any]]] = {
         "completion": _scenario_completion,
@@ -1081,7 +1105,8 @@ def scenarios() -> dict[str, dict[str, Any]]:
         "synthesize-host": lambda: _scenario_synthesize_host(silent=True),
         "synthesize-host-speaking": lambda: _scenario_synthesize_host(silent=False),
     }
-    return {name: _plain(_recorded(run)) for name, run in runs.items()}
+    with _frozen_today():
+        return {name: _plain(_recorded(run)) for name, run in runs.items()}
 
 
 # --------------------------------------------------------------

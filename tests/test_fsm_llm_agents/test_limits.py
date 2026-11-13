@@ -14,11 +14,6 @@ from fsm_llm.agents.adapt import ADaPTAgent
 from fsm_llm.agents.constants import Defaults
 from fsm_llm.agents.debate import DebateAgent
 from fsm_llm.agents.evaluator_optimizer import EvaluatorOptimizerAgent
-from fsm_llm.agents.exceptions import (
-    AgentError,
-    bounded_repr,
-    require_int_limit,
-)
 from fsm_llm.agents.maker_checker import MakerCheckerAgent
 from fsm_llm.agents.orchestrator import OrchestratorAgent
 from fsm_llm.agents.parallel_react import ParallelReactAgent
@@ -28,9 +23,10 @@ from fsm_llm.agents.self_consistency import SelfConsistencyAgent
 from fsm_llm.agents.semantic_memory import SemanticMemoryStore
 from fsm_llm.agents.swarm import SwarmAgent
 from fsm_llm.agents.tool_registries import CachingToolRegistry, RetryingToolRegistry
-from fsm_llm.agents.tools import ToolRegistry, check_timeout
 from fsm_llm.agents.verified_react import VerifiedReactAgent
+from fsm_llm.core.definitions import AgentError
 from fsm_llm.testing import MockLLM2Interface
+from fsm_llm.tools import ToolRegistry, bounded_repr, check_timeout, require_int_limit
 
 HUGE = 10**5000
 
@@ -315,7 +311,7 @@ class TestCheckTimeoutMessageIsBounded:
         ],
     )
     def test_a_huge_timeout_is_a_clean_tool_error(self, bad):
-        from fsm_llm.agents.exceptions import ToolExecutionError
+        from fsm_llm.tools import ToolExecutionError
 
         with pytest.raises(ToolExecutionError) as info:
             check_timeout("slow", bad)

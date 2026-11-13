@@ -16,7 +16,6 @@ from fsm_llm.agents import __all__ as agents_all
 from fsm_llm.agents import okf as agents_okf
 from fsm_llm.agents.agent_skills import SKILL_TOOL_DESCRIPTIONS, SKILL_TOOL_PARAMETERS
 from fsm_llm.agents.constants import ContextKeys, Defaults
-from fsm_llm.agents.definitions import ToolAnnotations, ToolCall
 from fsm_llm.agents.fsm_definitions import build_native_fc_fsm, build_react_fsm
 from fsm_llm.agents.handlers import AgentHandlers
 from fsm_llm.agents.okf import _budget
@@ -40,6 +39,7 @@ from fsm_llm.llm import LLMInterface
 from fsm_llm.okf import strip_unsafe_text
 from fsm_llm.skills import SkillLimits, load_skills
 from fsm_llm.testing import final_reply, tool_call_reply
+from fsm_llm.tools import ToolAnnotations, ToolCall
 from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 
 _TOOLS = ("skill_list", "skill_load", "skill_read")

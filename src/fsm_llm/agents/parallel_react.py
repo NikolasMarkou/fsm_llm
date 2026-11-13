@@ -38,10 +38,15 @@ from fsm_llm.agents.constants import (
 )
 from fsm_llm.agents.fsm_definitions.parallel_react import build_parallel_react_fsm
 from fsm_llm.logging import logger
+from fsm_llm.tools import (
+    ToolCall,
+    ToolRegistry,
+    redact_secret_entries,
+    require_int_limit,
+)
 
 from .base import BaseAgent, caller_prompt_keys
-from .definitions import AgentConfig, AgentResult, ToolCall
-from .exceptions import require_int_limit
+from .definitions import AgentConfig, AgentResult
 from .handlers import (
     ThinkTurnLimiter,
     call_label,
@@ -49,7 +54,7 @@ from .handlers import (
     record_tool_step,
     with_feedback,
 )
-from .tools import ToolRegistry, normalize_tool_input, redact_secret_entries
+from .tools import normalize_tool_input
 
 
 class ParallelReactAgent(BaseAgent):

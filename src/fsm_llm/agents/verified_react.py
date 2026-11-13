@@ -40,9 +40,9 @@ from typing import Any
 from fsm_llm import API
 from fsm_llm.agents.constants import ContextKeys, StopReason
 from fsm_llm.logging import logger
+from fsm_llm.tools import require_int_limit
 
 from .definitions import AgentResult
-from .exceptions import require_int_limit
 from .react import ReactAgent
 
 _REFLECTION_NOTE = (

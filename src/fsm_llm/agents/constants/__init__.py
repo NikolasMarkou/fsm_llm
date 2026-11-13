@@ -2,7 +2,12 @@
 
 Every public name of the old single module is re-exported (P1), so
 ``from fsm_llm.agents.constants import X`` keeps working.
+
+``ToolRunStatus`` and ``ToolObservationPrefix`` are defined in ``fsm_llm.tools.constants``
+(the tool models read them) and re-exported here.
 """
+
+from fsm_llm.tools.constants import ToolObservationPrefix, ToolRunStatus
 
 from .core import (
     ContextKeys,
@@ -48,8 +53,6 @@ from .meta import (
 from .outcomes import (
     OBSERVATION_ENTRY,
     StopReason,
-    ToolObservationPrefix,
-    ToolRunStatus,
 )
 from .states import (
     NATIVE_FC_HANDLER_ONLY_KEYS,

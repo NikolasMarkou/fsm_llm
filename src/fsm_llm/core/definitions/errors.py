@@ -125,6 +125,10 @@ class SkillError(FSMError):
     """
 
 
+class AgentError(FSMError):
+    """Base exception for all agent-related errors."""
+
+
 class FSMDefinitionNotFoundError(FSMError, ValueError):
     """No FSM definition is resolvable for a non-path id.
 

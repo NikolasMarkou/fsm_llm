@@ -14,9 +14,7 @@ from typing import Any
 import pytest
 
 from fsm_llm.agents.constants import OBSERVATION_ENTRY, Defaults
-from fsm_llm.agents.definitions import ToolCall
 from fsm_llm.agents.handlers import record_tool_step
-from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.core.definitions import (
     CompletionStateConfig,
     FSMDefinition,
@@ -37,6 +35,7 @@ from fsm_llm.synthesis.constants import PROCEDURE_UNTRUSTED_LABEL as LABEL
 from fsm_llm.synthesis.exceptions import SynthesisError
 from fsm_llm.synthesis.gates import GATES
 from fsm_llm.testing import ScriptedLLM
+from fsm_llm.tools import ToolCall, ToolRegistry
 from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM
 
 GOAL = "Collect the answer"

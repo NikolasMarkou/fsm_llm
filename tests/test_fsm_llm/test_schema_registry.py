@@ -687,7 +687,7 @@ def _example_definition_bodies() -> list[tuple[str, dict[str, Any]]]:
 
 def _agent_definition_bodies() -> list[tuple[str, dict[str, Any]]]:
     from fsm_llm.agents import fsm_definitions as fd
-    from fsm_llm.agents.tools import ToolRegistry
+    from fsm_llm.tools import ToolRegistry
 
     registry = ToolRegistry()
     registry.register_function(lambda: "ok", name="search", description="Search")

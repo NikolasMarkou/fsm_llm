@@ -8,7 +8,7 @@ import pytest
 
 from fsm_llm import API, LiteLLMInterface
 from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry, tool
-from fsm_llm.agents.exceptions import AgentError
+from fsm_llm.core.definitions import AgentError
 from fsm_llm.reasoning import ReasoningEngine
 from fsm_llm.testing import MockLLM2Interface
 

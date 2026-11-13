@@ -14,9 +14,7 @@ from collections.abc import Callable, Sequence
 
 from fsm_llm.llm import DEFAULT_EMBEDDING_MODEL, LiteLLMEmbedder
 from fsm_llm.logging import logger
-
-from .definitions import ToolDefinition
-from .tools import ToolRegistry
+from fsm_llm.tools import ToolDefinition, ToolRegistry
 
 EmbedFn = Callable[[str], list[float]]
 """A custom embedding backend: one text in, its vector out."""

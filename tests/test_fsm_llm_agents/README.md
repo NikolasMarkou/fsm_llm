@@ -10,7 +10,7 @@ FSM-LLM builds each agent pattern (ReAct, Reflexion, Plan-Execute, Debate, and o
 
 There are three kinds of test:
 
-- Unit tests call one class or function directly: models in `fsm_llm.agents.definitions`, `ToolRegistry`, the `build_*_fsm` builders, handler methods such as `_track_revisions` or `_execute_all_plans`.
+- Unit tests call one class or function directly: models in `fsm_llm.agents.definitions` (the tool models and `ToolRegistry` are in `fsm_llm.tools`), `ToolRegistry`, the `build_*_fsm` builders, handler methods such as `_track_revisions` or `_execute_all_plans`.
 - Structure tests build an FSM dict and check its states, transitions and priorities, or evaluate a transition's JsonLogic condition with `fsm_llm.core.expressions.evaluate_logic`.
 - Loop tests run `agent.run(...)` end to end with a fake LLM passed as `llm_interface=`. The fake subclasses `fsm_llm.llm.LLMInterface` and answers `extract_field`, `extract_bulk_data` and `generate_response` from a script.
 
@@ -104,6 +104,7 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_tool_registries.py` - `get_json_schemas`, `CachingToolRegistry` (never serves a granted call), `RetryingToolRegistry` (never retries a flagged tool).
 - `test_trust_boundary.py` - caller context cannot forge approval or a finished run (also through `AgentServer`, graph edges and swarm hand-offs), constructor kwargs checks, gated tools refused where there is no approval step, flagged tools with no approver fail closed.
 - `test_tools.py` - `ToolRegistry`, `@tool`, thread safety, `normalize_tool_input`, list and dict parameters, `register_function` shapes.
+- `test_tools_layer.py` - the tool layer `fsm_llm.tools`: the agents constants keep every attribute and share the tool-layer objects, `fsm_llm.agents` re-exports them, the old modules define none of the moved names, `AgentError` lives in core, importing the layer loads no subpackage.
 - `test_otel_exporter.py` - `OTELExporter` (monitor code, tested from this suite): thread-safe span handling and the exporter lifecycle.
 - `test_dependency_resolver.py` - `DependencyResolver` of `fsm_llm.workflows` (kept here to keep the pinned ids).
 - `test_truncation.py` - `smart_truncate`.

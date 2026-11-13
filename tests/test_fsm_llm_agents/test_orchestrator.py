@@ -15,7 +15,6 @@ from fsm_llm.agents.constants import (
 from fsm_llm.agents.definitions import AgentConfig, AgentResult
 from fsm_llm.agents.fsm_definitions import build_orchestrator_fsm
 from fsm_llm.agents.orchestrator import OrchestratorAgent
-from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.core.definitions import (
     DataExtractionResponse,
     FieldExtractionRequest,
@@ -25,6 +24,7 @@ from fsm_llm.core.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
+from fsm_llm.tools import ToolRegistry
 
 
 def _dummy_tool(params):

@@ -15,8 +15,8 @@ from fsm_llm.agents import (
 )
 from fsm_llm.agents.composition import _default_complete
 from fsm_llm.agents.definitions import AgentResult, AgentTrace, EvaluationResult
-from fsm_llm.agents.exceptions import AgentError, EvaluationError
-from fsm_llm.core.definitions import LLMResponseError
+from fsm_llm.agents.exceptions import EvaluationError
+from fsm_llm.core.definitions import AgentError, LLMResponseError
 
 
 @tool

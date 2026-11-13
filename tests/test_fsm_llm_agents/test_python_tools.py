@@ -15,7 +15,7 @@ from fsm_llm.agents.python_tools import PythonToolLoader, PythonToolLoadReport
 _MODULE_BOTH_SOURCES = textwrap.dedent(
     """
     from fsm_llm.agents.python_tools import PythonToolDefinition
-    from fsm_llm.agents.tools import tool
+    from fsm_llm.agents import tool
 
 
     @tool
@@ -54,7 +54,7 @@ class TestPythonToolLoaderDedupe:
         path.write_text(
             textwrap.dedent(
                 """
-                from fsm_llm.agents.tools import tool
+                from fsm_llm.agents import tool
 
 
                 @tool
@@ -73,7 +73,7 @@ class TestPythonToolLoaderDedupe:
 
 _MODULE_ALIASED_TOOL = textwrap.dedent(
     """
-    from fsm_llm.agents.tools import tool
+    from fsm_llm.agents import tool
 
 
     @tool
@@ -89,7 +89,7 @@ _MODULE_ALIASED_TOOL = textwrap.dedent(
 
 _MODULE_NAME_COLLISION = textwrap.dedent(
     """
-    from fsm_llm.agents.tools import tool
+    from fsm_llm.agents import tool
 
 
     @tool(name="lookup")
@@ -181,7 +181,7 @@ class TestPythonToolLoaderRemovedNames:
 
 def _write_broken_and_good(tmp_path: Path) -> Path:
     (tmp_path / "a_good.py").write_text(
-        "from fsm_llm.agents.tools import tool\n\n\n"
+        "from fsm_llm.agents import tool\n\n\n"
         "@tool\ndef ping(value: str) -> str:\n"
         '    """Echo."""\n    return value\n',
         encoding="utf-8",
@@ -367,8 +367,8 @@ _MODULE_TOOL_FIELDS = textwrap.dedent(
     from enum import Enum
     from typing import Optional
 
-    from fsm_llm.agents.definitions import ToolAnnotations
-    from fsm_llm.agents.tools import tool
+    from fsm_llm.agents import ToolAnnotations
+    from fsm_llm.agents import tool
 
 
     class Mode(str, Enum):
@@ -415,8 +415,8 @@ class TestPythonToolCarriesToolFields:
         self._check(registry.get("lookup"))
 
     def test_defaults_equal_tool_definition_defaults(self) -> None:
-        from fsm_llm.agents.definitions import ToolDefinition
         from fsm_llm.agents.python_tools import PythonToolDefinition
+        from fsm_llm.tools import ToolDefinition
 
         bare = PythonToolDefinition(name="x", description="d", execute=lambda: 1)
         built = bare.to_tool_definition()

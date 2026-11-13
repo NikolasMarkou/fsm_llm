@@ -80,7 +80,7 @@ Helper in `test_tools.py`:
 
 - `populated_fsm_builder`: `set_overview("GreetingBot", "A simple greeting bot", persona="Friendly assistant")`; states added as `add_state(state_id, description, purpose, ...)`: `greeting`, `ask_name` (with `extraction_instructions` and `response_instructions`), `farewell`; transitions `greeting -> ask_name` and `ask_name -> farewell`, the second with `conditions=[{"description": "Name is set", "logic": {"has_context": "user_name"}}]`. `validate_complete()` returns `[]`. Many tests assert exact strings from it ("GreetingBot", "States (3)", "-> ask_name", "Persona:").
 - `meta_config`: `MetaBuilderConfig(model="gpt-4o-mini", temperature=0.5, max_tokens=1000, max_turns=20)`. No test in the directory requests this fixture at present (`agent.meta_config` in `test_agent.py` is the agent attribute, not the fixture).
-- `ToolCall` (from `fsm_llm.agents.definitions`): `tool_name` plus a `parameters` dict. Tool results are read through `result.success` and `result.result`.
+- `ToolCall` (from `fsm_llm.tools`): `tool_name` plus a `parameters` dict. Tool results are read through `result.success` and `result.result`.
 
 ## Invariants and constraints
 

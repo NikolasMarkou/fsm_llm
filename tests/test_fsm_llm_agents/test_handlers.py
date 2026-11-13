@@ -13,7 +13,7 @@ from fsm_llm.agents.handlers import (
     make_fresh_keys_handler,
     make_iteration_limiter,
 )
-from fsm_llm.agents.tools import ToolRegistry, tool
+from fsm_llm.tools import ToolRegistry, tool
 
 
 def _echo(params):

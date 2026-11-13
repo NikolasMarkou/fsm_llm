@@ -1,4 +1,8 @@
-"""How a run or a tool call ended: stop reasons, tool statuses and the observation texts."""
+"""How a run ended: stop reasons and the observation text of a tool step.
+
+``ToolRunStatus`` and ``ToolObservationPrefix`` (how one tool call ended) are defined in
+``fsm_llm.tools.constants`` and re-exported by ``fsm_llm.agents.constants``.
+"""
 
 from __future__ import annotations
 
@@ -55,33 +59,3 @@ class StopReason:
 # Read back by ``BaseAgent._try_parse_structured_output`` (the text after the last
 # "Result:") and sized by ``okf._budget``, which measures the wrapper with this.
 OBSERVATION_ENTRY = "[Step {step}] Tool: {tool} | Input: {input} | Result: {result}"
-
-
-class ToolObservationPrefix:
-    """Prefixes that tell the model how a tool call ended (``ToolResult.observation``)."""
-
-    # The call ran and failed (or never ran: unknown tool, bad arguments).
-    FAILED = "[TOOL FAILED]"
-    # The call timed out: it may still be running, its effects may happen.
-    OUTCOME_UNKNOWN = "[TOOL OUTCOME UNKNOWN]"
-
-
-class ToolRunStatus:
-    """How a call that was sent to a tool ended (``ToolResult.status``).
-
-    Written to ``ContextKeys.TOOL_STATUS`` by the executors that run a tool;
-    the other statuses there (``skipped``, ``rejected``,
-    ``awaiting_approval``) mean no tool ran.
-    """
-
-    SUCCESS = "success"
-    FAILED = "failed"
-    # The call timed out: it may still be running and may still take effect.
-    # Distinct from FAILED so no reader treats it as "safe to run again".
-    UNKNOWN = "unknown"
-    # The three values below mean NO tool ran for the turn.
-    SKIPPED = "skipped"
-    REJECTED = "rejected"
-    AWAITING_APPROVAL = "awaiting_approval"
-    # Statuses that mean a tool really ran.
-    RAN = frozenset({SUCCESS, FAILED, UNKNOWN})

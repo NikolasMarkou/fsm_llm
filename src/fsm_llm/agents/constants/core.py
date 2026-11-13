@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-import threading
-
 from fsm_llm.constants import CONTEXT_KEY_AGENT_TRACE, DEFAULT_TEMPERATURE
 from fsm_llm.llm import DEFAULT_MAX_TOKENS
+from fsm_llm.tools.constants import ContextKeys as _ToolContextKeys
+from fsm_llm.tools.constants import Defaults as _ToolDefaults
+from fsm_llm.tools.constants import ErrorMessages as _ToolErrorMessages
+from fsm_llm.tools.constants import LogMessages as _ToolLogMessages
 
 
 class ContextKeys:
@@ -14,16 +16,17 @@ class ContextKeys:
     # Task
     TASK = "task"
 
-    # Tool selection (extracted by LLM in think state)
-    TOOL_NAME = "tool_name"
-    TOOL_INPUT = "tool_input"
+    # Tool selection (extracted by LLM in think state); the tool layer owns
+    # the three tool-call keys, this class assigns them from there.
+    TOOL_NAME = _ToolContextKeys.TOOL_NAME
+    TOOL_INPUT = _ToolContextKeys.TOOL_INPUT
     # ParallelReact: the list of calls one think turn selects.
     TOOL_CALLS = "tool_calls"
     REASONING = "reasoning"
     SHOULD_TERMINATE = "should_terminate"
 
     # Sentinel value for "no tool selected"
-    NO_TOOL = "none"
+    NO_TOOL = _ToolContextKeys.NO_TOOL
 
     # Tool execution results
     TOOL_RESULT = "tool_result"
@@ -185,20 +188,19 @@ class Defaults:
     MAX_TOKENS = DEFAULT_MAX_TOKENS
     MAX_ITERATIONS = 10
     # Largest integer an agent limit (``max_*``/``num_*``) or an artifact int
-    # config field may take: 63 bits. A larger int is no real limit, and past
-    # 4300 digits it breaks every f-string, log line and ``json.dumps`` of it.
-    MAX_INT_LIMIT = 2**63 - 1
+    # config field may take: 63 bits (defined by the tool layer).
+    MAX_INT_LIMIT = _ToolDefaults.MAX_INT_LIMIT
     TIMEOUT_SECONDS = 300.0
     MCP_TIMEOUT_SECONDS = 30.0
     REMOTE_TOOL_TIMEOUT_SECONDS = 120.0  # RemoteAgentTool's HTTP call
-    MAX_OBSERVATION_LENGTH = 2000
+    MAX_OBSERVATION_LENGTH = _ToolDefaults.MAX_OBSERVATION_LENGTH
     # Largest per-call tool ``timeout_seconds``: the most a thread wait accepts
     # (``threading.TIMEOUT_MAX``; a larger wait raises OverflowError).
-    MAX_TOOL_TIMEOUT_S = threading.TIMEOUT_MAX
+    MAX_TOOL_TIMEOUT_S = _ToolDefaults.MAX_TOOL_TIMEOUT_S
     MAX_OBSERVATIONS = 20
     CONFIDENCE_THRESHOLD = 0.3
     # Tool-selection classification threshold (``to_classification_schema``).
-    TOOL_CONFIDENCE_THRESHOLD = 0.4
+    TOOL_CONFIDENCE_THRESHOLD = _ToolDefaults.TOOL_CONFIDENCE_THRESHOLD
     MAX_TASK_PREVIEW_LENGTH = 200
     # Cap on AgentConfig.instructions. They are prefixed to prompt slots that
     # core caps at 5000 chars; a ReAct think slot grows with the tool list, so
@@ -265,17 +267,10 @@ class Defaults:
 class ErrorMessages:
     """Standard error messages."""
 
-    TOOL_NOT_FOUND = "Tool '{name}' not found in registry"
-    TOOL_EXECUTION_FAILED = "Tool '{name}' execution failed: {error}"
-    TOOL_TIMED_OUT = (
-        "Tool '{name}' timed out after {timeout} s; its outcome is unknown: it "
-        "may still be running and its side effects may still happen. Do not "
-        "assume it did not run"
-    )
-    TOOL_BAD_TIMEOUT = (
-        "Tool '{name}' has an invalid timeout_seconds {timeout}: it must be a "
-        "finite number above 0 and at most {limit} s; the tool was not run"
-    )
+    TOOL_NOT_FOUND = _ToolErrorMessages.TOOL_NOT_FOUND
+    TOOL_EXECUTION_FAILED = _ToolErrorMessages.TOOL_EXECUTION_FAILED
+    TOOL_TIMED_OUT = _ToolErrorMessages.TOOL_TIMED_OUT
+    TOOL_BAD_TIMEOUT = _ToolErrorMessages.TOOL_BAD_TIMEOUT
     EXECUTE_WITHOUT_GATED = (
         "{registry}.execute does not accept the keyword argument 'gated': a "
         "ToolRegistry subclass must keep the signature "
@@ -314,10 +309,7 @@ class LogMessages:
     TOOL_SELECTED = "Selected tool: {name} with input: {input}"
     TOOL_EXECUTED = "Tool '{name}' executed successfully"
     TOOL_FAILED = "Tool '{name}' failed: {error}"
-    TOOL_LATE_RESULT = (
-        "Tool '{name}' finished after its {timeout} s timeout; "
-        "its {outcome} was discarded"
-    )
+    TOOL_LATE_RESULT = _ToolLogMessages.TOOL_LATE_RESULT
     ITERATION = "Iteration {current}/{max}"
     AGENT_COMPLETE = "Agent completed in {iterations} iterations"
     APPROVAL_REQUESTED = "Requesting approval for: {action}"

@@ -9,7 +9,7 @@ They keep no copy: this file is the one source (plan 65baa765, D-002), and
 helpers equal to their ``fsm_llm.eval`` twins.
 
 Import hygiene: the top level imports the standard library only; anything
-else (``fsm_llm.llm.providers.litellm``, ``fsm_llm.agents.tools``) is imported LAZILY inside the
+else (``fsm_llm.llm.providers.litellm``, ``fsm_llm.tools``) is imported LAZILY inside the
 function that needs it, so importing this module opens no socket. Pinned by a
 socket-disabled subprocess import in the tests.
 """
@@ -195,11 +195,11 @@ def wire_settings(call_params: dict[str, Any]) -> dict[str, Any]:
 
     Values are kept (a ``seed`` 7 vs 8, an ``api_base`` change, temperature,
     ``max_tokens``, ``reasoning_effort``, timeout, ``max_retries``), sorted
-    by name; an entry ``fsm_llm.agents.tools.redact_secret_entries`` (core's
+    by name; an entry ``fsm_llm.tools.redact_secret_entries`` (core's
     ``is_forbidden_context_entry`` at every level) calls secret keeps its key
     with the value ``"<redacted>"``.
     """
-    from fsm_llm.agents.tools import redact_secret_entries
+    from fsm_llm.tools import redact_secret_entries
 
     settings = {
         key: call_params[key]

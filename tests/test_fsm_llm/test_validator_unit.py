@@ -2349,8 +2349,8 @@ class TestHandlerOnlyKeysValidatorWarnings:
             build_plan_execute_fsm,
             build_react_fsm,
         )
-        from fsm_llm.agents.tools import ToolRegistry
         from fsm_llm.core.definitions import FSMDefinition
+        from fsm_llm.tools import ToolRegistry
 
         built = (
             build_react_fsm(ToolRegistry()),
@@ -2443,7 +2443,7 @@ class TestHandlerOnlyKeysValidatorWarnings:
             checked += 1
         assert checked >= 10
         from fsm_llm.agents.constants import FRAMEWORK_ONLY_KEYS
-        from fsm_llm.agents.tools import ToolRegistry
+        from fsm_llm.tools import ToolRegistry
 
         # Agent FSMs list the framework-written keys (D-051 of plan
         # 2026-09-29T103145-06a5ec0a); a key a state never reads is an INFO

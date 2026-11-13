@@ -11,9 +11,9 @@ import pytest
 from fsm_llm.agents.constants import ContextKeys, DebateStates, Defaults, HandlerNames
 from fsm_llm.agents.debate import DebateAgent
 from fsm_llm.agents.definitions import AgentConfig, DebateRound
-from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.fsm_definitions import build_debate_fsm
 from fsm_llm.core.definitions import (
+    AgentError,
     DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,

@@ -16,14 +16,10 @@ from fsm_llm.agents.constants import (
     HandlerNames,
 )
 from fsm_llm.agents.definitions import AgentConfig, DecompositionResult
-from fsm_llm.agents.exceptions import (
-    AgentError,
-    AgentTimeoutError,
-    BudgetExhaustedError,
-)
+from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
 from fsm_llm.agents.fsm_definitions import build_adapt_fsm
-from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.core.definitions import (
+    AgentError,
     DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
@@ -33,6 +29,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.llm import LLMInterface
 from fsm_llm.testing import PromptGroundedLLM
+from fsm_llm.tools import ToolRegistry
 from tests.test_fsm_llm_agents.support import SequenceMockLLM, _Out
 
 
@@ -332,7 +329,8 @@ class TestADaPTJSONLeakFix:
         )
 
     def test_real_completion_is_success(self):
-        from fsm_llm.agents.definitions import AgentTrace, ToolCall
+        from fsm_llm.agents.definitions import AgentTrace
+        from fsm_llm.tools import ToolCall
 
         assert ADaPTAgent._completion_is_real(
             {},

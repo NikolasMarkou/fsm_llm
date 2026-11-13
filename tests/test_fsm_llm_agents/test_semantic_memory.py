@@ -14,8 +14,7 @@ from fsm_llm.agents import (
     SemanticMemoryStore,
     create_semantic_memory_tools,
 )
-from fsm_llm.agents.definitions import ToolCall
-from fsm_llm.agents.tools import ToolRegistry
+from fsm_llm.tools import ToolCall, ToolRegistry
 
 
 def _fake_embed(text: str) -> list[float]:

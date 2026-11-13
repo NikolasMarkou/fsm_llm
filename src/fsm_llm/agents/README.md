@@ -60,9 +60,9 @@ These are the 18 names `create_agent` accepts (`react`, `rewoo`, `reflexion`, `p
 - `base.py` - `BaseAgent`: the shared loop, limits, answer extraction, trace, structured output.
 - `react.py`, `rewoo.py`, `reflexion.py`, `plan_execute.py`, `prompt_chain.py`, `self_consistency.py`, `debate.py`, `orchestrator.py`, `adapt.py`, `evaluator_optimizer.py`, `maker_checker.py`, `reasoning_react.py`, `parallel_react.py`, `verified_react.py`, `auto_memory.py`, `native_fc.py`, `swarm.py`, `agent_graph.py` - one pattern each.
 - `fsm_definitions/` - builds the FSM for each pattern, one module each, `native_fc` and the meta-builder included. `prompts.py` - the instructions each state gives the LLM.
-- `tools.py` - `ToolRegistry` and the `@tool` decorator (tool annotations, exact schemas, enforced timeouts). `tool_registries.py` - caching and retrying registries. `semantic_tools.py` - picks relevant tools by embedding similarity.
+- `tools.py` - what only an agent run needs around tools: reading a tool call from a run's context, the `gated=` contract of a registry, `register_agent`. `ToolRegistry` and the `@tool` decorator (tool annotations, exact schemas, enforced timeouts) are in the layer package `fsm_llm.tools` and exported from here. `tool_registries.py` - caching and retrying registries. `semantic_tools.py` - picks relevant tools by embedding similarity.
 - `handlers.py` - runs tools, enforces the iteration limit, and checks human approval. `hitl.py` - human approval before sensitive tools.
-- `memory_tools.py`, `semantic_memory.py`, `memory_persistence.py`, `summarization.py`, `truncation.py` - working-memory tools, long-term embedding memory, saving memory to disk, condensing old observations, shortening long tool output.
+- `memory_tools.py`, `semantic_memory.py`, `memory_persistence.py`, `summarization.py` - working-memory tools, long-term embedding memory, saving memory to disk, condensing old observations (`smart_truncate`, which shortens long tool output, is `fsm_llm.tools.smart_truncate`).
 - `okf.py` - Open Knowledge Format (OKF) for agents: `create_okf_tools(bundle)` gives four read-only tools (`okf_list`, `okf_read`, `okf_search`, `okf_links`), `OKFMemoryBackend` is a read-only memory backend for `AutoMemoryReactAgent`, and `export_semantic_memory` and `export_agent_result` write bundles. The format itself lives in core `fsm_llm.okf`.
 - `agent_skills.py` - Agent Skills for agents: `create_skill_tools(catalog)` gives three read-only tools (`skill_list`, `skill_load`, `skill_read`) over skills loaded by `fsm_llm.skills`. Skill text is untrusted tool output under a fixed label; nothing in a skill is run.
 - `composition.py` - use ReAct agents as orchestrator workers; an LLM judge for the evaluator-optimizer.
@@ -70,7 +70,7 @@ These are the 18 names `create_agent` accepts (`react`, `rewoo`, `reflexion`, `p
 - `mcp.py` - load tools from an MCP (Model Context Protocol) server. `remote.py` - serve an agent over HTTP, or call a remote one as a tool.
 - `meta_builder.py`, `meta_builders.py`, `meta_tools.py`, `meta_prompts.py`, `meta_output.py`, `meta_cli.py` - the meta-builder, its artifact builders (`FSMArtifactBuilder`, `WorkflowArtifactBuilder`, `AgentArtifactBuilder`: calls chain, `take_warnings()` returns and clears the warnings, `build()` validates) and its `fsm-llm-meta` command.
 - `builders.py` - `ConfiguredAgentBuilder`.
-- `definitions.py`, `constants/`, `exceptions.py` - data models, names and defaults (a package, one module per group: `core`, `states`, `keys`, `outcomes`, `handler_names`, `meta`; `fsm_llm.agents.constants` re-exports every name), errors.
+- `definitions.py`, `constants/`, `exceptions.py` - data models (the tool models are `fsm_llm.tools.models`), names and defaults (a package, one module per group: `core`, `states`, `keys`, `outcomes`, `handler_names`, `meta`; `fsm_llm.agents.constants` re-exports every name), errors (`AgentError` is defined in core, the two tool errors in `fsm_llm.tools`).
 - `__init__.py`, `__main__.py`, `__version__.py` - exports and `create_agent()`, `python -m fsm_llm.agents --info`, version.
 
 ## How to use it

@@ -35,11 +35,11 @@ from collections.abc import Iterator
 from typing import Any, Protocol
 
 from fsm_llm.logging import logger
+from fsm_llm.tools import tool
 
 from .definitions import AgentConfig, AgentResult
 from .react import ReactAgent
 from .semantic_memory import SemanticMemoryStore
-from .tools import tool
 
 
 # DECISION plan_2026-05-30_5598b755/D-005 [STALE]

@@ -18,14 +18,9 @@ from unittest.mock import patch
 import pytest
 
 from fsm_llm.agents.constants import ContextKeys, Defaults
-from fsm_llm.agents.definitions import (
-    ApprovalRequest,
-    EvaluationResult,
-    ToolCall,
-    ToolDefinition,
-)
-from fsm_llm.agents.tools import ToolRegistry
+from fsm_llm.agents.definitions import ApprovalRequest, EvaluationResult
 from fsm_llm.logging import enable_library_logging, logger
+from fsm_llm.tools import ToolCall, ToolDefinition, ToolRegistry
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "fsm_llm"
 
@@ -176,8 +171,8 @@ class TestTimedApprovalRunsLikeATimedTool:
     def test_a_bad_timeout_is_refused_at_construction(self, timeout):
         """REVIEW-C9: a misconfiguration fails when the object is built, with
         the predicate ``call_with_timeout`` uses, not at the first gated call."""
-        from fsm_llm.agents.exceptions import ToolExecutionError
         from fsm_llm.agents.hitl import HumanInTheLoop
+        from fsm_llm.tools import ToolExecutionError
 
         with pytest.raises(ToolExecutionError):
             HumanInTheLoop(
@@ -185,8 +180,8 @@ class TestTimedApprovalRunsLikeATimedTool:
             )
 
     def test_a_timeout_set_later_is_still_refused_not_a_silent_denial(self):
-        from fsm_llm.agents.exceptions import ToolExecutionError
         from fsm_llm.agents.hitl import HumanInTheLoop
+        from fsm_llm.tools import ToolExecutionError
 
         hitl = HumanInTheLoop(
             approval_callback=lambda _request: True, approval_timeout=5.0
@@ -227,7 +222,7 @@ class TestTimedApprovalRunsLikeATimedTool:
         """REVIEW2-C3: pre-plan ``thread.join(timeout=np.int64(5))`` worked;
         the shared predicate refused it. ``float`` and ``Integral`` pass."""
         from fsm_llm.agents.hitl import HumanInTheLoop
-        from fsm_llm.agents.tools import check_timeout
+        from fsm_llm.tools import check_timeout
 
         check_timeout("t", self._integer_like(5))
         hitl = HumanInTheLoop(
@@ -251,8 +246,7 @@ class TestTimedApprovalRunsLikeATimedTool:
     def test_an_integer_like_out_of_range_is_still_refused_not_an_overflow(
         self, timeout
     ):
-        from fsm_llm.agents.exceptions import ToolExecutionError
-        from fsm_llm.agents.tools import check_timeout
+        from fsm_llm.tools import ToolExecutionError, check_timeout
 
         with pytest.raises(ToolExecutionError):
             check_timeout("t", self._integer_like(timeout))
@@ -266,8 +260,8 @@ class TestTimedApprovalRunsLikeATimedTool:
         import decimal
         import fractions
 
-        from fsm_llm.agents.exceptions import ToolExecutionError
         from fsm_llm.agents.hitl import HumanInTheLoop
+        from fsm_llm.tools import ToolExecutionError
 
         value = decimal.Decimal(5) if kind == "decimal" else fractions.Fraction(5)
         with pytest.raises(ToolExecutionError):

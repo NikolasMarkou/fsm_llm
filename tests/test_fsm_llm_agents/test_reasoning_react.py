@@ -9,7 +9,7 @@ import pytest
 
 from fsm_llm.agents.constants import ContextKeys, ReasoningIntegrationKeys
 from fsm_llm.agents.definitions import AgentConfig
-from fsm_llm.agents.tools import ToolRegistry
+from fsm_llm.tools import ToolRegistry
 from tests.test_fsm_llm_agents.support import (
     SequenceMockLLM,
     _bug_fixes_make_registry,

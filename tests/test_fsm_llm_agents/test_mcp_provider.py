@@ -87,8 +87,8 @@ class TestMCPSessionLifecycle:
         """An MCP error result (1.x isError, 2.x is_error) is a failed call (D-026)."""
         from types import SimpleNamespace
 
-        from fsm_llm.agents.exceptions import ToolExecutionError
         from fsm_llm.agents.mcp import _format_mcp_result
+        from fsm_llm.tools import ToolExecutionError
 
         result = SimpleNamespace(content=[SimpleNamespace(text="boom")], **{flag: True})
         with pytest.raises(ToolExecutionError, match="boom") as exc:
@@ -104,8 +104,7 @@ class TestMCPSessionLifecycle:
         from types import SimpleNamespace
 
         from fsm_llm.agents import mcp as mcp_mod
-        from fsm_llm.agents.definitions import ToolCall
-        from fsm_llm.agents.tools import ToolRegistry
+        from fsm_llm.tools import ToolCall, ToolRegistry
 
         err = SimpleNamespace(
             content=[SimpleNamespace(text="bad input")], **{flag: True}
@@ -185,7 +184,7 @@ class TestMCPToolProvider:
     def test_register_mock_tools_with_registry(self):
         """Mock tools can be registered with ToolRegistry."""
         from fsm_llm.agents.mcp import MCPToolProvider
-        from fsm_llm.agents.tools import ToolRegistry
+        from fsm_llm.tools import ToolRegistry
 
         provider = MCPToolProvider.__new__(MCPToolProvider)
         provider._tools = [
@@ -317,7 +316,7 @@ class TestMCPTimeouts:
     async def test_hung_call_raises_tool_execution_error(
         self, monkeypatch, timing_factor
     ):
-        from fsm_llm.agents.exceptions import ToolExecutionError
+        from fsm_llm.tools import ToolExecutionError
 
         provider = self._provider(monkeypatch, timeout=0.05)
         tools = await provider.discover_tools()
@@ -333,8 +332,7 @@ class TestMCPTimeouts:
 
     def test_hung_call_via_registry_is_failed_result(self, monkeypatch, timing_factor):
         import fsm_llm.agents.mcp as mcp_mod
-        from fsm_llm.agents.definitions import ToolCall
-        from fsm_llm.agents.tools import ToolRegistry
+        from fsm_llm.tools import ToolCall, ToolRegistry
 
         provider = self._provider(monkeypatch, timeout=0.05)
         asyncio.run(provider.discover_tools())
@@ -367,9 +365,8 @@ class TestMCPRegisterNameCollision:
         return provider
 
     def test_mcp_tool_does_not_replace_gated_local_tool(self):
-        from fsm_llm.agents.definitions import ToolDefinition
         from fsm_llm.agents.mcp import MCPToolProvider
-        from fsm_llm.agents.tools import ToolRegistry
+        from fsm_llm.tools import ToolDefinition, ToolRegistry
 
         local = ToolDefinition(
             name="delete_file",
@@ -392,7 +389,7 @@ class TestMCPRegisterNameCollision:
 
     def test_two_providers_with_colliding_name_keep_the_first(self):
         from fsm_llm.agents.mcp import MCPToolProvider
-        from fsm_llm.agents.tools import ToolRegistry
+        from fsm_llm.tools import ToolRegistry
 
         first = MCPToolProvider.create_mock_tool(
             "search", "first", execute_fn=lambda **kw: "first"
@@ -410,7 +407,7 @@ class TestMCPRegisterNameCollision:
         import warnings
 
         from fsm_llm.agents.mcp import MCPToolProvider
-        from fsm_llm.agents.tools import ToolRegistry
+        from fsm_llm.tools import ToolRegistry
 
         provider = self._provider(MCPToolProvider.create_mock_tool("a", "A"))
         with warnings.catch_warnings():

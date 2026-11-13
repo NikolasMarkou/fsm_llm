@@ -10,7 +10,7 @@ from fsm_llm.agents.prompts import (
     build_plan_steps_instructions,
     build_think_extraction_instructions,
 )
-from fsm_llm.agents.tools import ToolRegistry
+from fsm_llm.tools import ToolRegistry
 
 
 def _dummy(params):

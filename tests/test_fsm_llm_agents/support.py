@@ -6,7 +6,6 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.core.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
@@ -14,6 +13,7 @@ from fsm_llm.core.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
+from fsm_llm.tools import ToolRegistry
 
 
 def _bug_fixes_search(params: dict) -> str:

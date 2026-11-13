@@ -649,7 +649,7 @@ class TestToolReplyText:
 
 def _make_call(tool_name: str, **kwargs):
     """Create a ToolCall for testing."""
-    from fsm_llm.agents.definitions import ToolCall
+    from fsm_llm.tools import ToolCall
 
     return ToolCall(tool_name=tool_name, parameters=kwargs)
 

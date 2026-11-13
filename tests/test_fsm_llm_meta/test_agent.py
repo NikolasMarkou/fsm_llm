@@ -14,14 +14,13 @@ from fsm_llm.agents.definitions import (
     MetaBuilderResult,
 )
 from fsm_llm.agents.exceptions import (
-    AgentError,
     BuilderError,
     MetaBuilderError,
     MetaValidationError,
 )
 from fsm_llm.agents.meta_builder import MetaBuilderAgent, _normalize_message
 from fsm_llm.agents.meta_prompts import artifact_schema
-from fsm_llm.core.definitions import CompletionResponse, LLMResponseError
+from fsm_llm.core.definitions import AgentError, CompletionResponse, LLMResponseError
 
 from .conftest import ScriptedMetaLLM
 

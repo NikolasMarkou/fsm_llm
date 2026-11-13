@@ -10,19 +10,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from fsm_llm.core.definitions import BuildError
+from fsm_llm.core.definitions import AgentError, BuildError
 from fsm_llm.engine.builders import refuse_named_options
+from fsm_llm.tools import ToolDefinition, ToolRegistry, registry_from
 
 from . import create_agent
 from .definitions import (
     AgentConfig,
     MetaBuilderConfig,
-    ToolDefinition,
     config_with,
     default_agent_config,
 )
-from .exceptions import AgentError
-from .tools import ToolRegistry, registry_from
 
 _NAMED_OPTION_HINT = {
     "pattern": "set_pattern",

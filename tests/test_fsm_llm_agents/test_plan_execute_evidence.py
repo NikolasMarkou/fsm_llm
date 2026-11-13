@@ -18,9 +18,9 @@ from fsm_llm.agents.base import BaseAgent
 from fsm_llm.agents.constants import ContextKeys
 from fsm_llm.agents.definitions import AgentConfig, AgentTrace
 from fsm_llm.agents.plan_execute import PlanExecuteAgent
-from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.core.definitions import FieldExtractionResponse, ResponseGenerationResponse
 from fsm_llm.llm import LLMInterface
+from fsm_llm.tools import ToolRegistry
 
 
 def _trace() -> AgentTrace:

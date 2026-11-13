@@ -7,8 +7,7 @@ from typing import Annotated
 import pytest
 
 from fsm_llm.agents import CachingToolRegistry, RetryingToolRegistry, tool
-from fsm_llm.agents.definitions import ToolAnnotations, ToolCall
-from fsm_llm.agents.tools import ToolRegistry
+from fsm_llm.tools import ToolAnnotations, ToolCall, ToolRegistry
 
 
 @tool

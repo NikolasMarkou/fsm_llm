@@ -29,7 +29,6 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from fsm_llm.agents.definitions import ToolCall
 from fsm_llm.agents.hitl import HumanInTheLoop
 from fsm_llm.agents.semantic_tools import EmbedTextsFn
 from fsm_llm.constants import SKILL_DEFANG
@@ -56,6 +55,7 @@ from fsm_llm.llm import (
 from fsm_llm.llm.json_extraction import extract_json_from_text
 from fsm_llm.logging import logger
 from fsm_llm.okf import capped_line, strip_unsafe_text
+from fsm_llm.tools import ToolCall
 
 from .constants import (
     APPROVAL_UNTRUSTED_LABEL,

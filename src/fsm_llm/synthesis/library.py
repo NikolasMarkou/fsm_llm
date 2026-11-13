@@ -40,13 +40,13 @@ from typing import Any, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from fsm_llm.agents.exceptions import require_int_limit
 from fsm_llm.agents.semantic_tools import EmbedTextsFn, cosine_similarity
 from fsm_llm.core.definitions import FSMDefinition
 from fsm_llm.core.state_kinds import declared_tool_names
 from fsm_llm.logging import logger
 from fsm_llm.okf import capped_line, iso_utc
 from fsm_llm.security import resolve_within
+from fsm_llm.tools import require_int_limit
 
 from .constants import (
     DEFAULT_MAX_TRACES,

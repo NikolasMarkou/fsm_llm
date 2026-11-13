@@ -63,7 +63,7 @@ class TestSemanticToolRegistry:
     def test_inherits_tool_registry(self):
         """SemanticToolRegistry is a ToolRegistry subclass."""
         from fsm_llm.agents.semantic_tools import SemanticToolRegistry
-        from fsm_llm.agents.tools import ToolRegistry
+        from fsm_llm.tools import ToolRegistry
 
         assert issubclass(SemanticToolRegistry, ToolRegistry)
 

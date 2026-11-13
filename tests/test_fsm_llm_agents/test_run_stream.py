@@ -13,8 +13,9 @@ import pytest
 from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry
 from fsm_llm.agents.auto_memory import AutoMemoryReactAgent
 from fsm_llm.agents.constants import ContextKeys
-from fsm_llm.agents.exceptions import AgentError, AgentTimeoutError
+from fsm_llm.agents.exceptions import AgentTimeoutError
 from fsm_llm.agents.verified_react import VerifiedReactAgent
+from fsm_llm.core.definitions import AgentError
 from fsm_llm.testing import PromptGroundedLLM
 
 _ANSWER = "The capital of France is Paris."

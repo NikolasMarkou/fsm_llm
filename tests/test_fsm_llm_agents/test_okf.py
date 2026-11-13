@@ -33,7 +33,7 @@ from fsm_llm.agents import (
 )
 from fsm_llm.agents import __all__ as agents_all
 from fsm_llm.agents.constants import ContextKeys, Defaults
-from fsm_llm.agents.definitions import AgentTrace, ToolCall
+from fsm_llm.agents.definitions import AgentTrace
 from fsm_llm.agents.fsm_definitions import build_native_fc_fsm, build_react_fsm
 from fsm_llm.agents.handlers import AgentHandlers
 from fsm_llm.agents.okf import (
@@ -61,6 +61,7 @@ from fsm_llm.okf import (
 )
 from fsm_llm.okf import cli as okf_cli
 from fsm_llm.testing import final_reply, tool_call_reply
+from fsm_llm.tools import ToolCall
 from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 
 _TOOLS = ("okf_list", "okf_read", "okf_search", "okf_links")

@@ -9,12 +9,9 @@ import pytest
 
 from fsm_llm.agents.base import BaseAgent
 from fsm_llm.agents.definitions import AgentConfig, AgentResult
-from fsm_llm.agents.exceptions import (
-    AgentError,
-    AgentTimeoutError,
-    BudgetExhaustedError,
-)
-from fsm_llm.agents.tools import ToolRegistry
+from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
+from fsm_llm.core.definitions import AgentError
+from fsm_llm.tools import ToolRegistry
 
 
 class ConcreteAgent(BaseAgent):
@@ -264,7 +261,7 @@ class TestCreateAgent:
 
     def test_create_react_agent(self):
         from fsm_llm.agents import create_agent
-        from fsm_llm.agents.tools import tool
+        from fsm_llm.tools import tool
 
         @tool
         def search(query: str) -> str:
@@ -305,7 +302,7 @@ class TestCreateAgent:
 
     def test_create_parallel_react_agent(self):
         from fsm_llm.agents import ParallelReactAgent, create_agent
-        from fsm_llm.agents.tools import tool
+        from fsm_llm.tools import tool
 
         @tool
         def search(query: str) -> str:
@@ -317,7 +314,7 @@ class TestCreateAgent:
 
     def test_create_native_fc_agent(self):
         from fsm_llm.agents import NativeFunctionCallingReactAgent, create_agent
-        from fsm_llm.agents.tools import tool
+        from fsm_llm.tools import tool
 
         @tool
         def search(query: str) -> str:
@@ -329,7 +326,7 @@ class TestCreateAgent:
 
     def test_create_verified_react_agent(self):
         from fsm_llm.agents import VerifiedReactAgent, create_agent
-        from fsm_llm.agents.tools import tool
+        from fsm_llm.tools import tool
 
         @tool
         def search(query: str) -> str:
@@ -341,7 +338,7 @@ class TestCreateAgent:
 
     def test_create_auto_memory_agent(self):
         from fsm_llm.agents import AutoMemoryReactAgent, create_agent
-        from fsm_llm.agents.tools import tool
+        from fsm_llm.tools import tool
 
         @tool
         def search(query: str) -> str:

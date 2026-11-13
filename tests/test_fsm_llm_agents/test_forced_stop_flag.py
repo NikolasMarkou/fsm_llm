@@ -19,7 +19,6 @@ from fsm_llm.agents.definitions import AgentConfig
 from fsm_llm.agents.maker_checker import MakerCheckerAgent
 from fsm_llm.agents.react import ReactAgent
 from fsm_llm.agents.reflexion import ReflexionAgent
-from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.core.definitions import (
     DataExtractionResponse,
     FieldExtractionRequest,
@@ -28,6 +27,7 @@ from fsm_llm.core.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
+from fsm_llm.tools import ToolRegistry
 
 from .test_maker_checker import _AlwaysRejectLLM
 

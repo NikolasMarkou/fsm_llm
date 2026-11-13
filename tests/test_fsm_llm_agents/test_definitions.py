@@ -11,10 +11,8 @@ from fsm_llm.agents.definitions import (
     AgentStep,
     AgentTrace,
     ApprovalRequest,
-    ToolCall,
-    ToolDefinition,
-    ToolResult,
 )
+from fsm_llm.tools import ToolCall, ToolDefinition, ToolResult
 
 
 class TestToolDefinition:

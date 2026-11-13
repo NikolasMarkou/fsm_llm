@@ -13,11 +13,10 @@ from fsm_llm.agents.constants import (
 from fsm_llm.agents.definitions import (
     AgentConfig,
 )
-from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.fsm_definitions import build_rewoo_fsm
 from fsm_llm.agents.rewoo import REWOOAgent
-from fsm_llm.agents.tools import ToolRegistry
-from fsm_llm.core.definitions import FSMDefinition
+from fsm_llm.core.definitions import AgentError, FSMDefinition
+from fsm_llm.tools import ToolRegistry
 
 
 def _search(params):

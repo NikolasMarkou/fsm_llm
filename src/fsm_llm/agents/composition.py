@@ -28,6 +28,7 @@ from fsm_llm.core.definitions import CompletionRequest
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.llm.json_extraction import extract_json_from_text
 from fsm_llm.logging import logger
+from fsm_llm.tools import ToolRegistry
 
 from .definitions import (
     AgentConfig,
@@ -38,7 +39,6 @@ from .definitions import (
 )
 from .exceptions import EvaluationError
 from .react import ReactAgent
-from .tools import ToolRegistry
 
 WorkerFn = Callable[[str], AgentResult]
 JudgeFn = Callable[[str, dict[str, Any]], EvaluationResult]

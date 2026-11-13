@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fsm_llm.agents.tools import ToolRegistry
+from fsm_llm.tools import ToolRegistry
 
 
 def _noop(params):

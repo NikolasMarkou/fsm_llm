@@ -13,16 +13,17 @@ from typing import Any
 from fsm_llm.agents.constants import ContextKeys, Defaults, LogMessages
 from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
 from fsm_llm.logging import logger
-
-from .definitions import ApprovalRequest, ToolCall
-from .exceptions import ApprovalDeniedError
-from .tools import (
+from fsm_llm.tools import (
+    ToolCall,
     ToolTimedOut,
     call_with_timeout,
     check_timeout,
     redact_secret_entries,
-    tool_call_from_context,
 )
+
+from .definitions import ApprovalRequest
+from .exceptions import ApprovalDeniedError
+from .tools import tool_call_from_context
 
 # Type aliases
 ApprovalCallback = Callable[[ApprovalRequest], bool]

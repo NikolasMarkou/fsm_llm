@@ -898,9 +898,9 @@ class TestStubToolExecution:
         import pytest
 
         pytest.importorskip("fsm_llm.agents")
-        from fsm_llm.agents.definitions import ToolCall
         from fsm_llm.monitor import instance_manager as im
         from fsm_llm.monitor.definitions import StubToolConfig
+        from fsm_llm.tools import ToolCall
 
         captured: dict = {}
         done = threading.Event()

@@ -12,10 +12,9 @@ Two fixes for the recall/chat-turn filler:
 
 from fsm_llm.agents.auto_memory import AutoMemoryReactAgent
 from fsm_llm.agents.constants import ContextKeys
-from fsm_llm.agents.definitions import AgentConfig, ToolCall
+from fsm_llm.agents.definitions import AgentConfig
 from fsm_llm.agents.prompts import build_conclude_response_instructions
 from fsm_llm.agents.semantic_memory import SemanticMemoryStore
-from fsm_llm.agents.tools import ToolRegistry, tool
 from fsm_llm.core.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
@@ -23,6 +22,7 @@ from fsm_llm.core.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
+from fsm_llm.tools import ToolCall, ToolRegistry, tool
 
 
 @tool

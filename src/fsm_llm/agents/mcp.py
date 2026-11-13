@@ -16,9 +16,9 @@ from typing import Any
 
 from fsm_llm.agents.constants import Defaults
 from fsm_llm.logging import logger
+from fsm_llm.tools import ToolAnnotations, ToolDefinition, ToolExecutionError
 
-from .definitions import ToolAnnotations, ToolDefinition
-from .exceptions import AgentTimeoutError, ToolExecutionError
+from .exceptions import AgentTimeoutError
 
 try:
     from mcp import ClientSession, StdioServerParameters

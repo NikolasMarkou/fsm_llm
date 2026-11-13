@@ -33,10 +33,9 @@ from fsm_llm.skills import (
     skipped_note,
 )
 from fsm_llm.text import capped_line, strip_unsafe_text, text_page
+from fsm_llm.tools import ToolAnnotations, ToolRegistry
 
-from .definitions import ToolAnnotations
 from .okf import _budget, _finish, _fit, _int
-from .tools import ToolRegistry
 
 __all__ = ["create_skill_tools"]
 

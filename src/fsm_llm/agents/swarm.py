@@ -15,10 +15,11 @@ from typing import Any
 from fsm_llm.agents.constants import StopReason
 from fsm_llm.logging import logger
 from fsm_llm.memory import WorkingMemory
+from fsm_llm.tools import require_int_limit
 
 from .base import BaseAgent, pattern_run_output_keys, strip_caller_context
 from .definitions import AgentConfig, AgentResult, AgentTrace, model_or_placeholder
-from .exceptions import AgentTimeoutError, BudgetExhaustedError, require_int_limit
+from .exceptions import AgentTimeoutError, BudgetExhaustedError
 
 # DECISION plan-2026-09-29T103145-06a5ec0a/D-045: per-hop routing outputs.
 # The swarm reads them from one agent's result and never forwards them: an

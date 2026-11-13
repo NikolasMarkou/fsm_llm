@@ -16,7 +16,9 @@ from fsm_llm import API
 from fsm_llm.agents.constants import ContextKeys, Defaults, LogMessages, StopReason
 from fsm_llm.agents.fsm_definitions.self_consistency import build_self_consistency_fsm
 from fsm_llm.constants import CONTEXT_KEY_RESPONSE_TEMPERATURE
+from fsm_llm.core.definitions import AgentError
 from fsm_llm.logging import logger
+from fsm_llm.tools import require_int_limit
 
 from .base import (
     BaseAgent,
@@ -24,7 +26,6 @@ from .base import (
     strip_caller_context,
 )
 from .definitions import AgentConfig, AgentResult, AgentTrace
-from .exceptions import AgentError, require_int_limit
 
 _ANSWER_LINE = re.compile(
     r"^[ \t*_#>-]*(?:final[ \t]+)?answer[ \t*_]*:(.*)$", re.IGNORECASE | re.MULTILINE

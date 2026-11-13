@@ -33,7 +33,7 @@ from fsm_llm.agents import (
     NativeFunctionCallingReactAgent,
     ToolRegistry,
 )
-from fsm_llm.agents.definitions import ToolDefinition
+from fsm_llm.tools import ToolDefinition
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "native_fc_golden_requests.json"
 

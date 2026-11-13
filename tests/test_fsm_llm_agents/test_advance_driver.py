@@ -59,11 +59,7 @@ from fsm_llm.agents import constants as agent_constants
 from fsm_llm.agents.base import BaseAgent
 from fsm_llm.agents.constants import RUN_OUTPUT_KEYS, ContextKeys, StopReason
 from fsm_llm.agents.definitions import AgentResult, ApprovalRequest, EvaluationResult
-from fsm_llm.agents.exceptions import (
-    AgentError,
-    AgentTimeoutError,
-    BudgetExhaustedError,
-)
+from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
 from fsm_llm.agents.fsm_definitions import (
     build_adapt_fsm,
     build_debate_fsm,
@@ -82,6 +78,7 @@ from fsm_llm.agents.fsm_definitions._loop import _await_approval_state
 from fsm_llm.agents.handlers import AgentHandlers, approval_grant
 from fsm_llm.agents.verified_react import _REFLECTION_NOTE
 from fsm_llm.core.definitions import (
+    AgentError,
     BulkExtractionRequest,
     ClassificationResult,
     ConversationBusyError,

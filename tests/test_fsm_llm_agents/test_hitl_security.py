@@ -43,7 +43,6 @@ from fsm_llm.agents.handlers import AgentHandlers
 from fsm_llm.agents.hitl import HumanInTheLoop
 from fsm_llm.agents.react import ReactAgent
 from fsm_llm.agents.reflexion import ReflexionAgent
-from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.constants import RESERVED_CONTEXT_KEYS, has_internal_prefix
 from fsm_llm.core.definitions import (
     ClassificationResult,
@@ -55,6 +54,7 @@ from fsm_llm.core.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
+from fsm_llm.tools import ToolRegistry
 
 MAX_ITERATIONS = 8
 _INPUT = {"x": "1"}

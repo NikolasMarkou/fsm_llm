@@ -22,7 +22,6 @@ from fsm_llm.agents.constants import ContextKeys
 from fsm_llm.agents.definitions import AgentConfig
 from fsm_llm.agents.fsm_definitions import build_react_fsm
 from fsm_llm.agents.react import ReactAgent
-from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.core.definitions import (
     FieldExtractionRequest,
     FieldExtractionResponse,
@@ -30,6 +29,7 @@ from fsm_llm.core.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
+from fsm_llm.tools import ToolRegistry
 
 
 def _search(params):

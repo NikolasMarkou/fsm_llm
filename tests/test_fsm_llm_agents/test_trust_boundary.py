@@ -23,22 +23,16 @@ from fsm_llm.agents.agent_graph import AgentGraphBuilder
 from fsm_llm.agents.base import BaseAgent, pattern_run_output_keys, strip_caller_context
 from fsm_llm.agents.constants import RUN_OUTPUT_KEYS, ContextKeys
 from fsm_llm.agents.debate import DebateAgent
-from fsm_llm.agents.definitions import (
-    AgentConfig,
-    AgentResult,
-    EvaluationResult,
-    ToolCall,
-)
+from fsm_llm.agents.definitions import AgentConfig, AgentResult, EvaluationResult
 from fsm_llm.agents.evaluator_optimizer import EvaluatorOptimizerAgent
-from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.hitl import HumanInTheLoop
 from fsm_llm.agents.maker_checker import MakerCheckerAgent
 from fsm_llm.agents.native_fc import NativeFunctionCallingReactAgent
 from fsm_llm.agents.react import ReactAgent
 from fsm_llm.agents.self_consistency import SelfConsistencyAgent
 from fsm_llm.agents.swarm import SwarmAgent
-from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.core.definitions import (
+    AgentError,
     CompletionResponse,
     DataExtractionResponse,
     FieldExtractionRequest,
@@ -47,6 +41,7 @@ from fsm_llm.core.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
+from fsm_llm.tools import ToolCall, ToolRegistry
 from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 
 _INPUT = {"x": "1"}
@@ -694,7 +689,7 @@ class TestUngatedFlaggedToolWarning:
 
     @pytest.mark.parametrize("cls", _HITL_AGENTS, ids=_HITL_IDS)
     def test_no_hitl_raises(self, cls):
-        from fsm_llm.agents.exceptions import AgentError
+        from fsm_llm.core.definitions import AgentError
 
         registry = _Harness().registry
         with pytest.raises(AgentError, match="danger"):
@@ -824,7 +819,7 @@ class TestNoHitlPatternsRefuseGatedTools:
 
     @pytest.mark.parametrize("factory", _NO_HITL_AGENTS, ids=_NO_HITL_IDS)
     def test_constructor_refuses_flagged_tool(self, factory):
-        from fsm_llm.agents.exceptions import AgentError
+        from fsm_llm.core.definitions import AgentError
 
         registry = _safe_registry()
         _add_danger(registry, [])
@@ -833,7 +828,7 @@ class TestNoHitlPatternsRefuseGatedTools:
 
     @pytest.mark.parametrize("factory", _NO_HITL_AGENTS, ids=_NO_HITL_IDS)
     def test_flag_added_after_construction_refused_before_any_llm_call(self, factory):
-        from fsm_llm.agents.exceptions import AgentError
+        from fsm_llm.core.definitions import AgentError
 
         registry = _safe_registry()
         calls: list[str] = []
@@ -851,7 +846,7 @@ class TestNoHitlPatternsRefuseGatedTools:
     )
     def test_wrapping_registries_are_covered(self, registry_cls):
         from fsm_llm.agents import tool_registries
-        from fsm_llm.agents.exceptions import AgentError
+        from fsm_llm.core.definitions import AgentError
 
         registry = _safe_registry(getattr(tool_registries, registry_cls))
         _add_danger(registry, [])

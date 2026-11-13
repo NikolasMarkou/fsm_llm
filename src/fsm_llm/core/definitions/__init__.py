@@ -38,6 +38,7 @@ from .completion import (
     ModelToolCall,
 )
 from .errors import (
+    AgentError,
     BuildError,
     ClassificationError,
     ClassificationResponseError,
@@ -117,6 +118,7 @@ from .transition import (
 __all__ = [
     "ASCII_IDENTIFIER_PATTERN",
     "AdvanceResult",
+    "AgentError",
     "BuildError",
     "BulkExtractionRequest",
     "CONTEXT_KEY_CUT_OFF",

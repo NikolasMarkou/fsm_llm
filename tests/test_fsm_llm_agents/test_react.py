@@ -9,11 +9,10 @@ import pytest
 
 from fsm_llm.agents.constants import ContextKeys
 from fsm_llm.agents.definitions import AgentConfig
-from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.handlers import AgentHandlers
 from fsm_llm.agents.react import ReactAgent
-from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.core.definitions import (
+    AgentError,
     FieldExtractionRequest,
     FieldExtractionResponse,
     ResponseGenerationRequest,
@@ -21,6 +20,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.llm import LLMInterface
 from fsm_llm.testing import PromptGroundedLLM
+from fsm_llm.tools import ToolRegistry
 
 
 def _search(params):
@@ -304,8 +304,8 @@ class TestReactAgentApprovalIsSingleUse:
 
     @staticmethod
     def _run(decide):
-        from fsm_llm.agents.exceptions import AgentError
         from fsm_llm.agents.hitl import HumanInTheLoop
+        from fsm_llm.core.definitions import AgentError
 
         executions: list[dict] = []
         asks: list[bool] = []

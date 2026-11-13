@@ -33,20 +33,18 @@ from fsm_llm.agents.constants import (
     NativeFCStates,
     StopReason,
 )
-from fsm_llm.agents.definitions import AgentTrace, ToolCall, ToolResult
-from fsm_llm.agents.exceptions import (
-    AgentError,
-    AgentTimeoutError,
-    BudgetExhaustedError,
-)
+from fsm_llm.agents.definitions import AgentTrace
+from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
 from fsm_llm.agents.native_fc import _SYSTEM_PROMPT, NativeFCHandlers
 from fsm_llm.core.definitions import (
+    AgentError,
     CompletionResponse,
     LLMResponseError,
     ModelToolCall,
     RunBudgetExceededError,
 )
 from fsm_llm.testing import final_reply
+from fsm_llm.tools import ToolCall, ToolResult
 from tests.conftest import bind_api_clock
 from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 from tests.test_fsm_llm_agents import test_native_fc_golden as golden

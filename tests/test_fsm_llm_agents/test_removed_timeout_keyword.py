@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 
 from fsm_llm.agents import tool
-from fsm_llm.agents.definitions import ToolDefinition
 from fsm_llm.agents.python_tools import PythonToolDefinition, PythonToolLoader
+from fsm_llm.tools import ToolDefinition
 
 
 def _run(**kwargs):

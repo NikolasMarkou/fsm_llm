@@ -19,12 +19,12 @@ from fsm_llm.agents.constants import (
 )
 from fsm_llm.agents.fsm_definitions.react import build_react_fsm
 from fsm_llm.logging import logger
+from fsm_llm.tools import ToolRegistry
 
 from .base import BaseAgent, caller_prompt_keys
 from .definitions import AgentConfig, AgentResult
 from .handlers import AgentHandlers
 from .hitl import HumanInTheLoop
-from .tools import ToolRegistry
 
 
 class ReactAgent(BaseAgent):

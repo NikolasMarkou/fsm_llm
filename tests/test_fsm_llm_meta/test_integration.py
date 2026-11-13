@@ -160,7 +160,7 @@ class TestAgenticToolSelection:
 
     def test_builder_tools_mutate_builder(self):
         """Tools modify the builder in place — confirming closure pattern works."""
-        from fsm_llm.agents.definitions import ToolCall
+        from fsm_llm.tools import ToolCall
 
         b = FSMArtifactBuilder()
         tools = create_builder_tools(b, ArtifactType.FSM)

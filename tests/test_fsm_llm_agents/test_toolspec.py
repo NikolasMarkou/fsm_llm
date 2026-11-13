@@ -34,14 +34,19 @@ from fsm_llm.agents import (
     tool,
 )
 from fsm_llm.agents.constants import ContextKeys
-from fsm_llm.agents.definitions import ToolCall, ToolDefinition, ToolResult
-from fsm_llm.agents.exceptions import AgentError
 from fsm_llm.agents.handlers import AgentHandlers
 from fsm_llm.agents.parallel_react import ParallelReactAgent
 from fsm_llm.agents.prompts import build_think_extraction_instructions
 from fsm_llm.agents.tool_registries import CachingToolRegistry, RetryingToolRegistry
-from fsm_llm.agents.tools import ToolRegistry, schema_types
+from fsm_llm.core.definitions import AgentError
 from fsm_llm.testing import PromptGroundedLLM
+from fsm_llm.tools import (
+    ToolCall,
+    ToolDefinition,
+    ToolRegistry,
+    ToolResult,
+    schema_types,
+)
 from tests.test_fsm_llm_agents import test_native_fc_golden as golden
 
 # ---------------------------------------------------------------------------

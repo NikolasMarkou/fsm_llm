@@ -17,10 +17,9 @@ import pytest
 
 pytest.importorskip("mcp")
 
-from fsm_llm.agents.definitions import ToolCall
 from fsm_llm.agents.exceptions import AgentTimeoutError
 from fsm_llm.agents.mcp import MCPToolProvider
-from fsm_llm.agents.tools import ToolRegistry
+from fsm_llm.tools import ToolCall, ToolRegistry
 from tests.conftest import posix_only
 
 _FIXTURE = Path(__file__).with_name("mcp_fixture_server.py")

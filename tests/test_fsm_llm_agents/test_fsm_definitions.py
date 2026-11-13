@@ -9,10 +9,10 @@ from fsm_llm.agents.fsm_definitions import (
     build_reflexion_fsm,
     build_rewoo_fsm,
 )
-from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.core.definitions import FSMDefinition, State
 from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.llm.ollama import build_ollama_response_format
+from fsm_llm.tools import ToolRegistry
 
 
 def _dummy_tool(params):

@@ -13,9 +13,10 @@ from unittest.mock import Mock
 import pytest
 
 from fsm_llm.agents import PythonToolLoader, ToolRegistry
-from fsm_llm.agents.definitions import AgentResult, AgentTrace, ToolCall
+from fsm_llm.agents.definitions import AgentResult, AgentTrace
 from fsm_llm.agents.swarm import SwarmAgent
 from fsm_llm.memory import WorkingMemory
+from fsm_llm.tools import ToolCall
 
 
 def _agent(

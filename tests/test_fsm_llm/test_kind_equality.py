@@ -16,6 +16,7 @@ or a model, and no test reads state another test leaves behind.
 
 from __future__ import annotations
 
+import datetime
 import json
 from typing import Any
 
@@ -140,6 +141,22 @@ class TestEqualityWithTheParentCode:
     def test_scenario_matches(self, current: dict[str, Any], scenario: str):
         problems = _differences(
             _BASELINE["scenarios"][scenario], current["scenarios"][scenario], scenario
+        )
+        assert not problems, "\n".join(problems)
+
+    def test_the_day_never_reaches_a_scenario(self, monkeypatch: pytest.MonkeyPatch):
+        """The extraction prompt names today's date: the scenarios freeze the clock."""
+        real = datetime.date
+
+        class _OtherDay(real):  # type: ignore[misc, valid-type]
+            @classmethod
+            def today(cls) -> datetime.date:
+                return real(2000, 1, 1)
+
+        monkeypatch.setattr(datetime, "date", _OtherDay)
+        assert datetime.date.today() == real(2000, 1, 1)
+        problems = _differences(
+            _BASELINE["scenarios"]["plain"], kc.scenarios()["plain"], "plain"
         )
         assert not problems, "\n".join(problems)
 

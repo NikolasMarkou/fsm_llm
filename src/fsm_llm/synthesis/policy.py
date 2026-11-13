@@ -39,7 +39,6 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from fsm_llm.agents.exceptions import require_int_limit
 from fsm_llm.constants import CONTEXT_KEY_AGENT_TRACE, RESERVED_CONTEXT_KEYS
 from fsm_llm.core.definitions import (
     FSMDefinition,
@@ -50,6 +49,7 @@ from fsm_llm.core.definitions import (
 from fsm_llm.core.state_kinds import raw_kinds
 from fsm_llm.okf import capped_line, has_lone_surrogate, strip_unsafe_text
 from fsm_llm.security import has_internal_prefix, is_forbidden_context_entry
+from fsm_llm.tools import require_int_limit
 
 from .constants import (
     ABORT_CONTEXT_KEY,

@@ -21,9 +21,6 @@ from threading import Lock
 from typing import Any
 
 from fsm_llm.agents.constants import OBSERVATION_ENTRY, Defaults
-from fsm_llm.agents.definitions import ToolAnnotations
-from fsm_llm.agents.exceptions import require_int_limit
-from fsm_llm.agents.tools import ToolRegistry
 from fsm_llm.core.definitions import (
     SYNTHESIZE_GOAL_MAX_LENGTH,
     LLMResponseError,
@@ -33,6 +30,7 @@ from fsm_llm.core.expressions import is_missing
 from fsm_llm.engine.api.conversation import API
 from fsm_llm.llm import LLMInterface
 from fsm_llm.logging import logger
+from fsm_llm.tools import ToolAnnotations, ToolRegistry, require_int_limit
 
 from .constants import (
     LIFECYCLE_VERIFIED,

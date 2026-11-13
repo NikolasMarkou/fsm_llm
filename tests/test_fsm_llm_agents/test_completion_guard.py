@@ -6,7 +6,8 @@ call must report success=False instead of leaking planner prose."""
 
 from fsm_llm.agents.base import BaseAgent
 from fsm_llm.agents.constants import ContextKeys
-from fsm_llm.agents.definitions import AgentTrace, ToolCall
+from fsm_llm.agents.definitions import AgentTrace
+from fsm_llm.tools import ToolCall
 
 
 def _trace(*tool_names: str) -> AgentTrace:

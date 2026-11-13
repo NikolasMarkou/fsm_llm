@@ -24,11 +24,11 @@ from fsm_llm.agents.constants import (
 from fsm_llm.agents.fsm_definitions.rewoo import build_rewoo_fsm
 from fsm_llm.core.definitions import CONTEXT_KEY_CUT_OFF
 from fsm_llm.logging import logger
+from fsm_llm.tools import ToolCall, ToolRegistry, redact_secret_entries
 
 from .base import BaseAgent, caller_prompt_keys
-from .definitions import AgentConfig, AgentResult, ToolCall
+from .definitions import AgentConfig, AgentResult
 from .handlers import make_iteration_limiter
-from .tools import ToolRegistry, redact_secret_entries
 
 # A plan id the model wrote as 1, "1", "E1" or "#E1" (any case).
 _PLAN_ID = re.compile(r"#?E?(\d+)", re.IGNORECASE)
