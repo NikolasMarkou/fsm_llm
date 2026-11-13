@@ -389,32 +389,57 @@ class TestModuleDocstringsAreReal:
 #:
 #: The rule works on WHOLE name segments (the stem split on `_`, `-` and `.`), so a
 #: word that only contains a refused word is clean (`preview`, `rfc2045`,
-#: `reviewer`, `prefixes`, `round_robin`). A segment is refused when it is
-#: `review`, `fixes`, `round<N>`, `iter<N>`, `phase<N>` (the digit is required, so
-#: `iter`, `round` and `phase` in a feature name stay allowed) or a four-digit
-#: year `20NN`. `audit` is refused unless the next segment names a feature
-#: (`audit_log`, `audit_trail`, `audit_event(s)`, `audit_hook(s)`, `audit_record(s)`,
-#: `audit_logging`): `test_audit_sweeps`, `test_audit_fixes`, `test_audit_2026_09_21`
-#: and `test_security_audit` are refused. Review gate 1 concern 16 (plan d454fd62
-#: step 58.1) replaced the substring regex that refused `test_preview.py`. The
-#: accept and refuse tables below and the 38 historical names pin the rule.
-_DATED_SEGMENT = re.compile(r"review|fixes|round\d+|iter\d+|phase\d+|20\d\d")
-_AUDIT_FEATURE_WORDS = frozenset(
-    {"log", "logs", "logging", "trail", "event", "events", "hook", "hooks"}
-    | {"record", "records"}
+#: `reviewer`, `prefixes`, `round_robin`). A name is dated when one segment is
+#: `fixes`, `round<N>`, `iter<N>`, `phase<N>`, `step<N>` or `gate<N>` (the digit is
+#: required, so `iter`, `round` and `phase` in a feature name stay allowed), a
+#: counted process word followed by a number segment (`round_2`, `iter-2`), a year
+#: from 2020 to 2030 or a segment that starts with one (`2026`, `2026nov`), a
+#: date-like 8-digit run (`20261113`), or a compound (`reviewfixes`, `auditfixes`,
+#: `reviewround2`). `review` and `audit` are real feature words here (`review_queue`,
+#: `build_review_presentation`, `audit_log`, `policy_audit`), so they are refused
+#: only where they name the process: a trailing or bare `review` (`test_review.py`,
+#: `test_regression_review.py`), a bare `audit` (`test_audit.py`), and `audit`
+#: followed by `sweep(s)` (the other process words after `review` or `audit`, such
+#: as `fixes`, `round<N>`, `iter<N>` and a year, are refused on their own). A
+#: trailing `audit` (`test_policy_audit.py`) and `review` before a feature word
+#: (`test_review_queue.py`) are clean. Review gate 1 concern 16 (plan d454fd62 step
+#: 58.1) replaced the substring regex that refused `test_preview.py`; the re-review
+#: (step 58.2, concern 5) let `review` and a trailing `audit` through as feature
+#: words and caught the year, date and compound shapes the first segment rule
+#: missed. The accept and refuse tables below and the 38 historical names pin it;
+#: `test_regression_review.py` is the one historical name that needs the
+#: trailing-`review` rule.
+_PROCESS_SEGMENT = re.compile(r"fixes|round\d+|iter\d+|phase\d+|step\d+|gate\d+")
+_YEAR_SEGMENT = re.compile(r"20(?:2\d|30)[a-z0-9]*")
+_DATE_SEGMENT = re.compile(r"(?:19|20)\d\d(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])")
+_COMPOUND_SEGMENT = re.compile(
+    r"(?:review|audit)(?:fixes|rounds?\d*|iters?\d+|phases?\d+|sweeps?)"
 )
+_COUNTED_WORDS = frozenset({"round", "iter", "phase", "step", "gate"})
 
 
 def _is_dated_name(name: str) -> bool:
     """True when a file or folder name carries a dated or process segment."""
-    segments = [s for s in re.split(r"[_.\-]+", name.lower()) if s]
+    stem = name.lower().removesuffix(".py")
+    segments = [s for s in re.split(r"[_.\-]+", stem) if s]
+    words = [s for s in segments if s != "test"]
     for position, segment in enumerate(segments):
-        if _DATED_SEGMENT.fullmatch(segment):
+        following = segments[position + 1] if position + 1 < len(segments) else None
+        if (
+            _PROCESS_SEGMENT.fullmatch(segment)
+            or _YEAR_SEGMENT.fullmatch(segment)
+            or _DATE_SEGMENT.fullmatch(segment)
+            or _COMPOUND_SEGMENT.fullmatch(segment)
+        ):
             return True
-        if segment == "audit":
-            following = segments[position + 1 : position + 2]
-            if not following or following[0] not in _AUDIT_FEATURE_WORDS:
-                return True
+        if segment in _COUNTED_WORDS and following and following.isdigit():
+            return True
+        if segment == "review" and following is None:
+            return True
+        if segment == "audit" and (
+            words == ["audit"] or following in ("sweep", "sweeps")
+        ):
+            return True
     return False
 
 
@@ -470,7 +495,6 @@ class TestNoDatedTestFiles:
             "tests/test_fsm_llm/test_audit_2026_09_21.py",
             "tests/test_fsm_llm/test_okf_cli_frontmatter_fixes.py",
             "tests/test_fsm_llm/test_audit_sweeps.py",
-            "tests/test_fsm_llm/test_security_audit.py",
             "tests/test_fsm_llm/test_audit.py",
             "tests/test_fsm_llm/test_regression_iter12.py",
             "tests/test_fsm_llm/test_strands_phase10.py",
@@ -479,6 +503,19 @@ class TestNoDatedTestFiles:
             "tests/test_fsm_llm/test_notes-2026-review.py",
             "tests/test_fsm_llm/test_cleanup.2026.py",
             "tests/test_fsm_llm_audit_2026_09",
+            # Re-review concern 5: year, date, compound and counted-word shapes.
+            "tests/test_fsm_llm/test_20261113.py",
+            "tests/test_fsm_llm/test_2026nov.py",
+            "tests/test_fsm_llm/test_reviewfixes.py",
+            "tests/test_fsm_llm/test_auditfixes.py",
+            "tests/test_fsm_llm/test_reviewround2.py",
+            "tests/test_fsm_llm/test_round_2.py",
+            "tests/test_fsm_llm/test_iter-2.py",
+            "tests/test_fsm_llm/test_step58.py",
+            "tests/test_fsm_llm/test_gate1.py",
+            "tests/test_fsm_llm/test_review.py",
+            "tests/test_fsm_llm/test_regression_review.py",
+            "tests/test_fsm_llm_review_2025",
         ],
     )
     def test_the_segment_rule_refuses(self, name):
@@ -503,6 +540,14 @@ class TestNoDatedTestFiles:
             "tests/test_fsm_llm/test_reviewer_agent.py",
             "tests/test_fsm_llm/test_sha2562.py",
             "tests/test_fsm_llm_audit_log",
+            # Re-review concern 5: `review` and `audit` are feature words.
+            "tests/test_fsm_llm/test_review_presentation.py",
+            "tests/test_fsm_llm/test_review_queue.py",
+            "tests/test_fsm_llm/test_code_review_agent.py",
+            "tests/test_fsm_llm/test_policy_audit.py",
+            "tests/test_fsm_llm/test_security_audit.py",
+            "tests/test_fsm_llm/test_year_2038.py",
+            "tests/test_fsm_llm/test_iso8601_dates.py",
         ],
     )
     def test_the_segment_rule_accepts(self, name):
