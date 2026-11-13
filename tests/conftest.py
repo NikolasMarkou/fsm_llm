@@ -138,6 +138,12 @@ def current_timing_factor() -> float:
           not parse, is not finite or is not above 0 is ignored; one below 1
           cannot lower the floor.
         - Never raises. Budgets are scaled, never skipped or deselected.
+        - Scale an ABSOLUTE time budget only. A ratio bound (the spread of
+          per-character times over a doubling sweep, a speed-up) is never
+          multiplied by it: a uniform slowdown cancels in a ratio, so scaling
+          the bound only lets a quadratic pattern through. Retry a noisy
+          ratio instead (``tests/test_fsm_llm/test_timing_factor.py`` scans
+          every test file for a scaled ratio name).
     """
     traced = (
         sys.gettrace() is not None
@@ -161,8 +167,8 @@ def timing_factor() -> float:
     """Multiplier for a wall-clock budget: 1.0 normally, 5.0 under a tracer.
 
     Use it as ``budget * timing_factor`` in a test that asserts an elapsed
-    time, joins a thread or waits on an event; a test about a time budget in
-    product code injects a fake monotonic clock instead. See
+    time, joins a thread or waits on an event (never on a ratio bound); a test
+    about a time budget in product code injects a fake monotonic clock instead. See
     ``current_timing_factor`` for the rules and the env override.
     """
     return current_timing_factor()

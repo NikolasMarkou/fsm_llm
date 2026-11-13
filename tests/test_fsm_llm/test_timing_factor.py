@@ -6,8 +6,10 @@ and the coverage probe, so they pass the same way plain and under ``--cov``.
 
 from __future__ import annotations
 
+import ast
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -105,3 +107,66 @@ class TestTimingFactor:
             assert timing_factor >= TRACED_TIMING_FACTOR
         else:
             assert timing_factor >= 1.0
+
+
+class TestNoRatioBoundIsScaled:
+    """Review gate 1 (plan d454fd62 step 58.1, concern 6): a ratio bound is never
+    multiplied by ``timing_factor``.
+
+    A tracer or a loaded machine slows every size of a sweep by the same factor,
+    so the ratio of two sizes does not move; scaling its bound only loosens it
+    (``_LINEAR_SPREAD = 2.5`` became 12.5 under coverage, and
+    ``FSM_LLM_TEST_TIMING_FACTOR=20`` made a quadratic crypto-gap regex pass).
+    Only an absolute time budget scales. A noisy ratio is retried, never widened.
+    """
+
+    _RATIO_WORDS = ("spread", "ratio", "growth", "slope")
+
+    @staticmethod
+    def _names(node: ast.AST) -> set[str]:
+        return {
+            n.id if isinstance(n, ast.Name) else n.attr
+            for n in ast.walk(node)
+            if isinstance(n, ast.Name | ast.Attribute)
+        }
+
+    def _scaled_ratios(self, source: str) -> list[int]:
+        """Line numbers where ``timing_factor`` meets a ratio name: in a product
+        (``bound = _LINEAR_SPREAD * timing_factor``) or in one comparison
+        (``assert spread <= 2.0 * timing_factor``)."""
+        hits: set[int] = set()
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+                parts = [self._names(node.left), self._names(node.right)]
+            elif isinstance(node, ast.Compare):
+                parts = [self._names(n) for n in (node.left, *node.comparators)]
+            else:
+                continue
+            names = set().union(*parts)
+            if "timing_factor" in names and any(
+                word in name.lower() for name in names for word in self._RATIO_WORDS
+            ):
+                hits.add(node.lineno)
+        return sorted(hits)
+
+    def test_the_detector_sees_a_scaled_ratio(self):
+        assert self._scaled_ratios("bound = _LINEAR_SPREAD * timing_factor") == [1]
+        assert self._scaled_ratios("assert ratio <= 2.0 * timing_factor") == [1]
+        assert self._scaled_ratios("limit = timing_factor * growth_cap") == [1]
+
+    def test_the_detector_passes_an_absolute_budget(self):
+        assert self._scaled_ratios("assert elapsed < 0.5 * timing_factor") == []
+        assert self._scaled_ratios("w = _LINEAR_BUDGET_S * timing_factor") == []
+
+    def test_no_test_file_scales_a_ratio_bound(self):
+        offenders = {}
+        for path in sorted(Path(conftest.__file__).parent.rglob("*.py")):
+            if path == Path(__file__):
+                continue
+            lines = self._scaled_ratios(path.read_text(encoding="utf-8"))
+            if lines:
+                offenders[str(path.relative_to(Path(conftest.__file__).parent))] = lines
+        assert offenders == {}, (
+            "a ratio bound must stay fixed (a uniform slowdown cancels in a "
+            "ratio): scale only absolute time budgets"
+        )

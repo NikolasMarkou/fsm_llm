@@ -60,24 +60,27 @@ from tests.test_fsm_llm.support import (
 
 #: Largest per-character time spread (slowest size over fastest) a linear
 #: pattern may show over a doubling sweep; a quadratic one shows 64x or more.
+#: A RATIO bound: it is never multiplied by ``timing_factor``. A tracer or a
+#: loaded machine slows every size alike, so the ratio does not move, and a
+#: scaled bound only lets a quadratic pattern through (review gate 1, plan
+#: d454fd62 step 58.1; ``test_timing_factor.py`` scans for it). Noise is handled
+#: by retrying the sweep, never by widening the bound.
 _LINEAR_SPREAD = 2.5
 
 
-def _settled_spread(sweep, timing_factor, attempts=3):
+def _settled_spread(sweep, attempts=3):
     """The lowest ``(spread, detail)`` of up to *attempts* runs of *sweep*.
 
     Interface contract (the two ratio-based linear-time tests below):
-        - *sweep* is a zero-argument callable returning ``(spread, detail)``;
-          *timing_factor* is the ``timing_factor`` fixture value.
-        - Stops at the first sweep within ``_LINEAR_SPREAD * timing_factor``
-          and returns the lowest spread seen otherwise. A stall from load or a
-          tracer inflates one sweep; a quadratic pattern inflates every one,
-          so the retry hides noise and never a defect.
+        - *sweep* is a zero-argument callable returning ``(spread, detail)``.
+        - Stops at the first sweep within ``_LINEAR_SPREAD`` and returns the
+          lowest spread seen otherwise. A stall from load or a tracer inflates
+          one sweep; a quadratic pattern inflates every one, so the retry hides
+          noise and never a defect. The bound is fixed (see ``_LINEAR_SPREAD``).
     """
-    bound = _LINEAR_SPREAD * timing_factor
     best = sweep()
     for _ in range(attempts - 1):
-        if best[0] <= bound:
+        if best[0] <= _LINEAR_SPREAD:
             break
         best = min(best, sweep(), key=lambda result: result[0])
     return best
@@ -2239,7 +2242,7 @@ class TestCryptoKeyAndTokenTriggers:
         assert self._locate(c._CRYPTO_GAP) is not None
 
     # -- (c) ReDoS --------------------------------------------------------
-    def test_the_patterns_are_linear_on_adversarial_input(self, timing_factor):
+    def test_the_patterns_are_linear_on_adversarial_input(self):
         """SC-6/I-9. These patterns run inside `_is_forbidden_context_key` on the
         prompt path, while the per-conversation lock is held, over context keys
         that are arbitrary consumer input -- so catastrophic backtracking here is
@@ -2290,8 +2293,8 @@ class TestCryptoKeyAndTokenTriggers:
             return max(per_char) / min(per_char), per_char
 
         for label, generate in adversarial.items():
-            spread, per_char = _settled_spread(partial(sweep, generate), timing_factor)
-            assert spread <= _LINEAR_SPREAD * timing_factor, (
+            spread, per_char = _settled_spread(partial(sweep, generate))
+            assert spread <= _LINEAR_SPREAD, (
                 f"{label}: time per character varied {spread:.2f}x over 7 "
                 f"doublings, which is not linear. ns/char by size: "
                 f"{[round(t * 1e9, 1) for t in per_char]}"
@@ -4863,7 +4866,7 @@ class TestDigitSuffixedCredentialNames:
         )
         assert clean_context_keys(dict(data), "c1", strip_forbidden_keys=True) == kept
 
-    def test_the_digit_suffix_stays_linear_on_adversarial_input(self, timing_factor):
+    def test_the_digit_suffix_stays_linear_on_adversarial_input(self):
         import time
 
         from fsm_llm.constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS
@@ -4889,8 +4892,8 @@ class TestDigitSuffixedCredentialNames:
             '"secret1"*n': lambda n: "secret1" * n,
             '"a1"*n+"keys2"': lambda n: "a1" * n + "keys2",
         }.items():
-            spread, _ = _settled_spread(partial(per_char, make), timing_factor)
-            assert spread <= _LINEAR_SPREAD * timing_factor, label
+            spread, _ = _settled_spread(partial(per_char, make))
+            assert spread <= _LINEAR_SPREAD, label
 
 
 _DIFF_ATOMS = ("", "a", "ssh", "order", "max", "csrf", "api", "x_", "A", "_", "1")

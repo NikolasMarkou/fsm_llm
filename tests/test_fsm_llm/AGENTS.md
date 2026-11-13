@@ -85,7 +85,7 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_strands_features.py` | schema output, invocation state, streaming, `save_session`/`restore_session` | imports `fsm_llm.agents.base` |
 | `test_streaming_history_seam.py` | history after mid-stream error or abandonment | |
 | `test_stack_lifecycle_seam.py` | `push_fsm`/`pop_fsm` races, stale cleanup | uses a fake clock |
-| `test_timing_factor.py` | the `timing_factor` fixture and `current_timing_factor()` of `tests/conftest.py` | simulates a tracer, pytest-cov, a live coverage and the env override |
+| `test_timing_factor.py` | the `timing_factor` fixture and `current_timing_factor()` of `tests/conftest.py` | simulates a tracer, pytest-cov, a live coverage and the env override; an AST scan fails any test file that multiplies a ratio bound (spread, ratio) by the fixture |
 | `test_turn_guard_deterministic.py` | concurrent `converse` on one conversation raises `FSMError` | event-synchronised, no sleeps |
 | `test_bulk_extraction.py` | bulk extraction through `API.converse`: correction overwrite, provenance, coercion and validation, rejected corrections, back-edge re-extraction, grounding, a failed bulk surfaced to Pass 2 | |
 | `test_prompt_injection_seam.py` | extraction prompt sanitising at `LLMInterface.extract_field` | |
