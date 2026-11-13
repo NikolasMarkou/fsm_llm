@@ -38,6 +38,9 @@ flowchart LR
 | `test_regression_messages_and_operators.py` | plan 12: V1, V4, V5, V14, V15 | 10 | Reads `pyproject.toml` for `requires-python = ">=3.11"` |
 | `test_api_snapshot.py` | the public API snapshot `docs/api.txt` equals the output of `scripts/api_snapshot.py` | 3 | Runs the script in a child process; `importorskip("fastapi")`; fails with `make api-snapshot` as the fix; `TestMroAwareClassLines` and `TestSamePackageMixinRule` load the script by path and build fake classes with a claimed `__module__` (private and Mixin bases) |
 | `test_regression_transition_eval.py` | plan 8: B1..B6 | 7 | Replaces pipeline methods with `MagicMock` |
+| `test_module_path_map.py` | the layout plan's module path map `fixtures/module_path_map.json`: every module has one decision, no old path imports (no shim), every new path and symbol resolves | 35 | Walks the package directory (`src/` or `src/fsm_llm/`) through `support.py`; scanners are pure functions, the mutation proofs run them over scratch trees and synthetic maps; `--write` refreshes `unmoved` |
+| `test_decision_anchor_multiset.py` | the `plan-<id>/D-NNN` token multiset of `src/` equals `fixtures/anchor_multiset.json` plus its `reasons` | 19 | Counts every occurrence in the planner's anchor-scan file types, both id forms; reports tokens LOST and GAINED; the baseline is written once |
+| `test_module_size_guard.py` | no `src` module over 800 physical lines unless in the `OVERSIZED` ceiling table (grow, stale entry and missing module fail) | 14 | Counts `len(text.splitlines())`; keys are dotted modules so the table survives the 0.3 move; a split step deletes its entry |
 | `test_no_model_paths.py` | review gate 1 of plan d454fd62: the no-model sweep | 55 | Deletes `LLM_MODEL` itself (the root autouse fixture sets it); one row per public entry point that takes an injected interface, plus the paths that still raise `ModelNotConfiguredError` |
 
 ## Public interface

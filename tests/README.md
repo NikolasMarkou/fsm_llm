@@ -50,8 +50,8 @@ flowchart TD
 | `test_fsm_llm_eval/` | 431 | `fsm_llm.eval` and the `fsm-llm-eval` CLI: example scoring, case datasets, config, statistics, result files |
 | `test_fsm_llm_synthesis/` | 2,037 | `fsm_llm.synthesis`: the gates, the library, the runner, the agent tools, traces, diagnosis and repair, the concierge end to end, and the offline checks of `scripts/synthesis_bench.py`. Bench status: three blocks run and recorded, all INCONCLUSIVE (see `docs/synthesis.md`). |
 | `test_fsm_llm_testing/` | 9 | `fsm_llm.testing`, the public test-helper subpackage: its layering (imported by name, loaded by no library module, no `pytest`, `litellm` or other subpackage) |
-| `test_fsm_llm_regression/` | 268 | One class per fixed bug across core, reasoning, workflows, CLI and packaging text |
-| `test_examples/` | 67 | Every JSON file under `examples/` (14 today) loads, parses as an `FSMDefinition` and passes `FSMValidator` (43 tests), and every call into `fsm_llm` in the `examples/**/*.py` scripts still binds to the live signature, checked with `ast` and `inspect.signature` without running an example (24 tests); `test_example_scripted_paths.py` drives four shipped example FSMs offline with the public `fsm_llm.testing` doubles, scripted user and assertions, reading them as they are |
+| `test_fsm_llm_regression/` | 268 | One class per fixed bug across core, reasoning, workflows, CLI and packaging text, plus the layout safety nets (module path map, anchor multiset, 800-line guard) |
+| `test_examples/` | 67 | Every JSON file under `examples/` (14 today) loads, parses as an `FSMDefinition` and passes `FSMValidator` (43 tests), and every call into `fsm_llm` in the `examples/**/*.py` scripts still binds to the live signature, checked with `ast` and `inspect.signature` without running an example (24 tests); `test_example_scripted_paths.py` drives four shipped example FSMs offline with the public `fsm_llm.testing` doubles, scripted user and assertions, reading them as they are; `test_example_import_paths.py` resolves every `fsm_llm` import of the example scripts (module and name) without editing one |
 
 ## Files at this level
 
@@ -64,6 +64,7 @@ flowchart TD
 - `test_coverage_ratchet.py` - 44 offline tests for `scripts/coverage_ratchet.py` (the branch-coverage ratchet: `check` against the baseline minus the tolerance, `update` that only raises and floors to 0.01, `guard` against an `origin/main` ref in a throwaway git repo) and for the coverage configuration (`[tool.coverage]` in `pyproject.toml`, the `coverage` pin, `--cov-branch` in the Makefile and tox coverage commands). No coverage run, no network.
 - `test_integration_ollama.py` - 12 tests, all marked `integration`, `real_llm` and `slow`. Most run a real conversation on `ollama_chat/qwen3.5:9b-q8_0` and skip without it; two small classes (`TestWorkflowUTCConsistency`, `TestParallelStepIsolation`) check workflow timestamps and parallel-step context isolation with no model.
 - `fixtures/test_fsm_definitions/minimal_fsm.json` - a one-state FSM loaded by the `sample_fsm_definition` fixture (the fixture writes it if missing).
+- `fixtures/module_path_map.json` and `fixtures/anchor_multiset.json` - the layout plan's module path map and the baseline multiset of `plan-<id>/D-NNN` tokens of `src/`; read by `test_fsm_llm_regression/test_module_path_map.py` and `test_decision_anchor_multiset.py`.
 
 ## How to use it
 
