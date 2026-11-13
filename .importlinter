@@ -1,0 +1,68 @@
+# Import contracts for the `fsm_llm` package, run by `make lint-imports`
+# (`lint-imports`, from import-linter; the engine is grimp).
+#
+# Plan d454fd62, step 61: only the contracts that hold on today's flat layout
+# (source in `src/`, imported as `fsm_llm`). Step 95 activates the layered
+# Section 5.2 contract (D-016) once the packages it names exist; every move
+# step (65 to 94) extends this file for the packages it places. A contract is
+# never weakened to pass: a debt is an `ignore_imports` line that names the row
+# retiring it (`# retired by: <row>`) or the written reason it stays
+# (`# permanent: <reason>`). import-linter fails on an ignore that matches no
+# import, so a stale entry is caught.
+#
+# No `forbidden` contract here uses `allow_indirect_imports`: a chain through
+# another module counts, so a re-export cannot launder an import.
+#
+# Source `fsm_llm.*` (every direct child, so a new module is covered with no
+# edit) is used where the forbidden module is itself inside `fsm_llm`: with the
+# bare root as source import-linter treats the forbidden module as part of the
+# source and reports nothing (measured at step 61: a planted import was missed).
+# The root `fsm_llm/__init__.py` is not a child: `TestPackageInitImportsNoSubpackage`
+# in tests/test_packaging.py covers it.
+
+[importlinter]
+root_package = fsm_llm
+include_external_packages = True
+# An import under `if TYPE_CHECKING:` costs nothing at run time.
+exclude_type_checking_imports = True
+
+[importlinter:contract:litellm-one-module]
+name = litellm is imported by one module, fsm_llm.llm
+type = forbidden
+source_modules =
+    fsm_llm
+forbidden_modules =
+    litellm
+ignore_imports =
+    # permanent: the one LLM layer. Step 73 moves it to fsm_llm.llm.providers.litellm.
+    fsm_llm.llm -> litellm
+
+[importlinter:contract:testing-is-never-imported]
+name = no library module imports fsm_llm.testing
+type = forbidden
+source_modules =
+    fsm_llm.*
+forbidden_modules =
+    fsm_llm.testing
+
+[importlinter:contract:pytest-is-not-shipped]
+name = no shipped module imports pytest
+type = forbidden
+source_modules =
+    fsm_llm
+forbidden_modules =
+    pytest
+    _pytest
+
+[importlinter:contract:entry-modules-are-leaves]
+name = nothing imports the entry modules fsm_llm.runner and fsm_llm.__main__
+type = forbidden
+source_modules =
+    fsm_llm.*
+forbidden_modules =
+    fsm_llm.runner
+    fsm_llm.__main__
+ignore_imports =
+    # permanent: `python -m fsm_llm` is the one entry that hands over to the
+    # runner (a lazy import inside `main_cli`); no other module may.
+    fsm_llm.__main__ -> fsm_llm.runner

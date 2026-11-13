@@ -21,6 +21,7 @@ make test           # full suite (pytest -v)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy on the fsm_llm package (core and subpackages)
+make lint-imports   # import contracts in .importlinter (needs the dev extra)
 pytest tests/test_fsm_llm/            # one suite (core)
 pytest -m "not slow"                  # skip the slow tests
 ```

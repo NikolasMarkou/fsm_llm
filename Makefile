@@ -1,4 +1,4 @@
-.PHONY: help test lint format type-check build clean install-dev coverage audit counts api-snapshot
+.PHONY: help test lint format type-check lint-imports build clean install-dev coverage audit counts api-snapshot
 
 # Default target
 help: ## Show this help message
@@ -15,6 +15,9 @@ format: ## Format code with ruff
 
 type-check: ## Run type checker (mypy)
 	python scripts/type_check.py
+
+lint-imports: ## Check the import contracts in .importlinter (import-linter)
+	lint-imports
 
 coverage: ## Run tests with coverage report
 	python -m pytest tests/ --cov=fsm_llm --cov-branch --cov-report=term-missing --cov-report=html

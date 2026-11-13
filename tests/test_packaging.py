@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import collections
+import configparser
 import importlib
 import json
 import os
@@ -26,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+import zipfile
 
 import pytest
 from packaging.requirements import Requirement
@@ -39,6 +41,8 @@ if _SCRIPTS not in sys.path:  # scripts/ is not a package
 
 import audit_pth
 import doc_counts
+
+from tests.test_fsm_llm_regression.support import package_dir
 
 
 def _read(rel: str) -> str:
@@ -825,6 +829,233 @@ class TestDeclaredRangesMatchPins:
             if ln.strip().startswith("litellm")
         ]
         assert len(lines) == 1, lines
+
+
+# ══════════════════════════════════════════════════════════════
+# Wheel content (step 61 of plan d454fd62): the wheel ships the package and
+# its package data, under `fsm_llm/`, and nothing from the rest of the repo.
+# Every path below is relative to the PACKAGE ROOT (`package_dir`, which is
+# `src/` while the layout is flat and `src/fsm_llm/` after the move), so the
+# check holds on both sides of that move.
+# ══════════════════════════════════════════════════════════════
+
+#: Non-`.py` files the wheel carries, relative to the package root. Written out
+#: by hand on purpose: derived from `[tool.setuptools.package-data]`, a dropped
+#: glob would shrink both sides of the comparison and still pass.
+_WHEEL_DATA_GLOBS = ("py.typed", "monitor/static/**/*", "monitor/templates/*")
+
+#: Repo-root files setuptools reads while building (readme, license, manifest).
+_BUILD_ROOT_FILES = ("pyproject.toml", "README.md", "LICENSE", "MANIFEST.in")
+
+#: Top-level repo directories that must never reach a wheel.
+_NEVER_SHIPPED = ("tests", "examples", "scripts", "docs", "plans", "src")
+
+
+def _tracked(*paths: str) -> list[str]:
+    """Repo-relative tracked files under `paths`; skips the test without git."""
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is not installed")
+    done = subprocess.run(
+        [git, "-C", str(_REPO_ROOT), "ls-files", "-z", "--", *paths],
+        capture_output=True,
+        check=False,
+    )
+    if done.returncode != 0:
+        pytest.skip("not a git checkout")
+    return [p for p in done.stdout.decode("utf-8").split("\0") if p]
+
+
+def _stage_tracked_tree(dest: pathlib.Path) -> None:
+    """Copy the tracked `src/` tree and the build root files into `dest`.
+
+    The build runs on this copy, so setuptools leaves no `build/` or
+    `*.egg-info` in the repository and an untracked stray file in the working
+    tree cannot change what is shipped.
+    """
+    for rel in [*_tracked("src"), *_BUILD_ROOT_FILES]:
+        source = _REPO_ROOT / rel
+        if source.is_file():
+            target = dest / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+
+
+def _expected_wheel_files(staged: pathlib.Path) -> set[str]:
+    """Wheel entries a staged tree must produce: every module, py.typed and the data."""
+    root = package_dir(staged)
+    rels = {
+        p.relative_to(root).as_posix()
+        for p in root.rglob("*.py")
+        if "__pycache__" not in p.parts
+    }
+    for pattern in _WHEEL_DATA_GLOBS:
+        rels |= {
+            p.relative_to(root).as_posix() for p in root.glob(pattern) if p.is_file()
+        }
+    return {f"fsm_llm/{rel}" for rel in rels}
+
+
+def _build_wheel(staged: pathlib.Path, outdir: pathlib.Path) -> pathlib.Path:
+    """Build a wheel from `staged` with the interpreter's own `build` and setuptools."""
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "build",
+            "--wheel",
+            "--no-isolation",
+            "--outdir",
+            str(outdir),
+            str(staged),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=600,
+        check=False,
+    )
+    assert done.returncode == 0, done.stdout[-2000:] + done.stderr[-2000:]
+    wheels = sorted(outdir.glob("*.whl"))
+    assert len(wheels) == 1, wheels
+    return wheels[0]
+
+
+def _wheel_file_problems(names: set[str], expected: set[str]) -> list[str]:
+    """Problems between a wheel's entries and the expected package files."""
+    problems: list[str] = []
+    payload = {n for n in names if not n.split("/")[0].endswith(".dist-info")}
+    for name in sorted(payload):
+        if name.split("/")[0] in _NEVER_SHIPPED:
+            problems.append(f"{name}: repo content that must never ship")
+        elif not name.startswith("fsm_llm/"):
+            problems.append(f"{name}: outside the top-level fsm_llm/ directory")
+    inside = {n for n in payload if n.startswith("fsm_llm/")}
+    problems += [f"{n}: shipped but not expected" for n in sorted(inside - expected)]
+    problems += [f"{n}: expected but not shipped" for n in sorted(expected - payload)]
+    return problems
+
+
+def _dist_info_problems(wheel: pathlib.Path) -> list[str]:
+    """Problems in the wheel's metadata: project name, version and console scripts."""
+    project = _pyproject()["project"]
+    stem = re.sub(r"[-_.]+", "_", project["name"]).lower()
+    problems: list[str] = []
+    with zipfile.ZipFile(wheel) as archive:
+        dirs = {n.split("/")[0] for n in archive.namelist() if ".dist-info/" in n}
+        wanted = f"{stem}-{project['version']}.dist-info"
+        if dirs != {wanted}:
+            return [f"dist-info directories are {sorted(dirs)}, expected {wanted}"]
+        metadata = archive.read(f"{wanted}/METADATA").decode("utf-8")
+        names = [ln[6:] for ln in metadata.splitlines() if ln.startswith("Name: ")]
+        if names != [project["name"]]:
+            problems.append(f"METADATA Name is {names}, expected {project['name']!r}")
+        entry_points = configparser.ConfigParser(delimiters=("=",), interpolation=None)
+        entry_points.optionxform = str  # type: ignore[assignment, method-assign]
+        entry_points.read_string(archive.read(f"{wanted}/entry_points.txt").decode())
+        shipped = dict(entry_points["console_scripts"])
+        declared = dict(project["scripts"])
+        if shipped != declared:
+            problems.append(
+                f"entry_points.txt {shipped} != [project.scripts] {declared}"
+            )
+    return problems
+
+
+class TestWheelComparison:
+    """The comparison itself, on synthetic wheel listings (no build)."""
+
+    _EXPECTED = frozenset(
+        {"fsm_llm/__init__.py", "fsm_llm/py.typed", "fsm_llm/monitor/static/a.js"}
+    )
+
+    def _problems(self, names: set[str]) -> list[str]:
+        return _wheel_file_problems(
+            names | {"fsm_llm-1.dist-info/METADATA"}, self._EXPECTED
+        )
+
+    def test_the_exact_file_set_has_no_problem(self):
+        assert self._problems(set(self._EXPECTED)) == []
+
+    def test_a_stray_module_is_reported(self):
+        stray = self._EXPECTED | {"fsm_llm/zz_stray.py"}
+        assert self._problems(stray) == [
+            "fsm_llm/zz_stray.py: shipped but not expected"
+        ]
+
+    def test_a_dropped_data_file_is_reported(self):
+        short = self._EXPECTED - {"fsm_llm/monitor/static/a.js"}
+        assert self._problems(short) == [
+            "fsm_llm/monitor/static/a.js: expected but not shipped"
+        ]
+
+    @pytest.mark.parametrize("top", _NEVER_SHIPPED)
+    def test_repo_content_is_reported(self, top):
+        found = self._problems(self._EXPECTED | {f"{top}/x.py"})
+        assert found == [f"{top}/x.py: repo content that must never ship"]
+
+    def test_a_file_outside_the_package_is_reported(self):
+        found = self._problems(self._EXPECTED | {"other_pkg/x.py"})
+        assert found == ["other_pkg/x.py: outside the top-level fsm_llm/ directory"]
+
+
+class TestPackageInitImportsNoSubpackage:
+    """`import fsm_llm` loads only the core (AGENTS.md): the package `__init__`
+    has no import statement that names a subpackage. import-linter cannot say
+    this (a contract's source module includes every descendant), so it is here."""
+
+    def test_the_package_init_has_no_subpackage_import(self):
+        root = package_dir(_REPO_ROOT)
+        subpackages = {p.name for p in root.iterdir() if (p / "__init__.py").is_file()}
+        assert subpackages >= _EXPECTED_SUBPACKAGES  # non-vacuous
+        tree = ast.parse((root / "__init__.py").read_text(encoding="utf-8"))
+        named: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                if node.level == 1 and node.module:
+                    named.append(node.module)
+                elif node.level == 0 and (node.module or "").startswith("fsm_llm."):
+                    named.append(node.module.removeprefix("fsm_llm."))
+                elif node.level == 1 and not node.module:
+                    named += [a.name for a in node.names]
+            elif isinstance(node, ast.Import):
+                named += [
+                    a.name.removeprefix("fsm_llm.")
+                    for a in node.names
+                    if a.name.startswith("fsm_llm.")
+                ]
+        hits = sorted(n for n in named if n.split(".")[0] in subpackages)
+        assert not hits, f"fsm_llm/__init__.py imports subpackages: {hits}"
+
+
+@pytest.fixture(scope="module")
+def built_wheel(tmp_path_factory):
+    """`(wheel path, entry names, expected entries)` of one wheel built from the tracked tree."""
+    base = tmp_path_factory.mktemp("wheel")
+    staged = base / "tree"
+    staged.mkdir()
+    _stage_tracked_tree(staged)
+    expected = _expected_wheel_files(staged)
+    wheel = _build_wheel(staged, base / "out")
+    with zipfile.ZipFile(wheel) as archive:
+        return wheel, set(archive.namelist()), expected
+
+
+@pytest.mark.slow
+class TestWheelContent:
+    """A real wheel, built once from the tracked tree (seconds, but a build)."""
+
+    def test_the_wheel_holds_the_package_files_and_nothing_else(self, built_wheel):
+        _wheel, names, expected = built_wheel
+        # Non-vacuous: modules, the typing marker and nested frontend files.
+        assert "fsm_llm/__init__.py" in expected and "fsm_llm/py.typed" in expected
+        assert any(n.startswith("fsm_llm/monitor/static/pages/") for n in expected)
+        assert any(n.startswith("fsm_llm/monitor/templates/") for n in expected)
+        assert _wheel_file_problems(names, expected) == []
+
+    def test_the_wheel_metadata_names_the_project_and_its_scripts(self, built_wheel):
+        wheel, _names, _expected = built_wheel
+        assert _dist_info_problems(wheel) == []
 
 
 # ══════════════════════════════════════════════════════════════

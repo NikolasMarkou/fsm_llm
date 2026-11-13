@@ -79,7 +79,8 @@ One LLM layer (`src/llm.py`, the only module that imports litellm): `LLMInterfac
 | `scripts/api_snapshot.py` | Prints the public API (static `__all__` of the eight packages and the named core modules, with signatures) for `docs/api.txt`; `--write PATH`; `make api-snapshot`; walks the MRO: members of a private (`_`-prefixed) base or of a same-package `<Group>Mixin` are listed under the class and the class line names only declared bases, so a class split into mixins keeps its text | `tests/test_fsm_llm_regression/test_api_snapshot.py` fails when `docs/api.txt` differs; regenerate and review the diff in the same commit; never edit `docs/api.txt` by hand |
 | `evaluation/datasets/` | `simple_greeting_cases.json`, `name_capture_fsm.json` | Samples for `fsm-llm-eval run` |
 | `examples/<category>/<name>/` | `run.py` plus FSM JSON; 8 categories | Evaluation baselines |
-| `pyproject.toml`, `Makefile`, `tox.ini`, `constraints.txt`, `MANIFEST.in`, `.pre-commit-config.yaml` | Build, tasks, envs, exact pins, sdist, hooks | All checked by `test_packaging.py` |
+| `pyproject.toml`, `Makefile`, `tox.ini`, `constraints.txt`, `MANIFEST.in`, `.pre-commit-config.yaml` | Build, tasks, envs, exact pins, sdist, hooks | All checked by `test_packaging.py`, which also builds a wheel (slow) and compares its file set with the tracked package files |
+| `.importlinter` | import-linter contracts run by `make lint-imports` (`root_package = fsm_llm`, `include_external_packages`, `exclude_type_checking_imports`): `litellm` imported only by `fsm_llm.llm`, nothing imports `fsm_llm.testing`, `pytest` is never imported, nothing imports the entry modules `fsm_llm.runner` and `fsm_llm.__main__` | Only the contracts that hold today; the layered Section 5.2 contract arrives with the layout split (plan d454fd62, step 95); an `ignore_imports` line is a named debt with a `# retired by:` or `# permanent:` comment; `import-linter` and `grimp` pinned in `constraints.txt`, `import-linter` in the `dev` extra; CI and tox wiring pending |
 | `CHANGELOG.md`, `EVALUATE.md`, `CONTRIBUTING.md`, `SECURITY.md` | Release history, eval method and run log, contributor rules, security policy | |
 
 ## Public interface
@@ -207,6 +208,7 @@ make test           # pytest -v (14,043 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # python scripts/type_check.py (mypy -p fsm_llm)
+make lint-imports   # lint-imports: the import contracts of .importlinter (litellm, testing, pytest, entry modules)
 make build          # python -m build (wheel + sdist)
 make clean          # remove build artifacts, caches, logs/
 make coverage       # pytest with --cov=fsm_llm --cov-branch

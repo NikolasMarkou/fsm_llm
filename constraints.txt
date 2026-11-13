@@ -70,6 +70,13 @@ pytest-mock==3.15.1
 ruff==0.15.22
 mypy==2.3.0
 
+# Import contracts (`make lint-imports`, `.importlinter`; plan d454fd62 step 61) and the
+# wheel-content test (`python -m build --wheel --no-isolation`). grimp is import-linter's
+# graph engine, not declared by the project: pinned so every machine reads one graph.
+import-linter==2.16
+grimp==3.19
+build==1.2.2.post1
+
 # DECISION plan-2026-09-24T091842-c1d5bfbc/D-025: pin mcp to the version CI was
 # measured green with. CI installs the `mcp` extra since 1d2611e, and the extra's
 # `mcp>=1.0.0` floats: mcp 2.x already renamed Tool.inputSchema and moved FastMCP,
