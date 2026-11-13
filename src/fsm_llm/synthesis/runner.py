@@ -35,9 +35,9 @@ from fsm_llm.core.definitions import (
     LLMResponseError,
     SynthesizeConfig,
 )
+from fsm_llm.core.expressions import is_missing
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
-from fsm_llm.expressions import is_missing
 from fsm_llm.logging import logger
 
 from .constants import (

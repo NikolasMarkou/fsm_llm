@@ -79,7 +79,7 @@ Three-outcome evaluation:
 - **AMBIGUOUS** -- Two or more passing transitions tied at the lowest priority; only the tied group is delegated to LLM classification
 - **BLOCKED** -- No matches, stay in current state
 
-Uses JsonLogic conditions (`expressions.py`) and required context key checks.
+Uses JsonLogic conditions (`core/expressions/`) and required context key checks.
 
 ## Data Flow
 

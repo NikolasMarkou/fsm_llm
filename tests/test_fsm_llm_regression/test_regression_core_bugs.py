@@ -20,7 +20,7 @@ from fsm_llm.core.definitions import (
     Transition,
     TransitionCondition,
 )
-from fsm_llm.expressions import evaluate_logic, get_var, greater, less
+from fsm_llm.core.expressions import evaluate_logic, get_var, greater, less
 
 # ── VB1: Self-transitions silently suppressed ──────────────────
 
@@ -794,18 +794,18 @@ class TestLessDocstringCorrectness:
 
     def test_less_with_numeric_strings(self):
         """less('10', '2') should return False (numeric coercion)."""
-        from fsm_llm.expressions import less
+        from fsm_llm.core.expressions import less
 
         assert less("10", "2") is False
 
     def test_less_basic(self):
         """less(1, 2) should return True."""
-        from fsm_llm.expressions import less
+        from fsm_llm.core.expressions import less
 
         assert less(1, 2) is True
 
     def test_less_chain(self):
         """less(1, 2, 3) should return True."""
-        from fsm_llm.expressions import less
+        from fsm_llm.core.expressions import less
 
         assert less(1, 2, 3) is True

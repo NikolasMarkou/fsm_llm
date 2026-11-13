@@ -22,7 +22,7 @@ from fsm_llm.core.definitions import (
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
-from fsm_llm.expressions import evaluate_logic
+from fsm_llm.core.expressions import evaluate_logic
 from fsm_llm.llm import LLMInterface
 
 

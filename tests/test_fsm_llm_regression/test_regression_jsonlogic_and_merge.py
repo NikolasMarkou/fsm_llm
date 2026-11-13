@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fsm_llm.core.definitions import FSMContext, FSMDefinition, State
-from fsm_llm.expressions import (
+from fsm_llm.core.expressions import (
     evaluate_logic,
     greater,
     greater_or_equal,
@@ -38,7 +38,7 @@ class TestEvaluateLogicMultiKey:
 
     def test_single_key_no_warning(self):
         """Normal single-key dicts should not warn."""
-        with patch("fsm_llm.expressions.logger") as mock_logger:
+        with patch("fsm_llm.core.expressions.evaluator.logger") as mock_logger:
             evaluate_logic({">": [5, 3]}, {})
             # Should not have warnings about multiple keys
             for call in mock_logger.warning.call_args_list:

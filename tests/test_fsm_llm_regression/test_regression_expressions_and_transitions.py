@@ -129,25 +129,25 @@ class TestAndOrReturnValues:
     """B7: and/or should return actual values per JsonLogic spec, not True/False."""
 
     def test_or_returns_first_truthy_value(self):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         result = evaluate_logic({"or": [0, "default"]}, {})
         assert result == "default", f"Expected 'default', got {result!r}"
 
     def test_or_coalesce_pattern(self):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         result = evaluate_logic({"or": [{"var": "x"}, "fallback"]}, {})
         assert result == "fallback", f"Expected 'fallback', got {result!r}"
 
     def test_and_returns_last_truthy_value(self):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         result = evaluate_logic({"and": [1, 2, 3]}, {})
         assert result == 3, f"Expected 3, got {result!r}"
 
     def test_and_returns_first_falsy_value(self):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         result = evaluate_logic({"and": [1, 0, 3]}, {})
         assert result == 0, f"Expected 0, got {result!r}"
@@ -160,19 +160,19 @@ class TestGreaterThanChaining:
     """B8: > and >= should support chained comparisons like < and <=."""
 
     def test_greater_than_three_operands(self):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         result = evaluate_logic({">": [3, 2, 1]}, {})
         assert result is True, f"Expected True for 3 > 2 > 1, got {result!r}"
 
     def test_greater_or_equal_three_operands(self):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         result = evaluate_logic({">=": [3, 2, 2]}, {})
         assert result is True, f"Expected True for 3 >= 2 >= 2, got {result!r}"
 
     def test_greater_than_chained_false(self):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         result = evaluate_logic({">": [3, 2, 5]}, {})
         assert result is False, f"Expected False for 3 > 2 > 5, got {result!r}"

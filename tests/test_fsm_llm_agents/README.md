@@ -11,7 +11,7 @@ FSM-LLM builds each agent pattern (ReAct, Reflexion, Plan-Execute, Debate, and o
 There are three kinds of test:
 
 - Unit tests call one class or function directly: models in `fsm_llm.agents.definitions`, `ToolRegistry`, the `build_*_fsm` builders, handler methods such as `_track_revisions` or `_execute_all_plans`.
-- Structure tests build an FSM dict and check its states, transitions and priorities, or evaluate a transition's JsonLogic condition with `fsm_llm.expressions.evaluate_logic`.
+- Structure tests build an FSM dict and check its states, transitions and priorities, or evaluate a transition's JsonLogic condition with `fsm_llm.core.expressions.evaluate_logic`.
 - Loop tests run `agent.run(...)` end to end with a fake LLM passed as `llm_interface=`. The fake subclasses `fsm_llm.llm.LLMInterface` and answers `extract_field`, `extract_bulk_data` and `generate_response` from a script.
 
 ```mermaid

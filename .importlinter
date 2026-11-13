@@ -100,8 +100,9 @@ ignore_imports =
 
 # Steps 69 and 70 (definitions split, then `codes`, `schema`, `state_kinds` and
 # `transition_evaluator` placed): the layer package `core` (L0). It reads only the kernel
-# (`constants`, `logging`, `security`) and `fsm_llm.expressions`, which has not moved yet
-# (`core.transition_evaluator`, until step 71); it never reaches a higher layer or a subpackage
+# (`constants`, `logging`, `security`); step 71 moved `expressions` into it as `core.expressions`,
+# a package whose modules import each other and `core.definitions` and are read by
+# `core.transition_evaluator`; it never reaches a higher layer or a subpackage
 # (`FSMDefinition._check_synthesize_states` imports `core.transition_evaluator` lazily, a core
 # edge). The list is every module that is not core and not kernel today; step 95 replaces it
 # with the `layers` contract of D-016.

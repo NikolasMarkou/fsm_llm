@@ -694,7 +694,7 @@ class TestSoftEqualsBoolString:
 
     def test_true_equals_lowercase_true(self):
         """soft_equals(True, 'true') should return True (case-insensitive)."""
-        from fsm_llm.expressions import soft_equals
+        from fsm_llm.core.expressions import soft_equals
 
         assert soft_equals(True, "true"), (
             "soft_equals(True, 'true') should be True — JSON booleans are lowercase"
@@ -702,7 +702,7 @@ class TestSoftEqualsBoolString:
 
     def test_false_equals_lowercase_false(self):
         """soft_equals(False, 'false') should return True (case-insensitive)."""
-        from fsm_llm.expressions import soft_equals
+        from fsm_llm.core.expressions import soft_equals
 
         assert soft_equals(False, "false"), (
             "soft_equals(False, 'false') should be True — JSON booleans are lowercase"
@@ -710,13 +710,13 @@ class TestSoftEqualsBoolString:
 
     def test_true_string_equals_bool_true(self):
         """soft_equals('true', True) should also work (reversed order)."""
-        from fsm_llm.expressions import soft_equals
+        from fsm_llm.core.expressions import soft_equals
 
         assert soft_equals("true", True), "soft_equals('true', True) should be True"
 
     def test_non_boolean_string_comparison_unchanged(self):
         """Normal string comparisons should not be affected."""
-        from fsm_llm.expressions import soft_equals
+        from fsm_llm.core.expressions import soft_equals
 
         assert soft_equals("hello", "hello")
         assert not soft_equals("hello", "world")

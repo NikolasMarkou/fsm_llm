@@ -99,6 +99,11 @@ from .core.definitions import (
 )
 
 # --------------------------------------------------------------
+# Expression Evaluation
+# --------------------------------------------------------------
+from .core.expressions import evaluate_logic
+
+# --------------------------------------------------------------
 # Transition Evaluation Components
 # --------------------------------------------------------------
 from .core.transition_evaluator import TransitionEvaluator, TransitionEvaluatorConfig
@@ -107,11 +112,6 @@ from .core.transition_evaluator import TransitionEvaluator, TransitionEvaluatorC
 # Explicit .env loading (opt-in; importing fsm_llm reads no .env file)
 # --------------------------------------------------------------
 from .env import load_env
-
-# --------------------------------------------------------------
-# Expression Evaluation
-# --------------------------------------------------------------
-from .expressions import evaluate_logic
 from .fsm import FSMManager
 
 # --------------------------------------------------------------

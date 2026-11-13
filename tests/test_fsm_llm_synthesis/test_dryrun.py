@@ -19,8 +19,8 @@ from typing import Any, ClassVar
 import pytest
 
 from fsm_llm.core.definitions import FSMContext, FSMDefinition
+from fsm_llm.core.expressions import evaluate_logic, is_missing
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
-from fsm_llm.expressions import evaluate_logic, is_missing
 from fsm_llm.flow_analysis import FlowFinding, analyze_liveness
 from fsm_llm.logging import logger
 from fsm_llm.synthesis import dryrun

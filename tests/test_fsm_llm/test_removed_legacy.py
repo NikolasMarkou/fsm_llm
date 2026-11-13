@@ -206,7 +206,7 @@ class TestStep9LeafDeadCode:
     # The operator disjointness / one-dispatcher pins moved to
     # test_expressions.py::TestOperatorSweep (plan step 15).
     def test_short_circuit_still_lazy_and_if_still_works(self):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         guard = {
             "and": [{"!=": [{"var": "x"}, 0]}, {"<": [{"/": [1, {"var": "x"}]}, 5]}]
@@ -217,9 +217,17 @@ class TestStep9LeafDeadCode:
         assert evaluate_logic({"if": [False, "a", "default"]}) == "default"
 
     def test_if_condition_is_gone(self):
-        import fsm_llm.expressions as expressions
+        import importlib
+        import pkgutil
 
-        assert not hasattr(expressions, "if_condition")
+        import fsm_llm.core.expressions as expressions
+
+        modules = [expressions] + [
+            importlib.import_module(f"{expressions.__name__}.{info.name}")
+            for info in pkgutil.iter_modules(expressions.__path__)
+        ]
+        for module in modules:
+            assert not hasattr(module, "if_condition"), module.__name__
 
     def test_ollama_transition_schema_is_gone(self):
         import fsm_llm.ollama as ollama

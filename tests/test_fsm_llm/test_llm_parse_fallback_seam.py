@@ -2364,13 +2364,13 @@ class TestStep15D6D12B8:
     @pytest.mark.parametrize("bad", ["not-an-int", None, True, 1.5, [1]])
     def test_b8_missing_some_non_int_min_is_a_clean_error(self, bad):
         from fsm_llm.core.definitions import TransitionEvaluationError
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         with pytest.raises(TransitionEvaluationError, match="missing_some"):
             evaluate_logic({"missing_some": [bad, ["a"]]}, {"a": 1})
 
     def test_b8_missing_some_integral_float_min_accepted(self):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         assert evaluate_logic({"missing_some": [2.0, ["a", "b"]]}, {"a": 1}) == ["b"]
         assert evaluate_logic({"missing_some": [1, ["a", "b"]]}, {"a": 1}) == []
@@ -2396,12 +2396,13 @@ class TestStep15D6D12B8:
         ],
     )
     def test_b8_in_integer_needle_on_string_haystack(self, logic, expected):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         assert evaluate_logic(logic, {}) is expected
 
     def test_b8_mod_sign_semantics_documented(self):
-        from fsm_llm.expressions import _safe_mod, evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
+        from fsm_llm.core.expressions.arithmetic import _safe_mod
 
         assert evaluate_logic({"%": [-7, 3]}, {}) == 2.0
         doc = (_safe_mod.__doc__ or "").lower()

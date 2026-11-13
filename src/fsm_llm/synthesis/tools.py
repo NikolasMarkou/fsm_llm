@@ -30,7 +30,7 @@ from fsm_llm.core.definitions import (
     LLMResponseError,
     RunBudgetExceededError,
 )
-from fsm_llm.expressions import is_missing
+from fsm_llm.core.expressions import is_missing
 from fsm_llm.llm import LLMInterface
 from fsm_llm.logging import logger
 

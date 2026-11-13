@@ -33,6 +33,7 @@ from fsm_llm.core.definitions import (
     LLMResponseError,
     State,
 )
+from fsm_llm.core.expressions import is_missing
 from fsm_llm.eval.cases import (
     ConversationCase,
     Expectations,
@@ -41,7 +42,6 @@ from fsm_llm.eval.cases import (
 )
 from fsm_llm.eval.config import EvalConfig
 from fsm_llm.eval.stats import pass_rate
-from fsm_llm.expressions import is_missing
 from fsm_llm.llm import LLMInterface, implements_complete
 from fsm_llm.utilities import extract_json_from_text
 

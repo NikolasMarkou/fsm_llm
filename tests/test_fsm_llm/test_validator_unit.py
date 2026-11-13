@@ -2622,7 +2622,7 @@ class TestStep10B5B6B9B10:
     def test_b5_load_acceptance_agrees_with_evaluate_logic(self, levels):
         """The load-time depth bound is exactly the runtime one."""
         from fsm_llm.core.definitions import TransitionEvaluationError
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         logic = _b5_chain(levels)
         try:
@@ -2647,7 +2647,7 @@ class TestStep10B5B6B9B10:
         ],
     )
     def test_b9_dict_in_data_list_accepted(self, logic, data):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         TransitionCondition(description="x", logic=logic)
         _assert_loader_and_validator_accept(_b5_fsm_data(logic))
@@ -2669,7 +2669,7 @@ class TestStep10B5B6B9B10:
         rejected at load iff ``evaluate_logic`` evaluates that argument as logic
         (so ``JSONLOGIC_RAW_ARGUMENT_OPERATIONS`` matches the runtime)."""
         from fsm_llm.core.definitions import TransitionEvaluationError
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         logic = {operator: [{"bogus": 1}, {"bogus": 1}]}
         try:

@@ -13,8 +13,8 @@ from typing import Any
 
 import pytest
 
-from fsm_llm import expressions
 from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS
+from fsm_llm.core import expressions
 from fsm_llm.core.definitions import (
     FSMContext,
     Transition,
@@ -22,8 +22,15 @@ from fsm_llm.core.definitions import (
     TransitionEvaluation,
     TransitionEvaluationResult,
 )
+from fsm_llm.core.expressions import (
+    comparison,
+    evaluate_logic,
+    evaluator,
+    hard_equals,
+    registry,
+    soft_equals,
+)
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
-from fsm_llm.expressions import evaluate_logic, hard_equals, soft_equals
 from fsm_llm.logging import logger
 from tests.test_fsm_llm.support import _a2_state, _gate_fsm, _Prov
 
@@ -773,13 +780,11 @@ class TestNumericStringOrdering:
         assert evaluate_logic({"<=": ["1_000", "1000"]}) is False
 
     def test_module_docstring_does_not_claim_eq_le_ge_agree(self):
-        import fsm_llm.expressions as expressions
-
         doc = " ".join((expressions.__doc__ or "").split())
         assert "so ``==``, ``<=`` and ``>=`` agree" not in doc
         # It says what the operators do differ on instead.
         assert '``"01" <= "1"``' in doc
-        helper = " ".join((expressions._numeric_equal.__doc__ or "").split())
+        helper = " ".join((comparison._numeric_equal.__doc__ or "").split())
         assert "so the three agree on numeric equality" not in helper
         assert '``"01" <= "1"``' in helper
 
@@ -861,7 +866,7 @@ class TestStep09B1B4:
     def test_b1_minus_with_none_second_operand_is_none(self):
         """Never ``-total`` (the pre-fix unary reading). Step 9.2 (D-048):
         None, not False, so an enclosing comparison cannot read it as 0."""
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         logic = {"-": [{"var": "total"}, {"var": "discount"}]}
         assert evaluate_logic(logic, {"total": 50}) is None
@@ -872,7 +877,7 @@ class TestStep09B1B4:
             assert evaluate_logic({op: [{"var": "a"}, 2]}, {}) is None, op
 
     def test_b1_unary_minus_unchanged(self):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         assert evaluate_logic({"-": [5]}) == -5
         assert evaluate_logic({"-": [-5]}) == 5
@@ -882,7 +887,7 @@ class TestStep09B1B4:
         assert evaluate_logic({"-": [{"var": "x"}]}, {}) is None  # D-048
 
     def test_b2_le_ge_false_when_both_unset(self):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         for op in ("<=", ">=", "<", ">"):
             assert evaluate_logic({op: [{"var": "x"}, {"var": "y"}]}, {}) is False, op
@@ -893,7 +898,7 @@ class TestStep09B1B4:
         assert evaluate_logic({"<=": [1, {"var": "x"}, 3]}, {"x": 2}) is True
 
     def test_b2_null_eq_null_still_true(self):
-        from fsm_llm.expressions import evaluate_logic, soft_equals
+        from fsm_llm.core.expressions import evaluate_logic, soft_equals
 
         assert soft_equals(None, None) is True
         assert evaluate_logic({"==": [{"var": "x"}, {"var": "y"}]}, {}) is True
@@ -905,7 +910,7 @@ class TestStep09B1B4:
         [(1.0, "1"), ("1", 1.0), (2, "2.00"), ("1e3", 1000), (0.5, ".5")],
     )
     def test_b3_eq_numeric_coercion_agrees_with_le_ge(self, a, b):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         assert evaluate_logic({"<=": [a, b]}) is True
         assert evaluate_logic({">=": [a, b]}) is True
@@ -916,7 +921,7 @@ class TestStep09B1B4:
     @pytest.mark.parametrize(("a", "b"), [("01", "1"), ("1", "1.0"), ("1e3", "1000")])
     def test_b3_two_strings_are_never_numerically_coerced(self, a, b):
         """Two strings compare as strings (JS semantics): leading zeros matter."""
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         assert evaluate_logic({"==": [a, b]}) is False
         assert evaluate_logic({"!=": [a, b]}) is True
@@ -924,7 +929,7 @@ class TestStep09B1B4:
 
     def test_b3_unequal_numbers_stay_unequal(self):
         """Guard: coercion only equates numerically equal values."""
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         assert evaluate_logic({"==": [1.5, "1"]}) is False
         assert evaluate_logic({"==": ["01", "1.5"]}) is False
@@ -932,7 +937,7 @@ class TestStep09B1B4:
         assert evaluate_logic({"==": ["abc", 1]}) is False
 
     def test_b3_bool_not_coerced(self):
-        from fsm_llm.expressions import evaluate_logic, soft_equals
+        from fsm_llm.core.expressions import evaluate_logic, soft_equals
 
         assert soft_equals(True, "1") is False
         assert soft_equals(False, "0") is False
@@ -942,7 +947,7 @@ class TestStep09B1B4:
         assert evaluate_logic({"==": [True, "1"]}) is False
 
     def test_b3_missing_var_never_equals_string_None(self):
-        from fsm_llm.expressions import evaluate_logic, soft_equals
+        from fsm_llm.core.expressions import evaluate_logic, soft_equals
 
         for probe in ("None", "none", "NONE", "nan", ""):
             assert evaluate_logic({"==": [{"var": "x"}, probe]}, {}) is False, probe
@@ -950,7 +955,7 @@ class TestStep09B1B4:
             assert soft_equals(None, probe) is False, probe
 
     def test_b4_missing_treats_none_and_empty_as_missing(self):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         data = {"a": None, "b": "", "c": 0, "d": False, "e": [], "f": "x"}
         assert evaluate_logic(
@@ -983,15 +988,21 @@ class TestStep09B1B4:
 
     def test_b4_requires_context_keys_shares_the_missing_helper(self):
         """Guard: one predicate, not three copies of the sentinel idiom."""
+        import importlib
         import inspect
+        import pkgutil
 
-        from fsm_llm import expressions
         from fsm_llm.core import transition_evaluator
 
         assert transition_evaluator.is_missing is expressions.is_missing
-        source = inspect.getsource(expressions) + inspect.getsource(
-            transition_evaluator
+        # The old module is now the union of the package's modules.
+        source = inspect.getsource(expressions) + "".join(
+            inspect.getsource(
+                importlib.import_module(f"{expressions.__name__}.{info.name}")
+            )
+            for info in pkgutil.iter_modules(expressions.__path__)
         )
+        source += inspect.getsource(transition_evaluator)
         assert "_not_found = object()" not in source
         assert "not_found = object()" not in source
 
@@ -1019,7 +1030,7 @@ class TestStep09_2:
     (plan-2026-09-21T203800-8a03483a/D-048)."""
 
     def test_b1_nested_arithmetic_with_unset_operand_compares_false(self):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         audit = {"<": [{"-": [{"var": "total"}, {"var": "discount"}]}, 100]}
         assert evaluate_logic(audit, {"total": 150}) is False
@@ -1060,7 +1071,8 @@ class TestStep09_2:
         ],
     )
     def test_b3_underscore_and_nonstandard_numeric_strings_not_coerced(self, a, b):
-        from fsm_llm.expressions import _numeric_equal, evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
+        from fsm_llm.core.expressions.comparison import _numeric_equal
 
         assert _numeric_equal(a, b) is False
         if str(a) != str(b):
@@ -1075,7 +1087,7 @@ class TestStep09_2:
     )
     def test_b3_plain_numeric_strings_still_coerced(self, a, b):
         """Guard (passes on the pre-step source)."""
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         assert evaluate_logic({"==": [a, b]}) is True
 
@@ -1111,12 +1123,12 @@ class TestStep09_3:
         ],
     )
     def test_b1_comparison_with_undefined_arithmetic_is_false(self, logic, data):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         assert evaluate_logic(logic, data) is False
 
     def test_b1_undefined_is_falsy_in_logical_operators(self):
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         assert evaluate_logic({"!": [_B93_A]}, {}) is True
         assert evaluate_logic({"!!": [_B93_A]}, {}) is False
@@ -1139,7 +1151,7 @@ class TestStep09_3:
     def test_b1_real_nulls_unchanged(self):
         """Guard (passes on the pre-step source): D-017 ``null == null`` for
         real nulls and set arithmetic are unchanged."""
-        from fsm_llm.expressions import evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
 
         assert evaluate_logic({"==": [{"var": "x"}, None]}, {}) is True
         assert evaluate_logic({"==": [{"var": "x"}, {"var": "y"}]}, {}) is True
@@ -1152,7 +1164,8 @@ class TestStep09_3:
         ("a", "b"), [("١٠٠٠", 1000), ("１", 1), ("٣", 3), ("1٠", 10)]
     )
     def test_b3_unicode_digits_not_numeric(self, a, b):
-        from fsm_llm.expressions import _numeric_equal, evaluate_logic
+        from fsm_llm.core.expressions import evaluate_logic
+        from fsm_llm.core.expressions.comparison import _numeric_equal
 
         assert _numeric_equal(a, b) is False
         assert evaluate_logic({"==": [a, b]}) is False
@@ -1161,31 +1174,31 @@ class TestStep09_3:
 
 class TestOperatorSweep:
     def test_short_circuit_operators_never_reach_operations(self):
-        short_circuit = expressions._SHORT_CIRCUIT_OPERATORS
+        short_circuit = registry._SHORT_CIRCUIT_OPERATORS
         assert short_circuit == {"and", "or", "if"}
-        assert short_circuit.isdisjoint(expressions.operations)
+        assert short_circuit.isdisjoint(registry.operations)
 
     def test_every_allowed_operator_has_exactly_one_dispatcher(self):
         tables = [
-            set(expressions.operations),
-            set(expressions._data_operators),
-            set(expressions._SHORT_CIRCUIT_OPERATORS),
+            set(registry.operations),
+            set(evaluator._data_operators),
+            set(registry._SHORT_CIRCUIT_OPERATORS),
         ]
         assert set().union(*tables) == ALLOWED_JSONLOGIC_OPERATIONS
         assert sum(len(t) for t in tables) == len(ALLOWED_JSONLOGIC_OPERATIONS)
 
-    @pytest.mark.parametrize("operator", sorted(expressions.operations))
+    @pytest.mark.parametrize("operator", sorted(registry.operations))
     def test_every_eager_operator_is_dispatched(self, operator, monkeypatch):
         """Each ``operations`` entry is the one ``evaluate_logic`` calls."""
         sentinel = object()
-        monkeypatch.setitem(expressions.operations, operator, lambda *a: sentinel)
-        assert expressions.evaluate_logic({operator: [1, 2]}, {}) is sentinel
+        monkeypatch.setitem(registry.operations, operator, lambda *a: sentinel)
+        assert evaluate_logic({operator: [1, 2]}, {}) is sentinel
 
-    @pytest.mark.parametrize("operator", sorted(expressions._data_operators))
+    @pytest.mark.parametrize("operator", sorted(evaluator._data_operators))
     def test_every_data_operator_is_dispatched(self, operator, monkeypatch):
         sentinel = object()
-        monkeypatch.setitem(expressions._data_operators, operator, lambda *a: sentinel)
-        assert expressions.evaluate_logic({operator: ["x"]}, {}) is sentinel
+        monkeypatch.setitem(evaluator._data_operators, operator, lambda *a: sentinel)
+        assert evaluate_logic({operator: ["x"]}, {}) is sentinel
 
     @pytest.mark.parametrize("operator", ["and", "or", "if"])
     def test_every_short_circuit_operator_is_dispatched(self, operator, monkeypatch):
@@ -1195,6 +1208,6 @@ class TestOperatorSweep:
             seen.append(op)
             return "spied"
 
-        monkeypatch.setattr(expressions, "_evaluate_short_circuit", spy)
-        assert expressions.evaluate_logic({operator: [True, 1, 2]}, {}) == "spied"
+        monkeypatch.setattr(evaluator, "_evaluate_short_circuit", spy)
+        assert evaluate_logic({operator: [True, 1, 2]}, {}) == "spied"
         assert seen == [operator]

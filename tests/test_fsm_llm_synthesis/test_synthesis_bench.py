@@ -1202,7 +1202,7 @@ UNPINNED_CORE = {
     "src/fsm_llm/constants.py": "the engine's defaults",
     "src/fsm_llm/context.py": "the engine's context",
     "src/fsm_llm/core/definitions/__init__.py": "the engine's models (facade, read through what the pinned files import)",
-    "src/fsm_llm/expressions.py": "the engine's JsonLogic (is_missing)",
+    "src/fsm_llm/core/expressions/__init__.py": "the engine's JsonLogic (is_missing; facade, read through what the pinned files import)",
     "src/fsm_llm/handlers.py": "the engine's handlers",
     "src/fsm_llm/llm.py": "the one LLM layer",
     "src/fsm_llm/logging.py": "library logging",

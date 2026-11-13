@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from fsm_llm.expressions import evaluate_logic
+from fsm_llm.core.expressions import evaluate_logic
 
 # ── VB1: AND([]) returns False instead of True ────
 
