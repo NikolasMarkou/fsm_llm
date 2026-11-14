@@ -185,13 +185,13 @@ class ContextCompactor:
 # what makes a self-referential dict (`d["self"] = d`) terminate, and a
 # RecursionError here is a crash inside prompt construction on
 # provider-influenced data. The bound itself lives in constants.py so this
-# filter and prompts.py's `_filter_context_for_security` share ONE value
+# filter and `context.layout.base.BasePromptBuilder._filter_context_for_security` share ONE value
 # (D-011). See decisions.md D-010, D-011.
 #
 # DECISION plan-2026-09-12T135914-45a654de/D-016
 # The depth-bounded dict/list/tuple recursion itself (byte-identical to
 # `engine/fsm/helpers.py`'s walker) now lives in ONE shared place,
-# `utilities.filter_context_tree`. This call site supplies its OWN 5-reason
+# `context.filtering.filter_context_tree`. This call site supplies its OWN 5-reason
 # predicate and its OWN logging/`removed_keys`/`warned_keys` tracking via the
 # `should_drop`/`on_drop` closures below -- every behavior documented in this
 # function's docstring (None-stripping, forbidden-pattern check, WARNING

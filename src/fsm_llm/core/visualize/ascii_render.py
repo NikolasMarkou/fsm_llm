@@ -202,7 +202,8 @@ def build_metadata_section(
     # fsm_data.get("description", "No description") + a bare textwrap.wrap(...).
     # `.get(k, default)` returns None for an explicit null, and textwrap.wrap("")
     # / wrap("   ") both return [], so `wrapped_desc[0]` raised out of this
-    # public, non-pydantic-validated function. Same guard at :364 and :470.
+    # public, non-pydantic-validated function. Same guard in `build_states_section`
+    # and `build_transitions_section`.
     description = fsm_data.get("description") or "No description"
     # Wrap to the space left AFTER the "Description: " label, so a normal
     # description never reaches `_section_box_row`'s truncation.

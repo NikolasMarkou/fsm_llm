@@ -20,7 +20,7 @@ from .security import (  # noqa: F401
 
 # DECISION plan-2026-07-19T191147-4b664252/D-011 [STALE]
 # One bound for BOTH recursive context filters (`context.clean_context_keys`
-# and `prompts.BasePromptBuilder._filter_context_for_security`). Do NOT
+# and `context.layout.base.BasePromptBuilder._filter_context_for_security`). Do NOT
 # re-declare a local depth limit in either module: two hand-maintained copies
 # of a security bound is the same duplication that produced F-13, and a filter
 # that stops one level shallower than its sibling is a bypass. The behaviour AT
@@ -30,11 +30,11 @@ MAX_CONTEXT_FILTER_DEPTH = 16
 
 # DECISION plan-2026-09-21T203800-8a03483a/D-011
 # DECISION plan-2026-09-21T203800-8a03483a/D-045
-# Work bound for the PROMPT walker (`prompts.BasePromptBuilder`): every value
+# Work bound for the PROMPT walker (`context.layout.base.BasePromptBuilder`): every value
 # visited costs one node, and past the budget the rest is DROPPED from the
 # prompt (fail-closed, like the depth bound). The depth bound does not bound
 # work on aliased input (3-way aliasing at 14 levels never finished). Do NOT
-# apply this truncating budget to `utilities.filter_context_tree` (`get_data`,
+# apply this truncating budget to `context.filtering.filter_context_tree` (`get_data`,
 # `save_session`, the extracted-data commit): truncating DATA silently cut a
 # 150,000-item list and dropped later keys. That walker memoises every
 # container that cannot reach a cycle (D-052) and raises

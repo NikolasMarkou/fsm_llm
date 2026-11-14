@@ -59,9 +59,9 @@ def _tool_selection_field_extractions(
 # them `str`: `any` is their baseline type (before step 20), and on a provider
 # without a grammar it lets the model return a JSON deliverable as a native
 # object. On Ollama it changes nothing for objects (the `any` grammar has no
-# object branch, ollama.py `_VALUE_TYPES_ANY`), so a JSON deliverable is still
+# object branch, llm/ollama.py `_VALUE_TYPES_ANY`), so a JSON deliverable is still
 # an escaped string that max_tokens can cut off; the protection there is core
-# llm.py's envelope salvage (never ships the envelope; a cut-off value is
+# llm/parsing.py's envelope salvage (never ships the envelope; a cut-off value is
 # logged and returned at confidence 0.3, D-056), not this type. A cut-off
 # artifact can still ship as the answer (Known open: output budget, Track B).
 # Short prose fields (feedback, critiques, reflections, plan step results,

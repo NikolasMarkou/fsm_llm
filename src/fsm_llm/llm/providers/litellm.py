@@ -331,7 +331,7 @@ class LiteLLMInterface(RequestMixin, ParseMixin, LLMInterface, _Metered):
                 # both `continue` identically to before. Safe here because
                 # nothing downstream distinguishes "attribute missing" from
                 # "attribute present but falsy" -- see decisions.md D-022 for
-                # the ONE flagged call site (llm.py content check) where that
+                # the ONE flagged call site (the content check in this module) where that
                 # distinction IS load-bearing and was deliberately left as
                 # `hasattr()`.
                 choices = getattr(chunk, "choices", None)
@@ -749,8 +749,8 @@ class LiteLLMInterface(RequestMixin, ParseMixin, LLMInterface, _Metered):
         # DECISION plan-2026-07-21T045419-9925aa3a/D-002
         # The reasoning-trace field-name resolution (reasoning_content ->
         # legacy thinking -> thinking_blocks) now lives in the SINGLE shared
-        # `resolve_reasoning_trace` (utilities.py) so this reader and
-        # classification.py::_extract_response can never re-diverge. Do NOT
+        # `resolve_reasoning_trace` (llm/text.py) so this reader and
+        # engine/classification.py::_extract_response can never re-diverge. Do NOT
         # revert to a `hasattr(message, "thinking")`/`.thinking`-only read:
         # installed litellm RENAMES `thinking` to `reasoning_content` and
         # DELETES `thinking` before building the Message/Delta object, making a

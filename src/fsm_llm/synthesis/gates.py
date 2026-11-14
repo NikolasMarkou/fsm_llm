@@ -154,7 +154,7 @@ _ALLOWED_TAIL = "Allowed: ["
 # what to write, so a model that nests `{"var": ...}` inside `missing` repeated it
 # four rounds running (live). The fixed note below names the plain-string shape.
 # Do NOT defang it (the defang turns its `[ ]` into `( )`), do NOT edit
-# `flow_analysis.py` for it, and do NOT put a task word in it.
+# `core/verify/flow.py` for it, and do NOT put a task word in it.
 _KEY_NAME_NOTE = (
     'Write {"var": "k"} and {"missing": ["k"]} with plain key-name strings, '
     'never a nested expression such as {"missing": [{"var": "k"}]}.'

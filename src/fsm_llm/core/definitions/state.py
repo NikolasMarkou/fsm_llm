@@ -154,7 +154,7 @@ class State(BaseModel):
     # runner outside core pushes the procedure. Do NOT add a push seam to the
     # pipeline or `FSMManager` (a bare `converse` stays BLOCKED, by design), and
     # do NOT make `FSMValidator.validate()` stricter than this loader (the
-    # never-stricter tests pin it; the flow gates live in `flow_analysis.py`).
+    # never-stricter tests pin it; the flow gates live in `core/verify/flow.py`).
     # Plan 9013b0e3 D-004 (appended): "no existing `fsm_id` moves" holds for
     # definitions that omit `version`; the default is now 4.2, so an explicit
     # "version": "4.1" definition has a new `fsm_id`.

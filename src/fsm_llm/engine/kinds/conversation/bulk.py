@@ -117,7 +117,7 @@ class ConversationBulkMixin(_ConversationSurface):
         # `cast(LiteLLMInterface, self._services.llm_interface)._make_llm_call(...)` —
         # a private method of ONE concrete implementation, called from
         # outside that class. Now goes through the public ABC surface
-        # (`extract_bulk_data`, llm.py), which does its own parsing via the
+        # (`extract_bulk_data`, llm/interface.py), which does its own parsing via the
         # shared `strip_think_and_fences` helper (llm/text.py) — the
         # <think>-tag/fence-stripping regex that used to be hand-duplicated
         # here is gone, not reconciled. Do NOT reintroduce a cast+private-call

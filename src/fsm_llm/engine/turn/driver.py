@@ -112,7 +112,7 @@ class DriverMixin(_PipelineSurface):
         # POST_PROCESSING / Pass 2 / restore sequence for the no-message case:
         # every anchor below would then have to hold in two places.
         # Contextualize propagates conversation_id to all downstream logger
-        # calls on this thread (llm.py, transition_evaluator.py, etc.)
+        # calls on this thread (llm/, core/transition_evaluator.py, etc.)
         with logger.contextualize(conversation_id=conversation_id, package="fsm_llm"):
             # DECISION plan-2026-07-21T045419-9925aa3a/D-012
             # Turn-level atomicity snapshot, taken BEFORE Pass 1. A Pass-2

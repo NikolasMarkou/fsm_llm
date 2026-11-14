@@ -40,7 +40,7 @@ import re
 # anchoring under-matched a ~200-key class: EVERY `password_<non-numeric-suffix>`
 # key was kept, and `password_hash`/`db_password_plaintext`/`user_password_salt`/
 # `admin_password_encrypted` were measured reaching the LLM prompt through
-# `prompts.BasePromptBuilder._filter_context_for_security`.
+# `context.layout.base.BasePromptBuilder._filter_context_for_security`.
 # The pattern below separates the two classes with a NEGATIVE LOOKAHEAD over a
 # bounded allowlist of POLICY/STATUS suffix tokens. Read the direction
 # carefully, because it is the whole point:

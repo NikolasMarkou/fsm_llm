@@ -296,7 +296,7 @@ class ParseMixin:
             - Never raises; a span that is not JSON is skipped.
         """
         # The objects come from the one string-aware scanner
-        # (`utilities.balanced_json_objects`), outermost spans only: a line
+        # (`llm.json_extraction.balanced_json_objects`), outermost spans only: a line
         # scan plus a string-blind brace count returned an inner one-line
         # fragment or a lone `}` for a pretty-printed object. The last object
         # wins here (the first-wins split with `extract_json_from_text` is
@@ -706,7 +706,7 @@ class ParseMixin:
                 # canonical victim. See decisions.md D-022.
                 coerced_value = raw
             elif request.field_type in ("int", "float"):
-                # The pipeline's number rules (utilities.coerce_int/_float):
+                # The pipeline's number rules (core.coerce.coerce_int/_float):
                 # no bool, no 3.7 as 3, no inf or nan.
                 number = coerce_int if request.field_type == "int" else coerce_float
                 try:
@@ -714,8 +714,8 @@ class ParseMixin:
                 except ValueError:
                     pass
             elif request.field_type == "bool":
-                # Same closed vocabulary as `pipeline._coerce_bool`
-                # (utilities.parse_bool_word, plan-2026-11-05T134105-5ed71cf2/D-008).
+                # Same closed vocabulary as `engine.kinds.conversation.fields._coerce_bool`
+                # (core.coerce.parse_bool_word, plan-2026-11-05T134105-5ed71cf2/D-008).
                 coerced_value = parse_bool_word(raw)
             elif request.field_type in ("dict", "list"):
                 # Strict: only accept JSON-parsed values of the correct type

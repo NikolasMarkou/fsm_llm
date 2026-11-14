@@ -129,8 +129,8 @@ class FSMValidator(StructureMixin, GraphMixin):
             # So `API.from_file` is the reference implementation and this validator
             # is a diagnostic that must AGREE with it. `missing`-class failures are
             # exactly the class where they used to disagree: no entry path that
-            # builds an FSMDefinition from a dict (utilities.py, api.py,
-            # meta_builders.py) backfills `description`/`id`, so `fsm-llm-validate`
+            # builds an FSMDefinition from a dict (core/loaders.py, engine/api/,
+            # agents/meta_builders/) backfills `description`/`id`, so `fsm-llm-validate`
             # was reporting is_valid=True for files API.from_file hard-crashes on.
             #
             # Do NOT "tidy" `missing` back out — that reopens the lie, and the

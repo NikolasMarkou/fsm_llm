@@ -52,7 +52,7 @@ def visualize_fsm_from_file(
 
 def main(fsm_path, style: str = "full", *, output_format: str = "ascii"):
     # DECISION plan-2026-07-19T191147-4b664252/D-014 [STALE]
-    # NOT redundant — do not delete. See the twin anchor in `validator.py:main`.
+    # NOT redundant — do not delete. See the twin anchor in `core/verify/cli.py:main`.
     # `logging.py`'s import-time `logger.disable("fsm_llm")` is deliberate library
     # hygiene; this function is the APPLICATION (the `fsm-llm-visualize` console
     # script and `fsm-llm --mode visualize`) and must opt back in, or the diagram

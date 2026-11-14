@@ -226,7 +226,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         # DECISION plan-2026-07-18T162030-a02151fe/D-023 [STALE]
         # This strategy is FIRST-wins: it returns on the first successful parse.
         # That disagrees with Strategy 4 below and with
-        # llm.py::_extract_content_from_thinking, both of which prefer the LAST
+        # llm/providers/litellm.py::_extract_content_from_thinking, both of which prefer the LAST
         # object. The divergence is REAL and still OPEN — which helper you hit
         # depends only on whether the provider split the reasoning trace into a
         # separate `thinking` field.
@@ -238,7 +238,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         #     broken. Only the unfenced variant changed.
         #   - It actively broke the answer-then-example shape:
         #     'The intent is {"intent": "buy"}. Schema: {"intent": "<name>"}'
-        #     started returning the EXAMPLE. For classification.py that silently
+        #     started returning the EXAMPLE. For engine/classification.py that silently
         #     degrades a correct intent to `fallback_intent`.
         # Resolving this means deciding what these three helpers are FOR (is a
         # trailing object a correction, or a restated schema?), and changing

@@ -322,7 +322,7 @@ class ConversationExtractionMixin(_ConversationSurface):
                         # corrected (skip-if-set) but IS reported below under
                         # the same grounding test. Do NOT correct it here.
                         # LV6-01: a back edge that then applies the value
-                        # prunes this entry (~line 1009).
+                        # prunes this entry (post_transition.py, LV6-01).
                         if cfg is not None and prov.get(key) == _value_digest(current):
                             extracted_data[key] = value
                             log.debug(f"Bulk extraction corrected field: {key}")

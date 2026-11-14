@@ -36,7 +36,7 @@ from fsm_llm.logging import logger
 # Do NOT remove the depth bound and do NOT return an unfiltered sub-tree at it.
 # Behaviour AT the bound is fail-CLOSED (drop), the same as
 # `context.clean_context_keys` (D-010) and
-# `prompts.BasePromptBuilder._filter_context_for_security` (D-011) -- three
+# `context.layout.base.BasePromptBuilder._filter_context_for_security` (D-011) -- three
 # filters, one bound, one disposition here. The bound is also what makes a
 # self-referential dict (`d["self"] = d`) terminate.
 #
@@ -49,7 +49,7 @@ from fsm_llm.logging import logger
 #
 # DECISION plan-2026-09-12T135914-45a654de/D-016
 # The depth-bounded dict/list/tuple recursion itself (the part that was
-# byte-identical to `context.py`'s walker) now lives in ONE shared place,
+# byte-identical to `context/compactor.py`'s walker) now lives in ONE shared place,
 # `context.filtering.filter_context_tree`. This call site supplies ONLY the bare
 # predicate the D-010 comment above describes, plus a no-op `on_drop` -- it
 # does not, and must never, reference `None`, `remove_none_values`, or

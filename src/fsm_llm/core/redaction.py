@@ -27,7 +27,7 @@ class _RedactionWalk:
 
 
 # DECISION plan-2026-07-18T162030-a02151fe/D-015 [STALE]
-# This duplicates the key-matching loop in ``prompts.py``
+# This duplicates the key-matching loop in ``context/layout/base.py``
 # ``_filter_context_for_security`` ON PURPOSE. Do NOT "clean this up" by
 # importing that method or hoisting it into a shared helper: it is a bound
 # method of ``BasePromptBuilder`` gated on ``config.filter_internal_context``,
@@ -39,7 +39,7 @@ class _RedactionWalk:
 #
 # DECISION plan-2026-07-19T191147-4b664252/D-014 [STALE]
 # The recursion is NOT optional and the replace-don't-drop rule above is NOT a
-# harmonization bug. `clean_context_keys` (D-010) and `prompts.py`'s
+# harmonization bug. `clean_context_keys` (D-010) and `context/layout/base.py`'s
 # `_filter_context_for_security` (D-011) DROP a matched key; this one keeps the
 # key and redacts its VALUE, on purpose — see the paragraph above. Do NOT
 # "unify" the three. What IS shared, and must stay shared, is the matching
@@ -54,7 +54,7 @@ class _RedactionWalk:
 # The (id, depth) memo caches ONLY a subtree whose walk met no placeholder: a
 # placeholder depends on the active path, so sharing it is wrong (D-052). Do
 # NOT key the memo by id alone (the depth bound truncates per depth), and do
-# NOT route this through `utilities.filter_context_tree` (it drops, D-023).
+# NOT route this through `context.filtering.filter_context_tree` (it drops, D-023).
 def _redact_value(value: object, depth: int, walk: _RedactionWalk) -> object:
     """Redact one context value; recurses into dicts and into lists/tuples."""
     if not isinstance(value, (dict, list, tuple)):

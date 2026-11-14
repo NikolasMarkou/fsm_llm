@@ -201,7 +201,7 @@ def _no_result_key(state: Any) -> str | None:
 # DECISION plan-2026-11-10T194139-2cefeb61/D-017 (item 7)
 # This is the ONE minting rule. It used to be spelled twice (the pipeline's
 # `_build_field_configs_from_state` and a hand mirror `_minted_keys` in
-# flow_analysis.py, kept equal by a parity test); both now read it through
+# core/verify/flow.py, kept equal by a parity test); both now read it through
 # `KindSpec.minted_keys`. Do NOT re-spell it in either place and do NOT change
 # it without the corpus: the completion/synthesize exclusion (those kinds use
 # `_no_minted_keys`), the classification-owned filter (anchored below, D-006 of
