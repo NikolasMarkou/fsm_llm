@@ -188,6 +188,12 @@
       "HumanInTheLoop": "fsm_llm.policy.hitl",
       "make_hitl_checker": "fsm_llm.agents.tools"
     },
+    "fsm_llm.agents.meta_builders": {
+      "AgentArtifactBuilder": "fsm_llm.agents.meta_builders.agent",
+      "ArtifactBuilder": "fsm_llm.agents.meta_builders.base",
+      "FSMArtifactBuilder": "fsm_llm.agents.meta_builders.fsm",
+      "WorkflowArtifactBuilder": "fsm_llm.agents.meta_builders.workflow"
+    },
     "fsm_llm.agents.tools": {
       "ToolRegistry": "fsm_llm.tools.registry",
       "ToolTimedOut": "fsm_llm.tools.timeouts",
@@ -821,7 +827,6 @@
     "fsm_llm.agents.memory_persistence",
     "fsm_llm.agents.memory_tools",
     "fsm_llm.agents.meta_builder",
-    "fsm_llm.agents.meta_builders",
     "fsm_llm.agents.meta_cli",
     "fsm_llm.agents.meta_output",
     "fsm_llm.agents.meta_prompts",

@@ -683,3 +683,214 @@ class TestFSMBuilderReportsAnOrphanOnce:
         b.states["mid"]["description"] = "x" * 5000
         errors = b.validate_complete()
         assert any("orphan" in e.lower() for e in errors), errors
+
+
+# ===================================================================
+# Package layout (plan d454fd62, step 89)
+# ===================================================================
+
+_BUILDER_MODULE_OF = {
+    "ArtifactBuilder": "base",
+    "FSMArtifactBuilder": "fsm",
+    "WorkflowArtifactBuilder": "workflow",
+    "AgentArtifactBuilder": "agent",
+}
+
+
+class TestMetaBuildersPackageLayout:
+    """``agents/meta_builders.py`` is a package at the same dotted path."""
+
+    def test_the_facade_names_exactly_the_four_builder_classes(self):
+        import fsm_llm.agents.meta_builders as package
+
+        assert set(package.__all__) == set(_BUILDER_MODULE_OF)
+        assert len(package.__all__) == 4
+        for name in package.__all__:
+            assert hasattr(package, name), name
+
+    def test_each_class_is_defined_in_its_own_module(self):
+        import fsm_llm.agents.meta_builders as package
+
+        for name, module in _BUILDER_MODULE_OF.items():
+            assert getattr(package, name).__module__ == (
+                f"fsm_llm.agents.meta_builders.{module}"
+            ), name
+
+    def test_the_three_builders_share_the_one_abstract_base(self):
+        from fsm_llm.agents.meta_builders import ArtifactBuilder
+
+        for cls in (FSMArtifactBuilder, WorkflowArtifactBuilder, AgentArtifactBuilder):
+            assert cls.__mro__[1] is ArtifactBuilder
+        with pytest.raises(TypeError, match="abstract"):
+            ArtifactBuilder()  # type: ignore[abstract]
+
+    def test_the_template_model_and_its_anchor_stay_in_the_agent_module(self):
+        from pathlib import Path
+
+        import fsm_llm.agents.meta_builders.agent as agent_module
+        from fsm_llm.agents.constants import MetaDefaults
+
+        assert AgentArtifactBuilder().config["model"] == MetaDefaults.AGENT_MODEL
+        text = Path(agent_module.__file__).read_text(encoding="utf-8")
+        assert "MetaDefaults.AGENT_MODEL" in text
+        assert "Do NOT switch" in text
+        # the anchor of the call-time refusals sits in the FSM module, the lazy
+        # warnings anchor in the base, the workflow load-check anchor in the workflow
+        for module, token in (
+            ("fsm", "89b03f61/D-005"),
+            ("base", "042b086f/D-012"),
+            ("workflow", "3e4eb3e5/D-004"),
+            ("agent", "0068b055/D-011"),
+        ):
+            source = Path(agent_module.__file__).with_name(f"{module}.py")
+            assert token in source.read_text(encoding="utf-8"), (module, token)
+
+    def test_a_log_record_is_named_after_its_module(self):
+        from loguru import logger
+
+        names: list[str] = []
+        logger.enable("fsm_llm")
+        sink = logger.add(lambda m: names.append(m.record["name"]), level="DEBUG")
+        try:
+            b = FSMArtifactBuilder()
+            b.add_state("a", "d", "p")
+            b.add_state("b", "d", "p")
+            b.add_transition("a", "b", "go")
+            b.remove_state("b")
+        finally:
+            logger.remove(sink)
+            logger.disable("fsm_llm")
+        assert names == ["fsm_llm.agents.meta_builders.fsm"] * 4
+
+    def test_the_old_module_attributes_are_not_on_the_package(self):
+        import fsm_llm.agents.meta_builders as package
+
+        for name in ("logger", "MetaDefaults", "BuildError", "FSMDefinition", "copy"):
+            assert not hasattr(package, name), name
+
+
+class TestSerializationAndProgressEdges:
+    """Two edges the step 89 mutation proof found no test for (only a differential saw others)."""
+
+    def test_to_dict_returns_copies_of_the_top_level_containers(self):
+        fsm = FSMArtifactBuilder().set_overview("Bot", "d")
+        fsm.add_state("a", "d", "p")
+        wf = WorkflowArtifactBuilder().set_overview("wf", "W", "d")
+        wf.add_step("a", "timer", "A")
+        agent = AgentArtifactBuilder().set_overview("A", "d")
+        agent.add_tool("t", "d")
+
+        fsm.to_dict()["states"]["zzz"] = {}
+        wf.to_dict()["steps"]["zzz"] = {}
+        agent.to_dict()["tools"].append({"name": "zzz"})
+        agent.to_dict()["config"]["model"] = "zzz"
+
+        assert list(fsm.states) == ["a"]
+        assert list(wf.steps) == ["a"]
+        assert [t["name"] for t in agent.tools] == ["t"]
+        assert agent.config["model"] != "zzz"
+
+    def test_progress_never_reports_a_negative_completed_count(self):
+        b = FSMArtifactBuilder()
+        for sid in ("a", "b", "c"):
+            b.add_state(sid, "", "")
+        missing = b.get_missing_fields()
+        assert len(missing) > b._TOTAL_REQUIRED
+        progress = b.get_progress()
+        assert progress.total_required == b._TOTAL_REQUIRED
+        assert progress.completed == 0
+        assert progress.missing == missing
+
+
+class TestBuilderEdgesOnlyTheDifferentialSaw:
+    """Edges of the builders that no earlier test pinned (step 89 mutation proof).
+
+    Each case was a mutant of the split that only a 400-program differential killed.
+    """
+
+    def test_the_minimal_summary_counts_edges_not_nodes(self):
+        fsm = FSMArtifactBuilder().set_overview("Bot", "d")
+        for sid in ("a", "b", "c"):
+            fsm.add_state(sid, "d", "p")
+        fsm.add_transition("a", "b", "x").add_transition("a", "c", "y")
+        assert "Transitions: 2 defined" in fsm.get_summary("minimal").splitlines()
+
+        wf = WorkflowArtifactBuilder().set_overview("wf", "W", "d")
+        for sid in ("a", "b", "c"):
+            wf.add_step(sid, "timer", sid)
+        wf.set_step_transition("a", "b").set_step_transition("b", "c")
+        wf.set_step_transition("a", "c")
+        assert "Connections: 3 defined" in wf.get_summary("minimal").splitlines()
+
+    def test_update_state_strips_the_value(self):
+        b = FSMArtifactBuilder()
+        b.add_state("a", "d", "p")
+        b.update_state("a", description="  padded  ", purpose="\tp2\n")
+        assert b.states["a"]["description"] == "padded"
+        assert b.states["a"]["purpose"] == "p2"
+
+    def test_a_graph_with_no_terminal_state_is_missing_one(self):
+        b = FSMArtifactBuilder().set_overview("Bot", "d")
+        b.add_state("a", "d", "p").add_state("b", "d", "p")
+        b.add_transition("a", "b", "x").add_transition("b", "a", "y")
+        assert b.get_missing_fields() == [
+            "At least one terminal state (state with no outgoing transitions)"
+        ]
+        b.add_state("end", "d", "p")
+        assert b.get_missing_fields() == []
+
+    def test_remove_transition_removes_only_the_named_target(self):
+        b = FSMArtifactBuilder()
+        for sid in ("a", "b", "c"):
+            b.add_state(sid, "d", "p")
+        b.add_transition("a", "b", "x").add_transition("a", "c", "y")
+        assert b.remove_transition("a", "zzz") is b
+        assert b.remove_transition("nope", "b") is b
+        assert [t["target_state"] for t in b.states["a"]["transitions"]] == ["b", "c"]
+        b.remove_transition("a", "b")
+        assert [t["target_state"] for t in b.states["a"]["transitions"]] == ["c"]
+
+    def test_the_standard_workflow_summary_cuts_a_step_name(self):
+        from fsm_llm.agents.constants import MetaDefaults
+
+        width = MetaDefaults.SUMMARY_LINE_WIDTH
+        wf = WorkflowArtifactBuilder().set_overview("wf", "W", "d")
+        wf.add_step("a", "timer", "n" * (width + 25))
+        line = next(ln for ln in wf.get_summary("standard").splitlines() if "- a" in ln)
+        assert line.endswith(": " + "n" * width)
+
+    @pytest.mark.parametrize(
+        ("alias", "canonical"),
+        [
+            ("react_agent", "react"),
+            ("reactagent", "react"),
+            ("plan_and_execute", "plan_execute"),
+            ("plan_execute_agent", "plan_execute"),
+            ("planexecute", "plan_execute"),
+            ("self_consistent", "self_consistency"),
+            ("eval_opt", "evaluator_optimizer"),
+            ("eval_optimize", "evaluator_optimizer"),
+            ("maker_check", "maker_checker"),
+            ("reflexion_agent", "reflexion"),
+            ("debate_agent", "debate"),
+            ("orchestrate", "orchestrator"),
+            ("adapt_agent", "adapt"),
+            ("prompt_chaining", "prompt_chain"),
+            ("rewoo_agent", "rewoo"),
+        ],
+    )
+    def test_every_agent_type_alias_resolves_to_its_pattern(self, alias, canonical):
+        b = AgentArtifactBuilder().set_agent_type(f"  {alias.upper()} ")
+        assert b.agent_type == canonical
+
+    def test_a_config_without_a_model_still_reports_the_other_keys(self, monkeypatch):
+        monkeypatch.delenv("LLM_MODEL", raising=False)
+        problems = AgentArtifactBuilder._config_problems({"max_iterations": 0})
+        assert set(problems) == {"model", "max_iterations"}
+        assert "No LLM model is set" in problems["model"]
+        assert problems["max_iterations"] == "max_iterations must be at least 1"
+
+    def test_a_validator_reason_loses_the_pydantic_prefix(self):
+        config = {"model": "m", "temperature": float("nan")}
+        reason = AgentArtifactBuilder._config_problems(config)["temperature"]
+        assert not reason.startswith("Value error")

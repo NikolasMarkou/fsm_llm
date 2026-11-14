@@ -635,3 +635,66 @@ source_modules =
     fsm_llm.agents.handlers.run_guards
 forbidden_modules =
     fsm_llm.agents.handlers.executor
+
+# Step 89 (agents/meta_builders.py became the package agents/meta_builders/, D-041). The artifact
+# builders are what `meta_tools`, `meta_prompts` and `MetaBuilderAgent` read, so the package imports
+# no pattern module, no other meta-builder module, no transport, and neither `agents.base` nor
+# `agents.handlers` (all of them reach it or sit beside it; the reverse would be a cycle): it reads its
+# sibling support modules (`constants`, `definitions`, `exceptions`) and `core`.
+[importlinter:contract:agents-meta-builders-imports-no-pattern]
+name = fsm_llm.agents.meta_builders imports no agent pattern, meta-builder peer, transport, base or handlers module
+type = forbidden
+source_modules =
+    fsm_llm.agents.meta_builders
+forbidden_modules =
+    fsm_llm.agents.adapt
+    fsm_llm.agents.agent_graph
+    fsm_llm.agents.agent_skills
+    fsm_llm.agents.auto_memory
+    fsm_llm.agents.base
+    fsm_llm.agents.builders
+    fsm_llm.agents.composition
+    fsm_llm.agents.debate
+    fsm_llm.agents.evaluator_optimizer
+    fsm_llm.agents.handlers
+    fsm_llm.agents.maker_checker
+    fsm_llm.agents.mcp
+    fsm_llm.agents.meta_builder
+    fsm_llm.agents.meta_cli
+    fsm_llm.agents.meta_output
+    fsm_llm.agents.meta_prompts
+    fsm_llm.agents.meta_tools
+    fsm_llm.agents.native_fc
+    fsm_llm.agents.okf
+    fsm_llm.agents.orchestrator
+    fsm_llm.agents.parallel_react
+    fsm_llm.agents.plan_execute
+    fsm_llm.agents.prompt_chain
+    fsm_llm.agents.python_tools
+    fsm_llm.agents.react
+    fsm_llm.agents.reasoning_react
+    fsm_llm.agents.reflexion
+    fsm_llm.agents.remote
+    fsm_llm.agents.rewoo
+    fsm_llm.agents.self_consistency
+    fsm_llm.agents.semantic_memory
+    fsm_llm.agents.semantic_tools
+    fsm_llm.agents.sop
+    fsm_llm.agents.swarm
+    fsm_llm.agents.tool_registries
+    fsm_llm.agents.verified_react
+
+# The three builders sit side by side on the abstract `ArtifactBuilder` (`base.py`): none imports
+# another, and `base` imports none of them.
+[importlinter:contract:agents-meta-builders-modules-are-independent]
+name = no builder module of fsm_llm.agents.meta_builders imports another builder module, and base imports none
+type = forbidden
+source_modules =
+    fsm_llm.agents.meta_builders.agent
+    fsm_llm.agents.meta_builders.base
+    fsm_llm.agents.meta_builders.fsm
+    fsm_llm.agents.meta_builders.workflow
+forbidden_modules =
+    fsm_llm.agents.meta_builders.agent
+    fsm_llm.agents.meta_builders.fsm
+    fsm_llm.agents.meta_builders.workflow

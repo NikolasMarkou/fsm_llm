@@ -9,7 +9,7 @@ Covers these source modules (all under `src/fsm_llm/agents/`):
 
 - `meta_builder.py` (`MetaBuilderAgent`, the driver: keyword hints, handlers, result)
 - `fsm_definitions/meta_builder.py` (`build_meta_builder_fsm`: `classify`, `collect`, `build`, `build_failed`, `done`)
-- `meta_builders.py` (`FSMArtifactBuilder`, `WorkflowArtifactBuilder`, `AgentArtifactBuilder`)
+- `meta_builders/` (the package of `base.py`, `fsm.py`, `workflow.py`, `agent.py`; `FSMArtifactBuilder`, `WorkflowArtifactBuilder`, `AgentArtifactBuilder`)
 - `meta_tools.py` (`create_fsm_tools`, `create_workflow_tools`, `create_agent_tools`, `create_builder_tools`)
 - `meta_prompts.py` (`build_welcome_message`, `build_review_presentation`, `build_meta_collect_response_instructions`, `artifact_schema`, `build_response_format`, `build_artifact_prompt`)
 - `meta_output.py` (`format_artifact_json`, `format_summary`, `save_artifact`)
