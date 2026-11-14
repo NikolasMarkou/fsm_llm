@@ -1,0 +1,95 @@
+# Documentation site (roadmap row 0.7). Build: `make docs` (a strict build: any warning fails).
+# Tools: `pip install --group docs -c constraints.txt` (see [dependency-groups] in pyproject.toml).
+# pre-commit's check-yaml skips this file: `!!python/name:` below is a python tag it cannot read.
+# `tests/test_fsm_llm/test_docs_site.py` reads this file without importing mkdocs.
+site_name: FSM-LLM
+site_description: Finite state machines for large language models
+site_url: https://nikolasmarkou.github.io/fsm_llm/
+repo_url: https://github.com/NikolasMarkou/fsm_llm
+repo_name: NikolasMarkou/fsm_llm
+edit_uri: edit/main/docs/
+docs_dir: docs
+site_dir: site
+
+# A warning is a failure: mike's own build inherits this too.
+strict: true
+
+# `AGENTS.md` files are notes for coding agents and are never published (a test pins it). `api.txt`
+# is the generated API snapshot: it is read by a test, not served as a file. `/README.md` is the
+# GitHub folder index of docs/ (index.md is the site's landing page).
+exclude_docs: |
+  AGENTS.md
+  api.txt
+  /README.md
+
+# mkdocs 1.6 `validation`: each of these is `info` by default, which strict mode does not fail on.
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    absolute_links: warn
+    unrecognized_links: warn
+    anchors: warn
+
+# Every existing page is listed; the reference, package and project pages arrive with later steps.
+nav:
+  - Home: index.md
+  - Getting started:
+      - Quick Start: quickstart.md
+  - Guides:
+      - FSM Design: fsm_design.md
+      - Handlers: handlers.md
+      - Runtime FSM synthesis: synthesis.md
+      - Testing: testing.md
+  - Concepts:
+      - Architecture: architecture.md
+  - Reference:
+      - API Reference: api_reference.md
+  - Decisions: decisions/index.md
+  - Roadmap:
+      - 2026 roadmap: 2026_roadmap.md
+      - Agents roadmap: agents_roadmap.md
+
+theme:
+  name: material
+  # false: no request to Google Fonts (privacy, and the site works offline).
+  font: false
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+
+plugins:
+  - search
+  - include-markdown
+  - mkdocstrings:
+      handlers:
+        python:
+          # src layout: the package is src/fsm_llm/, read statically (nothing is imported).
+          paths: [src]
+          options:
+            # `google` would give strict warnings on docstrings that bench manifests pin; `null`
+            # leaves the docstring text as written and renders it as plain Markdown.
+            docstring_style: null
+            show_root_heading: true
+            show_source: false
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+extra:
+  version:
+    # mike writes versions.json and the selector reads it; `make docs` does not need mike.
+    provider: mike

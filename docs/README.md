@@ -49,6 +49,7 @@ Some tests read these files. `tests/test_fsm_llm/test_docs_snippets.py` finds ev
 - `strands_features_phase_1.md` - historical: delivery note for schema-enforced output, the hidden `metadata` memory buffer, response streaming and session persistence (commit `a7e3d88`).
 - `strands_features_phase_2.md` - historical: plan for the other 8 features (OTEL, swarm, agent graph, MCP, semantic tool retrieval, dependency-based workflow parallelism, SOPs, A2A).
 - `agents_roadmap.md` - design record, not a guide: the `fsm_llm.agents` audit (verdict per audit id, commits, known open items, deferred Track B) and recorded baselines (G3 examples run, agent bench blocks B0 to B2). Current agents contracts live in `src/fsm_llm/agents/README.md` and the Agents section of `api_reference.md`. Source code and `scripts/agents_bench.py` point to it by name.
+- `index.md` - the landing page of the published documentation site (`mkdocs.yml` at the repository root builds it; `make docs`). This `README.md` is the folder index on GitHub and is not part of the site.
 - `decisions/index.md` - the generated decision index: every `# DECISION` anchor of the code, grouped by plan, with its rationale and its places. Not a guide and never edited by hand: `make decision-index` writes it and `make decision-check` fails when it is stale or an anchor has no line in `plans/ANCHORS.md`.
 - `AGENTS.md` - maintainer notes for coding agents; not part of the user guides.
 

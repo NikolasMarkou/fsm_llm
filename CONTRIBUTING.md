@@ -68,6 +68,18 @@ Two markers can follow an anchor's id:
 - `[STALE]`: the plan directory that recorded the decision has been retired, so the full entry may be gone (its one-line summary is in `plans/ANCHORS.md`). The gate counts such an anchor as resolved by its tag (it is listed in the index under Retired). The rule itself may still bind. Read the anchor text and the code around it before changing anything.
 - `[SUPERSEDED BY D-nnn]` (or an inline `[supersedes ...]` note on the newer anchor): the rule was replaced. Follow the newer decision; the old text is kept only as history.
 
+## Building the docs
+
+The documentation site is built from `docs/` and `mkdocs.yml` with mkdocs-material. Its tools are a dependency group, not an extra (they need Python 3.11 or newer and are for maintainers), pinned exactly in `constraints.txt`:
+
+```bash
+.venv/bin/pip install --group docs -c constraints.txt   # needs pip 25.1 or newer
+make docs                                               # a strict build into site/ (ignored by git)
+make docs-serve                                         # live reload at http://127.0.0.1:8000
+```
+
+A strict build fails on any warning: a page missing from the `nav` in `mkdocs.yml`, a broken link or anchor, an `include-markdown` target that does not exist. A new page under `docs/` goes into the `nav`; `AGENTS.md` files are never published (`exclude_docs`). `tests/test_fsm_llm/test_docs_site.py` checks the same structure without mkdocs installed.
+
 ## Pull requests
 
 1. Fork the repository and create a feature branch.

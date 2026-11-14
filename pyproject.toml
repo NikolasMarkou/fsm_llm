@@ -114,6 +114,25 @@ fsm-llm-eval = "fsm_llm.eval.__main__:run"
 fsm-llm-okf = "fsm_llm.okf.cli:main_cli"
 fsm-llm-skills = "fsm_llm.skills.cli:main_cli"
 
+# Docs site tooling (roadmap row 0.7; `mkdocs.yml`, `make docs`). A PEP 735 dependency GROUP,
+# not an extra, on purpose: mkdocs-material needs Python >= 3.11 and these tools are for
+# maintainers and CI, never for a user of the library, so they must not appear in the package
+# metadata or in `all`/`dev`. Install with `pip install --group docs -c constraints.txt`
+# (pip >= 25.1). Every range is bounded and holds its exact pin in constraints.txt
+# (`tests/test_packaging.py::TestDeclaredRangesMatchPins`). `mkdocs<2` is deliberate: mkdocs 2
+# drops the plugin system and the YAML config that this site is built on, and Material for MkDocs
+# is in maintenance mode (end of life 2027-05-05), so everything here is pinned exactly.
+[dependency-groups]
+docs = [
+    "mkdocs>=1.6.1,<2",
+    "mkdocs-material>=9.8.1,<10",
+    "mkdocstrings>=1.0.8,<2",
+    "mkdocstrings-python>=2.0.10,<3",
+    "mike>=2.2.0,<3",
+    "mkdocs-include-markdown-plugin>=7.3.1,<8",
+    "pymdown-extensions>=13.1,<14",
+]
+
 # The import package `fsm_llm` is the directory `src/fsm_llm/` (src layout):
 # `packages.find` finds it and its subpackages by itself; nothing to list when one
 # is added. `include` keeps the search to `fsm_llm*` (a stray top-level directory

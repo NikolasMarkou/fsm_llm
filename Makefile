@@ -1,4 +1,4 @@
-.PHONY: help test lint format type-check lint-imports build clean install-dev coverage audit counts api-snapshot decision-index decision-check
+.PHONY: help test lint format type-check lint-imports build clean install-dev coverage audit counts api-snapshot decision-index decision-check docs docs-serve docs-clean
 
 # Default target
 help: ## Show this help message
@@ -35,6 +35,7 @@ clean: ## Remove build artifacts and caches
 	rm -rf src/logs* src/fsm_llm/logs*
 	rm -rf src/fsm_llm/__pycache__
 	rm -rf htmlcov/ .coverage
+	rm -rf site/
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 
@@ -56,3 +57,12 @@ decision-index: ## Regenerate docs/decisions/index.md, the decision index
 
 decision-check: ## Fail when the decision index is stale or a decision anchor does not resolve
 	python scripts/decision_index.py --check docs/decisions/index.md
+
+docs: ## Build the docs site into site/ (strict: any warning fails); needs `pip install --group docs -c constraints.txt`
+	NO_MKDOCS_2_WARNING=1 mkdocs build --strict
+
+docs-serve: ## Serve the docs site locally with live reload (http://127.0.0.1:8000)
+	NO_MKDOCS_2_WARNING=1 mkdocs serve
+
+docs-clean: ## Remove the built docs site (site/)
+	rm -rf site/

@@ -83,3 +83,19 @@ build==1.2.2.post1
 # so an unpinned CI would silently test a new major. Same rule as the dev tools
 # above: bump deliberately, with the stdio MCP tests on every matrix leg.
 mcp==2.2.0
+
+# ---------------------------------------------------------------------------
+# Docs site tools (`[dependency-groups] docs` in pyproject.toml, `make docs`, row 0.7 of the
+# roadmap). Install: `pip install --group docs -c constraints.txt` (Python >= 3.11). This is the
+# set measured together with a strict build (2026-11); newer patch releases of
+# mkdocstrings-python (2.0.11) and mkdocs-include-markdown-plugin (7.3.2) exist and were not
+# tried. mkdocs stays below 2 (mkdocs 2 has no plugins and no YAML config), and Material for
+# MkDocs reaches end of life on 2027-05-05: bump deliberately, with a strict build as the test.
+# ---------------------------------------------------------------------------
+mkdocs==1.6.1
+mkdocs-material==9.8.1
+mkdocstrings==1.0.8
+mkdocstrings-python==2.0.10
+mike==2.2.0
+mkdocs-include-markdown-plugin==7.3.1
+pymdown-extensions==13.1
