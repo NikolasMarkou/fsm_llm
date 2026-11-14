@@ -29,7 +29,7 @@ There are 11 step types: automatic (run a function, move on), API call, conditio
 ## Files
 
 - `engine/` - `WorkflowEngine`: starts and drives instances, delivers events, runs timers and deadlines, cancels, cleans up, calls hooks. Also `Timer`. A package since step 91 of plan d454fd62: `engine.py` (the shell), the mixins `status`, `lifecycle`, `driver`, `events`, `timers`, `resources` and `queries`, `helpers` and `surface`.
-- `steps.py` - the `WorkflowStep` base class and the 11 step classes.
+- `steps/` - a package: `base.py` (the `WorkflowStep` base class), `helpers.py` (the step executor and the user-callable call), and the 11 step classes by group: `routing.py`, `calls.py`, `waits.py`, `conversation.py`, `agent.py`, `composite.py`.
 - `dsl.py` - short factory functions (`create_workflow`, `auto_step`, `condition_step`, ...), `WorkflowBuilder` (`add_step`, `set_initial_step`, `add_metadata`; `build()` always validates, returns a fresh definition and raises `BuildError` chained from the workflow error), and three pattern helpers that register a set of steps without wiring them together.
 - `definitions.py` - `WorkflowDefinition` with validation (targets exist, all steps reachable, no loop that never pauses).
 - `models.py` - statuses, events, step results, instances, history entries, event listeners, wait settings.

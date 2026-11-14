@@ -1502,7 +1502,7 @@ class TestEngineEdgesOfEachModule:
     async def test_the_step_executor_does_not_leak_into_the_callers_context(self):
         from concurrent.futures import ThreadPoolExecutor
 
-        from fsm_llm.workflows.steps import _STEP_EXECUTOR
+        from fsm_llm.workflows.steps.helpers import _STEP_EXECUTOR
 
         executor = ThreadPoolExecutor(max_workers=1)
         try:

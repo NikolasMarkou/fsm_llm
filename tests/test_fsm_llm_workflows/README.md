@@ -12,7 +12,7 @@ Most tests build a step or a small workflow directly in Python, run it, and chec
 
 - Step tests call `await step.execute(context)` on one step and check the returned `WorkflowStepResult` (`success`, `next_step_id`, `data`, `error`).
 - Engine tests build a workflow with `create_workflow(...)`, `with_initial_step(...)` and `with_step(...)`, register it on a fresh `WorkflowEngine()`, call `start(...)`, then check the instance status (`PENDING`, `RUNNING`, `WAITING`, `COMPLETED`, `FAILED`, `CANCELLED`) and its context.
-- LLMs, agents and the core `fsm_llm.API` are replaced by small fake classes or `unittest.mock.MagicMock`. `ConversationStep` tests patch `fsm_llm.workflows.steps.API`.
+- LLMs, agents and the core `fsm_llm.API` are replaced by small fake classes or `unittest.mock.MagicMock`. `ConversationStep` tests patch `fsm_llm.workflows.steps.conversation.API` (the module that reads it).
 - Timing tests use real sleeps and tiny timeouts (0.05 s to 0.5 s). Most sleeps are short (0.01 s to 1 s); the 8 `slow` tests in `test_step_timeouts.py` sleep 5.0 s and rely on a 0.1 s step timeout to cut them off.
 
 Async tests need no decorator: the repository's `pyproject.toml` sets `asyncio_mode = "auto"`.
@@ -22,7 +22,7 @@ Async tests need no decorator: the repository's `pyproject.toml` sets `asyncio_m
 - `support.py` - helpers that more than one test file uses (a wait-then-done workflow builder, `_settle`, fake LLM responses). Not collected: the name has no `test_` prefix.
 - `test_workflows.py` - exceptions, models (`WorkflowStatus`, `WorkflowEvent`, `WorkflowStepResult`, `WorkflowInstance`, `EventListener`, `WaitEventConfig`), definition validation, basic DSL, internal-key filtering, terminal routing on `""`, nested-step serialization, package exports. 55 tests.
 - `test_dsl.py` - every DSL factory (`auto_step`, `api_step`, `llm_step`, `timer_step`, ...), the `WorkflowBuilder` fluent builder, and the `create_linear_workflow`, `create_conditional_workflow`, `create_event_driven_workflow` helpers. The builder classes pin that `build()` always validates (an empty builder is refused), that step call order is kept (the last `set_initial_step` is initial but the step keeps its position), that every failure inside `build()` is a `BuildError` chained from its cause, and that each build is isolated (mutating the builder after a build, or the product before the next build, touches neither; steps stay shared by reference). 59 tests.
-- `test_steps.py` - execution of `AutoStep`, `ConditionStep`, `APIStep`, `WaitEventStep`, `TimerStep`, `ParallelStep`, `ConversationStep`. 59 tests.
+- `test_steps.py` - execution of `AutoStep`, `ConditionStep`, `APIStep`, `WaitEventStep`, `TimerStep`, `ParallelStep`, `ConversationStep`, the layout of the `steps/` package and the edges of each step module. 59 tests.
 - `test_new_steps.py` - `SwitchStep`, `RetryStep`, `AgentStep`, their DSL factories, and engine instance removal and purging. 46 tests.
 - `test_step_timeouts.py` - the per-step `timeout_seconds` field and the `_with_timeout` helper. 23 tests, 8 marked `slow`.
 - `test_engine_lifecycle.py` - the engine's lifecycle and resources: instance ids, `max_seconds` deadlines, loops and the step budget, release of timers and listeners on cancel and close, definition pinning, hooks and the engine API, silent logging by default (a subprocess), failures raised by steps, async `aggregation_function`, the announced first RUNNING, per-instance locking, terminal-status guards, float timeouts, the package layout of `engine/`. 49 tests.

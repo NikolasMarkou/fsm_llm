@@ -9,6 +9,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import Field, ValidationError
 
 from fsm_llm.workflows import (
     WorkflowEngine,
@@ -26,6 +27,8 @@ from fsm_llm.workflows.steps import (
     ConversationStep,
     LLMStep,
     ParallelStep,
+    RetryStep,
+    SwitchStep,
     TimerStep,
     WaitEventStep,
     WorkflowStep,
@@ -443,7 +446,7 @@ class TestConversationStep:
             context_mapping={"user_name": "name", "user_age": "age"},
         )
 
-        with patch("fsm_llm.workflows.steps.API") as MockAPI:
+        with patch("fsm_llm.workflows.steps.conversation.API") as MockAPI:
             MockAPI.from_definition.return_value = mock_api
             result = await step.execute({})
 
@@ -465,7 +468,7 @@ class TestConversationStep:
             initial_context={"conv_user": "workflow_user"},
         )
 
-        with patch("fsm_llm.workflows.steps.API") as MockAPI:
+        with patch("fsm_llm.workflows.steps.conversation.API") as MockAPI:
             MockAPI.from_definition.return_value = mock_api
             await step.execute({"workflow_user": "Bob"})
 
@@ -487,7 +490,7 @@ class TestConversationStep:
             error_step_id="error_step_id",
         )
 
-        with patch("fsm_llm.workflows.steps.API") as MockAPI:
+        with patch("fsm_llm.workflows.steps.conversation.API") as MockAPI:
             MockAPI.from_definition.side_effect = Exception("LLM unavailable")
             result = await step.execute({})
 
@@ -510,7 +513,7 @@ class TestConversationStep:
             auto_messages=["m1", "m2", "m3", "m4", "m5"],
         )
 
-        with patch("fsm_llm.workflows.steps.API") as MockAPI:
+        with patch("fsm_llm.workflows.steps.conversation.API") as MockAPI:
             MockAPI.from_definition.return_value = mock_api
             await step.execute({})
 
@@ -662,7 +665,7 @@ class TestFailClosedRouting:
         )
         from unittest.mock import patch
 
-        with patch("fsm_llm.workflows.steps.API") as mock_api:
+        with patch("fsm_llm.workflows.steps.conversation.API") as mock_api:
             mock_api.from_definition.side_effect = RuntimeError("no model")
             result = await step.execute({})
         assert result.success is False
@@ -879,7 +882,7 @@ class TestConversationStepFixes:
             timeout_seconds=0.05 * timing_factor,
             error_step_id="err",
         )
-        with patch("fsm_llm.workflows.steps.API") as mock_cls:
+        with patch("fsm_llm.workflows.steps.conversation.API") as mock_cls:
             mock_cls.from_definition.return_value = self._mock_api(
                 delay=0.3 * timing_factor
             )
@@ -899,7 +902,7 @@ class TestConversationStepFixes:
             error_step_id="err",
             require_completion=True,
         )
-        with patch("fsm_llm.workflows.steps.API") as mock_cls:
+        with patch("fsm_llm.workflows.steps.conversation.API") as mock_cls:
             mock_cls.from_definition.return_value = self._mock_api(ended=False)
             result = await step.execute({})
         assert result.success is False
@@ -916,7 +919,7 @@ class TestConversationStepFixes:
             fsm_definition={"name": "x"},
             use_user_input=True,
         )
-        with patch("fsm_llm.workflows.steps.API") as mock_cls:
+        with patch("fsm_llm.workflows.steps.conversation.API") as mock_cls:
             mock_cls.from_definition.return_value = api
             await step.execute({"_user_input": "hello there"})
         api.converse.assert_called_once_with(
@@ -1052,7 +1055,7 @@ class TestConversationStepResourceCleanup:
         mock_api_class.from_file.return_value = mock_api
 
         with patch.dict("sys.modules", {}):
-            with patch("fsm_llm.workflows.steps.API", mock_api_class):
+            with patch("fsm_llm.workflows.steps.conversation.API", mock_api_class):
                 with patch("fsm_llm.engine.api.conversation.API", mock_api_class):
                     result = await step.execute({})
 
@@ -1086,3 +1089,777 @@ class TestLLMStepTemplateError:
         # Should fail gracefully instead of crashing with raw KeyError
         assert result.success is False
         assert "order_id" in result.error.lower() or "template" in result.error.lower()
+
+
+# ---------------------------------------------------------------------------
+# package layout (step 92 of plan d454fd62)
+# ---------------------------------------------------------------------------
+
+# class name -> the module of ``fsm_llm.workflows.steps`` that defines it
+_STEP_MODULE_OF = {
+    "WorkflowStep": "base",
+    "AutoStep": "routing",
+    "ConditionStep": "routing",
+    "SwitchStep": "routing",
+    "APIStep": "calls",
+    "LLMStep": "calls",
+    "WaitEventStep": "waits",
+    "TimerStep": "waits",
+    "ConversationStep": "conversation",
+    "AgentStep": "agent",
+    "ParallelStep": "composite",
+    "RetryStep": "composite",
+}
+
+
+def _minimal_step_kwargs() -> dict[str, dict[str, Any]]:
+    """Valid keyword arguments for each of the 11 step kinds."""
+    inner = AutoStep(step_id="inner", name="Inner", next_step_id="")
+    return {
+        "AutoStep": {"next_step_id": "n"},
+        "ConditionStep": {
+            "condition": lambda c: True,
+            "true_step_id": "a",
+            "false_step_id": "b",
+        },
+        "SwitchStep": {"key": "k", "cases": {"a": "x"}},
+        "APIStep": {
+            "api_function": lambda: 1,
+            "success_step_id": "a",
+            "failure_step_id": "b",
+        },
+        "LLMStep": {
+            "llm_interface": MagicMock(),
+            "prompt_template": "hi",
+            "next_step_id": "n",
+        },
+        "WaitEventStep": {
+            "config": WaitEventConfig(event_type="e", success_step_id="a")
+        },
+        "TimerStep": {"delay_seconds": 1, "next_step_id": "n"},
+        "ConversationStep": {"fsm_definition": {"x": 1}},
+        "AgentStep": {"agent": MagicMock()},
+        "ParallelStep": {"steps": [inner], "next_step_id": "n"},
+        "RetryStep": {"step": inner},
+    }
+
+
+class TestWorkflowStepsPackageLayout:
+    """``workflows/steps.py`` is a package at the same dotted path: the base in
+    one module, the 11 kinds in six modules by what they do."""
+
+    def test_the_facade_exports_exactly_the_twelve_public_names(self):
+        import fsm_llm.workflows.steps as facade
+
+        assert sorted(facade.__all__) == sorted(_STEP_MODULE_OF)
+        namespace: dict = {}
+        exec("from fsm_llm.workflows.steps import *", namespace)
+        assert set(_STEP_MODULE_OF) <= set(namespace)
+        for private in (
+            "_STEP_EXECUTOR",
+            "_call_user_callable",
+            "_is_async_callable",
+            "_error_text",
+            "_lookup_path",
+        ):
+            assert private not in namespace
+            assert not hasattr(facade, private), private
+        # `API` is read by `ConversationStep` in its own module, never the facade
+        assert not hasattr(facade, "API")
+
+    def test_every_class_is_defined_in_the_module_that_owns_it(self):
+        import importlib
+
+        import fsm_llm.workflows.steps as facade
+
+        for name, module in _STEP_MODULE_OF.items():
+            cls = getattr(facade, name)
+            assert cls.__module__ == f"fsm_llm.workflows.steps.{module}", name
+            defining = importlib.import_module(f"fsm_llm.workflows.steps.{module}")
+            assert vars(defining)[name] is cls
+
+    def test_every_kind_inherits_the_forbidding_base_and_refuses_an_unknown_keyword(
+        self,
+    ):
+        import fsm_llm.workflows.steps as facade
+
+        kwargs = _minimal_step_kwargs()
+        assert set(kwargs) == set(_STEP_MODULE_OF) - {"WorkflowStep"}
+        assert WorkflowStep.model_config["extra"] == "forbid"
+        for name, required in kwargs.items():
+            cls = getattr(facade, name)
+            assert issubclass(cls, WorkflowStep), name
+            assert cls.model_config["extra"] == "forbid", name
+            cls(step_id="s", name="S", **required)
+            with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+                cls(step_id="s", name="S", next_state="x", **required)
+
+    def test_serialize_tags_are_the_class_names_not_a_module_path(self):
+        import fsm_llm.workflows.steps as facade
+        from fsm_llm.workflows import WorkflowDefinition
+
+        for name, required in _minimal_step_kwargs().items():
+            step = getattr(facade, name)(step_id="s", name="S", **required)
+            definition = WorkflowDefinition(
+                workflow_id="w", name="W", steps={"s": step}, initial_step_id="s"
+            )
+            dumped = definition.serialize()["steps"]["s"]
+            assert dumped["type"] == name
+            assert "fsm_llm" not in str(dumped["type"])
+
+    def test_the_step_executor_is_one_object_defined_in_one_module(self):
+        import ast
+        from pathlib import Path
+
+        import fsm_llm.workflows.steps as facade
+        from fsm_llm.workflows.engine import driver
+        from fsm_llm.workflows.steps import conversation, helpers
+
+        assert driver._STEP_EXECUTOR is helpers._STEP_EXECUTOR
+        assert conversation._STEP_EXECUTOR is helpers._STEP_EXECUTOR
+        assert helpers._STEP_EXECUTOR.name == "fsm_llm_workflows_step_executor"
+        defined_in = []
+        for path in sorted(Path(facade.__file__).parent.glob("*.py")):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                targets = []
+                if isinstance(node, ast.Assign):
+                    targets = [t for t in node.targets if isinstance(t, ast.Name)]
+                elif isinstance(node, ast.AnnAssign) and isinstance(
+                    node.target, ast.Name
+                ):
+                    targets = [node.target]
+                if any(t.id == "_STEP_EXECUTOR" for t in targets):
+                    defined_in.append(path.stem)
+        assert defined_in == ["helpers"]
+
+    async def test_the_executor_the_driver_sets_is_the_one_the_steps_use(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        seen: list[str] = []
+
+        def action(ctx):
+            seen.append(threading.current_thread().name)
+            return {}
+
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="step92")
+        try:
+            engine = WorkflowEngine(executor=executor)
+            engine.register_workflow(
+                create_workflow("wf", "W").with_initial_step(
+                    auto_step("a", "A", next_step_id="", action=action)
+                )
+            )
+            await engine.start("wf")
+        finally:
+            executor.shutdown()
+        assert seen and all(name.startswith("step92") for name in seen)
+
+    def test_a_patch_of_api_aims_at_the_module_that_reads_it(self):
+        import fsm_llm.workflows.steps as facade
+        from fsm_llm.workflows.steps import conversation
+
+        assert conversation.API.__name__ == "API"
+        with pytest.raises(AttributeError):
+            with patch("fsm_llm.workflows.steps.API"):
+                pass  # pragma: no cover
+        assert not hasattr(facade, "API")
+
+    async def test_a_patch_at_the_conversation_module_reaches_the_step(self):
+        mock_api = MagicMock()
+        mock_api.start_conversation.return_value = ("c1", "hello")
+        mock_api.has_conversation_ended.return_value = True
+        mock_api.get_data.return_value = {"k": "v"}
+        step = ConversationStep(
+            step_id="c",
+            name="C",
+            fsm_definition={"x": 1},
+            context_mapping={"out": "k"},
+            success_step_id="done",
+        )
+        with patch("fsm_llm.workflows.steps.conversation.API") as api_class:
+            api_class.from_definition.return_value = mock_api
+            result = await step.execute({})
+        api_class.from_definition.assert_called_once()
+        assert result.success is True
+        assert result.data["out"] == "v"
+
+    def test_every_decision_anchor_sits_with_the_code_it_constrains(self):
+        from pathlib import Path
+
+        import fsm_llm.workflows.steps as facade
+
+        root = Path(facade.__file__).parent
+        expected = {
+            "helpers": ("5d1e7a3b/D-004",),
+            "composite": ("5d1e7a3b/D-003", "089d0ec7/D-010"),
+            "conversation": ("07ad3f8c/D-039",),
+        }
+        for module, tokens in expected.items():
+            text = (root / f"{module}.py").read_text(encoding="utf-8")
+            for token in tokens:
+                assert token in text, (module, token)
+        assert (root / "composite.py").read_text(encoding="utf-8").count(
+            "5d1e7a3b/D-003"
+        ) == 2
+
+    async def test_a_log_record_is_named_after_the_module_that_logs_it(self):
+        from loguru import logger
+
+        records: list[tuple[str, str]] = []
+        extras: list[tuple[str, dict]] = []
+        logger.enable("fsm_llm")
+        sink = logger.add(
+            lambda m: (
+                records.append((m.record["name"], m.record["message"])),
+                extras.append((m.record["name"], dict(m.record["extra"]))),
+            ),
+            level="DEBUG",
+            format="{message}",
+        )
+
+        def boom(ctx):
+            raise ValueError("boom")
+
+        try:
+            await AutoStep(
+                step_id="a", name="A", next_step_id="n", action=boom
+            ).execute({})
+            await APIStep(
+                step_id="b",
+                name="B",
+                api_function=lambda: {},
+                success_step_id="x",
+                failure_step_id="y",
+                output_mapping={"o": "missing"},
+            ).execute({})
+            await AgentStep(
+                step_id="g", name="G", agent=MagicMock(run=boom), task_template="t"
+            ).execute({})
+        finally:
+            logger.remove(sink)
+            logger.disable("fsm_llm")
+
+        def logged_by(prefix: str) -> str:
+            return next(n for n, message in records if message.startswith(prefix))
+
+        assert logged_by("Error in auto transition step") == (
+            "fsm_llm.workflows.steps.routing"
+        )
+        assert logged_by("APIStep [b]") == "fsm_llm.workflows.steps.calls"
+        assert logged_by("Agent step 'g' failed") == "fsm_llm.workflows.steps.agent"
+        # no step binds extra context onto its records: besides the two keys the
+        # library's own record patcher adds once a test has set logging up, a
+        # record of a step carries nothing
+        step_extras = [e for n, e in extras if n.startswith("fsm_llm.workflows.steps")]
+        assert len(step_extras) == 3
+        assert all(set(e) <= {"conversation_id", "package"} for e in step_extras)
+
+
+# ---------------------------------------------------------------------------
+# edges of each step module that the split of step 92 found unpinned
+# ---------------------------------------------------------------------------
+
+
+class _NoExecutor:
+    """An executor that fails when asked to run anything."""
+
+    def submit(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover
+        raise AssertionError("an async callable must not run in the executor")
+
+
+class TestStepModuleHelpers:
+    """``steps/helpers.py`` and the private helper of ``steps/calls.py``."""
+
+    def test_error_text_is_never_empty(self):
+        from fsm_llm.workflows.steps.helpers import _error_text
+
+        assert _error_text(ValueError("x")) == "x"
+        assert _error_text(KeyError("k")) == "'k'"
+        assert _error_text(TimeoutError()) == "TimeoutError"
+        assert _error_text(RuntimeError("")) == "RuntimeError"
+
+    def test_which_callables_count_as_async(self):
+        import functools
+
+        from fsm_llm.workflows.steps.helpers import _is_async_callable
+
+        async def coro():
+            return 1
+
+        class AsyncCallable:
+            async def __call__(self):
+                return 1
+
+        class SyncCallable:
+            def __call__(self):
+                return 1
+
+        assert _is_async_callable(coro) is True
+        assert _is_async_callable(AsyncCallable()) is True
+        assert _is_async_callable(functools.partial(coro)) is True
+        assert _is_async_callable(lambda: 1) is False
+        assert _is_async_callable(SyncCallable()) is False
+        assert _is_async_callable(functools.partial(lambda: 1)) is False
+        assert _is_async_callable(5) is False
+        assert _is_async_callable(None) is False
+
+    async def test_a_callable_object_with_an_async_call_is_awaited_in_place(self):
+        from fsm_llm.workflows.steps.helpers import _STEP_EXECUTOR, _call_user_callable
+
+        class AsyncCallable:
+            async def __call__(self, a, b=0):
+                return ("obj", a, b)
+
+        token = _STEP_EXECUTOR.set(_NoExecutor())  # type: ignore[arg-type]
+        try:
+            assert await _call_user_callable(AsyncCallable(), 1, b=2) == ("obj", 1, 2)
+        finally:
+            _STEP_EXECUTOR.reset(token)
+
+    async def test_a_sync_callable_runs_in_the_step_executor_with_its_arguments(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        from fsm_llm.workflows.steps.helpers import _STEP_EXECUTOR, _call_user_callable
+
+        names: list[str] = []
+
+        def sync(a, b=0):
+            names.append(threading.current_thread().name)
+            return (a, b)
+
+        async def later():
+            return "awaited"
+
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="step92b")
+        token = _STEP_EXECUTOR.set(executor)
+        try:
+            assert await _call_user_callable(sync, 1, b=2) == (1, 2)
+            # a sync factory that RETURNS an awaitable is awaited too
+            assert await _call_user_callable(lambda: later()) == "awaited"
+        finally:
+            _STEP_EXECUTOR.reset(token)
+            executor.shutdown()
+        assert names == ["step92b_0"]
+
+    def test_lookup_path_resolves_a_result_key(self):
+        from fsm_llm.workflows.steps.calls import _lookup_path
+
+        nested = {"a": {"b": {"c": [1]}}, "a.b": "exact"}
+        assert _lookup_path(nested, "a.b") == (True, "exact")  # an exact key wins
+        assert _lookup_path({"a": {"b": 1}}, "a.b") == (True, 1)
+        assert _lookup_path({"a": {"b": {"c": [1]}}}, "a.b.c") == (True, [1])
+        assert _lookup_path(5, "") == (True, 5)  # "" is the whole result
+        assert _lookup_path([1], "x") == (False, None)  # not a dict
+        assert _lookup_path({"a": None}, "a.b") == (False, None)
+        assert _lookup_path({"a": {"b": 1}}, "a.") == (False, None)
+
+
+class TestStepKindEdges:
+    """Edges of the routing, call, wait and composite modules."""
+
+    async def test_a_switch_compares_a_missing_or_none_value_as_empty_text(self):
+        step = SwitchStep(
+            step_id="s",
+            name="S",
+            key="k",
+            cases={"": "empty", "None": "text"},
+            default_step_id="other",
+        )
+        for context in ({}, {"k": None}):
+            result = await step.execute(context)
+            assert result.next_step_id == "empty", context
+            assert result.data["switch_s_matched"] == ""
+        assert (await step.execute({"k": "None"})).next_step_id == "text"
+
+    async def test_a_switch_matches_case_sensitively(self):
+        step = SwitchStep(
+            step_id="s", name="S", key="k", cases={"a": "x"}, default_step_id="d"
+        )
+        assert (await step.execute({"k": "a"})).next_step_id == "x"
+        assert (await step.execute({"k": "A"})).next_step_id == "d"
+
+    def test_a_switch_references_every_target_but_no_empty_marker(self):
+        step = SwitchStep(
+            step_id="s",
+            name="S",
+            key="k",
+            cases={"a": "x", "b": "", "c": "y"},
+            default_step_id="",
+        )
+        assert step.referenced_step_ids() == {"x", "y"}
+        with_default = SwitchStep(
+            step_id="s", name="S", key="k", cases={"a": "x"}, default_step_id="d"
+        )
+        assert with_default.referenced_step_ids() == {"x", "d"}
+
+    async def test_an_api_output_key_that_is_an_exact_key_beats_a_dotted_path(self):
+        step = APIStep(
+            step_id="a",
+            name="A",
+            api_function=lambda: {"user.name": "exact", "user": {"name": "nested"}},
+            success_step_id="ok",
+            failure_step_id="bad",
+            output_mapping={"who": "user.name"},
+        )
+        assert (await step.execute({})).data == {"who": "exact"}
+
+    async def test_an_api_input_key_missing_from_the_context_is_omitted(self):
+        seen: list[dict[str, Any]] = []
+
+        def api(**params):
+            seen.append(params)
+            return {}
+
+        step = APIStep(
+            step_id="a",
+            name="A",
+            api_function=api,
+            success_step_id="ok",
+            failure_step_id="bad",
+            input_mapping={"p": "present", "q": "absent"},
+        )
+        result = await step.execute({"present": 1})
+        assert result.success is True and result.next_step_id == "ok"
+        assert seen == [{"p": 1}]
+
+    async def test_an_llm_regex_matches_across_lines(self):
+        step = LLMStep(
+            step_id="l",
+            name="L",
+            llm_interface=_CoreLikeLLM("first\nsecond"),
+            prompt_template="go",
+            output_mapping={"both": "first.second", "head": r"(\w+)\n"},
+            next_step_id="n",
+        )
+        result = await step.execute({})
+        assert result.data == {"both": "first\nsecond", "head": "first"}
+
+    async def test_an_empty_llm_system_prompt_falls_back_to_the_default_text(self):
+        llm = _CoreLikeLLM("done")
+        step = LLMStep(
+            step_id="l",
+            name="L",
+            llm_interface=llm,
+            prompt_template="go",
+            system_prompt="",
+            next_step_id="n",
+        )
+        await step.execute({})
+        assert llm.requests[0].system_prompt == "Follow the user's instructions."
+
+
+class _Outcome(WorkflowStep):
+    """Does what ``kind`` says: ``ok`` (with ``data``), ``fail``, ``raise`` or ``garbage``."""
+
+    kind: str = "ok"
+    data: dict[str, Any] = Field(default_factory=dict)
+    calls: int = 0
+
+    async def execute(self, context: dict[str, Any]) -> Any:
+        self.calls += 1
+        if self.kind == "raise":
+            raise ValueError("boom")
+        if self.kind == "garbage":
+            return "text"
+        if self.kind == "fail":
+            return WorkflowStepResult.failure_result(error="bad")
+        return WorkflowStepResult.success_result(data=dict(self.data))
+
+
+def _conversation_api(ended: bool = True) -> MagicMock:
+    api = MagicMock()
+    api.start_conversation.return_value = ("c1", "hello")
+    api.has_conversation_ended.return_value = ended
+    api.converse.return_value = "reply"
+    api.get_data.return_value = {}
+    return api
+
+
+class TestStepKindEdgesWaitsAndConversation:
+    """Edges of ``steps/waits.py``, ``steps/conversation.py`` and ``steps/agent.py``."""
+
+    async def test_a_wait_step_reports_the_whole_wait_and_when_it_began(self):
+        from datetime import datetime
+
+        config = WaitEventConfig(
+            event_type="e",
+            success_step_id="a",
+            timeout_seconds=2.0,
+            timeout_step_id="t",
+            event_mapping={"g": "v"},
+            correlation_key="c",
+        )
+        result = await WaitEventStep(step_id="w", name="W", config=config).execute({})
+        info = result.data["_waiting_info"]
+        since = info.pop("waiting_since")
+        assert datetime.fromisoformat(since).tzinfo is not None
+        assert info == {
+            "waiting_for_event": True,
+            "event_type": "e",
+            "timeout_seconds": 2.0,
+            "timeout_step_id": "t",
+            "success_step_id": "a",
+            "event_mapping": {"g": "v"},
+            "correlation_key": "c",
+        }
+        assert result.next_step_id is None
+
+    async def test_a_timer_step_reports_when_the_timer_starts_and_ends(self):
+        from datetime import datetime
+
+        result = await TimerStep(
+            step_id="t", name="T", delay_seconds=90, next_step_id="n"
+        ).execute({})
+        info = result.data["_timer_info"]
+        start = datetime.fromisoformat(info.pop("timer_start"))
+        end = datetime.fromisoformat(info.pop("timer_end"))
+        assert 89.0 < (end - start).total_seconds() < 91.0
+        assert info == {
+            "waiting_for_timer": True,
+            "delay_seconds": 90,
+            "next_step_id": "n",
+        }
+
+    def test_a_conversation_has_the_smaller_of_its_two_time_limits(self):
+        def limit(own, conversation):
+            return ConversationStep(
+                step_id="c",
+                name="C",
+                fsm_definition={"x": 1},
+                timeout_seconds=own,
+                conversation_timeout=conversation,
+            )._effective_timeout()
+
+        assert limit(None, None) is None
+        assert limit(5, 2) == 2
+        assert limit(2, 5) == 2
+        assert limit(None, 3) == 3
+        assert limit(3, None) == 3
+
+    def test_a_conversation_needs_at_least_one_turn(self):
+        for bad in (0, -1):
+            with pytest.raises(ValidationError, match="max_turns must be >= 1"):
+                ConversationStep(
+                    step_id="c", name="C", fsm_definition={"x": 1}, max_turns=bad
+                )
+        assert (
+            ConversationStep(
+                step_id="c", name="C", fsm_definition={"x": 1}, max_turns=1
+            ).max_turns
+            == 1
+        )
+
+    async def test_the_user_input_is_sent_only_when_the_step_asks_for_it(self):
+        for use_user_input, sent in ((False, []), (True, ["hi"])):
+            api = _conversation_api(ended=False)
+            step = ConversationStep(
+                step_id="c",
+                name="C",
+                fsm_definition={"x": 1},
+                use_user_input=use_user_input,
+            )
+            with patch("fsm_llm.workflows.steps.conversation.API") as api_class:
+                api_class.from_definition.return_value = api
+                await step.execute({"_user_input": "hi"})
+            assert [c.kwargs["user_message"] for c in api.converse.call_args_list] == (
+                sent
+            ), use_user_input
+
+    async def test_the_model_is_passed_to_the_api(self):
+        for kwargs, factory in (
+            ({"fsm_definition": {"x": 1}}, "from_definition"),
+            ({"fsm_file": "x.json"}, "from_file"),
+        ):
+            step = ConversationStep(step_id="c", name="C", model="some-model", **kwargs)
+            with patch("fsm_llm.workflows.steps.conversation.API") as api_class:
+                getattr(api_class, factory).return_value = _conversation_api()
+                await step.execute({})
+            assert getattr(api_class, factory).call_args.kwargs == {
+                "model": "some-model"
+            }
+
+    async def test_the_conversation_runs_in_the_executor_the_driver_set(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        from fsm_llm.workflows.steps.helpers import _STEP_EXECUTOR
+
+        names: list[str] = []
+        api = _conversation_api()
+        api.start_conversation.side_effect = lambda **kw: (
+            names.append(threading.current_thread().name) or ("c1", "hello")
+        )
+        step = ConversationStep(step_id="c", name="C", fsm_definition={"x": 1})
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="conv92")
+        token = _STEP_EXECUTOR.set(executor)
+        try:
+            with patch("fsm_llm.workflows.steps.conversation.API") as api_class:
+                api_class.from_definition.return_value = api
+                await step.execute({})
+        finally:
+            _STEP_EXECUTOR.reset(token)
+            executor.shutdown()
+        assert names == ["conv92_0"]
+
+    async def test_an_agent_result_without_a_success_flag_is_a_failure(self):
+        class _Result:
+            answer = "partial"
+
+        agent = MagicMock()
+        agent.run.return_value = _Result()
+        result = await AgentStep(step_id="a", name="A", agent=agent).execute(
+            {"task": "go"}
+        )
+        assert result.success is False
+        assert "Agent reported failure: partial" in str(result.error)
+
+    async def test_a_missing_task_variable_is_named_in_the_error(self):
+        step = AgentStep(
+            step_id="a", name="A", agent=MagicMock(), task_template="do {topic}"
+        )
+        result = await step.execute({})
+        assert result.success is False
+        assert "Missing context key for task template: 'topic'" in str(result.error)
+
+    async def test_a_missing_prompt_variable_is_named_in_the_error(self):
+        step = LLMStep(
+            step_id="l",
+            name="L",
+            llm_interface=_CoreLikeLLM("x"),
+            prompt_template="hi {nope}",
+            next_step_id="n",
+        )
+        result = await step.execute({})
+        assert result.success is False
+        assert "Prompt template variable 'nope' not found" in str(result.error)
+
+
+class TestStepKindEdgesComposite:
+    """Edges of ``steps/composite.py``."""
+
+    def test_a_wait_or_timer_child_is_refused_however_deeply_it_is_wrapped(self):
+        wait = WaitEventStep(
+            step_id="w",
+            name="W",
+            config=WaitEventConfig(event_type="e", success_step_id="a"),
+        )
+        timer = TimerStep(step_id="t", name="T", delay_seconds=1, next_step_id="n")
+        wrapped = [
+            RetryStep(step_id="r", name="R", step=wait),
+            RetryStep(
+                step_id="r2",
+                name="R2",
+                step=RetryStep(step_id="r1", name="R1", step=timer),
+            ),
+            timer,
+        ]
+        for child in wrapped:
+            with pytest.raises(ValidationError, match="cannot run inside a Parallel"):
+                ParallelStep(step_id="p", name="P", steps=[child], next_step_id="n")
+        ParallelStep(
+            step_id="p",
+            name="P",
+            steps=[
+                RetryStep(step_id="r", name="R", step=_Outcome(step_id="o", name="O"))
+            ],
+            next_step_id="n",
+        )
+
+    async def test_a_raising_child_does_not_cancel_the_others(self):
+        ok = _Outcome(step_id="a", name="A", data={"v": 1})
+        boom = _Outcome(step_id="b", name="B", kind="raise")
+        step = ParallelStep(step_id="p", name="P", steps=[ok, boom], next_step_id="n")
+        result = await step.execute({})
+        assert result.success is False
+        assert result.data == {"step_0_v": 1}
+        assert "boom" in str(result.error)
+        assert ok.calls == boom.calls == 1
+
+    async def test_a_child_that_returns_no_result_object_fails_the_step(self):
+        step = ParallelStep(
+            step_id="p",
+            name="P",
+            steps=[_Outcome(step_id="g", name="G", kind="garbage")],
+            next_step_id="n",
+            error_step_id="err",
+        )
+        result = await step.execute({})
+        assert result.success is False
+        assert result.next_step_id == "err"
+        assert "returned str, not a WorkflowStepResult" in str(result.error)
+
+    async def test_the_context_copy_warning_starts_above_the_threshold(self):
+        from loguru import logger
+
+        from fsm_llm.workflows.constants import PARALLEL_DEEPCOPY_WARNING_THRESHOLD
+
+        warnings: list[str] = []
+        logger.enable("fsm_llm")
+        sink = logger.add(
+            lambda m: (
+                warnings.append(m.record["message"])
+                if m.record["name"] == "fsm_llm.workflows.steps.composite"
+                else None
+            ),
+            level="WARNING",
+            format="{message}",
+        )
+        try:
+            for count in (
+                PARALLEL_DEEPCOPY_WARNING_THRESHOLD,
+                PARALLEL_DEEPCOPY_WARNING_THRESHOLD + 1,
+            ):
+                warnings.clear()
+                children = [_Outcome(step_id=f"c{i}", name="C") for i in range(count)]
+                await ParallelStep(
+                    step_id="p", name="P", steps=children, next_step_id="n"
+                ).execute({})
+                assert bool(warnings) is (count > PARALLEL_DEEPCOPY_WARNING_THRESHOLD)
+        finally:
+            logger.remove(sink)
+            logger.disable("fsm_llm")
+
+    def test_a_retry_step_takes_no_negative_count_or_backoff(self):
+        inner = _Outcome(step_id="o", name="O")
+        with pytest.raises(ValidationError, match="max_retries must be >= 0"):
+            RetryStep(step_id="r", name="R", step=inner, max_retries=-1)
+        with pytest.raises(ValidationError, match="backoff_factor must be >= 0"):
+            RetryStep(step_id="r", name="R", step=inner, backoff_factor=-0.5)
+        step = RetryStep(
+            step_id="r", name="R", step=inner, max_retries=0, backoff_factor=0
+        )
+        assert (step.max_retries, step.backoff_factor) == (0, 0)
+
+    async def test_a_retry_waits_the_backoff_between_failed_results(self):
+        delays: list[float] = []
+
+        async def fake_sleep(delay: float) -> None:
+            delays.append(delay)
+
+        inner = _Outcome(step_id="o", name="O", kind="fail")
+        step = RetryStep(
+            step_id="r", name="R", step=inner, max_retries=2, backoff_factor=0.5
+        )
+        with patch("fsm_llm.workflows.steps.composite.asyncio.sleep", fake_sleep):
+            result = await step.execute({})
+        assert result.success is False and result.error == "bad"
+        assert inner.calls == 3
+        assert delays == [0.5, 1.0]
+
+    async def test_a_retry_waits_the_backoff_between_raised_errors_too(self):
+        delays: list[float] = []
+
+        async def fake_sleep(delay: float) -> None:
+            delays.append(delay)
+
+        inner = _Outcome(step_id="o", name="O", kind="raise")
+        step = RetryStep(
+            step_id="r", name="R", step=inner, max_retries=2, backoff_factor=2.0
+        )
+        with patch("fsm_llm.workflows.steps.composite.asyncio.sleep", fake_sleep):
+            with pytest.raises(ValueError, match="boom"):
+                await step.execute({})
+        assert inner.calls == 3
+        assert delays == [2.0, 4.0]

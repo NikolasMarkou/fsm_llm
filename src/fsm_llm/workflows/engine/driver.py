@@ -30,7 +30,7 @@ from ..models import (
     WorkflowStatus,
     WorkflowStepResult,
 )
-from ..steps import _STEP_EXECUTOR
+from ..steps.helpers import _STEP_EXECUTOR
 from .helpers import _timeout_error
 from .surface import _EngineSurface
 

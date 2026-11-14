@@ -148,8 +148,8 @@ class TestRetryStep:
     async def test_retries_on_non_workflow_step_error(self):
         """A non-conforming inner step raising a bare exception (e.g.
         ValueError) must still be retried, not propagated immediately.
-        Regression test for D-010 (steps.py RetryStep.execute except clause
-        widened from WorkflowStepError to Exception)."""
+        Regression test for D-010 (RetryStep.execute in steps/composite.py: its
+        except clause widened from WorkflowStepError to Exception)."""
         call_count = {"n": 0}
 
         class _RaisesValueErrorThenSucceeds:

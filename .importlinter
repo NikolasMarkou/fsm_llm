@@ -777,3 +777,24 @@ source_modules =
     fsm_llm.workflows.engine.timers
 forbidden_modules =
     fsm_llm.workflows.engine.engine
+
+# Step 92 (workflows/steps.py became the package workflows/steps/, by step kind). The step modules are
+# read by the engine, the definition and the DSL (all three import them), so no step module imports any
+# of those three back, directly or through the `fsm_llm.workflows` package facade (a chain that ends in
+# the engine): a step is a model with an `execute`, it knows nothing of the thing that drives it.
+[importlinter:contract:workflows-steps-import-no-driver-definition-or-dsl]
+name = the step modules of fsm_llm.workflows.steps import no engine, definition or DSL module
+type = forbidden
+source_modules =
+    fsm_llm.workflows.steps.agent
+    fsm_llm.workflows.steps.base
+    fsm_llm.workflows.steps.calls
+    fsm_llm.workflows.steps.composite
+    fsm_llm.workflows.steps.conversation
+    fsm_llm.workflows.steps.helpers
+    fsm_llm.workflows.steps.routing
+    fsm_llm.workflows.steps.waits
+forbidden_modules =
+    fsm_llm.workflows.definitions
+    fsm_llm.workflows.dsl
+    fsm_llm.workflows.engine
