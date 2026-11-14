@@ -515,7 +515,7 @@ class TestSwitchStepTerminalRoute:
     Regression test for finding 10: `get_terminal_states()`'s static
     whole-step analysis never marks a `SwitchStep` with non-empty `cases`
     as terminal, even when the specific route taken returns
-    `next_step_id == ""`. See decisions.md D-013 / engine.py D-013 anchor.
+    `next_step_id == ""`. See decisions.md D-013 / engine/driver.py D-013 anchor.
     """
 
     async def test_default_empty_string_route_completes_workflow(self):

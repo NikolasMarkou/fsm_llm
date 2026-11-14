@@ -758,3 +758,22 @@ source_modules =
     fsm_llm.agents.meta_builder.surface
 forbidden_modules =
     fsm_llm.agents.meta_builder.agent
+
+# Step 91 (workflows/engine.py became the package workflows/engine/, WorkflowEngine as mixins over a
+# shell). The shell composes the mixins, so no mixin, helper or surface module may import it back (a cycle
+# the mixins would only avoid by a function-local import).
+[importlinter:contract:workflows-engine-mixins-do-not-import-the-shell]
+name = the mixins, helpers and surface of fsm_llm.workflows.engine do not import its shell (engine.py)
+type = forbidden
+source_modules =
+    fsm_llm.workflows.engine.driver
+    fsm_llm.workflows.engine.events
+    fsm_llm.workflows.engine.helpers
+    fsm_llm.workflows.engine.lifecycle
+    fsm_llm.workflows.engine.queries
+    fsm_llm.workflows.engine.resources
+    fsm_llm.workflows.engine.status
+    fsm_llm.workflows.engine.surface
+    fsm_llm.workflows.engine.timers
+forbidden_modules =
+    fsm_llm.workflows.engine.engine

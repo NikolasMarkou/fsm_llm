@@ -938,7 +938,7 @@ class TestCancelWorkflowTerminalGuard:
 class TestFloatTimeoutSecondsEndToEnd:
     """F7 regression: a sub-second max_seconds must report its real
     float value (e.g. 0.5) in the raised WorkflowTimeoutError, not `0` from
-    a stale `int(...)` truncation in engine.py's `_timeout_seconds()`
+    a stale `int(...)` truncation in engine/driver.py's `_timeout_seconds()`
     helper. See decisions.md D-011."""
 
     async def test_expired_deadline_reports_subsecond_float_timeout(self):
@@ -1114,3 +1114,764 @@ class TestCancelMidChain:
         assert instance.status == WorkflowStatus.CANCELLED
         assert instance.context[CONTEXT_KEY_CANCELLATION_REASON] == "bye"
         assert engine._cancel_requests == {}
+
+
+_ENGINE_MIXIN_MODULE_OF = {
+    "StatusMixin": "status",
+    "LifecycleMixin": "lifecycle",
+    "DriverMixin": "driver",
+    "EventsMixin": "events",
+    "TimersMixin": "timers",
+    "ResourcesMixin": "resources",
+    "QueriesMixin": "queries",
+}
+
+_ENGINE_METHODS_OF = {
+    "status": {
+        "add_hook",
+        "remove_hook",
+        "_emit",
+        "_get_instance_lock",
+        "_set_status",
+        "_fail",
+    },
+    "lifecycle": {
+        "close",
+        "register_workflow",
+        "start",
+        "_run_in_background",
+        "_get_workflow_definition",
+        "_definition_for",
+        "_create_workflow_instance",
+        "advance",
+        "cancel",
+    },
+    "driver": {
+        "_execute_workflow_step",
+        "_run_current_step",
+        "_timeout_seconds",
+        "_get_current_step",
+        "_handle_successful_step",
+        "_handle_failed_step",
+        "_prepare_transition",
+        "_leave_wait",
+        "_transition_to_state",
+        "_handle_step_without_transition",
+    },
+    "events": {
+        "register_event_listener",
+        "_handle_event_timeout",
+        "process_event",
+        "_restore_listeners",
+        "_deliver_event",
+        "_correlates",
+        "_apply_event",
+        "_buffer_event",
+        "_take_buffered_event",
+        "_cancel_event_timeout",
+    },
+    "timers": {
+        "_live_instance",
+        "_arm_timer",
+        "_forget_timer",
+        "schedule_timer",
+        "_handle_timer_expiration",
+        "_arm_deadline",
+        "_handle_deadline",
+    },
+    "resources": {
+        "_drop_wait_resources",
+        "_release_instance_resources",
+        "remove_instance",
+        "_forget_instance",
+        "_purge_oldest_terminal_instances",
+    },
+    "queries": {
+        "get_instance",
+        "get_definition",
+        "get_status",
+        "get_context",
+        "list_active_instances",
+        "get_statistics",
+    },
+}
+
+
+class TestWorkflowEnginePackageLayout:
+    """``workflows/engine.py`` is a package at the same dotted path (step 91 of
+    plan d454fd62): ``WorkflowEngine`` is a shell over seven mixins."""
+
+    def test_the_facade_exports_exactly_the_four_names(self):
+        import fsm_llm.workflows.engine as facade
+        from fsm_llm.workflows import Timer
+        from fsm_llm.workflows.constants import DEFAULT_MAX_STEPS
+
+        assert facade.__all__ == [
+            "DEFAULT_MAX_STEPS",
+            "LifecycleHook",
+            "Timer",
+            "WorkflowEngine",
+        ]
+        assert facade.WorkflowEngine is WorkflowEngine
+        assert facade.Timer is Timer
+        assert facade.DEFAULT_MAX_STEPS == DEFAULT_MAX_STEPS == 1000
+        namespace: dict = {}
+        exec("from fsm_llm.workflows.engine import *", namespace)
+        assert {"WorkflowEngine", "Timer", "LifecycleHook"} <= set(namespace)
+        assert "_timer_key" not in namespace
+
+    def test_the_engine_is_a_shell_over_seven_mixins_each_in_its_module(self):
+        mro = WorkflowEngine.__mro__
+        assert WorkflowEngine.__module__ == "fsm_llm.workflows.engine.engine"
+        mixins = mro[1:-2]
+        assert [c.__name__ for c in mixins] == list(_ENGINE_MIXIN_MODULE_OF)
+        for cls in mixins:
+            module = _ENGINE_MIXIN_MODULE_OF[cls.__name__]
+            assert cls.__module__ == f"fsm_llm.workflows.engine.{module}", cls.__name__
+        surface = mro[-2]
+        assert surface.__name__ == "_EngineSurface"
+        # the declarations are for mypy only: a runtime no-op
+        assert [n for n in vars(surface) if not n.startswith("__")] == []
+
+    def test_the_shell_defines_only_its_constructor(self):
+        assert {n for n in vars(WorkflowEngine) if not n.startswith("__")} == set()
+        assert "__init__" in vars(WorkflowEngine)
+
+    def test_every_method_is_defined_by_the_mixin_that_owns_it(self):
+        import importlib
+
+        for module, names in _ENGINE_METHODS_OF.items():
+            mixin = next(
+                getattr(
+                    importlib.import_module(f"fsm_llm.workflows.engine.{module}"), c
+                )
+                for c, m in _ENGINE_MIXIN_MODULE_OF.items()
+                if m == module
+            )
+            assert {n for n in vars(mixin) if not n.startswith("__")} == names, module
+
+    def test_a_private_name_is_imported_from_its_module_not_the_facade(self):
+        import fsm_llm.workflows.engine as facade
+        from fsm_llm.workflows.engine import helpers
+
+        assert helpers._timer_key("i1", "timeout", "e1") == "i1_e1_timeout"
+        assert helpers._timer_key("i1", "deadline") == "i1_deadline"
+        assert helpers._timeout_error("op", 0.5, "i1").timeout_seconds == 0.5
+        assert helpers._CancelRequest("why").honored is False
+        for name in (
+            "_timer_key",
+            "_timeout_error",
+            "_CancelRequest",
+            "logger",
+            "asyncio",
+        ):
+            assert not hasattr(facade, name), name
+
+    def test_every_decision_anchor_sits_with_the_code_it_constrains(self):
+        from pathlib import Path
+
+        import fsm_llm.workflows.engine as facade
+
+        root = Path(facade.__file__).parent
+        expected = {
+            "driver": (
+                "5d1e7a3b/D-002",
+                "5ed71cf2/D-017",
+                "089d0ec7/D-011",
+                "876e7164/D-003",
+                "45a654de/D-013",
+                "45a654de/D-020",
+            ),
+            "events": ("5d1e7a3b/D-001", "5b2fbb09/D-001"),
+            "lifecycle": ("5d1e7a3b/D-005", "089d0ec7/D-015"),
+            "status": ("089d0ec7/D-003", "089d0ec7/D-005"),
+            "resources": ("5d1e7a3b/D-005",),
+            "timers": ("5ed71cf2/D-002",),
+        }
+        for module, tokens in expected.items():
+            text = (root / f"{module}.py").read_text(encoding="utf-8")
+            for token in tokens:
+                assert token in text, (module, token)
+
+    async def test_a_log_record_is_named_after_the_module_that_logs_it(self):
+        from loguru import logger
+
+        records: list[tuple[str, str]] = []
+        logger.enable("fsm_llm")
+        sink = logger.add(
+            lambda m: records.append((m.record["name"], m.record["message"])),
+            level="DEBUG",
+            format="{message}",
+        )
+        try:
+            engine = WorkflowEngine()
+            engine.register_workflow(
+                create_workflow("wf-names", "Names").with_initial_step(
+                    auto_step("a", "A", next_step_id="")
+                )
+            )
+            iid = await engine.start("wf-names")
+            assert engine.remove_instance(iid) is True
+        finally:
+            logger.remove(sink)
+            logger.disable("fsm_llm")
+
+        names = {name for name, _ in records}
+        assert names == {
+            "fsm_llm.workflows.engine.engine",
+            "fsm_llm.workflows.engine.lifecycle",
+            "fsm_llm.workflows.engine.driver",
+            "fsm_llm.workflows.engine.resources",
+        }
+
+        def logged_by(prefix: str) -> str:
+            return next(n for n, message in records if message.startswith(prefix))
+
+        assert logged_by("Workflow engine initialized").endswith(".engine.engine")
+        assert logged_by("Started workflow instance").endswith(".lifecycle")
+        assert logged_by("Executing step").endswith(".driver")
+        assert logged_by("Removed terminal instance").endswith(".resources")
+
+
+class _RunsOnceStep(WorkflowStep):
+    """Counts its runs, routes to ``b`` in its definition but returns no route:
+    a non-terminal step with no transition, which leaves the instance RUNNING."""
+
+    next_step_id: str = "b"
+    runs: int = 0
+
+    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
+        self.runs += 1
+        return WorkflowStepResult(success=True)
+
+
+class _FailsWithErrorStep(WorkflowStep):
+    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
+        return WorkflowStepResult.failure_result(error="E!", message="M")
+
+
+class TestEngineEdgesOfEachModule:
+    """Edges of the engine modules that the step 91 mutation proof found no suite test
+    for (each was seen only by the differential, or by nothing): the exact limits, the
+    emission rules of the hooks, the guards under the lock and the buffers."""
+
+    async def test_a_hook_is_told_only_about_a_real_status_change(self):
+        engine = WorkflowEngine()
+        engine.register_workflow(_wait_then_done("wf"))
+        iid = await engine.start("wf")
+        instance = engine.workflow_instances[iid]
+        seen: list[tuple[str, str]] = []
+        engine.add_hook(lambda ev, inst, data: seen.append((ev, data["status"])))
+
+        engine._set_status(instance, WorkflowStatus.WAITING)  # unchanged
+        assert seen == []
+        engine._set_status(instance, WorkflowStatus.RUNNING)
+        assert seen == [("status_changed", "running")]
+        await engine.close()
+
+    async def test_an_awaitable_hook_result_runs_as_a_background_task(self):
+        engine = WorkflowEngine()
+        engine.register_workflow(_single_auto("wf"))
+        events: list[str] = []
+
+        async def hook(event: str, instance: Any, data: dict[str, Any]) -> None:
+            events.append(event)
+
+        engine.add_hook(hook)
+        await engine.start("wf")
+        assert engine._background_tasks  # scheduled, not awaited inline
+        await _settle(0.05)
+        assert events == [
+            "status_changed",
+            "step_started",
+            "step_completed",
+            "status_changed",
+        ]
+        assert engine._background_tasks == set()
+
+    def test_remove_hook_reports_whether_the_hook_was_registered(self):
+        engine = WorkflowEngine()
+
+        def hook(*args: Any) -> None:
+            return None
+
+        engine.add_hook(hook)
+        assert engine.remove_hook(hook) is True
+        assert engine.remove_hook(hook) is False
+        assert engine._hooks == []
+
+    async def test_the_concurrency_limit_is_exact(self):
+        engine = WorkflowEngine(max_concurrent_workflows=2)
+        engine.register_workflow(_wait_then_done("wf"))
+        await engine.start("wf", instance_id="a")
+        await engine.start("wf", instance_id="b")
+        with pytest.raises(WorkflowResourceError) as info:
+            await engine.start("wf", instance_id="c")
+        assert info.value.resource_id == "concurrent_limit"
+        assert sorted(engine.list_active_instances()) == ["a", "b"]
+        await engine.close()
+
+    async def test_a_background_start_skips_an_instance_another_entry_point_drove(self):
+        step = _RunsOnceStep(step_id="a", name="A")
+        wf = create_workflow("wf", "wf")
+        wf.with_initial_step(step)
+        wf.with_step(auto_step("b", "B", next_step_id=""))
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+
+        iid = await engine.start("wf", wait=False)
+        assert await engine.advance(iid) is True  # drives the step before the task runs
+        await _settle(0.05)
+
+        assert step.runs == 1  # the background task saw the history move and returned
+        assert engine.get_status(iid) == WorkflowStatus.RUNNING
+
+    async def test_the_initial_context_dict_of_the_caller_is_never_shared(self):
+        engine = WorkflowEngine()
+        engine.register_workflow(_wait_then_done("wf"))
+        initial: dict[str, Any] = {"k": 1}
+        iid = await engine.start("wf", initial)
+
+        assert initial == {"k": 1}  # no `_workflow_info` written into it
+        engine.workflow_instances[iid].context["added"] = 2
+        assert "added" not in initial
+        await engine.close()
+
+    async def test_close_drops_buffered_events(self):
+        engine = WorkflowEngine()
+        engine.register_workflow(_wait_then_done("wf"))
+        iid = await engine.start("wf")
+        woke = await engine.process_event(
+            WorkflowEvent(event_type="other", payload={}, instance_id=iid)
+        )
+        assert woke == []
+        assert engine.get_statistics()["buffered_events"] == 1
+
+        await engine.close()
+        assert engine.get_statistics()["buffered_events"] == 0
+
+    async def test_the_step_budget_is_exactly_max_steps_per_call(self):
+        def chain(workflow_id: str, length: int):
+            wf = create_workflow(workflow_id, workflow_id)
+            for i in range(length):
+                nxt = f"s{i + 1}" if i < length - 1 else ""
+                wf.with_step(
+                    auto_step(f"s{i}", f"S{i}", next_step_id=nxt), is_initial=i == 0
+                )
+            return wf
+
+        engine = WorkflowEngine(max_steps=3)
+        engine.register_workflow(chain("fits", 3))
+        engine.register_workflow(chain("over", 4))
+        fits = await engine.start("fits")
+        over = await engine.start("over")
+
+        assert engine.get_status(fits) == WorkflowStatus.COMPLETED
+        assert engine.get_status(over) == WorkflowStatus.FAILED
+        assert "Step budget exceeded: 3 steps" in str(
+            engine.workflow_instances[over].error
+        )
+
+    async def test_a_cancel_request_never_cancels_an_instance_that_is_terminal(self):
+        from fsm_llm.workflows.engine.helpers import _CancelRequest
+
+        engine = WorkflowEngine()
+        engine.register_workflow(_single_auto("wf"))
+        iid = await engine.start("wf")
+        instance = engine.workflow_instances[iid]
+        assert instance.status == WorkflowStatus.COMPLETED
+        request = _CancelRequest("late")
+        engine._cancel_requests[iid] = request
+
+        await engine._execute_workflow_step(instance)  # must not raise
+
+        assert instance.status == WorkflowStatus.COMPLETED
+        assert request.honored is False
+
+    async def test_a_failed_step_with_no_route_reports_message_and_error(self):
+        wf = create_workflow("wf", "wf")
+        wf.with_initial_step(_FailsWithErrorStep(step_id="s", name="S"))
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start("wf")
+
+        instance = engine.workflow_instances[iid]
+        assert instance.status == WorkflowStatus.FAILED
+        assert "M (E!)" in str(instance.error)
+
+    async def test_the_step_executor_does_not_leak_into_the_callers_context(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        from fsm_llm.workflows.steps import _STEP_EXECUTOR
+
+        executor = ThreadPoolExecutor(max_workers=1)
+        try:
+            engine = WorkflowEngine(executor=executor)
+            engine.register_workflow(_single_auto("wf"))
+            await engine.start("wf")
+            assert _STEP_EXECUTOR.get() is None
+        finally:
+            executor.shutdown()
+
+    async def test_a_step_that_returns_no_result_object_fails_the_instance(self):
+        class _ReturnsText(WorkflowStep):
+            async def execute(self, context: dict[str, Any]) -> Any:
+                return "done"
+
+        wf = create_workflow("wf", "wf")
+        wf.with_initial_step(_ReturnsText(step_id="s", name="S"))
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start("wf")
+
+        instance = engine.workflow_instances[iid]
+        assert instance.status == WorkflowStatus.FAILED
+        assert "returned str, expected a WorkflowStepResult" in str(instance.error)
+
+    async def test_an_event_is_not_delivered_to_a_listener_whose_timeout_has_passed(
+        self,
+    ):
+        from datetime import datetime, timedelta
+
+        engine = WorkflowEngine()
+        engine.register_workflow(_wait_then_done("wf", timeout_seconds=30))
+        iid = await engine.start("wf")
+        engine.event_listeners["go"][iid].timeout_at = datetime.now(UTC) - timedelta(
+            seconds=1
+        )
+
+        woke = await engine.process_event(WorkflowEvent(event_type="go", payload={}))
+
+        assert woke == []
+        assert engine.get_status(iid) == WorkflowStatus.WAITING
+        assert iid in engine.event_listeners["go"]  # skipped, not consumed
+        await engine.close()
+
+    async def test_a_delivery_keeps_the_timeout_of_the_next_wait_on_the_same_event(
+        self,
+    ):
+        wf = create_workflow("wf", "wf")
+        wf.with_initial_step(
+            wait_event_step("w1", "W1", "go", "w2", timeout_seconds=30)
+        )
+        wf.with_step(wait_event_step("w2", "W2", "go", "done", timeout_seconds=30))
+        wf.with_step(auto_step("done", "Done", next_step_id=""))
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start("wf")
+        first = engine.timers[f"{iid}_go_timeout"].task
+
+        woke = await engine.process_event(WorkflowEvent(event_type="go", payload={}))
+
+        assert woke == [iid]
+        assert engine.workflow_instances[iid].current_step_id == "w2"
+        second = engine.timers[f"{iid}_go_timeout"].task
+        assert second is not first
+        assert not second.cancelled()
+        await engine.close()
+
+    async def test_a_delivered_event_is_recorded_in_the_context(self):
+        engine = WorkflowEngine()
+        engine.register_workflow(_wait_then_done("wf"))
+        iid = await engine.start("wf")
+
+        await engine.process_event(
+            WorkflowEvent(event_type="go", payload={"a": 1}, instance_id=iid)
+        )
+
+        last = engine.get_context(iid)["_last_event"]
+        assert last["event_type"] == "go"
+        assert last["payload"] == {"a": 1}
+
+    async def test_the_buffer_of_targeted_events_keeps_the_newest(self):
+        from fsm_llm.workflows.constants import MAX_BUFFERED_EVENTS_PER_INSTANCE
+
+        engine = WorkflowEngine()
+        engine.register_workflow(_wait_then_done("wf"))
+        iid = await engine.start("wf")
+        limit = MAX_BUFFERED_EVENTS_PER_INSTANCE
+        for n in range(limit + 5):
+            await engine.process_event(
+                WorkflowEvent(event_type="other", payload={"n": n}, instance_id=iid)
+            )
+
+        buffer = engine._event_buffers[iid]
+        assert len(buffer) == limit
+        assert buffer[0].payload["n"] == 5
+        assert buffer[-1].payload["n"] == limit + 4
+        await engine.close()
+
+    async def test_a_buffered_event_satisfies_one_wait_only(self):
+        wf = create_workflow("wf", "wf")
+        wf.with_initial_step(wait_event_step("w0", "W0", "start", "w1"))
+        wf.with_step(wait_event_step("w1", "W1", "go", "w2"))
+        wf.with_step(wait_event_step("w2", "W2", "go", "done"))
+        wf.with_step(auto_step("done", "Done", next_step_id=""))
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start("wf")
+        await engine.process_event(
+            WorkflowEvent(event_type="go", payload={}, instance_id=iid)
+        )
+        assert len(engine._event_buffers[iid]) == 1
+
+        await engine.process_event(
+            WorkflowEvent(event_type="start", payload={}, instance_id=iid)
+        )
+
+        # w1 took the buffered event; w2 must wait for another one
+        instance = engine.workflow_instances[iid]
+        assert instance.status == WorkflowStatus.WAITING
+        assert instance.current_step_id == "w2"
+        assert len(engine._event_buffers[iid]) == 0
+        await engine.close()
+
+    async def test_an_event_timeout_does_nothing_to_an_instance_that_is_not_waiting(
+        self,
+    ):
+        step = _RunsOnceStep(step_id="a", name="A")
+        wf = create_workflow("wf", "wf")
+        wf.with_initial_step(step)
+        wf.with_step(auto_step("b", "B", next_step_id=""))
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start("wf")
+        instance = engine.workflow_instances[iid]
+        assert instance.status == WorkflowStatus.RUNNING
+
+        await engine._handle_event_timeout(iid, "go", "b")
+
+        assert instance.status == WorkflowStatus.RUNNING
+        assert instance.current_step_id == "a"
+        assert "_timeout" not in instance.context
+
+    async def test_a_timer_expiry_and_a_deadline_do_nothing_to_an_instance_that_is_not_waiting(
+        self,
+    ):
+        step = _RunsOnceStep(step_id="a", name="A")
+        wf = create_workflow("wf", "wf")
+        wf.with_initial_step(step)
+        wf.with_step(auto_step("b", "B", next_step_id=""))
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start("wf")
+        instance = engine.workflow_instances[iid]
+
+        await engine._handle_timer_expiration(iid, "b")
+        await engine._handle_deadline(iid)
+
+        assert instance.status == WorkflowStatus.RUNNING
+        assert instance.current_step_id == "a"
+        assert "_timer_expired" not in instance.context
+
+    async def test_an_event_wait_that_times_out_reports_the_configured_seconds(
+        self, timing_factor
+    ):
+        engine = WorkflowEngine()
+        engine.register_workflow(
+            _wait_then_done("wf", timeout_seconds=0.05 * timing_factor)
+        )
+        iid = await engine.start("wf")
+        await _settle(0.25 * timing_factor)
+
+        instance = engine.workflow_instances[iid]
+        assert instance.status == WorkflowStatus.FAILED
+        assert f"timed out after {0.05 * timing_factor} seconds" in str(instance.error)
+        assert "wait for event 'go'" in str(instance.error)
+
+    async def test_a_delivered_event_cancels_the_timeout_task_of_its_wait(self):
+        engine = WorkflowEngine()
+        engine.register_workflow(_wait_then_done("wf", timeout_seconds=30))
+        iid = await engine.start("wf")
+        task = engine.timers[f"{iid}_go_timeout"].task
+
+        await engine.process_event(WorkflowEvent(event_type="go", payload={}))
+        await _settle(0)
+
+        assert task.cancelled()
+        assert f"{iid}_go_timeout" not in engine.timers
+
+    async def test_a_targeted_event_for_a_finished_instance_is_dropped_not_buffered(
+        self,
+    ):
+        engine = WorkflowEngine()
+        engine.register_workflow(_single_auto("wf"))
+        iid = await engine.start("wf")
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
+
+        woke = await engine.process_event(
+            WorkflowEvent(event_type="go", payload={}, instance_id=iid)
+        )
+
+        assert woke == []
+        assert engine._event_buffers == {}
+
+    async def test_a_listener_of_an_unknown_instance_is_removed_by_process_event(self):
+        from fsm_llm.workflows.models import EventListener
+
+        engine = WorkflowEngine()
+        engine.event_listeners["go"] = {
+            "ghost": EventListener(instance_id="ghost", success_step_id="done")
+        }
+
+        woke = await engine.process_event(WorkflowEvent(event_type="go", payload={}))
+
+        assert woke == []
+        assert engine.event_listeners["go"] == {}
+
+    async def test_a_timer_task_logs_the_error_of_its_handler_and_swallows_a_cancel(
+        self,
+    ):
+        from loguru import logger
+
+        engine = WorkflowEngine()
+        messages: list[str] = []
+        logger.enable("fsm_llm")
+        sink = logger.add(
+            lambda m: messages.append(m.record["message"]),
+            level="ERROR",
+            format="{message}",
+        )
+
+        async def broken() -> None:
+            raise RuntimeError("handler broke")
+
+        async def never() -> None:
+            await asyncio.sleep(30)
+
+        try:
+            engine._arm_timer("k1", "i1", None, 0, broken, "demo")
+            await _settle(0.05)
+            assert messages == ["Error in demo task: handler broke"]
+
+            engine._arm_timer("k2", "i1", None, 0, never, "never")
+            await _settle(0.01)
+            engine.timers["k2"].task.cancel()
+            await _settle(0.01)
+            assert messages == ["Error in demo task: handler broke"]
+        finally:
+            logger.remove(sink)
+            logger.disable("fsm_llm")
+            await engine.close()
+
+    async def test_a_deadline_already_past_arms_a_watchdog_that_fires_at_once(self):
+        from datetime import datetime, timedelta
+
+        engine = WorkflowEngine()
+        engine.register_workflow(_wait_then_done("wf"))
+        iid = await engine.start("wf")
+        instance = engine.workflow_instances[iid]
+        instance.deadline = datetime.now(UTC) - timedelta(seconds=5)
+        before = datetime.now(UTC)
+
+        engine._arm_deadline(instance)
+
+        assert engine.timers[f"{iid}_deadline"].expires_at >= before
+        await engine.close()
+
+    async def test_a_deadline_that_fires_on_a_running_instance_leaves_no_timer_entry(
+        self, timing_factor
+    ):
+        step = _RunsOnceStep(step_id="a", name="A")
+        wf = create_workflow("wf", "wf")
+        wf.with_initial_step(step)
+        wf.with_step(auto_step("b", "B", next_step_id=""))
+        engine = WorkflowEngine()
+        engine.register_workflow(wf)
+        iid = await engine.start("wf", max_seconds=0.05 * timing_factor)
+        assert f"{iid}_deadline" in engine.timers
+
+        await _settle(0.25 * timing_factor)
+
+        assert engine.get_status(iid) == WorkflowStatus.RUNNING
+        assert f"{iid}_deadline" not in engine.timers
+        await engine.close()
+
+    async def test_forgetting_an_instance_drops_everything_the_engine_keeps_for_it(
+        self,
+    ):
+        from fsm_llm.workflows.engine.helpers import _CancelRequest
+
+        engine = WorkflowEngine()
+        engine.register_workflow(_single_auto("wf"))
+        iid = await engine.start("wf")
+        engine._get_instance_lock(iid)
+        engine._cancel_requests[iid] = _CancelRequest("x")
+        assert iid in engine._instance_definitions
+
+        assert engine.remove_instance(iid) is True
+
+        assert iid not in engine.workflow_instances
+        assert iid not in engine._instance_locks
+        assert iid not in engine._instance_definitions
+        assert engine._cancel_requests == {}
+
+    async def test_the_statistics_count_live_timers_and_every_status(self):
+        engine = WorkflowEngine()
+        engine.register_workflow(_wait_then_done("waits", timeout_seconds=30))
+        engine.register_workflow(_single_auto("ends"))
+        waiting = await engine.start("waits")
+        await engine.start("ends")
+        await engine.process_event(
+            WorkflowEvent(event_type="other", payload={}, instance_id=waiting)
+        )
+
+        async def quick() -> None:
+            return None
+
+        engine._arm_timer("quick", waiting, None, 0, quick, "quick")
+        await _settle(0.02)  # the quick timer's task is done, the event timeout is not
+
+        stats = engine.get_statistics()
+        assert stats["total_workflows"] == 2
+        assert stats["active_workflows"] == 1
+        assert stats["registered_definitions"] == 2
+        assert stats["event_listeners"] == 1
+        assert stats["active_timers"] == 1
+        assert stats["buffered_events"] == 1
+        assert stats["status_breakdown"] == {"waiting": 1, "completed": 1}
+        await engine.close()
+
+    async def test_a_timer_never_cancels_the_task_that_runs_it(self):
+        from datetime import datetime
+
+        from fsm_llm.workflows import Timer
+
+        async def inner() -> int:
+            current = asyncio.current_task()
+            assert current is not None
+            Timer("i", None, datetime.now(UTC), current).cancel()
+            return current.cancelling()
+
+        assert await asyncio.ensure_future(inner()) == 0
+
+        other = asyncio.ensure_future(asyncio.sleep(30))
+        Timer("i", None, datetime.now(UTC), other).cancel()
+        await _settle(0)
+        assert other.cancelled()
+        Timer("i", None, datetime.now(UTC), None).cancel()  # no task: a no-op
+
+    async def test_a_terminal_instance_releases_its_buffered_events(self):
+        engine = WorkflowEngine()
+        engine.register_workflow(_wait_then_done("wf"))
+        iid = await engine.start("wf")
+        await engine.process_event(
+            WorkflowEvent(event_type="other", payload={}, instance_id=iid)
+        )
+        assert iid in engine._event_buffers
+
+        assert await engine.cancel(iid) is True
+
+        assert iid not in engine._event_buffers
+
+    def test_max_steps_of_one_is_accepted_and_below_one_is_refused(self):
+        assert WorkflowEngine(max_steps=1).max_steps == 1
+        for bad in (0, -3):
+            with pytest.raises(ValueError, match="max_steps must be >= 1"):
+                WorkflowEngine(max_steps=bad)
+
+
+def _single_auto(workflow_id: str):
+    wf = create_workflow(workflow_id, workflow_id)
+    wf.with_initial_step(auto_step("only", "Only", next_step_id=""))
+    return wf

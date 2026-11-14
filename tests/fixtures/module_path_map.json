@@ -829,6 +829,14 @@
       "to_mermaid": "fsm_llm.core.visualize.graph",
       "visualize_fsm_ascii": "fsm_llm.core.visualize.ascii_render",
       "visualize_fsm_from_file": "fsm_llm.core.visualize.cli"
+    },
+    "fsm_llm.workflows.engine": {
+      "LifecycleHook": "fsm_llm.workflows.engine.helpers",
+      "Timer": "fsm_llm.workflows.engine.helpers",
+      "WorkflowEngine": "fsm_llm.workflows.engine.engine",
+      "_CancelRequest": "fsm_llm.workflows.engine.helpers",
+      "_timeout_error": "fsm_llm.workflows.engine.helpers",
+      "_timer_key": "fsm_llm.workflows.engine.helpers"
     }
   },
   "unmoved": [
@@ -982,7 +990,14 @@
     "fsm_llm.workflows.definitions",
     "fsm_llm.workflows.dependency_resolver",
     "fsm_llm.workflows.dsl",
-    "fsm_llm.workflows.engine",
+    "fsm_llm.workflows.engine.driver",
+    "fsm_llm.workflows.engine.events",
+    "fsm_llm.workflows.engine.lifecycle",
+    "fsm_llm.workflows.engine.queries",
+    "fsm_llm.workflows.engine.resources",
+    "fsm_llm.workflows.engine.status",
+    "fsm_llm.workflows.engine.surface",
+    "fsm_llm.workflows.engine.timers",
     "fsm_llm.workflows.exceptions",
     "fsm_llm.workflows.models",
     "fsm_llm.workflows.steps"
