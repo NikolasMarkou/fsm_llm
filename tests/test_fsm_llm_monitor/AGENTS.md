@@ -5,7 +5,7 @@ Purpose: pytest suite (458 collected tests) for `fsm_llm.monitor`, the FastAPI d
 
 ## Scope
 
-- Unit and HTTP-level tests for `server.py`, `instance_manager/`, `collector.py`, `definitions.py`, `otel.py`, `__main__.py` (`_browser_url` only) and the package `__init__.py` exports.
+- Unit and HTTP-level tests for `server/` (a package), `instance_manager/`, `collector.py`, `definitions.py`, `otel.py`, `__main__.py` (`_browser_url` only) and the package `__init__.py` exports.
 - No real LLM calls, no network, no browser. The FSM `API` is a `MagicMock` or a small fake; HTTP goes through `fastapi.testclient.TestClient`.
 - Not here: the monitor source itself (`src/fsm_llm/monitor/`) and the JS SPA logic (only static file presence, HTTP 200, and the HTML/CSS limits in `TestUiMatchesServerLimits` are checked).
 
@@ -29,7 +29,7 @@ Manager test pattern: `InstanceManager(config=MonitorConfig())`, then `mgr.globa
 | File | Role | Notes |
 | --- | --- | --- |
 | `conftest.py` | autouse `_clear_monitor_api_key_env` | `monkeypatch.delenv("FSM_LLM_MONITOR_API_KEY", raising=False)`; without it an exported key makes about 22 `test_app.py` tests 401 |
-| `support.py` | `_manager(**config)` (an `InstanceManager` with a cleaned global collector; keyword arguments go to `MonitorConfig`), shared by the feature files | not collected (no `test_` prefix) |
+| `support.py` | `_manager(**config)` (an `InstanceManager` with a cleaned global collector; keyword arguments go to `MonitorConfig`), shared by the feature files; `server_modules()` (the source text of every module of the `fsm_llm.monitor.server` package by module name) and `server_package_modules()` (the module objects), for a test that reads or inspects "the server" as a whole | not collected (no `test_` prefix) |
 | `test_app.py` | routes, static assets, exports, version, API-key gate, WS redaction, UI limits vs server constants | 132 tests; asserts `"0.12.0"` for `/api/info` `monitor_version` and `fsm_llm.monitor.__version__` |
 | `test_server_security.py` | Origin/Host, body limit, headers, gated reads, WebSocket auth, error mapping, bounds, dashboard config, builder busy guard, `validate_preset_id` | 36 tests; autouse `_reset_key` reconfigures with env key `""` after each test |
 | `test_instance_manager.py` | `Managed*` classes, `InstanceManager`, handlers, snapshots, workflow presets, agent types, stub tools, failed launch, terminal send, OTEL re-enable (real SDK), instance event feed, `close()` teardown | 100 tests; contains unmarked `async def` tests |
@@ -37,6 +37,7 @@ Manager test pattern: `InstanceManager(config=MonitorConfig())`, then `mgr.globa
 | `test_definitions.py` | models, `normalize_message_history`, `model_to_dict` | 60 tests |
 | `test_otel.py` | `OTELExporter` | 20 tests; autouse `_mock_otel` fixture |
 | `test_server_consistency.py` | 2026-11-05 server and SPA fixes (plan 5980fbb7 step 17), preset UTF-8 read, route-launched workflow stop | 60 tests; autouse `_reset_key` |
+| `test_server_package.py` | `monitor/server.py` became the package `monitor/server/` (plan d454fd62 step 94): the static and template directories the server itself uses (the mount, the Jinja search path, the served bytes, `flows.json`), the registration order of routes and middleware (a pinned list of the 53 entries of `app.routes`, the OpenAPI path order), one home for each global that `configure()` rebinds and `configure()` seen through every router module and the WebSocket, the package layout (facade `__all__`, sibling imports, log record names) | 39 tests; autouse `_reset_key` |
 
 ## Public interface
 
@@ -46,6 +47,7 @@ Suite entry points (what a new test uses):
 - Helpers: `_client(api_key=None) -> TestClient` (`test_server_security.py`); `_minimal_fsm_dict()` (in `test_app.py`); `_manager(**config) -> InstanceManager` (`support.py`, shared by `test_instance_manager.py` and `test_server_consistency.py`), `_fsm(mgr, iid, api=None) -> ManagedFSM`, `_fire(api, timing, current, target)`, `_snapshot_api(collected, extraction=None) -> MagicMock` (`test_instance_manager.py`), fakes `_FakeAPI`, `_FakeHandlerSystem` (`test_collector.py`) and `_Secretive` (`test_instance_manager.py`); `_build_otel_mocks()`, `_import_otel()`, `_make_event(event_type="conversation_start", conv_id="conv-1", **kwargs)` (`test_otel.py`).
 - Test classes per file:
   - `test_app.py`: `TestWebServer`, `TestMonitorImports`, `TestUiMatchesServerLimits`, `TestServerFSMEndpoints`, `TestServerInstanceEndpoints`, `TestServerConfigEndpoints`, `TestDashboardConfigEndpoints`, `TestServerPresetEndpoints`, `TestServerErrorHandling`, `TestActivityEndpoint`, `TestServerHygieneAndWorkflow`, `TestApiKeyGate`, `TestDashboardWebsocketRedaction`, `TestCliHelpers`.
+  - `test_server_package.py`: `TestStaticAndTemplateDirectories`, `TestRegistrationOrder`, `TestSharedStateHasOneHome`, `TestServerPackageLayout`.
   - `test_server_security.py`: `TestOriginAndHost`, `TestApiKeyGating`, `TestWebSocket`, `TestErrorMapping`, `TestRequestBounds`, `TestDashboardConfig`, `TestBuilderGuards`, `TestPresetValidation`.
   - `test_instance_manager.py`: `TestManagedClasses`, `TestInstanceManager`, `TestRegisterMonitorHandlers`, `TestSnapshotInternalKeyHiding`, `TestConversationCaching`, `TestInstanceManagerListFilter`, `TestDestroyInstance`, `TestActivitySnapshots`, `TestFindExamplesDir`, `TestWorkflowPresets`, `TestDisabledAgentTypes`, `TestAgentConcurrencyHardening`, `TestStubToolExecution`, `TestRedaction`, `TestCancelAgent`, `TestFSMLifecycle`, `TestWorkflowTracking`, `TestFailedLaunchKeepsFinishedInstance`, `TestTerminalSendKeepsTheConversationOpenWhenEndFails`, `TestOtelReenableDoesNotExportTwice`, `TestInstanceEventFeed`, `TestCloseTearsDownEveryInstanceType`, `TestInstanceManagerPackageLayout` (the package layout: facade names, owning modules, the mixin MRO, anchors, log record names, the one `__file__` reader).
 
@@ -74,7 +76,7 @@ API-key gate (`TestApiKeyGate`, `TestApiKeyGating`, `TestWebSocket`):
 - Key changes take effect after the first request (read at request time).
 - Reconfiguring the same manager keeps `global_collector._log_sink_id`.
 - WebSocket `/ws`: client sends `{"type": "auth", "api_key": ...}`; right or unneeded key gets a `metrics` message; wrong key closes with 4401; cross-origin closes with 4403.
-- `server.py` source must contain `default=redacting_json_default` and no `default=str` call site.
+- The source of `server/` (every module, read with `support.server_modules()`) must contain `default=redacting_json_default` and no `default=str` call site.
 
 Collector (`test_collector.py`):
 - `get_events`/`get_logs` newest first; bounded deques (`max_events`, `max_log_lines`) while `total_events` keeps counting.
@@ -121,7 +123,7 @@ Payloads and records pinned elsewhere in the suite:
 ## Invariants and constraints
 
 - Tests must be independent of the ambient environment; keep `conftest.py`'s delenv and reset server globals after tests that set a key.
-- `server.py` holds module-level state (`_api_key`, `_builder_sessions`, `_builder_busy`). Any test that sets it must restore it (`try/finally`, `teardown_method`, or autouse fixture).
+- `server/` holds module-level state (`_api_key` in `server.application`, `_builder_sessions` and `_builder_busy` in `server.routes_builder`). Any test that sets it must restore it (`try/finally`, `teardown_method`, or autouse fixture).
 - Library logging is disabled by default; tests that assert log output call `logger.enable("fsm_llm")` and `logger.disable("fsm_llm")` around a temporary sink.
 - `test_otel.py` must restore `sys.modules` entries it replaces; the fixture already does.
 - Threads started in tests are daemon threads and are released before the test ends.

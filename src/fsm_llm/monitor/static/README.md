@@ -16,7 +16,7 @@ flowchart LR
     Pages --> Services
     Pages --> Utils[utils/]
     Services --> Utils
-    Services -- REST /api and WebSocket /ws --> Server[monitor server.py]
+    Services -- REST /api and WebSocket /ws --> Server[monitor server/]
     Server -- reads --> Flows[flows.json]
 ```
 

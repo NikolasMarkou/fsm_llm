@@ -16,7 +16,7 @@ flowchart TD
     App[static/app.js] -- setDeps showPage, refreshInstances, ... --> Pages
     App -- data-action click delegation --> Pages
     WS[services/ws.js registerHandlers] -- updateMetrics, appendLogs, renderInstanceGrid, ... --> Pages
-    Pages -- fetchJson/postJson --> API[/api/... in server.py/]
+    Pages -- fetchJson/postJson --> API[/api/... in server//]
     Pages -- read/write --> State[services/state.js state]
 ```
 
@@ -122,6 +122,6 @@ Exports called by `app.js` or `ws.js`, grouped by file:
 
 - New page: create `<name>.js` here, export render and action functions, add markup in `templates/index.html`, register routing and `data-action` handlers in `static/app.js`, and add WebSocket handlers in the `registerHandlers({...})` call in `app.js` if it needs pushes.
 - New action button: emit `data-action="<name>"` plus `data-*` args in the HTML and add the entry to the `ACTIONS` map in `app.js`.
-- New REST call: add the route in `src/fsm_llm/monitor/server.py` first; keep `detail` in error bodies so `fetchJson` can show it.
+- New REST call: add the route in the `src/fsm_llm/monitor/server/routes_*.py` module of its group first; keep `detail` in error bodies so `fetchJson` can show it.
 - Keep every new interpolation behind `esc()`, and add new server-supplied class names to a whitelist.
 - Tests: `tests/test_fsm_llm_monitor/` covers the Python server; there are no JS unit tests. Verify manually with `fsm-llm-monitor` (http://127.0.0.1:8420).

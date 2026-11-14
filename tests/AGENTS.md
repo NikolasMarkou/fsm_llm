@@ -109,7 +109,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 - Run from the repo root: `tests` is a package and files import `tests.conftest` and `tests.test_fsm_llm.<file>`.
 - Default runs make no network call and no real LLM call; the agents and meta suites enforce it with `block_network`. Live tests self-skip: core `test_live_classification_memory.py` and `test_integration_ollama.py` on Ollama availability, so a default run without a model skips them.
 - Never use `caplog` for library logs; `fsm_llm` logs through loguru and is disabled at import. Enable with `logger.enable("fsm_llm")`, add a sink, then remove it and disable again.
-- Tests that change process globals (cwd, env vars, `server.py` API key, `sys.modules`, logging) restore them.
+- Tests that change process globals (cwd, env vars, `server/` API key, `sys.modules`, logging) restore them.
 - Regression classes and `DECISION plan-.../D-NNN` pins record deliberate fixes. Treat a failure as a regression in `src/` unless the cited decision was reversed; do not weaken, delete or regenerate them (secret-filter corpora, eval scoring golden table).
 - Every documented test count in root `AGENTS.md` and root `README.md` must equal the measured collection.
 

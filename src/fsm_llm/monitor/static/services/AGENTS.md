@@ -5,7 +5,7 @@ Purpose: Frontend infrastructure for the FSM-LLM Monitor dashboard: REST client,
 
 ## Scope
 
-Four browser ES modules: `api.js`, `auth.js`, `state.js`, `ws.js`. No build step, no framework, no npm. Served as static files by the `fsm_llm.monitor` FastAPI server (`server.py` mounts `static/` at `/static`; packaged via `pyproject.toml` `"fsm_llm.monitor" = ["static/**/*", "templates/*"]`). Page rendering lives in `static/pages/*.js`, DOM helpers in `static/utils/*.js`, wiring and boot in `static/app.js`. This folder renders nothing except the WebSocket status indicator (`#ws-status`, `#ws-dot`, `#conn-status`) and the API key modal (`#apikey-modal`, markup in `templates/index.html`).
+Four browser ES modules: `api.js`, `auth.js`, `state.js`, `ws.js`. No build step, no framework, no npm. Served as static files by the `fsm_llm.monitor` FastAPI server (`server/application.py` mounts `static/` at `/static`; packaged via `pyproject.toml` `"fsm_llm.monitor" = ["static/**/*", "templates/*"]`). Page rendering lives in `static/pages/*.js`, DOM helpers in `static/utils/*.js`, wiring and boot in `static/app.js`. This folder renders nothing except the WebSocket status indicator (`#ws-status`, `#ws-dot`, `#conn-status`) and the API key modal (`#apikey-modal`, markup in `templates/index.html`).
 
 ## Architecture
 

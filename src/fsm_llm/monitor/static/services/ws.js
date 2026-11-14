@@ -6,7 +6,7 @@ import { state, scheduleRefresh, WS_MAX_DELAY } from './state.js';
 import { getApiKey, requestApiKey, onApiKeyChange } from './auth.js';
 import { hashInstances, $ } from '../utils/dom.js';
 
-// Close codes the server uses (server.py _WS_CLOSE_UNAUTHORIZED / _WS_CLOSE_FORBIDDEN):
+// Close codes the server uses (server/application.py _WS_CLOSE_UNAUTHORIZED / _WS_CLOSE_FORBIDDEN):
 // the first-message auth failed / the Host or Origin header was refused.
 const WS_AUTH_FAILED = 4401;
 const WS_FORBIDDEN = 4403;

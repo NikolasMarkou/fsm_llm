@@ -12,7 +12,7 @@ It is the `fsm_llm.monitor` subpackage of the `fsm-llm` distribution. The `monit
 
 ```mermaid
 flowchart LR
-    Browser[Browser dashboard: static/ + templates/index.html] -- REST /api --> Server[server.py FastAPI app]
+    Browser[Browser dashboard: static/ + templates/index.html] -- REST /api --> Server[server/ FastAPI app]
     Browser <-- WebSocket /ws every refresh_interval --> Server
     Server --> Manager[InstanceManager]
     Manager --> FSMs[FSM API instances]
@@ -34,7 +34,7 @@ flowchart LR
 ## Files
 
 - `__main__.py` - the `fsm-llm-monitor` command: `--host`, `--port`, `--api-key`, `--otel`, `--no-browser`, `--version`, `--info`; then runs uvicorn.
-- `server.py` - FastAPI app: HTML page, REST API, WebSocket, security checks, optional API key, meta-builder chat sessions.
+- `server/` - FastAPI app (a package: `application.py` holds the app, `configure` and the security checks; the route modules and `websocket.py` register on it): HTML page, REST API, WebSocket, optional API key, meta-builder chat sessions.
 - `instance_manager/` - (a package) creates, runs, queries, and destroys FSM, agent, and workflow instances; attaches the observer hooks; `attach_api` shows an `API` object you already have (its events and conversations; one at a time).
 - `collector.py` - `EventCollector` (thread-safe bounded store of events and logs, metric counters, hook callbacks) and `redact_context`.
 - `otel.py` - `OTELExporter`: mirrors collector events as OpenTelemetry spans.

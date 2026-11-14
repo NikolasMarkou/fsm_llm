@@ -17,11 +17,10 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from fsm_llm.core.definitions import ConversationBusyError
-from fsm_llm.monitor import server as server_module
 from fsm_llm.monitor.definitions import MonitorConfig
 from fsm_llm.monitor.exceptions import MonitorCapacityError
 from fsm_llm.monitor.instance_manager import InstanceManager, validate_preset_id
-from fsm_llm.monitor.server import app, configure
+from fsm_llm.monitor.server import app, configure, routes_builder
 
 
 def _client(api_key: str | None = None) -> TestClient:
@@ -44,6 +43,13 @@ class TestOriginAndHost:
             "/api/agent/x/cancel", headers={"Origin": "http://evil.example"}
         )
         assert resp.status_code == 403
+
+    def test_null_origin_post_refused(self):
+        # sandboxed iframes and some redirects send `Origin: null`
+        client = _client()
+        resp = client.post("/api/agent/x/cancel", headers={"Origin": "null"})
+        assert resp.status_code == 403
+        assert resp.json() == {"detail": "cross-origin request refused"}
 
     def test_same_origin_post_allowed(self):
         client = _client()
@@ -95,7 +101,7 @@ class TestApiKeyGating:
     def test_env_key_applies_without_configure(self):
         script = (
             "import os; os.environ['FSM_LLM_MONITOR_API_KEY']='k1';"
-            "from fsm_llm.monitor import server; print(server._api_key)"
+            "from fsm_llm.monitor.server import application; print(application._api_key)"
         )
         proc = subprocess.run(
             [sys.executable, "-c", script], capture_output=True, text=True, timeout=120
@@ -110,6 +116,15 @@ class TestApiKeyGating:
         configure(manager=mgr, api_key="k2")
         assert sink is not None
         assert mgr.global_collector._log_sink_id == sink
+
+    def test_configuring_another_manager_closes_the_previous_one(self):
+        first, second = InstanceManager(), InstanceManager()
+        configure(manager=first)
+        with mock.patch.object(first, "close", wraps=first.close) as closed:
+            configure(manager=second)
+        closed.assert_called_once_with()
+        assert first.global_collector._log_sink_id is None
+        assert second.global_collector._log_sink_id is not None
 
 
 class TestWebSocket:
@@ -171,6 +186,33 @@ class TestErrorMapping:
         ):
             resp = client.post("/api/workflow/launch", json={"preset_id": "x"})
         assert resp.status_code == 501
+
+    @pytest.mark.parametrize(
+        "method, path, body, patched, detail",
+        [
+            (
+                "post",
+                "/api/fsm/x/converse",
+                {"message": "hi", "conversation_id": "c"},
+                "send_message",
+                "LLM operation timed out",
+            ),
+            (
+                "post",
+                "/api/fsm/x/start",
+                {},
+                "start_conversation",
+                "LLM operation timed out",
+            ),
+        ],
+    )
+    def test_a_timed_out_llm_call_is_504(self, method, path, body, patched, detail):
+        # `_bounded`: a timeout is a 504 with the route's own detail, not a 500
+        client = _client()
+        with mock.patch.object(InstanceManager, patched, side_effect=TimeoutError()):
+            resp = getattr(client, method)(path, json=body)
+        assert resp.status_code == 504
+        assert resp.json() == {"detail": detail}
 
     def test_unknown_fsm_preset_is_404(self):
         client = _client()
@@ -244,14 +286,49 @@ class TestDashboardConfig:
 class TestBuilderGuards:
     def test_busy_session_reports_busy_and_refuses_delete(self):
         client = _client()
-        server_module._builder_sessions["b1"] = (mock.MagicMock(), 0.0)
-        server_module._builder_busy.add("b1")
+        routes_builder._builder_sessions["b1"] = (mock.MagicMock(), 0.0)
+        routes_builder._builder_busy.add("b1")
         try:
             assert client.get("/api/builder/result/b1").json()["busy"] is True
             assert client.delete("/api/builder/b1").status_code == 409
         finally:
-            server_module._builder_busy.discard("b1")
-            server_module._builder_sessions.pop("b1", None)
+            routes_builder._builder_busy.discard("b1")
+            routes_builder._builder_sessions.pop("b1", None)
+
+    def test_a_second_send_to_a_busy_session_is_refused(self):
+        client = _client()
+        agent = mock.MagicMock()
+        routes_builder._builder_sessions["b2"] = (agent, 0.0)
+        routes_builder._builder_busy.add("b2")
+        try:
+            resp = client.post(
+                "/api/builder/send", json={"session_id": "b2", "message": "again"}
+            )
+            assert resp.status_code == 409
+            assert resp.json() == {
+                "detail": "Builder session is processing another message"
+            }
+            agent.send.assert_not_called()
+        finally:
+            routes_builder._builder_busy.discard("b2")
+            routes_builder._builder_sessions.pop("b2", None)
+
+    def test_the_stale_sweep_keeps_a_session_with_a_send_in_flight(self):
+        import asyncio
+        import time
+
+        old = time.time() - 2 * routes_builder._BUILDER_SESSION_TTL
+        routes_builder._builder_sessions["idle"] = (mock.MagicMock(), old)
+        routes_builder._builder_sessions["busy"] = (mock.MagicMock(), old)
+        routes_builder._builder_sessions["fresh"] = (mock.MagicMock(), time.time())
+        routes_builder._builder_busy.add("busy")
+        try:
+            asyncio.run(routes_builder._cleanup_stale_builder_sessions())
+            assert sorted(routes_builder._builder_sessions) == ["busy", "fresh"]
+        finally:
+            routes_builder._builder_busy.discard("busy")
+            for sid in ("idle", "busy", "fresh"):
+                routes_builder._builder_sessions.pop(sid, None)
 
 
 class TestPresetValidation:

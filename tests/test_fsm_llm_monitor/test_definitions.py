@@ -20,7 +20,7 @@ from fsm_llm.monitor.definitions import (
     model_to_dict,
     normalize_message_history,
 )
-from fsm_llm.monitor.server import _fsm_dict_to_snapshot
+from fsm_llm.monitor.server.routes_visualize import _fsm_dict_to_snapshot
 from tests.test_fsm_llm_monitor.support import _manager
 
 

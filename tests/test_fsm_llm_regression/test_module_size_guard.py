@@ -1,10 +1,13 @@
-"""No module of the package is over 800 lines, and the 25 that are may not grow.
+"""No module of the package is over 800 lines, and `OVERSIZED` is empty.
 
-The 0.4 split of the layout plan (steps 65 to 94) cuts every module over 800
-physical lines. Until a module is cut it sits in `OVERSIZED` with its size
-today as a CEILING: it may shrink (lower the ceiling when it does) but never
-grow, and a new module may not start over the limit. Each split step deletes
-the module from `OVERSIZED` in the same commit; at the end the table is empty.
+The 0.4 split of the layout plan (steps 65 to 94) cut every module over 800
+physical lines. While a module was uncut it sat in `OVERSIZED` with its size at
+the time as a CEILING: it could shrink but never grow, and a new module could
+not start over the limit. Each split step deleted the module from `OVERSIZED` in
+the same commit; step 94 (`monitor/server.py`) deleted the last one, so the
+table is empty and the limit applies to every module with no exception.
+`test_the_table_ends_empty` fails when an entry comes back: a module over the
+limit must be split, not listed.
 
 Counting (reproduced at the commit the split map was measured on, `dfd14d80`:
 145 modules, 78,970 lines, 25 over 800 holding 42,490; the explorer recorded
@@ -31,9 +34,7 @@ from tests.test_fsm_llm_regression.support import source_modules
 LIMIT = 800
 
 # dotted module -> ceiling (its physical lines when step 60 recorded it)
-OVERSIZED: dict[str, int] = {
-    "fsm_llm.monitor.server": 1677,
-}
+OVERSIZED: dict[str, int] = {}
 
 
 def line_count(path: Path) -> int:
@@ -78,6 +79,14 @@ def size_problems(
 def test_no_module_over_800_lines() -> None:
     problems = size_problems(module_sizes())
     assert problems == [], "\n" + "\n".join(problems)
+
+
+def test_the_table_ends_empty() -> None:
+    """The split is done: no module is allowed to be over the limit, whatever its ceiling."""
+    assert OVERSIZED == {}
+    assert size_problems({"fsm_llm.big": 801}, OVERSIZED) == [
+        "fsm_llm.big has 801 lines, over the limit of 800 and not in OVERSIZED: split it"
+    ]
 
 
 def test_the_table_is_what_step_60_measured() -> None:

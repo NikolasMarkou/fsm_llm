@@ -1,6 +1,6 @@
 """Differential for the three API-key compare sites (plan 5980fbb7, step 7).
 
-``monitor/server.py`` (``_require_api_key`` for HTTP, ``_api_key_matches`` for
+``monitor/server/application.py`` (``_require_api_key`` for HTTP, ``_api_key_matches`` for
 the WebSocket auth message) and ``agents/remote.py`` (``AgentServer.
 _require_api_key``) must accept and refuse exactly the same presented keys, and
 agree with a plain oracle (utf-8 / surrogateescape byte equality). The first
@@ -19,7 +19,7 @@ pytest.importorskip("fastapi")
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import fsm_llm.monitor.server as server_module
+import fsm_llm.monitor.server.application as server_module
 from fsm_llm.agents.remote import AgentServer
 
 KEYS = ["s3cr3t", "a", "k" * 300, "\xe9", "s\xe9cret"]

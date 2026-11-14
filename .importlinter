@@ -802,7 +802,7 @@ forbidden_modules =
 # Step 93 (monitor/instance_manager.py became the package monitor/instance_manager/, InstanceManager as
 # mixins over a shell). The shell composes the mixins, so no mixin, helper or surface module may import it
 # back (a cycle the mixins would only avoid by a function-local import), and the package is read by the
-# dashboard server (`monitor/server.py` imports it), so no module of it imports the server back.
+# dashboard server (`monitor/server/` imports it), so no module of it imports the server back.
 [importlinter:contract:monitor-instance-manager-mixins-do-not-import-the-shell]
 name = the mixins, helpers and surface of fsm_llm.monitor.instance_manager do not import its shell (manager.py)
 type = forbidden
@@ -837,3 +837,19 @@ source_modules =
     fsm_llm.monitor.instance_manager.manager
 forbidden_modules =
     fsm_llm.monitor.server
+
+# Step 94 (monitor/server.py became the package monitor/server/: the app and its state in application.py, the
+# helpers every route uses in support.py, one module per route group, the /ws push in websocket.py). The route
+# modules register on the one `app` of application.py, and every piece of state that `configure()` rebinds lives
+# there, so the imports run one way only: websocket, then the route modules (independent of each other; the one
+# exception is the push sweeping the builder sessions, which is a higher layer reading a lower one), then support,
+# then application. A route module that imported another, or application importing a route, would be a cycle at
+# import time (the registration order is the import order) and a bound copy of state `configure()` cannot reach.
+[importlinter:contract:monitor-server-layers]
+name = the modules of fsm_llm.monitor.server import only downward: websocket, route modules, support, application
+type = layers
+layers =
+    fsm_llm.monitor.server.websocket
+    fsm_llm.monitor.server.routes_agent | fsm_llm.monitor.server.routes_builder | fsm_llm.monitor.server.routes_fsm | fsm_llm.monitor.server.routes_monitoring | fsm_llm.monitor.server.routes_visualize | fsm_llm.monitor.server.routes_workflow
+    fsm_llm.monitor.server.support
+    fsm_llm.monitor.server.application

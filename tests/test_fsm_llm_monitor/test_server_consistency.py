@@ -15,7 +15,6 @@ import re
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -27,10 +26,10 @@ from fsm_llm.monitor import server as server_module
 from fsm_llm.monitor.definitions import DashboardConfig, InstanceInfo, MonitorConfig
 from fsm_llm.monitor.exceptions import MetricCollectionError
 from fsm_llm.monitor.instance_manager import InstanceManager
-from fsm_llm.monitor.server import app, configure
+from fsm_llm.monitor.server import app, application, configure, routes_builder, support
 from tests.test_fsm_llm_monitor.support import _manager
 
-STATIC = Path(server_module.__file__).parent / "static"
+STATIC = server_module.STATIC_DIR
 
 
 def _client() -> tuple[TestClient, InstanceManager]:
@@ -60,7 +59,7 @@ class TestVisualizeWithoutManager:
     )
     def test_first_request_finds_the_flow(self, url, monkeypatch):
         client, _ = _client()
-        monkeypatch.setattr(server_module, "_flows", {})
+        monkeypatch.setattr(application, "_flows", {})
         resp = client.get(url)
         assert resp.status_code == 200, resp.text
         assert resp.json()["nodes"]
@@ -149,7 +148,7 @@ class TestMonitoringFailuresAreLogged:
         mgr.get_metrics = mock.Mock(  # type: ignore[method-assign]
             side_effect=MetricCollectionError("collector exploded")
         )
-        with mock.patch.object(server_module, "logger") as log:
+        with mock.patch.object(support, "logger") as log:
             resp = client.get("/api/metrics")
         assert resp.status_code == 500
         assert resp.json() == {"detail": "Internal server error"}
@@ -158,8 +157,8 @@ class TestMonitoringFailuresAreLogged:
     def test_builder_internal_state_failure_is_logged(self):
         agent = mock.Mock()
         agent.get_internal_state.side_effect = RuntimeError("no state")
-        with mock.patch.object(server_module, "logger") as log:
-            state = server_module._get_builder_internal_state(agent)
+        with mock.patch.object(routes_builder, "logger") as log:
+            state = routes_builder._get_builder_internal_state(agent)
         assert state == {"phase": "unknown", "turn_count": 0}
         assert log.debug.called or log.warning.called
 
@@ -248,8 +247,8 @@ class TestStaticPins:
 
     def test_ws_client_stops_on_4403_like_4401(self):
         ws_js = (STATIC / "services" / "ws.js").read_text(encoding="utf-8")
-        assert f"= {server_module._WS_CLOSE_FORBIDDEN};" in ws_js
-        assert f"= {server_module._WS_CLOSE_UNAUTHORIZED};" in ws_js
+        assert f"= {application._WS_CLOSE_FORBIDDEN};" in ws_js
+        assert f"= {application._WS_CLOSE_UNAUTHORIZED};" in ws_js
         assert "WS_FORBIDDEN" in ws_js.split("ws.onclose", 1)[1]
 
     def test_ws_client_reads_only_what_the_server_sends(self):
@@ -345,7 +344,7 @@ class TestStaticPins:
 _UTF8_SCRIPT = """
 import json
 from pathlib import Path
-from fsm_llm.monitor import server
+from fsm_llm.monitor.server import application, routes_visualize
 from fsm_llm.monitor.instance_manager import InstanceManager, find_examples_dir
 
 preset = "basic/form_filling/fsm.json"
@@ -355,10 +354,10 @@ expected = json.loads(
 mgr = InstanceManager()
 mgr.global_collector.cleanup()
 assert mgr._resolve_fsm_data(preset, None) == expected
-assert server._read_preset_json(preset) == expected
-scanned = server._scan_fsm_presets()["fsm"]
+assert routes_visualize._read_preset_json(preset) == expected
+scanned = routes_visualize._scan_fsm_presets()["fsm"]
 assert not [p for p in scanned if p.get("parse_error")], scanned
-assert server._load_flows()["agents"]
+assert application._load_flows()["agents"]
 print("OK")
 """
 

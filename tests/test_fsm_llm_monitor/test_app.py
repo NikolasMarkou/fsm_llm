@@ -11,7 +11,8 @@ from fastapi.testclient import TestClient
 
 from fsm_llm.monitor.constants import LOG_LEVELS, MAX_AGENT_ITERATIONS
 from fsm_llm.monitor.instance_manager import InstanceManager
-from fsm_llm.monitor.server import _fsm_dict_to_snapshot, app, configure
+from fsm_llm.monitor.server import app, configure
+from fsm_llm.monitor.server.routes_visualize import _fsm_dict_to_snapshot
 
 
 class TestWebServer:
@@ -537,7 +538,7 @@ class TestFSMVisualizeReadsTheCoreGraph:
     def test_endpoint_follows_build_fsm_graph(self, monkeypatch):
         """Fails if the monitor builds nodes and edges from the definition."""
         from fsm_llm.core.visualize import FSMGraph, FSMGraphEdge, FSMGraphNode
-        from fsm_llm.monitor import server
+        from fsm_llm.monitor.server import routes_visualize as server
 
         seen = []
 
@@ -591,7 +592,7 @@ class TestFSMVisualizeReadsTheCoreGraph:
 
     def test_preset_route_follows_build_fsm_graph(self, monkeypatch):
         from fsm_llm.core.visualize import build_fsm_graph
-        from fsm_llm.monitor import server
+        from fsm_llm.monitor.server import routes_visualize as server
 
         calls = []
 
@@ -642,7 +643,7 @@ class TestFSMVisualizeReadsTheCoreGraph:
     def test_graph_error_reason_hides_pydantic_internals_and_other_errors(self):
         from pydantic import BaseModel
 
-        from fsm_llm.monitor.server import _graph_error_reason
+        from fsm_llm.monitor.server.routes_visualize import _graph_error_reason
 
         class _Node(BaseModel):
             description: str
@@ -675,10 +676,11 @@ class TestRemovedMonitorLegacy:
             configure(InstanceManager())  # keyword-only: no positional bridge slot
 
     def test_server_has_no_get_bridge(self):
-        from fsm_llm.monitor import server
+        from tests.test_fsm_llm_monitor.support import server_package_modules
 
-        assert not hasattr(server, "get_bridge")
-        assert not hasattr(server, "_bridge_cache")
+        for module in server_package_modules():
+            assert not hasattr(module, "get_bridge"), module
+            assert not hasattr(module, "_bridge_cache"), module
 
     def test_instance_manager_has_no_connect_bridge(self):
         assert not hasattr(InstanceManager, "connect_bridge")
@@ -1064,7 +1066,7 @@ class TestActivityEndpoint:
 
 
 class TestServerHygieneAndWorkflow:
-    """server.py hygiene + workflow endpoints (plan Steps 1,3,5)."""
+    """server/ hygiene + workflow endpoints (plan Steps 1,3,5)."""
 
     def setup_method(self):
         configure()
@@ -1314,7 +1316,7 @@ class TestApiKeyGate:
         """
         from starlette.requests import Request
 
-        import fsm_llm.monitor.server as server_module
+        import fsm_llm.monitor.server.application as server_module
 
         configure(manager=InstanceManager(), api_key="s3cr3t")
         scope = {
@@ -1330,7 +1332,7 @@ class TestApiKeyGate:
         """D-020: same guarantee via the Authorization: Bearer header path."""
         from starlette.requests import Request
 
-        import fsm_llm.monitor.server as server_module
+        import fsm_llm.monitor.server.application as server_module
 
         configure(manager=InstanceManager(), api_key="s3cr3t")
         scope = {
@@ -1389,7 +1391,7 @@ class TestApiKeyGate:
         """D-006 (P2-W5): an empty or whitespace-only programmatic key raises.
         Accepting "" let an empty X-API-Key header authenticate
         (compare_digest(b"", b"") is True); the prior key must stay in force."""
-        from fsm_llm.monitor import server as server_module
+        from fsm_llm.monitor.server import application as server_module
 
         configure(manager=InstanceManager(), api_key="s3cr3t")
         with pytest.raises(ValueError, match="api_key"):
@@ -1401,7 +1403,7 @@ class TestApiKeyGate:
 
     def test_empty_env_api_key_still_means_unset(self, monkeypatch):
         """D-006: FSM_LLM_MONITOR_API_KEY="" keeps its unset meaning (no auth)."""
-        from fsm_llm.monitor import server as server_module
+        from fsm_llm.monitor.server import application as server_module
 
         monkeypatch.setenv("FSM_LLM_MONITOR_API_KEY", "")
         configure(manager=InstanceManager())
@@ -1461,12 +1463,12 @@ class TestDashboardWebsocketRedaction:
     """
 
     def test_server_uses_the_shared_redacting_hook(self):
-        import inspect
         import re
 
-        from fsm_llm.monitor import server as server_mod
+        from tests.test_fsm_llm_monitor.support import server_modules
 
-        source = inspect.getsource(server_mod)
+        # the server is a package: read every module, never the facade alone
+        source = "\n".join(server_modules().values())
         assert "default=redacting_json_default" in source
         # A call site, not the anchor comment that names the old hook.
         assert re.search(r"default=str[,)\s]", source) is None

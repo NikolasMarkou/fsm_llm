@@ -1234,8 +1234,7 @@ class TestStartNeverBuilds:
         from fastapi.testclient import TestClient
 
         import fsm_llm.agents.meta_builder as meta_module
-        from fsm_llm.monitor import server
-        from fsm_llm.monitor.server import app, configure
+        from fsm_llm.monitor.server import app, configure, routes_builder
 
         llm = ScriptedMetaLLM(intents=["fsm"], builds=[_GOOD_FSM])
 
@@ -1262,8 +1261,8 @@ class TestStartNeverBuilds:
             assert sent.json()["is_complete"] is True
             assert set(sent.json()["artifact"]["states"]) == {"q1", "end"}
         finally:
-            server._builder_sessions.clear()
-            server._builder_busy.clear()
+            routes_builder._builder_sessions.clear()
+            routes_builder._builder_busy.clear()
 
 
 class TestBuildPromptNeverDoubled:

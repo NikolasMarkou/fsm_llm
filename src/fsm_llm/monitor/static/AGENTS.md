@@ -5,7 +5,7 @@ Purpose: Framework-free browser frontend of the FSM-LLM Monitor dashboard (JS ES
 
 ## Scope
 
-Everything served under `/static/` by `src/fsm_llm/monitor/server.py` (`STATIC_DIR = Path(__file__).parent / "static"`, `app.mount("/static", StaticFiles(directory=str(STATIC_DIR)))`). The monitor is the `fsm_llm.monitor` subpackage of the `fsm-llm` distribution (FastAPI dashboard, command `fsm-llm-monitor`). The HTML shell is `src/fsm_llm/monitor/templates/index.html` (served at `/`, not in this folder); it loads `/static/style.css` and `<script type="module" src="/static/app.js">`. No bundler, no npm, no transpile. Shipped in the wheel via `pyproject.toml` package-data `"fsm_llm.monitor" = ["static/**/*", "templates/*"]` (recursive, so `pages/`, `services/`, `utils/` ship too). REST routes and WebSocket broadcast live in `server.py`, not here.
+Everything served under `/static/` by `src/fsm_llm/monitor/server/` (`application.py`: `STATIC_DIR = Path(__file__).parent.parent / "static"`, `app.mount("/static", StaticFiles(directory=str(STATIC_DIR)))`). The monitor is the `fsm_llm.monitor` subpackage of the `fsm-llm` distribution (FastAPI dashboard, command `fsm-llm-monitor`). The HTML shell is `src/fsm_llm/monitor/templates/index.html` (served at `/`, not in this folder); it loads `/static/style.css` and `<script type="module" src="/static/app.js">`. No bundler, no npm, no transpile. Shipped in the wheel via `pyproject.toml` package-data `"fsm_llm.monitor" = ["static/**/*", "templates/*"]` (recursive, so `pages/`, `services/`, `utils/` ship too). REST routes and WebSocket broadcast live in `server.py`, not here.
 
 ## Architecture
 
@@ -20,7 +20,7 @@ flowchart TD
     Pages --> Utils[utils/*.js]
     API --> Auth
     WS -->|registerHandlers table| Pages
-    API -->|/api/...| Server[server.py]
+    API -->|/api/...| Server[server/]
     WS -->|/ws| Server
     Server -->|_load_flows| Flows[flows.json]
 ```
@@ -75,7 +75,7 @@ Control flow in `app.js`:
 - `markdown.js`: `renderMarkdown(text)`; escapes first, then a fixed regex sequence (code, headings as bold, bold, italic, lists, rules). No links or tables.
 - `graph.js`: `renderGraph(svgId, {nodes, edges}, opts)`; BFS layers from the first `is_initial` node, rows of at most 5 columns, writes `x`/`y` onto the passed nodes.
 
-Server endpoints the frontend relies on (defined in `server.py`): `GET /api/auth`, `/api/config`, `/api/info`, `/api/dashboard/config`, `/api/instances`, `/api/activity`, the `/api/fsm/...`, `/api/workflow/...`, `/api/agent/...`, `/api/builder/...` routes, `GET /api/agent/visualize?agent_type=` (default `ReactAgent`), `GET /api/workflow/visualize?workflow_id=` (default `order_processing`), and `WS /ws`. Error bodies carry `detail`.
+Server endpoints the frontend relies on (defined in `server/`): `GET /api/auth`, `/api/config`, `/api/info`, `/api/dashboard/config`, `/api/instances`, `/api/activity`, the `/api/fsm/...`, `/api/workflow/...`, `/api/agent/...`, `/api/builder/...` routes, `GET /api/agent/visualize?agent_type=` (default `ReactAgent`), `GET /api/workflow/visualize?workflow_id=` (default `order_processing`), and `WS /ws`. Error bodies carry `detail`.
 
 ## Data shapes
 
@@ -93,7 +93,7 @@ Server endpoints the frontend relies on (defined in `server.py`): `GET /api/auth
 - `flows.json`: `{agents: {<AgentClass>: {description, nodes[], edges[]}}, workflows: {<id>: {name, description, nodes[], edges[]}}}`. Node `{id, label, description, is_initial, is_terminal}` (workflow nodes also carry `step_type`). Edge `{from, to, label}`.
   - Agents (12): `ReactAgent`, `ReflexionAgent`, `PlanExecuteAgent`, `DebateAgent`, `SelfConsistencyAgent`, `REWOOAgent`, `PromptChainAgent`, `EvaluatorOptimizerAgent`, `MakerCheckerAgent`, `OrchestratorAgent`, `ADaPTAgent`, `ReasoningReactAgent`.
   - Workflows (5): `order_processing`, `data_pipeline`, `approval_flow`, `parallel_processing`, `timer_wait`.
-  - `server.py` `_load_flows()` reads it into `_flows` inside `configure()`, and again in `get_manager()` when `_flows` is empty (a missing file gives `{"agents": {}, "workflows": {}}`). Served by the two visualize routes; unknown names give 404 with `detail`. Also reachable raw at `/static/flows.json`.
+  - `server/application.py` `_load_flows()` reads it into `_flows` inside `configure()`, and again in `get_flows()` when `_flows` is empty (a missing file gives `{"agents": {}, "workflows": {}}`). Served by the two visualize routes; unknown names give 404 with `detail`. Also reachable raw at `/static/flows.json`.
 
 ## Invariants and constraints
 
@@ -111,7 +111,7 @@ Server endpoints the frontend relies on (defined in `server.py`): `GET /api/auth
 
 - Browser only: ES modules, `fetch`, `WebSocket`, `sessionStorage`, Clipboard API.
 - External: Google Fonts (`Inter` 400/500/600/700, `JetBrains Mono` 400) via `@font-face` URLs in `style.css`, `font-display: swap`, system font fallbacks.
-- Server side: `fastapi.staticfiles.StaticFiles`, the Jinja2 template, `flows.json` read by `server.py`. The server accepts the key as `X-API-Key` (or `Authorization: Bearer`) and gates mutating routes; `/api/auth` is never gated.
+- Server side: `fastapi.staticfiles.StaticFiles`, the Jinja2 template, `flows.json` read by `server/application.py`. The server accepts the key as `X-API-Key` (or `Authorization: Bearer`) and gates mutating routes; `/api/auth` is never gated.
 
 ## Failure modes
 
@@ -125,8 +125,8 @@ Server endpoints the frontend relies on (defined in `server.py`): `GET /api/auth
 
 - New page: add `<div id="page-<name>" class="page">` and a sidebar button with `data-action="show-page" data-page="<name>"` in `templates/index.html`, a module in `pages/`, the import, `VALID_PAGES` entry, and `PAGE_REFRESH` hook in `app.js`, and a number key in `pageKeys` if wanted.
 - New action: emit `data-action` (plus `data-*` args) in markup, add it to `ACTIONS` in `app.js`. Non-button clickable elements get `tabindex="0"` (and `role="button"` when they hold no nested buttons).
-- New live push: add the field in the `server.py` broadcast, a branch in `services/ws.js` `onmessage`, and a handler in the `registerHandlers({...})` call in `app.js`.
-- New REST call: add the route in `server.py` first; keep `detail` in error bodies so `fetchJson` can show it.
+- New live push: add the field in the `server/websocket.py` broadcast, a branch in `services/ws.js` `onmessage`, and a handler in the `registerHandlers({...})` call in `app.js`.
+- New REST call: add the route in the `server/routes_*.py` module of its group first; keep `detail` in error bodies so `fetchJson` can show it.
 - New shared state: add the field with a default to `_target` in `services/state.js`. New debounced refresh: distinct `scheduleRefresh` key, cancelled where its selection is cleared.
 - New launchable agent type: mirror it in `services/state.js` `TOOL_BASED_AGENTS` if it needs tools, and add its graph to `flows.json`.
 - Styling: reuse `:root` tokens in `style.css`; do not hardcode colors in JS except the existing inline fallbacks.
