@@ -46,7 +46,7 @@ from packaging.version import Version
 _ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOWS = _ROOT / ".github" / "workflows"
 _CI = _WORKFLOWS / "python-package.yml"
-_FIXTURE_REL = "tests/fixtures/vulnerable-requirements.txt"
+_FIXTURE_REL = "tests/fixtures/canary-vulnerable-pins.txt"
 _FIXTURE = _ROOT / _FIXTURE_REL
 _SECURITY = _ROOT / "SECURITY.md"
 _REFRESH_WORKFLOW = _WORKFLOWS / "refresh-pins.yml"
@@ -574,7 +574,7 @@ class TestTheFixtureAndThePins:
             if not path.is_file():
                 continue
             for line in path.read_text(encoding="utf-8").splitlines():
-                if "vulnerable-requirements" in line and not line.lstrip().startswith(
+                if "canary-vulnerable-pins" in line and not line.lstrip().startswith(
                     "#"
                 ):
                     assert "pip-audit" in line, (path.name, line)

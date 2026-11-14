@@ -237,7 +237,7 @@ jobs:
           set -euo pipefail
           report="$RUNNER_TEMP/canary-audit.json"
           status=0
-          pip-audit -r tests/fixtures/vulnerable-requirements.txt --no-deps --disable-pip --format json --output "$report" || status=$?
+          pip-audit -r tests/fixtures/canary-vulnerable-pins.txt --no-deps --disable-pip --format json --output "$report" || status=$?
           if [ "$status" -ne 1 ]; then
             echo "::error::the canary audit exited $status, expected 1 (vulnerabilities found)"
             exit 1

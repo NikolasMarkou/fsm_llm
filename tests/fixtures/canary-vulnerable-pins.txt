@@ -1,7 +1,7 @@
 # The canary of the CI job `supply-chain` (plan d454fd62, step 109; roadmap row 0.10).
 #
 # These are old releases with published security advisories, and that is their whole job:
-# `pip-audit -r tests/fixtures/vulnerable-requirements.txt --no-deps --disable-pip` must exit 1
+# `pip-audit -r tests/fixtures/canary-vulnerable-pins.txt --no-deps --disable-pip` must exit 1
 # with a non-empty report on every CI run. If it does not, the audit itself is broken (an
 # unreachable advisory service, a changed exit code, a withdrawn advisory) and the build fails,
 # so a green `pip-audit --skip-editable` over the real environment can be believed.
