@@ -114,6 +114,11 @@ class _Provider:
         return _response(json.dumps({"message": "Hello there", "reasoning": ""}))
 
     def __enter__(self) -> _Provider:
+        # The classifier must not bind a provider call of its own. A patch of such a
+        # name would be dead code unless the name exists, so say it does not: the
+        # `litellm-one-module` import contract keeps the import out, this keeps the
+        # binding out.
+        assert not hasattr(classification_module, "completion")
         self._patches = [
             patch(
                 "fsm_llm.llm.providers.litellm.completion", side_effect=self.completion
@@ -121,12 +126,6 @@ class _Provider:
             patch(
                 "fsm_llm.llm.providers.litellm.get_supported_openai_params",
                 return_value=self._supported,
-            ),
-            # The parent commit's classifier binding: reaching it is a failure.
-            patch(
-                "fsm_llm.engine.classification.completion",
-                side_effect=AssertionError("classifier bypassed the LLM layer"),
-                create=True,
             ),
         ]
         for p in self._patches:
