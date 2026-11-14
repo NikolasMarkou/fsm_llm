@@ -43,7 +43,7 @@ from tests.test_fsm_llm_agents.test_grounded_patterns import (
     _TurnAwareLLM,
 )
 
-# What core ships for a reply cut inside a JSON envelope (llm.py, D-024).
+# What core ships for a reply cut inside a JSON envelope (llm/parsing.py, D-024).
 _CUT_OFF_MESSAGE = (
     "I'm sorry, my answer was cut off before it was finished. "
     "Please try again or ask for a shorter answer."

@@ -1,6 +1,6 @@
 # fsm_llm
 
-The `fsm_llm` package at `src` is the whole FSM-LLM framework. Its top level is the core engine: it runs chatbots defined as finite state machines, where a large language model (LLM) reads each user message, pulls out data, and writes the reply. Seven subpackages built on that core add reasoning, workflows, agents, a web dashboard, evaluation tools, runtime FSM synthesis, and public test doubles.
+The `fsm_llm` package at `src/fsm_llm` is the whole FSM-LLM framework. Its top level is the core engine: it runs chatbots defined as finite state machines, where a large language model (LLM) reads each user message, pulls out data, and writes the reply. Seven subpackages built on that core add reasoning, workflows, agents, a web dashboard, evaluation tools, runtime FSM synthesis, and public test doubles.
 
 ## Where it lives
 
@@ -58,7 +58,9 @@ flowchart TD
     testing[fsm_llm.testing] --> core
 ```
 
-`import fsm_llm` loads only the core. Each subpackage is imported on its own, for example `from fsm_llm.agents import ReactAgent`.
+The core is itself layered, and a layer imports only the layers below it: `engine` (the `API`, the `FSMManager`, the turn), `handlers`, `policy` (approval and human-in-the-loop), then `context`, `okf`, `skills` and `tools` side by side, then `llm`, then `core` (the models, JsonLogic, the validator); the kernel modules (`constants`, `logging`, `security`, `text`, `env`, `frontmatter`, `memory`) import no layer. The rules are in `.importlinter`.
+
+`import fsm_llm` loads only the core layers (`core`, `engine`, `handlers`, `context`, `llm`, `security` and a few kernel modules); `okf`, `skills`, `tools`, `policy` and every subpackage load when you import them. Each subpackage is imported on its own, for example `from fsm_llm.agents import ReactAgent`.
 
 ## Subpackages
 
@@ -89,7 +91,7 @@ flowchart TD
 - `memory.py` - `WorkingMemory`: named buffers for agent-style scratch data.
 - `engine/session.py` - save and restore conversations to JSON files.
 - `core/verify/` (the validator), `core/visualize/` (the visualizer) - check an FSM file for problems (`fsm-llm-validate` is `fsm_llm.core.verify.cli:main_cli`); draw it as ASCII art, or as Mermaid or DOT through the graph data of `build_fsm_graph`.
-- `core/verify/flow.py` - static analysis of an FSM graph: `strongly_connected_components` (shared with `core/verify/graph.py`), and the data-flow and liveness checks `analyze_data_flow` and `analyze_liveness` that runtime synthesis uses as gates. It imports only `definitions` and `state_kinds`, never logs, and the validator does not call the two analyses.
+- `core/verify/flow.py` - static analysis of an FSM graph: `strongly_connected_components` (shared with `core/verify/graph.py`), and the data-flow and liveness checks `analyze_data_flow` and `analyze_liveness` that runtime synthesis uses as gates. It imports only `core.definitions` and `core.state_kinds`, never logs, and the validator does not call the two analyses.
 - `core/state_kinds.py` - the registry of state kinds: one frozen `KindSpec` per kind (`conversation`, `completion`, `synthesize`) holding the rules the loader, the validator, the data-flow and liveness analyses, the dry-run gate and the pipeline read instead of testing `state.completion` or `state.synthesize`, plus `kind_of(state)`, `get_kind` and `State.kind`, a plain property that is never serialised. A leaf (standard library only) and internal: it is not exported from `fsm_llm`.
 - `engine/kinds/` - what a state's kind does in Pass 1 of a turn (the old flat `executors.py`; `__init__.py` re-exports `StateExecutor`, `ConversationExecutor`, `CompletionExecutor`, `executor_for`, `register_executor`, `check_executors`): `base.py` (`StateExecutor`: `extract`, `cleans_extracted`, `after_transition`), `registry.py` (the module table and `executor_for`), `completion.py` (the completion executor: one `complete` call over a consumer-owned transcript), `conversation/` (the conversation executor, also the passive executor of `synthesize`, which owns the field, bulk, classification and post-transition extraction, bound to the services of one pipeline by `ConversationPass1`), `services.py` (`_PipelineServices`, the protocol of what an executor may ask of the pipeline) and `records.py`. The pipeline picks the executor with `executor_for(state, self._executors)` at its one Pass-1 seam (a keyword-only per-instance `executors={kind_name: StateExecutor}` on `API`, `FSMManager` and `MessagePipeline` wins over the module table); the package never imports the turn pipeline and is internal.
 - `runner.py`, `__main__.py` - the interactive command-line chat.

@@ -151,13 +151,13 @@ DEFAULT_MAX_STACK_DEPTH = 10
 FSM_ID_HASH_LENGTH = 8
 
 # Confidence of a field value salvaged from an extraction envelope that
-# max_tokens cut off INSIDE the value (llm.py unstructured rung, D-056 of plan
+# max_tokens cut off INSIDE the value (llm/parsing.py unstructured rung, D-056 of plan
 # 06a5ec0a). Below the 0.5 of every other unstructured coercion, so a field's
 # `confidence_threshold` (e.g. 0.5) can reject a cut-off artifact.
 TRUNCATED_SALVAGE_CONFIDENCE = 0.3
 
-# Label of the context section in a per-field extraction prompt (prompts.py).
-# `definitions.typed_field_extraction` names it in its instructions.
+# Label of the context section in a per-field extraction prompt (context/layout/extraction.py).
+# `core.definitions.typed_field_extraction` names it in its instructions.
 FIELD_PROMPT_CONTEXT_LABEL = "Already extracted:"
 
 # DECISION plan-2026-09-29T103145-06a5ec0a/D-035
@@ -242,8 +242,8 @@ CLASSIFIER_HISTORY_EXCHANGES = 3
 
 # Upper bound on intents in one multi-intent classification. Single source for
 # the `MultiClassificationResult.intents` pydantic cap (core/definitions/classification.py), the
-# `ClassificationPromptConfig.max_intents` bound (prompts.py) and the
-# truncation in `Classifier.classify_multi` (classification.py).
+# `ClassificationPromptConfig.max_intents` bound (context/layout/classification.py) and the
+# truncation in `Classifier.classify_multi` (engine/classification.py).
 MAX_MULTI_INTENTS = 5
 
 # Upper bound on cached `Classifier` instances per `MessagePipeline`
@@ -284,9 +284,9 @@ CLI_EXIT_INTERRUPTED = 130
 # --------------------------------------------------------------
 
 #: Deepest operator nesting `evaluate_logic` accepts (DoS guard). It lives here,
-#: not in expressions.py, so `definitions.TransitionCondition` can enforce the
-#: same bound at load time without importing expressions (which imports
-#: definitions). Both import it from this one place.
+#: not in `core/expressions/`, so `core.definitions.TransitionCondition` can enforce the
+#: same bound at load time without importing `core.expressions` (which imports
+#: `core.definitions`). Both import it from this one place.
 MAX_JSONLOGIC_DEPTH = 50
 
 #: JsonLogic operators whose arguments `evaluate_logic` reads as raw DATA (a
@@ -429,7 +429,7 @@ OKF_INCOMPLETE_NOTE = (
 OKF_EXPORT_TEXT_MAX_CHARS = 50_000
 
 # --------------------------------------------------------------
-# Agent Skills (fsm_llm.agent_skills) limits
+# Agent Skills (fsm_llm.skills) limits
 # --------------------------------------------------------------
 
 # Resource bounds for reading untrusted skill folders (`SkillLimits` defaults).

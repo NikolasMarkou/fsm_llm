@@ -737,7 +737,8 @@ class TestWiring:
             "import fsm_llm.okf.cli\n"
             "bad = [m for m in sys.modules if m.split('.')[:2] in "
             "(['fsm_llm', 'agents'], ['fsm_llm', 'reasoning'], "
-            "['fsm_llm', 'workflows'], ['fsm_llm', 'monitor'], ['fsm_llm', 'eval'])]\n"
+            "['fsm_llm', 'workflows'], ['fsm_llm', 'monitor'], ['fsm_llm', 'eval'], "
+            "['fsm_llm', 'synthesis'], ['fsm_llm', 'testing'])]\n"
             "assert not bad, bad\n"
             "print('ok')\n"
         )

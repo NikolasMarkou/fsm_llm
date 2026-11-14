@@ -531,19 +531,21 @@ The repository is one distribution (`fsm-llm`, setuptools, src layout). The dire
 fsm_llm/
 ├── src/fsm_llm/      # THE LIBRARY (the import package)
 │   ├── engine/api/, engine/fsm/,   # API, FSMManager, MessagePipeline (the 2-pass turn)
-│   │   engine/turn/
+│   │   engine/turn/, engine/kinds/
 │   ├── core/definitions/      # Pydantic FSM models and core exceptions (a package)
 │   ├── core/transition_evaluator.py, core/expressions/   # JsonLogic evaluation, no LLM
-│   ├── core/verify/flow.py    # Data-flow and liveness analysis of an FSM
-│   ├── llm/                   # The only module that imports litellm (`__init__.py`), reply-text helpers
-│   ├── context/               # Context cleaning, compaction, filtering and redaction
+│   ├── core/verify/, core/visualize/   # Validator, data-flow and liveness analysis; diagrams and graph export
+│   ├── handlers/              # Handler system, HandlerBuilder, create_handler
+│   ├── llm/                   # LLMInterface and LiteLLMInterface (llm/providers/litellm.py is the only litellm import), reply parsing
+│   ├── context/               # Context cleaning, compaction, filtering and the prompt builders (context/layout/)
 │   ├── engine/classification.py, session.py, builders.py   # Classifier, session store, API/FSMManager builders
-│   ├── security/, constants.py   # Key filtering, path confinement, limits
+│   ├── security/, constants.py, logging.py, memory.py, env.py   # Key filtering, path confinement, limits, logging, working memory, .env loader
 │   ├── okf/, text.py                       # Open Knowledge Format, text helpers (okf_bridge is engine/okf_bridge.py)
 │   ├── skills/                # Agent Skills (read-only), the fsm-llm-skills command
 │   ├── tools/                 # Tool registry, tool models and the @tool decorator (re-exported by agents)
 │   ├── policy/                # Approval policy and the human-in-the-loop manager (re-exported by agents)
-│   ├── frontmatter.py         # The one YAML frontmatter loader
+│   ├── frontmatter.py, cli_support.py   # The one YAML frontmatter loader, the shared CLI skeleton
+│   ├── runner.py, __main__.py           # The interactive fsm-llm command
 │   ├── reasoning/             # 9 strategies as stacked FSMs
 │   ├── workflows/             # Async workflow engine, 11 step types, DSL
 │   ├── agents/                # 18 agent patterns, tools, HITL, MCP, A2A, meta-builder

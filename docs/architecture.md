@@ -157,12 +157,12 @@ A state has exactly one kind, derived from the config it carries: `conversation`
 
 The extension point has two halves, and a new kind needs both:
 
-- **Declaration** (core). A frozen `KindSpec` in `fsm_llm.core.state_kinds` names the kind, the `State` field that carries its config (`config_field`) and the rules the rest of core reads: `result_key`, `inherits_result_on_push`, `forbidden_declarations`, `check_state`, `check_definition` and `sample_results` (the loader), `dryrun_judged`, `mentioned_keys` and `typed_keys` (gate G6a), `minted_keys` and `produced_keys` (the pipeline, G3 and G4), `lint_raw` and `raw_result_key` (the validator, which reads raw dicts), `declared_tools`, `raw_declared_tools` and `supported_in_procedure` (synthesis). The registry (`KINDS`, `kind_of`, `get_kind`) is static and process-wide; `state_kinds` is a leaf that imports only the standard library.
+- **Declaration** (core). A frozen `KindSpec` in `fsm_llm.core.state_kinds` names the kind, the `State` field that carries its config (`config_field`) and the rules the rest of core reads: `result_key`, `inherits_result_on_push`, `forbidden_declarations`, `check_state`, `check_definition` and `sample_results` (the loader), `dryrun_judged`, `mentioned_keys` and `typed_keys` (gate G6a), `minted_keys` and `produced_keys` (the pipeline, G3 and G4), `lint_raw` and `raw_result_key` (the validator, which reads raw dicts), `declared_tools`, `raw_declared_tools` and `supported_in_procedure` (synthesis). The registry (`KINDS`, `kind_of`, `get_kind`) is static and process-wide; `fsm_llm.core.state_kinds` is a leaf that imports only the standard library.
 - **Execution** (engine). A `StateExecutor` in `fsm_llm.engine.kinds` says what the kind does in Pass 1: `extract(...)` produces the turn's extraction result, `cleans_extracted` says whether the data goes through `clean_context_keys`, and `after_transition(...)` runs when a transition lands in a state of the kind. The pipeline picks the executor with `executor_for(state, executors)` at the one Pass-1 seam that the sync and the stream path share. The executor table is per instance: `API(..., executors={kind_name: executor})`, passed down to `FSMManager` and `MessagePipeline`, is validated, copied read-only and visible to that `API` only. A kind with no executor (`synthesize`, which is passive, or a runtime kind nobody registered) runs as conversation, resolved through that `API`'s own `conversation` entry first and the module's second, so an `executors={"conversation": X}` override covers it too (a bare `converse` on a synthesize state stays in it, as before).
 
 What the engine guarantees to an executor: `process()` takes the one snapshot of the turn and restores it on a failure (see Turn atomicity in `src/fsm_llm/AGENTS.md`), so an executor takes none of its own; handler-only keys (a kind's `result_key`) are never minted as extraction targets; Pass 2 stays shared and kind-agnostic. What it does not: the conversation Pass-1 methods (`_extract_after_transition`, `_execute_data_extraction` and their field, bulk and classification helpers) still live on `MessagePipeline` and the conversation executor calls them; they move with the module layout split (roadmap 0.4), they were not deleted. A test-only kind registered at runtime runs a full conversation with no edit in core (`tests/test_fsm_llm/test_executor_map.py`).
 
-Nothing here is public yet: `fsm_llm/__init__.py` exports neither module, `executors=` is not on the builders, and the entry-point group for third-party kinds arrives with the plugin work (roadmap C10, row 5.5). Until then both modules are internal. The `executors` keyword of `API`, `FSMManager` and `MessagePipeline` shows in `docs/api.txt` as `Mapping[str, StateExecutor] | None`: `StateExecutor` is imported from `fsm_llm.engine.kinds` (not from `fsm_llm`) and is internal until the kind registry is exported, so the annotation names a class the package does not export, on purpose.
+Nothing here is public yet: `fsm_llm/__init__.py` exports neither module, `executors=` is not on the builders, and the entry-point group for third-party kinds arrives with the plugin work (roadmap C10, row 5.5). Until then both packages (`core.state_kinds` and `engine.kinds`) are internal. The `executors` keyword of `API`, `FSMManager` and `MessagePipeline` shows in `docs/api.txt` as `Mapping[str, StateExecutor] | None`: `StateExecutor` is imported from `fsm_llm.engine.kinds` (not from `fsm_llm`) and is internal until the kind registry is exported, so the annotation names a class the package does not export, on purpose.
 
 ### Conversation Start
 
@@ -234,6 +234,23 @@ Priority ordering (lower first). Error modes: `"continue"` (log + skip) or `"rai
 - **Handler pre-filtering**: Only check handlers matching current timing
 - **Thread safety**: Per-conversation RLocks in FSMManager
 
+## Package Layout
+
+The library is one import package, `fsm_llm`, in `src/fsm_llm/`. Beneath the seven extension subpackages sit layer packages that ship with every install, and a layer imports only the layers below it. The rule is enforced by `.importlinter` (`make lint-imports`, and the test `tests/test_fsm_llm_regression/test_import_contract.py`), and no module is over 800 lines.
+
+| Layer (top to bottom) | Packages | What it holds |
+|---|---|---|
+| Subpackages | `monitor`, `eval`; `agents`, `synthesis`, `workflows`, `reasoning`; `testing` | One extra each, imported by name, never by `import fsm_llm` |
+| `engine` | `fsm_llm.engine` | `API` (`engine.api`), `FSMManager` (`engine.fsm`), the 2-pass `MessagePipeline` (`engine.turn`), the state-kind executors (`engine.kinds`), `Classifier`, the builders, the session store, the plain-FSM OKF handler (`engine.okf_bridge`) |
+| `handlers` | `fsm_llm.handlers` | The handler system, `HandlerBuilder`, `create_handler` |
+| `policy` | `fsm_llm.policy` | Approval types and the human-in-the-loop manager |
+| Independent siblings | `context`, `okf`, `skills`, `tools` | Context compaction and prompt builders (`context.layout`); Open Knowledge Format; Agent Skills; the tool registry and tool models |
+| `llm` | `fsm_llm.llm` | `LLMInterface`, `LiteLLMInterface` (the one litellm import), the embedder, reply parsing |
+| `core` | `fsm_llm.core` | Pydantic FSM models (`core.definitions`), JsonLogic (`core.expressions`), `core.transition_evaluator`, `core.state_kinds`, `core.verify` (validator, data-flow and liveness analyses), `core.visualize` |
+| Kernel | `constants`, `logging`, `security`, `text`, `env`, `frontmatter`, `memory`, `cli_support` | Small modules any layer may import; they import no layer |
+
+`import fsm_llm` loads the `core`, `engine`, `handlers`, `context`, `llm` and `security` packages and a few kernel modules, and nothing else: no subpackage and none of `okf`, `skills`, `tools` or `policy` (pinned by `tests/test_fsm_llm_regression/test_import_laziness.py`). Three edges break the order on purpose and are named in `.importlinter`: `agents` imports `reasoning` (for `ReasoningReactAgent`), and `synthesis` imports `agents.semantic_tools` and `eval` (the simulator reuses the scripted-trial code).
+
 ## Extension Integration
 
 ```
@@ -253,7 +270,8 @@ fsm_llm (core, includes classification)
 ```
 
 The seven extensions are subpackages of `fsm_llm`. Core never imports them at package
-import time; each one imports core (`from fsm_llm import API`).
+import time; each one imports core (`from fsm_llm import API`). Their place among the
+layers is in Package Layout above.
 
 | Package | Integration | Key Mechanism |
 |---------|------------|---------------|

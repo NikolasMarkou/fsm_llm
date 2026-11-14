@@ -312,7 +312,7 @@ class TestEmptyStreamIsNotPersisted:
     def test_chunk_list_of_empty_strings_stores_nothing(self):
         """The pipeline guard alone: `['', '']` is a TRUTHY list but empty content.
 
-        Uses a plain scripted LLM (no `llm.py` involvement) so this pins
+        Uses a plain scripted LLM (no `llm/` involvement) so this pins
         `engine/turn/driver.py`'s joined-content guard independently of the interface fix.
         """
         api, conv_id = _make_api(_ScriptedStreamLLM(["", ""]))

@@ -475,7 +475,7 @@ class BuildProgress(BaseModel):
 
 
 # AgentConfig fields the meta-builder never reads (checked against
-# meta_builder.py, which uses model, temperature, max_tokens, timeout_seconds
+# the agents/meta_builder/ package, which uses model, temperature, max_tokens, timeout_seconds
 # and max_turns only). ``max_iterations`` (D-012) and ``instructions`` stay
 # accepted.
 _UNREAD_AGENT_FIELDS = (

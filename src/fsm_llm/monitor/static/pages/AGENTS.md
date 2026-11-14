@@ -7,7 +7,7 @@ Purpose: Page-level ES modules of the FSM-LLM Monitor frontend (vanilla JS, no b
 
 Rendering and user actions for Dashboard, Control Center (with detail drawer), Conversations (drawer sub-view), Launch modal, Visualizer, Builder, Logs, Settings.
 
-Not here: routing, click and keyboard delegation, dependency wiring, and the 10 s refresh timer (`src/fsm_llm/monitor/static/app.js`); HTTP, shared state, auth, WebSocket (`static/services/api.js`, `state.js`, `auth.js`, `ws.js`); escaping, formatting, markdown, graph drawing (`static/utils/dom.js`, `format.js`, `markdown.js`, `graph.js`); markup and element ids (`src/fsm_llm/monitor/templates/index.html`); styles (`static/style.css`); REST routes (`src/fsm_llm/monitor/server.py`).
+Not here: routing, click and keyboard delegation, dependency wiring, and the 10 s refresh timer (`src/fsm_llm/monitor/static/app.js`); HTTP, shared state, auth, WebSocket (`static/services/api.js`, `state.js`, `auth.js`, `ws.js`); escaping, formatting, markdown, graph drawing (`static/utils/dom.js`, `format.js`, `markdown.js`, `graph.js`); markup and element ids (`src/fsm_llm/monitor/templates/index.html`); styles (`static/style.css`); REST routes (`src/fsm_llm/monitor/server/`).
 
 ## Architecture
 

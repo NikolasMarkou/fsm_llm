@@ -15,7 +15,7 @@ ASCII_IDENTIFIER_PATTERN = r"^[a-zA-Z_][a-zA-Z0-9_]*$"
 _ASCII_IDENTIFIER = re.compile(ASCII_IDENTIFIER_PATTERN)
 
 # Cap of the free text a model returns in a response model (``message``,
-# ``reasoning``). ``llm.py`` truncates a recovered raw reply to it, so it must
+# ``reasoning``). ``llm/parsing.py`` truncates a recovered raw reply to it, so it must
 # build the same capped model the pydantic field declares: one definition here.
 RESPONSE_TEXT_MAX_LENGTH = 5000
 

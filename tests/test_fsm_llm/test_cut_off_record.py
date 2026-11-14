@@ -1,7 +1,7 @@
 """The turn's cut-off record (plan 0068b055, step 12.28, D-025).
 
 A reply the provider cut off at ``max_tokens`` reaches the pipeline as
-``truncated=True`` on the response (set by ``llm.py`` from the provider's
+``truncated=True`` on the response (set by ``llm/providers/litellm.py`` from the provider's
 ``finish_reason``). The pipeline writes ONE internal key,
 ``definitions.CONTEXT_KEY_CUT_OFF``, into the conversation context for the turn
 that produced it: ``{"reply": True}`` and/or ``{"fields": [names]}``. The key is
@@ -300,7 +300,7 @@ class TestCompletionStateRecordsTheCut:
 
 
 class TestLlmLayerFlagsTheResponse:
-    """``llm.py`` sets ``truncated`` from the provider's ``finish_reason``."""
+    """``llm/providers/litellm.py`` sets ``truncated`` from the provider's ``finish_reason``."""
 
     @staticmethod
     def _provider(content: str, finish: str | None):

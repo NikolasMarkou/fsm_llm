@@ -37,7 +37,7 @@ Manager test pattern: `InstanceManager(config=MonitorConfig())`, then `mgr.globa
 | `test_definitions.py` | models, `normalize_message_history`, `model_to_dict` | 60 tests |
 | `test_otel.py` | `OTELExporter` | 20 tests; autouse `_mock_otel` fixture |
 | `test_server_consistency.py` | 2026-11-05 server and SPA fixes (plan 5980fbb7 step 17), preset UTF-8 read, route-launched workflow stop | 60 tests; autouse `_reset_key` |
-| `test_server_package.py` | `monitor/server.py` became the package `monitor/server/` (plan d454fd62 step 94): the static and template directories the server itself uses (the mount, the Jinja search path, the served bytes, `flows.json`), the registration order of routes and middleware (a pinned list of the 53 entries of `app.routes`, the OpenAPI path order), one home for each global that `configure()` rebinds and `configure()` seen through every router module and the WebSocket, the package layout (facade `__all__`, sibling imports, log record names) | 39 tests; autouse `_reset_key` |
+| `test_server_package.py` | the old `monitor/server.py` became the package `monitor/server/` (plan d454fd62 step 94): the static and template directories the server itself uses (the mount, the Jinja search path, the served bytes, `flows.json`), the registration order of routes and middleware (a pinned list of the 53 entries of `app.routes`, the OpenAPI path order), one home for each global that `configure()` rebinds and `configure()` seen through every router module and the WebSocket, the package layout (facade `__all__`, sibling imports, log record names) | 39 tests; autouse `_reset_key` |
 
 ## Public interface
 

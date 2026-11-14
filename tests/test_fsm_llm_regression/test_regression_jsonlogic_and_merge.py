@@ -78,14 +78,15 @@ class TestTransitionDecisionExcludedFromJsonMode:
     `"transition_decision"` call.
 
     Transitions are decided by `TransitionEvaluator`'s rules, not by the LLM,
-    so `llm.py`'s two gates — the `response_format` gate (`llm.py:548-560`) and
-    `_apply_model_specific_params`' `is_structured` gate (`llm.py:616`) — both
-    list only `data_extraction` and `field_extraction`.
+    so the two gates of the LLM layer (the `response_format` gate and the
+    `is_structured` gate of `_apply_model_specific_params`, both in
+    `llm/providers/request.py`) list only `data_extraction` and
+    `field_extraction`.
 
-    `ollama.py` no longer registers a `"transition_decision"` schema (step
+    `llm/ollama.py` no longer registers a `"transition_decision"` schema (step
     9.2 deleted the unreachable entry), so the public helper returns its
     documented unknown-call-type fallback, ``None``. This section pins both:
-    the exclusion in `llm.py`, and the helper's fallback.
+    the exclusion in the LLM layer, and the helper's fallback.
     """
 
     @staticmethod

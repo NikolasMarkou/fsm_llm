@@ -49,7 +49,7 @@ def _usage_of(response: Any) -> tuple[int, int, int] | None:
 class _UsageMeter:
     """Per-kind provider-call counters of one interface instance.
 
-    Interface contract (shared by every provider call site of ``llm.py``):
+    Interface contract (shared by every provider call site of ``llm/providers/litellm.py``):
     - ``record(kind, response)``: one answered call of ``kind``; its token
       usage is read with ``_usage_of`` (a streamed call passes ``None`` and
       counts as usage-missing). Never raises on a strange reply shape.

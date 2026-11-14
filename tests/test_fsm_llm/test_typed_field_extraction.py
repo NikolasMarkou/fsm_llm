@@ -249,7 +249,7 @@ class TestDictValueForStrFieldIsRejected:
 class TestStrictBoolCoercion:
     """F-LC-01: a bool field accepts a closed yes/no vocabulary, nothing else.
 
-    Drives the real validation seam and the real llm.py unstructured rung, so the
+    Drives the real validation seam and the real unstructured rung of `llm/parsing.py`, so the
     two readers are pinned to the same answers.
     """
 

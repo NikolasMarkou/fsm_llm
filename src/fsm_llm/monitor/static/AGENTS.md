@@ -5,7 +5,7 @@ Purpose: Framework-free browser frontend of the FSM-LLM Monitor dashboard (JS ES
 
 ## Scope
 
-Everything served under `/static/` by `src/fsm_llm/monitor/server/` (`application.py`: `STATIC_DIR = Path(__file__).parent.parent / "static"`, `app.mount("/static", StaticFiles(directory=str(STATIC_DIR)))`). The monitor is the `fsm_llm.monitor` subpackage of the `fsm-llm` distribution (FastAPI dashboard, command `fsm-llm-monitor`). The HTML shell is `src/fsm_llm/monitor/templates/index.html` (served at `/`, not in this folder); it loads `/static/style.css` and `<script type="module" src="/static/app.js">`. No bundler, no npm, no transpile. Shipped in the wheel via `pyproject.toml` package-data `"fsm_llm.monitor" = ["static/**/*", "templates/*"]` (recursive, so `pages/`, `services/`, `utils/` ship too). REST routes and WebSocket broadcast live in `server.py`, not here.
+Everything served under `/static/` by `src/fsm_llm/monitor/server/` (`application.py`: `STATIC_DIR = Path(__file__).parent.parent / "static"`, `app.mount("/static", StaticFiles(directory=str(STATIC_DIR)))`). The monitor is the `fsm_llm.monitor` subpackage of the `fsm-llm` distribution (FastAPI dashboard, command `fsm-llm-monitor`). The HTML shell is `src/fsm_llm/monitor/templates/index.html` (served at `/`, not in this folder); it loads `/static/style.css` and `<script type="module" src="/static/app.js">`. No bundler, no npm, no transpile. Shipped in the wheel via `pyproject.toml` package-data `"fsm_llm.monitor" = ["static/**/*", "templates/*"]` (recursive, so `pages/`, `services/`, `utils/` ship too). REST routes and WebSocket broadcast live in the package `server/`, not here.
 
 ## Architecture
 

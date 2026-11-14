@@ -612,7 +612,7 @@ class TestLayering:
     def test_the_format_module_loads_no_subpackage(self) -> None:
         _isolated(
             "import sys, fsm_llm.skills\n"
-            "subs = ('agents', 'reasoning', 'workflows', 'monitor', 'eval', 'synthesis')\n"
+            "subs = ('agents', 'reasoning', 'workflows', 'monitor', 'eval', 'synthesis', 'testing')\n"
             "bad = [m for m in sys.modules if m.split('.')[:2] in "
             "[['fsm_llm', s] for s in subs]]\n"
             "assert not bad, bad\n"

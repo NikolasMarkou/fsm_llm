@@ -157,7 +157,7 @@ class TransitionsMixin(_PipelineSurface):
         built over the interface object bound now; it never returns one built
         for another schema, prompt config, model or interface. Cache misses
         construct via the module-level ``Classifier`` symbol (so
-        ``patch("fsm_llm.pipeline.Classifier")`` keeps observing construction)
+        ``patch("fsm_llm.engine.turn.transitions.Classifier")`` keeps observing construction)
         and evict the oldest entry when the cache holds
         ``MAX_CLASSIFIER_CACHE_SIZE`` entries. Raises ``ClassificationError``
         (soft at both call sites) when the classifier would send through a

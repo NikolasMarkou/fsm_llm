@@ -128,7 +128,7 @@ def apply_ollama_params(
     Mutates *call_params* in place.
 
     Args:
-        call_params: The parameter dict that ``llm.py``'s one send path
+        call_params: The parameter dict that the one send path of ``llm/providers/litellm.py``
             passes to the provider completion call.
         model: The model identifier string.
         structured: When ``True`` (the default), also forces
@@ -178,7 +178,7 @@ def prepare_ollama_messages(
         messages: The message list for the LLM call.
         model: The model identifier string.
         response_format: The ``response_format`` dict (if any) that
-            ``llm.py`` sends with the provider completion call.
+            ``llm/providers/litellm.py`` sends with the provider completion call.
     """
     if not is_ollama_model(model):
         return messages

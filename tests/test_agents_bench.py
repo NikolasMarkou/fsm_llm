@@ -790,7 +790,7 @@ class TestCallMeter:
 
     def test_completion_targets_cover_every_binding(self):
         """Defect guarded: a binding left unwrapped (core `from litellm import
-        completion` in llm.py), so legacy calls go uncounted."""
+        completion` in llm/providers/litellm.py), so legacy calls go uncounted."""
         import litellm
 
         import fsm_llm.llm.providers.litellm

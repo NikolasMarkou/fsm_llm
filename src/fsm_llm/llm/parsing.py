@@ -545,7 +545,7 @@ class ParseMixin:
 
         # Strip <think>...</think> tags and markdown code fences that some
         # models (e.g. Qwen) emit — shared with extract_bulk_data via
-        # strip_think_and_fences (utilities.py) so the two readers cannot
+        # strip_think_and_fences (llm/text.py) so the two readers cannot
         # re-diverge.
         if isinstance(content, str):
             content = strip_think_and_fences(content)
@@ -568,7 +568,7 @@ class ParseMixin:
                         value = ed.get(request.field_name)
                 # coerce_confidence maps NaN/±inf → default (1.0) and clamps to
                 # [0,1]; a `{...}`/`null` still raises TypeError/ValueError for
-                # the ladder below (D-001, utilities.py).
+                # the ladder below (D-001, core/coerce.py).
                 try:
                     confidence = coerce_confidence(data.get("confidence", 1.0), 1.0)
                 except (TypeError, ValueError):
@@ -617,7 +617,7 @@ class ParseMixin:
                     # non-str `reasoning` (or one over max_length=5000) raises
                     # ValidationError — both would otherwise escape the ladder from
                     # this rung just as the unguarded construction did. NaN/±inf
-                    # is now mapped to the 0.95 default first (D-001, utilities.py).
+                    # is now mapped to the 0.95 default first (D-001, core/coerce.py).
                     try:
                         confidence = coerce_confidence(
                             data.get("confidence", 0.95), 0.95

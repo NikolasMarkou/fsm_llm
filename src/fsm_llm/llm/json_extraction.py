@@ -333,7 +333,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         # their capture here, which flipped a previously-None result into a dict
         # for garbled free text that merely mentions one of them — a real
         # cross-package hazard for non-classification callers (e.g. a lenient
-        # all-optional structured-output schema in fsm_llm/agents/base.py would
+        # all-optional structured-output schema in fsm_llm/agents/base/ would
         # then build a partial model from a stray `"confidence": 0.8` substring).
         # Keep a lone auxiliary key ONLY when a co-occurring PRIMARY payload key
         # is present IN THE TEXT — message/selected_transition/value/
