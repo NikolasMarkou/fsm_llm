@@ -209,7 +209,7 @@ class TestStatusOfToolStatus:
         assert status_of_tool_status(tool_status) == self._EXPECTED[tool_status]
 
     def test_unknown_is_refused_not_reported_as_failed(self):
-        # `agents/handlers.py` D-043: a timed-out call may still be running and
+        # `agents/handlers/executor.py` D-043: a timed-out call may still be running and
         # may still take effect, so "failed" (safe to run again) would be a lie.
         with pytest.raises(ValueError) as exc:
             status_of_tool_status(ToolRunStatus.UNKNOWN)

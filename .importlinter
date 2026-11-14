@@ -575,3 +575,63 @@ source_modules =
     fsm_llm.agents.base.surface
 forbidden_modules =
     fsm_llm.agents.base.agent
+
+# Step 88 (agents/handlers.py became the package agents/handlers/, D-040). The handlers are what the
+# patterns and `BaseAgent` register, so the package imports no pattern module, no meta-builder module,
+# no transport and not `agents.base` (all of them import it; the reverse would be a cycle): it reads its
+# sibling support modules (`constants`, `definitions`, `exceptions`, `tools`) and the layers below `agents`.
+[importlinter:contract:agents-handlers-imports-no-pattern]
+name = fsm_llm.agents.handlers imports no agent pattern, meta-builder, transport or base module
+type = forbidden
+source_modules =
+    fsm_llm.agents.handlers
+forbidden_modules =
+    fsm_llm.agents.adapt
+    fsm_llm.agents.agent_graph
+    fsm_llm.agents.agent_skills
+    fsm_llm.agents.auto_memory
+    fsm_llm.agents.builders
+    fsm_llm.agents.composition
+    fsm_llm.agents.debate
+    fsm_llm.agents.evaluator_optimizer
+    fsm_llm.agents.maker_checker
+    fsm_llm.agents.mcp
+    fsm_llm.agents.meta_builder
+    fsm_llm.agents.meta_builders
+    fsm_llm.agents.meta_cli
+    fsm_llm.agents.meta_output
+    fsm_llm.agents.meta_prompts
+    fsm_llm.agents.meta_tools
+    fsm_llm.agents.native_fc
+    fsm_llm.agents.okf
+    fsm_llm.agents.orchestrator
+    fsm_llm.agents.parallel_react
+    fsm_llm.agents.plan_execute
+    fsm_llm.agents.prompt_chain
+    fsm_llm.agents.python_tools
+    fsm_llm.agents.react
+    fsm_llm.agents.reasoning_react
+    fsm_llm.agents.reflexion
+    fsm_llm.agents.remote
+    fsm_llm.agents.rewoo
+    fsm_llm.agents.self_consistency
+    fsm_llm.agents.semantic_memory
+    fsm_llm.agents.semantic_tools
+    fsm_llm.agents.sop
+    fsm_llm.agents.swarm
+    fsm_llm.agents.tool_registries
+    fsm_llm.agents.verified_react
+    fsm_llm.agents.base
+
+[importlinter:contract:agents-handlers-modules-do-not-import-the-executor]
+name = the helper modules of fsm_llm.agents.handlers do not import the executor (executor.py)
+type = forbidden
+source_modules =
+    fsm_llm.agents.handlers.approval
+    fsm_llm.agents.handlers.forced
+    fsm_llm.agents.handlers.freshness
+    fsm_llm.agents.handlers.limiters
+    fsm_llm.agents.handlers.recording
+    fsm_llm.agents.handlers.run_guards
+forbidden_modules =
+    fsm_llm.agents.handlers.executor

@@ -1218,7 +1218,7 @@ UNPINNED_CORE = {
     "src/fsm_llm/engine/api/stack.py": "ContextMergeStrategy, which the pinned synthesis/runner.py names (the old api.py, split at step 81, D-031)",
     "src/fsm_llm/constants.py": "the engine's defaults",
     "src/fsm_llm/context/__init__.py": "the engine's context",
-    "src/fsm_llm/context/commit.py": "clear_keys_delta, the one clear rule the pinned agents/handlers.py calls (moved down from handlers.py at step 74 of plan d454fd62; core imports only)",
+    "src/fsm_llm/context/commit.py": "clear_keys_delta, the one clear rule the pinned agents/handlers/freshness.py calls (moved down from handlers.py at step 74 of plan d454fd62; core imports only)",
     "src/fsm_llm/core/definitions/__init__.py": "the engine's models (facade, read through what the pinned files import)",
     "src/fsm_llm/core/verify/__init__.py": "the validator's import surface (facade, read through what the pinned files import)",
     "src/fsm_llm/core/expressions/__init__.py": "the engine's JsonLogic (is_missing; facade, read through what the pinned files import)",

@@ -609,3 +609,189 @@ class TestMakeFreshKeysHandler:
         assert is_forced_verdict(True, forced) is True
         assert is_forced_verdict(1, forced) is False
         assert is_forced_verdict(True, {}) is False
+
+
+_HANDLER_MODULE_OF = {
+    "AgentHandlers": "executor",
+    "ThinkTurnLimiter": "limiters",
+    "make_iteration_limiter": "limiters",
+    "approval_grant": "approval",
+    "call_label": "approval",
+    "call_ran": "approval",
+    "refusal_record": "approval",
+    "forced_stop_skip": "forced",
+    "recorded_forced_reason": "forced",
+    "concluded_on_evidence": "forced",
+    "is_forced_verdict": "forced",
+    "next_step_number": "recording",
+    "with_feedback": "recording",
+    "record_tool_step": "recording",
+    "make_redraft_handlers": "freshness",
+    "make_fresh_keys_handler": "freshness",
+    "run_evaluation_fn": "run_guards",
+    "RunEndingErrorHolder": "run_guards",
+}
+
+
+class TestHandlersPackageLayout:
+    """``agents/handlers.py`` is a package at the same dotted path (plan d454fd62, step 88)."""
+
+    def test_the_facade_names_exactly_the_public_names(self):
+        import fsm_llm.agents.handlers as package
+
+        assert set(package.__all__) == {*_HANDLER_MODULE_OF, "RUN_ENDING_ERRORS"}
+        assert len(package.__all__) == len(set(package.__all__)) == 19
+        for name in package.__all__:
+            assert hasattr(package, name), name
+
+    def test_each_name_is_defined_in_its_group_module(self):
+        import fsm_llm.agents.handlers as package
+
+        for name, module in _HANDLER_MODULE_OF.items():
+            assert getattr(package, name).__module__ == (
+                f"fsm_llm.agents.handlers.{module}"
+            ), name
+        # a tuple has no __module__: the facade binds the one tuple of its module
+        from fsm_llm.agents.handlers import run_guards
+
+        assert package.RUN_ENDING_ERRORS is run_guards.RUN_ENDING_ERRORS
+
+    def test_a_private_name_and_the_old_module_attributes_are_not_on_the_package(self):
+        import fsm_llm.agents.handlers as package
+
+        for name in ("_CONCLUDE_VERDICTS", "logger", "clear_keys_delta", "ToolCall"):
+            assert not hasattr(package, name), name
+        from fsm_llm.agents.handlers import forced
+
+        assert set(forced._CONCLUDE_VERDICTS) == {"think", "evaluate"}
+
+    def test_agent_handlers_still_inherits_the_think_turn_limiter(self):
+        from fsm_llm.agents.handlers import AgentHandlers, ThinkTurnLimiter
+
+        assert AgentHandlers.__mro__[:3] == (AgentHandlers, ThinkTurnLimiter, object)
+        assert "check_iteration_limit" not in vars(AgentHandlers)
+
+    def test_a_log_record_is_named_after_its_module(self):
+        from loguru import logger
+
+        from fsm_llm.agents.handlers import (
+            RunEndingErrorHolder,
+            ThinkTurnLimiter,
+            forced_stop_skip,
+            record_tool_step,
+        )
+
+        names: list[str] = []
+        logger.enable("fsm_llm")
+        sink = logger.add(lambda m: names.append(m.record["name"]), level="DEBUG")
+        try:
+            forced_stop_skip({ContextKeys.MAX_ITERATIONS_REACHED: True})
+            ThinkTurnLimiter().check_iteration_limit({})
+            record_tool_step(
+                {ContextKeys.OBSERVATIONS: ["o"] * 25},
+                tool_name="t",
+                shown_input={},
+                observation="r",
+                status="success",
+                thought="",
+                action="a",
+            )
+            holder = RunEndingErrorHolder()
+            from fsm_llm.agents import AgentTimeoutError
+
+            holder.capture(AgentTimeoutError(1.0))
+            holder.capture(AgentTimeoutError(2.0))
+        finally:
+            logger.remove(sink)
+            logger.disable("fsm_llm")
+        assert set(names) == {
+            "fsm_llm.agents.handlers.forced",
+            "fsm_llm.agents.handlers.limiters",
+            "fsm_llm.agents.handlers.recording",
+            "fsm_llm.agents.handlers.run_guards",
+        }
+
+
+class TestHandlerHelperEdges:
+    """Edges of the module-level helpers that no pattern test reaches (step 88 mutation proof).
+
+    Each case was a surviving mutant of the split: only a 400-program differential
+    saw it, no test did.
+    """
+
+    def test_approval_grant_names_the_tool_as_text(self):
+        from fsm_llm.agents.handlers import approval_grant
+
+        assert approval_grant(5, None) == {"tool_name": "5", "parameters": {}}
+        assert approval_grant(None, {"x": 1})["tool_name"] == "None"
+
+    @pytest.mark.parametrize("trace", [None, "ran", {"action": "t({})"}, 3])
+    def test_call_ran_is_false_for_anything_but_a_trace_list(self, trace):
+        from fsm_llm.agents.handlers import call_label, call_ran
+
+        assert call_ran(trace, "t", {}) is False
+        assert call_ran([{"action": call_label("t", {})}], "t", {}) is True
+
+    @pytest.mark.parametrize("flag", [1, "true", [1], None, False])
+    def test_forced_stop_skip_needs_a_strict_true(self, flag):
+        from fsm_llm.agents.handlers import forced_stop_skip
+
+        assert forced_stop_skip({ContextKeys.MAX_ITERATIONS_REACHED: flag}) is None
+        delta = forced_stop_skip({ContextKeys.MAX_ITERATIONS_REACHED: True})
+        assert delta[ContextKeys.SHOULD_TERMINATE] is True
+
+    @pytest.mark.parametrize("verdict", [1, "true", "yes", [True]])
+    def test_concluded_on_evidence_needs_a_strict_true_verdict(self, verdict):
+        from fsm_llm.agents.handlers import concluded_on_evidence
+
+        context = {ContextKeys.OBSERVATION_COUNT: 1}
+        assert (
+            concluded_on_evidence("think", {**context, "should_terminate": verdict})
+            is False
+        )
+        assert (
+            concluded_on_evidence("think", {**context, "should_terminate": True})
+            is True
+        )
+
+    @pytest.mark.parametrize("count", [0, -1, None, "2"])
+    def test_concluded_on_evidence_needs_an_observation(self, count):
+        from fsm_llm.agents.handlers import concluded_on_evidence
+
+        context = {ContextKeys.SHOULD_TERMINATE: True}
+        assert (
+            concluded_on_evidence(
+                "think", {**context, ContextKeys.OBSERVATION_COUNT: count}
+            )
+            is False
+        )
+
+    def test_concluded_on_evidence_reads_the_verdict_of_the_state_it_leaves(self):
+        from fsm_llm.agents.handlers import concluded_on_evidence
+
+        passed = {ContextKeys.EVALUATION_PASSED: True, ContextKeys.OBSERVATION_COUNT: 1}
+        terminate = {
+            ContextKeys.SHOULD_TERMINATE: True,
+            ContextKeys.OBSERVATION_COUNT: 1,
+        }
+        assert concluded_on_evidence("evaluate", passed) is True
+        assert concluded_on_evidence("evaluate", terminate) is False
+        assert concluded_on_evidence("think", passed) is False
+        assert concluded_on_evidence("act", {**passed, **terminate}) is False
+
+    def test_the_limiter_keeps_a_flag_a_forcing_handler_recorded(self):
+        from fsm_llm.agents.handlers import ThinkTurnLimiter
+
+        base = {
+            ContextKeys.CURRENT_STATE: "think",
+            ContextKeys.SHOULD_TERMINATE: True,
+            ContextKeys.OBSERVATION_COUNT: 1,
+            ContextKeys.MAX_ITERATIONS_REACHED: True,
+            ContextKeys.ITERATION_BUDGET: 10,
+        }
+        bare = ThinkTurnLimiter().check_iteration_limit(dict(base))
+        assert bare[ContextKeys.MAX_ITERATIONS_REACHED] is False
+        recorded = ThinkTurnLimiter().check_iteration_limit(
+            {**base, ContextKeys.FORCED_STOP_REASON: StopReason.STALLED}
+        )
+        assert ContextKeys.MAX_ITERATIONS_REACHED not in recorded

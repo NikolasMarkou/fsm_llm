@@ -155,7 +155,7 @@ OKF_TOOL_PARAMETERS: dict[str, dict[str, Any]] = {
 # DECISION plan-2026-10-21T140931-095ea5f8/D-016
 # The agent loop stores a reply as "[Step n] Tool: <name> | Input: <input> |
 # Result: <reply>" and cuts that whole entry at MAX_OBSERVATION_LENGTH
-# (handlers.py). Do NOT size a reply from a flat number (1,900 cut `okf_read`
+# (handlers/recording.py). Do NOT size a reply from a flat number (1,900 cut `okf_read`
 # pages mid-text and kept the `next offset` line): size it from `_budget`,
 # which counts the echoed arguments. See decisions.md D-016.
 # DECISION plan-2026-10-21T140931-095ea5f8/D-017

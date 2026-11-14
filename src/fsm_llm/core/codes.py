@@ -172,7 +172,7 @@ def status_of_tool_status(tool_status: str) -> tuple[Status, Reason | None]:
     ``unknown`` (a timed-out call) is deliberately NOT mapped: it raises
     ``ValueError``. The call may still be running and may still take effect,
     so an unknown outcome must not be reported as failed (``failed`` reads as
-    safe to run again; the D-043 rule at ``agents/handlers.py``). Any other
+    safe to run again; the D-043 rule at ``agents/handlers/executor.py``). Any other
     unrecognised value raises too.
     """
     if tool_status == "unknown":
