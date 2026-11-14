@@ -40,6 +40,7 @@ from fsm_llm.okf import strip_unsafe_text
 from fsm_llm.skills import SkillLimits, load_skills
 from fsm_llm.testing import final_reply, tool_call_reply
 from fsm_llm.tools import ToolAnnotations, ToolCall
+from fsm_llm.tools.constants import Defaults as ToolDefaults
 from tests.test_fsm_llm.test_completion_state import _ScriptedLLM
 
 _TOOLS = ("skill_list", "skill_load", "skill_read")
@@ -243,6 +244,8 @@ class TestReplyBudget:
         self, tmp_path: Path, monkeypatch, cap: int
     ):
         monkeypatch.setattr(Defaults, "MAX_OBSERVATION_LENGTH", cap)
+        # one configuration: the tool layer (ToolResult.observation) moved with it
+        assert ToolDefaults.MAX_OBSERVATION_LENGTH == cap
         text = _LONG + f"\n{_ESC}[0m tail" + "\n\n" + "y" * 40
         text += "\n" + _ZWJ_RUN + "x" + _ZWJ_RUN + chr(0x1F600)  # both parities
         _make(tmp_path, "big", "Big.", text + "\n", {"references/r.md": text})
@@ -341,6 +344,7 @@ class TestReplyBudget:
         label = SKILL_UNTRUSTED_LABEL
         head = "\n".join([label, "skill: s", "files under 'd' (2)", "", ""])
         monkeypatch.setattr(Defaults, "MAX_OBSERVATION_LENGTH", 0)
+        assert ToolDefaults.MAX_OBSERVATION_LENGTH == 0  # one configuration (D-045)
         monkeypatch.setattr(agents_okf, "_MIN_BUDGET", len(head) + 10)
         # One character of the listing and the whole footer, never a negative slice.
         reply = _run(registry, "skill_read", name="s", path="d")

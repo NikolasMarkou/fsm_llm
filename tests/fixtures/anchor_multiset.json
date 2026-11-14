@@ -499,6 +499,11 @@
       "delta": 1,
       "reason": "step 80 of plan d454fd62: new anchor at ConversationExecutor (engine/kinds/conversation/executor.py): the conversation Pass 1 is bound to one pipeline's services per call, the executor is a shared singleton and engine/kinds never imports engine/turn; no other token was added or lost",
       "token": "plan-2026-11-12T073150-d454fd62/D-030"
+    },
+    {
+      "delta": 1,
+      "reason": "step 97.1 of plan d454fd62 (review gate 2 concern 1): new anchor at the MirroredConstants mechanism (tools/constants.py): a shared constant is mirrored on the tool, policy and agents classes and a change is written through to all of them; no other token was added or lost",
+      "token": "plan-2026-11-12T073150-d454fd62/D-045"
     }
   ]
 }

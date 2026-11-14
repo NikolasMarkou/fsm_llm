@@ -10,9 +10,10 @@ from fsm_llm.tools.constants import ContextKeys as _ToolContextKeys
 from fsm_llm.tools.constants import Defaults as _ToolDefaults
 from fsm_llm.tools.constants import ErrorMessages as _ToolErrorMessages
 from fsm_llm.tools.constants import LogMessages as _ToolLogMessages
+from fsm_llm.tools.constants import MirroredConstants, mirror
 
 
-class ContextKeys:
+class ContextKeys(metaclass=MirroredConstants):
     """Standard context keys used across the agents package."""
 
     # Task
@@ -183,7 +184,7 @@ class ContextKeys:
     CURRENT_DEPTH = "current_depth"
 
 
-class Defaults:
+class Defaults(metaclass=MirroredConstants):
     """Default configuration values."""
 
     TEMPERATURE = DEFAULT_TEMPERATURE
@@ -267,7 +268,7 @@ class Defaults:
     SERVER_MAX_CONCURRENT = 8
 
 
-class ErrorMessages:
+class ErrorMessages(metaclass=MirroredConstants):
     """Standard error messages."""
 
     TOOL_NOT_FOUND = _ToolErrorMessages.TOOL_NOT_FOUND
@@ -305,7 +306,7 @@ class ErrorMessages:
     )
 
 
-class LogMessages:
+class LogMessages(metaclass=MirroredConstants):
     """Standard log message templates."""
 
     AGENT_STARTED = "Agent started with {tool_count} tools, model={model}"
@@ -323,3 +324,31 @@ class LogMessages:
     EVALUATION = "Evaluation {result}: score={score}"
     DEBATE_ROUND = "Debate round {current}/{max}"
     DECOMPOSITION = "Decomposing task at depth {depth}"
+
+
+# The attributes each class above assigns from a lower layer are linked to it: an
+# override of either class reaches every reader of both (D-045; the registry is pinned
+# against the assignments above by ``test_constants_mirror.py``).
+mirror(_ToolContextKeys, ContextKeys, ("TOOL_NAME", "TOOL_INPUT", "NO_TOOL"))
+mirror(
+    _ToolDefaults,
+    Defaults,
+    (
+        "MAX_INT_LIMIT",
+        "MAX_OBSERVATION_LENGTH",
+        "MAX_TOOL_TIMEOUT_S",
+        "TOOL_CONFIDENCE_THRESHOLD",
+    ),
+)
+mirror(_PolicyDefaults, Defaults, ("CONFIDENCE_THRESHOLD",))
+mirror(
+    _ToolErrorMessages,
+    ErrorMessages,
+    ("TOOL_NOT_FOUND", "TOOL_EXECUTION_FAILED", "TOOL_TIMED_OUT", "TOOL_BAD_TIMEOUT"),
+)
+mirror(_ToolLogMessages, LogMessages, ("TOOL_LATE_RESULT",))
+mirror(
+    _PolicyLogMessages,
+    LogMessages,
+    ("APPROVAL_REQUESTED", "APPROVAL_RESULT", "ESCALATION"),
+)

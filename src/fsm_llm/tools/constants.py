@@ -3,16 +3,96 @@ message templates that the registry and the tool models read, the tool statuses 
 text of one stored tool observation (``OBSERVATION_ENTRY``).
 
 The agents classes of the same names (``fsm_llm.agents.constants``) assign every
-attribute below from these classes, in their own position, so each value has one
-source and ``vars()`` of the agents classes lists the same names as before.
+attribute below from these classes, in their own position, so ``vars()`` of the agents
+classes lists the same names as before and each value has one source at import time.
+At run time the classes that share a name are linked (``MirroredConstants``, ``mirror``
+below): setting or deleting a shared name on ANY of them sets or deletes it on all of
+them, so a reader of any class sees an override made on any other, as when one class
+held the value.
 """
 
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterable
+from typing import Any
+
+# DECISION plan-2026-11-12T073150-d454fd62/D-045: a shared constant is mirrored on the
+# classes that hold it and a change is written through to every one of them.
+# Do NOT make the agents classes subclasses of these (a subclass hides the names
+# from `vars()`, and three tests enumerate `vars(ContextKeys)` and `vars(Defaults)`);
+# do NOT replace the copies by properties or a read-through descriptor (a class
+# attribute that is not a plain value changes `vars()` and `repr` and breaks the
+# "assigned from the lower class" identity); do NOT document the lower classes as the
+# place to configure (BASE had one class: an override of the agents class reached every
+# reader, and `monkeypatch.setattr(agents Defaults, ...)` in tests relies on that).
+# The registry lives HERE, in a module dict, never as a class attribute (it would show
+# in `vars()`); a class registers its copy with `mirror()` in its own constants module.
+_MIRRORS: dict[tuple[type, str], tuple[type, ...]] = {}
 
 
-class ContextKeys:
+class MirroredConstants(type):
+    """Metaclass of a constants class that shares attributes with another class.
+
+    Interface contract: a class made with it behaves as a plain class (its values
+    stay in ``vars()`` in definition order, ``repr`` and ``__bases__`` unchanged);
+    only assignment and deletion of a name registered with :func:`mirror` also
+    assign or delete that name on the other classes of the group. The write to a
+    peer goes through ``type.__setattr__``, which bypasses this hook, so no write
+    loops. A name that is not registered stays local. Never raises beyond what a
+    plain class would (``AttributeError`` when deleting an absent name).
+    """
+
+    def __setattr__(cls, name: str, value: Any) -> None:
+        super().__setattr__(name, value)
+        for peer in _MIRRORS.get((cls, name), ()):
+            type.__setattr__(peer, name, value)
+
+    def __delattr__(cls, name: str) -> None:
+        super().__delattr__(name)
+        for peer in _MIRRORS.get((cls, name), ()):
+            if name in vars(peer):
+                type.__delattr__(peer, name)
+
+
+def mirror(owner: type, copy: type, names: Iterable[str]) -> None:
+    """Link attribute *names* of *copy* to the same names of *owner*.
+
+    Interface contract: both classes must use :class:`MirroredConstants` (``TypeError``
+    otherwise) and hold the very same object under each name when called
+    (``ValueError`` otherwise: a copy that already drifted is a defect, not a link).
+    The link is symmetric and joins groups: a name that *owner* already shares with a
+    third class is shared by all three. Call it once per pair, at import, in the module
+    that defines *copy*; ``mirror_links`` returns what is registered.
+    """
+    for cls in (owner, copy):
+        if not isinstance(cls, MirroredConstants):
+            raise TypeError(f"{cls.__qualname__} must use MirroredConstants")
+    pending = tuple(names)
+    for name in pending:
+        if name not in vars(owner) or vars(owner)[name] is not vars(copy).get(name):
+            raise ValueError(
+                f"{copy.__qualname__}.{name} is not the object {owner.__qualname__}.{name}"
+            )
+    for name in pending:
+        group = dict.fromkeys(
+            [
+                owner,
+                copy,
+                *_MIRRORS.get((owner, name), ()),
+                *_MIRRORS.get((copy, name), ()),
+            ]
+        )
+        for member in group:
+            _MIRRORS[(member, name)] = tuple(c for c in group if c is not member)
+
+
+def mirror_links() -> dict[tuple[type, str], tuple[type, ...]]:
+    """A copy of the registry: ``(class, name)`` to the other classes sharing the name."""
+    return dict(_MIRRORS)
+
+
+class ContextKeys(metaclass=MirroredConstants):
     """The context keys a tool call is read from and the sentinel for no tool."""
 
     # Tool selection (extracted by LLM in think state)
@@ -23,7 +103,7 @@ class ContextKeys:
     NO_TOOL = "none"
 
 
-class Defaults:
+class Defaults(metaclass=MirroredConstants):
     """Default configuration values of the tool layer."""
 
     # Largest integer an agent limit (``max_*``/``num_*``) or an artifact int
@@ -38,7 +118,7 @@ class Defaults:
     TOOL_CONFIDENCE_THRESHOLD = 0.4
 
 
-class ErrorMessages:
+class ErrorMessages(metaclass=MirroredConstants):
     """Error messages of the tool layer."""
 
     TOOL_NOT_FOUND = "Tool '{name}' not found in registry"
@@ -54,7 +134,7 @@ class ErrorMessages:
     )
 
 
-class LogMessages:
+class LogMessages(metaclass=MirroredConstants):
     """Log message templates of the tool layer."""
 
     TOOL_LATE_RESULT = (
