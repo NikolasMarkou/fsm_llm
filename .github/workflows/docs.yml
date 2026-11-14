@@ -1,0 +1,146 @@
+# The documentation site (roadmap row 0.7, plan d454fd62 step 106).
+#
+# Every pull request and every version tag builds the site with `mkdocs build --strict`, so a
+# broken link, a missing nav entry or an include of a deleted file fails the check. A tag `v*`
+# then deploys the site to the `gh-pages` branch with mike, under the version of the tag.
+#
+# Policy (pinned by tests/test_fsm_llm_regression/test_docs_workflow.py):
+#   * the token is read-only except in the `deploy` job, which runs on a tag push only;
+#   * no `pull_request_target`, no secret, no event field written into a script (they go through
+#     `env:`);
+#   * every action is pinned to a commit SHA, with its release tag in the trailing comment
+#     (resolved with `gh api repos/<owner>/<repo>/git/ref/tags/<tag>`, 2026-11-14);
+#   * the docs tools install from the `docs` dependency group against `constraints.txt`. The
+#     package itself is NOT installed: mkdocstrings reads `src/` statically (`paths: [src]`).
+#
+# Owner steps after the first deploy (they are not CI's): enable GitHub Pages from the `gh-pages`
+# branch (root), then run `mike set-default latest` once. See docs/README.md.
+name: Docs
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install the docs tools
+        run: |
+          set -euo pipefail
+          # `pip install --group` needs pip 25.1; the runner's bundled pip may be older.
+          python -m pip install "pip>=25.1"
+          python -m pip install -c constraints.txt --group docs
+      - name: Build the site (strict)
+        env:
+          NO_MKDOCS_2_WARNING: "1"
+        run: mkdocs build --strict
+
+  deploy:
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    concurrency:
+      group: docs-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Check out the repository with its history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          # The one place credentials stay in the checkout: mike pushes the gh-pages branch with
+          # them. The build job, which also runs on pull requests, drops them.
+          persist-credentials: true
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install the docs tools
+        run: |
+          set -euo pipefail
+          # `pip install --group` needs pip 25.1; the runner's bundled pip may be older.
+          python -m pip install "pip>=25.1"
+          python -m pip install -c constraints.txt --group docs
+      - name: Configure the git identity
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Check the tag against the package version
+        id: version
+        # The tag must be `v` plus `__version__` exactly. A pre-release (an a, b, rc or dev
+        # segment of PEP 440) is published under its own version and never takes the `latest`
+        # alias. The version file is read as text (nothing is imported).
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import ast
+          import os
+          import pathlib
+          import re
+          import sys
+
+          PEP440 = re.compile(
+              r"(?P<release>[0-9]+(?:\.[0-9]+)*)"
+              r"(?P<pre>[-_.]?(?:a|b|c|rc|alpha|beta|pre|preview)[-_.]?[0-9]*)?"
+              r"(?P<post>-[0-9]+|[-_.]?(?:post|rev|r)[-_.]?[0-9]*)?"
+              r"(?P<dev>[-_.]?dev[-_.]?[0-9]*)?",
+              re.IGNORECASE,
+          )
+          tag = os.environ["GITHUB_REF_NAME"]
+          path = pathlib.Path("src/fsm_llm/__version__.py")
+          declared = None
+          for node in ast.parse(path.read_text(encoding="utf-8")).body:
+              if (
+                  isinstance(node, ast.Assign)
+                  and any(isinstance(t, ast.Name) and t.id == "__version__" for t in node.targets)
+                  and isinstance(node.value, ast.Constant)
+                  and isinstance(node.value.value, str)
+              ):
+                  declared = node.value.value
+          if declared is None:
+              sys.exit(f"error: no __version__ string assignment in {path}")
+          if tag != "v" + declared:
+              sys.exit(f"error: tag {tag} does not match {path} (version {declared}): expected v{declared}")
+          parts = PEP440.fullmatch(declared)
+          if parts is None:
+              sys.exit(f"error: version {declared} in {path} is not a plain PEP 440 release")
+          prerelease = bool(parts["pre"] or parts["dev"])
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"version={declared}\n")
+              out.write(f"prerelease={'true' if prerelease else 'false'}\n")
+          PY
+      - name: Deploy a pre-release (no latest alias)
+        if: steps.version.outputs.prerelease == 'true'
+        env:
+          NO_MKDOCS_2_WARNING: "1"
+          VERSION: ${{ steps.version.outputs.version }}
+        run: mike deploy --push --update-aliases "$VERSION"
+      - name: Deploy a final release (alias latest)
+        if: steps.version.outputs.prerelease == 'false'
+        env:
+          NO_MKDOCS_2_WARNING: "1"
+          VERSION: ${{ steps.version.outputs.version }}
+        run: mike deploy --push --update-aliases "$VERSION" latest

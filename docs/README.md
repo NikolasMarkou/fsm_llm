@@ -58,6 +58,18 @@ Some tests read these files. `tests/test_fsm_llm/test_docs_snippets.py` finds ev
 - `decisions/index.md` - the generated decision index: every `# DECISION` anchor of the code, grouped by plan, with its rationale and its places. Not a guide and never edited by hand: `make decision-index` writes it and `make decision-check` fails when it is stale or an anchor has no line in `plans/ANCHORS.md`.
 - `AGENTS.md` - maintainer notes for coding agents; not part of the user guides.
 
+## Publishing the site
+
+The site is built and published by `.github/workflows/docs.yml` (roadmap row 0.7). Every pull request to `main` and every tag `v*` runs `mkdocs build --strict`; a tag then deploys the site to the `gh-pages` branch with `mike`, under the version of the tag. The workflow refuses a tag that is not `v` plus `__version__` of `src/fsm_llm/__version__.py`. A pre-release version (an `a`, `b`, `rc` or `.dev` segment) is published under its own version and never takes the `latest` alias; a final release gets `latest`. CI never runs `mike set-default`. The site address is `https://nikolasmarkou.github.io/fsm_llm/`.
+
+Owner steps, once, after the first tag deploy (they need the repository settings, so they are not in CI):
+
+1. Settings, Pages: source "Deploy from a branch", branch `gh-pages`, folder `/ (root)`.
+2. From a clone of `main` with the docs tools installed (`pip install --group docs -c constraints.txt`): `mike set-default --push latest` (mike fetches `gh-pages` itself; this was run against a local bare remote at step 106). Until this runs, the root of the site has no `index.html` and shows a 404; the versioned paths (`/0.13.0/`, `/latest/`) work.
+3. Check the first run of the workflow on the Actions tab, then the version selector on the site.
+
+Risk, recorded: Material for MkDocs reaches end of life on 2027-05-05, and mkdocs 1.x itself has had no release since 1.6.1 (2024-08-30). The site pins every tool exactly (`constraints.txt`, group `docs` in `pyproject.toml`), caps `mkdocs` below 2 (mkdocs 2 has no plugins and no YAML configuration) and builds with `NO_MKDOCS_2_WARNING=1`, so nothing moves by itself. When the time comes there are two escape hatches that read the same `mkdocs.yml` and `docs/`: ProperDocs (a community continuation of mkdocs 1.x) and Zensical (the successor from the Material authors). Switch one tool deliberately, with a strict build as the test, and update the pins and the tool test in `tests/test_fsm_llm/test_docs_site.py`.
+
 ## How to use it
 
 Open the files in any Markdown viewer. Snippets assume the package is installed, and a model is configured (`LLM_MODEL`, see `quickstart.md`). Run the examples from a repository clone:

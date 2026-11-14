@@ -131,6 +131,8 @@ make docs-serve                                         # live reload at http://
 
 A strict build fails on any warning: a page missing from the `nav` in `mkdocs.yml`, a broken link or anchor, an `include-markdown` target that does not exist. A new page under `docs/` goes into the `nav`; `AGENTS.md` files are never published (`exclude_docs`). `tests/test_fsm_llm/test_docs_site.py` checks the same structure without mkdocs installed.
 
+`.github/workflows/docs.yml` builds the site strictly on every pull request and every tag `v*`, and a tag deploys it with `mike` to the `gh-pages` branch after checking that the tag equals `src/fsm_llm/__version__.py` (`docs/README.md`, "Publishing the site", lists the owner steps). Its text is pinned by `tests/test_fsm_llm_regression/test_docs_workflow.py`; check a change to it with `uvx --from actionlint-py actionlint .github/workflows/docs.yml`. Every `uses:` in a workflow is a full 40-character commit SHA with the release tag in a trailing comment.
+
 ## Good places to help
 
 All taken from recorded open items:
