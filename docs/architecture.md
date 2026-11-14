@@ -243,7 +243,7 @@ The library is one import package, `fsm_llm`, in `src/fsm_llm/`. Beneath the sev
 | Subpackages | `monitor`, `eval`; `agents`, `synthesis`, `workflows`, `reasoning`; `testing` | One extra each, imported by name, never by `import fsm_llm` |
 | `engine` | `fsm_llm.engine` | `API` (`engine.api`), `FSMManager` (`engine.fsm`), the 2-pass `MessagePipeline` (`engine.turn`), the state-kind executors (`engine.kinds`), `Classifier`, the builders, the session store, the plain-FSM OKF handler (`engine.okf_bridge`) |
 | `handlers` | `fsm_llm.handlers` | The handler system, `HandlerBuilder`, `create_handler` |
-| `policy` | `fsm_llm.policy` | Approval types and the human-in-the-loop manager |
+| `policy` | `fsm_llm.policy` | Approval types and the human-in-the-loop manager; imports `tools` and none of `context`, `okf`, `skills` (the contract `policy-imports-no-sibling-layer`: the row sits above the siblings, so only the contract keeps it off them) |
 | Independent siblings | `context`, `okf`, `skills`, `tools` | Context compaction and prompt builders (`context.layout`); Open Knowledge Format; Agent Skills; the tool registry and tool models |
 | `llm` | `fsm_llm.llm` | `LLMInterface`, `LiteLLMInterface` (the one litellm import), the embedder, reply parsing |
 | `core` | `fsm_llm.core` | Pydantic FSM models (`core.definitions`), JsonLogic (`core.expressions`), `core.transition_evaluator`, `core.state_kinds`, `core.verify` (validator, data-flow and liveness analyses), `core.visualize` |
