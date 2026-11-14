@@ -1,62 +1,175 @@
+# The test workflow (roadmap rows 0.1 and 0.2, plan d454fd62 step 108).
+#
+# Two jobs run in parallel on every push and pull request to main:
+#   * `lint` runs once (Linux, Python 3.12): ruff, the format check, mypy, the `.pth` audit,
+#     the import contracts and the decision-anchor gate;
+#   * `test` is the matrix, nine legs: Linux on Python 3.11 to 3.15, macOS and Windows on 3.11
+#     and 3.15 (the two ends of the supported range). Every leg runs the whole non-slow suite
+#     with `mcp` installed, so the real stdio MCP tests run instead of skipping.
+#
+# Policy (pinned by tests/test_fsm_llm_regression/test_ci_workflow.py, which reads this file as
+# data, computes the legs from the YAML and kills 68 one-edit mutants of it):
+#   * the token is read-only (`contents: read`), no job asks for more and no secret is named;
+#   * every action is pinned to a commit SHA with its release tag in the trailing comment
+#     (resolved with `gh api repos/<owner>/<repo>/git/ref/tags/<tag>`, 2026-11-14), and the
+#     checkouts keep no credentials;
+#   * runners are pinned (never `-latest`), `fail-fast` is off so one red leg does not hide
+#     the others, and Python versions are quoted strings (an unquoted 3.15 would be a float);
+#   * the package installs once per job against `constraints.txt`.
+#
+# The coverage ratchet (scripts/coverage_ratchet.py) runs on ONE leg, the canonical one
+# (Linux, Python 3.12, `mcp` installed: the leg `coverage-baseline.json` is measured on), in
+# place of the plain pytest step, so no leg runs the suite twice. `check` compares the run with
+# the committed baseline; `guard` (pull requests only) compares the baseline file with the one on
+# `main`, so the committed number cannot be lowered in a branch.
+#
+# The documentation site is built by docs.yml, not here.
 name: Python package
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    # Install ~2 min, mypy ~3 min, the rest seconds: 20 is ~2x headroom for a slow PyPI day
+    # and 18x tighter than GitHub's 360-minute default. Do not remove it.
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            constraints.txt
+            pyproject.toml
+      - name: Install the package and every extra
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          # `mcp` (beyond the package extras) makes the real stdio MCP tests run instead of
+          # skip (D-025/D-026 of plan-2026-09-24T091842-c1d5bfbc); mypy reads it too.
+          pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis,testing,mcp]"
+      - name: Audit for suspicious .pth files
+        run: python scripts/audit_pth.py
+      - name: Lint with ruff
+        run: ruff check src/ tests/
+      - name: Check formatting with ruff
+        # Developers run `make format`; without this step CI could not see drift.
+        run: ruff format --check src/ tests/
+      - name: Type check with mypy
+        run: python -m mypy -p fsm_llm
+      - name: Check the import contracts
+        # The `.importlinter` contracts run as one test (`make lint-imports` is the same command).
+        run: python -m pytest tests/test_fsm_llm_regression/test_import_contract.py -q
+      - name: Check the decision index
+        # `make decision-check`. The gate reads the committed `plans/ANCHORS.md`: a decision
+        # anchor with no manifest line fails it on purpose.
+        run: python scripts/decision_index.py --check docs/decisions/index.md
+      - name: Summarise the decision anchors
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          {
+            echo '### Decision anchors'
+            echo '```text'
+            python scripts/decision_index.py --report
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   test:
-    runs-on: ubuntu-latest
-    # A whole leg runs well under 5 min (pip install ~1-2 min, pytest ~45s, ruff/mypy
-    # seconds), so 15 gives ~3x headroom for a slow PyPI day while being 24x tighter
-    # than GitHub's 360-minute default. Raise it if a leg ever legitimately outgrows it;
-    # do not remove it — an unbounded hang burns 6 hours across all three legs.
-    timeout-minutes: 15
+    # An explicit name: the default would append the `coverage` flag of the canonical leg
+    # (`test (ubuntu-24.04, 3.12, true)`), and the owner names these checks in branch protection.
+    name: test (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    # One value for every leg. Measured: a Linux leg takes about 10 minutes (the suite alone is
+    # ~15 min single-process on a developer box, ~8 min on the runners); the coverage leg adds
+    # about half again; macOS and Windows runners start and install slower (1.3 to 2x). 45 is
+    # ~2x the slowest expected leg and 8x tighter than the 360-minute default. Raise it if a leg
+    # legitimately outgrows it; do not remove it, an unbounded hang burns six hours per leg.
+    timeout-minutes: 45
+    env:
+      # Windows 3.11 to 3.14 default to cp1252 (UTF-8 is the default only from 3.15, PEP 686):
+      # the code and tests pass `encoding="utf-8"` and this is the belt (D-018).
+      PYTHONUTF8: "1"
+      # Marker exclusions are deliberate, do NOT "restore" a bare `pytest tests/`:
+      #   not slow        -> tests that deliberately time.sleep() to exercise timeout code
+      #                      paths; excluded for CI speed, not safety.
+      #   not real_llm    -> the tests in tests/test_integration_ollama.py, which need a live
+      #   not integration    ollama on localhost:11434 (absent in CI, so they self-skip;
+      #                      excluded explicitly for intent).
+      # `examples` and tests/test_fsm_llm_meta/ are intentionally KEPT: they are fast and
+      # offline-safe in CI. No test is deselected (the one that used to be now stubs its FSM
+      # loop). AGENTS.md documents this selection and a test compares the two.
+      PYTEST_MARKERS: not slow and not real_llm and not integration
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
-
+        # `coverage: true` marks the canonical leg, the one the baseline is measured on.
+        include:
+          - {os: ubuntu-24.04, python-version: "3.11"}
+          - {os: ubuntu-24.04, python-version: "3.12", coverage: true}
+          - {os: ubuntu-24.04, python-version: "3.13"}
+          - {os: ubuntu-24.04, python-version: "3.14"}
+          - {os: ubuntu-24.04, python-version: "3.15"}
+          - {os: macos-15, python-version: "3.11"}
+          - {os: macos-15, python-version: "3.15"}
+          - {os: windows-2025, python-version: "3.11"}
+          - {os: windows-2025, python-version: "3.15"}
     steps:
-    - uses: actions/checkout@v5
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v6
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        # `mcp` (beyond the package extras) makes the real stdio MCP tests run
-        # instead of skip (D-025/D-026 of plan-2026-09-24T091842-c1d5bfbc).
-        pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis,testing,mcp]"
-    - name: Audit for suspicious .pth files
-      run: |
-        python scripts/audit_pth.py
-    - name: Lint with ruff
-      run: |
-        ruff check src/ tests/
-    - name: Check formatting with ruff
-      # Developers run `make format`; without this step CI could not see drift.
-      run: |
-        ruff format --check src/ tests/
-    - name: Type check with mypy
-      run: |
-        python -m mypy -p fsm_llm
-    - name: Test with pytest
-      # Marker exclusions are deliberate — do NOT "restore" a bare `pytest tests/`:
-      #   not slow        -> tests that deliberately time.sleep() to exercise
-      #                      timeout code paths; excluded for CI speed, not safety.
-      #   not real_llm    -> the tests in tests/test_integration_ollama.py, which
-      #   not integration    need a live ollama on localhost:11434 (absent in CI, so
-      #                      they self-skip; excluded explicitly for intent).
-      # `examples` and tests/test_fsm_llm_meta/ are intentionally KEPT here even
-      # though the local dev gate drops them: they are fast and offline-safe in CI
-      # (the structural JSON example tests and the meta suite, every LLM call guarded),
-      # so CI gets MORE coverage than the local gate, not less.
-      # No test is deselected: the one that used to be (the handler-reset test of
-      # tests/test_fsm_llm_agents/test_reasoning_react.py, which hung on a dev box
-      # with a live ollama) now stubs the FSM loop, so it makes no model call.
-      run: |
-        python -m pytest tests/ -q -m "not slow and not real_llm and not integration"
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python ${{ matrix.python-version }}
+        # 3.15.2 is a stable release in the actions/python-versions manifest (linux 24.04,
+        # darwin, win32), so no leg needs `allow-prereleases`.
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            constraints.txt
+            pyproject.toml
+      - name: Install the package and every extra
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          # `mcp` (beyond the package extras) makes the real stdio MCP tests run instead of
+          # skip (D-025/D-026 of plan-2026-09-24T091842-c1d5bfbc).
+          pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis,testing,mcp]"
+      - name: Audit for suspicious .pth files
+        run: python scripts/audit_pth.py
+      - name: Test with pytest
+        if: ${{ !matrix.coverage }}
+        run: python -m pytest tests/ -q -m "$PYTEST_MARKERS"
+      - name: Test with pytest and measure coverage
+        if: ${{ matrix.coverage }}
+        run: python -m pytest tests/ -q -m "$PYTEST_MARKERS" --cov --cov-branch --cov-report=json
+      - name: Check the coverage ratchet
+        if: ${{ matrix.coverage }}
+        run: python scripts/coverage_ratchet.py check coverage.json
+      - name: Guard the coverage baseline against main
+        if: ${{ matrix.coverage && github.event_name == 'pull_request' }}
+        run: |
+          set -euo pipefail
+          # The checkout is shallow and has no `origin/main`; the repository is public, so the
+          # fetch needs no credentials (the checkout keeps none).
+          git fetch --no-tags --depth=1 origin "+refs/heads/main:refs/remotes/origin/main"
+          python scripts/coverage_ratchet.py guard

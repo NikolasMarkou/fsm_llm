@@ -33,7 +33,7 @@ pytest -m "not slow"                  # skip the slow tests
 ```
 
 - The default suite mocks the LLM: it needs no network and no model. Live tests need a reachable Ollama and skip without one.
-- CI runs Python 3.11 and 3.12: `.pth` audit, ruff lint and format check, mypy, and pytest without the `slow`, `real_llm` and `integration` markers.
+- CI (`.github/workflows/python-package.yml`) runs a `lint` job once (ruff lint and format check, mypy, the `.pth` audit, the import contracts and the decision-anchor gate) and a `test` matrix of nine legs: Linux on Python 3.11 to 3.15, macOS and Windows on 3.11 and 3.15. Every leg runs the `.pth` audit and pytest without the `slow`, `real_llm` and `integration` markers; the Linux 3.12 leg also measures branch coverage and runs the ratchet (`scripts/coverage_ratchet.py`). The Windows legs run `python -m` commands in bash, never `make`. Check an edit to a workflow with `uvx --from actionlint-py actionlint .github/workflows/*.yml`; `tests/test_fsm_llm_regression/test_ci_workflow.py` pins the matrix.
 - Pre-commit runs ruff (lint with `--fix`, and format) and the file hygiene hooks on commit, and a quick pytest run on push.
 - A behaviour change needs a test that fails on the code before the change. Run it against the parent commit to confirm.
 - Test counts are written out as literals in `AGENTS.md` and in `CONTRIBUTING.md` (the `make test` line above; the README is the PyPI page and holds no count), and `tests/test_packaging.py` checks them against a fresh collection. When you add or remove tests, re-measure with `pytest --collect-only -q | tail -1` (and per suite) and update every literal. Never guess or adjust a count by hand.
@@ -80,7 +80,7 @@ fsm_llm/
 ├── evaluation/                # Datasets and recorded eval runs
 ├── scripts/                   # Supply-chain audit, benches, doc-count check
 ├── images/                    # Logo and diagrams
-├── .github/workflows/         # CI: Python 3.11, 3.12
+├── .github/workflows/         # CI: 9-leg matrix (Python 3.11 to 3.15), docs
 └── CHANGELOG.md, EVALUATE.md, CONTRIBUTING.md, SECURITY.md
 ```
 

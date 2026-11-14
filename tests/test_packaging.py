@@ -363,11 +363,6 @@ class TestPackageBackedExtrasAreInstalled:
             ("pyproject:all", "pyproject.toml", None),
             ("makefile:install-dev", "Makefile", "pip install -c constraints.txt -e"),
             ("tox:testenv-extras", "tox.ini", "extras = dev,"),
-            (
-                "ci:install",
-                ".github/workflows/python-package.yml",
-                "pip install -c constraints.txt -e",
-            ),
         ],
     )
     def test_install_list_requests_every_package_extra(
@@ -380,6 +375,22 @@ class TestPackageBackedExtrasAreInstalled:
             requested = set(re.findall(r"[\[,]([a-z0-9_]+)", _one_line(rel, needle)))
         missing = self.EXPECTED - requested
         assert not missing, f"{label} does not request extras: {sorted(missing)}"
+
+    def test_every_ci_install_line_requests_every_package_extra(self):
+        """CI installs the package in two jobs (`lint` and the `test` matrix), one line each:
+        both name every extra, so mypy and the matrix see the same environment (the count
+        and the `mcp` extra are pinned by `test_ci_workflow.py`)."""
+        rel = ".github/workflows/python-package.yml"
+        lines = [
+            ln
+            for ln in _read(rel).splitlines()
+            if "pip install -c constraints.txt -e" in ln
+        ]
+        assert len(lines) == 2, lines
+        for line in lines:
+            requested = set(re.findall(r"[\[,]([a-z0-9_]+)", line))
+            missing = self.EXPECTED - requested
+            assert not missing, f"ci:install does not request extras: {sorted(missing)}"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -415,12 +426,16 @@ class TestCiRunsEveryTestOfItsMarkerSet:
     silently outlives its reason (the one CI carried named a test that had not
     existed since a rename)."""
 
-    def test_the_ci_pytest_command_deselects_nothing(self):
-        line = _one_line(
-            ".github/workflows/python-package.yml",
-            'python -m pytest tests/ -q -m "not slow',
-        )
-        assert "--deselect" not in line, line
+    def test_the_ci_pytest_commands_deselect_nothing(self):
+        # The marker selection is the job env `PYTEST_MARKERS`; the plain and the coverage
+        # form of the one selection are the two commands that read it.
+        lines = [
+            ln
+            for ln in _read(".github/workflows/python-package.yml").splitlines()
+            if 'python -m pytest tests/ -q -m "$PYTEST_MARKERS"' in ln
+        ]
+        assert len(lines) == 2, lines
+        assert not [ln for ln in lines if "--deselect" in ln], lines
 
     def test_no_workflow_or_task_file_deselects_a_test(self):
         for rel in ("Makefile", "tox.ini", ".github/workflows/python-package.yml"):
