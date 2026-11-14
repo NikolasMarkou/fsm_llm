@@ -1164,20 +1164,6 @@ def real_manifest(di) -> dict[Any, Any]:
 class TestRealTree:
     """Loose numbers over the real repository (775 anchors at the time of the plan)."""
 
-    #: the plans whose live anchors had no manifest line before step 99, and the open plan
-    LIVE_PLANS = frozenset(
-        {
-            "plan-2026-07-21T045419-9925aa3a",
-            "plan-2026-07-21T072826-e3131cc2",
-            "plan-2026-07-21T082818-4c63deac",
-            "plan-2026-07-21T191807-bf7ffe24",
-            "plan-2026-07-22T114536-879d04a0",
-            "plan-2026-09-29T184639-65baa765",
-            "plan-2026-11-12T023759-9013b0e3",
-            "plan-2026-11-12T073150-d454fd62",
-        }
-    )
-
     def test_the_anchor_count_is_of_the_order_the_survey_found(self, real):
         assert 700 <= len(real) <= 900, len(real)
 
@@ -1218,24 +1204,31 @@ class TestRealTree:
         assert all(a.path == a.path.replace("\\", "/") for a in real)
         assert {a.prefix is None for a in real} == {False}, "a bare anchor exists"
 
-    def test_the_real_tree_has_every_state_but_few_live_unresolved(
+    def test_the_real_tree_has_no_unresolved_and_no_badprefix_anchor(
         self, di, real, real_manifest
     ):
+        """Every live anchor of the repository has a line in `plans/ANCHORS.md`.
+
+        Step 99 appended the manifest lines of the six closed plans and of the open
+        plan. The manifest is an uncommitted working-tree file until its owner commits
+        it, so a checkout of a commit without it (or with an older copy) fails here on
+        purpose: the failure message names the one remedy.
+        """
         got = di.classify(real, real_manifest)
         counts = {s: len(v) for s, v in got.items()}
         assert counts["resolved"] > 400, counts
         assert counts["retired"] > 50, counts
-        assert counts["badprefix"] == 0, [a.token for a in got["badprefix"]]
         assert sum(counts.values()) == len(real)
-        # Before step 99 the live anchors of six closed plans have no manifest line (26
-        # anchors, 19 keys in the survey), and so have the open plan's own anchors (its
-        # CLOSE appends them) and, in a checkout that lacks the five uncommitted lines,
-        # plan 9013b0e3: `0 < unresolved <= 60`, all of them in the eight plans below.
-        # Step 99 appends the manifest lines and this is rewritten there to the live
-        # anchors of the open plan only.
-        assert 0 < counts["unresolved"] <= 60, counts
-        plans = {a.plan_id for a in got["unresolved"]}
-        assert plans <= self.LIVE_PLANS, sorted(plans - self.LIVE_PLANS)
+        hint = (
+            "HAND-OFF: commit plans/ANCHORS.md (it is the owner's append-only "
+            "manifest and may still be uncommitted); a decision anchor added after "
+            "this step needs its own line there"
+        )
+        assert counts["unresolved"] == 0, (
+            hint,
+            sorted({(a.plan_id, a.number) for a in got["unresolved"]})[:30],
+        )
+        assert counts["badprefix"] == 0, (hint, [a.token for a in got["badprefix"]])
 
     def test_a_retired_anchor_is_stale_and_a_live_one_never_is(
         self, di, real, real_manifest
