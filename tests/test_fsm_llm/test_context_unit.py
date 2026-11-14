@@ -5960,7 +5960,7 @@ def _run_filter(name: str, ctx: dict) -> dict:
         )
     if name == "prompt":
         return BasePromptBuilder()._filter_context_for_security(ctx)
-    from fsm_llm.context.filtering import redact_context
+    from fsm_llm.core.redaction import redact_context
 
     return redact_context(ctx)
 

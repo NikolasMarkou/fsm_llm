@@ -1,30 +1,160 @@
 # Import contracts for the `fsm_llm` package, run by `make lint-imports`
-# (`lint-imports`, from import-linter; the engine is grimp).
+# (`lint-imports`, from import-linter; the engine is grimp) and, as one pytest test, by
+# tests/test_fsm_llm_regression/test_import_contract.py (so pytest gates it).
 #
-# Plan d454fd62, step 61 (and 65: reasoning): only the contracts that hold on today's layout
-# (source in `src/fsm_llm/`, imported as `fsm_llm`). Step 95 activates the layered
-# Section 5.2 contract (D-016) once the packages it names exist; every move
-# step (65 to 94) extends this file for the packages it places. A contract is
-# never weakened to pass: a debt is an `ignore_imports` line that names the row
-# retiring it (`# retired by: <row>`) or the written reason it stays
-# (`# permanent: <reason>`). import-linter fails on an ignore that matches no
-# import, so a stale entry is caught.
+# Plan d454fd62, step 95: the layered Section 5.2 contract of the 2026 roadmap (D-016, amended
+# by D-042), written for the real tree. The file holds, in this order:
+#   1. `layers-section-5-2`: a layer package imports only the layers below it. It replaces the
+#      per-package "imports no higher layer" lists of steps 69 to 86 (`llm`, `context`,
+#      `handlers`, `okf`, `skills`, `tools`, `policy` and the layer part of `engine`).
+#   2. `kernel-imports-no-layer`: the kernel modules import no layer package.
+#   3. What the layers contract cannot say: the L3 layers read no `llm`, `policy` is independent
+#      of the other L3 layers, `core` reads no `memory`, `engine` reads no `okf` or `skills`
+#      outside the one bridge module.
+#   4. litellm, testing, pytest, the entry modules, `reasoning` and `security`.
+#   5. The order of the modules INSIDE one layer package (`engine`, `agents`, `workflows`,
+#      `monitor`): the roadmap's contract orders packages, not the modules in them.
+# A contract is never weakened to pass: a debt is an `ignore_imports` line that names the row
+# retiring it (`# retired by: <row>`) or the written reason it stays (`# permanent: <reason>`);
+# the test pins the whole set of debts, so adding one is a visible diff. import-linter fails on
+# an ignore that matches no import, so a stale entry is caught.
 #
-# No `forbidden` contract here uses `allow_indirect_imports`: a chain through
-# another module counts, so a re-export cannot launder an import.
+# No `forbidden` contract here uses `allow_indirect_imports`: a chain through another module
+# counts, so a re-export cannot launder an import.
 #
-# Source `fsm_llm.*` (every direct child, so a new module is covered with no
-# edit) is used where the forbidden module is itself inside `fsm_llm`: with the
-# bare root as source import-linter treats the forbidden module as part of the
-# source and reports nothing (measured at step 61: a planted import was missed).
-# The root `fsm_llm/__init__.py` is not a child: `TestPackageInitImportsNoSubpackage`
-# in tests/test_packaging.py covers it.
+# Source `fsm_llm.*` (every direct child, so a new module is covered with no edit) or an explicit
+# module list is used where the forbidden module is itself inside `fsm_llm`: with the bare root
+# as source import-linter treats the forbidden module as part of the source and reports nothing
+# (measured at step 61: a planted import was missed). The root `fsm_llm/__init__.py` is not a
+# child: `TestPackageInitImportsNoSubpackage` in tests/test_packaging.py covers it.
+#
+# A new layer package: add it to the `layers` contract (an absent package stays optional there,
+# in parentheses) and to the forbidden list of the kernel contract; the test cross-checks both
+# against the directories of `src/fsm_llm/`.
 
 [importlinter]
 root_package = fsm_llm
 include_external_packages = True
 # An import under `if TYPE_CHECKING:` costs nothing at run time.
 exclude_type_checking_imports = True
+
+# 1. The layered contract. Top to bottom, as the roadmap's Section 5.2 table with the measured
+# deviations of D-014, D-016 and D-042; `|` joins independent siblings (no import either way), a
+# row may import every row below it, never one above. A name in parentheses is a package of the
+# roadmap that does not exist yet (`serve`, `simulation`, `oo`, `retrieval`, `runtime`): optional,
+# so it takes its place the day it is created.
+#   serve | monitor | eval                      L7  consumers
+#   agents | synthesis | workflows | reasoning  L6  patterns and runtimes
+#   simulation | oo                             L5  (absent)
+#   engine                                      L4  API, manager, turn, kinds, builders, session
+#   handlers                                    L4  below the engine: the engine imports it, never the reverse
+#                                                   (D-016 wrote `engine : handlers`; this is stricter and holds)
+#   policy                                      L3  above `tools` (D-037, D-042): it gates a tool call
+#   context | retrieval | okf | skills | tools L3  independent siblings
+#   runtime                                     L2  (absent)
+#   llm                                         L1
+#   core                                        L0
+# Not in the contract: the kernel (`constants`, `logging`, `security`, `text`, `env`, `frontmatter`,
+# `memory`, `cli_support`: held by the kernel contract), the entry modules (`runner`, `__main__`) and
+# `testing` (held by the entry and testing contracts).
+# Debts, each measured by the first run of this contract on the real tree (progress.md "Step 95"):
+# three named, each with its retiring row or its permanent reason (D-016 a, b, c). Six more edges
+# the first run listed were fixed by moving a symbol down instead (D-042).
+[importlinter:contract:layers-section-5-2]
+name = Section 5.2 layers: a layer package imports only the layers below it
+type = layers
+containers =
+    fsm_llm
+layers =
+    (serve) | monitor | eval
+    agents | synthesis | workflows | reasoning
+    (simulation) | (oo)
+    engine
+    handlers
+    policy
+    context | (retrieval) | okf | skills | tools
+    (runtime)
+    llm
+    core
+ignore_imports =
+    # retired by: roadmap 6.6 and P7.6 (one shared simulator: `synthesis.Simulator` moves to
+    # `simulation/`, and G6b and repair admission use it, so they stop reading the `eval` case
+    # driver, its config and its statistics; D-016 a).
+    fsm_llm.synthesis.simulation -> fsm_llm.eval.cases
+    fsm_llm.synthesis.simulation -> fsm_llm.eval.config
+    fsm_llm.synthesis.simulation -> fsm_llm.eval.stats
+    fsm_llm.synthesis.repair -> fsm_llm.eval.stats
+    # retired by: roadmap 3.2 (the `VectorStore` protocol and the embedding helpers
+    # `EmbedTextsFn` and `cosine_similarity` move to `retrieval/`; D-016 b).
+    fsm_llm.synthesis.library -> fsm_llm.agents.semantic_tools
+    fsm_llm.synthesis.synthesizer -> fsm_llm.agents.semantic_tools
+    # permanent (D-016 c): `ReasoningReactAgent` is the agents pattern built on the reasoning
+    # engine, and no roadmap row retires the edge; it is reported to the user as a decision.
+    fsm_llm.agents.reasoning_react -> fsm_llm.reasoning
+
+# 2. The kernel (D-014, D-016): modules every layer may read, so they read no layer package, no
+# subpackage, no `testing` and no entry module. A kernel module imports only the standard library
+# and other kernel modules. `security` is stricter still (`security-is-a-leaf` below: standard
+# library only). `text` and `cli_support` were the first two held this way (step 83, D-033); the
+# contract that named them is replaced by this one.
+[importlinter:contract:kernel-imports-no-layer]
+name = kernel modules import no layer package, subpackage, testing or entry module
+type = forbidden
+source_modules =
+    fsm_llm.cli_support
+    fsm_llm.constants
+    fsm_llm.env
+    fsm_llm.frontmatter
+    fsm_llm.logging
+    fsm_llm.memory
+    fsm_llm.security
+    fsm_llm.text
+forbidden_modules =
+    fsm_llm.__main__
+    fsm_llm.agents
+    fsm_llm.context
+    fsm_llm.core
+    fsm_llm.engine
+    fsm_llm.eval
+    fsm_llm.handlers
+    fsm_llm.llm
+    fsm_llm.monitor
+    fsm_llm.okf
+    fsm_llm.policy
+    fsm_llm.reasoning
+    fsm_llm.runner
+    fsm_llm.skills
+    fsm_llm.synthesis
+    fsm_llm.testing
+    fsm_llm.tools
+    fsm_llm.workflows
+
+# 3. What the layers contract cannot say. The L3 layers sit above `llm` in the table, so they MAY
+# import it by that contract; only `context` needs it (the compactor's summary call). `okf`,
+# `skills`, `tools` and `policy` read the kernel and `core` and nothing else (steps 83 to 86).
+[importlinter:contract:l3-layers-import-no-llm]
+name = fsm_llm.okf, skills, tools and policy import no llm module
+type = forbidden
+source_modules =
+    fsm_llm.okf
+    fsm_llm.skills
+    fsm_llm.tools
+    fsm_llm.policy
+forbidden_modules =
+    fsm_llm.llm
+
+# `policy` sits above `tools` (it wraps a tool call; D-037), which the layers contract expresses by
+# giving it a row of its own above the L3 row. That row would let it import `context`, `okf` and
+# `skills` too; it reads none of them (measured at step 86) and stays independent of them.
+[importlinter:contract:policy-imports-no-sibling-layer]
+name = fsm_llm.policy imports no context, okf or skills module
+type = forbidden
+source_modules =
+    fsm_llm.policy
+forbidden_modules =
+    fsm_llm.context
+    fsm_llm.okf
+    fsm_llm.skills
 
 [importlinter:contract:litellm-one-module]
 name = litellm is imported by one module, fsm_llm.llm.providers.litellm
@@ -68,6 +198,9 @@ ignore_imports =
     # runner (a lazy import inside `main_cli`); no other module may.
     fsm_llm.__main__ -> fsm_llm.runner
 
+# Stricter than the layers contract, which lets `monitor`, `eval` and `serve` import `reasoning`
+# (they sit above it): only `agents.reasoning_react` does, the one permanent debt of D-016 c (the
+# same edge is an ignore line of the layers contract, with the same tag).
 [importlinter:contract:reasoning-is-imported-by-agents-only]
 name = no module outside fsm_llm.reasoning and fsm_llm.agents imports fsm_llm.reasoning
 type = forbidden
@@ -84,7 +217,7 @@ ignore_imports =
 
 # Step 67 (security split): the first layer package. `security` is a KERNEL module (D-014,
 # D-016): it imports the standard library only, today and by contract, which is stricter
-# than the kernel rule of step 95 (kernel modules import no layer package). The forbidden
+# than the kernel contract above (kernel modules import no layer package). The forbidden
 # set is `fsm_llm.*` (every direct child), not the bare root: with the root as the
 # forbidden module and a source inside it, import-linter reports nothing (measured at
 # step 67: a planted `from fsm_llm.constants import ...` in `security/paths.py` was missed).
@@ -108,8 +241,9 @@ ignore_imports =
 # `fsm_llm.validator` left the lists of the `llm` and `context` contracts below: the module is
 # gone and both layers may import `core`); it never reaches a higher layer or a subpackage
 # (`FSMDefinition._check_synthesize_states` imports `core.transition_evaluator` lazily, a core
-# edge). The list is every module that is not core and not kernel today; step 95 replaces it
-# with the `layers` contract of D-016.
+# edge). Step 95: the `layers` contract (core is its bottom row) now forbids every layer package;
+# this list stays whole for what that contract cannot see, `fsm_llm.memory` (a kernel module the
+# core does not read) and the entry and testing modules.
 [importlinter:contract:core-imports-no-higher-layer]
 name = fsm_llm.core imports no engine, llm, context, okf, skills, tools, policy or subpackage module
 type = forbidden
@@ -137,120 +271,36 @@ ignore_imports =
     # the package's own modules import each other
     fsm_llm.core.** -> fsm_llm.core.**
 
-# Step 72 (utilities split; `llm.py` and `context.py` became the packages `llm/` and `context/`):
-# the layer package `llm` (L1) reads the kernel (`constants`, `logging`), `core` (the models in
-# `core.definitions`, the number and bool coercions in `core.coerce`) and `fsm_llm.llm.ollama` (placed
-# in `llm/` at step 73, so it is inside the package now), and nothing above it. `fsm_llm.utilities` is gone from the core contract
-# above (the module no longer exists; its pieces are `llm.text`, `llm.json_extraction`,
-# `context.filtering`, `core.coerce`, `core.loaders`). The list is every module that is neither
-# `llm`, `core` or kernel today; step 95 replaces it with the `layers` contract of D-016.
-[importlinter:contract:llm-imports-no-higher-layer]
-name = fsm_llm.llm imports no engine, context, okf, skills, tools, policy or subpackage module
-type = forbidden
-source_modules =
-    fsm_llm.llm
-forbidden_modules =
-    fsm_llm.agents
-    fsm_llm.context
-    fsm_llm.engine
-    fsm_llm.eval
-    fsm_llm.handlers
-    fsm_llm.monitor
-    fsm_llm.okf
-    fsm_llm.policy
-    fsm_llm.reasoning
-    fsm_llm.runner
-    fsm_llm.skills
-    fsm_llm.synthesis
-    fsm_llm.testing
-    fsm_llm.tools
-    fsm_llm.workflows
-
-# Step 74 (prompts split into `context/layout/`, `clear_keys_delta` moved down from `handlers`
-# into `context/commit.py`): the layer package `context` (L3) reads the kernel (`constants`,
-# `logging`), `core` and `llm` (the compactor's summary call) and nothing above it: it imports no
-# engine module (`handlers` was the one edge, retired by the move), no peer layer (`okf`,
-# `skills`) and no subpackage. Same module list as the `llm` contract above, which step 95
-# replaces together with this one by the `layers` contract of D-016.
-[importlinter:contract:context-imports-no-higher-layer]
-name = fsm_llm.context imports no engine, okf, skills, tools, policy or subpackage module
-type = forbidden
-source_modules =
-    fsm_llm.context
-forbidden_modules =
-    fsm_llm.agents
-    fsm_llm.engine
-    fsm_llm.eval
-    fsm_llm.handlers
-    fsm_llm.monitor
-    fsm_llm.okf
-    fsm_llm.policy
-    fsm_llm.reasoning
-    fsm_llm.runner
-    fsm_llm.skills
-    fsm_llm.synthesis
-    fsm_llm.testing
-    fsm_llm.tools
-    fsm_llm.workflows
-
-# Step 77 (handlers split into the package `handlers/`, at the same dotted path because 13 examples
-# import `fsm_llm.handlers.HandlerTiming`): `handlers` sits in the engine layer (D-016: `engine :
-# handlers`, peers that import neither each other nor anything above them). Today it reads the
-# kernel (`constants`, `logging`), `core` (the errors' base, `BuildError`, `checked_key_names`) and
-# `context.commit` (`clear_keys_delta`). It imports no engine peer (`api`, `engine` and
-# `engine` (with `engine.kinds`, the old `executors`) import it, never the reverse) and no subpackage; the list is those peers plus every
-# module above the engine layer. Step 95 replaces it with the `layers` contract of D-016.
-[importlinter:contract:handlers-import-no-engine-peer-or-higher-layer]
-name = fsm_llm.handlers imports no engine peer or subpackage module
-type = forbidden
-source_modules =
-    fsm_llm.handlers
-forbidden_modules =
-    fsm_llm.agents
-    fsm_llm.engine
-    fsm_llm.eval
-    fsm_llm.monitor
-    fsm_llm.reasoning
-    fsm_llm.runner
-    fsm_llm.synthesis
-    fsm_llm.testing
-    fsm_llm.workflows
-
 # Step 78 (fsm.py split into the layer package `engine/fsm/`, the first module of the `engine`
 # layer, L4 of D-016): `engine` reads the kernel (`constants`, `logging`, `security`), `core`, `llm`,
-# `context` and `handlers`, plus the modules that moved into it (`api` is `engine/api/` since
-# step 81; `classification`, `session` and `builders` are `engine/*.py` since step 82). It imports
-# no subpackage, no okf or skills module and no entry module. The `core`, `llm`, `context` and
-# `handlers` contracts above forbid `fsm_llm.engine`, so the lower layers never import it. Step 83
-# moved `okf_bridge` into `engine/`: it is the engine's one module on `okf` (one ignore line below),
-# and two contracts at the end of this file keep it isolated both ways. What waits for step 95: the
-# `layers` contract replaces these lists.
-[importlinter:contract:engine-imports-no-subpackage-or-okf-or-skills]
-name = fsm_llm.engine imports no subpackage, okf, skills or entry module
+# `context`, `handlers` and `policy`, plus the modules that moved into it (`api` is `engine/api/`
+# since step 81; `classification`, `session` and `builders` are `engine/*.py` since step 82). Step 95:
+# the layers contract keeps the engine off every subpackage and the entry modules; this contract
+# keeps it off `okf` and `skills`, which the layers contract would allow (they sit below the
+# engine). Step 83 moved `okf_bridge` into `engine/`: it is the engine's one module on `okf` (two
+# ignore lines below: the package and `okf.memory_export`, from which it re-exports
+# `bundle_from_memory_entries`), and two contracts further down keep it isolated both ways.
+[importlinter:contract:engine-imports-no-okf-or-skills]
+name = fsm_llm.engine imports no okf or skills module
 type = forbidden
 source_modules =
     fsm_llm.engine
 forbidden_modules =
-    fsm_llm.agents
-    fsm_llm.eval
-    fsm_llm.monitor
     fsm_llm.okf
-    fsm_llm.reasoning
-    fsm_llm.runner
     fsm_llm.skills
-    fsm_llm.synthesis
-    fsm_llm.testing
-    fsm_llm.workflows
 ignore_imports =
     # permanent (D-033): the bridge between memory, plain FSMs and OKF is the one engine module
     # that reads `okf` (the engine layer sits above it); every other engine module stays forbidden.
     fsm_llm.engine.okf_bridge -> fsm_llm.okf
+    # permanent (D-033, D-042): the same bridge re-exports `bundle_from_memory_entries`, defined in
+    # `okf/memory_export.py` since step 95.
+    fsm_llm.engine.okf_bridge -> fsm_llm.okf.memory_export
 
 # Step 79 (pipeline.py split into the layer package `engine/turn/`): the per-turn engine sits
 # below the conversation manager (`engine/fsm`, which builds a `MessagePipeline`), the `API`
 # that wraps the manager, the builders and the session store; it imports none of them, directly
-# or through another module. Step 95 replaces this with the `layers` contract of D-016, where
-# these become intra-engine edges.
+# or through another module. The layers contract orders the packages, not the modules inside
+# `engine`, so this contract stays (the internal order of the engine).
 [importlinter:contract:engine-turn-imports-no-manager-or-api]
 name = fsm_llm.engine.turn imports no manager, API, builder or session module
 type = forbidden
@@ -269,7 +319,7 @@ forbidden_modules =
 # of `engine/kinds/services.py`. The contract does not see an import under `TYPE_CHECKING`
 # (`exclude_type_checking_imports`); `test_executors.py` scans every module of the package for
 # one. The `engine-turn` contract above does not forbid `engine.kinds` (the turn calls it).
-# Step 95 replaces this with the `layers` contract of D-016, where it is an intra-engine edge.
+# Kept at step 95: the layers contract does not order the modules inside `engine`.
 [importlinter:contract:engine-kinds-imports-no-turn-or-manager-or-api]
 name = fsm_llm.engine.kinds imports no turn, manager, API, builder or session module
 type = forbidden
@@ -288,8 +338,8 @@ forbidden_modules =
 # below the builders (`engine/builders.py` builds an `API`). So the three lower engine packages import it
 # nowhere (the turn and the kinds contracts above name it; this contract holds the manager), and it
 # imports no builder. The `core`, `llm`, `context` and `handlers` contracts forbid `fsm_llm.engine`
-# as a whole, so the lower layers never import it either. Step 95 replaces these with the `layers`
-# contract of D-016, where they are intra-engine edges.
+# as a whole, so the lower layers never import it either (the layers contract now says so for the
+# whole engine). Kept at step 95: it does not order the modules inside `engine`.
 [importlinter:contract:engine-fsm-imports-no-api-or-builder]
 name = fsm_llm.engine.fsm imports no API or builder module
 type = forbidden
@@ -311,8 +361,8 @@ forbidden_modules =
 # the classifier and the session store are leaves of the engine layer. They read the kernel, `core`,
 # `llm` and `context` only; the turn, the kinds, the manager and the API import them, never the
 # reverse, and neither reaches the builders. (`engine/builders.py` sits on top: it builds an `API` and
-# an `FSMManager`, held by the two contracts above.) Step 95 replaces this with the `layers`
-# contract of D-016, where these are intra-engine edges.
+# an `FSMManager`, held by the two contracts above.) Kept at step 95: the layers contract does not
+# order the modules inside `engine`.
 [importlinter:contract:engine-classification-and-session-are-leaves]
 name = fsm_llm.engine classification and session import no engine peer
 type = forbidden
@@ -326,69 +376,10 @@ forbidden_modules =
     fsm_llm.engine.kinds
     fsm_llm.engine.turn
 
-# Step 83 (okf.py became the layer package `okf/`, `okf_bridge.py` moved into `engine/`, the okf
-# text helpers moved to the kernel module `text.py`; D-032, D-033). `okf` (L3) reads the kernel,
-# `core` (`OKFError`) and `security`; it imports no engine, llm, context or handlers module, no
-# peer layer (`skills`) and no subpackage. ONE named debt: the `export` subcommand of the CLI calls
-# `bundle_from_memory_entries`, which lives in `engine/okf_bridge.py` (it needs `handlers`).
-[importlinter:contract:okf-imports-no-engine-or-higher-layer]
-name = fsm_llm.okf imports no engine, llm, context, skills, tools, policy or subpackage module
-type = forbidden
-source_modules =
-    fsm_llm.okf
-forbidden_modules =
-    fsm_llm.agents
-    fsm_llm.context
-    fsm_llm.engine
-    fsm_llm.eval
-    fsm_llm.handlers
-    fsm_llm.llm
-    fsm_llm.monitor
-    fsm_llm.policy
-    fsm_llm.reasoning
-    fsm_llm.runner
-    fsm_llm.skills
-    fsm_llm.synthesis
-    fsm_llm.testing
-    fsm_llm.tools
-    fsm_llm.workflows
-ignore_imports =
-    # retired by: step 95 (the `layers` contract decides: exempt the `*.cli` entry modules, or move
-    # `bundle_from_memory_entries` down into `okf/`); the CLI is an entry point that composes layers.
-    fsm_llm.okf.cli -> fsm_llm.engine.okf_bridge
-
-# Step 83: `text` and `cli_support` are kernel leaves: they read the standard library, `constants`
-# and (`cli_support` only) `env`, never a layer package, a subpackage or an entry module. This is
-# why `cli_support` left the forbidden lists of the layer contracts above (D-033).
-[importlinter:contract:kernel-leaves-import-no-layer]
-name = fsm_llm.text and fsm_llm.cli_support import no layer package, subpackage or entry module
-type = forbidden
-source_modules =
-    fsm_llm.text
-    fsm_llm.cli_support
-forbidden_modules =
-    fsm_llm.agents
-    fsm_llm.context
-    fsm_llm.core
-    fsm_llm.engine
-    fsm_llm.eval
-    fsm_llm.handlers
-    fsm_llm.llm
-    fsm_llm.monitor
-    fsm_llm.okf
-    fsm_llm.policy
-    fsm_llm.reasoning
-    fsm_llm.runner
-    fsm_llm.skills
-    fsm_llm.synthesis
-    fsm_llm.testing
-    fsm_llm.tools
-    fsm_llm.workflows
-
 # Step 83: the OKF bridge sits in the engine layer (it needs `handlers`) but is isolated from the
 # rest of the engine in both directions: it imports no engine peer, and no engine peer imports it.
-# The second contract is what keeps the engine off `okf` (the ignore line of the engine contract
-# above hides the bridge's own `okf` edge, so a chain through the bridge would otherwise be missed).
+# The second contract is what keeps the engine off `okf` (the ignore lines of the engine contract
+# above hide the bridge's own `okf` edges, so a chain through the bridge would otherwise be missed).
 [importlinter:contract:engine-okf-bridge-imports-no-engine-peer]
 name = fsm_llm.engine.okf_bridge imports no engine peer
 type = forbidden
@@ -416,105 +407,6 @@ source_modules =
     fsm_llm.engine.turn
 forbidden_modules =
     fsm_llm.engine.okf_bridge
-
-# Step 84 (agent_skills.py and agent_skills_cli.py became the layer package `skills/`, D-034).
-# `skills` (L3) reads the kernel (`constants`, `frontmatter`, `security`, `text`, `cli_support`)
-# and `core` (`SkillError`); it imports no okf module (a sibling in the Section 5.2 row; the text
-# helpers it shares with okf are the kernel module `text`), no engine, llm, context or handlers
-# module and no subpackage; the agents-side tools are `fsm_llm.agents.agent_skills`, which
-# imports this package, never the reverse. No debt: the CLI needs nothing above the kernel.
-[importlinter:contract:skills-imports-no-okf-engine-or-higher-layer]
-name = fsm_llm.skills imports no okf, engine, llm, context, tools, policy or subpackage module
-type = forbidden
-source_modules =
-    fsm_llm.skills
-forbidden_modules =
-    fsm_llm.agents
-    fsm_llm.context
-    fsm_llm.engine
-    fsm_llm.eval
-    fsm_llm.handlers
-    fsm_llm.llm
-    fsm_llm.monitor
-    fsm_llm.okf
-    fsm_llm.policy
-    fsm_llm.reasoning
-    fsm_llm.runner
-    fsm_llm.synthesis
-    fsm_llm.testing
-    fsm_llm.tools
-    fsm_llm.workflows
-
-# Step 85 (ToolRegistry, the tool models and their helpers moved down from `agents/` into the layer
-# package `tools/`, D-035 and D-036). `tools` (L3, a sibling of `context`, `okf`, `skills` and the
-# later `policy` in the Section 5.2 row) reads the kernel (`logging`), `core` (`AgentError`, the
-# base of its two errors, which moved down into `core.definitions.errors` for this) and nothing
-# else: no agents, engine, llm, handlers or peer layer, no subpackage, no entry module. ONE named
-# debt: `redact_secret_entries` (the registry logs through it) calls
-# `context.filtering.redact_context`, a `context` module; step 95 decides between moving the filter
-# down to `core` and a sibling exemption. The rest of the layer contracts above forbid
-# `fsm_llm.tools` for the layers below and beside it (`core`, `llm`, `context`, `okf`, `skills`,
-# the kernel leaves): the engine, the handlers and the subpackages may import it.
-[importlinter:contract:tools-imports-no-agents-engine-or-peer-layer]
-name = fsm_llm.tools imports no agents, engine, llm, handlers, okf, skills, context, policy or subpackage module
-type = forbidden
-source_modules =
-    fsm_llm.tools
-forbidden_modules =
-    fsm_llm.agents
-    fsm_llm.context
-    fsm_llm.engine
-    fsm_llm.eval
-    fsm_llm.handlers
-    fsm_llm.llm
-    fsm_llm.monitor
-    fsm_llm.okf
-    fsm_llm.policy
-    fsm_llm.reasoning
-    fsm_llm.runner
-    fsm_llm.skills
-    fsm_llm.synthesis
-    fsm_llm.testing
-    fsm_llm.workflows
-ignore_imports =
-    # retired by: step 95 (the `layers` contract decides: move `redact_context` and its module
-    # down to `core`, or exempt the `tools` to `context` edge); one import, in `arguments.py`.
-    fsm_llm.tools.arguments -> fsm_llm.context.filtering
-
-# Step 86 (the approval types and the HITL manager moved from `agents/` into the layer package
-# `policy/`, D-037). `policy` sits above `tools` (it wraps a tool call and uses the tool models, the
-# per-call timeout and the redaction helper): it reads the kernel (`constants`, `logging`), `core`
-# (`AgentError`, the base of `ApprovalDeniedError`) and `fsm_llm.tools`, and nothing else: no agents
-# (the driver-only approval grant stays in `agents.base`), engine, llm, handlers or peer layer, no
-# subpackage, no entry module. `policy -> tools` is a deviation from the roadmap Section 5.2 row
-# (`context | retrieval | okf | skills | tools | policy`, independent siblings): step 95 amends the
-# `layers` contract so `policy` sits above `tools`; until then `tools` and the layers below it forbid
-# `fsm_llm.policy` (the lists above). `context` is forbidden too, which is why the one named debt of
-# the `tools` contract (`tools.arguments -> context.filtering`, reached through `tools`) is repeated.
-[importlinter:contract:policy-imports-no-agents-engine-or-peer-layer]
-name = fsm_llm.policy imports no agents, engine, llm, handlers, okf, skills, context or subpackage module
-type = forbidden
-source_modules =
-    fsm_llm.policy
-forbidden_modules =
-    fsm_llm.agents
-    fsm_llm.context
-    fsm_llm.engine
-    fsm_llm.eval
-    fsm_llm.handlers
-    fsm_llm.llm
-    fsm_llm.monitor
-    fsm_llm.okf
-    fsm_llm.reasoning
-    fsm_llm.runner
-    fsm_llm.skills
-    fsm_llm.synthesis
-    fsm_llm.testing
-    fsm_llm.workflows
-ignore_imports =
-    # retired by: step 95 (the `tools` contract's debt, reached through `fsm_llm.tools`; the
-    # `layers` contract decides how `redact_context` is reached); not an import of `policy`.
-    fsm_llm.tools.arguments -> fsm_llm.context.filtering
 
 # Step 87 (agents/base.py became the package agents/base/, D-039). `BaseAgent` is the base of every
 # pattern, so the package imports no pattern module (a pattern imports it; the reverse would be a

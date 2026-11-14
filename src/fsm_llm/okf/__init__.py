@@ -5,9 +5,10 @@ The format layer, a layer package: ``models`` (the trust tier, an issue, the loa
 limits, a concept), ``parser`` (the tolerant parser), ``links`` (ids and links),
 ``bundle`` (the in-memory bundle, link graph and search), ``loader`` (bounded
 loading), ``checker`` (conformance checks), ``writer`` (rendering and writing),
-``reading`` (the helpers of the agent tools and the CLI) and ``cli`` (the
-``fsm-llm-okf`` command). The memory export and the plain-FSM handler are in
-``fsm_llm.engine.okf_bridge``. The text helpers (``strip_unsafe_text``,
+``reading`` (the helpers of the agent tools and the CLI), ``memory_export``
+(``bundle_from_memory_entries``, not re-exported here: import it by that module's name) and
+``cli`` (the ``fsm-llm-okf`` command). The plain-FSM handler is in
+``fsm_llm.engine.okf_bridge``, which also re-exports ``bundle_from_memory_entries``. The text helpers (``strip_unsafe_text``,
 ``capped_line``, ``capped_issues``, ``capped_note``, ``text_page``, ``iso_utc``) live
 in the kernel module ``fsm_llm.text`` and are re-exported here as documented public
 names. OKF text is untrusted third-party prose: content never raises (a problem

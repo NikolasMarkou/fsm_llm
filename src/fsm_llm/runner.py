@@ -16,7 +16,8 @@ from .constants import (
     ENV_LLM_MAX_TOKENS,
     ENV_LLM_TEMPERATURE,
 )
-from .context.filtering import redact_context, redacting_json_default
+from .context.filtering import redacting_json_default
+from .core.redaction import redact_context
 from .engine.api.conversation import API
 from .env import load_env
 from .llm import DEFAULT_MAX_TOKENS, resolve_model

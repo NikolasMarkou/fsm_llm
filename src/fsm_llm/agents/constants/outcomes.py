@@ -1,7 +1,8 @@
-"""How a run ended: stop reasons and the observation text of a tool step.
+"""How a run ended: the stop reasons.
 
-``ToolRunStatus`` and ``ToolObservationPrefix`` (how one tool call ended) are defined in
-``fsm_llm.tools.constants`` and re-exported by ``fsm_llm.agents.constants``.
+``ToolRunStatus`` and ``ToolObservationPrefix`` (how one tool call ended) and
+``OBSERVATION_ENTRY`` (the text of a tool step) are defined in ``fsm_llm.tools.constants``
+and re-exported by ``fsm_llm.agents.constants``.
 """
 
 from __future__ import annotations
@@ -53,9 +54,3 @@ class StopReason:
     FORCED: frozenset[str] = frozenset(
         {MAX_ITERATIONS, FORCED_PASS, STALLED, GATE_FAILED, ENDED, TRUNCATED}
     )
-
-
-# One tool observation as the loop stores it (``handlers.record_tool_step``).
-# Read back by ``BaseAgent._try_parse_structured_output`` (the text after the last
-# "Result:") and sized by ``okf._budget``, which measures the wrapper with this.
-OBSERVATION_ENTRY = "[Step {step}] Tool: {tool} | Input: {input} | Result: {result}"

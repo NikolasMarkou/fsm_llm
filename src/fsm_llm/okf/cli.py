@@ -22,8 +22,9 @@ with ``--strict`` also a warning; an unreadable bundle or memory file; an
 unknown concept id; a refused export); ``2`` usage error (argparse);
 ``130`` interrupted by Ctrl-C.
 
-Imports core only (never a subpackage, never litellm); the one engine import is
-``engine.okf_bridge`` for ``export`` (a named debt of ``.importlinter``, D-033).
+Imports core only (never a subpackage, never litellm, never an engine module): ``export`` calls
+``memory_export.bundle_from_memory_entries``, which moved here from ``engine.okf_bridge`` at
+step 95 of plan d454fd62 (D-042) and retired the one named debt of the ``okf`` contract.
 """
 
 from __future__ import annotations
@@ -50,12 +51,12 @@ from fsm_llm.constants import (
     OKF_READ_PAGE_CHARS,
 )
 from fsm_llm.core.definitions import OKFError
-from fsm_llm.engine.okf_bridge import bundle_from_memory_entries
 from fsm_llm.text import capped_line
 
 from .bundle import OKFBundle, incomplete_note
 from .checker import check_bundle
 from .loader import load_bundle
+from .memory_export import bundle_from_memory_entries
 from .models import OKFLimits
 from .reading import body_page, close_ids
 from .writer import write_bundle

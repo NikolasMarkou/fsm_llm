@@ -8,13 +8,13 @@ a model sent turned into call arguments, and ``redact_secret_entries``), ``hints
 ``timeouts`` (the per-call timeout), ``errors`` (``ToolExecutionError``,
 ``ToolNotFoundError``), ``limits`` (``require_int_limit``, ``bounded_repr``),
 ``truncation`` and ``constants`` (the subset of the agents constants these modules
-read, plus ``ToolRunStatus`` and ``ToolObservationPrefix``). The agents package builds
+read, plus ``ToolRunStatus``, ``ToolObservationPrefix`` and ``OBSERVATION_ENTRY``). The agents package builds
 on it (``fsm_llm.agents`` re-exports the public names); the tools never import
 ``agents``.
 
-Imports the kernel (``logging``), ``core`` (``AgentError``) and one helper of the
-``context`` layer (``context.filtering.redact_context``, the one named debt of the
-contract) and nothing above.
+Imports the kernel (``logging``), ``core`` (``AgentError`` and the redaction walk
+``core.redaction.redact_context``) and nothing above (the debt of a ``context`` import was
+retired at step 95 of plan d454fd62 by moving the walk down to ``core``).
 
 This ``__init__`` is the one import surface of the package (a static ``__all__``);
 a private name is imported from the module that defines it.

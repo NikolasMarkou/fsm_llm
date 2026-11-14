@@ -88,6 +88,23 @@ class TestConstantsKeepOneSource:
         assert getattr(agents_constants, name).__module__ == "fsm_llm.tools.constants"
         assert name in agents_constants.__all__
 
+    def test_the_observation_entry_is_one_string_defined_in_the_tool_layer(
+        self,
+    ) -> None:
+        """Step 95 (D-042): the template moved down so `synthesis.tools` reads it without
+        `agents`; the agents name is the same object, the text is the one the loop stores."""
+        from fsm_llm.agents.constants import outcomes
+        from fsm_llm.synthesis import tools as synthesis_tools
+
+        assert agents_constants.OBSERVATION_ENTRY is tool_constants.OBSERVATION_ENTRY
+        assert "OBSERVATION_ENTRY" in agents_constants.__all__
+        assert not hasattr(outcomes, "OBSERVATION_ENTRY")
+        assert synthesis_tools.OBSERVATION_ENTRY is tool_constants.OBSERVATION_ENTRY
+        assert synthesis_tools.Defaults is tool_constants.Defaults
+        assert tool_constants.OBSERVATION_ENTRY == (
+            "[Step {step}] Tool: {tool} | Input: {input} | Result: {result}"
+        )
+
 
 class TestTheAgentsFacadeReexports:
     @pytest.mark.parametrize(
@@ -233,7 +250,7 @@ class TestTheLayerIsBelowTheSubpackages:
                 for name in names:
                     assert not name.startswith(forbidden), f"{path.name}: {name}"
 
-    def test_the_one_context_edge_is_the_filter(self) -> None:
+    def test_the_tools_layer_imports_no_context_module(self) -> None:
         edges = set()
         for path in sorted((SRC / "tools").glob("*.py")):
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -241,7 +258,8 @@ class TestTheLayerIsBelowTheSubpackages:
                     "fsm_llm.context"
                 ):
                     edges.add((path.name, node.module))
-        assert edges == {("arguments.py", "fsm_llm.context.filtering")}
+        # the redaction walk moved down to core.redaction at step 95 (D-042): no edge is left
+        assert edges == set()
 
 
 class TestTheFacade:

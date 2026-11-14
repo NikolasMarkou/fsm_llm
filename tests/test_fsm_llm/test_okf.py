@@ -2121,6 +2121,70 @@ class TestBridgeLayering:
         assert [n for n, _ in _imported_from_okf(tree) if n.startswith("_")] == []
 
 
+_MEMORY_EXPORT = _SRC_ROOT / "okf" / "memory_export.py"
+
+
+class TestMemoryExportLayering:
+    """Step 95 (D-042): ``bundle_from_memory_entries`` is defined in ``okf/memory_export.py``,
+    so ``okf.cli`` reaches it without an engine module; the bridge re-exports it."""
+
+    def test_it_is_defined_in_okf_and_the_bridge_re_exports_the_same_object(
+        self,
+    ) -> None:
+        from fsm_llm.okf import memory_export
+
+        assert memory_export.bundle_from_memory_entries.__module__ == (
+            "fsm_llm.okf.memory_export"
+        )
+        assert okf_bridge.bundle_from_memory_entries is (
+            memory_export.bundle_from_memory_entries
+        )
+        assert memory_export.__all__ == ["bundle_from_memory_entries"]
+        assert not hasattr(okf_module, "bundle_from_memory_entries")
+
+    def test_the_module_imports_no_litellm_engine_handlers_or_subpackage(self) -> None:
+        tree = ast.parse(_MEMORY_EXPORT.read_text(encoding="utf-8"))
+        names: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and not node.level:
+                names.append(node.module or "")
+            elif isinstance(node, ast.Import):
+                names += [a.name for a in node.names]
+        banned = (
+            "litellm",
+            "fsm_llm.engine",
+            "fsm_llm.handlers",
+            "fsm_llm.llm",
+            "fsm_llm.agents",
+            "fsm_llm.reasoning",
+            "fsm_llm.workflows",
+            "fsm_llm.monitor",
+            "fsm_llm.eval",
+            "fsm_llm.synthesis",
+        )
+        assert [n for n in names if n.startswith(banned)] == []
+
+    def test_the_okf_cli_does_not_load_the_bridge(self, tmp_path: Path) -> None:
+        src = str(Path(fsm_llm.__file__).parent.parent)
+        probe = (
+            f"import sys; sys.path.insert(0, {src!r})\n"
+            "import fsm_llm.okf.cli\n"
+            "assert 'fsm_llm.okf.memory_export' in sys.modules\n"
+            "assert 'fsm_llm.engine.okf_bridge' not in sys.modules\n"
+            "print('ok')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=tmp_path,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "ok"
+
+
 # --------------------------------------------------------------
 # Writer (step 4)
 # --------------------------------------------------------------

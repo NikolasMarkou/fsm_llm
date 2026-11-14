@@ -1,5 +1,6 @@
 """Constants of the tool layer: the subset of the agents context keys, defaults and
-message templates that the registry and the tool models read, and the tool statuses.
+message templates that the registry and the tool models read, the tool statuses and the
+text of one stored tool observation (``OBSERVATION_ENTRY``).
 
 The agents classes of the same names (``fsm_llm.agents.constants``) assign every
 attribute below from these classes, in their own position, so each value has one
@@ -60,6 +61,14 @@ class LogMessages:
         "Tool '{name}' finished after its {timeout} s timeout; "
         "its {outcome} was discarded"
     )
+
+
+# One tool observation as the agent loop stores it (``handlers.record_tool_step``).
+# Read back by ``BaseAgent._try_parse_structured_output`` (the text after the last
+# "Result:") and sized by ``okf._budget`` and the synthesis tools' ``_room``, which
+# measure the wrapper with this. Moved down from ``agents/constants/outcomes.py`` (plan
+# d454fd62, step 95) so the synthesis tools read it without importing ``agents``.
+OBSERVATION_ENTRY = "[Step {step}] Tool: {tool} | Input: {input} | Result: {result}"
 
 
 class ToolObservationPrefix:

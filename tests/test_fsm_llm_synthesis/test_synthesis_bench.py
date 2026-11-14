@@ -1196,7 +1196,8 @@ REQUIRED_PINS = (
     "src/fsm_llm/llm/text.py",  # the other half of the old utilities.py pin (split at step 72)
     "src/fsm_llm/core/coerce.py",  # ... split at step 72
     "src/fsm_llm/core/loaders.py",  # ... split at step 72: read_json_object, the FSM file reader
-    "src/fsm_llm/context/filtering.py",  # ... split at step 72: redaction and the context filter
+    "src/fsm_llm/context/filtering.py",  # ... split at step 72: the context filter and the leaf redaction
+    "src/fsm_llm/core/redaction.py",  # ... split out of context/filtering.py at step 95 (D-042): redact_context
     "src/fsm_llm/core/verify/validator.py",  # FSMValidator is gate G2 (the shell; split at step 75 of plan d454fd62)
     "src/fsm_llm/core/verify/structure.py",  # ... StructureMixin, the structure and key checks
     "src/fsm_llm/core/verify/graph.py",  # ... GraphMixin, the graph analysis

@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
-from fsm_llm.context.filtering import redact_context
+from fsm_llm.core.redaction import redact_context
 from fsm_llm.logging import logger
 
 from .constants import ContextKeys

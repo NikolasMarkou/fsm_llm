@@ -575,7 +575,7 @@ make test           # Run full test suite (14,043 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy on the fsm_llm package (src/fsm_llm/)
-make lint-imports   # import contracts in .importlinter (litellm, testing, pytest, entry modules, core)
+make lint-imports   # import contracts in .importlinter (the Section 5.2 layers, kernel, litellm, testing, pytest, entry modules, ...)
 make audit          # scan site-packages for malicious .pth files
 make counts         # fail when a test count written in a .md file differs from a collection
 make build          # wheel and sdist
