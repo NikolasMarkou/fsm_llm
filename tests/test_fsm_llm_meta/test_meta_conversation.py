@@ -38,7 +38,8 @@ from fsm_llm.agents.exceptions import (
     MetaBuilderError,
     MetaValidationError,
 )
-from fsm_llm.agents.meta_builder import MetaBuilderAgent, _with_build_prompt
+from fsm_llm.agents.meta_builder import MetaBuilderAgent
+from fsm_llm.agents.meta_builder.session import _with_build_prompt
 from fsm_llm.agents.meta_builders import (
     AgentArtifactBuilder,
     FSMArtifactBuilder,

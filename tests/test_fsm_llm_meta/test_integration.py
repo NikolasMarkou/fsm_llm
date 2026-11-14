@@ -8,7 +8,8 @@ type detection, and result building.
 from __future__ import annotations
 
 from fsm_llm.agents.definitions import ArtifactType
-from fsm_llm.agents.meta_builder import _TYPE_ALIASES, MetaBuilderAgent
+from fsm_llm.agents.meta_builder import MetaBuilderAgent
+from fsm_llm.agents.meta_builder.hints import _TYPE_ALIASES
 from fsm_llm.agents.meta_builders import (
     FSMArtifactBuilder,
     WorkflowArtifactBuilder,

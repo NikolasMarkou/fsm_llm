@@ -7,7 +7,7 @@ Purpose: Pytest suite (515 tests) for the meta-builder in `fsm_llm.agents`: buil
 
 Covers these source modules (all under `src/fsm_llm/agents/`):
 
-- `meta_builder.py` (`MetaBuilderAgent`, the driver: keyword hints, handlers, result)
+- `meta_builder/` (`MetaBuilderAgent`, the driver, a package since step 90 of plan d454fd62: the shell `agent.py` over the mixins `hints.py` (keyword hints), `handlers.py`, `assembly.py`, `runs.py`, `session.py` and `results.py`; `specs.py`, `names.py`, `surface.py`)
 - `fsm_definitions/meta_builder.py` (`build_meta_builder_fsm`: `classify`, `collect`, `build`, `build_failed`, `done`)
 - `meta_builders/` (the package of `base.py`, `fsm.py`, `workflow.py`, `agent.py`; `FSMArtifactBuilder`, `WorkflowArtifactBuilder`, `AgentArtifactBuilder`)
 - `meta_tools.py` (`create_fsm_tools`, `create_workflow_tools`, `create_agent_tools`, `create_builder_tools`)

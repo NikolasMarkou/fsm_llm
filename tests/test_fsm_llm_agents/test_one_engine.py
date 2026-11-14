@@ -21,8 +21,7 @@ from fsm_llm.agents import (
     ToolRegistry,
     create_agent,
 )
-from fsm_llm.agents.definitions import AgentResult
-from fsm_llm.agents.meta_builder import MetaBuilderResult
+from fsm_llm.agents.definitions import AgentResult, MetaBuilderResult
 from fsm_llm.agents.semantic_memory import SemanticMemoryStore
 from fsm_llm.core.definitions import (
     BulkExtractionRequest,

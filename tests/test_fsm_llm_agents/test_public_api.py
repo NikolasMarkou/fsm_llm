@@ -358,8 +358,9 @@ class TestCoreOwnsTypedFieldsAndKeyClearing:
         # with core clear_keys_delta (D-051); no agents module re-implements it.
         src = Path(__file__).resolve().parents[2] / "src" / "fsm_llm" / "agents"
         # ``make_fresh_keys_handler`` lives in ``handlers/freshness.py`` since
-        # step 88 of plan d454fd62 (``handlers.py`` is a package now).
-        for path in ("handlers/freshness.py", "meta_builder.py"):
+        # step 88 of plan d454fd62 (``handlers.py`` is a package now) and the
+        # meta-builder's two clears in ``meta_builder/handlers.py`` since step 90.
+        for path in ("handlers/freshness.py", "meta_builder/handlers.py"):
             assert "clear_keys_delta(" in (src / path).read_text(encoding="utf-8"), path
 
 

@@ -32,7 +32,6 @@ LIMIT = 800
 
 # dotted module -> ceiling (its physical lines when step 60 recorded it)
 OVERSIZED: dict[str, int] = {
-    "fsm_llm.agents.meta_builder": 1101,
     "fsm_llm.monitor.instance_manager": 1974,
     "fsm_llm.monitor.server": 1677,
     "fsm_llm.workflows.engine": 1570,

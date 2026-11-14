@@ -18,7 +18,8 @@ from fsm_llm.agents.exceptions import (
     MetaBuilderError,
     MetaValidationError,
 )
-from fsm_llm.agents.meta_builder import MetaBuilderAgent, _normalize_message
+from fsm_llm.agents.meta_builder import MetaBuilderAgent
+from fsm_llm.agents.meta_builder.hints import _normalize_message
 from fsm_llm.agents.meta_prompts import artifact_schema
 from fsm_llm.core.definitions import AgentError, CompletionResponse, LLMResponseError
 
@@ -599,11 +600,26 @@ class TestRunsThroughCore:
             MetaBuilderAgent(**{kwarg: 1})
 
     def test_module_has_no_direct_litellm_use(self):
-        import inspect
+        from pathlib import Path
 
         from fsm_llm.agents import meta_builder
 
-        assert "litellm" not in inspect.getsource(meta_builder)
+        # ``meta_builder`` is a package since step 90 of plan d454fd62:
+        # ``inspect.getsource`` of it reads only the facade, so read every module.
+        modules = sorted(Path(meta_builder.__file__).parent.glob("*.py"))
+        assert {p.stem for p in modules} >= {
+            "__init__",
+            "agent",
+            "assembly",
+            "handlers",
+            "hints",
+            "results",
+            "runs",
+            "session",
+            "specs",
+        }
+        for path in modules:
+            assert "litellm" not in path.read_text(encoding="utf-8"), path.name
         assert not hasattr(MetaBuilderAgent, "_llm_call")
 
 
@@ -724,3 +740,238 @@ class TestTriggersTolerateTrailingPunctuation:
     )  # fmt: skip
     def test_punctuation_does_not_turn_other_messages_into_triggers(self, message):
         assert not _trigger(message)
+
+
+_AGENT_MODULE_OF = {
+    "HintsMixin": "hints",
+    "HandlersMixin": "handlers",
+    "AssemblyMixin": "assembly",
+    "RunMixin": "runs",
+    "SessionMixin": "session",
+    "ResultsMixin": "results",
+}
+_METHODS_OF = {
+    "hints": ["_is_build_trigger", "_is_type_switch", "_detect_type_fallback", "_turn_hints"],
+    "handlers": ["_create_api", "_enter_classify", "_resolve_artifact_type", "_write_build_request", "_judge_build_reply"],
+    "assembly": ["_assemble_reply", "_assemble_fsm", "_assemble_workflow", "_assemble_agent", "_set_agent_type", "_is_schema_echo", "_create_builder"],
+    "runs": ["run", "_advance_build"],
+    "session": ["start", "send", "_session", "_session_data", "_turn", "_build_turn", "_record_failed_build", "_collect_fallback"],
+    "results": ["is_complete", "get_result", "get_internal_state", "run_interactive", "_result_from"],
+}  # fmt: skip
+
+
+class TestMetaBuilderAgentPackageLayout:
+    """``agents/meta_builder.py`` is a package at the same dotted path (step 90 of
+    plan d454fd62): ``MetaBuilderAgent`` is a shell over six mixins."""
+
+    def test_the_facade_exports_exactly_the_two_public_names(self):
+        import fsm_llm.agents.meta_builder as facade
+
+        assert facade.__all__ == ["MetaBuilderAgent", "MetaBuilderConfig"]
+        assert facade.MetaBuilderAgent is MetaBuilderAgent
+        assert facade.MetaBuilderConfig is MetaBuilderConfig
+        namespace: dict = {}
+        exec("from fsm_llm.agents.meta_builder import *", namespace)
+        assert {"MetaBuilderAgent", "MetaBuilderConfig"} <= set(namespace)
+        assert "_normalize_message" not in namespace
+
+    def test_the_agent_is_a_shell_over_six_mixins_each_in_its_module(self):
+        mro = MetaBuilderAgent.__mro__
+        assert MetaBuilderAgent.__module__ == "fsm_llm.agents.meta_builder.agent"
+        mixins = mro[1:-2]
+        assert [c.__name__ for c in mixins] == list(_AGENT_MODULE_OF)
+        for cls in mixins:
+            assert cls.__module__ == (
+                f"fsm_llm.agents.meta_builder.{_AGENT_MODULE_OF[cls.__name__]}"
+            ), cls.__name__
+        surface = mro[-2]
+        assert surface.__name__ == "_MetaBuilderSurface"
+        # the declarations are for mypy only: a runtime no-op
+        assert [n for n in vars(surface) if not n.startswith("__")] == []
+
+    def test_the_shell_defines_only_its_constructor(self):
+        public = {n for n in vars(MetaBuilderAgent) if not n.startswith("__")}
+        assert public == set()
+        assert "__init__" in vars(MetaBuilderAgent)
+
+    def test_every_method_is_defined_by_the_mixin_that_owns_it(self):
+        import importlib
+
+        for module, names in _METHODS_OF.items():
+            mixin = next(
+                getattr(
+                    importlib.import_module(f"fsm_llm.agents.meta_builder.{module}"), c
+                )
+                for c, m in _AGENT_MODULE_OF.items()
+                if m == module
+            )
+            assert {n for n in vars(mixin) if not n.startswith("__")} == set(names), (
+                module
+            )
+
+    def test_a_private_name_is_imported_from_its_module_not_the_facade(self):
+        import fsm_llm.agents.meta_builder as facade
+        from fsm_llm.agents.meta_builder import hints, names, session, specs
+
+        assert hints._normalize_message is _normalize_message
+        assert hints._TYPE_ALIASES["workflow"] == "workflow"
+        assert callable(session._with_build_prompt)
+        assert specs._SPEC_MODELS[ArtifactType.FSM].__name__ == "_FSMSpec"
+        assert names._TYPE_VALUES == {"fsm", "workflow", "agent"}
+        for name in (
+            "_normalize_message",
+            "_TYPE_ALIASES",
+            "_with_build_prompt",
+            "_S",
+            "_K",
+            "API",
+            "logger",
+        ):
+            assert not hasattr(facade, name), name
+
+    def test_every_decision_anchor_sits_with_the_code_it_constrains(self):
+        from pathlib import Path
+
+        import fsm_llm.agents.meta_builder as facade
+
+        root = Path(facade.__file__).parent
+        for module, token in (
+            ("hints", "944e2692/D-044"),
+            ("handlers", "944e2692/D-023"),
+            ("handlers", "944e2692/D-035"),
+            ("assembly", "26c9510a/D-001"),
+            ("runs", "876e7164/D-006"),
+            ("session", "944e2692/D-025"),
+            ("session", "944e2692/D-023"),
+        ):
+            assert token in (root / f"{module}.py").read_text(encoding="utf-8"), (
+                module,
+                token,
+            )
+
+    def test_a_log_record_is_named_after_its_module(self):
+        from loguru import logger
+
+        names: list[str] = []
+        logger.enable("fsm_llm")
+        sink = logger.add(lambda m: names.append(m.record["name"]), level="DEBUG")
+        try:
+            MetaBuilderAgent._resolve_artifact_type({})
+            MetaBuilderAgent._write_build_request({"artifact_type": "fsm"})
+            MetaBuilderAgent._assemble_reply(
+                MetaBuilderAgent._create_builder(ArtifactType.FSM),
+                ArtifactType.FSM,
+                "no json at all",
+                "",
+            )
+        finally:
+            logger.remove(sink)
+            logger.disable("fsm_llm")
+        assert [n for n in names if n.startswith("fsm_llm.agents.")] == [
+            "fsm_llm.agents.meta_builder.handlers",
+            "fsm_llm.agents.meta_builder.handlers",
+            "fsm_llm.agents.meta_builder.assembly",
+        ]
+
+
+class TestHandlersAndAssemblyOnContexts:
+    """What the handlers and the assembly do on a context, with no conversation
+    (the old suite reached them only through whole sessions): each edge below was
+    found by a mutation that only the step-90 differential saw."""
+
+    def test_the_classify_entry_stashes_the_type_and_clears_the_build(self):
+        delta = MetaBuilderAgent._enter_classify(
+            {
+                "artifact_type": "workflow",
+                "artifact": {"a": 1},
+                "build_reply": {"kind": "final"},
+                "requirements": ["keep"],
+            }
+        )
+        assert delta == {
+            "artifact": None,
+            "build_reply": None,
+            "_previous_artifact_type": "workflow",
+        }
+
+    def test_the_classify_exit_prefers_the_classified_then_the_previous_then_the_keyword(
+        self,
+    ):
+        resolve = MetaBuilderAgent._resolve_artifact_type
+        assert resolve({"artifact_type": "agent"}) == {
+            "artifact_type": "agent",
+            "_previous_artifact_type": None,
+        }
+        both = {
+            "artifact_type": "unknown",
+            "_previous_artifact_type": "workflow",
+            "keyword_type": "agent",
+        }
+        assert resolve(both)["artifact_type"] == "workflow"
+        assert (
+            resolve({"keyword_type": "agent", "_previous_artifact_type": "x"})[
+                "artifact_type"
+            ]
+            == "agent"
+        )
+        assert resolve({"keyword_type": "x"})["artifact_type"] == "fsm"
+        # the stash is spent: it is cleared on every exit
+        assert resolve(both)["_previous_artifact_type"] is None
+        assert resolve({})["_previous_artifact_type"] is None
+
+    def test_a_duplicate_tool_name_is_added_once_and_the_first_description_wins(self):
+        builder = MetaBuilderAgent._create_builder(ArtifactType.AGENT)
+        spec = {
+            "name": "A",
+            "description": "d",
+            "agent_type": "react",
+            "tools": [
+                {"name": "web", "description": "first"},
+                {"name": "web", "description": "second"},
+                {"name": "read", "description": "third"},
+            ],
+        }
+        outcome, errors = MetaBuilderAgent._assemble_reply(
+            builder, ArtifactType.AGENT, json.dumps(spec), ""
+        )
+        assert [t["name"] for t in builder.to_dict()["tools"]] == ["web", "read"]
+        assert builder.to_dict()["tools"][0]["description"] == "first"
+        assert errors == []
+        assert outcome == "valid"
+
+    def test_without_a_reply_pattern_the_first_pattern_in_alphabetical_order_named_wins(
+        self,
+    ):
+        builder = MetaBuilderAgent._create_builder(ArtifactType.AGENT)
+        MetaBuilderAgent._set_agent_type(builder, None, "a react agent or a debate")
+        assert builder.to_dict()["agent_type"] == "debate"
+        MetaBuilderAgent._set_agent_type(builder, None, "use the plan execute pattern")
+        assert builder.to_dict()["agent_type"] == "plan_execute"
+        # a bad pattern in the reply falls back to the requirement
+        builder = MetaBuilderAgent._create_builder(ArtifactType.AGENT)
+        MetaBuilderAgent._set_agent_type(builder, "nonsense", "a reflexion agent")
+        assert builder.to_dict()["agent_type"] == "reflexion"
+
+    def test_a_session_with_an_api_and_no_conversation_id_is_refused(self):
+        agent = MetaBuilderAgent(llm_interface=ScriptedMetaLLM())
+        agent._api = object()  # type: ignore[assignment]
+        with pytest.raises(MetaBuilderError):
+            agent._session()
+        assert agent._session_data() == {}
+
+    def test_a_field_of_the_wrong_type_is_reported_with_its_path(self):
+        builder = MetaBuilderAgent._create_builder(ArtifactType.FSM)
+        outcome, errors = MetaBuilderAgent._assemble_reply(
+            builder,
+            ArtifactType.FSM,
+            json.dumps({"name": "Bot", "states": [{"state_id": 5}]}),
+            "",
+        )
+        assert outcome == "malformed"
+        assert errors == [
+            "Build reply field 'states.0.state_id': Input should be a valid string"
+        ]
+        outcome, errors = MetaBuilderAgent._assemble_reply(
+            builder, ArtifactType.FSM, json.dumps({"states": ["x"]}), ""
+        )
+        assert errors == ["Build reply field 'states.0': Input should be an object"]
