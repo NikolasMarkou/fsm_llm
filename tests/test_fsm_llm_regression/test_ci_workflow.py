@@ -15,10 +15,12 @@ here as data.
 * Only the standard library and `yaml.safe_load` are used. PyYAML reads the key `on` as the
   boolean `True` (YAML 1.1); `_load` puts it back under `"on"`.
 * The action pins are 40 hex characters with the release tag in a trailing `# vX.Y.Z` comment,
-  the same table as `docs.yml` (progress.md "Step 106"); the cross-file pin check for every
-  workflow arrives with step 109.
+  the same table as `docs.yml` (progress.md "Step 106"); `test_supply_chain.py` (step 109) reads
+  every workflow file for the same rule and for the write-permission allowlist.
 * The job `lint` runs once (ruff, format, mypy, the `.pth` audit, the import contracts, the
-  decision gate); the job `test` is the matrix and runs in parallel with it. The canonical leg
+  decision gate, `actionlint` and `zizmor`); the job `test` is the matrix and runs in parallel
+  with it, beside `supply-chain` (audits the installed environment, `test_supply_chain.py`) and
+  `dependency-review` (pull requests only, the one job with a write scope). The canonical leg
   (Linux, Python 3.12, `mcp` installed: the one the coverage baseline is measured on) runs the
   coverage form of the same marker selection, then the ratchet.
 """
@@ -57,6 +59,16 @@ _IMPORT_CONTRACT = (
 )
 _RATCHET_CHECK = "python scripts/coverage_ratchet.py check coverage.json"
 _AUDIT = "python scripts/audit_pth.py"
+_LINTERS_INSTALL = "pip install -c constraints.txt zizmor actionlint-py"
+_ZIZMOR = "zizmor --offline .github/workflows"
+_ACTIONLINT = "actionlint"
+
+#: The four jobs: `lint` and the `test` matrix, the audit of the installed environment, and the
+#: dependency review (pull requests only), whose write scope is the one grant the file has.
+_JOBS = {"lint", "test", "supply-chain", "dependency-review"}
+_REVIEW_PERMISSIONS = {"contents": "read", "pull-requests": "write"}
+_CONCURRENCY_GROUP = "ci-${{ github.workflow }}-${{ github.ref }}"
+_CONCURRENCY_CANCEL = "${{ github.event_name == 'pull_request' }}"
 
 _IF_PLAIN = "${{ !matrix.coverage }}"
 _IF_COVERAGE = "${{ matrix.coverage }}"
@@ -191,20 +203,34 @@ def workflow_problems(text: str) -> set[str]:
     if "pull_request_target" in code:
         found.add("pull-request-target")
 
-    # Permissions: read at the top, nothing granted per job, no token beyond it.
+    # Permissions: read at the top; only the dependency review grants itself a write scope (its
+    # failure comment), no token beyond it.
     if wf.get("permissions") != {"contents": "read"}:
         found.add("top-permissions")
-    if any("permissions" in job for job in jobs.values()):
-        found.add("job-permissions")
-    if re.search(r"\bid-token\b|:\s*write\b", code):
+    for job_id, job in jobs.items():
+        if job_id == "dependency-review":
+            if job.get("permissions") != _REVIEW_PERMISSIONS:
+                found.add("job-permissions")
+        elif "permissions" in job:
+            found.add("job-permissions")
+    if re.search(r"\bid-token\b", code) or len(re.findall(r":\s*write\b", code)) != 1:
         found.add("extra-permission")
     if re.search(r"\bsecrets\.|GITHUB_TOKEN", code):
         found.add("secrets")
 
-    # Jobs: lint once, the matrix beside it (no `needs`), nothing else (docs.yml owns the docs).
-    if set(jobs) != {"lint", "test"}:
+    # A superseded pull-request run is cancelled; a push to main never is.
+    concurrency = wf.get("concurrency") or {}
+    if (
+        concurrency.get("group") != _CONCURRENCY_GROUP
+        or concurrency.get("cancel-in-progress") != _CONCURRENCY_CANCEL
+    ):
+        found.add("concurrency")
+
+    # Jobs: lint once, the matrix beside it (no `needs`), the two supply-chain jobs, nothing else
+    # (docs.yml owns the docs).
+    if set(jobs) != _JOBS:
         found.add("jobs")
-    if "needs" in lint or "needs" in test:
+    if any("needs" in job for job in jobs.values()):
         found.add("job-needs")
     if "mkdocs" in code:
         found.add("docs-build-in-ci")
@@ -252,7 +278,7 @@ def workflow_problems(text: str) -> set[str]:
             if isinstance(run, str) and "${{" in run:
                 found.add("run-interpolation")
 
-    # Actions: a 40-hex SHA and a `# vX.Y.Z` comment on every `uses:`; two actions only.
+    # Actions: a 40-hex SHA and a `# vX.Y.Z` comment on every `uses:`; three actions only.
     parsed_uses = [
         str(s["uses"]) for job in jobs.values() for s in _steps(job) if "uses" in s
     ]
@@ -267,15 +293,18 @@ def workflow_problems(text: str) -> set[str]:
     if {u.split("@")[0] for u in parsed_uses} != {
         "actions/checkout",
         "actions/setup-python",
+        "actions/dependency-review-action",
     }:
         found.add("action-set")
-    for name, job in (("lint", lint), ("test", test)):
+    for name, job in jobs.items():
         checkouts = _uses_steps(job, "actions/checkout")
         if (
             len(checkouts) != 1
             or (checkouts[0].get("with") or {}).get("persist-credentials") is not False
         ):
             found.add("persist-credentials")
+        if name == "dependency-review":
+            continue
         pythons = _uses_steps(job, "actions/setup-python")
         if len(pythons) != 1:
             found.add("setup-python")
@@ -291,13 +320,17 @@ def workflow_problems(text: str) -> set[str]:
         if "allow-prereleases" in with_:
             found.add("prereleases")
 
-    # One install line per job, naming `dev` and (on the matrix) `mcp`; the audit after it.
-    for name, job in (("lint", lint), ("test", test)):
+    # One install line per job that needs the package, naming `dev` and (on the matrix) `mcp`;
+    # the `.pth` audit after it in the two jobs that run it.
+    for name in ("lint", "test", "supply-chain"):
+        job = jobs.get(name) or {}
         extras = _install_extras(job)
         if len(extras) != 1 or "dev" not in extras[0]:
             found.add("install")
         if name == "test" and not (extras and "mcp" in extras[0]):
             found.add("mcp")
+        if name == "supply-chain":
+            continue
         audit = _runs(job).count(_AUDIT)
         if audit != 1 or _index_of(job, _AUDIT) < _index_of(
             job, "pip install -c constraints.txt -e"
@@ -339,6 +372,9 @@ def workflow_problems(text: str) -> set[str]:
             "decision-check",
             "python scripts/decision_index.py --check docs/decisions/index.md",
         ),
+        ("linters-install", _LINTERS_INSTALL),
+        ("zizmor", _ZIZMOR),
+        ("actionlint", _ACTIONLINT),
     ):
         if lint_runs.count(command) != 1:
             found.add("lint-" + label)
@@ -444,14 +480,18 @@ class TestTheRealWorkflow:
         assert "workflow_dispatch" in on
         assert set(on) == {"push", "pull_request", "workflow_dispatch"}
 
-    def test_the_token_is_read_only_everywhere(self):
+    def test_the_token_is_read_only_except_the_dependency_review_comment(self):
         wf = _load(_real_text())
         assert wf["permissions"] == {"contents": "read"}
-        for job in wf["jobs"].values():
-            assert "permissions" not in job
+        for name, job in wf["jobs"].items():
+            if name == "dependency-review":
+                assert job["permissions"] == _REVIEW_PERMISSIONS
+            else:
+                assert "permissions" not in job, name
         code = "\n".join(_code_lines(_real_text()))
         assert "id-token" not in code and "secrets." not in code
         assert "pull_request_target" not in code
+        assert len(re.findall(r":\s*write\b", code)) == 1
 
     def test_runners_are_pinned_never_latest(self):
         wf = _load(_real_text())
@@ -476,7 +516,8 @@ class TestTheRealWorkflow:
 
     def test_every_action_is_a_sha_pin_with_its_release_tag(self):
         matches = list(_USES_LINE.finditer(_real_text()))
-        assert len(matches) == 4  # checkout and setup-python, in two jobs
+        # checkout and setup-python in three jobs, checkout and the review in the fourth
+        assert len(matches) == 8
         for match in matches:
             assert _SHA_USES.match(match["ref"]), match["ref"]
             assert _TAG_COMMENT.match(match["rest"]), match["rest"]
@@ -494,8 +535,9 @@ class TestTheRealWorkflow:
         assert {a: len(v) for a, v in here.items()} == {
             "actions/checkout": 1,
             "actions/setup-python": 1,
+            "actions/dependency-review-action": 1,
         }
-        assert here == docs
+        assert {a: v for a, v in here.items() if a in docs} == docs
 
     def test_checkouts_drop_their_credentials(self):
         # `guard` fetches `main` anonymously: the repository is public, so no token is needed.
@@ -507,28 +549,30 @@ class TestTheRealWorkflow:
         # actions/python-versions lists 3.15.2 stable for linux 24.04, darwin and win32 x64
         # (checked 2026-11-14), so no leg needs `allow-prereleases`.
         for job in _load(_real_text())["jobs"].values():
-            assert (
-                "allow-prereleases"
-                not in _uses_steps(job, "actions/setup-python")[0]["with"]
-            )
+            for step in _uses_steps(job, "actions/setup-python"):
+                assert "allow-prereleases" not in step["with"]
 
     def test_the_pip_cache_keys_on_the_pins(self):
         for job in _load(_real_text())["jobs"].values():
-            with_ = _uses_steps(job, "actions/setup-python")[0]["with"]
-            assert with_["cache"] == "pip"
-            assert "constraints.txt" in with_["cache-dependency-path"]
+            for step in _uses_steps(job, "actions/setup-python"):
+                assert step["with"]["cache"] == "pip"
+                assert "constraints.txt" in step["with"]["cache-dependency-path"]
 
-    def test_each_job_has_one_editable_install_naming_dev_and_the_matrix_job_mcp(self):
+    def test_each_job_that_needs_the_package_has_one_editable_install_naming_dev(self):
         jobs = _load(_real_text())["jobs"]
         for name, job in jobs.items():
+            if name == "dependency-review":
+                continue  # reads the dependency graph through the API, installs nothing
             extras = _install_extras(job)
             assert len(extras) == 1, name
             assert "dev" in extras[0], name
         # `mcp` (beyond the package extras) makes the real stdio MCP tests run, not skip.
         assert "mcp" in _install_extras(jobs["test"])[0]
 
-    def test_the_pth_audit_runs_after_the_install_in_both_jobs(self):
+    def test_the_pth_audit_runs_after_the_install_in_the_lint_and_test_jobs(self):
         for name, job in _load(_real_text())["jobs"].items():
+            if name not in ("lint", "test"):
+                continue
             assert _runs(job).count(_AUDIT) == 1, name
             assert _index_of(job, _AUDIT) > _index_of(job, "pip install -c"), name
 
@@ -587,7 +631,7 @@ class TestTheRealWorkflow:
         assert summary is not None
         assert "GITHUB_STEP_SUMMARY" in summary["run"]
 
-    def test_the_two_jobs_run_in_parallel(self):
+    def test_the_four_jobs_run_in_parallel(self):
         for job in _load(_real_text())["jobs"].values():
             assert "needs" not in job
 
@@ -601,6 +645,25 @@ class TestTheRealWorkflow:
                 assert "${{" not in run, step.get("name")
                 if "\n" in run.strip():
                     assert "set -euo pipefail" in run, step.get("name")
+
+    def test_a_push_never_cancels_a_run_and_a_superseded_pull_request_run_is_cancelled(
+        self,
+    ):
+        wf = _load(_real_text())
+        assert wf["concurrency"] == {
+            "group": _CONCURRENCY_GROUP,
+            "cancel-in-progress": _CONCURRENCY_CANCEL,
+        }
+
+    def test_the_lint_job_runs_the_two_workflow_linters_after_installing_their_pins(
+        self,
+    ):
+        lint = _load(_real_text())["jobs"]["lint"]
+        runs = _runs(lint)
+        assert runs.count(_LINTERS_INSTALL) == 1
+        assert runs.count(_ZIZMOR) == 1 and runs.count(_ACTIONLINT) == 1
+        assert runs.index(_LINTERS_INSTALL) < runs.index(_ZIZMOR)
+        assert runs.index(_LINTERS_INSTALL) < runs.index(_ACTIONLINT)
 
     def test_the_old_workflow_text_breaks_the_rules(self):
         # The parent state: one three-leg job on ubuntu-latest with floating tags.
@@ -657,6 +720,21 @@ def _drop_step(name: str, nth: int = 0) -> Any:
         matches = list(pattern.finditer(text))
         assert len(matches) > nth, f"step {name!r} not found"
         m = matches[nth]
+        return text[: m.start()] + text[m.end() :]
+
+    return mutate
+
+
+def _drop_job(job_id: str) -> Any:
+    """Remove the job `job_id` (to the next job or the end of the file)."""
+
+    def mutate(text: str) -> str:
+        pattern = re.compile(
+            rf"^  {re.escape(job_id)}:\n(?:    .*\n|\n)*?(?=  [\w-]+:\n|\Z)",
+            re.MULTILINE,
+        )
+        m = pattern.search(text)
+        assert m, f"job {job_id!r} not found"
         return text[: m.start()] + text[m.end() :]
 
     return mutate
@@ -1004,6 +1082,110 @@ MUTANTS: list[tuple[str, Any, str]] = [
         _drop_step("Summarise the decision anchors"),
         "lint-decision-summary",
     ),
+    # the supply-chain jobs, the concurrency group and the linters
+    (
+        "the concurrency group removed",
+        _sub(r"^concurrency:\n(?:  .*\n)+\n", ""),
+        "concurrency",
+    ),
+    (
+        "a push cancels the run in progress too",
+        _edit(
+            "cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+            "cancel-in-progress: true",
+        ),
+        "concurrency",
+    ),
+    (
+        "the concurrency group shared by every workflow",
+        _edit("group: ci-${{ github.workflow }}-${{ github.ref }}", "group: ci"),
+        "concurrency",
+    ),
+    ("the supply-chain job removed", _drop_job("supply-chain"), "jobs"),
+    ("the dependency review job removed", _drop_job("dependency-review"), "jobs"),
+    (
+        "a write scope on the supply-chain job",
+        _edit(
+            "  supply-chain:\n    runs-on: ubuntu-24.04\n",
+            "  supply-chain:\n    permissions:\n      pull-requests: write\n"
+            "    runs-on: ubuntu-24.04\n",
+        ),
+        "job-permissions",
+    ),
+    (
+        "the dependency review without its write scope",
+        _edit("      pull-requests: write\n", "      pull-requests: read\n"),
+        "job-permissions",
+    ),
+    (
+        "contents write on the dependency review",
+        _edit_nth("      contents: read\n", "      contents: write\n", 0),
+        "job-permissions",
+    ),
+    (
+        "a second write scope on the dependency review",
+        _edit(
+            "      pull-requests: write\n",
+            "      pull-requests: write\n      issues: write\n",
+        ),
+        "extra-permission",
+    ),
+    (
+        "the dependency review waits for the matrix",
+        _edit(
+            "    if: ${{ github.event_name == 'pull_request' }}\n",
+            "    needs: test\n    if: ${{ github.event_name == 'pull_request' }}\n",
+        ),
+        "job-needs",
+    ),
+    (
+        "the dependency review action pinned to a tag",
+        _sub(
+            r"actions/dependency-review-action@[0-9a-f]{40}",
+            "actions/dependency-review-action@v5",
+        ),
+        "action-pin",
+    ),
+    (
+        "the dependency review action without its tag comment",
+        _sub(r"(actions/dependency-review-action@[0-9a-f]{40})\s+# v[\d.]+", r"\1"),
+        "action-tag-comment",
+    ),
+    (
+        "the supply-chain checkout persists credentials",
+        _edit_nth("persist-credentials: false", "persist-credentials: true", 2),
+        "persist-credentials",
+    ),
+    (
+        "the dependency review checkout persists credentials",
+        _edit_nth("persist-credentials: false", "persist-credentials: true", 3),
+        "persist-credentials",
+    ),
+    (
+        "no pip cache on the supply-chain job",
+        _edit_nth("          cache: pip\n", "", 2),
+        "pip-cache",
+    ),
+    (
+        "the supply-chain install removed",
+        _drop_step("Install the package and every extra", 2),
+        "install",
+    ),
+    (
+        "the linters install removed",
+        _drop_step("Install the workflow linters at their pinned versions"),
+        "lint-linters-install",
+    ),
+    (
+        "zizmor removed from the lint job",
+        _drop_step("Audit the workflows with zizmor"),
+        "lint-zizmor",
+    ),
+    (
+        "actionlint removed from the lint job",
+        _drop_step("Lint the workflows with actionlint"),
+        "lint-actionlint",
+    ),
     # jobs
     (
         "the matrix job waits for lint",
@@ -1121,6 +1303,9 @@ class TestMutantsAreKilled:
                 "mypy",
                 "import-contract",
                 "decision-check",
+                "linters-install",
+                "zizmor",
+                "actionlint",
             )
         }
         killed = {m[2] for m in MUTANTS}

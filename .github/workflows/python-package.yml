@@ -1,21 +1,33 @@
 # The test workflow (roadmap rows 0.1 and 0.2, plan d454fd62 step 108).
 #
-# Two jobs run in parallel on every push and pull request to main:
+# Four jobs run in parallel on every push and pull request to main:
 #   * `lint` runs once (Linux, Python 3.12): ruff, the format check, mypy, the `.pth` audit,
-#     the import contracts and the decision-anchor gate;
+#     the import contracts, the decision-anchor gate and the two workflow linters (`actionlint`,
+#     `zizmor`, installed at the pins of constraints.txt);
 #   * `test` is the matrix, nine legs: Linux on Python 3.11 to 3.15, macOS and Windows on 3.11
 #     and 3.15 (the two ends of the supported range). Every leg runs the whole non-slow suite
-#     with `mcp` installed, so the real stdio MCP tests run instead of skipping.
+#     with `mcp` installed, so the real stdio MCP tests run instead of skipping;
+#   * `supply-chain` installs the same environment and audits it with `pip-audit`, then runs a
+#     CANARY: the audit over a fixture of known-vulnerable pins must FAIL, so a vulnerable
+#     dependency failing the build is proved on every run, not assumed (roadmap row 0.10);
+#   * `dependency-review` (pull requests only) fails a pull request that adds a dependency with
+#     a high advisory; it is the only job with a write scope, and only for its failure comment.
 #
 # Policy (pinned by tests/test_fsm_llm_regression/test_ci_workflow.py, which reads this file as
 # data, computes the legs from the YAML and kills 68 one-edit mutants of it):
-#   * the token is read-only (`contents: read`), no job asks for more and no secret is named;
+#   * the token is read-only (`contents: read`); the one write scope is `pull-requests` on the
+#     dependency-review job (its failure comment); no secret is named;
 #   * every action is pinned to a commit SHA with its release tag in the trailing comment
 #     (resolved with `gh api repos/<owner>/<repo>/git/ref/tags/<tag>`, 2026-11-14), and the
 #     checkouts keep no credentials;
 #   * runners are pinned (never `-latest`), `fail-fast` is off so one red leg does not hide
 #     the others, and Python versions are quoted strings (an unquoted 3.15 would be a float);
-#   * the package installs once per job against `constraints.txt`.
+#   * the package installs once per job that needs it, against `constraints.txt`;
+#   * a new push to a pull request cancels the run in progress on that pull request (one
+#     nine-leg set at a time); a push to `main` and a manual dispatch never cancel one. The
+#     group uses only `github.workflow` and `github.ref`, no text a contributor controls.
+#   * `test_supply_chain.py` reads EVERY file in this directory: pinned SHAs, no
+#     `pull_request_target`, the write-scope allowlist.
 #
 # The coverage ratchet (scripts/coverage_ratchet.py) runs on ONE leg, the canonical one
 # (Linux, Python 3.12, `mcp` installed: the leg `coverage-baseline.json` is measured on), in
@@ -35,6 +47,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
@@ -73,6 +89,16 @@ jobs:
       - name: Check formatting with ruff
         # Developers run `make format`; without this step CI could not see drift.
         run: ruff format --check src/ tests/
+      - name: Install the workflow linters at their pinned versions
+        # CI-only tools: pinned in constraints.txt, in no extra (`pip` is on every runner; `uv`
+        # and `pipx` are not guaranteed to be).
+        run: pip install -c constraints.txt zizmor actionlint-py
+      - name: Lint the workflows with actionlint
+        # Reads `.github/workflows`; the runner's shellcheck also checks every `run:` script.
+        run: actionlint
+      - name: Audit the workflows with zizmor
+        # Offline: the audits that call the GitHub API need a token, and no token is named here.
+        run: zizmor --offline .github/workflows
       - name: Type check with mypy
         run: python -m mypy -p fsm_llm
       - name: Check the import contracts
@@ -173,3 +199,79 @@ jobs:
           # fetch needs no credentials (the checkout keeps none).
           git fetch --no-tags --depth=1 origin "+refs/heads/main:refs/remotes/origin/main"
           python scripts/coverage_ratchet.py guard
+
+  supply-chain:
+    runs-on: ubuntu-24.04
+    # Install ~2 min, the audit about a minute: 20 matches `lint` and is 18x tighter than
+    # GitHub's 360-minute default. Do not remove it.
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            constraints.txt
+            pyproject.toml
+      - name: Install the package and every extra
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          # The same line as the matrix: the audit reads the environment the tests run in.
+          pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis,testing,mcp]"
+      - name: Audit the installed environment for known vulnerabilities
+        # Every installed distribution, transitive ones included (the pins of constraints.txt
+        # cover the direct dependencies only). The editable package itself is not on PyPI.
+        run: pip-audit --skip-editable
+      - name: Prove that the audit fails on a known-vulnerable pin (canary)
+        # The step passes only when pip-audit EXITS 1 with a non-empty report over the fixture
+        # (pins of old releases with published advisories, never installed). A clean exit, a
+        # service failure (any other code) and an empty report all fail the step, so an audit
+        # that cannot fail, or that cannot reach its advisory source, turns the build red.
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/canary-audit.json"
+          status=0
+          pip-audit -r tests/fixtures/vulnerable-requirements.txt --no-deps --disable-pip --format json --output "$report" || status=$?
+          if [ "$status" -ne 1 ]; then
+            echo "::error::the canary audit exited $status, expected 1 (vulnerabilities found)"
+            exit 1
+          fi
+          python - "$report" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              report = json.load(handle)
+          found = sum(len(dep.get("vulns", [])) for dep in report["dependencies"])
+          if found < 1:
+              sys.exit("error: the canary audit exited 1 but its report lists no vulnerability")
+          print(f"canary ok: the audit reported {found} advisories")
+          PY
+
+  dependency-review:
+    # Pull requests only: the action diffs the dependency graph of the base and the head commit.
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      # `contents: read` is what the checkout needs.
+      contents: read
+      # Only for the failure comment (`comment-summary-in-pr`); a pull request from a fork gets
+      # a read-only token anyway and keeps the job summary. The one write grant of this file.
+      pull-requests: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Review the dependency changes of the pull request
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure

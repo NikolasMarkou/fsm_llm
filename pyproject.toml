@@ -85,6 +85,9 @@ dev = [
     "import-linter>=2.1,<3",
     # The wheel-content test builds a wheel with `python -m build --no-isolation`.
     "build>=1.2,<2",
+    # The CI job `supply-chain` audits the installed environment with it; exact pin in
+    # constraints.txt, `.github/workflows/python-package.yml` runs `pip-audit --skip-editable`.
+    "pip-audit>=2.9,<3",
 ]
 all = [
     "fsm-llm[workflows]",

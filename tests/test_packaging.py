@@ -377,16 +377,17 @@ class TestPackageBackedExtrasAreInstalled:
         assert not missing, f"{label} does not request extras: {sorted(missing)}"
 
     def test_every_ci_install_line_requests_every_package_extra(self):
-        """CI installs the package in two jobs (`lint` and the `test` matrix), one line each:
-        both name every extra, so mypy and the matrix see the same environment (the count
-        and the `mcp` extra are pinned by `test_ci_workflow.py`)."""
+        """CI installs the package in three jobs (`lint`, the `test` matrix and `supply-chain`),
+        one line each: all name every extra, so mypy, the matrix and the vulnerability audit see
+        the same environment (the count and the `mcp` extra are pinned by
+        `test_ci_workflow.py`, the identity of the audit's line by `test_supply_chain.py`)."""
         rel = ".github/workflows/python-package.yml"
         lines = [
             ln
             for ln in _read(rel).splitlines()
             if "pip install -c constraints.txt -e" in ln
         ]
-        assert len(lines) == 2, lines
+        assert len(lines) == 3, lines
         for line in lines:
             requested = set(re.findall(r"[\[,]([a-z0-9_]+)", line))
             missing = self.EXPECTED - requested
