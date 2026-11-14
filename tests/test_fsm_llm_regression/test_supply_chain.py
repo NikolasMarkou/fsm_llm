@@ -55,7 +55,7 @@ _AUDIT = "pip-audit --skip-editable"
 _LINTER_PINS = ("zizmor", "actionlint-py")
 
 #: Job-level `write` grants the repository allows, keyed by (file name, job id). Everything else
-#: is read-only. A workflow that needs a write scope (the release job of step 112, the pin
+#: is read-only. A workflow that needs a write scope (the release of step 112, the pin
 #: refresh of step 110) registers its line here, in the commit that adds the workflow, and the
 #: policy sentence in SECURITY.md says why.
 _WRITE_ALLOWED: dict[tuple[str, str], set[str]] = {
@@ -66,6 +66,11 @@ _WRITE_ALLOWED: dict[tuple[str, str], set[str]] = {
     # the weekly pin refresh pushes a branch and opens a pull request, after the gates passed
     # inside the job (step 110; test_refresh_workflow.py pins the shape of the job).
     ("refresh-pins.yml", "refresh"): {"contents", "pull-requests"},
+    # the release workflow (step 112; test_release_workflow.py pins the shape): the OIDC token that
+    # PyPI trusted publishing exchanges, on the `publish` job only, and the GitHub release that
+    # a pushed tag creates, on the `github-release` job only.
+    ("release.yml", "publish"): {"id-token"},
+    ("release.yml", "github-release"): {"contents"},
 }
 
 _SHA_USES = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}$")
@@ -426,7 +431,16 @@ _POLICY_PHRASES: dict[str, tuple[str, ...]] = {
     "policy-linters": ("zizmor", "actionlint"),
     "policy-pth": (".pth",),
     "policy-litellm": ("1.82.7", "1.82.8"),
-    "policy-write-scopes": ("pull-requests", "contents"),
+    "policy-write-scopes": ("pull-requests", "contents", "id-token"),
+    "policy-trusted-publishing": (
+        "trusted publishing",
+        "release.yml",
+        "attestations",
+        "no long-lived",
+        "twine upload",
+    ),
+    "policy-release-build-once": ("built once", "twine check --strict"),
+    "policy-sbom": ("sbom", "cyclonedx 1.6", "github release"),
 }
 
 
@@ -601,8 +615,13 @@ class TestTheFixtureAndThePins:
 
 
 class TestEveryWorkflowFile:
-    def test_the_glob_finds_the_three_workflows_of_this_plan_so_far(self):
-        assert {"python-package.yml", "docs.yml"} <= set(_workflow_texts())
+    def test_the_glob_finds_the_four_workflows_of_this_plan_so_far(self):
+        assert {
+            "python-package.yml",
+            "docs.yml",
+            "refresh-pins.yml",
+            "release.yml",
+        } <= set(_workflow_texts())
 
     def test_no_workflow_breaks_a_cross_file_rule(self):
         assert cross_file_problems(_workflow_texts()) == set()
@@ -1028,6 +1047,52 @@ CROSS_MUTANTS: list[tuple[str, Callable[[dict[str, str]], dict[str, str]], str]]
         "job-write",
     ),
     (
+        "id-token write on the release build job",
+        _with(
+            "release.yml",
+            _edit(
+                "  build:\n    runs-on: ubuntu-24.04\n",
+                "  build:\n    permissions:\n      id-token: write\n"
+                "    runs-on: ubuntu-24.04\n",
+            ),
+        ),
+        "job-write",
+    ),
+    (
+        "contents write on the release publish job",
+        _with(
+            "release.yml",
+            _edit(
+                "      id-token: write\n",
+                "      id-token: write\n      contents: write\n",
+            ),
+        ),
+        "job-write",
+    ),
+    (
+        "id-token write on the github-release job",
+        _with(
+            "release.yml",
+            _edit(
+                "      contents: write\n",
+                "      contents: write\n      id-token: write\n",
+            ),
+        ),
+        "job-write",
+    ),
+    (
+        "a floating tag on the publish action",
+        _with(
+            "release.yml",
+            lambda t: re.sub(
+                r"pypa/gh-action-pypi-publish@[0-9a-f]{40}",
+                "pypa/gh-action-pypi-publish@release/v1",
+                t,
+            ),
+        ),
+        "action-pin",
+    ),
+    (
         "write-all on the docs build job",
         _with(
             "docs.yml",
@@ -1217,6 +1282,61 @@ POLICY_MUTANTS: list[tuple[str, Callable[[str], str], str]] = [
         "the write scopes left unexplained",
         _edit_all("pull-requests", "comments"),
         "policy-write-scopes",
+    ),
+    (
+        "the id-token scope left unexplained",
+        _edit_all("id-token", "oidc"),
+        "policy-write-scopes",
+    ),
+    (
+        "trusted publishing not described",
+        _edit_all("rusted publishing", "rusted upload"),
+        "policy-trusted-publishing",
+    ),
+    (
+        "the release workflow not named",
+        _edit_all("release.yml", "the release workflow"),
+        "policy-trusted-publishing",
+    ),
+    (
+        "attestations not described",
+        _edit_all("attestations", "signatures"),
+        "policy-trusted-publishing",
+    ),
+    (
+        "the no-token claim removed",
+        _edit_all("no long-lived", "a short"),
+        "policy-trusted-publishing",
+    ),
+    (
+        "the twine upload ban removed",
+        _edit_all("twine upload", "an upload"),
+        "policy-trusted-publishing",
+    ),
+    (
+        "the build-once claim removed",
+        _edit_all("built once", "built"),
+        "policy-release-build-once",
+    ),
+    (
+        "the strict distribution check removed",
+        _edit_all("twine check --strict", "a check"),
+        "policy-release-build-once",
+    ),
+    (
+        "the SBOM not described",
+        _edit_all("SBOM", "list"),
+        "policy-sbom",
+    ),
+    (
+        "the SBOM format not named",
+        _edit_all("CycloneDX", "a"),
+        "policy-sbom",
+    ),
+    (
+        "the GitHub release not named",
+        _edit_all("GitHub release", "tag page"),
+        "policy-sbom",
     ),
     (
         "the refresh described without its cooldown",

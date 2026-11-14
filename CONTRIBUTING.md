@@ -80,7 +80,7 @@ fsm_llm/
 ├── evaluation/                # Datasets and recorded eval runs
 ├── scripts/                   # Supply-chain audit, benches, doc-count check
 ├── images/                    # Logo and diagrams
-├── .github/workflows/         # CI: 9-leg matrix (Python 3.11 to 3.15), docs
+├── .github/workflows/         # CI: 9-leg matrix (Python 3.11 to 3.15), docs, pin refresh, release
 └── CHANGELOG.md, EVALUATE.md, CONTRIBUTING.md, SECURITY.md
 ```
 
@@ -149,6 +149,35 @@ A strict build fails on any warning: a page missing from the `nav` in `mkdocs.ym
 `.github/workflows/refresh-pins.yml` refreshes the `litellm` and `mcp` pins of `constraints.txt` once a week (Mondays 05:17 UTC) and on demand (Actions tab, "Refresh pins", Run workflow). `scripts/refresh_pins.py` picks, per package, the newest release that is stable, not yanked, **at least 7 days old** (the cooldown: litellm 1.82.7 and 1.82.8 were malware for hours, and a bad release is usually yanked within days), whose `Requires-Python` admits every Python of the CI matrix, and that stays in the major of the current pin; it never downgrades and never crosses a major (a new major is a decision, not a refresh). When a pin moves, the same job installs it and runs the non-slow suite (the `mcp` stdio tests included), mypy, the `.pth` audit and `pip-audit`, and only if all pass pushes a `chore/refresh-pins-<date>` branch and opens a pull request whose body is the script's report (old and new pins, release dates, ages, the newer releases skipped and why). A pull request opened with the default `GITHUB_TOKEN` does not trigger the CI workflow, which is why the gate runs inside the refresh job. **Owner action, once:** Settings, Actions, General, Workflow permissions: tick "Allow GitHub Actions to create and approve pull requests" (without it the last step fails with a permission error and no pull request appears; the branch is still pushed). **When a pull request appears:** read the table, skim the upstream release notes of the new version, merge it, and close an older refresh pull request it supersedes. A refresh job that goes red means the new pin broke the suite or has a known vulnerability: nothing is pushed, the pin stays, and the log names the failing step. Scheduled workflows run only from the default branch and GitHub stops them after 60 days without repository activity (re-enable in the Actions tab). Try the script without touching the repository: `python scripts/refresh_pins.py --dry-run` (reads PyPI, prints the table and the diff, writes nothing; `--json-dir DIR` reads canned `<package>.json` files instead). The tests are `tests/test_fsm_llm_regression/test_refresh_pins.py` (the script, canned JSON, no network) and `test_refresh_workflow.py` (the workflow).
 
 `.github/workflows/docs.yml` builds the site strictly on every pull request and every tag `v*`, and a tag deploys it with `mike` to the `gh-pages` branch after checking that the tag equals `src/fsm_llm/__version__.py` (`docs/README.md`, "Publishing the site", lists the owner steps). Its text is pinned by `tests/test_fsm_llm_regression/test_docs_workflow.py`; check a change to it with `uvx --from actionlint-py actionlint .github/workflows/docs.yml`. Every `uses:` in a workflow is a full 40-character commit SHA with the release tag in a trailing comment.
+
+## Releasing
+
+A release is one pushed tag. `.github/workflows/release.yml` starts on a push of a tag `v*` and on nothing else (no manual dispatch, no pull request, no branch push), so only a pushed tag releases. It builds the sdist and the wheel once, checks them (`twine check --strict`, the tag against `src/fsm_llm/__version__.py`, a final release only, the section of the version in `CHANGELOG.md` through `scripts/changelog_check.py extract`), writes an SBOM (`sbom.cdx.json`, CycloneDX, from a fresh environment with the wheel installed with every extra), then publishes to PyPI by trusted publishing with PEP 740 attestations (no API token exists anywhere), and finally creates the GitHub release with the distributions, the SBOM and the notes. `tests/test_fsm_llm_regression/test_release_workflow.py` pins the workflow; the distribution is `llm-fsm` once plan step 113 renames it, and until then the publish job cannot succeed.
+
+Owner steps, in this order (the commands need `gh` logged in as the owner):
+
+1. On PyPI, confirm `llm-fsm` is in "Your projects" and add a Trusted Publisher with exactly these names: owner `NikolasMarkou`, repository `fsm_llm`, workflow `release.yml`, environment `pypi`. (A TestPyPI pending publisher is an optional dry run.)
+2. The GitHub environment `pypi` holds a required reviewer (the owner, with two-factor authentication on). Restrict it to tags `v*`:
+
+   ```bash
+   gh api -X PUT repos/NikolasMarkou/fsm_llm/environments/pypi \
+     -f 'deployment_branch_policy[protected_branches]=false' \
+     -f 'deployment_branch_policy[custom_branch_policies]=true'
+   gh api -X POST repos/NikolasMarkou/fsm_llm/environments/pypi/deployment-branch-policies \
+     -f name='v*' -f type=tag
+   ```
+
+3. Release from a clean `main` whose CI is green, with the version already bumped in `pyproject.toml` and `src/fsm_llm/__version__.py` and a dated section in `CHANGELOG.md`:
+
+   ```bash
+   git tag -a vX.Y.Z -m "vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+
+4. Open the run in the Actions tab. `build` and `sbom` run first; `publish` then waits for the environment review: approve the deployment. `github-release` follows.
+5. Check the result: the PyPI page of `llm-fsm` shows the release with its attestations ("Provenance"), the GitHub release carries the wheel, the sdist, `sbom.cdx.json` and the notes, and `pip install llm-fsm==X.Y.Z` works in a fresh environment on Linux, macOS and Windows.
+
+A tag that fails a guard publishes nothing: delete it (`git push origin :refs/tags/vX.Y.Z` and `git tag -d vX.Y.Z`), fix the cause and tag again. A version that reached PyPI cannot be replaced: cut the next one (the files of a release are immutable there).
 
 ## Good places to help
 
