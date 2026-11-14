@@ -495,6 +495,25 @@ class _PopEndedSub:
             self.api.pop_fsm(self.conv_id)
 
 
+class _PopEndedFrames:
+    """``before_step`` hook: records ``(n, state, depth)`` and pops up to ``per_call``
+    ended pushed frames from the top of the stack in ONE call."""
+
+    def __init__(self, api: API, conv_id: str, *, per_call: int) -> None:
+        self.api = api
+        self.conv_id = conv_id
+        self.per_call = per_call
+        self.calls: list[tuple[int, str, int]] = []
+
+    def __call__(self, step: int) -> None:
+        depth = self.api.get_stack_depth(self.conv_id)
+        self.calls.append((step, self.api.get_current_state(self.conv_id), depth))
+        for _ in range(self.per_call):
+            if depth > 1 and self.api.has_conversation_ended(self.conv_id):
+                self.api.pop_fsm(self.conv_id)
+                depth -= 1
+
+
 class TestBeforeStepPopsEndedFrame:
     """D-052 of plan 944e2692: when the top of the stack is an ended pushed
     frame, the round offers it to ``before_step`` once; a pop lets the run go
@@ -786,6 +805,35 @@ class TestEndedFrameHookPushes:
         ]
         assert api.get_stack_depth(conv_id) == 1
         assert api.get_current_state(conv_id) == "done"
+
+    @_RUNNERS
+    def test_a_hook_that_pops_two_ended_frames_in_one_call_lets_the_run_go_on(
+        self, run
+    ):
+        """Review gate 2 concern 2: the rule is "the stack is shallower than before the
+        call" (``< depth``), not "exactly one frame shallower". The mutant
+        ``_stack_depth(...) == depth - 1`` agrees with it whenever the hook pops one
+        frame, or pops down to a live parent (the answer is then settled by "the top is
+        no longer ended"), so the tests above cannot kill it. It differs when one call
+        pops TWO frames and the top is STILL ended: root and three ended frames (depth
+        4), a hook that pops two per call leaves an ended frame at depth 2. The run must
+        offer that frame to the hook again and go on to the root's terminal."""
+        api, conv_id = self._api()
+        for _ in range(2):  # sub_done, then two leaves pushed on it: depth 4
+            run(
+                api,
+                conv_id,
+                _PushOnEndedFrame(api, conv_id, _leaf_fsm(), pop_first=False),
+            )
+        assert api.get_stack_depth(conv_id) == 4
+        hook = _PopEndedFrames(api, conv_id, per_call=2)
+
+        run(api, conv_id, hook)
+
+        assert hook.calls == [(1, "leaf_done", 4), (1, "sub_done", 2), (1, "plan", 1)]
+        assert api.get_stack_depth(conv_id) == 1
+        assert api.get_current_state(conv_id) == "done"
+        assert api.has_conversation_ended(conv_id)
 
 
 class TestRunEnded:
