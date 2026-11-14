@@ -5,7 +5,7 @@ plan_2026-05-31_f08da86d/D-001 [STALE]).
 
 The plan_execute step tracker appends entries to ``step_results`` that carry a
 ``success`` flag, so they hit the ``_has_execution_evidence`` "list of dicts all
-carrying success" branch (``base.py:364``). Before the fix, ``success`` was
+carrying success" branch (``base/outcome.py``). Before the fix, ``success`` was
 ``not step_failed`` and ``step_failed`` defaults False, so a weak model that
 NARRATES a step (zero tool calls) produced an all-``success=True`` entry and the
 guard reported ``success=True`` on filler. The fix ties the per-entry flag to a

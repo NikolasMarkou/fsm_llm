@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from fsm_llm.agents import ReactAgent, REWOOAgent
 from fsm_llm.agents.constants import ContextKeys, ErrorMessages, StopReason
 from fsm_llm.core.definitions import (
@@ -469,3 +471,71 @@ class TestAnswerWasCutOffSeam:
         assert BaseAgent._run_outcome(
             ctx, trace, ["k"], judged=True, answer_cut_off=True
         ) == (False, StopReason.FORCED_PASS)
+
+
+class TestLastTurnCutOffReader:
+    """``BaseAgent._last_turn_cut_off`` (``base/runs.py``): core's record of the run's last turn.
+
+    Step 87 of plan d454fd62 found no test of this reader: a mutant that dropped its first
+    guard (a conversation that is no longer active) survived the agents suites and a
+    3,000-program differential. The reader's interface contract is pinned here against a stub
+    ``API`` (no model, no FSM)."""
+
+    class _Manager:
+        def __init__(self, raw: Any, calls: list[str]) -> None:
+            self._raw = raw
+            self._calls = calls
+
+        def copy_raw_context_data(self, conversation_id: str) -> Any:
+            self._calls.append(conversation_id)
+            return self._raw
+
+    class _Api:
+        def __init__(self, active: list[str], raw: Any = None) -> None:
+            self.calls: list[str] = []
+            self._active = active
+            self.fsm_manager = TestLastTurnCutOffReader._Manager(raw, self.calls)
+
+        def list_active_conversations(self) -> list[str]:
+            return list(self._active)
+
+        def get_sub_conversation_id(self, conversation_id: str) -> str:
+            if conversation_id not in self._active:
+                raise ValueError(f"Conversation {conversation_id} not found")
+            return f"{conversation_id}/sub"
+
+    @staticmethod
+    def _read(api: Any, conversation_id: str = "c1") -> dict[str, Any]:
+        from fsm_llm.agents.base import BaseAgent
+
+        return BaseAgent._last_turn_cut_off(api, conversation_id)
+
+    def test_a_conversation_that_is_no_longer_active_reads_nothing(self):
+        # closed from outside: asking for its sub-conversation would raise
+        api = self._Api(active=[], raw={CONTEXT_KEY_CUT_OFF: {"reply": True}})
+
+        assert self._read(api) == {}
+        assert api.calls == []
+
+    def test_the_record_of_the_top_frame_is_returned_as_a_copy(self):
+        record = {"reply": True, "fields": ["tool_name"]}
+        api = self._Api(active=["c1"], raw={CONTEXT_KEY_CUT_OFF: record})
+
+        cut = self._read(api)
+
+        assert cut == record and cut is not record
+        assert api.calls == ["c1/sub"]
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            None,
+            {},
+            {"other": 1},
+            {CONTEXT_KEY_CUT_OFF: None},
+            {CONTEXT_KEY_CUT_OFF: []},
+        ],
+        ids=["none", "empty", "absent", "null", "not-a-mapping"],
+    )
+    def test_an_absent_or_malformed_record_reads_as_empty(self, raw):
+        assert self._read(self._Api(active=["c1"], raw=raw)) == {}

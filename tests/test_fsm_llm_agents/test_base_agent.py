@@ -223,7 +223,7 @@ class TestBaseAgentContextFiltering:
 class TestBaseAgentCreateApi:
     """Tests for API factory helper."""
 
-    @patch("fsm_llm.agents.base.API.from_definition")
+    @patch("fsm_llm.agents.base.runs.API.from_definition")
     def test_create_api(self, mock_from_def):
         agent = ConcreteAgent(config=AgentConfig(model="test-model"))
         fsm_def = {"name": "test", "initial_state": "start", "states": {}}
@@ -367,3 +367,164 @@ class TestOneEmptyRegistryGuard:
 
         with pytest.raises(AgentError, match="empty tool registry"):
             create_agent(pattern, ToolRegistry())
+
+
+class TestBaseAgentPackageLayout:
+    """``fsm_llm.agents.base`` is a package (plan d454fd62, step 87): ``BaseAgent`` is a shell
+    over four mixins and the module helpers sit in ``helpers``. Pins the facade, the
+    composition and that every declaration of ``_AgentSurface`` (mypy only) is backed."""
+
+    PUBLIC = (
+        "BaseAgent",
+        "accepts_tools",
+        "artifact_text",
+        "caller_prompt_keys",
+        "flagged_tool_names",
+        "pattern_run_output_keys",
+        "reject_misplaced_kwargs",
+        "strip_caller_context",
+    )
+
+    def test_the_facade_exports_the_public_names_of_the_old_module(self):
+        import fsm_llm.agents.base as package
+
+        assert tuple(package.__all__) == self.PUBLIC
+        for name in self.PUBLIC:
+            assert getattr(package, name) is not None
+
+    def test_the_shell_is_composed_of_the_mixins(self):
+        from fsm_llm.agents.base.hitl_gate import HitlGateMixin
+        from fsm_llm.agents.base.outcome import OutcomeMixin
+        from fsm_llm.agents.base.registration import RegistrationMixin
+        from fsm_llm.agents.base.runs import RunsMixin
+        from fsm_llm.agents.base.surface import _AgentSurface
+
+        mro = [k.__name__ for k in BaseAgent.__mro__]
+        assert mro == [
+            "BaseAgent",
+            "HitlGateMixin",
+            "OutcomeMixin",
+            "RunsMixin",
+            "RegistrationMixin",
+            "_AgentSurface",
+            "ABC",
+            "object",
+        ]
+        for mixin in (HitlGateMixin, OutcomeMixin, RunsMixin, RegistrationMixin):
+            assert issubclass(mixin, _AgentSurface)
+            assert not issubclass(mixin, BaseAgent)
+
+    def test_the_two_members_that_name_the_class_stay_in_the_shell(self):
+        assert "_run_outcome" in vars(BaseAgent)
+        assert BaseAgent.__module__ == "fsm_llm.agents.base.agent"
+
+    def test_answer_source_keys_sits_beside_extract_answer(self):
+        # D-027: a pattern that overrides `_extract_answer` overrides this too.
+        assert (
+            BaseAgent._answer_source_keys.__qualname__.split(".")[0]
+            == (BaseAgent._extract_answer.__qualname__.split(".")[0])
+        )
+
+    def test_every_surface_declaration_is_defined_by_the_agent(self):
+        """mypy cannot tell that a declaration is backed by nothing (the step-81 lesson):
+        every name of ``_AgentSurface`` is defined by a class of the ``BaseAgent`` MRO or
+        assigned as ``self.<name>`` in one of them."""
+        import ast
+        import inspect
+
+        from fsm_llm.agents.base import surface
+
+        tree = ast.parse(inspect.getsource(surface))
+        surface_class = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "_AgentSurface"
+        )
+        declared: set[str] = set()
+        for node in surface_class.body:
+            if not isinstance(node, ast.If):  # the TYPE_CHECKING block
+                continue
+            for member in node.body:
+                if isinstance(member, ast.AnnAssign) and isinstance(
+                    member.target, ast.Name
+                ):
+                    declared.add(member.target.id)
+                elif isinstance(member, ast.FunctionDef):
+                    declared.add(member.name)
+        assert len(declared) >= 12  # an empty scan would pass vacuously
+
+        defined: set[str] = set()
+        for klass in BaseAgent.__mro__:
+            if klass in (surface._AgentSurface, object):
+                continue
+            defined |= set(vars(klass))
+            for node in ast.walk(ast.parse(inspect.getsource(klass))):
+                if (
+                    isinstance(node, ast.Attribute)
+                    and isinstance(node.ctx, ast.Store)
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id == "self"
+                ):
+                    defined.add(node.attr)
+        assert declared - defined == set()
+
+
+class TestHandlerRegistrationHelpers:
+    """``_register_iteration_limiter`` and ``_register_tool_executor`` (``base/registration.py``).
+
+    Step 87 of plan d454fd62 found no test of the priorities they register: a mutant that
+    registered the tool executor at the limiter's priority survived the agents suites and a
+    3,000-program differential (no built-in handler shares its timing and state, so only a
+    caller's own handler could see the order). The constants of ``HandlerPriorities`` are the
+    documented order, pinned here."""
+
+    @staticmethod
+    def _api():
+        from fsm_llm import API
+        from fsm_llm.testing import PromptGroundedLLM
+
+        fsm = {
+            "name": "t",
+            "description": "d",
+            "initial_state": "a",
+            "persona": "p",
+            "states": {
+                "a": {
+                    "id": "a",
+                    "description": "a",
+                    "purpose": "a",
+                    "transitions": [
+                        {"target_state": "b", "description": "go", "priority": 100}
+                    ],
+                },
+                "b": {"id": "b", "description": "b", "purpose": "b"},
+            },
+        }
+        return API.from_definition(fsm, llm_interface=PromptGroundedLLM())
+
+    def test_the_limiter_runs_before_a_transition_at_its_own_priority(self):
+        from fsm_llm.agents.constants import HandlerNames, HandlerPriorities
+        from fsm_llm.handlers import HandlerTiming
+
+        api = self._api()
+        ConcreteAgent()._register_iteration_limiter(api, lambda ctx: {})
+
+        (handler,) = api.handler_system.handlers
+        assert handler.name == HandlerNames.ITERATION_LIMITER
+        assert handler.priority == HandlerPriorities.ITERATION_LIMITER == 50
+        assert api.handler_system.handlers_at(HandlerTiming.PRE_TRANSITION) == [handler]
+
+    def test_the_tool_executor_runs_on_entry_after_the_limiter_and_approval(self):
+        from fsm_llm.agents.constants import HandlerNames, HandlerPriorities
+        from fsm_llm.handlers import HandlerTiming
+
+        api = self._api()
+        ConcreteAgent()._register_tool_executor(api, "b", lambda ctx: {})
+
+        (handler,) = api.handler_system.handlers
+        assert handler.name == HandlerNames.TOOL_EXECUTOR
+        assert handler.priority == HandlerPriorities.TOOL_EXECUTOR == 100
+        assert api.handler_system.handlers_at(HandlerTiming.POST_TRANSITION) == [
+            handler
+        ]
+        assert HandlerPriorities.ITERATION_LIMITER < handler.priority

@@ -352,9 +352,10 @@ def _endless_fsm() -> dict[str, Any]:
 class _FakeClock:
     """A monotonic clock that moves only when a test advances it.
 
-    Stands in for the ``time`` binding of ``fsm_llm.engine.api`` (every module
-    of it that reads the clock) and ``fsm_llm.agents.base`` (the modules that
-    read the run budget); every other attribute is the real ``time`` module's. A budget test built on it
+    Stands in for the ``time`` binding of ``fsm_llm.engine.api`` and of
+    ``fsm_llm.agents.base`` (every module of each package that reads the clock;
+    the agents one is ``runs``, the run budget); every other attribute is the
+    real ``time`` module's. A budget test built on it
     cannot flake on a loaded or traced machine: no real second passes into it.
     """
 
@@ -373,12 +374,21 @@ class _FakeClock:
 
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> _FakeClock:
-    """The fake clock, bound as ``time`` in core's api package and the agents base."""
+    """The fake clock, bound as ``time`` in core's api package and the agents base package."""
+    import importlib
+    import pkgutil
+
     import fsm_llm.agents.base as agents_base
 
     fake = _FakeClock()
     bind_api_clock(monkeypatch, fake)
-    monkeypatch.setattr(agents_base, "time", fake)
+    bound = []
+    for info in pkgutil.iter_modules(agents_base.__path__):
+        module = importlib.import_module(f"{agents_base.__name__}.{info.name}")
+        if getattr(module, "time", None) is time:
+            monkeypatch.setattr(module, "time", fake)
+            bound.append(info.name)
+    assert "runs" in bound, bound
     return fake
 
 
@@ -3072,6 +3082,42 @@ class _OwnBudgetAgent(BaseAgent):
 
     def _register_handlers(self, api: API) -> None:
         pass
+
+
+class TestTheRunBudgetReadsTheBoundClock:
+    """The agents' own clock reads are in ``fsm_llm.agents.base.runs``: the fixture binds it.
+
+    Before step 87 of plan d454fd62 the binding of ``fsm_llm.agents.base.time`` was inert
+    (no test failed without it); this makes it live: the seconds left of a run are computed
+    from the fake clock, so a real second cannot move them.
+    """
+
+    def test_run_budgets_counts_the_seconds_left_on_the_fake_clock(
+        self, clock: _FakeClock
+    ):
+        agent = _EndlessAgent(
+            AgentConfig(max_iterations=2, timeout_seconds=100.0),
+            llm_interface=PromptGroundedLLM(),
+        )
+        started = clock.now
+        clock.advance(30.0)
+
+        max_steps, max_seconds = agent._run_budgets(started)
+
+        assert (max_steps, max_seconds) == (6, 70.0)
+
+    def test_a_spent_budget_on_the_fake_clock_raises_before_any_step(
+        self, clock: _FakeClock
+    ):
+        agent = _EndlessAgent(
+            AgentConfig(max_iterations=2, timeout_seconds=100.0),
+            llm_interface=PromptGroundedLLM(),
+        )
+        started = clock.now
+        clock.advance(100.0)
+
+        with pytest.raises(AgentTimeoutError):
+            agent._run_budgets(started)
 
 
 class TestBudgetErrorOfTheRunLoops:

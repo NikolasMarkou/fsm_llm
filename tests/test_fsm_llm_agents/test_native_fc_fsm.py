@@ -26,7 +26,7 @@ from pydantic import BaseModel
 
 from fsm_llm import API
 from fsm_llm.agents import ToolRegistry
-from fsm_llm.agents.base import _output_response_format
+from fsm_llm.agents.base.helpers import _output_response_format
 from fsm_llm.agents.constants import (
     FRAMEWORK_ONLY_KEYS,
     NATIVE_FC_HANDLER_ONLY_KEYS,

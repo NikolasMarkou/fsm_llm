@@ -168,7 +168,7 @@ class TestReactAgentConcurrentRuns:
     run(), read back later by `_register_handlers`) did NOT close this race:
     `_register_handlers` reads `self._handlers` well AFTER the assignment
     line (after `build_react_fsm()`, `_init_context()`, and entry into
-    `base.py::_standard_run`), so two threads could each reassign
+    `base/runs.py::_standard_run`), so two threads could each reassign
     `self._handlers` before either's `_register_handlers` read it back — both
     calls would then bind to whichever assignment landed last. D-014 replaced
     this with a true call-local `handlers` variable threaded explicitly into

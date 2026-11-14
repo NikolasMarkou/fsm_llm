@@ -1214,7 +1214,7 @@ UNPINNED_CORE = {
     "src/fsm_llm/__init__.py": "re-export facade of the core",
     "src/fsm_llm/synthesis/__init__.py": "re-export facade of the subpackage",
     "src/fsm_llm/engine/api/conversation.py": "API, the engine all three arms run on (git_commit shows an edit; step 81 of plan d454fd62 split the old api.py, D-031)",
-    "src/fsm_llm/engine/api/helpers.py": "llm_settings_for, which the pinned agents/base.py calls (the old api.py, split at step 81, D-031)",
+    "src/fsm_llm/engine/api/helpers.py": "llm_settings_for, which the pinned agents/base/runs.py calls (the old api.py, split at step 81, D-031; agents/base.py split at step 87, D-039)",
     "src/fsm_llm/engine/api/stack.py": "ContextMergeStrategy, which the pinned synthesis/runner.py names (the old api.py, split at step 81, D-031)",
     "src/fsm_llm/constants.py": "the engine's defaults",
     "src/fsm_llm/context/__init__.py": "the engine's context",

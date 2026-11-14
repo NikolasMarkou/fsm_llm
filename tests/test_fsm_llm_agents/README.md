@@ -39,7 +39,7 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_agent_config_passthrough.py` - newer `AgentConfig` fields and what `_create_api` forwards to `API.from_definition`, prompt cache and settings with an injected interface.
 - `test_auto_memory.py` - `augment_task_with_memories`, `remember_interaction`, `AutoMemoryReactAgent` recall and remember.
 - `test_auto_memory_coherence.py` - the `respond` action, recall score threshold, conclude prompt wording.
-- `test_base_agent.py` - `BaseAgent` budgets, answer extraction, trace building, context filtering, `create_agent` (an empty registry is refused).
+- `test_base_agent.py` - `BaseAgent` budgets, answer extraction, trace building, context filtering, `create_agent` (an empty registry is refused), and the layout of the `fsm_llm.agents.base` package (facade, MRO of the shell, every `_AgentSurface` declaration backed).
 - `test_cli_entrypoints.py` - `fsm-llm-meta` (`meta_cli.main_cli`) and `python -m fsm_llm.agents`.
 - `test_completion_guard.py` - `BaseAgent._completion_is_real` and `_has_execution_evidence`.
 - `test_composition.py` - `react_worker_factory`, `default_llm_judge` (a malformed score fails), `_default_complete` error wrapping.

@@ -515,3 +515,63 @@ ignore_imports =
     # retired by: step 95 (the `tools` contract's debt, reached through `fsm_llm.tools`; the
     # `layers` contract decides how `redact_context` is reached); not an import of `policy`.
     fsm_llm.tools.arguments -> fsm_llm.context.filtering
+
+# Step 87 (agents/base.py became the package agents/base/, D-039). `BaseAgent` is the base of every
+# pattern, so the package imports no pattern module (a pattern imports it; the reverse would be a
+# cycle), no meta-builder module and no transport (`mcp`, `remote`): it reads its sibling support
+# modules (`constants`, `definitions`, `exceptions`, `handlers`, `summarization`, `tools`) and the
+# layers below `agents`.
+[importlinter:contract:agents-base-imports-no-pattern]
+name = fsm_llm.agents.base imports no agent pattern, meta-builder or transport module
+type = forbidden
+source_modules =
+    fsm_llm.agents.base
+forbidden_modules =
+    fsm_llm.agents.adapt
+    fsm_llm.agents.agent_graph
+    fsm_llm.agents.agent_skills
+    fsm_llm.agents.auto_memory
+    fsm_llm.agents.builders
+    fsm_llm.agents.composition
+    fsm_llm.agents.debate
+    fsm_llm.agents.evaluator_optimizer
+    fsm_llm.agents.maker_checker
+    fsm_llm.agents.mcp
+    fsm_llm.agents.meta_builder
+    fsm_llm.agents.meta_builders
+    fsm_llm.agents.meta_cli
+    fsm_llm.agents.meta_output
+    fsm_llm.agents.meta_prompts
+    fsm_llm.agents.meta_tools
+    fsm_llm.agents.native_fc
+    fsm_llm.agents.okf
+    fsm_llm.agents.orchestrator
+    fsm_llm.agents.parallel_react
+    fsm_llm.agents.plan_execute
+    fsm_llm.agents.prompt_chain
+    fsm_llm.agents.python_tools
+    fsm_llm.agents.react
+    fsm_llm.agents.reasoning_react
+    fsm_llm.agents.reflexion
+    fsm_llm.agents.remote
+    fsm_llm.agents.rewoo
+    fsm_llm.agents.self_consistency
+    fsm_llm.agents.semantic_memory
+    fsm_llm.agents.semantic_tools
+    fsm_llm.agents.sop
+    fsm_llm.agents.swarm
+    fsm_llm.agents.tool_registries
+    fsm_llm.agents.verified_react
+
+[importlinter:contract:agents-base-mixins-do-not-import-the-shell]
+name = the mixins, helpers and surface of fsm_llm.agents.base do not import its shell (agent.py)
+type = forbidden
+source_modules =
+    fsm_llm.agents.base.helpers
+    fsm_llm.agents.base.hitl_gate
+    fsm_llm.agents.base.outcome
+    fsm_llm.agents.base.registration
+    fsm_llm.agents.base.runs
+    fsm_llm.agents.base.surface
+forbidden_modules =
+    fsm_llm.agents.base.agent

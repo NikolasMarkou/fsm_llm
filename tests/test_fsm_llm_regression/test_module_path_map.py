@@ -440,7 +440,7 @@ class TestImportProblems:
 
     def test_a_split_module_may_stay_importable_only_as_a_package(self) -> None:
         ok = import_problems(
-            _data({"fsm_llm.agents": {"BaseAgent": "fsm_llm.agents.base"}})
+            _data({"fsm_llm.agents": {"BaseAgent": "fsm_llm.agents.base.agent"}})
         )
         assert ok == []
         bad = import_problems(

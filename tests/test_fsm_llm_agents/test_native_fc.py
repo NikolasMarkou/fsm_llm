@@ -26,7 +26,8 @@ from fsm_llm.agents import (
     ToolRegistry,
     tool,
 )
-from fsm_llm.agents.base import BaseAgent, _output_response_format
+from fsm_llm.agents.base import BaseAgent
+from fsm_llm.agents.base.helpers import _output_response_format
 from fsm_llm.agents.constants import (
     ContextKeys,
     NativeFCContextKeys,
@@ -219,7 +220,7 @@ _VALID_PAYLOAD = '{"findings_count": 3, "needs_explore": false}'
 
 
 class TestOutputResponseFormatHelper:
-    """``base._output_response_format`` is the single envelope builder shared by
+    """``base.helpers._output_response_format`` is the single envelope builder shared by
     ``_init_context`` (which the native repair state reads) and Pass 2.
     """
 

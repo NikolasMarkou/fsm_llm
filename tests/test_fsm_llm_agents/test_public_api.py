@@ -26,7 +26,7 @@ from fsm_llm.agents import (
     create_agent,
     default_llm_judge,
 )
-from fsm_llm.agents.base import _with_instructions
+from fsm_llm.agents.base.helpers import _with_instructions
 from fsm_llm.agents.definitions import MetaBuilderConfig
 from fsm_llm.agents.sop import SOPDefinition, SOPRegistry
 from fsm_llm.testing import PromptGroundedLLM

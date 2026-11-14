@@ -1871,7 +1871,7 @@ class InstanceManager:
         else:
             inst.cancel_event.set()
             # DECISION plan-2026-09-12T065608-089d0ec7/D-007
-            # `agent.run()` has no cancellation hook (see base.py's `run()`
+            # `agent.run()` has no cancellation hook (see base/agent.py's `run()`
             # abstract signature) so setting cancel_event cannot interrupt
             # in-flight work — do NOT assume the background thread stops
             # here. Bound our OWN wait instead: join with a short timeout so

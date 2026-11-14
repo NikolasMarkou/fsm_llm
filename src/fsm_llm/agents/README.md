@@ -57,7 +57,7 @@ These are the 18 names `create_agent` accepts (`react`, `rewoo`, `reflexion`, `p
 
 ## Files
 
-- `base.py` - `BaseAgent`: the shared loop, limits, answer extraction, trace, structured output.
+- `base/` - `BaseAgent`: the shared loop, limits, answer extraction, trace, structured output (a package: `agent.py` the shell, `hitl_gate.py`, `outcome.py`, `runs.py`, `registration.py` the mixins, `helpers.py`, `surface.py`).
 - `react.py`, `rewoo.py`, `reflexion.py`, `plan_execute.py`, `prompt_chain.py`, `self_consistency.py`, `debate.py`, `orchestrator.py`, `adapt.py`, `evaluator_optimizer.py`, `maker_checker.py`, `reasoning_react.py`, `parallel_react.py`, `verified_react.py`, `auto_memory.py`, `native_fc.py`, `swarm.py`, `agent_graph.py` - one pattern each.
 - `fsm_definitions/` - builds the FSM for each pattern, one module each, `native_fc` and the meta-builder included. `prompts.py` - the instructions each state gives the LLM.
 - `tools.py` - what only an agent run needs around tools: reading a tool call from a run's context, the `gated=` contract of a registry, `register_agent`. `ToolRegistry` and the `@tool` decorator (tool annotations, exact schemas, enforced timeouts) are in the layer package `fsm_llm.tools` and exported from here. `tool_registries.py` - caching and retrying registries. `semantic_tools.py` - picks relevant tools by embedding similarity.
