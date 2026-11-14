@@ -11,7 +11,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from fsm_llm.monitor import instance_manager as im
 from fsm_llm.monitor.collector import EventCollector, redact_context
 from fsm_llm.monitor.constants import (
     EVENT_AGENT_STARTED,
@@ -30,6 +29,7 @@ from fsm_llm.monitor.instance_manager import (
     register_monitor_handlers,
     snapshot_from_api,
 )
+from fsm_llm.monitor.instance_manager import agent as agent_mod
 from tests.test_fsm_llm_monitor.support import _manager
 
 
@@ -550,7 +550,9 @@ class TestDestroyInstance:
             mgr._instances["ag-hang"] = agent
             mgr._collectors["ag-hang"] = collector
 
-        with mock.patch("fsm_llm.monitor.instance_manager.logger") as mock_logger:
+        with mock.patch(
+            "fsm_llm.monitor.instance_manager.lifecycle.logger"
+        ) as mock_logger:
             start = time.monotonic()
             mgr.end_instance("ag-hang")
             elapsed = time.monotonic() - start
@@ -591,7 +593,9 @@ class TestDestroyInstance:
             mgr._instances["ag-quick"] = agent
             mgr._collectors["ag-quick"] = collector
 
-        with mock.patch("fsm_llm.monitor.instance_manager.logger") as mock_logger:
+        with mock.patch(
+            "fsm_llm.monitor.instance_manager.lifecycle.logger"
+        ) as mock_logger:
             mgr.end_instance("ag-quick")
 
         thread.join(timeout=2.0 * timing_factor)
@@ -672,15 +676,103 @@ class TestActivitySnapshots:
 
 
 class TestFindExamplesDir:
+    """``find_examples_dir`` counts directories from the file that performs the
+    read (``instance_manager/examples.py``, four below the repo root); a wrong
+    depth does not raise, it returns ``None`` and the dashboard lists no
+    presets (plan d454fd62 step 93)."""
+
+    @staticmethod
+    def _module_file():
+        import inspect
+        from pathlib import Path
+
+        from fsm_llm.monitor.instance_manager import find_examples_dir
+
+        return Path(inspect.getsourcefile(find_examples_dir)).resolve()
+
+    @staticmethod
+    def _load_copy_at(path):
+        """Load a copy of the real module from ``path`` (so its ``__file__`` is
+        ``path``) and return its ``find_examples_dir``."""
+        import importlib.util
+
+        source = TestFindExamplesDir._module_file().read_text(encoding="utf-8")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+        spec = importlib.util.spec_from_file_location("_zz_examples_probe", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.find_examples_dir
+
     def test_examples_dir_resolves_to_repo_examples(self):
-        # instance_manager.py is src/fsm_llm/monitor/instance_manager.py, three
-        # directories below the repo root; a wrong depth silently returns None.
         from pathlib import Path
 
         from fsm_llm.monitor.instance_manager import find_examples_dir
 
         repo = Path(__file__).resolve().parents[2]
         assert find_examples_dir() == repo / "examples"
+
+    def test_the_directory_found_is_a_real_non_empty_examples_tree(self):
+        from fsm_llm.monitor.instance_manager import find_examples_dir
+
+        found = find_examples_dir()
+        assert found is not None and found.is_dir()
+        assert (found / "basic").is_dir()
+        assert list(found.glob("*/*/fsm.json")), "examples/ holds no FSM presets"
+
+    def test_a_preset_of_the_examples_tree_loads_through_the_module(self):
+        from fsm_llm.monitor.instance_manager import load_preset_json
+
+        data = load_preset_json("basic/form_filling/fsm.json")
+        assert isinstance(data, dict) and data["initial_state"]
+
+    def test_the_read_is_relative_to_the_file_that_performs_it(self):
+        # The nearest ancestor of the defining file named ``src`` sits next to
+        # ``examples/``, whatever depth the module has inside the package.
+        from fsm_llm.monitor.instance_manager import find_examples_dir
+
+        here = self._module_file()
+        src = next(a for a in here.parents if a.name == "src")
+        assert find_examples_dir() == src.parent / "examples"
+
+    def test_a_copy_four_levels_below_a_root_finds_that_roots_examples(self, tmp_path):
+        root = tmp_path.resolve() / "repo"
+        (root / "examples").mkdir(parents=True)
+        probe = (
+            root / "src" / "fsm_llm" / "monitor" / "instance_manager" / "examples.py"
+        )
+        assert self._load_copy_at(probe)() == root / "examples"
+
+    def test_a_copy_does_not_take_an_examples_dir_one_level_too_shallow(self, tmp_path):
+        # A decoy next to ``src/`` 's own level (the old single-module depth).
+        root = tmp_path.resolve() / "repo"
+        (root / "src" / "examples").mkdir(parents=True)
+        probe = (
+            root / "src" / "fsm_llm" / "monitor" / "instance_manager" / "examples.py"
+        )
+        assert self._load_copy_at(probe)() is None
+
+    def test_a_layout_with_no_examples_dir_returns_none_without_raising(self, tmp_path):
+        # The installed (wheel) layout: nothing named ``examples`` is there.
+        probe = (
+            tmp_path.resolve()
+            / "lib"
+            / "site-packages"
+            / "fsm_llm"
+            / "monitor"
+            / "instance_manager"
+            / "examples.py"
+        )
+        assert self._load_copy_at(probe)() is None
+
+    def test_load_preset_json_with_no_examples_dir_raises_file_not_found(
+        self, monkeypatch
+    ):
+        from fsm_llm.monitor.instance_manager import examples
+
+        monkeypatch.setattr(examples, "find_examples_dir", lambda: None)
+        with pytest.raises(FileNotFoundError, match="Examples directory not found"):
+            examples.load_preset_json("basic/form_filling/fsm.json")
 
 
 class TestWorkflowPresets:
@@ -817,7 +909,7 @@ class TestDisabledAgentTypes:
             mgr.launch_agent(agent_type="MakerCheckerAgent", task="x")
 
     def test_supported_agent_types(self):
-        from fsm_llm.monitor.instance_manager import _AGENT_CLASSES
+        from fsm_llm.monitor.instance_manager.agent import _AGENT_CLASSES
 
         assert "EvaluatorOptimizerAgent" not in _AGENT_CLASSES
         assert "MakerCheckerAgent" not in _AGENT_CLASSES
@@ -898,8 +990,8 @@ class TestStubToolExecution:
         import pytest
 
         pytest.importorskip("fsm_llm.agents")
-        from fsm_llm.monitor import instance_manager as im
         from fsm_llm.monitor.definitions import StubToolConfig
+        from fsm_llm.monitor.instance_manager import agent as agent_mod
         from fsm_llm.tools import ToolCall
 
         captured: dict = {}
@@ -913,7 +1005,7 @@ class TestStubToolExecution:
                 done.set()
                 raise RuntimeError("stop after capture")
 
-        monkeypatch.setitem(im._AGENT_CLASSES, "ReactAgent", _CapturingAgent)
+        monkeypatch.setitem(agent_mod._AGENT_CLASSES, "ReactAgent", _CapturingAgent)
         mgr = InstanceManager(config=MonitorConfig())
         mgr.global_collector.cleanup()
         mgr.launch_agent(
@@ -942,15 +1034,15 @@ class TestLaunchConstructsEveryAgentClass:
     def test_every_class_constructs_through_launch(self, monkeypatch):
         import pytest
 
-        from fsm_llm.monitor import instance_manager as im
         from fsm_llm.monitor.definitions import StubToolConfig
+        from fsm_llm.monitor.instance_manager import agent as agent_mod
 
-        if not im._AGENT_CLASSES:
+        if not agent_mod._AGENT_CLASSES:
             pytest.skip("fsm_llm.agents not importable")
-        assert len(im._AGENT_CLASSES) == 7
+        assert len(agent_mod._AGENT_CLASSES) == 7
 
         constructed: dict[str, threading.Event] = {}
-        for name, real_cls in list(im._AGENT_CLASSES.items()):
+        for name, real_cls in list(agent_mod._AGENT_CLASSES.items()):
             event = threading.Event()
             constructed[name] = event
 
@@ -959,7 +1051,7 @@ class TestLaunchConstructsEveryAgentClass:
                 raise RuntimeError("stop after construction")
 
             monkeypatch.setitem(
-                im._AGENT_CLASSES, name, type(name, (real_cls,), {"run": _run})
+                agent_mod._AGENT_CLASSES, name, type(name, (real_cls,), {"run": _run})
             )
 
         mgr = InstanceManager(config=MonitorConfig())
@@ -1045,18 +1137,18 @@ class TestAgentRunEventsOnTheCoreLoop:
         import pytest
 
         pytest.importorskip("fsm_llm.agents")
-        from fsm_llm.monitor import instance_manager as im
         from fsm_llm.monitor.definitions import StubToolConfig
+        from fsm_llm.monitor.instance_manager import agent as agent_mod
         from fsm_llm.testing import PromptGroundedLLM
 
         llm = PromptGroundedLLM(facts=_REACT_FACTS, default_response=_REACT_ANSWER)
-        real_cls = im._AGENT_CLASSES["ReactAgent"]
+        real_cls = agent_mod._AGENT_CLASSES["ReactAgent"]
 
         def _init(self, **kwargs):
             real_cls.__init__(self, llm_interface=llm, **kwargs)
 
         monkeypatch.setitem(
-            im._AGENT_CLASSES,
+            agent_mod._AGENT_CLASSES,
             "ReactAgent",
             type("ReactAgent", (real_cls,), {"__init__": _init}),
         )
@@ -1142,7 +1234,7 @@ class TestAgentRunEventsOnTheCoreLoop:
 
     def test_fsm_chat_path_sends_the_user_message_through_converse(self, monkeypatch):
         from fsm_llm import API
-        from fsm_llm.monitor import instance_manager as im
+        from fsm_llm.monitor.instance_manager import fsm as fsm_mod
         from fsm_llm.testing import MockLLM2Interface
 
         llm = MockLLM2Interface(
@@ -1153,7 +1245,7 @@ class TestAgentRunEventsOnTheCoreLoop:
         def _from_definition(definition, **kwargs):
             return real_from_definition(definition, llm_interface=llm)
 
-        monkeypatch.setattr(im.API, "from_definition", _from_definition)
+        monkeypatch.setattr(fsm_mod.API, "from_definition", _from_definition)
         mgr = InstanceManager(config=MonitorConfig())
         mgr.global_collector.cleanup()
         inst = mgr.launch_fsm(fsm_json=_CHAT_FSM)
@@ -1185,7 +1277,7 @@ class TestDestroyClosesBeforeUnregister:
 
     def _live_manager(self, monkeypatch):
         from fsm_llm import API
-        from fsm_llm.monitor import instance_manager as im
+        from fsm_llm.monitor.instance_manager import fsm as fsm_mod
         from fsm_llm.testing import MockLLM2Interface
 
         llm = MockLLM2Interface(response_text="What is your name?")
@@ -1194,7 +1286,7 @@ class TestDestroyClosesBeforeUnregister:
         def _from_definition(definition, **kwargs):
             return real_from_definition(definition, llm_interface=llm)
 
-        monkeypatch.setattr(im.API, "from_definition", _from_definition)
+        monkeypatch.setattr(fsm_mod.API, "from_definition", _from_definition)
         mgr = InstanceManager(config=MonitorConfig())
         mgr.global_collector.cleanup()
         inst = mgr.launch_fsm(fsm_json=_CHAT_FSM)
@@ -1561,7 +1653,7 @@ class TestFailedLaunchKeepsFinishedInstance:
         assert [i.instance_id for i in mgr.list_instances()] == ["old"]
 
     def test_a_valid_launch_still_evicts_the_oldest_finished(self, monkeypatch):
-        monkeypatch.setitem(im._AGENT_CLASSES, "ReactAgent", _QuickAgent)
+        monkeypatch.setitem(agent_mod._AGENT_CLASSES, "ReactAgent", _QuickAgent)
         mgr = _manager(max_instances=1)
         _finished_fsm(mgr)
         managed = mgr.launch_agent(task="t", tools_config=[_STUB])
@@ -1632,7 +1724,7 @@ class TestInstanceEventFeed:
     """F-MI-10: an instance's own collector sees its lifecycle events."""
 
     def test_agent_events_reach_the_instance_collector(self, monkeypatch):
-        monkeypatch.setitem(im._AGENT_CLASSES, "ReactAgent", _QuickAgent)
+        monkeypatch.setitem(agent_mod._AGENT_CLASSES, "ReactAgent", _QuickAgent)
         mgr = _manager()
         managed = mgr.launch_agent(task="t", tools_config=[_STUB])
         managed.thread.join(5)
@@ -1667,7 +1759,7 @@ class TestCloseTearsDownEveryInstanceType:
 
     def test_close_sets_the_agent_cancel_flag(self, monkeypatch):
         _BlockingAgent.release.clear()
-        monkeypatch.setitem(im._AGENT_CLASSES, "ReactAgent", _BlockingAgent)
+        monkeypatch.setitem(agent_mod._AGENT_CLASSES, "ReactAgent", _BlockingAgent)
         mgr = _manager()
         managed = mgr.launch_agent(task="t", tools_config=[_STUB])
         try:
@@ -1696,3 +1788,556 @@ class TestCloseTearsDownEveryInstanceType:
 
         asyncio.run(go())
         assert stopped == [1]
+
+
+_PACKAGE = "fsm_llm.monitor.instance_manager"
+
+#: public name -> the module of the package that defines it (plan d454fd62 step 93)
+_MODULE_OF = {
+    "InstanceManager": "manager",
+    "ManagedAgent": "managed",
+    "ManagedFSM": "managed",
+    "ManagedWorkflow": "managed",
+    "find_examples_dir": "examples",
+    "load_preset_json": "examples",
+    "monitor_handlers_on": "handlers",
+    "read_json_file": "examples",
+    "register_monitor_handlers": "handlers",
+    "snapshot_from_api": "snapshots",
+    "unregister_monitor_handlers": "handlers",
+    "validate_preset_id": "examples",
+}
+
+#: every method and property of the old single-module ``InstanceManager``
+_OLD_MEMBERS = frozenset(
+    {
+        "__init__",
+        "_cache_ended_conversation",
+        "_check_agent_capacity",
+        "_close_fsm_api",
+        "_emit_agent_run_events",
+        "_emit_event",
+        "_ended_snapshot",
+        "_finish_conversation",
+        "_get_agent",
+        "_get_fsm",
+        "_get_typed",
+        "_get_workflow",
+        "_make_room",
+        "_mark_conversation_ended",
+        "_new_collector",
+        "_record_event",
+        "_register_instance",
+        "_resolve_fsm_data",
+        "_run_agent",
+        "_setup_loguru_sink",
+        "_snapshot_from_api",
+        "_teardown",
+        "_validate_workflow_instance_id",
+        "_workflow_hook",
+        "advance_workflow",
+        "attach_api",
+        "cancel_agent",
+        "cancel_workflow",
+        "close",
+        "config",
+        "dashboard_config",
+        "dashboard_config_version",
+        "end_conversation",
+        "end_instance",
+        "get_active_conversations",
+        "get_agent_result",
+        "get_agent_status",
+        "get_all_activity_snapshots",
+        "get_all_conversation_snapshots",
+        "get_capabilities",
+        "get_conversation_snapshot",
+        "get_events",
+        "get_fsm_conversations",
+        "get_instance",
+        "get_instance_collector",
+        "get_metrics",
+        "get_workflow_instances",
+        "get_workflow_presets",
+        "get_workflow_status",
+        "global_collector",
+        "launch_agent",
+        "launch_fsm",
+        "launch_workflow",
+        "list_instances",
+        "send_message",
+        "send_workflow_event",
+        "start_conversation",
+        "start_workflow_instance",
+    }
+)
+
+
+def _package_dir():
+    from pathlib import Path
+
+    import fsm_llm.monitor.instance_manager as facade
+
+    return Path(facade.__file__).parent
+
+
+class TestInstanceManagerPackageLayout:
+    """``monitor/instance_manager.py`` is a package at the same dotted path:
+    ``InstanceManager`` is a shell over five mixins, the ``Managed*`` classes
+    sit in one module, a private name lives in its defining module."""
+
+    def test_the_facade_exports_exactly_the_public_names(self):
+        import fsm_llm.monitor.instance_manager as facade
+
+        assert sorted(facade.__all__) == sorted([*_MODULE_OF, "ManagedInstance"])
+        namespace: dict = {}
+        exec(f"from {_PACKAGE} import *", namespace)
+        assert set(_MODULE_OF) | {"ManagedInstance"} <= set(namespace)
+        for private in (
+            "_AGENT_CLASSES",
+            "_MonitorHandler",
+            "_WORKFLOW_PRESETS",
+            "_build_context_capture_handlers",
+            "_new_instance_id",
+            "_pending_tasks",
+            "_status_str",
+        ):
+            assert private not in namespace
+            assert not hasattr(facade, private), private
+        # a patch aims at the module that performs the lookup, never the facade
+        for module_attribute in ("API", "logger", "asyncio", "uuid", "resolve_model"):
+            assert not hasattr(facade, module_attribute), module_attribute
+
+    def test_every_public_name_is_defined_in_the_module_that_owns_it(self):
+        import importlib
+
+        import fsm_llm.monitor.instance_manager as facade
+
+        for name, module in _MODULE_OF.items():
+            obj = getattr(facade, name)
+            assert obj.__module__ == f"{_PACKAGE}.{module}", name
+            assert vars(importlib.import_module(f"{_PACKAGE}.{module}"))[name] is obj
+
+    def test_instance_manager_is_a_shell_over_five_mixins(self):
+        from fsm_llm.monitor.instance_manager import InstanceManager
+
+        assert [c.__name__ for c in InstanceManager.__mro__] == [
+            "InstanceManager",
+            "SnapshotsMixin",
+            "FsmMixin",
+            "WorkflowsMixin",
+            "AgentsMixin",
+            "LifecycleMixin",
+            "_InstanceSurface",
+            "object",
+        ]
+        owners: dict[str, list[str]] = {}
+        for cls in InstanceManager.__mro__[:-2]:
+            for name in vars(cls):
+                if not (name.startswith("__") and name.endswith("__")) or (
+                    name == "__init__"
+                ):
+                    owners.setdefault(name, []).append(cls.__name__)
+        assert set(owners) == _OLD_MEMBERS
+        assert {n: o for n, o in owners.items() if len(o) > 1} == {}
+        surface = InstanceManager.__mro__[-2]
+        assert [n for n in vars(surface) if not n.startswith("__")] == [], (
+            "the surface class declares for mypy only, a runtime no-op"
+        )
+
+    def test_the_managed_classes_and_their_base_share_one_module(self):
+        from fsm_llm.monitor.instance_manager import managed
+
+        for cls, kind in (
+            (managed.ManagedFSM, "fsm"),
+            (managed.ManagedWorkflow, "workflow"),
+            (managed.ManagedAgent, "agent"),
+        ):
+            assert cls.__mro__[1] is managed._ManagedBase
+            assert cls.__module__ == managed.__name__
+            assert cls.instance_type == kind
+        assert managed._ManagedBase.__module__ == managed.__name__
+        inst = managed.ManagedAgent("i1", label="L")
+        assert (inst.instance_id, inst.label, inst.status) == ("i1", "L", "running")
+        assert inst.to_info().instance_type == "agent"
+
+    def test_the_tables_the_mixins_read_are_the_ones_of_their_modules(self):
+        from fsm_llm.monitor.instance_manager import agent, workflow, workflow_presets
+
+        assert agent.AgentsMixin.launch_agent.__globals__["_AGENT_CLASSES"] is (
+            agent._AGENT_CLASSES
+        )
+        assert agent.AgentsMixin._run_agent.__globals__["_AGENT_CLASSES"] is (
+            agent._AGENT_CLASSES
+        )
+        assert workflow.WorkflowsMixin.launch_workflow.__globals__[
+            "_WORKFLOW_PRESETS"
+        ] is (workflow_presets._WORKFLOW_PRESETS)
+
+    def test_a_patch_of_the_logger_aims_at_the_module_that_logs(self):
+        with pytest.raises(AttributeError):
+            with mock.patch(f"{_PACKAGE}.logger"):
+                pass  # pragma: no cover
+        from fsm_llm.monitor.instance_manager import lifecycle
+
+        assert lifecycle.LifecycleMixin._teardown.__globals__["logger"] is (
+            lifecycle.logger
+        )
+
+    def test_every_decision_anchor_sits_with_the_code_it_constrains(self):
+        # token -> module -> count (the launch docstring of `workflow` names
+        # the preset anchor of `workflow_presets` once)
+        expected = {
+            "plan_2026-05-29_0c00a594/D-001": {"agent": 1},
+            "plan_2026-05-29_0c00a594/D-002": {"workflow_presets": 1, "workflow": 1},
+            "plan_2026-05-29_0c00a594/D-003": {"agent": 2, "manager": 1},
+            "plan-2026-07-20T040150-876e7164/D-003": {"snapshots": 1},
+            "plan-2026-09-12T065608-089d0ec7/D-007": {"lifecycle": 1},
+            "plan-2026-09-12T135914-45a654de/D-017": {"snapshots": 1},
+            "plan-2026-09-28T090000-3c9e41d2/D-002": {"snapshots": 1},
+            "plan-2026-09-28T090000-3c9e41d2/D-003": {"handlers": 1},
+            "plan-2026-09-28T090000-3c9e41d2/D-006": {"workflow": 1},
+            "plan-2026-11-05T134105-5ed71cf2/D-015": {"lifecycle": 1},
+            "plan-2026-11-05T185903-5980fbb7/D-005": {"lifecycle": 1},
+        }
+        texts = {
+            path.stem: path.read_text(encoding="utf-8")
+            for path in _package_dir().glob("*.py")
+        }
+        for token, where in expected.items():
+            found = {stem: text.count(token) for stem, text in texts.items()}
+            assert {s: n for s, n in found.items() if n} == where, token
+
+    def test_a_module_level_name_is_defined_in_one_module_only(self):
+        import ast
+
+        defined: dict[str, list[str]] = {}
+        for path in sorted(_package_dir().glob("*.py")):
+            if path.stem in {"__init__", "surface"}:
+                continue
+            for node in ast.parse(path.read_text(encoding="utf-8")).body:
+                if isinstance(
+                    node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+                ):
+                    names = [node.name]
+                elif isinstance(node, ast.Assign):
+                    names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+                elif isinstance(node, ast.AnnAssign) and isinstance(
+                    node.target, ast.Name
+                ):
+                    names = [node.target.id]
+                else:
+                    names = []
+                for name in names:
+                    defined.setdefault(name, []).append(path.stem)
+        assert {n: m for n, m in defined.items() if len(m) > 1} == {}
+        for name, module in {
+            "_AGENT_CLASSES": "agent",
+            "_HANDLER_STATES": "handlers",
+            "_WORKFLOW_PRESETS": "workflow_presets",
+            "_new_instance_id": "managed",
+            "_pending_tasks": "lifecycle",
+            "_status_str": "workflow",
+        }.items():
+            assert defined[name] == [module], name
+
+    def test_only_the_examples_module_reads_its_own_file_location(self):
+        # A module that reads `__file__` counts directories from where it sits:
+        # moving it changes the answer silently (see `TestFindExamplesDir`).
+        users = {
+            path.stem
+            for path in _package_dir().glob("*.py")
+            if "__file__"
+            in path.read_text(encoding="utf-8")
+            .replace("``__file__``", "")
+            .replace("`__file__`", "")
+            and path.stem != "__init__"
+        }
+        assert users == {"examples"}
+
+    def test_a_log_record_is_named_after_the_module_that_logs_it(self):
+        from loguru import logger
+
+        records: list[tuple[str, str, str]] = []
+        logger.enable("fsm_llm")
+        sink = logger.add(
+            lambda m: records.append(
+                (m.record["name"], m.record["module"], m.record["message"])
+            ),
+            level="DEBUG",
+            format="{message}",
+        )
+        try:
+            # lifecycle: a managed FSM whose API fails to list its conversations
+            mgr = _manager()
+            api = MagicMock()
+            api.list_active_conversations.side_effect = RuntimeError("closed")
+            _fsm(mgr, "f1", api)
+            mgr.end_instance("f1")
+            # snapshots: the attached API fails to list its conversations
+            mgr = _manager()
+            attached = MagicMock()
+            attached.list_active_conversations.side_effect = RuntimeError("gone")
+            mgr._attached_api = attached
+            mgr.get_active_conversations()
+            # workflow: a run the engine does not know
+            mgr = _manager()
+            wf = ManagedWorkflow(instance_id="w1")
+            wf.engine = MagicMock()
+            wf.engine.get_instance.return_value = None
+            wf.active_instance_ids = ["run1"]
+            mgr._instances["w1"] = wf
+            mgr.get_workflow_instances("w1")
+            # fsm: the conversation ends but its end is refused
+            mgr = _manager()
+            inst = ManagedFSM(instance_id="f2", api=MagicMock())
+            inst.api.has_conversation_ended.return_value = True
+            inst.api.end_conversation.side_effect = RuntimeError("busy")
+            inst.conversation_ids = ["c1"]
+            mgr._instances["f2"] = inst
+            mgr.send_message("f2", "c1", "hi")
+        finally:
+            logger.remove(sink)
+            logger.disable("fsm_llm")
+
+        def logged_by(prefix: str) -> tuple[str, str]:
+            return next((n, m) for n, m, text in records if text.startswith(prefix))
+
+        assert logged_by("Failed to close FSM API of instance") == (
+            f"{_PACKAGE}.lifecycle",
+            "lifecycle",
+        )
+        assert logged_by("Failed to list attached API conversations") == (
+            f"{_PACKAGE}.snapshots",
+            "snapshots",
+        )
+        assert logged_by("Failed to get workflow status for") == (
+            f"{_PACKAGE}.workflow",
+            "workflow",
+        )
+        assert logged_by("Failed to end terminal conversation") == (
+            f"{_PACKAGE}.fsm",
+            "fsm",
+        )
+
+
+class TestInstanceManagerEdgesOfTheSplit:
+    """Edges of ``InstanceManager`` that no test pinned before the split and
+    that the mutation proof of step 93 reached (D-001)."""
+
+    def test_the_capabilities_report_is_exactly_the_three_flags(self):
+        assert _manager().get_capabilities() == {
+            "fsm": True,
+            "workflows": True,
+            "agents": True,
+        }
+
+    def test_a_lexical_dot_dot_in_a_preset_id_is_refused_even_inside_the_tree(self):
+        # ``sub/../x`` resolves INSIDE the examples directory: only the lexical
+        # pre-check refuses it, not the confinement test.
+        from fsm_llm.monitor.instance_manager import (
+            find_examples_dir,
+            validate_preset_id,
+        )
+
+        base = find_examples_dir()
+        for preset_id in (
+            "basic/../basic/form_filling/fsm.json",
+            "../examples/basic/form_filling/fsm.json",
+            "/etc/passwd",
+        ):
+            with pytest.raises(ValueError, match="Invalid preset ID"):
+                validate_preset_id(preset_id, base)
+        assert validate_preset_id("basic/form_filling/fsm.json", base).is_file()
+
+    def test_a_launch_evicts_the_oldest_of_several_finished_instances(self):
+        from datetime import UTC, datetime, timedelta
+
+        mgr = _manager(max_instances=3)
+        base = datetime(2024, 1, 1, tzinfo=UTC)
+        for n, name in enumerate(["f_old", "f_mid", "f_new"]):
+            inst = ManagedFSM(name, MagicMock())
+            inst.status = "completed"
+            inst.created_at = base + timedelta(hours=n)
+            mgr._instances[name] = inst
+        mgr.launch_workflow(preset_id="demo_linear")
+        remaining = {i.instance_id for i in mgr.list_instances()}
+        assert "f_old" not in remaining
+        assert {"f_mid", "f_new"} <= remaining
+
+    def test_a_launch_never_evicts_a_running_instance(self):
+        mgr = _manager(max_instances=2)
+        running = ManagedFSM("f_run", MagicMock())
+        done = ManagedFSM("f_done", MagicMock())
+        done.status = "completed"
+        mgr._instances.update({"f_run": running, "f_done": done})
+        mgr.launch_workflow(preset_id="demo_linear")
+        remaining = {i.instance_id for i in mgr.list_instances()}
+        assert "f_run" in remaining and "f_done" not in remaining
+
+    def test_ending_a_running_agent_marks_it_cancelled_and_destroyed(self):
+        mgr = _manager()
+        agent = ManagedAgent(instance_id="a_run")
+        mgr._instances["a_run"] = agent
+        mgr._collectors["a_run"] = EventCollector()
+        mgr.end_instance("a_run")
+        assert agent.status == "cancelled"
+        assert agent.cancel_event.is_set()
+        assert mgr.get_instance("a_run") is None
+
+    def test_a_launch_resolves_a_blank_model_from_the_environment(self, monkeypatch):
+        from fsm_llm import API
+        from fsm_llm.monitor.instance_manager import fsm as fsm_mod
+        from fsm_llm.testing import MockLLM2Interface
+
+        seen: list[dict] = []
+        real_from_definition = API.from_definition
+
+        def _from_definition(definition, **kwargs):
+            seen.append(kwargs)
+            return real_from_definition(definition, llm_interface=MockLLM2Interface())
+
+        monkeypatch.setattr(fsm_mod.API, "from_definition", _from_definition)
+        monkeypatch.setenv("LLM_MODEL", "ollama_chat/from-env")
+        mgr = _manager()
+        mgr.launch_fsm(fsm_json=_CHAT_FSM, model="  ")
+        mgr.launch_fsm(fsm_json=_CHAT_FSM, model="ollama_chat/given")
+        assert [kw["model"] for kw in seen] == [
+            "ollama_chat/from-env",
+            "ollama_chat/given",
+        ]
+
+    def test_an_agent_launch_resolves_its_model_the_same_way(self, monkeypatch):
+        configs: list[Any] = []
+
+        class _Probe(_QuickAgent):
+            def __init__(self, **kwargs):
+                configs.append(kwargs["config"])
+
+        monkeypatch.setitem(agent_mod._AGENT_CLASSES, "ReactAgent", _Probe)
+        monkeypatch.setenv("LLM_MODEL", "ollama_chat/from-env")
+        mgr = _manager()
+        first = mgr.launch_agent(task="t", tools_config=[_STUB], model="")
+        first.thread.join(5)
+        second = mgr.launch_agent(
+            task="t", tools_config=[_STUB], model="ollama_chat/given"
+        )
+        second.thread.join(5)
+        assert [c.model for c in configs] == [
+            "ollama_chat/from-env",
+            "ollama_chat/given",
+        ]
+
+    def test_a_cancelled_but_running_agent_is_cancelling_and_holds_its_slot(self):
+        mgr = _manager(max_running_agents=1)
+        agent = ManagedAgent("a1")
+        release = threading.Event()
+        agent.thread = threading.Thread(target=release.wait, daemon=True)
+        agent.thread.start()
+        mgr._instances["a1"] = agent
+        try:
+            assert mgr.cancel_agent("a1") is True
+            assert agent.status == "cancelling"
+            assert agent.cancel_event.is_set()
+            assert mgr.get_agent_status("a1")["status"] == "cancelling"
+            with pytest.raises(MonitorCapacityError, match="1 agents are already"):
+                mgr.launch_agent(task="t", tools_config=[_STUB])
+        finally:
+            release.set()
+            agent.thread.join(5)
+
+    def test_the_agent_limit_is_reached_at_exactly_the_maximum(self, monkeypatch):
+        monkeypatch.setitem(agent_mod._AGENT_CLASSES, "ReactAgent", _QuickAgent)
+        mgr = _manager(max_running_agents=2)
+        for name in ("a1", "a2"):
+            mgr._instances[name] = ManagedAgent(name)
+        with pytest.raises(MonitorCapacityError, match="2 agents are already running"):
+            mgr.launch_agent(task="t", tools_config=[_STUB])
+        del mgr._instances["a2"]
+        managed = mgr.launch_agent(task="t", tools_config=[_STUB])
+        managed.thread.join(5)
+        assert managed.status == "completed"
+
+
+class TestWorkflowCancelEvents:
+    @pytest.fixture(autouse=True)
+    def _needs_workflows(self):
+        pytest.importorskip("fsm_llm.workflows")
+
+    def test_a_cancelled_run_emits_workflow_cancelled_with_its_reason(self):
+        from fsm_llm.monitor.constants import EVENT_WORKFLOW_CANCELLED
+        from fsm_llm.workflows import auto_step, create_workflow, wait_event_step
+
+        async def go():
+            mgr = _manager()
+            managed = mgr.launch_workflow(preset_id="demo_linear")
+            waiting = create_workflow("wait_wf", "Wait")
+            waiting.with_initial_step(
+                wait_event_step("w", "W", event_type="go", success_step_id="d")
+            )
+            waiting.with_step(auto_step("d", "D", next_step_id="", action=lambda c: {}))
+            managed.engine.register_workflow(waiting)
+            run = await mgr.start_workflow_instance(managed.instance_id, "wait_wf", {})
+            assert run in managed.active_instance_ids
+            assert await mgr.cancel_workflow(managed.instance_id, run, "because")
+            return mgr, managed, run
+
+        mgr, managed, run = asyncio.run(go())
+        cancelled = [
+            e
+            for e in mgr.get_events(limit=0)
+            if e.event_type == EVENT_WORKFLOW_CANCELLED
+        ]
+        assert len(cancelled) == 1
+        assert cancelled[0].data["reason"] == "because"
+        assert cancelled[0].data["workflow_instance_id"] == run
+        assert managed.run_statuses[run] == "cancelled"
+        assert managed.status == "cancelled"
+        assert managed.active_instance_ids == []
+        mgr.global_collector.cleanup()
+
+
+class TestSnapshotAndActivityEdges:
+    def test_the_snapshot_default_hides_internal_keys_and_secrets(self):
+        # D-017: the default is fail-closed; a caller that forgets the
+        # parameter must not leak internal keys into the dashboard.
+        api = _snapshot_api(
+            {"city": "Oslo", "_internal": 1, "system_x": 2, "password": "hunter2"}
+        )
+        snap = snapshot_from_api(api, "c1")
+        assert snap is not None
+        assert snap.context_data == {"city": "Oslo"}
+        shown = snapshot_from_api(api, "c1", show_internal_keys=True)
+        assert shown is not None
+        assert shown.context_data == {"city": "Oslo", "_internal": 1, "system_x": 2}
+
+    def test_activity_without_ended_runs_lists_only_the_active_runs(self):
+        mgr = _manager()
+        wf = ManagedWorkflow("w1", label="W")
+        wf.run_ids = ["r1", "r2"]
+        wf.active_instance_ids = ["r1"]
+        mgr._instances["w1"] = wf
+        mgr.get_workflow_status = lambda instance_id, run_id: {
+            "status": "Running" if run_id == "r1" else "Completed",
+            "current_step": "s",
+        }
+        only_active = mgr.get_all_activity_snapshots(include_ended=False)
+        everything = mgr.get_all_activity_snapshots(include_ended=True)
+        assert [i.item_id for i in only_active] == ["r1"]
+        assert [(i.item_id, i.status, i.is_terminal) for i in everything] == [
+            ("r1", "running", False),
+            ("r2", "completed", True),
+        ]
+
+
+class TestInstanceManagerLoggingModules:
+    def test_every_module_that_logs_uses_the_library_logger_itself(self):
+        # A bound or wrapped logger would add context to every record; the
+        # records of the manager are the library's own (names pinned above).
+        import importlib
+
+        import fsm_llm.logging as library_logging
+
+        for module in ("fsm", "lifecycle", "snapshots", "workflow"):
+            loaded = importlib.import_module(f"{_PACKAGE}.{module}")
+            assert loaded.logger is library_logging.logger, module

@@ -294,9 +294,9 @@ def _monitor_construction(tmp_path: Path) -> None:
 
 
 def _workflow_presets() -> list[str]:
-    from fsm_llm.monitor import instance_manager
+    from fsm_llm.monitor.instance_manager import workflow_presets
 
-    return list(instance_manager._WORKFLOW_PRESETS)
+    return list(workflow_presets._WORKFLOW_PRESETS)
 
 
 def _synthesis_synthesizer_injected(tmp_path: Path) -> None:

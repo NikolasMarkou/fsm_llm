@@ -5,7 +5,7 @@ Purpose: pytest suite (458 collected tests) for `fsm_llm.monitor`, the FastAPI d
 
 ## Scope
 
-- Unit and HTTP-level tests for `server.py`, `instance_manager.py`, `collector.py`, `definitions.py`, `otel.py`, `__main__.py` (`_browser_url` only) and the package `__init__.py` exports.
+- Unit and HTTP-level tests for `server.py`, `instance_manager/`, `collector.py`, `definitions.py`, `otel.py`, `__main__.py` (`_browser_url` only) and the package `__init__.py` exports.
 - No real LLM calls, no network, no browser. The FSM `API` is a `MagicMock` or a small fake; HTTP goes through `fastapi.testclient.TestClient`.
 - Not here: the monitor source itself (`src/fsm_llm/monitor/`) and the JS SPA logic (only static file presence, HTTP 200, and the HTML/CSS limits in `TestUiMatchesServerLimits` are checked).
 
@@ -47,7 +47,7 @@ Suite entry points (what a new test uses):
 - Test classes per file:
   - `test_app.py`: `TestWebServer`, `TestMonitorImports`, `TestUiMatchesServerLimits`, `TestServerFSMEndpoints`, `TestServerInstanceEndpoints`, `TestServerConfigEndpoints`, `TestDashboardConfigEndpoints`, `TestServerPresetEndpoints`, `TestServerErrorHandling`, `TestActivityEndpoint`, `TestServerHygieneAndWorkflow`, `TestApiKeyGate`, `TestDashboardWebsocketRedaction`, `TestCliHelpers`.
   - `test_server_security.py`: `TestOriginAndHost`, `TestApiKeyGating`, `TestWebSocket`, `TestErrorMapping`, `TestRequestBounds`, `TestDashboardConfig`, `TestBuilderGuards`, `TestPresetValidation`.
-  - `test_instance_manager.py`: `TestManagedClasses`, `TestInstanceManager`, `TestRegisterMonitorHandlers`, `TestSnapshotInternalKeyHiding`, `TestConversationCaching`, `TestInstanceManagerListFilter`, `TestDestroyInstance`, `TestActivitySnapshots`, `TestFindExamplesDir`, `TestWorkflowPresets`, `TestDisabledAgentTypes`, `TestAgentConcurrencyHardening`, `TestStubToolExecution`, `TestRedaction`, `TestCancelAgent`, `TestFSMLifecycle`, `TestWorkflowTracking`, `TestFailedLaunchKeepsFinishedInstance`, `TestTerminalSendKeepsTheConversationOpenWhenEndFails`, `TestOtelReenableDoesNotExportTwice`, `TestInstanceEventFeed`, `TestCloseTearsDownEveryInstanceType`.
+  - `test_instance_manager.py`: `TestManagedClasses`, `TestInstanceManager`, `TestRegisterMonitorHandlers`, `TestSnapshotInternalKeyHiding`, `TestConversationCaching`, `TestInstanceManagerListFilter`, `TestDestroyInstance`, `TestActivitySnapshots`, `TestFindExamplesDir`, `TestWorkflowPresets`, `TestDisabledAgentTypes`, `TestAgentConcurrencyHardening`, `TestStubToolExecution`, `TestRedaction`, `TestCancelAgent`, `TestFSMLifecycle`, `TestWorkflowTracking`, `TestFailedLaunchKeepsFinishedInstance`, `TestTerminalSendKeepsTheConversationOpenWhenEndFails`, `TestOtelReenableDoesNotExportTwice`, `TestInstanceEventFeed`, `TestCloseTearsDownEveryInstanceType`, `TestInstanceManagerPackageLayout` (the package layout: facade names, owning modules, the mixin MRO, anchors, log record names, the one `__file__` reader).
 
 Monitor surface the tests pin:
 
@@ -138,7 +138,7 @@ Payloads and records pinned elsewhere in the suite:
 - 401s across `test_app.py`: an API key leaked in (env var or a test that did not reset `configure`).
 - Version assertion failures in `test_app.py` after a release: update the two `"0.12.0"` literals.
 - Static file tests fail if a JS module under `src/fsm_llm/monitor/static/` is renamed or removed.
-- `test_examples_dir_resolves_to_repo_examples` fails if `instance_manager.py` moves to another depth.
+- `TestFindExamplesDir` (`test_instance_manager.py`) fails if the module that reads the `examples/` directory (`instance_manager/examples.py`) moves to another depth; it also loads a copy of the module at a scratch depth so the test cannot pass vacuously.
 - Preset tests only assert when `/api/presets` finds FSM presets; they pass vacuously if none exist.
 
 ## Working here

@@ -798,3 +798,42 @@ forbidden_modules =
     fsm_llm.workflows.definitions
     fsm_llm.workflows.dsl
     fsm_llm.workflows.engine
+
+# Step 93 (monitor/instance_manager.py became the package monitor/instance_manager/, InstanceManager as
+# mixins over a shell). The shell composes the mixins, so no mixin, helper or surface module may import it
+# back (a cycle the mixins would only avoid by a function-local import), and the package is read by the
+# dashboard server (`monitor/server.py` imports it), so no module of it imports the server back.
+[importlinter:contract:monitor-instance-manager-mixins-do-not-import-the-shell]
+name = the mixins, helpers and surface of fsm_llm.monitor.instance_manager do not import its shell (manager.py)
+type = forbidden
+source_modules =
+    fsm_llm.monitor.instance_manager.agent
+    fsm_llm.monitor.instance_manager.examples
+    fsm_llm.monitor.instance_manager.fsm
+    fsm_llm.monitor.instance_manager.handlers
+    fsm_llm.monitor.instance_manager.lifecycle
+    fsm_llm.monitor.instance_manager.managed
+    fsm_llm.monitor.instance_manager.snapshots
+    fsm_llm.monitor.instance_manager.surface
+    fsm_llm.monitor.instance_manager.workflow
+    fsm_llm.monitor.instance_manager.workflow_presets
+forbidden_modules =
+    fsm_llm.monitor.instance_manager.manager
+
+[importlinter:contract:monitor-instance-manager-imports-no-server]
+name = the modules of fsm_llm.monitor.instance_manager import no dashboard server module
+type = forbidden
+source_modules =
+    fsm_llm.monitor.instance_manager.agent
+    fsm_llm.monitor.instance_manager.examples
+    fsm_llm.monitor.instance_manager.fsm
+    fsm_llm.monitor.instance_manager.handlers
+    fsm_llm.monitor.instance_manager.lifecycle
+    fsm_llm.monitor.instance_manager.managed
+    fsm_llm.monitor.instance_manager.snapshots
+    fsm_llm.monitor.instance_manager.surface
+    fsm_llm.monitor.instance_manager.workflow
+    fsm_llm.monitor.instance_manager.workflow_presets
+    fsm_llm.monitor.instance_manager.manager
+forbidden_modules =
+    fsm_llm.monitor.server

@@ -14,7 +14,7 @@ Each test file targets one source module in `src/fsm_llm/monitor/`. Server tests
 flowchart LR
     conftest[conftest.py: clears FSM_LLM_MONITOR_API_KEY] --> all[every test]
     app[test_app.py, test_server_security.py] --> server[server.py via TestClient]
-    im[test_instance_manager.py] --> manager[instance_manager.py]
+    im[test_instance_manager.py] --> manager[instance_manager/]
     col[test_collector.py] --> collector[collector.py]
     defs[test_definitions.py] --> definitions[definitions.py]
     ot[test_otel.py] --> otel[otel.py with mocked opentelemetry]
@@ -27,7 +27,7 @@ flowchart LR
 - `__init__.py` - empty package marker.
 - `test_app.py` - HTTP routes, static files, public exports, version, API-key gate, WebSocket redaction hook, and that the UI log levels, Max Iterations limit and log CSS match the server constants (132 tests).
 - `test_server_security.py` - Origin and Host checks, body size limit, security headers, key-gated reads, WebSocket auth, error-to-status mapping, request bounds, dashboard config parsing, builder guards, preset path validation (36 tests).
-- `test_instance_manager.py` - `ManagedFSM`/`ManagedWorkflow`/`ManagedAgent`, `InstanceManager` lookups, ending an instance, activity, workflow presets, disabled agent types, agent status resolution, stub tools, a failed launch keeping a finished instance, a terminal send when `end_conversation` fails, one span per exporter after an OTEL re-enable (real `opentelemetry` SDK, skipped without it), the instance event feed, `close()` teardown of every instance type (100 tests).
+- `test_instance_manager.py` - `ManagedFSM`/`ManagedWorkflow`/`ManagedAgent`, `InstanceManager` lookups, ending an instance, activity, workflow presets, disabled agent types, agent status resolution, stub tools, a failed launch keeping a finished instance, a terminal send when `end_conversation` fails, one span per exporter after an OTEL re-enable (real `opentelemetry` SDK, skipped without it), the instance event feed, `close()` teardown of every instance type, the `examples/` directory read from its module's depth, the package layout of `instance_manager/` (100 tests).
 - `test_collector.py` - `EventCollector` buffers, metrics, log filtering, handler callbacks, loguru sink, cursors, thread safety (50 tests).
 - `test_definitions.py` - Pydantic models and helpers in `definitions.py` (60 tests).
 - `test_otel.py` - `OTELExporter` enable, disable, shutdown and event routing (20 tests).

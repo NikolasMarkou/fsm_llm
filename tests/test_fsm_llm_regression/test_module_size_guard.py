@@ -32,7 +32,6 @@ LIMIT = 800
 
 # dotted module -> ceiling (its physical lines when step 60 recorded it)
 OVERSIZED: dict[str, int] = {
-    "fsm_llm.monitor.instance_manager": 1974,
     "fsm_llm.monitor.server": 1677,
 }
 

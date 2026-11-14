@@ -35,7 +35,7 @@ flowchart LR
 
 - `__main__.py` - the `fsm-llm-monitor` command: `--host`, `--port`, `--api-key`, `--otel`, `--no-browser`, `--version`, `--info`; then runs uvicorn.
 - `server.py` - FastAPI app: HTML page, REST API, WebSocket, security checks, optional API key, meta-builder chat sessions.
-- `instance_manager.py` - creates, runs, queries, and destroys FSM, agent, and workflow instances; attaches the observer hooks; `attach_api` shows an `API` object you already have (its events and conversations; one at a time).
+- `instance_manager/` - (a package) creates, runs, queries, and destroys FSM, agent, and workflow instances; attaches the observer hooks; `attach_api` shows an `API` object you already have (its events and conversations; one at a time).
 - `collector.py` - `EventCollector` (thread-safe bounded store of events and logs, metric counters, hook callbacks) and `redact_context`.
 - `otel.py` - `OTELExporter`: mirrors collector events as OpenTelemetry spans.
 - `definitions.py` - Pydantic models for events, logs, metrics, snapshots, config, and request bodies.

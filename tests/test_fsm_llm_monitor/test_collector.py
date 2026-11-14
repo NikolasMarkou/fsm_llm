@@ -20,10 +20,10 @@ from fsm_llm.monitor.constants import (
 from fsm_llm.monitor.definitions import LogRecord, MonitorEvent
 from fsm_llm.monitor.instance_manager import (
     ManagedAgent,
-    _MonitorHandler,
     register_monitor_handlers,
     unregister_monitor_handlers,
 )
+from fsm_llm.monitor.instance_manager.handlers import _MonitorHandler
 from tests.test_fsm_llm_monitor.support import _manager
 
 
@@ -529,7 +529,9 @@ class TestTransitionStates:
     def test_capture_log_records_transition_and_end_state(self):
         agent = ManagedAgent("a1")
         collector = EventCollector()
-        from fsm_llm.monitor.instance_manager import _build_context_capture_handlers
+        from fsm_llm.monitor.instance_manager.handlers import (
+            _build_context_capture_handlers,
+        )
 
         api = _FakeAPI()
         for h in _build_context_capture_handlers(collector, agent):
