@@ -119,6 +119,21 @@ Two markers can follow an anchor's id:
 - `[STALE]`: the plan directory that recorded the decision has been retired, so the full entry may be gone (its one-line summary is in `plans/ANCHORS.md`). The gate counts such an anchor as resolved by its tag (it is listed in the index under Retired). The rule itself may still bind. Read the anchor text and the code around it before changing anything.
 - `[SUPERSEDED BY D-nnn]` (or an inline `[supersedes ...]` note on the newer anchor): the rule was replaced. Follow the newer decision; the old text is kept only as history.
 
+## Changelog and upgrade guides
+
+`CHANGELOG.md` follows Keep a Changelog 1.1.0: a `## [Unreleased]` section first, then `## [X.Y.Z] - YYYY-MM-DD` releases, newest first; inside a section the `###` headings are only Added, Changed, Deprecated, Removed, Fixed and Security, each at most once, in that order; and `[Unreleased]: .../compare/v<newest release>...HEAD` sits with the reference links at the bottom. Releases already published stay as they were written.
+
+A change that breaks a caller (a removed or renamed public name or path, a changed default, a new refusal) gets one bullet that starts its breaking part with the exact marker `**BREAKING:**` (not `**Breaking:**`, not prose) and links its upgrade guide: `docs/upgrade-guide/vX.Y.Z/<name>.md#<slug>`, where `vX.Y.Z` is the release that ships the change, `<name>.md` is a page under `docs/upgrade-guide/vX.Y.Z/` and `<slug>` is the id of a heading in it (one heading per change, with the before and after code). The CHANGELOG is published on the documentation site, so a link into `docs/` must be written the way the site build accepts it; the checker only needs the `docs/upgrade-guide/vX.Y.Z/<name>.md#<slug>` tail to be present.
+
+```bash
+python scripts/changelog_check.py check                   # the form and every BREAKING bullet's guide link
+python scripts/changelog_check.py check --from 0.12.0     # widen the scope to older sections
+python scripts/changelog_check.py extract 0.13.0          # the notes of one release (also v0.13.0 or Unreleased)
+make changelog-check                                      # the same check as `check`
+```
+
+The checker (stdlib only, read-only) judges `[Unreleased]`, plus the newest release while `[Unreleased]` is empty. It is not part of CI yet: until the upgrade guides of 0.13.0 exist it reports every BREAKING bullet of `[Unreleased]` without a guide, so it is enforced at release prep, and the release workflow reads the release notes with `extract`.
+
 ## Building the docs
 
 The documentation site is built from `docs/` and `mkdocs.yml` with mkdocs-material. Its tools are a dependency group, not an extra (they need Python 3.11 or newer and are for maintainers), pinned exactly in `constraints.txt`:

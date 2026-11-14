@@ -1,4 +1,4 @@
-.PHONY: help test lint format type-check lint-imports build clean install-dev coverage audit counts api-snapshot decision-index decision-check docs docs-serve docs-clean
+.PHONY: help test lint format type-check lint-imports build clean install-dev coverage audit counts api-snapshot decision-index decision-check changelog-check docs docs-serve docs-clean
 
 # Default target
 help: ## Show this help message
@@ -57,6 +57,11 @@ decision-index: ## Regenerate docs/decisions/index.md, the decision index
 
 decision-check: ## Fail when the decision index is stale or a decision anchor does not resolve
 	python scripts/decision_index.py --check docs/decisions/index.md
+
+# Red on the real CHANGELOG.md until its BREAKING bullets link their upgrade guides (step 118 of plan
+# d454fd62), so it is NOT wired into CI or a test yet: it is enforced at release prep.
+changelog-check: ## Check the CHANGELOG form: ### headings, compare link, every BREAKING bullet links its upgrade guide
+	python scripts/changelog_check.py check
 
 docs: ## Build the docs site into site/ (strict: any warning fails); needs `pip install --group docs -c constraints.txt`
 	NO_MKDOCS_2_WARNING=1 mkdocs build --strict
