@@ -34,7 +34,9 @@ validation:
     unrecognized_links: warn
     anchors: warn
 
-# Every existing page is listed; the reference, package and project pages arrive with later steps.
+# Every existing page is listed; the project pages arrive with later steps. The module pages follow
+# MODULES of scripts/api_snapshot.py and the package pages follow src/fsm_llm/*/README.md (a test
+# pins both).
 nav:
   - Home: index.md
   - Getting started:
@@ -46,8 +48,34 @@ nav:
       - Testing: testing.md
   - Concepts:
       - Architecture: architecture.md
+  - Packages:
+      - agents: packages/agents.md
+      - eval: packages/eval.md
+      - monitor: packages/monitor.md
+      - reasoning: packages/reasoning.md
+      - synthesis: packages/synthesis.md
+      - testing: packages/testing.md
+      - workflows: packages/workflows.md
   - Reference:
       - API Reference: api_reference.md
+      - API snapshot: reference/api-snapshot.md
+      - Command line: reference/cli.md
+      - Modules:
+          - fsm_llm: reference/fsm_llm.md
+          - fsm_llm.skills: reference/fsm_llm.skills.md
+          - fsm_llm.core.codes: reference/fsm_llm.core.codes.md
+          - fsm_llm.core.verify.flow: reference/fsm_llm.core.verify.flow.md
+          - fsm_llm.frontmatter: reference/fsm_llm.frontmatter.md
+          - fsm_llm.okf: reference/fsm_llm.okf.md
+          - fsm_llm.engine.okf_bridge: reference/fsm_llm.engine.okf_bridge.md
+          - fsm_llm.core.definitions.schema: reference/fsm_llm.core.definitions.schema.md
+          - fsm_llm.agents: reference/fsm_llm.agents.md
+          - fsm_llm.eval: reference/fsm_llm.eval.md
+          - fsm_llm.monitor: reference/fsm_llm.monitor.md
+          - fsm_llm.reasoning: reference/fsm_llm.reasoning.md
+          - fsm_llm.synthesis: reference/fsm_llm.synthesis.md
+          - fsm_llm.testing: reference/fsm_llm.testing.md
+          - fsm_llm.workflows: reference/fsm_llm.workflows.md
   - Decisions: decisions/index.md
   - Roadmap:
       - 2026 roadmap: 2026_roadmap.md
