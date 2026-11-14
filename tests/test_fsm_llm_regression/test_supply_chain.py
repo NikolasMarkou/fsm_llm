@@ -63,6 +63,9 @@ _WRITE_ALLOWED: dict[tuple[str, str], set[str]] = {
     ("docs.yml", "deploy"): {"contents"},
     # the failure comment of the dependency review (pull requests only).
     ("python-package.yml", "dependency-review"): {"pull-requests"},
+    # the weekly pin refresh pushes a branch and opens a pull request, after the gates passed
+    # inside the job (step 110; test_refresh_workflow.py pins the shape of the job).
+    ("refresh-pins.yml", "refresh"): {"contents", "pull-requests"},
 }
 
 _SHA_USES = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}$")
@@ -431,7 +434,8 @@ def policy_problems(text: str, refresh_exists: bool) -> set[str]:
     """Rule codes for the supply-chain section of SECURITY.md.
 
     The refresh workflow of step 110 is described only once it exists, and must be described
-    once it does: a policy sentence for a job that is not there would be a false claim.
+    once it does (its file name, the cooldown and the 7-day age): a policy sentence for a job
+    that is not there would be a false claim.
     """
     found: set[str] = set()
     low = text.lower()
@@ -440,6 +444,10 @@ def policy_problems(text: str, refresh_exists: bool) -> set[str]:
             found.add(code)
     mentions_refresh = "cooldown" in low or "refresh-pins" in low
     if mentions_refresh != refresh_exists:
+        found.add("policy-refresh-claim")
+    if refresh_exists and not all(
+        phrase in low for phrase in ("refresh-pins", "cooldown", "7-day")
+    ):
         found.add("policy-refresh-claim")
     return found
 
@@ -1211,10 +1219,26 @@ POLICY_MUTANTS: list[tuple[str, Callable[[str], str], str]] = [
         "policy-write-scopes",
     ),
     (
-        "a refresh job claimed that does not exist",
-        lambda t: (
-            t
-            + "\nA scheduled job proposes litellm pin updates after a 7-day cooldown.\n"
+        "the refresh described without its cooldown",
+        _edit_all("cooldown", "delay"),
+        "policy-refresh-claim",
+    ),
+    (
+        "the refresh described without its file name",
+        _edit_all("refresh-pins", "the refresh workflow"),
+        "policy-refresh-claim",
+    ),
+    (
+        "the refresh described without its age",
+        _edit_all("7-day", "short"),
+        "policy-refresh-claim",
+    ),
+    (
+        "the refresh sentence removed",
+        lambda t: "\n".join(
+            ln
+            for ln in t.splitlines()
+            if "refresh-pins" not in ln and "cooldown" not in ln
         ),
         "policy-refresh-claim",
     ),
@@ -1230,11 +1254,31 @@ class TestThePolicyMutantsAreKilled:
     ):
         mutated = mutate(_security())
         assert mutated != _security()
-        assert code in policy_problems(mutated, refresh_exists=False), label
+        assert code in policy_problems(mutated, refresh_exists=True), label
 
     def test_a_refresh_workflow_that_exists_must_be_described(self):
+        text = _security()
+        assert policy_problems(text, refresh_exists=True) == set()
         assert "policy-refresh-claim" in policy_problems(
-            _security(), refresh_exists=True
+            "\n".join(
+                ln
+                for ln in text.splitlines()
+                if "refresh-pins" not in ln and "cooldown" not in ln
+            ),
+            refresh_exists=True,
+        )
+
+    def test_a_refresh_described_while_no_workflow_exists_is_a_false_claim(self):
+        assert "policy-refresh-claim" in policy_problems(
+            _security(), refresh_exists=False
+        )
+        without = "\n".join(
+            ln
+            for ln in _security().splitlines()
+            if "refresh-pins" not in ln and "cooldown" not in ln
+        )
+        assert "policy-refresh-claim" not in policy_problems(
+            without, refresh_exists=False
         )
 
 

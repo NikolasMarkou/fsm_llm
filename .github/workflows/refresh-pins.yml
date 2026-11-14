@@ -1,0 +1,140 @@
+# The scheduled pin refresh (roadmap row 0.10, plan d454fd62 step 110).
+#
+# Once a week `scripts/refresh_pins.py` picks the newest litellm and mcp release that is at least
+# 7 days old (the cooldown: litellm 1.82.7 and 1.82.8 were malware for hours, and a bad release is
+# usually yanked within days), is stable, admits every Python of the test matrix and stays in the
+# major of the current pin. When a pin moves, this job installs the new pins and runs the SAME
+# gates as the CI workflow (the whole non-slow suite, the `.pth` audit, mypy, pip-audit), and ONLY
+# THEN pushes a branch and opens a pull request.
+#
+# Why the gates run here: a pull request opened with the default `GITHUB_TOKEN` does not trigger
+# workflows (GitHub rule against recursive runs), so the CI workflow would never run on it. The
+# suite therefore runs inside this job, before the pull request exists. The owner still reviews
+# and merges; the pull request body is the script's report (old and new pins, release dates, ages,
+# the newer releases it skipped and why).
+#
+# The owner must allow Actions to create pull requests (Settings, Actions, General, Workflow
+# permissions: "Allow GitHub Actions to create and approve pull requests"); see CONTRIBUTING.md.
+#
+# Policy (pinned by tests/test_fsm_llm_regression/test_refresh_workflow.py and test_supply_chain.py):
+#   * triggers are `schedule` and `workflow_dispatch` only, never a pull request or a push;
+#   * the token is read-only at the top; this one job holds `contents: write` (push the branch) and
+#     `pull-requests: write` (open the pull request), the only job of that kind besides the docs
+#     deploy; the one secret named is the default `secrets.GITHUB_TOKEN`;
+#   * every action is pinned to a commit SHA with its release tag in a trailing comment;
+#   * nothing from an event or from the network is pasted into a `run:` script: values go through
+#     `env:` or are computed in the shell.
+name: Refresh pins
+
+on:
+  schedule:
+    # Mondays 05:17 UTC (a non-round minute: the top of the hour is when scheduled runs queue).
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One refresh at a time; a run in progress finishes (a half-pushed branch helps nobody).
+  group: refresh-pins
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  refresh:
+    # A fork has no use for this job (and no permission to open pull requests upstream).
+    if: ${{ github.repository == 'NikolasMarkou/fsm_llm' }}
+    runs-on: ubuntu-24.04
+    # Install ~2 min, the suite about 10, mypy ~3, the audit ~1: 90 is generous headroom and 4x
+    # tighter than GitHub's 360-minute default. Do not remove it.
+    timeout-minutes: 90
+    permissions:
+      # Push the `chore/refresh-pins-*` branch.
+      contents: write
+      # Open the pull request.
+      pull-requests: write
+    env:
+      # The same selection as python-package.yml (a test compares the two): no test is deselected.
+      PYTEST_MARKERS: not slow and not real_llm and not integration
+      PYTHONUTF8: "1"
+    steps:
+      - name: Check out the repository
+        # The credentials stay in the git config on purpose: this job pushes a branch with them
+        # (`git push`), and the job ends right after, so nothing outlives the run.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            constraints.txt
+            pyproject.toml
+      - name: Pick the newest eligible pins
+        id: refresh
+        # Reads PyPI JSON and rewrites the pin lines of constraints.txt in the working tree only.
+        # The last line of its report is `changed=true` or `changed=false`; a missing line fails
+        # the step (`grep` exits 1 under `pipefail`), so a failed read can never pass as no change.
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/refresh-report.md"
+          python scripts/refresh_pins.py > "$report"
+          cat "$report"
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          grep -E '^changed=(true|false)$' "$report" | tail -n 1 >> "$GITHUB_OUTPUT"
+      - name: Install the package and every extra at the new pins
+        if: steps.refresh.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          # The same line as every job of python-package.yml (a test compares them).
+          pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis,testing,mcp]"
+      - name: Audit for suspicious .pth files
+        if: steps.refresh.outputs.changed == 'true'
+        run: python scripts/audit_pth.py
+      - name: Audit the installed environment for known vulnerabilities
+        if: steps.refresh.outputs.changed == 'true'
+        # A new pin must not bring a known vulnerability; the CI `supply-chain` job runs this too.
+        run: pip-audit --skip-editable
+      - name: Type check with mypy
+        if: steps.refresh.outputs.changed == 'true'
+        run: python -m mypy -p fsm_llm
+      - name: Test with pytest
+        if: steps.refresh.outputs.changed == 'true'
+        # The whole non-slow suite, `mcp` installed so the real stdio MCP tests run: the gate that
+        # the pull request will not get from the CI workflow (see the header).
+        run: python -m pytest tests/ -q -m "$PYTEST_MARKERS"
+      - name: Open the pull request
+        if: steps.refresh.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          branch="chore/refresh-pins-$(date -u +%Y-%m-%d-%H%M%S)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add constraints.txt pyproject.toml
+          git commit -m "chore(deps): refresh litellm and mcp pins"
+          git push origin "$branch"
+          body="$RUNNER_TEMP/pull-request-body.md"
+          {
+            echo 'The scheduled pin refresh found newer releases that are at least 7 days old.'
+            echo 'The whole non-slow suite, mypy, the .pth audit and pip-audit passed in the'
+            echo 'refresh job before this pull request was opened (the CI workflow does not run on'
+            echo 'a pull request opened with the default token, so review the run of the refresh'
+            echo 'workflow named below instead).'
+            echo
+            grep -v '^changed=' "$RUNNER_TEMP/refresh-report.md"
+            echo
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > "$body"
+          gh pr create --base main --head "$branch" \
+            --title "chore(deps): refresh litellm and mcp pins" \
+            --body-file "$body"
