@@ -1,4 +1,4 @@
-.PHONY: help test lint format type-check lint-imports build clean install-dev coverage audit counts api-snapshot
+.PHONY: help test lint format type-check lint-imports build clean install-dev coverage audit counts api-snapshot decision-index decision-check
 
 # Default target
 help: ## Show this help message
@@ -50,3 +50,9 @@ counts: ## Fail when a documented test count differs from a collection
 
 api-snapshot: ## Regenerate docs/api.txt, the public API snapshot
 	python scripts/api_snapshot.py --write docs/api.txt
+
+decision-index: ## Regenerate docs/decisions/index.md, the decision index
+	python scripts/decision_index.py --write docs/decisions/index.md
+
+decision-check: ## Fail when the decision index is stale or a decision anchor does not resolve
+	python scripts/decision_index.py --check docs/decisions/index.md

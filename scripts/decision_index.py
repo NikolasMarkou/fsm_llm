@@ -3,8 +3,8 @@
 
 Standard library only. It never imports `fsm_llm` and never touches `sys.path`: run it
 with a plain `python scripts/decision_index.py --report` (roadmap row 0.5, plan d454fd62,
-steps 98 to 100; the generator `--write` / `--check` of the committed index arrives at
-step 100).
+steps 98 to 100). Step 100 adds the generator of the committed index `docs/decisions/
+index.md` (`--write`), the gate (`--check`) and the extended `--report`.
 
 An anchor is a comment of the form `# DECISION [plan-id/]D-NNN [STALE]` next to the code
 a decision guards. `plans/ANCHORS.md` (the append-only manifest, one line per anchored
@@ -51,16 +51,44 @@ Interface (the contract the generator of step 100 builds on):
   into the date and the rationale, so a `|` or `<` inside the rationale survives.
 * `state_of(anchor, manifest) -> str` and `classify(anchors, manifest) -> dict[str,
   list[Anchor]]` with every state of `STATES` present, in that order.
-* `main(argv) -> int`: `--root PATH`, `--manifest PATH`, `--report` (counts, exit 0).
+* `render(anchors, manifest) -> str`: the decision index (markdown) from the anchors and
+  the manifest ONLY. Pure: it reads no file, no environment variable, no clock and no
+  absolute path, so the text is the same on every machine and every checkout. Plans in
+  date order, decisions by number, locations as `path` plus the enclosing `Class.method`
+  (never a line number), the rule summary cut at `SUMMARY_WIDTH` characters from the
+  anchor's comment, a "Retired" section, a section for anchors that do not resolve (empty
+  on a healthy tree) and the manifest entries with no anchor in the tree. ASCII only (any
+  other character becomes a visible `\\uXXXX` escape), no trailing space, one trailing
+  newline.
+* `problems(anchors, manifest) -> list[str]`: why the gate is red (an `unresolved` or a
+  `badprefix` anchor), each with its remedy; `[]` when green.
+* `check_index(path, anchors, manifest) -> list[str]`: `problems` plus the freshness of
+  the committed file against `render` (CRLF read as LF).
+* `comment_share(root) -> CommentShare`: comment tokens over source rows of the `.py`
+  files under `src`, by `tokenize`: the definition of the baseline 12.87% of the plan
+  (10,169 of 78,983 at commit 4b24387d). Reported, never gated.
+* `local_resolved(root, anchors)`: the unresolved anchors that a local
+  `plans/<plan-id>/decisions.md` names, only while the environment variable `CI` is
+  unset (the `resolved-local` count of `--report`). It is a REPORT-ONLY tier: it changes
+  neither `render` nor `check_index`, so `--check` says the same in CI and on a developer
+  machine, and the committed index never depends on a plan directory that only one
+  machine has.
+* `main(argv) -> int`: `--root PATH`, `--manifest PATH` and one mode: `--report` (counts,
+  exit 0), `--write PATH` (write the index) or `--check PATH` (exit 1 when the file
+  differs from `render` or any anchor is `unresolved` or `badprefix`, with the cause and
+  the fix command on stderr). `make decision-index` and `make decision-check` call them.
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import difflib
+import io
 import os
 import re
 import sys
+import tokenize
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -498,35 +526,457 @@ def classify(
     return out
 
 
+# --------------------------------------------------------------------------- text
+
+
+#: The rule summary of a decision: the anchor's comment, whitespace collapsed, cut here.
+SUMMARY_WIDTH = 120
+
+#: Non-ASCII characters that read better as ASCII than as an escape.
+_TRANSLITERATE = {
+    " ": " ",
+    "–": "-",
+    "—": "-",
+    "‘": "'",
+    "’": "'",
+    "“": '"',
+    "”": '"',
+    "…": "...",
+    "←": "<-",
+    "→": "->",
+    "≤": "<=",
+    "≥": ">=",
+    "×": "x",
+}
+_CODE_SPAN = re.compile(r"(`[^`]*`)")
+_PLAN_DATE = re.compile(
+    r"^plan[-_](?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})(?:T(?P<time>[0-9]{6}))?[-_]"
+    r"(?P<hex>[0-9a-f]{8})$"
+)
+
+
+def _ascii(text: str) -> str:
+    """`text` with every character outside printable ASCII spelled in ASCII: a known
+    punctuation mark becomes its ASCII twin, anything else a visible `\\uXXXX` escape.
+    Table-driven, never `unicodedata`: the result must not depend on the Python version."""
+    out: list[str] = []
+    for ch in text:
+        code = ord(ch)
+        if ch in _TRANSLITERATE:
+            out.append(_TRANSLITERATE[ch])
+        elif 32 <= code < 127:
+            out.append(ch)
+        elif code < 128:
+            out.append(f"\\x{code:02x}")
+        elif code <= 0xFFFF:
+            out.append(f"\\u{code:04x}")
+        else:
+            out.append(f"\\U{code:08x}")
+    return "".join(out)
+
+
+def _squash(text: str) -> str:
+    """One line: every run of whitespace is one space, no trailing or leading space."""
+    return " ".join(text.split())
+
+
+def _prose(text: str) -> str:
+    """A manifest rationale as one markdown line: a `<` outside a code span is escaped
+    (a raw one starts an HTML tag in mkdocs), the rest is ASCII."""
+    parts = _CODE_SPAN.split(_squash(text))
+    return _ascii(
+        "".join(p if i % 2 else p.replace("<", "&lt;") for i, p in enumerate(parts))
+    )
+
+
+def _code(text: str) -> str:
+    """`text` as one inline code span: markdown characters stay inert."""
+    return "`" + _ascii(_squash(text).replace("`", "'")) + "`"
+
+
+def _summary(text: str) -> str:
+    """The rule summary: the anchor's comment, one line, cut at `SUMMARY_WIDTH`."""
+    flat = _squash(text)
+    if len(flat) > SUMMARY_WIDTH:
+        flat = flat[: SUMMARY_WIDTH - 3].rstrip() + "..."
+    return flat
+
+
+# --------------------------------------------------------------------------- the index
+
+
+def _plan_order(plan_id: str) -> tuple[str, str, str, str]:
+    """Plans by date, then time, then hex id (a legacy id has no time); the id last
+    keeps the order total for an id the pattern does not read."""
+    match = _PLAN_DATE.match(plan_id)
+    if match is None:
+        return ("", "", "", plan_id)
+    return (match["date"], match["time"] or "", match["hex"], plan_id)
+
+
+def _where(scope: str) -> str:
+    return "module level" if scope == "-" else _code(scope)
+
+
+def _locations(anchors: Sequence[Anchor]) -> list[str]:
+    """One place per (path, scope) of a decision, sorted; no line number."""
+    by_place: dict[tuple[str, str], list[Anchor]] = {}
+    for anchor in anchors:
+        by_place.setdefault((anchor.path, anchor.scope), []).append(anchor)
+    out = []
+    for (path, scope), group in sorted(by_place.items()):
+        bullet = f"{_code(path)}, {_where(scope)}"
+        if len(group) > 1:
+            bullet += f" ({len(group)} anchors)"
+        if all(a.stale for a in group):
+            bullet += " [STALE]"
+        out.append(bullet)
+    return out
+
+
+def _rule(anchors: Sequence[Anchor]) -> str | None:
+    """The summary of the first anchor, in (path, scope) order, that has comment text."""
+    for anchor in sorted(anchors, key=lambda a: (a.path, a.scope)):
+        if _squash(anchor.text):
+            return _summary(anchor.text)
+    return None
+
+
+def _decision_block(
+    heading: str, facts: list[str], anchors: Sequence[Anchor]
+) -> list[str]:
+    block = ["", f"#### {heading}"]
+    block += facts
+    rule = _rule(anchors)
+    if rule is not None:
+        block.append(f"- Rule: {_code(rule)}")
+    places = _locations(anchors)
+    if len(places) == 1:
+        block.append(f"- Where: {places[0]}")
+    else:
+        block.append("- Where:")
+        block += [f"  - {place}" for place in places]
+    return block
+
+
+def _by_plan(anchors: Sequence[Anchor]) -> list[tuple[str, dict[int, list[Anchor]]]]:
+    plans: dict[str, dict[int, list[Anchor]]] = {}
+    for anchor in anchors:
+        if anchor.plan_id is not None:
+            plans.setdefault(anchor.plan_id, {}).setdefault(anchor.number, []).append(
+                anchor
+            )
+    return [(p, plans[p]) for p in sorted(plans, key=_plan_order)]
+
+
+def _key(plan_id: str, number: int) -> str:
+    return f"{plan_id}/D-{number:03d}"
+
+
+def render(
+    anchors: Sequence[Anchor], manifest: dict[tuple[str, int], ManifestEntry]
+) -> str:
+    """The decision index as markdown. Pure and deterministic; see the module docstring."""
+    states = classify(anchors, manifest)
+    seen = {a.key for a in anchors if a.plan_id is not None}
+    unanchored = sorted(
+        (k for k in manifest if k not in seen), key=lambda k: (_plan_order(k[0]), k[1])
+    )
+    out = [
+        "# Decision index",
+        "",
+        "Generated by `scripts/decision_index.py`: do not edit by hand. Regenerate it with",
+        "`make decision-index` after any change to a `# DECISION` anchor or its comment, or to",
+        "`plans/ANCHORS.md`; `make decision-check` (and a test in the default suite) fails",
+        "when this file is out of date or an anchor does not resolve.",
+        "",
+        "A decision anchor is a comment in the code that states a rule and what not to do",
+        "(`decision-anchoring` in the planner skill). Each one names a decision as",
+        "`<plan-id>/D-NNN`; the one-line record of a decision (its date and rationale) is a",
+        "line of the append-only manifest `plans/ANCHORS.md`. Places are given as a path and",
+        "the enclosing definition, never as a line number, which is stale at the next commit.",
+        "",
+        "## Summary",
+        "",
+        f"- Anchors: {len(anchors)} in {len({a.path for a in anchors})} files, "
+        f"{len(seen)} distinct decisions.",
+        f"- Resolved (the manifest has the decision): {len(states[RESOLVED])}.",
+        f"- Retired (marked `[STALE]`, no manifest line): {len(states[RETIRED])}.",
+        f"- Unresolved: {len(states[UNRESOLVED])}. Bad prefix: {len(states[BADPREFIX])}.",
+        f"- Manifest entries: {len(manifest)}, of which {len(unanchored)} have no anchor "
+        "in the tree.",
+        "",
+        "## Decisions",
+    ]
+    for plan_id, numbers in _by_plan(states[RESOLVED]):
+        out += ["", f"### {plan_id}"]
+        for number in sorted(numbers):
+            entry = manifest[(plan_id, number)]
+            facts = [f"- Rationale ({_ascii(entry.date)}): {_prose(entry.rationale)}"]
+            out += _decision_block(_key(plan_id, number), facts, numbers[number])
+    out += [
+        "",
+        "## Retired",
+        "",
+        "These anchors carry `[STALE]` and the manifest has no line for their decision: the",
+        "plan directory that held the record is gone. They resolve by tag: the comment in",
+        "the code is the only record left, and the rule it states may still bind.",
+    ]
+    if not states[RETIRED]:
+        out += ["", "None."]
+    for plan_id, numbers in _by_plan(states[RETIRED]):
+        out += ["", f"### {plan_id}"]
+        for number in sorted(numbers):
+            out += _decision_block(_key(plan_id, number), [], numbers[number])
+    broken = [*states[UNRESOLVED], *states[BADPREFIX]]
+    if broken:
+        out += [
+            "",
+            "## Anchors that do not resolve",
+            "",
+            "Each of these fails `make decision-check`: add the decision's line to",
+            "`plans/ANCHORS.md` (unresolved) or write the full plan id (bad prefix).",
+            "",
+        ]
+        for anchor in sorted(broken, key=lambda a: (a.token, a.path, a.scope)):
+            state = BADPREFIX if anchor.plan_id is None else UNRESOLVED
+            out.append(
+                f"- {_code(anchor.token)} ({state}): {_code(anchor.path)}, "
+                f"{_where(anchor.scope)}"
+            )
+    out += [
+        "",
+        "## Manifest entries with no code anchor",
+        "",
+        "The manifest has a line for each of these decisions but no `# DECISION` anchor in",
+        "the tree names it (an anchor is removed when the code it guarded is reverted).",
+        "",
+    ]
+    if not unanchored:
+        out.append("None.")
+    for plan_id, number in unanchored:
+        entry = manifest[(plan_id, number)]
+        out.append(
+            f"- {_code(_key(plan_id, number))}, {_ascii(entry.date)}: "
+            f"{_prose(entry.rationale)}"
+        )
+    return "\n".join(out) + "\n"
+
+
+# --------------------------------------------------------------------------- the gate
+
+
+def problems(
+    anchors: Sequence[Anchor], manifest: dict[tuple[str, int], ManifestEntry]
+) -> list[str]:
+    """Why the anchor gate is red, one message per cause with its remedy; `[]` if green.
+    Reads the manifest only, never the environment: `CI` changes nothing here."""
+    states = classify(anchors, manifest)
+    out = []
+    if states[UNRESOLVED]:
+        keys = sorted({_key(a.plan_id or "", a.number) for a in states[UNRESOLVED]})
+        out.append(
+            f"{len(states[UNRESOLVED])} live anchor(s) have no line in plans/ANCHORS.md: "
+            + ", ".join(keys[:10])
+            + (f" and {len(keys) - 10} more" if len(keys) > 10 else "")
+            + ". Fix: the plan's archivist appends one `<plan-id>/D-NNN | date | rationale` "
+            "line per decision (append only, from the plan's decisions.md); if the "
+            "anchor is a leftover, mark it [STALE]."
+        )
+    if states[BADPREFIX]:
+        tokens = sorted({a.token for a in states[BADPREFIX]})
+        out.append(
+            f"{len(states[BADPREFIX])} anchor(s) name no plan id: "
+            + ", ".join(tokens[:10])
+            + (f" and {len(tokens) - 10} more" if len(tokens) > 10 else "")
+            + ". Fix: write the full plan directory name before /D-NNN."
+        )
+    return out
+
+
+def check_index(
+    path: Path,
+    anchors: Sequence[Anchor],
+    manifest: dict[tuple[str, int], ManifestEntry],
+) -> list[str]:
+    """`problems` plus the freshness of the committed index at `path`; `[]` if green."""
+    out = problems(anchors, manifest)
+    wanted = render(anchors, manifest)
+    fix = f"run `make decision-index` (or `python scripts/decision_index.py --write {path}`)"
+    text = _read(Path(path))
+    if text is None:
+        out.append(f"{path} is missing or unreadable: {fix}")
+    elif text.replace("\r\n", "\n") != wanted:
+        diff = list(
+            difflib.unified_diff(
+                text.replace("\r\n", "\n").split("\n"),
+                wanted.split("\n"),
+                "committed",
+                "generated",
+                n=0,
+                lineterm="",
+            )
+        )
+        hint = "\n".join(f"    {d}"[:160] for d in diff[2:14])
+        out.append(
+            f"{path} is out of date ({max(len(diff) - 2, 0)} diff row(s)); {fix}, then "
+            f"commit it. First differences (- committed, + generated):\n{hint}"
+        )
+    return out
+
+
+# --------------------------------------------------------------------------- the report
+
+
+@dataclass(frozen=True)
+class CommentShare:
+    """Comment tokens against source rows (`str.splitlines`) of the `.py` files of `src`."""
+
+    comments: int
+    rows: int
+    files: int
+
+    @property
+    def percent(self) -> float | None:
+        return 100.0 * self.comments / self.rows if self.rows else None
+
+
+def comment_share(root: Path) -> CommentShare:
+    """The comment share of `src`, by `tokenize`: one COMMENT token is one comment (a
+    full-line comment or a trailing one), the denominator is every physical row. A file
+    that does not tokenize is left out of both."""
+    comments = rows = files = 0
+    for rel, path in _files(Path(root)):
+        if not rel.startswith("src/") or not rel.endswith(".py"):
+            continue
+        text = _read(path)
+        if text is None:
+            continue
+        try:
+            found = sum(
+                tok.type == tokenize.COMMENT
+                for tok in tokenize.generate_tokens(io.StringIO(text).readline)
+            )
+        except (tokenize.TokenError, SyntaxError, ValueError):
+            continue
+        comments += found
+        rows += len(text.splitlines())
+        files += 1
+    return CommentShare(comments, rows, files)
+
+
+_LOCAL_HEADING = re.compile(r"^##[ \t]+D-(?P<number>[0-9]{3,})(?![0-9])", re.MULTILINE)
+
+
+def ci_is_set() -> bool:
+    """True when the environment variable `CI` is set to anything but an empty value."""
+    return bool(os.environ.get("CI"))
+
+
+def local_resolved(root: Path, anchors: Sequence[Anchor]) -> list[Anchor]:
+    """Live `unresolved` anchors that a local `plans/<plan-id>/decisions.md` names with a
+    `## D-NNN` heading: the `resolved-local` tier. Report-only; empty when `CI` is set."""
+    if ci_is_set():
+        return []
+    known: dict[str, set[int]] = {}
+    out = []
+    for anchor in anchors:
+        if anchor.plan_id is None:
+            continue
+        if anchor.plan_id not in known:
+            text = _read(Path(root) / "plans" / anchor.plan_id / "decisions.md")
+            known[anchor.plan_id] = {
+                int(m["number"]) for m in _LOCAL_HEADING.finditer(text or "")
+            }
+        if anchor.number in known[anchor.plan_id]:
+            out.append(anchor)
+    return out
+
+
+def _percent(part: int, whole: int) -> str:
+    return f"{100.0 * part / whole:.1f}%" if whole else "n/a"
+
+
+def report_lines(
+    root: Path,
+    anchors: Sequence[Anchor],
+    manifest: dict[tuple[str, int], ManifestEntry],
+) -> list[str]:
+    """The `--report` text. The word for the share is `comment share`, never gated."""
+    states = classify(anchors, manifest)
+    seen = {a.key for a in anchors if a.plan_id is not None}
+    lines = [f"anchors: {len(anchors)}"]
+    lines += [f"{state}: {len(states[state])}" for state in STATES]
+    lines += [
+        f"distinct decisions: {len(seen)}",
+        f"manifest entries: {len(manifest)}",
+        f"manifest entries without an anchor: {len([k for k in manifest if k not in seen])}",
+        f"resolved + retired: {len(states[RESOLVED]) + len(states[RETIRED])} of "
+        f"{len(anchors)} ({_percent(len(states[RESOLVED]) + len(states[RETIRED]), len(anchors))})",
+    ]
+    if ci_is_set():
+        lines.append("resolved-local: n/a (CI is set)")
+    else:
+        local = local_resolved(root, states[UNRESOLVED])
+        lines.append(
+            f"resolved-local: {len(local)} of {len(states[UNRESOLVED])} unresolved"
+        )
+    share = comment_share(root)
+    lines.append(
+        f"comment share: {_percent(share.comments, share.rows)} "
+        f"({share.comments} comment tokens of {share.rows} source rows, "
+        f"{share.files} files of src; reported, not gated)"
+    )
+    return lines
+
+
 # --------------------------------------------------------------------------- command
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="decision_index.py",
-        description="Scan the `# DECISION` anchors and sort them against plans/ANCHORS.md.",
+        description="Scan the `# DECISION` anchors and sort them against plans/ANCHORS.md; "
+        "write or check the generated decision index.",
     )
     parser.add_argument("--root", type=Path, default=ROOT, help="project directory")
     parser.add_argument(
         "--manifest", type=Path, default=None, help="default: <root>/plans/ANCHORS.md"
     )
-    parser.add_argument(
-        "--report", action="store_true", help="print the counts, exit 0"
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--report", action="store_true", help="print the counts, exit 0")
+    mode.add_argument(
+        "--write", type=Path, metavar="PATH", help="write the decision index to PATH"
+    )
+    mode.add_argument(
+        "--check",
+        type=Path,
+        metavar="PATH",
+        help="exit 1 when PATH differs from the generated index or an anchor does "
+        "not resolve",
     )
     args = parser.parse_args(argv)
-    if not args.report:
-        parser.error("nothing to do: pass --report")
     if not args.root.is_dir():
         print(f"error: {args.root} is not a directory", file=sys.stderr)
         return 1
     manifest = load_manifest(args.manifest or args.root / "plans" / "ANCHORS.md")
     anchors = scan(args.root)
-    states = classify(anchors, manifest)
-    print(f"anchors: {len(anchors)}")
-    for state in STATES:
-        print(f"{state}: {len(states[state])}")
-    print(f"distinct decisions: {len({a.key for a in anchors if a.plan_id})}")
-    print(f"manifest entries: {len(manifest)}")
+    if args.report:
+        print("\n".join(report_lines(args.root, anchors, manifest)))
+        return 0
+    if args.write is not None:
+        args.write.parent.mkdir(parents=True, exist_ok=True)
+        # bytes, not text: no newline translation, and a non-ASCII character is an error
+        args.write.write_bytes(render(anchors, manifest).encode("ascii"))
+        return 0
+    found = check_index(args.check, anchors, manifest)
+    if found:
+        for message in found:
+            print(f"error: {message}", file=sys.stderr)
+        return 1
+    print(
+        f"ok: {args.check} is current ({len(anchors)} anchors, all resolved or retired)"
+    )
     return 0
 
 

@@ -997,7 +997,8 @@ class TestMain:
         self._tree(tmp_path)
         proc = _run(tmp_path, "--report")
         assert proc.returncode == 0, proc.stderr
-        assert proc.stdout.splitlines() == [
+        # the first seven rows are the step-98 report; step 100 appends the rest
+        assert proc.stdout.splitlines()[:7] == [
             "anchors: 5",
             "resolved: 1",
             "retired: 1",
@@ -1022,12 +1023,12 @@ class TestMain:
             "unresolved: 0",
             "badprefix: 1",
         ]
-        assert out[-1] == "manifest entries: 3"
+        assert out[6] == "manifest entries: 3"
 
     def test_the_default_manifest_is_plans_anchors_md_under_the_root(self, tmp_path):
         _write(tmp_path, "src/a.py", f"{A} {P1}/D-001: x\n")
         out = _run(tmp_path, "--report").stdout.splitlines()
-        assert "unresolved: 1" in out and out[-1] == "manifest entries: 0"
+        assert "unresolved: 1" in out and "manifest entries: 0" in out
 
     def test_without_a_mode_the_command_is_a_usage_error(self, tmp_path):
         proc = _run(tmp_path)
