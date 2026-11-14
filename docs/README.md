@@ -1,6 +1,6 @@
 # docs
 
-The `docs/` folder at the root of the FSM-LLM repository holds the long-form user guides for the framework. FSM-LLM is a Python library that runs conversations as JSON-defined finite state machines (FSMs), with an LLM doing data extraction and response writing. It contains Markdown files and one generated text file, no code: the guides and records listed below, plus this index, a maintainer-notes file (`AGENTS.md`, for coding agents) and `api.txt`, the public API snapshot that `scripts/api_snapshot.py` writes (`make api-snapshot`) and `tests/test_fsm_llm_regression/test_api_snapshot.py` compares.
+The `docs/` folder at the root of the FSM-LLM repository holds the long-form user guides for the framework. FSM-LLM is a Python library that runs conversations as JSON-defined finite state machines (FSMs), with an LLM doing data extraction and response writing. It contains Markdown files and one generated text file, no code: the guides and records listed below, plus this index, a maintainer-notes file (`AGENTS.md`, for coding agents), the generated decision index (`decisions/index.md`) and `api.txt`, the public API snapshot that `scripts/api_snapshot.py` writes (`make api-snapshot`) and `tests/test_fsm_llm_regression/test_api_snapshot.py` compares.
 
 ## What it is for
 
@@ -49,6 +49,7 @@ Some tests read these files. `tests/test_fsm_llm/test_docs_snippets.py` finds ev
 - `strands_features_phase_1.md` - historical: delivery note for schema-enforced output, the hidden `metadata` memory buffer, response streaming and session persistence (commit `a7e3d88`).
 - `strands_features_phase_2.md` - historical: plan for the other 8 features (OTEL, swarm, agent graph, MCP, semantic tool retrieval, dependency-based workflow parallelism, SOPs, A2A).
 - `agents_roadmap.md` - design record, not a guide: the `fsm_llm.agents` audit (verdict per audit id, commits, known open items, deferred Track B) and recorded baselines (G3 examples run, agent bench blocks B0 to B2). Current agents contracts live in `src/fsm_llm/agents/README.md` and the Agents section of `api_reference.md`. Source code and `scripts/agents_bench.py` point to it by name.
+- `decisions/index.md` - the generated decision index: every `# DECISION` anchor of the code, grouped by plan, with its rationale and its places. Not a guide and never edited by hand: `make decision-index` writes it and `make decision-check` fails when it is stale or an anchor has no line in `plans/ANCHORS.md`.
 - `AGENTS.md` - maintainer notes for coding agents; not part of the user guides.
 
 ## How to use it

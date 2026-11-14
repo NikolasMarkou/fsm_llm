@@ -58,12 +58,14 @@ Code whose reason is not obvious from reading it carries a decision anchor, a co
 - Format: `# DECISION <plan-id>/D-NNN`, with the full plan directory name as the plan id. Older anchors use the legacy form `plan_YYYY-MM-DD_<8 hex>`. A bare `D-NNN` with no plan id is not allowed in new code.
 - Add one when the code takes an approach chosen after another one failed, when a simpler-looking alternative was rejected on purpose, when it works around a library or framework constraint, or when a reader would reasonably ask "why not just do X?".
 - The body says what NOT to do and why. A new anchor is at most 6 lines; the full reasoning belongs in `decisions.md`.
-- When you place or move an anchor, update the entry's `**Anchor-Refs**:` line (`path:line`) in the same commit.
+- Every anchor needs a line in `plans/ANCHORS.md`, the append-only manifest (one line per decision: plan id, number, date, one-line rationale). The line is produced when the plan closes; never edit or reorder an existing line. `plans/ANCHORS.md` is the one tracked file under `plans/`, so a fresh clone has it. The owner commits the appended lines before the first push.
+- `make decision-check` is the gate: it fails when an anchor has no manifest line (and is not `[STALE]`), when an anchor has a bad prefix (not a plan id, or a bare `D-NNN`), and when `docs/decisions/index.md` is stale. A default-suite test runs the same check.
+- `docs/decisions/index.md` is generated from the anchors and the manifest: do not edit it. After you add, move, reword or remove an anchor (or when `plans/ANCHORS.md` gains lines) run `make decision-index` and commit the regenerated file with the change. The index lists every place of each decision (path and enclosing definition, no line numbers), so it is the lookup path from a decision to its code; the `**Anchor-Refs**:` line in a plan's `decisions.md` is no longer the way to find the places.
 - Read the anchors near code before you change it, and do not undo what they forbid. If a rule no longer fits, record a new decision that supersedes it instead of deleting the anchor quietly.
 
 Two markers can follow an anchor's id:
 
-- `[STALE]`: the plan directory that recorded the decision has been retired, so the full entry may be gone (its one-line summary is in `plans/ANCHORS.md`). The rule itself may still bind. Read the anchor text and the code around it before changing anything.
+- `[STALE]`: the plan directory that recorded the decision has been retired, so the full entry may be gone (its one-line summary is in `plans/ANCHORS.md`). The gate counts such an anchor as resolved by its tag (it is listed in the index under Retired). The rule itself may still bind. Read the anchor text and the code around it before changing anything.
 - `[SUPERSEDED BY D-nnn]` (or an inline `[supersedes ...]` note on the newer anchor): the rule was replaced. Follow the newer decision; the old text is kept only as history.
 
 ## Pull requests
