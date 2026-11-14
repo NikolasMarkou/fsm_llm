@@ -1,5 +1,7 @@
 # Contributing to FSM-LLM
 
+Contributions are welcome, from a typo fix to a new agent pattern. Report vulnerabilities as described in [SECURITY.md](https://github.com/NikolasMarkou/fsm_llm/blob/main/SECURITY.md).
+
 ## Development setup
 
 Work inside the project virtualenv. Every command below assumes `.venv/bin` is on `PATH` (or call `.venv/bin/python` directly).
@@ -17,21 +19,70 @@ Upgrading a clone from before the 2026-09-29 restructure (extensions moved under
 ## Tests, lint and types
 
 ```bash
-make test           # full suite (pytest -v)
+make install-dev    # editable install with every extra, plus pre-commit hooks
+make test           # Run full test suite (14,043 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
-make type-check     # mypy on the fsm_llm package (core and subpackages)
-make lint-imports   # import contracts in .importlinter (needs the dev extra)
+make type-check     # mypy on the fsm_llm package (src/fsm_llm/)
+make lint-imports   # import contracts in .importlinter (the Section 5.2 layers, kernel, litellm, testing, pytest, entry modules, ...)
+make audit          # scan site-packages for malicious .pth files
+make counts         # fail when a test count written in a .md file differs from a collection
+make build          # wheel and sdist
 pytest tests/test_fsm_llm/            # one suite (core)
 pytest -m "not slow"                  # skip the slow tests
 ```
 
-- The default suite mocks the LLM. Live tests need a reachable Ollama and skip without one.
+- The default suite mocks the LLM: it needs no network and no model. Live tests need a reachable Ollama and skip without one.
+- CI runs Python 3.11 and 3.12: `.pth` audit, ruff lint and format check, mypy, and pytest without the `slow`, `real_llm` and `integration` markers.
 - Pre-commit runs ruff (lint with `--fix`, and format) and the file hygiene hooks on commit, and a quick pytest run on push.
 - A behaviour change needs a test that fails on the code before the change. Run it against the parent commit to confirm.
-- Test counts are written out as literals in `AGENTS.md` and `README.md`, and `tests/test_packaging.py` checks them against a fresh collection. When you add or remove tests, re-measure with `pytest --collect-only -q | tail -1` (and per suite) and update every literal. Never guess or adjust a count by hand.
+- Test counts are written out as literals in `AGENTS.md` and in `CONTRIBUTING.md` (the `make test` line above; the README is the PyPI page and holds no count), and `tests/test_packaging.py` checks them against a fresh collection. When you add or remove tests, re-measure with `pytest --collect-only -q | tail -1` (and per suite) and update every literal. Never guess or adjust a count by hand.
 - `tests/test_fsm_llm/test_docs_snippets.py` loads every fenced block that names `"initial_state"` in the first-touch docs. A full FSM snippet in the docs must be a valid FSM.
 - Naming for new code (ids, units, constants, enums, builders, exceptions, verbs) follows the `Naming conventions` section of [AGENTS.md](https://github.com/NikolasMarkou/fsm_llm/blob/main/AGENTS.md).
+- litellm is imported in exactly one module, `src/fsm_llm/llm/providers/litellm.py`. Do not add a second request builder or provider call elsewhere.
+- Internal-key and secret-key checks go through `fsm_llm.constants.has_internal_prefix` and `is_forbidden_context_entry`. Do not re-inline them.
+- Anything new that is configured with many settings gets a step-by-step builder that follows the convention in [src/fsm_llm/AGENTS.md](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/AGENTS.md): setters only record, `build()` is the only validator.
+- Commit messages follow `<type>(<scope>): <summary>`.
+
+## Project structure
+
+The repository is one distribution (`fsm-llm`, setuptools, src layout). The directory `src/fsm_llm/` is the import package `fsm_llm` (found by `packages.find` in `pyproject.toml`), so `src/fsm_llm/engine/api/conversation.py` is `fsm_llm.engine.api.conversation`, and a subpackage is imported by name, for example `from fsm_llm.agents import create_agent`.
+
+```
+fsm_llm/
+├── src/fsm_llm/      # THE LIBRARY (the import package)
+│   ├── engine/api/, engine/fsm/,   # API, FSMManager, MessagePipeline (the 2-pass turn)
+│   │   engine/turn/, engine/kinds/
+│   ├── core/definitions/      # Pydantic FSM models and core exceptions (a package)
+│   ├── core/transition_evaluator.py, core/expressions/   # JsonLogic evaluation, no LLM
+│   ├── core/verify/, core/visualize/   # Validator, data-flow and liveness analysis; diagrams and graph export
+│   ├── handlers/              # Handler system, HandlerBuilder, create_handler
+│   ├── llm/                   # LLMInterface and LiteLLMInterface (llm/providers/litellm.py is the only litellm import), reply parsing
+│   ├── context/               # Context cleaning, compaction, filtering and the prompt builders (context/layout/)
+│   ├── engine/classification.py, session.py, builders.py   # Classifier, session store, API/FSMManager builders
+│   ├── security/, constants.py, logging.py, memory.py, env.py   # Key filtering, path confinement, limits, logging, working memory, .env loader
+│   ├── okf/, text.py                       # Open Knowledge Format, text helpers (okf_bridge is engine/okf_bridge.py)
+│   ├── skills/                # Agent Skills (read-only), the fsm-llm-skills command
+│   ├── tools/                 # Tool registry, tool models and the @tool decorator (re-exported by agents)
+│   ├── policy/                # Approval policy and the human-in-the-loop manager (re-exported by agents)
+│   ├── frontmatter.py, cli_support.py   # The one YAML frontmatter loader, the shared CLI skeleton
+│   ├── runner.py, __main__.py           # The interactive fsm-llm command
+│   ├── reasoning/             # 9 strategies as stacked FSMs
+│   ├── workflows/             # Async workflow engine, 11 step types, DSL
+│   ├── agents/                # 18 agent patterns, tools, HITL, MCP, A2A, meta-builder
+│   ├── monitor/               # FastAPI dashboard, OTEL exporter
+│   ├── eval/                  # Examples scorer, conversation cases
+│   ├── synthesis/             # Runtime FSM synthesis: compile, gates, library, runner
+│   └── testing/               # Public test doubles, scripted user, assertions
+├── tests/                     # One folder per subpackage plus root-level files
+├── examples/                  # 100 runnable examples in 8 categories (evaluation baselines)
+├── docs/                      # Guides, API reference and the site pages (mkdocs.yml builds them)
+├── evaluation/                # Datasets and recorded eval runs
+├── scripts/                   # Supply-chain audit, benches, doc-count check
+├── images/                    # Logo and diagrams
+├── .github/workflows/         # CI: Python 3.11, 3.12
+└── CHANGELOG.md, EVALUATE.md, CONTRIBUTING.md, SECURITY.md
+```
 
 ## Examples are frozen
 
@@ -79,6 +130,15 @@ make docs-serve                                         # live reload at http://
 ```
 
 A strict build fails on any warning: a page missing from the `nav` in `mkdocs.yml`, a broken link or anchor, an `include-markdown` target that does not exist. A new page under `docs/` goes into the `nav`; `AGENTS.md` files are never published (`exclude_docs`). `tests/test_fsm_llm/test_docs_site.py` checks the same structure without mkdocs installed.
+
+## Good places to help
+
+All taken from recorded open items:
+
+- **Agents** ([docs/agents_roadmap.md](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/agents_roadmap.md), Known open items and Track B): `AgentGraph` has no failure routing, so a fallback branch cannot be built; Orchestrator subtasks dropped over `max_workers` do not affect `success`; a reply cut off by `max_tokens` is detected (`finish_reason`, a WARNING, a named cause in extraction errors, no unreadable half envelope shown as a reply) and a cut final reply (or answer field) of an agent run ends it with `success=False` and `stop_reason="truncated"` (REWOO stops on a cut plan), but a cut `native_fc` tool call, a `SelfConsistencyAgent` sample, a long meta-builder artifact, a streamed reply and a cut in an earlier turn are still not flagged; Swarm never hands off by itself; real human-in-the-loop for REWOO, PlanExecute, ParallelReact and native_fc; MCP v2 and A2A v1.0.
+- **Core** (`CHANGELOG.md`, Unreleased, Known open): validating an `FSMDefinition` for the first time from several threads at once can race; the message-free `classification_extractions` path has offline coverage only; nothing was checked live on a non-Ollama provider.
+- **Reasoning** (`CHANGELOG.md`, Known open): cheaper typed per-key reasoning fields were tried and reverted after losing answers on a pre-registered probe, so a new attempt needs its own probe; a `final_context` passed back as `initial_context` still carries the previous problem's analysis.
+- **Measurement**: every live number here comes from one small local model. Runs on other models and providers are welcome, as new pre-registered blocks (see `scripts/bench_data/README.md`).
 
 ## Pull requests
 

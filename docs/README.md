@@ -4,12 +4,14 @@ The `docs/` folder at the root of the FSM-LLM repository holds the long-form use
 
 ## What it is for
 
-The package READMEs say what each part is. These guides go further: they teach you to build a bot, design states and transitions, write handlers, and they list the public API. Seven files are current guides for version 0.12.0, and each one starts with the line `> Covers FSM-LLM v0.12.0`. The other four are dated design records, kept to explain design choices, not to teach usage:
+The package READMEs say what each part is. These guides go further: they teach you to build a bot, design states and transitions, write handlers, and they list the public API. Seven files are current guides for version 0.12.0, and each one starts with the line `> Covers FSM-LLM v0.12.0`. Two more are dated records and plans, kept to explain design choices, not to teach usage, and neither has a `Covers` header:
 
-- Three come from the "Strands" initiative, which adapted features from the Strands Agents SDK. All of it shipped in v0.4.0, and their counts and paths are from the time of writing.
-- `agents_roadmap.md` is the audit record and roadmap for `fsm_llm.agents` (dated 2026-09-29, with measured baselines added later). It has no `Covers` header, and it describes work that shipped in 0.12.0, on top of 0.11.0.
+- `agents_roadmap.md` is the audit record and roadmap for `fsm_llm.agents` (dated 2026-09-29, with measured baselines added later). It describes work that shipped in 0.12.0, on top of 0.11.0.
+- `2026_roadmap.md` is the project roadmap. It belongs to the maintainer and is published as written: never edit it.
 
-If you only want to use the library, read the seven guides. Per-package READMEs under `src/fsm_llm/` and the repo root `README.md` hold the rest.
+The rest of the folder is the documentation site: pages that feed `mkdocs.yml` (the landing page, concepts, examples, the wrapper pages and the generated pages), listed below.
+
+If you only want to use the library, read the seven guides. Per-package READMEs under `src/fsm_llm/` and the repo root `README.md` (the short page PyPI shows) hold the rest.
 
 ## How it works
 
@@ -38,7 +40,7 @@ Some tests read these files. `tests/test_fsm_llm/test_docs_snippets.py` finds ev
 
 ## Files
 
-- `quickstart.md` - install, API key and environment variables (`LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `FSM_PATH`), a first bot (`friendly_greeter`), a first handler, streaming and session persistence, CLI commands, troubleshooting.
+- `quickstart.md` - install, API key and environment variables (`LLM_MODEL`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`, `FSM_PATH`), a first bot (`friendly_greeter`), a first handler, streaming and session persistence, more ways to build (the step-by-step builders, an agent, a workflow, the reasoning engine), CLI commands, troubleshooting.
 - `fsm_design.md` - design guide: one purpose per state, JsonLogic transitions, patterns (Gatekeeper, Collector, Router, Confirmer), priority and ambiguity, `evaluation_priority`, `llm_description`, context scope, `handler_only_keys`, how corrections work, FSM stacking, classification routing, `completion` states (tool calling and structured turns), `synthesize` states (procedures written on demand), designing for agents, anti-patterns, testing and validation.
 - `handlers.md` - the 8 handler timings, the `HandlerBuilder` methods, `handler_error_mode` (`"continue"` or `"raise"`), critical handlers, what ERROR handlers can and cannot do, common patterns, testing, how each extension uses handlers.
 - `architecture.md` - the 2-pass design, core components (`engine/api/`, `engine/fsm/`, `engine/turn/`, `context/layout/`, `handlers/`, `llm/`, `core/transition_evaluator.py`), message, start and streaming flows, context handling, stacked-FSM merge rules, security, performance, how the six extension subpackages plug in, extension points.
@@ -49,9 +51,6 @@ Some tests read these files. `tests/test_fsm_llm/test_docs_snippets.py` finds ev
 - `contributing.md`, `security.md`, `evaluate.md`, `changelog.md` - one-line wrapper pages that include the root files of the same names (`CONTRIBUTING.md`, `SECURITY.md`, `EVALUATE.md`, `CHANGELOG.md`); edit the root file.
 - `2026_roadmap.md` and `agents_roadmap.md` - the roadmaps, published as written.
 - `reference/`, `packages/`, `decisions/` - generated or included pages (see `docs/AGENTS.md`).
-- `strands_features.md` - historical: the report that picked 12 Strands features to adapt, plus the features it rejected.
-- `strands_features_phase_1.md` - historical: delivery note for schema-enforced output, the hidden `metadata` memory buffer, response streaming and session persistence (commit `a7e3d88`).
-- `strands_features_phase_2.md` - historical: plan for the other 8 features (OTEL, swarm, agent graph, MCP, semantic tool retrieval, dependency-based workflow parallelism, SOPs, A2A).
 - `agents_roadmap.md` - design record, not a guide: the `fsm_llm.agents` audit (verdict per audit id, commits, known open items, deferred Track B) and recorded baselines (G3 examples run, agent bench blocks B0 to B2). Current agents contracts live in `src/fsm_llm/agents/README.md` and the Agents section of `api_reference.md`. Source code and `scripts/agents_bench.py` point to it by name.
 - `index.md` - the landing page of the published documentation site (`mkdocs.yml` at the repository root builds it; `make docs`). This `README.md` is the folder index on GitHub and is not part of the site.
 - `reference/` - generated reference pages of the site: one page per module of the API snapshot (`<dotted.module>.md`, rendered by mkdocstrings from the source), `api-snapshot.md` (the full `api.txt` text) and `cli.md` (every console script, its entry point, usage and exit codes). They are stubs, not prose: the content comes from the code.
@@ -78,7 +77,7 @@ After editing a guide, run the snippet tests:
 ## Things to know
 
 - Extensions are documented as subpackages of `fsm_llm`: `fsm_llm.reasoning`, `fsm_llm.workflows`, `fsm_llm.agents`, `fsm_llm.monitor`, `fsm_llm.eval`, `fsm_llm.synthesis`, `fsm_llm.testing`. This matches the code under `src/fsm_llm/`.
-- The Strands files quote counts, file paths and "not yet implemented" lists as they were when written. Some of those paths use the subpackage layout. Their counts are not current. `agents_roadmap.md` is likewise a dated record: its status lines and baselines are as recorded on their dates.
+- `agents_roadmap.md` is a dated record: its status lines, counts and baselines are as recorded on their dates and are not kept current.
 - Monitor documentation belongs in `api_reference.md` (the Monitor section). Do not create a separate `docs/monitor.md`.
 - Pre-registered benchmark data is not documented here; see `scripts/bench_data/README.md`.
 - `required_context_keys` never blocks a transition. The guides gate transitions with a condition (`requires_context_keys` plus `logic`). Keep new examples consistent with this.

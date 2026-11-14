@@ -171,7 +171,144 @@ conv_id, response = api.start_conversation()
 new_conv_id, state = api.restore_session(conv_id)
 ```
 
-## 6. Next Steps
+## 6. More Ways to Build
+
+The conversation above is one way in. The rest of the library is built from the same parts, and the sections below show a builder, an agent, a workflow and the reasoning engine in a few lines each. `greeter.json` in the builder example stands for any FSM definition file, for example your own saved copy of the `friendly_greeter` dictionary above or the `greeter.json` of the project README.
+
+### Assemble It Step by Step
+
+Anything with more than a couple of settings can be put together by chaining calls. While you chain, nothing is checked; the final `.build()` checks everything at once and hands back a private copy, so one recipe can make many independent objects.
+
+A conversation with a hook and a model:
+
+```python
+from fsm_llm import APIBuilder, HandlerTiming, create_handler
+
+audit = (
+    create_handler("audit")
+    .at(HandlerTiming.POST_TRANSITION)
+    .do(lambda context: {"audited": True})
+)
+
+api = (
+    APIBuilder()
+    .set_definition("greeter.json")
+    .set_model("ollama_chat/qwen3.5:4b")
+    .set_temperature(0.2)
+    .add_handler(audit)
+    .build()
+)
+```
+
+An agent with a tool, an instruction and an iteration limit (a real run against the local model; the wording differs each time):
+
+```python
+from fsm_llm.agents import ConfiguredAgentBuilder, tool
+
+
+@tool
+def add(a: int, b: int) -> int:
+    """Add two integers."""
+    return a + b
+
+
+agent = (
+    ConfiguredAgentBuilder()
+    .set_pattern("react")
+    .add_tool(add)
+    .set_system_prompt("Answer in one short sentence.")
+    .set_max_iterations(6)
+    .build()
+)
+result = agent("What is 19 + 23? Use the add tool.")
+print(result.answer, result.success, result.stop_reason)
+# 19 + 23 equals 42, as calculated by the add tool. True answered
+```
+
+Mistakes come back together, in one error, instead of one at a time:
+
+```python
+from fsm_llm import APIBuilder, BuildError
+
+try:
+    APIBuilder().set_llm_option("model", "a").set_llm_option("max_history_size", 3).build()
+except BuildError as err:
+    print(*err.errors, sep="\n")
+# option 'model' names a constructor parameter; use set_model()
+# option 'max_history_size' names a constructor parameter; use set_max_history_size()
+```
+
+What you get from this style:
+
+- Setters only record, so you can chain them in any order and pass the half-built recipe around.
+- One `.build()` does all the checking and raises one error type. `BuildError` is a `ValueError` that lists every problem in `.errors` and keeps the underlying cause attached.
+- The result is a private copy: change the recipe afterwards, or build again, and nothing already built moves. Objects you hand in (a model interface, a tool, a store) stay shared, not copied.
+- Settings that pass straight through to the model library are accepted without a whitelist, and a name that clashes with a typed setter is refused with a message that names the setter to use.
+- It is an alternative, not a replacement: the plain constructors and `from_file` still work everywhere.
+
+The same shape builds conversations, agents of any pattern, workflows, agent graphs and handlers. The rules are in [API Reference](./api_reference.md).
+
+### Create an Agent in One Line
+
+```python
+from fsm_llm.agents import AgentConfig, create_agent, tool
+
+
+@tool
+def add(a: int, b: int) -> int:
+    """Add two integers."""
+    return a + b
+
+
+agent = create_agent("react", [add], config=AgentConfig(model="ollama_chat/qwen3.5:4b"))   # or set LLM_MODEL
+result = agent("What is 19 + 23? Use the add tool.")
+print(result.answer, result.success, result.stop_reason)   # 19 + 23 equals 42. True answered
+```
+
+`success` is `True` only when the run reached its goal. A forced stop still returns its last answer, with `success=False` and a `stop_reason`.
+
+### Run a Workflow (No LLM Needed)
+
+This prints `WorkflowStatus.COMPLETED`:
+
+```python
+import asyncio
+from fsm_llm.workflows import WorkflowEngine, auto_step, condition_step, create_workflow_builder
+
+wf = (
+    create_workflow_builder("orders", "Order check")
+    .set_initial_step(auto_step("load", "Load order", next_step_id="route",
+                                action=lambda ctx: {"amount": 1500}))
+    .add_step(condition_step("route", "Big order?", condition=lambda ctx: ctx["amount"] >= 1000,
+                             true_step_id="review", false_step_id="done"))
+    .add_step(auto_step("review", "Manual review", next_step_id="done"))
+    .add_step(auto_step("done", "Finish", next_step_id=""))
+    .build()
+)
+
+
+async def main():
+    engine = WorkflowEngine()
+    engine.register_workflow(wf)
+    instance_id = await engine.start("orders")
+    print(engine.get_status(instance_id))
+
+
+asyncio.run(main())
+```
+
+### Solve a Problem with the Reasoning Engine
+
+```python
+from fsm_llm.reasoning import ReasoningEngine
+
+engine = ReasoningEngine(model="ollama_chat/qwen3.5:4b")
+solution, trace = engine.solve_problem("If all cats are mammals and Tom is a cat, what is Tom?")
+print(solution)
+print(trace["summary"])
+```
+
+## 7. Next Steps
 
 ### Try These Examples
 

@@ -59,7 +59,7 @@ Suite folders (test counts from full collection) and root files at this level.
 - `TestMonitorPackageData`: `"fsm_llm.monitor"` package-data globs cover every file under `static/` and `templates/`.
 - `TestPackageBackedExtrasAreInstalled`: each subpackage name is an extra, requested by `pyproject` `all`, `make install-dev`, tox `extras = dev,...` and the CI install line.
 - `TestModuleDocstringsAreReal`: no module under `src/` puts its docstring after `from __future__ import annotations`; at least 50 modules scanned.
-- `TestDocumentedTestCountsMatchCollection` (`slow`): one `pytest --collect-only -q -o addopts= -p no:cacheprovider tests/` subprocess (env drops `PYTEST_ADDOPTS`, `SKIP_SLOW_TESTS`, `TEST_REAL_LLM`), then pins: root `AGENTS.md` `pytest -v (N tests)` and `Run all tests (N collected)`; root `README.md` `Run full test suite (N tests)`; the root `AGENTS.md` per-suite lines `pytest tests/<suite>/  # ... (N tests)` (dict equality both ways); the sentence `The N suites above sum to S. The remaining R ...`; the `tests/<file>.py (N)` root-file list. `CHANGELOG.md` is deliberately not pinned (D-015).
+- `TestDocumentedTestCountsMatchCollection` (`slow`): one `pytest --collect-only -q -o addopts= -p no:cacheprovider tests/` subprocess (env drops `PYTEST_ADDOPTS`, `SKIP_SLOW_TESTS`, `TEST_REAL_LLM`), then pins: root `AGENTS.md` `pytest -v (N tests)` and `Run all tests (N collected)`; root `CONTRIBUTING.md` `Run full test suite (N tests)`; the root `AGENTS.md` per-suite lines `pytest tests/<suite>/  # ... (N tests)` (dict equality both ways); the sentence `The N suites above sum to S. The remaining R ...`; the `tests/<file>.py (N)` root-file list. `CHANGELOG.md` is deliberately not pinned (D-015).
 - `TestNoTopLevelNameIsBoundTwice` (1 test): over every `src/**/*.py`, no top-level assignment, annotated assignment, def or class binds a name twice (`if`/`try` branches and `@overload` stubs are exempt); it replaced the constants-only test of `test_agent_skills.py`.
 - `TestNoPypiInstallHint` (1 test): no `pip install fsm-llm` hint in `src/` (that name on PyPI is another project).
 - `TestClassifiersMatchFloor` (4 tests): the version classifiers run contiguously from the `requires-python` floor (3.11), the newest equals the evidenced version, and the build backend asks for setuptools 77 or later.
@@ -111,7 +111,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 - Never use `caplog` for library logs; `fsm_llm` logs through loguru and is disabled at import. Enable with `logger.enable("fsm_llm")`, add a sink, then remove it and disable again.
 - Tests that change process globals (cwd, env vars, `server/` API key, `sys.modules`, logging) restore them.
 - Regression classes and `DECISION plan-.../D-NNN` pins record deliberate fixes. Treat a failure as a regression in `src/` unless the cited decision was reversed; do not weaken, delete or regenerate them (secret-filter corpora, eval scoring golden table).
-- Every documented test count in root `AGENTS.md` and root `README.md` must equal the measured collection.
+- Every documented test count in root `AGENTS.md` and root `CONTRIBUTING.md` must equal the measured collection.
 
 ## Dependencies
 

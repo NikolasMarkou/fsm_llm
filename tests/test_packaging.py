@@ -1501,6 +1501,10 @@ class TestGitattributesPinLineEndings:
 _COUNT = r"(\d[\d,]*)"
 
 
+#: The `make test` line of CONTRIBUTING.md (the README keeps no count: it is the PyPI page).
+_MAKE_TEST_PIN = rf"Run full test suite \({_COUNT} tests\)"
+
+
 def _num(token: str) -> int:
     return int(token.replace(",", ""))
 
@@ -1603,6 +1607,31 @@ def measured() -> tuple[int, dict[str, int], dict[str, int]]:
     return total, dict(per_suite), dict(per_root_file)
 
 
+class TestTheMakeTestPinLivesInContributing:
+    """Step 105 of plan d454fd62: the README is the PyPI page and holds no count line.
+
+    The `make test` line ("Run full test suite (N tests)") that the slow class below pins
+    moved to CONTRIBUTING.md. These checks are cheap (no collection), so the retarget is
+    guarded in the default run; the count VALUE is the slow class's business.
+    """
+
+    def test_contributing_holds_the_line_once(self):
+        assert len(_pinned_counts("CONTRIBUTING.md", _MAKE_TEST_PIN)) == 1
+
+    def test_the_readme_holds_no_such_line(self):
+        assert not re.search(_MAKE_TEST_PIN, _read("README.md"))
+
+    @pytest.mark.parametrize("rel", ["AGENTS.md", "tests/AGENTS.md", "tests/README.md"])
+    def test_the_prose_names_contributing_not_the_readme(self, rel):
+        text = _read(rel)
+        mentions = [m.start() for m in re.finditer(r"Run full test suite", text)]
+        assert mentions, f"{rel} no longer names the `Run full test suite` line"
+        for at in mentions:
+            window = text[max(0, at - 80) : at + 40]
+            assert "CONTRIBUTING.md" in window, f"{rel}: {window!r}"
+            assert "README" not in window, f"{rel}: {window!r}"
+
+
 @pytest.mark.slow
 class TestDocumentedTestCountsMatchCollection:
     """Every hand-maintained test-count literal equals `pytest --collect-only`.
@@ -1627,7 +1656,7 @@ class TestDocumentedTestCountsMatchCollection:
         [
             ("AGENTS.md", rf"pytest -v \({_COUNT} tests\)"),
             ("AGENTS.md", rf"Run all tests \({_COUNT} collected\)"),
-            ("README.md", rf"Run full test suite \({_COUNT} tests\)"),
+            ("CONTRIBUTING.md", _MAKE_TEST_PIN),
         ],
     )
     def test_total_literals(self, measured, rel: str, pattern: str):
