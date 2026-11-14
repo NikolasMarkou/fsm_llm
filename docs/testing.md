@@ -4,7 +4,7 @@
 
 `fsm_llm.testing` is the public home of the fakes and assertions the FSM-LLM repository uses for its own tests: fake LLM interfaces that need no network, a scripted user that drives a conversation, and four assertions that name a state, a context value, a visited path or a run result in one line. Use it to test a bot, an agent or a workflow without a model: a model call is slow, costs money and answers differently on each run.
 
-Every Python block in this guide runs offline, top to bottom in one namespace, as part of the test suite (`tests/test_fsm_llm_testing/test_guide.py`). A block fenced `python notest` is shown only.
+Every Python block in this guide runs offline, top to bottom in one namespace, as part of the test suite (`tests/test_fsm_llm_testing/test_guide.py`). A block fenced `python {.notest}` is shown only.
 
 ## Install and import
 
@@ -286,7 +286,7 @@ Caveat: registering ANY handler makes the pipeline deep-copy the context at ever
 
 The assertions need nothing from pytest. They build every message by hand, so `pytest.register_assert_rewrite("fsm_llm.testing")` is not needed. Add it, before the import, to a `conftest.py` only if you write your own helpers in a module that use plain `assert` and want pytest's introspection there:
 
-```python notest
+```python {.notest}
 # conftest.py
 import pytest
 
@@ -299,7 +299,7 @@ The doubles never open a socket, so a test that uses them passes in a suite that
 
 Projects that copied `MockLLM2Interface` or `PromptGroundedLLM` out of this repository's `tests/conftest.py` can delete the copy. The classes are the same (the dead `transition_target` argument of `MockLLM2Interface`, stored and never read, is gone); the import changes.
 
-```diff notest
+```diff {.notest}
 -from tests.conftest import MockLLM2Interface, PromptGroundedLLM
 +from fsm_llm.testing import MockLLM2Interface, PromptGroundedLLM
 ```

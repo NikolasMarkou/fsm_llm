@@ -15,6 +15,9 @@ the core (stacked FSMs, message-free steps, one LLM layer), so there is one way 
 
 - **Run a first conversation:** the [Quick Start](quickstart.md) installs the package, sets the
   model and walks through a small FSM.
+- **Understand the idea:** [Concepts](concepts.md) says where the library fits, how one message
+  travels through the two passes, and what each subpackage adds; the [Examples](examples.md)
+  page lists the runnable examples in the repository.
 - **Design your own machine:** the [FSM Design Guide](fsm_design.md) covers states, transitions,
   priorities, context and classification; [Handler Development](handlers.md) covers code that
   runs at the eight points of a turn.
@@ -38,8 +41,15 @@ decision, its rationale, and where in the code it applies.
 The [2026 roadmap](2026_roadmap.md) and the [agents roadmap](agents_roadmap.md) are the plans and
 audit records the project works from. They are kept as written.
 
-## Source and project
+## Project
 
-The code, the examples, the changelog and the issue tracker are on
+* [Contributing](contributing.md): the development setup, the checks, and the rules for a change.
+* [Security](security.md): how to report a vulnerability and how the dependencies are checked.
+* [Evaluate](evaluate.md): the method for scoring the examples against a model, and the run log.
+* [Changelog](changelog.md): the release history and the known open items.
+
+## Source
+
+The code, the examples and the issue tracker are on
 [GitHub](https://github.com/NikolasMarkou/fsm_llm). The library is released under the Apache
 License 2.0.

@@ -4,7 +4,7 @@ The blocks run in document order in ONE shared namespace (a later block uses
 the FSM and helpers of an earlier one), from a temporary working directory, with
 the model server addresses pointed at a closed port as a belt on top of the
 fact that nothing in `fsm_llm.testing` builds a real interface. A block fenced
-```python notest``` (or ```diff notest```) is not run; any other language is
+```python {.notest}``` (or ```diff {.notest}```) is not run; any other language is
 ignored. The guide's FSM dicts also go through `test_docs_snippets.py`.
 """
 
@@ -47,8 +47,8 @@ class TestGuideIsExecutable:
         ]
         for lang, rest in opening:
             if rest:
-                assert rest == "notest", f"unknown fence option {lang} {rest!r}"
-        assert any(rest == "notest" for _, rest in opening)
+                assert rest == "{.notest}", f"unknown fence option {lang} {rest!r}"
+        assert any(rest == "{.notest}" for _, rest in opening)
 
     def test_the_guide_names_every_public_helper(self):
         import fsm_llm.testing as public

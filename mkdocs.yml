@@ -34,28 +34,22 @@ validation:
     unrecognized_links: warn
     anchors: warn
 
-# Every existing page is listed; the project pages arrive with later steps. The module pages follow
-# MODULES of scripts/api_snapshot.py and the package pages follow src/fsm_llm/*/README.md (a test
-# pins both).
+# Every page is listed (a test fails on one that is not). Groups: the landing page, getting started,
+# guides, the reference, the package pages, architecture, the decision index and the project pages
+# (the root files CONTRIBUTING, SECURITY, EVALUATE and CHANGELOG are included by thin wrapper pages,
+# and both roadmaps are published as written). The module pages follow MODULES of
+# scripts/api_snapshot.py and the package pages follow src/fsm_llm/*/README.md (tests pin both).
 nav:
   - Home: index.md
   - Getting started:
       - Quick Start: quickstart.md
+      - Concepts: concepts.md
+      - Examples: examples.md
   - Guides:
       - FSM Design: fsm_design.md
       - Handlers: handlers.md
       - Runtime FSM synthesis: synthesis.md
       - Testing: testing.md
-  - Concepts:
-      - Architecture: architecture.md
-  - Packages:
-      - agents: packages/agents.md
-      - eval: packages/eval.md
-      - monitor: packages/monitor.md
-      - reasoning: packages/reasoning.md
-      - synthesis: packages/synthesis.md
-      - testing: packages/testing.md
-      - workflows: packages/workflows.md
   - Reference:
       - API Reference: api_reference.md
       - API snapshot: reference/api-snapshot.md
@@ -76,10 +70,25 @@ nav:
           - fsm_llm.synthesis: reference/fsm_llm.synthesis.md
           - fsm_llm.testing: reference/fsm_llm.testing.md
           - fsm_llm.workflows: reference/fsm_llm.workflows.md
+  - Packages:
+      - agents: packages/agents.md
+      - eval: packages/eval.md
+      - monitor: packages/monitor.md
+      - reasoning: packages/reasoning.md
+      - synthesis: packages/synthesis.md
+      - testing: packages/testing.md
+      - workflows: packages/workflows.md
+  - Architecture:
+      - Architecture: architecture.md
   - Decisions: decisions/index.md
-  - Roadmap:
-      - 2026 roadmap: 2026_roadmap.md
-      - Agents roadmap: agents_roadmap.md
+  - Project:
+      - Contributing: contributing.md
+      - Security: security.md
+      - Evaluate: evaluate.md
+      - Changelog: changelog.md
+      - Roadmaps:
+          - 2026 roadmap: 2026_roadmap.md
+          - Agents roadmap: agents_roadmap.md
 
 theme:
   name: material
