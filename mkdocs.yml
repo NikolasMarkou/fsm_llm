@@ -35,7 +35,7 @@ validation:
     anchors: warn
 
 # Every page is listed (a test fails on one that is not). Groups: the landing page, getting started,
-# guides, the reference, the package pages, architecture, the decision index and the project pages
+# guides, the reference, the package pages, architecture, the decision index, the upgrade guides and the project pages
 # (the root files CONTRIBUTING, SECURITY, EVALUATE and CHANGELOG are included by thin wrapper pages,
 # and both roadmaps are published as written). The module pages follow MODULES of
 # scripts/api_snapshot.py and the package pages follow src/fsm_llm/*/README.md (tests pin both).
@@ -81,6 +81,12 @@ nav:
   - Architecture:
       - Architecture: architecture.md
   - Decisions: decisions/index.md
+  - Upgrade guides:
+      - Core renames: upgrade-guide/v0.13.0/core-renames.md
+      - Definition version: upgrade-guide/v0.13.0/definition-version.md
+      - Workflows vocabulary: upgrade-guide/v0.13.0/workflows-vocabulary.md
+      - Monitor and reasoning: upgrade-guide/v0.13.0/monitor-and-reasoning.md
+      - Agents renames and behaviour: upgrade-guide/v0.13.0/agents-renames.md
   - Project:
       - Contributing: contributing.md
       - Security: security.md

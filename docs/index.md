@@ -27,6 +27,7 @@ the core (stacked FSMs, message-free steps, one LLM layer), so there is one way 
   functions and command-line tools.
 - **Compile a procedure at run time:** [Runtime FSM synthesis](synthesis.md) explains how a model
   writes an FSM, the gates that judge it and how a host conversation runs it.
+- **Upgrade from 0.12.0:** every breaking change of 0.13.0 has an upgrade guide with the code before and after, linked from the [Changelog](changelog.md): [core renames](upgrade-guide/v0.13.0/core-renames.md), [definition version](upgrade-guide/v0.13.0/definition-version.md), [workflows](upgrade-guide/v0.13.0/workflows-vocabulary.md), [monitor and reasoning](upgrade-guide/v0.13.0/monitor-and-reasoning.md) and [agents](upgrade-guide/v0.13.0/agents-renames.md).
 - **Test code built on the library:** [Testing](testing.md) documents the public test doubles,
   the scripted user and the assertions in `fsm_llm.testing`.
 
