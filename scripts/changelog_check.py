@@ -5,7 +5,7 @@ Standard library only, Python 3.11+, deterministic, no network. It only reads fi
 writes one. Roadmap row 0.5, plan d454fd62, step 111. Two subcommands:
 
     changelog_check.py check   [--file PATH] [--docs-root PATH] [--next-version V] [--from VERSION]
-    changelog_check.py extract VERSION [--file PATH] [--with-heading]
+    changelog_check.py extract VERSION [--file PATH] [--with-heading] [--link-base URL]
 
 Exit codes: 0 clean, 1 findings (`check`) or a version that is missing or has no body
 (`extract`), 2 usage error or an unreadable CHANGELOG file.
@@ -53,6 +53,15 @@ to the line before the next `## ` heading, with the leading and trailing blank l
 and one final newline; `--with-heading` prints the heading and a blank line first. VERSION is
 `0.13.0`, `v0.13.0` or `Unreleased`. A missing version, and a section with no body, exit 1 (an
 empty release note is a defect of the release, not an empty file).
+
+`--link-base URL` rewrites the repository-relative links of the printed text for a reader that is
+not looking at the repository tree (a GitHub release body does not resolve `docs/...` against
+the tag). Every inline link whose target starts with `docs/` (also `./docs/` and `<docs/`) becomes
+`URL` + `docs/...`; `URL` must be an `http://` or `https://` address and gets a trailing `/` when
+it has none (for the tag v0.13.0: `https://github.com/NikolasMarkou/fsm_llm/blob/v0.13.0/`).
+Links inside code fences and inline code spans are left as written, nothing else is touched, and
+the rewrite is idempotent (an absolute target does not start with `docs/`). Only inline links
+are read; the section holds no reference-style link definitions.
 """
 
 from __future__ import annotations
@@ -612,6 +621,50 @@ def check_text(
     return sorted(set(findings), key=lambda f: (f.line, f.code, f.message))
 
 
+_DOC_LINK = re.compile(r"\]\((<?)(?:\./)?docs/")
+
+
+def rewrite_doc_links(text: str, link_base: str) -> str:
+    """`text` with every inline link into `docs/` made absolute under `link_base`.
+
+    Contract: `link_base` is the URL of the repository tree at a tag, with or without a trailing
+    `/`; it is not validated here (the CLI does). Returns the text with each
+    `](docs/x)`, `](./docs/x)` and `](<docs/x>)` outside a code fence or an inline code span
+    changed to `](<link_base>docs/x)` (the `<` kept). Everything else is returned byte for byte,
+    including line ends. Pure, never raises.
+    """
+    base = link_base if link_base.endswith("/") else link_base + "/"
+
+    def replace(match: re.Match[str]) -> str:
+        return f"]({match.group(1)}{base}docs/"
+
+    def rewrite_chunk(chunk: str) -> str:
+        out: list[str] = []
+        position = 0
+        for span in _CODE_SPAN.finditer(chunk):
+            out.append(_DOC_LINK.sub(replace, chunk[position : span.start()]))
+            out.append(span.group(0))
+            position = span.end()
+        out.append(_DOC_LINK.sub(replace, chunk[position:]))
+        return "".join(out)
+
+    lines = text.split("\n")
+    fenced = [line == _MASK or line.endswith(_MASK) for line in mask_fences(lines)]
+    result: list[str] = []
+    chunk: list[str] = []
+    for line, is_fence in zip(lines, fenced, strict=True):
+        if is_fence:
+            if chunk:
+                result.append(rewrite_chunk("\n".join(chunk)))
+                chunk = []
+            result.append(line)
+        else:
+            chunk.append(line)
+    if chunk:
+        result.append(rewrite_chunk("\n".join(chunk)))
+    return "\n".join(result)
+
+
 def extract_text(text: str, version: str, *, with_heading: bool = False) -> str | None:
     """The body of one section (see the module docstring), or None when it is missing."""
     parsed = parse(text)
@@ -649,6 +702,14 @@ def _next_version(value: str) -> str:
     return value
 
 
+def _link_base(value: str) -> str:
+    if not re.fullmatch(r"https?://\S+", value):
+        raise argparse.ArgumentTypeError(
+            f"expected an http:// or https:// address, got {value!r}"
+        )
+    return value if value.endswith("/") else value + "/"
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = _Parser(prog="changelog_check.py", description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True, parser_class=_Parser)
@@ -661,6 +722,13 @@ def _build_parser() -> argparse.ArgumentParser:
     check.add_argument("--from", dest="from_version", default=None, metavar="VERSION")
     extract.add_argument("version", help="0.13.0, v0.13.0 or Unreleased")
     extract.add_argument("--with-heading", action="store_true")
+    extract.add_argument(
+        "--link-base",
+        type=_link_base,
+        default=None,
+        metavar="URL",
+        help="make the docs/ links absolute under URL (the repository tree at a tag)",
+    )
     return parser
 
 
@@ -697,6 +765,8 @@ def main(
                 file=sys.stderr,
             )
             return 1
+        if args.link_base:
+            body = rewrite_doc_links(body, args.link_base)
         stdout(body)
         return 0
     docs_root = args.docs_root or path.resolve().parent / "docs"

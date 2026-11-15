@@ -2,7 +2,7 @@
 
 Covers FSM-LLM 0.12.0 to 0.13.0. Four public names of `fsm_llm.monitor` and `fsm_llm.reasoning` changed to follow the vocabulary of core: the monitor's errors now sit under `FSMError`, its manager has the lifecycle verbs of core, the reasoning root exception is `ReasoningError`, and the reasoning step budgets say that they count steps. None has an alias.
 
-The 49 monitor route functions that moved out of `fsm_llm.monitor.server` in the same release are a separate change and are covered with the module paths.
+The 49 monitor route functions that moved out of `fsm_llm.monitor.server` in the same release are a separate change and are covered in [Monitor route functions](monitor-routes.md).
 
 ## MonitorError is an FSMError
 

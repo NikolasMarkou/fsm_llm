@@ -2,8 +2,8 @@
 #
 # Four jobs run in parallel on every push and pull request to main:
 #   * `lint` runs once (Linux, Python 3.12): ruff, the format check, mypy, the `.pth` audit,
-#     the import contracts, the decision-anchor gate and the two workflow linters (`actionlint`,
-#     `zizmor`, installed at the pins of constraints.txt);
+#     the import contracts, the decision-anchor gate, the changelog check and the two workflow
+#     linters (`actionlint`, `zizmor`, installed at the pins of constraints.txt);
 #   * `test` is the matrix, nine legs: Linux on Python 3.11 to 3.15, macOS and Windows on 3.11
 #     and 3.15 (the two ends of the supported range). Every leg runs the whole non-slow suite
 #     with `mcp` installed, so the real stdio MCP tests run instead of skipping;
@@ -14,7 +14,7 @@
 #     a high advisory; it is the only job with a write scope, and only for its failure comment.
 #
 # Policy (pinned by tests/test_fsm_llm_regression/test_ci_workflow.py, which reads this file as
-# data, computes the legs from the YAML and kills 68 one-edit mutants of it):
+# data, computes the legs from the YAML and kills 90 one-edit mutants of it):
 #   * the token is read-only (`contents: read`); the one write scope is `pull-requests` on the
 #     dependency-review job (its failure comment); no secret is named;
 #   * every action is pinned to a commit SHA with its release tag in the trailing comment
@@ -108,6 +108,10 @@ jobs:
         # `make decision-check`. The gate reads the committed `plans/ANCHORS.md`: a decision
         # anchor with no manifest line fails it on purpose.
         run: python scripts/decision_index.py --check docs/decisions/index.md
+      - name: Check the changelog and its upgrade guides
+        # `make changelog-check`: the Keep a Changelog form of `[Unreleased]` and a link to its
+        # upgrade guide on every `**BREAKING:**` bullet (read-only, standard library only).
+        run: python scripts/changelog_check.py check
       - name: Summarise the decision anchors
         if: ${{ !cancelled() }}
         run: |

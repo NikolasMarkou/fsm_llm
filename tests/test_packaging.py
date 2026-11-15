@@ -763,6 +763,9 @@ _HINT_SCAN_FILES = (
     ".env.example",
 )
 _HINT_SCAN_SKIP = ("docs/2026_roadmap.md",)
+#: The upgrade guides quote the old install command as the `Before` of the distribution rename
+#: (and tell a reader never to run it): migration text, like the CHANGELOG, not an install hint.
+_HINT_SCAN_SKIP_DIRS = ("docs/upgrade-guide/",)
 _HINT_SUFFIXES = (".py", ".md", ".yml", ".yaml", ".toml", ".txt", ".ini")
 
 
@@ -777,7 +780,14 @@ def _hint_scan_files() -> list[pathlib.Path]:
             and "__pycache__" not in p.parts
         ]
     skip = {_REPO_ROOT / s for s in _HINT_SCAN_SKIP}
-    return [p for p in found if p.is_file() and p not in skip]
+    skip_dirs = tuple(_REPO_ROOT / s for s in _HINT_SCAN_SKIP_DIRS)
+    return [
+        p
+        for p in found
+        if p.is_file()
+        and p not in skip
+        and not any(p.is_relative_to(d) for d in skip_dirs)
+    ]
 
 
 class TestNoPypiInstallHint:
@@ -1088,6 +1098,161 @@ class TestDeclaredRangesMatchPins:
             if ln.strip().startswith("litellm")
         ]
         assert len(lines) == 1, lines
+
+
+# ══════════════════════════════════════════════════════════════
+# The real CHANGELOG.md (step 118 of plan d454fd62, roadmap row 0.5): the form of its sections and
+# a guide link on every `**BREAKING:**` bullet. This is the ONE place that enforces it on the
+# real file (the checker's own rules are tested on fixtures in
+# `tests/test_fsm_llm_regression/test_changelog_check.py`; CI also runs the same command in the
+# `lint` job, so a docs-only change cannot skip it).
+# ══════════════════════════════════════════════════════════════
+
+
+def _changelog_check(*argv: str, cwd: pathlib.Path = _REPO_ROOT):
+    return subprocess.run(
+        [sys.executable, str(_REPO_ROOT / "scripts" / "changelog_check.py"), *argv],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+
+
+class TestTheRealChangelog:
+    def test_every_section_has_its_form_and_every_breaking_bullet_links_its_guide(self):
+        proc = _changelog_check("check")
+        assert proc.returncode == 0, (
+            "scripts/changelog_check.py check reports findings on CHANGELOG.md:\n"
+            + proc.stdout
+            + proc.stderr
+        )
+        assert proc.stdout == ""
+
+    def test_the_default_scope_is_the_unreleased_section(self):
+        # No `--from`: history before the release being prepared is frozen and not judged.
+        text = (_REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        assert "\n## [Unreleased]\n" in text
+        assert "--from" not in "\n".join(
+            line for line in _read("Makefile").splitlines() if "changelog_check" in line
+        )
+
+    def test_the_makefile_target_and_ci_run_the_same_command(self):
+        assert "python scripts/changelog_check.py check" in _read("Makefile")
+        ci = _read(".github/workflows/python-package.yml")
+        assert ci.count("run: python scripts/changelog_check.py check") == 1
+
+    @pytest.mark.parametrize(
+        ("label", "edit", "code"),
+        [
+            pytest.param(
+                "an unlinked BREAKING bullet",
+                lambda text, docs: text.replace(
+                    "### Changed\n\n",
+                    "### Changed\n\n- **BREAKING:** a new break.\n",
+                    1,
+                ),
+                "CL006",
+                id="unlinked-bullet",
+            ),
+            pytest.param(
+                "a BREAKING bullet that lost its link",
+                lambda text, docs: re.sub(
+                    r"\s*\[Upgrade guide\]\(docs/upgrade-guide/v0\.13\.0/[^)]+\)",
+                    "",
+                    text,
+                    count=1,
+                ),
+                "CL006",
+                id="lost-link",
+            ),
+            pytest.param(
+                "a link to a guide page that does not exist",
+                lambda text, docs: text.replace(
+                    "/default-model-and-env.md#", "/no-such-page.md#", 1
+                ),
+                "CL007",
+                id="missing-page",
+            ),
+            pytest.param(
+                "a link to a heading that does not exist",
+                lambda text, docs: text.replace(
+                    "#resolve_model-raises-when-no-model-is-configured",
+                    "#renamed-away",
+                    1,
+                ),
+                "CL008",
+                id="missing-heading",
+            ),
+            pytest.param(
+                "the spelling `**Breaking:**`",
+                lambda text, docs: text.replace(
+                    "- **BREAKING:**", "- **Breaking:**", 1
+                ),
+                "CL005",
+                id="spelling-variant",
+            ),
+            pytest.param(
+                "the compare reference removed",
+                lambda text, docs: re.sub(
+                    r"^\[Unreleased\]: .*\n", "", text, flags=re.M
+                ),
+                "CL004",
+                id="no-compare-reference",
+            ),
+        ],
+    )
+    def test_the_check_fails_on_each_defect_of_a_copy(
+        self, tmp_path, label, edit, code
+    ):
+        """Mutation proofs of the enforcement: the same file with one defect must fail it."""
+        real = (_REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        mutated = edit(real, None)
+        assert mutated != real, label
+        copy = tmp_path / "CHANGELOG.md"
+        copy.write_text(mutated, encoding="utf-8")
+        proc = _changelog_check(
+            "check", "--file", str(copy), "--docs-root", str(_REPO_ROOT / "docs")
+        )
+        assert proc.returncode == 1 and f": {code}: " in proc.stdout, (
+            label,
+            proc.stdout,
+        )
+
+    def test_the_check_fails_when_a_guide_heading_is_renamed(self, tmp_path):
+        docs = tmp_path / "docs"
+        shutil.copytree(_REPO_ROOT / "docs" / "upgrade-guide", docs / "upgrade-guide")
+        page = docs / "upgrade-guide" / "v0.13.0" / "python-floor.md"
+        text = page.read_text(encoding="utf-8")
+        assert "## Python 3.11 is the minimum\n" in text
+        page.write_text(
+            text.replace(
+                "## Python 3.11 is the minimum\n", "## Python 3.11 is required\n"
+            ),
+            encoding="utf-8",
+        )
+        proc = _changelog_check(
+            "check",
+            "--file",
+            str(_REPO_ROOT / "CHANGELOG.md"),
+            "--docs-root",
+            str(docs),
+        )
+        assert proc.returncode == 1 and ": CL008: " in proc.stdout, proc.stdout
+
+    def test_the_check_fails_when_a_guide_page_is_removed(self, tmp_path):
+        docs = tmp_path / "docs"
+        shutil.copytree(_REPO_ROOT / "docs" / "upgrade-guide", docs / "upgrade-guide")
+        (docs / "upgrade-guide" / "v0.13.0" / "removals.md").unlink()
+        proc = _changelog_check(
+            "check",
+            "--file",
+            str(_REPO_ROOT / "CHANGELOG.md"),
+            "--docs-root",
+            str(docs),
+        )
+        assert proc.returncode == 1 and ": CL007: " in proc.stdout, proc.stdout
 
 
 # ══════════════════════════════════════════════════════════════

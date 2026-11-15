@@ -313,6 +313,9 @@ class TestWhereTheTrimmedTextWent:
 #: Files a reader meets before they have the package: the README and every `docs/` guide and
 #: package README, except the dated roadmap (history, quotes the clone install on purpose).
 _INSTALL_DOC_SKIP = ("docs/2026_roadmap.md",)
+#: The upgrade guides quote the OLD commands on purpose (a `Before` block, the clone owner's
+#: uninstall and reinstall in `distribution-rename.md`); they are migration text, not install docs.
+_INSTALL_DOC_SKIP_DIRS = ("docs/upgrade-guide/",)
 
 #: Emoji ranges: pictographs, symbols and dingbats, the few misc-technical and star emoji, and
 #: the variation selector and joiner. Arrows (U+2190..21FF) and box drawing are NOT emoji.
@@ -383,6 +386,7 @@ def _install_doc_files() -> list[Path]:
         p
         for p in sorted((ROOT / "docs").rglob("*.md"))
         if p.relative_to(ROOT).as_posix() not in _INSTALL_DOC_SKIP
+        and not p.relative_to(ROOT).as_posix().startswith(_INSTALL_DOC_SKIP_DIRS)
     ]
     pkg = sorted((ROOT / "src" / "fsm_llm").rglob("README.md"))
     return [README, *docs, *pkg]

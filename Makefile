@@ -58,8 +58,8 @@ decision-index: ## Regenerate docs/decisions/index.md, the decision index
 decision-check: ## Fail when the decision index is stale or a decision anchor does not resolve
 	python scripts/decision_index.py --check docs/decisions/index.md
 
-# Red on the real CHANGELOG.md until its BREAKING bullets link their upgrade guides (step 118 of plan
-# d454fd62), so it is NOT wired into CI or a test yet: it is enforced at release prep.
+# Green on the real CHANGELOG.md: every BREAKING bullet links its upgrade guide. CI runs the same
+# command in the lint job and tests/test_packaging.py::TestTheRealChangelog runs it on every pytest run.
 changelog-check: ## Check the CHANGELOG form: ### headings, compare link, every BREAKING bullet links its upgrade guide
 	python scripts/changelog_check.py check
 

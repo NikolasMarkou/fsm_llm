@@ -82,11 +82,19 @@ nav:
       - Architecture: architecture.md
   - Decisions: decisions/index.md
   - Upgrade guides:
+      - Overview: upgrade-guide/index.md
+      - Distribution rename: upgrade-guide/v0.13.0/distribution-rename.md
+      - Python and dependency floors: upgrade-guide/v0.13.0/python-floor.md
+      - Default model and dotenv files: upgrade-guide/v0.13.0/default-model-and-env.md
+      - Module paths: upgrade-guide/v0.13.0/module-paths.md
+      - Tools and approval policy: upgrade-guide/v0.13.0/tools-and-policy.md
+      - Monitor route functions: upgrade-guide/v0.13.0/monitor-routes.md
       - Core renames: upgrade-guide/v0.13.0/core-renames.md
       - Definition version: upgrade-guide/v0.13.0/definition-version.md
       - Workflows vocabulary: upgrade-guide/v0.13.0/workflows-vocabulary.md
-      - Monitor and reasoning: upgrade-guide/v0.13.0/monitor-and-reasoning.md
       - Agents renames and behaviour: upgrade-guide/v0.13.0/agents-renames.md
+      - Monitor and reasoning: upgrade-guide/v0.13.0/monitor-and-reasoning.md
+      - Removals and small API changes: upgrade-guide/v0.13.0/removals.md
   - Project:
       - Contributing: contributing.md
       - Security: security.md

@@ -8,11 +8,15 @@ newest release when `[Unreleased]` is empty): the `###` headings and their order
 `extract VERSION` prints one section for the release notes.
 
 Fixtures only: every test builds its CHANGELOG and its `docs/` tree under `tmp_path`. The real
-`CHANGELOG.md` is deliberately NOT read here; it is enforced at step 118 of the plan, when its
-bullets have their guides (a test of today's real file would pin a state that is meant to change).
+`CHANGELOG.md` is deliberately NOT read here: `tests/test_packaging.py::TestTheRealChangelog`
+enforces it (step 118), so one place owns that rule.
+
+`extract --link-base URL` (step 118) makes the `docs/...` links of the notes absolute under a tag
+URL for the GitHub release body; `LINK_CASES` and the CLI scenarios below pin it.
 
 * `CASES` is a table of CHANGELOG texts and the finding codes each must give; `EXTRACTS` the same
-  for `extract`; `EXTRA` holds the scenarios that need the CLI. `scenario_problems(module, tmp)`
+  for `extract`; `LINK_CASES` the same for the link rewrite; `EXTRA` holds the scenarios that
+  need the CLI. `scenario_problems(module, tmp)`
   returns the ids of the scenarios that fail on a loaded copy of the script: the real script
   returns the empty set, and each of the mutants (`MUTANTS`) is the real source with one edit
   and must fail the scenario it names. A check that cannot fail is not a check.
@@ -701,6 +705,91 @@ EXTRACTS: list[Extract] = [
 ]
 
 
+BASE = "https://github.com/o/r/blob/v0.13.0/"
+
+
+@dataclass(frozen=True)
+class LinkCase:
+    """`rewrite_doc_links(text, base)` must return `expected`."""
+
+    id: str
+    text: str
+    expected: str
+    base: str = BASE
+
+
+_GUIDE = "docs/upgrade-guide/v0.13.0/core.md#renamed-thing"
+
+LINK_CASES: list[LinkCase] = [
+    LinkCase(
+        "plain",
+        f"- [Upgrade guide]({_GUIDE})\n",
+        f"- [Upgrade guide]({BASE}{_GUIDE})\n",
+    ),
+    LinkCase("dot-slash", "[a](./docs/x.md)", f"[a]({BASE}docs/x.md)"),
+    LinkCase("angle", "[a](<docs/up guide.md>)", f"[a](<{BASE}docs/up guide.md>)"),
+    LinkCase(
+        "two-per-line",
+        "[a](docs/a.md) and [b](docs/b.md)",
+        f"[a]({BASE}docs/a.md) and [b]({BASE}docs/b.md)",
+    ),
+    LinkCase(
+        "code-span",
+        "`](docs/x.md)` and [a](docs/y.md)",
+        f"`](docs/x.md)` and [a]({BASE}docs/y.md)",
+    ),
+    LinkCase(
+        "code-span-over-a-line-break",
+        "the `form\n](docs/x.md)` stays, [a](docs/y.md) goes",
+        f"the `form\n](docs/x.md)` stays, [a]({BASE}docs/y.md) goes",
+    ),
+    LinkCase(
+        "double-backtick-span",
+        "``a ` ](docs/x.md)`` and [a](docs/y.md)",
+        f"``a ` ](docs/x.md)`` and [a]({BASE}docs/y.md)",
+    ),
+    LinkCase(
+        "fence",
+        "[a](docs/a.md)\n```text\n[k](docs/k.md)\n```\n[b](docs/b.md)\n",
+        f"[a]({BASE}docs/a.md)\n```text\n[k](docs/k.md)\n```\n[b]({BASE}docs/b.md)\n",
+    ),
+    LinkCase(
+        "tilde-fence",
+        "~~~\n[k](docs/k.md)\n~~~\n[b](docs/b.md)",
+        f"~~~\n[k](docs/k.md)\n~~~\n[b]({BASE}docs/b.md)",
+    ),
+    LinkCase(
+        "an-unclosed-fence-holds-the-rest",
+        "[a](docs/a.md)\n```\n[k](docs/k.md)\n[l](docs/l.md)\n",
+        f"[a]({BASE}docs/a.md)\n```\n[k](docs/k.md)\n[l](docs/l.md)\n",
+    ),
+    LinkCase(
+        "other-targets-are-left-alone",
+        "[a](CONTRIBUTING.md) [b](src/docs/x.md) [c](https://x.org/docs/y.md) [d](#docs/e) docs/f.md",
+        "[a](CONTRIBUTING.md) [b](src/docs/x.md) [c](https://x.org/docs/y.md) [d](#docs/e) docs/f.md",
+    ),
+    LinkCase(
+        "no-slash-in-the-base",
+        "[a](docs/x.md)",
+        "[a](https://h/blob/t/docs/x.md)",
+        "https://h/blob/t",
+    ),
+    LinkCase(
+        "a-text-with-no-link-is-byte-identical", "a \r\n  b  \n\n", "a \r\n  b  \n\n"
+    ),
+    LinkCase(
+        "an-absolute-target-is-not-rewritten-again",
+        f"[a]({BASE}docs/x.md)",
+        f"[a]({BASE}docs/x.md)",
+    ),
+]
+
+
+def run_link_case(module: types.ModuleType, case: LinkCase) -> bool:
+    once = module.rewrite_doc_links(case.text, case.base)
+    return once == case.expected and module.rewrite_doc_links(once, case.base) == once
+
+
 def run_extract(module: types.ModuleType, case: Extract) -> bool:
     return (
         module.extract_text(case.text, case.version, with_heading=case.with_heading)
@@ -725,6 +814,97 @@ class TestExtract:
     def test_extract_equals_the_check_scope_headings(self, cc):
         # the body of a section holds its `###` headings, so a section can be re-checked alone
         assert cc.extract_text(doc(), "Unreleased").startswith("### Added")
+
+
+class TestLinkBase:
+    def test_case_ids_are_unique(self):
+        ids = [c.id for c in LINK_CASES]
+        assert len(ids) == len(set(ids))
+
+    @pytest.mark.parametrize("case", LINK_CASES, ids=[c.id for c in LINK_CASES])
+    def test_case(self, cc: types.ModuleType, case: LinkCase):
+        once = cc.rewrite_doc_links(case.text, case.base)
+        assert once == case.expected
+        assert cc.rewrite_doc_links(once, case.base) == once  # idempotent
+
+    def test_the_rewrite_runs_on_the_extracted_notes_before_anything_else(
+        self, cc, tmp_path
+    ):
+        text = doc(changed(f"- {B} x. {OK_LINK}"))
+        path = _write(tmp_path, text)
+        code, plain = run_main(cc, ["extract", "Unreleased", "--file", str(path)])
+        code2, linked = run_main(
+            cc, ["extract", "Unreleased", "--file", str(path), "--link-base", BASE]
+        )
+        assert (code, code2) == (0, 0)
+        assert linked == cc.rewrite_doc_links(plain, BASE) != plain
+        assert f"]({BASE}{G}#renamed-thing)" in linked and "](docs/" not in linked
+
+    def test_the_link_base_applies_to_the_heading_line_too(self, cc, tmp_path):
+        path = _write(tmp_path, doc(changed(f"- {B} x. {OK_LINK}")))
+        code, out = run_main(
+            cc,
+            [
+                "extract",
+                "Unreleased",
+                "--file",
+                str(path),
+                "--with-heading",
+                "--link-base",
+                BASE,
+            ],
+        )
+        assert code == 0 and out.startswith("## [Unreleased]\n\n")
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "",
+            "ftp://h/",
+            "github.com/o/r/",
+            "https://",
+            "file:///tmp/x/",
+            "https:// x/",
+        ],
+    )
+    def test_a_base_that_is_not_an_http_address_is_a_usage_error(
+        self, cc, tmp_path, bad, capsys
+    ):
+        path = _write(tmp_path, doc())
+        argv = ["extract", "Unreleased", "--file", str(path), "--link-base", bad]
+        assert run_main(cc, argv) == (2, "")
+        assert "--link-base" in capsys.readouterr().err
+
+    def test_check_does_not_take_the_option(self, cc, tmp_path):
+        path = _write(tmp_path, doc())
+        assert run_main(cc, ["check", "--file", str(path), "--link-base", BASE])[0] == 2
+
+    def test_a_trailing_slash_is_added_once(self, cc, tmp_path):
+        path = _write(tmp_path, doc(changed(f"- {B} x. {OK_LINK}")))
+        for base in ("https://h/blob/t", "https://h/blob/t/"):
+            _, out = run_main(
+                cc, ["extract", "Unreleased", "--file", str(path), "--link-base", base]
+            )
+            assert "](https://h/blob/t/docs/" in out and "t//docs" not in out
+
+    def test_the_rewrite_is_pure_and_changes_nothing_else(self, cc):
+        text = "# t\n\n- a [b](docs/x.md) `c` **d**\n\n```\ncode\n```\n"
+        out = cc.rewrite_doc_links(text, BASE)
+        assert out.replace(BASE, "") == text
+
+    def test_the_real_changelog_notes_hold_no_relative_docs_link_after_it(self, cc):
+        """Every link of the real [Unreleased] section: absolute after the rewrite."""
+        import re
+
+        text = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        notes = cc.extract_text(text, "Unreleased")
+        if notes is None or not notes:
+            pytest.skip("[Unreleased] is empty (the release was cut)")
+        out = cc.rewrite_doc_links(notes, BASE)
+        no_fence = re.sub(r"^(```+|~~~+).*?^\1[ \t]*$", "", out, flags=re.S | re.M)
+        no_code = re.sub(r"(`+)(.+?)\1", "", no_fence, flags=re.S)
+        assert re.findall(r"\]\(<?(?:\./)?docs/", no_code) == []
+        assert out.count(f"]({BASE}docs/") >= 1
 
 
 # --------------------------------------------------------------------------------------
@@ -1130,7 +1310,31 @@ def _scn_slug_table(module: types.ModuleType, tmp: Path) -> bool:
     ]
 
 
+def _scn_cli_link_base(module: types.ModuleType, tmp: Path) -> bool:
+    path = _write(tmp, doc(changed(f"- {B} x. {OK_LINK}")), "c.md")
+    argv = ["extract", "Unreleased", "--file", str(path)]
+    plain = run_main(module, argv)
+    linked = run_main(module, [*argv, "--link-base", BASE])
+    return (
+        plain[0] == 0
+        and f"]({G}#renamed-thing)" in plain[1]
+        and linked[0] == 0
+        and f"]({BASE}{G}#renamed-thing)" in linked[1]
+        and "](docs/" not in linked[1]
+    )
+
+
+def _scn_cli_link_base_usage(module: types.ModuleType, tmp: Path) -> bool:
+    path = _write(tmp, doc(), "c.md")
+    argv = ["extract", "Unreleased", "--file", str(path), "--link-base"]
+    return run_main(module, [*argv, "ftp://h/"])[0] == 2 and (
+        run_main(module, [*argv, "https://h/t/"])[0] == 0
+    )
+
+
 EXTRA: dict[str, Callable[[types.ModuleType, Path], bool]] = {
+    "cli-link-base": _scn_cli_link_base,
+    "cli-link-base-usage": _scn_cli_link_base_usage,
     "exit-codes": _scn_exit_codes,
     "exit-unreadable": _scn_exit_unreadable,
     "exit-extract-missing": _scn_exit_extract_missing,
@@ -1159,6 +1363,13 @@ def scenario_problems(module: types.ModuleType, tmp: Path) -> set[str]:
             ok = False
         if not ok:
             bad.add("extract-" + ex.id)
+    for link_case in LINK_CASES:
+        try:
+            ok = run_link_case(module, link_case)
+        except Exception:
+            ok = False
+        if not ok:
+            bad.add("links-" + link_case.id)
     for name, fn in EXTRA.items():
         sub = tmp / name
         sub.mkdir()
@@ -1411,6 +1622,62 @@ MUTANTS: list[tuple[str, str, str, str]] = [
         "    while ident in taken or not ident:",
         "    while not ident:",
     ),
+    (
+        "the link base is not applied",
+        "cli-link-base",
+        "        if args.link_base:",
+        "        if False:",
+    ),
+    (
+        "a link in a code span is rewritten",
+        "links-code-span",
+        "        out.append(span.group(0))",
+        "        out.append(_DOC_LINK.sub(replace, span.group(0)))",
+    ),
+    (
+        "a link in a tilde code fence is rewritten",
+        "links-tilde-fence",
+        "        if is_fence:",
+        "        if False:",
+    ),
+    (
+        "the ./docs form is not rewritten",
+        "links-dot-slash",
+        '_DOC_LINK = re.compile(r"\\]\\((<?)(?:\\./)?docs/")',
+        '_DOC_LINK = re.compile(r"\\]\\((<?)docs/")',
+    ),
+    (
+        "the angle-bracket form loses its bracket",
+        "links-angle",
+        '    return f"]({match.group(1)}{base}docs/"'.replace(
+            "    return", "        return"
+        ),
+        '        return f"]({base}docs/"',
+    ),
+    (
+        "only the first link of a line is rewritten",
+        "links-two-per-line",
+        "    out.append(_DOC_LINK.sub(replace, chunk[position:]))",
+        "    out.append(_DOC_LINK.sub(replace, chunk[position:], count=1))",
+    ),
+    (
+        "a base with no trailing slash is joined as written",
+        "links-no-slash-in-the-base",
+        '    base = link_base if link_base.endswith("/") else link_base + "/"',
+        "    base = link_base",
+    ),
+    (
+        "any base is accepted by the command line",
+        "cli-link-base-usage",
+        '    if not re.fullmatch(r"https?://\\S+", value):',
+        "    if False:",
+    ),
+    (
+        "a code span over a line break is not protected",
+        "links-code-span-over-a-line-break",
+        "        for span in _CODE_SPAN.finditer(chunk):",
+        '        for span in re.finditer(r"(`+)(.+?)\\1", chunk):',
+    ),
 ]
 
 
@@ -1430,7 +1697,12 @@ class TestMutantsAreKilled:
         assert len(MUTANTS) >= 12
 
     def test_every_named_scenario_exists(self):
-        ids = {c.id for c in CASES} | {"extract-" + e.id for e in EXTRACTS} | set(EXTRA)
+        ids = (
+            {c.id for c in CASES}
+            | {"extract-" + e.id for e in EXTRACTS}
+            | {"links-" + c.id for c in LINK_CASES}
+            | set(EXTRA)
+        )
         assert {m[1] for m in MUTANTS} <= ids
 
     @pytest.mark.parametrize(

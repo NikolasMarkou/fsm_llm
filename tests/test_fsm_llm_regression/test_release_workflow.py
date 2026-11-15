@@ -63,6 +63,13 @@ _RELEASE_COMMAND = (
     'gh release create "$TAG" dist/* sbom/sbom.cdx.json --title "$TAG" '
     "--notes-file notes/release-notes.md --verify-tag"
 )
+#: The extract step: the notes carry absolute links under the tag, written before the cut.
+_EXTRACT_COMMAND = (
+    'python scripts/changelog_check.py extract "$VERSION" '
+    '--link-base "https://github.com/${REPO}/blob/${TAG}/" > release-notes.md'
+)
+#: The fit step drops a link text that a cut would leave open.
+_OPEN_LINK_LOOP = 'while (open_link := re.search(r"\\[[^\\[\\]]*\\Z", cut)):'
 _SBOM_COMMAND = (
     'cyclonedx-py environment "$RUNNER_TEMP/sbom-env/bin/python" '
     "--pyproject pyproject.toml --mc-type library --sv 1.6 --of JSON -o sbom.cdx.json"
@@ -328,11 +335,14 @@ def workflow_problems(text: str) -> set[str]:
     erun = str((extract or {}).get("run"))
     if (
         extract is None
-        or 'python scripts/changelog_check.py extract "$VERSION" > release-notes.md'
-        not in erun
+        or _EXTRACT_COMMAND not in erun
         or "test -s release-notes.md" not in erun
-        or (extract.get("env") or {}).get("VERSION")
-        != "${{ steps.version.outputs.version }}"
+        or (extract.get("env") or {})
+        != {
+            "VERSION": "${{ steps.version.outputs.version }}",
+            "TAG": "${{ github.ref_name }}",
+            "REPO": "${{ github.repository }}",
+        }
     ):
         found.add("extract")
 
@@ -344,10 +354,18 @@ def workflow_problems(text: str) -> set[str]:
         != {"TAG": "${{ github.ref_name }}", "REPO": "${{ github.repository }}"}
         or "if len(text) > limit:" not in frun_text
         or 'cut.count("```") % 2' not in frun_text
+        or _OPEN_LINK_LOOP not in frun_text
         or "os.environ['REPO']" not in frun_text
         or "os.environ['TAG']" not in frun_text
     ):
         found.add("notes-limit")
+
+    if (
+        extract is not None
+        and fit is not None
+        and _index(build, extract) > _index(build, fit)
+    ):
+        found.add("notes-order")  # the links are made absolute BEFORE the notes are cut
 
     built = _step_with(build, "python -m build")
     if (
@@ -631,8 +649,13 @@ class TestTheRealWorkflow:
     def test_the_release_notes_come_from_the_changelog_extractor_into_a_file(self):
         build = _load(_real_text())["jobs"]["build"]
         step = _step_with(build, "changelog_check.py")
-        assert step["env"] == {"VERSION": "${{ steps.version.outputs.version }}"}
-        assert 'extract "$VERSION" > release-notes.md' in step["run"]
+        assert step["env"] == {
+            "VERSION": "${{ steps.version.outputs.version }}",
+            "TAG": "${{ github.ref_name }}",
+            "REPO": "${{ github.repository }}",
+        }
+        assert _EXTRACT_COMMAND in step["run"]
+        assert "${{" not in step["run"]
         assert "test -s release-notes.md" in step["run"]
 
     def test_the_artifacts_are_named_uniquely_and_fail_when_empty(self):
@@ -975,6 +998,60 @@ _CHANGELOG = """# Changelog
 """
 
 
+def _unreleased_has_notes(text: str) -> bool:
+    """True while `## [Unreleased]` holds a body (it is empty right after a release is cut)."""
+    match = re.search(r"^## \[Unreleased\]\n(.*?)(?=^## \[)", text, re.M | re.S)
+    return bool(match and match.group(1).strip())
+
+
+def _newest_release(text: str) -> str:
+    return re.findall(r"^## \[(\d+\.\d+\.\d+)\]", text, re.MULTILINE)[0]
+
+
+#: The environment the extract step gets from the workflow (`github.ref_name`, `github.repository`).
+_NOTES_ENV = {"TAG": "v0.13.0", "REPO": "NikolasMarkou/fsm_llm"}
+_LINK_BASE = "https://github.com/NikolasMarkou/fsm_llm/blob/v0.13.0/"
+
+#: A section with relative guide links in every position the rewrite must tell apart: a plain
+#: link, a `./docs/` link, a link in `<...>`, an inline code span and a fenced block that quote
+#: the relative form, a link outside `docs/`, and an absolute link.
+_LINKED_CHANGELOG = """# Changelog
+
+## [Unreleased]
+
+## [0.13.0] - 2026-11-20
+
+### Changed
+
+- **BREAKING:** a thing moved. [Upgrade guide](docs/upgrade-guide/v0.13.0/a.md#moved)
+- Also [the guide](./docs/guide.md) and [angle](<docs/up guide.md>) are links.
+- The rule: no `](docs/x.md)` link stays relative; see [the repo](https://example.org/docs/y.md).
+- A [file outside docs](CONTRIBUTING.md) is not rewritten.
+
+```text
+[kept](docs/in-a-fence.md)
+```
+"""
+_LINKED_NOTES = f"""### Changed
+
+- **BREAKING:** a thing moved. [Upgrade guide]({_LINK_BASE}docs/upgrade-guide/v0.13.0/a.md#moved)
+- Also [the guide]({_LINK_BASE}docs/guide.md) and [angle](<{_LINK_BASE}docs/up guide.md>) are links.
+- The rule: no `](docs/x.md)` link stays relative; see [the repo](https://example.org/docs/y.md).
+- A [file outside docs](CONTRIBUTING.md) is not rewritten.
+
+```text
+[kept](docs/in-a-fence.md)
+```
+"""
+
+
+def _relative_doc_links(text: str) -> list[str]:
+    """`](docs/` targets left outside code fences and inline code spans."""
+    no_fences = re.sub(r"^(```+|~~~+).*?^\1[ \t]*$", "", text, flags=re.S | re.M)
+    no_code = re.sub(r"(`+)(.+?)\1", "", no_fences, flags=re.S)
+    return re.findall(r"\]\(<?(?:\./)?docs/[^)>]*", no_code)
+
+
 def _notes_tree(cwd: Path, changelog: str = _CHANGELOG) -> None:
     (cwd / "scripts").mkdir(parents=True, exist_ok=True)
     shutil.copy(_ROOT / "scripts" / "changelog_check.py", cwd / "scripts")
@@ -985,7 +1062,7 @@ def _notes_failures(script: str, base: Path) -> list[str]:
     wrong = []
     cwd = base / "ok"
     _notes_tree(cwd)
-    code, _, _ = _run(script, cwd, {"VERSION": "0.13.0"})
+    code, _, _ = _run(script, cwd, {"VERSION": "0.13.0", **_NOTES_ENV})
     notes = (cwd / "release-notes.md").read_text(encoding="utf-8") if code == 0 else ""
     if (
         code != 0
@@ -993,6 +1070,24 @@ def _notes_failures(script: str, base: Path) -> list[str]:
         != "### Added\n\n- The thing that shipped.\n\n### Fixed\n\n- The bug that was fixed.\n"
     ):
         wrong.append("ok")
+    # The links of the notes point at the tag, not at the working tree of the reader.
+    cwd = base / "links"
+    _notes_tree(cwd, _LINKED_CHANGELOG)
+    code, _, _ = _run(script, cwd, {"VERSION": "0.13.0", **_NOTES_ENV})
+    notes = (cwd / "release-notes.md").read_text(encoding="utf-8") if code == 0 else ""
+    if code != 0 or notes != _LINKED_NOTES or _relative_doc_links(notes):
+        wrong.append("links")
+    cwd = base / "links-other-tag"
+    _notes_tree(cwd, _LINKED_CHANGELOG)
+    env = {"TAG": "v9.9.9", "REPO": "someone/else"}
+    code, _, _ = _run(script, cwd, {"VERSION": "0.13.0", **env})
+    notes = (cwd / "release-notes.md").read_text(encoding="utf-8") if code == 0 else ""
+    if (
+        code != 0
+        or "](https://github.com/someone/else/blob/v9.9.9/docs/guide.md)" not in notes
+        or "NikolasMarkou" in notes
+    ):
+        wrong.append("links-follow-the-tag-and-repository")
     for case_id, version in (
         ("missing", "0.99.0"),
         ("empty", "0.12.9"),
@@ -1000,10 +1095,43 @@ def _notes_failures(script: str, base: Path) -> list[str]:
     ):
         cwd = base / case_id
         _notes_tree(cwd)
-        code, _, _ = _run(script, cwd, {"VERSION": version})
+        code, _, _ = _run(script, cwd, {"VERSION": version, **_NOTES_ENV})
         if code == 0:
             wrong.append(case_id)
     return wrong
+
+
+def _filler(size: int) -> str:
+    """Lines `- xxx...` of at most 55 characters that add up to exactly `size`."""
+    assert size >= 110
+    lines, left = [], size
+    while left >= 110:
+        lines.append(55)
+        left -= 55
+    lines.extend([left // 2, left - left // 2])
+    return "".join("- " + "x" * (n - 3) + "\n" for n in lines)
+
+
+_FILLER_END = "xxxx"  # the last whole filler line, after the cut stripped its line end
+
+
+def _link_cut_cases() -> dict[str, tuple[str, tuple[str, ...]]]:
+    """Notes whose 120000th character sits where a link would be cut. Value: (notes, what must go).
+
+    `straddle`: the character is inside the target of an absolute link (a line is kept whole or
+    dropped whole, so no half target may survive). `open-text`: the cut falls on the line break
+    inside a link text, `[the upgrade` / `guide](...)`; the open text must not survive either.
+    """
+    tail = "- a changelog line of moderate length, enough to add up.\n" * 400
+    target = _LINK_BASE + "docs/upgrade-guide/v0.13.0/aaaa.md#bbbb"
+    straddle = _filler(119_950) + f"- see [the guide]({target}) and more text.\n" + tail
+    opener = "- see [the upgrade\n"
+    closer = "guide](" + target + ") and " + "more text " * 60 + "\n"
+    open_text = _filler(119_900) + opener + closer + tail
+    return {
+        "link-straddle": (straddle, ("aaaa.md", "[the guide]")),
+        "link-open-text": (open_text, ("[the upgrade", "guide](")),
+    }
 
 
 def _fit_failures(script: str, base: Path) -> list[str]:
@@ -1037,6 +1165,19 @@ def _fit_failures(script: str, base: Path) -> list[str]:
             and out.endswith(f"in [CHANGELOG.md]({link}).\n")
             and out.count("```") % 2 == 0
             and out.startswith(notes[:50])
+        ):
+            wrong.append(case_id)
+    for case_id, (notes, gone) in _link_cut_cases().items():
+        cwd = base / case_id
+        cwd.mkdir(parents=True)
+        (cwd / "release-notes.md").write_text(notes, encoding="utf-8")
+        code, _, _ = _run(script, cwd, env)
+        out = (cwd / "release-notes.md").read_text(encoding="utf-8")
+        kept = out.split("\n\n---\n\n")[0]
+        if (
+            code != 0
+            or any(part in out for part in gone)
+            or not kept.endswith(_FILLER_END)
         ):
             wrong.append(case_id)
     return wrong
@@ -1154,7 +1295,7 @@ class TestTheOtherScripts:
         code, _, err = _run(
             _script("build", needle="changelog_check.py"),
             tmp_path,
-            {"VERSION": "0.12.9"},
+            {"VERSION": "0.12.9", **_NOTES_ENV},
         )
         assert code != 0 and "0.12.9" in err
 
@@ -1164,13 +1305,17 @@ class TestTheOtherScripts:
         text = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         versions = re.findall(r"^## \[(\d+\.\d+\.\d+)\]", text, re.MULTILINE)
         assert versions, "the real CHANGELOG has no dated release"
-        for i, version in enumerate(("Unreleased", versions[0])):
+        # `[Unreleased]` is empty right after a release is cut (it then has no notes to extract).
+        pending = ("Unreleased",) if _unreleased_has_notes(text) else ()
+        for i, version in enumerate((*pending, versions[0])):
             cwd = tmp_path / str(i)
             (cwd / "scripts").mkdir(parents=True)
             shutil.copy(_ROOT / "scripts" / "changelog_check.py", cwd / "scripts")
             (cwd / "CHANGELOG.md").write_text(text, encoding="utf-8")
             code, _, err = _run(
-                _script("build", needle="changelog_check.py"), cwd, {"VERSION": version}
+                _script("build", needle="changelog_check.py"),
+                cwd,
+                {"VERSION": version, **_NOTES_ENV},
             )
             assert code == 0, (version, err)
             assert (cwd / "release-notes.md").stat().st_size > 0
@@ -1187,7 +1332,9 @@ class TestTheOtherScripts:
         (tmp_path / "scripts").mkdir()
         shutil.copy(_ROOT / "scripts" / "changelog_check.py", tmp_path / "scripts")
         shutil.copy(_ROOT / "CHANGELOG.md", tmp_path / "CHANGELOG.md")
-        code, _, err = _run(extract, tmp_path, {"VERSION": "Unreleased"})
+        text = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        version = "Unreleased" if _unreleased_has_notes(text) else _newest_release(text)
+        code, _, err = _run(extract, tmp_path, {"VERSION": version, **_NOTES_ENV})
         assert code == 0, err
         code, _, err = _run(
             _script("build", needle="limit = 120_000"),
@@ -1224,6 +1371,157 @@ class TestTheOtherScripts:
 # --------------------------------------------------------------------------------------
 # Every shipped script has mutants that its battery kills
 # --------------------------------------------------------------------------------------
+
+
+def _long_linked_changelog() -> str:
+    """A 0.13.0 section just under the GitHub limit, with a guide link on every bullet.
+
+    The raw section is below 120000 characters, so a cut BEFORE the links are made absolute would
+    keep all of it; the absolute links add about 54 characters each and push it far above the
+    limit, so only a cut AFTER the rewrite keeps the body under the GitHub limit.
+    """
+    head = (
+        "# Changelog\n\n## [Unreleased]\n\n## [0.13.0] - 2026-11-20\n\n### Changed\n\n"
+    )
+    lines: list[str] = []
+    size = 0
+    while True:
+        i = len(lines)
+        line = (
+            f"- **BREAKING:** item {i:05d} "
+            + "word " * 12
+            + f"[Upgrade guide](docs/upgrade-guide/v0.13.0/page-{i % 7}.md#section-{i})\n"
+        )
+        if size + len(line) > 119_000:
+            return head + "".join(lines)
+        lines.append(line)
+        size += len(line)
+
+
+_BULLET = re.compile(
+    r"- \*\*BREAKING:\*\* item \d{5} (?:word ){12}"
+    r"\[Upgrade guide\]\(https://github\.com/NikolasMarkou/fsm_llm/blob/v0\.13\.0/"
+    r"docs/upgrade-guide/v0\.13\.0/page-\d\.md#section-\d+\)"
+)
+
+
+def _final_notes_problems(notes: str) -> list[str]:
+    """What is wrong with the notes `gh release create` would receive, as short phrases."""
+    problems: list[str] = []
+    if len(notes) > 125_000:
+        problems.append("over the GitHub limit")
+    if _relative_doc_links(notes):
+        problems.append("a relative docs link is left")
+    if "These notes are cut at the GitHub release limit." not in notes:
+        problems.append("not cut")
+    kept = notes.split("\n\n---\n\n")[0]
+    for line in kept.splitlines():
+        if line.startswith("- ") and not _BULLET.fullmatch(line):
+            problems.append("a damaged bullet: ..." + line[-50:])
+            break
+    return problems
+
+
+def _notes_pipeline(
+    cwd: Path, extract: str, fit: str, *, rewrite_late: bool = False
+) -> str:
+    """Run the extract step and the cut step the way the workflow orders them; the notes."""
+    _notes_tree(cwd, _long_linked_changelog())
+    env = {"VERSION": "0.13.0", **_NOTES_ENV}
+    code, _, err = _run(extract, cwd, env)
+    assert code == 0, err
+    code, _, err = _run(fit, cwd, _NOTES_ENV)
+    assert code == 0, err
+    notes = (cwd / "release-notes.md").read_text(encoding="utf-8")
+    if rewrite_late:  # the wrong order: the links are made absolute after the cut
+        module = _load_checker()
+        notes = module.rewrite_doc_links(notes, _LINK_BASE)
+    return notes
+
+
+def _load_checker() -> Any:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_changelog_check_notes", _ROOT / "scripts" / "changelog_check.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+    return module
+
+
+class TestTheReleaseNotesLinks:
+    """The body of the GitHub release links the tag, never the reader's working tree (step 118)."""
+
+    def test_the_notes_after_the_extract_and_the_cut_are_sound(self, tmp_path: Path):
+        notes = _notes_pipeline(
+            tmp_path,
+            _script("build", needle="changelog_check.py"),
+            _script("build", needle="limit = 120_000"),
+        )
+        assert _final_notes_problems(notes) == []
+        assert (
+            notes.count("](https://github.com/NikolasMarkou/fsm_llm/blob/v0.13.0/docs/")
+            > 500
+        )
+
+    def test_the_fixture_is_below_the_limit_before_the_rewrite_and_above_after(
+        self, tmp_path: Path
+    ):
+        body = _load_checker().extract_text(_long_linked_changelog(), "0.13.0")
+        assert len(body) < 120_000
+        assert len(_load_checker().rewrite_doc_links(body, _LINK_BASE)) > 125_000
+
+    def test_links_made_absolute_after_the_cut_break_the_limit(self, tmp_path: Path):
+        # The wrong order: extract WITHOUT the base (so the raw 119k characters are not cut), then
+        # the rewrite. The body is over the limit and not cut.
+        plain = _script("build", needle="changelog_check.py").replace(
+            ' --link-base "https://github.com/${REPO}/blob/${TAG}/"', ""
+        )
+        notes = _notes_pipeline(
+            tmp_path,
+            plain,
+            _script("build", needle="limit = 120_000"),
+            rewrite_late=True,
+        )
+        problems = _final_notes_problems(notes)
+        assert "over the GitHub limit" in problems and "not cut" in problems
+
+    def test_notes_with_no_base_keep_relative_links(self, tmp_path: Path):
+        plain = _script("build", needle="changelog_check.py").replace(
+            ' --link-base "https://github.com/${REPO}/blob/${TAG}/"', ""
+        )
+        notes = _notes_pipeline(
+            tmp_path, plain, _script("build", needle="limit = 120_000")
+        )
+        assert "a relative docs link is left" in _final_notes_problems(notes)
+
+    def test_the_real_changelog_notes_have_no_relative_link_after_the_steps(
+        self, tmp_path: Path
+    ):
+        (tmp_path / "scripts").mkdir()
+        shutil.copy(_ROOT / "scripts" / "changelog_check.py", tmp_path / "scripts")
+        shutil.copy(_ROOT / "CHANGELOG.md", tmp_path / "CHANGELOG.md")
+        text = (tmp_path / "CHANGELOG.md").read_text(encoding="utf-8")
+        version = "Unreleased" if _unreleased_has_notes(text) else _newest_release(text)
+        code, _, err = _run(
+            _script("build", needle="changelog_check.py"),
+            tmp_path,
+            {"VERSION": version, **_NOTES_ENV},
+        )
+        assert code == 0, err
+        code, _, err = _run(
+            _script("build", needle="limit = 120_000"), tmp_path, _NOTES_ENV
+        )
+        assert code == 0, err
+        notes = (tmp_path / "release-notes.md").read_text(encoding="utf-8")
+        assert _relative_doc_links(notes) == []
+        assert len(notes) <= 125_000
 
 
 def _swap(old: str, new: str, count: int = 1) -> Callable[[str], str]:
@@ -1290,6 +1588,16 @@ NOTES_SCRIPT_MUTANTS: list[tuple[str, Callable[[str], str]]] = [
         ).replace("test -s release-notes.md", "true", 1),
     ),
     ("the wrong version extracted", _swap('extract "$VERSION"', "extract Unreleased")),
+    (
+        "the link base option missing",
+        _swap(' --link-base "https://github.com/${REPO}/blob/${TAG}/"', ""),
+    ),
+    ("the links pinned to the main branch", _swap("blob/${TAG}/", "blob/main/")),
+    (
+        "the links name another repository",
+        _swap("github.com/${REPO}/", "github.com/example/"),
+    ),
+    ("the links lose the tag directory", _swap("/blob/${TAG}/", "/")),
 ]
 
 FIT_SCRIPT_MUTANTS: list[tuple[str, Callable[[str], str]]] = [
@@ -1300,6 +1608,10 @@ FIT_SCRIPT_MUTANTS: list[tuple[str, Callable[[str], str]]] = [
     ("the pointer names no repository", _swap("os.environ['REPO']", "'example'")),
     ("the pointer names no tag", _swap("os.environ['TAG']", "'main'")),
     ("the cut keeps a partial line", _swap('.rsplit("\\n", 1)[0]', "")),
+    (
+        "a link text left open at the cut",
+        _swap("while (open_link :=", "while False and (open_link :="),
+    ),
     (
         "the cut file is not written",
         _swap('path.write_text(text, encoding="utf-8")', "pass"),
@@ -1739,18 +2051,62 @@ MUTANTS: list[tuple[str, Any, str]] = [
     (
         "the release-notes extraction removed",
         _edit(
-            'python scripts/changelog_check.py extract "$VERSION" > release-notes.md',
-            "python scripts/changelog_check.py check > release-notes.md",
+            _EXTRACT_COMMAND,
+            _EXTRACT_COMMAND.replace("extract", "check", 1),
         ),
         "extract",
     ),
     (
         "the extraction not written to a file",
+        _edit(_EXTRACT_COMMAND, _EXTRACT_COMMAND.removesuffix(" > release-notes.md")),
+        "extract",
+    ),
+    (
+        "the link base option removed from the extraction",
+        _edit(' --link-base "https://github.com/${REPO}/blob/${TAG}/"', ""),
+        "extract",
+    ),
+    (
+        "the link base pinned to the main branch",
         _edit(
-            'python scripts/changelog_check.py extract "$VERSION" > release-notes.md',
-            'python scripts/changelog_check.py extract "$VERSION"',
+            '--link-base "https://github.com/${REPO}/blob/${TAG}/"',
+            '--link-base "https://github.com/${REPO}/blob/main/"',
         ),
         "extract",
+    ),
+    (
+        "the link base names another repository",
+        _edit(
+            '--link-base "https://github.com/${REPO}/blob/${TAG}/"',
+            '--link-base "https://github.com/example/example/blob/${TAG}/"',
+        ),
+        "extract",
+    ),
+    (
+        "the link base takes the tag from an expression in the script",
+        _edit(
+            '--link-base "https://github.com/${REPO}/blob/${TAG}/"',
+            '--link-base "https://github.com/${REPO}/blob/${{ github.ref_name }}/"',
+        ),
+        "extract",
+    ),
+    (
+        "the extraction no longer gets the tag",
+        _edit(
+            "          TAG: ${{ github.ref_name }}\n          REPO: ${{ github.repository }}\n        run: |\n          set -euo pipefail\n          python scripts/changelog_check.py extract",
+            "          REPO: ${{ github.repository }}\n        run: |\n          set -euo pipefail\n          python scripts/changelog_check.py extract",
+        ),
+        "extract",
+    ),
+    (
+        "the links made absolute after the cut (the cut step runs first)",
+        lambda text: _fit_before_extract(text),
+        "notes-order",
+    ),
+    (
+        "the cut leaves a link text open",
+        _edit(_OPEN_LINK_LOOP, "while False:"),
+        "notes-limit",
     ),
     (
         "the empty-notes check removed",
@@ -2089,7 +2445,10 @@ MUTANTS: list[tuple[str, Any, str]] = [
     ),
     (
         "the notes fitting step without its repository",
-        _edit("          REPO: ${{ github.repository }}\n", ""),
+        _edit(
+            "          REPO: ${{ github.repository }}\n        run: |\n          set -euo pipefail\n          python - <<'PY'\n          import os\n",
+            "        run: |\n          set -euo pipefail\n          python - <<'PY'\n          import os\n",
+        ),
         "notes-limit",
     ),
     (
@@ -2121,13 +2480,29 @@ MUTANTS: list[tuple[str, Any, str]] = [
     (
         "a uses line hidden inside a script",
         _edit(
-            '          python scripts/changelog_check.py extract "$VERSION" > release-notes.md\n',
-            '          python scripts/changelog_check.py extract "$VERSION" > release-notes.md\n          uses: actions/checkout@v4\n',
+            "          " + _EXTRACT_COMMAND + "\n",
+            "          " + _EXTRACT_COMMAND + "\n          uses: actions/checkout@v4\n",
         ),
         "uses-count",
     ),
     ("an unreadable file", lambda t: "jobs: [unterminated", "unreadable"),
 ]
+
+
+def _fit_before_extract(text: str) -> str:
+    """Move the step that cuts the notes in front of the step that extracts them."""
+    extract = re.search(
+        r"^      - name: Extract the release notes from the changelog\n(?:        .*\n|\n)*?(?=      - name:)",
+        text,
+        re.MULTILINE,
+    )
+    fit = re.search(
+        r"^      - name: Fit the release notes to the GitHub limit\n(?:        .*\n|\n)*?(?=      - name:)",
+        text,
+        re.MULTILINE,
+    )
+    assert extract and fit and extract.end() == fit.start()
+    return text[: extract.start()] + fit.group(0) + extract.group(0) + text[fit.end() :]
 
 
 def _nth_edit(text: str, old: str, new: str, nth: int) -> str:

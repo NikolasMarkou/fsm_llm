@@ -132,7 +132,7 @@ python scripts/changelog_check.py extract 0.13.0          # the notes of one rel
 make changelog-check                                      # the same check as `check`
 ```
 
-The checker (stdlib only, read-only) judges `[Unreleased]`, plus the newest release while `[Unreleased]` is empty. It is not part of CI yet: until the upgrade guides of 0.13.0 exist it reports every BREAKING bullet of `[Unreleased]` without a guide, so it is enforced at release prep, and the release workflow reads the release notes with `extract`.
+The checker (stdlib only, read-only) judges `[Unreleased]`, plus the newest release while `[Unreleased]` is empty. It is enforced three ways: `tests/test_packaging.py::TestTheRealChangelog` runs it on the real file in every test run, the `lint` job of the CI workflow runs the same command, and the release workflow reads the release notes with `extract`. A BREAKING bullet without its guide link therefore fails the build; add the guide section first, then the link. In the release body the `docs/...` links are made absolute under the tag by `extract --link-base` (a GitHub release body does not resolve a relative link), so write them relative as above and never as an absolute URL to `main`.
 
 ## Building the docs
 

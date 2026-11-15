@@ -62,6 +62,7 @@ _AUDIT = "python scripts/audit_pth.py"
 _LINTERS_INSTALL = "pip install -c constraints.txt zizmor actionlint-py"
 _ZIZMOR = "zizmor --offline .github/workflows"
 _ACTIONLINT = "actionlint"
+_CHANGELOG_CHECK = "python scripts/changelog_check.py check"
 
 #: The four jobs: `lint` and the `test` matrix, the audit of the installed environment, and the
 #: dependency review (pull requests only), whose write scope is the one grant the file has.
@@ -372,6 +373,7 @@ def workflow_problems(text: str) -> set[str]:
             "decision-check",
             "python scripts/decision_index.py --check docs/decisions/index.md",
         ),
+        ("changelog-check", _CHANGELOG_CHECK),
         ("linters-install", _LINTERS_INSTALL),
         ("zizmor", _ZIZMOR),
         ("actionlint", _ACTIONLINT),
@@ -645,6 +647,18 @@ class TestTheRealWorkflow:
         summary = _step_running(lint, "decision_index.py --report")
         assert summary is not None
         assert "GITHUB_STEP_SUMMARY" in summary["run"]
+
+    def test_the_changelog_check_runs_once_in_the_lint_job_only(self):
+        wf = _load(_real_text())
+        lint = wf["jobs"]["lint"]
+        assert _runs(lint).count(_CHANGELOG_CHECK) == 1
+        step = _step_running(lint, "changelog_check.py")
+        assert step is not None and step["run"].strip() == _CHANGELOG_CHECK
+        # After the editable install (the script reads docs/ and CHANGELOG.md from the checkout).
+        assert _index_of(lint, _CHANGELOG_CHECK) > _index_of(lint, "pip install -c")
+        for name, job in wf["jobs"].items():
+            if name != "lint":
+                assert "changelog_check" not in "\n".join(_runs(job)), name
 
     def test_the_four_jobs_run_in_parallel(self):
         for job in _load(_real_text())["jobs"].values():
@@ -1097,6 +1111,29 @@ MUTANTS: list[tuple[str, Any, str]] = [
         _drop_step("Summarise the decision anchors"),
         "lint-decision-summary",
     ),
+    (
+        "the changelog check removed",
+        _drop_step("Check the changelog and its upgrade guides"),
+        "lint-changelog-check",
+    ),
+    (
+        "the changelog check turned into an extract",
+        _edit(
+            "run: python scripts/changelog_check.py check",
+            "run: python scripts/changelog_check.py extract Unreleased",
+        ),
+        "lint-changelog-check",
+    ),
+    (
+        "the changelog check run twice",
+        _edit(
+            "      - name: Summarise the decision anchors\n",
+            "      - name: Check the changelog again\n"
+            "        run: python scripts/changelog_check.py check\n"
+            "      - name: Summarise the decision anchors\n",
+        ),
+        "lint-changelog-check",
+    ),
     # the supply-chain jobs, the concurrency group and the linters
     (
         "the concurrency group removed",
@@ -1318,6 +1355,7 @@ class TestMutantsAreKilled:
                 "mypy",
                 "import-contract",
                 "decision-check",
+                "changelog-check",
                 "linters-install",
                 "zizmor",
                 "actionlint",

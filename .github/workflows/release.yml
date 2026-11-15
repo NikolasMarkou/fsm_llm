@@ -109,17 +109,24 @@ jobs:
           PY
       - name: Extract the release notes from the changelog
         # `changelog_check.py extract` exits 1 when the section is missing or empty: a release
-        # with no notes is refused here, before anything is built or uploaded.
+        # with no notes is refused here, before anything is built or uploaded. `--link-base` makes
+        # the `docs/...` links of the changelog absolute under the tag (a release body does not
+        # resolve a relative link against the repository tree); the next step cuts the result.
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          python scripts/changelog_check.py extract "$VERSION" > release-notes.md
+          python scripts/changelog_check.py extract "$VERSION" --link-base "https://github.com/${REPO}/blob/${TAG}/" > release-notes.md
           test -s release-notes.md
       - name: Fit the release notes to the GitHub limit
         # A GitHub release body holds at most 125000 characters, and `gh release create` fails
         # beyond it, AFTER the upload to PyPI. A longer section is cut here, at a line end, with a
-        # pointer to the full text at the tag; shorter notes pass unchanged.
+        # pointer to the full text at the tag; shorter notes pass unchanged. The notes already hold
+        # their absolute links (the extract step wrote them before this cut), so a link target never
+        # straddles the cut: a line is kept whole or dropped whole, and a link text that runs over
+        # a line break is dropped from the line it opens on.
         env:
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
@@ -128,12 +135,15 @@ jobs:
           python - <<'PY'
           import os
           import pathlib
+          import re
 
           limit = 120_000
           path = pathlib.Path("release-notes.md")
           text = path.read_text(encoding="utf-8")
           if len(text) > limit:
               cut = text[:limit].rsplit("\n", 1)[0].rstrip()
+              while (open_link := re.search(r"\[[^\[\]]*\Z", cut)):
+                  cut = cut[: open_link.start()].rsplit("\n", 1)[0].rstrip()
               if cut.count("```") % 2:
                   cut += "\n```"
               link = f"https://github.com/{os.environ['REPO']}/blob/{os.environ['TAG']}/CHANGELOG.md"
