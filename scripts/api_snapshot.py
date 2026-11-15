@@ -15,7 +15,7 @@ Public means the names in the static `__all__` of the modules in `MODULES`,
 plus the names listed in `EXPLICIT` for a module that has no `__all__`
 (`core.verify.flow`, public by the AGENTS.md key-files row). `__version__` is left
 out: the release version is pinned elsewhere and would force a regeneration
-every release. The text is stable across Python 3.10 to 3.12, the environment,
+every release. The text is stable across Python 3.11 to 3.15, the environment,
 the working directory and the hash seed: types are rendered by one formatter,
 set defaults are sorted, classes are named by `__qualname__` only (so a later
 module split does not change the file), and nothing prints an address.
