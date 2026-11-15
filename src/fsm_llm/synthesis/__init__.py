@@ -20,8 +20,7 @@ Import it by name, ``from fsm_llm.synthesis import SynthesisError``;
 ``import fsm_llm`` never loads it.
 
 Install:
-    From a clone of https://github.com/NikolasMarkou/fsm_llm (no extra deps):
-    pip install -e .
+    pip install "llm-fsm[synthesis]"  (the extra adds no third-party dependency)
 """
 
 from __future__ import annotations

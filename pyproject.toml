@@ -4,7 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 version = "0.12.0"
-name = "fsm-llm"
+# The PyPI distribution is `llm-fsm`: `fsm-llm` on PyPI is another project. Only this name
+# (and the `llm-fsm[extra]` self-references of `all`) changed; the import package stays
+# `fsm_llm` and the console scripts below stay `fsm-llm*` (plan d454fd62, D-020).
+name = "llm-fsm"
 description = "Finite State Machines for Large Language Models"
 readme = "README.md"
 authors = [{name = "Nikolas Markou", email = "nikolasmarkou@gmail.com"}]
@@ -90,16 +93,16 @@ dev = [
     "pip-audit>=2.9,<3",
 ]
 all = [
-    "fsm-llm[workflows]",
-    "fsm-llm[reasoning]",
-    "fsm-llm[agents]",
-    "fsm-llm[monitor]",
-    "fsm-llm[eval]",
-    "fsm-llm[synthesis]",
-    "fsm-llm[testing]",
-    "fsm-llm[mcp]",
-    "fsm-llm[otel]",
-    "fsm-llm[a2a]",
+    "llm-fsm[workflows]",
+    "llm-fsm[reasoning]",
+    "llm-fsm[agents]",
+    "llm-fsm[monitor]",
+    "llm-fsm[eval]",
+    "llm-fsm[synthesis]",
+    "llm-fsm[testing]",
+    "llm-fsm[mcp]",
+    "llm-fsm[otel]",
+    "llm-fsm[a2a]",
 ]
 
 [project.urls]
@@ -144,6 +147,13 @@ docs = [
 where = ["src"]
 include = ["fsm_llm*"]
 namespaces = false
+
+[tool.setuptools]
+# The data files are listed by `package-data` below. The default of a pyproject project,
+# `include-package-data = true`, also reads MANIFEST.in and then warns that
+# `fsm_llm.monitor.static` (a data directory, not a package) is "absent from the packages
+# configuration"; a newer setuptools may make that an error (roadmap row 0.1, step 113).
+include-package-data = false
 
 [tool.setuptools.package-data]
 fsm_llm = ["py.typed"]

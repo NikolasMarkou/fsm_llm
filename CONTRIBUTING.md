@@ -46,7 +46,7 @@ pytest -m "not slow"                  # skip the slow tests
 
 ## Project structure
 
-The repository is one distribution (`fsm-llm`, setuptools, src layout). The directory `src/fsm_llm/` is the import package `fsm_llm` (found by `packages.find` in `pyproject.toml`), so `src/fsm_llm/engine/api/conversation.py` is `fsm_llm.engine.api.conversation`, and a subpackage is imported by name, for example `from fsm_llm.agents import create_agent`.
+The repository is one distribution (`llm-fsm`, setuptools, src layout). The directory `src/fsm_llm/` is the import package `fsm_llm` (found by `packages.find` in `pyproject.toml`), so `src/fsm_llm/engine/api/conversation.py` is `fsm_llm.engine.api.conversation`, and a subpackage is imported by name, for example `from fsm_llm.agents import create_agent`.
 
 ```
 fsm_llm/

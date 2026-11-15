@@ -1438,23 +1438,19 @@ def _pins() -> dict[str, list[str]]:
 
 class TestTheDistributionName:
     def test_the_environment_url_names_the_llm_fsm_project(self):
-        # Step 113 renames `[project] name` to `llm-fsm`; until then the publish job cannot
-        # succeed (a trusted publisher is registered per project name). Both facts are pinned
-        # here so that the rename changes `TARGET_NAME` below and nothing else in this file.
+        # A trusted publisher is registered per project name, so the publish job can only
+        # succeed when the environment url and `[project] name` are both `llm-fsm`.
         publish = _load(_real_text())["jobs"]["publish"]
         assert publish["environment"]["url"] == "https://pypi.org/p/llm-fsm"
 
-    def test_the_project_name_is_the_one_step_113_renames_or_already_the_target(self):
-        assert _pyproject()["project"]["name"] in {"fsm-llm", "llm-fsm"}
+    def test_the_project_name_is_llm_fsm(self):
+        # Tightened at step 113 (the rename): it accepted both names before.
+        assert _pyproject()["project"]["name"] == "llm-fsm"
 
-    def test_the_publish_url_matches_the_project_once_renamed(self):
+    def test_the_publish_url_matches_the_project(self):
         name = _pyproject()["project"]["name"]
         url = _load(_real_text())["jobs"]["publish"]["environment"]["url"]
-        if name == "llm-fsm":
-            assert url == f"https://pypi.org/p/{name}"
-        else:
-            # Before step 113: the workflow is written for the final name and cannot publish.
-            assert name == "fsm-llm" and url.endswith("/llm-fsm")
+        assert url == f"https://pypi.org/p/{name}"
 
 
 class TestTheToolPins:

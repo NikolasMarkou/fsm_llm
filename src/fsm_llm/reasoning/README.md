@@ -55,7 +55,7 @@ The nine strategies and their number of states:
 
 ## How to use it
 
-The package ships with `fsm-llm` itself; the `reasoning` extra adds no dependencies. There is no console script, so run it as a module:
+The package ships with `llm-fsm` itself; the `reasoning` extra adds no dependencies. There is no console script, so run it as a module:
 
 ```bash
 python -m fsm_llm.reasoning "What is 15% of 240?"

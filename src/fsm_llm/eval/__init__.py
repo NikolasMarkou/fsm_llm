@@ -15,8 +15,7 @@ Import it as ``from fsm_llm import eval as fsm_eval`` or import names directly
 (``from fsm_llm.eval import wilson_ci``) to avoid shadowing the builtin.
 
 Install:
-    From a clone of https://github.com/NikolasMarkou/fsm_llm (no extra deps):
-    pip install -e .
+    pip install "llm-fsm[eval]"  (the extra adds no third-party dependency)
 """
 
 from __future__ import annotations

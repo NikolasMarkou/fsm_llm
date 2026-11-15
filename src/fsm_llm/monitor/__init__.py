@@ -9,8 +9,7 @@ workflow instances, and system logs via a browser-based dashboard.
 
 Quick Start::
 
-    # From a clone of https://github.com/NikolasMarkou/fsm_llm
-    pip install -e ".[monitor]"
+    pip install "llm-fsm[monitor]"
 
     # Launch the monitor (opens browser at http://127.0.0.1:8420)
     python -m fsm_llm.monitor

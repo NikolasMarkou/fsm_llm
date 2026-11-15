@@ -243,7 +243,7 @@ class TestEveryPackageIsWired:
 
     @pytest.mark.parametrize("layer", sorted(LAYER_PACKAGES))
     def test_a_layer_package_needs_no_extra(self, layer: str):
-        # It ships with the core: no extra of its name, so `pip install fsm-llm` has it.
+        # It ships with the core: no extra of its name, so `pip install llm-fsm` has it.
         body = _section("pyproject.toml", "[project.optional-dependencies]")
         declared = set(re.findall(r"^([a-z0-9_]+) = ", body, re.MULTILINE))
         assert layer not in declared
@@ -369,8 +369,7 @@ class TestPackageBackedExtrasAreInstalled:
         self, label: str, rel: str, needle: str | None
     ):
         if needle is None:
-            text = _section("pyproject.toml", "[project.optional-dependencies]")
-            requested = set(re.findall(r"fsm-llm\[([a-z0-9_]+)\]", text))
+            requested = _self_referenced_extras()
         else:
             requested = set(re.findall(r"[\[,]([a-z0-9_]+)", _one_line(rel, needle)))
         missing = self.EXPECTED - requested
@@ -743,8 +742,49 @@ class TestNoTopLevelNameIsBoundTwice:
         assert not offenders, offenders
 
 
+#: The install hint of another project: `pip install fsm-llm`, with options, quotes or extras
+#: (`pip install -U "fsm-llm[a]"`). `llm-fsm` (this project) never matches, and neither does
+#: `fsm-llm-<x>` (a different name).
+_OTHER_PROJECT_HINT = re.compile(r"pip\s+install\s+(?:-\S+\s+)*[\"']?fsm-llm(?![-\w.])")
+
+#: Tracked text where an install hint may stand. The CHANGELOG and the roadmaps are history and
+#: plan text (they quote the old name on purpose); `tests/` documents the ban itself; `examples/`
+#: are frozen baselines (AGENTS.md: never edited unless asked); `plans/` is not tracked.
+_HINT_SCAN_ROOTS = ("src", "docs", ".github")
+_HINT_SCAN_FILES = (
+    "README.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "AGENTS.md",
+    "pyproject.toml",
+    "Makefile",
+    "tox.ini",
+    ".env.example",
+)
+_HINT_SCAN_SKIP = ("docs/2026_roadmap.md",)
+_HINT_SUFFIXES = (".py", ".md", ".yml", ".yaml", ".toml", ".txt", ".ini")
+
+
+def _hint_scan_files() -> list[pathlib.Path]:
+    found = [_REPO_ROOT / f for f in _HINT_SCAN_FILES]
+    for root in _HINT_SCAN_ROOTS:
+        found += [
+            p
+            for p in sorted((_REPO_ROOT / root).rglob("*"))
+            if p.is_file()
+            and p.suffix in _HINT_SUFFIXES
+            and "__pycache__" not in p.parts
+        ]
+    skip = {_REPO_ROOT / s for s in _HINT_SCAN_SKIP}
+    return [p for p in found if p.is_file() and p not in skip]
+
+
 class TestNoPypiInstallHint:
-    """`fsm-llm` on PyPI is a different project: this repo installs from a clone."""
+    """`fsm-llm` on PyPI is another project: no tracked text tells a reader to install it.
+
+    This project is published as `llm-fsm` (step 113 of plan d454fd62, D-020), so
+    `pip install llm-fsm` and `pip install "llm-fsm[extra]"` are the legal shapes.
+    """
 
     def test_no_pypi_install_hint_in_src(self):
         needle = "pip install fsm-llm"
@@ -754,7 +794,60 @@ class TestNoPypiInstallHint:
             for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
             if needle in line
         ]
-        assert not hits, f"stale PyPI install hint (clone install instead): {hits}"
+        assert not hits, f"hint that installs another project: {hits}"
+
+    def test_no_hint_of_the_other_project_in_tracked_text(self):
+        files = _hint_scan_files()
+        assert len(files) > 200, len(
+            files
+        )  # non-vacuous: the scan really walks src/docs
+        hits = [
+            f"{p.relative_to(_REPO_ROOT)}:{n}"
+            for p in files
+            for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
+            if _OTHER_PROJECT_HINT.search(line)
+        ]
+        assert not hits, f"hint that installs another project: {hits}"
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "pip install fsm-llm",
+            'pip install "fsm-llm[agents]"',
+            "pip install 'fsm-llm[a,b]'",
+            "pip install -U fsm-llm",
+            "python -m pip install --upgrade fsm-llm",
+            "pip  install  fsm-llm[monitor]",
+            "Install with: pip install fsm-llm[agents,reasoning]",
+        ],
+    )
+    def test_the_other_projects_hint_is_recognised(self, line: str):
+        assert _OTHER_PROJECT_HINT.search(line)
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "pip install llm-fsm",
+            'pip install "llm-fsm[agents]"',
+            "pip install --force-reinstall llm-fsm",
+            "pip install -e .",
+            "pip install fsm-llm-extra",
+            "fsm-llm --fsm x.json",
+        ],
+    )
+    def test_this_projects_hint_and_other_text_is_not(self, line: str):
+        assert not _OTHER_PROJECT_HINT.search(line)
+
+    def test_the_clone_install_hint_is_gone_from_python_source(self):
+        # The nine hints that said `From a clone: pip install -e ".[x]"` name the PyPI
+        # distribution now (`test_distribution_name.py` pins each one with its extra).
+        hits = [
+            f"{p.relative_to(_REPO_ROOT)}:{n}"
+            for p in sorted((_REPO_ROOT / "src").rglob("*.py"))
+            for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
+            if "pip install -e" in line or "From a clone" in line
+        ]
+        assert not hits, f"stale clone-install hint: {hits}"
 
 
 #: Newest Python minor that has a classifier. Raised (with evidence from the
@@ -765,6 +858,33 @@ _NEWEST_CLASSIFIED_MINOR = 12
 
 def _pyproject() -> dict:
     return tomllib.loads(_read("pyproject.toml"))
+
+
+#: How many `llm-fsm[extra]` self-references the `all` extra holds today (one per extra that
+#: is not `dev`). The extraction below must find at least this many, so a rename that leaves the
+#: references on the old name can never make it match nothing and pass on an empty set.
+_SELF_REFERENCES_TODAY = 10
+
+
+def _self_referenced_extras() -> set[str]:
+    """Extras the `all` extra requests from the distribution itself (`llm-fsm[x]` entries).
+
+    Reads `[project].name` and parses every entry of `all` with `packaging`; an entry
+    that names another distribution, or the project under a stale name, fails here,
+    so the set cannot be silently empty or point at a different project.
+    """
+    project = _pyproject()["project"]
+    entries = project["optional-dependencies"]["all"]
+    assert len(entries) >= _SELF_REFERENCES_TODAY, entries
+    requested: set[str] = set()
+    for entry in entries:
+        requirement = Requirement(entry)
+        assert _normalized(requirement.name) == _normalized(project["name"]), (
+            f"`all` entry {entry!r} does not name the project {project['name']!r}"
+        )
+        assert len(requirement.extras) == 1, entry
+        requested |= requirement.extras
+    return requested
 
 
 def _python_floor_minor() -> int:
@@ -822,12 +942,27 @@ def _normalized(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+#: The distribution name of this project (a different project owns `fsm-llm` on PyPI).
+_DISTRIBUTION = "llm-fsm"
+
+
+def _dist_stem(name: str | None = None) -> str:
+    """The file-name form of a distribution name: `llm-fsm` is `llm_fsm` (PEP 427, 625).
+
+    Wheel, sdist, `.dist-info` and the editable `.pth` all start with it; reads
+    `[project] name` when no name is given.
+    """
+    if name is None:
+        name = _pyproject()["project"]["name"]
+    return re.sub(r"[-_.]+", "_", name).lower()
+
+
 def _declared_requirements() -> list[tuple[str, Requirement]]:
     """(where, requirement) for every non-self requirement pyproject.toml declares.
 
     Reads `[project].dependencies`, every extra and `[dependency-groups]` (string
     entries; an `{include-group = ...}` table repeats another group). A
-    `fsm-llm[extra]` entry is the package naming itself and is skipped.
+    `<project name>[extra]` entry is the package naming itself and is skipped.
     """
     data = _pyproject()
     found: list[tuple[str, str]] = [
@@ -838,7 +973,8 @@ def _declared_requirements() -> list[tuple[str, Requirement]]:
     for group, reqs in data.get("dependency-groups", {}).items():
         found += [(f"group:{group}", r) for r in reqs if isinstance(r, str)]
     out = [(where, Requirement(text)) for where, text in found]
-    return [(w, r) for w, r in out if _normalized(r.name) != "fsm-llm"]
+    own = _normalized(data["project"]["name"])
+    return [(w, r) for w, r in out if _normalized(r.name) != own]
 
 
 def _constraint_pins() -> dict[str, list[str]]:
@@ -978,6 +1114,10 @@ def _expected_wheel_files(staged: pathlib.Path) -> set[str]:
     return {f"fsm_llm/{rel}" for rel in rels}
 
 
+#: Output (stdout + stderr) of the wheel builds `_build_wheel` ran, for the warning check.
+_WHEEL_BUILD_OUTPUT: list[str] = []
+
+
 def _build_wheel(staged: pathlib.Path, outdir: pathlib.Path) -> pathlib.Path:
     """Build a wheel from `staged` with the interpreter's own `build` and setuptools."""
     done = subprocess.run(
@@ -998,6 +1138,7 @@ def _build_wheel(staged: pathlib.Path, outdir: pathlib.Path) -> pathlib.Path:
         check=False,
     )
     assert done.returncode == 0, done.stdout[-2000:] + done.stderr[-2000:]
+    _WHEEL_BUILD_OUTPUT.append(done.stdout + done.stderr)
     wheels = sorted(outdir.glob("*.whl"))
     assert len(wheels) == 1, wheels
     return wheels[0]
@@ -1021,7 +1162,7 @@ def _wheel_file_problems(names: set[str], expected: set[str]) -> list[str]:
 def _dist_info_problems(wheel: pathlib.Path) -> list[str]:
     """Problems in the wheel's metadata: project name, version and console scripts."""
     project = _pyproject()["project"]
-    stem = re.sub(r"[-_.]+", "_", project["name"]).lower()
+    stem = _dist_stem(project["name"])
     problems: list[str] = []
     with zipfile.ZipFile(wheel) as archive:
         dirs = {n.split("/")[0] for n in archive.namelist() if ".dist-info/" in n}
@@ -1042,6 +1183,45 @@ def _dist_info_problems(wheel: pathlib.Path) -> list[str]:
                 f"entry_points.txt {shipped} != [project.scripts] {declared}"
             )
     return problems
+
+
+class TestTheDistributionIsLlmFsm:
+    """Non-slow facts of the rename (step 113, D-020) that need no build.
+
+    `[project] name` decides the wheel, sdist, `.dist-info` and `.pth` file names;
+    the slow classes below check the built files themselves.
+    """
+
+    def test_the_project_name_is_llm_fsm(self):
+        assert _pyproject()["project"]["name"] == _DISTRIBUTION
+
+    def test_the_file_name_form_is_llm_fsm(self):
+        assert _dist_stem() == "llm_fsm"
+        assert _dist_stem("LLM.fsm") == "llm_fsm"
+        assert _dist_stem("fsm-llm") == "fsm_llm"  # the other project's form differs
+
+    def test_the_self_references_of_the_all_extra_are_found(self):
+        assert len(_self_referenced_extras()) >= _SELF_REFERENCES_TODAY
+
+    def test_no_stale_self_reference_is_left_in_pyproject(self):
+        stale = re.findall(r"fsm-llm\[", _read("pyproject.toml"))
+        assert stale == []
+
+    def test_the_extraction_refuses_a_self_reference_under_the_old_name(
+        self, monkeypatch
+    ):
+        data = _pyproject()
+        data["project"]["optional-dependencies"]["all"][0] = "fsm-llm[workflows]"
+        monkeypatch.setattr(sys.modules[__name__], "_pyproject", lambda: data)
+        with pytest.raises(AssertionError, match="does not name the project"):
+            _self_referenced_extras()
+
+    def test_the_extraction_cannot_match_nothing(self, monkeypatch):
+        data = _pyproject()
+        data["project"]["optional-dependencies"]["all"] = []
+        monkeypatch.setattr(sys.modules[__name__], "_pyproject", lambda: data)
+        with pytest.raises(AssertionError):
+            _self_referenced_extras()
 
 
 class TestWheelComparison:
@@ -1140,6 +1320,83 @@ class TestWheelContent:
     def test_the_wheel_metadata_names_the_project_and_its_scripts(self, built_wheel):
         wheel, _names, _expected = built_wheel
         assert _dist_info_problems(wheel) == []
+
+    def test_the_build_warns_of_no_package_missing_from_the_configuration(
+        self, built_wheel
+    ):
+        """setuptools (84) warned "Package 'fsm_llm.monitor.static' is absent from the
+        `packages` configuration": `include_package_data` (the default of a pyproject
+        project) read the static directories as importable packages. The data files are
+        listed by `[tool.setuptools.package-data]`, so the default is off. A newer
+        setuptools may turn that warning into an error and break the release build."""
+        assert _WHEEL_BUILD_OUTPUT, "the wheel fixture ran no build"
+        log = _WHEEL_BUILD_OUTPUT[-1]
+        assert "is absent from the `packages` configuration" not in log, log[-3000:]
+
+    def test_the_wheel_file_name_is_the_one_of_the_llm_fsm_distribution(
+        self, built_wheel
+    ):
+        wheel, _names, _expected = built_wheel
+        version = _pyproject()["project"]["version"]
+        assert _pyproject()["project"]["name"] == _DISTRIBUTION
+        assert wheel.name == f"llm_fsm-{version}-py3-none-any.whl"
+
+    def test_the_wheel_metadata_requires_the_extras_of_its_own_name(self, built_wheel):
+        wheel, _names, _expected = built_wheel
+        with zipfile.ZipFile(wheel) as archive:
+            (meta,) = [
+                n for n in archive.namelist() if n.endswith(".dist-info/METADATA")
+            ]
+            text = archive.read(meta).decode("utf-8")
+        assert "Name: llm-fsm\n" in text
+        requires = [
+            Requirement(ln[len("Requires-Dist: ") :])
+            for ln in text.splitlines()
+            if ln.startswith("Requires-Dist: ")
+        ]
+        selfref = [r for r in requires if _normalized(r.name) == "llm-fsm"]
+        assert len(selfref) >= _SELF_REFERENCES_TODAY, selfref
+        assert all(r.marker is not None and "all" in str(r.marker) for r in selfref)
+        assert [r for r in requires if _normalized(r.name) == "fsm-llm"] == []
+
+
+@pytest.fixture(scope="module")
+def built_sdist(tmp_path_factory):
+    """The sdist built from the staged tracked tree (a second, seconds-long build)."""
+    base = tmp_path_factory.mktemp("sdist")
+    staged = base / "tree"
+    staged.mkdir()
+    _stage_tracked_tree(staged)
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "build",
+            "--sdist",
+            "--no-isolation",
+            "--outdir",
+            str(base / "out"),
+            str(staged),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=600,
+        check=False,
+    )
+    assert done.returncode == 0, done.stdout[-2000:] + done.stderr[-2000:]
+    sdists = sorted((base / "out").glob("*.tar.gz"))
+    assert len(sdists) == 1, sdists
+    return sdists[0]
+
+
+@pytest.mark.slow
+class TestSdistName:
+    def test_the_sdist_file_name_is_the_one_of_the_llm_fsm_distribution(
+        self, built_sdist
+    ):
+        version = _pyproject()["project"]["version"]
+        assert built_sdist.name == f"llm_fsm-{version}.tar.gz"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1883,6 +2140,22 @@ class TestAuditPthNeedsNoAllowlist:
         monkeypatch.setattr(audit_pth.site, "getsitepackages", lambda: [str(tmp_path)])
         return audit_pth.audit()
 
+    @staticmethod
+    def _pth_name() -> str:
+        """The `.pth` file an editable install of this project writes (`pip install -e .`).
+
+        Derived from `[project]`, never from the installed metadata, so the test holds
+        on a machine that still has the old `fsm_llm-<version>` editable install and on one
+        that has the renamed `llm_fsm-<version>` one.
+        """
+        version = _pyproject()["project"]["version"]
+        return f"__editable__.{_dist_stem()}-{version}.pth"
+
+    def test_the_pth_name_is_the_one_of_the_renamed_distribution(self):
+        assert self._pth_name() == (
+            f"__editable__.llm_fsm-{_pyproject()['project']['version']}.pth"
+        )
+
     def test_the_audit_carries_no_editable_finder_allowlist(self):
         assert not hasattr(audit_pth, "EDITABLE_FINDER")
         assert not hasattr(audit_pth, "is_editable_finder")
@@ -1891,13 +2164,10 @@ class TestAuditPthNeedsNoAllowlist:
         self, tmp_path, monkeypatch
     ):
         text = str(_REPO_ROOT / "src") + "\n"
-        assert (
-            self._audit(tmp_path, monkeypatch, "__editable__.fsm_llm-0.12.0.pth", text)
-            == 0
-        )
+        assert self._audit(tmp_path, monkeypatch, self._pth_name(), text) == 0
 
     def test_the_old_finder_hook_is_flagged(self, tmp_path, monkeypatch, capsys):
-        name = "__editable__.fsm_llm-0.12.0.pth"
+        name = self._pth_name()
         assert self._audit(tmp_path, monkeypatch, name, self._FINDER_HOOK) == 1
         assert name in capsys.readouterr().err
 

@@ -33,7 +33,7 @@ def _require_mcp() -> None:
     if not _HAS_MCP:
         raise ImportError(
             "MCP support requires the 'mcp' package. "
-            'From a clone: pip install -e ".[mcp]" or pip install mcp'
+            'Install it with: pip install "llm-fsm[mcp]" or pip install mcp'
         )
 
 

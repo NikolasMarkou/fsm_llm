@@ -1,6 +1,6 @@
 # fsm_llm.synthesis
 
-Runtime FSM synthesis, shipped inside the `fsm-llm` package as the subpackage `fsm_llm.synthesis` (folder `src/fsm_llm/synthesis`). A model compiles a goal into a finite state machine (FSM, a conversation described as states and transitions), a stack of checks decides whether the result may run, a file-backed library stores it, and a runner executes it as a pushed child of a host conversation.
+Runtime FSM synthesis, shipped inside the `llm-fsm` package as the subpackage `fsm_llm.synthesis` (folder `src/fsm_llm/synthesis`). A model compiles a goal into a finite state machine (FSM, a conversation described as states and transitions), a stack of checks decides whether the result may run, a file-backed library stores it, and a runner executes it as a pushed child of a host conversation.
 
 ## What it is for
 
@@ -60,7 +60,7 @@ Reuse: the search first filters on the signature (every required input available
 
 ## How to use it
 
-The package ships with `fsm-llm`; the `synthesis` extra adds no dependency. Import it by name, because `import fsm_llm` loads no synthesis module. Compile and reuse, offline, with a scripted strong model (a real one is `FSMSynthesizer(model="...")`):
+The package ships with `llm-fsm`; the `synthesis` extra adds no dependency. Import it by name, because `import fsm_llm` loads no synthesis module. Compile and reuse, offline, with a scripted strong model (a real one is `FSMSynthesizer(model="...")`):
 
 ```python
 import json, tempfile

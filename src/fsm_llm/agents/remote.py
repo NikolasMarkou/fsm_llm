@@ -68,7 +68,7 @@ def _require_httpx() -> None:
     if not _HAS_HTTPX:
         raise ImportError(
             "Remote agent client requires 'httpx'. "
-            'From a clone: pip install -e ".[a2a]" or pip install httpx'
+            'Install it with: pip install "llm-fsm[a2a]" or pip install httpx'
         )
 
 
@@ -89,7 +89,7 @@ def _require_fastapi() -> None:
     if not _HAS_FASTAPI:
         raise ImportError(
             "AgentServer requires 'fastapi'. "
-            'From a clone: pip install -e ".[monitor]" or pip install fastapi'
+            'Install it with: pip install "llm-fsm[monitor]" or pip install fastapi'
         )
 
 

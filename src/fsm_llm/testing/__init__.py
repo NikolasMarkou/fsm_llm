@@ -28,8 +28,7 @@ loads it and no library module imports it. It imports the core and
 and importing it has no side effect (no clock, no randomness, no socket).
 
 Install:
-    From a clone of https://github.com/NikolasMarkou/fsm_llm (no extra deps):
-    pip install -e .
+    pip install "llm-fsm[testing]"  (the extra adds no third-party dependency)
 """
 
 from __future__ import annotations

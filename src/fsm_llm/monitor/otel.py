@@ -61,7 +61,7 @@ def _require_otel() -> None:
     if not _HAS_OTEL:
         raise ImportError(
             "OTEL support requires opentelemetry packages. "
-            'From a clone: pip install -e ".[otel]" or '
+            'Install it with: pip install "llm-fsm[otel]" or '
             "pip install opentelemetry-api opentelemetry-sdk"
         )
 

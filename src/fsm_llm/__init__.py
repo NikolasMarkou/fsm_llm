@@ -395,7 +395,7 @@ def get_workflows():
     return _import_extension(
         "fsm_llm.workflows",
         "fsm_llm.workflows is missing from this install. "
-        "Reinstall from a clone of https://github.com/NikolasMarkou/fsm_llm: pip install -e .",
+        'Reinstall it with: pip install --force-reinstall "llm-fsm[workflows]"',
     )
 
 
@@ -412,7 +412,7 @@ def get_reasoning():
     return _import_extension(
         "fsm_llm.reasoning",
         "fsm_llm.reasoning is missing from this install. "
-        "Reinstall from a clone of https://github.com/NikolasMarkou/fsm_llm: pip install -e .",
+        'Reinstall it with: pip install --force-reinstall "llm-fsm[reasoning]"',
     )
 
 
@@ -429,7 +429,7 @@ def get_agents():
     return _import_extension(
         "fsm_llm.agents",
         "fsm_llm.agents is missing from this install. "
-        "Reinstall from a clone of https://github.com/NikolasMarkou/fsm_llm: pip install -e .",
+        'Reinstall it with: pip install --force-reinstall "llm-fsm[agents]"',
     )
 
 

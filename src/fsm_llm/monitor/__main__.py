@@ -134,7 +134,7 @@ def main_cli() -> None:
     except ImportError as e:
         print(f"Error: Could not import dependencies: {e}", file=sys.stderr)
         print(
-            'Make sure deps are installed: pip install -e ".[monitor]" (from a clone)',
+            'Make sure deps are installed: pip install "llm-fsm[monitor]"',
             file=sys.stderr,
         )
         sys.exit(CLI_EXIT_FAILURE)

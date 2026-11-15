@@ -5,7 +5,7 @@ Purpose: FastAPI web dashboard (REST + WebSocket + vanilla-JS SPA) that launches
 
 ## Scope
 
-Python backend (`server/` (a package), `instance_manager/` (a package), `collector.py`, `otel.py`, `definitions.py`, `constants.py`, `exceptions.py`, `__main__.py`), the browser app in `static/`, and the HTML shell `templates/index.html`. Subpackage of the `fsm-llm` distribution (version from `fsm_llm.__version__`); deps from extra `monitor` (fastapi >=0.100.0, uvicorn >=0.20.0, jinja2 >=3.1.0), OTEL from extra `otel`. Console script `fsm-llm-monitor = fsm_llm.monitor.__main__:main_cli`; package data `static/**/*` and `templates/*`. Not here: FSM runtime (`fsm_llm` core), agent implementations (`fsm_llm.agents`), workflow engine (`fsm_llm.workflows`).
+Python backend (`server/` (a package), `instance_manager/` (a package), `collector.py`, `otel.py`, `definitions.py`, `constants.py`, `exceptions.py`, `__main__.py`), the browser app in `static/`, and the HTML shell `templates/index.html`. Subpackage of the `llm-fsm` distribution (version from `fsm_llm.__version__`); deps from extra `monitor` (fastapi >=0.100.0, uvicorn >=0.20.0, jinja2 >=3.1.0), OTEL from extra `otel`. Console script `fsm-llm-monitor = fsm_llm.monitor.__main__:main_cli`; package data `static/**/*` and `templates/*`. Not here: FSM runtime (`fsm_llm` core), agent implementations (`fsm_llm.agents`), workflow engine (`fsm_llm.workflows`).
 
 ## Architecture
 
