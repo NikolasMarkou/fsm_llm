@@ -4,3 +4,6 @@ include CHANGELOG.md
 recursive-include examples *.json
 recursive-include src *.py
 global-exclude *.py[cod] __pycache__ *.so .DS_Store
+# setuptools adds tests/test*.py to an sdist by default; those files cannot run outside the
+# repository (step 116 of plan d454fd62, pinned by TestSdistContent in tests/test_packaging.py)
+prune tests

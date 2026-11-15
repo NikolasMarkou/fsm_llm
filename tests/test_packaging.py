@@ -28,6 +28,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tomllib
 import zipfile
 
@@ -1400,13 +1401,8 @@ class TestWheelContent:
         assert [r for r in requires if _normalized(r.name) == "fsm-llm"] == []
 
 
-@pytest.fixture(scope="module")
-def built_sdist(tmp_path_factory):
-    """The sdist built from the staged tracked tree (a second, seconds-long build)."""
-    base = tmp_path_factory.mktemp("sdist")
-    staged = base / "tree"
-    staged.mkdir()
-    _stage_tracked_tree(staged)
+def _build_sdist(staged: pathlib.Path, outdir: pathlib.Path) -> pathlib.Path:
+    """Build an sdist from `staged` with the interpreter's own `build` and setuptools."""
     done = subprocess.run(
         [
             sys.executable,
@@ -1415,7 +1411,7 @@ def built_sdist(tmp_path_factory):
             "--sdist",
             "--no-isolation",
             "--outdir",
-            str(base / "out"),
+            str(outdir),
             str(staged),
         ],
         capture_output=True,
@@ -1425,9 +1421,40 @@ def built_sdist(tmp_path_factory):
         check=False,
     )
     assert done.returncode == 0, done.stdout[-2000:] + done.stderr[-2000:]
-    sdists = sorted((base / "out").glob("*.tar.gz"))
+    sdists = sorted(outdir.glob("*.tar.gz"))
     assert len(sdists) == 1, sdists
     return sdists[0]
+
+
+@pytest.fixture(scope="module")
+def built_sdist(tmp_path_factory):
+    """The sdist built from the staged tracked tree (a second, seconds-long build)."""
+    base = tmp_path_factory.mktemp("sdist")
+    staged = base / "tree"
+    staged.mkdir()
+    _stage_tracked_tree(staged)
+    return _build_sdist(staged, base / "out")
+
+
+@pytest.fixture(scope="module")
+def built_whole_tree_sdist(tmp_path_factory):
+    """`(sdist path, staged tree)`: an sdist built from EVERY tracked file.
+
+    The `release.yml` build job runs on a full checkout. `built_sdist` stages only
+    `src/` and the build root files, so it cannot see what setuptools adds to an
+    sdist by default from the rest of the tree (`tests/test*.py`) nor what
+    `MANIFEST.in` takes from `examples/`.
+    """
+    base = tmp_path_factory.mktemp("sdist_whole")
+    staged = base / "tree"
+    staged.mkdir()
+    for rel in _tracked("."):
+        source = _REPO_ROOT / rel
+        if source.is_file():
+            target = staged / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+    return _build_sdist(staged, base / "out"), staged
 
 
 @pytest.mark.slow
@@ -1439,13 +1466,78 @@ class TestSdistName:
         assert built_sdist.name == f"llm_fsm-{version}.tar.gz"
 
 
+#: Top-level names of an sdist: the files `MANIFEST.in` names (`LICENSE`, `README.md`,
+#: `CHANGELOG.md`, `examples/*.json`, `src/**/*.py`), the build files setuptools always
+#: adds (`pyproject.toml`, `MANIFEST.in`) and the two it generates (`PKG-INFO`,
+#: `setup.cfg`). Written out by hand on purpose, like `_WHEEL_DATA_GLOBS`.
+_SDIST_TOP_LEVEL = {
+    "CHANGELOG.md",
+    "LICENSE",
+    "MANIFEST.in",
+    "PKG-INFO",
+    "README.md",
+    "examples",
+    "pyproject.toml",
+    "setup.cfg",
+    "src",
+}
+
+
+def _sdist_files(sdist: pathlib.Path) -> list[str]:
+    """Regular files of an sdist, relative to its `<name>-<version>/` root directory."""
+    root = sdist.name.removesuffix(".tar.gz") + "/"
+    with tarfile.open(sdist) as archive:
+        return sorted(
+            m.name.removeprefix(root) for m in archive.getmembers() if m.isfile()
+        )
+
+
+@pytest.mark.slow
+class TestSdistContent:
+    """What an sdist of the full tracked tree holds (step 116 of plan d454fd62)."""
+
+    def test_the_sdist_ships_the_policy_files_and_no_test_file(
+        self, built_whole_tree_sdist
+    ):
+        """setuptools adds `tests/test*.py` to an sdist by default: six root-level test
+        files that cannot run outside the repository (they read `tests/` as a package,
+        `scripts/`, `docs/` and git). `MANIFEST.in` prunes `tests`."""
+        sdist, _staged = built_whole_tree_sdist
+        files = _sdist_files(sdist)
+        stray = [n for n in files if n.split("/")[0] not in _SDIST_TOP_LEVEL]
+        assert stray == [], stray
+        assert {n.split("/")[0] for n in files} == _SDIST_TOP_LEVEL
+
+    def test_the_sdist_holds_the_package_files_the_wheel_holds(
+        self, built_whole_tree_sdist
+    ):
+        sdist, staged = built_whole_tree_sdist
+        expected = _expected_wheel_files(staged)
+        shipped = {
+            n.removeprefix("src/")
+            for n in _sdist_files(sdist)
+            if n.startswith("src/fsm_llm/")
+        }
+        assert "fsm_llm/__init__.py" in expected  # not vacuous
+        assert shipped == expected
+
+    def test_the_sdist_ships_the_example_json_and_nothing_else_of_examples(
+        self, built_whole_tree_sdist
+    ):
+        sdist, _staged = built_whole_tree_sdist
+        tracked = {p for p in _tracked("examples") if p.endswith(".json")}
+        shipped = {n for n in _sdist_files(sdist) if n.startswith("examples/")}
+        assert len(tracked) >= 10  # not vacuous: today 14 examples keep a JSON file
+        assert shipped == tracked
+
+
 # ══════════════════════════════════════════════════════════════
 # Explicit text encodings (D-011, D-018): Windows and the C locale do not
 # default to UTF-8, so every text file call names its encoding.
 # ══════════════════════════════════════════════════════════════
 
 #: Receivers of an `.open(...)` that is not a file open (os.open takes flags).
-_NOT_A_FILE_OPEN_RECEIVERS = {"os", "webbrowser"}
+_NOT_A_FILE_OPEN_RECEIVERS = {"os", "tarfile", "webbrowser"}
 #: Calls whose mode defaults to binary: only an explicit text mode is checked.
 _BINARY_DEFAULT_CALLS = {"NamedTemporaryFile", "TemporaryFile", "SpooledTemporaryFile"}
 
@@ -1543,6 +1635,7 @@ class TestExplicitEncodings:
             "os.fdopen(fd, 'wb')\n"
             "os.open(p, flags)\n"
             "webbrowser.open(url)\n"
+            "tarfile.open(path)\n"
             "tempfile.NamedTemporaryFile()\n"
             "open(p, 'w', encoding='utf-8')\n"
         )
