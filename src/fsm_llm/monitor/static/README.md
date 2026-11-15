@@ -39,7 +39,7 @@ flowchart LR
 ## How to use it
 
 ```bash
-pip install -e ".[monitor]"      # from a clone of the repository
+pip install "llm-fsm[monitor]"
 fsm-llm-monitor
 # open http://127.0.0.1:8420
 ```

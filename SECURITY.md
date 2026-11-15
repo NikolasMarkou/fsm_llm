@@ -6,7 +6,7 @@ Report security vulnerabilities to nikolasmarkou@gmail.com.
 
 ## Supply Chain Security
 
-- `pyproject.toml` bounds every declared dependency on both sides (a floor and an upper bound at the next major, or `<1` for 0.x packages), and `tests/test_packaging.py` fails when a range has no upper bound or does not contain its pin.
+- `pyproject.toml` bounds every dependency it declares (the core dependencies, every extra and the `docs` group) on both sides: a floor and an upper bound, normally the next major or `<1` for 0.x packages (a few ranges span more than one major, for example `tenacity>=8.0,<10` and `pytest>=7.4.0,<10`). `tests/test_packaging.py` fails when such a range has no upper bound or does not contain its exact pin in `constraints.txt`. The one exception is the build backend `setuptools>=77`, which has a floor only; its exact version is pinned in `constraints.txt` and the release build runs under those pins.
 - The compromised litellm releases 1.82.7 and 1.82.8 are excluded by the `litellm>=1.109.0` floor. No `!=` specifiers are used.
 - CI runs `.pth` file auditing on every build (`scripts/audit_pth.py`, in the `lint` job and on every leg of the test matrix)
 - CI audits the installed environment, transitive dependencies included, with `pip-audit --skip-editable` in the job `supply-chain` on every push and pull request, and a known vulnerability in any installed package fails the build. A canary step in the same job runs `pip-audit` over `tests/fixtures/canary-vulnerable-pins.txt` (pins of old releases with published advisories, never installed) and passes only when the audit exits 1 with a non-empty report, so a broken audit, a changed exit code or an unreachable advisory source turns the build red instead of passing silently. `pip-audit` is pinned in `constraints.txt` and listed in the `dev` extra.
@@ -22,6 +22,9 @@ Report security vulnerabilities to nikolasmarkou@gmail.com.
 ```bash
 # Audit for malicious .pth files
 make audit
+
+# Verify you have this project: the distribution is llm-fsm (fsm-llm on PyPI is another project)
+pip show llm-fsm | grep Version
 
 # Verify installed litellm version
 pip show litellm | grep Version

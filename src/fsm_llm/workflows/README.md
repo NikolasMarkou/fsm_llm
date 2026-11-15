@@ -93,7 +93,7 @@ except BuildError as err:
     print(err.errors)             # ["Step 'a' references unknown state: 'nowhere'"]
 ```
 
-Installing the `workflows` extra (`pip install -e ".[workflows]"` from a clone) adds no packages beyond core `llm-fsm`.
+Installing the `workflows` extra (`pip install "llm-fsm[workflows]"`) adds no packages beyond core `llm-fsm`.
 
 ## Where to go next
 

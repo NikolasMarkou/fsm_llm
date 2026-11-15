@@ -4,7 +4,7 @@ The `fsm_llm` package at `src/fsm_llm` is the whole FSM-LLM framework. Its top l
 
 ## Where it lives
 
-This directory is the Python package `fsm_llm` (the standard `src/` layout): `pyproject.toml` finds it with `[tool.setuptools.packages.find]`, so the file `src/fsm_llm/engine/api/conversation.py` is imported as `fsm_llm.engine.api.conversation`. Install with `pip install -e .` (re-run it after pulling the change that moved the package back to `src/fsm_llm/`). The generated `src/fsm_llm.egg-info/` is ignored by git and is removed by `make clean`. Do not add this directory to `sys.path` by hand: it holds modules named like standard-library ones, such as `logging.py`.
+This directory is the Python package `fsm_llm` (the standard `src/` layout): `pyproject.toml` finds it with `[tool.setuptools.packages.find]`, so the file `src/fsm_llm/engine/api/conversation.py` is imported as `fsm_llm.engine.api.conversation`. Users install it with `pip install llm-fsm`; contributors use the editable install in CONTRIBUTING.md (re-run it after pulling the change that moved the package back to `src/fsm_llm/`). The generated `src/fsm_llm.egg-info/` is ignored by git and is removed by `make clean`. Do not add this directory to `sys.path` by hand: it holds modules named like standard-library ones, such as `logging.py`.
 
 ## What it is for
 
@@ -215,7 +215,7 @@ The subpackages have their own commands:
 ```bash
 python -m fsm_llm.reasoning "What is 15% of 240?"
 fsm-llm-meta --output my_bot.json        # design an FSM by chatting
-fsm-llm-monitor                          # needs: pip install -e ".[monitor]"
+fsm-llm-monitor                          # needs: pip install "llm-fsm[monitor]"
 fsm-llm-eval examples --category basic   # run from the repository root
 fsm-llm-okf validate ./my_bundle         # check an Open Knowledge Format bundle
 fsm-llm-skills validate ./skills         # check Agent Skills folders (also list, show)

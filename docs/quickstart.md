@@ -12,16 +12,15 @@ Welcome to FSM-LLM! This tutorial will have you building stateful conversations 
 ## 1. Installation
 
 ```bash
-git clone https://github.com/NikolasMarkou/fsm_llm.git && cd fsm_llm
 python -m venv .venv && source .venv/bin/activate
-pip install -e .
+pip install llm-fsm
 
 # With extensions
-pip install -e ".[monitor]"      # Real-time monitoring dashboard (fastapi, uvicorn, jinja2)
-pip install -e ".[all]"          # Every optional dependency
+pip install "llm-fsm[monitor]"      # Real-time monitoring dashboard (fastapi, uvicorn, jinja2)
+pip install "llm-fsm[all]"          # Every optional dependency
 ```
 
-The name `fsm-llm` on PyPI belongs to a different project, so install from a clone. The reasoning, workflows, agents, eval and synthesis extras add no packages (that code ships in every install); extras only add third-party dependencies.
+The distribution is `llm-fsm`; the import package is `fsm_llm`. `fsm-llm` on PyPI is a different, unrelated project: if you installed it by mistake, run `pip uninstall fsm-llm` first. The reasoning, workflows, agents, eval and synthesis extras add no packages (that code ships in every install); extras only add third-party dependencies.
 
 Classification is built into the core package -- no extra install needed.
 

@@ -72,11 +72,11 @@ Risk, recorded: Material for MkDocs reaches end of life on 2027-05-05, and mkdoc
 
 ## How to use it
 
-Open the files in any Markdown viewer. Snippets assume the package is installed, and a model is configured (`LLM_MODEL`, see `quickstart.md`). Run the examples from a repository clone:
+Open the files in any Markdown viewer. Snippets assume the package is installed (`pip install llm-fsm`), and a model is configured (`LLM_MODEL`, see `quickstart.md`). The examples are not in the package: clone the repository to get them and run one against the installed package:
 
 ```bash
-# from a clone of the repository (the examples are not in the package)
-pip install -e .
+pip install llm-fsm
+git clone https://github.com/NikolasMarkou/fsm_llm.git && cd fsm_llm
 python examples/basic/form_filling/run.py
 ```
 

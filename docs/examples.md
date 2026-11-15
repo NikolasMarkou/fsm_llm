@@ -6,7 +6,8 @@ The repository holds 100 runnable examples in 8 categories. Each is a folder wit
 its FSM JSON. The examples are not part of this site: the links below open the folders on
 GitHub.
 
-Run one from a clone of the repository:
+The examples are not in the installed package (`pip install llm-fsm`). Clone the repository to get them
+(`git clone https://github.com/NikolasMarkou/fsm_llm.git`) and run one from the clone:
 
 ```bash
 python examples/basic/simple_greeting/run.py     # needs a model: an OpenAI key, or a local Ollama

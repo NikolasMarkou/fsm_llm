@@ -184,8 +184,8 @@ class TestDefectsAreCaught:
             ),
             ("```text\nbot:", "```text title\nbot:", "not a plain language"),
             (
-                "```bash\n    git clone",
-                "```bash title\n    git clone",
+                "```bash\n    python -m venv",
+                "```bash title\n    python -m venv",
                 "not a plain language",
             ),
             (
@@ -299,3 +299,211 @@ class TestWhereTheTrimmedTextWent:
             assert "strands_features" not in text, name
             assert "9 Markdown files" not in text, name
             assert "2026_roadmap.md" in text, name
+
+
+# ---------------------------------------------------------------------------
+# Install from PyPI (step 114 of plan d454fd62, roadmap row 0.1, D-020)
+# ---------------------------------------------------------------------------
+#
+# The distribution is `llm-fsm`; the import package is `fsm_llm`; `fsm-llm` on PyPI is another
+# project. A reader installs with `pip install llm-fsm`, never from a clone (a clone is for
+# contributors and is described in CONTRIBUTING.md only). The rules are pure functions of a text,
+# so a permanent mutant (an edited copy of the real README) proves each rule fires.
+
+#: Files a reader meets before they have the package: the README and every `docs/` guide and
+#: package README, except the dated roadmap (history, quotes the clone install on purpose).
+_INSTALL_DOC_SKIP = ("docs/2026_roadmap.md",)
+
+#: Emoji ranges: pictographs, symbols and dingbats, the few misc-technical and star emoji, and
+#: the variation selector and joiner. Arrows (U+2190..21FF) and box drawing are NOT emoji.
+_EMOJI = re.compile("[\U0001f000-\U0001faff☀-➿⭐⭕⌚⌛⏩-⏳⏸-⏺️‍]")
+_CLONE_INSTALL = re.compile(
+    r"pip\s+install\s+(?:-\S+\s+)*-e\b|install\s+from\s+a\s+clone|from\s+a\s+clone\s*:",
+    re.IGNORECASE,
+)
+#: A relative link of the root files that render on GitHub and PyPI (`docs/` is relative inside
+#: the site, so it is judged elsewhere).
+_RELATIVE_ROOT_LINK = re.compile(r"\]\((?:docs/|\./|\.\./)")
+
+
+def _project_extras() -> dict[str, list[str]]:
+    """`extra -> [third-party distribution names]` from `[project.optional-dependencies]`."""
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text("utf-8"))["project"]
+    own = data["name"]
+    out: dict[str, list[str]] = {}
+    for extra, reqs in data["optional-dependencies"].items():
+        names = [re.split(r"[\[<>=!~ ;]", r, maxsplit=1)[0] for r in reqs]
+        out[extra] = [n for n in names if n != own]
+    return out
+
+
+def _install_problems(text: str, extras: dict[str, list[str]]) -> list[str]:
+    """What the README Installation must say. `[]` when it says all of it.
+
+    Contract: `text` is the README, `extras` maps each real extra to its third-party
+    distribution names (`dev` is named but its tools are not listed). Never raises.
+    """
+    problems: list[str] = []
+    blocks = [
+        body
+        for _info, body in ((m.group(1), m.group(2)) for m in _FENCE.finditer(text))
+    ]
+    code = "\n".join(blocks)
+    if "pip install llm-fsm" not in code:
+        problems.append("no `pip install llm-fsm` line in a code block")
+    if not re.search(r'pip install "llm-fsm\[[a-z0-9_,-]+\]"', code):
+        problems.append('no `pip install "llm-fsm[extra]"` line in a code block')
+    if "pip uninstall fsm-llm" not in text:
+        problems.append(
+            "no `pip uninstall fsm-llm` note for a reader of the other project"
+        )
+    if not re.search(r"fsm-llm`? on PyPI is a different", text):
+        problems.append("does not say `fsm-llm` on PyPI is a different project")
+    if "Python 3.11" not in text:
+        problems.append("does not state the Python floor 3.11")
+    for extra, deps in extras.items():
+        if f"`{extra}`" not in text:
+            problems.append(f"extra {extra!r} is not named in backticks")
+        if extra != "dev":
+            for dep in deps:
+                if dep not in text:
+                    problems.append(f"extra {extra!r} dependency {dep!r} is not named")
+    for line in text.splitlines():
+        if _CLONE_INSTALL.search(line) or re.search(r"git\s+clone\b", line):
+            problems.append(f"a clone-install instruction: {line.strip()[:80]!r}")
+    return problems
+
+
+def _emoji_in(text: str) -> list[str]:
+    return sorted(set(_EMOJI.findall(text)))
+
+
+def _install_doc_files() -> list[Path]:
+    docs = [
+        p
+        for p in sorted((ROOT / "docs").rglob("*.md"))
+        if p.relative_to(ROOT).as_posix() not in _INSTALL_DOC_SKIP
+    ]
+    pkg = sorted((ROOT / "src" / "fsm_llm").rglob("README.md"))
+    return [README, *docs, *pkg]
+
+
+class TestInstallFromPyPI:
+    def test_the_readme_installs_from_pypi(self, readme):
+        assert _install_problems(readme, _project_extras()) == []
+
+    def test_the_extras_are_the_real_ones(self):
+        extras = _project_extras()
+        assert {"monitor", "mcp", "otel", "a2a", "all", "dev"} <= set(extras)
+        assert extras["monitor"] == ["fastapi", "uvicorn", "jinja2"]
+
+    def test_no_reader_facing_text_installs_from_a_clone(self):
+        files = _install_doc_files()
+        assert len(files) > 25, len(files)  # non-vacuous: the docs and package READMEs
+        hits = [
+            f"{p.relative_to(ROOT)}:{n}"
+            for p in files
+            for n, line in enumerate(p.read_text("utf-8").splitlines(), 1)
+            if _CLONE_INSTALL.search(line)
+        ]
+        assert not hits, hits
+
+    def test_the_contributor_install_stays_in_contributing(self):
+        text = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+        assert "make install-dev" in text
+        assert 'pip install -c constraints.txt -e ".[dev,' in text
+
+    def test_the_version_badge_is_the_package_version(self, readme):
+        from fsm_llm import __version__
+
+        assert f"img.shields.io/badge/version-{__version__}-" in readme
+
+    def test_the_python_badge_matches_the_stated_range(self, readme):
+        # Until row 0.2 (step 115) the range is 3.11 and 3.12: the badge, the note and the
+        # classifiers say one thing.
+        badge = re.search(r"img\.shields\.io/badge/python-([^\"']+)", readme)
+        assert badge, "no Python badge"
+        assert badge.group(1) == "3.11%20%7C%203.12-blue"
+        assert "tested on 3.11 and 3.12" in readme
+
+
+class TestRootFilesAndDocsRules:
+    @pytest.mark.parametrize("name", ["README.md", "CONTRIBUTING.md", "SECURITY.md"])
+    def test_a_root_file_has_no_relative_docs_link(self, name):
+        text = _outside_fences((ROOT / name).read_text(encoding="utf-8"))
+        assert not _RELATIVE_ROOT_LINK.search(text), name
+        for target in _links(text):
+            assert target.startswith(("https://", "#")), (name, target)
+
+    def test_no_emoji_in_the_readme_or_the_docs(self):
+        files = [README, *sorted((ROOT / "docs").rglob("*.md"))]
+        assert len(files) > 15, len(files)
+        hits = {
+            p.relative_to(ROOT).as_posix(): _emoji_in(p.read_text("utf-8"))
+            for p in files
+            if _emoji_in(p.read_text("utf-8"))
+        }
+        assert not hits, hits
+
+    @pytest.mark.parametrize(
+        ("text", "found"),
+        [
+            ("done ✅", True),
+            ("ship it \U0001f680", True),
+            ("warn ⚠️", True),
+            ("⭐ star", True),
+            ("a → b and ⇒ c", False),
+            ("─│├└ tree", False),
+            ("plain ASCII only", False),
+        ],
+    )
+    def test_the_emoji_rule_recognises_emoji_and_spares_arrows(self, text, found):
+        assert bool(_emoji_in(text)) is found
+
+
+class TestInstallDefectsAreCaught:
+    """Each install rule fires on an edited copy of the real README."""
+
+    @pytest.mark.parametrize(
+        ("old", "new", "expect"),
+        [
+            ("pip install llm-fsm\n", "pip install fsm-llm-x\n", "pip install llm-fsm"),
+            ('pip install "llm-fsm[', 'pip install "other[', "llm-fsm[extra]"),
+            ("pip uninstall fsm-llm", "pip install llm-fsm", "pip uninstall fsm-llm"),
+            ("is a different, unrelated project", "is the same", "different project"),
+            ("Python 3.11", "Python 3.10", "Python floor"),
+            ("| `otel` |", "| `otelx` |", "extra 'otel'"),
+            ("fastapi", "flask", "dependency 'fastapi'"),
+            (
+                "pip install llm-fsm\n",
+                "git clone x\npip install llm-fsm\n",
+                "clone-install",
+            ),
+            (
+                "pip install llm-fsm\n",
+                "pip install -e .\npip install llm-fsm\n",
+                "clone-install",
+            ),
+            (
+                "## Quick Start",
+                "Install from a clone.\n\n## Quick Start",
+                "clone-install",
+            ),
+        ],
+    )
+    def test_an_install_defect_is_reported(self, readme, old, new, expect):
+        assert readme.count(old) >= 1, f"the mutant anchor {old!r} is gone"
+        problems = _install_problems(readme.replace(old, new), _project_extras())
+        assert any(expect in p for p in problems), problems
+
+    def test_an_emoji_is_reported(self, readme):
+        assert _emoji_in(readme.replace("## License", "## License ✅")) == ["✅"]
+
+    def test_a_relative_docs_link_is_reported(self, readme):
+        mutated = readme.replace(
+            f"{REPO_URL}/blob/main/docs/quickstart.md", "docs/quickstart.md", 1
+        )
+        assert _RELATIVE_ROOT_LINK.search(_outside_fences(mutated))
+
+    def test_a_dot_slash_link_is_reported(self):
+        assert _RELATIVE_ROOT_LINK.search("see [x](./CONTRIBUTING.md)")

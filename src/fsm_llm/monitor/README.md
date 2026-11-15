@@ -50,7 +50,7 @@ flowchart LR
 Run the dashboard:
 
 ```bash
-pip install -e ".[monitor]"      # from a clone of the repository
+pip install "llm-fsm[monitor]"
 fsm-llm-monitor                       # opens http://127.0.0.1:8420
 fsm-llm-monitor --port 9000 --no-browser
 fsm-llm-monitor --env-file .env       # launch requests find LLM_MODEL in that file
