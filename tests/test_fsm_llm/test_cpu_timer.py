@@ -163,6 +163,72 @@ class TestUnderASimulatedLoadedHost:
         assert timer.elapsed < 0.5 * timing_factor
 
 
+class TestD3RunBoundedRepeatsAContentionSpike:
+    """``support._d3_run_bounded`` (plan d454fd62 step 120): a finished run over
+    the CPU budget is repeated and the cheapest run counts; a hang is not."""
+
+    @staticmethod
+    def _spiky(burns):
+        calls = []
+
+        def fn(data):
+            burns_now = burns[min(len(calls), len(burns) - 1)]
+            calls.append(burns_now)
+            _burn(burns_now)
+            return {"calls": len(calls)}
+
+        return fn, calls
+
+    def test_one_slow_run_among_fast_ones_is_forgiven(self):
+        from tests.test_fsm_llm.support import _d3_run_bounded
+
+        fn, calls = self._spiky([0.15, 0.0])
+        finished, result = _d3_run_bounded(fn, None, 0.05)
+        assert finished is True
+        assert calls == [0.15, 0.0]
+        assert result == {"calls": 2}
+
+    def test_a_run_that_is_always_over_budget_still_fails_after_all_attempts(self):
+        from tests.test_fsm_llm.support import _d3_run_bounded
+
+        fn, calls = self._spiky([0.08])
+        finished, _ = _d3_run_bounded(fn, None, 0.02)
+        assert finished is False
+        assert len(calls) == 3
+
+    def test_one_attempt_restores_the_single_shot_behaviour(self):
+        from tests.test_fsm_llm.support import _d3_run_bounded
+
+        fn, calls = self._spiky([0.08, 0.0])
+        finished, _ = _d3_run_bounded(fn, None, 0.02, attempts=1)
+        assert finished is False
+        assert len(calls) == 1
+
+    def test_a_within_budget_run_is_not_repeated(self):
+        from tests.test_fsm_llm.support import _d3_run_bounded
+
+        fn, calls = self._spiky([0.0])
+        assert _d3_run_bounded(fn, None, 0.05)[0] is True
+        assert len(calls) == 1
+
+    def test_a_hang_is_reported_at_once_not_repeated(self):
+        from tests.test_fsm_llm.support import _d3_run_bounded
+
+        release = threading.Event()
+        calls = []
+
+        def hang(data):
+            calls.append(1)
+            release.wait(5)
+
+        try:
+            finished, _ = _d3_run_bounded(hang, None, 1.0, hang_seconds=0.2)
+        finally:
+            release.set()
+        assert finished is False
+        assert len(calls) == 1
+
+
 #: Files that may still call ``time.perf_counter``: only this file (it simulates
 #: the wall clock). The scale-free spread sweeps of ``test_context_unit.py`` read
 #: CPU time too since plan d454fd62 step 120: a wall-clock ratio is not immune to

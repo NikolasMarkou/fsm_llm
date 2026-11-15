@@ -343,16 +343,38 @@ def _d3_run_in_thread(fn: Any, data: Any, hang_seconds: float = _D3_HANG_S) -> _
 
 
 def _d3_run_bounded(
-    fn: Any, data: Any, cpu_seconds: float, hang_seconds: float = _D3_HANG_S
+    fn: Any,
+    data: Any,
+    cpu_seconds: float,
+    hang_seconds: float = _D3_HANG_S,
+    attempts: int = 3,
 ) -> tuple[bool, Any]:
     """Run ``fn(data)`` in a daemon thread; ``(finished, result)``.
 
     ``finished`` means the worker ended AND used at most *cpu_seconds* of CPU
     time (callers multiply the budget by ``timing_factor``); the wall clock only
     guards against a hang (*hang_seconds*).
+
+    Interface contract (plan d454fd62 step 120): a run that FINISHED but spent
+    more than *cpu_seconds* is repeated, up to *attempts* runs in all, and the
+    cheapest run counts. CPU time is not immune to a host at load 70 (cache and
+    SMT contention stretched a 0.83 s walk past a 2 s budget once); a genuine
+    regression is over budget on every run, a contention spike is not. A hang
+    (unfinished worker) is never repeated: it is reported at once, so an
+    exponential walk costs one kill switch, not *attempts* of them. *attempts* of
+    1 restores the single-shot behaviour.
     """
     run = _d3_run_in_thread(fn, data, hang_seconds)
-    return (run.finished and run.cpu_seconds <= cpu_seconds, run.result)
+    best = run
+    for _ in range(attempts - 1):
+        if not best.finished or best.cpu_seconds <= cpu_seconds:
+            break
+        run = _d3_run_in_thread(fn, data, hang_seconds)
+        if run.finished and run.cpu_seconds < best.cpu_seconds:
+            best = run
+        elif not run.finished:
+            best = run
+    return (best.finished and best.cpu_seconds <= cpu_seconds, best.result)
 
 
 def _c3_fsm() -> FSMDefinition:
