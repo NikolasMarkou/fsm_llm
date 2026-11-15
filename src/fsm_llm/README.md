@@ -109,7 +109,7 @@ The core is itself layered, and a layer imports only the layers below it: `engin
 - `policy/` - the approval and human-in-the-loop layer, a package behind a facade `__init__` (`from fsm_llm.policy import HumanInTheLoop`; `fsm_llm.agents` re-exports the names): `approval` (`ApprovalRequest`, `ApprovalPolicy`, `ApprovalCallback`, `ApprovalDeniedError`), `hitl` (`HumanInTheLoop`, `EscalationCallback`) and `constants`. It imports the kernel, core and `fsm_llm.tools`, never `agents` or the engine.
 - `cli_support.py` - the small skeleton `fsm-llm-okf` and `fsm-llm-skills` share: exit codes (0, 1, 130), BrokenPipe handling, escaping of text the console cannot encode, and the `--max-seconds` argument type.
 - `logging.py` - loguru setup (logging is off until you turn it on; turning it on also replaces loguru's default handler so a library record prints once).
-- `__init__.py`, `__version__.py`, `py.typed` - public exports, version (0.12.0, shared by all subpackages), type-hint marker.
+- `__init__.py`, `__version__.py`, `py.typed` - public exports, version (0.13.0, shared by all subpackages), type-hint marker.
 
 ## How to use it
 

@@ -152,12 +152,21 @@ A strict build fails on any warning: a page missing from the `nav` in `mkdocs.ym
 
 ## Releasing
 
-A release is one pushed tag. `.github/workflows/release.yml` starts on a push of a tag `v*` and on nothing else (no manual dispatch, no pull request, no branch push), so only a pushed tag releases. It builds the sdist and the wheel once, checks them (`twine check --strict`, the tag against `src/fsm_llm/__version__.py`, a final release only, the section of the version in `CHANGELOG.md` through `scripts/changelog_check.py extract`), writes an SBOM (`sbom.cdx.json`, CycloneDX, from a fresh environment with the wheel installed with every extra), then publishes to PyPI by trusted publishing with PEP 740 attestations (no API token exists anywhere), and finally creates the GitHub release with the distributions, the SBOM and the notes. `tests/test_fsm_llm_regression/test_release_workflow.py` pins the workflow; the distribution is `llm-fsm` once plan step 113 renames it, and until then the publish job cannot succeed.
+A release is one pushed tag. `.github/workflows/release.yml` starts on a push of a tag `v*` and on nothing else (no manual dispatch, no pull request, no branch push), so only a pushed tag releases. It builds the sdist and the wheel once, checks them (`twine check --strict`, the tag against `src/fsm_llm/__version__.py`, a final release only, the section of the version in `CHANGELOG.md` through `scripts/changelog_check.py extract`), writes an SBOM (`sbom.cdx.json`, CycloneDX, from a fresh environment with the wheel installed with every extra), then publishes to PyPI by trusted publishing with PEP 740 attestations (no API token exists anywhere), and finally creates the GitHub release with the distributions, the SBOM and the notes. `tests/test_fsm_llm_regression/test_release_workflow.py` pins the workflow; the distribution is `llm-fsm` (the import package stays `fsm_llm`).
 
-Owner steps, in this order (the commands need `gh` logged in as the owner):
+**The version bump** (what the release commit of 0.13.0 did; the next one repeats it): set `version` in `pyproject.toml` and `__version__` in `src/fsm_llm/__version__.py` (the subpackage `__version__.py` files re-export it); the three literal pins of the version in `tests/test_fsm_llm_monitor/test_app.py` and `tests/test_fsm_llm_regression/test_regression_cli_and_exports.py`; the README badge; the `> Covers FSM-LLM v<version>` header of the current guides in `docs/` (and the lines that say the same in `docs/AGENTS.md`, `docs/README.md`, `docs/concepts.md`, `AGENTS.md`, `src/fsm_llm/AGENTS.md`, `src/fsm_llm/README.md`); in `CHANGELOG.md`, `## [Unreleased]` becomes `## [X.Y.Z] - YYYY-MM-DD` under a fresh empty `## [Unreleased]`, with the reference links `[Unreleased]: .../compare/vX.Y.Z...HEAD` and `[X.Y.Z]: .../compare/v<previous>...vX.Y.Z`. The release section opens with a short `**Highlights**` block before its first `###` heading (under 8,000 characters, links in the `docs/...` form): the release body on GitHub holds at most 125,000 characters, `release.yml` cuts a longer body at 120,000 and points at the full text, so the Highlights are the part that always survives. `tests/test_fsm_llm_regression/test_release_version.py` fails on any place that was missed and on a section without Highlights.
 
-1. On PyPI, confirm `llm-fsm` is in "Your projects" and add a Trusted Publisher with exactly these names: owner `NikolasMarkou`, repository `fsm_llm`, workflow `release.yml`, environment `pypi`. (A TestPyPI pending publisher is an optional dry run.)
-2. The GitHub environment `pypi` holds a required reviewer (the owner, with two-factor authentication on). Restrict it to tags `v*`:
+```bash
+python scripts/changelog_check.py check                   # the release section is judged while [Unreleased] is empty
+python scripts/changelog_check.py extract X.Y.Z --link-base https://github.com/NikolasMarkou/fsm_llm/blob/vX.Y.Z/ > /tmp/notes.md   # the body GitHub will show, before the cut; `head -40 /tmp/notes.md` is the Highlights
+```
+
+Owner steps, in this order (the commands need `gh` logged in as the owner). Steps 1 to 3 are done once, before the first push of a plan's work:
+
+1. Commit the anchor manifest first: `git add plans/ANCHORS.md && git commit -m "docs: anchor manifest lines"`. It holds the appended lines that `make decision-check` (and the `lint` job) need, so a push before this commit is a red first run on purpose. Never edit an existing line of it.
+2. In any other clone or virtualenv, after the layout move of 0.13.0: `pip uninstall fsm-llm`, delete a leftover `src/fsm_llm.egg-info`, then `pip install -e .` once (console scripts and the distribution name moved; `python scripts/audit_pth.py` flags a stale code-bearing finder).
+3. On PyPI, confirm `llm-fsm` is in "Your projects" and add a Trusted Publisher with exactly these names: owner `NikolasMarkou`, repository `fsm_llm`, workflow `release.yml`, environment `pypi`. (A TestPyPI pending publisher with the same names is an optional dry run of the whole path before the real tag.)
+4. The GitHub environment `pypi` holds a required reviewer (the owner, with two-factor authentication on). Restrict it to tags `v*`:
 
    ```bash
    gh api -X PUT repos/NikolasMarkou/fsm_llm/environments/pypi \
@@ -167,15 +176,17 @@ Owner steps, in this order (the commands need `gh` logged in as the owner):
      -f name='v*' -f type=tag
    ```
 
-3. Release from a clean `main` whose CI is green, with the version already bumped in `pyproject.toml` and `src/fsm_llm/__version__.py` and a dated section in `CHANGELOG.md`:
+5. Settings, Actions, General: tick "Allow GitHub Actions to create and approve pull requests" (the weekly pin refresh opens its pull request with it). Once the matrix is green, Settings, Branches: protect `main` and require the nine `test (<os>, Python <version>)` checks of the CI workflow (and `lint`).
+6. `git push origin main` and watch the first matrix of nine legs. The Windows and macOS legs have never run before: a failure there is a finding to fix, not a reason to skip the leg. The coverage tolerance is meant to be tightened after three green runs.
+7. Release from a clean `main` whose CI is green and whose `CHANGELOG.md` date is the day of the tag (edit `## [X.Y.Z] - YYYY-MM-DD` if the tag is cut on another day, commit, and run `python scripts/changelog_check.py check` again):
 
    ```bash
-   git tag -a vX.Y.Z -m "vX.Y.Z"
-   git push origin vX.Y.Z
+   git tag -a v0.13.0 -m "v0.13.0"
+   git push origin v0.13.0
    ```
 
-4. Open the run in the Actions tab. `build` and `sbom` run first; `publish` then waits for the environment review: approve the deployment. `github-release` follows.
-5. Check the result: the PyPI page of `llm-fsm` shows the release with its attestations ("Provenance"), the GitHub release carries the wheel, the sdist, `sbom.cdx.json` and the notes, and `pip install llm-fsm==X.Y.Z` works in a fresh environment on Linux, macOS and Windows.
+8. Open the run in the Actions tab. `build` and `sbom` run first; `publish` then waits for the environment review: approve the deployment. `github-release` follows. Check the result: the PyPI page of `llm-fsm` shows the release with its attestations ("Provenance"), the GitHub release carries the wheel, the sdist, `sbom.cdx.json` and the notes (they open with the Highlights), and `pip install llm-fsm==0.13.0` works in a fresh environment on Linux, macOS and Windows.
+9. After the first docs deploy (the tag also starts `.github/workflows/docs.yml`): Settings, Pages, source "Deploy from a branch", branch `gh-pages`, folder `/ (root)`; then, from a clone of `main` with the docs tools installed (`pip install --group docs -c constraints.txt`), run `mike set-default --push latest`. [`docs/README.md`](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/README.md), "Publishing the site", has the detail.
 
 A tag that fails a guard publishes nothing: delete it (`git push origin :refs/tags/vX.Y.Z` and `git tag -d vX.Y.Z`), fix the cause and tag again. A version that reached PyPI cannot be replaced: cut the next one (the files of a release are immutable there).
 
@@ -184,7 +195,7 @@ A tag that fails a guard publishes nothing: delete it (`git push origin :refs/ta
 All taken from recorded open items:
 
 - **Agents** ([docs/agents_roadmap.md](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/agents_roadmap.md), Known open items and Track B): `AgentGraph` has no failure routing, so a fallback branch cannot be built; Orchestrator subtasks dropped over `max_workers` do not affect `success`; a reply cut off by `max_tokens` is detected (`finish_reason`, a WARNING, a named cause in extraction errors, no unreadable half envelope shown as a reply) and a cut final reply (or answer field) of an agent run ends it with `success=False` and `stop_reason="truncated"` (REWOO stops on a cut plan), but a cut `native_fc` tool call, a `SelfConsistencyAgent` sample, a long meta-builder artifact, a streamed reply and a cut in an earlier turn are still not flagged; Swarm never hands off by itself; real human-in-the-loop for REWOO, PlanExecute, ParallelReact and native_fc; MCP v2 and A2A v1.0.
-- **Core** (`CHANGELOG.md`, Unreleased, Known open): validating an `FSMDefinition` for the first time from several threads at once can race; the message-free `classification_extractions` path has offline coverage only; nothing was checked live on a non-Ollama provider.
+- **Core** (`CHANGELOG.md`, 0.12.0, Known open): validating an `FSMDefinition` for the first time from several threads at once can race; the message-free `classification_extractions` path has offline coverage only; nothing was checked live on a non-Ollama provider.
 - **Reasoning** (`CHANGELOG.md`, Known open): cheaper typed per-key reasoning fields were tried and reverted after losing answers on a pre-registered probe, so a new attempt needs its own probe; a `final_context` passed back as `initial_context` still carries the previous problem's analysis.
 - **Measurement**: every live number here comes from one small local model. Runs on other models and providers are welcome, as new pre-registered blocks (see `scripts/bench_data/README.md`).
 

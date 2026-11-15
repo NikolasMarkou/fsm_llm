@@ -1,7 +1,7 @@
 # docs
 
 Path: `docs/`
-Purpose: Long-form Markdown guides for FSM-LLM v0.12.0 (quickstart, FSM design, handlers, architecture, API reference, runtime FSM synthesis) plus the two dated roadmaps and the pages of the documentation site.
+Purpose: Long-form Markdown guides for FSM-LLM v0.13.0 (quickstart, FSM design, handlers, architecture, API reference, runtime FSM synthesis) plus the two dated roadmaps and the pages of the documentation site.
 
 ## Scope
 
@@ -14,7 +14,7 @@ Three groups of files:
 
 | Group | Files | Header | Status |
 | --- | --- | --- | --- |
-| Current guides | `quickstart.md`, `fsm_design.md`, `handlers.md`, `architecture.md`, `api_reference.md`, `synthesis.md`, `testing.md` | `> Covers FSM-LLM v0.12.0` (matches `src/fsm_llm/__version__.py`) | Must match the code |
+| Current guides | `quickstart.md`, `fsm_design.md`, `handlers.md`, `architecture.md`, `api_reference.md`, `synthesis.md`, `testing.md` | `> Covers FSM-LLM v0.13.0` (matches `src/fsm_llm/__version__.py`) | Must match the code |
 | Roadmaps | `2026_roadmap.md`, `agents_roadmap.md` | none | Dated records, published as written. `2026_roadmap.md` is user-owned: never edit it. `agents_roadmap.md` keeps its counts as recorded on their dates |
 | Site pages | `index.md`, `concepts.md`, `examples.md`, the four wrappers, `reference/`, `packages/`, `decisions/index.md`, `upgrade-guide/` | none | Described in the key files below; every one is in the `nav` of `mkdocs.yml` |
 

@@ -4,7 +4,7 @@ The `docs/` folder at the root of the FSM-LLM repository holds the long-form use
 
 ## What it is for
 
-The package READMEs say what each part is. These guides go further: they teach you to build a bot, design states and transitions, write handlers, and they list the public API. Seven files are current guides for version 0.12.0, and each one starts with the line `> Covers FSM-LLM v0.12.0`. Two more are dated records and plans, kept to explain design choices, not to teach usage, and neither has a `Covers` header:
+The package READMEs say what each part is. These guides go further: they teach you to build a bot, design states and transitions, write handlers, and they list the public API. Seven files are current guides for version 0.13.0, and each one starts with the line `> Covers FSM-LLM v0.13.0`. Two more are dated records and plans, kept to explain design choices, not to teach usage, and neither has a `Covers` header:
 
 - `agents_roadmap.md` is the audit record and roadmap for `fsm_llm.agents` (dated 2026-09-29, with measured baselines added later). It describes work that shipped in 0.12.0, on top of 0.11.0.
 - `2026_roadmap.md` is the project roadmap. It belongs to the maintainer and is published as written: never edit it.

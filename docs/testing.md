@@ -1,6 +1,6 @@
 # Testing Guide
 
-> Covers FSM-LLM v0.12.0
+> Covers FSM-LLM v0.13.0
 
 `fsm_llm.testing` is the public home of the fakes and assertions the FSM-LLM repository uses for its own tests: fake LLM interfaces that need no network, a scripted user that drives a conversation, and four assertions that name a state, a context value, a visited path or a run result in one line. Use it to test a bot, an agent or a workflow without a model: a model call is slow, costs money and answers differently on each run.
 

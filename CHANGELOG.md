@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-15
+
+**Highlights**
+
+The first release of the project on PyPI as `llm-fsm` (`pip install llm-fsm`). The import package is still `fsm_llm` and the console scripts keep their names. This block is the short version: the sections below list every change, and each change that breaks a caller has an upgrade guide with the code before and after.
+
+- Install and support: `pip install llm-fsm` (extras such as `llm-fsm[agents]` or `llm-fsm[all]`), Python 3.11 to 3.15 (3.10 is dropped), an upper bound on every dependency range. The licence is Apache-2.0; an older 0.1.1 upload under the same name on PyPI is GPLv3 and was left in place.
+- New layout: the flat modules of 0.12.0 became layer packages (`fsm_llm.core`, `engine`, `llm`, `context`, `handlers`, `security`, `tools`, `policy`, `okf`, `skills`), held by import-linter contracts. The old import paths do not resolve and there is no shim: the [module paths guide](docs/upgrade-guide/v0.13.0/module-paths.md) gives the new place of every module and a script that rewrites your imports.
+- Safe defaults: there is no built-in default model (pass `model=` or set `LLM_MODEL`, else `ModelNotConfiguredError`), and importing the package reads no `.env` file (call `fsm_llm.load_env()` or pass `--env-file`). See the [default model and `.env` guide](docs/upgrade-guide/v0.13.0/default-model-and-env.md).
+- `fsm_llm.testing` is a public subpackage: scripted and prompt-grounded model doubles, reply builders, a scripted user and state assertions for code built on `fsm_llm`, with no network and no `pytest` import.
+- State kinds: every state is a `conversation`, `completion` or `synthesize` state, read through one internal registry that the pipeline, the loader, the validator and the analyses share (`State.kind`). Definition version 4.2 is the new default; the [definition version guide](docs/upgrade-guide/v0.13.0/definition-version.md) says when a definition gets a new `fsm_id`.
+- Supply chain and CI: dependencies pinned in `constraints.txt` and refreshed weekly under a 7-day cooldown, `pip-audit` and a `.pth` audit in CI, a nine-leg test matrix (Linux on Python 3.11 to 3.15, macOS and Windows on 3.11 and 3.15) and a coverage gate that never decreases.
+- Releases and docs: one pushed tag `v*` builds and checks the sdist and the wheel, writes an SBOM and publishes to PyPI by trusted publishing with attestations; a documentation site (mkdocs-material, versioned with mike) is built from `docs/`.
+- Also new: Open Knowledge Format bundles (`fsm_llm.okf`, `fsm-llm-okf`), Agent Skills (`fsm_llm.skills`, `fsm-llm-skills`), `HandlerErrorMode`, `fsm-llm-validate --upgrade`, `--env-file` on every model command, and a generated public API snapshot (`docs/api.txt`).
+
+Upgrading from 0.12.0: start at the [upgrade guides overview](docs/upgrade-guide/index.md), which lists what changed in the order a migration meets it. The list of every change follows.
+
 ### Added
 
 - Python 3.13, 3.14 and 3.15 are supported (roadmap row 0.2, plan d454fd62 step 115): `pyproject.toml` classifies them next to 3.11 and 3.12 (`requires-python = ">=3.11"` is unchanged and has no upper bound), `tox.ini` runs `py311` to `py315`, and the README and `AGENTS.md` state the range. Evidence before the declaration: on each of the three interpreters, in a scratch virtual environment with the CI install line against `constraints.txt` and `mcp`, `import fsm_llm`, `mypy -p fsm_llm` (no issues), `scripts/audit_pth.py`, the import contracts (32 kept), the same 17,358 collected tests as on 3.12, the API snapshot byte-equal to `docs/api.txt` and the whole non-slow suite (17,344 passed, 12 skipped and one failure on each, fixed below). PyYAML 6.0.3 has no cp315 wheel, so on 3.15 pip builds it from the sdist (about 5 seconds, Cython 3.3.1 pulled at build time, pure Python without libyaml headers, the C extension also builds and loads when the headers exist). New tests: `TestClassifiersMatchFloor` pins the newest classifier, the `tox.ini` envlist and the `AGENTS.md` range to the classifiers, the CI Linux legs equal the classified versions, and the README badge and note are derived from them. macOS and Windows stay unverified until the first matrix run. `setuptools` is now in the `dev` extra: Python 3.12 and later no longer seed it, so `test_packages_find_matches_disk` failed on every leg from 3.12 up (no BREAKING).
@@ -4098,7 +4115,8 @@ examples, signatures, and the 2-pass core contract are unchanged. New optional
 - 7 examples (basic, intermediate, advanced)
 - Comprehensive documentation
 
-[Unreleased]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/NikolasMarkou/fsm_llm/compare/v0.9.0...v0.10.0

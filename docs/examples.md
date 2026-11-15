@@ -1,6 +1,6 @@
 # Examples
 
-> Covers FSM-LLM v0.12.0
+> Covers FSM-LLM v0.13.0
 
 The repository holds 100 runnable examples in 8 categories. Each is a folder with a `run.py` and
 its FSM JSON. The examples are not part of this site: the links below open the folders on

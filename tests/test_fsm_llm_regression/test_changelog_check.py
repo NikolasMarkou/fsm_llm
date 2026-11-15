@@ -245,6 +245,25 @@ CASES: list[Case] = [
         doc(refs="```\n" + REFS.split("\n")[0] + "\n```\n"),
         ("CL004",),
     ),
+    # ---- a preamble before the first `###` (the Highlights of a release, step 119) -----
+    Case(
+        "clean-preamble-before-the-first-heading",
+        doc("**Highlights**\n\n- A short thing.\n- Another.\n\n" + ADDED),
+    ),
+    Case(
+        "preamble-bullet-is-read-for-the-breaking-marker",
+        doc("- A breaking change is hidden here.\n\n" + ADDED),
+        ("CL005",),
+    ),
+    Case(
+        "preamble-breaking-bullet-needs-its-guide",
+        doc(f"- {B} x.\n\n" + ADDED),
+        ("CL006",),
+    ),
+    Case(
+        "preamble-breaking-bullet-with-its-guide",
+        doc(f"- {B} x. {OK_LINK}\n\n" + ADDED),
+    ),
     # ---- CL005 -------------------------------------------------------------------
     Case("spelling-Breaking", doc(changed("- **Breaking:** x.")), ("CL005",)),
     Case("spelling-lower", doc(changed("- **breaking:** x.")), ("CL005",)),
@@ -651,6 +670,17 @@ EXTRACTS: list[Extract] = [
         "## [Unreleased]\n\n" + _UNRELEASED_BODY,
         True,
     ),
+    Extract(
+        "a-preamble-comes-first-in-the-body",
+        "0.12.0",
+        "**Highlights**\n\n- Short.\n\n" + _BODY_0_12,
+        text=doc(
+            middle=RELEASES.replace(
+                "[0.12.0] - 2026-10-02\n\n",
+                "[0.12.0] - 2026-10-02\n\n**Highlights**\n\n- Short.\n\n",
+            )
+        ),
+    ),
     Extract("does-not-include-the-next-heading", "0.12.0", _BODY_0_12),
     Extract(
         "trailing-blank-lines-are-dropped",
@@ -893,13 +923,18 @@ class TestLinkBase:
         assert out.replace(BASE, "") == text
 
     def test_the_real_changelog_notes_hold_no_relative_docs_link_after_it(self, cc):
-        """Every link of the real [Unreleased] section: absolute after the rewrite."""
+        """Every link of the real section being prepared: absolute after the rewrite."""
         import re
 
         text = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         notes = cc.extract_text(text, "Unreleased")
-        if notes is None or not notes:
-            pytest.skip("[Unreleased] is empty (the release was cut)")
+        if not notes:
+            # Right after a release `[Unreleased]` is empty: the section being prepared is the
+            # newest release (step 119 cut 0.13.0), so judge that one instead of skipping.
+            newest = cc.newest_release(cc.parse(text))
+            assert newest is not None
+            notes = cc.extract_text(text, newest.version_text)
+        assert notes, "neither [Unreleased] nor the newest release has a body"
         out = cc.rewrite_doc_links(notes, BASE)
         no_fence = re.sub(r"^(```+|~~~+).*?^\1[ \t]*$", "", out, flags=re.S | re.M)
         no_code = re.sub(r"(`+)(.+?)\1", "", no_fence, flags=re.S)

@@ -1524,6 +1524,106 @@ class TestTheReleaseNotesLinks:
         assert len(notes) <= 125_000
 
 
+def _real_notes(cwd: Path, version: str) -> tuple[str, str]:
+    """The notes of the REAL changelog after the extract and the cut steps: (before, after the cut)."""
+    (cwd / "scripts").mkdir(parents=True, exist_ok=True)
+    shutil.copy(_ROOT / "scripts" / "changelog_check.py", cwd / "scripts")
+    shutil.copy(_ROOT / "CHANGELOG.md", cwd / "CHANGELOG.md")
+    env = {"VERSION": version, "TAG": f"v{version}", "REPO": "NikolasMarkou/fsm_llm"}
+    code, _, err = _run(_script("build", needle="changelog_check.py"), cwd, env)
+    assert code == 0, err
+    before = (cwd / "release-notes.md").read_text(encoding="utf-8")
+    code, _, err = _run(_script("build", needle="limit = 120_000"), cwd, env)
+    assert code == 0, err
+    return before, (cwd / "release-notes.md").read_text(encoding="utf-8")
+
+
+class TestTheRealReleaseNotes:
+    """The body of the release the tag will publish, read from the real files (step 119).
+
+    The section of 0.13.0 is far longer than a release body can hold, so the workflow cuts it at a
+    line end and points at the full text. What must survive that cut is the Highlights block at
+    the top: the short version, the upgrade guides and the pointer to the full list.
+    """
+
+    def test_the_notes_open_with_the_highlights_and_the_cut_keeps_them(
+        self, tmp_path: Path
+    ):
+        version = tomllib.loads((_ROOT / "pyproject.toml").read_text("utf-8"))[
+            "project"
+        ]["version"]
+        before, after = _real_notes(tmp_path, version)
+        assert before.startswith("**Highlights**\n"), before[:80]
+        first_heading = after.index("\n### ")
+        highlights = after[:first_heading]
+        assert before.startswith(highlights)
+        assert len(highlights) < 8_000
+        # The cut replaced the tail, kept the head whole and ends with the pointer.
+        assert len(before) > 120_000, "the premise of the cut: the section is long"
+        assert len(after) < len(before)
+        assert after.rstrip().endswith(
+            f"[CHANGELOG.md](https://github.com/NikolasMarkou/fsm_llm/blob/v{version}/CHANGELOG.md)."
+        )
+        assert "These notes are cut at the GitHub release limit." in after
+        assert _relative_doc_links(after) == []
+        assert len(after) <= 125_000
+        assert (
+            f"](https://github.com/NikolasMarkou/fsm_llm/blob/v{version}/docs/upgrade-guide/index.md)"
+            in highlights
+        )
+
+    def test_the_notes_keep_the_first_sections_after_the_highlights(
+        self, tmp_path: Path
+    ):
+        _, after = _real_notes(tmp_path, "0.13.0")
+        head, _, rest = after.partition("\n### Added\n")
+        assert head.startswith("**Highlights**") and rest, (
+            "### Added follows the Highlights"
+        )
+
+    def test_the_unreleased_section_is_empty_so_its_extraction_fails_by_design(
+        self, tmp_path: Path
+    ):
+        (tmp_path / "scripts").mkdir()
+        shutil.copy(_ROOT / "scripts" / "changelog_check.py", tmp_path / "scripts")
+        shutil.copy(_ROOT / "CHANGELOG.md", tmp_path / "CHANGELOG.md")
+        env = {"VERSION": "Unreleased", **_NOTES_ENV}
+        code, _, _ = _run(_script("build", needle="changelog_check.py"), tmp_path, env)
+        assert code != 0, "an empty [Unreleased] must not produce release notes"
+
+    def test_the_guard_accepts_the_tag_of_the_release_and_names_the_files(
+        self, tmp_path: Path
+    ):
+        (tmp_path / "src" / "fsm_llm").mkdir(parents=True)
+        shutil.copy(
+            _ROOT / "src" / "fsm_llm" / "__version__.py",
+            tmp_path / "src" / "fsm_llm" / "__version__.py",
+        )
+        shutil.copy(_ROOT / "pyproject.toml", tmp_path / "pyproject.toml")
+        code, output, err = _run(
+            _script("build", step_id="version"), tmp_path, {"TAG": "v0.13.0"}
+        )
+        assert code == 0, err
+        assert output.splitlines() == [
+            "version=0.13.0",
+            "wheel=llm_fsm-0.13.0-py3-none-any.whl",
+            "sdist=llm_fsm-0.13.0.tar.gz",
+        ]
+
+    def test_the_guard_refuses_the_tag_of_the_previous_release(self, tmp_path: Path):
+        (tmp_path / "src" / "fsm_llm").mkdir(parents=True)
+        shutil.copy(
+            _ROOT / "src" / "fsm_llm" / "__version__.py",
+            tmp_path / "src" / "fsm_llm" / "__version__.py",
+        )
+        shutil.copy(_ROOT / "pyproject.toml", tmp_path / "pyproject.toml")
+        code, output, err = _run(
+            _script("build", step_id="version"), tmp_path, {"TAG": "v0.12.0"}
+        )
+        assert code != 0 and output == ""
+        assert "expected v0.13.0" in err
+
+
 def _swap(old: str, new: str, count: int = 1) -> Callable[[str], str]:
     def apply(script: str) -> str:
         assert old in script, f"script mutant anchor not found: {old!r}"

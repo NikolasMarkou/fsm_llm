@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-version = "0.12.0"
+version = "0.13.0"
 # The PyPI distribution is `llm-fsm`: `fsm-llm` on PyPI is another project. Only this name
 # (and the `llm-fsm[extra]` self-references of `all`) changed; the import package stays
 # `fsm_llm` and the console scripts below stay `fsm-llm*` (plan d454fd62, D-020).

@@ -3,7 +3,7 @@
     <img alt="License: Apache-2.0" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg">
   </a>
   <img alt="Python Version" src="https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14%20%7C%203.15-blue">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.12.0-green">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.13.0-green">
   <a href="https://github.com/NikolasMarkou/fsm_llm/actions/workflows/python-package.yml">
     <img alt="Tests" src="https://github.com/NikolasMarkou/fsm_llm/actions/workflows/python-package.yml/badge.svg">
   </a>

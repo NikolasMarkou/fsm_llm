@@ -1,6 +1,6 @@
 # Concepts
 
-> Covers FSM-LLM v0.12.0
+> Covers FSM-LLM v0.13.0
 
 This page explains what the library is made of, where it fits, and how one message travels
 through it. For a first run go to the [Quick Start](quickstart.md); for the parts in detail go
@@ -186,7 +186,7 @@ The library is organized into five pillars.
 
 ## Status
 
-* Version 0.12.0. Most tests are offline and use a fake model, so they check logic and wiring,
+* Version 0.13.0. Most tests are offline and use a fake model, so they check logic and wiring,
   not model quality.
 * Evaluation scores are a heuristic and overstate quality. The recorded runs on the
   [Evaluate](evaluate.md) page used a 4B local model, and scores on other models differ.

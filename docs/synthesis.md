@@ -1,6 +1,6 @@
 # Runtime FSM Synthesis
 
-> Covers FSM-LLM v0.12.0
+> Covers FSM-LLM v0.13.0
 
 Some conversations cannot be written ahead of time. "Collect what this visa form needs" depends on a goal that only shows up at run time. `fsm_llm.synthesis` lets a host conversation ask for a procedure by goal: a model writes a finite state machine (FSM) for it, a stack of checks decides whether that FSM may run, a library stores it, and a runner executes it as a child of the host conversation.
 
