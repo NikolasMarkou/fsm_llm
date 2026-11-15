@@ -419,12 +419,20 @@ class TestInstallFromPyPI:
         assert f"img.shields.io/badge/version-{__version__}-" in readme
 
     def test_the_python_badge_matches_the_stated_range(self, readme):
-        # Until row 0.2 (step 115) the range is 3.11 and 3.12: the badge, the note and the
-        # classifiers say one thing.
+        """The badge, the install note and the classifiers say one thing (row 0.2)."""
+        prefix = "Programming Language :: Python :: 3."
+        classifiers = tomllib.loads(
+            (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        )["project"]["classifiers"]
+        minors = sorted(
+            int(c[len(prefix) :]) for c in classifiers if c.startswith(prefix)
+        )
+        assert minors == list(range(minors[0], minors[-1] + 1)), minors
+        versions = [f"3.{m}" for m in minors]
         badge = re.search(r"img\.shields\.io/badge/python-([^\"']+)", readme)
         assert badge, "no Python badge"
-        assert badge.group(1) == "3.11%20%7C%203.12-blue"
-        assert "tested on 3.11 and 3.12" in readme
+        assert badge.group(1) == "%20%7C%20".join(versions) + "-blue"
+        assert f"tested on {versions[0]} to {versions[-1]}" in readme
 
 
 class TestRootFilesAndDocsRules:

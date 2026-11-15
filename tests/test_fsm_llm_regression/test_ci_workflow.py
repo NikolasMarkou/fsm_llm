@@ -473,6 +473,21 @@ class TestTheRealWorkflow:
         project = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         assert project["project"]["requires-python"] == f">={floor[0]}.{floor[1]}"
 
+    def test_the_linux_legs_are_the_classified_versions(self):
+        """Every Python version the classifiers promise has a Linux leg, and no leg
+        tests a version that is not promised (macOS and Windows run the two ends)."""
+        wf = _load(_real_text())
+        legs = matrix_legs(wf["jobs"]["test"]["strategy"]["matrix"])
+        linux = {leg["python-version"] for leg in legs if leg["os"] == _LINUX}
+        project = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        prefix = "Programming Language :: Python :: "
+        classified = {
+            c[len(prefix) :]
+            for c in project["project"]["classifiers"]
+            if re.fullmatch(re.escape(prefix) + r"3\.\d+", c)
+        }
+        assert linux == classified, (sorted(linux), sorted(classified))
+
     def test_triggers_are_push_and_pull_request_to_main_and_dispatch(self):
         on = _load(_real_text())["on"]
         assert on["push"] == {"branches": ["main"]}

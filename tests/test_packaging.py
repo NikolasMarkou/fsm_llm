@@ -850,10 +850,11 @@ class TestNoPypiInstallHint:
         assert not hits, f"stale clone-install hint: {hits}"
 
 
-#: Newest Python minor that has a classifier. Raised (with evidence from the
-#: uv runs) when 3.13 to 3.15 are classified; it is a constant so that adding a
-#: classifier without the evidence step fails here.
-_NEWEST_CLASSIFIED_MINOR = 12
+#: Newest Python minor that has a classifier. Raised only with evidence (step 115 of
+#: plan d454fd62: the install, mypy, the API snapshot and the whole non-slow suite on
+#: 3.13, 3.14 and 3.15, progress.md "Step 115"); it is a constant so that adding a
+#: classifier without the evidence fails here.
+_NEWEST_CLASSIFIED_MINOR = 15
 
 
 def _pyproject() -> dict:
@@ -918,6 +919,21 @@ class TestClassifiersMatchFloor:
 
     def test_the_newest_classifier_is_the_evidenced_version(self):
         assert _classified_minors()[-1] == _NEWEST_CLASSIFIED_MINOR
+
+    def test_the_tox_envlist_is_one_env_per_classified_minor(self):
+        """`tox.ini` runs every version the classifiers promise, no more and no less."""
+        parser = configparser.ConfigParser()
+        parser.read_string(_read("tox.ini"))
+        envs = [e.strip() for e in parser["tox"]["envlist"].split(",") if e.strip()]
+        expected = [f"py3{m}" for m in _classified_minors()]
+        assert envs == expected, (envs, expected)
+
+    def test_agents_md_states_the_classified_range(self):
+        """The one-line purpose of AGENTS.md names the same range as the classifiers."""
+        minors = _classified_minors()
+        assert (
+            f"Python 3.{minors[0]}-3.{minors[-1]}" in _read("AGENTS.md").splitlines()[3]
+        )
 
     def test_setuptools_floor_reads_the_license_expression(self):
         """`license = "Apache-2.0"` (PEP 639) needs setuptools 77 or later."""

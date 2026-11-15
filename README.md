@@ -2,7 +2,7 @@
   <a href="https://www.apache.org/licenses/LICENSE-2.0">
     <img alt="License: Apache-2.0" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg">
   </a>
-  <img alt="Python Version" src="https://img.shields.io/badge/python-3.11%20%7C%203.12-blue">
+  <img alt="Python Version" src="https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14%20%7C%203.15-blue">
   <img alt="Version" src="https://img.shields.io/badge/version-0.12.0-green">
   <a href="https://github.com/NikolasMarkou/fsm_llm/actions/workflows/python-package.yml">
     <img alt="Tests" src="https://github.com/NikolasMarkou/fsm_llm/actions/workflows/python-package.yml/badge.svg">
@@ -27,7 +27,7 @@ It is one package, `fsm_llm`, with a small core and seven subpackages on top: re
 
 ## Installation
 
-> **Note:** This library requires Python 3.11 or newer (tested on 3.11 and 3.12). It is published on PyPI as `llm-fsm`; the import package is `fsm_llm`. `fsm-llm` on PyPI is a different, unrelated project: if you installed it by mistake, run `pip uninstall fsm-llm` first.
+> **Note:** This library requires Python 3.11 or newer (tested on 3.11 to 3.15). It is published on PyPI as `llm-fsm`; the import package is `fsm_llm`. `fsm-llm` on PyPI is a different, unrelated project: if you installed it by mistake, run `pip uninstall fsm-llm` first.
 
 1.  **Create an environment and install:**
     ```bash
