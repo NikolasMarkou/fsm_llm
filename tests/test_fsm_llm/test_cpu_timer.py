@@ -163,13 +163,13 @@ class TestUnderASimulatedLoadedHost:
         assert timer.elapsed < 0.5 * timing_factor
 
 
-#: Files that may still call ``time.perf_counter``: this file (it simulates the
-#: wall clock) and ``test_context_unit.py``, whose scale-free spread sweeps keep
-#: the best of three wall timings per size and compare RATIOS of them (a uniform
-#: slowdown cancels in a ratio; see ``TestNoRatioBoundIsScaled``).
+#: Files that may still call ``time.perf_counter``: only this file (it simulates
+#: the wall clock). The scale-free spread sweeps of ``test_context_unit.py`` read
+#: CPU time too since plan d454fd62 step 120: a wall-clock ratio is not immune to
+#: a loaded host (the scheduler stretches the sizes unevenly), and a ratio bound
+#: is never scaled (see ``TestNoRatioBoundIsScaled``).
 _WALL_CLOCK_FILES = {
     "test_cpu_timer.py": None,
-    "test_context_unit.py": {"measure", "per_char"},
 }
 _TEST_ROOT = Path(conftest.__file__).parent
 

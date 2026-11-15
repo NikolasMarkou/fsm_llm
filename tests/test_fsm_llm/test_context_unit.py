@@ -2257,7 +2257,6 @@ class TestCryptoKeyAndTokenTriggers:
         sweep). Using the spread rather than one adjacent pair keeps a single
         noisy sample from failing the run."""
         import re
-        import time
 
         from fsm_llm.constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS
 
@@ -2282,10 +2281,12 @@ class TestCryptoKeyAndTokenTriggers:
             inner = max(1, 120_000 // len(text))
             best = None
             for _ in range(3):
-                start = time.perf_counter()
-                for _ in range(inner):
-                    any(p.match(text) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
-                best = min(best or 1e9, (time.perf_counter() - start) / inner)
+                # CPU time, not wall time (plan d454fd62 step 120): see the
+                # digit-suffix sweep; the spread stays an unscaled ratio.
+                with cpu_timer() as timer:
+                    for _ in range(inner):
+                        any(p.match(text) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
+                best = min(best or 1e9, timer.elapsed / inner)
             return best
 
         def sweep(generate):
@@ -4872,10 +4873,13 @@ class TestDigitSuffixedCredentialNames:
         assert clean_context_keys(dict(data), "c1", strip_forbidden_keys=True) == kept
 
     def test_the_digit_suffix_stays_linear_on_adversarial_input(self):
-        import time
-
         from fsm_llm.constants import COMPILED_FORBIDDEN_CONTEXT_PATTERNS
 
+        # CPU time, not wall time (plan d454fd62 step 120): on a host at load 40+
+        # a wall-clock sample is stretched by the scheduler, unevenly across the
+        # sizes, and the spread (a RATIO, never scaled) flipped. CPU time does not
+        # grow while the process waits for a CPU; the retry and the best of three
+        # per size stay for cache and frequency noise.
         def per_char(make):
             times = []
             for step in range(6):
@@ -4883,10 +4887,13 @@ class TestDigitSuffixedCredentialNames:
                 inner = max(1, 60_000 // len(text))
                 best = 1e9
                 for _ in range(3):
-                    start = time.perf_counter()
-                    for _ in range(inner):
-                        any(p.match(text) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
-                    best = min(best, (time.perf_counter() - start) / inner)
+                    with cpu_timer() as timer:
+                        for _ in range(inner):
+                            any(
+                                p.match(text)
+                                for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS
+                            )
+                    best = min(best, timer.elapsed / inner)
                 times.append(best / len(text))
             return max(times) / min(times), times
 
