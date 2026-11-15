@@ -69,6 +69,9 @@ coverage==7.13.5
 pytest-mock==3.15.1
 ruff==0.15.22
 mypy==2.3.0
+# numpy: only the tests that `importorskip("numpy")` need it (`dev` extra, marker
+# `python_version < "3.15"`: no cp315 wheel in 2.4.6). Released 2026-05-18.
+numpy==2.4.6
 
 # Import contracts (`make lint-imports`, `.importlinter`; plan d454fd62 step 61) and the
 # wheel-content test (`python -m build --wheel --no-isolation`). grimp is import-linter's

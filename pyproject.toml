@@ -98,6 +98,11 @@ dev = [
     # The CI job `supply-chain` audits the installed environment with it; exact pin in
     # constraints.txt, `.github/workflows/python-package.yml` runs `pip-audit --skip-editable`.
     "pip-audit>=2.9,<3",
+    # Two tests (`test_limits.py`, `test_foundation_dedup.py`) check that a real numpy integer is
+    # accepted by the tool limit readers; they `importorskip("numpy")`, so without it they skip
+    # in CI (plan d454fd62 step 120.2). Exact pin in constraints.txt. numpy 2.4.6 ships wheels
+    # for CPython 3.11 to 3.14 only, so the Python 3.15 leg skips them instead of building from source.
+    "numpy>=2.0,<3; python_version < '3.15'",
 ]
 all = [
     "llm-fsm[workflows]",
