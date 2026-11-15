@@ -1,10 +1,10 @@
 {
   "schema": 1,
   "canonical": "linux / 3.12 / mcp installed",
-  "combined_percent": 95.12,
-  "branch_percent": 92.17,
-  "line_percent": 96.02,
+  "combined_percent": 95.79,
+  "branch_percent": 92.95,
+  "line_percent": 96.6,
   "python": "3.12.8",
   "mcp": "2.2.0",
-  "measured": "2026-11-12"
+  "measured": "2026-11-15"
 }
