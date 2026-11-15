@@ -816,7 +816,19 @@ class TestReadConcurrency:
     _SEED_KEYS = 300
     _GROWTH_PER_TURN = 40
     _MIN_READS = 500
-    _DEADLINE_S = 60.0
+    # The window is bounded by PROGRESS, not by one wall-clock total (plan
+    # d454fd62 step 120): on a host at load 40+ the readers reached 345 cycles in
+    # 60 s of wall time with zero tears and the old fixed deadline called that
+    # "too narrow". The writer now keeps the window open until the coverage floor
+    # is met and stops only when no read cycle and no writer turn has completed for
+    # ``_STALL_S`` (a stuck lock) or at the ``_HARD_S`` backstop. A starved host
+    # reads about 1 cycle per writer turn (the readers lose the lock to the writer,
+    # and every turn adds ``_GROWTH_PER_TURN`` keys), so the floor can stay out of
+    # reach however long the window is: a run that ended on the backstop is held
+    # to ``_STARVED_MIN_READS`` instead. Torn reads and crashes fail it either way.
+    _STALL_S = 60.0
+    _HARD_S = 240.0
+    _STARVED_MIN_READS = 100
 
     def _make_api(self):
         api = API.from_definition(
@@ -844,9 +856,10 @@ class TestReadConcurrency:
 
     def test_concurrent_reads_never_tear_or_crash(self, timing_factor):
         api, conv_id = self._make_api()
-        # Wall-clock bound on the adaptive window; it grows with the factor so a
-        # traced or loaded run still reaches the read floor.
-        deadline_s = self._DEADLINE_S * timing_factor
+        # Both bounds grow with the factor so a traced run still reaches the
+        # read floor; they are wall-clock because they guard against a stall.
+        stall_s = self._STALL_S * timing_factor
+        hard_s = self._HARD_S * timing_factor
         errors: list[tuple[str, BaseException]] = []
         errors_lock = threading.Lock()
         stop = threading.Event()
@@ -855,10 +868,12 @@ class TestReadConcurrency:
         # _WRITER_TURNS can complete before the readers reach the _MIN_READS
         # coverage floor, failing the final assert as "window too narrow"
         # with zero actual tears (measured: CI 3.11 hit 349/500). The writer
-        # keeps writing until the floor is met (bounded by _DEADLINE_S), so
-        # the floor asserts coverage, not runner speed.
+        # keeps writing until the floor is met (bounded by a stall of _STALL_S
+        # or the _HARD_S backstop), so the floor asserts coverage, not runner
+        # speed.
         reads_tally = [0]
         tally_lock = threading.Lock()
+        window_capped = [False]  # the writer ended on the stall or hard limit
 
         def _record(who: str, exc: BaseException) -> None:
             with errors_lock:
@@ -866,11 +881,16 @@ class TestReadConcurrency:
 
         def writer() -> int:
             turns = 0
-            deadline = time.monotonic() + deadline_s
+            started = last_move = time.monotonic()
+            last_progress = 0
             try:
-                while (
-                    turns < self._WRITER_TURNS or reads_tally[0] < self._MIN_READS
-                ) and time.monotonic() < deadline:
+                while turns < self._WRITER_TURNS or reads_tally[0] < self._MIN_READS:
+                    now = time.monotonic()
+                    if reads_tally[0] + turns != last_progress:
+                        last_progress, last_move = reads_tally[0] + turns, now
+                    if now - last_move > stall_s or now - started > hard_s:
+                        window_capped[0] = True
+                        break
                     try:
                         api.converse("hello", conv_id)
                         turns += 1
@@ -945,13 +965,15 @@ class TestReadConcurrency:
             )
             # Beat the non-determinism: the readers must actually have cycled
             # many times against in-flight writes, not exited early. The
-            # writer holds the window open until this floor is met (or the
-            # _DEADLINE_S wall-clock bound trips), so a miss here means a
-            # genuinely pathological environment, not an unlucky fast writer.
-            assert reads_done >= self._MIN_READS, (
-                f"readers only completed {reads_done} cycles within "
-                f"{deadline_s}s — the window was too narrow to prove "
-                "anything; widen READERS/WRITER_TURNS/_DEADLINE_S"
+            # writer holds the window open until this floor is met (or no
+            # progress for _STALL_S, or the _HARD_S backstop, where the floor
+            # drops to _STARVED_MIN_READS), so a miss here means a genuinely
+            # pathological environment, not a slow host.
+            required = self._STARVED_MIN_READS if window_capped[0] else self._MIN_READS
+            assert reads_done >= required, (
+                f"readers only completed {reads_done} cycles, need {required} "
+                f"(stall limit {stall_s}s, hard limit {hard_s}s) - the window was "
+                "too narrow to prove anything; widen READERS/WRITER_TURNS/_HARD_S"
             )
         finally:
             api.close()
