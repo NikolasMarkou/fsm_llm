@@ -86,8 +86,12 @@ dev = [
     "mypy>=2.0,<3",
     # Layering contracts in `.importlinter` (`make lint-imports`); grimp is its engine.
     "import-linter>=2.1,<3",
-    # The wheel-content test builds a wheel with `python -m build --no-isolation`.
+    # The wheel-content test builds a wheel with `python -m build --no-isolation`, and
+    # `test_packages_find_matches_disk` imports setuptools: both need the backend importable
+    # in the test environment. Python 3.12 and later no longer seed it (step 115.1). The exact
+    # pin is in constraints.txt, the same one the build backend uses.
     "build>=1.2,<2",
+    "setuptools>=77,<85",
     # The CI job `supply-chain` audits the installed environment with it; exact pin in
     # constraints.txt, `.github/workflows/python-package.yml` runs `pip-audit --skip-editable`.
     "pip-audit>=2.9,<3",

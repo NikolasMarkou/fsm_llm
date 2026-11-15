@@ -1028,6 +1028,30 @@ class TestDeclaredRangesMatchPins:
                 )
         assert not problems, problems
 
+    def test_the_dev_extra_installs_the_build_backend_the_tests_import(self):
+        """Step 115.1 (Python 3.13 evidence run): `test_packages_find_matches_disk` imports
+        `setuptools` and the wheel tests build with `--no-isolation`, but nothing in the
+        `dev` extra installed it: `ensurepip` stopped seeding setuptools in Python 3.12 and
+        `pip install -e` only puts it into an isolated build environment, so on every
+        CI leg from 3.12 up the test failed with `ModuleNotFoundError`. On 3.11 the
+        virtualenv seed hid it."""
+        importer = re.compile(r"^\s*(?:import|from)\s+setuptools\b", re.MULTILINE)
+        importers = [
+            p.relative_to(_REPO_ROOT).as_posix()
+            for p in sorted((_REPO_ROOT / "tests").rglob("*.py"))
+            if importer.search(p.read_text(encoding="utf-8"))
+        ]
+        assert importers, (
+            "no test imports setuptools any more: drop this rule and the pin"
+        )
+        dev = {
+            _normalized(Requirement(r).name)
+            for r in _pyproject()["project"]["optional-dependencies"]["dev"]
+        }
+        assert "setuptools" in dev, (
+            f"{importers} import setuptools, the dev extra lacks it"
+        )
+
     def test_the_build_backend_is_pinned_inside_its_range(self):
         pins = _constraint_pins()
         for text in _pyproject()["build-system"]["requires"]:
