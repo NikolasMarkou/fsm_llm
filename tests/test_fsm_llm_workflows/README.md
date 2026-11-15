@@ -1,6 +1,6 @@
 # test_fsm_llm_workflows
 
-The pytest suite for `fsm_llm.workflows`, the async workflow engine that lives in `src/fsm_llm/workflows/` of the FSM-LLM repository. It holds 330 tests in 8 files, and none of them call a real LLM or the network.
+The pytest suite for `fsm_llm.workflows`, the async workflow engine that lives in `src/fsm_llm/workflows/` of the FSM-LLM repository. It holds 407 tests in 8 files, and none of them call a real LLM or the network.
 
 ## What it is for
 
@@ -22,10 +22,10 @@ Async tests need no decorator: the repository's `pyproject.toml` sets `asyncio_m
 - `support.py` - helpers that more than one test file uses (a wait-then-done workflow builder, `_settle`, fake LLM responses). Not collected: the name has no `test_` prefix.
 - `test_workflows.py` - exceptions, models (`WorkflowStatus`, `WorkflowEvent`, `WorkflowStepResult`, `WorkflowInstance`, `EventListener`, `WaitEventConfig`), definition validation, basic DSL, internal-key filtering, terminal routing on `""`, nested-step serialization, package exports. 55 tests.
 - `test_dsl.py` - every DSL factory (`auto_step`, `api_step`, `llm_step`, `timer_step`, ...), the `WorkflowBuilder` fluent builder, and the `create_linear_workflow`, `create_conditional_workflow`, `create_event_driven_workflow` helpers. The builder classes pin that `build()` always validates (an empty builder is refused), that step call order is kept (the last `set_initial_step` is initial but the step keeps its position), that every failure inside `build()` is a `BuildError` chained from its cause, and that each build is isolated (mutating the builder after a build, or the product before the next build, touches neither; steps stay shared by reference). 59 tests.
-- `test_steps.py` - execution of `AutoStep`, `ConditionStep`, `APIStep`, `WaitEventStep`, `TimerStep`, `ParallelStep`, `ConversationStep`, the layout of the `steps/` package and the edges of each step module. 59 tests.
+- `test_steps.py` - execution of `AutoStep`, `ConditionStep`, `APIStep`, `WaitEventStep`, `TimerStep`, `ParallelStep`, `ConversationStep`, the layout of the `steps/` package and the edges of each step module. 98 tests.
 - `test_new_steps.py` - `SwitchStep`, `RetryStep`, `AgentStep`, their DSL factories, and engine instance removal and purging. 46 tests.
 - `test_step_timeouts.py` - the per-step `timeout_seconds` field and the `_with_timeout` helper. 23 tests, 8 marked `slow`.
-- `test_engine_lifecycle.py` - the engine's lifecycle and resources: instance ids, `max_seconds` deadlines, loops and the step budget, release of timers and listeners on cancel and close, definition pinning, hooks and the engine API, silent logging by default (a subprocess), failures raised by steps, async `aggregation_function`, the announced first RUNNING, per-instance locking, terminal-status guards, float timeouts, the package layout of `engine/`. 49 tests.
+- `test_engine_lifecycle.py` - the engine's lifecycle and resources: instance ids, `max_seconds` deadlines, loops and the step budget, release of timers and listeners on cancel and close, definition pinning, hooks and the engine API, silent logging by default (a subprocess), failures raised by steps, async `aggregation_function`, the announced first RUNNING, per-instance locking, terminal-status guards, float timeouts, the package layout of `engine/`. 87 tests.
 - `test_wait_events.py` - waits and timers: event isolation between instances, correlation keys and targeted events, wait timeouts, re-waits, timer keys and re-arming, timers on finished instances, completing from a wait, listener cleanup. 31 tests.
 - `test_removed_keywords.py` - a removed keyword spelling (`error_state=`, `timeout=`, `default_state=`, `timeout_state=`, `next_state=`, `workflow_timeout=`) raises a `ValidationError` on the pydantic workflow models and the new spelling works. 8 tests.
 - `__init__.py` - empty package marker.

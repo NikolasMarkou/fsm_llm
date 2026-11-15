@@ -1,7 +1,7 @@
 # test_fsm_llm
 
 Path: `tests/test_fsm_llm`
-Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass MessagePipeline, transitions, prompts, LLM wrapper, handlers, memory, validator, visualizer, logging), 72 test files, 6,237 collected tests.
+Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass MessagePipeline, transitions, prompts, LLM wrapper, handlers, memory, validator, visualizer, logging), 84 test files, 7,172 collected tests.
 
 ## Scope
 
@@ -87,6 +87,7 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_stack_lifecycle_seam.py` | `push_fsm`/`pop_fsm` races, stale cleanup | uses a fake clock |
 | `test_cpu_timer.py` | the `cpu_timer` context manager of `tests/conftest.py` (CPU time, not wall time, for budgets about computation) | burns CPU in this thread, in a joined worker and in a worker timed with `thread=True`, and sleeps, to show `process_time`/`thread_time` apart from the wall clock; simulates a loaded host (`time.perf_counter` 10x fast: the old shape fails, the new one passes); an AST scan fails any other test file that calls `time.perf_counter` (the two ratio sweeps of `test_context_unit.py` read CPU time too since step 120) |
 | `test_timing_factor.py` | the `timing_factor` fixture and `current_timing_factor()` of `tests/conftest.py` | simulates a tracer, pytest-cov, a live coverage and the env override; an AST scan (`_ScaleScan`, by value: a division of two measured values, a ratio-named variable, a bound held in a variable, an alias, `current_timing_factor()`, a same-module helper's parameter) fails any test file that scales a ratio bound by the factor; shapes proven on defeat attempts |
+| `test_upgrade_guides.py` | the upgrade guides under `docs/upgrade-guide/` are real code: page shape, labelled fences, `After` blocks import and run, every `**BREAKING:**` bullet links a guide section, the module-paths guide covers every old module of the path map | `TestDefectsAreCaught` plants one defect per rule on a scratch tree; no model, no network |
 | `test_turn_guard_deterministic.py` | concurrent `converse` on one conversation raises `FSMError` | event-synchronised, no sleeps |
 | `test_fsm_lock_order.py` | the lock order of `FSMManager`: recording lock wrappers over every manager operation, the exact `_lock` / `conv_lock` call order of the turn, read, write and end paths pinned, the checker proven on synthetic and inverted orders | single thread except one busy-lock test; read the anchors in `engine/fsm/` before changing a pin |
 | `test_bulk_extraction.py` | bulk extraction through `API.converse`: correction overwrite, provenance, coercion and validation, rejected corrections, back-edge re-extraction, grounding, a failed bulk surfaced to Pass 2 | |
@@ -194,7 +195,7 @@ Seam files fake the backend with `patch("fsm_llm.llm.providers.litellm.completio
 - New regression for a public-path bug: add a seam test that drives `API.converse` or patched `fsm_llm.llm.providers.litellm.completion`, not only a helper-level test.
 - Reuse a helper by import (see the helper table) rather than copying it. Name a new test file for the behaviour it pins, never for an audit, review round or plan step: `TestNoDatedTestFiles` in `tests/test_packaging.py` refuses such names.
 - Do not relabel, delete or regenerate corpus rows to improve a rate; do not add filter words to catch one corpus entry. Add names from real vocabulary without reading `constants.py` first.
-- After adding or removing tests, re-measure with the first command below. The suite count (6,237) is pinned by `tests/test_packaging.py::test_per_suite_table` (marked slow), which compares a measured `--collect-only` count per suite against a documented literal of the form `pytest tests/test_fsm_llm/  # ... (N tests)`; run that test after changing the count. The counts stated in this file (72 test files, 6,237 tests, 14 slow) are not pinned by any test and must be updated by hand.
+- After adding or removing tests, re-measure with the first command below. The suite count (7,172) is pinned by `tests/test_packaging.py::test_per_suite_table` (marked slow), which compares a measured `--collect-only` count per suite against a documented literal of the form `pytest tests/test_fsm_llm/  # ... (N tests)`; run that test after changing the count. The counts stated in this file (84 test files, 7,172 tests, 14 slow) are not pinned by any test and must be updated by hand.
 
 ```bash
 .venv/bin/python -m pytest tests/test_fsm_llm/ --collect-only -q | tail -1
