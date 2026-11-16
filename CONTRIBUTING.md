@@ -166,17 +166,20 @@ Owner steps, in this order (the commands need `gh` logged in as the owner). Step
 1. Commit the anchor manifest first: `git add plans/ANCHORS.md && git commit -m "docs: anchor manifest lines"`. It holds the appended lines that `make decision-check` (and the `lint` job) need, so a push before this commit is a red first run on purpose. Never edit an existing line of it.
 2. In any other clone or virtualenv, after the layout move of 0.13.0: `pip uninstall fsm-llm`, delete a leftover `src/fsm_llm.egg-info`, then `pip install -e .` once (console scripts and the distribution name moved; `python scripts/audit_pth.py` flags a stale code-bearing finder).
 3. On PyPI, confirm `llm-fsm` is in "Your projects" and add a Trusted Publisher with exactly these names: owner `NikolasMarkou`, repository `fsm_llm`, workflow `release.yml`, environment `pypi`. (A TestPyPI pending publisher with the same names is an optional dry run of the whole path before the real tag.)
-4. The GitHub environment `pypi` holds a required reviewer (the owner, with two-factor authentication on). Restrict it to tags `v*`:
+4. Create the GitHub environment `pypi` with a required reviewer (you, with two-factor authentication on) and restrict it to tags `v*`. Without the reviewer `publish` runs unattended on any pushed `v*` tag; without the tag restriction a branch can deploy to the environment. One `PUT` sets the reviewer and the restriction to custom policies, then one `POST` adds the tag pattern. The environments API takes `reviewers` as an array of objects, which `gh api` field flags cannot express (they document scalar arrays only), so the `PUT` body is JSON on standard input, with real JSON booleans: the booleans as `-f` fields would be sent as the strings `"true"` and `"false"` and the API refuses them (422); with `-F` they would be booleans, but the reviewer would still be missing. The `type` of the `POST` is a string, so `-f` is right there:
 
    ```bash
-   gh api -X PUT repos/NikolasMarkou/fsm_llm/environments/pypi \
-     -f 'deployment_branch_policy[protected_branches]=false' \
-     -f 'deployment_branch_policy[custom_branch_policies]=true'
+   owner_id=$(gh api users/NikolasMarkou --jq .id)
+   body='{"prevent_self_review":false,"reviewers":[{"type":"User","id":'"$owner_id"'}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+   gh api -X PUT repos/NikolasMarkou/fsm_llm/environments/pypi --input - <<< "$body"
    gh api -X POST repos/NikolasMarkou/fsm_llm/environments/pypi/deployment-branch-policies \
      -f name='v*' -f type=tag
+   gh api repos/NikolasMarkou/fsm_llm/environments/pypi --jq '{protection_rules, deployment_branch_policy}'
    ```
 
-5. Settings, Actions, General: tick "Allow GitHub Actions to create and approve pull requests" (the weekly pin refresh opens its pull request with it). Once the matrix is green, Settings, Branches: protect `main` and require the nine `test (<os>, Python <version>)` checks of the CI workflow (and `lint`).
+   The last command is the check: `protection_rules` must hold a `required_reviewers` rule naming you and `deployment_branch_policy` must read `{"custom_branch_policies":true,"protected_branches":false}`; the tag pattern is listed by `gh api repos/NikolasMarkou/fsm_llm/environments/pypi/deployment-branch-policies --jq '.branch_policies'` (one entry, name `v*`, type `tag`). The same in the web UI: Settings, Environments, `pypi`: tick "Required reviewers" and add yourself, leave "Prevent self-review" off (you are the only maintainer: with it on, nobody could approve your own tag), then "Deployment branches and tags", "Selected branches and tags", "Add deployment branch or tag rule", type "Tag", pattern `v*`. Required reviewers need a public repository or a paid plan. The `PUT` creates the environment when it does not exist and replaces its whole protection configuration, so run it once, before the first tag.
+
+5. Settings, Actions, General: tick "Allow GitHub Actions to create and approve pull requests" (the weekly pin refresh opens its pull request with it). Once the matrix is green, Settings, Branches: protect `main`, require a pull request before merging, and require the nine `test (<os>, Python <version>)` checks of the CI workflow (and `lint`). The pull request rule is not a formality: the coverage ratchet's `guard` (the baseline in `coverage-baseline.json` may only rise) runs on pull requests only, so a direct push to `main` that lowers the baseline file would pass `check` against the lowered file. As the sole maintainer, set the required approvals to 0 (a pull request, no second reviewer).
 6. `git push origin main` and watch the first matrix of nine legs. The Windows and macOS legs have never run before: a failure there is a finding to fix, not a reason to skip the leg. The coverage tolerance is meant to be tightened after three green runs.
 7. Release from a clean `main` whose CI is green and whose `CHANGELOG.md` date is the day of the tag (edit `## [X.Y.Z] - YYYY-MM-DD` if the tag is cut on another day, commit, and run `python scripts/changelog_check.py check` again):
 
@@ -187,6 +190,11 @@ Owner steps, in this order (the commands need `gh` logged in as the owner). Step
 
 8. Open the run in the Actions tab. `build` and `sbom` run first; `publish` then waits for the environment review: approve the deployment. `github-release` follows. Check the result: the PyPI page of `llm-fsm` shows the release with its attestations ("Provenance"), the GitHub release carries the wheel, the sdist, `sbom.cdx.json` and the notes (they open with the Highlights), and `pip install llm-fsm==0.13.0` works in a fresh environment on Linux, macOS and Windows.
 9. After the first docs deploy (the tag also starts `.github/workflows/docs.yml`): Settings, Pages, source "Deploy from a branch", branch `gh-pages`, folder `/ (root)`; then, from a clone of `main` with the docs tools installed (`pip install --group docs -c constraints.txt`), run `mike set-default --push latest`. [`docs/README.md`](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/README.md), "Publishing the site", has the detail.
+
+If a run goes wrong after the tag:
+
+- `github-release` failed after `publish` succeeded (the files are on PyPI): use "Re-run failed jobs" only. It reuses the artifacts of the run. "Re-run all jobs" rebuilds, and PyPI refuses files it already has ("File already exists"), so the GitHub release would never be cut. A failure before `publish` is fixed by deleting the tag (below) and tagging again.
+- `.github/workflows/docs.yml` also starts on the tag and deploys the site on its own, whether or not the release publishes. If a publish is abandoned (the tag deleted or PyPI refused it), remove that version from the site with `mike delete <version> --push` from a clone with the docs tools installed (deleting a version deletes its aliases too, so `latest` goes with it), then give `latest` back to the previous release with `mike alias --push --update-aliases <previous version> latest`. The two workflows are not chained on purpose: a `workflow_run` chain cannot be tested without a real run, so this sentence is the guard.
 
 A tag that fails a guard publishes nothing: delete it (`git push origin :refs/tags/vX.Y.Z` and `git tag -d vX.Y.Z`), fix the cause and tag again. A version that reached PyPI cannot be replaced: cut the next one (the files of a release are immutable there).
 
