@@ -721,41 +721,53 @@ class TestConcurrentOverridesStayMirrored:
         Probabilistic on its own: before D-053 one trial in about 3,000 diverged, so a
         pass here proves little by itself. The deterministic scenarios above are the
         RED proof of the lock."""
-        import sys
+        assert _stress_divergences(monkeypatch, tool_constants.MirroredConstants) == 0
 
-        a, b, _registry = _group(monkeypatch, tool_constants.MirroredConstants)
-        trials = 3000
-        start, done = threading.Barrier(2), threading.Barrier(3)
-        errors: list[BaseException] = []
 
-        def worker(cls: type, base: int) -> None:
-            try:
-                for i in range(trials):
-                    start.wait(10)
-                    cls.X = base + i  # type: ignore[attr-defined]
-                    done.wait(10)
-            except BaseException as exc:  # a broken barrier ends the test, not hangs it
-                errors.append(exc)
-                start.abort()
-                done.abort()
+def _stress_divergences(
+    monkeypatch: pytest.MonkeyPatch, meta: type, trials: int = 3000
+) -> int:
+    """Trials in which two threads, each writing a different value to one class of a
+    two-class group at the same moment, left the classes different.
 
-        old = sys.getswitchinterval()
-        sys.setswitchinterval(1e-7)
-        threads = [
-            threading.Thread(target=worker, args=(a, 0), daemon=True),
-            threading.Thread(target=worker, args=(b, 10**6), daemon=True),
-        ]
-        divergent = 0
+    Three parties meet at each barrier (the two writers and the checking thread), so a
+    trial is read only after both writes are over and the next one starts only after the
+    read: the one thing that can make the classes differ is the write-through itself."""
+    import sys
+
+    a, b, _registry = _group(monkeypatch, meta)
+    start, done = threading.Barrier(3), threading.Barrier(3)
+    errors: list[BaseException] = []
+
+    def worker(cls: type, base: int) -> None:
         try:
-            for thread in threads:
-                thread.start()
-            for _ in range(trials):
+            for i in range(trials):
+                start.wait(10)
+                cls.X = base + i  # type: ignore[attr-defined]
                 done.wait(10)
-                left, right = _state(a, b)
-                divergent += left != right
-        finally:
-            sys.setswitchinterval(old)
-            for thread in threads:
-                thread.join(10)
-        assert not errors, errors
-        assert divergent == 0
+        except BaseException as exc:  # a broken barrier ends the test, not hangs it
+            errors.append(exc)
+            start.abort()
+            done.abort()
+
+    old = sys.getswitchinterval()
+    sys.setswitchinterval(1e-7)
+    threads = [
+        threading.Thread(target=worker, args=(a, 0), daemon=True),
+        threading.Thread(target=worker, args=(b, 10**6), daemon=True),
+    ]
+    divergent = 0
+    try:
+        for thread in threads:
+            thread.start()
+        for _ in range(trials):
+            start.wait(10)
+            done.wait(10)
+            left, right = _state(a, b)
+            divergent += left != right
+    finally:
+        sys.setswitchinterval(old)
+        for thread in threads:
+            thread.join(10)
+    assert not errors, errors
+    return divergent

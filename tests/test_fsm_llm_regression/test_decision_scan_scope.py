@@ -25,6 +25,7 @@ from types import ModuleType
 
 import pytest
 
+from tests.conftest import symlink_or_skip
 from tests.test_fsm_llm_regression.support import REPO
 from tests.test_fsm_llm_regression.test_decision_index import P1, A, _load, _write
 
@@ -192,7 +193,7 @@ class TestNothingElseTrips:
         _write(tmp_path, "docs/untracked.md", f"{HTML} {TOKEN} x -->\n")
         _write(tmp_path, "docs/blob.bin", b"\x00\x01" + f"{A} {TOKEN}\n".encode())
         real = _write(tmp_path, "docs/real.md", f"{HTML} {TOKEN} x -->\n")
-        (tmp_path / "docs" / "link.md").symlink_to(real)
+        symlink_or_skip(tmp_path / "docs" / "link.md", real)
         tracked = ["docs/blob.bin", "docs/link.md", "docs/missing.md"]
         assert stray_anchors(di, tmp_path, tracked) == []
 

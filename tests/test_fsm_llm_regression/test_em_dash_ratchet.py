@@ -34,6 +34,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import symlink_or_skip
 from tests.test_fsm_llm_regression.support import REPO
 
 DASH = chr(0x2014)  # built from its code point: this file holds no literal one
@@ -203,10 +204,7 @@ class TestMutants:
         (tmp_path / "latin.txt").write_bytes(b"\xff" + DASH.encode())
         real = tmp_path / "real.md"
         real.write_text(f"{DASH}\n", encoding="utf-8")
-        try:
-            (tmp_path / "link.md").symlink_to(real)
-        except OSError:
-            pytest.skip("symlinks are not available")
+        symlink_or_skip(tmp_path / "link.md", real)
         counts = count_dashes(
             tmp_path, ["blob.bin", "latin.txt", "gone.md", "link.md", "real.md"]
         )
