@@ -1,7 +1,7 @@
 # tests
 
 Path: `tests`
-Purpose: The full pytest tree of FSM-LLM (17,579 collected tests): ten suite folders for the `fsm_llm` package and its seven subpackages, five repo-wide root test files, and the shared `conftest.py`.
+Purpose: The full pytest tree of FSM-LLM (17,808 collected tests): ten suite folders for the `fsm_llm` package and its seven subpackages, five repo-wide root test files, and the shared `conftest.py`.
 
 ## Scope
 
@@ -31,7 +31,7 @@ Suite folders (test counts from full collection) and root files at this level.
 | File | Role | Notes |
 | --- | --- | --- |
 | `conftest.py` | Shared fixtures, fakes and marker registration (see Public interface) | 0 tests |
-| `test_packaging.py` | Repo-wide wiring and doc-count pins | 224 tests; classes listed below |
+| `test_packaging.py` | Repo-wide wiring and doc-count pins | 269 tests; classes listed below |
 | `test_bench_common.py` | Offline checks of `scripts/bench_common.py`, the stdlib helpers shared by the agents, skills and synthesis benches | 19 tests |
 | `test_agents_bench.py` | Offline checks of `scripts/agents_bench.py` | 132 tests |
 | `test_skills_bench.py` | Offline checks of `scripts/skills_bench.py` (Agent Skills read-hint ablation: fixture, grader, hint ablation, one trial, blocks, hygiene); scripted agents drive the REAL skill tools | 38 tests; never calls a model |
@@ -50,7 +50,7 @@ Suite folders (test counts from full collection) and root files at this level.
 | `test_fsm_llm_eval/` | `fsm_llm.eval` and `fsm-llm-eval`: config, records, stats, scoring golden table, examples mode, cases mode, exit codes; parity with `scripts/bench_common.py` | 438 tests. Reads `evaluation/` files and needs a git checkout |
 | `test_fsm_llm_synthesis/` | `fsm_llm.synthesis` (policy G5, gates, G6a `dryrun`, G6b `simulation`, `synthesizer`, `library`, `runner`, `tools`, `traces`, `diagnose`, `patch`, `repair`), the concierge end to end, and the offline checks of `scripts/synthesis_bench.py` (`test_synthesis_bench.py`; blocks s0 to s2 were run, see `scripts/bench_data/README.md`) | Own `conftest.py` (`ScriptedRunnerLLM`, `ByTurn`, `host_fsm`, `good_fsm`, `stuck_fsm`) that fails on any built `LiteLLMInterface` or provider call; see `test_fsm_llm_synthesis/AGENTS.md` |
 | `test_fsm_llm_testing/` | `fsm_llm.testing` (the seventh subpackage): import probes and source scans for its layering (loaded by no library module, no `pytest`, `litellm` or other subpackage), the skeleton checks | 317 tests (step 21; grows with steps 22 to 25). Child-process probes with the model-server variables on a closed port |
-| `test_fsm_llm_regression/` | One class per fixed bug id across core, reasoning, workflows, CLI, packaging text | 1,826 tests. Many private-method and source-text pins; also the layout safety nets (`test_module_path_map.py`, `test_decision_anchor_multiset.py`, `test_module_size_guard.py`, `test_patch_targets.py`, helper `support.py`) |
+| `test_fsm_llm_regression/` | One class per fixed bug id across core, reasoning, workflows, CLI, packaging text | 2,010 tests. Many private-method and source-text pins; also the layout safety nets (`test_module_path_map.py`, `test_decision_anchor_multiset.py`, `test_module_size_guard.py`, `test_patch_targets.py`, helper `support.py`) |
 | `test_examples/` | Every `examples/**/*.json` loads as JSON with `name`/`initial_state`/`states`, parses as `FSMDefinition`, passes `FSMValidator.validate()`; at least 5 files exist | 110 tests. Marker `examples`; 14 JSON files today. `test_example_scripted_paths.py` also drives four shipped example FSMs offline with `fsm_llm.testing` (no example edited); `test_example_import_paths.py` scans the `examples/**/*.py` imports of `fsm_llm` and resolves each one |
 
 `test_packaging.py` classes:
@@ -104,7 +104,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 
 - Env knobs: `FSM_LLM_REAL_SKILLS` (arms the Agent Skills home-directory test in `test_agent_skills.py`), `FSM_LLM_MONITOR_API_KEY` (cleared for monitor tests), `FSM_LLM_TEST_TIMING_FACTOR` (a positive float: raises the `timing_factor` fixture, for a slow CI runner or a loaded machine; read at test time, never below 1). No test reads `SKIP_SLOW_TESTS`, `TEST_REAL_LLM` or `TEST_LLM_MODEL`; `test_packaging.py` drops the first two from its collection child env.
 - pytest config in `pyproject.toml`: `testpaths = ["tests"]`, `addopts = "-v --tb=short"`, `asyncio_mode = "auto"`, `asyncio_default_fixture_loop_scope = "function"`.
-- Marker counts (full collection): `slow` 51, `integration` 20, `real_llm` 19, `examples` 81; `-m "not slow"` collects 17,528.
+- Marker counts (full collection): `slow` 51, `integration` 20, `real_llm` 19, `examples` 81; `-m "not slow"` collects 17,757.
 
 ## Invariants and constraints
 
