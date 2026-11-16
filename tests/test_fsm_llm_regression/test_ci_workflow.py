@@ -1,4 +1,4 @@
-"""The CI workflow: a nine-leg matrix, pinned actions, a read-only token and a coverage ratchet.
+"""The CI workflow: a seven-leg matrix, pinned actions, a read-only token and a coverage ratchet.
 
 Plan d454fd62, step 108 (roadmap rows 0.1 and 0.2). `.github/workflows/python-package.yml` is
 what every push and pull request runs, and none of it runs on a developer machine, so it is read
@@ -10,7 +10,7 @@ here as data.
   (`TestMutantsAreKilled`): a check that cannot fail is not a check.
 * The legs are COMPUTED from the YAML (`matrix_legs`, GitHub's own include and exclude rules for
   the shapes used here), never grepped, so the matrix may be written as an explicit `include`
-  list or as an `os` by `python-version` product with `exclude`; the exact set of nine
+  list or as an `os` by `python-version` product with `exclude`; the exact set of seven
   (os, python) pairs is what is pinned.
 * Only the standard library and `yaml.safe_load` are used. PyYAML reads the key `on` as the
   boolean `True` (YAML 1.1); `_load` puts it back under `"on"`.
@@ -52,10 +52,12 @@ from tests.test_fsm_llm_regression.workflow_support import (
 _ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = _ROOT / ".github" / "workflows" / "python-package.yml"
 
-#: The nine legs: Linux on every supported Python, macOS and Windows on the two ends.
+#: The seven legs: Linux on every supported Python, Windows on the two ends. macOS is not
+#: tested in CI (the owner's choice, D-001 of plan d7719b03): a macOS leg is a refused edit.
 _LINUX = "ubuntu-24.04"
+_WINDOWS = "windows-2025"
 _EXPECTED_LEGS = {(_LINUX, v) for v in ("3.11", "3.12", "3.13", "3.14", "3.15")} | {
-    (os_name, v) for os_name in ("macos-15", "windows-2025") for v in ("3.11", "3.15")
+    (_WINDOWS, v) for v in ("3.11", "3.15")
 }
 _CANONICAL_LEG = (_LINUX, "3.12")
 
@@ -217,7 +219,7 @@ def workflow_problems(text: str) -> set[str]:
     if "mkdocs" in code:
         found.add("docs-build-in-ci")
 
-    # The matrix: the exact nine legs, computed; strings, not floats; no early cancellation.
+    # The matrix: the exact seven legs, computed; strings, not floats; no early cancellation.
     strategy = test.get("strategy") or {}
     legs = matrix_legs(strategy.get("matrix") or {})
     pairs = _pairs(legs)
@@ -424,12 +426,28 @@ class TestTheRealWorkflow:
     def test_it_breaks_no_rule(self):
         assert workflow_problems(_real_text()) == set()
 
-    def test_the_matrix_is_exactly_the_nine_legs(self):
+    def test_the_matrix_is_exactly_the_seven_legs(self):
         wf = _load(_real_text())
         legs = matrix_legs(wf["jobs"]["test"]["strategy"]["matrix"])
-        assert len(legs) == 9
+        assert len(legs) == 7
         assert set(_pairs(legs)) == _EXPECTED_LEGS
-        assert len(set(_pairs(legs))) == 9
+        assert len(set(_pairs(legs))) == 7
+        # Seven spelled out, so a changed constant cannot hide a changed matrix.
+        assert sorted(_pairs(legs)) == [
+            ("ubuntu-24.04", "3.11"),
+            ("ubuntu-24.04", "3.12"),
+            ("ubuntu-24.04", "3.13"),
+            ("ubuntu-24.04", "3.14"),
+            ("ubuntu-24.04", "3.15"),
+            ("windows-2025", "3.11"),
+            ("windows-2025", "3.15"),
+        ]
+
+    def test_no_macos_leg_is_tested(self):
+        # The owner does not test macOS (D-001 of plan d7719b03): no runner of the matrix is one.
+        legs = matrix_legs(_load(_real_text())["jobs"]["test"]["strategy"]["matrix"])
+        assert not [leg for leg in legs if "mac" in str(leg["os"]).lower()]
+        assert "macos" not in "\n".join(_code_lines(_real_text())).lower()
 
     def test_python_versions_are_strings_so_3_15_is_not_a_float(self):
         wf = _load(_real_text())
@@ -459,7 +477,7 @@ class TestTheRealWorkflow:
 
     def test_the_linux_legs_are_the_classified_versions(self):
         """Every Python version the classifiers promise has a Linux leg, and no leg
-        tests a version that is not promised (macOS and Windows run the two ends)."""
+        tests a version that is not promised (Windows runs the two ends)."""
         wf = _load(_real_text())
         legs = matrix_legs(wf["jobs"]["test"]["strategy"]["matrix"])
         linux = {leg["python-version"] for leg in legs if leg["os"] == _LINUX}
@@ -498,9 +516,9 @@ class TestTheRealWorkflow:
         assert wf["jobs"]["test"]["runs-on"] == "${{ matrix.os }}"
         assert "-latest" not in "\n".join(_code_lines(_real_text()))
         legs = matrix_legs(wf["jobs"]["test"]["strategy"]["matrix"])
-        assert {leg["os"] for leg in legs} == {_LINUX, "macos-15", "windows-2025"}
+        assert {leg["os"] for leg in legs} == {_LINUX, _WINDOWS}
 
-    def test_the_timeout_is_one_plain_number_long_enough_for_macos_and_windows(self):
+    def test_the_timeout_is_one_plain_number_long_enough_for_windows(self):
         wf = _load(_real_text())
         timeout = wf["jobs"]["test"]["timeout-minutes"]
         assert isinstance(timeout, int) and timeout >= 25
@@ -545,7 +563,7 @@ class TestTheRealWorkflow:
             assert checkout["with"]["persist-credentials"] is False
 
     def test_python_3_15_is_the_stable_release_not_a_prerelease(self):
-        # actions/python-versions lists 3.15.2 stable for linux 24.04, darwin and win32 x64
+        # actions/python-versions lists 3.15.2 stable for linux 24.04 and win32 x64
         # (checked 2026-11-14), so no leg needs `allow-prereleases`.
         for job in _load(_real_text())["jobs"].values():
             for step in _uses_steps(job, "actions/setup-python"):
@@ -726,14 +744,37 @@ MUTANTS: list[tuple[str, Any, str]] = [
     (
         "a duplicated leg",
         _sub(
-            r'^( *)(- \{os: macos-15, python-version: "3\.11"\}\n)',
+            r'^( *)(- \{os: windows-2025, python-version: "3\.11"\}\n)',
             r"\1\2\1\2",
         ),
         "matrix-legs",
     ),
     (
-        "macOS 3.15 swapped for 3.14",
-        _sub(r'(os: macos-15, python-version: )"3\.15"', r'\1"3.14"'),
+        "Windows 3.15 swapped for 3.14",
+        _sub(r'(os: windows-2025, python-version: )"3\.15"', r'\1"3.14"'),
+        "matrix-legs",
+    ),
+    (
+        "a macOS leg added",
+        _sub(
+            r'^( *)(- \{os: windows-2025, python-version: )"3\.11"\}\n',
+            r'\1- {os: macos-15, python-version: "3.11"}\n\1\2"3.11"}\n',
+        ),
+        "matrix-legs",
+    ),
+    (
+        "a Windows leg removed (3.11)",
+        _sub(r'^ *- \{os: windows-2025, python-version: "3\.11"\}\n', ""),
+        "matrix-legs",
+    ),
+    (
+        "the Windows 3.15 leg dropped",
+        _sub(r'^ *- \{os: windows-2025, python-version: "3\.15"\}\n', ""),
+        "matrix-legs",
+    ),
+    (
+        "the Linux 3.15 leg dropped",
+        _sub(r'^ *- \{os: ubuntu-24\.04, python-version: "3\.15"\}\n', ""),
         "matrix-legs",
     ),
     (
@@ -749,7 +790,7 @@ MUTANTS: list[tuple[str, Any, str]] = [
     ("fail-fast true", _edit("fail-fast: false", "fail-fast: true"), "fail-fast"),
     (
         "3.15 unquoted (a YAML float)",
-        _edit('python-version: "3.15"', "python-version: 3.15", 3),
+        _edit('python-version: "3.15"', "python-version: 3.15", 2),
         "python-version-type",
     ),
     (
@@ -874,8 +915,8 @@ MUTANTS: list[tuple[str, Any, str]] = [
         "runner",
     ),
     (
-        "macos-latest in the matrix",
-        _edit("os: macos-15", "os: macos-latest", 2),
+        "windows-latest in the matrix",
+        _edit("os: windows-2025", "os: windows-latest", 2),
         "runner",
     ),
     (
@@ -897,7 +938,7 @@ MUTANTS: list[tuple[str, Any, str]] = [
         "timeout",
     ),
     (
-        "timeout too short for macOS and Windows",
+        "timeout too short for Windows",
         _edit("    timeout-minutes: 45\n", "    timeout-minutes: 20\n"),
         "timeout",
     ),
@@ -1242,12 +1283,9 @@ MUTANTS: list[tuple[str, Any, str]] = [
 
 
 _PRODUCT_FORM = """      matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
+        os: [ubuntu-24.04, windows-2025]
         python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
         exclude:
-          - {os: macos-15, python-version: "3.12"}
-          - {os: macos-15, python-version: "3.13"}
-          - {os: macos-15, python-version: "3.14"}
           - {os: windows-2025, python-version: "3.12"}
           - {os: windows-2025, python-version: "3.13"}
           - {os: windows-2025, python-version: "3.14"}
@@ -1257,17 +1295,17 @@ _PRODUCT_FORM = """      matrix:
 
 
 class TestTheMatrixMayBeWrittenEitherWay:
-    def test_a_product_with_excludes_is_the_same_nine_legs_and_breaks_no_rule(self):
+    def test_a_product_with_excludes_is_the_same_seven_legs_and_breaks_no_rule(self):
         text = _real_text()
         start = text.index("      matrix:\n")
         end = text.index("    steps:\n", start)
         rewritten = text[:start] + _PRODUCT_FORM + text[end:]
         assert rewritten != text
         legs = matrix_legs(_load(rewritten)["jobs"]["test"]["strategy"]["matrix"])
-        assert set(_pairs(legs)) == _EXPECTED_LEGS and len(legs) == 9
+        assert set(_pairs(legs)) == _EXPECTED_LEGS and len(legs) == 7
         assert workflow_problems(rewritten) == set()
 
-    def test_the_product_form_with_one_exclude_too_few_has_ten_legs_and_is_refused(
+    def test_the_product_form_with_one_exclude_too_few_has_eight_legs_and_is_refused(
         self,
     ):
         text = _real_text()

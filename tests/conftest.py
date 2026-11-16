@@ -65,7 +65,7 @@ def posix_only(reason: str) -> pytest.MarkDecorator:
         - Parameter: *reason*, a non-blank string literal saying what the test
           needs that Windows does not give (a mode bit, a signal, a pid probe).
         - Returns a ``pytest.mark.skipif`` for ``sys.platform == "win32"``;
-          macOS and Linux run the test.  This is a capability skip, never a
+          every other platform runs the test.  This is a capability skip, never a
           place to hide a failure: the reason names the missing capability.
     """
     return pytest.mark.skipif(sys.platform == "win32", reason=reason)

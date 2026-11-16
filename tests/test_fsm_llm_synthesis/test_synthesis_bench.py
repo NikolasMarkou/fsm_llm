@@ -1335,8 +1335,8 @@ def _fold_case_of_is_file(monkeypatch):
 
 class TestClosureHelpersAreCaseExact:
     """The import closure of the pins reads the disk: on NTFS or APFS ``State.py`` is a
-    file when ``state.py`` is, and the class ``State`` was taken for a module (macOS leg
-    of the first CI run). Simulated here by an ``is_file`` that folds case."""
+    file when ``state.py`` is, and the class ``State`` was taken for a module (found by
+    the first CI run on a case-folding volume). Simulated here by an ``is_file`` that folds case."""
 
     @pytest.fixture
     def folding(self, monkeypatch):

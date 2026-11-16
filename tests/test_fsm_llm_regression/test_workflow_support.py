@@ -188,7 +188,7 @@ def _probe_contract_failures(mod: types.SimpleNamespace, base: Path) -> list[str
     """The labels of the probe expectations `mod` (the real module or a mutant) breaks.
 
     Each case is a PATH and whether the probe must report a problem there. The stubs stand
-    for what a Windows or macOS runner offers: no bash, a WSL-like bash that fails, a bash
+    for what a Windows runner offers: no bash, a WSL-like bash that fails, a bash
     that prints something else, a BSD find that knows no `-printf`.
     """
     real = os.environ["PATH"]
@@ -313,7 +313,7 @@ class TestScriptWriter:
 
 class TestProbes:
     @posix_only("the stubs are executable shell scripts")
-    def test_the_probes_report_what_a_windows_or_macos_runner_would_offer(
+    def test_the_probes_report_what_a_windows_runner_would_offer(
         self, tmp_path: Path
     ) -> None:
         assert _probe_contract_failures(ws_namespace(), tmp_path) == []

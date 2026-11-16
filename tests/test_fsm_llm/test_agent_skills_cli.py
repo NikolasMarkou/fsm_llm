@@ -73,7 +73,7 @@ def _path_limit_problem(path: Path) -> str | None:
     Interface contract: *path* is a long path that does not exist. The probe makes
     the two calls the skill loader makes (``resolve`` then ``is_dir``). Returns a
     skip reason when either raises ``OSError`` (a short path limit: ENAMETOOLONG on
-    macOS or Windows), else ``None`` (the loader reports the missing root with the
+    Windows), else ``None`` (the loader reports the missing root with the
     whole path in the message). Raises nothing.
     """
     try:
@@ -605,7 +605,7 @@ class TestExitCodes:
 
 class TestPathLimitProbe:
     """The probe that lets the real-path test skip where a path is too long (a
-    short MAX_PATH: Windows, macOS) and run where it is not (Linux)."""
+    short MAX_PATH: Windows) and run where it is not (Linux)."""
 
     def test_a_short_path_has_no_problem(self, tmp_path: Path) -> None:
         assert _path_limit_problem(tmp_path / "x") is None
@@ -638,8 +638,9 @@ class TestPathLimitProbe:
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        # What macOS showed: is_dir() raising ENAMETOOLONG gives the terse
-        # "cannot open skill root" line, so a bound on the real path is false there.
+        # What the first CI run showed on a short-path volume: is_dir() raising
+        # ENAMETOOLONG gives the terse "cannot open skill root" line, so a bound on
+        # the real path is false there.
         def too_long(self: Path) -> bool:
             raise OSError(errno.ENAMETOOLONG, "File name too long")
 

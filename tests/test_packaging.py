@@ -2128,7 +2128,7 @@ def _gitattributes() -> dict[str, set[str]]:
 
 
 class TestPortabilityRules:
-    """Windows and macOS legs: the test tree never trips on a POSIX-only call."""
+    """The Windows legs: the test tree never trips on a POSIX-only call."""
 
     def test_no_test_calls_a_posix_only_function_at_import_time(self):
         offenders = [

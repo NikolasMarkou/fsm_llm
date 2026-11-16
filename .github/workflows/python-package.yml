@@ -4,8 +4,9 @@
 #   * `lint` runs once (Linux, Python 3.12): ruff, the format check, mypy, the `.pth` audit,
 #     the import contracts, the decision-anchor gate, the changelog check and the two workflow
 #     linters (`actionlint`, `zizmor`, installed at the pins of constraints.txt);
-#   * `test` is the matrix, nine legs: Linux on Python 3.11 to 3.15, macOS and Windows on 3.11
-#     and 3.15 (the two ends of the supported range). Every leg runs the whole non-slow suite
+#   * `test` is the matrix, seven legs: Linux on Python 3.11 to 3.15, Windows on 3.11 and 3.15
+#     (the two ends of the supported range). macOS is not tested (the owner's choice, D-001 of
+#     plan d7719b03). Every leg runs the whole non-slow suite
 #     with `mcp`, `otel` and `a2a` installed (every extra of the project), so the real stdio MCP
 #     tests and the OpenTelemetry exporter tests run instead of skipping;
 #   * `supply-chain` installs the same environment and audits it with `pip-audit`, then runs a
@@ -15,7 +16,7 @@
 #     a high advisory; it is the only job with a write scope, and only for its failure comment.
 #
 # Policy (pinned by tests/test_fsm_llm_regression/test_ci_workflow.py, which reads this file as
-# data, computes the legs from the YAML and kills 90 one-edit mutants of it):
+# data, computes the legs from the YAML and kills 98 one-edit mutants of it):
 #   * the token is read-only (`contents: read`); the one write scope is `pull-requests` on the
 #     dependency-review job (its failure comment); no secret is named;
 #   * every action is pinned to a commit SHA with its release tag in the trailing comment
@@ -25,7 +26,7 @@
 #     the others, and Python versions are quoted strings (an unquoted 3.15 would be a float);
 #   * the package installs once per job that needs it, against `constraints.txt`;
 #   * a new push to a pull request cancels the run in progress on that pull request (one
-#     nine-leg set at a time); a push to `main` and a manual dispatch never cancel one. The
+#     seven-leg set at a time); a push to `main` and a manual dispatch never cancel one. The
 #     group uses only `github.workflow` and `github.ref`, no text a contributor controls.
 #   * `test_supply_chain.py` reads EVERY file in this directory: pinned SHAs, no
 #     `pull_request_target`, the write-scope allowlist.
@@ -132,7 +133,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     # One value for every leg. Measured: a Linux leg takes about 10 minutes (the suite alone is
     # ~15 min single-process on a developer box, ~8 min on the runners); the coverage leg adds
-    # about half again; macOS and Windows runners start and install slower (1.3 to 2x). 45 is
+    # about half again; Windows runners start and install slower (1.3 to 2x). 45 is
     # ~2x the slowest expected leg and 8x tighter than the 360-minute default. Raise it if a leg
     # legitimately outgrows it; do not remove it, an unbounded hang burns six hours per leg.
     timeout-minutes: 45
@@ -160,8 +161,6 @@ jobs:
           - {os: ubuntu-24.04, python-version: "3.13"}
           - {os: ubuntu-24.04, python-version: "3.14"}
           - {os: ubuntu-24.04, python-version: "3.15"}
-          - {os: macos-15, python-version: "3.11"}
-          - {os: macos-15, python-version: "3.15"}
           - {os: windows-2025, python-version: "3.11"}
           - {os: windows-2025, python-version: "3.15"}
     steps:
@@ -171,7 +170,7 @@ jobs:
           persist-credentials: false
       - name: Set up Python ${{ matrix.python-version }}
         # 3.15.2 is a stable release in the actions/python-versions manifest (linux 24.04,
-        # darwin, win32), so no leg needs `allow-prereleases`.
+        # win32), so no leg needs `allow-prereleases`.
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python-version }}
