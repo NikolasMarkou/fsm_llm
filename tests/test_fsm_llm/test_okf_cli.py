@@ -835,16 +835,50 @@ class TestExportOfDeepMetadata:
         ]
 
     def test_metadata_json_itself_cannot_parse_exits_one_without_a_traceback(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch
     ) -> None:
-        # deep enough that json.loads raises RecursionError on 3.10, 3.11 and
-        # 3.12; the C scanner's limit differs per interpreter (3.12 parses 5,000)
+        # Forced: whether a 100,000-deep value overflows json.loads depends on
+        # the build (a count-based limit on 3.11 to 3.13, a stack-based one on
+        # 3.14 and later, where it can parse). The reader must turn the
+        # RecursionError into an OKFError, so the error is injected.
         store = _deep_store(tmp_path / "store.json", 100_000)
+
+        def _overflow(*args: Any, **kwargs: Any) -> Any:
+            raise RecursionError("maximum recursion depth exceeded")
+
+        monkeypatch.setattr(okf_cli.json, "loads", _overflow)
 
         code, out, err = _run(capsys, "export", store, tmp_path / "kb")
 
         assert code == 1 and out == ""
         assert err.startswith("fsm-llm-okf:") and "Traceback" not in err
+        assert not (tmp_path / "kb").exists()
+
+    def test_a_100000_deep_metadata_follows_what_the_interpreter_does(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # The real input, asserted by what THIS interpreter does with it: it
+        # raises (exit 1, no traceback) or it parses (the value is cut at depth 4
+        # and both entries are exported, exit 0). Neither may be a crash.
+        store = _deep_store(tmp_path / "store.json", 100_000)
+        try:
+            json.loads(store.read_text(encoding="utf-8"))
+            parses = True
+        except RecursionError:
+            parses = False
+
+        code, out, err = _run(capsys, "export", store, tmp_path / "kb")
+
+        if parses:
+            assert code == 0, err
+            assert "wrote 3 files" in out
+            assert sorted(c.id for c in load_bundle(tmp_path / "kb")) == [
+                "memory/a",
+                "memory/b",
+            ]
+        else:
+            assert code == 1 and out == ""
+            assert err.startswith("fsm-llm-okf:") and "Traceback" not in err
 
 
 # --------------------------------------------------------------

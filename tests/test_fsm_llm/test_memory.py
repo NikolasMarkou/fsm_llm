@@ -920,8 +920,11 @@ class TestWorkingMemoryConcurrency:
         # A large seeded buffer plus a non-matching query forces `search` to scan
         # every key, widening the iteration window the writer must race into.
         # A small buffer (or an early `limit` cutoff) makes the race rare enough
-        # that the test would pass against un-fixed code.
-        for i in range(2000):
+        # that the test would pass against un-fixed code. 20,000 keys: with the
+        # bounded writer below, a scan of 2,000 keys is shorter than a thread
+        # switch and the lock-free `search` was caught in only half of the runs
+        # on 3.11 and 3.12; at 20,000 it is caught in every run.
+        for i in range(20_000):
             memory.set(BUFFER_CORE, f"seed_{i}", f"value_{i}")
 
         stop = threading.Event()
@@ -930,8 +933,19 @@ class TestWorkingMemoryConcurrency:
 
         def writer():
             nonlocal writes
+            # The buffer must stay BOUNDED while its size keeps changing: an
+            # insert-only writer grows it without limit, every read then scans a
+            # growing buffer under the lock, and the total read time becomes
+            # quadratic in the write rate (3.15 writes faster than 3.12 and
+            # missed the 60 s join below with no deadlock). A sawtooth does both:
+            # 64 inserts, then 64 deletes of exactly those keys, so a scan that
+            # a write interrupts almost always sees a different size
+            # ("dictionary changed size during iteration") at a constant cost.
             while not stop.is_set():
-                memory.set(BUFFER_CORE, f"k_{writes}", writes)
+                if (writes // 64) % 2 == 0:
+                    memory.set(BUFFER_CORE, f"k_{writes}", writes)
+                else:
+                    memory.delete(BUFFER_CORE, f"k_{writes - 64}")
                 writes += 1
 
         def reader():

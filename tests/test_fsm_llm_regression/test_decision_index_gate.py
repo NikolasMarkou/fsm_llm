@@ -769,7 +769,12 @@ class TestReport:
         out = self._report(tmp_path)
         assert "unresolved: 1" in out, "still unresolved: the manifest decides"
 
-    def test_resolved_local_needs_the_heading_of_the_same_number(self, di, tmp_path):
+    def test_resolved_local_needs_the_heading_of_the_same_number(
+        self, di, tmp_path, monkeypatch
+    ):
+        # `local_resolved` is empty while the ambient `CI` variable is set (GitHub
+        # sets it on every runner); this test is about the heading rule only.
+        monkeypatch.delenv("CI", raising=False)
         _write(tmp_path, "src/a.py", f"{A} {P3}/D-003: x\n{A} {P3}/D-030: y\n")
         _write(
             tmp_path,
