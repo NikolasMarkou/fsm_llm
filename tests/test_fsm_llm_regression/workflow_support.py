@@ -33,20 +33,22 @@ version comment after the first `actions/setup-python` pin goes.
 
 Running a script (the shell-script tests run the `run:` text of a workflow step in bash; the
 workflows themselves only ever run on `ubuntu-24.04`, so a machine without a working bash or
-without GNU find skips these tests with the reason, never fails them; plan d7719b03 D-006):
+without GNU find skips these tests with the reason, never fails them, and Windows skips them
+unconditionally: plan d7719b03 D-006 and D-009; the bare name `bash` that the tests run
+resolves, through `CreateProcess`, to WSL's launcher in System32 whatever `which` finds first):
 
 - `write_script(path, text) -> None`: writes UTF-8 with `newline="\\n"`, so a Windows checkout
   never hands bash a `\\r` before each newline.
 - `passthrough_env() -> dict[str, str]`: `{"SYSTEMROOT": value}` when the variable is set (a
   hand-built child environment on Windows needs it), else `{}`.
-- `bash_problem(path=None) -> str | None`: why no usable bash is on `path` (default: the
-  `PATH` of this process), or `None`. It runs `bash -c 'echo ok'` and wants exactly `ok`; no
-  `bash`, a Windows `bash.exe` under System32 or WindowsApps (the WSL launcher, whose file
-  system is not this one), a non-zero exit, other output or a timeout is a problem. Cached per
-  `PATH`. Never raises.
+- `bash_problem(path=None) -> str | None`: why the scripts cannot run here, or `None`. On
+  `sys.platform == "win32"` (read at call time) always a problem, naming D-009, whatever bash
+  is installed. Elsewhere: why no usable bash is on `path` (default: the `PATH` of this
+  process). It runs `bash -c 'echo ok'` and wants exactly `ok`; no `bash`, a non-zero exit,
+  other output or a timeout is a problem. Cached per `PATH`. Never raises.
 - `gnu_find_problem(path=None) -> str | None`: the same for `find . -maxdepth 0 -printf x`
-  run through that bash (what the release script does); a BSD or Windows `find` is a problem.
-  A missing bash is reported as the bash problem. Cached per `PATH`. Never raises.
+  run through that bash (what the release script does); a BSD `find` is a problem. A missing
+  bash (and win32) is reported as the bash problem. Cached per `PATH`. Never raises.
 - `skip_unless_bash(path=None)` and `skip_unless_gnu_find(path=None)`: call the probe and
   `pytest.skip(reason)` when it reports a problem. Call them in a test body or in the helper
   that runs a script, never at import time.
@@ -65,6 +67,7 @@ import functools
 import os
 import re
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from shutil import which
@@ -190,10 +193,6 @@ def _drop_comment(text: str) -> str:
 # --------------------------------------------------------------------------------------
 
 _PROBE_TIMEOUT_SECONDS = 30
-#: Where the Windows launchers of WSL live (a `bash.exe` there runs a Linux distribution, or
-#: prints an error when none is installed): not the bash the workflow scripts expect.
-_WSL_LAUNCHER_DIRS = ("\\system32\\", "\\windowsapps\\")
-_IS_WINDOWS = os.name == "nt"  # a module attribute, so a test can answer for Windows
 
 
 def write_script(path: Path, text: str) -> None:
@@ -211,8 +210,21 @@ def _search_path(path: str | None) -> str:
     return os.environ.get("PATH", "") if path is None else path
 
 
+def _windows_problem() -> str | None:
+    """Why no script runs on Windows (D-009), or ``None`` elsewhere. Reads the platform now."""
+    if sys.platform == "win32":
+        return (
+            "the workflow scripts run on ubuntu-24.04 only (plan d7719b03 D-009): "
+            "on Windows the bare name `bash` reaches the WSL launcher in System32, "
+            "not the bash `which` finds"
+        )
+    return None
+
+
 def bash_problem(path: str | None = None) -> str | None:
     """Why no usable bash is on *path*, or ``None`` (see the module docstring)."""
+    if problem := _windows_problem():
+        return problem
     return _bash_problem(_search_path(path), os.environ.get("SYSTEMROOT", ""))
 
 
@@ -221,9 +233,6 @@ def _bash_problem(path: str, systemroot: str) -> str | None:
     found = which("bash", path=path)
     if found is None:
         return "no bash on PATH"
-    where = found.lower().replace("/", "\\")
-    if _IS_WINDOWS and any(d in where for d in _WSL_LAUNCHER_DIRS):
-        return f"the only bash is a WSL launcher ({found})"
     env = {"PATH": path, **({"SYSTEMROOT": systemroot} if systemroot else {})}
     try:
         proc = subprocess.run(
@@ -243,6 +252,8 @@ def _bash_problem(path: str, systemroot: str) -> str | None:
 
 def gnu_find_problem(path: str | None = None) -> str | None:
     """Why bash on *path* has no GNU ``find`` (``-printf``), or ``None``."""
+    if problem := _windows_problem():
+        return problem
     return _gnu_find_problem(_search_path(path), os.environ.get("SYSTEMROOT", ""))
 
 

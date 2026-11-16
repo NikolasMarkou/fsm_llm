@@ -10,9 +10,11 @@ input here, and to give the old answer on a good one (final REFLECT hygiene item
 from __future__ import annotations
 
 import ast
+import contextlib
 import os
 import sys
 import types
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -184,6 +186,17 @@ def _stub(directory: Path, name: str, body: str) -> Path:
     return path
 
 
+@contextlib.contextmanager
+def _pretend_platform(name: str) -> Iterator[None]:
+    """`sys.platform` is *name* inside the block (the helpers read it at call time)."""
+    before = sys.platform
+    sys.platform = name
+    try:
+        yield
+    finally:
+        sys.platform = before
+
+
 def _probe_contract_failures(mod: types.SimpleNamespace, base: Path) -> list[str]:
     """The labels of the probe expectations `mod` (the real module or a mutant) breaks.
 
@@ -220,6 +233,25 @@ def _probe_contract_failures(mod: types.SimpleNamespace, base: Path) -> list[str
         ),
     ]
     failures = [label for label, got, bad in cases if (got is not None) != bad]
+    gnu_path = both([str(base / "gnu-find"), real])
+    with _pretend_platform("win32"):  # a usable bash and GNU find, and still no run
+        failures += [
+            label
+            for label, got in [
+                ("win32: bash_problem", mod.bash_problem(gnu_path)),
+                ("win32: gnu_find_problem", mod.gnu_find_problem(gnu_path)),
+            ]
+            if got is None
+        ]
+        for label, call in [
+            ("win32: skip_unless_bash", mod.skip_unless_bash),
+            ("win32: skip_unless_gnu_find", mod.skip_unless_gnu_find),
+        ]:
+            try:
+                call(gnu_path)
+                failures.append(label)
+            except pytest.skip.Exception:
+                pass
     for label, call, path, skips in [
         ("skip_unless_bash on no bash", mod.skip_unless_bash, str(nobash), True),
         (
@@ -266,6 +298,8 @@ _BASH_CALL = (
 _FIND_CALL = (
     'return _gnu_find_problem(_search_path(path), os.environ.get("SYSTEMROOT", ""))'
 )
+_BASH_WIN = "    if problem := _windows_problem():\n        return problem\n    return _bash_problem("
+_FIND_WIN = "    if problem := _windows_problem():\n        return problem\n    return _gnu_find_problem("
 _BASH_SKIP = '    if problem:\n        pytest.skip(f"these tests run'
 
 
@@ -319,22 +353,34 @@ class TestProbes:
         assert _probe_contract_failures(ws_namespace(), tmp_path) == []
 
     @posix_only("the stubs are executable shell scripts")
-    def test_a_bash_in_a_wsl_launcher_directory_is_refused_on_windows_only(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    def test_on_win32_a_usable_bash_is_still_a_problem(self, tmp_path: Path) -> None:
+        # The scripts run on ubuntu-24.04 only (plan d7719b03 D-009): on Windows the
+        # bare name `bash` reaches WSL's launcher, whatever `which` found first.
+        stub = _stub(tmp_path / "bin", "bash", "echo ok\n")
+        assert bash_problem(str(stub.parent)) is None  # usable by the probe's own test
+
+        with _pretend_platform("win32"):
+            for problem in (
+                bash_problem(str(stub.parent)),
+                gnu_find_problem(os.environ["PATH"]),
+            ):
+                assert problem and "D-009" in problem and "ubuntu-24.04" in problem
+
+    def test_on_win32_both_skip_helpers_skip_with_the_reason(self) -> None:
+        with _pretend_platform("win32"):
+            for helper in (skip_unless_bash, skip_unless_gnu_find):
+                with pytest.raises(pytest.skip.Exception, match="D-009"):
+                    helper(os.environ["PATH"])
+
+    @posix_only("the stubs are executable shell scripts")
+    @pytest.mark.parametrize("platform", ["linux", "darwin", "cygwin"])
+    def test_on_any_other_platform_a_usable_bash_does_not_skip(
+        self, tmp_path: Path, platform: str
     ) -> None:
-        launcher = _stub(tmp_path / "Windows" / "System32", "bash", "echo ok\n")
-        same_name = _stub(tmp_path / "other" / "System32", "bash", "echo ok\n")
-        elsewhere = _stub(tmp_path / "elsewhere", "bash", "echo ok\n")
-
-        monkeypatch.setattr(ws, "_IS_WINDOWS", True)
-        problem = bash_problem(str(launcher.parent))
-        assert problem and "WSL" in problem
-        assert bash_problem(str(elsewhere.parent)) is None
-
-        monkeypatch.setattr(
-            ws, "_IS_WINDOWS", False
-        )  # the same directory name, on Linux
-        assert bash_problem(str(same_name.parent)) is None
+        stub = _stub(tmp_path / "bin", "bash", "echo ok\n")
+        with _pretend_platform(platform):
+            assert bash_problem(str(stub.parent)) is None
+            skip_unless_bash(str(stub.parent))  # raises when it skips
 
     @pytest.mark.skipif(
         sys.platform != "linux",
@@ -355,6 +401,17 @@ class TestProbes:
     @pytest.mark.parametrize(
         "label,old,new",
         [
+            (
+                "the win32 rule is gone",
+                '    if sys.platform == "win32":',
+                "    if False:",
+            ),
+            ("bash_problem ignores win32", _BASH_WIN, "    return _bash_problem("),
+            (
+                "gnu_find_problem ignores win32",
+                _FIND_WIN,
+                "    return _gnu_find_problem(",
+            ),
             ("bash_problem always None", _BASH_CALL, "return None"),
             ("bash_problem always a problem", _BASH_CALL, 'return "always"'),
             ("gnu_find_problem always None", _FIND_CALL, "return None"),
@@ -397,7 +454,7 @@ def _calls(path: Path) -> set[str]:
                 func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
             )
         if (
-            isinstance(node, ast.List)
+            isinstance(node, ast.List | ast.Tuple)
             and node.elts
             and isinstance(node.elts[0], ast.Constant)
             and node.elts[0].value == "bash"
@@ -435,9 +492,10 @@ class TestEveryBashRunnerAsksFirst:
         assert "-printf" in _RELEASE.read_text(encoding="utf-8")  # else drop the rule
         assert "skip_unless_gnu_find" in self._modules()["test_release_workflow.py"]
 
-    def test_the_scan_sees_a_runner_that_does_not_ask(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("form", ["['bash', 'x']", "('bash', 'x')"])
+    def test_the_scan_sees_a_runner_that_does_not_ask(
+        self, tmp_path: Path, form: str
+    ) -> None:
         bad = tmp_path / "test_x.py"
-        bad.write_text(
-            "import subprocess\nsubprocess.run(['bash', 'x'])\n", encoding="utf-8"
-        )
+        bad.write_text(f"import subprocess\nsubprocess.run({form})\n", encoding="utf-8")
         assert '["bash"]' in _calls(bad) and "skip_unless_bash" not in _calls(bad)
