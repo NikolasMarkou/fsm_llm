@@ -5,6 +5,8 @@ Keep a Changelog form and judges only the sections being prepared (`[Unreleased]
 newest release when `[Unreleased]` is empty): the `###` headings and their order, the
 `[Unreleased]` compare reference, the order of the sections, and every `**BREAKING:**` bullet
 (it must link `docs/upgrade-guide/vX.Y.Z/<name>.md#<slug>` to an existing file and heading).
+A `**BREAKING:**` marker outside a list item (a table row, a paragraph) is CL012 (final REFLECT
+concern 6, round 121.2), because only a bullet is checked for its link.
 `extract VERSION` prints one section for the release notes.
 
 Fixtures only: every test builds its CHANGELOG and its `docs/` tree under `tmp_path`. The real
@@ -524,6 +526,78 @@ CASES: list[Case] = [
         ).format(bullet=f"- {B} x. " + link(f"{G}#core")),
         ("CL004",),
     ),
+    # ---- CL012: the marker outside a list item -----------------------------------
+    Case(
+        "stray-table-row",
+        doc(
+            "### Changed\n\n| Name | Note |\n| --- | --- |\n"
+            f"| `old` | {B} gone, see {OK_LINK} |\n\n"
+        ),
+        ("CL012",),
+    ),
+    Case(
+        "stray-paragraph",
+        doc(f"### Changed\n\n{B} the old name is gone. {OK_LINK}\n\n"),
+        ("CL012",),
+    ),
+    Case(
+        "stray-paragraph-after-a-bullet",
+        doc(changed("- A fine entry.", "", f"{B} the old name is gone.")),
+        ("CL012",),
+    ),
+    Case(
+        "stray-two-rows-two-findings",
+        doc(f"### Changed\n\n| a | {B} x |\n| b | {B} y |\n\n"),
+        ("CL012", "CL012"),
+    ),
+    Case(
+        "stray-beside-a-good-bullet",
+        doc(changed(f"- {B} good. {OK_LINK}", "", f"| a | {B} |")),
+        ("CL012",),
+    ),
+    Case(
+        "stray-and-a-bullet-with-no-link",
+        doc(changed(f"- {B} no guide.", "", f"| a | {B} |")),
+        ("CL006", "CL012"),
+    ),
+    Case(
+        "stray-in-a-release-in-scope",
+        doc(middle=RELEASES.replace("- Old thing.", f"| a | {B} |")),
+        ("CL012",),
+        {"from_version": "0.12.0"},
+    ),
+    Case(
+        "stray-code-span-is-clean",
+        doc(f"### Changed\n\nWrite `{B}` in front of a breaking bullet.\n\n"),
+    ),
+    Case(
+        "stray-code-span-over-a-line-break-is-clean",
+        doc(f"### Changed\n\nWrite `a\n{B}` in front of one.\n\n"),
+    ),
+    Case(
+        "stray-fence-is-clean",
+        doc(f"### Changed\n\n```\n{B} x\n```\n\n"),
+    ),
+    Case(
+        "stray-continuation-line-of-a-bullet-is-clean",
+        doc(changed("- Entry text,", f"  {B} x. {OK_LINK}")),
+    ),
+    Case(
+        "stray-indented-paragraph-of-a-bullet-is-clean",
+        doc(changed("- Entry text.", "", f"  {B} x. {OK_LINK}")),
+    ),
+    Case(
+        "stray-highlights-paragraph-without-marker-is-clean",
+        doc("Highlights: a large release, see the notes below.\n\n" + ADDED),
+    ),
+    Case(
+        "stray-marker-in-a-frozen-release-is-clean",
+        doc(middle=RELEASES.replace("- Old thing.", f"| a | {B} |")),
+    ),
+    Case(
+        "stray-marker-in-the-file-head-is-clean",
+        doc(head=HEAD + f"Old text: {B} was spelled so.\n\n"),
+    ),
     # ---- line ends ---------------------------------------------------------------
     Case("crlf", doc(changed(f"- {B} x. {OK_LINK}")).replace("\n", "\r\n")),
     Case("cr-only", doc(changed(f"- {B} x. {OK_LINK}")).replace("\n", "\r")),
@@ -544,7 +618,7 @@ def run_case(module: types.ModuleType, case: Case, docs: Path) -> bool:
 class TestFindings:
     def test_there_are_cases_for_every_code(self):
         codes = {c for case in CASES for c in case.expected}
-        assert codes == {f"CL{n:03d}" for n in range(1, 12)}
+        assert codes == {f"CL{n:03d}" for n in range(1, 13)}
 
     def test_case_ids_are_unique(self):
         ids = [c.id for c in CASES]
@@ -1222,13 +1296,13 @@ class TestRobustness:
             stripped = line.strip()
             if stripped.startswith("CL") and stripped[2:5].isdigit():
                 documented.add(stripped[:5])
-        assert documented == {f"CL{n:03d}" for n in range(1, 12)}
+        assert documented == {f"CL{n:03d}" for n in range(1, 13)}
 
     def test_the_script_codes_are_the_documented_ones(self):
         import re
 
         used = set(re.findall(r'"(CL\d{3})"', _SCRIPT.read_text(encoding="utf-8")))
-        assert used == {f"CL{n:03d}" for n in range(1, 12)}
+        assert used == {f"CL{n:03d}" for n in range(1, 13)}
 
     def test_the_six_headings_are_the_keep_a_changelog_ones(self, cc):
         assert cc.KAC_HEADINGS == (
@@ -1367,6 +1441,21 @@ def _scn_cli_link_base_usage(module: types.ModuleType, tmp: Path) -> bool:
     )
 
 
+def _scn_stray_line(module: types.ModuleType, tmp: Path) -> bool:
+    docs = _write_docs(tmp)
+    text = doc("### Changed\n\nfirst line\nsecond\n" + f"| a | {B} |\n\n")
+    found = module.check_text(text, docs_root=docs)
+    return [(f.line, f.code) for f in found] == [(11, "CL012")] and (
+        text.split("\n")[10].startswith("| a |")
+    )
+
+
+def _scn_stray_exit(module: types.ModuleType, tmp: Path) -> bool:
+    path = _write(tmp, doc(f"### Changed\n\n| a | {B} |\n\n"), "c.md")
+    code, out = run_main(module, ["check", "--file", str(path)])
+    return code == 1 and f"{path}:9: CL012: " in out
+
+
 EXTRA: dict[str, Callable[[types.ModuleType, Path], bool]] = {
     "cli-link-base": _scn_cli_link_base,
     "cli-link-base-usage": _scn_cli_link_base_usage,
@@ -1377,6 +1466,8 @@ EXTRA: dict[str, Callable[[types.ModuleType, Path], bool]] = {
     "cli-output": _scn_cli_output,
     "findings-sorted": _scn_sorted,
     "slug-table": _scn_slug_table,
+    "stray-line": _scn_stray_line,
+    "stray-exit": _scn_stray_exit,
 }
 
 
@@ -1419,6 +1510,48 @@ def scenario_problems(module: types.ModuleType, tmp: Path) -> set[str]:
 
 # (label, scenario id that must fail, old text, new text); `old` occurs exactly once
 MUTANTS: list[tuple[str, str, str, str]] = [
+    (
+        "a marker outside a bullet is not looked for",
+        "stray-table-row",
+        "    yield from _stray_markers(parsed, section, covered)",
+        "    pass",
+    ),
+    (
+        "only the first line of a bullet counts as inside it",
+        "stray-continuation-line-of-a-bullet-is-clean",
+        "for n in range(bullet.line - 1, bullet.stop)}",
+        "for n in range(bullet.line - 1, bullet.line)}",
+    ),
+    (
+        "the paragraphs of a bullet do not count as inside it",
+        "stray-indented-paragraph-of-a-bullet-is-clean",
+        "found.append(Bullet(index + 1, text, j))",
+        "found.append(Bullet(index + 1, text, index + 1))",
+    ),
+    (
+        "a marker in an inline code span is a stray marker",
+        "stray-code-span-is-clean",
+        "            if not any(a <= m.start() < b for a, b in spans):",
+        "            if True:",
+    ),
+    (
+        "the stray marker is reported on the first line of its run",
+        "stray-line",
+        'index + 1 + run.count("\\n", 0, m.start()),',
+        "index + 1,",
+    ),
+    (
+        "a run of lines is read one line at a time (a span over a break splits)",
+        "stray-code-span-over-a-line-break-is-clean",
+        '        run = "\\n".join(parsed.masked[index:stop])',
+        "        run = parsed.masked[index]\n        stop = index + 1",
+    ),
+    (
+        "a stray marker is read only in the unreleased section",
+        "stray-in-a-release-in-scope",
+        "    yield from _stray_markers(parsed, section, covered)",
+        '    if section.kind == "unreleased":\n        yield from _stray_markers(parsed, section, covered)',
+    ),
     (
         "BREAKING is matched case-insensitively",
         "spelling-Breaking",

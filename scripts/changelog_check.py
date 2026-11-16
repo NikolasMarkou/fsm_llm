@@ -36,10 +36,14 @@ Findings, printed one per line as `path:line: CODE: message`, sorted by line the
     CL009  sections not newest first (`[Unreleased]` first, then versions strictly descending)
     CL010  a `###` heading that is none of the six Keep a Changelog names
     CL011  the link names the directory of another version than the section's own
+    CL012  a `**BREAKING:**` marker outside a list item (a table row, a paragraph, a heading
+           line): only a bullet is checked for its guide link, so a marker anywhere else
+           would need no link; write the entry as a bullet
 
 Rules of the BREAKING check. A bullet is a list item at any indent with its continuation lines
 (a nested item is a bullet of its own). Code fences and inline code spans are removed first, so
-`**BREAKING:**` inside backticks is not a marker. The link is an inline Markdown link whose
+`**BREAKING:**` inside backticks is not a marker. Every line of a section that no bullet covers is
+read for the exact marker too (CL012); the spellings of CL005 are judged in bullets only. The link is an inline Markdown link whose
 target holds `docs/upgrade-guide/` (any prefix: relative, `./`, or an absolute URL); it may sit
 on a continuation line. `vX.Y.Z` must be the version of the section the bullet sits in; for
 `[Unreleased]` it is `--next-version` (default: the minor bump of the newest dated release,
@@ -339,6 +343,7 @@ def anchors_of(text: str) -> set[str]:
 class Bullet:
     line: int  # 1-based line of the first line of the item
     text: str  # the item's own lines (nested items excluded), code spans removed
+    stop: int  # 0-based index one past the item's last line (`masked[line - 1 : stop]`)
 
 
 def _indent(line: str) -> int:
@@ -378,7 +383,7 @@ def bullets(masked: list[str], start: int, end: int) -> list[Bullet]:
             body.append(line)
             j += 1
         text = _CODE_SPAN.sub(_MASK, "\n".join(body))
-        found.append(Bullet(index + 1, text))
+        found.append(Bullet(index + 1, text, j))
         index = j
     return found
 
@@ -488,6 +493,35 @@ def _guide_findings(
             )
 
 
+def _stray_markers(
+    parsed: Parsed, section: Section, covered: set[int]
+) -> Iterable[Finding]:
+    """CL012: the exact marker on a line of the section that no bullet covers.
+
+    `covered` holds the 0-based indexes of the lines inside a bullet. A run of the other
+    lines is read as one text (a code span may cross a line break) and the marker inside
+    an inline code span is not one."""
+    index = section.start
+    while index < section.end:
+        if index in covered:
+            index += 1
+            continue
+        stop = index
+        while stop < section.end and stop not in covered:
+            stop += 1
+        run = "\n".join(parsed.masked[index:stop])
+        spans = [m.span() for m in _CODE_SPAN.finditer(run)]
+        for m in re.finditer(re.escape(BREAKING_MARKER), run):
+            if not any(a <= m.start() < b for a, b in spans):
+                yield Finding(
+                    index + 1 + run.count("\n", 0, m.start()),
+                    "CL012",
+                    f"{BREAKING_MARKER} sits outside a list item; write the entry as a "
+                    "bullet so its guide link is checked",
+                )
+        index = stop
+
+
 def _check_bullets(
     parsed: Parsed,
     section: Section,
@@ -495,7 +529,10 @@ def _check_bullets(
     docs_root: Path,
     cache: dict[Path, set[str] | None],
 ) -> Iterable[Finding]:
-    for bullet in bullets(parsed.masked, section.start, section.end):
+    found = bullets(parsed.masked, section.start, section.end)
+    covered = {n for bullet in found for n in range(bullet.line - 1, bullet.stop)}
+    yield from _stray_markers(parsed, section, covered)
+    for bullet in found:
         text = bullet.text
         has_marker = False
         for m in _BOLD_BREAKING.finditer(text):
