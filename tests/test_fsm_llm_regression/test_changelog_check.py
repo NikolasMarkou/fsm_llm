@@ -101,7 +101,7 @@ def link(target: str, text: str = "guide") -> str:
     return f"[{text}]({target})"
 
 
-G = "docs/upgrade-guide/v0.13.0/core.md"
+G = "docs/notes/core.md"
 OK_LINK = "The entry is explained in the notes."
 DOCS_LINK = link(
     f"{G}#renamed-thing"
@@ -618,7 +618,7 @@ class LinkCase:
     base: str = BASE
 
 
-_GUIDE = "docs/upgrade-guide/v0.13.0/core.md#renamed-thing"
+_GUIDE = "docs/notes/core.md#renamed-thing"
 
 LINK_CASES: list[LinkCase] = [
     LinkCase(
@@ -809,7 +809,9 @@ class TestLinkBase:
         no_fence = re.sub(r"^(```+|~~~+).*?^\1[ \t]*$", "", out, flags=re.S | re.M)
         no_code = re.sub(r"(`+)(.+?)\1", "", no_fence, flags=re.S)
         assert re.findall(r"\]\(<?(?:\./)?docs/", no_code) == []
-        assert out.count(f"]({BASE}docs/") >= 1
+        assert (
+            out == notes
+        )  # step 123: the changelog links no page of docs/, so the rewrite is a no-op
 
 
 # --------------------------------------------------------------------------------------

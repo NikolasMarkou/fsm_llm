@@ -1001,7 +1001,7 @@ _LINKED_CHANGELOG = """# Changelog
 
 ### Changed
 
-- **BREAKING:** a thing moved. [Upgrade guide](docs/upgrade-guide/v0.13.0/a.md#moved)
+- **BREAKING:** a thing moved. [Notes](docs/notes/a.md#moved)
 - Also [the guide](./docs/guide.md) and [angle](<docs/up guide.md>) are links.
 - The rule: no `](docs/x.md)` link stays relative; see [the repo](https://example.org/docs/y.md).
 - A [file outside docs](CONTRIBUTING.md) is not rewritten.
@@ -1012,7 +1012,7 @@ _LINKED_CHANGELOG = """# Changelog
 """
 _LINKED_NOTES = f"""### Changed
 
-- **BREAKING:** a thing moved. [Upgrade guide]({_LINK_BASE}docs/upgrade-guide/v0.13.0/a.md#moved)
+- **BREAKING:** a thing moved. [Notes]({_LINK_BASE}docs/notes/a.md#moved)
 - Also [the guide]({_LINK_BASE}docs/guide.md) and [angle](<{_LINK_BASE}docs/up guide.md>) are links.
 - The rule: no `](docs/x.md)` link stays relative; see [the repo](https://example.org/docs/y.md).
 - A [file outside docs](CONTRIBUTING.md) is not rewritten.
@@ -1101,7 +1101,7 @@ def _link_cut_cases() -> dict[str, tuple[str, tuple[str, ...]]]:
     inside a link text, `[the upgrade` / `guide](...)`; the open text must not survive either.
     """
     tail = "- a changelog line of moderate length, enough to add up.\n" * 400
-    target = _LINK_BASE + "docs/upgrade-guide/v0.13.0/aaaa.md#bbbb"
+    target = _LINK_BASE + "docs/notes/aaaa.md#bbbb"
     straddle = _filler(119_950) + f"- see [the guide]({target}) and more text.\n" + tail
     opener = "- see [the upgrade\n"
     closer = "guide](" + target + ") and " + "more text " * 60 + "\n"
@@ -1368,7 +1368,7 @@ def _long_linked_changelog() -> str:
         line = (
             f"- **BREAKING:** item {i:05d} "
             + "word " * 12
-            + f"[Upgrade guide](docs/upgrade-guide/v0.13.0/page-{i % 7}.md#section-{i})\n"
+            + f"[Notes](docs/notes/page-{i % 7}.md#section-{i})\n"
         )
         if size + len(line) > 119_000:
             return head + "".join(lines)
@@ -1378,8 +1378,8 @@ def _long_linked_changelog() -> str:
 
 _BULLET = re.compile(
     r"- \*\*BREAKING:\*\* item \d{5} (?:word ){12}"
-    r"\[Upgrade guide\]\(https://github\.com/NikolasMarkou/fsm_llm/blob/v0\.13\.0/"
-    r"docs/upgrade-guide/v0\.13\.0/page-\d\.md#section-\d+\)"
+    r"\[Notes\]\(https://github\.com/NikolasMarkou/fsm_llm/blob/v0\.13\.0/"
+    r"docs/notes/page-\d\.md#section-\d+\)"
 )
 
 
