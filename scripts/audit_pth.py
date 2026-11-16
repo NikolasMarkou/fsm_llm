@@ -1,16 +1,40 @@
 #!/usr/bin/env python3
-"""Audit site-packages for suspicious .pth files.
+"""Audit site-packages for suspicious .pth and .start files.
 
-Python .pth files in site-packages execute on every interpreter startup.
-This script detects known malicious files and any .pth files containing
-executable code (imports, exec, subprocess, etc.) rather than simple
-path entries. A file may carry code only when it is on the `KNOWN_SAFE` name
-list, or when its name and every line are vetted by content (`VETTED_CODE_LINES`).
+Python .pth files in site-packages execute on every interpreter startup, and
+Python 3.15 also runs the entry points of `.start` files (PEP 829). This script
+detects known malicious files and any .pth file containing executable code
+(imports, exec, subprocess, etc.) rather than simple path entries, and any
+.start file holding an entry point (none is vetted). A .pth file may carry code
+only when it is on the `KNOWN_SAFE` name list, or when its name and every line
+are vetted by content (`VETTED_CODE_LINES`).
+
+The content is read and split as `site` reads it, on every supported
+interpreter: UTF-8 with an optional BOM, then the locale encoding (`site`'s
+fallback for a file that is not UTF-8), and BOTH line splits, the newline split
+of Python 3.11 and `str.splitlines()` of 3.12.15 and later, 3.13, 3.14 and 3.15
+(a form feed, \\x0b, \\x1c to \\x1e, \\x85, \\u2028 and \\u2029 end a line there). A
+line is judged under both, so code that hides behind a break only one of them
+honours is flagged.
+
+Residuals, stated so nobody has to rediscover them:
+
+- The vetted `pywin32.pth` line `import pywin32_bootstrap` imports whatever module
+  of that name `site` finds first. A top-level `pywin32_bootstrap.py` in a scanned
+  site directory shadows pywin32's own (`win32/lib/pywin32_bootstrap.py`) and the
+  audit does not look for it. Whoever can write a file into site-packages can
+  already run code there, so this is accepted, not guarded.
+- Only `site.getsitepackages()` is scanned. The user site directory
+  (`site.getusersitepackages()`, which `site` also processes when
+  `site.ENABLE_USER_SITE` is true) is not, so a `.pth` or `.start` file there is
+  never audited; `make audit` and the CI jobs audit the interpreter's own
+  site-packages.
 
 Run: python scripts/audit_pth.py
 Or:  make audit
 """
 
+import locale
 import re
 import site
 import sys
@@ -51,23 +75,43 @@ SUSPICIOUS_PATTERN = re.compile(
 # install) is code and is flagged like any other.
 
 
+def startup_lines(content: str) -> list[str]:
+    """Every line `site` may see in `content`: the lines of BOTH splitting styles.
+
+    Contract: `content` is decoded text (a BOM already removed); returns the lines
+    of the newline split followed by the lines of `str.splitlines()`. Python 3.11
+    reads a `.pth` as a text file, where only a newline, a `\\r\\n` or a lone `\\r` ends
+    a line: that is the newline split (a `\\r` before the newline is stripped) with
+    a lone `\\r` also seen by `str.splitlines()`, which is what 3.12.15 and later
+    use and which splits at more (see the module docstring). A reader of either
+    style sees a subset of these lines, so a line is safe only when every one of
+    them is. Raises nothing.
+    """
+    return content.split("\n") + content.splitlines()
+
+
+def has_code(content: str) -> bool:
+    """True when any line `site` may see (`startup_lines`) looks like a statement."""
+    return any(SUSPICIOUS_PATTERN.search(line) for line in startup_lines(content))
+
+
 def only_vetted_code(name: str, content: str) -> bool:
     """True when `name` is in `VETTED_CODE_LINES` and so is every line of `content`.
 
-    Contract: `content` is the decoded text (a BOM already removed). It is split
-    on the newline character only, as `site` does after universal-newline reading,
-    and never with `str.splitlines()`: that also splits on a form feed, which
-    would let a vetted line followed by a form feed and `; import os` pass as two
-    harmless lines while `site` executes the whole line. A line is accepted when
-    it is blank, a `#` comment, exactly a vetted line after `strip()`, or does not
-    match `SUSPICIOUS_PATTERN` (a path entry: `site` executes only a line that
-    starts with "import"). Any other line, or a name outside the table, returns
-    False.
+    Contract: `content` is the decoded text (a BOM already removed). Every line of
+    `startup_lines(content)` is judged, so a line break only one of the two
+    splitting styles honours cannot hide code: a vetted line followed by a form
+    feed and `; import os` is one line to the newline split and a comment followed
+    by a form feed and `import os` is two to `str.splitlines()`, and both are
+    refused. A line is accepted when it is blank, a `#` comment, exactly a vetted
+    line after `strip()`, or does not match `SUSPICIOUS_PATTERN` (a path entry:
+    `site` executes only a line that starts with "import"). Any other line, or a
+    name outside the table, returns False.
     """
     vetted = VETTED_CODE_LINES.get(name)
     if vetted is None:
         return False
-    for line in content.split("\n"):
+    for line in startup_lines(content):
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or stripped in vetted:
             continue
@@ -76,8 +120,41 @@ def only_vetted_code(name: str, content: str) -> bool:
     return True
 
 
+def read_startup_file(path: Path) -> str:
+    """The text of `path` as `site` decodes it.
+
+    Contract: UTF-8 with an optional BOM; when the bytes are not UTF-8, the
+    locale encoding (`site`'s fallback, which Windows tools need for an ANSI
+    byte in a path); when that fails too, UTF-8 with replacement characters, so
+    the ASCII code lines are still scanned and the audit never crashes on a
+    file it cannot decode. Raises `OSError` when the file cannot be read.
+    """
+    raw = path.read_bytes()
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        pass
+    try:
+        return raw.decode(locale.getencoding())
+    except (UnicodeDecodeError, LookupError):
+        return raw.decode("utf-8-sig", errors="replace")
+
+
+def has_entry_point(content: str) -> bool:
+    """True when a `.start` file holds a line that is neither blank nor a comment.
+
+    Contract: judged over `startup_lines(content)`, like a `.pth`. No entry point
+    is vetted: Python 3.15 imports and calls every one at startup.
+    """
+    for line in startup_lines(content):
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            return True
+    return False
+
+
 def audit() -> int:
-    """Scan all site-packages directories for suspicious .pth files.
+    """Scan all site-packages directories for suspicious .pth and .start files.
 
     Returns 0 if clean, 1 if issues found.
     """
@@ -94,18 +171,18 @@ def audit() -> int:
             if pth.name in KNOWN_SAFE:
                 continue
             try:
-                # `site` reads UTF-8 with an optional BOM (then the locale
-                # encoding on 3.13+); Windows tools write both. `utf-8-sig`
-                # keeps a BOM from hiding an `import` line from the pattern,
-                # and `replace` keeps an ANSI byte in a path from crashing the
-                # audit while the code lines (ASCII) are still scanned.
-                content = pth.read_text(encoding="utf-8-sig", errors="replace")
+                content = read_startup_file(pth)
             except OSError:
                 continue
-            if SUSPICIOUS_PATTERN.search(content) and not only_vetted_code(
-                pth.name, content
-            ):
+            if has_code(content) and not only_vetted_code(pth.name, content):
                 issues.append(f"WARNING: Executable code in {pth}")
+        for start in sp_path.glob("*.start"):
+            try:
+                content = read_startup_file(start)
+            except OSError:
+                continue
+            if has_entry_point(content):
+                issues.append(f"WARNING: Startup entry point in {start}")
 
     if issues:
         for issue in issues:

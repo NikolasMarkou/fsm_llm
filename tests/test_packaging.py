@@ -2831,3 +2831,246 @@ class TestAuditPthReadsWhatSiteReads:
         data = b"\xef\xbb\xbf" + self._CODE
         assert self._audit(tmp_path, monkeypatch, "bom.pth", data) == 1
         assert "bom.pth" in capsys.readouterr().err
+
+
+# `site` reads a `.pth` with `str.splitlines()` on 3.12.15 and later (a form feed, \x0b,
+# \x1c to \x1e, \x85, \u2028 and \u2029 end a line there) and with line iteration of a
+# text file on 3.11 (only a newline does). The audit must judge the lines of BOTH.
+_LINE_BREAKS = {
+    "ff": "\x0c",
+    "vt": "\x0b",
+    "fs": "\x1c",
+    "gs": "\x1d",
+    "rs": "\x1e",
+    "nel": "\x85",
+    "u2028": "\u2028",
+    "u2029": "\u2029",
+}
+_EVIL = "import evilmark"  # `evilmark.py` writes a marker file when it is imported
+_HEADER = TestAuditPthAcceptsPywin32ByContent._REAL.rsplit(
+    "import pywin32_bootstrap", 1
+)[0]
+_VETTED_LINE = "import pywin32_bootstrap"
+
+
+def _pth_shapes() -> dict[str, tuple[str, bool]]:
+    """The shapes of one review: name -> (`pywin32.pth` text, whether the audit flags it).
+
+    Every shape is a real `pywin32.pth` (header, path lines, the vetted line) with one
+    change. Three are accepted: the real file, a trailing blank after the vetted line (a
+    line `site` strips) and a NUL in a path line (`site` runs nothing for it).
+    """
+    real, v, h = TestAuditPthAcceptsPywin32ByContent._REAL, _VETTED_LINE, _HEADER
+    shapes: dict[str, tuple[str, bool]] = {
+        "real": (real, False),
+        "lf-evil-line": (h + v + "\n" + _EVIL + "\n", True),
+        "cr-alone": (h + v + "\r" + _EVIL + "\n", True),
+        "ff-after-vetted": (h + v + "\x0c" + _EVIL + "\n", True),
+        "vt-after-vetted": (h + v + "\x0b" + _EVIL + "\n", True),
+        "comment-ff-import": (h + v + "\n# c\x0c" + _EVIL + "\n", True),
+        "comment-u2028-import": (h + v + "\n# c\u2028" + _EVIL + "\n", True),
+        "vetted-semicolon": (h + v + "; " + _EVIL + "\n", True),
+        "vetted-ff-semicolon": (h + v + "\x0c; import evilmark\n", True),
+        "leading-space-import": (h + v + "\n  " + _EVIL + "\n", True),
+        "import-tab": (h + "import\tpywin32_bootstrap, evilmark\n", True),
+        "trailing-ws-vetted": (h + v + " \t\n", False),
+        "nul-in-path": (h + v + "\nwin32\x00" + _EVIL + "\n", False),
+        "plain-evil-file-u2028": ("win32\u2028" + _EVIL + "\n", True),
+    }
+    for key, char in _LINE_BREAKS.items():
+        shapes[f"path-{key}-import"] = (h + v + f"\nwin32{char}{_EVIL}\n", True)
+    return shapes
+
+
+_PTH_SHAPES = _pth_shapes()
+
+
+class TestAuditPthJudgesEveryLineSiteMaySee:
+    """The audit splits the content as `site` does on EVERY supported interpreter: the
+    newline split of 3.11 and `str.splitlines()` of 3.12.15 and later. Code that hides
+    behind a line break only one of them honours must be flagged (plan d7719b03 step 9.1;
+    the review ran 22 shapes through `site.addsitedir` on 3.11, 3.12, 3.14 and 3.15)."""
+
+    def _audit(self, tmp_path, monkeypatch, files: dict[str, bytes]) -> int:
+        for name, data in files.items():
+            (tmp_path / name).write_bytes(data)
+        monkeypatch.setattr(audit_pth.site, "getsitepackages", lambda: [str(tmp_path)])
+        return audit_pth.audit()
+
+    @staticmethod
+    def _encode(text: str, bom: bool = False) -> bytes:
+        return (b"\xef\xbb\xbf" if bom else b"") + text.encode("utf-8")
+
+    def test_the_review_probed_22_shapes(self):
+        assert len(_PTH_SHAPES) == 22
+
+    @pytest.mark.parametrize("shape", sorted(_PTH_SHAPES))
+    def test_the_audit_flags_each_shape_that_carries_code(
+        self, tmp_path, monkeypatch, shape
+    ):
+        text, flagged = _PTH_SHAPES[shape]
+        data = self._encode(text, bom=shape == "real")
+        got = self._audit(tmp_path, monkeypatch, {"pywin32.pth": data})
+        assert got == (1 if flagged else 0), shape
+
+    @pytest.mark.parametrize("shape", sorted(_PTH_SHAPES))
+    def test_a_shape_the_audit_passes_runs_no_code_under_the_real_site(
+        self, tmp_path, monkeypatch, shape
+    ):
+        """What `site.addsitedir` of THIS interpreter executes, against the audit."""
+        text, _ = _PTH_SHAPES[shape]
+        data = self._encode(text, bom=shape == "real")
+        marker = tmp_path / "MARK"
+        (tmp_path / "pywin32_bootstrap.py").write_text("", encoding="utf-8")
+        (tmp_path / "evilmark.py").write_text(
+            f"open({str(marker)!r}, 'w').close()\n", encoding="utf-8"
+        )
+        verdict = self._audit(tmp_path, monkeypatch, {"pywin32.pth": data})
+        subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                "-c",
+                f"import site; site.addsitedir({str(tmp_path)!r})",
+            ],
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
+
+        assert verdict == 1 or not marker.exists(), (
+            f"{shape}: the audit passed a file that site executed"
+        )
+
+    @pytest.mark.parametrize("name", ["pywin32.pth", "evil.pth"])
+    @pytest.mark.parametrize("where", ["after a path", "after a comment"])
+    @pytest.mark.parametrize("key", sorted(_LINE_BREAKS))
+    def test_code_behind_a_splitlines_only_break_is_flagged_in_any_file_name(
+        self, tmp_path, monkeypatch, name, where, key
+    ):
+        head = "win32" if where == "after a path" else "# a comment"
+        text = f"{head}{_LINE_BREAKS[key]}{_EVIL}\n"
+        if name == "pywin32.pth":
+            text = TestAuditPthAcceptsPywin32ByContent._REAL + text
+        got = self._audit(tmp_path, monkeypatch, {name: self._encode(text)})
+        assert got == 1
+
+    def test_the_vetted_line_with_a_trailing_form_feed_alone_still_passes(
+        self, tmp_path, monkeypatch
+    ):
+        # `site` strips the form feed on every build, so nothing hides behind it.
+        text = TestAuditPthAcceptsPywin32ByContent._REAL.rstrip("\r\n") + "\x0c\r\n"
+        got = self._audit(tmp_path, monkeypatch, {"pywin32.pth": self._encode(text)})
+        assert got == 0
+
+    def test_the_vetted_check_judges_both_splits_directly(self):
+        real = TestAuditPthAcceptsPywin32ByContent._REAL
+        assert audit_pth.only_vetted_code("pywin32.pth", real) is True
+        for char in _LINE_BREAKS.values():
+            hidden = real + f"win32{char}{_EVIL}\n"
+            assert audit_pth.only_vetted_code("pywin32.pth", hidden) is False, repr(
+                char
+            )
+            assert audit_pth.has_code(f"win32{char}{_EVIL}\n") is True, repr(char)
+        assert audit_pth.has_code("win32\nC:\\path\n") is False
+
+    def test_a_non_utf8_pth_is_read_in_the_locale_encoding_as_site_reads_it(
+        self, tmp_path, monkeypatch
+    ):
+        # Invalid UTF-8: `site` falls back to the locale encoding. In Latin-1 the byte
+        # 0x85 is NEL, a line break of `str.splitlines()`, so code follows a path.
+        data = b"win32\x85" + _EVIL.encode() + b"\n"
+        monkeypatch.setattr(audit_pth.locale, "getencoding", lambda: "latin-1")
+        assert self._audit(tmp_path, monkeypatch, {"evil.pth": data}) == 1
+
+    def test_the_same_bytes_in_a_locale_without_that_break_are_a_path(
+        self, tmp_path, monkeypatch
+    ):
+        # cp1252 maps 0x85 to an ellipsis: one path line, no code, as `site` sees it.
+        data = b"win32\x85" + _EVIL.encode() + b"\n"
+        monkeypatch.setattr(audit_pth.locale, "getencoding", lambda: "cp1252")
+        assert self._audit(tmp_path, monkeypatch, {"evil.pth": data}) == 0
+
+    def test_bytes_no_locale_can_decode_do_not_crash_the_audit(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(audit_pth.locale, "getencoding", lambda: "ascii")
+        assert self._audit(tmp_path, monkeypatch, {"p.pth": b"C:\\J\xfcrgen\n"}) == 0
+
+
+class TestAuditPthScansStartFiles:
+    """Python 3.15 runs the entry points of `<name>.start` files (PEP 829) at startup:
+    `pkg.mod:callable` per line. No `.start` file is vetted, so any entry point is code;
+    a comment, a blank line and an empty file are not."""
+
+    _ENTRY = "evilmark:run"
+
+    def _audit(self, tmp_path, monkeypatch, files: dict[str, bytes]) -> int:
+        for name, data in files.items():
+            (tmp_path / name).write_bytes(data)
+        monkeypatch.setattr(audit_pth.site, "getsitepackages", lambda: [str(tmp_path)])
+        return audit_pth.audit()
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            _ENTRY + "\n",
+            "# a comment\n" + _ENTRY + "\r\n",
+            "\n\n  " + _ENTRY + "  \n",
+            "# a comment\x0c" + _ENTRY + "\n",  # splitlines splits after the comment
+            "# a comment\u2028" + _ENTRY + "\n",
+            "pkg.mod:callable\n",
+        ],
+    )
+    def test_an_entry_point_is_flagged(self, tmp_path, monkeypatch, capsys, text):
+        files = {"evil.start": text.encode("utf-8")}
+        assert self._audit(tmp_path, monkeypatch, files) == 1
+        assert "evil.start" in capsys.readouterr().err
+
+    def test_a_bom_does_not_hide_an_entry_point(self, tmp_path, monkeypatch):
+        data = b"\xef\xbb\xbf" + self._ENTRY.encode() + b"\n"
+        assert self._audit(tmp_path, monkeypatch, {"evil.start": data}) == 1
+
+    @pytest.mark.parametrize("text", ["", "\n", "# nothing to run\n\n", "  \r\n"])
+    def test_a_start_file_without_an_entry_point_passes(
+        self, tmp_path, monkeypatch, text
+    ):
+        assert self._audit(tmp_path, monkeypatch, {"x.start": text.encode()}) == 0
+
+    def test_a_start_file_next_to_clean_pth_files_is_reported_alone(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        files = {"paths.pth": b"C:\\one\n", "evil.start": self._ENTRY.encode() + b"\n"}
+        assert self._audit(tmp_path, monkeypatch, files) == 1
+        err = capsys.readouterr().err
+        assert "evil.start" in err and "paths.pth" not in err
+
+    @pytest.mark.skipif(
+        sys.version_info < (3, 15), reason="`.start` files exist from Python 3.15"
+    )
+    def test_site_runs_a_start_file_and_the_audit_flags_it(self, tmp_path, monkeypatch):
+        marker = tmp_path / "MARK"
+        (tmp_path / "evilmark.py").write_text(
+            f"def run():\n    open({str(marker)!r}, 'w').close()\n", encoding="utf-8"
+        )
+        verdict = self._audit(
+            tmp_path, monkeypatch, {"evil.start": self._ENTRY.encode() + b"\n"}
+        )
+        subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                "-c",
+                f"import site; site.addsitedir({str(tmp_path)!r})",
+            ],
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
+
+        assert marker.exists(), (
+            "the premise: this interpreter runs `.start` entry points"
+        )
+        assert verdict == 1
