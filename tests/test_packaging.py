@@ -394,6 +394,81 @@ class TestPackageBackedExtrasAreInstalled:
             assert not missing, f"ci:install does not request extras: {sorted(missing)}"
 
 
+def declared_extras() -> set[str]:
+    """Every extra of `[project.optional-dependencies]` except `all` (the union of the others)."""
+    return set(_pyproject()["project"]["optional-dependencies"]) - {"all"}
+
+
+def requested_extras(line: str) -> set[str]:
+    """The extras an install line names: `.[a,b]` (pip) or `extras = a,b` (tox)."""
+    return set(re.findall(r"(?:[\[,]|=\s*)([a-z0-9_]+)", line))
+
+
+class TestEveryInstallListRequestsEveryDeclaredExtra:
+    """Final REFLECT concern 7: the coverage baseline was measured with `otel` and `a2a`, but CI
+    installed `mcp` only, so the OpenTelemetry tests skipped there and `pip-audit` never audited
+    their packages. `TestPackageBackedExtrasAreInstalled` judges the extras that have a
+    subpackage; this class judges every extra, `mcp`, `otel` and `a2a` included. Nothing was
+    exempted: the older rule simply never looked at them (they have no package behind them).
+
+    `make install-dev` and `tox` leave `mcp` out on purpose (the documented test counts are the
+    no-`mcp` counts, `AGENTS.md` "MCP rule"); CI and the pin refresh install it.
+    """
+
+    #: Left out of the local install lists (`make install-dev`, tox), named in CI.
+    LOCAL_LEAVES_OUT = frozenset({"mcp"})
+
+    def _ci_lines(self) -> list[tuple[str, str]]:
+        return [
+            (rel, ln)
+            for rel in (
+                ".github/workflows/python-package.yml",
+                ".github/workflows/refresh-pins.yml",
+            )
+            for ln in _read(rel).splitlines()
+            if "pip install -c constraints.txt -e" in ln
+        ]
+
+    def test_the_declared_extras_are_the_ones_the_docs_list(self):
+        assert declared_extras() >= {"mcp", "otel", "a2a", "dev", *SUBPACKAGES}
+
+    def test_every_ci_and_refresh_install_line_requests_every_declared_extra(self):
+        lines = self._ci_lines()
+        assert len(lines) == 4, lines  # lint, test, supply-chain, the refresh test job
+        for rel, line in lines:
+            missing = declared_extras() - requested_extras(line)
+            assert not missing, f"{rel}: {line.strip()} lacks {sorted(missing)}"
+
+    def test_the_ci_lines_are_one_identical_line(self):
+        assert len({ln.strip() for _, ln in self._ci_lines()}) == 1
+
+    @pytest.mark.parametrize(
+        "label,rel,needle",
+        [
+            ("makefile:install-dev", "Makefile", "pip install -c constraints.txt -e"),
+            ("tox:testenv-extras", "tox.ini", "extras = dev,"),
+        ],
+    )
+    def test_the_local_install_lists_request_every_declared_extra_but_mcp(
+        self, label, rel, needle
+    ):
+        missing = (
+            declared_extras()
+            - self.LOCAL_LEAVES_OUT
+            - requested_extras(_one_line(rel, needle))
+        )
+        assert not missing, f"{label} lacks {sorted(missing)}"
+
+    @pytest.mark.parametrize(
+        "extra", ["otel", "a2a", "mcp", "dev", "workflows", "testing"]
+    )
+    def test_a_line_without_one_extra_is_refused(self, extra):
+        line = self._ci_lines()[0][1]
+        mutated = line.replace(f",{extra}", "").replace(f"[{extra},", "[")
+        assert mutated != line
+        assert declared_extras() - requested_extras(mutated) == {extra}
+
+
 # ══════════════════════════════════════════════════════════════
 # Module docstrings are real docstrings (not inert strings after a future import)
 # ══════════════════════════════════════════════════════════════

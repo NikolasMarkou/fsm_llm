@@ -192,7 +192,7 @@ markers = [
 ]
 
 # Branch coverage of the package, read by `pytest --cov` (and by the ratchet, which only
-# gates the canonical leg: Linux, Python 3.12, `mcp` installed). `make coverage` and the
+# gates the canonical leg: Linux, Python 3.12, `mcp`, `otel` and `a2a` installed). `make coverage` and the
 # tox coverage env still pass `--cov=fsm_llm --cov-branch` explicitly.
 [tool.coverage.run]
 branch = true

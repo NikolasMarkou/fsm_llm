@@ -931,7 +931,7 @@ WORKFLOW_MUTANTS: list[tuple[str, Callable[[str], str], str]] = [
     ),
     (
         "the supply-chain install loses the mcp extra",
-        _edit_nth(",mcp]", "]", 2),
+        _edit_nth(",mcp,otel,a2a]", "]", 2),
         "sc-install",
     ),
     (

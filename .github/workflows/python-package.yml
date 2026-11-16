@@ -6,7 +6,8 @@
 #     linters (`actionlint`, `zizmor`, installed at the pins of constraints.txt);
 #   * `test` is the matrix, nine legs: Linux on Python 3.11 to 3.15, macOS and Windows on 3.11
 #     and 3.15 (the two ends of the supported range). Every leg runs the whole non-slow suite
-#     with `mcp` installed, so the real stdio MCP tests run instead of skipping;
+#     with `mcp`, `otel` and `a2a` installed (every extra of the project), so the real stdio MCP
+#     tests and the OpenTelemetry exporter tests run instead of skipping;
 #   * `supply-chain` installs the same environment and audits it with `pip-audit`, then runs a
 #     CANARY: the audit over a fixture of known-vulnerable pins must FAIL, so a vulnerable
 #     dependency failing the build is proved on every run, not assumed (roadmap row 0.10);
@@ -30,7 +31,8 @@
 #     `pull_request_target`, the write-scope allowlist.
 #
 # The coverage ratchet (scripts/coverage_ratchet.py) runs on ONE leg, the canonical one
-# (Linux, Python 3.12, `mcp` installed: the leg `coverage-baseline.json` is measured on), in
+# (Linux, Python 3.12, `mcp`, `otel` and `a2a` installed: the leg `coverage-baseline.json` is
+# measured on), in
 # place of the plain pytest step, so no leg runs the suite twice. `check` compares the run with
 # the committed baseline; `guard` (pull requests only) compares the baseline file with the one on
 # `main`, so the committed number cannot be lowered in a branch.
@@ -81,7 +83,7 @@ jobs:
           python -m pip install --upgrade pip
           # `mcp` (beyond the package extras) makes the real stdio MCP tests run instead of
           # skip (D-025/D-026 of plan-2026-09-24T091842-c1d5bfbc); mypy reads it too.
-          pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis,testing,mcp]"
+          pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis,testing,mcp,otel,a2a]"
       - name: Audit for suspicious .pth files
         run: python scripts/audit_pth.py
       - name: Lint with ruff
@@ -183,7 +185,7 @@ jobs:
           python -m pip install --upgrade pip
           # `mcp` (beyond the package extras) makes the real stdio MCP tests run instead of
           # skip (D-025/D-026 of plan-2026-09-24T091842-c1d5bfbc).
-          pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis,testing,mcp]"
+          pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis,testing,mcp,otel,a2a]"
       - name: Audit for suspicious .pth files
         run: python scripts/audit_pth.py
       - name: Test with pytest
@@ -227,7 +229,7 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           # The same line as the matrix: the audit reads the environment the tests run in.
-          pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis,testing,mcp]"
+          pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis,testing,mcp,otel,a2a]"
       - name: Audit the installed environment for known vulnerabilities
         # Every installed distribution, transitive ones included (the pins of constraints.txt
         # cover the direct dependencies only). The editable package itself is not on PyPI.

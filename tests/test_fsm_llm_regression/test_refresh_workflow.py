@@ -1800,7 +1800,11 @@ MUTANTS: list[tuple[str, Callable[[str], str], str]] = [
         ),
         "pytest-line",
     ),
-    ("the install line drops mcp", _edit("testing,mcp]", "testing]"), "install-line"),
+    (
+        "the install line drops mcp",
+        _edit("testing,mcp,otel,a2a]", "testing]"),
+        "install-line",
+    ),
     (
         "mypy runs on a subset",
         _edit("python -m mypy -p fsm_llm", "python -m mypy -p fsm_llm.core"),

@@ -126,7 +126,7 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           # The same line as every job of python-package.yml (a test compares them).
-          pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis,testing,mcp]"
+          pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis,testing,mcp,otel,a2a]"
       - name: Audit for suspicious .pth files
         if: steps.refresh.outputs.changed == 'true'
         run: python scripts/audit_pth.py
@@ -139,7 +139,7 @@ jobs:
         run: python -m mypy -p fsm_llm
       - name: Test with pytest
         if: steps.refresh.outputs.changed == 'true'
-        # The whole non-slow suite, `mcp` installed so the real stdio MCP tests run: the gate that
+        # The whole non-slow suite, every extra installed so the real stdio MCP tests run: the gate that
         # the pull request will not get from the CI workflow (see the header).
         run: python -m pytest tests/ -q -m "$PYTEST_MARKERS"
 

@@ -21,7 +21,7 @@ here as data.
   decision gate, `actionlint` and `zizmor`); the job `test` is the matrix and runs in parallel
   with it, beside `supply-chain` (audits the installed environment, `test_supply_chain.py`) and
   `dependency-review` (pull requests only, the one job with a write scope). The canonical leg
-  (Linux, Python 3.12, `mcp` installed: the one the coverage baseline is measured on) runs the
+  (Linux, Python 3.12, `mcp`, `otel`, `a2a` installed: the one the coverage baseline is measured on) runs the
   coverage form of the same marker selection, then the ratchet.
 """
 
@@ -79,6 +79,10 @@ _SHA_USES = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}$")
 _USES_LINE = re.compile(r"^\s*(?:-\s*)?uses:\s*(?P<ref>\S+)(?P<rest>.*)$", re.MULTILINE)
 _TAG_COMMENT = re.compile(r"^\s*#\s*v\d+\.\d+\.\d+\s*$")
 _INSTALL = re.compile(r'pip install -c constraints\.txt -e "\.\[(?P<extras>[^\]]+)\]"')
+#: The extras beyond the subpackages that every CI install line names: `mcp` makes the real stdio
+#: MCP tests run, `otel` the OpenTelemetry exporter tests (the coverage baseline is measured with
+#: them), `a2a` the httpx client; `pip-audit` then audits all of them (final REFLECT concern 7).
+_BEYOND_PACKAGES = frozenset({"mcp", "otel", "a2a"})
 
 
 # --------------------------------------------------------------------------------------
@@ -321,15 +325,16 @@ def workflow_problems(text: str) -> set[str]:
         if "allow-prereleases" in with_:
             found.add("prereleases")
 
-    # One install line per job that needs the package, naming `dev` and (on the matrix) `mcp`;
+    # One install line per job that needs the package, naming `dev` and the extras beyond the
+    # subpackages (`mcp`, `otel`, `a2a`) in the three jobs that install it;
     # the `.pth` audit after it in the two jobs that run it.
     for name in ("lint", "test", "supply-chain"):
         job = jobs.get(name) or {}
         extras = _install_extras(job)
         if len(extras) != 1 or "dev" not in extras[0]:
             found.add("install")
-        if name == "test" and not (extras and "mcp" in extras[0]):
-            found.add("mcp")
+        if not (extras and _BEYOND_PACKAGES <= extras[0]):
+            found.add("extras-beyond")
         if name == "supply-chain":
             continue
         audit = _runs(job).count(_AUDIT)
@@ -583,8 +588,10 @@ class TestTheRealWorkflow:
             extras = _install_extras(job)
             assert len(extras) == 1, name
             assert "dev" in extras[0], name
-        # `mcp` (beyond the package extras) makes the real stdio MCP tests run, not skip.
-        assert "mcp" in _install_extras(jobs["test"])[0]
+        # `mcp`, `otel` and `a2a` (beyond the package extras) make the real stdio MCP tests and
+        # the OpenTelemetry tests run instead of skipping, and put them under `pip-audit`.
+        for name in ("lint", "test", "supply-chain"):
+            assert _BEYOND_PACKAGES <= _install_extras(jobs[name])[0], name
 
     def test_the_pth_audit_runs_after_the_install_in_the_lint_and_test_jobs(self):
         for name, job in _load(_real_text())["jobs"].items():
@@ -1034,8 +1041,28 @@ MUTANTS: list[tuple[str, Any, str]] = [
     ),
     (
         "mcp missing from the matrix install",
-        _edit_nth(",mcp]", "]", 1),
-        "mcp",
+        _edit_nth("testing,mcp,otel,a2a]", "testing,otel,a2a]", 1),
+        "extras-beyond",
+    ),
+    (
+        "otel missing from the matrix install",
+        _edit_nth(",mcp,otel,a2a]", ",mcp,a2a]", 1),
+        "extras-beyond",
+    ),
+    (
+        "a2a missing from the matrix install",
+        _edit_nth(",mcp,otel,a2a]", ",mcp,otel]", 1),
+        "extras-beyond",
+    ),
+    (
+        "otel missing from the lint install",
+        _edit_nth(",mcp,otel,a2a]", ",mcp,a2a]", 0),
+        "extras-beyond",
+    ),
+    (
+        "a2a missing from the audited install",
+        _edit_nth(",mcp,otel,a2a]", ",mcp,otel]", 2),
+        "extras-beyond",
     ),
     (
         "a second install line in the matrix job",
