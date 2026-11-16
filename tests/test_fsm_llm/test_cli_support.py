@@ -223,8 +223,11 @@ class _Stdout:
         os.close(self._fd)
 
 
-def _einval() -> OSError:
-    return OSError(errno.EINVAL, "Invalid argument")  # what a closed Windows pipe gives
+def _einval(filename: str | None = None) -> OSError:
+    """What a closed Windows pipe gives (no file name), or a Windows path error (a name)."""
+    if filename is None:
+        return OSError(errno.EINVAL, "Invalid argument")
+    return OSError(errno.EINVAL, "Invalid argument", filename)
 
 
 class TestWindowsBrokenPipe:
@@ -260,6 +263,9 @@ class TestWindowsBrokenPipe:
             (_einval(), "win32", True),
             (_einval(), "linux", False),
             (_einval(), "darwin", False),
+            # Windows maps a bad path (ERROR_INVALID_NAME, ERROR_INVALID_PARAMETER)
+            # to EINVAL too; a path error names the file, a closed pipe does not.
+            (_einval("bad<name"), "win32", False),
             (OSError(errno.ENOSPC, "No space left"), "win32", False),
             (OSError("no errno"), "win32", False),
             (ValueError("x"), "win32", False),
@@ -332,6 +338,31 @@ class TestWindowsBrokenPipe:
         else:
             assert _run(func) == 1
             assert "error: " in capsys.readouterr().err
+
+    def test_a_windows_path_error_is_reported_not_taken_for_a_gone_reader(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(sys, "platform", "win32")
+
+        assert (
+            _run(_raises(_einval("bad<name"))) == 1
+        )  # not re-raised, stdout not parked
+
+        assert "error: " in capsys.readouterr().err
+
+    def test_a_windows_path_error_does_not_park_stdout(
+        self, monkeypatch: pytest.MonkeyPatch, stdout_with: Any
+    ) -> None:
+        stream = stdout_with(_einval("bad<name"))
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(sys, "stdout", stream)
+
+        with pytest.raises(OSError) as info:
+            cli_support.exit_main(lambda: 0)
+
+        assert info.value.filename == "bad<name" and not stream.parked()
 
     @_CLIS
     def test_both_clis_park_stdout_on_a_windows_broken_pipe(

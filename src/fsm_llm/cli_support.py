@@ -167,8 +167,11 @@ def _is_broken_pipe(exc: BaseException) -> bool:
 
     Interface contract: ``True`` for a ``BrokenPipeError`` on every platform, and on
     Windows (``sys.platform == "win32"``, read at call time) also for an ``OSError``
-    whose ``errno`` is ``EINVAL``, which is what a write or flush to a closed pipe
-    raises there. Any other error, or ``EINVAL`` elsewhere, is ``False``. Raises nothing.
+    whose ``errno`` is ``EINVAL`` and which names no file (``filename`` is ``None``):
+    that is what a write or flush to a closed pipe raises there. Windows maps a bad
+    path (a ``<`` or ``|`` in a name) to ``EINVAL`` too, but that error names the file
+    and is an ordinary error. Any other error, or ``EINVAL`` elsewhere, is ``False``.
+    Raises nothing.
     """
     if isinstance(exc, BrokenPipeError):
         return True
@@ -176,6 +179,7 @@ def _is_broken_pipe(exc: BaseException) -> bool:
         sys.platform == "win32"
         and isinstance(exc, OSError)
         and exc.errno == errno.EINVAL
+        and exc.filename is None
     )
 
 
