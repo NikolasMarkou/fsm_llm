@@ -952,7 +952,7 @@ class TestClassifiersMatchFloor:
         floors = [
             int(m.group(1))
             for r in requires
-            if (m := re.fullmatch(r"setuptools\s*>=\s*(\d+)(?:\.\d+)*", r.strip()))
+            if (m := re.match(r"setuptools\s*>=\s*(\d+)(?:\.\d+)*", r.strip()))
         ]
         assert floors and floors[0] >= 77, requires
 
@@ -1098,6 +1098,190 @@ class TestDeclaredRangesMatchPins:
             if ln.strip().startswith("litellm")
         ]
         assert len(lines) == 1, lines
+
+
+#: The build backend is the one named exception to "the floor's major is the pin's major": its
+#: versions are single big numbers (setuptools 77 to 84 are all "major" releases), so its floor
+#: is the first release that supports what the project needs (`license = "Apache-2.0"`, PEP 639,
+#: setuptools 77), not the pinned major. Its ceiling is still the pinned release plus one.
+_FEATURE_FLOORS = {"setuptools": 77}
+
+
+def _build_requirements() -> list[tuple[str, Requirement]]:
+    return [
+        ("build-system", Requirement(r))
+        for r in _pyproject()["build-system"]["requires"]
+    ]
+
+
+def untested_major_problems(
+    requirements: list[tuple[str, Requirement]],
+    pins: dict[str, list[str]],
+    feature_floors: dict[str, int],
+) -> list[str]:
+    """Why a declared range admits a release outside the major of its exact pin.
+
+    The "major" of a pin is its first version component (`9` for `tenacity==9.2.1`, `0` for every
+    `0.x` package such as `fastapi==0.162.5`, whose floor is therefore judged by the `<1` ceiling
+    alone). A range may not contain the last release of the previous major or the first of the
+    next one. An entry of `feature_floors` replaces the floor rule by "the floor is exactly this
+    release"; the ceiling rule still applies to it.
+    """
+    problems = []
+    for where, req in requirements:
+        name = _normalized(req.name)
+        versions = pins.get(name, [])
+        if len(versions) != 1:
+            problems.append(f"{where}: {req} has {len(versions)} pins")
+            continue
+        major = Version(versions[0]).release[0]
+        spec = req.specifier
+        if spec.contains(Version(f"{major + 1}.0"), prereleases=True):
+            problems.append(f"{where}: {req} admits major {major + 1}")
+        if name in feature_floors:
+            floor = feature_floors[name]
+            if not spec.contains(
+                Version(str(floor)), prereleases=True
+            ) or spec.contains(Version(f"{floor - 1}.99999"), prereleases=True):
+                problems.append(
+                    f"{where}: {req} floor is not the feature floor {floor}"
+                )
+        elif major > 0 and spec.contains(
+            Version(f"{major - 1}.99999"), prereleases=True
+        ):
+            problems.append(f"{where}: {req} admits major {major - 1}")
+    return problems
+
+
+class TestNoRangeAdmitsAnUntestedMajor:
+    """Roadmap row 0.10, "no declared range admits an untested major version" (final REFLECT
+    concern 3): the first component of every floor equals the first component of its pin, the
+    ceiling stops before the next one, and the build backend is bounded too.
+    """
+
+    def test_every_declared_range_stays_inside_the_pinned_major(self):
+        problems = untested_major_problems(
+            [*_declared_requirements(), *_build_requirements()],
+            _constraint_pins(),
+            _FEATURE_FLOORS,
+        )
+        assert not problems, problems
+
+    def test_the_build_backend_is_bounded_like_the_dev_extra(self):
+        build = {
+            _normalized(Requirement(r).name): r
+            for r in _pyproject()["build-system"]["requires"]
+        }
+        dev = {
+            _normalized(Requirement(r).name): r
+            for r in _pyproject()["project"]["optional-dependencies"]["dev"]
+        }
+        assert build == {"setuptools": "setuptools>=77,<85"}
+        assert dev["setuptools"] == build["setuptools"]
+
+    def test_the_only_exception_is_setuptools_and_it_still_applies(self):
+        assert set(_FEATURE_FLOORS) == {"setuptools"}
+        pin = Version(_constraint_pins()["setuptools"][0])
+        # the feature floor is below the pinned release (otherwise it is no exception at all)
+        assert _FEATURE_FLOORS["setuptools"] < pin.release[0]
+
+    def test_no_pin_outside_the_exceptions_has_a_floor_below_its_major(self):
+        pins = _constraint_pins()
+        for where, req in _declared_requirements():
+            name = _normalized(req.name)
+            if name in _FEATURE_FLOORS:
+                continue
+            floors = [s for s in req.specifier if s.operator in {">=", ">", "~=", "=="}]
+            assert floors, f"{where}: {req} has no floor"
+            major = Version(pins[name][0]).release[0]
+            for spec in floors:
+                assert Version(spec.version).release[0] == major, (where, str(req))
+
+    def test_documented_in_security_md_with_the_exception_named(self):
+        text = _read("SECURITY.md")
+        assert (
+            "no declared range admits a major version other than the tested one" in text
+        )
+        assert "setuptools" in text and "first version component" in text
+
+    @pytest.mark.parametrize(
+        "line,fragment",
+        [
+            ("tenacity>=8.0,<10", "admits major 8"),
+            ("tenacity>=9", "admits major 10"),
+            ("tenacity>=9,<11", "admits major 10"),
+            ("pytest>=7.4.0,<10", "admits major 8"),
+            ("pytest>=8,<10", "admits major 8"),
+            ("pytest-asyncio>=0.21.0,<2", "admits major 0"),
+            ("pytest-cov>=4.0.0,<8", "admits major 6"),
+            ("litellm>=1,<3", "admits major 2"),
+            ("litellm>=0.5,<2", "admits major 0"),
+            ("fastapi>=0.100.0", "admits major 1"),
+            ("fastapi>=0.100.0,<2", "admits major 1"),
+            ("loguru>=0.7.3", "admits major 1"),
+            ("setuptools>=77", "admits major 85"),
+            ("setuptools>=77,<86", "admits major 85"),
+            ("setuptools>=70,<85", "feature floor 77"),
+            ("setuptools>=78,<85", "feature floor 77"),
+            ("setuptools<85", "feature floor 77"),
+            ("build>=0.9,<2", "admits major 0"),
+        ],
+    )
+    def test_each_widened_range_is_refused(self, line, fragment):
+        pins = {
+            "tenacity": ["9.2.1"],
+            "pytest": ["9.1.1"],
+            "pytest-asyncio": ["1.4.0"],
+            "pytest-cov": ["7.1.0"],
+            "litellm": ["1.109.1"],
+            "fastapi": ["0.162.5"],
+            "loguru": ["0.8.0"],
+            "setuptools": ["84.2.1"],
+            "build": ["1.2.2.post1"],
+        }
+        problems = untested_major_problems(
+            [("mutant", Requirement(line))], pins, _FEATURE_FLOORS
+        )
+        assert any(fragment in p for p in problems), (line, problems)
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "tenacity>=9.0,<10",
+            "pytest>=9.0,<10",
+            "pytest-asyncio>=1.0,<2",
+            "pytest-cov>=7.0,<8",
+            "litellm>=1.109.0,<2.0",
+            "fastapi>=0.100.0,<1",
+            "loguru>=0.7.3,<1",
+            "setuptools>=77,<85",
+            "build>=1.2,<2",
+            "numpy>=2.0,<3; python_version < '3.15'",
+        ],
+    )
+    def test_each_range_inside_the_major_passes(self, line):
+        pins = {
+            "tenacity": ["9.2.1"],
+            "pytest": ["9.1.1"],
+            "pytest-asyncio": ["1.4.0"],
+            "pytest-cov": ["7.1.0"],
+            "litellm": ["1.109.1"],
+            "fastapi": ["0.162.5"],
+            "loguru": ["0.8.0"],
+            "setuptools": ["84.2.1"],
+            "build": ["1.2.2.post1"],
+            "numpy": ["2.4.6"],
+        }
+        assert (
+            untested_major_problems([("ok", Requirement(line))], pins, _FEATURE_FLOORS)
+            == []
+        )
+
+    def test_a_missing_or_doubled_pin_is_a_problem(self):
+        assert untested_major_problems([("x", Requirement("a>=1,<2"))], {}, {})
+        assert untested_major_problems(
+            [("x", Requirement("a>=1,<2"))], {"a": ["1.0", "1.1"]}, {}
+        )
 
 
 # ══════════════════════════════════════════════════════════════

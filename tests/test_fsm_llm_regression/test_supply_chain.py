@@ -541,6 +541,11 @@ _POLICY_PHRASES: dict[str, tuple[str, ...]] = {
     "policy-pth": (".pth",),
     "policy-litellm": ("1.82.7", "1.82.8"),
     "policy-write-scopes": ("pull-requests", "contents", "id-token"),
+    "policy-range-rule": (
+        "no declared range admits a major version other than the tested one",
+        "setuptools>=77,<85",
+        "first version component",
+    ),
     "policy-write-jobs-run-no-code": (
         "no job that holds a write scope installs a package",
         "docs `deploy`",
@@ -1506,6 +1511,24 @@ POLICY_MUTANTS: list[tuple[str, Callable[[str], str], str]] = [
         "the GitHub release not named",
         _edit_all("GitHub release", "tag page"),
         "policy-sbom",
+    ),
+    (
+        "the range rule removed",
+        _edit_all(
+            "no declared range admits a major version other than the tested one",
+            "ranges are bounded",
+        ),
+        "policy-range-rule",
+    ),
+    (
+        "the build backend exception not named",
+        _edit_all("setuptools>=77,<85", "setuptools"),
+        "policy-range-rule",
+    ),
+    (
+        "the first-component rule removed",
+        _edit_all("first version component", "version"),
+        "policy-range-rule",
     ),
     (
         "the write-job rule removed",

@@ -41,6 +41,8 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.conftest import symlink_or_skip
+
 _ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOWS = _ROOT / ".github" / "workflows"
 _WORKFLOW = _WORKFLOWS / "refresh-pins.yml"
@@ -863,14 +865,14 @@ def _guard_scenarios() -> list[tuple[str, Callable[[_Scratch], None], bool]]:
             s.constraints.replace("mcp==2.2.0", "mcp==2.3.0"), encoding="utf-8"
         )
         (s.pins / "constraints.txt").unlink()
-        (s.pins / "constraints.txt").symlink_to(target)
+        symlink_or_skip(s.pins / "constraints.txt", target)
 
     def symlinked_report(s: _Scratch) -> None:
         s.artifact()
         target = s.temp / "elsewhere.md"
         target.write_text(_REPORT, encoding="utf-8")
         (s.pins / "report.md").unlink()
-        (s.pins / "report.md").symlink_to(target)
+        symlink_or_skip(s.pins / "report.md", target)
 
     def oversized_report(s: _Scratch) -> None:
         s.artifact(report="x" * 1_000_001)

@@ -232,9 +232,9 @@ Rules for NEW code, so the vocabulary stays one across core and the subpackages.
 
 ## Dependencies
 
-- Core: loguru>=0.7.3,<1, litellm>=1.109.0,<2.0 (compromised 1.82.7/1.82.8 are below the floor; `constraints.txt` pins 1.109.1), pydantic>=2.0,<3, python-dotenv>=1.0.0,<2, pyyaml>=6.0,<7 (parses OKF and Agent Skills YAML frontmatter, in `frontmatter.py` only; declared explicitly because it was only a transitive dependency), tenacity>=8.0,<10 (unimported, needed by litellm's sync retry path; do not remove).
+- Core: loguru>=0.7.3,<1, litellm>=1.109.0,<2.0 (compromised 1.82.7/1.82.8 are below the floor; `constraints.txt` pins 1.109.1), pydantic>=2.0,<3, python-dotenv>=1.0.0,<2, pyyaml>=6.0,<7 (parses OKF and Agent Skills YAML frontmatter, in `frontmatter.py` only; declared explicitly because it was only a transitive dependency), tenacity>=9.0,<10 (unimported, needed by litellm's sync retry path; do not remove).
 - Extras: `reasoning`, `agents`, `workflows`, `eval`, `synthesis`, `testing` (no deps), `monitor` (fastapi, uvicorn, jinja2), `mcp` (mcp>=2.2,<3), `otel` (opentelemetry-api/sdk>=1.20.0,<2), `a2a` (httpx>=0.24.0,<1), `all`, `dev`.
-- `constraints.txt` pins every direct dependency (core, extras, dev tools) and the build backend exactly, one line each, and every declared range has an upper bound containing its pin (`TestDeclaredRangesMatchPins`).
+- `constraints.txt` pins every direct dependency (core, extras, dev tools) and the build backend exactly, one line each, and every declared range has an upper bound containing its pin and admits no major other than the pinned one (`TestDeclaredRangesMatchPins`, `TestNoRangeAdmitsAnUntestedMajor`; the first component of a floor equals the pin's, `0.x` packages are bounded by `<1`, and the build backend `setuptools>=77,<85` is the one named exception).
 - Docs tools are the PEP 735 dependency group `docs` (`mkdocs>=1.6.1,<2`, `mkdocs-material`, `mkdocstrings`, `mkdocstrings-python`, `mike`, `mkdocs-include-markdown-plugin`, `pymdown-extensions`), not an extra and not in `all` or `dev`: Material needs Python 3.11 and the tools are for maintainers. Install with `pip install --group docs -c constraints.txt`; the pins are in `constraints.txt` and `TestDeclaredRangesMatchPins` covers the group.
 
 ## Failure modes

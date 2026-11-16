@@ -25,8 +25,11 @@ litellm==1.109.1
 # of pyproject.toml, and `tests/test_packaging.py::TestDeclaredRangesMatchPins`
 # fails when a declared range has no upper bound, has no pin here, or does not
 # contain its pin. So a new dependency or a widened range needs a pin in this file
-# in the same commit. Versions were chosen with `uv pip compile` for Python 3.11
-# and 3.15 on linux, macos and windows (the one set resolves on all six).
+# in the same commit. `TestNoRangeAdmitsAnUntestedMajor` also fails when a range admits a
+# major other than its pin's (the floor's first component equals the pin's; the build backend
+# `setuptools>=77,<85` is the one named exception, a feature floor). Versions were chosen with
+# `uv pip compile` for Python 3.11 and 3.15 on linux, macos and windows (the one set resolves
+# on all six).
 # ---------------------------------------------------------------------------
 loguru==0.8.0
 pydantic==2.14.3

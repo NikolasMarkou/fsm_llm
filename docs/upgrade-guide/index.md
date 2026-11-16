@@ -23,7 +23,7 @@ Each page opens with `Covers FSM-LLM 0.12.0 to 0.13.0.`, then has one `##` secti
 In the order to migrate:
 
 1. [Distribution rename](v0.13.0/distribution-rename.md): install `llm-fsm`, uninstall the old name, and the licence note.
-2. [Python and dependency floors](v0.13.0/python-floor.md): Python 3.11, and the dependency ranges with upper bounds.
+2. [Python and dependency floors](v0.13.0/python-floor.md): Python 3.11, and the dependency ranges with upper bounds, inside the tested major.
 3. [Default model and dotenv files](v0.13.0/default-model-and-env.md): `ModelNotConfiguredError`, `load_env`, `--env-file`, the removed default model constants and the new default embedder.
 4. [Module paths](v0.13.0/module-paths.md): where every module of 0.12.0 went, a script that rewrites the imports, and the patch targets that changed.
 5. [Tools and approval policy](v0.13.0/tools-and-policy.md): `fsm_llm.tools` and `fsm_llm.policy`, out of `fsm_llm.agents`.

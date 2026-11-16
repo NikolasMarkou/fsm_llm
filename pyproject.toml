@@ -1,5 +1,10 @@
 [build-system]
-requires = ["setuptools>=77"]
+# setuptools has no stable major semantics (77 to 84 are all "major" releases): the floor is the
+# first release that reads `license = "Apache-2.0"` (PEP 639, 77), the ceiling stops before the
+# release after the pinned one, so an sdist build cannot pick an untested setuptools. The same
+# range is in the `dev` extra; the one named exception of
+# `tests/test_packaging.py::TestNoRangeAdmitsAnUntestedMajor`.
+requires = ["setuptools>=77,<85"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -42,7 +47,7 @@ dependencies = [
     # BARE Exception on ImportError with no fallback. litellm does not declare it itself (verified via
     # importlib.metadata.requires('litellm') on 1.82.6), so without this line `num_retries` is
     # accepted through **kwargs but silently non-functional. See decisions.md D-002.
-    "tenacity>=8.0,<10",
+    "tenacity>=9.0,<10",
     # fsm_llm.frontmatter (shared by okf and skills) parses YAML frontmatter
     # with a SafeLoader subclass. PyYAML was only installed transitively (litellm
     # -> tokenizers -> huggingface-hub), so it is declared here like tenacity.
@@ -77,9 +82,9 @@ synthesis = []
 # and never import pytest; listed as an extra so it appears in `all` and the install lists.
 testing = []
 dev = [
-    "pytest>=7.4.0,<10",
-    "pytest-asyncio>=0.21.0,<2",
-    "pytest-cov>=4.0.0,<8",
+    "pytest>=9.0,<10",
+    "pytest-asyncio>=1.0,<2",
+    "pytest-cov>=7.0,<8",
     # coverage itself (pytest-cov only requires >=7.10.6): pinned in constraints.txt so the
     # branch-coverage ratchet (scripts/coverage_ratchet.py) reads one measurement everywhere.
     "coverage>=7.10.6,<8",
