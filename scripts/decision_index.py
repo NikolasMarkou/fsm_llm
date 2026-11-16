@@ -31,6 +31,20 @@ on purpose: the four root files (`pyproject.toml`, `constraints.txt`, `Makefile`
 string literal opens a phantom comment: it over-reports, never loses an anchor; no scanned
 file has one).
 
+Scope, the one deliberate gap: the planner walks the WHOLE project (`walkSourceFiles`:
+`docs/`, `examples/`, the root `.md` files, dot-named files such as
+`.pre-commit-config.yaml`), this scanner reads only `SCAN_DIRS` and `SCAN_FILES`, skips
+dot entries and knows only the file suffixes of `_STYLES`. The reason is the committed
+index and the gate: `--check` must give the same answer on every checkout and in CI with
+no planner, the pages of `docs/` quote anchors as examples, and `examples/` are frozen
+baselines, so widening the roots would move the generated index for text that is not a
+decision. The price is that a real anchor written outside the roots would be checked by
+the planner and never by CI. `outside_scope(root, tracked)` closes that: it reads every
+TRACKED file `scan` does not read with this same grammar (a file with no known suffix is
+read in every comment family), and `tests/test_fsm_llm_regression/test_decision_scan_scope.py`
+fails with the list, so such an anchor is never silently ignored. Citations of a decision
+in prose or in a docstring (no comment marker) are outside both grammars and stay prose.
+
 Interface (the contract the generator of step 100 builds on):
 
 * `scan(root) -> list[Anchor]`: every anchor under `root` (a project directory), in
@@ -45,6 +59,10 @@ Interface (the contract the generator of step 100 builds on):
   table or target for markdown, toml or ini, and Makefile; else `-`), `text` (the comment
   run that holds the anchor, marker and head removed). `key` is `(plan_id, number)`.
   There is no line number on purpose (D-008): a line is stale at the next commit.
+* `outside_scope(root, tracked) -> list[Anchor]`: the anchors of the files in `tracked` (POSIX
+  paths relative to `root`, for instance `git ls-files`) that `scan` does not read, same
+  order and shape as `scan`; the guard of the scope gap above. Never raises: a missing,
+  unreadable, symlinked or binary (a NUL byte) file is skipped.
 * `load_manifest(path) -> dict[(plan_id, number), ManifestEntry]` in file order; the first
   line of a repeated key wins; a missing or unreadable file is `{}`. A manifest line is
   `^<plan-id>/D-NNN[ \\t]*|` (the planner's resolver); the rest is split on the first `|`
@@ -89,7 +107,7 @@ import os
 import re
 import sys
 import tokenize
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -436,7 +454,9 @@ def _make(match: re.Match[str], rel: str, scope: str, text: str) -> Anchor | Non
     )
 
 
-def _scan_file(rel: str, text: str) -> list[Anchor]:
+def _scan_file(
+    rel: str, text: str, styles: tuple[str, ...] | None = None
+) -> list[Anchor]:
     lines = text.split("\n")
     starts = [0]
     for line in lines:
@@ -454,7 +474,7 @@ def _scan_file(rel: str, text: str) -> list[Anchor]:
                 hi = mid - 1
         return lo + 1
 
-    styles = _style_of(rel)
+    styles = _style_of(rel) if styles is None else styles
     for marker in (m for m in styles if m in _LINE_MARKERS):
         for i, line in enumerate(lines):
             match = _LINE_MARKERS[marker].search(line)
@@ -501,6 +521,26 @@ def scan(root: Path) -> list[Anchor]:
         text = _read(path)
         if text is not None:
             anchors.extend(_scan_file(rel, text))
+    return anchors
+
+
+#: Every comment family, read in a file `outside_scope` meets with no known suffix.
+_ALL_STYLES = ("#", "//", "/*", "--", "<!--")
+
+
+def outside_scope(root: Path, tracked: Iterable[str]) -> list[Anchor]:
+    """The anchors of the `tracked` files that `scan` does not read. See the docstring."""
+    base = Path(root)
+    scanned = {rel for rel, _ in _files(base)}
+    anchors: list[Anchor] = []
+    for rel in sorted(set(tracked) - scanned):
+        path = base / rel
+        if not path.is_file() or path.is_symlink():
+            continue
+        text = _read(path)
+        if text is None or "\x00" in text:
+            continue
+        anchors.extend(_scan_file(rel, text, _style_of(rel) or _ALL_STYLES))
     return anchors
 
 
