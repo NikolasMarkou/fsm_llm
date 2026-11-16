@@ -89,7 +89,7 @@ One LLM layer (the package `src/fsm_llm/llm/`; litellm is imported in exactly on
 | `scripts/api_snapshot.py` | Prints the public API (static `__all__` of the eight packages and the named core modules, with signatures); `--write PATH`; `make api-snapshot` writes `tests/fixtures/api_snapshot.txt` | Held by `tests/test_fsm_llm_regression/test_api_snapshot.py`; regenerate and review the diff in the same commit; never edit the fixture by hand |
 | `scripts/decision_index.py` | Anchor scanner and manifest parser; `--check` fails when an anchor has no line in `plans/ANCHORS.md` or names no plan id (reads the manifest only); `--write PATH` renders a report on demand; `--report` prints counts | Stdlib only; `make decision-check`, the CI lint job; nothing of the report is committed (`make decision-index` writes `build/decision-index.md`) |
 | `scripts/changelog_check.py` | `check` judges the CHANGELOG form (headings and their order, the `[Unreleased]` compare reference, section order, the exact `**BREAKING:**` marker); `extract VERSION [--link-base URL]` prints one release section | Stdlib only, read-only; `make changelog-check`, the CI lint job, `TestTheRealChangelog` |
-| `scripts/doc_counts.py`, `scripts/coverage_ratchet.py`, `scripts/refresh_pins.py`, `scripts/audit_pth.py` | The documented-count check (`make counts`), the branch-coverage ratchet against `coverage-baseline.json`, the weekly litellm and mcp pin proposal, the malicious `.pth` audit (`make audit`) | `doc_counts.py` skips when `mcp` is importable; the ratchet baseline is written from the Linux, Python 3.12 leg only |
+| `scripts/doc_counts.py`, `scripts/coverage_ratchet.py`, `scripts/refresh_pins.py`, `scripts/audit_pth.py` | The documented-count check (`make counts`), the branch-coverage ratchet against `coverage-baseline.json`, the weekly litellm and mcp pin proposal, the malicious `.pth` and `.start` audit (`make audit`) | `doc_counts.py` skips when `mcp` is importable; the ratchet baseline is written from the Linux, Python 3.12 leg only |
 | `scripts/bench_common.py`, `agents_bench.py`, `skills_bench.py`, `synthesis_bench.py`, `scripts/bench_data/` | Pre-registered benches and their recorded rows | `bench_data/` is tracked on purpose and never edited; see the invariants |
 | `.github/workflows/`, `mkdocs.yml`, `Makefile`, `tox.ini`, `pyproject.toml`, `constraints.txt`, `MANIFEST.in`, `.pre-commit-config.yaml`, `.importlinter` | CI (`python-package.yml`), the docs site (`docs.yml`), the pin refresh (`refresh-pins.yml`), the release (`release.yml`); the site configuration; tasks, envs, exact pins, sdist, hooks, import contracts | All checked by tests; `docs/` is not shipped in the wheel or the sdist |
 | `evaluation/datasets/`, `examples/<category>/<name>/` | Eval samples; `run.py` plus FSM JSON, 8 categories | Examples are the baselines of `fsm-llm-eval examples` |
@@ -218,7 +218,7 @@ Rules for NEW code, so the vocabulary stays one across core and the subpackages.
 ## Working here
 
 ```bash
-make test           # pytest -v (17,779 tests)
+make test           # pytest -v (17,886 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # python -m mypy -p fsm_llm (`mypy_path = "src"` in pyproject.toml)
@@ -239,20 +239,20 @@ make docs-clean     # rm -rf site/
 ```
 
 ```bash
-pytest                                 # Run all tests (17,779 collected)
-pytest tests/test_fsm_llm/            # Core package tests (7,090 tests)
+pytest                                 # Run all tests (17,886 collected)
+pytest tests/test_fsm_llm/            # Core package tests (7,094 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (232 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (407 tests)
 pytest tests/test_fsm_llm_agents/     # Agents tests (3,418 tests)
 pytest tests/test_fsm_llm_monitor/    # Monitor tests (533 tests)
 pytest tests/test_fsm_llm_meta/       # Meta-builder tests (558 tests)
-pytest tests/test_fsm_llm_regression/ # Regression tests (2,029 tests)
+pytest tests/test_fsm_llm_regression/ # Regression tests (2,037 tests)
 pytest tests/test_examples/           # Example validation tests (110 tests)
 pytest tests/test_fsm_llm_eval/       # Eval tests (438 tests)
 pytest tests/test_fsm_llm_synthesis/  # Synthesis tests (2,114 tests)
 pytest tests/test_fsm_llm_testing/    # Public test doubles and assertions (317 tests)
-# The 11 suites above sum to 17,246. The remaining 533 are six root-level files:
-#   tests/test_integration_ollama.py (12), tests/test_packaging.py (287),
+# The 11 suites above sum to 17,258. The remaining 628 are six root-level files:
+#   tests/test_integration_ollama.py (12), tests/test_packaging.py (382),
 #   tests/test_bench_common.py (19), tests/test_agents_bench.py (132),
 #   tests/test_skills_bench.py (38) and tests/test_coverage_ratchet.py (45)
 pytest -m "not slow"                  # Skip slow tests
