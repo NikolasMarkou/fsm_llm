@@ -49,18 +49,18 @@ audit: ## Audit site-packages for suspicious .pth files
 counts: ## Fail when a documented test count differs from a collection
 	python scripts/doc_counts.py
 
-api-snapshot: ## Regenerate docs/api.txt, the public API snapshot
-	python scripts/api_snapshot.py --write docs/api.txt
+api-snapshot: ## Regenerate tests/fixtures/api_snapshot.txt, the public API snapshot
+	python scripts/api_snapshot.py --write tests/fixtures/api_snapshot.txt
 
-decision-index: ## Regenerate docs/decisions/index.md, the decision index
-	python scripts/decision_index.py --write docs/decisions/index.md
+decision-index: ## Write a decision report to build/decision-index.md (on demand, gitignored, never committed)
+	python scripts/decision_index.py --write build/decision-index.md
 
-decision-check: ## Fail when the decision index is stale or a decision anchor does not resolve
-	python scripts/decision_index.py --check docs/decisions/index.md
+decision-check: ## Fail when a decision anchor has no line in plans/ANCHORS.md or names no plan id
+	python scripts/decision_index.py --check
 
-# Green on the real CHANGELOG.md: every BREAKING bullet links its upgrade guide. CI runs the same
+# Green on the real CHANGELOG.md: the form of every heading and BREAKING bullet. CI runs the same
 # command in the lint job and tests/test_packaging.py::TestTheRealChangelog runs it on every pytest run.
-changelog-check: ## Check the CHANGELOG form: ### headings, compare link, every BREAKING bullet links its upgrade guide
+changelog-check: ## Check the CHANGELOG form: ### headings, compare links, the BREAKING marker spelling
 	python scripts/changelog_check.py check
 
 docs: ## Build the docs site into site/ (strict: any warning fails); needs `pip install --group docs -c constraints.txt`

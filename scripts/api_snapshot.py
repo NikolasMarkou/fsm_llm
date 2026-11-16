@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-"""Print the public API of `fsm_llm`, one deterministic text, for `docs/api.txt`.
+"""Print the public API of `fsm_llm`, one deterministic text, for `tests/fixtures/api_snapshot.txt`.
 
 Run `.venv/bin/python scripts/api_snapshot.py` (stdout) or
-`.venv/bin/python scripts/api_snapshot.py --write docs/api.txt` (`make
+`.venv/bin/python scripts/api_snapshot.py --write tests/fixtures/api_snapshot.txt` (`make
 api-snapshot`). `tests/test_fsm_llm_regression/test_api_snapshot.py` compares
 the stdout with the committed file, so a removed or renamed name in the
 listed `__all__` lists, or a changed signature, model field, default or enum

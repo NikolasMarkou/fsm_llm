@@ -4,7 +4,7 @@
 Standard library only, Python 3.11+, deterministic, no network. It only reads files and never
 writes one. Roadmap row 0.5, plan d454fd62, step 111. Two subcommands:
 
-    changelog_check.py check   [--file PATH] [--docs-root PATH] [--next-version V] [--from VERSION]
+    changelog_check.py check   [--file PATH] [--from VERSION]
     changelog_check.py extract VERSION [--file PATH] [--with-heading] [--link-base URL]
 
 Exit codes: 0 clean, 1 findings (`check`) or a version that is missing or has no body
@@ -30,27 +30,20 @@ Findings, printed one per line as `path:line: CODE: message`, sorted by line the
            `<url>/compare/v<newest dated release>...HEAD` (`main` is accepted for `HEAD`)
     CL005  a bullet with `**Breaking:**`, `**breaking for ...**`, `**BREAKING**` or the prose
            "breaking change(s)" / "breaking for" instead of the exact marker `**BREAKING:**`
-    CL006  a `**BREAKING:**` bullet with no link `docs/upgrade-guide/vX.Y.Z/<name>.md#<slug>`
-    CL007  that link names a file that does not exist under the docs root
-    CL008  that link has no `#slug`, or the file has no heading with that id
     CL009  sections not newest first (`[Unreleased]` first, then versions strictly descending)
     CL010  a `###` heading that is none of the six Keep a Changelog names
-    CL011  the link names the directory of another version than the section's own
     CL012  a `**BREAKING:**` marker outside a list item (a table row, a paragraph, a heading
-           line): only a bullet is checked for its guide link, so a marker anywhere else
-           would need no link; write the entry as a bullet
+           line): the spellings of CL005 are judged in bullets only, so a marker anywhere
+           else escapes that check; write the entry as a bullet
+
+Step 123 dropped the guide-link rules (CL006, CL007, CL008, CL011) with the upgrade guides:
+the CHANGELOG is the migration record and no page of `docs/` is linked from it. The codes
+are not reused.
 
 Rules of the BREAKING check. A bullet is a list item at any indent with its continuation lines
 (a nested item is a bullet of its own). Code fences and inline code spans are removed first, so
 `**BREAKING:**` inside backticks is not a marker. Every line of a section that no bullet covers is
-read for the exact marker too (CL012); the spellings of CL005 are judged in bullets only. The link is an inline Markdown link whose
-target holds `docs/upgrade-guide/` (any prefix: relative, `./`, or an absolute URL); it may sit
-on a continuation line. `vX.Y.Z` must be the version of the section the bullet sits in; for
-`[Unreleased]` it is `--next-version` (default: the minor bump of the newest dated release,
-`0.12.0` gives `0.13.0`, and `0.1.0` when there is no release). The slug is the id the `toc`
-extension of Python-Markdown gives a heading (the rule of the docs link test, replicated here
-because this script imports nothing of the repository); `<docs-root>/upgrade-guide/vX.Y.Z/
-<name>.md` must exist (docs root default: `docs/` beside the CHANGELOG file).
+read for the exact marker too (CL012); the spellings of CL005 are judged in bullets only.
 
 `extract VERSION` prints the body of one section: the lines after its `## [VERSION]` heading up
 to the line before the next `## ` heading, with the leading and trailing blank lines removed
@@ -73,13 +66,11 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-import unicodedata
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_FILE = ROOT / "CHANGELOG.md"
@@ -87,7 +78,6 @@ DEFAULT_FILE_LABEL = "CHANGELOG.md"
 
 KAC_HEADINGS = ("Added", "Changed", "Deprecated", "Removed", "Fixed", "Security")
 BREAKING_MARKER = "**BREAKING:**"
-GUIDE_PREFIX = "docs/upgrade-guide/"
 
 _FENCE = re.compile(r"^\s*(```+|~~~+)")
 _H2 = re.compile(r"^## ")
@@ -104,13 +94,6 @@ _ANY_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]")
 _CODE_SPAN = re.compile(r"(`+)(.+?)\1", re.S)
 _BOLD_BREAKING = re.compile(r"\*\*[ \t]*breaking\b[^*\n]*\*\*", re.I)
 _PROSE_BREAKING = re.compile(r"\bbreaking[ \t\n]+(?:changes?|for)\b", re.I)
-_LINK_TARGET = re.compile(
-    r"\]\([ \t]*(<[^>\n]*>|[^)\s]*)(?:[ \t]+(?:\"[^\"]*\"|'[^']*'))?[ \t]*\)"
-)
-_GUIDE = re.compile(
-    r"^v(\d+\.\d+\.\d+)/([A-Za-z0-9][A-Za-z0-9._-]*)\.md(?:#(.*))?$", re.S
-)
-_VERSION = re.compile(r"^\d+\.\d+\.\d+$")
 _MASK = "\x00"
 
 
@@ -216,14 +199,6 @@ def newest_release(parsed: Parsed) -> Section | None:
     return next((s for s in parsed.sections if s.kind == "release"), None)
 
 
-def default_next_version(parsed: Parsed) -> str:
-    newest = newest_release(parsed)
-    if newest is None or newest.version is None:
-        return "0.1.0"
-    major, minor, _ = newest.version
-    return f"{major}.{minor + 1}.0"
-
-
 def _has_content(parsed: Parsed, section: Section) -> bool:
     return any(line.strip() for line in parsed.masked[section.start : section.end])
 
@@ -264,74 +239,6 @@ def _matches(section: Section, key: str) -> bool:
     if key == "unreleased":
         return section.kind == "unreleased"
     return section.kind == "release" and section.version_text == key
-
-
-# --------------------------------------------------------------------------------------
-# Heading ids (the `toc` extension of Python-Markdown; a copy of the rule of
-# tests/test_fsm_llm/test_docs_links.py, held equal to it by a test)
-# --------------------------------------------------------------------------------------
-
-_MD_HEADING = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.*?)[ \t]*$")
-_ATTR_ID = re.compile(r"\{[^}]*?#([\w.:-]+)[^}]*\}\s*$")
-_HTML_ID = re.compile(r"""<[a-zA-Z][^>]*?\s(?:id|name)\s*=\s*["']([^"']+)["']""")
-_BLOCK_ID = re.compile(r"\{:?\s*#([\w.:-]+)[^}]*\}")
-
-
-def slugify(text: str) -> str:
-    """`markdown.extensions.toc.slugify` with separator `-`: ASCII fold, strip, lowercase."""
-    value = (
-        unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
-    )
-    value = re.sub(r"[^\w\s-]", "", value).strip().lower()
-    return re.sub(r"[-\s]+", "-", value)
-
-
-def _unique(ident: str, taken: set[str]) -> str:
-    while ident in taken or not ident:
-        m = re.match(r"^(.*)_([0-9]+)$", ident)
-        ident = f"{m.group(1)}_{int(m.group(2)) + 1}" if m else f"{ident}_1"
-    taken.add(ident)
-    return ident
-
-
-def _heading_text(raw: str) -> str:
-    text = re.sub(r"[ \t]+#+[ \t]*$", "", raw)
-    text = re.sub(r"(`+)(.+?)\1", lambda m: "\x00" + m.group(2).strip() + "\x00", text)
-    text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
-    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
-    text = re.sub(r"\[([^\]]*)\]\[[^\]]*\]", r"\1", text)
-    text = re.sub(r"<[^>]+>", "", text)
-    text = text.replace("*", "")
-    text = re.sub(r"(?<!\w)(_{1,2})(?=\S)(.+?)(?<=\S)\1(?!\w)", r"\2", text)
-    return text.replace("\x00", "")
-
-
-def heading_ids(text: str) -> list[str]:
-    """The id of every heading of a page outside code fences, in order."""
-    explicit: list[str] = []
-    rows: list[tuple[str | None, str]] = []
-    for line in mask_fences(normalise(text)):
-        m = _MD_HEADING.match(line)
-        if not m:
-            continue
-        body = m.group(2)
-        attr = _ATTR_ID.search(body)
-        if attr:
-            explicit.append(attr.group(1))
-            body = body[: attr.start()].rstrip()
-        rows.append((attr.group(1) if attr else None, body))
-    taken = set(explicit)
-    return [
-        ident if ident else _unique(slugify(_heading_text(body)), taken)
-        for ident, body in rows
-    ]
-
-
-def anchors_of(text: str) -> set[str]:
-    anchors = set(heading_ids(text))
-    anchors.update(m.group(1) for m in _HTML_ID.finditer(text))
-    anchors.update(m.group(1) for m in _BLOCK_ID.finditer(text))
-    return anchors
 
 
 # --------------------------------------------------------------------------------------
@@ -426,73 +333,6 @@ def _check_headings(parsed: Parsed, section: Section) -> Iterable[Finding]:
         highest = max(highest, rank)
 
 
-def _guide_findings(
-    bullet: Bullet,
-    version_dir: str,
-    docs_root: Path,
-    cache: dict[Path, set[str] | None],
-) -> Iterable[Finding]:
-    targets = []
-    for m in _LINK_TARGET.finditer(bullet.text):
-        target = m.group(1).strip("<>")
-        at = target.find(GUIDE_PREFIX)
-        if at >= 0:
-            targets.append(target[at + len(GUIDE_PREFIX) :])
-    if not targets:
-        yield Finding(
-            bullet.line,
-            "CL006",
-            f"a {BREAKING_MARKER} bullet must link its upgrade guide, "
-            f"`docs/upgrade-guide/v{version_dir}/<name>.md#<slug>`",
-        )
-        return
-    for rest in targets:
-        shown = GUIDE_PREFIX + rest
-        m = _GUIDE.match(rest)
-        if not m:
-            yield Finding(
-                bullet.line,
-                "CL006",
-                f"the guide link `{shown}` is not of the form "
-                f"`docs/upgrade-guide/v{version_dir}/<name>.md#<slug>`",
-            )
-            continue
-        version, name, fragment = m.group(1), m.group(2), m.group(3)
-        if version != version_dir:
-            yield Finding(
-                bullet.line,
-                "CL011",
-                f"the guide link `{shown}` is in the directory of v{version}, "
-                f"this section is v{version_dir}",
-            )
-            continue
-        page = docs_root / "upgrade-guide" / f"v{version}" / f"{name}.md"
-        if page not in cache:
-            try:
-                cache[page] = anchors_of(page.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError):
-                cache[page] = None
-        anchors = cache[page]
-        if anchors is None:
-            yield Finding(
-                bullet.line,
-                "CL007",
-                f"the guide `{shown.split('#')[0]}` does not exist",
-            )
-            continue
-        slug = unquote(fragment or "")
-        if not slug:
-            yield Finding(
-                bullet.line, "CL008", f"the guide link `{shown}` has no `#slug`"
-            )
-        elif slug not in anchors:
-            yield Finding(
-                bullet.line,
-                "CL008",
-                f"the guide `{shown.split('#')[0]}` has no heading with the id `{slug}`",
-            )
-
-
 def _stray_markers(
     parsed: Parsed, section: Section, covered: set[int]
 ) -> Iterable[Finding]:
@@ -517,28 +357,19 @@ def _stray_markers(
                     index + 1 + run.count("\n", 0, m.start()),
                     "CL012",
                     f"{BREAKING_MARKER} sits outside a list item; write the entry as a "
-                    "bullet so its guide link is checked",
+                    "bullet so that the spelling of the marker is checked",
                 )
         index = stop
 
 
-def _check_bullets(
-    parsed: Parsed,
-    section: Section,
-    version_dir: str,
-    docs_root: Path,
-    cache: dict[Path, set[str] | None],
-) -> Iterable[Finding]:
+def _check_bullets(parsed: Parsed, section: Section) -> Iterable[Finding]:
     found = bullets(parsed.masked, section.start, section.end)
     covered = {n for bullet in found for n in range(bullet.line - 1, bullet.stop)}
     yield from _stray_markers(parsed, section, covered)
     for bullet in found:
         text = bullet.text
-        has_marker = False
         for m in _BOLD_BREAKING.finditer(text):
-            if m.group(0) == BREAKING_MARKER:
-                has_marker = True
-            else:
+            if m.group(0) != BREAKING_MARKER:
                 yield Finding(
                     bullet.line,
                     "CL005",
@@ -550,10 +381,8 @@ def _check_bullets(
                 bullet.line,
                 "CL005",
                 f"the bullet says it is breaking in prose; start the breaking part "
-                f"with {BREAKING_MARKER} and link its upgrade guide",
+                f"with {BREAKING_MARKER}",
             )
-        if has_marker:
-            yield from _guide_findings(bullet, version_dir, docs_root, cache)
 
 
 def _check_order(parsed: Parsed, in_scope: list[Section]) -> Iterable[Finding]:
@@ -616,13 +445,7 @@ def _check_reference(parsed: Parsed) -> Iterable[Finding]:
     )
 
 
-def check_text(
-    text: str,
-    *,
-    docs_root: Path,
-    next_version: str | None = None,
-    from_version: str | None = None,
-) -> list[Finding]:
+def check_text(text: str, *, from_version: str | None = None) -> list[Finding]:
     """The findings of a CHANGELOG text, sorted; see the module docstring for the rules.
 
     Raises `KeyError(from_version)` when `from_version` names no section.
@@ -633,10 +456,7 @@ def check_text(
             Finding(1, "CL001", "no `## [Unreleased]` or `## [X.Y.Z] - date` section")
         ]
     in_scope = scope_of(parsed, from_version)
-    if next_version is None:
-        next_version = default_next_version(parsed)
     findings: list[Finding] = list(_check_order(parsed, in_scope))
-    cache: dict[Path, set[str] | None] = {}
     for section in in_scope:
         if section.kind == "bad":
             findings.append(
@@ -648,11 +468,8 @@ def check_text(
                 )
             )
             continue
-        version_dir = (
-            next_version if section.kind == "unreleased" else section.version_text
-        )
         findings.extend(_check_headings(parsed, section))
-        findings.extend(_check_bullets(parsed, section, version_dir, docs_root, cache))
+        findings.extend(_check_bullets(parsed, section))
     if any(s.kind == "unreleased" for s in in_scope):
         findings.extend(_check_reference(parsed))
     return sorted(set(findings), key=lambda f: (f.line, f.code, f.message))
@@ -733,12 +550,6 @@ class _Parser(argparse.ArgumentParser):
         raise SystemExit(2)
 
 
-def _next_version(value: str) -> str:
-    if not _VERSION.match(value):
-        raise argparse.ArgumentTypeError(f"expected X.Y.Z, got {value!r}")
-    return value
-
-
 def _link_base(value: str) -> str:
     if not re.fullmatch(r"https?://\S+", value):
         raise argparse.ArgumentTypeError(
@@ -754,8 +565,6 @@ def _build_parser() -> argparse.ArgumentParser:
     extract = sub.add_parser("extract", help="print the body of one release section")
     for p in (check, extract):
         p.add_argument("--file", type=Path, default=None, help="default: CHANGELOG.md")
-    check.add_argument("--docs-root", type=Path, default=None, help="default: docs/")
-    check.add_argument("--next-version", type=_next_version, default=None)
     check.add_argument("--from", dest="from_version", default=None, metavar="VERSION")
     extract.add_argument("version", help="0.13.0, v0.13.0 or Unreleased")
     extract.add_argument("--with-heading", action="store_true")
@@ -806,14 +615,8 @@ def main(
             body = rewrite_doc_links(body, args.link_base)
         stdout(body)
         return 0
-    docs_root = args.docs_root or path.resolve().parent / "docs"
     try:
-        findings = check_text(
-            text,
-            docs_root=docs_root,
-            next_version=args.next_version,
-            from_version=args.from_version,
-        )
+        findings = check_text(text, from_version=args.from_version)
     except KeyError:
         print(
             f"changelog_check: no section [{args.from_version}] for --from",

@@ -40,8 +40,6 @@ HISTORICAL = {
     "docs/2026_roadmap.md": "dated roadmap, counts are the 7a0aa42 baseline",
     "plans/": "retired plan directories",
     "evaluation/": "dated eval runs",
-    "docs/decisions/": "generated decision index, quotes anchor comments of every date",
-    "docs/upgrade-guide/": "migration guides, name the old paths and counts on purpose",
     "scripts/bench_data/": "pre-registered bench blocks, never edited",
 }
 NUM = r"(?:\d{1,3}(?:,\d{3})+|\d+)"

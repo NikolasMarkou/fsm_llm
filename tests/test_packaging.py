@@ -1361,8 +1361,9 @@ class TestNoRangeAdmitsAnUntestedMajor:
 
 # ══════════════════════════════════════════════════════════════
 # The real CHANGELOG.md (step 118 of plan d454fd62, roadmap row 0.5): the form of its sections and
-# a guide link on every `**BREAKING:**` bullet. This is the ONE place that enforces it on the
-# real file (the checker's own rules are tested on fixtures in
+# the spelling of the `**BREAKING:**` marker (step 123 removed the upgrade guides and with them
+# the guide-link rules). This is the ONE place that enforces it on the real file (the checker's
+# own rules are tested on fixtures in
 # `tests/test_fsm_llm_regression/test_changelog_check.py`; CI also runs the same command in the
 # `lint` job, so a docs-only change cannot skip it).
 # ══════════════════════════════════════════════════════════════
@@ -1380,7 +1381,7 @@ def _changelog_check(*argv: str, cwd: pathlib.Path = _REPO_ROOT):
 
 
 class TestTheRealChangelog:
-    def test_every_section_has_its_form_and_every_breaking_bullet_links_its_guide(self):
+    def test_every_section_has_its_form_and_every_marker_is_spelt_exactly(self):
         proc = _changelog_check("check")
         assert proc.returncode == 0, (
             "scripts/changelog_check.py check reports findings on CHANGELOG.md:\n"
@@ -1402,63 +1403,41 @@ class TestTheRealChangelog:
         ci = _read(".github/workflows/python-package.yml")
         assert ci.count("run: python scripts/changelog_check.py check") == 1
 
+    def test_the_changelog_links_no_page_of_docs(self):
+        """Step 123: the guides are gone, so no entry links a repository-relative page."""
+        text = (_REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        assert "](docs/" not in text and "upgrade-guide" not in text.replace(
+            "`upgrade-guide/`", ""
+        )
+
     @pytest.mark.parametrize(
         ("label", "edit", "code"),
         [
             pytest.param(
-                "an unlinked BREAKING bullet",
-                lambda text, docs: text.replace(
-                    "### Changed\n\n",
-                    "### Changed\n\n- **BREAKING:** a new break.\n",
-                    1,
-                ),
-                "CL006",
-                id="unlinked-bullet",
-            ),
-            pytest.param(
-                "a BREAKING bullet that lost its link",
-                lambda text, docs: re.sub(
-                    r"\s*\[Upgrade guide\]\(docs/upgrade-guide/v0\.13\.0/[^)]+\)",
-                    "",
-                    text,
-                    count=1,
-                ),
-                "CL006",
-                id="lost-link",
-            ),
-            pytest.param(
-                "a link to a guide page that does not exist",
-                lambda text, docs: text.replace(
-                    "/default-model-and-env.md#", "/no-such-page.md#", 1
-                ),
-                "CL007",
-                id="missing-page",
-            ),
-            pytest.param(
-                "a link to a heading that does not exist",
-                lambda text, docs: text.replace(
-                    "#resolve_model-raises-when-no-model-is-configured",
-                    "#renamed-away",
-                    1,
-                ),
-                "CL008",
-                id="missing-heading",
-            ),
-            pytest.param(
                 "the spelling `**Breaking:**`",
-                lambda text, docs: text.replace(
-                    "- **BREAKING:**", "- **Breaking:**", 1
-                ),
+                lambda text: text.replace("- **BREAKING:**", "- **Breaking:**", 1),
                 "CL005",
                 id="spelling-variant",
             ),
             pytest.param(
-                "the compare reference removed",
-                lambda text, docs: re.sub(
-                    r"^\[Unreleased\]: .*\n", "", text, flags=re.M
+                "the marker in a table row",
+                lambda text: text.replace(
+                    "### Changed\n\n", "### Changed\n\n| a | **BREAKING:** b |\n\n", 1
                 ),
+                "CL012",
+                id="marker-outside-a-bullet",
+            ),
+            pytest.param(
+                "the compare reference removed",
+                lambda text: re.sub(r"^\[Unreleased\]: .*\n", "", text, flags=re.M),
                 "CL004",
                 id="no-compare-reference",
+            ),
+            pytest.param(
+                "an unknown section heading",
+                lambda text: text.replace("### Changed\n", "### Altered\n", 1),
+                "CL010",
+                id="unknown-heading",
             ),
         ],
     )
@@ -1467,51 +1446,15 @@ class TestTheRealChangelog:
     ):
         """Mutation proofs of the enforcement: the same file with one defect must fail it."""
         real = (_REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-        mutated = edit(real, None)
+        mutated = edit(real)
         assert mutated != real, label
         copy = tmp_path / "CHANGELOG.md"
         copy.write_text(mutated, encoding="utf-8")
-        proc = _changelog_check(
-            "check", "--file", str(copy), "--docs-root", str(_REPO_ROOT / "docs")
-        )
+        proc = _changelog_check("check", "--file", str(copy), "--from", "0.13.0")
         assert proc.returncode == 1 and f": {code}: " in proc.stdout, (
             label,
             proc.stdout,
         )
-
-    def test_the_check_fails_when_a_guide_heading_is_renamed(self, tmp_path):
-        docs = tmp_path / "docs"
-        shutil.copytree(_REPO_ROOT / "docs" / "upgrade-guide", docs / "upgrade-guide")
-        page = docs / "upgrade-guide" / "v0.13.0" / "python-floor.md"
-        text = page.read_text(encoding="utf-8")
-        assert "## Python 3.11 is the minimum\n" in text
-        page.write_text(
-            text.replace(
-                "## Python 3.11 is the minimum\n", "## Python 3.11 is required\n"
-            ),
-            encoding="utf-8",
-        )
-        proc = _changelog_check(
-            "check",
-            "--file",
-            str(_REPO_ROOT / "CHANGELOG.md"),
-            "--docs-root",
-            str(docs),
-        )
-        assert proc.returncode == 1 and ": CL008: " in proc.stdout, proc.stdout
-
-    def test_the_check_fails_when_a_guide_page_is_removed(self, tmp_path):
-        docs = tmp_path / "docs"
-        shutil.copytree(_REPO_ROOT / "docs" / "upgrade-guide", docs / "upgrade-guide")
-        (docs / "upgrade-guide" / "v0.13.0" / "removals.md").unlink()
-        proc = _changelog_check(
-            "check",
-            "--file",
-            str(_REPO_ROOT / "CHANGELOG.md"),
-            "--docs-root",
-            str(docs),
-        )
-        assert proc.returncode == 1 and ": CL007: " in proc.stdout, proc.stdout
 
 
 # ══════════════════════════════════════════════════════════════

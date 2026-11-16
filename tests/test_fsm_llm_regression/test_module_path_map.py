@@ -35,8 +35,9 @@ re-exported):
 - the file is deterministic JSON (sorted keys, indent 2, `\\n`, UTF-8) and
   `unmoved` is sorted without duplicates.
 
-The check that `docs/upgrade-guide/v0.13.0/module-paths.md` names every old
-key is owned by step 118 (it needs that file); it is not part of this module.
+There is no page that lists the old paths (step 123 removed the upgrade guides); the map
+file itself, and the CHANGELOG entries of the 0.13.0 release, are the record of where
+each module went.
 
 The scanners are pure functions over data and a module set, so the unit tests
 below drive them with synthetic maps and scratch directories. To refresh

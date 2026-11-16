@@ -188,18 +188,6 @@ class TestEveryQuotedVersionFollows:
             "src/fsm_llm/README.md"
         )
 
-    def test_the_upgrade_guides_of_the_release_exist_and_cover_it(self):
-        pages = sorted(
-            (_ROOT / "docs" / "upgrade-guide" / f"v{_version()}").glob("*.md")
-        )
-        assert len(pages) >= 12, [p.name for p in pages]
-        for page in pages:
-            lines = page.read_text("utf-8").splitlines()
-            covers = next((ln for ln in lines if ln.startswith("Covers FSM-LLM ")), "")
-            assert re.match(
-                rf"Covers FSM-LLM \d+\.\d+\.\d+ to {re.escape(_version())}\.", covers
-            ), page.name
-
     def test_the_contributing_examples_name_real_sections(self):
         text = _read("CONTRIBUTING.md")
         named = set(
@@ -257,19 +245,20 @@ class TestTheHighlights:
         assert len(text) < HIGHLIGHTS_MAX_CHARS, len(text)
         assert len(text.splitlines()) <= 60
 
-    def test_it_has_bullets_and_points_at_the_guides_and_the_full_list(self):
+    def test_it_has_bullets_and_points_at_the_breaking_entries_and_the_full_list(self):
         head = _preamble(_version())
         text = "\n".join(head)
         bullets = [line for line in head if line.startswith("- ")]
         assert len(bullets) >= HIGHLIGHTS_MIN_BULLETS, len(bullets)
-        assert "(docs/upgrade-guide/index.md)" in text
-        assert "(docs/upgrade-guide/v0.13.0/module-paths.md)" in text
+        assert "docs/upgrade-guide" not in text  # step 123: the guides are gone
+        assert "entries marked BREAKING" in text
         assert "list of every change follows" in text
 
-    def test_it_uses_only_links_the_release_body_can_rewrite(self):
+    def test_it_uses_only_absolute_links(self):
+        """The release body does not resolve a repository-relative link against the tag."""
         text = "\n".join(_preamble(_version()))
         for target in re.findall(r"\]\(([^)\s]+)\)", text):
-            assert target.startswith(("docs/", "https://")), target
+            assert target.startswith("https://"), target
 
     def test_it_holds_no_word_the_changelog_checker_reads_as_a_breaking_marker(self):
         # CL005 reads the whole section, preamble included.

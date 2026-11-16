@@ -353,7 +353,7 @@ def workflow_problems(text: str) -> set[str]:
         ("import-contract", _IMPORT_CONTRACT),
         (
             "decision-check",
-            "python scripts/decision_index.py --check docs/decisions/index.md",
+            "python scripts/decision_index.py --check",
         ),
         ("changelog-check", _CHANGELOG_CHECK),
         ("linters-install", _LINTERS_INSTALL),
@@ -624,10 +624,7 @@ class TestTheRealWorkflow:
 
     def test_the_decision_gate_and_its_summary_run_in_the_lint_job(self):
         lint = _load(_real_text())["jobs"]["lint"]
-        assert (
-            "python scripts/decision_index.py --check docs/decisions/index.md"
-            in _runs(lint)
-        )
+        assert "python scripts/decision_index.py --check" in _runs(lint)
         summary = _step_running(lint, "decision_index.py --report")
         assert summary is not None
         assert "GITHUB_STEP_SUMMARY" in summary["run"]
@@ -638,7 +635,7 @@ class TestTheRealWorkflow:
         assert _runs(lint).count(_CHANGELOG_CHECK) == 1
         step = _step_running(lint, "changelog_check.py")
         assert step is not None and step["run"].strip() == _CHANGELOG_CHECK
-        # After the editable install (the script reads docs/ and CHANGELOG.md from the checkout).
+        # After the editable install (the script reads CHANGELOG.md from the checkout).
         assert _index_of(lint, _CHANGELOG_CHECK) > _index_of(lint, "pip install -c")
         for name, job in wf["jobs"].items():
             if name != "lint":
@@ -1057,7 +1054,7 @@ MUTANTS: list[tuple[str, Any, str]] = [
     ),
     (
         "the decision gate removed",
-        _drop_step("Check the decision index"),
+        _drop_step("Check the decision anchors"),
         "lint-decision-check",
     ),
     (
@@ -1067,7 +1064,7 @@ MUTANTS: list[tuple[str, Any, str]] = [
     ),
     (
         "the changelog check removed",
-        _drop_step("Check the changelog and its upgrade guides"),
+        _drop_step("Check the changelog"),
         "lint-changelog-check",
     ),
     (

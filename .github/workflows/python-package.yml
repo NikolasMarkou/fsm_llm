@@ -106,13 +106,13 @@ jobs:
       - name: Check the import contracts
         # The `.importlinter` contracts run as one test (`make lint-imports` is the same command).
         run: python -m pytest tests/test_fsm_llm_regression/test_import_contract.py -q
-      - name: Check the decision index
+      - name: Check the decision anchors
         # `make decision-check`. The gate reads the committed `plans/ANCHORS.md`: a decision
         # anchor with no manifest line fails it on purpose.
-        run: python scripts/decision_index.py --check docs/decisions/index.md
-      - name: Check the changelog and its upgrade guides
-        # `make changelog-check`: the Keep a Changelog form of `[Unreleased]` and a link to its
-        # upgrade guide on every `**BREAKING:**` bullet (read-only, standard library only).
+        run: python scripts/decision_index.py --check
+      - name: Check the changelog
+        # `make changelog-check`: the Keep a Changelog form of `[Unreleased]` and the spelling of
+        # the `**BREAKING:**` marker (read-only, standard library only).
         run: python scripts/changelog_check.py check
       - name: Summarise the decision anchors
         if: ${{ !cancelled() }}

@@ -34,10 +34,10 @@ SLASH = "//" + " DECISION"
 DASHES = "--" + " DECISION"
 TOKEN = f"{P1}/D-001"
 
-#: Tracked paths the guard does not read: generated or manifest text that QUOTES anchors
-#: on purpose (a decision index lists each anchor with its rule, the manifest holds
-#: `<plan-id>/D-NNN | date | rationale` lines). A path that does not exist is harmless.
-EXCLUDED = ("docs/decisions/", "plans/ANCHORS.md")
+#: Tracked paths the guard does not read: manifest text that QUOTES anchors on purpose (the
+#: manifest holds `<plan-id>/D-NNN | date | rationale` lines). A path that does not exist is
+#: harmless.
+EXCLUDED = ("plans/ANCHORS.md",)
 
 
 @pytest.fixture(scope="module")
@@ -197,11 +197,8 @@ class TestNothingElseTrips:
         tracked = ["docs/blob.bin", "docs/link.md", "docs/missing.md"]
         assert stray_anchors(di, tmp_path, tracked) == []
 
-    @pytest.mark.parametrize(
-        "rel",
-        ["docs/decisions/index.md", "docs/decisions/deep/x.md", "plans/ANCHORS.md"],
-    )
-    def test_the_generated_index_and_the_manifest_are_excluded(
+    @pytest.mark.parametrize("rel", ["plans/ANCHORS.md"])
+    def test_the_manifest_is_excluded(
         self, di: ModuleType, tmp_path: Path, rel: str
     ) -> None:
         _write(tmp_path, rel, f"{HTML} {TOKEN} quoted -->\n")
@@ -211,4 +208,4 @@ class TestNothingElseTrips:
     def test_a_missing_excluded_path_is_harmless(
         self, di: ModuleType, tmp_path: Path
     ) -> None:
-        assert stray_anchors(di, tmp_path, ["docs/decisions/index.md"]) == []
+        assert stray_anchors(di, tmp_path, ["plans/ANCHORS.md"]) == []

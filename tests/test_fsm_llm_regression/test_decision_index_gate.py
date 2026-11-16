@@ -1,10 +1,9 @@
-"""The generated decision index `docs/decisions/index.md` and its gate (roadmap row 0.5).
+"""The anchor gate and the on-demand decision report of `scripts/decision_index.py` (roadmap row 0.5).
 
-`scripts/decision_index.py` renders every `# DECISION` anchor of the repository into
-`docs/decisions/index.md` and `--check` fails when that file is stale or when an anchor is
-`unresolved` or has a `badprefix`. The index is GENERATED FROM THE ANCHORS: any commit that
-adds, moves or re-words an anchor, or appends to `plans/ANCHORS.md`, must run
-`make decision-index` or `TestCommittedIndex` goes red.
+`--check` fails when an anchor is `unresolved` (no line in `plans/ANCHORS.md`) or has a
+`badprefix`; it takes no argument and reads no committed file. `--write PATH` renders the
+same anchors as a report to any path, on demand: nothing of it is committed (step 123 removed
+the committed index page and its freshness rule).
 
 Most tests build synthetic trees under `tmp_path`. Fixture text is built in pieces
 (`A = "#" + " DECISION"`): the planner and the scanner read that head followed by a
@@ -14,7 +13,6 @@ plan-id-like token in ANY string of a `.py` file as an anchor (step 98).
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -35,8 +33,6 @@ from tests.test_fsm_llm_regression.test_decision_index import (
     _write,
 )
 
-INDEX = REPO / "docs" / "decisions" / "index.md"
-REGENERATE = "make decision-index"
 LEGACY_OLD = "plan_2026-05-29_0c00a594"
 
 
@@ -105,7 +101,7 @@ def _healthy(root: Path) -> None:
 
 
 def _write_index(root: Path, name: str = "index.md") -> Path:
-    out = root / "docs" / "decisions" / name
+    out = root / "build" / name
     proc = _run(root, "--write", str(out))
     assert proc.returncode == 0, proc.stderr
     return out
@@ -114,148 +110,84 @@ def _write_index(root: Path, name: str = "index.md") -> Path:
 # --------------------------------------------------------------------------- real tree
 
 
-class TestCommittedIndex:
-    """The committed index equals what the scanner renders from the working tree."""
+class TestRealTree:
+    """Every anchor of the working tree resolves to a line of the manifest."""
 
-    def test_the_committed_index_is_current_and_the_anchors_resolve(self, di):
-        assert INDEX.is_file(), f"docs/decisions/index.md is missing: {REGENERATE}"
-        manifest = di.load_manifest(MANIFEST)
-        found = di.check_index(INDEX, di.scan(REPO), manifest)
+    def test_the_anchors_of_the_real_tree_resolve(self, di):
+        found = di.problems(di.scan(REPO), di.load_manifest(MANIFEST))
         assert found == [], (
-            f"run `{REGENERATE}` and commit docs/decisions/index.md (any step that "
-            "adds, moves or re-words a decision anchor, or appends to "
-            "plans/ANCHORS.md, regenerates it); HAND-OFF: plans/ANCHORS.md is the "
-            "owner's manifest and may still be uncommitted",
+            "a live anchor needs a `<plan-id>/D-NNN | date | rationale` line in "
+            "plans/ANCHORS.md (the owner's append-only manifest, which may still be "
+            "uncommitted), or a [STALE] mark",
             found,
         )
 
-    def test_the_real_cli_exits_zero_on_the_committed_index(self):
-        proc = _run(REPO, "--check", str(INDEX), cwd=REPO)
-        assert proc.returncode == 0, (REGENERATE, proc.stderr)
+    def test_the_real_cli_exits_zero_and_takes_no_argument(self):
+        proc = _run(REPO, "--check", cwd=REPO)
+        assert proc.returncode == 0, proc.stderr
         assert proc.stdout.startswith("ok:") and proc.stderr == ""
 
-    def test_the_committed_index_has_the_promised_shape(self):
-        data = INDEX.read_bytes()
-        text = data.decode("ascii")
-        assert text.endswith("\n") and not text.endswith("\n\n")
-        assert "\r" not in text
-        assert not [n for n, ln in enumerate(text.split("\n"), 1) if ln != ln.rstrip()]
-        assert len(data) < 300_000, "keep it well under the 500 KB pre-commit limit"
-        for section in (
-            "## Summary",
-            "## Decisions",
-            "## Retired",
-            "## Manifest entries with no code anchor",
-        ):
-            assert section in text, section
-        assert "## Anchors that do not resolve" not in text
-
-    def test_the_committed_index_names_no_line_number_and_no_absolute_path(self):
-        text = INDEX.read_text(encoding="ascii")
-        assert str(REPO) not in text and "/home/" not in text
-        # a manifest rationale may quote `file.py:123` (it is the ledger's own text); a
-        # place of the index never carries one
-        places = [ln for ln in text.split("\n") if ln.startswith(("- Where", "  - `"))]
-        assert places and not [p for p in places if re.search(r"\.py[:#]", p)]
-
-    def test_a_stale_edit_of_the_committed_index_makes_check_exit_one(
-        self, di, tmp_path
-    ):
-        """The RED run on a COPY: one changed word is enough."""
-        copy = tmp_path / "index.md"
-        copy.write_bytes(
-            INDEX.read_bytes().replace(b"# Decision index", b"# Decisions")
-        )
-        manifest = di.load_manifest(MANIFEST)
-        found = di.check_index(copy, di.scan(REPO), manifest)
-        assert len(found) == 1 and "out of date" in found[0]
-        assert REGENERATE in found[0]
-        proc = _run(REPO, "--check", str(copy), cwd=REPO)
-        assert proc.returncode == 1
-        assert REGENERATE in proc.stderr and "committed" in proc.stderr
-
-    def test_a_removed_decision_block_makes_check_exit_one(self, di, tmp_path):
-        text = INDEX.read_text(encoding="ascii")
-        cut = text.index("\n#### ")
-        end = text.index("\n#### ", cut + 1)
-        copy = tmp_path / "index.md"
-        copy.write_bytes((text[:cut] + text[end:]).encode("ascii"))
-        found = di.check_index(copy, di.scan(REPO), di.load_manifest(MANIFEST))
-        assert found and "out of date" in found[0]
+    def test_the_committed_tree_has_no_decision_index_page(self):
+        assert not (REPO / "docs" / "decisions").exists()
 
 
 # --------------------------------------------------------------------------- the gate
 
 
 class TestGate:
-    def test_a_healthy_tree_with_a_fresh_index_passes(self, tmp_path):
+    def test_a_healthy_tree_passes(self, tmp_path):
         _healthy(tmp_path)
-        index = _write_index(tmp_path)
-        proc = _run(tmp_path, "--check", str(index))
+        proc = _run(tmp_path, "--check")
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.startswith("ok:") and proc.stderr == ""
 
-    def test_a_stale_index_exits_one_and_names_the_fix(self, tmp_path):
+    def test_check_needs_no_file_and_reads_none(self, tmp_path):
+        """No index exists anywhere under the tree and the gate is still green."""
         _healthy(tmp_path)
-        index = _write_index(tmp_path)
-        index.write_bytes(index.read_bytes().replace(b"lock order", b"LOCK ORDER"))
-        proc = _run(tmp_path, "--check", str(index))
-        assert proc.returncode == 1
-        assert "out of date" in proc.stderr
-        assert "make decision-index" in proc.stderr
-        assert "--write" in proc.stderr
-        assert "LOCK ORDER" in proc.stderr, "the diff hint shows the changed row"
+        assert not list(tmp_path.rglob("index.md"))
+        assert _run(tmp_path, "--check").returncode == 0
 
-    def test_a_missing_index_exits_one_and_names_the_fix(self, tmp_path):
+    def test_check_refuses_a_path_argument(self, tmp_path):
         _healthy(tmp_path)
-        proc = _run(tmp_path, "--check", str(tmp_path / "nope.md"))
-        assert proc.returncode == 1
-        assert "missing" in proc.stderr and "make decision-index" in proc.stderr
+        assert _run(tmp_path, "--check", "index.md").returncode == 2
 
-    def test_an_unresolved_anchor_exits_one_even_when_the_index_is_fresh(
-        self, tmp_path
-    ):
+    def test_an_unresolved_anchor_exits_one(self, tmp_path):
         _healthy(tmp_path)
         _write(
             tmp_path,
             "src/pkg/b.py",
             f"{A} {P3}/D-044: a live anchor nobody recorded\ndef f():\n    pass\n",
         )
-        index = _write_index(tmp_path)  # regenerated AFTER planting: not just stale
-        proc = _run(tmp_path, "--check", str(index))
+        proc = _run(tmp_path, "--check")
         assert proc.returncode == 1
         assert "no line in plans/ANCHORS.md" in proc.stderr
         assert f"{P3}/D-044" in proc.stderr
-        assert "out of date" not in proc.stderr, "the index itself is current"
 
-    def test_a_badprefix_anchor_exits_one_even_when_the_index_is_fresh(self, tmp_path):
+    def test_a_badprefix_anchor_exits_one(self, tmp_path):
         _healthy(tmp_path)
         _write(tmp_path, "src/pkg/c.py", f"{A} plan-2026-07-18-80b0bd4d/D-013: x\n")
         _write(tmp_path, "src/pkg/d.py", f"{A} D-021: a bare number\n")
-        index = _write_index(tmp_path)
-        proc = _run(tmp_path, "--check", str(index))
+        proc = _run(tmp_path, "--check")
         assert proc.returncode == 1
         assert "no plan id" in proc.stderr
         assert (
             "D-021" in proc.stderr and "plan-2026-07-18-80b0bd4d/D-013" in proc.stderr
         )
-        assert "out of date" not in proc.stderr
 
     def test_a_retired_anchor_alone_is_green(self, tmp_path):
         _write(tmp_path, "src/a.py", f"{A} {P2}/D-007 [STALE]: gone\n")
         _write(tmp_path, "plans/ANCHORS.md", _manifest_text())
-        index = _write_index(tmp_path)
-        proc = _run(tmp_path, "--check", str(index))
+        proc = _run(tmp_path, "--check")
         assert proc.returncode == 0, proc.stderr
 
     def test_both_causes_are_reported_in_one_run(self, tmp_path):
         _healthy(tmp_path)
-        index = _write_index(tmp_path)
         _write(tmp_path, "src/pkg/b.py", f"{A} {P3}/D-044: new\n{A} nope/D-045: typo\n")
-        proc = _run(tmp_path, "--check", str(index))
+        proc = _run(tmp_path, "--check")
         assert proc.returncode == 1
-        assert proc.stderr.count("error:") == 3, proc.stderr
-        assert "out of date" in proc.stderr and "no plan id" in proc.stderr
+        assert proc.stderr.count("error:") == 2, proc.stderr
+        assert "no line in plans/ANCHORS.md" in proc.stderr
+        assert "no plan id" in proc.stderr
 
     def test_check_reads_the_manifest_only_never_a_local_decisions_file(self, tmp_path):
         """`CI` unset and a local decisions.md that names the key: still exit 1."""
@@ -266,23 +198,15 @@ class TestGate:
             f"plans/{P3}/decisions.md",
             "# decisions\n\n## D-044 | EXECUTE | 2026-11-14\nbody\n",
         )
-        index = _write_index(tmp_path)
         for ci in (None, "1"):
-            proc = _run(tmp_path, "--check", str(index), env=_env(CI=ci))
+            proc = _run(tmp_path, "--check", env=_env(CI=ci))
             assert proc.returncode == 1, (ci, proc.stderr)
             assert f"{P3}/D-044" in proc.stderr
 
-    def test_crlf_in_the_committed_index_is_read_as_lf(self, tmp_path):
-        """`.gitattributes` pins LF, but a checkout that translated must not fail."""
-        _healthy(tmp_path)
-        index = _write_index(tmp_path)
-        index.write_bytes(index.read_bytes().replace(b"\n", b"\r\n"))
-        assert _run(tmp_path, "--check", str(index)).returncode == 0
-
     def test_a_mode_is_required_and_the_modes_exclude_each_other(self, tmp_path):
         assert _run(tmp_path).returncode == 2
-        assert _run(tmp_path, "--report", "--check", "x.md").returncode == 2
-        assert _run(tmp_path, "--write", "x.md", "--check", "x.md").returncode == 2
+        assert _run(tmp_path, "--report", "--check").returncode == 2
+        assert _run(tmp_path, "--write", "x.md", "--check").returncode == 2
 
     def test_write_creates_missing_directories_and_prints_nothing(self, tmp_path):
         _healthy(tmp_path)
@@ -299,12 +223,15 @@ class TestGate:
 
     def test_main_returns_the_exit_code_in_process(self, di, tmp_path, capsys):
         _healthy(tmp_path)
-        out = tmp_path / "index.md"
-        assert di.main(["--root", str(tmp_path), "--write", str(out)]) == 0
-        assert di.main(["--root", str(tmp_path), "--check", str(out)]) == 0
-        out.write_text("stale\n", encoding="ascii")
-        assert di.main(["--root", str(tmp_path), "--check", str(out)]) == 1
-        assert "out of date" in capsys.readouterr().err
+        assert di.main(["--root", str(tmp_path), "--check"]) == 0
+        _write(tmp_path, "src/pkg/b.py", f"{A} {P3}/D-044: new\n")
+        assert di.main(["--root", str(tmp_path), "--check"]) == 1
+        assert "no line in plans/ANCHORS.md" in capsys.readouterr().err
+
+    def test_the_script_has_no_committed_index_freshness_rule(self):
+        """Step 123: the gate judges resolution only; nothing compares a file to `render`."""
+        text = SCRIPT.read_text(encoding="utf-8")
+        assert "check_index" not in text and "out of date" not in text
 
 
 # --------------------------------------------------------------------------- render
@@ -722,10 +649,8 @@ class TestCiIndependence:
         self, tmp_path
     ):
         self._local_tree(tmp_path)
-        index = _write_index(tmp_path)
         runs = [
-            _run(tmp_path, "--check", str(index), env=_env(CI=ci))
-            for ci in (None, "1", "true")
+            _run(tmp_path, "--check", env=_env(CI=ci)) for ci in (None, "1", "true")
         ]
         assert {r.returncode for r in runs} == {1}
         assert len({r.stderr for r in runs}) == 1
@@ -739,7 +664,7 @@ class TestCiIndependence:
         assert di.ci_is_set() is True
 
     def test_the_script_names_the_environment_in_one_place_only(self):
-        """Only `ci_is_set` reads the environment; `render` and `check_index` do not."""
+        """Only `ci_is_set` reads the environment; `render` and `problems` do not."""
         import ast
 
         tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))

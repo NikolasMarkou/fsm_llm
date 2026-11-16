@@ -1,5 +1,5 @@
 # Line endings are pinned so a Windows checkout (actions/checkout converts
-# them) stays byte-equal to the committed files: docs/api.txt, golden JSON and
+# them) stays byte-equal to the committed files: tests/fixtures/api_snapshot.txt, golden JSON and
 # the bench manifests are compared as bytes. See D-018 of plan d454fd62.
 * text=auto eol=lf
 

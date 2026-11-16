@@ -3,18 +3,24 @@
 Plan d454fd62, step 111 (roadmap row 0.5, CHANGELOG form). The script reads a CHANGELOG in the
 Keep a Changelog form and judges only the sections being prepared (`[Unreleased]`, plus the
 newest release when `[Unreleased]` is empty): the `###` headings and their order, the
-`[Unreleased]` compare reference, the order of the sections, and every `**BREAKING:**` bullet
-(it must link `docs/upgrade-guide/vX.Y.Z/<name>.md#<slug>` to an existing file and heading).
-A `**BREAKING:**` marker outside a list item (a table row, a paragraph) is CL012 (final REFLECT
-concern 6, round 121.2), because only a bullet is checked for its link.
+`[Unreleased]` compare reference, the order of the sections, and the spelling of the
+`**BREAKING:**` marker in every bullet. A `**BREAKING:**` marker outside a list item (a table
+row, a paragraph) is CL012 (final REFLECT concern 6, round 121.2), because only a bullet is
+read for the spellings of CL005. Step 123 removed the upgrade guides and with them the rules
+CL006, CL007, CL008 and CL011 (a link to a guide, its file, its heading and its version
+directory) and the options `--docs-root` and `--next-version`; the tests of those rules went
+with them.
 `extract VERSION` prints one section for the release notes.
 
-Fixtures only: every test builds its CHANGELOG and its `docs/` tree under `tmp_path`. The real
-`CHANGELOG.md` is deliberately NOT read here: `tests/test_packaging.py::TestTheRealChangelog`
-enforces it (step 118), so one place owns that rule.
+Fixtures only: every test builds its CHANGELOG under `tmp_path`. The real `CHANGELOG.md` is
+deliberately NOT read here: `tests/test_packaging.py::TestTheRealChangelog` enforces it, so one
+place owns that rule.
 
 `extract --link-base URL` (step 118) makes the `docs/...` links of the notes absolute under a tag
-URL for the GitHub release body; `LINK_CASES` and the CLI scenarios below pin it.
+URL for the GitHub release body. The CHANGELOG holds no such link any more (step 123), and the
+option stays on purpose: it is harmless, `release.yml` still passes it, and a later entry that
+links a page of `docs/` is then correct on the release page without an edit of the workflow;
+`LINK_CASES` and the CLI scenarios below pin it.
 
 * `CASES` is a table of CHANGELOG texts and the finding codes each must give; `EXTRACTS` the same
   for `extract`; `LINK_CASES` the same for the link rewrite; `EXTRA` holds the scenarios that
@@ -22,8 +28,6 @@ URL for the GitHub release body; `LINK_CASES` and the CLI scenarios below pin it
   returns the ids of the scenarios that fail on a loaded copy of the script: the real script
   returns the empty set, and each of the mutants (`MUTANTS`) is the real source with one edit
   and must fail the scenario it names. A check that cannot fail is not a check.
-* The slug of a heading is a copy of the rule of `tests/test_fsm_llm/test_docs_links.py` (the
-  script imports nothing of the repository); `TestSlugAgreement` holds the two equal on a table.
 """
 
 from __future__ import annotations
@@ -40,7 +44,6 @@ from typing import Any
 
 import pytest
 
-from tests.test_fsm_llm.test_docs_links import _heading_ids as docs_heading_ids
 from tests.test_fsm_llm_regression.support import load_script_module
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -65,14 +68,6 @@ def cc() -> types.ModuleType:
 # --------------------------------------------------------------------------------------
 # Fixture builders
 # --------------------------------------------------------------------------------------
-
-GUIDES = {
-    "upgrade-guide/v0.13.0/core.md": (
-        "# Core\n\n## Renamed Thing\n\ntext\n\n## Second `thing`\n\ntext\n\n"
-        "## Same\n\n## Same\n\n```\n## Fenced\n```\n"
-    ),
-    "upgrade-guide/v0.12.0/old.md": "# Old\n\n## Old rename\n\ntext\n",
-}
 
 HEAD = "# Changelog\n\nAll notable changes.\n\n"
 REFS = (
@@ -107,21 +102,10 @@ def link(target: str, text: str = "guide") -> str:
 
 
 G = "docs/upgrade-guide/v0.13.0/core.md"
-OK_LINK = link(f"{G}#renamed-thing")
-
-
-@pytest.fixture
-def docs_root(tmp_path: Path) -> Path:
-    return _write_docs(tmp_path)
-
-
-def _write_docs(tmp: Path) -> Path:
-    root = tmp / "docs"
-    for rel, text in GUIDES.items():
-        page = root / rel
-        page.parent.mkdir(parents=True, exist_ok=True)
-        page.write_text(text, encoding="utf-8")
-    return root
+OK_LINK = "The entry is explained in the notes."
+DOCS_LINK = link(
+    f"{G}#renamed-thing"
+)  # a link into docs/, for the `--link-base` rewrite
 
 
 # --------------------------------------------------------------------------------------
@@ -140,7 +124,7 @@ class Case:
 _HISTORY_MESS = (
     "## [0.12.0] - 2026-10-02\n\n### Fixed\n\n- x\n\n### Added\n\n- y\n\n"
     "### Known open\n\n"
-    f"- **Breaking:** old style.\n- {B} no guide at all.\n\n"
+    f"- **Breaking:** old style.\n- {B} a marked entry.\n\n"
     "## [0.11.0] - 2026-09-29\n\n### Added\n\n- Older thing.\n\n"
 )
 _EMPTY_UNRELEASED_DOC = (
@@ -247,15 +231,6 @@ CASES: list[Case] = [
         doc("- A breaking change is hidden here.\n\n" + ADDED),
         ("CL005",),
     ),
-    Case(
-        "preamble-breaking-bullet-needs-its-guide",
-        doc(f"- {B} x.\n\n" + ADDED),
-        ("CL006",),
-    ),
-    Case(
-        "preamble-breaking-bullet-with-its-guide",
-        doc(f"- {B} x. {OK_LINK}\n\n" + ADDED),
-    ),
     # ---- CL005 -------------------------------------------------------------------
     Case("spelling-Breaking", doc(changed("- **Breaking:** x.")), ("CL005",)),
     Case("spelling-lower", doc(changed("- **breaking:** x.")), ("CL005",)),
@@ -281,149 +256,22 @@ CASES: list[Case] = [
         ("CL005",),
     ),
     Case(
+        "spelling-after-a-blank-line-in-the-bullet",
+        doc(changed("- Entry text.", "", "  **Breaking:** x.")),
+        ("CL005",),
+    ),
+    Case(
+        "spelling-in-a-fence-is-fine",
+        doc("### Changed\n\n- Example:\n\n  ```\n  - **Breaking:** x\n  ```\n\n"),
+    ),
+    Case(
         "spelling-in-code-span-is-fine",
         doc(changed("- The text `**Breaking:**` is quoted.")),
         (),
     ),
     # ---- CL006 -------------------------------------------------------------------
-    Case("no-guide", doc(changed(f"- {B} x.")), ("CL006",)),
-    Case(
-        "link-no-version-dir",
-        doc(changed(f"- {B} x. " + link("docs/upgrade-guide/core.md#core"))),
-        ("CL006",),
-    ),
-    Case("link-bare-text", doc(changed(f"- {B} x. See {G}#core.")), ("CL006",)),
-    Case(
-        "link-in-code-span", doc(changed(f"- {B} x. See `[g]({G}#core)`.")), ("CL006",)
-    ),
-    Case(
-        "link-other-directory",
-        doc(changed(f"- {B} x. " + link("docs/guides/core.md#core"))),
-        ("CL006",),
-    ),
-    Case(
-        "link-not-markdown-file",
-        doc(changed(f"- {B} x. " + link("docs/upgrade-guide/v0.13.0/core.txt#core"))),
-        ("CL006",),
-    ),
-    Case(
-        "second-bullet-lacks-guide",
-        doc(changed(f"- {B} a. {OK_LINK}", f"- {B} b.")),
-        ("CL006",),
-    ),
-    Case(
-        "adjacent-bullets-first-linked-second-not",
-        doc(changed(f"- {B} a. {OK_LINK}", f"- {B} b. no link")),
-        ("CL006",),
-    ),
     # ---- CL007, CL008, CL011 -----------------------------------------------------
-    Case(
-        "link-missing-file",
-        doc(changed(f"- {B} x. " + link("docs/upgrade-guide/v0.13.0/nope.md#a"))),
-        ("CL007",),
-    ),
-    Case(
-        "link-missing-heading",
-        doc(changed(f"- {B} x. " + link(f"{G}#nope"))),
-        ("CL008",),
-    ),
-    Case("link-no-slug", doc(changed(f"- {B} x. " + link(G))), ("CL008",)),
-    Case("link-empty-slug", doc(changed(f"- {B} x. " + link(f"{G}#"))), ("CL008",)),
-    Case(
-        "link-slug-is-case-sensitive",
-        doc(changed(f"- {B} x. " + link(f"{G}#Renamed-Thing"))),
-        ("CL008",),
-    ),
-    Case(
-        "link-heading-inside-fence",
-        doc(changed(f"- {B} x. " + link(f"{G}#fenced"))),
-        ("CL008",),
-    ),
-    Case(
-        "link-other-version",
-        doc(
-            changed(f"- {B} x. " + link("docs/upgrade-guide/v0.12.0/old.md#old-rename"))
-        ),
-        ("CL011",),
-    ),
-    Case(
-        "link-next-version-option",
-        doc(changed(f"- {B} x. {OK_LINK}")),
-        ("CL011",),
-        {"next_version": "0.14.0"},
-    ),
-    Case(
-        "link-next-version-option-ok",
-        doc(
-            changed(f"- {B} x. " + link("docs/upgrade-guide/v0.12.0/old.md#old-rename"))
-        ),
-        (),
-        {"next_version": "0.12.0"},
-    ),
     # ---- valid guide links -------------------------------------------------------
-    Case("valid-link", doc(changed(f"- {B} x. {OK_LINK}"))),
-    Case(
-        "valid-link-capitalised-heading",
-        doc(changed(f"- {B} x. " + link(f"{G}#renamed-thing"))),
-    ),
-    Case("valid-link-dot-slash", doc(changed(f"- {B} x. " + link(f"./{G}#core")))),
-    Case(
-        "valid-link-absolute-url",
-        doc(changed(f"- {B} x. " + link(f"https://github.com/o/r/blob/main/{G}#core"))),
-    ),
-    Case("valid-link-angle-brackets", doc(changed(f"- {B} x. " + link(f"<{G}#core>")))),
-    Case("valid-link-with-title", doc(changed(f"- {B} x. " + f'[g]({G}#core "Core")'))),
-    Case(
-        "valid-link-code-heading",
-        doc(changed(f"- {B} x. " + link(f"{G}#second-thing"))),
-    ),
-    Case(
-        "valid-link-duplicate-heading-ids",
-        doc(
-            changed(
-                f"- {B} a. " + link(f"{G}#same"), f"- {B} b. " + link(f"{G}#same_1")
-            )
-        ),
-    ),
-    Case(
-        "valid-link-percent-encoded",
-        doc(changed(f"- {B} x. " + link(f"{G}#renamed%2Dthing"))),
-    ),
-    Case(
-        "valid-link-continuation-line",
-        doc(changed(f"- {B} x.", f"  See {OK_LINK} for the steps.")),
-    ),
-    Case(
-        "valid-link-after-blank-line",
-        doc(f"### Changed\n\n- {B} x.\n\n  See {OK_LINK}.\n\n"),
-    ),
-    Case(
-        "valid-link-two-links-one-bullet",
-        doc(changed(f"- {B} x. {OK_LINK} and " + link(f"{G}#core"))),
-    ),
-    Case(
-        "two-links-one-bad",
-        doc(changed(f"- {B} x. {OK_LINK} and " + link(f"{G}#nope"))),
-        ("CL008",),
-    ),
-    Case(
-        "two-bullets-one-line-each",
-        doc(changed(f"- {B} a. {OK_LINK}", f"- {B} b. " + link(f"{G}#core"))),
-    ),
-    Case(
-        "two-markers-in-one-bullet-one-link",
-        doc(changed(f"- {B} a. and {B} b. {OK_LINK}")),
-    ),
-    Case(
-        "nested-bullets-each-checked",
-        doc(changed("- Parent.", f"  - {B} a. {OK_LINK}", f"  - {B} b.")),
-        ("CL006",),
-    ),
-    Case(
-        "star-bullets-and-numbers",
-        doc(changed(f"* {B} a.", f"1. {B} b. {OK_LINK}")),
-        ("CL006",),
-    ),
     # ---- the marker is not a marker inside code ----------------------------------
     Case(
         "marker-in-code-span",
@@ -468,13 +316,13 @@ CASES: list[Case] = [
     Case(
         "from-version-widens",
         doc(middle=_HISTORY_MESS),
-        ("CL002", "CL005", "CL006", "CL010"),
+        ("CL002", "CL005", "CL010"),
         {"from_version": "0.12.0"},
     ),
     Case(
         "from-version-v-prefix",
         doc(middle=_HISTORY_MESS),
-        ("CL002", "CL005", "CL006", "CL010"),
+        ("CL002", "CL005", "CL010"),
         {"from_version": "v0.12.0"},
     ),
     Case(
@@ -485,8 +333,8 @@ CASES: list[Case] = [
     ),
     Case(
         "from-version-includes-unreleased",
-        doc(changed(f"- {B} x."), middle=_HISTORY_MESS),
-        ("CL002", "CL005", "CL006", "CL006", "CL010"),
+        doc(changed("- **Breaking:** x."), middle=_HISTORY_MESS),
+        ("CL002", "CL005", "CL005", "CL010"),
         {"from_version": "0.12.0"},
     ),
     Case(
@@ -499,15 +347,8 @@ CASES: list[Case] = [
     ),
     Case(
         "empty-unreleased-checks-newest-release",
-        _EMPTY_UNRELEASED_DOC.format(bullet=f"- {B} x."),
-        ("CL006",),
-    ),
-    Case(
-        "empty-unreleased-release-uses-its-own-version-dir",
-        _EMPTY_UNRELEASED_DOC.format(
-            bullet=f"- {B} x. " + link("docs/upgrade-guide/v0.12.0/old.md#old-rename")
-        ),
-        ("CL011",),
+        _EMPTY_UNRELEASED_DOC.format(bullet="- **Breaking:** x."),
+        ("CL005",),
     ),
     Case(
         "empty-unreleased-newest-release-ref-tag",
@@ -544,11 +385,6 @@ CASES: list[Case] = [
         "stray-beside-a-good-bullet",
         doc(changed(f"- {B} good. {OK_LINK}", "", f"| a | {B} |")),
         ("CL012",),
-    ),
-    Case(
-        "stray-and-a-bullet-with-no-link",
-        doc(changed(f"- {B} no guide.", "", f"| a | {B} |")),
-        ("CL006", "CL012"),
     ),
     Case(
         "stray-in-a-release-in-scope",
@@ -589,9 +425,13 @@ CASES: list[Case] = [
         doc(head=HEAD + f"Old text: {B} was spelled so.\n\n"),
     ),
     # ---- line ends ---------------------------------------------------------------
+    Case(
+        "crlf-finding",
+        doc(changed("- **Breaking:** x.")).replace("\n", "\r\n"),
+        ("CL005",),
+    ),
     Case("crlf", doc(changed(f"- {B} x. {OK_LINK}")).replace("\n", "\r\n")),
     Case("cr-only", doc(changed(f"- {B} x. {OK_LINK}")).replace("\n", "\r")),
-    Case("crlf-finding", doc(changed(f"- {B} x.")).replace("\n", "\r\n"), ("CL006",)),
     Case("no-final-newline", doc().rstrip("\n")),
 ]
 
@@ -600,103 +440,69 @@ def _codes(findings: list[Any]) -> list[str]:
     return [f.code for f in findings]
 
 
-def run_case(module: types.ModuleType, case: Case, docs: Path) -> bool:
-    got = _codes(module.check_text(case.text, docs_root=docs, **case.kwargs))
+def run_case(module: types.ModuleType, case: Case) -> bool:
+    got = _codes(module.check_text(case.text, **case.kwargs))
     return sorted(got) == sorted(case.expected)
 
 
 class TestFindings:
     def test_there_are_cases_for_every_code(self):
         codes = {c for case in CASES for c in case.expected}
-        assert codes == {f"CL{n:03d}" for n in range(1, 13)}
+        assert codes == {f"CL{n:03d}" for n in (1, 2, 3, 4, 5, 9, 10, 12)}
+
+    def test_the_guide_rules_are_gone(self, cc):
+        """CL006, CL007, CL008 and CL011 left with the upgrade guides (step 123)."""
+        text = doc(changed(f"- {B} x, with no link of any kind."))
+        assert cc.check_text(text) == []
+        source = _SCRIPT.read_text(encoding="utf-8")
+        for gone in ("upgrade-guide", "docs_root", "next_version", "slugify"):
+            assert gone not in source, gone
 
     def test_case_ids_are_unique(self):
         ids = [c.id for c in CASES]
         assert len(ids) == len(set(ids))
 
     @pytest.mark.parametrize("case", CASES, ids=[c.id for c in CASES])
-    def test_case(self, cc: types.ModuleType, docs_root: Path, case: Case):
-        got = _codes(cc.check_text(case.text, docs_root=docs_root, **case.kwargs))
+    def test_case(self, cc: types.ModuleType, case: Case):
+        got = _codes(cc.check_text(case.text, **case.kwargs))
         assert sorted(got) == sorted(case.expected), cc.check_text(
-            case.text, docs_root=docs_root, **case.kwargs
+            case.text, **case.kwargs
         )
 
-    def test_a_missing_from_version_raises_keyerror(self, cc, docs_root):
+    def test_a_missing_from_version_raises_keyerror(self, cc):
         with pytest.raises(KeyError):
-            cc.check_text(doc(), docs_root=docs_root, from_version="9.9.9")
+            cc.check_text(doc(), from_version="9.9.9")
 
-    def test_the_docs_root_may_not_exist(self, cc, tmp_path):
-        found = cc.check_text(
-            doc(changed(f"- {B} x. {OK_LINK}")), docs_root=tmp_path / "nowhere"
-        )
-        assert _codes(found) == ["CL007"]
+    def test_findings_carry_line_numbers_and_stay_sorted(self, cc):
+        # line 9 holds the misspelt bullet, line 11 the duplicate heading: the bullet is
+        # reported first although the heading checks run first.
+        text = doc("### Added\n\n- **Breaking:** x.\n\n### Added\n\n- y\n\n")
+        found = cc.check_text(text)
+        assert [(f.line, f.code) for f in found] == [(9, "CL005"), (11, "CL003")]
 
-    def test_a_guide_that_is_a_directory_is_missing(self, cc, tmp_path):
-        root = tmp_path / "docs"
-        (root / "upgrade-guide" / "v0.13.0" / "core.md").mkdir(parents=True)
-        found = cc.check_text(doc(changed(f"- {B} x. {OK_LINK}")), docs_root=root)
-        assert _codes(found) == ["CL007"]
-
-    def test_a_guide_that_is_not_utf8_is_missing(self, cc, tmp_path):
-        root = tmp_path / "docs" / "upgrade-guide" / "v0.13.0"
-        root.mkdir(parents=True)
-        (root / "core.md").write_bytes(b"# Core\n\xff\xfe\n")
-        found = cc.check_text(
-            doc(changed(f"- {B} x. {OK_LINK}")), docs_root=tmp_path / "docs"
-        )
-        assert _codes(found) == ["CL007"]
-
-    def test_an_explicit_id_and_an_html_anchor_count_as_headings(self, cc, tmp_path):
-        root = tmp_path / "docs" / "upgrade-guide" / "v0.13.0"
-        root.mkdir(parents=True)
-        (root / "core.md").write_text(
-            '# Core\n\n## Thing {#explicit-id}\n\n<a id="html-anchor"></a>\n',
-            encoding="utf-8",
-        )
-        text = doc(
-            changed(
-                f"- {B} a. " + link(f"{G}#explicit-id"),
-                f"- {B} b. " + link(f"{G}#html-anchor"),
-            )
-        )
-        assert cc.check_text(text, docs_root=tmp_path / "docs") == []
-
-    def test_findings_carry_line_numbers_and_stay_sorted(self, cc, docs_root):
-        # line 9 holds the bullet, line 11 the duplicate heading: the bullet is reported first
-        # although the heading checks run first.
-        text = doc(f"### Added\n\n- {B} x.\n\n### Added\n\n- y\n\n")
-        found = cc.check_text(text, docs_root=docs_root)
-        assert [(f.line, f.code) for f in found] == [(9, "CL006"), (11, "CL003")]
-
-    def test_the_reference_finding_points_at_the_unreleased_heading(
-        self, cc, docs_root
-    ):
-        found = cc.check_text(doc(refs=""), docs_root=docs_root)
+    def test_the_reference_finding_points_at_the_unreleased_heading(self, cc):
+        found = cc.check_text(doc(refs=""))
         assert [(f.line, f.code) for f in found] == [(5, "CL004")]
 
-    def test_the_reference_finding_points_at_the_bad_reference_line(
-        self, cc, docs_root
-    ):
+    def test_the_reference_finding_points_at_the_bad_reference_line(self, cc):
         text = doc(refs=REFS.replace("compare/v0.12.0...HEAD", "x"))
-        found = cc.check_text(text, docs_root=docs_root)
+        found = cc.check_text(text)
         assert [f.code for f in found] == ["CL004"]
         assert text.split("\n")[found[0].line - 1].startswith("[Unreleased]:")
 
-    def test_a_bullet_finding_points_at_the_first_line_of_the_bullet(
-        self, cc, docs_root
-    ):
-        text = doc(changed(f"- {B} x", "  continues", "  and ends"))
-        found = cc.check_text(text, docs_root=docs_root)
+    def test_a_bullet_finding_points_at_the_first_line_of_the_bullet(self, cc):
+        text = doc(changed("- **Breaking:** x", "  continues", "  and ends"))
+        found = cc.check_text(text)
         assert [f.line for f in found] == [9]
 
-    def test_a_nested_bullet_finding_points_at_the_nested_line(self, cc, docs_root):
-        text = doc(changed("- Parent", f"  - {B} child"))
-        found = cc.check_text(text, docs_root=docs_root)
+    def test_a_nested_bullet_finding_points_at_the_nested_line(self, cc):
+        text = doc(changed("- Parent", "  - **Breaking:** child"))
+        found = cc.check_text(text)
         assert [f.line for f in found] == [10]
 
-    def test_one_finding_per_defect_no_duplicates(self, cc, docs_root):
-        text = doc(changed(f"- {B} a. {B} b."))
-        assert _codes(cc.check_text(text, docs_root=docs_root)) == ["CL006"]
+    def test_one_finding_per_defect_no_duplicates(self, cc):
+        text = doc(changed("- **Breaking:** a. **breaking:** b."))
+        assert _codes(cc.check_text(text)) == ["CL005", "CL005"]
 
 
 # --------------------------------------------------------------------------------------
@@ -924,7 +730,7 @@ class TestLinkBase:
     def test_the_rewrite_runs_on_the_extracted_notes_before_anything_else(
         self, cc, tmp_path
     ):
-        text = doc(changed(f"- {B} x. {OK_LINK}"))
+        text = doc(changed(f"- {B} x. {DOCS_LINK}"))
         path = _write(tmp_path, text)
         code, plain = run_main(cc, ["extract", "Unreleased", "--file", str(path)])
         code2, linked = run_main(
@@ -935,7 +741,7 @@ class TestLinkBase:
         assert f"]({BASE}{G}#renamed-thing)" in linked and "](docs/" not in linked
 
     def test_the_link_base_applies_to_the_heading_line_too(self, cc, tmp_path):
-        path = _write(tmp_path, doc(changed(f"- {B} x. {OK_LINK}")))
+        path = _write(tmp_path, doc(changed(f"- {B} x. {DOCS_LINK}")))
         code, out = run_main(
             cc,
             [
@@ -974,7 +780,7 @@ class TestLinkBase:
         assert run_main(cc, ["check", "--file", str(path), "--link-base", BASE])[0] == 2
 
     def test_a_trailing_slash_is_added_once(self, cc, tmp_path):
-        path = _write(tmp_path, doc(changed(f"- {B} x. {OK_LINK}")))
+        path = _write(tmp_path, doc(changed(f"- {B} x. {DOCS_LINK}")))
         for base in ("https://h/blob/t", "https://h/blob/t/"):
             _, out = run_main(
                 cc, ["extract", "Unreleased", "--file", str(path), "--link-base", base]
@@ -1025,47 +831,29 @@ def _write(tmp: Path, text: str, name: str = "CHANGELOG.md") -> Path:
 
 class TestCli:
     def test_a_clean_file_exits_0_and_prints_nothing(self, cc, tmp_path):
-        _write_docs(tmp_path)
-        path = _write(tmp_path, doc(changed(f"- {B} x. {OK_LINK}")))
+        path = _write(tmp_path, doc(changed(f"- {B} x. {DOCS_LINK}")))
         assert run_main(cc, ["check", "--file", str(path)]) == (0, "")
 
     def test_findings_exit_1_one_per_line_in_the_documented_form(self, cc, tmp_path):
-        _write_docs(tmp_path)
-        path = _write(tmp_path, doc(changed(f"- {B} x.", "- **Breaking:** y.")))
+        path = _write(tmp_path, doc(changed("- **Breaking:** x.", "- **BREAKING** y.")))
         code, out = run_main(cc, ["check", "--file", str(path)])
         assert code == 1
         lines = out.splitlines()
         assert len(lines) == 2
-        assert lines[0].startswith(f"{path}:9: CL006: ")
+        assert lines[0].startswith(f"{path}:9: CL005: ")
         assert lines[1].startswith(f"{path}:10: CL005: ")
 
-    def test_the_docs_root_defaults_to_docs_beside_the_changelog(self, cc, tmp_path):
-        _write_docs(tmp_path)
-        path = _write(tmp_path, doc(changed(f"- {B} x. {OK_LINK}")))
-        assert run_main(cc, ["check", "--file", str(path)])[0] == 0
-        assert (
-            run_main(
-                cc, ["check", "--file", str(path), "--docs-root", str(tmp_path / "x")]
-            )[0]
-            == 1
-        )
+    def test_the_removed_options_are_usage_errors(self, cc, tmp_path):
+        path = _write(tmp_path, doc())
+        for option in (["--docs-root", str(tmp_path)], ["--next-version", "0.14.0"]):
+            assert run_main(cc, ["check", "--file", str(path), *option])[0] == 2
 
-    def test_an_explicit_docs_root_is_used(self, cc, tmp_path):
-        other = tmp_path / "elsewhere"
-        other.mkdir()
-        _write_docs(other)
-        path = _write(tmp_path, doc(changed(f"- {B} x. {OK_LINK}")))
-        argv = ["check", "--file", str(path), "--docs-root", str(other / "docs")]
-        assert run_main(cc, argv)[0] == 0
-
-    def test_next_version_and_from_are_passed_on(self, cc, tmp_path):
-        _write_docs(tmp_path)
+    def test_from_is_passed_on(self, cc, tmp_path):
         path = _write(
             tmp_path, doc(changed(f"- {B} x. {OK_LINK}"), middle=_HISTORY_MESS)
         )
         base = ["check", "--file", str(path)]
         assert run_main(cc, base)[0] == 0
-        assert run_main(cc, [*base, "--next-version", "0.14.0"])[0] == 1
         assert run_main(cc, [*base, "--from", "0.12.0"])[0] == 1
         assert run_main(cc, [*base, "--from", "Unreleased"])[0] == 0
 
@@ -1133,7 +921,6 @@ class TestCli:
         assert "no body" in capsys.readouterr().err
 
     def test_crlf_and_lf_files_give_the_same_output(self, cc, tmp_path):
-        _write_docs(tmp_path)
         text = doc(changed(f"- {B} x.", "- **Breaking:** y."))
         lf = _write(tmp_path, text, "lf.md")
         crlf = _write(tmp_path, text.replace("\n", "\r\n"), "crlf.md")
@@ -1155,8 +942,7 @@ class TestCli:
         assert capsys.readouterr().out == _BODY_0_12
 
     def test_running_it_as_a_script(self, tmp_path):
-        _write_docs(tmp_path)
-        path = _write(tmp_path, doc(changed(f"- {B} x.")))
+        path = _write(tmp_path, doc(changed("- **Breaking:** x.")))
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
         done = subprocess.run(
             [sys.executable, str(_SCRIPT), "check", "--file", str(path)],
@@ -1167,7 +953,7 @@ class TestCli:
             timeout=60,
         )
         assert done.returncode == 1
-        assert f"{path}:9: CL006: " in done.stdout
+        assert f"{path}:9: CL005: " in done.stdout
         done = subprocess.run(
             [sys.executable, str(_SCRIPT), "extract", "0.12.0", "--file", str(path)],
             capture_output=True,
@@ -1189,7 +975,7 @@ class TestCli:
 
 
 # --------------------------------------------------------------------------------------
-# Robustness: determinism, read-only, standard library only, slug agreement
+# Robustness: determinism, read-only, standard library only
 # --------------------------------------------------------------------------------------
 
 
@@ -1203,7 +989,6 @@ def _tree_state(root: Path) -> dict[str, bytes]:
 
 class TestRobustness:
     def test_the_output_is_the_same_twice(self, cc, tmp_path):
-        _write_docs(tmp_path)
         text = doc(
             changed(f"- {B} a.", "- **Breaking:** b.", f"- {B} c. " + link(f"{G}#no")),
         )
@@ -1213,14 +998,13 @@ class TestRobustness:
         assert first == second and first[1]
 
     def test_it_never_writes_a_file(self, cc, tmp_path):
-        _write_docs(tmp_path)
         path = _write(tmp_path, doc(changed(f"- {B} a.")))
         before = _tree_state(tmp_path)
         run_main(cc, ["check", "--file", str(path)])
         run_main(cc, ["extract", "0.12.0", "--file", str(path)])
         run_main(cc, ["check", "--file", str(tmp_path / "missing.md")])
         assert _tree_state(tmp_path) == before
-        assert sorted(p.name for p in tmp_path.iterdir()) == ["CHANGELOG.md", "docs"]
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["CHANGELOG.md"]
 
     def test_the_script_has_no_write_call(self):
         tree = ast.parse(_SCRIPT.read_text(encoding="utf-8"))
@@ -1286,13 +1070,13 @@ class TestRobustness:
             stripped = line.strip()
             if stripped.startswith("CL") and stripped[2:5].isdigit():
                 documented.add(stripped[:5])
-        assert documented == {f"CL{n:03d}" for n in range(1, 13)}
+        assert documented == {f"CL{n:03d}" for n in (1, 2, 3, 4, 5, 9, 10, 12)}
 
     def test_the_script_codes_are_the_documented_ones(self):
         import re
 
         used = set(re.findall(r'"(CL\d{3})"', _SCRIPT.read_text(encoding="utf-8")))
-        assert used == {f"CL{n:03d}" for n in range(1, 13)}
+        assert used == {f"CL{n:03d}" for n in (1, 2, 3, 4, 5, 9, 10, 12)}
 
     def test_the_six_headings_are_the_keep_a_changelog_ones(self, cc):
         assert cc.KAC_HEADINGS == (
@@ -1308,63 +1092,14 @@ class TestRobustness:
         assert cc.BREAKING_MARKER == "**BREAKING:**"
 
 
-HEADING_TABLES = [
-    "# Title",
-    "## Renamed Thing",
-    "## `code` heading",
-    "## Dup\n\n## Dup\n\n## Dup",
-    "## Unicode café and ñ",
-    "## A  --  b",
-    "## Heading {#custom-id}\n\n## Other",
-    "## **Bold** and _em_ and __strong__",
-    "## [link](x.md) text and ![img](a.png)",
-    "```\n## fenced\n```\n## after",
-    "~~~\n## tilde fenced\n~~~\n## after tilde",
-    "## 3. Numbers & symbols!",
-    "##   spaced   ",
-    "### Section_with_underscores",
-    "## trailing ###",
-    "## <b>html</b> heading",
-    "## Same\n\n## same\n\n## Same_1",
-    "## --leading dashes--",
-    "## éè only accents",
-    "#NoSpace\n\n## ok",
-    "    ## indented code",
-    "   ## three spaces",
-]
-
-
-class TestSlugAgreement:
-    """The script's slug rule equals the docs link test's (the one the site build follows)."""
-
-    @pytest.mark.parametrize("text", HEADING_TABLES)
-    def test_heading_ids_agree(self, cc, text):
-        assert cc.heading_ids(text) == docs_heading_ids(text)
-
-    def test_the_slug_table(self, cc):
-        table = {
-            "Renamed Thing": "renamed-thing",
-            "Second thing": "second-thing",
-            "A  --  b": "a-b",
-            "3. Numbers & symbols!": "3-numbers-symbols",
-            "Café": "cafe",
-            "UPPER": "upper",
-            "  padded  ": "padded",
-            "": "",
-        }
-        for heading, slug in table.items():
-            assert cc.slugify(heading) == slug, heading
-
-
 # --------------------------------------------------------------------------------------
 # Mutants: each edit of the real source must fail the scenario it names
 # --------------------------------------------------------------------------------------
 
 
 def _scn_exit_codes(module: types.ModuleType, tmp: Path) -> bool:
-    _write_docs(tmp)
     clean = _write(tmp, doc(), "clean.md")
-    dirty = _write(tmp, doc(changed(f"- {B} x.")), "dirty.md")
+    dirty = _write(tmp, doc(changed("- **Breaking:** x.")), "dirty.md")
     return (
         run_main(module, ["check", "--file", str(clean)])[0] == 0
         and run_main(module, ["check", "--file", str(dirty)])[0] == 1
@@ -1386,31 +1121,30 @@ def _scn_exit_extract_empty(module: types.ModuleType, tmp: Path) -> bool:
 
 
 def _scn_cli_output(module: types.ModuleType, tmp: Path) -> bool:
-    _write_docs(tmp)
-    path = _write(tmp, doc(changed(f"- {B} x.")), "c.md")
+    path = _write(tmp, doc(changed("- **Breaking:** x.")), "c.md")
     code, out = run_main(module, ["check", "--file", str(path)])
-    return code == 1 and out.startswith(f"{path}:9: CL006: ") and out.endswith("\n")
+    return code == 1 and out.startswith(f"{path}:9: CL005: ") and out.endswith("\n")
 
 
 def _scn_sorted(module: types.ModuleType, tmp: Path) -> bool:
-    docs = _write_docs(tmp)
-    text = doc(f"### Added\n\n- {B} x.\n\n### Added\n\n- y\n\n")
-    return [(f.line, f.code) for f in module.check_text(text, docs_root=docs)] == [
-        (9, "CL006"),
+    text = doc("### Added\n\n- **Breaking:** x.\n\n### Added\n\n- y\n\n")
+    return [(f.line, f.code) for f in module.check_text(text)] == [
+        (9, "CL005"),
         (11, "CL003"),
     ]
 
 
-def _scn_slug_table(module: types.ModuleType, tmp: Path) -> bool:
-    return module.heading_ids("## Renamed Thing\n\n## Same\n\n## Same\n") == [
-        "renamed-thing",
-        "same",
-        "same_1",
-    ]
+def _scn_bullet_lines(module: types.ModuleType, tmp: Path) -> bool:
+    """A finding sits on the first line of its own bullet, nested or adjacent."""
+    nested = doc(changed("- Parent", "  - **Breaking:** child"))
+    adjacent = doc(changed("- first ok", "- **Breaking:** second", "- third ok"))
+    return [f.line for f in module.check_text(nested)] == [10] and [
+        f.line for f in module.check_text(adjacent)
+    ] == [10]
 
 
 def _scn_cli_link_base(module: types.ModuleType, tmp: Path) -> bool:
-    path = _write(tmp, doc(changed(f"- {B} x. {OK_LINK}")), "c.md")
+    path = _write(tmp, doc(changed(f"- {B} x. {DOCS_LINK}")), "c.md")
     argv = ["extract", "Unreleased", "--file", str(path)]
     plain = run_main(module, argv)
     linked = run_main(module, [*argv, "--link-base", BASE])
@@ -1432,9 +1166,8 @@ def _scn_cli_link_base_usage(module: types.ModuleType, tmp: Path) -> bool:
 
 
 def _scn_stray_line(module: types.ModuleType, tmp: Path) -> bool:
-    docs = _write_docs(tmp)
     text = doc("### Changed\n\nfirst line\nsecond\n" + f"| a | {B} |\n\n")
-    found = module.check_text(text, docs_root=docs)
+    found = module.check_text(text)
     return [(f.line, f.code) for f in found] == [(11, "CL012")] and (
         text.split("\n")[10].startswith("| a |")
     )
@@ -1455,7 +1188,7 @@ EXTRA: dict[str, Callable[[types.ModuleType, Path], bool]] = {
     "exit-extract-empty": _scn_exit_extract_empty,
     "cli-output": _scn_cli_output,
     "findings-sorted": _scn_sorted,
-    "slug-table": _scn_slug_table,
+    "bullet-lines": _scn_bullet_lines,
     "stray-line": _scn_stray_line,
     "stray-exit": _scn_stray_exit,
 }
@@ -1463,11 +1196,10 @@ EXTRA: dict[str, Callable[[types.ModuleType, Path], bool]] = {
 
 def scenario_problems(module: types.ModuleType, tmp: Path) -> set[str]:
     """Ids of the scenarios the (possibly mutated) module fails; empty for the real script."""
-    docs = _write_docs(tmp)
     bad: set[str] = set()
     for case in CASES:
         try:
-            ok = run_case(module, case, docs)
+            ok = run_case(module, case)
         except Exception:
             ok = False
         if not ok:
@@ -1545,8 +1277,8 @@ MUTANTS: list[tuple[str, str, str, str]] = [
     (
         "BREAKING is matched case-insensitively",
         "spelling-Breaking",
-        "if m.group(0) == BREAKING_MARKER:",
-        "if m.group(0).upper() == BREAKING_MARKER:",
+        "if m.group(0) != BREAKING_MARKER:",
+        "if m.group(0).upper() != BREAKING_MARKER:",
     ),
     (
         "heading order is not checked",
@@ -1585,74 +1317,32 @@ MUTANTS: list[tuple[str, str, str, str]] = [
         'r"/compare/v?(\\d+',
     ),
     (
-        "the guide link is not resolved against the disk",
-        "link-missing-file",
-        "            except (OSError, UnicodeError):\n                cache[page] = None",
-        '            except (OSError, UnicodeError):\n                cache[page] = set(anchors_of("# x"))',
-    ),
-    (
-        "the slug keeps its capitals",
-        "valid-link-capitalised-heading",
-        'value = re.sub(r"[^\\w\\s-]", "", value).strip().lower()',
-        'value = re.sub(r"[^\\w\\s-]", "", value).strip()',
-    ),
-    (
-        "the slug keeps the spaces",
-        "slug-table",
-        'return re.sub(r"[-\\s]+", "-", value)',
-        "return value",
-    ),
-    (
-        "the heading of the guide is not checked",
-        "link-missing-heading",
-        "elif slug not in anchors:",
-        "elif False:",
-    ),
-    (
-        "a percent-encoded slug is not decoded",
-        "valid-link-percent-encoded",
-        'slug = unquote(fragment or "")',
-        'slug = fragment or ""',
-    ),
-    (
-        "the version directory is not checked",
-        "link-other-version",
-        "if version != version_dir:",
-        "if False:",
-    ),
-    (
-        "the next version is not bumped",
-        "valid-link",
-        'return f"{major}.{minor + 1}.0"',
-        'return f"{major}.{minor}.0"',
-    ),
-    (
         "continuation lines are ignored",
-        "valid-link-continuation-line",
+        "prose-on-continuation-line",
         "            body.append(line)\n            j += 1",
         "            j += 1",
     ),
     (
         "lines after a blank line are never part of the bullet",
-        "valid-link-after-blank-line",
+        "spelling-after-a-blank-line-in-the-bullet",
         "and _indent(masked[k]) >= marker_indent + 2",
         "and False",
     ),
     (
         "adjacent bullets are one bullet",
-        "adjacent-bullets-first-linked-second-not",
+        "bullet-lines",
         "if _ITEM.match(line) or _ANY_HEADING.match(line):",
         "if _ANY_HEADING.match(line):",
     ),
     (
         "inline code spans are not masked",
-        "marker-in-code-span",
+        "spelling-in-code-span-is-fine",
         'text = _CODE_SPAN.sub(_MASK, "\\n".join(body))',
         'text = "\\n".join(body)',
     ),
     (
         "code fences are not masked",
-        "marker-in-fence",
+        "spelling-in-a-fence-is-fine",
         "    masked = mask_fences(lines)\n    ref_start",
         "    masked = lines\n    ref_start",
     ),
@@ -1773,12 +1463,6 @@ MUTANTS: list[tuple[str, str, str, str]] = [
         "extract-with-heading",
         'out = ([parsed.lines[section.line - 1], ""] if with_heading else []) + body',
         "out = body",
-    ),
-    (
-        "a duplicate id is not made unique",
-        "slug-table",
-        "    while ident in taken or not ident:",
-        "    while not ident:",
     ),
     (
         "the link base is not applied",

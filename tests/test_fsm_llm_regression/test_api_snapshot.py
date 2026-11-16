@@ -1,4 +1,4 @@
-"""The public API snapshot `docs/api.txt` equals what the code declares now.
+"""The public API snapshot `tests/fixtures/api_snapshot.txt` equals what the code declares now.
 
 `scripts/api_snapshot.py` prints every public name (the static `__all__` of
 the eight packages and four core modules, plus `schema_registry`, `codes` and
@@ -23,8 +23,8 @@ pytest.importorskip("fastapi")  # fsm_llm.monitor needs it, like test_packaging
 
 _REPO_ROOT = pathlib.Path(__file__).parents[2]
 _SCRIPT = _REPO_ROOT / "scripts" / "api_snapshot.py"
-_SNAPSHOT = _REPO_ROOT / "docs" / "api.txt"
-_HINT = "run `make api-snapshot` and review `git diff docs/api.txt`"
+_SNAPSHOT = _REPO_ROOT / "tests" / "fixtures" / "api_snapshot.txt"
+_HINT = "run `make api-snapshot` and review `git diff tests/fixtures/api_snapshot.txt`"
 
 
 def _generate() -> str:
@@ -56,7 +56,7 @@ class TestApiSnapshot:
             difflib.unified_diff(
                 expected.splitlines(),
                 actual.splitlines(),
-                "docs/api.txt",
+                "tests/fixtures/api_snapshot.txt",
                 "generated",
                 lineterm="",
                 n=0,
@@ -64,7 +64,7 @@ class TestApiSnapshot:
         )
         shown = "\n".join(line[:300] for line in diff[:40])
         pytest.fail(
-            f"the public API differs from docs/api.txt ({len(diff)} diff lines, "
+            f"the public API differs from tests/fixtures/api_snapshot.txt ({len(diff)} diff lines, "
             f"first 40):\n{shown}\n{_HINT}"
         )
 

@@ -1521,7 +1521,7 @@ class TestTheRealReleaseNotes:
 
     The section of 0.13.0 is far longer than a release body can hold, so the workflow cuts it at a
     line end and points at the full text. What must survive that cut is the Highlights block at
-    the top: the short version, the upgrade guides and the pointer to the full list.
+    the top: the short version, the pointer to the BREAKING entries and the pointer to the full list.
     """
 
     def test_the_notes_open_with_the_highlights_and_the_cut_keeps_them(
@@ -1545,10 +1545,8 @@ class TestTheRealReleaseNotes:
         assert "These notes are cut at the GitHub release limit." in after
         assert _relative_doc_links(after) == []
         assert len(after) <= 125_000
-        assert (
-            f"](https://github.com/NikolasMarkou/fsm_llm/blob/v{version}/docs/upgrade-guide/index.md)"
-            in highlights
-        )
+        assert "entries marked BREAKING" in highlights
+        assert "docs/upgrade-guide" not in after  # step 123: no guide is linked any more
 
     def test_the_notes_keep_the_first_sections_after_the_highlights(
         self, tmp_path: Path

@@ -51,8 +51,6 @@ HISTORICAL = (
     "EVALUATE.md",  # eval run log
     "docs/2026_roadmap.md",  # the roadmap: plans, written before the layout
     "docs/agents_roadmap.md",  # a dated audit record
-    "docs/upgrade-guide/",  # names the old paths on purpose (step 118)
-    "docs/decisions/",  # generated index: quotes anchor comments, which name old modules
     "docs/strands_features",  # dated design records (prefix)
     "scripts/bench_data/",  # frozen bench record
     "plans/",  # planning artifacts
