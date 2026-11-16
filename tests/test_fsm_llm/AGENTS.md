@@ -62,7 +62,7 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | File | Role | Notes |
 | --- | --- | --- |
 | `conftest.py` | `minimal_fsm_dict` fixture | one state `only_state`, no transitions |
-| `support.py` | helpers shared by several test files: FSM builders (`_correction_fsm`, `_classified_fsm`), fake provider responses (`_fake_response`, `_stream_chunk`), the `_Prov` family of scripted providers, `_PassTwoSpy`, `_mock_llm`, `_api` | not collected (no `test_` prefix); a helper used by one file stays in that file; a clashing name carries its source as a prefix (`_aiter1_ambiguous_fsm`) |
+| `support.py` | helpers shared by several test files: FSM builders (`_correction_fsm`, `_classified_fsm`), fake provider responses (`_fake_response`, `_stream_chunk`), the `_Prov` family of scripted providers, `_PassTwoSpy`, `_mock_llm`, `_api`, `_child_env` (the scrubbed environment of a child Python process) and `_plain_state` | not collected (no `test_` prefix); a helper used by one file stays in that file; a clashing name carries its source as a prefix (`_aiter1_ambiguous_fsm`) |
 | `test_api.py`, `test_api_elaborate.py` | `API` loading, conversations, stacking | `test_api_elaborate.py` holds `TestBaseExceptionRollsBackUserMessage` |
 | `test_fsm.py`, `test_fsm_elaborate.py` | `FSMManager` data filtering, stacking | nested filtering of `get_conversation_data` |
 | `test_pipeline.py` | `MessagePipeline` 2-pass `process()` | Pass 2 failure is atomic (sync and stream) |
@@ -146,7 +146,7 @@ Helpers imported across files in this directory (module path `tests.test_fsm_llm
 
 | Defined in | Helpers | Imported by |
 | --- | --- | --- |
-| `support.py` | the helpers more than one test file needs (`_fake_response(content: str) -> MagicMock`, `_correction_fsm`, `_stream_chunk`, `_Prov`, `_PassTwoSpy`, `_EdgeProv`, `_PromptSpy`, `_ConnectionHarness`, `_mock_llm`, `_api` and others) | 43 feature files |
+| `support.py` | the helpers more than one test file needs (`_fake_response(content: str) -> MagicMock`, `_correction_fsm`, `_stream_chunk`, `_Prov`, `_PassTwoSpy`, `_EdgeProv`, `_PromptSpy`, `_ConnectionHarness`, `_mock_llm`, `_api`, `_child_env`, `_plain_state` and others) | 43 feature files |
 | `test_completion_state.py` | `_tool_fsm`, `_RESULT`, `_start`, `_to_call_model` | `test_api.py`, `test_classification_transitions.py`, `test_cut_off_record.py`, `test_definitions.py`, `test_validator_unit.py` |
 | `test_llm_complete.py` | `_Provider`, `_reply`, `_call` | `test_api.py`, `test_completion_state.py` |
 | `test_advance.py` | `_ScriptedLLM`, `_StreamingLLM`, `_trip_fsm`, `_start`, `_state`, `_always`, `_when_set`, `_CHUNKS`, `_REPLY` | `test_run_until_terminal.py` |

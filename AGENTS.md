@@ -250,7 +250,7 @@ Rules for NEW code, so the vocabulary stays one across core and the subpackages.
 ## Working here
 
 ```bash
-make test           # pytest -v (17,808 tests)
+make test           # pytest -v (17,890 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # python -m mypy -p fsm_llm (`mypy_path = "src"` in pyproject.toml)
@@ -271,19 +271,19 @@ make docs-clean     # rm -rf site/
 ```
 
 ```bash
-pytest                                 # Run all tests (17,808 collected)
+pytest                                 # Run all tests (17,890 collected)
 pytest tests/test_fsm_llm/            # Core package tests (7,172 tests)
 pytest tests/test_fsm_llm_reasoning/  # Reasoning tests (232 tests)
 pytest tests/test_fsm_llm_workflows/  # Workflows tests (407 tests)
-pytest tests/test_fsm_llm_agents/     # Agents tests (3,410 tests)
+pytest tests/test_fsm_llm_agents/     # Agents tests (3,418 tests)
 pytest tests/test_fsm_llm_monitor/    # Monitor tests (533 tests)
 pytest tests/test_fsm_llm_meta/       # Meta-builder tests (558 tests)
-pytest tests/test_fsm_llm_regression/ # Regression tests (2,010 tests)
+pytest tests/test_fsm_llm_regression/ # Regression tests (2,084 tests)
 pytest tests/test_examples/           # Example validation tests (110 tests)
 pytest tests/test_fsm_llm_eval/       # Eval tests (438 tests)
 pytest tests/test_fsm_llm_synthesis/  # Synthesis tests (2,106 tests)
 pytest tests/test_fsm_llm_testing/    # Public test doubles and assertions (317 tests)
-# The 11 suites above sum to 17,293. The remaining 515 are six root-level files:
+# The 11 suites above sum to 17,375. The remaining 515 are six root-level files:
 #   tests/test_integration_ollama.py (12), tests/test_packaging.py (269),
 #   tests/test_bench_common.py (19), tests/test_agents_bench.py (132),
 #   tests/test_skills_bench.py (38) and tests/test_coverage_ratchet.py (45)

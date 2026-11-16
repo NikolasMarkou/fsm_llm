@@ -105,7 +105,7 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_trust_boundary.py` - caller context cannot forge approval or a finished run (also through `AgentServer`, graph edges and swarm hand-offs), constructor kwargs checks, gated tools refused where there is no approval step, flagged tools with no approver fail closed.
 - `test_tools.py` - `ToolRegistry`, `@tool`, thread safety, `normalize_tool_input`, list and dict parameters, `register_function` shapes.
 - `test_tools_layer.py` - the tool layer `fsm_llm.tools`: the agents constants keep every attribute and share the tool-layer objects, `fsm_llm.agents` re-exports them, the old modules define none of the moved names, `AgentError` lives in core, importing the layer loads no subpackage.
-- `test_constants_mirror.py` - a shared constant has one value for every reader whichever class it is set on (review gate 2 concern 1, D-045): 16 names across the tool, policy and agents `ContextKeys`, `Defaults`, `ErrorMessages` and `LogMessages`; a probe per name over every reader, set one class versus all, undo restores, delete, the registry pinned against the AST of `agents/constants`.
+- `test_constants_mirror.py` - a shared constant has one value for every reader whichever class it is set on (review gate 2 concern 1, D-045): 16 names across the tool, policy and agents `ContextKeys`, `Defaults`, `ErrorMessages` and `LogMessages`; a probe per name over every reader, set one class versus all, undo restores, delete, the registry pinned against the AST of `agents/constants`, and concurrent overrides serialised by one lock (D-053: deterministic interleaving tests, an unlocked mutant, a stress test).
 - `test_policy_layer.py` - the policy layer `fsm_llm.policy`: the agents constants share the policy-layer objects, `fsm_llm.agents` re-exports the approval names, the old modules define none of them, importing the layer loads no agents module, the manager logs under `fsm_llm.policy.hitl`, and the `make_hitl_checker` gate handler is pinned.
 - `test_otel_exporter.py` - `OTELExporter` (monitor code, tested from this suite): thread-safe span handling and the exporter lifecycle.
 - `test_dependency_resolver.py` - `DependencyResolver` of `fsm_llm.workflows` (kept here to keep the pinned ids).
@@ -123,7 +123,7 @@ From the repo root, with the project virtualenv:
 .venv/bin/python -m pytest tests/test_fsm_llm_agents/ --collect-only -q | tail -1
 ```
 
-The whole suite needs no network or API key; the `conftest.py` network block makes sure of it. A default run (about 20 seconds) collects 3,410 tests. If a new test must open a real connection, mark it `real_llm` or `integration`; otherwise it fails with `ConnectionRefusedError`.
+The whole suite needs no network or API key; the `conftest.py` network block makes sure of it. A default run (about 20 seconds) collects 3,418 tests. If a new test must open a real connection, mark it `real_llm` or `integration`; otherwise it fails with `ConnectionRefusedError`.
 
 ## Things to know
 

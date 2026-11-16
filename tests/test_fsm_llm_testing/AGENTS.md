@@ -26,6 +26,7 @@ Covers `fsm_llm.testing` as a leaf of the package: imported by name, loaded by n
 | `test_assertions.py` | `TestAssertState`, `TestAssertContext`, `TestAssertPath`, `TestAssertResult`, `TestFailuresAreExplicit`, `TestPathRecorder`, `TestExports` |
 | `test_guide.py` | `TestGuideIsExecutable` |
 | `test_layering.py` | `TestImportProbes`, `TestSourceLayering`, `TestSkeleton` |
+| `support.py` | Not collected: `_state`, `_chain` and `_stuck`, the FSM definition builders `test_assertions.py` and `test_user.py` share |
 | `__init__.py` | Empty package marker |
 
 ## Invariants and constraints
