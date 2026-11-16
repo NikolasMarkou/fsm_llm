@@ -2,9 +2,12 @@
 
 `pyproject.toml` sets `readme = "README.md"`, so PyPI renders this one file with no repository
 around it: a relative image or link breaks there (plan d454fd62 D-020), and a mkdocs-only
-construct (`{% include %}`, an admonition, a tab) shows as raw text. Step 105 trimmed the
-README to the intro, the installation, two Quick Starts and a links block; the rest lives on
-the docs site and in CONTRIBUTING.md.
+construct (`{% include %}`, an admonition, a tab) shows as raw text. Step 105 of plan d454fd62
+trimmed the README to a short page; step 9.2 of plan d7719b03 restored the showcase README (key
+features, why, installation, six Quick Starts, how it works, documentation, examples and
+commands, status, references) and refined it for 0.13.0, keeping only what CONTRIBUTING.md now
+holds (the contributor commands, the full tree, the open items) out of it. The README has no
+length rule on purpose (the maintainer deleted it).
 
 `_readme_problems(text, root)` is a pure function of the README text and a project root (the
 root is only read to check that a GitHub URL names a path that exists). The real README is one
@@ -30,7 +33,6 @@ ROOT = Path(__file__).resolve().parents[2]
 README = ROOT / "README.md"
 SITE_URL = "https://nikolasmarkou.github.io/fsm_llm/"
 REPO_URL = "https://github.com/NikolasMarkou/fsm_llm"
-MIN_LINES, MAX_LINES = 100, 200
 
 #: A fenced block, indented or not (the Installation steps nest theirs in a list).
 _FENCE = re.compile(
@@ -86,13 +88,13 @@ def _readme_problems(text: str, root: Path = ROOT) -> list[str]:
         blocks.append((info, body))
 
     full_fsms = [b for info, b in blocks if info == "json" and '"initial_state"' in b]
-    if len(full_fsms) != 1:
-        problems.append(f"{len(full_fsms)} full FSM blocks, expected exactly 1")
+    if not full_fsms:
+        problems.append("0 full FSM blocks, expected at least 1")
     for body in full_fsms:
         try:
             FSMDefinition(**json.loads(body))
         except Exception as err:
-            problems.append(f"the full FSM block does not load: {err!r:.120}")
+            problems.append(f"a full FSM block does not load: {err!r:.120}")
 
     if SITE_URL not in text:
         problems.append(f"no link to the docs site {SITE_URL}")
@@ -105,10 +107,6 @@ def _readme_problems(text: str, root: Path = ROOT) -> list[str]:
             problems.append(f"image {name!r} is not in images/")
     if not _RAW_IMAGE.search(text):
         problems.append("the logo is not an absolute raw.githubusercontent.com image")
-
-    n = len(text.splitlines())
-    if not MIN_LINES <= n <= MAX_LINES:
-        problems.append(f"{n} lines, expected {MIN_LINES} to {MAX_LINES}")
     return problems
 
 
@@ -128,20 +126,39 @@ class TestTheRealReadme:
     def test_the_no_model_example_runs_offline(
         self, readme, tmp_path, monkeypatch, capsys
     ):
-        """Quick Start 2: the FSM block saved as `greeter.json`, then the scripted-double block."""
+        """Quick Start 2: the FSM block saved as `greeter.json`, then each scripted-double block."""
         full = [b for i, b in _blocks(readme) if i == "json" and '"initial_state"' in b]
         offline = [
             b for i, b in _blocks(readme) if i == "python" and "ScriptedLLM" in b
         ]
-        assert len(full) == 1 and len(offline) == 1
+        assert len(full) >= 1 and len(offline) == 2
         (tmp_path / "greeter.json").write_text(full[0], encoding="utf-8")
         monkeypatch.chdir(tmp_path)
-        exec(compile(offline[0], "README.md", "exec"), {"__name__": "__readme__"})
+        for body in offline:  # each block stands alone: a fresh namespace per block
+            exec(compile(body, "README.md", "exec"), {"__name__": "__readme__"})
         assert capsys.readouterr().out.splitlines() == [
             "What is your name?",
             "Goodbye, Alice!",
             "{'name': 'Alice'} goodbye",
+            "the bot passes ('ask_name', 'goodbye')",
         ]
+
+    def test_the_builder_and_workflow_examples_run_offline(
+        self, readme, tmp_path, monkeypatch, capsys
+    ):
+        """The builder, `BuildError` and workflow blocks need no model: run them."""
+        full = [b for i, b in _blocks(readme) if i == "json" and '"initial_state"' in b]
+        (tmp_path / "greeter.json").write_text(full[0], encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        chosen = [
+            b
+            for i, b in _blocks(readme)
+            if i == "python" and ("APIBuilder" in b or "WorkflowEngine" in b)
+        ]
+        assert len(chosen) == 2
+        for body in chosen:
+            exec(compile(body, "README.md", "exec"), {"__name__": "__readme__"})
+        assert capsys.readouterr().out.splitlines() == ["WorkflowStatus.COMPLETED"]
 
     def test_pyproject_still_publishes_the_readme(self):
         project = tomllib.loads((ROOT / "pyproject.toml").read_text("utf-8"))["project"]
@@ -151,20 +168,84 @@ class TestTheRealReadme:
         assert SITE_URL in readme
         assert REPO_URL in readme
 
-    def test_the_trimmed_sections_are_gone(self, readme):
-        # They moved to docs/concepts.md, docs/quickstart.md and CONTRIBUTING.md.
+    def test_the_showcase_sections_are_present(self, readme):
+        # The step 9.2 README is the feature-forward page, not the step 105 stub.
         headings = re.findall(r"^#{1,3} (.+)$", readme, re.MULTILINE)
-        for gone in (
+        for wanted in (
             "Key Features",
+            "Why FSM-LLM?",
+            "Installation",
+            "Quick Start",
             "How It Works",
-            "Project Structure",
-            "Contributing",
+            "In-Depth Documentation",
+            "Examples and Command-Line Tools",
+            "Quality, CI and Release",
+            "Status",
+            "License",
         ):
-            assert not any(gone in h for h in headings), gone
+            assert wanted in headings, wanted
+        # What CONTRIBUTING.md holds stays out of the README: no contributor command block.
+        assert "make install-dev" not in readme
+        assert "Good Places to Help" not in headings
 
     def test_the_readme_has_no_test_count_line(self, readme):
         # The count pin moved to CONTRIBUTING.md; a count here would drift with no pin.
         assert not re.search(r"\d[\d,]* tests\b", readme)
+
+
+class TestTheReadmeNumbersAreTrue:
+    """Every count the showcase README states is read from the code, not copied."""
+
+    def test_the_agent_patterns_are_the_ones_create_agent_accepts(self, readme):
+        from fsm_llm.agents import _PATTERNS
+
+        line = next(x for x in readme.splitlines() if "agent patterns (`react`" in x)
+        named = set(re.findall(r"`([a-z_]+)`", line.split("agent patterns", 1)[1]))
+        named -= {"AgentGraph"}
+        assert named == set(_PATTERNS)
+        assert len(_PATTERNS) == 18
+        assert "18 agent patterns" in readme
+
+    def test_nine_reasoning_strategies(self, readme):
+        from fsm_llm.reasoning import ReasoningType
+
+        assert len(ReasoningType) == 9
+        assert "9 reasoning strategies" in readme
+
+    def test_eleven_workflow_step_types(self, readme):
+        import fsm_llm.workflows as workflows
+
+        factories = [n for n in dir(workflows) if n.endswith("_step")]
+        assert len(factories) == 11
+        assert "11 step types" in readme
+
+    def test_the_example_counts_match_the_folders(self, readme):
+        counts = {}
+        for category in sorted((ROOT / "examples").iterdir()):
+            if category.is_dir():
+                counts[category.name] = sum(
+                    1 for d in category.iterdir() if (d / "run.py").is_file()
+                )
+        assert sum(counts.values()) == 100 and len(counts) == 8, counts
+        assert "100 runnable examples in 8 categories" in readme
+        for name, n in counts.items():
+            row = re.search(rf"^\| {name.title()} \| (\d+) \|", readme, re.MULTILINE)
+            assert row and int(row.group(1)) == n, name
+
+    def test_every_console_script_is_named(self, readme):
+        scripts = tomllib.loads((ROOT / "pyproject.toml").read_text("utf-8"))[
+            "project"
+        ]["scripts"]
+        assert len(scripts) == 8
+        for name in scripts:
+            assert f"`{name}" in readme, name
+
+    def test_the_two_state_kinds_beyond_conversation_exist(self, readme):
+        from fsm_llm import CompletionStateConfig  # noqa: F401
+        from fsm_llm.core.definitions import SynthesizeConfig  # noqa: F401
+
+        for kind in ("`conversation`", "`completion`", "`synthesize`"):
+            assert kind in readme, kind
 
 
 class TestDefectsAreCaught:
@@ -228,15 +309,15 @@ class TestDefectsAreCaught:
         mutated = readme.replace('"initial_state"', '"start_state"')
         assert any("0 full FSM blocks" in p for p in _readme_problems(mutated))
 
-    def test_a_second_full_fsm_block(self, readme):
+    def test_a_second_valid_full_fsm_block_is_fine(self, readme):
         bodies = [
             m.group(2)
             for m in _FENCE.finditer(readme)
             if '"initial_state"' in m.group(2)
         ]
-        assert len(bodies) == 1
+        assert len(bodies) >= 1
         mutated = readme + "\n```json\n" + bodies[0] + "```\n"
-        assert any("2 full FSM blocks" in p for p in _readme_problems(mutated))
+        assert _readme_problems(mutated) == []
 
     def test_a_broken_full_fsm_block(self, readme):
         mutated = readme.replace(
@@ -244,12 +325,14 @@ class TestDefectsAreCaught:
         )
         assert any("does not load" in p for p in _readme_problems(mutated))
 
-    def test_over_length(self, readme):
-        mutated = readme + "\nline\n" * (MAX_LINES - len(readme.splitlines()) + 1)
-        assert any("lines, expected" in p for p in _readme_problems(mutated))
+    def test_a_broken_second_full_fsm_block_is_caught(self, readme):
+        broken = '{"name": "B", "initial_state": "nowhere", "states": {}}'
+        mutated = readme + "\n```json\n" + broken + "\n```\n"
+        assert any("does not load" in p for p in _readme_problems(mutated))
 
-    def test_under_length(self):
-        assert any("lines, expected" in p for p in _readme_problems("# x\n"))
+    def test_length_is_not_a_rule(self, readme):
+        """The maintainer deleted the README length bound: neither a short nor a long text fails on size."""
+        assert _readme_problems(readme + "\nline\n" * 2000) == []
 
     def test_a_link_inside_a_fence_is_not_a_link(self, readme):
         mutated = readme + "\n```text\n[a](relative.md)\n```\n"
@@ -271,8 +354,29 @@ def _links(text: str) -> list[str]:
     return [m.group(1) for m in _INLINE_LINK.finditer(_outside_fences(text))]
 
 
-class TestWhereTheTrimmedTextWent:
-    """What the README lost is somewhere a reader can find it (step 105 of plan d454fd62)."""
+class TestWhatTheReadmePointsToIsThere:
+    """The README links guides and leaves the contributor text to CONTRIBUTING.md.
+
+    Step 105 of plan d454fd62 moved four Quick Start sections to `docs/quickstart.md` and the
+    contributor sections to CONTRIBUTING.md; step 9.2 of plan d7719b03 restored the README
+    sections that are for readers, and these checks keep the long forms where they are.
+    """
+
+    def test_the_readme_links_every_guide_page(self, readme):
+        for page in (
+            "quickstart",
+            "concepts",
+            "fsm_design",
+            "handlers",
+            "architecture",
+            "testing",
+            "synthesis",
+            "api_reference",
+            "cli",
+            "examples",
+        ):
+            assert (ROOT / "docs" / f"{page}.md").is_file(), page
+            assert f"{REPO_URL}/blob/main/docs/{page}.md" in readme, page
 
     def test_quickstart_holds_the_four_moved_sections(self):
         text = (ROOT / "docs" / "quickstart.md").read_text(encoding="utf-8")
@@ -502,7 +606,11 @@ class TestInstallDefectsAreCaught:
             ("pip uninstall fsm-llm", "pip install llm-fsm", "pip uninstall fsm-llm"),
             ("is a different, unrelated project", "is the same", "different project"),
             ("Python 3.11", "Python 3.10", "Python floor"),
-            ("| `otel` |", "| `otelx` |", "extra 'otel'"),
+            (
+                "`otel`",
+                "`otelx`",
+                "extra 'otel'",
+            ),  # every mention: the Key Features name it too
             ("fastapi", "flask", "dependency 'fastapi'"),
             (
                 "pip install llm-fsm\n",
