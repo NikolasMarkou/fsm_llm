@@ -2615,7 +2615,7 @@ def test_doc_counts_checks_the_per_file_rows(md, lines, want):
 
 
 # ══════════════════════════════════════════════════════════════
-# scripts/audit_pth.py has no allowlist: the editable install is a plain path
+# scripts/audit_pth.py has no allowlist for the editable install (a plain path)
 # ══════════════════════════════════════════════════════════════
 
 
@@ -2664,6 +2664,139 @@ class TestAuditPthNeedsNoAllowlist:
         name = self._pth_name()
         assert self._audit(tmp_path, monkeypatch, name, self._FINDER_HOOK) == 1
         assert name in capsys.readouterr().err
+
+
+class TestAuditPthAcceptsPywin32ByContent:
+    """`pywin32.pth` (pywin32 is pulled in by `mcp` on win32 only) holds the code
+    line `import pywin32_bootstrap`. The audit accepts that file by CONTENT, never
+    by name alone: the file name must be in `VETTED_CODE_LINES` and every line must
+    be blank, a comment, a path line or exactly the vetted line."""
+
+    _VETTED = "import pywin32_bootstrap"
+    # The shape of the file in the pywin32 wheels: CRLF, a comment header, three
+    # path lines, a comment, then the vetted line.
+    _REAL = (
+        "# .pth file for the PyWin32 extensions\r\n"
+        "win32\r\n"
+        "win32\\lib\r\n"
+        "Pythonwin\r\n"
+        "# And some hackery to deal with environments where the post_install script\r\n"
+        "# isn't run.\r\n"
+        "import pywin32_bootstrap\r\n"
+    )
+
+    def _audit(self, tmp_path, monkeypatch, files: dict[str, bytes]) -> int:
+        for name, data in files.items():
+            (tmp_path / name).write_bytes(data)
+        monkeypatch.setattr(audit_pth.site, "getsitepackages", lambda: [str(tmp_path)])
+        return audit_pth.audit()
+
+    def test_the_vetted_table_is_exactly_the_one_file_and_line(self):
+        assert audit_pth.VETTED_CODE_LINES == {"pywin32.pth": {self._VETTED}}
+
+    def test_the_real_pywin32_shape_passes(self, tmp_path, monkeypatch):
+        files = {"pywin32.pth": self._REAL.encode("utf-8")}
+        assert self._audit(tmp_path, monkeypatch, files) == 0
+
+    def test_the_real_shape_with_lf_endings_and_a_bom_passes(
+        self, tmp_path, monkeypatch
+    ):
+        data = b"\xef\xbb\xbf" + self._REAL.replace("\r\n", "\n").encode("utf-8")
+        assert self._audit(tmp_path, monkeypatch, {"pywin32.pth": data}) == 0
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            "import os; os.system('echo owned')\r\n",
+            "import subprocess\r\n",
+            "exec('1')\r\n",
+            "  import os\r\n",
+            "import pywin32_bootstrap2\r\n",
+        ],
+    )
+    def test_the_real_file_plus_another_code_line_is_flagged(
+        self, tmp_path, monkeypatch, capsys, extra
+    ):
+        data = (self._REAL + extra).encode("utf-8")
+        assert self._audit(tmp_path, monkeypatch, {"pywin32.pth": data}) == 1
+        assert "pywin32.pth" in capsys.readouterr().err
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "import pywin32_bootstrap; import os",
+            "import pywin32_bootstrap;import os",
+            "import pywin32_bootstrap, os",
+            "import pywin32_bootstrap # x",
+            "import pywin32_bootstrap\x0c; import os; os.system('x')",
+            "import  pywin32_bootstrap",
+        ],
+    )
+    def test_the_vetted_line_with_a_suffix_is_flagged(
+        self, tmp_path, monkeypatch, capsys, line
+    ):
+        data = f"win32\n{line}\n".encode()
+        assert self._audit(tmp_path, monkeypatch, {"pywin32.pth": data}) == 1
+        assert "pywin32.pth" in capsys.readouterr().err
+
+    def test_a_bom_plus_extra_code_is_flagged(self, tmp_path, monkeypatch, capsys):
+        data = b"\xef\xbb\xbf" + (self._REAL + "import os\r\n").encode("utf-8")
+        assert self._audit(tmp_path, monkeypatch, {"pywin32.pth": data}) == 1
+        assert "pywin32.pth" in capsys.readouterr().err
+
+    def test_a_bom_hiding_code_on_the_first_line_is_flagged(
+        self, tmp_path, monkeypatch
+    ):
+        data = b"\xef\xbb\xbfimport os; os.system('x')\n" + self._REAL.encode()
+        assert self._audit(tmp_path, monkeypatch, {"pywin32.pth": data}) == 1
+
+    def test_the_vetted_line_in_another_file_name_is_flagged(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        data = self._REAL.encode("utf-8")
+        for name in ("evil.pth", "PYWIN32.pth", "pywin32-x.pth", "xpywin32.pth"):
+            assert self._audit(tmp_path, monkeypatch, {name: data}) == 1, name
+            assert name in capsys.readouterr().err
+            (tmp_path / name).unlink()
+
+    def test_a_path_line_that_looks_like_code_in_pywin32_is_flagged(
+        self, tmp_path, monkeypatch
+    ):
+        # `os.` and `subprocess` at the start of a line are what the pattern
+        # flags in any other file; the vetted file gets no exemption for them.
+        for line in ("os.system('x')", "subprocess.call(['x'])", "http://x"):
+            data = (self._REAL + line + "\n").encode("utf-8")
+            assert self._audit(tmp_path, monkeypatch, {"pywin32.pth": data}) == 1, line
+
+    def test_a_windows_layout_site_packages_passes(self, tmp_path, monkeypatch):
+        files = {
+            "pywin32.pth": self._REAL.encode("utf-8"),
+            "distutils-precedence.pth": (
+                b"import os; var = 'SETUPTOOLS_USE_DISTUTILS'; "
+                b"enabled = os.environ.get(var, 'local') == 'local'; "
+                b"enabled and __import__('_distutils_hack').add_shim(); \r\n"
+            ),
+            f"__editable__.llm_fsm-{_pyproject()['project']['version']}.pth": (
+                b"C:\\Users\\runner\\work\\fsm_llm\\fsm_llm\\src\r\n"
+            ),
+        }
+        assert self._audit(tmp_path, monkeypatch, files) == 0
+
+    def test_a_clean_file_next_to_a_flagged_pywin32_is_still_reported(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        files = {
+            "pywin32.pth": (self._REAL + "import os\r\n").encode("utf-8"),
+            "paths.pth": b"C:\\one\r\n",
+        }
+        assert self._audit(tmp_path, monkeypatch, files) == 1
+        err = capsys.readouterr().err
+        assert "pywin32.pth" in err and "paths.pth" not in err
+
+    def test_only_vetted_code_is_false_for_a_name_outside_the_table(self):
+        assert audit_pth.only_vetted_code("pywin32.pth", self._REAL) is True
+        assert audit_pth.only_vetted_code("other.pth", self._REAL) is False
+        assert audit_pth.only_vetted_code("pywin32.pth", "import os\n") is False
 
 
 class TestAuditPthReadsWhatSiteReads:
