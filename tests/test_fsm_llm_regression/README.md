@@ -62,13 +62,13 @@ From the repo root, with the project virtualenv:
 .venv/bin/python -m pytest tests/test_fsm_llm_regression/test_regression_core_bugs.py -k VB14b
 ```
 
-At the time of writing, 2,007 tests are collected; two of them (the `requirements.txt` checks in `test_regression_cli_and_exports.py`) are skipped on purpose, there is no `requirements.txt`. The whole folder takes minutes, most of it the mutation and differential tests of the release and CI guards; one class runs in about a second.
+At the time of writing, 2,029 tests are collected; two of them (the `requirements.txt` checks in `test_regression_cli_and_exports.py`) are skipped on purpose, there is no `requirements.txt`. The whole folder takes minutes, most of it the mutation and differential tests of the release and CI guards; one class runs in about a second.
 
 ## Things to know
 
 - `test_regression_cli_and_exports.py` pins the package version to `"0.13.0"` (`TestVersionAlignment`). Update it on every release.
 - `test_em_dash_ratchet.py` - 17 tests: new text carries no em dash. `tests/fixtures/em_dash_allowlist.json` maps every tracked text file that has one to its exact count; the test fails when a file gains a dash or when an entry is above the real count (the allowlist only tightens); `plans/`, `scripts/bench_data/`, `examples/`, `docs/2026_roadmap.md` and `EVALUATE.md` are never read; regenerate with `python -m tests.test_fsm_llm_regression.test_em_dash_ratchet --write`.
-- `test_workflow_support.py` - 12 tests for `workflow_support.py`, the helpers the five workflow tests share (YAML loader, step finders, text mutators, the three shared assertions): each rejects a bad input, so a helper that asserted nothing cannot make every workflow test pass.
+- `test_workflow_support.py` - 29 tests for `workflow_support.py`, the helpers the five workflow tests share (YAML loader, step finders, text mutators, the three shared assertions): each rejects a bad input, so a helper that asserted nothing cannot make every workflow test pass.
 - Many tests call private methods (for example `TransitionEvaluator._determine_evaluation_result`, `LiteLLMInterface._parse_response_generation_response`, `manager._pipeline._execute_state_transition`). Renaming them breaks these tests.
 - Source checks fail on text, not behavior: reintroducing the string `md5` in any module of `src/fsm_llm/engine/api/` or `import asyncio` in the `handlers` package fails a test even if unused.
 - Tests that build `API.__new__(API)` must set every attribute the method reads (`_stack_lock`, `_last_accessed`, `_pending_push_ids`, `_ended_conversations`, `_MAX_ENDED_CACHE`, `_temp_fsm_definitions`). A new attribute in `API.__init__` may need adding here.

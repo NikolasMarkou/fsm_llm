@@ -5,7 +5,7 @@ Purpose: pytest regression suite that pins fixed bugs in the `fsm_llm` package (
 
 ## Scope
 
-- In scope: 36 test modules, the helper modules `support.py` and `workflow_support.py` and an empty `__init__.py`. 2,007 tests collected; 266 pass, 2 skip (as of this writing).
+- In scope: 36 test modules, the helper modules `support.py` and `workflow_support.py` and an empty `__init__.py`. 2,029 tests collected; 2 skip on purpose (as of this writing).
 - Code under test: `fsm_llm` core modules (`engine/api`, `engine/fsm`, `engine/turn` via `FSMManager._pipeline`, `core/transition_evaluator`, `core/expressions`, `core/definitions`, `llm` (incl. `llm/ollama`), `context` (incl. `context/layout`), `constants`, `handlers`, `logging`, `core/verify`, `core/visualize`, `runner`, `__main__`), plus `fsm_llm.reasoning` and `fsm_llm.workflows` subpackages.
 - Also reads repo files: `README.md`, `docs/quickstart.md`, `pyproject.toml`, `tox.ini`, `src/fsm_llm/__init__.py`, `src/fsm_llm/engine/api/conversation.py`, `src/fsm_llm/py.typed`.
 - Not in scope: live LLM calls (none here), agents, monitor, eval. No fixtures or conftest live in this folder.
@@ -61,7 +61,7 @@ flowchart LR
 | `test_docs_workflow.py` | `.github/workflows/docs.yml`, the docs build and deploy (roadmap row 0.7, plan d454fd62 step 106) | 78 | `workflow_problems(text)` is a pure function returning rule codes: the real workflow returns none and each of 38 mutants (widened permission, a tag instead of a SHA pin, `ubuntu-latest`, the guard removed or made silent, `latest` on a pre-release, deploy on a pull request, `fetch-depth` or `concurrency` removed, `--strict` removed, `pull_request_target`, an event field in a `run:`, ...) returns its own code; the guard script of the deploy job is extracted from the YAML and run with bash on synthetic refs (`v0.13.0` against `0.13.0` passes, `v0.13.1` against `0.13.0` fails, pre-release classification); `yaml.safe_load` only, the key `on` is read as `True` and put back |
 | `test_no_model_paths.py` | review gate 1 of plan d454fd62: the no-model sweep | 58 | Deletes `LLM_MODEL` itself (the root autouse fixture sets it); one row per public entry point that takes an injected interface, plus the paths that still raise `ModelNotConfiguredError` |
 | `test_em_dash_ratchet.py` | no em dash in new text: a per-file ratchet over every tracked text file against `tests/fixtures/em_dash_allowlist.json` (final REFLECT hygiene item 10, round 121.2) | 17 | A file may not gain a dash and an entry may not outlive a removed one; regenerate with `python -m tests.test_fsm_llm_regression.test_em_dash_ratchet --write` (step 123 does after it deletes `docs/` pages); `plans/`, `scripts/bench_data/`, `examples/`, `docs/2026_roadmap.md` and `EVALUATE.md` are never read; mutants plant a dash in a clean, a listed and a new file |
-| `test_workflow_support.py` | `workflow_support.py`, the helpers the five workflow tests share (loader, step finders, text mutators, the three shared assertions): each rejects a bad input (round 121.2, hygiene items 7 and 8) | 12 | A helper that asserted nothing would turn every workflow test green: mutants of the helper fail here |
+| `test_workflow_support.py` | `workflow_support.py`, the helpers the five workflow tests share (loader, step finders, text mutators, the three shared assertions): each rejects a bad input (round 121.2, hygiene items 7 and 8) | 29 | A helper that asserted nothing would turn every workflow test green: mutants of the helper fail here |
 
 ## Public interface
 
