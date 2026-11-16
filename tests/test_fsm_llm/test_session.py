@@ -70,6 +70,28 @@ class TestStep13C4C5:
         assert store.exists(long_id) is False
         assert store.delete(long_id) is False
 
+    def test_load_of_a_json_too_deep_to_parse_is_none_not_a_crash(self, tmp_path):
+        # `load` returns None for any unreadable session and never raises. A
+        # parser that runs out of recursion raises RecursionError, which is not
+        # a ValueError: forced here so the test holds on every interpreter.
+        from fsm_llm.engine.session import FileSessionStore
+
+        store = FileSessionStore(tmp_path)
+        store.save("deep", _c4_state("deep"))
+        with patch("fsm_llm.engine.session.json.loads", side_effect=RecursionError):
+            assert store.load("deep") is None
+
+    def test_load_of_a_100000_deep_context_file_never_raises(self, tmp_path):
+        # The real input: a count-based parser (3.11 to 3.13) refuses it, a
+        # stack-based one (3.14 and later) may accept it. Either way no raise.
+        from fsm_llm.engine.session import FileSessionStore, SessionState
+
+        head = json.dumps(_c4_state("deep").model_dump())[:-1]
+        text = head + ', "x": ' + "[" * 100_000 + "]" * 100_000 + "}"
+        (tmp_path / "deep.json").write_text(text, encoding="utf-8")
+        loaded = FileSessionStore(tmp_path).load("deep")
+        assert loaded is None or isinstance(loaded, SessionState)
+
     def test_c4_list_sessions_filters_invalid_stems(self, tmp_path):
         from fsm_llm.engine.session import FileSessionStore
 

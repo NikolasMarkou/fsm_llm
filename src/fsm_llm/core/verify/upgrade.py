@@ -13,6 +13,7 @@ import json
 import os
 import stat
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,6 +24,13 @@ from fsm_llm.core.definitions.schema import (
     parse_version,
 )
 from fsm_llm.logging import logger
+
+# Deepest container nesting a file may have and still be REWRITTEN. The dump is
+# `indent=2`, whose cost grows with the square of the depth, and a parser whose
+# recursion limit follows the stack (3.14 and later) accepts a 100,000-deep value.
+# The deepest definition the loader accepts (a condition at MAX_JSONLOGIC_DEPTH
+# with list arguments) is about 108 containers deep; 256 leaves more than 2x room.
+_MAX_NESTING_DEPTH = 256
 
 
 @dataclass(frozen=True)
@@ -50,6 +58,28 @@ def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return dict(pairs)
 
 
+def _nests_deeper_than(value: Any, limit: int) -> bool:
+    """True when a container of `value` sits deeper than `limit` (the root is 1).
+
+    Iterative (an explicit stack): a recursive walk would hit the very limit it
+    guards against. `value` is what `json.load` returned: dicts, lists, scalars.
+    """
+    stack = [(value, 1)]
+    while stack:
+        node, level = stack.pop()
+        children: Iterable[Any]
+        if isinstance(node, dict):
+            children = node.values()
+        elif isinstance(node, list):
+            children = node
+        else:
+            continue
+        if level > limit:
+            return True
+        stack.extend((child, level + 1) for child in children)
+    return False
+
+
 def upgrade_fsm_file(path: str) -> UpgradeResult:
     """Stamp the current definition version on an older FSM file, in place.
 
@@ -61,8 +91,10 @@ def upgrade_fsm_file(path: str) -> UpgradeResult:
             cause other than "already current or newer": an I/O failure,
             invalid JSON, a non-object top level, duplicate keys, a file that
             does not load as an FSM definition, a present non-string or empty
-            ``version``, or one outside ``[4.0, SCHEMA_VERSION_DEFAULT)``. An
-            omitted ``version`` already means the default: nothing to do.
+            ``version``, one outside ``[4.0, SCHEMA_VERSION_DEFAULT)``, or a
+            file about to be rewritten that nests containers deeper than
+            ``_MAX_NESTING_DEPTH`` (256). An omitted ``version`` already means
+            the default: nothing to do.
         Never raises, whatever the file holds (a deeply nested one included):
         the reason is logged and the file is left byte-identical.
         Rewriting normalises the file: indent 2, LF line endings, numbers
@@ -119,6 +151,8 @@ def upgrade_fsm_file(path: str) -> UpgradeResult:
         )
     if parsed >= current:
         return UpgradeResult(rewritten=False)  # nothing to do, not a failure
+    if _nests_deeper_than(data, _MAX_NESTING_DEPTH):
+        return _refuse(path, f"it is nested more than {_MAX_NESTING_DEPTH} levels deep")
     data["version"] = SCHEMA_VERSION_DEFAULT
     text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 

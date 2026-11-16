@@ -214,10 +214,11 @@ class FileSessionStore(SessionStore):
                 return None
             data = json.loads(path.read_text(encoding="utf-8"))
             return SessionState.model_validate(data)
-        except (json.JSONDecodeError, ValueError, OSError) as e:
+        except (json.JSONDecodeError, ValueError, OSError, RecursionError) as e:
             # OSError covers PermissionError, ENAMETOOLONG from exists() and the
             # TOCTOU window where the file is deleted between exists() and
-            # read_text(); contract is to return
+            # read_text(); RecursionError is a JSON too deep for a count-based
+            # parser (3.11 to 3.13), not a ValueError; contract is to return
             # None on any unreadable/invalid session, never raise (CB3-001).
             logger.warning(f"Failed to load session {session_id}: {e}")
             return None

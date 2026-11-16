@@ -908,6 +908,99 @@ class TestUpgradeFsmFile:
         assert result.rewritten is False and result.refusal is not None
         assert path.read_bytes() == text
 
+    @pytest.mark.parametrize("depth", [500, 1_000, 2_000])
+    def test_a_deep_extra_key_is_refused_on_every_interpreter(self, tmp_path, depth):
+        # The 100,000-deep tests above are refused by the parser on a build with a
+        # count-based recursion limit and reach the rewrite on a stack-based one
+        # (3.14 and later), where the indent=2 dump of such a value needs gigabytes
+        # (MemoryError). These depths parse on most builds, so they fail on the
+        # parent: 3.11 to 3.15 rewrite 500 levels, and 3.12 raises RecursionError
+        # out of the dump for 1,000 and 2,000 (3.11 refuses those at the parser).
+        from fsm_llm.core.verify import upgrade_fsm_file
+
+        path = tmp_path / "deep.json"
+        body = json.dumps(_declared_body("4.1", with_synthesize=False))[:-1]
+        text = (body + ', "deep": ' + "[" * depth + "]" * depth + "}").encode()
+        path.write_bytes(text)
+        result = upgrade_fsm_file(str(path))
+        assert result.rewritten is False and result.refusal is not None
+        assert path.read_bytes() == text
+
+    def test_a_deep_extra_key_the_parser_accepts_is_refused_for_its_nesting(
+        self, tmp_path
+    ):
+        # 500 levels parse on every build, so the refusal comes from the guard.
+        from fsm_llm.core.verify import upgrade_fsm_file
+
+        path = tmp_path / "deep.json"
+        body = json.dumps(_declared_body("4.1", with_synthesize=False))[:-1]
+        text = (body + ', "deep": ' + "[" * 500 + "]" * 500 + "}").encode()
+        path.write_bytes(text)
+        result = upgrade_fsm_file(str(path))
+        assert result.rewritten is False and "nested" in (result.refusal or "")
+        assert path.read_bytes() == text
+
+    @staticmethod
+    def _definition_nested_to(tmp_path, total_depth: int):
+        """A 4.1 file whose deepest container sits at `total_depth` (root is 1)."""
+        path = tmp_path / "edge.json"
+        body = json.dumps(_declared_body("4.1", with_synthesize=False))[:-1]
+        extra = total_depth - 1  # the root object is level 1, the value starts at 2
+        text = (body + ', "deep": ' + "[" * extra + "]" * extra + "}").encode()
+        path.write_bytes(text)
+        return path, text
+
+    def test_exactly_the_nesting_cap_is_rewritten_and_one_more_is_refused(
+        self, tmp_path
+    ):
+        from fsm_llm.core.verify import upgrade_fsm_file
+        from fsm_llm.core.verify.upgrade import _MAX_NESTING_DEPTH
+
+        path, text = self._definition_nested_to(tmp_path, _MAX_NESTING_DEPTH)
+        result = upgrade_fsm_file(str(path))
+        assert result.rewritten is True and result.refusal is None
+        assert json.loads(path.read_text(encoding="utf-8"))["version"] == "4.2"
+
+        path, text = self._definition_nested_to(tmp_path, _MAX_NESTING_DEPTH + 1)
+        result = upgrade_fsm_file(str(path))
+        assert result.rewritten is False and "nested" in (result.refusal or "")
+        assert path.read_bytes() == text
+
+    def test_a_definition_at_the_maximum_jsonlogic_depth_still_upgrades(self, tmp_path):
+        # The deepest shape the loader accepts: a condition nested to
+        # MAX_JSONLOGIC_DEPTH with a list argument per level (two containers a
+        # level). Its container depth must leave at least 2x headroom under the
+        # cap, so no definition the loader accepts is refused for depth.
+        from fsm_llm.constants import MAX_JSONLOGIC_DEPTH
+        from fsm_llm.core.verify import upgrade_fsm_file
+        from fsm_llm.core.verify.upgrade import _MAX_NESTING_DEPTH
+
+        logic: Any = {"var": "x"}
+        for _ in range(MAX_JSONLOGIC_DEPTH):
+            logic = {"and": [logic, True]}
+        body = _declared_body("4.1", with_synthesize=False)
+        body["states"]["start"]["transitions"][0]["conditions"] = [
+            {"description": "c", "logic": logic}
+        ]
+        path = tmp_path / "logic.json"
+        path.write_text(json.dumps(body), encoding="utf-8")
+        deepest, stack = 0, [(body, 1)]
+        while stack:
+            node, level = stack.pop()
+            children = (
+                node.values()
+                if isinstance(node, dict)
+                else node
+                if isinstance(node, list)
+                else ()
+            )
+            if isinstance(node, dict | list):
+                deepest = max(deepest, level)
+            stack.extend((child, level + 1) for child in children)
+        assert deepest * 2 <= _MAX_NESTING_DEPTH
+        result = upgrade_fsm_file(str(path))
+        assert result.rewritten is True and result.refusal is None
+
     @pytest.mark.parametrize("version", [4.1, 4, None, ["4.1"]])
     def test_a_non_string_version_is_left_alone(self, tmp_path, version):
         from fsm_llm.core.verify import upgrade_fsm_file
