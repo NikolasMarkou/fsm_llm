@@ -4142,6 +4142,8 @@ class TestIdCollisions:
         self, tmp_path: Path
     ) -> None:
         root = _write(tmp_path / "b", {f"{n}.md": _doc() for n in ("OK", "Ok", "ok")})
+        if len(list(root.iterdir())) < 3:  # a case-folding file system (NTFS, APFS)
+            pytest.skip("file system folds these names")
 
         bundle = load_bundle(root)
 
@@ -4149,6 +4151,22 @@ class TestIdCollisions:
         warnings = [i for i in bundle.issues if i.code == "id-collision"]
         assert [w.path for w in warnings] == ["Ok.md", "ok.md"]
         assert all("'OK'" in w.message for w in warnings)
+
+    def test_three_lookalikes_skip_on_a_file_system_that_folds_case(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Simulates NTFS or APFS: the three writes land in one file, which the
+        # test must report as a skip, never as "assert 1 == 3".
+        def folding_write_text(
+            self: Path, data: str, *args: object, **kw: object
+        ) -> int:
+            target = self.with_name(self.name.lower())
+            return target.write_bytes(data.encode("utf-8"))
+
+        monkeypatch.setattr(Path, "write_text", folding_write_text)
+
+        with pytest.raises(pytest.skip.Exception, match="folds these names"):
+            self.test_three_lookalikes_give_two_warnings_all_naming_the_first(tmp_path)
 
     def test_a_loaded_colliding_bundle_is_refused_by_the_writer(
         self, tmp_path: Path

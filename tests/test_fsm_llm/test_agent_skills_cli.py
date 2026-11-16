@@ -4,6 +4,7 @@ with ``chr`` or YAML escapes: this file stays pure ASCII."""
 
 from __future__ import annotations
 
+import errno
 import importlib
 import io
 import os
@@ -22,6 +23,7 @@ from fsm_llm.constants import (
     SKILL_LIST_MAX_ITEMS,
     SKILL_READ_PAGE_CHARS,
 )
+from fsm_llm.core.definitions import SkillError
 from fsm_llm.skills import AgentSkill, SkillCatalog, SkillIssue
 from fsm_llm.skills.cli import main
 from tests.conftest import symlink_or_skip
@@ -63,6 +65,22 @@ def _run(capsys: pytest.CaptureFixture[str], *argv: str | Path) -> tuple[int, st
     code = main([str(a) for a in argv])
     captured = capsys.readouterr()
     return code, captured.out, captured.err
+
+
+def _path_limit_problem(path: Path) -> str | None:
+    """Why *path* cannot be used as a long, missing skill root here, or ``None``.
+
+    Interface contract: *path* is a long path that does not exist. The probe makes
+    the two calls the skill loader makes (``resolve`` then ``is_dir``). Returns a
+    skip reason when either raises ``OSError`` (a short path limit: ENAMETOOLONG on
+    macOS or Windows), else ``None`` (the loader reports the missing root with the
+    whole path in the message). Raises nothing.
+    """
+    try:
+        path.resolve().is_dir()
+    except OSError as exc:
+        return f"this file system refuses a path of {len(str(path))} characters: {exc}"
+    return None
 
 
 @pytest.fixture
@@ -475,9 +493,31 @@ class TestExitCodes:
         assert "Traceback" not in err
 
     def test_a_very_long_error_line_is_capped(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # No real path: the cap of report_error must not depend on PATH_MAX.
+        def boom(*args: Any, **kwargs: Any) -> Any:
+            raise SkillError("x" * 2400)
+
+        monkeypatch.setattr(skills_cli, "load_skills", boom)
+
+        code, _, err = _run(capsys, "list", ".")
+
+        prefix = "fsm-llm-skills: "
+        assert code == 1 and len(err.splitlines()) == 1
+        assert 1000 < len(err) < 1100
+        # the line is the prefix plus exactly the 1,000 characters of the cap
+        assert len(err) == len(prefix) + 1000 + 1  # the newline
+
+    def test_a_very_long_real_path_is_one_capped_line(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         far = tmp_path.joinpath(*["d" * 200] * 12, "x")  # about 2,400 characters
+        problem = _path_limit_problem(far)
+        if problem:
+            pytest.skip(problem)
 
         code, _, err = _run(capsys, "list", far)
 
@@ -561,6 +601,55 @@ class TestExitCodes:
 
         assert result.returncode == 0, result.stderr
         assert result.stdout.startswith("alpha\t")
+
+
+class TestPathLimitProbe:
+    """The probe that lets the real-path test skip where a path is too long (a
+    short MAX_PATH: Windows, macOS) and run where it is not (Linux)."""
+
+    def test_a_short_path_has_no_problem(self, tmp_path: Path) -> None:
+        assert _path_limit_problem(tmp_path / "x") is None
+
+    @pytest.mark.skipif(
+        sys.platform != "linux",
+        reason="asserts that the probe does NOT skip on Linux (PATH_MAX 4096)",
+    )
+    def test_the_long_path_is_usable_on_linux_so_the_real_test_is_not_skipped(
+        self, tmp_path: Path
+    ) -> None:
+        assert _path_limit_problem(tmp_path.joinpath(*["d" * 200] * 12, "x")) is None
+
+    @pytest.mark.parametrize("name", ["is_dir", "resolve"])
+    def test_a_path_too_long_for_the_system_call_is_reported(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str
+    ) -> None:
+        def too_long(self: Path, *args: Any, **kwargs: Any) -> bool:
+            raise OSError(errno.ENAMETOOLONG, "File name too long")
+
+        monkeypatch.setattr(Path, name, too_long)
+
+        problem = _path_limit_problem(tmp_path / "x")
+
+        assert problem and "path" in problem
+
+    def test_the_old_test_form_fails_where_the_path_is_too_long(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        # What macOS showed: is_dir() raising ENAMETOOLONG gives the terse
+        # "cannot open skill root" line, so a bound on the real path is false there.
+        def too_long(self: Path) -> bool:
+            raise OSError(errno.ENAMETOOLONG, "File name too long")
+
+        monkeypatch.setattr(Path, "is_dir", too_long)
+        far = tmp_path.joinpath(*["d" * 200] * 12, "x")
+
+        code, _, err = _run(capsys, "list", far)
+
+        assert code == 1 and not 1000 < len(err) < 1100
+        assert _path_limit_problem(far)
 
 
 class TestWiring:

@@ -8,6 +8,7 @@ import ast
 import hashlib
 import inspect
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -1243,6 +1244,28 @@ UNPINNED_CORE = {
 }
 
 
+def _is_exact_file(path):
+    """Whether *path* is a file whose every component below ``ROOT`` has exactly this case.
+
+    Interface contract: *path* is under ``ROOT``; returns a bool, raises nothing for a
+    missing file or an unlistable directory. ``is_file`` alone is not enough: on a
+    case-insensitive disk (NTFS, APFS) ``State.py`` is a file when ``state.py`` is, so
+    the class ``State`` would be taken for a module. The directory listing returns the
+    case on disk on every file system.
+    """
+    if not path.is_file():
+        return False
+    here = path
+    while here != ROOT and here != here.parent:
+        try:
+            if here.name not in os.listdir(here.parent):
+                return False
+        except OSError:
+            return False
+        here = here.parent
+    return True
+
+
 def _fsm_llm_imports(path):
     """The src files *path* imports from ``fsm_llm``, at module level or in a function."""
     rel = path.relative_to(ROOT).with_suffix("")
@@ -1261,7 +1284,7 @@ def _fsm_llm_imports(path):
             continue
         for mod in (m for m in mods if m[:1] == ["fsm_llm"]):
             stem = ROOT.joinpath("src", "fsm_llm", *mod[1:])
-            hit = next((c for c in (stem.with_suffix(".py"), stem / "__init__.py") if c.is_file()), None)  # fmt: skip
+            hit = next((c for c in (stem.with_suffix(".py"), stem / "__init__.py") if _is_exact_file(c)), None)  # fmt: skip
             found |= {hit.relative_to(ROOT).as_posix()} if hit else set()
     return found
 
@@ -1280,9 +1303,107 @@ def _module_imports(path):
         for alias in node.names if node.module is None else node.names[:1]:
             stem = alias.name if node.module is None else node.module.split(".")[0]
             plain, package = here / f"{stem}.py", here / stem / "__init__.py"
-            hit = plain if plain.is_file() or not package.is_file() else package
+            hit = (
+                plain
+                if _is_exact_file(plain) or not _is_exact_file(package)
+                else package
+            )
             found.add(hit.relative_to(ROOT).as_posix())
     return found
+
+
+def _fold_case_of_is_file(monkeypatch):
+    """Make ``Path.is_file`` answer as a case-insensitive disk does (a test double).
+
+    Interface contract: *monkeypatch* is pytest's fixture; the patch is undone with the
+    test. A path is a file when any entry of its directory equals the name ignoring case
+    and is a file; only the last component folds.
+    """
+    real = Path.is_file
+
+    def folding_is_file(self, *args, **kwargs):
+        try:
+            names = os.listdir(self.parent)
+        except OSError:
+            return False
+        return any(
+            n.lower() == self.name.lower() and real(self.parent / n) for n in names
+        )
+
+    monkeypatch.setattr(Path, "is_file", folding_is_file)
+
+
+class TestClosureHelpersAreCaseExact:
+    """The import closure of the pins reads the disk: on NTFS or APFS ``State.py`` is a
+    file when ``state.py`` is, and the class ``State`` was taken for a module (macOS leg
+    of the first CI run). Simulated here by an ``is_file`` that folds case."""
+
+    @pytest.fixture
+    def folding(self, monkeypatch):
+        _fold_case_of_is_file(monkeypatch)
+
+    @pytest.fixture
+    def mini(self, monkeypatch, tmp_path):
+        """A tmp ROOT with ``core/definitions/state.py`` and a file importing ``State``."""
+        defs = tmp_path / "src" / "fsm_llm" / "core" / "definitions"
+        defs.mkdir(parents=True)
+        (defs / "__init__.py").write_text("", encoding="utf-8")
+        (defs / "state.py").write_text("class State: ...\n", encoding="utf-8")
+        user = tmp_path / "src" / "fsm_llm" / "user.py"
+        user.write_text(
+            "from fsm_llm.core.definitions import State\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(sys.modules[__name__], "ROOT", tmp_path)
+        return user
+
+    def test_the_folding_stub_really_folds(self, mini, folding):
+        defs = mini.parent / "core" / "definitions"
+        assert (defs / "State.py").is_file()  # what a case-insensitive disk answers
+        assert (defs / "state.py").is_file()
+        assert not (defs / "Other.py").is_file()
+
+    def test_a_class_name_is_not_taken_for_a_module_on_a_folding_disk(
+        self, mini, folding
+    ):
+        assert _fsm_llm_imports(mini) == {"src/fsm_llm/core/definitions/__init__.py"}
+
+    def test_the_same_answer_on_a_case_sensitive_disk(self, mini):
+        assert _fsm_llm_imports(mini) == {"src/fsm_llm/core/definitions/__init__.py"}
+
+    def test_a_real_module_import_is_still_found_on_a_folding_disk(self, mini, folding):
+        mini.write_text(
+            "from fsm_llm.core.definitions import state\n", encoding="utf-8"
+        )
+        assert _fsm_llm_imports(mini) == {
+            "src/fsm_llm/core/definitions/__init__.py",
+            "src/fsm_llm/core/definitions/state.py",
+        }
+
+    def test_the_helper_checks_every_component_not_only_the_last(
+        self, mini, monkeypatch
+    ):
+        right = mini.parent / "core" / "definitions" / "state.py"
+        wrong = mini.parent / "Core" / "definitions" / "State.py"
+        # a disk that folds every component of the path
+        monkeypatch.setattr(
+            Path, "is_file", lambda self: str(self).lower() == str(right).lower()
+        )
+        assert wrong.is_file() and right.is_file()
+
+        assert _is_exact_file(right)
+        assert not _is_exact_file(wrong)
+        assert not _is_exact_file(mini.parent / "Core" / "definitions" / "state.py")
+
+    def test_every_real_pinned_file_gives_the_same_closure_on_a_folding_disk(
+        self, monkeypatch
+    ):
+        reads = [p for p in ["scripts/synthesis_bench.py", *sb.SRC_PINS] if not p.endswith("__init__.py")]  # fmt: skip
+        expect = {p: _fsm_llm_imports(ROOT / p) for p in reads}
+        siblings = {p: _module_imports(ROOT / p) for p in sb.SRC_PINS if "/agents/" in p and not p.endswith("__init__.py")}  # fmt: skip
+        _fold_case_of_is_file(monkeypatch)
+
+        assert {p: _fsm_llm_imports(ROOT / p) for p in reads} == expect
+        assert {p: _module_imports(ROOT / p) for p in siblings} == siblings
 
 
 class TestPins:
