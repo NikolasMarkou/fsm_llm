@@ -56,6 +56,9 @@ from tests.test_fsm_llm_regression.workflow_support import (
     _index_of,
     _load,
     _steps,
+    passthrough_env,
+    skip_unless_bash,
+    write_script,
 )
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -256,6 +259,7 @@ def canary_behaviour_problems(script: str, tmp_path: Path) -> set[str]:
     a clean audit, a service failure (any other exit code) and an empty report all fail it.
     """
     found: set[str] = set()
+    skip_unless_bash()
     scenarios = [
         # (stub exit code, report written, the script must succeed)
         (
@@ -286,7 +290,8 @@ def canary_behaviour_problems(script: str, tmp_path: Path) -> set[str]:
         write_report = ""
         if report is not None:
             write_report = f"printf '%s' '{report}' > \"$out\"\n"
-        stub.write_text(
+        write_script(
+            stub,
             "#!/usr/bin/env bash\n"
             'out=""\n'
             'while [ "$#" -gt 0 ]; do\n'
@@ -294,11 +299,10 @@ def canary_behaviour_problems(script: str, tmp_path: Path) -> set[str]:
             "  shift\n"
             "done\n"
             f"{write_report}exit {code}\n",
-            encoding="utf-8",
         )
         stub.chmod(0o755)
         path = work / "run.sh"
-        path.write_text(script, encoding="utf-8")
+        write_script(path, script)
         env = {
             "PATH": os.pathsep.join(
                 [
@@ -309,6 +313,7 @@ def canary_behaviour_problems(script: str, tmp_path: Path) -> set[str]:
             ),
             "RUNNER_TEMP": str(work / "tmp"),
             "HOME": str(work),
+            **passthrough_env(),
         }
         proc = subprocess.run(
             ["bash", str(path)],
@@ -649,14 +654,15 @@ class TestTheCanaryScript:
 
     def test_a_clean_audit_fails_the_step(self, tmp_path: Path):
         # the canary must be red on a clean exit: "the audit passed" is the failure
+        skip_unless_bash()
         script = self._script()
         scenario = tmp_path / "clean"
         (scenario / "bin").mkdir(parents=True)
         (scenario / "tmp").mkdir()
         stub = scenario / "bin" / "pip-audit"
-        stub.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        write_script(stub, "#!/usr/bin/env bash\nexit 0\n")
         stub.chmod(0o755)
-        (scenario / "run.sh").write_text(script, encoding="utf-8")
+        write_script(scenario / "run.sh", script)
         proc = subprocess.run(
             ["bash", str(scenario / "run.sh")],
             cwd=_ROOT,
@@ -670,6 +676,7 @@ class TestTheCanaryScript:
                 ),
                 "RUNNER_TEMP": str(scenario / "tmp"),
                 "HOME": str(scenario),
+                **passthrough_env(),
             },
             capture_output=True,
             text=True,

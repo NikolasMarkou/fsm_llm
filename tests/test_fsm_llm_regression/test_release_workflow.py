@@ -53,6 +53,10 @@ from tests.test_fsm_llm_regression.workflow_support import (
     _steps,
     _unpin_checkout,
     _uses_steps,
+    passthrough_env,
+    skip_unless_bash,
+    skip_unless_gnu_find,
+    write_script,
 )
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -723,16 +727,21 @@ def _script(job: str, *, step_id: str | None = None, needle: str | None = None) 
 def _run(
     script: str, cwd: Path, env: dict[str, str] | None = None
 ) -> tuple[int, str, str]:
-    """Run a workflow script in bash inside `cwd`; return (exit code, $GITHUB_OUTPUT, stderr)."""
+    """Run a workflow script in bash inside `cwd`; return (exit code, $GITHUB_OUTPUT, stderr).
+
+    Skips the calling test where there is no usable bash (the script is LF-only on every platform).
+    """
+    skip_unless_bash()
     cwd.mkdir(parents=True, exist_ok=True)
     out = cwd / "github_output"
     out.write_text("", encoding="utf-8")
     sh = cwd / "step.sh"
-    sh.write_text(script, encoding="utf-8")
+    write_script(sh, script)
     full_env = {
         "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"],
         "GITHUB_OUTPUT": str(out),
         "HOME": str(cwd),
+        **passthrough_env(),
         **(env or {}),
     }
     proc = subprocess.run(
@@ -1162,6 +1171,7 @@ def _fit_failures(script: str, base: Path) -> list[str]:
 
 
 def _names_failures(script: str, base: Path) -> list[str]:
+    skip_unless_gnu_find()  # the script lists dist/ with `find -printf`
     wrong = []
     good = ("llm_fsm-0.13.0-py3-none-any.whl", "llm_fsm-0.13.0.tar.gz")
     env = {"WHEEL": good[0], "SDIST": good[1]}
@@ -1328,6 +1338,7 @@ class TestTheOtherScripts:
         assert _names_failures(_script("build", needle="LC_ALL=C sort"), tmp_path) == []
 
     def test_the_name_check_reports_both_listings(self, tmp_path: Path):
+        skip_unless_gnu_find()
         (tmp_path / "dist").mkdir()
         (tmp_path / "dist" / "stray.txt").write_text("x", encoding="utf-8")
         code, _, err = _run(

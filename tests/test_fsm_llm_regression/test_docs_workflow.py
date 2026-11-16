@@ -43,6 +43,9 @@ from tests.test_fsm_llm_regression.workflow_support import (
     _steps,
     _unpin_checkout,
     _uses_steps,
+    passthrough_env,
+    skip_unless_bash,
+    write_script,
 )
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -419,6 +422,7 @@ def _guard_script() -> str:
 
 def _run_guard(tmp_path: Path, tag: str, declared: str | None) -> tuple[int, str, str]:
     """Run the workflow's guard script in a scratch tree; return (exit code, output, stderr)."""
+    skip_unless_bash()
     pkg = tmp_path / "src" / "fsm_llm"
     pkg.mkdir(parents=True, exist_ok=True)
     version_file = pkg / "__version__.py"
@@ -429,12 +433,13 @@ def _run_guard(tmp_path: Path, tag: str, declared: str | None) -> tuple[int, str
     out = tmp_path / "github_output"
     out.write_text("", encoding="utf-8")
     script = tmp_path / "guard.sh"
-    script.write_text(_guard_script(), encoding="utf-8")
+    write_script(script, _guard_script())
     env = {
         "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"],
         "GITHUB_REF_NAME": tag,
         "GITHUB_OUTPUT": str(out),
         "HOME": str(tmp_path),
+        **passthrough_env(),
     }
     proc = subprocess.run(
         ["bash", str(script)],

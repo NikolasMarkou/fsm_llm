@@ -9,8 +9,16 @@ input here, and to give the old answer on a good one (final REFLECT hygiene item
 
 from __future__ import annotations
 
+import ast
+import os
+import sys
+import types
+from pathlib import Path
+
 import pytest
 
+from tests.conftest import posix_only
+from tests.test_fsm_llm_regression import workflow_support as ws
 from tests.test_fsm_llm_regression.workflow_support import (
     _assert_multi_line_scripts_fail_fast,
     _assert_mutant_caught,
@@ -27,7 +35,16 @@ from tests.test_fsm_llm_regression.workflow_support import (
     _steps,
     _unpin_checkout,
     _uses_steps,
+    bash_problem,
+    gnu_find_problem,
+    passthrough_env,
+    skip_unless_bash,
+    skip_unless_gnu_find,
+    write_script,
 )
+
+_TESTS = Path(__file__).resolve().parents[1]
+_RELEASE = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "release.yml"
 
 SHA = "a" * 40
 TEXT = (
@@ -151,3 +168,276 @@ class TestAssertions:
             _assert_mutant_caught("ok", lambda t: t + "x", "rule", "missed", problems)
         with pytest.raises(AssertionError):  # another rule saw it, not this one
             _assert_mutant_caught("ok", lambda t: t + "BAD", "other", "wrong", problems)
+
+
+# --------------------------------------------------------------------------------------
+# Running a script: the LF writer and the capability probes (plan d7719b03, D-006)
+# --------------------------------------------------------------------------------------
+
+
+def _stub(directory: Path, name: str, body: str) -> Path:
+    """An executable `name` in `directory` (a shell stub)."""
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    write_script(path, "#!/bin/sh\n" + body)
+    path.chmod(0o755)
+    return path
+
+
+def _probe_contract_failures(mod: types.SimpleNamespace, base: Path) -> list[str]:
+    """The labels of the probe expectations `mod` (the real module or a mutant) breaks.
+
+    Each case is a PATH and whether the probe must report a problem there. The stubs stand
+    for what a Windows or macOS runner offers: no bash, a WSL-like bash that fails, a bash
+    that prints something else, a BSD find that knows no `-printf`.
+    """
+    real = os.environ["PATH"]
+    nobash = base / "nobash"
+    nobash.mkdir(parents=True)
+    _stub(base / "failing-bash", "bash", "echo 'no distribution' >&2\nexit 1\n")
+    _stub(base / "odd-bash", "bash", "echo something else\n")
+    _stub(
+        base / "bsd-find", "find", "echo 'find: -printf: unknown primary' >&2\nexit 1\n"
+    )
+    _stub(base / "gnu-find", "find", "printf x\n")
+    _stub(base / "good-bash", "bash", "echo ok\n")
+    both = os.pathsep.join
+    cases = [
+        ("bash missing", mod.bash_problem(str(nobash)), True),
+        ("bash exits 1", mod.bash_problem(str(base / "failing-bash")), True),
+        ("bash prints other text", mod.bash_problem(str(base / "odd-bash")), True),
+        ("bash says ok", mod.bash_problem(str(base / "good-bash")), False),
+        ("find without bash", mod.gnu_find_problem(str(nobash)), True),
+        (
+            "BSD find first",
+            mod.gnu_find_problem(both([str(base / "bsd-find"), real])),
+            True,
+        ),
+        (
+            "GNU-like find first",
+            mod.gnu_find_problem(both([str(base / "gnu-find"), real])),
+            False,
+        ),
+    ]
+    failures = [label for label, got, bad in cases if (got is not None) != bad]
+    for label, call, path, skips in [
+        ("skip_unless_bash on no bash", mod.skip_unless_bash, str(nobash), True),
+        (
+            "skip_unless_bash on a bash",
+            mod.skip_unless_bash,
+            str(base / "good-bash"),
+            False,
+        ),
+        (
+            "skip_unless_gnu_find on BSD find",
+            mod.skip_unless_gnu_find,
+            both([str(base / "bsd-find"), real]),
+            True,
+        ),
+        (
+            "skip_unless_gnu_find on GNU find",
+            mod.skip_unless_gnu_find,
+            both([str(base / "gnu-find"), real]),
+            False,
+        ),
+    ]:
+        try:
+            call(path)
+            skipped = False
+        except pytest.skip.Exception:
+            skipped = True
+        if skipped != skips:
+            failures.append(label)
+    return failures
+
+
+def _variant(old: str, new: str) -> types.SimpleNamespace:
+    """The `workflow_support` module with `old` replaced by `new` (a mutant), fresh caches."""
+    source = Path(ws.__file__).read_text(encoding="utf-8")
+    assert source.count(old) == 1, old
+    namespace: dict[str, object] = {"__name__": "workflow_support_mutant"}
+    exec(compile(source.replace(old, new), "<mutant>", "exec"), namespace)
+    return types.SimpleNamespace(**namespace)
+
+
+_BASH_CALL = (
+    'return _bash_problem(_search_path(path), os.environ.get("SYSTEMROOT", ""))'
+)
+_FIND_CALL = (
+    'return _gnu_find_problem(_search_path(path), os.environ.get("SYSTEMROOT", ""))'
+)
+_BASH_SKIP = '    if problem:\n        pytest.skip(f"these tests run'
+
+
+class TestScriptWriter:
+    def test_the_script_is_written_with_lf_only(self, tmp_path: Path) -> None:
+        write_script(tmp_path / "s.sh", "set -e\necho a\n")
+        assert (tmp_path / "s.sh").read_bytes() == b"set -e\necho a\n"
+
+    def test_the_writer_asks_for_no_newline_translation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Linux cannot translate "\n" to "\r\n", so the argument itself is what is pinned.
+        seen: dict[str, object] = {}
+
+        def recorder(self: Path, data: str, **kwargs: object) -> int:
+            seen.update(kwargs)
+            return 0
+
+        monkeypatch.setattr(Path, "write_text", recorder)
+        write_script(tmp_path / "s.sh", "x\n")
+        assert seen == {"encoding": "utf-8", "newline": "\n"}
+
+    def test_passthrough_env_carries_systemroot_only_when_set(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SYSTEMROOT", "C:\\Windows")
+        assert passthrough_env() == {"SYSTEMROOT": "C:\\Windows"}
+        monkeypatch.delenv("SYSTEMROOT")
+        assert passthrough_env() == {}
+        monkeypatch.setenv("SYSTEMROOT", "")
+        assert passthrough_env() == {}
+
+    def test_the_release_runner_hands_systemroot_to_the_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from tests.test_fsm_llm_regression.test_release_workflow import _run
+
+        monkeypatch.setenv("SYSTEMROOT", "C:\\Windows")
+        _, _, err = _run('echo "[${SYSTEMROOT-unset}]" >&2', tmp_path / "a")
+        monkeypatch.delenv("SYSTEMROOT")
+        _, _, err_unset = _run('echo "[${SYSTEMROOT-unset}]" >&2', tmp_path / "b")
+
+        assert err.strip() == "[C:\\Windows]" and err_unset.strip() == "[unset]"
+
+
+class TestProbes:
+    @posix_only("the stubs are executable shell scripts")
+    def test_the_probes_report_what_a_windows_or_macos_runner_would_offer(
+        self, tmp_path: Path
+    ) -> None:
+        assert _probe_contract_failures(ws_namespace(), tmp_path) == []
+
+    @posix_only("the stubs are executable shell scripts")
+    def test_a_bash_in_a_wsl_launcher_directory_is_refused_on_windows_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        launcher = _stub(tmp_path / "Windows" / "System32", "bash", "echo ok\n")
+        same_name = _stub(tmp_path / "other" / "System32", "bash", "echo ok\n")
+        elsewhere = _stub(tmp_path / "elsewhere", "bash", "echo ok\n")
+
+        monkeypatch.setattr(ws, "_IS_WINDOWS", True)
+        problem = bash_problem(str(launcher.parent))
+        assert problem and "WSL" in problem
+        assert bash_problem(str(elsewhere.parent)) is None
+
+        monkeypatch.setattr(
+            ws, "_IS_WINDOWS", False
+        )  # the same directory name, on Linux
+        assert bash_problem(str(same_name.parent)) is None
+
+    @pytest.mark.skipif(
+        sys.platform != "linux",
+        reason="asserts that the probes do NOT skip on Linux (real bash, GNU find)",
+    )
+    def test_on_linux_nothing_is_skipped_because_the_probes_find_bash_and_gnu_find(
+        self,
+    ) -> None:
+        assert bash_problem() is None
+        assert gnu_find_problem() is None
+        try:
+            skip_unless_bash()
+            skip_unless_gnu_find()
+        except pytest.skip.Exception as skipped:  # pragma: no cover - the failure
+            pytest.fail(f"every shell-script test would be skipped on Linux: {skipped}")
+
+    @posix_only("the stubs are executable shell scripts")
+    @pytest.mark.parametrize(
+        "label,old,new",
+        [
+            ("bash_problem always None", _BASH_CALL, "return None"),
+            ("bash_problem always a problem", _BASH_CALL, 'return "always"'),
+            ("gnu_find_problem always None", _FIND_CALL, "return None"),
+            ("gnu_find_problem always a problem", _FIND_CALL, 'return "always"'),
+            (
+                "skip_unless_bash never skips",
+                _BASH_SKIP,
+                '    if False:\n        pytest.skip(f"these tests run',
+            ),
+            (
+                "skip_unless_bash always skips",
+                "    problem = bash_problem(path)\n    if problem:",
+                "    problem = bash_problem(path) or 'x'\n    if problem:",
+            ),
+        ],
+    )
+    def test_a_probe_mutant_breaks_the_contract(
+        self, tmp_path: Path, label: str, old: str, new: str
+    ) -> None:
+        assert _probe_contract_failures(_variant(old, new), tmp_path), label
+
+
+def ws_namespace() -> types.SimpleNamespace:
+    """The real module as a namespace (the same shape as a mutant)."""
+    return types.SimpleNamespace(
+        bash_problem=bash_problem,
+        gnu_find_problem=gnu_find_problem,
+        skip_unless_bash=skip_unless_bash,
+        skip_unless_gnu_find=skip_unless_gnu_find,
+    )
+
+
+def _calls(path: Path) -> set[str]:
+    """The names of the functions `path` calls, plus the `["bash", ...]` lists it holds."""
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Call):
+            func = node.func
+            found.add(
+                func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+            )
+        if (
+            isinstance(node, ast.List)
+            and node.elts
+            and isinstance(node.elts[0], ast.Constant)
+            and node.elts[0].value == "bash"
+        ):
+            found.add('["bash"]')
+    return found
+
+
+class TestEveryBashRunnerAsksFirst:
+    def _modules(self) -> dict[str, set[str]]:
+        return {
+            p.name: _calls(p)
+            for p in sorted(_TESTS.rglob("test_*.py"))
+            if p.name != Path(__file__).name
+        }
+
+    def test_the_four_workflow_modules_run_bash(self) -> None:
+        runners = {n for n, c in self._modules().items() if '["bash"]' in c}
+        assert runners == {
+            "test_docs_workflow.py",
+            "test_refresh_workflow.py",
+            "test_release_workflow.py",
+            "test_supply_chain.py",
+        }
+
+    def test_every_module_that_runs_bash_calls_the_probe_and_the_lf_writer(
+        self,
+    ) -> None:
+        for name, calls in self._modules().items():
+            if '["bash"]' in calls:
+                assert "skip_unless_bash" in calls, name
+                assert "write_script" in calls, name
+
+    def test_the_release_name_check_asks_for_gnu_find(self) -> None:
+        assert "-printf" in _RELEASE.read_text(encoding="utf-8")  # else drop the rule
+        assert "skip_unless_gnu_find" in self._modules()["test_release_workflow.py"]
+
+    def test_the_scan_sees_a_runner_that_does_not_ask(self, tmp_path: Path) -> None:
+        bad = tmp_path / "test_x.py"
+        bad.write_text(
+            "import subprocess\nsubprocess.run(['bash', 'x'])\n", encoding="utf-8"
+        )
+        assert '["bash"]' in _calls(bad) and "skip_unless_bash" not in _calls(bad)

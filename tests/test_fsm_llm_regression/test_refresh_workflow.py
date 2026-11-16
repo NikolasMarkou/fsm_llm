@@ -45,6 +45,9 @@ from tests.test_fsm_llm_regression.workflow_support import (
     _code_lines,
     _load,
     _steps,
+    passthrough_env,
+    skip_unless_bash,
+    write_script,
 )
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -783,8 +786,10 @@ class _Scratch:
         (self.pins / "report.md").write_text(report, encoding="utf-8")
 
     def run(self, script: str, **extra: str) -> subprocess.CompletedProcess[str]:
+        skip_unless_bash()
         env = {
             "PATH": os.environ["PATH"],
+            **passthrough_env(),
             "HOME": str(self.temp),
             "RUNNER_TEMP": str(self.temp),
             "GIT_CONFIG_GLOBAL": os.devnull,
@@ -1123,14 +1128,14 @@ class TestThePullRequestStep:
         stub = tmp_path / "bin"
         stub.mkdir()
         log = tmp_path / "gh.log"
-        (stub / "gh").write_text(
+        write_script(
+            stub / "gh",
             "#!/usr/bin/env bash\n"
             'printf "%s\\n" "$@" > "$GH_LOG"\n'
             'while [ "$#" -gt 0 ]; do\n'
             '  if [ "$1" = "--body-file" ]; then cp "$2" "$GH_LOG.body"; fi\n'
             "  shift\n"
             "done\n",
-            encoding="utf-8",
         )
         (stub / "gh").chmod(0o755)
         proc = scratch.run(
