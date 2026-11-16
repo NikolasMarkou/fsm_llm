@@ -311,7 +311,7 @@ class TestStaticFallback:
     """What the fallback decides when a third-party extra is missing."""
 
     def _repo(self, tmp_path: Path) -> Path:
-        pkg = tmp_path / "src"
+        pkg = tmp_path / "src" / "fsm_llm"
         _write(pkg, "__init__.py", "from .a import exported\n")
         _write(
             pkg,

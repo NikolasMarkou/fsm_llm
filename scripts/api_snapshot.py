@@ -78,7 +78,7 @@ _TYPING = re.compile(r"\btyping\.")
 
 
 def _t(a) -> str:
-    """Render a runtime type object the same way on 3.10, 3.11 and 3.12."""
+    """Render a runtime type object the same way on Python 3.11 to 3.15."""
     import collections.abc as cabc
     import types as _types
 

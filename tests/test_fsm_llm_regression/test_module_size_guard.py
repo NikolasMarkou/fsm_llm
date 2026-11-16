@@ -130,8 +130,8 @@ class TestSizeProblems:
         assert len(bad) == 1 and "still in OVERSIZED" in bad[0]
 
     def test_five_lines_appended_to_a_listed_module_fail(self, tmp_path: Path) -> None:
-        src = tmp_path / "src"
-        src.mkdir()
+        src = tmp_path / "src" / "fsm_llm"
+        src.mkdir(parents=True)
         (src / "__init__.py").write_text("", encoding="utf-8")
         (src / "big.py").write_text("x = 1\n" * 900, encoding="utf-8")
         table = {"fsm_llm.big": 900}

@@ -294,8 +294,8 @@ class TestShapeProblems:
         assert shape_problems(data) == []
 
 
-def _scratch(root: Path, files: list[str], nested: bool = False) -> Path:
-    base = root / "src" / (PACKAGE if nested else "")
+def _scratch(root: Path, files: list[str]) -> Path:
+    base = root / "src" / PACKAGE
     for name in files:
         target = base / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -310,17 +310,27 @@ MODULES = {"fsm_llm", "fsm_llm.a", "fsm_llm.pkg", "fsm_llm.pkg.b"}
 class TestScratchTrees:
     """The mutation proofs of the coverage net, on scratch directories."""
 
-    @pytest.mark.parametrize("nested", [False, True])
-    def test_both_layouts_give_the_same_dotted_names(
-        self, tmp_path: Path, nested: bool
-    ) -> None:
-        repo = _scratch(tmp_path, FILES, nested)
-        assert set(source_modules(repo)) == MODULES
-        assert package_dir(repo).name == (PACKAGE if nested else "src")
-
-    def test_a_leftover_pycache_directory_does_not_make_the_layout_nested(
+    def test_the_package_directory_is_src_fsm_llm_and_nothing_else(
         self, tmp_path: Path
     ) -> None:
+        """`package_dir` has no second layout: the real tree, a scratch tree, an empty
+        directory and a tree left in the old flat `src/` layout all give `src/fsm_llm`
+        (the flat tree has no modules there: it is not read as a package)."""
+        assert package_dir() == REPO / "src" / PACKAGE
+        assert package_dir().is_dir()
+        repo = _scratch(tmp_path / "scratch", FILES)
+        assert package_dir(repo) == repo / "src" / PACKAGE
+        assert set(source_modules(repo)) == MODULES
+        assert package_dir(tmp_path / "empty") == tmp_path / "empty" / "src" / PACKAGE
+        assert source_modules(tmp_path / "empty") == {}
+        flat = tmp_path / "flat"
+        (flat / "src").mkdir(parents=True)
+        (flat / "src" / "__init__.py").write_text("X = 1\n", encoding="utf-8")
+        (flat / "src" / "a.py").write_text("X = 1\n", encoding="utf-8")
+        assert package_dir(flat) == flat / "src" / PACKAGE
+        assert source_modules(flat) == {}
+
+    def test_a_leftover_pycache_directory_adds_no_module(self, tmp_path: Path) -> None:
         repo = _scratch(tmp_path, FILES)
         (repo / "src" / PACKAGE / "__pycache__").mkdir(parents=True)
         (repo / "src" / PACKAGE / "__pycache__" / "x.cpython-311.pyc.py").write_text(
