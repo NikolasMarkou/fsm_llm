@@ -7,8 +7,8 @@ program name. It also holds the ``--env-file`` flag of the CLIs that need a mode
 (``fsm-llm``, ``fsm-llm-eval``, ``fsm-llm-meta``, ``python -m fsm_llm.reasoning``,
 ``fsm-llm-monitor``); the okf, skills, validate and visualize CLIs call no model
 and never get it. Interface contract: ``run_cli`` returns 0, 1 or 130 and lets a
-``BrokenPipeError`` and a usage ``SystemExit`` through; ``exit_main`` never
-returns; ``report_issues`` prints and returns 0 or 1. Imports stdlib,
+``BrokenPipeError`` (on Windows also the ``EINVAL`` ``OSError`` of a closed pipe) and a
+usage ``SystemExit`` through; ``exit_main`` never returns; ``report_issues`` prints and returns 0 or 1. Imports stdlib,
 ``constants``, ``env.load_env`` and ``text.capped_line`` / ``text.strip_unsafe_text``
 only (a kernel module, held by an import contract); not imported by ``fsm_llm/__init__.py``.
 """
@@ -16,6 +16,7 @@ only (a kernel module, held by an import contract); not imported by ``fsm_llm/__
 from __future__ import annotations
 
 import argparse
+import errno
 import math
 import os
 import sys
@@ -154,11 +155,28 @@ def run_cli(
     except KeyboardInterrupt:
         report_error(prog, "interrupted")
         return CLI_EXIT_INTERRUPTED
-    except BrokenPipeError:
-        raise  # handled by exit_main, which owns stdout
     except caught as exc:
+        if _is_broken_pipe(exc):
+            raise  # handled by exit_main, which owns stdout
         report_error(prog, f"error: {exc}")
         return CLI_EXIT_FAILURE
+
+
+def _is_broken_pipe(exc: BaseException) -> bool:
+    """Whether *exc* says the reader of stdout is gone.
+
+    Interface contract: ``True`` for a ``BrokenPipeError`` on every platform, and on
+    Windows (``sys.platform == "win32"``, read at call time) also for an ``OSError``
+    whose ``errno`` is ``EINVAL``, which is what a write or flush to a closed pipe
+    raises there. Any other error, or ``EINVAL`` elsewhere, is ``False``. Raises nothing.
+    """
+    if isinstance(exc, BrokenPipeError):
+        return True
+    return (
+        sys.platform == "win32"
+        and isinstance(exc, OSError)
+        and exc.errno == errno.EINVAL
+    )
 
 
 def exit_main(main: Callable[[], int]) -> NoReturn:
@@ -166,7 +184,9 @@ def exit_main(main: Callable[[], int]) -> NoReturn:
     try:
         code = main()
         sys.stdout.flush()
-    except BrokenPipeError:
+    except OSError as exc:
+        if not _is_broken_pipe(exc):
+            raise
         # Piped into `head`: park stdout so the exit flush prints no second error.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         code = CLI_EXIT_FAILURE

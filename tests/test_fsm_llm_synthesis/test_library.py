@@ -7,6 +7,8 @@ signature-first retrieval.
 import contextlib
 import inspect
 import json
+import ntpath
+import os
 import threading
 import time
 from pathlib import Path
@@ -257,11 +259,40 @@ class TestSafety:
         assert not lib.root.exists()
 
     def test_tilde_is_expanded_once_in_the_constructor(self, tmp_path, monkeypatch):
+        # POSIX reads HOME, Windows reads USERPROFILE: set both, the test is the same on both.
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         home = FSMLibrary("~/procs")
         assert home.root == (tmp_path / "procs").resolve()
         _put(home)
         assert (tmp_path / "procs" / "records").is_dir()
+
+    def test_tilde_follows_the_windows_rule_when_userprofile_is_set(
+        self, tmp_path, monkeypatch
+    ):
+        # `ntpath.expanduser` is what os.path.expanduser is on Windows: it reads
+        # USERPROFILE (then HOMEPATH), never HOME.
+        monkeypatch.setattr(os.path, "expanduser", ntpath.expanduser)
+        monkeypatch.setenv("HOME", str(tmp_path / "decoy"))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+
+        home = FSMLibrary("~/procs")
+
+        assert home.root == (tmp_path / "procs").resolve()
+
+    def test_a_home_only_environment_is_not_enough_on_windows(
+        self, tmp_path, monkeypatch
+    ):
+        # What the first CI run's Windows leg would have seen with the old test: only HOME
+        # set, so the library root was not under the temp directory.
+        monkeypatch.setattr(os.path, "expanduser", ntpath.expanduser)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("USERPROFILE", raising=False)
+        monkeypatch.delenv("HOMEPATH", raising=False)
+
+        home = FSMLibrary("~/procs")
+
+        assert home.root != (tmp_path / "procs").resolve()
 
     def test_root_that_is_a_file_is_refused(self, tmp_path: Path):
         (tmp_path / "f").write_text("x", encoding="utf-8")

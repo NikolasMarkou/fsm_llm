@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import inspect
 import io
 import os
@@ -192,6 +193,164 @@ class TestExitMain:
         finally:
             monkeypatch.undo()
             stream.close()
+
+
+class _Stdout:
+    """A stdout whose flush fails with a given error, on a real file descriptor.
+
+    The descriptor is what ``exit_main`` parks on ``os.devnull`` after a broken pipe;
+    ``parked()`` writes one byte to it and says whether that byte stayed out of the file.
+    """
+
+    def __init__(self, path: Path, error: OSError) -> None:
+        self._path, self._error = path, error
+        self._fd = os.open(path, os.O_WRONLY | os.O_CREAT)
+
+    def write(self, text: str) -> int:
+        return len(text)
+
+    def flush(self) -> None:
+        raise self._error
+
+    def fileno(self) -> int:
+        return self._fd
+
+    def parked(self) -> bool:
+        os.write(self._fd, b"x")
+        return self._path.stat().st_size == 0
+
+    def close(self) -> None:
+        os.close(self._fd)
+
+
+def _einval() -> OSError:
+    return OSError(errno.EINVAL, "Invalid argument")  # what a closed Windows pipe gives
+
+
+class TestWindowsBrokenPipe:
+    """Windows reports a gone reader as ``OSError`` with ``EINVAL`` on write or flush,
+    not ``BrokenPipeError`` (plan d7719b03 step 7). The platform is simulated here;
+    unverified until the Windows run of the CI matrix."""
+
+    @pytest.fixture
+    def stdout_with(self, tmp_path: Path) -> Any:
+        """A factory of `_Stdout` over a file in tmp_path; the descriptors are closed after."""
+        made: list[_Stdout] = []
+
+        def make(error: OSError) -> _Stdout:
+            stream = _Stdout(tmp_path / f"out{len(made)}", error)
+            made.append(stream)
+            return stream
+
+        yield make
+        for stream in made:
+            stream.close()
+
+    @pytest.mark.parametrize(
+        ("error", "platform", "expected"),
+        [
+            (BrokenPipeError(), "linux", True),
+            (BrokenPipeError(), "win32", True),
+            (BrokenPipeError(), "darwin", True),
+            (
+                OSError(errno.EPIPE, "Broken pipe"),
+                "linux",
+                True,
+            ),  # is a BrokenPipeError
+            (_einval(), "win32", True),
+            (_einval(), "linux", False),
+            (_einval(), "darwin", False),
+            (OSError(errno.ENOSPC, "No space left"), "win32", False),
+            (OSError("no errno"), "win32", False),
+            (ValueError("x"), "win32", False),
+        ],
+    )
+    def test_which_errors_are_a_gone_reader(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        error: BaseException,
+        platform: str,
+        expected: bool,
+    ) -> None:
+        monkeypatch.setattr(sys, "platform", platform)
+
+        assert cli_support._is_broken_pipe(error) is expected
+
+    @pytest.mark.parametrize("platform", ["win32", "linux", "darwin"])
+    def test_a_broken_pipe_error_parks_stdout_on_every_platform(
+        self, monkeypatch: pytest.MonkeyPatch, stdout_with: Any, platform: str
+    ) -> None:
+        stream = stdout_with(BrokenPipeError())
+        monkeypatch.setattr(sys, "platform", platform)
+        monkeypatch.setattr(sys, "stdout", stream)
+
+        with pytest.raises(SystemExit) as info:
+            cli_support.exit_main(lambda: 0)
+
+        assert info.value.code == 1 and stream.parked()
+
+    def test_einval_on_flush_parks_stdout_and_exits_1_on_windows(
+        self, monkeypatch: pytest.MonkeyPatch, stdout_with: Any
+    ) -> None:
+        stream = stdout_with(_einval())
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(sys, "stdout", stream)
+
+        with pytest.raises(SystemExit) as info:
+            cli_support.exit_main(lambda: 0)
+
+        assert info.value.code == 1 and stream.parked()
+
+    def test_the_same_error_elsewhere_is_an_ordinary_error(
+        self, monkeypatch: pytest.MonkeyPatch, stdout_with: Any
+    ) -> None:
+        stream = stdout_with(_einval())
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(sys, "stdout", stream)
+
+        with pytest.raises(OSError) as info:
+            cli_support.exit_main(lambda: 0)
+
+        assert info.value.errno == errno.EINVAL and not stream.parked()
+
+    @pytest.mark.parametrize(
+        ("platform", "reraised"), [("win32", True), ("linux", False)]
+    )
+    def test_run_cli_hands_a_windows_broken_pipe_to_exit_main_only_there(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        platform: str,
+        reraised: bool,
+    ) -> None:
+        monkeypatch.setattr(sys, "platform", platform)
+        func = _raises(_einval())
+
+        if reraised:
+            with pytest.raises(OSError):
+                _run(func)
+        else:
+            assert _run(func) == 1
+            assert "error: " in capsys.readouterr().err
+
+    @_CLIS
+    def test_both_clis_park_stdout_on_a_windows_broken_pipe(
+        self, mod: Any, monkeypatch: pytest.MonkeyPatch, stdout_with: Any
+    ) -> None:
+        def talk(args: Any) -> int:
+            print("a line for a reader that is gone")
+            return 0
+
+        stream = stdout_with(_einval())
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(sys, "stdout", stream)
+        monkeypatch.setattr(mod, "_cmd_list", talk)
+        monkeypatch.setattr(sys, "argv", [mod._PROG, "list", "somewhere"])
+
+        with pytest.raises(SystemExit) as info:
+            mod.main_cli()
+
+        assert info.value.code == 1 and stream.parked()
 
 
 class TestSmallHelpers:
