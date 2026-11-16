@@ -209,7 +209,7 @@ source_modules =
 forbidden_modules =
     fsm_llm.reasoning
 ignore_imports =
-    # the package's own modules import each other
+    # permanent: the package's own modules import each other
     fsm_llm.reasoning.** -> fsm_llm.reasoning.**
     # permanent (D-016 c): ReasoningReactAgent is the agents pattern built on the reasoning
     # engine, and no roadmap row retires the edge; it is reported to the user as a decision.
@@ -229,7 +229,7 @@ source_modules =
 forbidden_modules =
     fsm_llm.*
 ignore_imports =
-    # the package's own modules import each other
+    # permanent: the package's own modules import each other
     fsm_llm.security.** -> fsm_llm.security.**
 
 # Steps 69 and 70 (definitions split, then `codes`, `schema`, `state_kinds` and
@@ -268,7 +268,7 @@ forbidden_modules =
     fsm_llm.tools
     fsm_llm.workflows
 ignore_imports =
-    # the package's own modules import each other
+    # permanent: the package's own modules import each other
     fsm_llm.core.** -> fsm_llm.core.**
 
 # Step 78 (fsm.py split into the layer package `engine/fsm/`, the first module of the `engine`

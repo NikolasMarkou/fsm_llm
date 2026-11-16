@@ -43,9 +43,18 @@ needs_linter = pytest.mark.skipif(
     reason="import-linter is not installed (the `dev` extra: pip install -e '.[dev]')",
 )
 
-# The named debts: every ignore line of `.importlinter` that is not a package's own modules
-# importing each other. Edge -> how it ends. A new line is a new debt: it needs a row that
-# retires it or a written reason, and an entry here, in the same commit.
+# `a.** -> a.**` lines: the modules of one package importing each other. They are tagged
+# `permanent` like every other ignore (the tag check has no special case for them), and the
+# wildcard is allowed for these three edges only (`test_no_ignore_line_is_a_blanket`).
+PACKAGE_OWN_IGNORES = {
+    "fsm_llm.core.** -> fsm_llm.core.**",
+    "fsm_llm.reasoning.** -> fsm_llm.reasoning.**",
+    "fsm_llm.security.** -> fsm_llm.security.**",
+}
+
+# The named debts: every ignore line of `.importlinter`, the three own-package lines included.
+# Edge -> how it ends. A new line is a new debt: it needs a row that retires it or a written
+# reason, and an entry here, in the same commit.
 NAMED_DEBTS = {
     # D-016 a: the G6b simulator and the repair statistics read the eval case driver
     "fsm_llm.synthesis.simulation -> fsm_llm.eval.cases": "retired by: roadmap 6.6 and P7.6",
@@ -63,12 +72,8 @@ NAMED_DEBTS = {
     # the one LLM layer, and the one entry that hands over to the runner
     "fsm_llm.llm.providers.litellm -> litellm": "permanent",
     "fsm_llm.__main__ -> fsm_llm.runner": "permanent",
-}
-# `a.** -> a.**` lines: the modules of one package importing each other, no debt
-PACKAGE_OWN_IGNORES = {
-    "fsm_llm.core.** -> fsm_llm.core.**",
-    "fsm_llm.reasoning.** -> fsm_llm.reasoning.**",
-    "fsm_llm.security.** -> fsm_llm.security.**",
+    # a package's own modules import each other
+    **dict.fromkeys(sorted(PACKAGE_OWN_IGNORES), "permanent"),
 }
 
 # Kernel modules (D-014, D-016), entry modules and the test doubles: the top-level names that are
@@ -248,23 +253,44 @@ class TestTheContractRuns:
             )
 
 
+def _untagged_ignores() -> list[tuple[str, str, str]]:
+    """Every ignore line whose comment group is not `retired by: <row>` or `permanent`."""
+    untagged = []
+    for name, section in _contracts().items():
+        for edge, group in section["ignores"]:
+            if not _TAG.match(group):
+                untagged.append((name, edge, group[:60]))
+    return untagged
+
+
 class TestTheDebts:
     def test_every_ignore_line_is_a_tagged_named_debt(self) -> None:
-        untagged = []
-        for name, section in _contracts().items():
-            for edge, group in section["ignores"]:
-                if edge in PACKAGE_OWN_IGNORES:
-                    continue
-                if not _TAG.match(group):
-                    untagged.append((name, edge, group[:60]))
-        assert untagged == []
+        # no exemption: the three `a.** -> a.**` lines carry `# permanent: ...` like the rest
+        assert _untagged_ignores() == []
+
+    @pytest.mark.parametrize("edge", sorted(PACKAGE_OWN_IGNORES))
+    def test_an_untagged_own_package_ignore_is_refused(
+        self, edge: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The mutant of the tag check: the old plain comment on one own-package line."""
+        text = CONFIG.read_text(encoding="utf-8")
+        tag = "    # permanent: the package's own modules import each other\n    "
+        assert text.count(tag + edge) == 1, edge
+        mutated = tmp_path / ".importlinter"
+        mutated.write_text(
+            text.replace(
+                tag + edge,
+                "    # the package's own modules import each other\n    " + edge,
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(sys.modules[__name__], "CONFIG", mutated)
+        assert [e for _, e, _ in _untagged_ignores()] == [edge]
 
     def test_the_set_of_debts_is_the_pinned_one(self) -> None:
         found: dict[str, str] = {}
         for name, section in _contracts().items():
             for edge, group in section["ignores"]:
-                if edge in PACKAGE_OWN_IGNORES:
-                    continue
                 match = _TAG.match(group)
                 assert match, (name, edge)
                 kind = match.group(1).strip()
