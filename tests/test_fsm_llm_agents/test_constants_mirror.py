@@ -545,3 +545,217 @@ class TestTheRegistryMatchesTheSource:
         fails here until it is registered (the source scan above reads them all)."""
         stems = {stem for stem, *_rest in _assigned_from_lower_layers()}
         assert stems == {"core"}
+
+
+# ---------------------------------------------------------------------------
+# Concurrent overrides (final REFLECT concern 4, D-053): one lock serialises
+# set-and-propagate, so the copies of a shared name can never end up different.
+# ---------------------------------------------------------------------------
+
+_V0 = "start value"
+
+
+class _UnlockedMirrored(tool_constants.MirroredConstants):
+    """The metaclass of D-045 as it was before D-053: no lock around the write-through.
+
+    It is the mutant that proves the interleaving scenarios below can tell a locked
+    write from an unlocked one: the same scenario must diverge here and must not on
+    the real metaclass."""
+
+    def __setattr__(cls, name: str, value: Any) -> None:
+        type.__setattr__(cls, name, value)
+        for peer in tool_constants._MIRRORS.get((cls, name), ()):
+            type.__setattr__(peer, name, value)
+
+    def __delattr__(cls, name: str) -> None:
+        type.__delattr__(cls, name)
+        for peer in tool_constants._MIRRORS.get((cls, name), ()):
+            if name in vars(peer):
+                type.__delattr__(peer, name)
+
+
+class _HookedRegistry(dict):  # type: ignore[type-arg]
+    """A registry whose lookup of one armed key runs a callback once.
+
+    The write-through looks the peers up right after it wrote its own class and right
+    before it writes the peers: the one point where another thread must not get in.
+    The callback runs on the writing thread at that point, so the interleaving is
+    exact, with no timing involved."""
+
+    armed: tuple[type, str] | None = None
+    callback: Callable[[], None] | None = None
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        if key == self.armed and self.callback is not None:
+            callback, self.callback = self.callback, None
+            callback()
+        return super().get(key, default)
+
+
+def _group(
+    monkeypatch: pytest.MonkeyPatch, meta: type
+) -> tuple[type, type, _HookedRegistry]:
+    """Two classes of one throwaway group on a private hooked registry."""
+    registry = _HookedRegistry(tool_constants.mirror_links())
+    monkeypatch.setattr(tool_constants, "_MIRRORS", registry)
+    a = meta("A", (), {"X": _V0})
+    b = meta("B", (), {"X": _V0})
+    tool_constants.mirror(a, b, ("X",))
+    return a, b, registry
+
+
+def _interleave(
+    registry: _HookedRegistry,
+    armed: tuple[type, str],
+    first: Callable[[], None],
+    second: Callable[[], None],
+) -> None:
+    """Run *first* and make *second* start on another thread at the hooked point.
+
+    Without a lock *second* runs to its end inside the hook (the join returns at
+    once); with one it blocks until *first* is done (the join times out and *first*
+    goes on). Either way both are finished when this returns."""
+    other: list[threading.Thread] = []
+
+    def compete() -> None:
+        started = threading.Event()
+
+        def run() -> None:
+            started.set()
+            second()
+
+        thread = threading.Thread(target=run, daemon=True)
+        other.append(thread)
+        thread.start()
+        assert started.wait(5)
+        thread.join(0.3)
+
+    registry.armed, registry.callback = armed, compete
+    first()
+    other[0].join(5)
+    assert not other[0].is_alive(), "the competing write never finished"
+
+
+def _state(a: type, b: type) -> tuple[object, object]:
+    missing = "<absent>"
+    return vars(a).get("X", missing), vars(b).get("X", missing)
+
+
+class TestConcurrentOverridesStayMirrored:
+    """The deterministic scenarios are the proof; the stress test below is a
+    probabilistic second line (it can only fail when a bad interleaving happens)."""
+
+    # (name, first op on A, second op on B, final state when the writes are serial,
+    # the second one running after the first)
+    _SCENARIOS = (
+        ("set against set", "set", "set", ("two", "two")),
+        ("delete against set", "del", "set", ("two", "two")),
+        ("set against delete", "set", "del", ("<absent>", "<absent>")),
+    )
+
+    @staticmethod
+    def _op(cls: type, kind: str, value: str) -> Callable[[], None]:
+        if kind == "set":
+            return lambda: setattr(cls, "X", value)
+        return lambda: delattr(cls, "X")
+
+    @pytest.mark.parametrize(
+        ("label", "first_kind", "second_kind", "final"),
+        _SCENARIOS,
+        ids=[s[0] for s in _SCENARIOS],
+    )
+    def test_a_competing_write_cannot_slip_between_the_class_and_its_peers(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        label: str,
+        first_kind: str,
+        second_kind: str,
+        final: tuple[str, str],
+    ) -> None:
+        a, b, registry = _group(monkeypatch, tool_constants.MirroredConstants)
+        _interleave(
+            registry,
+            (a, "X"),
+            self._op(a, first_kind, "one"),
+            self._op(b, second_kind, "two"),
+        )
+        assert _state(a, b) == final, label
+
+    @pytest.mark.parametrize(
+        ("label", "first_kind", "second_kind", "final"),
+        _SCENARIOS,
+        ids=[s[0] for s in _SCENARIOS],
+    )
+    def test_the_same_scenario_diverges_without_the_lock(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        label: str,
+        first_kind: str,
+        second_kind: str,
+        final: tuple[str, str],
+    ) -> None:
+        """Mutant: the unlocked metaclass leaves the copies different, so the scenario
+        above would fail when the lock of ``MirroredConstants`` is removed."""
+        a, b, registry = _group(monkeypatch, _UnlockedMirrored)
+        _interleave(
+            registry,
+            (a, "X"),
+            self._op(a, first_kind, "one"),
+            self._op(b, second_kind, "two"),
+        )
+        left, right = _state(a, b)
+        assert left != right, (label, left, right)
+
+    def test_the_lock_is_re_entrant(self) -> None:
+        """A hook that writes a second mirrored name from inside a write (a descriptor,
+        a ``__set_name__``) must not block the thread on itself: the lock is an
+        ``RLock``. Checked by type, not by trying: a plain ``Lock`` would hang the
+        process on the failing run."""
+        assert isinstance(tool_constants._LOCK, type(threading.RLock()))
+
+    def test_stress_two_threads_never_leave_the_copies_different(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """3,000 forced trials (barrier, a switch interval of 1e-7 s), 0 divergences.
+
+        Probabilistic on its own: before D-053 one trial in about 3,000 diverged, so a
+        pass here proves little by itself. The deterministic scenarios above are the
+        RED proof of the lock."""
+        import sys
+
+        a, b, _registry = _group(monkeypatch, tool_constants.MirroredConstants)
+        trials = 3000
+        start, done = threading.Barrier(2), threading.Barrier(3)
+        errors: list[BaseException] = []
+
+        def worker(cls: type, base: int) -> None:
+            try:
+                for i in range(trials):
+                    start.wait(10)
+                    cls.X = base + i  # type: ignore[attr-defined]
+                    done.wait(10)
+            except BaseException as exc:  # a broken barrier ends the test, not hangs it
+                errors.append(exc)
+                start.abort()
+                done.abort()
+
+        old = sys.getswitchinterval()
+        sys.setswitchinterval(1e-7)
+        threads = [
+            threading.Thread(target=worker, args=(a, 0), daemon=True),
+            threading.Thread(target=worker, args=(b, 10**6), daemon=True),
+        ]
+        divergent = 0
+        try:
+            for thread in threads:
+                thread.start()
+            for _ in range(trials):
+                done.wait(10)
+                left, right = _state(a, b)
+                divergent += left != right
+        finally:
+            sys.setswitchinterval(old)
+            for thread in threads:
+                thread.join(10)
+        assert not errors, errors
+        assert divergent == 0

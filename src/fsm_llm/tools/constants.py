@@ -28,6 +28,12 @@ from typing import Any
 # reader, and `monkeypatch.setattr(agents Defaults, ...)` in tests relies on that).
 # The registry lives HERE, in a module dict, never as a class attribute (it would show
 # in `vars()`); a class registers its copy with `mirror()` in its own constants module.
+# Concurrent overrides are serialised by ONE module lock (D-053): the write to the class
+# and the loop over its peers are two steps, and two threads writing two classes of a
+# group could otherwise leave the copies permanently different. Do NOT drop the lock,
+# and do NOT replace it by a lock per group (groups join in `mirror()`, so two locks
+# could be taken in two orders).
+_LOCK = threading.RLock()
 _MIRRORS: dict[tuple[type, str], tuple[type, ...]] = {}
 
 
@@ -41,18 +47,24 @@ class MirroredConstants(type):
     peer goes through ``type.__setattr__``, which bypasses this hook, so no write
     loops. A name that is not registered stays local. Never raises beyond what a
     plain class would (``AttributeError`` when deleting an absent name).
+
+    Thread safety: the write to the class and the writes to its peers happen under
+    one module lock, so concurrent overrides of a shared name are serialised and the
+    last writer wins on every class of the group (a reader takes no lock).
     """
 
     def __setattr__(cls, name: str, value: Any) -> None:
-        super().__setattr__(name, value)
-        for peer in _MIRRORS.get((cls, name), ()):
-            type.__setattr__(peer, name, value)
+        with _LOCK:
+            super().__setattr__(name, value)
+            for peer in _MIRRORS.get((cls, name), ()):
+                type.__setattr__(peer, name, value)
 
     def __delattr__(cls, name: str) -> None:
-        super().__delattr__(name)
-        for peer in _MIRRORS.get((cls, name), ()):
-            if name in vars(peer):
-                type.__delattr__(peer, name)
+        with _LOCK:
+            super().__delattr__(name)
+            for peer in _MIRRORS.get((cls, name), ()):
+                if name in vars(peer):
+                    type.__delattr__(peer, name)
 
 
 def mirror(owner: type, copy: type, names: Iterable[str]) -> None:
@@ -69,27 +81,30 @@ def mirror(owner: type, copy: type, names: Iterable[str]) -> None:
         if not isinstance(cls, MirroredConstants):
             raise TypeError(f"{cls.__qualname__} must use MirroredConstants")
     pending = tuple(names)
-    for name in pending:
-        if name not in vars(owner) or vars(owner)[name] is not vars(copy).get(name):
-            raise ValueError(
-                f"{copy.__qualname__}.{name} is not the object {owner.__qualname__}.{name}"
+    with _LOCK:
+        for name in pending:
+            if name not in vars(owner) or vars(owner)[name] is not vars(copy).get(name):
+                raise ValueError(
+                    f"{copy.__qualname__}.{name} is not the object "
+                    f"{owner.__qualname__}.{name}"
+                )
+        for name in pending:
+            group = dict.fromkeys(
+                [
+                    owner,
+                    copy,
+                    *_MIRRORS.get((owner, name), ()),
+                    *_MIRRORS.get((copy, name), ()),
+                ]
             )
-    for name in pending:
-        group = dict.fromkeys(
-            [
-                owner,
-                copy,
-                *_MIRRORS.get((owner, name), ()),
-                *_MIRRORS.get((copy, name), ()),
-            ]
-        )
-        for member in group:
-            _MIRRORS[(member, name)] = tuple(c for c in group if c is not member)
+            for member in group:
+                _MIRRORS[(member, name)] = tuple(c for c in group if c is not member)
 
 
 def mirror_links() -> dict[tuple[type, str], tuple[type, ...]]:
     """A copy of the registry: ``(class, name)`` to the other classes sharing the name."""
-    return dict(_MIRRORS)
+    with _LOCK:
+        return dict(_MIRRORS)
 
 
 class ContextKeys(metaclass=MirroredConstants):
