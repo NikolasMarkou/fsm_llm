@@ -28,8 +28,13 @@ from fsm_llm.logging import logger
 # Deepest container nesting a file may have and still be REWRITTEN. The dump is
 # `indent=2`, whose cost grows with the square of the depth, and a parser whose
 # recursion limit follows the stack (3.14 and later) accepts a 100,000-deep value.
-# The deepest definition the loader accepts (a condition at MAX_JSONLOGIC_DEPTH
-# with list arguments) is about 108 containers deep; 256 leaves more than 2x room.
+# The loader bounds the nesting of JsonLogic OPERATORS (MAX_JSONLOGIC_DEPTH), not of
+# data values: a condition at that depth with list arguments is about 108 containers
+# deep, but a list nested inside an `in` argument, `completion.tools` or an unknown
+# key is not walked, so a definition the loader accepts can be deeper than the cap
+# (one 309 deep loads on CPython 3.11, where the recursion limit stops the loader
+# near 500). Such a file is refused here, before `json.dumps`, not rewritten. 256 is
+# more than 2x the operator maximum (108), and a dump at that depth is about 64 KB.
 _MAX_NESTING_DEPTH = 256
 
 

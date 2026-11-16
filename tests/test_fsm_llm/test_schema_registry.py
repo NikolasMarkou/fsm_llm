@@ -967,10 +967,12 @@ class TestUpgradeFsmFile:
         assert path.read_bytes() == text
 
     def test_a_definition_at_the_maximum_jsonlogic_depth_still_upgrades(self, tmp_path):
-        # The deepest shape the loader accepts: a condition nested to
+        # The deepest OPERATOR nesting the loader accepts: a condition nested to
         # MAX_JSONLOGIC_DEPTH with a list argument per level (two containers a
         # level). Its container depth must leave at least 2x headroom under the
-        # cap, so no definition the loader accepts is refused for depth.
+        # cap, so no realistic definition is refused for depth. The loader does not
+        # bound data values (a list nested in an `in` argument), so a loadable file
+        # deeper than the cap is refused, not rewritten.
         from fsm_llm.constants import MAX_JSONLOGIC_DEPTH
         from fsm_llm.core.verify import upgrade_fsm_file
         from fsm_llm.core.verify.upgrade import _MAX_NESTING_DEPTH
@@ -1000,6 +1002,32 @@ class TestUpgradeFsmFile:
         assert deepest * 2 <= _MAX_NESTING_DEPTH
         result = upgrade_fsm_file(str(path))
         assert result.rewritten is True and result.refusal is None
+
+    def test_a_loadable_definition_deeper_than_the_cap_is_refused_not_rewritten(
+        self, tmp_path
+    ):
+        # The loader does not walk the data list of an `in` condition, so it accepts
+        # a definition the guard refuses (the comment above `_MAX_NESTING_DEPTH`).
+        from fsm_llm.core.definitions import FSMDefinition
+        from fsm_llm.core.verify import upgrade_fsm_file
+        from fsm_llm.core.verify.upgrade import _MAX_NESTING_DEPTH
+
+        data: Any = 0
+        for _ in range(_MAX_NESTING_DEPTH + 44):  # a container depth near 309
+            data = [data]
+        body = _declared_body("4.1", with_synthesize=False)
+        body["states"]["start"]["transitions"][0]["conditions"] = [
+            {"description": "c", "logic": {"in": [{"var": "x"}, data]}}
+        ]
+        FSMDefinition(**body)  # loads
+        path = tmp_path / "data.json"
+        path.write_text(json.dumps(body), encoding="utf-8")
+        before = path.read_bytes()
+
+        result = upgrade_fsm_file(str(path))
+
+        assert result.rewritten is False and "nested" in (result.refusal or "")
+        assert path.read_bytes() == before
 
     @pytest.mark.parametrize("version", [4.1, 4, None, ["4.1"]])
     def test_a_non_string_version_is_left_alone(self, tmp_path, version):
