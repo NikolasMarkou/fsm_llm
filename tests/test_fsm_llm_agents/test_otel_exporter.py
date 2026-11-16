@@ -40,10 +40,17 @@ class TestOTELThreadSafety:
     @pytest.mark.skipif(not _has_otel(), reason="opentelemetry sdk not installed")
     def test_concurrent_events_no_crash(self):
         """Concurrent event recording doesn't crash."""
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+            InMemorySpanExporter,
+        )
+
         from fsm_llm.monitor.definitions import MonitorEvent
         from fsm_llm.monitor.otel import OTELExporter
 
-        exporter = OTELExporter(service_name="test")
+        # An in-memory exporter: the default console exporter would flush its batch at
+        # interpreter exit into pytest's closed capture file and print a traceback after the
+        # summary (it only showed once CI installed the `otel` extra, step 121.1).
+        exporter = OTELExporter(service_name="test", exporter=InMemorySpanExporter())
         collector = Mock()
         collector.record_event = Mock()
         exporter.enable(collector)
