@@ -16,8 +16,6 @@ from __future__ import annotations
 
 import ast
 import importlib
-import subprocess
-import sys
 import threading
 from pathlib import Path
 
@@ -28,6 +26,7 @@ import fsm_llm.agents.constants as agents_constants
 import fsm_llm.tools as tools
 import fsm_llm.tools.constants as tool_constants
 from fsm_llm.core.definitions import AgentError
+from tests.test_fsm_llm_agents.support import _layer_probe_output
 
 SRC = Path(tools.__file__).resolve().parents[1]
 _ATTR_CLASSES = ("ContextKeys", "Defaults", "ErrorMessages", "LogMessages")
@@ -221,13 +220,7 @@ class TestTheLayerIsBelowTheSubpackages:
     )
 
     def test_importing_it_loads_no_subpackage_and_no_peer_layer(self) -> None:
-        out = subprocess.run(
-            [sys.executable, "-I", "-c", self._PROBE],
-            capture_output=True,
-            text=True,
-            timeout=300,
-            check=True,
-        ).stdout
+        out = _layer_probe_output(self._PROBE)
         assert out.strip() == "LOADED []", out
 
     def test_no_module_of_the_layer_names_a_higher_module_in_its_source(self) -> None:

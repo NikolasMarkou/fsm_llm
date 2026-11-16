@@ -29,7 +29,6 @@ URL for the GitHub release body; `LINK_CASES` and the CLI scenarios below pin it
 from __future__ import annotations
 
 import ast
-import importlib.util
 import os
 import subprocess
 import sys
@@ -42,6 +41,7 @@ from typing import Any
 import pytest
 
 from tests.test_fsm_llm.test_docs_links import _heading_ids as docs_heading_ids
+from tests.test_fsm_llm_regression.support import load_script_module
 
 _ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _ROOT / "scripts" / "changelog_check.py"
@@ -51,17 +51,7 @@ REF_OK = "https://github.com/o/r/compare/v0.12.0...HEAD"
 
 
 def _load_module(source: str, name: str) -> types.ModuleType:
-    spec = importlib.util.spec_from_loader(name, loader=None)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    module.__file__ = str(_SCRIPT)
-    sys.modules[name] = module
-    try:
-        exec(compile(source, str(_SCRIPT), "exec"), module.__dict__)
-    except BaseException:
-        sys.modules.pop(name, None)
-        raise
-    return module
+    return load_script_module(source, name, _SCRIPT)
 
 
 @pytest.fixture(scope="module")

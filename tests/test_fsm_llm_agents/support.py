@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from typing import Any
 
 from pydantic import BaseModel
@@ -89,3 +91,18 @@ class SequenceMockLLM(LLMInterface):
 class _Out(BaseModel):
     title: str = "unset"
     answer: str = ""
+
+
+def _layer_probe_output(probe: str) -> str:
+    """Run *probe* in a fresh isolated interpreter (`-I`) and return what it printed.
+
+    Interface contract: the probe imports one layer package and prints the `fsm_llm`
+    modules it loaded above itself; raises `subprocess.CalledProcessError` when the child
+    fails and `TimeoutExpired` after 300 s."""
+    return subprocess.run(
+        [sys.executable, "-I", "-c", probe],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=True,
+    ).stdout

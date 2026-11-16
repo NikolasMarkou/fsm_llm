@@ -41,6 +41,7 @@ import pytest
 import fsm_llm
 from fsm_llm import cli_support
 from fsm_llm.core.definitions import ModelNotConfiguredError
+from tests.test_fsm_llm.support import _child_env
 
 _REPO = Path(fsm_llm.__file__).resolve().parents[2]
 _DATASET = _REPO / "evaluation" / "datasets" / "simple_greeting_cases.json"
@@ -385,17 +386,6 @@ class TestNoModelClisHaveNoFlag:
 # working directory and a scrubbed environment; the timeout is long because a
 # full-suite run on a loaded machine slows imports a great deal.
 _CHILD_TIMEOUT_SECONDS = 180
-
-
-def _child_env(**extra: str) -> dict[str, str]:
-    keep = ("PATH", "HOME", "SYSTEMROOT", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL")
-    env = {key: os.environ[key] for key in keep if key in os.environ}
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["OLLAMA_API_BASE"] = "http://127.0.0.1:9"
-    env["OLLAMA_HOST"] = "http://127.0.0.1:9"
-    env["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
-    env.update(extra)
-    return env
 
 
 def _run(args: list[str], cwd: Path, **extra_env: str):

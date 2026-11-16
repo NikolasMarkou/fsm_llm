@@ -43,10 +43,20 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
+
+from tests.test_fsm_llm_regression.workflow_support import (
+    _code_lines,
+    _drop_job,
+    _drop_step,
+    _edit,
+    _edit_nth,
+    _index_of,
+    _load,
+    _steps,
+)
 
 _ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOWS = _ROOT / ".github" / "workflows"
@@ -104,23 +114,6 @@ _PIN_LINE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([0-9][A-Za-z0-9.!+_-]*)
 # --------------------------------------------------------------------------------------
 
 
-def _load(text: str) -> dict[str, Any]:
-    """`yaml.safe_load` with the key `on` (read by PyYAML as `True`) put back as `"on"`."""
-    data = yaml.safe_load(text)
-    assert isinstance(data, dict), "the workflow is not a mapping"
-    if True in data and "on" not in data:
-        data["on"] = data.pop(True)
-    return data
-
-
-def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
-    return [s for s in job.get("steps", []) if isinstance(s, dict)]
-
-
-def _code_lines(text: str) -> list[str]:
-    return [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
-
-
 def _normalized(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
@@ -142,13 +135,6 @@ def _install_line(job: dict[str, Any]) -> list[str]:
             if "pip install -c constraints.txt -e" in line:
                 lines.append(line.strip())
     return lines
-
-
-def _index_of(job: dict[str, Any], needle: str) -> int:
-    for i, step in enumerate(_steps(job)):
-        if needle in str(step.get("run", "")):
-            return i
-    return -1
 
 
 def _canary_step(job: dict[str, Any]) -> dict[str, Any] | None:
@@ -863,54 +849,10 @@ class TestSecurityPolicy:
 # --------------------------------------------------------------------------------------
 
 
-def _edit(old: str, new: str, count: int = 1) -> Callable[[str], str]:
-    def mutate(text: str) -> str:
-        assert text.count(old) >= count, f"{old!r} not found {count} time(s)"
-        return text.replace(old, new, count)
-
-    return mutate
-
-
 def _edit_all(old: str, new: str) -> Callable[[str], str]:
     def mutate(text: str) -> str:
         assert old in text, f"{old!r} not found"
         return text.replace(old, new)
-
-    return mutate
-
-
-def _edit_nth(old: str, new: str, nth: int) -> Callable[[str], str]:
-    def mutate(text: str) -> str:
-        parts = text.split(old)
-        assert len(parts) > nth + 1, f"{old!r} has no occurrence number {nth}"
-        return old.join(parts[: nth + 1]) + new + old.join(parts[nth + 1 :])
-
-    return mutate
-
-
-def _drop_step(name: str, nth: int = 0) -> Callable[[str], str]:
-    def mutate(text: str) -> str:
-        pattern = re.compile(
-            rf"^      - name: {re.escape(name)}\n(?:        .*\n|\n)*?(?=      - name:|\Z|\n  \w)",
-            re.MULTILINE,
-        )
-        matches = list(pattern.finditer(text))
-        assert len(matches) > nth, f"step {name!r} not found"
-        m = matches[nth]
-        return text[: m.start()] + text[m.end() :]
-
-    return mutate
-
-
-def _drop_job(job_id: str) -> Callable[[str], str]:
-    def mutate(text: str) -> str:
-        pattern = re.compile(
-            rf"^  {re.escape(job_id)}:\n(?:    .*\n|\n)*?(?=  [\w-]+:\n|\Z)",
-            re.MULTILINE,
-        )
-        m = pattern.search(text)
-        assert m, f"job {job_id!r} not found"
-        return text[: m.start()] + text[m.end() :]
 
     return mutate
 

@@ -30,7 +30,20 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
+
+from tests.test_fsm_llm_regression.workflow_support import (
+    _assert_multi_line_scripts_fail_fast,
+    _assert_mutant_caught,
+    _assert_runners_pinned_with_timeouts,
+    _code_lines,
+    _drop_comment,
+    _edit,
+    _load,
+    _step_running,
+    _steps,
+    _unpin_checkout,
+    _uses_steps,
+)
 
 _ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = _ROOT / ".github" / "workflows" / "docs.yml"
@@ -44,35 +57,6 @@ _MIKE_DEPLOY = 'mike deploy --push --update-aliases "$VERSION"'
 # --------------------------------------------------------------------------------------
 # Reading the workflow
 # --------------------------------------------------------------------------------------
-
-
-def _load(text: str) -> dict[str, Any]:
-    """`yaml.safe_load` with the key `on` (read by PyYAML as `True`) put back as `"on"`."""
-    data = yaml.safe_load(text)
-    assert isinstance(data, dict), "the workflow is not a mapping"
-    if True in data and "on" not in data:
-        data["on"] = data.pop(True)
-    return data
-
-
-def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
-    return [s for s in job.get("steps", []) if isinstance(s, dict)]
-
-
-def _code_lines(text: str) -> list[str]:
-    """The lines of the workflow that are not full-line comments."""
-    return [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
-
-
-def _step_named(job: dict[str, Any], needle: str) -> dict[str, Any] | None:
-    for step in _steps(job):
-        if needle in str(step.get("run", "")):
-            return step
-    return None
-
-
-def _uses_steps(job: dict[str, Any], action: str) -> list[dict[str, Any]]:
-    return [s for s in _steps(job) if str(s.get("uses", "")).startswith(action + "@")]
 
 
 def workflow_problems(text: str) -> set[str]:
@@ -166,7 +150,7 @@ def workflow_problems(text: str) -> set[str]:
         found.add("build-persist-credentials")
     if not _installs_docs_group(build):
         found.add("build-install")
-    strict = _step_named(build, "mkdocs build --strict")
+    strict = _step_running(build, "mkdocs build --strict")
     if (
         strict is None
         or str((strict.get("env") or {}).get("NO_MKDOCS_2_WARNING")) != "1"
@@ -199,7 +183,7 @@ def workflow_problems(text: str) -> set[str]:
         found.add("deploy-install")
     if not _python_312(deploy):
         found.add("deploy-python")
-    ident = _step_named(deploy, "git config user.name")
+    ident = _step_running(deploy, "git config user.name")
     if (
         ident is None
         or 'git config user.name "github-actions[bot]"' not in ident["run"]
@@ -233,7 +217,7 @@ def workflow_problems(text: str) -> set[str]:
 
 
 def _installs_docs_group(job: dict[str, Any]) -> bool:
-    step = _step_named(job, "--group docs")
+    step = _step_running(job, "--group docs")
     if step is None:
         return False
     run = str(step["run"])
@@ -319,14 +303,14 @@ class TestTheRealWorkflow:
 
     def test_build_runs_the_strict_build_with_the_mkdocs_2_warning_silenced(self):
         build = _load(_real_text())["jobs"]["build"]
-        step = _step_named(build, "mkdocs build --strict")
+        step = _step_running(build, "mkdocs build --strict")
         assert step is not None
         assert step["env"] == {"NO_MKDOCS_2_WARNING": "1"}
         assert step["run"].strip() == "mkdocs build --strict"
 
     def test_build_installs_the_docs_group_against_the_pins_only(self):
         build = _load(_real_text())["jobs"]["build"]
-        step = _step_named(build, "--group docs")
+        step = _step_running(build, "--group docs")
         assert step is not None
         assert "python -m pip install -c constraints.txt --group docs" in step["run"]
         # `--group` needs pip 25.1; the runner's bundled pip may be older.
@@ -362,7 +346,7 @@ class TestTheRealWorkflow:
 
     def test_the_bot_identity_is_the_standard_one(self):
         deploy = _load(_real_text())["jobs"]["deploy"]
-        run = _step_named(deploy, "git config user.name")["run"]
+        run = _step_running(deploy, "git config user.name")["run"]
         assert 'git config user.name "github-actions[bot]"' in run
         assert (
             'git config user.email "41898282+github-actions[bot]@users.noreply.github.com"'
@@ -416,18 +400,10 @@ class TestTheRealWorkflow:
         assert "-latest" not in code
 
     def test_every_job_has_a_timeout_and_a_pinned_runner(self):
-        for name, job in _load(_real_text())["jobs"].items():
-            assert job["runs-on"] == "ubuntu-24.04", name
-            assert isinstance(job["timeout-minutes"], int), name
+        _assert_runners_pinned_with_timeouts(_load(_real_text()))
 
     def test_every_multi_line_script_fails_fast(self):
-        wf = _load(_real_text())
-        assert wf["defaults"]["run"]["shell"] == "bash"
-        for job in wf["jobs"].values():
-            for step in _steps(job):
-                run = str(step.get("run", ""))
-                if "\n" in run.strip():
-                    assert "set -euo pipefail" in run, step.get("name")
+        _assert_multi_line_scripts_fail_fast(_load(_real_text()))
 
 
 # --------------------------------------------------------------------------------------
@@ -546,29 +522,6 @@ class TestTheTagGuard:
 # --------------------------------------------------------------------------------------
 # Mutants: each edit of the real text must be caught by its own rule
 # --------------------------------------------------------------------------------------
-
-_SHA_CHECKOUT = re.compile(r"actions/checkout@[0-9a-f]{40}")
-
-
-def _edit(old: str, new: str, count: int = 1):
-    def apply(text: str) -> str:
-        assert old in text, f"mutant anchor not in the workflow: {old!r}"
-        return text.replace(old, new, count)
-
-    return apply
-
-
-def _unpin_checkout(text: str) -> str:
-    assert _SHA_CHECKOUT.search(text)
-    return _SHA_CHECKOUT.sub("actions/checkout@v7", text, count=1)
-
-
-def _drop_comment(text: str) -> str:
-    mutated = re.sub(
-        r"(actions/setup-python@[0-9a-f]{40})\s+# v[\d.]+", r"\1", text, count=1
-    )
-    assert mutated != text
-    return mutated
 
 
 def _short_sha(text: str) -> str:
@@ -788,9 +741,7 @@ class TestMutantsAreKilled:
     def test_each_mutant_is_caught_by_its_rule(
         self, label: str, mutate: Any, code: str
     ):
-        mutated = mutate(_real_text())
-        assert mutated != _real_text()
-        assert code in workflow_problems(mutated), (label, workflow_problems(mutated))
+        _assert_mutant_caught(_real_text(), mutate, code, label, workflow_problems)
 
     def test_there_are_at_least_ten_distinct_rules_with_a_mutant(self):
         assert len({m[2] for m in MUTANTS}) >= 10

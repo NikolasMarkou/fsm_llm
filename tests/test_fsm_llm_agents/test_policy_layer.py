@@ -24,8 +24,6 @@ from __future__ import annotations
 
 import ast
 import importlib
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -45,6 +43,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.llm import LLMInterface
 from fsm_llm.tools import ToolCall, ToolRegistry
+from tests.test_fsm_llm_agents.support import _layer_probe_output
 
 SRC = Path(policy.__file__).resolve().parents[1]
 _ATTR_CLASSES = ("Defaults", "LogMessages")
@@ -169,13 +168,7 @@ class TestTheLayerIsBelowTheAgents:
     )
 
     def test_importing_it_loads_no_subpackage_and_no_peer_layer(self) -> None:
-        out = subprocess.run(
-            [sys.executable, "-I", "-c", self._PROBE],
-            capture_output=True,
-            text=True,
-            timeout=300,
-            check=True,
-        ).stdout
+        out = _layer_probe_output(self._PROBE)
         assert out.strip() == "LOADED []", out
 
     def test_the_modules_of_the_layer_are_exactly_these(self) -> None:

@@ -34,7 +34,20 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
+
+from tests.test_fsm_llm_regression.workflow_support import (
+    _assert_mutant_caught,
+    _code_lines,
+    _drop_job,
+    _drop_step,
+    _edit,
+    _edit_nth,
+    _index_of,
+    _load,
+    _step_running,
+    _steps,
+    _uses_steps,
+)
 
 _ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = _ROOT / ".github" / "workflows" / "python-package.yml"
@@ -90,44 +103,8 @@ _BEYOND_PACKAGES = frozenset({"mcp", "otel", "a2a"})
 # --------------------------------------------------------------------------------------
 
 
-def _load(text: str) -> dict[str, Any]:
-    """`yaml.safe_load` with the key `on` (read by PyYAML as `True`) put back as `"on"`."""
-    data = yaml.safe_load(text)
-    assert isinstance(data, dict), "the workflow is not a mapping"
-    if True in data and "on" not in data:
-        data["on"] = data.pop(True)
-    return data
-
-
-def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
-    return [s for s in job.get("steps", []) if isinstance(s, dict)]
-
-
 def _runs(job: dict[str, Any]) -> list[str]:
     return [str(s["run"]).strip() for s in _steps(job) if "run" in s]
-
-
-def _code_lines(text: str) -> list[str]:
-    """The lines of the workflow that are not full-line comments."""
-    return [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
-
-
-def _step_running(job: dict[str, Any], needle: str) -> dict[str, Any] | None:
-    for step in _steps(job):
-        if needle in str(step.get("run", "")):
-            return step
-    return None
-
-
-def _index_of(job: dict[str, Any], needle: str) -> int:
-    for i, step in enumerate(_steps(job)):
-        if needle in str(step.get("run", "")):
-            return i
-    return -1
-
-
-def _uses_steps(job: dict[str, Any], action: str) -> list[dict[str, Any]]:
-    return [s for s in _steps(job) if str(s.get("uses", "")).startswith(action + "@")]
 
 
 def matrix_legs(matrix: dict[str, Any]) -> list[dict[str, Any]]:
@@ -717,61 +694,11 @@ class TestTheRealWorkflow:
 # --------------------------------------------------------------------------------------
 
 
-def _edit(old: str, new: str, count: int = 1) -> Any:
-    def mutate(text: str) -> str:
-        assert text.count(old) >= count, f"{old!r} not found {count} time(s)"
-        return text.replace(old, new, count)
-
-    return mutate
-
-
-def _edit_nth(old: str, new: str, nth: int) -> Any:
-    """Replace only the `nth` (0-based) occurrence of `old`."""
-
-    def mutate(text: str) -> str:
-        parts = text.split(old)
-        assert len(parts) > nth + 1, f"{old!r} has no occurrence number {nth}"
-        return old.join(parts[: nth + 1]) + new + old.join(parts[nth + 1 :])
-
-    return mutate
-
-
 def _sub(pattern: str, repl: str, flags: int = re.MULTILINE) -> Any:
     def mutate(text: str) -> str:
         mutated, n = re.subn(pattern, repl, text, count=1, flags=flags)
         assert n == 1, f"{pattern!r} not found"
         return mutated
-
-    return mutate
-
-
-def _drop_step(name: str, nth: int = 0) -> Any:
-    """Remove the `nth` step whose `- name:` line is exactly `name` (to the next step)."""
-
-    def mutate(text: str) -> str:
-        pattern = re.compile(
-            rf"^      - name: {re.escape(name)}\n(?:        .*\n|\n)*?(?=      - name:|\Z|\n  \w)",
-            re.MULTILINE,
-        )
-        matches = list(pattern.finditer(text))
-        assert len(matches) > nth, f"step {name!r} not found"
-        m = matches[nth]
-        return text[: m.start()] + text[m.end() :]
-
-    return mutate
-
-
-def _drop_job(job_id: str) -> Any:
-    """Remove the job `job_id` (to the next job or the end of the file)."""
-
-    def mutate(text: str) -> str:
-        pattern = re.compile(
-            rf"^  {re.escape(job_id)}:\n(?:    .*\n|\n)*?(?=  [\w-]+:\n|\Z)",
-            re.MULTILINE,
-        )
-        m = pattern.search(text)
-        assert m, f"job {job_id!r} not found"
-        return text[: m.start()] + text[m.end() :]
 
     return mutate
 
@@ -1361,9 +1288,7 @@ class TestMutantsAreKilled:
     def test_each_mutant_is_caught_by_its_rule(
         self, label: str, mutate: Any, code: str
     ):
-        mutated = mutate(_real_text())
-        assert mutated != _real_text()
-        assert code in workflow_problems(mutated), (label, workflow_problems(mutated))
+        _assert_mutant_caught(_real_text(), mutate, code, label, workflow_problems)
 
     def test_there_are_at_least_twelve_distinct_rules_with_a_mutant(self):
         assert len({m[2] for m in MUTANTS}) >= 12

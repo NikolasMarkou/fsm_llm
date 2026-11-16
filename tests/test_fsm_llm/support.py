@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from contextlib import ExitStack, contextmanager
 from typing import Any, NamedTuple
@@ -1494,3 +1495,28 @@ def _state(state_id: str, **extra: Any) -> dict[str, Any]:
         "response_instructions": "",
         **extra,
     }
+
+
+def _child_env(**extra: str) -> dict[str, str]:
+    """A scrubbed environment for a child Python process: only the variables a process needs
+    to start, the model server pointed at a closed port, no ``LLM_MODEL`` and no
+    ``LITELLM_MODE``; *extra* is added on top. Pure: it returns a new dict."""
+    keep = ("PATH", "HOME", "SYSTEMROOT", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL")
+    env = {key: os.environ[key] for key in keep if key in os.environ}
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["OLLAMA_API_BASE"] = "http://127.0.0.1:9"
+    env["OLLAMA_HOST"] = "http://127.0.0.1:9"
+    env["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
+    env.update(extra)
+    return env
+
+
+def _plain_state(**fields: Any) -> State:
+    """A conversation `State` with one transition; *fields* override any of its fields."""
+    base: dict[str, Any] = {
+        "id": "s",
+        "description": "d",
+        "purpose": "p",
+        "transitions": [{"target_state": "t", "description": "go"}],
+    }
+    return State(**{**base, **fields})

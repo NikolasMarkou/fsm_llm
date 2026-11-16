@@ -24,6 +24,7 @@ import pytest
 
 import fsm_llm
 from fsm_llm.core.definitions import ModelNotConfiguredError
+from tests.test_fsm_llm.support import _child_env
 
 _SRC = Path(fsm_llm.__file__).resolve().parent
 _MESSAGE = ModelNotConfiguredError.DEFAULT_MESSAGE
@@ -376,17 +377,6 @@ class TestRunnerModelAndEnvFile:
 # --------------------------------------------------------------------------
 # The fsm-llm command, in a child process
 # --------------------------------------------------------------------------
-
-
-def _child_env(**extra: str) -> dict[str, str]:
-    keep = ("PATH", "HOME", "SYSTEMROOT", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL")
-    env = {key: os.environ[key] for key in keep if key in os.environ}
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["OLLAMA_API_BASE"] = "http://127.0.0.1:9"
-    env["OLLAMA_HOST"] = "http://127.0.0.1:9"
-    env["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
-    env.update(extra)
-    return env
 
 
 def _cli(args: list[str], cwd: Path, **extra_env: str):

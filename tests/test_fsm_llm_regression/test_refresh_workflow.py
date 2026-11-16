@@ -39,9 +39,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 from tests.conftest import symlink_or_skip
+from tests.test_fsm_llm_regression.workflow_support import (
+    _code_lines,
+    _load,
+    _steps,
+)
 
 _ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOWS = _ROOT / ".github" / "workflows"
@@ -82,23 +86,6 @@ _KEYWORDS = frozenset({"if", "then", "else", "elif", "fi", "do", "done", "while"
 # --------------------------------------------------------------------------------------
 # Reading the workflows
 # --------------------------------------------------------------------------------------
-
-
-def _load(text: str) -> dict[str, Any]:
-    """`yaml.safe_load` with the key `on` (read by PyYAML as `True`) put back as `"on"`."""
-    data = yaml.safe_load(text)
-    assert isinstance(data, dict), "the workflow is not a mapping"
-    if True in data and "on" not in data:
-        data["on"] = data.pop(True)
-    return data
-
-
-def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
-    return [s for s in job.get("steps", []) if isinstance(s, dict)]
-
-
-def _code_lines(text: str) -> list[str]:
-    return [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
 
 
 def _find(job: dict[str, Any], needle: str) -> int:

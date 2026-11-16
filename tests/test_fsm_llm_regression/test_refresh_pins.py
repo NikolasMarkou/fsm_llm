@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import ast
 import contextlib
-import importlib.util
 import io
 import itertools
 import json
@@ -41,6 +40,8 @@ from typing import Any
 
 import pytest
 
+from tests.test_fsm_llm_regression.support import load_script_module
+
 _ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _ROOT / "scripts" / "refresh_pins.py"
 _WORKFLOW = _ROOT / ".github" / "workflows" / "python-package.yml"
@@ -52,18 +53,7 @@ _OK_RP = ">=3.10,<3.16"
 
 
 def _load_module(source: str, name: str) -> types.ModuleType:
-    """Load `source` as a module named `name` (registered in `sys.modules` while it runs)."""
-    spec = importlib.util.spec_from_loader(name, loader=None)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    module.__file__ = str(_SCRIPT)
-    sys.modules[name] = module
-    try:
-        exec(compile(source, str(_SCRIPT), "exec"), module.__dict__)
-    except BaseException:
-        sys.modules.pop(name, None)
-        raise
-    return module
+    return load_script_module(source, name, _SCRIPT)
 
 
 @pytest.fixture(scope="module")

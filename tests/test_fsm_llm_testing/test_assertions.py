@@ -39,6 +39,7 @@ from fsm_llm.testing import (
     tool_call_reply,
 )
 from fsm_llm.testing import assertions as assertions_module
+from tests.test_fsm_llm_testing.support import _chain, _stuck
 
 _ROOT = Path(fsm_llm.__file__).resolve().parents[2]
 _GREETER = _ROOT / "examples" / "basic" / "simple_greeting" / "fsm.json"
@@ -59,71 +60,6 @@ def _greeter(*, handlers: list[Any] | None = None) -> tuple[API, ScriptedLLM]:
 def _driven() -> ConversationRun:
     api, _ = _greeter()
     return ScriptedUser(["hello", "good, thanks"]).run(api)
-
-
-def _state(
-    state_id: str, *, say: str | None, to: str | None = None, **extra: Any
-) -> dict[str, Any]:
-    state: dict[str, Any] = {
-        "id": state_id,
-        "description": state_id,
-        "purpose": f"be {state_id}",
-    }
-    if say is not None:
-        state["response_instructions"] = say
-    if to is not None:
-        state["transitions"] = [
-            {"target_state": to, "description": f"go to {to}", "priority": 100}
-        ]
-    state.update(extra)
-    return state
-
-
-def _chain() -> dict[str, Any]:
-    """a -> b (silent) -> c (terminal): no user message needed."""
-    return {
-        "name": "Chain",
-        "description": "three states in a row",
-        "initial_state": "a",
-        "persona": "a test persona",
-        "states": {
-            "a": _state("a", say="Say A", to="b"),
-            "b": _state("b", say="", to="c"),
-            "c": _state("c", say="Say done"),
-        },
-    }
-
-
-def _stuck() -> dict[str, Any]:
-    """`a` waits for a key nobody extracts, so every turn stays in `a`."""
-    gate = {
-        "target_state": "b",
-        "description": "when go is set",
-        "priority": 100,
-        "conditions": [
-            {
-                "description": "go is set",
-                "requires_context_keys": ["go"],
-                "logic": {"==": [{"var": "go"}, True]},
-            }
-        ],
-    }
-    return {
-        "name": "Stuck",
-        "description": "never leaves a",
-        "initial_state": "a",
-        "persona": "a test persona",
-        "states": {
-            "a": _state(
-                "a",
-                say="Still here.",
-                extraction_instructions="Extract go.",
-                required_context_keys=["go"],
-                transitions=[gate],
-            ),
-            "b": _state("b", say="Left."),
-        },
-    }
 
 
 def _inline(definition: dict[str, Any], *, handlers: list[Any] | None = None) -> API:

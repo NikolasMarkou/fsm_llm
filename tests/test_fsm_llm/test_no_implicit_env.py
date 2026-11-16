@@ -14,12 +14,13 @@ presence.
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from tests.test_fsm_llm.support import _child_env
 
 _REPO = Path(__file__).resolve().parents[2]
 _SRC = _REPO / "src" / "fsm_llm"
@@ -40,18 +41,6 @@ print("VALUE=" + os.environ.get("LLM_MODEL", ""))
 print("MODE_ENV=" + repr(os.environ.get("LITELLM_MODE")))
 print("MODE_LITELLM=" + repr(litellm.litellm_mode))
 """
-
-
-def _child_env(**extra: str) -> dict[str, str]:
-    """A scrubbed child environment: no ``LLM_MODEL``, no ``LITELLM_MODE``."""
-    keep = ("PATH", "HOME", "SYSTEMROOT", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL")
-    env = {key: os.environ[key] for key in keep if key in os.environ}
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["OLLAMA_API_BASE"] = "http://127.0.0.1:9"
-    env["OLLAMA_HOST"] = "http://127.0.0.1:9"
-    env["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
-    env.update(extra)
-    return env
 
 
 def _probe(cwd: Path, **extra: str) -> dict[str, str]:

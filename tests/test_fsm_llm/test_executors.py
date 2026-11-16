@@ -22,10 +22,11 @@ import pytest
 
 import fsm_llm
 from fsm_llm.core import state_kinds as sk
-from fsm_llm.core.definitions import DataExtractionResponse, State
+from fsm_llm.core.definitions import DataExtractionResponse
 from fsm_llm.engine import kinds
 from fsm_llm.engine.kinds import registry as ex
 from fsm_llm.testing import final_reply
+from tests.test_fsm_llm.support import _plain_state
 from tests.test_fsm_llm.test_completion_state import (
     _RESULT,
     _api,
@@ -87,16 +88,6 @@ def _kind_config_mentions(source: str) -> list[str]:
         elif isinstance(node, ast.alias) and node.name in _BANNED_NAMES:
             found.append(f"import {node.name}")
     return found
-
-
-def _state(**fields: Any) -> State:
-    base: dict[str, Any] = {
-        "id": "s",
-        "description": "d",
-        "purpose": "p",
-        "transitions": [{"target_state": "t", "description": "go"}],
-    }
-    return State(**{**base, **fields})
 
 
 _COMPLETION = {"tools": [{"type": "function", "function": {"name": "f"}}]}
@@ -400,23 +391,26 @@ class TestExecutorModule:
 
 class TestExecutorTable:
     def test_each_kind_has_its_executor(self):
-        assert type(ex.executor_for(_state())) is ex.ConversationExecutor
+        assert type(ex.executor_for(_plain_state())) is ex.ConversationExecutor
         assert (
-            type(ex.executor_for(_state(completion=_COMPLETION)))
+            type(ex.executor_for(_plain_state(completion=_COMPLETION)))
             is ex.CompletionExecutor
         )
 
     def test_synthesize_is_passive_the_conversation_executor(self):
         """D-002 of plan 2cefeb61: a bare converse on a synthesize state stays
         BLOCKED, so the kind shares the conversation executor."""
-        state = _state(synthesize=_SYNTHESIZE)
+        state = _plain_state(synthesize=_SYNTHESIZE)
         assert sk.kind_of(state).name == "synthesize"
-        assert ex.executor_for(state) is ex.executor_for(_state())
+        assert ex.executor_for(state) is ex.executor_for(_plain_state())
 
     def test_cleans_extracted_is_false_only_for_completion(self):
         assert ex.ConversationExecutor().cleans_extracted is True
         assert ex.CompletionExecutor().cleans_extracted is False
-        assert ex.executor_for(_state(synthesize=_SYNTHESIZE)).cleans_extracted is True
+        assert (
+            ex.executor_for(_plain_state(synthesize=_SYNTHESIZE)).cleans_extracted
+            is True
+        )
 
     def test_a_kind_without_an_executor_runs_as_conversation(self, monkeypatch):
         marker = sk.KindSpec(name="marker", config_field="marker")
@@ -441,7 +435,7 @@ class TestExecutorTable:
         base = ex.StateExecutor()
         assert base.cleans_extracted is True
         with pytest.raises(NotImplementedError):
-            base.extract(None, None, "m", "c", _state())  # type: ignore[arg-type]
+            base.extract(None, None, "m", "c", _plain_state())  # type: ignore[arg-type]
         response = DataExtractionResponse(extracted_data={}, confidence=1.0)
         # after_transition of the base (and of completion) runs nothing: a
         # pipeline of None would raise on any call.
@@ -454,7 +448,7 @@ class TestExecutorTable:
                     "c",
                     response,
                     "a",
-                    _state(),  # type: ignore[arg-type]
+                    _plain_state(),  # type: ignore[arg-type]
                 )
                 is None
             )
@@ -536,7 +530,7 @@ class TestCompletionExecutorNeedsACompletionConfig:
                 None,  # type: ignore[arg-type]
                 "m",
                 "c",
-                _state(),
+                _plain_state(),
             )
 
     def test_the_failure_makes_no_call_and_writes_nothing(self):
@@ -550,7 +544,7 @@ class TestCompletionExecutorNeedsACompletionConfig:
                 instance,  # type: ignore[arg-type]
                 "m",
                 "c",
-                _state(),
+                _plain_state(),
             )
         assert instance.last_extraction_response == "untouched"
 

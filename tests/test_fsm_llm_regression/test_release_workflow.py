@@ -40,7 +40,20 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
+
+from tests.test_fsm_llm_regression.workflow_support import (
+    _assert_multi_line_scripts_fail_fast,
+    _assert_mutant_caught,
+    _assert_runners_pinned_with_timeouts,
+    _code_lines,
+    _drop_comment,
+    _edit,
+    _load,
+    _step_running,
+    _steps,
+    _unpin_checkout,
+    _uses_steps,
+)
 
 _ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = _ROOT / ".github" / "workflows" / "release.yml"
@@ -87,37 +100,8 @@ _CREDENTIAL = re.compile(
 # --------------------------------------------------------------------------------------
 
 
-def _load(text: str) -> dict[str, Any]:
-    """`yaml.safe_load` with the key `on` (read by PyYAML as `True`) put back as `"on"`."""
-    data = yaml.safe_load(text)
-    assert isinstance(data, dict), "the workflow is not a mapping"
-    if True in data and "on" not in data:
-        data["on"] = data.pop(True)
-    return data
-
-
-def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
-    return [s for s in job.get("steps", []) if isinstance(s, dict)]
-
-
-def _code_lines(text: str) -> list[str]:
-    """The lines of the workflow that are not full-line comments."""
-    return [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
-
-
-def _step_with(job: dict[str, Any], needle: str) -> dict[str, Any] | None:
-    for step in _steps(job):
-        if needle in str(step.get("run", "")):
-            return step
-    return None
-
-
 def _step_id(job: dict[str, Any], step_id: str) -> dict[str, Any] | None:
     return next((s for s in _steps(job) if s.get("id") == step_id), None)
-
-
-def _uses_steps(job: dict[str, Any], action: str) -> list[dict[str, Any]]:
-    return [s for s in _steps(job) if str(s.get("uses", "")).startswith(action + "@")]
 
 
 def _index(job: dict[str, Any], step: dict[str, Any] | None) -> int:
@@ -301,7 +285,7 @@ def workflow_problems(text: str) -> set[str]:
             or "cache" in (pythons[0].get("with") or {})
         ):
             found.add("build-python")
-    install = _step_with(build, "pip install")
+    install = _step_running(build, "pip install")
     if install is None or install["run"].strip() != (
         "python -m pip install -c constraints.txt build twine"
     ):
@@ -331,7 +315,7 @@ def workflow_problems(text: str) -> set[str]:
     if 'pathlib.Path("src/fsm_llm/__version__.py")' not in grun:
         found.add("guard-version-file")
 
-    extract = _step_with(build, "changelog_check.py")
+    extract = _step_running(build, "changelog_check.py")
     erun = str((extract or {}).get("run"))
     if (
         extract is None
@@ -346,7 +330,7 @@ def workflow_problems(text: str) -> set[str]:
     ):
         found.add("extract")
 
-    fit = _step_with(build, "limit = 120_000")
+    fit = _step_running(build, "limit = 120_000")
     frun_text = str((fit or {}).get("run"))
     if (
         fit is None
@@ -367,7 +351,7 @@ def workflow_problems(text: str) -> set[str]:
     ):
         found.add("notes-order")  # the links are made absolute BEFORE the notes are cut
 
-    built = _step_with(build, "python -m build")
+    built = _step_running(build, "python -m build")
     if (
         built is None
         or built["run"].strip() != "python -m build"
@@ -375,10 +359,10 @@ def workflow_problems(text: str) -> set[str]:
         != "${{ github.workspace }}/constraints.txt"
     ):
         found.add("build-command")
-    checked = _step_with(build, "twine check")
+    checked = _step_running(build, "twine check")
     if checked is None or checked["run"].strip() != "twine check --strict dist/*":
         found.add("twine-strict")
-    names = _step_with(build, "LC_ALL=C sort")
+    names = _step_running(build, "LC_ALL=C sort")
     nrun = str((names or {}).get("run"))
     if (
         names is None
@@ -430,7 +414,7 @@ def workflow_problems(text: str) -> set[str]:
         or 'echo "path=${wheels[0]}" >> "$GITHUB_OUTPUT"' not in frun
     ):
         found.add("sbom-wheel")
-    wheel_install = _step_with(sbom, 'sbom-env/bin/python" -m pip install')
+    wheel_install = _step_running(sbom, 'sbom-env/bin/python" -m pip install')
     wrun = str((wheel_install or {}).get("run"))
     if (
         wheel_install is None
@@ -439,12 +423,12 @@ def workflow_problems(text: str) -> set[str]:
         != "${{ steps.wheel.outputs.path }}"
     ):
         found.add("sbom-extras")
-    tool = _step_with(sbom, "pip install -c constraints.txt cyclonedx-bom")
+    tool = _step_running(sbom, "pip install -c constraints.txt cyclonedx-bom")
     if tool is None or tool["run"].strip() != (
         "python -m pip install -c constraints.txt cyclonedx-bom"
     ):
         found.add("sbom-tool")
-    writer = _step_with(sbom, "cyclonedx-py")
+    writer = _step_running(sbom, "cyclonedx-py")
     swrun = str((writer or {}).get("run"))
     if writer is None or _SBOM_COMMAND not in swrun:
         found.add("sbom-command")
@@ -490,7 +474,7 @@ def workflow_problems(text: str) -> set[str]:
     ]
     if rdown != [("dist", "dist"), ("sbom", "sbom"), ("release-notes", "notes")]:
         found.add("release-download")
-    gh = _step_with(release, "gh release create")
+    gh = _step_running(release, "gh release create")
     if gh is None or gh["run"].count(_RELEASE_COMMAND) != 1:
         found.add("release-command")
     if gh is None or (gh.get("env") or {}) != {
@@ -600,13 +584,13 @@ class TestTheRealWorkflow:
 
     def test_the_default_token_is_named_once_and_only_for_gh(self):
         wf = _load(_real_text())
-        step = _step_with(wf["jobs"]["github-release"], "gh release create")
+        step = _step_running(wf["jobs"]["github-release"], "gh release create")
         assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
         assert len(re.findall(r"github\.token", _real_text())) == 1
 
     def test_the_release_job_creates_the_release_for_the_verified_tag(self):
         wf = _load(_real_text())
-        step = _step_with(wf["jobs"]["github-release"], "gh release create")
+        step = _step_running(wf["jobs"]["github-release"], "gh release create")
         assert step["run"].strip().splitlines()[-1] == _RELEASE_COMMAND
         assert step["env"] == {
             "GH_TOKEN": "${{ github.token }}",
@@ -641,14 +625,14 @@ class TestTheRealWorkflow:
 
     def test_the_build_runs_the_backend_under_the_repository_pins(self):
         build = _load(_real_text())["jobs"]["build"]
-        step = _step_with(build, "python -m build")
+        step = _step_running(build, "python -m build")
         assert step["env"] == {
             "PIP_CONSTRAINT": "${{ github.workspace }}/constraints.txt"
         }
 
     def test_the_release_notes_come_from_the_changelog_extractor_into_a_file(self):
         build = _load(_real_text())["jobs"]["build"]
-        step = _step_with(build, "changelog_check.py")
+        step = _step_running(build, "changelog_check.py")
         assert step["env"] == {
             "VERSION": "${{ steps.version.outputs.version }}",
             "TAG": "${{ github.ref_name }}",
@@ -669,11 +653,13 @@ class TestTheRealWorkflow:
 
     def test_the_sbom_is_written_from_the_wheel_installed_with_every_extra(self):
         sbom = _load(_real_text())["jobs"]["sbom"]
-        install = _step_with(sbom, '-m pip install -c constraints.txt "${WHEEL}[all]"')
+        install = _step_running(
+            sbom, '-m pip install -c constraints.txt "${WHEEL}[all]"'
+        )
         assert install is not None
-        writer = _step_with(sbom, "cyclonedx-py")
+        writer = _step_running(sbom, "cyclonedx-py")
         assert _SBOM_COMMAND in writer["run"]
-        assert "sbom.cdx.json" in _step_with(sbom, "cyclonedx-py")["run"]
+        assert "sbom.cdx.json" in _step_running(sbom, "cyclonedx-py")["run"]
 
     def test_every_action_is_a_sha_pin_with_its_release_tag(self):
         text = _real_text()
@@ -710,18 +696,10 @@ class TestTheRealWorkflow:
         assert "-latest" not in code
 
     def test_every_job_has_a_timeout_and_a_pinned_runner(self):
-        for name, job in _load(_real_text())["jobs"].items():
-            assert job["runs-on"] == "ubuntu-24.04", name
-            assert isinstance(job["timeout-minutes"], int), name
+        _assert_runners_pinned_with_timeouts(_load(_real_text()))
 
     def test_every_multi_line_script_fails_fast(self):
-        wf = _load(_real_text())
-        assert wf["defaults"]["run"]["shell"] == "bash"
-        for job in wf["jobs"].values():
-            for step in _steps(job):
-                run = str(step.get("run", ""))
-                if "\n" in run.strip():
-                    assert "set -euo pipefail" in run, step.get("name")
+        _assert_multi_line_scripts_fail_fast(_load(_real_text()))
 
     def test_the_checkouts_keep_no_credentials(self):
         wf = _load(_real_text())
@@ -737,7 +715,7 @@ class TestTheRealWorkflow:
 
 def _script(job: str, *, step_id: str | None = None, needle: str | None = None) -> str:
     j = _load(_real_text())["jobs"][job]
-    step = _step_id(j, step_id) if step_id else _step_with(j, needle or "")
+    step = _step_id(j, step_id) if step_id else _step_running(j, needle or "")
     assert step is not None, (job, step_id, needle)
     return str(step["run"])
 
@@ -1916,35 +1894,12 @@ class TestTheOwnerSteps:
 # Mutants: each edit of the real text must be caught by its own rule
 # --------------------------------------------------------------------------------------
 
-_SHA_CHECKOUT = re.compile(r"actions/checkout@[0-9a-f]{40}")
-
-
-def _edit(old: str, new: str, count: int = 1):
-    def apply(text: str) -> str:
-        assert old in text, f"mutant anchor not in the workflow: {old!r}"
-        return text.replace(old, new, count)
-
-    return apply
-
-
-def _unpin_checkout(text: str) -> str:
-    assert _SHA_CHECKOUT.search(text)
-    return _SHA_CHECKOUT.sub("actions/checkout@v7", text, count=1)
-
 
 def _unpin_publish(text: str) -> str:
     mutated = re.sub(
         r"pypa/gh-action-pypi-publish@[0-9a-f]{40}",
         "pypa/gh-action-pypi-publish@release/v1",
         text,
-    )
-    assert mutated != text
-    return mutated
-
-
-def _drop_comment(text: str) -> str:
-    mutated = re.sub(
-        r"(actions/setup-python@[0-9a-f]{40})\s+# v[\d.]+", r"\1", text, count=1
     )
     assert mutated != text
     return mutated
@@ -2638,9 +2593,7 @@ class TestMutantsAreKilled:
     def test_each_mutant_is_caught_by_its_rule(
         self, label: str, mutate: Any, code: str
     ):
-        mutated = mutate(_real_text())
-        assert mutated != _real_text()
-        assert code in workflow_problems(mutated), (label, workflow_problems(mutated))
+        _assert_mutant_caught(_real_text(), mutate, code, label, workflow_problems)
 
     def test_there_are_at_least_fourteen_distinct_rules_with_a_mutant(self):
         assert len({m[2] for m in MUTANTS}) >= 14

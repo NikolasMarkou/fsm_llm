@@ -27,22 +27,13 @@ from fsm_llm.core.definitions import FSMDefinition, State
 from fsm_llm.engine.api.conversation import API
 from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from tests.test_fsm_llm import kind_corpus as kc
+from tests.test_fsm_llm.support import _plain_state
 
 _MODULE = Path(sk.__file__)
 _PKG = _MODULE.parent.parent  # src/fsm_llm (the module sits in core/)
 # State fields typed `Model | None` that are not a state kind.
 _NOT_KIND_FIELDS = {"context_scope"}
 _CORPUS = kc.corpus()
-
-
-def _plain_state(**fields: Any) -> State:
-    base: dict[str, Any] = {
-        "id": "s",
-        "description": "d",
-        "purpose": "p",
-        "transitions": [{"target_state": "t", "description": "go"}],
-    }
-    return State(**{**base, **fields})
 
 
 def _completion() -> dict[str, Any]:
