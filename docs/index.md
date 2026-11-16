@@ -86,7 +86,7 @@ The conversation starts in `ask_name`, the extraction fills `name`, the transiti
 | Look up a command-line tool | [Command line](cli.md) |
 | See how the layers fit together | [Architecture](architecture.md) |
 | Run an example from the repository | [Examples](examples.md) |
-| See what changed and what moves next | [Changelog](changelog.md), [2026 roadmap](2026_roadmap.md), [MCP server roadmap](20261116_mcp_roadmap.md) |
+| See what changed and what moves next | [Changelog](changelog.md), [2026 roadmap](2026_roadmap.md) |
 
 ## The subpackages
 
