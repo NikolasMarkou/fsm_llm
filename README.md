@@ -19,9 +19,9 @@ It is one package, `fsm_llm`, with a small core and seven subpackages on top: re
 
 ## Documentation
 
--   **Documentation site:** [https://nikolasmarkou.github.io/fsm_llm/](https://nikolasmarkou.github.io/fsm_llm/) (guides, concepts, the API reference, the command-line tools and the decision index).
--   **Guides on GitHub:** [Quick Start](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/quickstart.md) (also the builders, an agent, a workflow and the reasoning engine), [Concepts](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/concepts.md) (what is in the box, where it fits, how a turn works), [FSM Design](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/fsm_design.md), [Handlers](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/handlers.md), [Architecture](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/architecture.md), [Testing](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/testing.md) and the [API Reference](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/api_reference.md).
--   **Examples and command-line tools:** [runnable examples](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/examples.md) (each is a folder with `run.py` and its FSM JSON) and the [command-line tools](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/reference/cli.md).
+-   **Documentation site:** [https://nikolasmarkou.github.io/fsm_llm/](https://nikolasmarkou.github.io/fsm_llm/) (guides, concepts, the API reference and the command-line tools).
+-   **Guides on GitHub:** [Quick Start](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/quickstart.md) (also the builders, an agent, a workflow and the reasoning engine), [Concepts](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/concepts.md) (what is in the box, where it fits, how a turn works), [FSM Design](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/fsm_design.md), [Handlers](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/handlers.md), [Runtime FSM synthesis](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/synthesis.md), [Testing](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/testing.md), [Architecture](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/architecture.md) and the [API Reference](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/api_reference.md).
+-   **Examples and command-line tools:** [runnable examples](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/examples.md) (each is a folder with `run.py` and its FSM JSON) and the [command-line tools](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/cli.md).
 -   **Per-package READMEs:** [core](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/README.md), [reasoning](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/reasoning/README.md), [workflows](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/workflows/README.md), [agents](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/agents/README.md), [monitor](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/monitor/README.md), [eval](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/eval/README.md), [synthesis](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/synthesis/README.md) and [testing](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/testing/README.md).
 -   **Project:** [source on GitHub](https://github.com/NikolasMarkou/fsm_llm), [CHANGELOG](https://github.com/NikolasMarkou/fsm_llm/blob/main/CHANGELOG.md), [CONTRIBUTING](https://github.com/NikolasMarkou/fsm_llm/blob/main/CONTRIBUTING.md) (setup, tests, repository layout), [SECURITY](https://github.com/NikolasMarkou/fsm_llm/blob/main/SECURITY.md) and [EVALUATE](https://github.com/NikolasMarkou/fsm_llm/blob/main/EVALUATE.md) (evaluation method and run log).
 
@@ -138,37 +138,40 @@ A state with no transitions (`goodbye`) is terminal. `required_context_keys` onl
 
 ### 2. Try It Without a Model
 
-Pass your own `llm_interface` (a subclass of `LLMInterface`) and nothing touches the network. This is how the repository's tests run:
+Pass your own `llm_interface` and nothing touches the network. `fsm_llm.testing` ships a scripted double, the one the repository's own tests use:
 
 ```python
-from fsm_llm import API, LLMInterface
-from fsm_llm.core.definitions import FieldExtractionResponse, ResponseGenerationResponse
+from fsm_llm import API
+from fsm_llm.testing import ScriptedLLM
 
-
-class FakeLLM(LLMInterface):
-    """Fixed reply and a fixed name; makes no network call."""
-
-    def generate_response(self, request):
-        return ResponseGenerationResponse(
-            message="Nice to meet you!", message_type="response", reasoning="fake"
-        )
-
-    def extract_field(self, request):
-        return FieldExtractionResponse(
-            field_name=request.field_name, value="Alice", confidence=1.0,
-            reasoning="fake", is_valid=True,
-        )
-
-
-api = API.from_file("greeter.json", llm_interface=FakeLLM())
-conv_id, _ = api.start_conversation()
-print(api.converse("anything", conv_id))                    # Nice to meet you!
+llm = ScriptedLLM(
+    extraction_data={"name": "Alice"},
+    responses={"ask_name": "What is your name?", "goodbye": "Goodbye, Alice!"},
+)
+api = API.from_file("greeter.json", llm_interface=llm)
+conv_id, opening = api.start_conversation()
+print(opening)                                                # What is your name?
+print(api.converse("I am Alice", conv_id))                    # Goodbye, Alice!
 print(api.get_data(conv_id), api.get_current_state(conv_id))  # {'name': 'Alice'} goodbye
 ```
 
 `API` refuses `model=`, `temperature=` and similar settings next to `llm_interface=`, because the interface owns them.
 
 Builders, agents, workflows and the reasoning engine are in the [Quick Start guide](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/quickstart.md).
+
+## The Packages at a Glance
+
+`import fsm_llm` loads only the core; each subpackage is imported by name (`from fsm_llm.agents import create_agent`).
+
+| Subpackage | What it adds |
+|------------|--------------|
+| `fsm_llm.reasoning` | 9 reasoning strategies run as stacked FSMs, with validation and retries |
+| `fsm_llm.workflows` | An async in-memory workflow engine with 11 step types and a Python DSL |
+| `fsm_llm.agents` | 18 agent patterns, tools, human approval, memory, MCP and A2A, a meta-builder |
+| `fsm_llm.monitor` | A FastAPI dashboard with REST, WebSocket and OpenTelemetry export |
+| `fsm_llm.eval` | An examples scorer (0 to 4) and scripted conversation evals with Wilson intervals |
+| `fsm_llm.synthesis` | A model compiles a goal into an FSM, gates judge it, a runner executes it |
+| `fsm_llm.testing` | Test doubles, a scripted user and assertions for code built on the library |
 
 ## License
 

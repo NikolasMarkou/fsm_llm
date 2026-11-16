@@ -24,6 +24,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 # Files that each carry at least one full FSM snippet (the first-touch docs).
 _FULL_FSM_DOCS = [
     "README.md",
+    "docs/index.md",
     "docs/quickstart.md",
     "src/fsm_llm/README.md",
     "AGENTS.md",

@@ -11,7 +11,7 @@
 #   * every action is pinned to a commit SHA, with its release tag in the trailing comment
 #     (resolved with `gh api repos/<owner>/<repo>/git/ref/tags/<tag>`, 2026-11-14);
 #   * the docs tools install from the `docs` dependency group against `constraints.txt`. The
-#     package itself is NOT installed: mkdocstrings reads `src/` statically (`paths: [src]`).
+#     package itself is NOT installed: no page reads the source (the site holds hand-written pages only).
 #
 # This workflow and release.yml both start on a tag `v*` and are NOT chained: a deploy happens
 # even when the publish of that tag is refused or abandoned. CONTRIBUTING.md "Releasing" says what

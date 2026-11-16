@@ -76,7 +76,7 @@ fsm_llm/
 │   └── testing/               # Public test doubles, scripted user, assertions
 ├── tests/                     # One folder per subpackage plus root-level files
 ├── examples/                  # 100 runnable examples in 8 categories (evaluation baselines)
-├── docs/                      # Guides, API reference and the site pages (mkdocs.yml builds them)
+├── docs/                      # The documentation pages of the site (mkdocs.yml builds them)
 ├── evaluation/                # Datasets and recorded eval runs
 ├── scripts/                   # Supply-chain audit, benches, doc-count check
 ├── images/                    # Logo and diagrams
@@ -110,8 +110,8 @@ Code whose reason is not obvious from reading it carries a decision anchor, a co
 - Add one when the code takes an approach chosen after another one failed, when a simpler-looking alternative was rejected on purpose, when it works around a library or framework constraint, or when a reader would reasonably ask "why not just do X?".
 - The body says what NOT to do and why. A new anchor is at most 6 lines; the full reasoning belongs in `decisions.md`.
 - Every anchor needs a line in `plans/ANCHORS.md`, the append-only manifest (one line per decision: plan id, number, date, one-line rationale). The line is produced when the plan closes; never edit or reorder an existing line. `plans/ANCHORS.md` is the one tracked file under `plans/`, so a fresh clone has it. The owner commits the appended lines before the first push.
-- `make decision-check` is the gate: it fails when an anchor has no manifest line (and is not `[STALE]`), when an anchor has a bad prefix (not a plan id, or a bare `D-NNN`), and when `docs/decisions/index.md` is stale. A default-suite test runs the same check.
-- `docs/decisions/index.md` is generated from the anchors and the manifest: do not edit it. After you add, move, reword or remove an anchor (or when `plans/ANCHORS.md` gains lines) run `make decision-index` and commit the regenerated file with the change. The index lists every place of each decision (path and enclosing definition, no line numbers), so it is the lookup path from a decision to its code; the `**Anchor-Refs**:` line in a plan's `decisions.md` is no longer the way to find the places.
+- `make decision-check` (`python scripts/decision_index.py --check`) is the gate: it fails when an anchor has no manifest line (and is not `[STALE]`) and when an anchor has a bad prefix (not a plan id, or a bare `D-NNN`). It reads the committed `plans/ANCHORS.md` only and takes no argument. A default-suite test runs the same check, and so does the `lint` job of CI.
+- `make decision-index` writes a report of every anchor to `build/decision-index.md` (ignored by git, never committed): each decision with its manifest rationale and every place (path and enclosing definition, no line numbers), so it is the lookup path from a decision to its code on a machine that has no plan directory. `python scripts/decision_index.py --report` prints the counts.
 - Read the anchors near code before you change it, and do not undo what they forbid. If a rule no longer fits, record a new decision that supersedes it instead of deleting the anchor quietly.
 
 Two markers can follow an anchor's id:
@@ -119,20 +119,20 @@ Two markers can follow an anchor's id:
 - `[STALE]`: the plan directory that recorded the decision has been retired, so the full entry may be gone (its one-line summary is in `plans/ANCHORS.md`). The gate counts such an anchor as resolved by its tag (it is listed in the index under Retired). The rule itself may still bind. Read the anchor text and the code around it before changing anything.
 - `[SUPERSEDED BY D-nnn]` (or an inline `[supersedes ...]` note on the newer anchor): the rule was replaced. Follow the newer decision; the old text is kept only as history.
 
-## Changelog and upgrade guides
+## Changelog
 
 `CHANGELOG.md` follows Keep a Changelog 1.1.0: a `## [Unreleased]` section first, then `## [X.Y.Z] - YYYY-MM-DD` releases, newest first; inside a section the `###` headings are only Added, Changed, Deprecated, Removed, Fixed and Security, each at most once, in that order; and `[Unreleased]: .../compare/v<newest release>...HEAD` sits with the reference links at the bottom. Releases already published stay as they were written.
 
-A change that breaks a caller (a removed or renamed public name or path, a changed default, a new refusal) gets one bullet that starts its breaking part with the exact marker `**BREAKING:**` (not `**Breaking:**`, not prose) and links its upgrade guide: `docs/upgrade-guide/vX.Y.Z/<name>.md#<slug>`, where `vX.Y.Z` is the release that ships the change, `<name>.md` is a page under `docs/upgrade-guide/vX.Y.Z/` and `<slug>` is the id of a heading in it (one heading per change, with the before and after code). Write the link target relative to the repository root, `docs/upgrade-guide/vX.Y.Z/<name>.md#<slug>`, with no leading `./` or `../` (the link text is `Upgrade guide`): GitHub resolves it from `CHANGELOG.md`, and the documentation site, which includes the file, rewrites it against the included file (the strict build checks it); the checker only needs that tail to be present. A guide page opens with `# Title` and `Covers FSM-LLM X.Y.Z to X.Y.Z.`, and each `##` heading shows the old code under a bold `**Before**` and the new code under `**After**`: `tests/test_fsm_llm/test_upgrade_guides.py` parses every block, checks the `fsm_llm` imports of an After block and runs it with no model, so keep it offline and self-contained (a block that cannot run is introduced by `**Sketch**` instead).
+A change that breaks a caller (a removed or renamed public name or path, a changed default, a new refusal) gets one bullet that starts its breaking part with the exact marker `**BREAKING:**` (not `**Breaking:**`, not prose). The bullet names the old form and the new one: the changelog is the migration record of a release, and no separate upgrade guide is published. A `**BREAKING:**` marker outside a list item (a table row, a paragraph) is refused, because only a bullet is read for the spelling.
 
 ```bash
-python scripts/changelog_check.py check                   # the form and every BREAKING bullet's guide link
+python scripts/changelog_check.py check                   # the form and the spelling of every BREAKING marker
 python scripts/changelog_check.py check --from 0.12.0     # widen the scope to older sections
 python scripts/changelog_check.py extract 0.13.0          # the notes of one release (also v0.13.0 or Unreleased)
 make changelog-check                                      # the same check as `check`
 ```
 
-The checker (stdlib only, read-only) judges `[Unreleased]`, plus the newest release while `[Unreleased]` is empty. It is enforced three ways: `tests/test_packaging.py::TestTheRealChangelog` runs it on the real file in every test run, the `lint` job of the CI workflow runs the same command, and the release workflow reads the release notes with `extract`. A BREAKING bullet without its guide link therefore fails the build; add the guide section first, then the link. In the release body the `docs/...` links are made absolute under the tag by `extract --link-base` (a GitHub release body does not resolve a relative link), so write them relative as above and never as an absolute URL to `main`.
+The checker (stdlib only, read-only) judges `[Unreleased]`, plus the newest release while `[Unreleased]` is empty. It is enforced three ways: `tests/test_packaging.py::TestTheRealChangelog` runs it on the real file in every test run, the `lint` job of the CI workflow runs the same command, and the release workflow reads the release notes with `extract`. In the release body a repository-relative link `docs/...` is made absolute under the tag by `extract --link-base` (a GitHub release body does not resolve a relative link); the changelog holds no such link today, and if you add one write it relative, never as an absolute URL to `main`.
 
 ## Building the docs
 
@@ -202,7 +202,7 @@ A tag that fails a guard publishes nothing: delete it (`git push origin :refs/ta
 
 All taken from recorded open items:
 
-- **Agents** ([docs/agents_roadmap.md](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/agents_roadmap.md), Known open items and Track B): `AgentGraph` has no failure routing, so a fallback branch cannot be built; Orchestrator subtasks dropped over `max_workers` do not affect `success`; a reply cut off by `max_tokens` is detected (`finish_reason`, a WARNING, a named cause in extraction errors, no unreadable half envelope shown as a reply) and a cut final reply (or answer field) of an agent run ends it with `success=False` and `stop_reason="truncated"` (REWOO stops on a cut plan), but a cut `native_fc` tool call, a `SelfConsistencyAgent` sample, a long meta-builder artifact, a streamed reply and a cut in an earlier turn are still not flagged; Swarm never hands off by itself; real human-in-the-loop for REWOO, PlanExecute, ParallelReact and native_fc; MCP v2 and A2A v1.0.
+- **Agents** (`src/fsm_llm/agents/README.md` and the [2026 roadmap](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/2026_roadmap.md), open items): `AgentGraph` has no failure routing, so a fallback branch cannot be built; Orchestrator subtasks dropped over `max_workers` do not affect `success`; a reply cut off by `max_tokens` is detected (`finish_reason`, a WARNING, a named cause in extraction errors, no unreadable half envelope shown as a reply) and a cut final reply (or answer field) of an agent run ends it with `success=False` and `stop_reason="truncated"` (REWOO stops on a cut plan), but a cut `native_fc` tool call, a `SelfConsistencyAgent` sample, a long meta-builder artifact, a streamed reply and a cut in an earlier turn are still not flagged; Swarm never hands off by itself; real human-in-the-loop for REWOO, PlanExecute, ParallelReact and native_fc; MCP v2 and A2A v1.0.
 - **Core** (`CHANGELOG.md`, 0.12.0, Known open): validating an `FSMDefinition` for the first time from several threads at once can race; the message-free `classification_extractions` path has offline coverage only; nothing was checked live on a non-Ollama provider.
 - **Reasoning** (`CHANGELOG.md`, Known open): cheaper typed per-key reasoning fields were tried and reverted after losing answers on a pre-registered probe, so a new attempt needs its own probe; a `final_context` passed back as `initial_context` still carries the previous problem's analysis.
 - **Measurement**: every live number here comes from one small local model. Runs on other models and providers are welcome, as new pre-registered blocks (see `scripts/bench_data/README.md`).

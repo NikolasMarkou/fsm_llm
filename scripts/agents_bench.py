@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pre-registered live bench for agent tool loops (E1 of docs/agents_roadmap.md).
+"""Pre-registered live bench for agent tool loops (E1 of the agents audit record of 0.12.0).
 
 Same discipline as ``scripts/bench_common.py``: raw jsonl rows, a manifest
 written before row 1, blocks run once at fixed n, and a ``report`` that

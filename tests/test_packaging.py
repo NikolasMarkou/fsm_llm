@@ -838,9 +838,6 @@ _HINT_SCAN_FILES = (
     ".env.example",
 )
 _HINT_SCAN_SKIP = ("docs/2026_roadmap.md",)
-#: The upgrade guides quote the old install command as the `Before` of the distribution rename
-#: (and tell a reader never to run it): migration text, like the CHANGELOG, not an install hint.
-_HINT_SCAN_SKIP_DIRS = ("docs/upgrade-guide/",)
 _HINT_SUFFIXES = (".py", ".md", ".yml", ".yaml", ".toml", ".txt", ".ini")
 
 
@@ -855,14 +852,7 @@ def _hint_scan_files() -> list[pathlib.Path]:
             and "__pycache__" not in p.parts
         ]
     skip = {_REPO_ROOT / s for s in _HINT_SCAN_SKIP}
-    skip_dirs = tuple(_REPO_ROOT / s for s in _HINT_SCAN_SKIP_DIRS)
-    return [
-        p
-        for p in found
-        if p.is_file()
-        and p not in skip
-        and not any(p.is_relative_to(d) for d in skip_dirs)
-    ]
+    return [p for p in found if p.is_file() and p not in skip]
 
 
 class TestNoPypiInstallHint:
@@ -2261,7 +2251,11 @@ class TestGitattributesPinLineEndings:
                 if line.count(": ") == 2
             }
 
-        for path in ("docs/api.txt", "pyproject.toml", "tests/conftest.py"):
+        for path in (
+            "tests/fixtures/api_snapshot.txt",
+            "pyproject.toml",
+            "tests/conftest.py",
+        ):
             assert attrs(path).get("eol") == "lf", path
         assert attrs("images/fsm-llm-logo-1.png").get("text") == "unset"
 

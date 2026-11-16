@@ -312,3 +312,9 @@ Which rows predate which fix: every s0 row predates all of the above; s1 rows pr
 - Importing the package loads `fsm_llm.agents`, `fsm_llm.reasoning` and `fsm_llm.eval`.
 
 See `src/fsm_llm/synthesis/README.md` and `src/fsm_llm/synthesis/AGENTS.md` for the file list and the contracts, and `docs/api_reference.md` for signatures.
+
+## Next steps
+
+- The [API Reference](api_reference.md) lists the synthesis names with their signatures.
+- The [FSM Design Guide](fsm_design.md) covers the host machine around a `synthesize` state.
+- [Testing](testing.md) shows how to test a host conversation with scripted models.

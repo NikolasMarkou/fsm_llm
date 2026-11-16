@@ -268,8 +268,11 @@ For agent-style flows that accumulate intermediate results across turns, `Workin
 # Validate structure
 from fsm_llm import validate_fsm_from_file
 result = validate_fsm_from_file("my_fsm.json")  # checks reachability, missing transitions
+```
 
-# Or from CLI
+Or from the command line:
+
+```bash
 fsm-llm-validate --fsm my_fsm.json
 ```
 

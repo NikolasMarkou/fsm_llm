@@ -36,7 +36,6 @@ MCP_INSTALLED = importlib.util.find_spec("mcp") is not None
 MCP_SKIP = "skipped: `mcp` is importable; the documented counts are the no-mcp counts"
 HISTORICAL = {
     "CHANGELOG.md": "release history",
-    "docs/agents_roadmap.md": "dated roadmap and bench reports",
     "docs/2026_roadmap.md": "dated roadmap, counts are the 7a0aa42 baseline",
     "plans/": "retired plan directories",
     "evaluation/": "dated eval runs",

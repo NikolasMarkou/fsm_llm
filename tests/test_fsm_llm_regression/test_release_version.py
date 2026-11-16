@@ -158,9 +158,9 @@ class TestEveryQuotedVersionFollows:
             for p in sorted((_ROOT / "docs").glob("*.md"))
             if "> Covers FSM-LLM v" in "\n".join(p.read_text("utf-8").splitlines()[:5])
         ]
-        assert len(guides) >= 9, [
+        assert len(guides) >= 11, [
             p.name for p in guides
-        ]  # seven current guides, two site pages
+        ]  # ten current guides and the landing page (step 123)
         for page in guides:
             header = re.search(
                 r"^> Covers FSM-LLM v(\S+)$", page.read_text("utf-8"), re.M

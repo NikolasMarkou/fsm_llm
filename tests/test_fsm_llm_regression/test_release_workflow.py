@@ -1546,7 +1546,9 @@ class TestTheRealReleaseNotes:
         assert _relative_doc_links(after) == []
         assert len(after) <= 125_000
         assert "entries marked BREAKING" in highlights
-        assert "docs/upgrade-guide" not in after  # step 123: no guide is linked any more
+        assert (
+            "docs/upgrade-guide" not in after
+        )  # step 123: no guide is linked any more
 
     def test_the_notes_keep_the_first_sections_after_the_highlights(
         self, tmp_path: Path

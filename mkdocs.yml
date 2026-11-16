@@ -14,12 +14,10 @@ site_dir: site
 # A warning is a failure: mike's own build inherits this too.
 strict: true
 
-# `AGENTS.md` files are notes for coding agents and are never published (a test pins it). `api.txt`
-# is the generated API snapshot: it is read by a test, not served as a file. `/README.md` is the
-# GitHub folder index of docs/ (index.md is the site's landing page).
+# `AGENTS.md` files are notes for coding agents and are never published (a test pins it). `/README.md`
+# is the GitHub folder index of docs/ (index.md is the site's landing page).
 exclude_docs: |
   AGENTS.md
-  api.txt
   /README.md
 
 # mkdocs 1.6 `validation`: each of these is `info` by default, which strict mode does not fail on.
@@ -35,10 +33,9 @@ validation:
     anchors: warn
 
 # Every page is listed (a test fails on one that is not). Groups: the landing page, getting started,
-# guides, the reference, the package pages, architecture, the decision index, the upgrade guides and the project pages
-# (the root files CONTRIBUTING, SECURITY, EVALUATE and CHANGELOG are included by thin wrapper pages,
-# and both roadmaps are published as written). The module pages follow MODULES of
-# scripts/api_snapshot.py and the package pages follow src/fsm_llm/*/README.md (tests pin both).
+# guides, the reference (API, command line, architecture) and the project pages (the root files
+# CONTRIBUTING, SECURITY, EVALUATE and CHANGELOG are included by thin wrapper pages, and the roadmaps
+# are published as written). The subpackage READMEs are not pages: they are linked on GitHub.
 nav:
   - Home: index.md
   - Getting started:
@@ -52,49 +49,8 @@ nav:
       - Testing: testing.md
   - Reference:
       - API Reference: api_reference.md
-      - API snapshot: reference/api-snapshot.md
-      - Command line: reference/cli.md
-      - Modules:
-          - fsm_llm: reference/fsm_llm.md
-          - fsm_llm.skills: reference/fsm_llm.skills.md
-          - fsm_llm.core.codes: reference/fsm_llm.core.codes.md
-          - fsm_llm.core.verify.flow: reference/fsm_llm.core.verify.flow.md
-          - fsm_llm.frontmatter: reference/fsm_llm.frontmatter.md
-          - fsm_llm.okf: reference/fsm_llm.okf.md
-          - fsm_llm.engine.okf_bridge: reference/fsm_llm.engine.okf_bridge.md
-          - fsm_llm.core.definitions.schema: reference/fsm_llm.core.definitions.schema.md
-          - fsm_llm.agents: reference/fsm_llm.agents.md
-          - fsm_llm.eval: reference/fsm_llm.eval.md
-          - fsm_llm.monitor: reference/fsm_llm.monitor.md
-          - fsm_llm.reasoning: reference/fsm_llm.reasoning.md
-          - fsm_llm.synthesis: reference/fsm_llm.synthesis.md
-          - fsm_llm.testing: reference/fsm_llm.testing.md
-          - fsm_llm.workflows: reference/fsm_llm.workflows.md
-  - Packages:
-      - agents: packages/agents.md
-      - eval: packages/eval.md
-      - monitor: packages/monitor.md
-      - reasoning: packages/reasoning.md
-      - synthesis: packages/synthesis.md
-      - testing: packages/testing.md
-      - workflows: packages/workflows.md
-  - Architecture:
+      - Command line: cli.md
       - Architecture: architecture.md
-  - Decisions: decisions/index.md
-  - Upgrade guides:
-      - Overview: upgrade-guide/index.md
-      - Distribution rename: upgrade-guide/v0.13.0/distribution-rename.md
-      - Python and dependency floors: upgrade-guide/v0.13.0/python-floor.md
-      - Default model and dotenv files: upgrade-guide/v0.13.0/default-model-and-env.md
-      - Module paths: upgrade-guide/v0.13.0/module-paths.md
-      - Tools and approval policy: upgrade-guide/v0.13.0/tools-and-policy.md
-      - Monitor route functions: upgrade-guide/v0.13.0/monitor-routes.md
-      - Core renames: upgrade-guide/v0.13.0/core-renames.md
-      - Definition version: upgrade-guide/v0.13.0/definition-version.md
-      - Workflows vocabulary: upgrade-guide/v0.13.0/workflows-vocabulary.md
-      - Agents renames and behaviour: upgrade-guide/v0.13.0/agents-renames.md
-      - Monitor and reasoning: upgrade-guide/v0.13.0/monitor-and-reasoning.md
-      - Removals and small API changes: upgrade-guide/v0.13.0/removals.md
   - Project:
       - Contributing: contributing.md
       - Security: security.md
@@ -102,7 +58,6 @@ nav:
       - Changelog: changelog.md
       - Roadmaps:
           - 2026 roadmap: 2026_roadmap.md
-          - Agents roadmap: agents_roadmap.md
 
 theme:
   name: material
@@ -117,17 +72,6 @@ theme:
 plugins:
   - search
   - include-markdown
-  - mkdocstrings:
-      handlers:
-        python:
-          # src layout: the package is src/fsm_llm/, read statically (nothing is imported).
-          paths: [src]
-          options:
-            # `google` would give strict warnings on docstrings that bench manifests pin; `null`
-            # leaves the docstring text as written and renders it as plain Markdown.
-            docstring_style: null
-            show_root_heading: true
-            show_source: false
 
 markdown_extensions:
   - admonition

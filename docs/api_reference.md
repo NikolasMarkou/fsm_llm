@@ -432,7 +432,7 @@ approval_code(None)                      # (Status.FAILED, Reason.APPROVAL_REQUI
 - The three mappers are pure and lossy by design, and each says so in its docstring: a spent `max_iterations` becomes `aborted` with `budget_spent` (the budget kind stays in `stop_reason`); an approval timeout is folded into denied. A timed-out tool call (`unknown`) is deliberately refused with `ValueError`, never mapped to `failed`: the call may still take effect, and `failed` reads as safe to run again.
 - Import it by name; `fsm_llm/__init__.py` does not load it. In messages use `.value`, not an f-string of a member.
 
-The public names of the packages, with signatures, are also in the generated `docs/api.txt`; regenerate it with `make api-snapshot` after a deliberate public change (a regression test fails until you do).
+A machine-checked list of the public names of the packages, with signatures, is the test fixture `tests/fixtures/api_snapshot.txt`; contributors regenerate it with `make api-snapshot` after a deliberate public change (a regression test fails until they do).
 
 ## Logging (`fsm_llm`)
 
@@ -514,7 +514,7 @@ agent = ReactAgent(tools=registry, config=AgentConfig(model="gpt-4o-mini"), hitl
 
 Multi-agent coordination and integrations (constructed directly, not via the factory): `SwarmAgent`, `AgentGraph` / `AgentGraphBuilder` (DAG orchestration; `build()` raises `BuildError`, a duplicate node name included), `ConfiguredAgentBuilder` (fluent `create_agent`), `MCPToolProvider` (MCP tools), `AgentServer` / `RemoteAgentTool` (A2A), `SemanticToolRegistry` (embedding-based tool retrieval through core's `LiteLLMEmbedder`, or `embed_fn=`), `SOPRegistry` / `load_builtin_sops` (reusable agent templates).
 
-User guide: `src/fsm_llm/agents/README.md`. Audit record, adjusted decisions and deferred work: `docs/agents_roadmap.md`.
+User guide: [`src/fsm_llm/agents/README.md`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/agents/README.md). Open work on agents is in the [2026 roadmap](2026_roadmap.md).
 
 ## WorkflowEngine (`fsm_llm.workflows`)
 
@@ -985,7 +985,7 @@ runner.end_conversation(conv_id)
 
 ## Testing (`fsm_llm.testing`)
 
-Public test doubles, a scripted user and assertions for code built on FSM-LLM. Import by name; `import fsm_llm` never loads it and no library module imports it. It imports the core and `fsm_llm.core.codes` only (never `pytest`, `litellm` or another subpackage), makes no network call and has no import side effect. Guide with runnable examples: [`docs/testing.md`](testing.md). The signatures are in the generated `docs/api.txt`.
+Public test doubles, a scripted user and assertions for code built on FSM-LLM. Import by name; `import fsm_llm` never loads it and no library module imports it. It imports the core and `fsm_llm.core.codes` only (never `pytest`, `litellm` or another subpackage), makes no network call and has no import side effect. Guide with runnable examples: [`docs/testing.md`](testing.md). The signatures are in the API snapshot fixture, `tests/fixtures/api_snapshot.txt`.
 
 ```python
 from fsm_llm import API
@@ -1064,3 +1064,9 @@ from fsm_llm.constants import (
 Model resolution: the `model=` argument, then the process environment `LLM_MODEL`; there is no built-in default, so with neither set `API`, `Classifier`, `AgentConfig()`, `ReasoningEngine`, the eval runs and the monitor launch routes raise `ModelNotConfiguredError` (a `FSMError` and a `ValueError`, so the monitor answers HTTP 400 with its message; a blank value counts as unset; an injected `llm_interface` needs no model; every CLI prints the message as one stderr line and exits 1). Importing `fsm_llm` loads no `.env` file: `fsm_llm.llm` sets `LITELLM_MODE=PRODUCTION` around its `import litellm` when the caller has not set one, and restores the environment afterwards (an explicit `LITELLM_MODE=DEV` opts back in; if the host imports litellm before `fsm_llm`, litellm has already loaded the file). A `.env` file is read only on request: `fsm_llm.load_env(path=None, *, override=False) -> Path | None` (from the working directory upward when `path` is `None`, `FileNotFoundError` for a missing explicit path, a variable the process already has is kept unless `override=True`; a blank one counts as unset, as for `resolve_model`, so the file fills it; to keep a variable deliberately empty, do not name it in the file) or the `--env-file PATH` flag of `fsm-llm`, `fsm-llm-eval`, `fsm-llm-meta`, `python -m fsm_llm.reasoning` and `fsm-llm-monitor` (`cli_support.add_env_file` and `apply_env_file`; a missing file is one stderr line and exit 1; `fsm-llm-okf`, `fsm-llm-skills`, `fsm-llm-validate` and `fsm-llm-visualize` call no model and do not take it); `--model` (`-m` on `fsm-llm` and the reasoning CLI) sets the model for one run (`--model`, then the process environment, then the file); the monitor starts without a model and its launch routes answer 400 until one is set. The default embedder is `DEFAULT_EMBEDDING_MODEL` in `fsm_llm.llm` (`ollama/embeddinggemma-2:740m`); a `SemanticMemoryStore` file records its own.
 
 Agent Skills limits and caps are `SKILL_*` constants in the same module: `SKILL_MAX_SKILLS` (500), `SKILL_MAX_FILE_BYTES` (262,144), `SKILL_MAX_RESOURCES` (1,000), `SKILL_MAX_LOAD_SECONDS` (60.0), `SKILL_MAX_DEPTH` (8), `SKILL_MAX_ISSUES` (5,000), `SKILL_MAX_ISSUES_PER_SKILL` (25), `SKILL_MAX_FRONTMATTER_BYTES` (16,384), `SKILL_MAX_YAML_DEPTH` (64); the format limits of the open standard `SKILL_NAME_MAX_CHARS` (64), `SKILL_DESCRIPTION_MAX_CHARS` (1,024), `SKILL_COMPATIBILITY_MAX_CHARS` (500), `SKILL_BODY_MAX_LINES` (500); the text caps `SKILL_READ_PAGE_CHARS` (1,500), `SKILL_LIST_MAX_ITEMS` (25), `SKILL_CATALOG_MAX_ITEMS` (50), `SKILL_CATALOG_DESCRIPTION_CHARS` (250); and the fixed texts `SKILL_UNTRUSTED_LABEL`, `SKILL_INCOMPLETE_NOTE`, `SKILL_CATALOG_END`, `SKILL_SKIPPED_NOTE` and `SKILL_READ_HINT`, plus the table `SKILL_DEFANG` that `render_catalog()` applies to skill text.
+
+## Next steps
+
+- The [Command line](cli.md) page lists every console script.
+- [Architecture](architecture.md) shows how the layers fit together.
+- [Concepts](concepts.md) says what each subpackage is for.

@@ -311,3 +311,9 @@ Inside this repository `tests/conftest.py` no longer exports the doubles at all 
 - The fakes stand in for a model; they say nothing about how a real model behaves. A passing scripted test proves your FSM, handlers and wiring, not the quality of your prompts.
 - `ScriptedLLM` answers every field extraction from one dict, whatever the state asks for; use `PromptGroundedLLM` when the evidence matters.
 - `PathRecorder` and the assertions read the conversation through the public `API`; a conversation closed while still open is read from the snapshot the API kept at the close.
+
+## Next steps
+
+- The [API Reference](api_reference.md) lists every name of `fsm_llm.testing`.
+- [Handler Development](handlers.md) covers the handlers you can test with these doubles.
+- The [FSM Design Guide](fsm_design.md) covers designing the machine under test.

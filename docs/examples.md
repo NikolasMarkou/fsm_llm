@@ -34,5 +34,10 @@ All of them are on GitHub under [`examples/`](https://github.com/NikolasMarkou/f
 The examples are the baselines for `fsm-llm-eval examples`, which runs them in parallel and
 scores each from 0 to 4. The score is a heuristic that overstates quality; see
 [Evaluate](evaluate.md) for the method and the recorded runs, and the
-[command line reference](reference/cli.md) for the flags. Do not edit the examples unless a
+[command line page](cli.md) for the flags. Do not edit the examples unless a
 maintainer asks: changing one moves the baseline.
+
+## Next steps
+
+The [Quick Start](quickstart.md) builds a first conversation, and the [Command line](cli.md) page
+lists the flags of `fsm-llm-eval`.

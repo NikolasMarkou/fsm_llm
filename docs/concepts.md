@@ -69,13 +69,13 @@ flowchart TD
 
 | Subpackage | What it adds | Maturity |
 |------------|--------------|----------|
-| [`fsm_llm.reasoning`](packages/reasoning.md) | 9 reasoning strategies as stacked FSMs, validation, up to 3 retries | Tested offline; live behavior depends on the model |
-| [`fsm_llm.workflows`](packages/workflows.md) | Async in-memory workflow engine, 11 step types, a Python DSL | Runs without an LLM unless you add LLM steps |
-| [`fsm_llm.agents`](packages/agents.md) | 18 agent patterns, tools, human approval, memory, MCP, A2A, meta-builder | Documented known limits, see the [agents roadmap](agents_roadmap.md) |
-| [`fsm_llm.monitor`](packages/monitor.md) | FastAPI dashboard, optional OpenTelemetry export | Needs the `monitor` extra |
-| [`fsm_llm.eval`](packages/eval.md) | Examples scorer (0 to 4), conversation cases with Wilson intervals | Scores are a heuristic that overstates quality; read the logs too |
-| [`fsm_llm.synthesis`](packages/synthesis.md) | A model compiles a goal into an FSM, gates judge it, a library stores it, a runner executes it; agent tools | Tested offline with scripted models. Bench status: three blocks run on one model, all INCONCLUSIVE; no result favours synthesis. |
-| [`fsm_llm.testing`](packages/testing.md) | Public test doubles, a scripted user and assertions for code built on `fsm_llm` (the fake `LLMInterface` doubles `MockLLM2Interface`, `PromptGroundedLLM` and `ScriptedLLM`, the reply builders, `hash_embed`, `ScriptedUser` with `ConversationRun`, and the assertions `assert_state`, `assert_context`, `assert_path`, `assert_result` with the opt-in `PathRecorder`) | Offline; imports core only, never pytest |
+| [`fsm_llm.reasoning`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/reasoning/README.md) | 9 reasoning strategies as stacked FSMs, validation, up to 3 retries | Tested offline; live behavior depends on the model |
+| [`fsm_llm.workflows`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/workflows/README.md) | Async in-memory workflow engine, 11 step types, a Python DSL | Runs without an LLM unless you add LLM steps |
+| [`fsm_llm.agents`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/agents/README.md) | 18 agent patterns, tools, human approval, memory, MCP, A2A, meta-builder | Documented known limits in the agents README; open work is in the [2026 roadmap](2026_roadmap.md) |
+| [`fsm_llm.monitor`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/monitor/README.md) | FastAPI dashboard, optional OpenTelemetry export | Needs the `monitor` extra |
+| [`fsm_llm.eval`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/eval/README.md) | Examples scorer (0 to 4), conversation cases with Wilson intervals | Scores are a heuristic that overstates quality; read the logs too |
+| [`fsm_llm.synthesis`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/synthesis/README.md) | A model compiles a goal into an FSM, gates judge it, a library stores it, a runner executes it; agent tools | Tested offline with scripted models. Bench status: three blocks run on one model, all INCONCLUSIVE; no result favours synthesis. |
+| [`fsm_llm.testing`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/testing/README.md) | Public test doubles, a scripted user and assertions for code built on `fsm_llm` (the fake `LLMInterface` doubles `MockLLM2Interface`, `PromptGroundedLLM` and `ScriptedLLM`, the reply builders, `hash_embed`, `ScriptedUser` with `ConversationRun`, and the assertions `assert_state`, `assert_context`, `assert_path`, `assert_result` with the opt-in `PathRecorder`) | Offline; imports core only, never pytest |
 
 **Evaluation honesty.** The examples scorer reads each run's output with simple rules and gives
 0 to 4. It overstates quality, and runs from before and after the 2026-09-29 restructure are not
@@ -182,7 +182,8 @@ The library is organized into five pillars.
 * **Assured reliability**: an offline-by-default suite (a fake model, no network) covering the
   core, every subpackage, packaging, regressions, and the examples.
 * **Decisions are recorded**: `# DECISION plan-<id>/D-NNN` comments in the code say what not to
-  do and why; the [Decisions](decisions/index.md) page indexes them.
+  do and why, and a gate (`make decision-check`) fails when one has no line in the manifest
+  `plans/ANCHORS.md`. See [Contributing](contributing.md).
 
 ## Status
 
@@ -251,3 +252,9 @@ and open specifications. Each pattern's module documents how it differs from the
 * **Probable Inference, the Law of Succession, and Statistical Inference**: Wilson, E. B.
   (1927). *Journal of the American Statistical Association*. The source of the Wilson
   confidence interval used by `wilson_ci`.
+
+## Next steps
+
+The [Quick Start](quickstart.md) runs a first conversation, the [FSM Design Guide](fsm_design.md)
+teaches the shape of a good machine, and the [API Reference](api_reference.md) lists every public
+name.

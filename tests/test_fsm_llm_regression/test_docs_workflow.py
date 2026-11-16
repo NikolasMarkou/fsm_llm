@@ -317,7 +317,7 @@ class TestTheRealWorkflow:
         assert re.search(r'pip install "pip>=25\.1"', step["run"])
 
     def test_the_package_itself_is_not_installed(self):
-        # mkdocstrings reads the source statically (`paths: [src]`, griffe): proved in a clean venv.
+        # No page reads the source (no mkdocstrings block since step 123), so the build needs no install.
         code = "\n".join(_code_lines(_real_text()))
         assert not re.search(r"pip install[^\n]*\s-e\s", code)
         assert "pip install ." not in code

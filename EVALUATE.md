@@ -477,7 +477,7 @@ Quick reference for all evaluation runs. The raw run directories (`scorecard.md`
 - **Top failure codes**: `0f0789c` F-LOOP (4, all timeouts), F-EXTRACT (2); `d4b1626` F-LOOP (3, all timeouts), F-EXTRACT (2); F-CODE 0 at both
 - **Only changed score**: `agents/plan_execute_recovery` 4 -> 1 (timeout at 180 s; 136.6 s at `d4b1626`). Not model noise: run alone 3 times per commit, `0f0789c` builds a 7-step plan (15 iterations, 24 LLM calls) every time, `d4b1626` a 4-step plan (9 iterations, 16 calls); both succeed alone.
 - **Raw logs**: 0 envelope leaks (`"field_name"`, `"extracted_data"`), 0 `Continue.`, 0 tracebacks at both commits. Agents `Success: True`/`False` lines: 22/3 vs 22/4. Every `Success: False` example still scores 4.
-- **Note**: the agents category alone (180/192) is 2 points above the recorded G3 baseline at `d4b1626` (178/192, 2026-09-29). Bench block `agents-react/B1` from the same day is in `docs/agents_roadmap.md`.
+- **Note**: the agents category alone (180/192) is 2 points above the recorded G3 baseline at `d4b1626` (178/192, 2026-09-29). Bench block `agents-react/B1` from the same day is recorded in `scripts/bench_data/agents-react/B1`.
 
 ### Run 008 -- 2026-10-01 (48 agents Examples, after the PlanExecute planner fix, 92.2%)
 

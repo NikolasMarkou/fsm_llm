@@ -143,7 +143,7 @@ fsm-llm-meta --env-file .env --output my_bot.json    # model from LLM_MODEL in t
 ## Where to go next
 
 - `examples/agents/` and `examples/meta/`: runnable programs for the patterns and the meta-builder.
-- `docs/agents_roadmap.md`: the audit record and the work that is still open.
+- `docs/2026_roadmap.md` (on GitHub): the open work on agents, with the rest of the project roadmap.
 - `src/fsm_llm/README.md`: the core engine these agents run on (message-free steps, handlers, the LLM layer).
 
 ## Things to know

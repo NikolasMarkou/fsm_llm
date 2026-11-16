@@ -260,10 +260,16 @@ class TestTheRealSite:
         assert (_ROOT / "docs" / "index.md").is_file()
         assert "index.md" in _nav_files(config["nav"])
 
-    def test_the_decision_index_is_a_page_and_api_txt_is_not(self):
+    def test_the_reference_pages_are_the_hand_written_ones(self):
+        """Step 123: the generated reference, package, upgrade and decision pages are gone."""
         config = _config(_ROOT)
-        assert "decisions/index.md" in _nav_files(config["nav"])
-        assert _is_excluded("api.txt", _exclude_patterns(config))
+        nav = _nav_files(config["nav"])
+        for page in ("api_reference.md", "cli.md", "architecture.md"):
+            assert page in nav, page
+        for gone in ("reference", "packages", "upgrade-guide", "decisions"):
+            assert not (_ROOT / "docs" / gone).exists(), gone
+            assert not [n for n in nav if n.startswith(gone + "/")], gone
+        assert not (_ROOT / "docs" / "api.txt").exists()
 
     def test_no_agents_file_is_reachable(self):
         config = _config(_ROOT)
@@ -296,14 +302,11 @@ class TestTheRealSite:
     def test_the_plugins(self):
         plugins = _config(_ROOT)["plugins"]
         names = [next(iter(p)) if isinstance(p, dict) else p for p in plugins]
-        assert {"search", "mkdocstrings", "include-markdown"} <= set(names)
-        python = next(
-            p for p in plugins if isinstance(p, dict) and "mkdocstrings" in p
-        )["mkdocstrings"]["handlers"]["python"]
-        assert python["paths"] == ["src"]
-        # `google` would give 10 strict warnings in files bench manifests pin; `null` gives none.
-        assert "docstring_style" in python["options"]
-        assert python["options"]["docstring_style"] is None
+        assert names == ["search", "include-markdown"]
+        # No page holds a `:::` block, so the mkdocstrings plugin and its pins are gone (step 123).
+        for page in (_ROOT / "docs").rglob("*.md"):
+            text = page.read_text(encoding="utf-8")
+            assert not re.search(r"^:::", text, re.M), page.name
 
     def test_the_version_selector_is_mike(self):
         assert _config(_ROOT)["extra"]["version"]["provider"] == "mike"
@@ -335,8 +338,6 @@ class TestDocsToolsAreAGroupNotAnExtra:
         assert names == {
             "mkdocs",
             "mkdocs-material",
-            "mkdocstrings",
-            "mkdocstrings-python",
             "mike",
             "mkdocs-include-markdown-plugin",
             "pymdown-extensions",

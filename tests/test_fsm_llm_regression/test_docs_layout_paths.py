@@ -23,7 +23,7 @@ This module reads every non-historical Markdown file and fails on stale paths of
   module came from, and only a statement of the CURRENT layout has to be true.
 
 Historical files are listed in `HISTORICAL` and are never read: release notes, run logs, design
-records, the roadmap, the upgrade guide (it names old paths on purpose) and the bench data.
+records, the roadmap and the bench data.
 `ALLOWED` lists the few statements that stay on purpose, each with its reason, so a new stale
 path is a failure and an old one that stays is a visible, argued line. Nothing here imports a
 model or touches the network; the resolver imports only `fsm_llm` modules the suite imports anyway.
@@ -50,7 +50,6 @@ HISTORICAL = (
     "CHANGELOG.md",  # release history; its entries name the paths of their day
     "EVALUATE.md",  # eval run log
     "docs/2026_roadmap.md",  # the roadmap: plans, written before the layout
-    "docs/agents_roadmap.md",  # a dated audit record
     "docs/strands_features",  # dated design records (prefix)
     "scripts/bench_data/",  # frozen bench record
     "plans/",  # planning artifacts

@@ -223,3 +223,9 @@ def test_handler_execution_order():
 - **Reasoning**: Validation, tracing, context pruning, retry limiting handlers
 - **Monitor**: Registers at all 8 timing points (priority 9999) as pure observers -- returns `{}`, never modifies state
 - **Workflows**: Manages step execution directly via async pipeline; ConversationStep has its own handler system
+
+## Next steps
+
+- [Testing](testing.md) shows how to test a handler with a scripted model.
+- The [API Reference](api_reference.md) lists `HandlerBuilder`, `HandlerTiming` and `HandlerErrorMode`.
+- [Architecture](architecture.md) shows where the eight points sit in a turn.

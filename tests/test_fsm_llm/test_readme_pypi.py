@@ -112,6 +112,10 @@ def _readme_problems(text: str, root: Path = ROOT) -> list[str]:
     return problems
 
 
+def _blocks(text: str) -> list[tuple[str, str]]:
+    return [(m.group(1).strip(), m.group(2)) for m in _FENCE.finditer(text)]
+
+
 @pytest.fixture(scope="module")
 def readme() -> str:
     return README.read_text(encoding="utf-8")
@@ -120,6 +124,24 @@ def readme() -> str:
 class TestTheRealReadme:
     def test_the_readme_stands_alone_on_pypi(self, readme):
         assert _readme_problems(readme) == []
+
+    def test_the_no_model_example_runs_offline(
+        self, readme, tmp_path, monkeypatch, capsys
+    ):
+        """Quick Start 2: the FSM block saved as `greeter.json`, then the scripted-double block."""
+        full = [b for i, b in _blocks(readme) if i == "json" and '"initial_state"' in b]
+        offline = [
+            b for i, b in _blocks(readme) if i == "python" and "ScriptedLLM" in b
+        ]
+        assert len(full) == 1 and len(offline) == 1
+        (tmp_path / "greeter.json").write_text(full[0], encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        exec(compile(offline[0], "README.md", "exec"), {"__name__": "__readme__"})
+        assert capsys.readouterr().out.splitlines() == [
+            "What is your name?",
+            "Goodbye, Alice!",
+            "{'name': 'Alice'} goodbye",
+        ]
 
     def test_pyproject_still_publishes_the_readme(self):
         project = tomllib.loads((ROOT / "pyproject.toml").read_text("utf-8"))["project"]
@@ -313,9 +335,6 @@ class TestWhereTheTrimmedTextWent:
 #: Files a reader meets before they have the package: the README and every `docs/` guide and
 #: package README, except the dated roadmap (history, quotes the clone install on purpose).
 _INSTALL_DOC_SKIP = ("docs/2026_roadmap.md",)
-#: The upgrade guides quote the OLD commands on purpose (a `Before` block, the clone owner's
-#: uninstall and reinstall in `distribution-rename.md`); they are migration text, not install docs.
-_INSTALL_DOC_SKIP_DIRS = ("docs/upgrade-guide/",)
 
 #: Emoji ranges: pictographs, symbols and dingbats, the few misc-technical and star emoji, and
 #: the variation selector and joiner. Arrows (U+2190..21FF) and box drawing are NOT emoji.
@@ -386,7 +405,6 @@ def _install_doc_files() -> list[Path]:
         p
         for p in sorted((ROOT / "docs").rglob("*.md"))
         if p.relative_to(ROOT).as_posix() not in _INSTALL_DOC_SKIP
-        and not p.relative_to(ROOT).as_posix().startswith(_INSTALL_DOC_SKIP_DIRS)
     ]
     pkg = sorted((ROOT / "src" / "fsm_llm").rglob("README.md"))
     return [README, *docs, *pkg]

@@ -349,3 +349,11 @@ fsm-llm-monitor                       # Launch monitoring dashboard
 | "No API key found" | `echo $OPENAI_API_KEY` -- ensure it's set |
 | "State not found" | Run `fsm-llm-validate --fsm your_fsm.json` |
 | "Context key missing" | Add a debug handler at `POST_PROCESSING` to print context keys |
+
+## Next steps
+
+- [Concepts](concepts.md) explains the two passes and what each subpackage adds.
+- The [FSM Design Guide](fsm_design.md) covers states, transitions, priorities and context.
+- [Handler Development](handlers.md) covers code that runs at the eight points of a turn.
+- The [Command line](cli.md) page lists every tool and its options.
+- [Testing](testing.md) shows how to test a bot offline.
