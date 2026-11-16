@@ -91,11 +91,11 @@ class Pass2Mixin(_PipelineSurface):
         # for **Exception subclasses only**.  For a true BaseException
         # (KeyboardInterrupt / SystemExit) this clause suppresses the partial reply
         # correctly, but the orphaned user turn SURVIVES: the rollback lives in
-        # engine/fsm/turns.py (`_open_locked_stream`), whose clauses are FSMError / GeneratorExit / Exception —
+        # engine/fsm/turns.py (`_open_locked_stream`), whose clauses are FSMError / GeneratorExit / Exception:
         # there is no BaseException clause, so _rollback_user_message never runs.
         # Probed on this tree: ^C mid-stream leaves
         # [{'system': 'Greetings!'}, {'user': 'hi'}].  Do NOT "fix" this by
-        # widening the engine/fsm/turns.py clause — whether a KeyboardInterrupt should roll back
+        # widening the engine/fsm/turns.py clause: whether a KeyboardInterrupt should roll back
         # is a design call, not a defect fix.  Open item, recorded in
         # verification.md § Not Verified.
         #

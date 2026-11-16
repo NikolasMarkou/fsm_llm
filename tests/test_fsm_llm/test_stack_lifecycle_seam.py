@@ -399,7 +399,7 @@ class _FakeClock:
 
     `cleanup_stale_conversations` decides eviction by pure arithmetic on `time.monotonic()`
     reads (`engine/api/lifecycle.py`: `now - last_access > max_idle_seconds`), so a controllable
-    clock makes the decision FULLY deterministic — no `time.sleep()`, no wall-clock race, no
+    clock makes the decision FULLY deterministic: no `time.sleep()`, no wall-clock race, no
     flake surface. Every other attribute delegates to the real module, so nothing else in the
     package changes behaviour, and only the `time` binding of each module of `fsm_llm.engine.api`
     that reads the clock is replaced (`tests.conftest.bind_api_clock`; never the global `time`

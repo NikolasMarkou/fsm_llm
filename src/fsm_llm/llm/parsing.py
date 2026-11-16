@@ -581,7 +581,7 @@ class ParseMixin:
                     # (D-016 drops exact 0.0). See decisions.md D-028.
                     confidence = 0.5
                 # D-020: `reasoning` carries max_length=5000 here too
-                # (core/definitions/pass_models.py) — same trapdoor class as
+                # (core/definitions/pass_models.py): same trapdoor class as
                 # ResponseGenerationResponse.reasoning.
                 reasoning = _safe_str(data.get("reasoning"))
 

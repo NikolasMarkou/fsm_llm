@@ -127,7 +127,7 @@ class TestExtractJsonFromText:
         elapsed = timer.elapsed
         assert result is None
         assert elapsed < 0.5 * timing_factor, (
-            f"took {elapsed:.2f}s — Strategy 3 regressed to O(n^2)"
+            f"took {elapsed:.2f}s: Strategy 3 regressed to O(n^2)"
         )
 
     def test_answer_then_example_returns_the_first_object(self):

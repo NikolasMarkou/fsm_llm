@@ -114,11 +114,11 @@ class ConversationBulkMixin(_ConversationSurface):
 
         # DECISION plan-2026-09-12T135914-45a654de/D-015
         # Previously reached past the LLMInterface ABC via
-        # `cast(LiteLLMInterface, self._services.llm_interface)._make_llm_call(...)` —
+        # `cast(LiteLLMInterface, self._services.llm_interface)._make_llm_call(...)`:
         # a private method of ONE concrete implementation, called from
         # outside that class. Now goes through the public ABC surface
         # (`extract_bulk_data`, llm/interface.py), which does its own parsing via the
-        # shared `strip_think_and_fences` helper (llm/text.py) — the
+        # shared `strip_think_and_fences` helper (llm/text.py): the
         # <think>-tag/fence-stripping regex that used to be hand-duplicated
         # here is gone, not reconciled. Do NOT reintroduce a cast+private-call
         # here; if a future LLMInterface subclass needs bulk extraction, it

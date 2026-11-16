@@ -138,7 +138,7 @@ class BasePromptBuilder:
     # DECISION plan-2026-07-18T162030-a02151fe/D-017 [STALE]: ALLOW-list, not a deny-list.
     # Do NOT reintroduce a `_CRITICAL_TAGS` enumeration of structural tags to
     # escape. That design was a live injection bypass: the denylist and the tags
-    # the prompt builders actually emit were two hand-maintained lists, and they drifted —
+    # the prompt builders actually emit were two hand-maintained lists, and they drifted:
     # `previously_extracted`/`still_missing` were emitted by build_refinement_prompt
     # but were never added to the 48-entry denylist, so a user message carrying
     # them reached the built prompt unescaped and indistinguishable from the
