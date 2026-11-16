@@ -17,6 +17,11 @@ Plan d454fd62, step 109 (roadmap row 0.10). Nothing here reaches the network: th
   with a `# v..` comment, no `pull_request_target`, a top-level `permissions` that grants no
   write, and a job-level write only where `_WRITE_ALLOWED` names it. A later workflow that
   needs a write scope adds its line to that table in the same commit.
+* `write_job_code_problems(files, waivers)` reads the same files for the rule of step 121.1
+  (final REFLECT concern 2): a job that holds a write scope installs no package and runs no
+  project code (no installer, interpreter, test runner or project script in a `run:` and no
+  `setup-*` action), so a freshly released third-party package can never execute next to a
+  repository write token. The one named waiver is the docs `deploy` job (`_INSTALL_WAIVERS`).
 * `pin_problems(constraints, pyproject)`, `fixture_problems(...)` and `policy_problems(...)`
   read `constraints.txt` plus the `dev` extra, the canary fixture and `SECURITY.md`.
 * Each checker returns a set of problem codes; the real files must return the empty set and each
@@ -63,14 +68,28 @@ _WRITE_ALLOWED: dict[tuple[str, str], set[str]] = {
     ("docs.yml", "deploy"): {"contents"},
     # the failure comment of the dependency review (pull requests only).
     ("python-package.yml", "dependency-review"): {"pull-requests"},
-    # the weekly pin refresh pushes a branch and opens a pull request, after the gates passed
-    # inside the job (step 110; test_refresh_workflow.py pins the shape of the job).
-    ("refresh-pins.yml", "refresh"): {"contents", "pull-requests"},
+    # the weekly pin refresh pushes a branch and opens a pull request, in the `propose` job that
+    # runs only after the `test` job (read-only, no credentials) passed every gate; `propose`
+    # installs nothing (step 110, split at step 121.1; test_refresh_workflow.py pins both jobs).
+    ("refresh-pins.yml", "propose"): {"contents", "pull-requests"},
     # the release workflow (step 112; test_release_workflow.py pins the shape): the OIDC token that
     # PyPI trusted publishing exchanges, on the `publish` job only, and the GitHub release that
     # a pushed tag creates, on the `github-release` job only.
     ("release.yml", "publish"): {"id-token"},
     ("release.yml", "github-release"): {"contents"},
+}
+
+#: Jobs that hold a write scope AND run an installer or project code, with the reason. The rule
+#: is "a job with a write scope runs no installer and no project code" (step 121.1). The docs
+#: `deploy` job is the one waiver: it runs `mike` from the `docs` dependency group, which
+#: `constraints.txt` pins exactly, which the weekly pin refresh never moves (it changes litellm
+#: and mcp only) and which only a reviewed commit can change, so no new third-party release
+#: reaches it unreviewed. Splitting it would need a second job that pushes a built site.
+_INSTALL_WAIVERS: dict[tuple[str, str], str] = {
+    ("docs.yml", "deploy"): (
+        "installs the docs tools, which are pinned exactly in constraints.txt and never moved "
+        "by the pin refresh, so no new third-party release reaches it unreviewed"
+    ),
 }
 
 _SHA_USES = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}$")
@@ -371,6 +390,96 @@ def cross_file_problems(files: dict[str, str]) -> set[str]:
     return found
 
 
+#: Commands that install a package or run an interpreter, a test runner or a project script.
+_CODE_COMMANDS = re.compile(
+    r"^(?:pip[\d.]*|pipx|uv|uvx|poetry|conda|npm|npx|yarn|pnpm|cargo|gem|bundle|go|"
+    r"python[\d.]*|pytest|mypy|ruff|tox|nox|make|bash|sh|zsh|node|source)$"
+)
+_WRAPPERS = frozenset(
+    {"sudo", "env", "time", "nice", "ionice", "exec", "xargs", "command", "timeout"}
+)
+_KEYWORDS = frozenset({"if", "then", "else", "elif", "fi", "do", "done", "while", "!"})
+
+
+def runs_code(script: str) -> bool:
+    """True when a shell `script` names an installer, an interpreter or a project script.
+
+    Best effort, copied from `test_refresh_workflow.py` (a test module never imports another):
+    heredoc bodies, single-quoted and plain double-quoted strings are dropped, the rest is cut at
+    `; & | ( ) { } $(` and newlines, and the first word of each piece (after keywords, wrappers
+    such as `nice` or `sudo` with their options, and `NAME=value` assignments) is judged.
+    """
+    text = re.sub(
+        r"<<-?\s*['\"]?(?P<tag>\w+)['\"]?[^\n]*\n.*?\n\s*(?P=tag)[ \t]*(?:\n|$)",
+        "\n",
+        script,
+        flags=re.DOTALL,
+    )
+    text = re.sub(r"'[^']*'", "''", text)
+    text = re.sub(r'"(?:[^"\\$`]|\\.|\$(?!\())*"', '""', text).replace('"', "")
+    text = re.sub(r"\\\n", " ", text)
+    text = re.sub(r"\$\(|[`;&|(){}]|\n", "\n", text)
+    for piece in text.split("\n"):
+        words = piece.split()
+        while words:
+            if words[0] in _WRAPPERS:
+                words = words[1:]
+                while words and (words[0].startswith("-") or words[0].isdigit()):
+                    words = words[1:]
+            elif words[0] in _KEYWORDS or re.fullmatch(r"[A-Za-z_]\w*=\S*", words[0]):
+                words = words[1:]
+            else:
+                break
+        if not words or words[0].startswith("#"):
+            continue
+        if _CODE_COMMANDS.match(words[0]) or words[0].startswith(("./", "scripts/")):
+            return True
+    return False
+
+
+def _job_writes(job: dict[str, Any]) -> bool:
+    granted = job.get("permissions")
+    if isinstance(granted, str):
+        return granted == "write-all"
+    return isinstance(granted, dict) and "write" in granted.values()
+
+
+def _job_runs_code(job: dict[str, Any]) -> bool:
+    for step in _steps(job):
+        if str(step.get("uses", "")).startswith("actions/setup-"):
+            return True
+        if isinstance(step.get("run"), str) and runs_code(step["run"]):
+            return True
+    return False
+
+
+def write_job_code_problems(
+    files: dict[str, str], waivers: dict[tuple[str, str], str]
+) -> set[str]:
+    """Rule codes for write-scope jobs that run code, and for waivers that no longer apply."""
+    found: set[str] = set()
+    named: set[tuple[str, str]] = set()
+    for name, text in files.items():
+        try:
+            jobs = _load(text).get("jobs") or {}
+        except Exception:
+            found.add("unreadable")
+            continue
+        for job_id, job in jobs.items():
+            if not _job_writes(job):
+                continue
+            runs = _job_runs_code(job)
+            if (name, job_id) in waivers:
+                named.add((name, job_id))
+                if not runs:
+                    found.add("waiver-unused")
+            elif runs:
+                found.add("write-job-runs-code")
+    if set(waivers) - named:
+        found.add("waiver-unused")
+    return found
+
+
 def pin_problems(constraints: str, pyproject: str) -> set[str]:
     """Rule codes for the pins of `pip-audit` and of the two workflow linters."""
     found: set[str] = set()
@@ -432,6 +541,11 @@ _POLICY_PHRASES: dict[str, tuple[str, ...]] = {
     "policy-pth": (".pth",),
     "policy-litellm": ("1.82.7", "1.82.8"),
     "policy-write-scopes": ("pull-requests", "contents", "id-token"),
+    "policy-write-jobs-run-no-code": (
+        "no job that holds a write scope installs a package",
+        "docs `deploy`",
+        "pinned exactly in `constraints.txt`",
+    ),
     "policy-trusted-publishing": (
         "trusted publishing",
         "release.yml",
@@ -457,6 +571,11 @@ def policy_problems(text: str, refresh_exists: bool) -> set[str]:
         if not all(p.lower() in low for p in phrases):
             found.add(code)
     mentions_refresh = "cooldown" in low or "refresh-pins" in low
+    if refresh_exists and not all(
+        phrase in low
+        for phrase in ("`propose`", "`test` job", "artifact", "no credentials")
+    ):
+        found.add("policy-refresh-split")
     if mentions_refresh != refresh_exists:
         found.add("policy-refresh-claim")
     if refresh_exists and not all(
@@ -670,6 +789,56 @@ class TestEveryWorkflowFile:
                     name,
                     job_id,
                 )
+
+
+class TestWriteJobsRunNoCode:
+    def test_no_write_job_installs_a_package_or_runs_project_code_except_the_waiver(
+        self,
+    ):
+        assert write_job_code_problems(_workflow_texts(), _INSTALL_WAIVERS) == set()
+
+    def test_the_one_waiver_is_the_docs_deploy_job_and_says_why(self):
+        assert set(_INSTALL_WAIVERS) == {("docs.yml", "deploy")}
+        reason = _INSTALL_WAIVERS[("docs.yml", "deploy")]
+        assert "pinned exactly in constraints.txt" in reason
+        assert "never moved by the pin refresh" in reason
+
+    def test_the_waived_job_really_installs_and_really_writes(self):
+        job = _load(_workflow_texts()["docs.yml"])["jobs"]["deploy"]
+        assert _job_writes(job) and _job_runs_code(job)
+
+    def test_the_waiver_is_stated_in_the_workflow_and_in_security_md(self):
+        assert "_INSTALL_WAIVERS" in _workflow_texts()["docs.yml"]
+        assert "docs `deploy`" in _SECURITY.read_text(encoding="utf-8")
+
+    def test_the_docs_tools_are_all_pinned_exactly_and_the_refresh_moves_only_two_packages(
+        self,
+    ):
+        pins = _constraint_pins((_ROOT / "constraints.txt").read_text(encoding="utf-8"))
+        groups = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
+            "dependency-groups"
+        ]["docs"]
+        for text in groups:
+            assert len(pins[_normalized(Requirement(text).name)]) == 1, text
+        script = (_ROOT / "scripts" / "refresh_pins.py").read_text(encoding="utf-8")
+        assert re.search(r'^TRACKED = \("litellm", "mcp"\)$', script, re.MULTILINE), (
+            "the refresh no longer moves litellm and mcp only: revisit the waiver"
+        )
+
+    def test_the_workflows_that_write_and_must_run_no_code_are_the_expected_ones(self):
+        writers = {
+            (name, job_id)
+            for name, text in _workflow_texts().items()
+            for job_id, job in (_load(text).get("jobs") or {}).items()
+            if _job_writes(job)
+        }
+        assert writers == {
+            ("docs.yml", "deploy"),
+            ("python-package.yml", "dependency-review"),
+            ("refresh-pins.yml", "propose"),
+            ("release.yml", "publish"),
+            ("release.yml", "github-release"),
+        }
 
 
 class TestSecurityPolicy:
@@ -1339,6 +1508,41 @@ POLICY_MUTANTS: list[tuple[str, Callable[[str], str], str]] = [
         "policy-sbom",
     ),
     (
+        "the write-job rule removed",
+        _edit_all("no job that holds a write scope installs a package", "a job"),
+        "policy-write-jobs-run-no-code",
+    ),
+    (
+        "the docs waiver removed",
+        _edit_all("docs `deploy`", "a deploy"),
+        "policy-write-jobs-run-no-code",
+    ),
+    (
+        "the waiver reason removed",
+        _edit_all("pinned exactly in `constraints.txt`", "pinned"),
+        "policy-write-jobs-run-no-code",
+    ),
+    (
+        "the propose job not described",
+        _edit_all("`propose`", "the second job"),
+        "policy-refresh-split",
+    ),
+    (
+        "the test job not described",
+        _edit_all("`test` job", "first job"),
+        "policy-refresh-split",
+    ),
+    (
+        "the artifact not described",
+        _edit_all("artifact", "file"),
+        "policy-refresh-split",
+    ),
+    (
+        "the credential-free test job not described",
+        _edit_all("no credentials", "credentials"),
+        "policy-refresh-split",
+    ),
+    (
         "the refresh described without its cooldown",
         _edit_all("cooldown", "delay"),
         "policy-refresh-claim",
@@ -1402,6 +1606,178 @@ class TestThePolicyMutantsAreKilled:
         )
 
 
+_RUN_STEP = "      - name: Injected\n        run: {command}\n"
+
+
+def _add_run_step(
+    name: str, before: str, command: str
+) -> Callable[[dict[str, str]], tuple[dict[str, str], dict[tuple[str, str], str]]]:
+    """Insert a `run:` step before the step `before` of workflow `name` (waivers unchanged)."""
+
+    def apply(files: dict[str, str]):
+        out = dict(files)
+        marker = f"      - name: {before}\n"
+        assert marker in out[name], before
+        out[name] = out[name].replace(
+            marker, _RUN_STEP.format(command=command) + marker, 1
+        )
+        return out, dict(_INSTALL_WAIVERS)
+
+    return apply
+
+
+def _add_uses_step(
+    name: str, before: str, action: str
+) -> Callable[[dict[str, str]], tuple[dict[str, str], dict[tuple[str, str], str]]]:
+    def apply(files: dict[str, str]):
+        out = dict(files)
+        marker = f"      - name: {before}\n"
+        assert marker in out[name], before
+        out[name] = out[name].replace(
+            marker, f"      - name: Injected\n        uses: {action}\n" + marker, 1
+        )
+        return out, dict(_INSTALL_WAIVERS)
+
+    return apply
+
+
+_SETUP = "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0"
+
+WRITE_CODE_MUTANTS: list[tuple[str, Any, str]] = [
+    (
+        "the propose job installs a package",
+        _add_run_step(
+            "refresh-pins.yml", "Download the proposed files", "pip install x"
+        ),
+        "write-job-runs-code",
+    ),
+    (
+        "the propose job runs the tests",
+        _add_run_step(
+            "refresh-pins.yml", "Download the proposed files", "python -m pytest tests/"
+        ),
+        "write-job-runs-code",
+    ),
+    (
+        "the propose job runs mypy",
+        _add_run_step(
+            "refresh-pins.yml", "Download the proposed files", "mypy -p fsm_llm"
+        ),
+        "write-job-runs-code",
+    ),
+    (
+        "the propose job runs a project script",
+        _add_run_step(
+            "refresh-pins.yml", "Download the proposed files", "scripts/refresh_pins.py"
+        ),
+        "write-job-runs-code",
+    ),
+    (
+        "the propose job sets up python",
+        _add_uses_step("refresh-pins.yml", "Download the proposed files", _SETUP),
+        "write-job-runs-code",
+    ),
+    (
+        "the release job installs with uv",
+        _add_run_step("release.yml", "Download the SBOM", "uv pip install x"),
+        "write-job-runs-code",
+    ),
+    (
+        "the publish job runs make",
+        _add_run_step("release.yml", "Publish to PyPI", "make build"),
+        "write-job-runs-code",
+    ),
+    (
+        "the publish job sets up python",
+        _add_uses_step("release.yml", "Publish to PyPI", _SETUP),
+        "write-job-runs-code",
+    ),
+    (
+        "the dependency review job runs the tests",
+        _add_run_step(
+            "python-package.yml",
+            "Review the dependency changes of the pull request",
+            "nice -n 19 pytest",
+        ),
+        "write-job-runs-code",
+    ),
+    (
+        "the waiver of the docs deploy job is removed",
+        lambda files: (files, {}),
+        "write-job-runs-code",
+    ),
+    (
+        "a waiver names a job that does not write",
+        lambda files: (
+            files,
+            {**_INSTALL_WAIVERS, ("python-package.yml", "lint"): "x"},
+        ),
+        "waiver-unused",
+    ),
+    (
+        "a waiver names a write job that runs no code",
+        lambda files: (
+            files,
+            {**_INSTALL_WAIVERS, ("python-package.yml", "dependency-review"): "x"},
+        ),
+        "waiver-unused",
+    ),
+    (
+        "a waiver names a job that is gone",
+        lambda files: (files, {**_INSTALL_WAIVERS, ("docs.yml", "gone"): "x"}),
+        "waiver-unused",
+    ),
+    (
+        "an unreadable workflow",
+        lambda files: (
+            {**files, "broken.yml": "jobs: [unterminated"},
+            dict(_INSTALL_WAIVERS),
+        ),
+        "unreadable",
+    ),
+]
+
+
+class TestTheWriteJobMutantsAreKilled:
+    @pytest.mark.parametrize(
+        "label,mutate,code", WRITE_CODE_MUTANTS, ids=[m[0] for m in WRITE_CODE_MUTANTS]
+    )
+    def test_each_mutant_is_caught_by_its_rule(
+        self, label: str, mutate: Any, code: str
+    ):
+        files, waivers = mutate(_files())
+        assert (files, waivers) != (_files(), _INSTALL_WAIVERS), label
+        assert code in write_job_code_problems(files, waivers), label
+
+    @pytest.mark.parametrize(
+        "script",
+        [
+            "pip install x",
+            "python -m pytest",
+            "nice -n 19 pytest",
+            "echo hi && uv pip install x",
+            "FOO=1 ./scripts/x.sh",
+            "make test",
+        ],
+    )
+    def test_the_scanner_finds_code(self, script: str):
+        assert runs_code(script)
+
+    @pytest.mark.parametrize(
+        "script",
+        [
+            "git push origin main",
+            "gh release create v1 dist/* --verify-tag",
+            "echo 'pip install x'",
+            'echo "run pytest; pip install"',
+            "cp a b && cd d",
+            "cat <<'X'\npip install y\nX\necho done",
+        ],
+    )
+    def test_the_scanner_ignores_plain_commands(self, script: str):
+        assert not runs_code(script)
+
+
 class TestEveryRuleHasAMutant:
     def test_at_least_twelve_distinct_mutants_in_total(self):
         total = (
@@ -1427,6 +1803,7 @@ class TestEveryRuleHasAMutant:
             | {m[2] for m in PIN_MUTANTS}
             | {m[2] for m in FIXTURE_MUTANTS}
             | {m[2] for m in POLICY_MUTANTS}
+            | {m[2] for m in WRITE_CODE_MUTANTS}
             | {"canary-polarity"}
         )
         assert codes - killed == set(), sorted(codes - killed)

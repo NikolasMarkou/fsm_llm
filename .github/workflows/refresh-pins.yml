@@ -1,15 +1,29 @@
-# The scheduled pin refresh (roadmap row 0.10, plan d454fd62 step 110).
+# The scheduled pin refresh (roadmap row 0.10, plan d454fd62 step 110, split at step 121.1).
 #
 # Once a week `scripts/refresh_pins.py` picks the newest litellm and mcp release that is at least
 # 7 days old (the cooldown: litellm 1.82.7 and 1.82.8 were malware for hours, and a bad release is
 # usually yanked within days), is stable, admits every Python of the test matrix and stays in the
-# major of the current pin. When a pin moves, this job installs the new pins and runs the SAME
-# gates as the CI workflow (the whole non-slow suite, the `.pth` audit, mypy, pip-audit), and ONLY
-# THEN pushes a branch and opens a pull request.
+# major of the current pin. When a pin moves, the `test` job installs the new pins and runs the
+# SAME gates as the CI workflow (the whole non-slow suite, the `.pth` audit, mypy, pip-audit), and
+# ONLY THEN the `propose` job pushes a branch and opens a pull request.
+#
+# Two jobs, because the first one runs brand-new third-party code (the freshly chosen release,
+# installed and imported by the whole test suite) and the second one holds a repository write
+# token. They must never be the same process (review concern 2 of the final REFLECT):
+#   * `test` has the read-only top-level token and NO write scope; its checkout keeps no
+#     credentials. Before it installs anything it stages the three files the proposal consists of
+#     (`constraints.txt`, `pyproject.toml`, the script's report) and uploads them as an artifact,
+#     so no code under test can touch what the next job receives. The artifact is still treated
+#     as untrusted input by `propose`.
+#   * `propose` runs only when `test` succeeded (`needs`) and found a change. It installs nothing
+#     and runs no project code: git, gh and the artifact files. A guard step checks that the
+#     artifact holds exactly the three expected regular files and that the working tree then
+#     differs from `main` in exactly the pin lines of those two files, and nothing is added with
+#     `git add -A`.
 #
 # Why the gates run here: a pull request opened with the default `GITHUB_TOKEN` does not trigger
 # workflows (GitHub rule against recursive runs), so the CI workflow would never run on it. The
-# suite therefore runs inside this job, before the pull request exists. The owner still reviews
+# suite therefore runs in the `test` job, before the pull request exists. The owner still reviews
 # and merges; the pull request body is the script's report (old and new pins, release dates, ages,
 # the newer releases it skipped and why).
 #
@@ -18,9 +32,10 @@
 #
 # Policy (pinned by tests/test_fsm_llm_regression/test_refresh_workflow.py and test_supply_chain.py):
 #   * triggers are `schedule` and `workflow_dispatch` only, never a pull request or a push;
-#   * the token is read-only at the top; this one job holds `contents: write` (push the branch) and
-#     `pull-requests: write` (open the pull request), the only job of that kind besides the docs
-#     deploy; the one secret named is the default `secrets.GITHUB_TOKEN`;
+#   * the token is read-only at the top and on `test`; only `propose` holds `contents: write` (push
+#     the branch) and `pull-requests: write` (open the pull request), and no job that holds a
+#     write scope installs a package or runs project code (the docs deploy is the one named
+#     waiver, in test_supply_chain.py); the one secret named is the default `secrets.GITHUB_TOKEN`;
 #   * every action is pinned to a commit SHA with its release tag in a trailing comment;
 #   * nothing from an event or from the network is pasted into a `run:` script: values go through
 #     `env:` or are computed in the shell.
@@ -45,29 +60,27 @@ defaults:
     shell: bash
 
 jobs:
-  refresh:
+  test:
     # A fork has no use for this job (and no permission to open pull requests upstream).
     if: ${{ github.repository == 'NikolasMarkou/fsm_llm' }}
     runs-on: ubuntu-24.04
     # Install ~2 min, the suite about 10, mypy ~3, the audit ~1: 90 is generous headroom and 4x
     # tighter than GitHub's 360-minute default. Do not remove it.
     timeout-minutes: 90
-    permissions:
-      # Push the `chore/refresh-pins-*` branch.
-      contents: write
-      # Open the pull request.
-      pull-requests: write
+    outputs:
+      # Read by `propose`; set by the refresh step before any new code runs, and a later step
+      # cannot change another step's output.
+      changed: ${{ steps.refresh.outputs.changed }}
     env:
       # The same selection as python-package.yml (a test compares the two): no test is deselected.
       PYTEST_MARKERS: not slow and not real_llm and not integration
       PYTHONUTF8: "1"
     steps:
       - name: Check out the repository
-        # The credentials stay in the git config on purpose: this job pushes a branch with them
-        # (`git push`), and the job ends right after, so nothing outlives the run.
+        # No credentials: nothing in this job may push, and the code under test runs here.
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: true
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -88,6 +101,25 @@ jobs:
           cat "$report"
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
           grep -E '^changed=(true|false)$' "$report" | tail -n 1 >> "$GITHUB_OUTPUT"
+      - name: Stage the proposed files
+        if: steps.refresh.outputs.changed == 'true'
+        # Copied now, before the install below runs a new third-party release: the next job gets
+        # exactly what the refresh script wrote.
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/pins"
+          mkdir "$stage"
+          cp constraints.txt pyproject.toml "$stage/"
+          cp "$RUNNER_TEMP/refresh-report.md" "$stage/report.md"
+      - name: Upload the proposed files
+        if: steps.refresh.outputs.changed == 'true'
+        # The `propose` job runs only if every later step of this job succeeds (`needs`).
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: refresh-pins
+          path: ${{ runner.temp }}/pins
+          if-no-files-found: error
+          retention-days: 7
       - name: Install the package and every extra at the new pins
         if: steps.refresh.outputs.changed == 'true'
         run: |
@@ -110,8 +142,75 @@ jobs:
         # The whole non-slow suite, `mcp` installed so the real stdio MCP tests run: the gate that
         # the pull request will not get from the CI workflow (see the header).
         run: python -m pytest tests/ -q -m "$PYTEST_MARKERS"
+
+  propose:
+    # Runs only when every step of `test` passed and a pin moved.
+    needs: test
+    if: ${{ needs.test.outputs.changed == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      # Push the `chore/refresh-pins-*` branch.
+      contents: write
+      # Open the pull request.
+      pull-requests: write
+    steps:
+      - name: Check out the repository
+        # The credentials stay in the git config on purpose: this job pushes a branch with them
+        # (`git push`), and the job ends right after, so nothing outlives the run. Nothing but git
+        # and gh runs here, so no third-party code can read them.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+      - name: Download the proposed files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: refresh-pins
+          path: ${{ runner.temp }}/pins
+      - name: Check the proposed files and apply them
+        # The artifact is input from another job: it must hold exactly three regular files, and
+        # the tree must then differ from the checkout in nothing but the pin lines of the two.
+        run: |
+          set -euo pipefail
+          pins="$RUNNER_TEMP/pins"
+          listing="$(cd "$pins" && find . -mindepth 1 | LC_ALL=C sort | tr '\n' ' ')"
+          if [ "$listing" != "./constraints.txt ./pyproject.toml ./report.md " ]; then
+            echo "error: the artifact holds unexpected entries: $listing" >&2
+            exit 1
+          fi
+          for name in constraints.txt pyproject.toml report.md; do
+            if [ -L "$pins/$name" ] || [ ! -f "$pins/$name" ]; then
+              echo "error: $name is not a regular file" >&2
+              exit 1
+            fi
+            if [ "$(wc -c < "$pins/$name")" -gt 1000000 ]; then
+              echo "error: $name is larger than 1 MB" >&2
+              exit 1
+            fi
+          done
+          cp "$pins/constraints.txt" constraints.txt
+          cp "$pins/pyproject.toml" pyproject.toml
+          if [ -n "$(git ls-files --others --exclude-standard)" ]; then
+            echo "error: the working tree holds untracked files" >&2
+            exit 1
+          fi
+          touched="$(git diff --name-only | LC_ALL=C sort | tr '\n' ' ')"
+          if [ "$touched" != "constraints.txt " ] && [ "$touched" != "constraints.txt pyproject.toml " ]; then
+            echo "error: the proposal changes unexpected paths: $touched" >&2
+            exit 1
+          fi
+          pin_line='^[+-](litellm|mcp)==[0-9]+(\.[0-9]+)*$'
+          if git diff -U0 --no-color -- constraints.txt | grep -E '^[+-]' | grep -vE '^(\+\+\+|---) ' | grep -vE "$pin_line"; then
+            echo "error: constraints.txt changes more than litellm and mcp pin lines" >&2
+            exit 1
+          fi
+          range_line='^[+-][[:space:]]*(mcp = \[)?"(litellm|mcp)>=[0-9]+(\.[0-9]+)*,<[0-9]+(\.[0-9]+)*"(\]|,)?$'
+          if git diff -U0 --no-color -- pyproject.toml | grep -E '^[+-]' | grep -vE '^(\+\+\+|---) ' | grep -vE "$range_line"; then
+            echo "error: pyproject.toml changes more than litellm and mcp range lines" >&2
+            exit 1
+          fi
+          git diff --stat
       - name: Open the pull request
-        if: steps.refresh.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -127,11 +226,11 @@ jobs:
           {
             echo 'The scheduled pin refresh found newer releases that are at least 7 days old.'
             echo 'The whole non-slow suite, mypy, the .pth audit and pip-audit passed in the'
-            echo 'refresh job before this pull request was opened (the CI workflow does not run on'
+            echo 'test job before this pull request was opened (the CI workflow does not run on'
             echo 'a pull request opened with the default token, so review the run of the refresh'
             echo 'workflow named below instead).'
             echo
-            grep -v '^changed=' "$RUNNER_TEMP/refresh-report.md"
+            grep -v '^changed=' "$RUNNER_TEMP/pins/report.md"
             echo
             echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           } > "$body"

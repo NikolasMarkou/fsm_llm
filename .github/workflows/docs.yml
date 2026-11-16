@@ -13,6 +13,16 @@
 #   * the docs tools install from the `docs` dependency group against `constraints.txt`. The
 #     package itself is NOT installed: mkdocstrings reads `src/` statically (`paths: [src]`).
 #
+# This workflow and release.yml both start on a tag `v*` and are NOT chained: a deploy happens
+# even when the publish of that tag is refused or abandoned. CONTRIBUTING.md "Releasing" says what
+# to do then (`mike delete <version> --push`, then give `latest` back with `mike alias`).
+#
+# The `deploy` job holds `contents: write` and installs the docs tools with pip. That is the one
+# write job that runs third-party code, waived on purpose in tests/test_fsm_llm_regression/
+# test_supply_chain.py (`_INSTALL_WAIVERS`): every tool is pinned exactly in constraints.txt, the
+# group `docs` is not touched by the weekly pin refresh, so no new third-party release reaches it
+# unreviewed.
+#
 # Owner steps after the first deploy (they are not CI's): enable GitHub Pages from the `gh-pages`
 # branch (root), then run `mike set-default latest` once. See docs/README.md.
 name: Docs
