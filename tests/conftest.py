@@ -2,6 +2,7 @@
 Global test configuration and fixtures for the entire test suite.
 """
 
+import errno
 import json
 import math
 import os
@@ -104,6 +105,66 @@ def symlink_or_skip(
         link.symlink_to(target, target_is_directory=is_dir)
     except (OSError, NotImplementedError):
         pytest.skip("symlinks are not supported here")
+
+
+#: ``OSError.winerror`` values Windows gives a file name it cannot hold (invalid name,
+#: bad path or file name syntax, label too long, invalid file or directory name).
+_BAD_NAME_WINERRORS = frozenset({123, 161, 206, 267})
+
+
+def name_refused(exc: OSError) -> bool:
+    """Whether *exc* is a file system refusing a NAME (not a permission or a missing parent).
+
+    Interface contract (``write_if_creatable`` and the tests that create a folder
+    with a hostile name): ``True`` for ``EINVAL`` or a Windows ``winerror`` in
+    ``_BAD_NAME_WINERRORS`` (NTFS cannot hold an ESC or a newline in a name, nor
+    ``<>:"|?*``: ``[Errno 22]`` or ``[WinError 123]``); ``False`` for every other
+    ``OSError``, so a real failure is never swallowed.
+    """
+    return exc.errno == errno.EINVAL or getattr(exc, "winerror", None) in (
+        _BAD_NAME_WINERRORS
+    )
+
+
+def write_if_creatable(path: Path, content: bytes = b"x") -> bool:
+    """Write *content* to *path* (parents created) unless the file system refuses its name.
+
+    Interface contract (the tests of hostile file names): returns ``True`` when the file
+    was written and ``False`` when the NAME is refused (``name_refused``); any other
+    ``OSError`` propagates. Bytes, so no newline translation. A test uses it to try an
+    ESC or newline name and checks what exists afterwards: Linux holds both, NTFS
+    refuses both, and the assertions must follow what was created.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    except OSError as exc:
+        if name_refused(exc):
+            return False
+        raise
+    return True
+
+
+def skip_if_backslash_separates(directory: Path) -> None:
+    """Skip the running test when a backslash in a file name is a path separator.
+
+    Interface contract: call it in the test BODY with a scratch *directory*. It writes
+    ``a\\b.txt`` in a ``_backslash_probe`` folder there and skips (reason: such a name
+    cannot exist) when that made a folder ``a`` (Windows) instead of one file; removes
+    the probe either way. Returns ``None``; the file system is probed, not the platform.
+    """
+    import shutil
+
+    probe = directory / "_backslash_probe"
+    probe.mkdir()
+    try:
+        write_if_creatable(probe / "a\\b.txt")
+        if (probe / "a").is_dir():
+            pytest.skip(
+                "a backslash is a path separator here, so that name cannot exist"
+            )
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
 
 
 #: Env knob that raises ``timing_factor`` (a positive float; a smaller or

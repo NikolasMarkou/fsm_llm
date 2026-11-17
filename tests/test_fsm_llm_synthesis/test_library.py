@@ -63,7 +63,7 @@ def lib(tmp_path: Path) -> FSMLibrary:
 
 def _files(lib: FSMLibrary) -> list[str]:
     return sorted(
-        str(p.relative_to(lib.root)) for p in lib.root.rglob("*") if p.is_file()
+        p.relative_to(lib.root).as_posix() for p in lib.root.rglob("*") if p.is_file()
     )
 
 

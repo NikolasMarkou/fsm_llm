@@ -138,8 +138,12 @@ class TestResolveWithin:
 
         assert resolve_within(root, "escape") is None
         assert resolve_within(root, "escape/secret.txt") is None
-        # A lexical `link/../..` fold would look contained and is not.
-        assert resolve_within(root, "escape/../x") is None
+        if os.name != "nt":
+            # A lexical `link/../..` fold would look contained and is not: POSIX
+            # follows the link first, so `escape/..` is the folder outside the root.
+            # Win32 folds `..` before any link is followed, so there the path is
+            # `ws/x`, inside the root, and nothing escapes.
+            assert resolve_within(root, "escape/../x") is None
 
     def test_a_symlink_staying_inside_is_allowed(self, root: Path) -> None:
         (root / "real").mkdir()
@@ -888,10 +892,11 @@ def _write(root: Path, files: dict[str, str | bytes]) -> Path:
     for rel, content in files.items():
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        if isinstance(content, bytes):
-            target.write_bytes(content)
-        else:
-            target.write_text(content, encoding="utf-8")
+        # bytes: `write_text` would write "\r\n" on Windows and the byte-size limits
+        # tests count what is on disk
+        target.write_bytes(
+            content if isinstance(content, bytes) else content.encode("utf-8")
+        )
     return root
 
 
@@ -4230,7 +4235,15 @@ class TestIdCollisions:
             target = self.with_name(self.name.lower())
             return target.write_bytes(data.encode("utf-8"))
 
+        real_write_bytes = Path.write_bytes
+
+        def folding_write_bytes(self: Path, data: bytes) -> int:
+            return real_write_bytes(self.with_name(self.name.lower()), data)
+
         monkeypatch.setattr(Path, "write_text", folding_write_text)
+        monkeypatch.setattr(
+            Path, "write_bytes", folding_write_bytes
+        )  # `_write` writes bytes
 
         with pytest.raises(pytest.skip.Exception, match="folds these names"):
             self.test_three_lookalikes_give_two_warnings_all_naming_the_first(tmp_path)

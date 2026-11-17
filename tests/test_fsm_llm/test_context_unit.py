@@ -7,6 +7,8 @@ import decimal
 import math
 import pathlib
 import re
+import sys
+import time
 import types
 from functools import partial
 from typing import Any
@@ -73,6 +75,123 @@ from tests.test_fsm_llm.support import (
 #: d454fd62 step 58.1; ``test_timing_factor.py`` scans for it). Noise is handled
 #: by retrying the sweep, never by widening the bound.
 _LINEAR_SPREAD = 2.5
+
+
+#: Doubling stops here: a CPU clock that never advances must fail, not loop for ever.
+_MAX_CALLS_PER_SAMPLE = 1 << 24
+
+
+def _match_any(patterns, text):
+    return any(p.match(text) for p in patterns)
+
+
+def _cpu_seconds_per_call(call, calls=1, samples=3):
+    """CPU seconds of one ``call()``: the best of *samples* runs of *calls* calls each.
+
+    Interface contract (the two ratio-based linear-time tests below):
+        - *call* is a zero-argument callable, *calls* the number of calls a sample
+          starts with. The CPU clock is ``time.process_time`` through ``cpu_timer``.
+        - *calls* doubles until ONE sample spans at least ten ticks of that clock
+          (``time.get_clock_info("process_time").resolution``): on Windows the clock
+          ticks every 15.6 ms, so a short sample read 0 seconds and the spread of a
+          sweep divided by zero. On a fine clock (Linux, nanoseconds) the first
+          sample already spans the floor, so nothing grows and the measurement is
+          the old one. The grown count is kept for the remaining samples.
+        - Returns the smallest per-call time; never zero for a call that takes time.
+    """
+    floor = 10 * time.get_clock_info("process_time").resolution
+    while True:
+        with cpu_timer() as timer:
+            for _ in range(calls):
+                call()
+        if timer.elapsed >= floor:
+            break
+        assert calls < _MAX_CALLS_PER_SAMPLE, "the CPU clock never advanced"
+        calls *= 2
+    best = timer.elapsed / calls
+    for _ in range(samples - 1):
+        with cpu_timer() as timer:
+            for _ in range(calls):
+                call()
+        best = min(best, timer.elapsed / calls)
+    return best
+
+
+class _FakeCpuClock:
+    """A CPU clock that advances only when ``call`` runs, quantised to *tick* seconds
+    (Windows: 0.015625), so the tests need neither real time nor a real CPU."""
+
+    def __init__(self, tick, cost=0.001):
+        self.tick, self.cost, self.now, self.calls = tick, cost, 0.0, 0
+
+    def process_time(self):
+        return math.floor(self.now / self.tick) * self.tick
+
+    def call(self):
+        self.now += self.cost
+        self.calls += 1
+
+    def install(self, monkeypatch):
+        monkeypatch.setattr(time, "process_time", self.process_time)
+        monkeypatch.setattr(
+            time,
+            "get_clock_info",
+            lambda name: types.SimpleNamespace(resolution=self.tick),
+        )
+        return self
+
+
+class TestCpuSecondsPerCall:
+    """The sweep helper of the linear-time tests on a coarse CPU clock (Windows ticks
+    every 15.6 ms: a short sample read 0 and the spread divided by zero, CI run
+    43959038258)."""
+
+    def test_the_premise_a_short_sample_reads_zero_on_a_coarse_clock(self, monkeypatch):
+        clock = _FakeCpuClock(tick=0.015625).install(monkeypatch)
+
+        with cpu_timer() as timer:
+            for _ in range(5):
+                clock.call()
+
+        assert timer.elapsed == 0.0  # the old fixed count divided 0 by 0 here
+
+    def test_a_coarse_clock_grows_the_sample_until_it_spans_ten_ticks(
+        self, monkeypatch
+    ):
+        clock = _FakeCpuClock(tick=0.015625).install(monkeypatch)
+
+        per_call = _cpu_seconds_per_call(clock.call, 1)
+
+        assert per_call == pytest.approx(0.001, rel=0.05)
+        # 1, 2, .. 256 calls to span 0.15625 s, then two more samples of 256
+        assert clock.calls == sum(2**i for i in range(9)) + 2 * 256
+
+    def test_a_fine_clock_keeps_the_count_and_takes_three_samples(self, monkeypatch):
+        clock = _FakeCpuClock(tick=1e-9).install(monkeypatch)
+
+        per_call = _cpu_seconds_per_call(clock.call, 5)
+
+        assert per_call == pytest.approx(0.001, rel=1e-6)
+        assert clock.calls == 3 * 5
+
+    def test_the_best_sample_wins(self, monkeypatch):
+        clock = _FakeCpuClock(tick=1e-9).install(monkeypatch)
+        costs = iter([0.004, 0.002, 0.003])
+
+        def call():
+            clock.cost = next(costs)
+            clock.call()
+
+        assert _cpu_seconds_per_call(call, 1, samples=3) == pytest.approx(0.002)
+
+    def test_a_clock_that_never_advances_fails_instead_of_looping(self, monkeypatch):
+        clock = _FakeCpuClock(tick=0.015625, cost=0.0).install(monkeypatch)
+        monkeypatch.setattr(sys.modules[__name__], "_MAX_CALLS_PER_SAMPLE", 64)
+
+        with pytest.raises(AssertionError, match="never advanced"):
+            _cpu_seconds_per_call(clock.call, 1)
+
+        assert clock.calls == sum(2**i for i in range(7))  # 1 .. 64
 
 
 def _settled_spread(sweep, attempts=3):
@@ -2278,16 +2397,12 @@ class TestCryptoKeyAndTokenTriggers:
         }
 
         def measure(text):
-            inner = max(1, 120_000 // len(text))
-            best = None
-            for _ in range(3):
-                # CPU time, not wall time (plan d454fd62 step 120): see the
-                # digit-suffix sweep; the spread stays an unscaled ratio.
-                with cpu_timer() as timer:
-                    for _ in range(inner):
-                        any(p.match(text) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS)
-                best = min(best or 1e9, timer.elapsed / inner)
-            return best
+            # CPU time, not wall time (plan d454fd62 step 120): see the
+            # digit-suffix sweep; the spread stays an unscaled ratio.
+            return _cpu_seconds_per_call(
+                lambda: any(p.match(text) for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS),
+                max(1, 120_000 // len(text)),
+            )
 
         def sweep(generate):
             per_char = []
@@ -4884,16 +4999,10 @@ class TestDigitSuffixedCredentialNames:
             times = []
             for step in range(6):
                 text = make(64 << step)
-                inner = max(1, 60_000 // len(text))
-                best = 1e9
-                for _ in range(3):
-                    with cpu_timer() as timer:
-                        for _ in range(inner):
-                            any(
-                                p.match(text)
-                                for p in COMPILED_FORBIDDEN_CONTEXT_PATTERNS
-                            )
-                    best = min(best, timer.elapsed / inner)
+                best = _cpu_seconds_per_call(
+                    partial(_match_any, COMPILED_FORBIDDEN_CONTEXT_PATTERNS, text),
+                    max(1, 60_000 // len(text)),
+                )
                 times.append(best / len(text))
             return max(times) / min(times), times
 

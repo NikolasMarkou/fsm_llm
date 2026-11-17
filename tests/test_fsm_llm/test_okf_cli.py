@@ -32,6 +32,7 @@ from fsm_llm.okf import (
     write_bundle,
 )
 from fsm_llm.okf.cli import main
+from tests.conftest import write_if_creatable
 from tests.test_fsm_llm.test_okf import (
     _LINK_RESOLVERS,
     _FakeClock,
@@ -133,12 +134,15 @@ class TestValidate:
     ) -> None:
         root = _write(
             tmp_path / "kb",
-            {f"x{_ESC}[31m.md": "x", "ok.md": _doc(title="fine")},
+            {"y\u202e.md": "x", "ok.md": _doc(title="fine")},  # a legal name everywhere
         )
+        # NTFS cannot hold an ESC in a name: written only where the file system takes it
+        write_if_creatable(root / f"x{_ESC}[31m.md")
 
         _, out, err = _run(capsys, "validate", root)
 
-        assert _ESC not in out + err
+        assert "id-unsafe" in out  # the hostile names are reported ...
+        assert _ESC not in out + err and "\u202e" not in out + err  # ... stripped
 
     def test_a_missing_root_is_exit_1_with_one_stderr_line_no_traceback(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

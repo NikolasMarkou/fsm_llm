@@ -747,7 +747,7 @@ def _store_with_entries() -> SemanticMemoryStore:
 def _tree(root: Path) -> dict[str, str]:
     files = sorted(p for p in root.rglob("*") if p.is_file())
     return {
-        str(p.relative_to(root)): re.sub(
+        p.relative_to(root).as_posix(): re.sub(
             r"(?m)^(\s*)at: .*$", r"\1at: T", p.read_text(encoding="utf-8")
         )
         for p in files

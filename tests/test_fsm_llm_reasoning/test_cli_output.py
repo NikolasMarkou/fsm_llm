@@ -51,7 +51,10 @@ class TestSaveAsJson:
 
 
 def _ascii_stream() -> io.TextIOWrapper:
-    return io.TextIOWrapper(io.BytesIO(), encoding="ascii", errors="strict")
+    # newline="\n": the default translates "\n" to os.linesep on write ("\r\n" on Windows)
+    return io.TextIOWrapper(
+        io.BytesIO(), encoding="ascii", errors="strict", newline="\n"
+    )
 
 
 def _a2026_11_05_trace_info(**trace: Any) -> dict[str, Any]:

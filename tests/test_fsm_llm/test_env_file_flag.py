@@ -367,7 +367,7 @@ class TestNoModelClisHaveNoFlag:
     def test_only_the_model_clis_import_the_helper(self):
         src = _REPO / "src" / "fsm_llm"
         users = sorted(
-            str(path.relative_to(src))
+            path.relative_to(src).as_posix()
             for path in src.rglob("*.py")
             if "add_env_file" in path.read_text(encoding="utf-8")
         )

@@ -6,6 +6,9 @@
   in setup and never ran).
 * ``pytest_collection_modifyitems``: a node id of more than ``MAX_NODEID_CHARS`` fails
   collection, so a new huge parameter is found on Linux.
+* ``name_refused`` / ``write_if_creatable`` / ``skip_if_backslash_separates``: the
+  hostile file name tests write an ESC or a newline name only where the file system
+  takes it (NTFS refuses both) and skip the backslash test where ``\\`` separates.
 * ``huge_operand_explanation`` / ``guard_assertrepr_compare`` (installed by
   ``pytest_configure`` over pytest's ``util.assertrepr_compare``; the
   ``pytest_assertrepr_compare`` hook itself cannot stop pytest's own implementation, which
@@ -16,6 +19,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import subprocess
 import sys
@@ -26,7 +30,7 @@ from types import SimpleNamespace
 import pytest
 
 from tests import conftest as guards
-from tests.conftest import cpu_timer
+from tests.conftest import cpu_timer, posix_only
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -246,3 +250,84 @@ class TestAssertReprGuard:
         assert done.returncode == 1, done.stdout[-1500:] + done.stderr[-500:]
         assert "full diff skipped" in done.stdout
         assert "1 failed" in done.stdout
+
+
+class TestHostileNameHelpers:
+    @pytest.mark.parametrize(
+        ("error", "expected"),
+        [
+            (OSError(errno.EINVAL, "Invalid argument"), True),
+            (OSError(errno.ENOENT, "missing parent"), False),
+            (PermissionError(errno.EACCES, "denied"), False),
+            (OSError(errno.ENOSPC, "full"), False),
+        ],
+    )
+    def test_only_a_refused_name_is_a_name_error(
+        self, error: OSError, expected: bool
+    ) -> None:
+        assert guards.name_refused(error) is expected
+
+    @pytest.mark.parametrize("winerror", [123, 161, 206, 267])
+    def test_the_windows_name_errors_count(self, winerror: int) -> None:
+        error = OSError(errno.ENOENT, "WinError")  # WinError 123 maps to ENOENT
+        error.winerror = winerror  # type: ignore[attr-defined]
+
+        assert guards.name_refused(error) is True
+
+    def test_another_windows_error_does_not(self) -> None:
+        error = OSError(errno.EACCES, "WinError 5")
+        error.winerror = 5  # type: ignore[attr-defined]
+
+        assert guards.name_refused(error) is False
+
+    @posix_only("an ESC or a newline in a file name needs a POSIX file system")
+    def test_a_posix_file_system_takes_the_hostile_names(self, tmp_path: Path) -> None:
+        """Non-vacuity: where the names exist the helper writes them, so the skill and
+        OKF tests exercise the real control characters on Linux."""
+        names = ["a\x1b[31mb.txt", "e\nf", "c\u202ed.txt", "sub/x\x1b.txt"]
+
+        assert [guards.write_if_creatable(tmp_path / n) for n in names] == [True] * 4
+        assert (tmp_path / "e\nf").read_bytes() == b"x"
+        assert (tmp_path / "sub" / "x\x1b.txt").exists()
+
+    def test_a_refused_name_is_false_and_nothing_else_is_swallowed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def refuse(self: Path, data: bytes) -> int:
+            raise OSError(errno.EINVAL, "Invalid argument")
+
+        monkeypatch.setattr(Path, "write_bytes", refuse)
+        assert guards.write_if_creatable(tmp_path / "bad") is False
+
+        def deny(self: Path, data: bytes) -> int:
+            raise PermissionError(errno.EACCES, "denied")
+
+        monkeypatch.setattr(Path, "write_bytes", deny)
+        with pytest.raises(PermissionError):
+            guards.write_if_creatable(tmp_path / "other")
+
+    @posix_only("the backslash probe is about a file system that treats it as a name")
+    def test_the_backslash_probe_does_not_skip_where_a_backslash_is_a_name(
+        self, tmp_path: Path
+    ) -> None:
+        guards.skip_if_backslash_separates(tmp_path)
+
+        assert list(tmp_path.iterdir()) == []  # the probe folder is removed
+
+    def test_the_backslash_probe_skips_where_it_separates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def windows_write(path: Path, content: bytes = b"x") -> bool:
+            target = (
+                path.parent / "a" / "b.txt"
+            )  # `a\\b.txt` became a folder and a file
+            target.parent.mkdir()
+            target.write_bytes(content)
+            return True
+
+        monkeypatch.setattr(guards, "write_if_creatable", windows_write)
+
+        with pytest.raises(pytest.skip.Exception, match="path separator"):
+            guards.skip_if_backslash_separates(tmp_path)
+
+        assert list(tmp_path.iterdir()) == []

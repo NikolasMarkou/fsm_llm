@@ -2034,7 +2034,13 @@ class TestExplicitEncodings:
         )
         assert proc.returncode == 0, proc.stderr
         encoding, loaded = proc.stdout.splitlines()
-        assert encoding.lower() in ("ansi_x3.4-1968", "ascii", "us-ascii"), encoding
+        if sys.platform == "win32":
+            # Windows has no C locale: the preferred encoding is the ANSI code page
+            # (cp1252), never UTF-8, which is the property the load must survive.
+            assert re.fullmatch(r"cp\d+", encoding.lower()), encoding
+            assert encoding.lower() != "cp65001", encoding
+        else:
+            assert encoding.lower() in ("ansi_x3.4-1968", "ascii", "us-ascii"), encoding
         assert loaded == ascii(session["context_data"])
 
 

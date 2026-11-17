@@ -886,7 +886,7 @@ def _clean_examples():
         except Exception:
             continue
         if FSMValidator(data).validate().is_valid:
-            yield str(Path(path).relative_to(_REPO)), definition
+            yield Path(path).relative_to(_REPO).as_posix(), definition
 
 
 # The read-only probe over the 14 loadable examples (manual read, step 1 of
