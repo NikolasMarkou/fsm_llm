@@ -86,9 +86,10 @@ from fsm_llm.core.definitions import (
     FSMDefinition,
     RunBudgetExceededError,
 )
+from fsm_llm.engine.turn import transitions
 from fsm_llm.policy import ApprovalRequest
 from fsm_llm.testing import PromptGroundedLLM, state_in_prompt
-from tests.conftest import bind_api_clock
+from tests.conftest import EveryReadLater, bind_api_clock
 from tests.test_fsm_llm_agents.test_grounded_patterns import _TurnAwareLLM
 
 _TASK = "What is the capital of France?"
@@ -1037,6 +1038,9 @@ class TestAwaitApprovalExtractsNothing:
     def test_step_makes_no_llm_call_and_a_model_reply_changes_no_key(
         self, monkeypatch: pytest.MonkeyPatch, build: Any, approve: bool
     ):
+        # core writes ``_transition_timestamp = time.time()`` on every transition; the step is
+        # expected to rewrite it, which a clock that reads the same twice hides
+        monkeypatch.setattr(transitions, "time", EveryReadLater())
         probe = _HitlProbe(
             monkeypatch,
             build,

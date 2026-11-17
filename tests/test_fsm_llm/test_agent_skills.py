@@ -51,6 +51,7 @@ from fsm_llm.skills import (
 )
 from fsm_llm.skills import catalog as skills_module
 from tests.conftest import (
+    EveryReadLater,
     name_refused,
     posix_only,
     skip_if_backslash_separates,
@@ -741,24 +742,6 @@ class _FakeClock:
         self.now = 0.0
 
     def monotonic(self) -> float:
-        return self.now
-
-
-class _SpentClock:
-    """Stand-in for ``time`` inside ``fsm_llm.skills.catalog``: every read is a second later.
-
-    A load budget is spent at the second read (the first sets the deadline), however
-    small it is and whatever the platform clock does: on Windows before Python 3.13
-    ``time.monotonic()`` ticks every 15.6 ms, so a real budget of 1e-9 s was not spent
-    before the first skill (CI run 44028115098) and the tests that need a spent budget
-    must not depend on the real clock.
-    """
-
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def monotonic(self) -> float:
-        self.now += 1.0
         return self.now
 
 
@@ -2100,7 +2083,7 @@ class TestRender:
     ) -> None:
         _mk(tmp_path, "bad", front="name: bad\ndescription: Do: this\n")
         skipped = load_skills(tmp_path)  # every folder skipped
-        monkeypatch.setattr(skills_module, "time", _SpentClock())
+        monkeypatch.setattr(skills_module, "time", EveryReadLater())
         cut = load_skills(tmp_path, limits=SkillLimits(max_seconds=1e-9))  # deadline
         for catalog, note in ((skipped, skipped_note), (cut, incomplete_note)):
             assert len(catalog) == 0

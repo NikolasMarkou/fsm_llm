@@ -267,11 +267,15 @@ class TestCpuTick:
     """``_cpu_tick`` measures the step of the CPU clock instead of reading a report."""
 
     def test_it_finds_the_step_of_a_quantised_clock(self, monkeypatch):
-        quantum = 0.004
+        """The fake clock moves a thousandth of a second per read and reports
+        multiples of 4 ms: it needs no real clock. It read ``time.monotonic()`` once,
+        and on Windows before Python 3.13 that ticks every 15.6 ms, so the steps it
+        showed were 16 ms, not 4 ms (CI run 44038473796, 3.11)."""
+        quantum, reads = 0.004, iter(range(1, 10_000))
         monkeypatch.setattr(
             time,
             "process_time",
-            lambda: math.floor(time.monotonic() / quantum) * quantum,
+            lambda: math.floor(next(reads) * 0.001 / quantum + 1e-9) * quantum,
         )
 
         assert _cpu_tick() == pytest.approx(quantum, rel=1e-6)

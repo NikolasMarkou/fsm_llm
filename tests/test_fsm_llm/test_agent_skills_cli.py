@@ -27,8 +27,7 @@ from fsm_llm.core.definitions import SkillError
 from fsm_llm.skills import AgentSkill, SkillCatalog, SkillIssue
 from fsm_llm.skills import catalog as skills_catalog
 from fsm_llm.skills.cli import main
-from tests.conftest import symlink_or_skip
-from tests.test_fsm_llm.test_agent_skills import _SpentClock
+from tests.conftest import EveryReadLater, symlink_or_skip
 
 _REPO = Path(__file__).resolve().parents[2]
 _ESC, _BIDI, _ZWSP, _CJK = chr(0x1B), chr(0x202E), chr(0x200B), chr(0x7F51)
@@ -88,9 +87,9 @@ def _path_limit_problem(path: Path) -> str | None:
 
 
 @pytest.fixture
-def _spent_clock(monkeypatch: pytest.MonkeyPatch) -> _SpentClock:
+def _spent_clock(monkeypatch: pytest.MonkeyPatch) -> EveryReadLater:
     """``time`` of the skills catalog moves a second per read, so `_TINY` is spent."""
-    clock = _SpentClock()
+    clock = EveryReadLater()
     monkeypatch.setattr(skills_catalog, "time", clock)
     return clock
 
@@ -211,7 +210,7 @@ class TestValidate:
         self,
         clean: Path,
         capsys: pytest.CaptureFixture[str],
-        _spent_clock: _SpentClock,
+        _spent_clock: EveryReadLater,
     ) -> None:
         code, out, err = _run(capsys, "validate", clean, "--max-seconds", _TINY)
 
@@ -386,7 +385,7 @@ class TestListShow:
         self,
         clean: Path,
         capsys: pytest.CaptureFixture[str],
-        _spent_clock: _SpentClock,
+        _spent_clock: EveryReadLater,
     ) -> None:
         note = SKILL_INCOMPLETE_NOTE.format(codes="load-deadline")
 

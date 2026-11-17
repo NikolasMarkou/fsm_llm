@@ -19,6 +19,9 @@ from fsm_llm.constants import ENV_LLM_MODEL
 from fsm_llm.core.definitions import FSMDefinition, ResponseGenerationResponse
 from fsm_llm.llm import LLMInterface
 from fsm_llm.testing import MockLLM2Interface
+from tests.clocks import (
+    EveryReadLater,  # noqa: F401  (re-exported: the one import path)
+)
 from tests.cputime import (  # noqa: F401  (re-exported: the one import path)
     CpuTimer,
     cpu_timer,

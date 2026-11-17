@@ -15,6 +15,9 @@
   runs whatever a conftest returns): a failed ``==`` on huge operands is explained without
   ``difflib.ndiff`` (cubic on Python 3.11 to 3.13: one failed assert held the Windows
   3.11 leg for 35 minutes).
+* ``EveryReadLater`` (``tests/clocks.py``): the stand-in clock of the tests that need a
+  deadline spent, an idle sweep or a timestamp that moved, whatever the platform tick
+  (Windows before Python 3.13 reads one value for 15.6 ms).
 """
 
 from __future__ import annotations
@@ -24,13 +27,14 @@ import os
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from tests import conftest as guards
-from tests.conftest import cpu_timer, posix_only
+from tests.conftest import EveryReadLater, cpu_timer, posix_only
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -391,3 +395,35 @@ class TestHostileNameHelpers:
             guards.skip_if_backslash_separates(tmp_path)
 
         assert list(tmp_path.iterdir()) == []
+
+
+class TestEveryReadLater:
+    """The shared stand-in clock: no two reads are ever equal (CI runs 44028115098 and
+    44038473796: a real clock read twice in one 15.6 ms tick gave the same value)."""
+
+    def test_every_read_is_later_than_the_one_before(self) -> None:
+        clock = EveryReadLater()
+
+        reads = [clock.monotonic(), clock.time(), clock.monotonic(), clock.time()]
+
+        assert reads == sorted(set(reads))  # strictly increasing: no repeats
+        assert reads == [1001.0, 1002.0, 1003.0, 1004.0]  # one second per read
+
+    def test_start_and_step_are_the_arguments(self) -> None:
+        clock = EveryReadLater(start=5.0, step=0.25)
+
+        assert (clock.monotonic(), clock.time()) == (5.25, 5.5)
+
+    def test_the_two_instances_do_not_share_a_counter(self) -> None:
+        first, second = EveryReadLater(), EveryReadLater()
+        first.monotonic()
+
+        assert second.monotonic() == 1001.0
+
+    def test_any_other_attribute_is_the_real_time_modules(self) -> None:
+        clock = EveryReadLater()
+
+        assert clock.sleep is time.sleep
+        assert clock.perf_counter is time.perf_counter
+        with pytest.raises(AttributeError):
+            clock.no_such_clock  # noqa: B018  (the attribute read is the test)

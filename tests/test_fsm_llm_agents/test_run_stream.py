@@ -12,11 +12,13 @@ import pytest
 
 from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry
 from fsm_llm.agents.auto_memory import AutoMemoryReactAgent
+from fsm_llm.agents.base import runs as runs_module
 from fsm_llm.agents.constants import ContextKeys
 from fsm_llm.agents.exceptions import AgentTimeoutError
 from fsm_llm.agents.verified_react import VerifiedReactAgent
 from fsm_llm.core.definitions import AgentError
 from fsm_llm.testing import PromptGroundedLLM
+from tests.conftest import EveryReadLater
 
 _ANSWER = "The capital of France is Paris."
 
@@ -97,7 +99,12 @@ class TestRunStream:
         with pytest.raises(AgentError, match="model exploded"):
             list(agent.run_stream("What is the capital of France?"))
 
-    def test_timeout_propagates_unwrapped(self):
+    def test_timeout_propagates_unwrapped(self, monkeypatch: pytest.MonkeyPatch):
+        # A budget of 1e-9 s is spent at the second clock read of the run, however fast
+        # the code between the reads is: ``time.monotonic()`` ticks every 15.6 ms on
+        # Windows before Python 3.13 and two reads of a fast start were equal (CI run
+        # 44038473796), so the run clock moves a second per read.
+        monkeypatch.setattr(runs_module, "time", EveryReadLater())
         runs: list[str] = []
         agent = _react(runs, config=AgentConfig(max_iterations=6, timeout_seconds=1e-9))
         with pytest.raises(AgentTimeoutError):

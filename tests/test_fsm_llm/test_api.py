@@ -39,7 +39,7 @@ from fsm_llm.handlers import HandlerErrorMode, HandlerTiming, create_handler
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.logging import logger
 from fsm_llm.testing import MockLLM2Interface
-from tests.conftest import bind_api_clock, current_timing_factor
+from tests.conftest import EveryReadLater, bind_api_clock, current_timing_factor
 from tests.test_fsm_llm.support import (
     _JOIN_TIMEOUT_S,
     _TWO_STATE,
@@ -1225,32 +1225,14 @@ def _c12_short_lock_timeout():
         yield
 
 
-class _LaterEveryRead:
-    """Stand-in for ``time`` inside ``fsm_llm.engine.api``: each ``monotonic()`` read is 1 s later.
-
-    The idle sweep ends a conversation when ``now - last_access > max_idle_seconds``, so a
-    sweep with ``max_idle_seconds=0`` needs a clock that has moved since each conversation
-    started. On Windows before Python 3.13 ``time.monotonic()`` ticks every 15.6 ms and a
-    run of fast calls reads the same value (CI run 44028115098), so these tests bind a
-    clock that cannot stand still. Every other attribute is the real ``time``'s.
-    """
-
-    def __init__(self) -> None:
-        self.now = 1000.0
-
-    def monotonic(self) -> float:
-        self.now += 1.0
-        return self.now
-
-    def __getattr__(self, name: str) -> Any:
-        import time
-
-        return getattr(time, name)
-
-
 @pytest.fixture
-def _later_every_read(monkeypatch: pytest.MonkeyPatch) -> _LaterEveryRead:
-    clock = _LaterEveryRead()
+def _later_every_read(monkeypatch: pytest.MonkeyPatch) -> EveryReadLater:
+    """The idle sweep ends a conversation when ``now - last_access >
+    max_idle_seconds``, so a sweep with ``max_idle_seconds=0`` needs a clock that has
+    moved since each conversation started: ``time.monotonic()`` ticks every 15.6 ms on
+    Windows before Python 3.13 and a run of fast calls reads the same value (CI run
+    44028115098)."""
+    clock = EveryReadLater()
     bind_api_clock(monkeypatch, clock)
     return clock
 
