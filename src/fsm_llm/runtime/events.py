@@ -257,6 +257,33 @@ def _check_envelope(event: object, error: type[EventLogError], what: str) -> Non
         raise error(f"{what} lacks envelope keys {missing}")
 
 
+def canonical_json(value: Any, *, what: str = "payload") -> bytes:
+    """Return the canonical ASCII JSON bytes of *value*: compact, keys sorted, no newline.
+
+    The one place the log's ``json.dumps`` arguments live; ``encode_event`` (a line) and the
+    blob store (``BlobStore.put_json``) both call it, so an event and a blob never encode
+    differently. Raises ``EventPayloadError`` (naming *what*) when *value* nests deeper than
+    ``MAX_PAYLOAD_DEPTH`` or holds a cycle (checked before ``json.dumps`` runs), or holds a
+    value JSON cannot (pass it through ``to_jsonable`` first; NaN and infinity are refused).
+    No size cap here: the caller applies its own.
+    """
+    if not check_depth(value, MAX_PAYLOAD_DEPTH):
+        raise EventPayloadError(
+            f"{what} nests deeper than {MAX_PAYLOAD_DEPTH} levels or contains a cycle"
+        )
+    try:
+        text = json.dumps(
+            value,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            sort_keys=True,
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise EventPayloadError(f"{what} is not JSON serializable: {exc}") from None
+    return text.encode("ascii")
+
+
 def encode_event(envelope: dict[str, Any]) -> bytes:
     """Return the log line of *envelope*: compact ASCII JSON with sorted keys and one ``b"\\n"``.
 
@@ -266,21 +293,7 @@ def encode_event(envelope: dict[str, Any]) -> bytes:
     newline (put a large payload in a blob). The depth is checked before ``json.dumps`` runs.
     """
     _check_envelope(envelope, EventPayloadError, "event")
-    if not check_depth(envelope, MAX_PAYLOAD_DEPTH):
-        raise EventPayloadError(
-            f"event nests deeper than {MAX_PAYLOAD_DEPTH} levels or contains a cycle"
-        )
-    try:
-        text = json.dumps(
-            envelope,
-            separators=(",", ":"),
-            ensure_ascii=True,
-            sort_keys=True,
-            allow_nan=False,
-        )
-    except (TypeError, ValueError) as exc:
-        raise EventPayloadError(f"event is not JSON serializable: {exc}") from None
-    data = text.encode("ascii") + b"\n"
+    data = canonical_json(envelope, what="event") + b"\n"
     if len(data) > MAX_EVENT_BYTES:
         raise EventPayloadError(
             f"event is {len(data)} bytes, over the {MAX_EVENT_BYTES} byte cap; "

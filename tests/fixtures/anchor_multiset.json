@@ -509,6 +509,11 @@
       "delta": 1,
       "reason": "step 2 of plan 21e6f00d: new anchor at the JSONL writer (runtime/stores/jsonl.py JsonlWriter.append): a local one-write-per-event append, no shared atomic-save helper, no buffered or text-mode open, no splitlines, no default=str or indent; the second D-011 anchor (runtime/blobs.py) arrives in step 3 with its own entry; no other token was added or lost",
       "token": "plan-2026-11-17T100529-21e6f00d/D-011"
+    },
+    {
+      "delta": 1,
+      "reason": "step 3 of plan 21e6f00d: second D-011 anchor at the blob writer (runtime/blobs.py BlobStore.put): a local write-if-absent (temp file in the same directory, fsync, os.replace; an existing file of the right size is success, a lost replace race is success only when the final file hashes right), no shared atomic-save helper, no retry loop, no text-mode open; no other token was added or lost",
+      "token": "plan-2026-11-17T100529-21e6f00d/D-011"
     }
   ]
 }
