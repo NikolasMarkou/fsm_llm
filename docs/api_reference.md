@@ -28,6 +28,7 @@ API(
     max_fsm_cache_size: int = 64,
     *,
     executors: Mapping[str, StateExecutor] | None = None,
+    event_log: EventLog | str | os.PathLike[str] | None = None,
     **llm_kwargs,
 )
 ```
@@ -103,6 +104,32 @@ new_conv_id, state = api.restore_session(session_id)   # -> (conv_id, SessionSta
 ```
 
 `save_session` also stores the pipeline's extraction provenance (one digest per extracted key, not the values) in `SessionState.metadata["pipeline_extracted"]`, and `restore_session` re-seeds it, so a later-turn correction still lands after a restart. A handler-set or `update_context` value has no digest and is never overwritten. The map is also visible (as `_pipeline_extracted`) in `FSMManager.get_complete_conversation()['metadata']` and in the session file. A session file without the key restores an empty map.
+
+### Event Log (`fsm_llm.runtime`)
+
+`event_log` (keyword-only, default `None`: off, and then nothing changes: no file, no extra model call, the same snapshots) turns on a durable, append-only event log beside the snapshots. It takes an `EventLog` (`fsm_llm.runtime.EventLog(root)`; shared, and `API.close()` leaves it open) or a directory path (the `API` owns the log and closes it). Every turn of a conversation tree is appended to `<root>/logs/<root conversation id>.jsonl` as one JSON event per line (`v`, `seq`, `ts`, `conversation_id`, `frame`, `type`, then the fields of the type); a payload over 8,192 bytes goes to `<root>/blobs/<aa>/<62 hex>` and the event keeps its `sha256:` reference. `seq` is the order, never `ts`. The log is written and fsynced before every model call, and a log that cannot be written refuses the call. For a `LiteLLMInterface` the request is the exact provider request (through the `fsm_llm.llm.observer` hook in `_send`, credentials and headers are never in it); an interface that never reaches `_send` (a custom one, a test double) is logged by the engine at the call site.
+
+```python
+from fsm_llm import API
+from fsm_llm.engine.session import EventLogSessionStore
+from fsm_llm.runtime import EventLog
+
+log = EventLog("./run-log")
+api = API.from_file("bot.json", model="gpt-4o-mini", event_log=log)
+conv_id, _ = api.start_conversation()
+api.converse("hello", conv_id)
+for event in log.read(conv_id):            # Iterator[dict], in seq order
+    print(event["seq"], event["type"])
+
+# After a crash (even kill -9 in the middle of a turn), resume from the log:
+api = API.from_file("bot.json", model="gpt-4o-mini",
+                    session_store=EventLogSessionStore(EventLog("./run-log")))
+new_conv_id, state = api.restore_session(conv_id)
+```
+
+Event types are the closed `fsm_llm.runtime.EventType` vocabulary (21 declared, 13 written today: `turn/start`, `turn/end` with an outcome of `committed`, `rolled_back`, `abandoned` or `interrupted`, `llm/request`, `llm/response`, `provider/error`, `executor/start`, `executor/result`, `transition`, `stack/push`, `stack/pop`, `context/record`, `tool/call`, `tool/result`). `EventLogSessionStore(log, *, legacy_dir=None)` is read-only (`save` is a no-op, `delete` raises `EventLogError`): `load` folds the log into the state of the last committed turn (or the pre-turn state of a turn that never ended), reads an old `FileSessionStore` file from `legacy_dir` through a versioned projection (`fsm_llm.runtime.stores.session.SessionProjection`, version 2, one migration from version 1) when the log has no state for the id, and reports tool calls with no result as `unknown` in `SessionState.metadata["unknown_tool_calls"]` (never retried). A completion state restored mid tool exchange continues from the transcript the log carries; a restore from a `FileSessionStore` snapshot still refuses it. `EventLog.tool_call(conversation_id, *, name, call_id, arguments, side_effecting=True)` is the checkpoint context manager a consumer wraps a tool run in (the product tool runners do not call it yet).
+
+Limits: the request of the greeting model call is not logged (its text is in the start record); stack restore, `fork` and `resume` are roadmap row 1.4; a prompt is stored as the model saw it, not rebuilt from the layout (rows 1.9 and 2.3). The log holds user text and prompts as the model saw them, so keep the log directory as private as the session directory: only context entries that are secret-looking by the repository rule are redacted, and a `*_token` key whose value is not token-shaped is not secret-looking by that rule. Power-loss durability is argued, not tested, and the file lock, the raw file descriptor and killing a writer are proven on Linux only; the CI Windows legs cover them there. Source: `src/fsm_llm/runtime/log.py`, `src/fsm_llm/runtime/stores/jsonl.py`, `src/fsm_llm/runtime/blobs.py`.
 
 ### State & Data Queries
 
@@ -185,7 +212,7 @@ except BuildError as exc:
     print(exc.errors, exc.__cause__)
 ```
 
-- `APIBuilder`: one setter per `API` parameter (`set_definition`, `set_llm_interface`, `set_model`, `set_api_key`, `set_temperature`, `set_max_tokens`, `set_llm_option(name, value)` (`build()` refuses a name that repeats a named `API` parameter and names the typed setter), `add_handler`, `set_handler_error_mode`, `set_transition_config`, `set_session_store`, `set_handler_timeout`, `set_max_history_size`, `set_max_message_length`, `set_max_fsm_cache_size`). Only set values reach `API(...)`, so `API`'s own rules (an `llm_interface` refuses other LLM settings) apply unchanged and come back as `BuildError`. No definition is a `BuildError`.
+- `APIBuilder`: one setter per `API` parameter (`set_definition`, `set_llm_interface`, `set_model`, `set_api_key`, `set_temperature`, `set_max_tokens`, `set_llm_option(name, value)` (`build()` refuses a name that repeats a named `API` parameter and names the typed setter), `add_handler`, `set_handler_error_mode`, `set_transition_config`, `set_session_store`, `set_handler_timeout`, `set_max_history_size`, `set_max_message_length`, `set_max_fsm_cache_size`, `set_event_log`). Only set values reach `API(...)`, so `API`'s own rules (an `llm_interface` refuses other LLM settings) apply unchanged and come back as `BuildError`. No definition is a `BuildError`.
 - `FSMManagerBuilder`: `set_fsm_loader`, `set_llm_interface`, the three prompt builders, `set_transition_evaluator`, `set_max_history_size`, `set_max_message_length`, `set_handler_system`, `set_handler_error_mode`, `set_max_fsm_cache_size`, `build() -> FSMManager`.
 - `fsm_llm.agents.ConfiguredAgentBuilder`: `set_pattern`, `add_tool` (or `set_tool_registry`, not both), `set_config`, `set_config_option`, typed config setters (`set_model`, `set_temperature`, `set_max_tokens`, `set_max_iterations`, `set_timeout_seconds`), `set_system_prompt` (a `create_agent` argument, not an `AgentConfig` field), `set_hitl`, `set_option(name, value)`; `build()` calls `create_agent` on a shallow copy of the config (callables inside it stay shared). `set_option` passes any other `create_agent` keyword; `build()` refuses a name that repeats a named parameter (`pattern`, `tools`, `config`, `system_prompt`, ...) and names the typed setter to use.
 

@@ -58,9 +58,9 @@ flowchart TD
     testing[fsm_llm.testing] --> core
 ```
 
-The core is itself layered, and a layer imports only the layers below it: `engine` (the `API`, the `FSMManager`, the turn), `handlers`, `policy` (approval and human-in-the-loop), then `context`, `okf`, `skills` and `tools` side by side, then `llm`, then `core` (the models, JsonLogic, the validator); the kernel modules (`constants`, `logging`, `security`, `text`, `env`, `frontmatter`, `memory`) import no layer. The rules are in `.importlinter`.
+The core is itself layered, and a layer imports only the layers below it: `engine` (the `API`, the `FSMManager`, the turn), `handlers`, `policy` (approval and human-in-the-loop), then `context`, `okf`, `skills` and `tools` side by side, then `runtime` (the opt-in event log), then `llm`, then `core` (the models, JsonLogic, the validator); the kernel modules (`constants`, `logging`, `security`, `text`, `env`, `frontmatter`, `memory`) import no layer. The rules are in `.importlinter`.
 
-`import fsm_llm` loads only the core layers (`core`, `engine`, `handlers`, `context`, `llm`, `security` and a few kernel modules); `okf`, `skills`, `tools`, `policy` and every subpackage load when you import them. Each subpackage is imported on its own, for example `from fsm_llm.agents import ReactAgent`.
+`import fsm_llm` loads only the core layers (`core`, `engine`, `handlers`, `context`, `llm`, `runtime`, `security` and a few kernel modules); `okf`, `skills`, `tools`, `policy` and every subpackage load when you import them. Each subpackage is imported on its own, for example `from fsm_llm.agents import ReactAgent`.
 
 ## Subpackages
 
