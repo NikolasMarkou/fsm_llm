@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from fsm_llm.engine.session import SessionStore
     from fsm_llm.handlers import HandlerSystem
     from fsm_llm.llm import LLMInterface
+    from fsm_llm.runtime import EventLog
 
     from .stack import FSMStackFrame
 
@@ -44,6 +45,8 @@ class _ApiSurface:
         _ended_conversations: dict[str, dict[str, Any]]
         _MAX_ENDED_CACHE: int
         _session_store: SessionStore | None
+        _event_log: EventLog | None
+        _owns_event_log: bool
 
         def _get_current_fsm_conversation_id(self, conversation_id: str) -> str: ...
 

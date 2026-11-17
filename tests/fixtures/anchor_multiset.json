@@ -519,6 +519,16 @@
       "delta": 1,
       "reason": "step 4 of plan 21e6f00d: new anchor at the request observer (llm/observer.py, above OBSERVED_CALL_KEYS): the observer gets an allow-list of the provider request, never a deny-list or the whole call_params, is a ContextVar callback and not a counter, begin_send fails closed, end_send and fail_send never break the call; the D-004 anchor of plan 944e2692 in llm/providers/litellm.py is untouched; no other token was added or lost",
       "token": "plan-2026-11-17T100529-21e6f00d/D-002"
+    },
+    {
+      "delta": 1,
+      "reason": "step 7 of plan 21e6f00d: new anchor at the turn boundary of the manager (engine/fsm/turns.py, _run_locked_turn): begin_turn and end_turn wrap the manager's own turn (log off: no-ops), the error is captured as a type by `except BaseException`, never read from sys.exc_info() (it answers with the caller's exception when the turn runs inside an except block); the stream closure carries a plain pointer comment without the token; no other token was added or lost",
+      "token": "plan-2026-11-17T100529-21e6f00d/D-008"
+    },
+    {
+      "delta": 1,
+      "reason": "step 7 of plan 21e6f00d: new anchor at the internal-key allow-list of the state blob (engine/events.py, declared_internal_keys): the log carries internal keys only by the running definition's completion-state keys (messages_key, response_format_key), never by prefix or deny-list (the driver-only approval grant lives in that namespace) and the FileSessionStore snapshots stay as D-029 and D-039 of plan 944e2692 pin them; no other token was added or lost",
+      "token": "plan-2026-11-17T100529-21e6f00d/D-009"
     }
   ]
 }

@@ -38,6 +38,42 @@ if TYPE_CHECKING:
 _SnapshotT = TypeVar("_SnapshotT")
 
 
+def snapshot_from_instance(inst: FSMInstance) -> dict[str, Any]:
+    """The fields of ``SnapshotsMixin.get_conversation_snapshot`` read from ONE instance.
+
+    Interface contract: the caller holds the instance's ``conv_lock`` (or owns the instance),
+    because every field is read in this one call (the atomicity of the snapshot is the
+    caller's hold, see ``get_conversation_snapshot``). Fast in-memory work only: no
+    definition lookup, no manager lock. Returns the dict that method documents. Never
+    raises for content. Shared with the event log's state blob (``engine/events.py``),
+    which reads the same fields so a logged state and a saved session cannot drift.
+    """
+    wm_obj = inst.context.working_memory
+    working_memory: dict[str, dict[str, Any]] | None = None
+    hidden_buffers: list[str] = []
+    # WorkingMemory guards its own buffers with its OWN internal
+    # lock (memory.py, independent of `_lock`/`conv_lock`), so
+    # calling `to_dict()` here -- already inside `conv_lock` -- does
+    # not nest under/invert either FSMManager lock. See plan.md
+    # Assumptions.
+    if wm_obj is not None and hasattr(wm_obj, "to_dict"):
+        working_memory = wm_obj.to_dict()
+        hidden_buffers = sorted(getattr(wm_obj, "hidden_buffers", frozenset()))
+    return {
+        "current_state": inst.current_state,
+        "context_data": _strip_internal_mapping(inst.context.data),
+        "conversation_history": inst.context.conversation.get_recent(),
+        "working_memory": working_memory,
+        "hidden_buffers": hidden_buffers,
+        "provenance": dict(inst.context.metadata.get(PROVENANCE_METADATA_KEY) or {}),
+        # DECISION plan-2026-09-21T203800-8a03483a/D-007 (A6): the
+        # summary is read in this SAME hold as the history it
+        # complements (a trim moves exchanges from one to the other).
+        # Do NOT read it through a separate call in save_session.
+        "conversation_summary": inst.context.conversation.summary,
+    }
+
+
 class SnapshotsMixin:
     """Reads, snapshots and the restore seed of ``FSMManager``, all under ``conv_lock``.
 
@@ -303,36 +339,7 @@ class SnapshotsMixin:
         only pull an unrelated lock into this hold. It stays a separate,
         non-atomic call, by design -- see plan.md's explicit scope note.
         """
-
-        def _snapshot(inst: FSMInstance) -> dict[str, Any]:
-            wm_obj = inst.context.working_memory
-            working_memory: dict[str, dict[str, Any]] | None = None
-            hidden_buffers: list[str] = []
-            # WorkingMemory guards its own buffers with its OWN internal
-            # lock (memory.py, independent of `_lock`/`conv_lock`), so
-            # calling `to_dict()` here -- already inside `conv_lock` -- does
-            # not nest under/invert either FSMManager lock. See plan.md
-            # Assumptions.
-            if wm_obj is not None and hasattr(wm_obj, "to_dict"):
-                working_memory = wm_obj.to_dict()
-                hidden_buffers = sorted(getattr(wm_obj, "hidden_buffers", frozenset()))
-            return {
-                "current_state": inst.current_state,
-                "context_data": _strip_internal_mapping(inst.context.data),
-                "conversation_history": inst.context.conversation.get_recent(),
-                "working_memory": working_memory,
-                "hidden_buffers": hidden_buffers,
-                "provenance": dict(
-                    inst.context.metadata.get(PROVENANCE_METADATA_KEY) or {}
-                ),
-                # DECISION plan-2026-09-21T203800-8a03483a/D-007 (A6): the
-                # summary is read in this SAME hold as the history it
-                # complements (a trim moves exchanges from one to the other).
-                # Do NOT read it through a separate call in save_session.
-                "conversation_summary": inst.context.conversation.summary,
-            }
-
-        return self._read_under_lock(conversation_id, _snapshot)
+        return self._read_under_lock(conversation_id, snapshot_from_instance)
 
     def seed_restored_conversation(
         self,

@@ -135,7 +135,15 @@ from fsm_llm.llm import (
     resolve_model,
 )
 from fsm_llm.logging import logger
+from fsm_llm.runtime import EventLog
 
+from .events import (
+    close_event_log,
+    event_scope,
+    event_stream,
+    open_event_log,
+    record_started,
+)
 from .helpers import _require_classifier_interface, _unexpected_error
 from .lifecycle import MAX_ENDED_CONVERSATIONS_CACHE, LifecycleMixin
 from .run import RunMixin
@@ -219,6 +227,7 @@ class API(RunMixin, StackMixin, LifecycleMixin, SessionsMixin):
         max_fsm_cache_size: int = DEFAULT_MAX_FSM_CACHE_SIZE,
         *,
         executors: Mapping[str, StateExecutor] | None = None,
+        event_log: EventLog | str | os.PathLike[str] | None = None,
         **llm_kwargs,
     ):
         """
@@ -252,6 +261,10 @@ class API(RunMixin, StackMixin, LifecycleMixin, SessionsMixin):
                 that is not a mapping of ``StateExecutor``, ``ValueError`` for
                 a kind name no ``KindSpec`` carries. Internal until the kind
                 extension point is public.
+            event_log: Opt-in durable event log: an ``EventLog`` (shared, left
+                open by ``close``) or a directory path (the API owns the log and
+                closes it). Off by default, and then nothing changes. See
+                ``engine/api/events.py``.
             **llm_kwargs: Additional LLM parameters
         """
         # Handle LLM interface initialization
@@ -376,6 +389,7 @@ class API(RunMixin, StackMixin, LifecycleMixin, SessionsMixin):
 
         # Session persistence
         self._session_store = session_store
+        self._event_log, self._owns_event_log = open_event_log(event_log)
 
         logger.info("Enhanced API fully initialized with the 2-pass architecture")
 
@@ -536,6 +550,7 @@ class API(RunMixin, StackMixin, LifecycleMixin, SessionsMixin):
                 ]
                 self._last_accessed[conversation_id] = time.monotonic()
 
+            record_started(self, conversation_id)
             return conversation_id, response
 
         except (ValueError, FSMError):
@@ -561,9 +576,10 @@ class API(RunMixin, StackMixin, LifecycleMixin, SessionsMixin):
         with _turn_errors("processing", "process"):
             # D-014: _get_current_fsm_conversation_id already refreshed _last_accessed.
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-            response: str = self.fsm_manager.process_message(
-                current_fsm_id, user_message
-            )
+            with event_scope(self, conversation_id):
+                response: str = self.fsm_manager.process_message(
+                    current_fsm_id, user_message
+                )
             # Auto-save session if store is configured
             _auto_save_session(self, conversation_id)
             return response
@@ -598,7 +614,8 @@ class API(RunMixin, StackMixin, LifecycleMixin, SessionsMixin):
         """
         with _turn_errors("advancing without a", "advance without a"):
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
-            result: AdvanceResult = self.fsm_manager.advance(current_fsm_id)
+            with event_scope(self, conversation_id):
+                result: AdvanceResult = self.fsm_manager.advance(current_fsm_id)
             _auto_save_session(self, conversation_id)
             return result
 
@@ -641,8 +658,12 @@ class API(RunMixin, StackMixin, LifecycleMixin, SessionsMixin):
         def _stream() -> Iterator[str]:
             with _turn_errors("streaming", "stream"):
                 try:
-                    yield from self.fsm_manager.process_message_stream(
-                        current_fsm_id, user_message
+                    yield from event_stream(
+                        self,
+                        conversation_id,
+                        self.fsm_manager.process_message_stream(
+                            current_fsm_id, user_message
+                        ),
                     )
                 finally:
                     # Auto-save session after stream completes or is abandoned
@@ -685,7 +706,11 @@ class API(RunMixin, StackMixin, LifecycleMixin, SessionsMixin):
         def _stream() -> Iterator[str]:
             with _turn_errors("streaming a step without a", "stream a step without a"):
                 try:
-                    yield from self.fsm_manager.advance_stream(current_fsm_id)
+                    yield from event_stream(
+                        self,
+                        conversation_id,
+                        self.fsm_manager.advance_stream(current_fsm_id),
+                    )
                 finally:
                     _auto_save_session(self, conversation_id)
 
@@ -748,6 +773,7 @@ class API(RunMixin, StackMixin, LifecycleMixin, SessionsMixin):
                 logger.warning(
                     f"Error ending conversation {conversation_id} during cleanup: {e!s}"
                 )
+        close_event_log(self)
 
     def __enter__(self):
         """Context manager entry."""

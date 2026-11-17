@@ -15,6 +15,7 @@ from typing import Any
 from fsm_llm.core.definitions import ConversationBusyError, FSMError
 from fsm_llm.logging import logger
 
+from .events import release_event_writer
 from .helpers import _read_or_ended, handle_conversation_errors
 from .surface import _ApiSurface
 
@@ -204,6 +205,8 @@ class LifecycleMixin(_ApiSurface):
         # frames are already out of conversation_stacks, so release any temp def
         # no OTHER live conversation still references.
         self._release_unreferenced_temp_definitions()
+        # The event log: a finished root conversation holds no writer, file or lock.
+        release_event_writer(self, conversation_id)
 
     def list_active_conversations(self) -> list[str]:
         """List all active conversation IDs."""

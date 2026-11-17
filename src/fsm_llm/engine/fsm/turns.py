@@ -14,6 +14,7 @@ from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from fsm_llm.core.definitions import AdvanceResult, FSMError, FSMInstance
+from fsm_llm.engine.events import begin_turn, end_turn
 from fsm_llm.handlers import HandlerTiming
 
 from .helpers import (
@@ -23,7 +24,7 @@ from .helpers import (
 )
 
 if TYPE_CHECKING:
-    from fsm_llm.core.definitions import State
+    from fsm_llm.core.definitions import FSMDefinition, State
     from fsm_llm.engine.turn import MessagePipeline
 
 
@@ -49,6 +50,8 @@ class TurnsMixin:
         def resolve_state_definition(
             self, instance: FSMInstance, conversation_id: str | None = None
         ) -> State: ...
+
+        def get_fsm_definition(self, fsm_id: str) -> FSMDefinition: ...
 
     def _enter_turn(self, conversation_id: str, conv_lock: threading.RLock) -> None:
         """Claim ``conversation_id`` for one turn; caller holds ``self._lock``.
@@ -145,11 +148,29 @@ class TurnsMixin:
                 self, conversation_id, missing_lock="keyerror"
             )
             self._enter_turn(conversation_id, conv_lock)
+        # DECISION plan-2026-11-17T100529-21e6f00d/D-008
+        # The event log's turn boundary lives HERE, not in the pipeline: `begin_turn` runs
+        # before the user message is added, `end_turn` after the except arms of
+        # `_process_message_locked` rolled back, both with `conv_lock` held and taking no
+        # manager lock. Both are no-ops with no scope bound (the log off). The error is
+        # captured as its TYPE by `except BaseException`, never read from `sys.exc_info()`:
+        # in a `finally` that call answers with the CALLER's exception when this turn runs
+        # inside an `except` block and succeeds. `end_turn` never raises an `Exception`, so
+        # the release below always runs. Do NOT move this into `_run_turn` (anchored bodies).
+        turn = None
+        error: type[BaseException] | None = None
         try:
+            turn = begin_turn(self, conversation_id, message)
             return self._process_message_locked(conversation_id, message, log, run)
+        except BaseException as exc:
+            error = type(exc)
+            raise
         finally:
-            self._active_turns.discard(conversation_id)
-            conv_lock.release()
+            try:
+                end_turn(turn, error)
+            finally:
+                self._active_turns.discard(conversation_id)
+                conv_lock.release()
 
     @with_conversation_context
     def process_message_stream(
@@ -258,7 +279,11 @@ class TurnsMixin:
                     self, conversation_id, missing_lock="keyerror"
                 )
                 self._enter_turn(conversation_id, conv_lock)
+            # The event log's turn boundary, as in `_run_locked_turn` (D-008 anchor there).
+            turn = None
+            error: type[BaseException] | None = None
             try:
+                turn = begin_turn(self, conversation_id, message)
                 instance = self.instances[conversation_id]
                 current_state = self.resolve_state_definition(instance, conversation_id)
                 if not current_state.transitions:
@@ -297,9 +322,15 @@ class TurnsMixin:
                     self._rollback_user_message(instance, message, log)
                     self._fire_error_handlers(instance, e, log)
                     raise failure from e
+            except BaseException as exc:
+                error = type(exc)
+                raise
             finally:
-                self._active_turns.discard(conversation_id)
-                conv_lock.release()
+                try:
+                    end_turn(turn, error)
+                finally:
+                    self._active_turns.discard(conversation_id)
+                    conv_lock.release()
 
         return _stream()
 

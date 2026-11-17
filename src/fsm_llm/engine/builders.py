@@ -170,6 +170,10 @@ class APIBuilder:
     def set_max_fsm_cache_size(self, size: int) -> APIBuilder:
         return self._put("max_fsm_cache_size", size)
 
+    def set_event_log(self, event_log: Any) -> APIBuilder:
+        """Turn the event log on: an ``EventLog`` (shared) or a directory path (the API owns it)."""
+        return self._put("event_log", event_log)
+
     def build(self) -> API:
         refuse_named_options(API, self._llm_options, _API_HINTS, owner=APIBuilder)
         if self._definition is None:

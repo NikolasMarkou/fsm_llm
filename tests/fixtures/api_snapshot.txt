@@ -1,6 +1,6 @@
 # fsm_llm
 fsm_llm.API class
-  def __init__(self, fsm_definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str], llm_interface: LLMInterface | None = None, model: str | None = None, api_key: str | None = None, temperature: float | None = None, max_tokens: int | None = None, max_history_size: int = 5, max_message_length: int = 1000, handlers: list[FSMHandler] | None = None, handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE, transition_config: TransitionEvaluatorConfig | None = None, session_store: SessionStore | None = None, handler_timeout: float | None = None, max_fsm_cache_size: int = 64, *, executors: Mapping[str, StateExecutor] | None = None, **llm_kwargs)
+  def __init__(self, fsm_definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str], llm_interface: LLMInterface | None = None, model: str | None = None, api_key: str | None = None, temperature: float | None = None, max_tokens: int | None = None, max_history_size: int = 5, max_message_length: int = 1000, handlers: list[FSMHandler] | None = None, handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE, transition_config: TransitionEvaluatorConfig | None = None, session_store: SessionStore | None = None, handler_timeout: float | None = None, max_fsm_cache_size: int = 64, *, executors: Mapping[str, StateExecutor] | None = None, event_log: EventLog | str | os.PathLike[str] | None = None, **llm_kwargs)
   def advance(self, conversation_id: str) -> AdvanceResult
   def advance_stream(self, conversation_id: str) -> Iterator[str]
   def cleanup_stale_conversations(self, max_idle_seconds: float = 3600.0) -> list[str]
@@ -37,6 +37,7 @@ fsm_llm.APIBuilder class
   def build(self) -> API
   def set_api_key(self, api_key: str) -> APIBuilder
   def set_definition(self, definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str]) -> APIBuilder
+  def set_event_log(self, event_log: Any) -> APIBuilder
   def set_handler_error_mode(self, mode: HandlerErrorMode | str) -> APIBuilder
   def set_handler_timeout(self, seconds: float | None) -> APIBuilder
   def set_llm_interface(self, llm_interface: Any) -> APIBuilder

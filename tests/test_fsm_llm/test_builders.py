@@ -125,6 +125,35 @@ class TestAPIBuilder:
         assert b.set_max_history_size(3) is b
         assert b.set_max_message_length(10) is b
         assert b.set_max_fsm_cache_size(2) is b
+        assert b.set_event_log(None) is b
+
+    def test_event_log_reaches_the_api(self, tmp_path):
+        from fsm_llm import API, APIBuilder
+        from fsm_llm.runtime import EventLog
+
+        shared = EventLog(tmp_path / "shared")
+        try:
+            api = (
+                APIBuilder()
+                .set_definition(_definition_dict())
+                .set_llm_interface(_mock_llm())
+                .set_event_log(shared)
+                .build()
+            )
+            assert api._event_log is shared and api._owns_event_log is False
+        finally:
+            shared.close()
+        owned = (
+            APIBuilder()
+            .set_definition(_definition_dict())
+            .set_llm_interface(_mock_llm())
+            .set_event_log(tmp_path / "owned")
+            .build()
+        )
+        assert isinstance(owned._event_log, EventLog) and owned._owns_event_log is True
+        owned.close()
+        direct = API(_definition_dict(), llm_interface=_mock_llm())
+        assert direct._event_log is None and direct._owns_event_log is False
 
     def test_missing_definition_raises_build_error(self):
         from fsm_llm import APIBuilder

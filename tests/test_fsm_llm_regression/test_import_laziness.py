@@ -45,6 +45,11 @@ EAGER = frozenset(
         "llm",
         "logging",
         "memory",
+        # plan 21e6f00d step 7: `engine` imports `runtime` at module top (D-007: the opt-in
+        # `API(event_log=)` and the turn boundary of `FSMManager` need it, and a function-local
+        # import would hide a real dependency from this pin). Cost, measured in step 7: about
+        # 5 ms and 9 small modules on top of `import fsm_llm` (standard library, `core`, `llm`).
+        "runtime",
         "security",
     }
 )
@@ -64,7 +69,6 @@ ON_REQUEST = (
     "skills",
     "tools",
     "policy",
-    "runtime",  # plan 21e6f00d step 1; moves to EAGER in step 7, when the engine imports it
     "text",
     "frontmatter",
     "cli_support",
