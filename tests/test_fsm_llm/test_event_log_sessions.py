@@ -363,7 +363,9 @@ class TestTheFold:
             projection.last_seq,
         ) == ("a", 2)
 
-    def test_deltas_apply_in_order_and_none_deletes(self, log: EventLog) -> None:
+    def test_deltas_apply_in_order_and_none_is_a_value_as_in_the_write(
+        self, log: EventLog
+    ) -> None:
         script = _Script(log)
         script.state(
             _START,
@@ -376,8 +378,12 @@ class TestTheFold:
         script.delta({"new": 4})
         projection = script.fold()
         assert projection is not None
-        assert projection.context_data == {"keep": 1, "new": 4}
-        assert projection.completion_context == {"_completion_messages": ["y"]}
+        # API.update_context keeps a key written as None (FSMContext.update), so the fold does
+        assert projection.context_data == {"keep": 1, "drop": None, "new": 4}
+        assert projection.completion_context == {
+            "_completion_messages": ["y"],
+            "other": None,
+        }
 
     def test_a_turn_start_after_a_delta_carries_it_and_a_rollback_loses_the_delta(
         self, log: EventLog

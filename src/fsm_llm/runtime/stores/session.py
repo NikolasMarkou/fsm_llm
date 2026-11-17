@@ -27,9 +27,9 @@ Interface contract:
       state-carrying event (``turn/start``, ``turn/end`` and ``context/record`` with a
       ``state_ref``); a ``turn/end`` with outcome ``rolled_back`` returns to the state of its own
       ``turn/start`` whatever it carries; a ``context/record`` with a ``delta_ref`` (the
-      ``update_context`` write) is applied onto the state in force (a ``None`` value deletes the
-      key). A crash leaves no ``turn/end``, so the open turn's ``turn/start`` state stands. An
-      unknown event type is skipped. ``tool/call`` events of ANY frame without a ``tool/result``
+      ``update_context`` write) is applied onto the state in force (a ``None`` value is set,
+      not deleted: ``API.update_context`` keeps the key). A crash leaves no ``turn/end``, so
+      the open turn's ``turn/start`` state stands. An unknown event type is skipped. ``tool/call`` events of ANY frame without a ``tool/result``
       become ``unknown_tool_calls``; nothing is executed or retried. Returns None when no event
       carries a state. A bad event stream (a corrupt middle line) raises from *events*; a state
       or delta blob that is missing, tampered or of the wrong shape raises ``LogCorruptError``.
@@ -152,7 +152,7 @@ def projection_from_legacy_file(path: str | os.PathLike[str]) -> SessionProjecti
 
 
 def _apply_delta(context: dict[str, Any], internal: dict[str, Any], delta: Any) -> None:
-    """Apply one ``update_context`` delta blob; ``None`` deletes the key."""
+    """Apply one ``update_context`` delta blob; a ``None`` value is a value, as in the write."""
     if not isinstance(delta, dict):
         raise LogCorruptError("a context delta blob is not a JSON object")
     for target, part, keep_internal in (
@@ -164,10 +164,7 @@ def _apply_delta(context: dict[str, Any], internal: dict[str, Any], delta: Any) 
         for key, value in part.items():
             if not keep_internal and has_internal_prefix(key):
                 continue
-            if value is None:
-                target.pop(key, None)
-            else:
-                target[key] = value
+            target[key] = value
 
 
 def fold_session(

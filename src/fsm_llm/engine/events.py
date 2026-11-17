@@ -36,7 +36,7 @@ Interface contract:
       (``API.update_context``): ``{"context": ..., "internal": ...}``. ``context`` holds the
       public keys through ``filter_context``; ``internal`` only the keys the definition's
       completion states declare (the D-009 allow-list), nothing else; a ``None`` value stays
-      ``None`` (it deletes the key, as in the write).
+      ``None`` (the write keeps the key with value ``None``).
     - ``record_delta(manager, scope, child_id, delta, *, source) -> int``: append the
       ``context/record`` of an out-of-turn write to conversation *child_id* under *scope*: ``source``,
       ``keys`` (the written key names, sorted) and ``delta_ref`` (the ``delta_blob`` of the
