@@ -42,3 +42,8 @@ WINDOWS_RESERVED_NAMES = frozenset(
 
 #: A content address: ``sha256:`` and 64 lowercase hex digits.
 BLOB_REF_RE = re.compile(r"sha256:[0-9a-f]{64}")
+
+#: A payload whose canonical JSON is at most this many bytes is stored inline in its event;
+#: a larger one is a blob and the event keeps only its reference (an event is capped at
+#: ``MAX_EVENT_BYTES``, so the inline limit leaves room for the rest of the event).
+MAX_INLINE_BYTES = 8_192

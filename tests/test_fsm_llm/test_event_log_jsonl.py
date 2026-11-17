@@ -207,6 +207,54 @@ class TestAppend:
         assert len(calls) == 1 and calls[0] == len(writer.path.read_bytes())
 
 
+class TestAppendMany:
+    def test_a_batch_is_one_write_with_contiguous_seq_and_one_fsync(
+        self, monkeypatch: pytest.MonkeyPatch, open_writer: Any
+    ) -> None:
+        writer = open_writer()
+        writer.append(_event(0))
+        writes: list[int] = []
+        syncs: list[int] = []
+        real = jsonl._write
+        monkeypatch.setattr(
+            jsonl, "_write", lambda fd, d: (writes.append(1), real(fd, d))[1]
+        )
+        monkeypatch.setattr(jsonl, "_fsync", lambda fd: syncs.append(fd))
+        assert writer.append_many(
+            [_event(i) for i in range(1, 4)], checkpoint=True
+        ) == [2, 3, 4]
+        assert (len(writes), len(syncs), writer.last_seq) == (1, 1, 4)
+        assert [e["seq"] for e in read_events(writer.path)] == [1, 2, 3, 4]
+
+    def test_an_empty_batch_writes_nothing_and_a_refused_event_refuses_the_whole_batch(
+        self, open_writer: Any
+    ) -> None:
+        writer = open_writer()
+        assert writer.append_many([]) == []
+        too_big = _event(1, text="x" * MAX_EVENT_BYTES)
+        with pytest.raises(EventPayloadError):
+            writer.append_many([_event(0), too_big])
+        with pytest.raises(EventPayloadError):
+            writer.append_many([_event(0), {**_event(1), "seq": 7}])
+        assert writer.path.read_bytes() == b"" and writer.last_seq == 0
+        assert writer.append(_event(2)) == 1  # not poisoned
+
+    def test_a_failing_batch_write_poisons_and_a_one_byte_short_write_still_lands_whole(
+        self, monkeypatch: pytest.MonkeyPatch, open_writer: Any
+    ) -> None:
+        writer = open_writer()
+        real = jsonl._write
+        monkeypatch.setattr(jsonl, "_write", lambda fd, d: real(fd, bytes(d)[:1]))
+        assert writer.append_many([_event(0), _event(1)]) == [1, 2]
+        monkeypatch.setattr(jsonl, "_write", lambda fd, d: 0)
+        with pytest.raises(LogWriteError):
+            writer.append_many([_event(2), _event(3)])
+        monkeypatch.undo()
+        with pytest.raises(LogWriteError, match="poisoned"):
+            writer.append_many([_event(4)])
+        assert [e["seq"] for e in read_events(writer.path)] == [1, 2]
+
+
 class TestFailClosed:
     def test_a_failing_write_raises_log_write_error_and_poisons_the_writer(
         self, monkeypatch: pytest.MonkeyPatch, open_writer: Any

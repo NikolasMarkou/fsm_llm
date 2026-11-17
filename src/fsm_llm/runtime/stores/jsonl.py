@@ -24,7 +24,7 @@ import errno
 import os
 import sys
 import threading
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -222,6 +222,11 @@ class JsonlWriter:
           the interrupt itself, and every later append raises ``LogWriteError``, so nothing
           can land after a partial line and a failed checkpoint can never be followed by the
           call it protects.
+        - ``append_many(events, *, checkpoint=False) -> list[int]``: *events* are appended as
+          consecutive lines in ONE write (contiguous ``seq``, one fsync when *checkpoint*);
+          every event is encoded first, so a refused payload writes nothing. Not crash
+          atomic: a kill inside the write leaves a whole-line prefix of the batch (never a
+          half line once the next writer cut the tail). An empty list writes nothing.
         - ``close()``: idempotent; releases the fd and the lock. The ``.lock`` file stays.
     """
 
@@ -294,13 +299,19 @@ class JsonlWriter:
     # events), a text-mode open (newline translation, the locale codec), str.splitlines()
     # (U+2028 and U+0085 would cut one event into three), default=str or indent= in the
     # encoder (hidden reprs, gigabytes on 3.14), or a second write per event (a kill between
-    # the two leaves a torn line). One event is one _write of the whole line, looped only
-    # over a short write; a partial line may exist only as a torn tail, cut by the next
-    # lock holder, so any interrupted write poisons this writer. See D-011 and D-012.
-    def append(self, event: Mapping[str, Any], *, checkpoint: bool = False) -> int:
-        """Append *event* as the next line and return its ``seq``; fsync when *checkpoint*."""
-        if "seq" in event or "v" in event:
-            raise EventPayloadError("the writer assigns v and seq; the caller must not")
+    # the two leaves a torn line). One event is one _write of the whole line (a batch is one
+    # _write of its concatenated lines), looped only over a short write; a partial line may
+    # exist only as a torn tail, cut by the next lock holder, so any interrupted write
+    # poisons this writer. See D-011 and D-012.
+    def append_many(
+        self, events: Sequence[Mapping[str, Any]], *, checkpoint: bool = False
+    ) -> list[int]:
+        """Append *events* as consecutive lines in one write; return their ``seq`` numbers."""
+        for event in events:
+            if "seq" in event or "v" in event:
+                raise EventPayloadError(
+                    "the writer assigns v and seq; the caller must not"
+                )
         with self._guard:
             if self._fd < 0:
                 raise LogWriteError(f"log {self.path.name} is closed")
@@ -309,8 +320,14 @@ class JsonlWriter:
                     f"log {self.path.name} is poisoned by an earlier failure "
                     f"({self._failure}); reopen the log to recover"
                 )
-            seq = self._seq + 1
-            data = encode_event({**event, "v": LOG_FORMAT_VERSION, "seq": seq})
+            if not events:
+                return []
+            first = self._seq + 1
+            seqs = list(range(first, first + len(events)))
+            data = b"".join(
+                encode_event({**event, "v": LOG_FORMAT_VERSION, "seq": seq})
+                for event, seq in zip(events, seqs, strict=True)
+            )
             self._failure = "interrupted write"
             try:
                 view = memoryview(data)
@@ -319,7 +336,7 @@ class JsonlWriter:
                     if written <= 0:
                         raise OSError(errno.EIO, "write made no progress")
                     view = view[written:]
-                self._seq = seq
+                self._seq = seqs[-1]
                 if checkpoint:
                     _fsync(self._fd)
                 self._failure = None
@@ -328,7 +345,11 @@ class JsonlWriter:
                 raise LogWriteError(
                     f"append to {self.path.name} failed: {self._failure}"
                 ) from exc
-            return seq
+            return seqs
+
+    def append(self, event: Mapping[str, Any], *, checkpoint: bool = False) -> int:
+        """Append *event* as the next line and return its ``seq``; fsync when *checkpoint*."""
+        return self.append_many([event], checkpoint=checkpoint)[0]
 
     def close(self) -> None:
         """Release the log fd and the lock. Safe to call twice and after a failed open."""
