@@ -1,0 +1,1848 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Finite state machines for large language models">
+      
+      
+      
+        <link rel="canonical" href="https://nikolasmarkou.github.io/fsm_llm/0.13.0/synthesis/">
+      
+      
+        <link rel="prev" href="../handlers/">
+      
+      
+        <link rel="next" href="../testing/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+    
+    
+      
+        <title>Runtime FSM synthesis - FSM-LLM</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#runtime-fsm-synthesis" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="FSM-LLM" class="md-header__button md-logo" aria-label="FSM-LLM" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            FSM-LLM
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Runtime FSM synthesis
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/NikolasMarkou/fsm_llm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    NikolasMarkou/fsm_llm
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="FSM-LLM" class="md-nav__button md-logo" aria-label="FSM-LLM" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    FSM-LLM
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/NikolasMarkou/fsm_llm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    NikolasMarkou/fsm_llm
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fsm_design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FSM Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../handlers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handlers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime FSM synthesis
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime FSM synthesis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#when-to-use-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to use it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-concierge-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The concierge pattern
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-synthesizer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The synthesizer
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The synthesizer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The gates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-verified-means" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What verified means
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-library" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The library
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The library">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reuse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reuse
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-a-procedure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running a procedure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent tools
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#approval" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approval
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#traces-diagnosis-and-repair" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Traces, diagnosis and repair
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#live-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#safety-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Safety model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api_reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command line
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evaluate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_5" id="__nav_5_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmaps
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Roadmaps
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026_roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026 roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#when-to-use-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to use it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-concierge-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The concierge pattern
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-synthesizer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The synthesizer
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The synthesizer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-gates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The gates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-verified-means" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What verified means
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-library" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The library
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The library">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reuse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reuse
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-a-procedure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running a procedure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent tools
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#approval" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approval
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#traces-diagnosis-and-repair" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Traces, diagnosis and repair
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#live-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#safety-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Safety model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="runtime-fsm-synthesis">Runtime FSM Synthesis<a class="headerlink" href="#runtime-fsm-synthesis" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Covers FSM-LLM v0.13.0</p>
+</blockquote>
+<p>Some conversations cannot be written ahead of time. "Collect what this visa form needs" depends on a goal that only shows up at run time. <code>fsm_llm.synthesis</code> lets a host conversation ask for a procedure by goal: a model writes a finite state machine (FSM) for it, a stack of checks decides whether that FSM may run, a library stores it, and a runner executes it as a child of the host conversation.</p>
+<p><strong>Status of the evidence.</strong> The code is tested offline with scripted models. The pre-registered live comparison, <code>scripts/synthesis_bench.py</code> (compiled FSM against an in-context ReAct agent, with a hand-written FSM as a harness check), ran three blocks, <code>s0</code>, <code>s1</code> and <code>s2</code>, and every verdict is INCONCLUSIVE. Every role and every arm used the same model, <code>ollama_chat/bonsai-2:27b</code> (Q2_0, 2-bit): there is NO strong/cheap split, so no strong-compile/cheap-run cost asymmetry was tested. No result in these docs says a compiled procedure helps; see "Live results" below.</p>
+<h2 id="when-to-use-it">When to use it<a class="headerlink" href="#when-to-use-it" title="Permanent link">&para;</a></h2>
+<p>Use it when the shape of a sub-conversation is known only at run time and you want the host's own, usually cheaper, model to run it with guardrails. Do not use it when you can write the FSM yourself: a hand-written FSM is cheaper, easier to review and is what the bench will compare against. A procedure cannot call tools (the runner refuses a <code>completion</code> state), cannot set a persona and cannot be longer than the policy allows (12 states by default).</p>
+<p><code>import fsm_llm</code> loads no synthesis code. Import it by name:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">fsm_llm.synthesis</span><span class="w"> </span><span class="kn">import</span> <span class="n">FSMLibrary</span><span class="p">,</span> <span class="n">FSMSynthesizer</span><span class="p">,</span> <span class="n">ProcedureRunner</span>
+</code></pre></div>
+<p>The <code>synthesis</code> extra adds no dependency, there is no console script, and importing <code>fsm_llm.synthesis</code> also imports <code>fsm_llm.agents</code> (and through it <code>fsm_llm.reasoning</code>) and <code>fsm_llm.eval</code>. Nothing in core imports it back.</p>
+<h2 id="the-concierge-pattern">The concierge pattern<a class="headerlink" href="#the-concierge-pattern" title="Permanent link">&para;</a></h2>
+<p>A host FSM names a procedure with a <code>synthesize</code> state. The state is silent (no <code>response_instructions</code>), carries the goal and the key names, and routes on <code>synthesis_result.status</code>. Save this as <code>concierge.json</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Concierge"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Greets a guest and books a table with a procedure written on demand"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"initial_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"greet"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"persona"</span><span class="p">:</span><span class="w"> </span><span class="s2">"A calm, friendly concierge"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"states"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"greet"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"greet"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Welcome the guest"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"purpose"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Greet the guest"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"response_instructions"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Welcome the guest to the venue."</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"transitions"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"gather"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Always continue"</span><span class="p">}]</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">"gather"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"gather"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Run the booking procedure"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"purpose"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Collect the party size and the date"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"response_instructions"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"synthesize"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">"goal"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Book a table: ask the party size and the date."</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"inputs"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"venue"</span><span class="p">],</span>
+<span class="w">        </span><span class="nt">"return_keys"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"party_size"</span><span class="p">,</span><span class="w"> </span><span class="s2">"visit_date"</span><span class="p">],</span>
+<span class="w">        </span><span class="nt">"on_failure"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sorry"</span>
+<span class="w">      </span><span class="p">},</span>
+<span class="w">      </span><span class="nt">"transitions"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">        </span><span class="p">{</span>
+<span class="w">          </span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"done"</span><span class="p">,</span>
+<span class="w">          </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"The procedure returned the booking"</span><span class="p">,</span>
+<span class="w">          </span><span class="nt">"priority"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">          </span><span class="nt">"conditions"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span>
+<span class="w">            </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"The procedure finished"</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">"requires_context_keys"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"synthesis_result"</span><span class="p">],</span>
+<span class="w">            </span><span class="nt">"logic"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"=="</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"var"</span><span class="p">:</span><span class="w"> </span><span class="s2">"synthesis_result.status"</span><span class="p">},</span><span class="w"> </span><span class="s2">"ok"</span><span class="p">]}</span>
+<span class="w">          </span><span class="p">}]</span>
+<span class="w">        </span><span class="p">},</span>
+<span class="w">        </span><span class="p">{</span>
+<span class="w">          </span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sorry"</span><span class="p">,</span>
+<span class="w">          </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"The procedure failed or was stopped"</span><span class="p">,</span>
+<span class="w">          </span><span class="nt">"priority"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<span class="w">          </span><span class="nt">"conditions"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span>
+<span class="w">            </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"The procedure did not finish"</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">"requires_context_keys"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"synthesis_result"</span><span class="p">],</span>
+<span class="w">            </span><span class="nt">"logic"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"in"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"var"</span><span class="p">:</span><span class="w"> </span><span class="s2">"synthesis_result.status"</span><span class="p">},</span><span class="w"> </span><span class="p">[</span><span class="s2">"failed"</span><span class="p">,</span><span class="w"> </span><span class="s2">"aborted"</span><span class="p">]]}</span>
+<span class="w">          </span><span class="p">}]</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">      </span><span class="p">]</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">"done"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"done"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Booking confirmed"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"purpose"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Confirm the booking"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"response_instructions"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Confirm the booking using party_size and visit_date."</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">"sorry"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sorry"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Booking failed"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"purpose"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Apologise"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"response_instructions"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Apologise and say the booking could not be made."</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The loader checks a synthesize state against the real transition evaluator, so a wrong edge fails at load, not in production:</p>
+<ul>
+<li>Every edge of the state must read <code>synthesis_result</code> (or a <code>handler_only_keys</code> entry), or it would fire before the runner has produced a result.</li>
+<li>No edge may pass while the result is absent or <code>running</code>.</li>
+<li>The edge to <code>on_failure</code> must pass for <code>status</code> <code>failed</code> AND for <code>aborted</code>. Write it as <code>status in [failed, aborted]</code>. A bare <code>== "failed"</code> is refused, because an aborted procedure would otherwise strand the host.</li>
+<li>A synthesize state declares no extraction and no <code>completion</code>, and <code>on_failure</code> must be one of its own transition targets.</li>
+</ul>
+<p>The runner drives the host. This runs offline with scripted interfaces (<code>Strong</code> stands in for the strong model, <code>Host</code> for the host's cheap model); with real models you pass <code>FSMSynthesizer(model="...")</code> and an <code>API</code> built the usual way:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">fsm_llm</span><span class="w"> </span><span class="kn">import</span> <span class="n">API</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fsm_llm.core.definitions</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">CompletionResponse</span><span class="p">,</span>
+    <span class="n">FieldExtractionResponse</span><span class="p">,</span>
+    <span class="n">ResponseGenerationResponse</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fsm_llm.llm</span><span class="w"> </span><span class="kn">import</span> <span class="n">LLMInterface</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fsm_llm.synthesis</span><span class="w"> </span><span class="kn">import</span> <span class="n">FSMLibrary</span><span class="p">,</span> <span class="n">FSMSynthesizer</span><span class="p">,</span> <span class="n">ProcedureRunner</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fsm_llm.synthesis.prompts</span><span class="w"> </span><span class="kn">import</span> <span class="n">EXAMPLE_FSM</span>
+
+<span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s2">"concierge.json"</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+    <span class="n">host</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Strong</span><span class="p">(</span><span class="n">LLMInterface</span><span class="p">):</span>  <span class="c1"># the compiler: returns a ready FSM as JSON text</span>
+    <span class="n">calls</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">complete</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">calls</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">return</span> <span class="n">CompletionResponse</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s2">"final"</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">EXAMPLE_FSM</span><span class="p">))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">generate_response</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Host</span><span class="p">(</span><span class="n">LLMInterface</span><span class="p">):</span>  <span class="c1"># the cheap model that runs the host and the child</span>
+    <span class="n">answers</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"party_size"</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span> <span class="s2">"visit_date"</span><span class="p">:</span> <span class="s2">"Friday"</span><span class="p">}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">generate_response</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">ResponseGenerationResponse</span><span class="p">(</span><span class="n">message</span><span class="o">=</span><span class="s2">"ok"</span><span class="p">,</span> <span class="n">message_type</span><span class="o">=</span><span class="s2">"response"</span><span class="p">,</span> <span class="n">reasoning</span><span class="o">=</span><span class="s2">""</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">extract_field</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">):</span>
+        <span class="n">value</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">answers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">request</span><span class="o">.</span><span class="n">field_name</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">FieldExtractionResponse</span><span class="p">(</span>
+            <span class="n">field_name</span><span class="o">=</span><span class="n">request</span><span class="o">.</span><span class="n">field_name</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="n">value</span><span class="p">,</span> <span class="n">is_valid</span><span class="o">=</span><span class="n">value</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">,</span>
+            <span class="n">confidence</span><span class="o">=</span><span class="mf">1.0</span> <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="mf">0.0</span><span class="p">,</span> <span class="n">reasoning</span><span class="o">=</span><span class="s2">""</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">complete</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span>
+
+
+<span class="n">strong</span> <span class="o">=</span> <span class="n">Strong</span><span class="p">()</span>
+<span class="n">api</span> <span class="o">=</span> <span class="n">API</span><span class="o">.</span><span class="n">from_definition</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">llm_interface</span><span class="o">=</span><span class="n">Host</span><span class="p">())</span>
+<span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">TemporaryDirectory</span><span class="p">()</span> <span class="k">as</span> <span class="n">root</span><span class="p">:</span>
+    <span class="n">synth</span> <span class="o">=</span> <span class="n">FSMSynthesizer</span><span class="p">(</span><span class="n">strong</span><span class="p">,</span> <span class="n">library</span><span class="o">=</span><span class="n">FSMLibrary</span><span class="p">(</span><span class="n">root</span><span class="p">))</span>
+    <span class="n">runner</span> <span class="o">=</span> <span class="n">ProcedureRunner</span><span class="p">(</span><span class="n">api</span><span class="p">,</span> <span class="n">host</span><span class="p">,</span> <span class="n">synth</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">2</span><span class="p">):</span>
+        <span class="n">conv_id</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">api</span><span class="o">.</span><span class="n">start_conversation</span><span class="p">({</span><span class="s2">"venue"</span><span class="p">:</span> <span class="s2">"Luna"</span><span class="p">})</span>
+        <span class="n">runner</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">conv_id</span><span class="p">,</span> <span class="n">max_steps</span><span class="o">=</span><span class="mi">40</span><span class="p">)</span>          <span class="c1"># message-free; or runner.converse(conv_id, "four, Friday")</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">api</span><span class="o">.</span><span class="n">get_current_state</span><span class="p">(</span><span class="n">conv_id</span><span class="p">),</span> <span class="n">api</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">conv_id</span><span class="p">)[</span><span class="s2">"synthesis_result"</span><span class="p">][</span><span class="s2">"status"</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">strong</span><span class="o">.</span><span class="n">calls</span><span class="p">)</span>                            <span class="c1"># 1: the second booking reused the stored procedure</span>
+</code></pre></div>
+<p>The output is <code>done ok</code> twice, then <code>1</code>. Drive the host through the runner (<code>run</code>, <code>converse</code>, <code>end_conversation</code>), not through <code>API</code> alone: a bare <code>API.converse</code> on a synthesize state finds no extraction and no passing edge, so it stays in the state. The runner is the thing that gives the field its meaning.</p>
+<h2 id="the-synthesizer">The synthesizer<a class="headerlink" href="#the-synthesizer" title="Permanent link">&para;</a></h2>
+<p><code>FSMSynthesizer(llm=None, *, model=None, policy=None, library=None, reviewer=None, embed=None, simulator=None)</code> takes exactly one of <code>llm</code> (anything implementing <code>complete</code>) or <code>model</code> (it builds a <code>LiteLLMInterface</code>). Two methods matter:</p>
+<ul>
+<li><code>compile(goal, *, inputs=(), return_keys) -&gt; CompileResult</code> asks the strong model for FSM JSON, runs the gates and, when they fail, sends the failures back as text for up to <code>policy.max_repair_rounds</code> more rounds. It raises <code>SynthesisError</code> when no round passes. A provider outage raises it too, chained from <code>LLMResponseError</code>, with no retry. A reply cut at <code>max_tokens</code> is a failed round and is never parsed.</li>
+<li><code>obtain(goal, *, inputs=(), return_keys, min_lifecycle="verified") -&gt; Procedure</code> searches the library first and compiles on a miss. <code>Procedure.source</code> is <code>library</code> or <code>compiled</code>.</li>
+</ul>
+<h3 id="the-gates">The gates<a class="headerlink" href="#the-gates" title="Permanent link">&para;</a></h3>
+<p>Every compile runs these checks, in this order, and reports all failures, not just the first:</p>
+<ol>
+<li><strong>G1, loads.</strong> The JSON loads as a core <code>FSMDefinition</code>, exactly as <code>API</code> would load it.</li>
+<li><strong>G2, structure.</strong> The core <code>FSMValidator</code> reports no error. Its warnings never fail a compile, and G2 is never stricter than the loader.</li>
+<li><strong>G3, data flow</strong> (<code>fsm_llm.core.verify.flow</code>). A key an edge reads must be extracted earlier on every path, or be a declared input. Each return key must be guaranteed when the procedure ends.</li>
+<li><strong>G4, liveness</strong> (<code>fsm_llm.core.verify.flow</code>). No trap, no loop without an exit that can fire, no edge hidden behind an unconditional edge of lower priority number, no permanent tie, no path longer than <code>policy.max_turns</code>.</li>
+<li><strong>G5, policy</strong> (<code>policy.check_policy</code>). Limits on states, edges, fields and text; reserved names; no persona; no secret-looking or internal key names; no model setting on a classification entry; no regular expression in a validation rule; completion tools only from <code>policy.allowed_tools</code>; no <code>synthesize</code> state inside a procedure unless <code>max_synthesis_depth</code> is above 1 (the default is 1). It is an allow-list of fields, so a field nobody thought of is refused.</li>
+<li><strong>G6a, dead edges</strong> (<code>dryrun.py</code>). It tries a small pool of values per key through the real evaluator and reports an edge no assignment can fire. No model call. It is coarse on purpose: anything outside the fragment it understands counts as possibly firing, so it never rejects a good procedure for what it cannot read.</li>
+<li><strong>G6b, simulation</strong> (<code>simulation.py</code>), only when a <code>Simulator</code> is given. A scripted happy path built from the definition, plus scenarios of four kinds written by one model call (<code>missing_info</code>, <code>correction</code>, <code>off_topic</code>, <code>adversarial</code>), are played against the procedure on the simulator's interface. It passes when the happy path and the overall pass rate both reach <code>policy.min_pass_rate</code> (default 0.5) and the happy path moves past the first state. <code>require_simulation=True</code> makes it mandatory.</li>
+<li><strong>G7, approval.</strong> Required when <code>policy.require_approval</code> is set or a <code>completion</code> state lists tools. See Approval below.</li>
+</ol>
+<p>When the gates pass, an abort path is injected: a silent <code>abort</code> terminal state and a priority 0 edge to it from every non-terminal state, gated on the handler-only key <code>procedure_abort</code>. The runner sets that key when the child spends its turn budget, so no model reply can forge or block it. G1 and G2 run again on the injected form. The names <code>abort</code>, <code>procedure_abort</code> and <code>synthesis_result</code> are reserved: a compile may not declare, read or write them.</p>
+<h3 id="what-verified-means">What <code>verified</code> means<a class="headerlink" href="#what-verified-means" title="Permanent link">&para;</a></h3>
+<p>A compiled procedure is stored as <code>verified</code>. That means the gates above passed: static checks, a dead-edge check and, if you passed a simulator, a bounded simulation over scenarios that a model wrote. It does not mean the procedure is correct. If the simulator runs on the same model that wrote the procedure, a passing simulation is partly the model agreeing with itself, which is a weaker signal than a separate judge. Review what matters before you trust it (see Approval).</p>
+<h2 id="the-library">The library<a class="headerlink" href="#the-library" title="Permanent link">&para;</a></h2>
+<p><code>FSMLibrary(path)</code> is a directory. Each procedure is stored under the sha256 of its canonical definition: <code>definitions/&lt;sha256&gt;.json</code> and <code>records/&lt;sha256&gt;.json</code>, with <code>traces/</code>, <code>scenarios/</code> and <code>patches/</code> beside them. Every write goes to a temp file, is synced, then replaced into place; a corrupt file raises <code>LibraryError</code> and is never overwritten, and a symlink is refused. Two processes on one directory are last writer wins on the run counters.</p>
+<p>A record has a lifecycle: <code>draft</code>, <code>verified</code>, <code>trusted</code>, <code>deprecated</code>. A compile is stored <code>verified</code>. A human moves it to <code>trusted</code> with <code>library.approve(digest, by)</code>, or run counts do when <code>policy.trust_after_successes</code> is set (never for a repaired child). Nothing leaves <code>deprecated</code>. A synthesize state's <code>min_lifecycle</code> (<code>verified</code> or <code>trusted</code>) says which stored procedures it will run.</p>
+<h3 id="reuse">Reuse<a class="headerlink" href="#reuse" title="Permanent link">&para;</a></h3>
+<p><code>search</code> first filters on the signature (every required input available, the return keys covered, the tools allowed, the lifecycle high enough), then scores the survivors against the stored goal:</p>
+<ul>
+<li>With no embedder, only an identical goal reuses (lowercased, whitespace normalised; punctuation counts).</li>
+<li>With an embedder (a function from a list of texts to vectors, <code>embed=</code>), the score is a cosine and a stored procedure is reused at or above <code>policy.reuse_min_score</code> (default 0.8). That is a similarity claim: cosine ignores negation, so "book a table" and "do not book a table" can match. For exact reuse, leave <code>embed=None</code> or set <code>reuse_min_score=1.0</code>.</li>
+</ul>
+<p>A hit is re-verified (G1 to G6a on the stored form) before it runs. A hit that fails is skipped with a warning and a compile follows.</p>
+<h2 id="running-a-procedure">Running a procedure<a class="headerlink" href="#running-a-procedure" title="Permanent link">&para;</a></h2>
+<p><code>ProcedureRunner(api, definition, synthesizer, *, trace_sink=None)</code> serves a host definition. Per conversation it settles three things as the host runs: it pops an ended child, aborts a child that spent <code>policy.max_turns</code> steps (it sets <code>procedure_abort</code>), and starts a pending synthesize state (write <code>running</code>, <code>obtain</code>, check that the procedure may run, push it as a child with no inherited context).</p>
+<ul>
+<li><code>run(conversation_id, *, max_steps, max_seconds=None)</code> runs message-free on core <code>run_until_terminal</code>. A spent budget raises <code>RunBudgetExceededError</code>.</li>
+<li><code>converse(conversation_id, message) -&gt; str</code> is one user turn.</li>
+<li><code>end_conversation(conversation_id)</code> closes the conversation and drops the runner's bookkeeping; use it instead of <code>API.end_conversation</code>.</li>
+</ul>
+<p>The child gets only the declared <code>inputs</code> and runs on the host's own interface. When it ends, only the declared <code>return_keys</code> come back, and only if every one is present and the child was not aborted. The result <code>synthesis_result</code> is <code>{status, procedure_id, version, reason}</code>: <code>status</code> is <code>ok</code>, <code>failed</code>, <code>aborted</code> or <code>running</code>, and <code>reason</code> is a fixed code or <code>None</code>, never exception text. The codes are <code>inputs_missing</code>, <code>return_keys_missing</code>, <code>provider_error</code>, <code>library_error</code>, <code>compile_failed</code>, <code>push_failed</code>, <code>approval_required</code>, <code>approval_denied</code>, <code>reviewer_error</code>, <code>depth_refused</code>, <code>completion_unsupported</code>, <code>lifecycle_too_low</code>, <code>not_simulated</code>, <code>budget_spent</code> and <code>unexpected_error</code>. Branch on the code, not on any message.</p>
+<p>Things to know when you run one:</p>
+<ul>
+<li>The result key is skip-if-set: a state that must run again on re-entry has to clear <code>synthesis_result</code> on entry (core <code>clear_keys_on_entry</code>). A child FSM you push yourself with <code>API.push_fsm</code> does not inherit the parent's value of its own synthesize <code>result_key</code> (the child's edges, which must read it, would route on the stale result before any run wrote one); pass it in <code>context_to_pass</code> if you want it.</li>
+<li>One thread per conversation, like <code>API.converse</code>. The runner holds no lock.</li>
+<li>A nested synthesize state (depth 2) works only for a procedure that returns one of its inputs.</li>
+<li><code>policy.max_turns</code> is the only turn bound. Core has none.</li>
+<li>Two interfaces are metered separately: the strong one inside the synthesizer, the cheap one on the host <code>API</code>.</li>
+</ul>
+<h2 id="agent-tools">Agent tools<a class="headerlink" href="#agent-tools" title="Permanent link">&para;</a></h2>
+<p><code>create_procedure_tools(synthesizer, *, runner_llm, registry=None, max_obtains=20) -&gt; ToolRegistry</code> gives an agent two tools, for example <code>ReactAgent(tools=registry)</code>:</p>
+<ul>
+<li><code>obtain_procedure(goal, return_keys, inputs=[])</code> compiles or reuses and replies with a receipt: <code>procedure_id</code>, <code>version</code>, <code>lifecycle</code>, <code>source</code>, <code>states</code>, <code>gates</code>.</li>
+<li><code>run_procedure(procedure_id, inputs={})</code> runs a stored procedure on <code>runner_llm</code> with no user messages and replies with its values, or <code>failed: &lt;code&gt;</code>. A procedure that needs a user answer replies <code>failed: needs_user_input</code>.</li>
+</ul>
+<p>Both replies start with a fixed untrusted label, are capped and control-stripped, and carry codes, ids and defanged values only. The tool descriptions are module constants, never built from a goal or a record. Neither tool is flagged <code>requires_approval</code>: that flag makes four agent patterns refuse the registry, so approval happens inside the synthesizer instead. <code>max_obtains</code> caps compiles per registry, because a compile is the slow, costly call.</p>
+<h2 id="approval">Approval<a class="headerlink" href="#approval" title="Permanent link">&para;</a></h2>
+<p>A reviewer is a callable <code>reviewer(request: ProcedureApprovalRequest) -&gt; bool</code>. It is asked on a compile only, never for a library hit, and it fails closed: a missing reviewer when approval is required, a reviewer that raises, and a result that is not exactly <code>True</code> all refuse the procedure, which is then not stored. <code>request.text()</code> shows a Mermaid diagram of the procedure, the gate verdicts, the goal and a size summary, and starts with a fixed untrusted label. <code>reviewer_from_hitl(hitl)</code> adapts a <code>fsm_llm.agents.HumanInTheLoop</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">fsm_llm.synthesis</span><span class="w"> </span><span class="kn">import</span> <span class="n">FSMSynthesizer</span><span class="p">,</span> <span class="n">SynthesisPolicy</span>
+
+<span class="n">synth</span> <span class="o">=</span> <span class="n">FSMSynthesizer</span><span class="p">(</span>
+    <span class="n">strong</span><span class="p">,</span>
+    <span class="n">library</span><span class="o">=</span><span class="n">library</span><span class="p">,</span>
+    <span class="n">policy</span><span class="o">=</span><span class="n">SynthesisPolicy</span><span class="p">(</span><span class="n">require_approval</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+    <span class="n">reviewer</span><span class="o">=</span><span class="k">lambda</span> <span class="n">request</span><span class="p">:</span> <span class="nb">input</span><span class="p">(</span><span class="n">request</span><span class="o">.</span><span class="n">text</span><span class="p">()</span> <span class="o">+</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">run it? "</span><span class="p">)</span> <span class="o">==</span> <span class="s2">"yes"</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+<p>Approval records who approved (<code>approved_by</code>) as provenance. It does NOT make the record <code>trusted</code>: that needs <code>library.approve(digest, by)</code>, a separate human edge.</p>
+<h2 id="traces-diagnosis-and-repair">Traces, diagnosis and repair<a class="headerlink" href="#traces-diagnosis-and-repair" title="Permanent link">&para;</a></h2>
+<p>Procedures that fail in use can be improved, and the loop is built so that a user cannot talk it into weakening a shared procedure.</p>
+<ul>
+<li><strong>Traces.</strong> <code>TraceRecorder(library.add_trace)</code> is a <code>trace_sink</code> for the runner. A <code>RunTrace</code> holds names, type names, state ids, counts and codes, never a value, user text or reply. <code>library.read_traces(digest)</code> returns <code>(traces, skipped)</code>; a torn or hostile line is skipped and counted, and the file keeps the last 200 traces per procedure.</li>
+<li><strong>Diagnosis.</strong> <code>diagnose(traces, definition, policy, *, return_keys=())</code> applies nine rules in a fixed order and returns <code>Diagnosis</code> objects with a code, the state, the keys and the share of runs. Only a run that failed for the procedure's own reasons (<code>budget_spent</code>, <code>return_keys_missing</code>) can justify a rewrite; an outage or a refusal is <code>not-procedure-fault</code> and is never patched.</li>
+<li><strong>Patch.</strong> <code>propose_patch(diagnoses, definition, policy, llm)</code> asks the model for RFC 6902 operations (<code>add</code>, <code>remove</code>, <code>replace</code>, <code>test</code> only), scoped to <code>/states/&lt;diagnosed state&gt;/...</code>, never the abort state, <code>initial_state</code>, <code>persona</code> or the handler-only list. <code>apply_patch</code> applies them to a copy and checks bounds before it walks anything.</li>
+<li><strong>Repair.</strong> <code>repair_procedure(parent_digest, ops, *, library, synthesizer, simulator, replay_scripts=None, write=False)</code> re-runs G1 to G6b on the patched child (and asks the approval reviewer again if the child now needs it), replays the parent's stored failing scenarios on parent and child, and returns a <code>PromotionResult</code> with the decision and the counts: <code>promote</code>, <code>regressed</code> or <code>no-improvement</code>, or a refusal code. By default it writes nothing. Only <code>write=True</code> with a <code>promote</code> verdict stores the child, as <code>verified</code>, never <code>trusted</code>, never with the parent's approver, and a <code>trusted</code> parent is never deprecated. Replay scripts come from the parent's stored scenarios plus the ones you pass; production traces are never used as scripts.</li>
+</ul>
+<h2 id="limits">Limits<a class="headerlink" href="#limits" title="Permanent link">&para;</a></h2>
+<p><code>SynthesisPolicy</code> is a frozen dataclass; a bad value raises <code>SynthesisError</code> at construction and is never clamped. The defaults are in <code>docs/api_reference.md</code> (Synthesis). The ones to know:</p>
+<ul>
+<li>Size of a procedure: <code>max_states</code> 12, <code>max_transitions_per_state</code> 6, <code>max_fields_per_state</code> 10, <code>max_text_chars</code> 600.</li>
+<li>Compile: <code>max_repair_rounds</code> 3, <code>max_compile_tokens</code> 8192, <code>max_synthesis_seconds</code> 300.</li>
+<li>Run: <code>max_turns</code> 40 steps of the child in total.</li>
+<li>Simulation: <code>max_sim_turns</code> 12, <code>sim_trials</code> 2, <code>min_pass_rate</code> 0.5, <code>max_simulation_calls</code> 400.</li>
+<li>Repair: <code>repair_min_failures</code> 3, <code>max_repairs_per_lineage</code> 3 (counted over the whole tree from the root).</li>
+</ul>
+<h2 id="live-results">Live results<a class="headerlink" href="#live-results" title="Permanent link">&para;</a></h2>
+<p>Three blocks of the comparison in <code>scripts/synthesis_bench.py</code> ran against <code>ollama_chat/bonsai-2:27b</code> on a local Ollama server (bench id <code>synthesis</code>; rows, summaries, reports and pre-registrations in <code>scripts/bench_data/synthesis/</code>). The compiler, scenario writer, executor, ReAct agent and hand-written arm are ONE model: there is no strong/cheap split, a G6b pass is partly the model agreeing with itself, and no cost saving from a cheaper runner could appear. 16 judge-free tasks in four families (collect, route, branch, retry), 3 trials each; the primary unit is the first trial of each task. The verdict rule (SUPPORTED needs S above R with Fisher p under 0.05) is byte-identical in all three blocks.</p>
+<table>
+<thead>
+<tr>
+<th>Block</th>
+<th>S first trial (Wilson 95%)</th>
+<th>H first trial</th>
+<th>R first trial</th>
+<th>All trials S / H / R of 48</th>
+<th>pass^3 S / H / R</th>
+<th>S first-trial failures</th>
+<th>Verdict</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>s0</td>
+<td>6 of 16 (0.18 to 0.61)</td>
+<td>8 of 16</td>
+<td>14 of 16</td>
+<td>27 / 26 / 40</td>
+<td>6 / 8 / 12</td>
+<td>10 (8 compile)</td>
+<td>INCONCLUSIVE (h = 8 of 16, below 10)</td>
+</tr>
+<tr>
+<td>s1</td>
+<td>15 of 16 (0.72 to 0.99)</td>
+<td>15 of 16</td>
+<td>16 of 16</td>
+<td>45 / 45 / 45</td>
+<td>14 / 15 / 14</td>
+<td>1 (compile)</td>
+<td>INCONCLUSIVE (ceiling: s = 15 and r = 16)</td>
+</tr>
+<tr>
+<td>s2</td>
+<td>15 of 16 (0.72 to 0.99)</td>
+<td>16 of 16</td>
+<td>16 of 16</td>
+<td>47 / 47 / 46</td>
+<td>15 / 15 / 15</td>
+<td>1 (compile)</td>
+<td>INCONCLUSIVE (ceiling: s = 15 and r = 16)</td>
+</tr>
+</tbody>
+</table>
+<p>Cost per block (prompt plus completion tokens over all 144 rows, wall time of the arm):</p>
+<table>
+<thead>
+<tr>
+<th>Block</th>
+<th>S tokens</th>
+<th>S wall</th>
+<th>H tokens</th>
+<th>H wall</th>
+<th>R tokens</th>
+<th>R wall</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>s0</td>
+<td>826,182 + 186,111</td>
+<td>5,433 s</td>
+<td>183,186 + 27,663</td>
+<td>945 s</td>
+<td>536,759 + 92,680</td>
+<td>2,869 s</td>
+</tr>
+<tr>
+<td>s1</td>
+<td>616,130 + 133,987</td>
+<td>3,923 s</td>
+<td>175,211 + 26,435</td>
+<td>869 s</td>
+<td>536,759 + 93,411</td>
+<td>2,848 s</td>
+</tr>
+<tr>
+<td>s2</td>
+<td>613,642 + 130,506</td>
+<td>3,991 s</td>
+<td>157,326 + 23,863</td>
+<td>822 s</td>
+<td>536,759 + 92,601</td>
+<td>2,902 s</td>
+</tr>
+</tbody>
+</table>
+<p>How to read this:</p>
+<ul>
+<li>No block shows a compiled procedure beating the ReAct agent. In s1 and s2 the three arms are within one task of each other on 16 tasks that this model has saturated, so the ceiling clause fires and the data cannot separate them. S is also the most expensive arm here: it pays a compile call and a bounded simulation (over 1,000 simulation calls per block), and with one model a reused procedure saves no cheaper-model cost. Reuse itself worked: 31 of 48 S rows in s1 and s2 made no compile call.</li>
+<li>s0 to s1 to s2 are NOT independent tests. After each block the failures were read in the raw calls and fixed, and the next block ran on the same 16 tasks. The gain of S from 6 to 15 of 16 shows the diagnosed defects were real and fixed on those tasks; it does not show the approach generalises.</li>
+<li>The hand-written arm and the ReAct arm are not comparable across blocks: the grader (s1) and two hand-written hints (s1, s2) changed between blocks, each disclosed in the pre-registration of the block that first used it.</li>
+<li>Single trials of this model are noisy: S r2 passed trial 1 and failed trials 2 and 3 of s1 on the same stored procedure; the ReAct arm (r1, two trials) and the hand-written arm (y2, one trial) ran out of turns re-asking in s2.</li>
+</ul>
+<p>What each round changed (generic changes under <code>src/fsm_llm/synthesis/</code>, no task text there; a hygiene test checks it):</p>
+<ul>
+<li>s0 to s1 (D-091 to D-105): a compile-time instruction that names the key a gated state extracts; deterministic repair of a mismatched closing bracket in a compile reply; the loader's allowed JsonLogic operators in the compile prompt and in plain ASCII in the repair text; a note on what a key name is when a gate reads a computed one. Harness v2 (one grader for all arms, hand-written branch detail from the state's own question).</li>
+<li>s1 to s2 (D-106, D-107): a compile prompt rule that a key the goal says to decide needs a value gate over the allowed values; the hand-written route hint says to pick the label that fits the need.</li>
+<li>After s2 (D-108, D-109), NOT covered by any registered block: the compile prompt says <code>missing</code> is true only when a key is absent; a dead-edge repair line says the same once, and a failing happy-path repair line says that a key chosen from a list needs an <code>in</code> gate. They were checked by short smokes only (y2 passed without a repair; y3 passed after one round; S r4 failed twice before the second note existed; the smoke meant to check that second note was stopped at close before it ran a trial, so D-109 has no live check at all). No fourth block was run, so their effect is unmeasured.</li>
+</ul>
+<p>Which rows predate which fix: every s0 row predates all of the above; s1 rows predate D-106 to D-109; s2 rows predate D-108 and D-109. The manifests of a block pin the source it ran against, so after later source edits <code>report &lt;block&gt;</code> refuses by design and the committed <code>REPORT_&lt;block&gt;.txt</code> is the record.</p>
+<h2 id="safety-model">Safety model<a class="headerlink" href="#safety-model" title="Permanent link">&para;</a></h2>
+<ol>
+<li>The goal is untrusted caller text. It reaches the strong model only inside a fenced block, cut to 2,000 characters, control characters stripped and the characters <code>[ ] &lt; &gt;</code> replaced, so it cannot spell a marker. It is never a setting or an instruction. System prompts are built from the policy alone.</li>
+<li>Model-written text never becomes a setting. G5 is an allow-list, and the persona, model, prompt settings and regular expressions of a compile are refused. Text from a compile, a receipt or an approval request reaches a model or a person under a fixed untrusted label.</li>
+<li>Return keys are the only way data leaves a child, and only on success. No goal, compile text, reply or provider text goes into an exception message, a finding, a result or a trace.</li>
+<li>The abort path hangs on a key no extraction can write.</li>
+<li>Repair needs positive evidence, a replay and, if asked, an approval; it is propose-only by default.</li>
+</ol>
+<h2 id="known-limits">Known limits<a class="headerlink" href="#known-limits" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The live comparison is inconclusive: three blocks, one model for every role and arm, 16 tasks the model has saturated, the later two in-sample after fixes made from earlier failures, and no fourth block. There is no measured claim that a compiled procedure beats a ReAct agent or saves anything; see "Live results".</li>
+<li>Open defects seen live: a G6b false rejection when a label-restricted extraction instruction meets an edge with no value gate (the gate feeds the filler "sample"; D-106 and D-109 push the model toward an <code>in</code> gate, unmeasured); G6b passes some compiles that fail at run time; the 2-bit compiler repeats a dead edge when a repair line gives no reason; the ReAct and hand-written arms sometimes re-ask past <code>max_iterations</code>; G6a has an over-cap residual and the outage detection has blind spots (see above).</li>
+<li><code>verified</code> is not proof of correctness (see above). G6a is coarse and G6b is only as good as the scenarios a model wrote.</li>
+<li>Procedures cannot call tools. A compile may list <code>completion</code> tools (and then needs approval), but the runner and <code>run_procedure</code> refuse to run one.</li>
+<li>A corrupt library file blocks retrieval for the whole library until a human fixes it.</li>
+<li>Two signals of misbehaviour (an out-of-scope intent and a raw malformed extraction) are not recorded by core, so <code>diagnose</code> cannot use them.</li>
+<li>The runner marks a provider outage from the host interface's error counter (<code>usage().errors</code>). A host that calls <code>reset_usage()</code> during a run, or an interface with no meter, gets the outage recorded as <code>budget_spent</code>, which <code>diagnose</code> reads as a procedure fault. A shared interface can give a false outage mark, which fails closed.</li>
+<li>Importing the package loads <code>fsm_llm.agents</code>, <code>fsm_llm.reasoning</code> and <code>fsm_llm.eval</code>.</li>
+</ul>
+<p>See <code>src/fsm_llm/synthesis/README.md</code> and <code>src/fsm_llm/synthesis/AGENTS.md</code> for the file list and the contracts, and <code>docs/api_reference.md</code> for signatures.</p>
+<h2 id="next-steps">Next steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The <a href="../api_reference/">API Reference</a> lists the synthesis names with their signatures.</li>
+<li>The <a href="../fsm_design/">FSM Design Guide</a> covers the host machine around a <code>synthesize</code> state.</li>
+<li><a href="../testing/">Testing</a> shows how to test a host conversation with scripted models.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>

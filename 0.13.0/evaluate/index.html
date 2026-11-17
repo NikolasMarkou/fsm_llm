@@ -1,0 +1,2625 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Finite state machines for large language models">
+      
+      
+      
+        <link rel="canonical" href="https://nikolasmarkou.github.io/fsm_llm/0.13.0/evaluate/">
+      
+      
+        <link rel="prev" href="../security/">
+      
+      
+        <link rel="next" href="../changelog/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+    
+    
+      
+        <title>Evaluate - FSM-LLM</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#fsm-llm-evaluation-process" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="FSM-LLM" class="md-header__button md-logo" aria-label="FSM-LLM" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            FSM-LLM
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Evaluate
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/NikolasMarkou/fsm_llm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    NikolasMarkou/fsm_llm
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="FSM-LLM" class="md-nav__button md-logo" aria-label="FSM-LLM" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    FSM-LLM
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/NikolasMarkou/fsm_llm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    NikolasMarkou/fsm_llm
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fsm_design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FSM Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../handlers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handlers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../synthesis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime FSM synthesis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api_reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command line
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick Start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-evaluation-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Evaluation Scope
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Evaluation Scope">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-we-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What We Test
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#categories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Categories
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-running-an-evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Running an Evaluation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Running an Evaluation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#automated-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automated (recommended)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-single-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual (single example)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-to-observe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What to Observe
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conversation-evaluations-fsm-llm-eval-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conversation evaluations (fsm-llm-eval run)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-scoring-rubric" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Scoring Rubric
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Scoring Rubric">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#distinguishing-scores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Distinguishing Scores
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-failure-classification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Failure Classification
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-scorecard-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Scorecard Format
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-aggregate-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Aggregate Metrics
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Aggregate Metrics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#overall-health-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overall Health Score
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#category-health" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Category Health
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#failure-distribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure Distribution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#regression-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regression Detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-model-compatibility-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Model Compatibility Matrix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-storing-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Storing Results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Storing Results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#output-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output Structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-gets-generated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What Gets Generated
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-output-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom Output Directory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#comparing-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparing Runs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-evaluation-log-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Evaluation Log Index
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Evaluation Log Index">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#run-001-2026-04-01-100-examples-honest-scoring-baseline-750" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 001 -- 2026-04-01 (100 Examples, Honest Scoring Baseline, 75.0%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-002-2026-04-02-100-examples-extraction-pipeline-improvements-880" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 002 -- 2026-04-02 (100 Examples, Extraction Pipeline Improvements, 88.0%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-003-2026-04-02-100-examples-example-fixes-eval-input-improvements-902" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 003 -- 2026-04-02 (100 Examples, Example Fixes + Eval Input Improvements, 90.2%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-004-2026-04-02-100-examples-debate-bug-fix-908" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 004 -- 2026-04-02 (100 Examples, Debate Bug Fix, 90.8%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-005-2026-04-02-100-examples-iterative-improvements-958" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 005 -- 2026-04-02 (100 Examples, Iterative Improvements, 95.8%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-006-2026-05-31-101-examples-react-under-call-memory-coherence-fixes-n3-median-953" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 006 -- 2026-05-31 (101 Examples, ReAct under-call + memory-coherence fixes, N=3 median 95.3%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-007-2026-10-01-101-examples-core-step-driver-ab-against-d4b1626-on-the-same-day-960-vs-968" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 007 -- 2026-10-01 (101 Examples, core step driver A/B against d4b1626 on the same day, 96.0% vs 96.8%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-008-2026-10-01-48-agents-examples-after-the-planexecute-planner-fix-922" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 008 -- 2026-10-01 (48 agents Examples, after the PlanExecute planner fix, 92.2%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-009-2026-10-01-101-examples-one-llm-layer-ab-against-e1f63a9-on-the-same-day-955-vs-908" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 009 -- 2026-10-01 (101 Examples, one LLM layer A/B against e1f63a9 on the same day, 95.5% vs 90.8%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-010-2026-11-06-plan-0068b055-first-live-evidence-on-ollama_chatbonsai-227b-the-agents-category-was-completed-in-a-later-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 010 -- 2026-11-06 (plan 0068b055, first live evidence on ollama_chat/bonsai-2:27b; the agents category was completed in a later session)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_5" id="__nav_5_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmaps
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Roadmaps
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026_roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026 roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick Start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-evaluation-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Evaluation Scope
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Evaluation Scope">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-we-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What We Test
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#categories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Categories
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-running-an-evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Running an Evaluation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Running an Evaluation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#automated-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automated (recommended)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-single-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual (single example)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-to-observe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What to Observe
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conversation-evaluations-fsm-llm-eval-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conversation evaluations (fsm-llm-eval run)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-scoring-rubric" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Scoring Rubric
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Scoring Rubric">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#distinguishing-scores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Distinguishing Scores
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-failure-classification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Failure Classification
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-scorecard-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Scorecard Format
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-aggregate-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Aggregate Metrics
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Aggregate Metrics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#overall-health-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overall Health Score
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#category-health" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Category Health
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#failure-distribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure Distribution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#regression-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regression Detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-model-compatibility-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Model Compatibility Matrix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-storing-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Storing Results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Storing Results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#output-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output Structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-gets-generated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What Gets Generated
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-output-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom Output Directory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#comparing-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparing Runs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-evaluation-log-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Evaluation Log Index
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Evaluation Log Index">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#run-001-2026-04-01-100-examples-honest-scoring-baseline-750" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 001 -- 2026-04-01 (100 Examples, Honest Scoring Baseline, 75.0%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-002-2026-04-02-100-examples-extraction-pipeline-improvements-880" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 002 -- 2026-04-02 (100 Examples, Extraction Pipeline Improvements, 88.0%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-003-2026-04-02-100-examples-example-fixes-eval-input-improvements-902" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 003 -- 2026-04-02 (100 Examples, Example Fixes + Eval Input Improvements, 90.2%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-004-2026-04-02-100-examples-debate-bug-fix-908" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 004 -- 2026-04-02 (100 Examples, Debate Bug Fix, 90.8%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-005-2026-04-02-100-examples-iterative-improvements-958" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 005 -- 2026-04-02 (100 Examples, Iterative Improvements, 95.8%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-006-2026-05-31-101-examples-react-under-call-memory-coherence-fixes-n3-median-953" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 006 -- 2026-05-31 (101 Examples, ReAct under-call + memory-coherence fixes, N=3 median 95.3%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-007-2026-10-01-101-examples-core-step-driver-ab-against-d4b1626-on-the-same-day-960-vs-968" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 007 -- 2026-10-01 (101 Examples, core step driver A/B against d4b1626 on the same day, 96.0% vs 96.8%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-008-2026-10-01-48-agents-examples-after-the-planexecute-planner-fix-922" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 008 -- 2026-10-01 (48 agents Examples, after the PlanExecute planner fix, 92.2%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-009-2026-10-01-101-examples-one-llm-layer-ab-against-e1f63a9-on-the-same-day-955-vs-908" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 009 -- 2026-10-01 (101 Examples, one LLM layer A/B against e1f63a9 on the same day, 95.5% vs 90.8%)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-010-2026-11-06-plan-0068b055-first-live-evidence-on-ollama_chatbonsai-227b-the-agents-category-was-completed-in-a-later-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 010 -- 2026-11-06 (plan 0068b055, first live evidence on ollama_chat/bonsai-2:27b; the agents category was completed in a later session)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="fsm-llm-evaluation-process">FSM-LLM Evaluation Process<a class="headerlink" href="#fsm-llm-evaluation-process" title="Permanent link">&para;</a></h1>
+<p>This document defines the evaluation methodology for testing FSM-LLM examples against LLM backends. It provides a repeatable, model-agnostic process for measuring framework quality over time.</p>
+<hr />
+<h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Automated parallel evaluation (recommended when the server can serve requests in parallel)</span>
+fsm-llm-eval<span class="w"> </span>examples<span class="w"> </span>--model<span class="w"> </span>ollama_chat/bonsai-2:27b<span class="w"> </span>--workers<span class="w"> </span><span class="m">4</span>
+
+<span class="c1"># One worker: use it when the server has ONE slot (for example OLLAMA_NUM_PARALLEL=1)</span>
+fsm-llm-eval<span class="w"> </span>examples<span class="w"> </span>--workers<span class="w"> </span><span class="m">1</span>
+
+<span class="c1"># Only a specific category</span>
+fsm-llm-eval<span class="w"> </span>examples<span class="w"> </span>--category<span class="w"> </span>agents
+
+<span class="c1"># Filter by name</span>
+fsm-llm-eval<span class="w"> </span>examples<span class="w"> </span>--filter<span class="w"> </span>react
+
+<span class="c1"># List discovered examples without running</span>
+fsm-llm-eval<span class="w"> </span>examples<span class="w"> </span>--list
+
+<span class="c1"># Fail a CI job (exit 2) when the health score is below 80%</span>
+fsm-llm-eval<span class="w"> </span>examples<span class="w"> </span>--fail-under<span class="w"> </span><span class="m">80</span>
+
+<span class="c1"># Scripted conversation evaluation of any FSM (see "Conversation evaluations")</span>
+fsm-llm-eval<span class="w"> </span>run<span class="w"> </span>evaluation/datasets/simple_greeting_cases.json<span class="w"> </span>--trials<span class="w"> </span><span class="m">3</span>
+</code></pre></div>
+<p><code>fsm-llm-eval</code> is installed with the package (<code>fsm_llm.eval</code>, extra <code>eval</code>);
+<code>python -m fsm_llm.eval</code> is the same program. These are the only entry points. Run
+<code>examples</code> from the repository root, or pass <code>--examples-dir</code>, since <code>examples/</code> is
+resolved from the current directory. Two behaviours differ from the removed
+<code>scripts/eval.py</code>: an <code>--output-dir</code> that already holds files is refused (exit 1)
+instead of reused, and usage errors exit 1 instead of argparse's 2 (exit 2 now means
+below <code>--fail-under</code>).</p>
+<p>Output goes to a new <code>evaluation/&lt;timestamp&gt;_&lt;hash&gt;_&lt;model&gt;/</code> (<code>_2</code>, <code>_3</code>, ... appended if that name exists) containing:
+- <code>scorecard.md</code> -- human-readable results with scores, timing, and category breakdown
+- <code>results.json</code> -- machine-readable results for scripting and diff
+- <code>logs/&lt;category&gt;/&lt;name&gt;.log</code> -- full stdout+stderr per example</p>
+<hr />
+<h2 id="1-evaluation-scope">1. Evaluation Scope<a class="headerlink" href="#1-evaluation-scope" title="Permanent link">&para;</a></h2>
+<h3 id="what-we-test">What We Test<a class="headerlink" href="#what-we-test" title="Permanent link">&para;</a></h3>
+<p>Every <code>run.py</code> under <code>examples/</code> is an evaluation target. The suite auto-discovers examples:</p>
+<div class="highlight"><pre><span></span><code>find<span class="w"> </span>examples/<span class="w"> </span>-name<span class="w"> </span><span class="s2">"run.py"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sort
+</code></pre></div>
+<p>The count will grow over time. The scoring system is ratio-based (percentages), so adding examples doesn't break historical comparisons.</p>
+<p><strong>IMPORTANT</strong>: Do NOT modify existing examples unless explicitly asked by the user. Examples serve as stable evaluation baselines.</p>
+<h3 id="categories">Categories<a class="headerlink" href="#categories" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Tests</th>
+<th>Focus</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>basic/</code></td>
+<td>Core FSM conversations</td>
+<td>Extraction, transitions, response quality</td>
+</tr>
+<tr>
+<td><code>intermediate/</code></td>
+<td>Multi-state FSMs</td>
+<td>Complex transitions, context accumulation</td>
+</tr>
+<tr>
+<td><code>advanced/</code></td>
+<td>Stacking, handlers, concurrency</td>
+<td>FSM stacking, handler hooks, context isolation</td>
+</tr>
+<tr>
+<td><code>classification/</code></td>
+<td>Intent classification</td>
+<td>Classification accuracy, routing correctness</td>
+</tr>
+<tr>
+<td><code>agents/</code></td>
+<td>Agent patterns</td>
+<td>Tool use, iteration control, agent composition</td>
+</tr>
+<tr>
+<td><code>reasoning/</code></td>
+<td>Structured reasoning</td>
+<td>Reasoning engine, validation, FSM stacking</td>
+</tr>
+<tr>
+<td><code>workflows/</code></td>
+<td>Workflow orchestration</td>
+<td>Step execution, context passing, async</td>
+</tr>
+<tr>
+<td><code>meta/</code></td>
+<td>Meta-builder</td>
+<td>Artifact generation, interactive building</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-running-an-evaluation">2. Running an Evaluation<a class="headerlink" href="#2-running-an-evaluation" title="Permanent link">&para;</a></h2>
+<h3 id="automated-recommended">Automated (recommended)<a class="headerlink" href="#automated-recommended" title="Permanent link">&para;</a></h3>
+<p>Use <code>fsm-llm-eval examples</code> to run all examples in parallel:</p>
+<div class="highlight"><pre><span></span><code>fsm-llm-eval<span class="w"> </span>examples<span class="w"> </span><span class="o">[</span>options<span class="o">]</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--model</code></td>
+<td><code>$LLM_MODEL</code> (none: exit 1)</td>
+<td>LLM model identifier</td>
+</tr>
+<tr>
+<td><code>--workers</code></td>
+<td>4</td>
+<td>Parallel workers, one example subprocess each. More workers only help when the model server runs requests in parallel. On a server with one slot (for example <code>OLLAMA_NUM_PARALLEL=1</code>) they queue behind each other, and the per-example timeout counts the wait, so examples time out that finish alone: use <code>--workers 1</code>, or raise the server's parallelism</td>
+</tr>
+<tr>
+<td><code>--timeout</code></td>
+<td>120</td>
+<td>Default timeout per example (seconds)</td>
+</tr>
+<tr>
+<td><code>--category</code></td>
+<td>all</td>
+<td>Filter by category (basic, agents, etc.)</td>
+</tr>
+<tr>
+<td><code>--filter</code></td>
+<td>all</td>
+<td>Substring match on example name</td>
+</tr>
+<tr>
+<td><code>--output-dir</code></td>
+<td>auto-generated</td>
+<td>Exact output directory; must be new or empty</td>
+</tr>
+<tr>
+<td><code>--examples-dir</code></td>
+<td><code>examples</code></td>
+<td>Examples tree to scan</td>
+</tr>
+<tr>
+<td><code>--python</code></td>
+<td>the running interpreter</td>
+<td>Interpreter for the example scripts</td>
+</tr>
+<tr>
+<td><code>--config</code></td>
+<td>none</td>
+<td>JSON file of settings (flags override it)</td>
+</tr>
+<tr>
+<td><code>--fail-under</code></td>
+<td>none</td>
+<td>Exit 2 when the health score is below this percentage</td>
+</tr>
+<tr>
+<td><code>--list</code></td>
+<td>--</td>
+<td>List examples and exit (dry run)</td>
+</tr>
+</tbody>
+</table>
+<p>The runner auto-discovers examples, classifies them as interactive or automated, pipes pre-configured stdin for interactive ones, applies per-category and per-example timeout overrides, and runs them in parallel on a thread pool, one subprocess per example.</p>
+<p><strong>Timeout overrides</strong> (built-in tables in <code>fsm_llm/eval/constants.py</code>):
+- basic/intermediate: 120s (default)
+- agents/workflows/advanced: 180s
+- reasoning: 300s
+- Known slow examples (e_commerce, reflexion, orchestrator, etc.): 240-360s. The 23 examples whose agents run on the default <code>AgentConfig.timeout_seconds</code> (300 s) are at 360 s (budget + 60 s), so the agent's own timeout (an <code>Error: Agent timed out after 300.0 seconds</code> line) always comes before a harness kill; <code>tests/test_fsm_llm_eval/test_timeout_table.py</code> scans <code>examples/</code> and fails when a harness timeout ties or is below an example's own agent budget.
+- The timeout clock also runs while a request waits for a busy server, so too many workers for the server's slots show up as timeouts (score 1), not as slowness: see <code>--workers</code> above.</p>
+<p>Stdin scripts (<code>EXAMPLE_INPUTS</code> in the same file) are checked against the examples by <code>tests/test_fsm_llm_eval/test_example_inputs.py</code>: an example that never reads stdin has none, the <code>meta/build_*</code> scripts end without <code>quit</code> (the builder reads to EOF and would take <code>quit</code> as a message), and <code>agents/react_hitl_combined</code> is sent a task that names the gated <code>publish_report</code> tool so its <code>y</code> answers a real approval prompt (a model that skips the gated tool still turns the <code>y</code> into a second task).</p>
+<p>A per-example value wins over the category value, which wins over <code>--timeout</code>, so <code>--timeout</code> cannot shorten a tabled example. To change a tabled value, pass a config file, for example <code>{"example_timeouts": {"agents/debate": 400}, "category_timeouts": {"agents": 240}}</code>; table entries in the file are merged over the built-in ones. Settings precedence is built-in defaults &lt; <code>--config FILE</code> &lt; flags; unknown keys are an error.</p>
+<p><strong>Exit codes</strong>: <code>0</code> the run finished (also with a low score), <code>1</code> usage error, bad config (including a file that is not UTF-8 or not JSON), unwritable output, a missing examples directory, or no example matched, <code>2</code> only when <code>--fail-under PCT</code> is given and the health score is below it (compared exactly: 116/200 meets 58), <code>130</code> interrupted. Ctrl-C cancels the examples not yet started and still writes <code>scorecard.md</code> and <code>results.json</code> for the finished ones, marked interrupted (<code>"interrupted": true</code>). SIGTERM (what <code>timeout(1)</code> and service managers send) is read the same way as Ctrl-C, for <code>examples</code> and <code>run</code>: the partial report is written and the exit code is 130. For <code>examples</code> the running example subprocesses are terminated too (step 12.34), so the process exits right after the report; before that it stayed alive until they finished. Before that change a <code>timeout</code>-killed run left a directory holding <code>logs/</code> only; <code>examples</code> now also creates <code>logs/</code> before the first example starts, so an interrupt before any example finished leaves <code>logs/</code>, <code>scorecard.md</code> and <code>results.json</code>. The handler lives for the run only, and is not installed off the main thread or over an ignored SIGTERM.</p>
+<h3 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Ensure the model is available</span>
+ollama<span class="w"> </span>list<span class="w">  </span><span class="c1"># for Ollama models</span>
+<span class="c1"># or set OPENAI_API_KEY for cloud models</span>
+</code></pre></div>
+<p><strong>Which model runs.</strong> The model is <code>--model</code>, then the process environment <code>LLM_MODEL</code>; with neither set the run exits 1 with <code>ModelNotConfiguredError</code>'s message (there is no built-in default). Importing <code>fsm_llm</code> loads no <code>.env</code> file (<code>fsm_llm.llm</code> sets <code>LITELLM_MODE=PRODUCTION</code> around its <code>import litellm</code>), so only the process environment fills <code>LLM_MODEL</code>. The scorecard and <code>results.json</code> name the model that really ran, so read them.</p>
+<h3 id="manual-single-example">Manual (single example)<a class="headerlink" href="#manual-single-example" title="Permanent link">&para;</a></h3>
+<p>For debugging or manual scoring of individual examples:</p>
+<p><strong>Interactive examples</strong> (have <code>input()</code> calls):
+<div class="highlight"><pre><span></span><code><span class="nb">echo</span><span class="w"> </span>-e<span class="w"> </span><span class="s2">"input line 1\ninput line 2\n..."</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="nv">LLM_MODEL</span><span class="o">=</span><span class="nv">$LLM_MODEL</span><span class="w"> </span>.venv/bin/python<span class="w"> </span>examples/&lt;category&gt;/&lt;name&gt;/run.py<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
+</code></pre></div></p>
+<p><strong>Automated examples</strong> (run to completion):
+<div class="highlight"><pre><span></span><code><span class="nv">LLM_MODEL</span><span class="o">=</span><span class="nv">$LLM_MODEL</span><span class="w"> </span>.venv/bin/python<span class="w"> </span>examples/&lt;category&gt;/&lt;name&gt;/run.py<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
+</code></pre></div></p>
+<h3 id="what-to-observe">What to Observe<a class="headerlink" href="#what-to-observe" title="Permanent link">&para;</a></h3>
+<p>For each example, evaluate these dimensions:</p>
+<ol>
+<li><strong>Startup</strong> -- Does it initialize without errors?</li>
+<li><strong>Core Function</strong> -- Does it perform its primary purpose?</li>
+<li><strong>Transitions</strong> -- Do FSM state transitions fire correctly?</li>
+<li><strong>Extraction</strong> -- Are context fields extracted from user input?</li>
+<li><strong>Tool Use</strong> -- (agents only) Are tools called and do they execute?</li>
+<li><strong>Completion</strong> -- Does it finish without crashing or infinite loops?</li>
+<li><strong>Output Quality</strong> -- Is the LLM output coherent and on-topic?</li>
+</ol>
+<h3 id="conversation-evaluations-fsm-llm-eval-run">Conversation evaluations (<code>fsm-llm-eval run</code>)<a class="headerlink" href="#conversation-evaluations-fsm-llm-eval-run" title="Permanent link">&para;</a></h3>
+<p>The example scores above come from a heuristic over stdout. To test a specific FSM's behaviour, write a dataset of scripted conversations with expected outcomes and run it several times:</p>
+<div class="highlight"><pre><span></span><code>fsm-llm-eval<span class="w"> </span>run<span class="w"> </span>DATASET<span class="w"> </span><span class="o">[</span>--model<span class="w"> </span>M<span class="o">]</span><span class="w"> </span><span class="o">[</span>--trials<span class="w"> </span>N<span class="o">]</span><span class="w"> </span><span class="o">[</span>--temperature<span class="w"> </span>T<span class="o">]</span><span class="w"> </span><span class="o">[</span>--max-tokens<span class="w"> </span>N<span class="o">]</span><span class="w"> </span><span class="o">[</span>--workers<span class="w"> </span>N<span class="o">]</span><span class="w"> </span><span class="o">[</span>--output-dir<span class="w"> </span>D<span class="o">]</span><span class="w"> </span><span class="o">[</span>--config<span class="w"> </span>FILE<span class="o">]</span><span class="w"> </span><span class="o">[</span>--fail-under<span class="w"> </span>PCT<span class="o">]</span><span class="w"> </span><span class="o">[</span>--list<span class="o">]</span>
+</code></pre></div>
+<p>A dataset is a JSON list of cases, a JSON object <code>{"config": {...}, "cases": [...]}</code>, or a <code>.jsonl</code> file with one case per line. Each case has an <code>id</code>, an <code>fsm</code> (path relative to the dataset file, or an inline definition), optional <code>initial_context</code>, the user <code>turns</code>, and <code>expect</code> with at least one of <code>final_state</code>, <code>visited_states</code>, <code>context</code> (exact values), <code>context_keys</code> (present and not null), <code>responses_contain</code> (case-insensitive substrings) and <code>ended</code>. A trial passes when every declared check holds and every turn was sent (an FSM that ends before the last turn fails unless the case declares <code>ended</code>); a trial that raises (model down, bad FSM) is a failed trial with the error recorded. The sample <code>evaluation/datasets/simple_greeting_cases.json</code> has three plumbing cases over <code>examples/basic/simple_greeting</code> (unconditional transitions: any model passes) and <code>name_is_extracted</code> over <code>evaluation/datasets/name_capture_fsm.json</code>, which passes only when the model extracts the user's name. A useful case makes its pass depend on the model.</p>
+<p>Each case runs <code>trials</code> times (default 3), in-process through <code>fsm_llm.API</code>, one fresh <code>API</code> per trial. Settings precedence: defaults &lt; the dataset's <code>config</code> &lt; <code>--config FILE</code> &lt; flags, so a dataset that sets <code>model</code> beats <code>$LLM_MODEL</code>. LLM settings: <code>temperature</code>, <code>max_tokens</code>, and <code>llm_kwargs</code> (extra <code>fsm_llm.API</code> arguments such as <code>api_base</code>; recorded by key only). From Python, <code>fsm_llm.eval.run_dataset(path, trials=5, checks=[...])</code> does the same in one call; a check is a function of the finished trial returning failure messages. The run directory (same naming as example runs) holds <code>rows.jsonl</code> (one row per trial, written as each finishes), <code>results.json</code> (per-case and overall <code>k</code>, <code>n</code>, <code>rate</code> and Wilson 95% <code>wilson_ci</code>, plus the config used) and <code>summary.md</code>. Report a pass rate with its interval: with 3 trials, 3/3 still has a Wilson lower bound of about 44%. <code>--fail-under PCT</code> compares the overall pass rate exactly (57/100 meets 57). Exit codes and Ctrl-C behaviour are the same as for <code>examples</code>.</p>
+<hr />
+<h2 id="3-scoring-rubric">3. Scoring Rubric<a class="headerlink" href="#3-scoring-rubric" title="Permanent link">&para;</a></h2>
+<p>Each example receives a single score from 0-4:</p>
+<table>
+<thead>
+<tr>
+<th>Score</th>
+<th>Label</th>
+<th>Criteria</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>4</strong></td>
+<td><strong>PASS</strong></td>
+<td>Fully functional. All transitions fire, tools work, output is correct and coherent. No errors.</td>
+</tr>
+<tr>
+<td><strong>3</strong></td>
+<td><strong>MOSTLY</strong></td>
+<td>Works with minor issues. Core function succeeds but has cosmetic problems (wrong counter, extra loop iteration, slightly off output).</td>
+</tr>
+<tr>
+<td><strong>2</strong></td>
+<td><strong>PARTIAL</strong></td>
+<td>Partially functional. Some features work but key behaviors fail (transitions don't fire, tools not used, gets stuck). Requires workarounds.</td>
+</tr>
+<tr>
+<td><strong>1</strong></td>
+<td><strong>BROKEN</strong></td>
+<td>Starts but fails at core function. Crashes mid-run, hits iteration limits, produces wrong results, infinite loops.</td>
+</tr>
+<tr>
+<td><strong>0</strong></td>
+<td><strong>CRASH</strong></td>
+<td>Cannot start. Import errors, validation failures, crashes before any useful output.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rules the automatic scorer applies on top of the table</strong> (since 2026-11-06, plan <code>0068b055</code>): a run that exits 0 but prints a line starting with <code>Error:</code> (or <code>Error during ...</code>; indentation allowed, stdout only) or a line starting with <code>Success: False</code> is capped at 2 (failure codes <code>F-CODE</code> and <code>F-MODEL</code>), and an extraction rate of at most 50% (<code>Extraction rate: 1/2 (50%)</code>) is a partial failure (exactly 50% used to pass). <code>Error:</code> quoted mid-line in prose, <code>Error Rate:</code> metric lines, <code>ValueError: ...</code> and stderr are not read. <strong>Scores before this change (Runs 001 to 010) were given by the older rule, so they are not comparable with scores after it</strong>: an example that said it failed but exited cleanly could score 4. The heuristic still overstates.</p>
+<h3 id="distinguishing-scores">Distinguishing Scores<a class="headerlink" href="#distinguishing-scores" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>4 vs 3</strong>: Does everything work, or is there a minor glitch that doesn't affect the main outcome?</li>
+<li><strong>3 vs 2</strong>: Does the example achieve its purpose (even if imperfectly), or does it fail at its primary goal?</li>
+<li><strong>2 vs 1</strong>: Do some components work independently, or does the whole thing fall apart?</li>
+<li><strong>1 vs 0</strong>: Does it at least start and produce some output, or does it crash immediately?</li>
+</ul>
+<hr />
+<h2 id="4-failure-classification">4. Failure Classification<a class="headerlink" href="#4-failure-classification" title="Permanent link">&para;</a></h2>
+<p>When an example scores below 4, classify the failure:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Category</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>F-CODE</code></td>
+<td>Code Bug</td>
+<td>Framework bug, not model-related. Fails with any model.</td>
+</tr>
+<tr>
+<td><code>F-MODEL</code></td>
+<td>Model Limitation</td>
+<td>Small model can't handle the task (bad classification, no tool use).</td>
+</tr>
+<tr>
+<td><code>F-TRANS</code></td>
+<td>Transition Failure</td>
+<td>FSM transitions don't fire despite correct context.</td>
+</tr>
+<tr>
+<td><code>F-EXTRACT</code></td>
+<td>Extraction Failure</td>
+<td>Pass 1 doesn't extract expected fields.</td>
+</tr>
+<tr>
+<td><code>F-TOOL</code></td>
+<td>Tool Failure</td>
+<td>Tool execution errors (calling convention, params).</td>
+</tr>
+<tr>
+<td><code>F-LOOP</code></td>
+<td>Loop/Budget</td>
+<td>Agent exceeds iteration limit or gets stuck in a loop.</td>
+</tr>
+<tr>
+<td><code>F-PARSE</code></td>
+<td>Parse Failure</td>
+<td>Can't parse LLM output (scores, JSON, structured data).</td>
+</tr>
+<tr>
+<td><code>F-SCHEMA</code></td>
+<td>Schema Error</td>
+<td>Pydantic validation, FSM definition errors.</td>
+</tr>
+</tbody>
+</table>
+<p>An example can have multiple failure codes. Record all that apply.</p>
+<hr />
+<h2 id="5-scorecard-format">5. Scorecard Format<a class="headerlink" href="#5-scorecard-format" title="Permanent link">&para;</a></h2>
+<p>After running all examples, record results in this format:</p>
+<div class="highlight"><pre><span></span><code># Evaluation Scorecard
+# Date: YYYY-MM-DD
+# Model: &lt;model identifier&gt;
+# Evaluator: &lt;name&gt;
+# Example count: &lt;N&gt;
+
+## Scores
+
+| # | Example | Score | Failures | Notes |
+|---|---------|-------|----------|-------|
+| 1 | basic/simple_greeting | 4 | | Clean pass |
+| 2 | basic/form_filling | 2 | F-TRANS, F-EXTRACT | Never reaches confirmation state |
+| ... | ... | ... | ... | ... |
+
+## Summary
+
+- Total examples: N
+- Score distribution: X at 4, Y at 3, Z at 2, W at 1, V at 0
+- Overall score: &lt;sum&gt; / &lt;max possible&gt; = &lt;percentage&gt;%
+- Category breakdown:
+  - basic: X/Y (Z%)
+  - intermediate: ...
+  - advanced: ...
+  - classification: ...
+  - agents: ...
+  - reasoning: ...
+  - workflows: ...
+  - meta: ...
+- Top failure codes: F-TOOL (N), F-TRANS (N), F-MODEL (N), ...
+</code></pre></div>
+<hr />
+<h2 id="6-aggregate-metrics">6. Aggregate Metrics<a class="headerlink" href="#6-aggregate-metrics" title="Permanent link">&para;</a></h2>
+<h3 id="overall-health-score">Overall Health Score<a class="headerlink" href="#overall-health-score" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>Health = (sum of all scores) / (4 * number of examples) * 100
+</code></pre></div>
+<p>A perfect run scores 100%. This is the primary metric for tracking progress.</p>
+<h3 id="category-health">Category Health<a class="headerlink" href="#category-health" title="Permanent link">&para;</a></h3>
+<p>Same formula applied per-category. Identifies which subsystem needs the most work.</p>
+<h3 id="failure-distribution">Failure Distribution<a class="headerlink" href="#failure-distribution" title="Permanent link">&para;</a></h3>
+<p>Count how many examples have each failure code. This drives prioritization:
+- High <code>F-CODE</code> count = framework bugs to fix (highest priority)
+- High <code>F-MODEL</code> count = model compatibility issues (tune prompts or set minimum model size)
+- High <code>F-TOOL</code> count = tool system bugs (single root cause, high leverage fix)</p>
+<h3 id="regression-detection">Regression Detection<a class="headerlink" href="#regression-detection" title="Permanent link">&para;</a></h3>
+<p>Compare current run's per-example scores against the previous run. Flag:
+- <strong>Regressions</strong>: Score decreased (something broke)
+- <strong>Improvements</strong>: Score increased (a fix worked)
+- <strong>New examples</strong>: First-time evaluation (no comparison)</p>
+<p><strong>Comparability break (2026-09-29 restructure).</strong> Since the extensions moved under
+<code>fsm_llm</code>, one library-wide <code>logger.disable("fsm_llm")</code> silences agents, reasoning,
+workflows, monitor and harness logs, and no example enables logging. Before, their
+warnings and tracebacks reached stderr, which <code>fsm_llm.eval</code> (<code>scoring.py</code>) scans for failure signals and
+which the per-example logs keep. Runs from before and after that change are not
+comparable, for agent examples especially: re-baseline before flagging a regression or
+improvement, and expect thinner per-example logs.</p>
+<hr />
+<h2 id="7-model-compatibility-matrix">7. Model Compatibility Matrix<a class="headerlink" href="#7-model-compatibility-matrix" title="Permanent link">&para;</a></h2>
+<p>Track results across models to understand minimum viable model size:</p>
+<div class="highlight"><pre><span></span><code>| Example | qwen3.5:4b | qwen3.5:9b | gpt-4o-mini | Notes |
+|---------|------------|------------|-------------|-------|
+| basic/simple_greeting | 4 | 4 | 4 | Works on all |
+| classification/intent_routing | 1 | 3 | 4 | Needs 9B+ for classification |
+| ... | ... | ... | ... | ... |
+</code></pre></div>
+<hr />
+<h2 id="8-storing-results">8. Storing Results<a class="headerlink" href="#8-storing-results" title="Permanent link">&para;</a></h2>
+<p>All evaluation results live in the <code>evaluation/</code> directory. <code>fsm-llm-eval</code> generates output automatically.</p>
+<h3 id="output-structure">Output Structure<a class="headerlink" href="#output-structure" title="Permanent link">&para;</a></h3>
+<p>Each run creates a timestamped directory (the names below are an illustration of the layout, not directories that exist in the repository):</p>
+<div class="highlight"><pre><span></span><code>evaluation/
+├── 2026-03-29_14-38_0aec60a_qwen3.5-4b/      # Auto-generated by fsm-llm-eval
+│   ├── scorecard.md                            # Human-readable results
+│   ├── results.json                            # Machine-readable results
+│   └── logs/                                   # Per-example logs
+│       ├── basic/
+│       │   ├── basic_simple_greeting.log
+│       │   └── basic_form_filling.log
+│       ├── agents/
+│       │   ├── agents_debate.log
+│       │   └── ...
+│       └── ...
+├── 2026-03-28:10-15_36aed00_qwen3.5-4b.md     # Legacy manual runs
+└── ...
+</code></pre></div>
+<h3 id="what-gets-generated">What Gets Generated<a class="headerlink" href="#what-gets-generated" title="Permanent link">&para;</a></h3>
+<p><code>fsm-llm-eval examples</code> produces three outputs per run:</p>
+<ol>
+<li><strong><code>scorecard.md</code></strong> -- date, git commit, model, scores table (per-example with score/duration/failures), summary (health score, distribution, category breakdown, top failure codes), timing stats. "Total wall time" is the real elapsed time of the run; "Total example time" is the sum of the example durations (sequential equivalent). Scorecards written by <code>scripts/eval.py</code> before the <code>fsm_llm.eval</code> move labelled that sum "Total wall time", so compare old and new runs on "Total example time"</li>
+<li><strong><code>results.json</code></strong> -- same data in machine-readable format for scripting, diffing, and trend analysis. The keys of the old format are unchanged; newer runs add <code>wall_time_s</code>, <code>workers</code>, <code>default_timeout</code> and <code>evaluator</code></li>
+<li><strong><code>logs/&lt;category&gt;/&lt;name&gt;.log</code></strong> -- full stdout+stderr capture per example, with metadata header (exit code, duration, timeout status). The example child runs with <code>PYTHONUNBUFFERED=1</code>, so the log of an example killed by its timeout holds the output it printed before the kill (earlier runs left such a log empty, which made a slow model look like a loop)</li>
+</ol>
+<h3 id="custom-output-directory">Custom Output Directory<a class="headerlink" href="#custom-output-directory" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Override the auto-generated path (must be new or empty)</span>
+fsm-llm-eval<span class="w"> </span>examples<span class="w"> </span>--output-dir<span class="w"> </span>evaluation/my_run
+</code></pre></div>
+<p>A run never overwrites another: when the auto-generated name already exists (two runs in the same minute on the same commit and model), <code>_2</code>, <code>_3</code>, ... is appended. Before the <code>fsm_llm.eval</code> move, such a rerun overwrote the first run's files.</p>
+<h3 id="comparing-runs">Comparing Runs<a class="headerlink" href="#comparing-runs" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Compare JSON results between runs</span>
+diff<span class="w"> </span>&lt;<span class="o">(</span>jq<span class="w"> </span><span class="s1">'.results[] | {name, score}'</span><span class="w"> </span>evaluation/run_a/results.json<span class="o">)</span><span class="w"> </span><span class="se">\</span>
+<span class="w">     </span>&lt;<span class="o">(</span>jq<span class="w"> </span><span class="s1">'.results[] | {name, score}'</span><span class="w"> </span>evaluation/run_b/results.json<span class="o">)</span>
+
+<span class="c1"># Filter by model</span>
+ls<span class="w"> </span>evaluation/*bonsai*
+
+<span class="c1"># Check a specific example's log</span>
+cat<span class="w"> </span>evaluation/&lt;run-dir&gt;/logs/agents/agents_debate.log
+</code></pre></div>
+<hr />
+<h2 id="9-evaluation-log-index">9. Evaluation Log Index<a class="headerlink" href="#9-evaluation-log-index" title="Permanent link">&para;</a></h2>
+<p>Quick reference for all evaluation runs. The raw run directories (<code>scorecard.md</code>, <code>results.json</code>, <code>logs/</code>) of Runs 001 to 009 were removed from <code>evaluation/</code> on 2026-11-06 together with the other qwen3.5 run directories; the numbers in each entry below are the record. The scorecard text of Run 001, the last of these directories that git tracked, is recoverable from git history with <code>git show 72388e6^:evaluation/2026-04-01_23-35_4025a78_qwen3.5-4b/scorecard.md</code> (and <code>results.json</code> the same way). Entries that give a path name the directory the run wrote; it no longer exists.</p>
+<hr />
+<h3 id="run-001-2026-04-01-100-examples-honest-scoring-baseline-750">Run 001 -- 2026-04-01 (100 Examples, Honest Scoring Baseline, 75.0%)<a class="headerlink" href="#run-001-2026-04-01-100-examples-honest-scoring-baseline-750" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>File</strong>: <code>evaluation/2026-04-01_23-35_4025a78_qwen3.5-4b/scorecard.md</code> (directory removed 2026-11-06; recover it with <code>git show 72388e6^:evaluation/2026-04-01_23-35_4025a78_qwen3.5-4b/scorecard.md</code>)</li>
+<li><strong>Model</strong>: <code>ollama_chat/qwen3.5:4b</code></li>
+<li><strong>Commit</strong>: <code>4025a78</code></li>
+<li><strong>Examples</strong>: 100 (all with standardized verification output)</li>
+<li><strong>Health Score</strong>: 75.0% (300/400)</li>
+<li><strong>Score distribution</strong>: 63x4, 2x3, 7x2, 28x1, 0x0</li>
+<li><strong>Category breakdown</strong>: workflows 100% (8/8), classification 100% (4/4), reasoning 100% (1/1), agents 95.8% (46/48 pass), meta 80% (2 pass, 3 partial), basic 7% (1/14 pass — only multi_turn_extraction), advanced 12% (1/17 pass — only yoga_instructions), intermediate 44% (adaptive_quiz partial, book_recommendation partial, product_recommendation broken)</li>
+<li><strong>Top failure codes</strong>: F-EXTRACT (35), F-TRANS (28), F-LOOP (2), F-CODE (1)</li>
+<li><strong>Root cause</strong>: FSM field extraction on 4B model fails across most basic/intermediate/advanced examples. The 2-pass architecture's Pass 1 (data extraction) does not reliably extract named fields — the model generates good conversational responses but returns no structured extraction data. Agent, workflow, classification, and meta examples work because they use different execution patterns (tool calling, step execution, intent classification) that don't rely on FSM field extraction.</li>
+<li><strong>Note</strong>: This is the first honest baseline. All prior runs (001-012) used eval scoring that only checked exit codes, allowing examples with 0% extraction to score PASS. Those runs have been invalidated and removed.</li>
+</ul>
+<hr />
+<h3 id="run-002-2026-04-02-100-examples-extraction-pipeline-improvements-880">Run 002 -- 2026-04-02 (100 Examples, Extraction Pipeline Improvements, 88.0%)<a class="headerlink" href="#run-002-2026-04-02-100-examples-extraction-pipeline-improvements-880" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>File</strong>: <code>evaluation/2026-04-02_08-28_830692b_qwen3.5-4b/scorecard.md</code> (directory removed 2026-11-06)</li>
+<li><strong>Model</strong>: <code>ollama_chat/qwen3.5:4b</code></li>
+<li><strong>Commit</strong>: <code>830692b</code></li>
+<li><strong>Examples</strong>: 100</li>
+<li><strong>Health Score</strong>: 88.0% (352/400) -- <strong>+13.0pp from Run 001</strong></li>
+<li><strong>Score distribution</strong>: 82x4, 0x3, 6x2, 12x1, 0x0</li>
+<li><strong>Category breakdown</strong>: advanced 96% (+84pp), basic 86% (+79pp), agents 86%, intermediate 67% (+23pp), classification 100%, workflows 100%, reasoning 100%, meta 70%</li>
+<li><strong>Top failure codes</strong>: F-EXTRACT (9), F-LOOP (9), F-TRANS (3)</li>
+<li><strong>Changes made</strong> (all in <code>src/</code>, no example modifications):</li>
+<li>Simplified field extraction prompt: replaced verbose XML+CDATA with concise plain text optimized for 4B models</li>
+<li>Post-transition extraction: after a state transition, re-extract in the new state from the same user message (skipped for agent FSMs)</li>
+<li>Transition condition scanning: extract fields from transition <code>requires_context_keys</code>, not just state <code>required_context_keys</code></li>
+<li>Bulk extraction fallback: for states with <code>extraction_instructions</code> but no explicit field configs</li>
+<li>Partial/relative value acceptance: prompts now accept "next Saturday" for dates, "around 7pm" for times</li>
+<li>Date context: today's date included in extraction prompts</li>
+<li>JSON parsing improvements: markdown fence stripping, <code>extracted_data</code> wrapper fallback</li>
+<li>Conversation data cache: <code>get_data()</code>/<code>get_current_state()</code> work after <code>end_conversation()</code></li>
+<li><strong>Remaining failures</strong>: Agent timeouts (9, model limitation), 2 basic examples without <code>required_context_keys</code>, 3 meta builder stdin issues</li>
+<li><strong>Note</strong>: This is the new official baseline. Agent score varies between runs due to non-deterministic LLM output (agent patterns are sensitive to exact model responses). The framework changes do not cause regressions — agent FSMs are explicitly excluded from post-transition extraction.</li>
+</ul>
+<hr />
+<h3 id="run-003-2026-04-02-100-examples-example-fixes-eval-input-improvements-902">Run 003 -- 2026-04-02 (100 Examples, Example Fixes + Eval Input Improvements, 90.2%)<a class="headerlink" href="#run-003-2026-04-02-100-examples-example-fixes-eval-input-improvements-902" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>File</strong>: <code>evaluation/iter8/scorecard.md</code> (directory removed 2026-11-06)</li>
+<li><strong>Model</strong>: <code>ollama_chat/qwen3.5:4b</code></li>
+<li><strong>Commit</strong>: <code>e6cf19d</code></li>
+<li><strong>Examples</strong>: 100</li>
+<li><strong>Health Score</strong>: 90.2% (361/400) -- <strong>+2.2pp from Run 002, +15.2pp from Run 001</strong></li>
+<li><strong>Score distribution</strong>: 84x4, 1x3, 7x2, 8x1, 0x0</li>
+<li><strong>Category breakdown</strong>: advanced 97%, basic 96% (+10pp), agents 86%, intermediate 75% (+8pp), classification 100%, workflows 100%, reasoning 100%, meta 70%</li>
+<li><strong>Top failure codes</strong>: F-LOOP (10), F-EXTRACT (7)</li>
+<li><strong>Changes made</strong>:</li>
+<li>Added <code>required_context_keys</code> to: simple_greeting (mood/intent), adaptive_quiz (4 states), book_recommendation (recommended_book), support_pipeline (3 states)</li>
+<li>Improved eval inputs: form_filling (one field per message), story_time (actual opinions), adaptive_quiz (player name + feedback), support_pipeline (customer name)</li>
+<li>Increased agent timeouts: debate 180→300s, evaluator_optimizer 180→300s, orchestrator 240→300s</li>
+<li><strong>Remaining failures</strong>: Agent timeouts (8, model limitation), 3 meta builder stdin issues, ~5 non-deterministic partial extractions</li>
+</ul>
+<hr />
+<h3 id="run-004-2026-04-02-100-examples-debate-bug-fix-908">Run 004 -- 2026-04-02 (100 Examples, Debate Bug Fix, 90.8%)<a class="headerlink" href="#run-004-2026-04-02-100-examples-debate-bug-fix-908" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>File</strong>: <code>evaluation/2026-04-02_10-24_7fa6633_qwen3.5-4b/scorecard.md</code> (directory removed 2026-11-06)</li>
+<li><strong>Model</strong>: <code>ollama_chat/qwen3.5:4b</code></li>
+<li><strong>Commit</strong>: <code>7fa6633</code></li>
+<li><strong>Examples</strong>: 100</li>
+<li><strong>Health Score</strong>: 90.8% (363/400) -- <strong>+0.6pp from Run 003, +15.8pp from Run 001</strong></li>
+<li><strong>Score distribution</strong>: 85x4, 1x3, 6x2, 8x1, 0x0</li>
+<li><strong>Category breakdown</strong>: advanced 93%, basic 96%, agents 89% (+3pp), intermediate 75%, classification 100%, workflows 100%, reasoning 100%, meta 70%</li>
+<li><strong>Top failure codes</strong>: F-LOOP (8), F-EXTRACT (7), F-TRANS (1)</li>
+<li><strong>Changes made</strong>: Fixed bug where bulk extraction fallback overwrote handler-set context values (consensus_reached). This caused the debate agent to loop past max_rounds.</li>
+<li><strong>Note</strong>: This is the new official baseline.</li>
+</ul>
+<hr />
+<h3 id="run-005-2026-04-02-100-examples-iterative-improvements-958">Run 005 -- 2026-04-02 (100 Examples, Iterative Improvements, 95.8%)<a class="headerlink" href="#run-005-2026-04-02-100-examples-iterative-improvements-958" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>File</strong>: <code>evaluation/2026-04-02_16-11_0b2b7f8_qwen3.5-4b/scorecard.md</code> (directory removed 2026-11-06)</li>
+<li><strong>Model</strong>: <code>ollama_chat/qwen3.5:4b</code></li>
+<li><strong>Commit</strong>: <code>0b2b7f8</code></li>
+<li><strong>Examples</strong>: 100</li>
+<li><strong>Health Score</strong>: 95.8% (383/400) -- <strong>+5.0pp from Run 004, +20.8pp from Run 001</strong></li>
+<li><strong>Score distribution</strong>: 94x4, 0x3, 1x2, 5x1, 0x0</li>
+<li><strong>Category breakdown</strong>: advanced 97%, basic 100% (+4pp), agents 94% (+5pp), intermediate 100% (+25pp), classification 81%, workflows 100%, reasoning 100%, meta 100% (+30pp)</li>
+<li><strong>Top failure codes</strong>: F-LOOP (5), F-EXTRACT (1)</li>
+<li><strong>Changes made</strong> (all in <code>src/</code> and <code>scripts/</code>, no example modifications):</li>
+<li>Orchestrator/EvalOpt FSM deadlock fix: added fallback unconditional transitions (priority 900) to orchestrator <code>collect</code> and evaluator-optimizer <code>evaluate</code> states, preventing deadlock when LLM fails to extract transition-triggering fields</li>
+<li>Type validation: <code>FSMManager.start_conversation()</code> now raises <code>FSMError</code> instead of <code>AttributeError</code> when <code>initial_context</code> is not a dict</li>
+<li>Extraction prompt improvement: field extraction now explicitly guides LLMs to check conversation history when value is not in current message</li>
+<li>Default extraction retries: changed from 0 to 1, giving each required field one retry pass</li>
+<li>Structured output terminal-only: <code>response_format</code> (JSON schema enforcement) now only applied on terminal FSM states, preventing small models from hanging on intermediate states</li>
+<li>Field name echo rejection: extraction validation now rejects values that match the field name (model confusion artifact)</li>
+<li>Eval script fixes: stdin piping for meta builders, timeout overrides for slow examples, improved story_time inputs</li>
+<li><strong>Remaining failures</strong>: Agent timeouts (5, model contention during parallel eval — pass when run individually), support_pipeline extraction (FSM stacking complexity)</li>
+<li><strong>Note</strong>: This is the new official baseline. Agent timeout failures are non-deterministic and depend on Ollama load during parallel evaluation. Classification dip (81% vs 100%) is a non-deterministic flap.</li>
+</ul>
+<h3 id="run-006-2026-05-31-101-examples-react-under-call-memory-coherence-fixes-n3-median-953">Run 006 -- 2026-05-31 (101 Examples, ReAct under-call + memory-coherence fixes, N=3 median 95.3%)<a class="headerlink" href="#run-006-2026-05-31-101-examples-react-under-call-memory-coherence-fixes-n3-median-953" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Model</strong>: <code>ollama_chat/qwen3.5:4b</code> | <strong>Workers</strong>: 4 | <strong>Commit</strong>: <code>2df048f</code> (tag <code>agent-coherence-2026-05-30</code>)</li>
+<li><strong>Examples</strong>: 101</li>
+<li><strong>Health Score</strong>: <strong>N=3 median 95.3%</strong> (385/404). Runs: 95.3% / 95.3% / 92.3%. <strong>Flat vs Run 005 (95.8%, 100 ex) — no regression.</strong> (Note: CLAUDE.md's "90.8%" figure was stale; the real prior baseline was Run 005's 95.8%.)</li>
+<li><strong>Category median</strong>: basic/intermediate/classification/reasoning/workflows/meta 100%; advanced 94.1%; <strong>agents 90.6%</strong>.</li>
+<li><strong>Changes evaluated</strong> (plan_2026-05-30_5598b755, all additive in <code>src/fsm_llm_agents/</code> + <code>scripts/</code>, no example edits):</li>
+<li><strong>B4 under-call fix</strong> — gate <code>think→conclude</code>/<code>act→conclude</code> on <code>should_terminate AND (observation_count&gt;0 OR max_iterations_reached)</code>; stall-detector sets <code>max_iterations_reached</code> (re-merge-immune; tool turns now invoke tools instead of answering mentally).</li>
+<li><strong>Memory coherence</strong> — conclude EXTRACTION prompt answers from task/context+recalled memory (killed "I don't have the previous context" filler); <code>respond</code> action for AutoMemory; <code>recall_min_score=0.25</code> stops stale-memory bleed.</li>
+<li><strong>Harness</strong> — <code>scripts/agent_chat_harness.py</code> (long multi-turn diagnostic).</li>
+<li><strong>Agent score-1s are non-deterministic timeouts, NOT regressions</strong> — all 7 examples that varied across the 3 runs are in <code>agents/</code> and toggle 4↔1 (full-pass ↔ 300s/240s timeout), never a partial/wrong answer: <code>agent_as_tool [1,1,4]</code>, <code>react_hitl_combined [1,4,1]</code>, <code>reflexion [4,1,1]</code>, <code>classified_dispatch/hitl_approval/multi_tool_recovery/pipeline_review [4,4,1]</code>. Log inspection confirmed bounded iterations (≤6) and zero <code>BudgetExhaustedError</code> — <code>--workers 4</code> contention, pass solo at <code>--workers 1</code>.</li>
+<li><strong>Note</strong>: This re-baseline supersedes the stale 90.8% figure. Validate behavior fixes with the harness + manual log read (the heuristic overstates ~15pp and flags correct tool-free answers as <code>success=False</code>).</li>
+</ul>
+<hr />
+<h3 id="run-007-2026-10-01-101-examples-core-step-driver-ab-against-d4b1626-on-the-same-day-960-vs-968">Run 007 -- 2026-10-01 (101 Examples, core step driver A/B against <code>d4b1626</code> on the same day, 96.0% vs 96.8%)<a class="headerlink" href="#run-007-2026-10-01-101-examples-core-step-driver-ab-against-d4b1626-on-the-same-day-960-vs-968" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Files</strong> (directories removed 2026-11-06): <code>evaluation/2026-10-01_09-23_0f0789c_qwen3.5-4b/scorecard.md</code> (HEAD) and <code>evaluation/2026-10-01_09-54_d4b1626_qwen3.5-4b_same-day-baseline/scorecard.md</code> (baseline, run from an isolated <code>d4b1626</code> worktree with <code>PYTHONPATH=&lt;worktree&gt;/src</code>; <code>results.json</code> records <code>git_commit</code> <code>d4b1626</code>)</li>
+<li><strong>Model</strong>: <code>ollama_chat/qwen3.5:4b</code> (digest <code>2a654d98e6fb</code>) | <strong>Workers</strong>: 4 | <strong>Timeouts</strong>: default 120 s plus the built-in overrides (eval code and <code>examples/</code> unchanged since <code>d4b1626</code>) | <strong>N</strong>: 1 per commit, run one after the other</li>
+<li><strong>Commits</strong>: <code>0f0789c</code> (plan <code>07ad3f8c</code> iteration 1: agent loops on core <code>advance</code>/<code>run_until_terminal</code>, no synthetic "Continue." turn) vs <code>d4b1626</code></li>
+<li><strong>Examples</strong>: 101</li>
+<li><strong>Health Score</strong>: <code>0f0789c</code> 96.0% (388/404) vs <code>d4b1626</code> 96.8% (391/404), -3 points</li>
+<li><strong>Score distribution</strong>: <code>0f0789c</code> 95x4, 0x3, 2x2, 4x1, 0x0; <code>d4b1626</code> 96x4, 0x3, 2x2, 3x1, 0x0</li>
+<li><strong>Category breakdown</strong>: identical at both commits except agents (180/192 vs 183/192): advanced 64/68, basic 56/56, classification 20/20, intermediate 12/12, meta 20/20, reasoning 4/4, workflows 32/32</li>
+<li><strong>Top failure codes</strong>: <code>0f0789c</code> F-LOOP (4, all timeouts), F-EXTRACT (2); <code>d4b1626</code> F-LOOP (3, all timeouts), F-EXTRACT (2); F-CODE 0 at both</li>
+<li><strong>Only changed score</strong>: <code>agents/plan_execute_recovery</code> 4 -&gt; 1 (timeout at 180 s; 136.6 s at <code>d4b1626</code>). Not model noise: run alone 3 times per commit, <code>0f0789c</code> builds a 7-step plan (15 iterations, 24 LLM calls) every time, <code>d4b1626</code> a 4-step plan (9 iterations, 16 calls); both succeed alone.</li>
+<li><strong>Raw logs</strong>: 0 envelope leaks (<code>"field_name"</code>, <code>"extracted_data"</code>), 0 <code>Continue.</code>, 0 tracebacks at both commits. Agents <code>Success: True</code>/<code>False</code> lines: 22/3 vs 22/4. Every <code>Success: False</code> example still scores 4.</li>
+<li><strong>Note</strong>: the agents category alone (180/192) is 2 points above the recorded G3 baseline at <code>d4b1626</code> (178/192, 2026-09-29). Bench block <code>agents-react/B1</code> from the same day is recorded in <code>scripts/bench_data/agents-react/B1</code>.</li>
+</ul>
+<h3 id="run-008-2026-10-01-48-agents-examples-after-the-planexecute-planner-fix-922">Run 008 -- 2026-10-01 (48 agents Examples, after the PlanExecute planner fix, 92.2%)<a class="headerlink" href="#run-008-2026-10-01-48-agents-examples-after-the-planexecute-planner-fix-922" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>File</strong>: <code>evaluation/2026-10-01_10-50_e9ef064_qwen3.5-4b/scorecard.md</code> (directory removed 2026-11-06)</li>
+<li><strong>Model</strong>: <code>ollama_chat/qwen3.5:4b</code> (digest <code>2a654d98e6fb</code>) | <strong>Workers</strong>: 4 | <strong>Timeouts</strong>: default 120 s plus the built-in overrides (same settings as Run 007) | <strong>N</strong>: 1 | <strong>Category</strong>: agents only (<code>--category agents</code>), started 07:50 UTC, nothing else on Ollama</li>
+<li><strong>Commit</strong>: <code>e9ef064</code> (plan <code>07ad3f8c</code> step 24.1: the PlanExecute <code>plan_steps</code>/replan field adds no tool-less step unless the task asks for one and no confirm/wait step, D-055)</li>
+<li><strong>Health Score</strong>: agents 177/192 = 92.2% (Run 007 same day: <code>0f0789c</code> 180/192, <code>d4b1626</code> 183/192; G3 <code>d4b1626</code> 2026-09-29: 178/192)</li>
+<li><strong>Score distribution</strong>: 43x4, 0x3, 0x2, 5x1, 0x0; wall time 1,363 s</li>
+<li><strong>Top failure codes</strong>: F-LOOP 5 (all timeouts); F-CODE 0</li>
+<li><strong>Changed scores</strong>: <code>agents/hierarchical_orchestrator</code> 4 -&gt; 1 (timeout at 300 s; 114.4 s at <code>0f0789c</code>, 164.1 s at <code>d4b1626</code>; OrchestratorAgent, code unchanged by the fix, also a timeout in the G3 run at <code>d4b1626</code>: load, not this change). <code>agents/plan_execute_recovery</code> stays 1 (timeout at 180 s; 4 at <code>d4b1626</code>): run alone it now takes 20 LLM calls and 28 s (<code>0f0789c</code> 24 calls, <code>d4b1626</code> 16), still over the timeout under 4 workers. <code>plan_execute</code>, <code>orchestrator_specialist</code>, <code>supply_chain_optimizer</code> time out at all three points.</li>
+<li><strong>Raw logs</strong>: 0 envelope leaks, 0 <code>Continue.</code>, 0 tracebacks; <code>Success: True</code>/<code>False</code> lines 21/3 (the same three <code>Success: False</code> examples as <code>0f0789c</code>, all scored 4); the 5 timeouts print nothing.</li>
+</ul>
+<h3 id="run-009-2026-10-01-101-examples-one-llm-layer-ab-against-e1f63a9-on-the-same-day-955-vs-908">Run 009 -- 2026-10-01 (101 Examples, one LLM layer A/B against <code>e1f63a9</code> on the same day, 95.5% vs 90.8%)<a class="headerlink" href="#run-009-2026-10-01-101-examples-one-llm-layer-ab-against-e1f63a9-on-the-same-day-955-vs-908" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Files</strong> (directories removed 2026-11-06): <code>evaluation/2026-10-01_22-19_7c823be_qwen3.5-4b/scorecard.md</code> (HEAD) and <code>evaluation/2026-10-01_21-32_e1f63a9_qwen3.5-4b_same-day-baseline/scorecard.md</code> (baseline); both run from isolated worktrees with <code>PYTHONPATH=&lt;worktree&gt;/src</code>, one after the other (21:32 and 22:19 UTC)</li>
+<li><strong>Model</strong>: <code>ollama_chat/qwen3.5:4b</code> (digest <code>2a654d98e6fb</code>) | <strong>Workers</strong>: 4 | <strong>Timeouts</strong>: default 120 s plus the built-in overrides | <strong>N</strong>: 1 per commit | <strong>Load</strong>: Ollama was shared with an external <code>qwen3.5:9b-q8_0</code> server under load during both runs, so timeouts are higher than in Run 007</li>
+<li><strong>Commits</strong>: <code>7c823be</code> (plan <code>944e2692</code>: one LLM layer, core completion state, native_fc and the meta-builder as FSMs on core, reasoning engine on core's run loop; the last reasoning fix <code>6496430</code> landed during the run and its examples were re-run, below) vs <code>e1f63a9</code></li>
+<li><strong>Health Score</strong>: <code>7c823be</code> 95.5% (386/404) vs <code>e1f63a9</code> 90.8% (367/404), +19 points</li>
+<li><strong>Top failure codes</strong>: <code>7c823be</code> F-LOOP 4 (timeouts), F-EXTRACT 3; <code>e1f63a9</code> F-LOOP 11 (timeouts), F-EXTRACT 2; F-CODE 0 at both</li>
+<li><strong>Changed scores</strong>: up at HEAD (baseline timeouts): <code>advanced/vendor_evaluation</code>, <code>agents/agent_memory_chain</code>, <code>agents/hierarchical_tools</code>, <code>agents/pipeline_review</code>, <code>agents/plan_execute_recovery</code>, <code>agents/react_hitl_combined</code>, <code>agents/react_structured_pipeline</code> 1 -&gt; 4, <code>agents/concurrent_react</code> 1 -&gt; 2. Down: <code>agents/reasoning_stacking</code> 4 -&gt; 1 (timeout at 180 s; 168.9 s at the baseline). Run alone twice per commit it scores 4 at both (<code>e1f63a9</code> 45.4 s, 45.5 s; <code>6496430</code> 45.2 s, 45.6 s): load, not code</li>
+<li><strong>Rebuilt paths</strong>: the 5 meta examples, <code>reasoning/math_tutor</code> and <code>agents/reasoning_tool</code> score 4 at HEAD; at <code>6496430</code> <code>reasoning/math_tutor</code> 4 (8.1 s) and <code>agents/reasoning_tool</code> 4 (11.8 s) run alone</li>
+<li><strong>Raw logs</strong>: 0 envelope leaks (<code>"field_name"</code>, <code>"extracted_data"</code>), 0 <code>Continue.</code>, 0 tracebacks at HEAD; agents <code>Success: True</code>/<code>False</code> lines 22/4</li>
+<li><strong>Rule</strong> (pre-registered, plan <code>944e2692</code> D-016): total within 8 points of the baseline, no code-caused 4 -&gt; 1 drop, 0 F-CODE, rebuilt examples within 1 point, 0 leaks: met (the <code>reasoning_stacking</code> clause through the solo re-runs, D-063)</li>
+</ul>
+<h3 id="run-010-2026-11-06-plan-0068b055-first-live-evidence-on-ollama_chatbonsai-227b-the-agents-category-was-completed-in-a-later-session">Run 010 -- 2026-11-06 (plan <code>0068b055</code>, first live evidence on <code>ollama_chat/bonsai-2:27b</code>; the agents category was completed in a later session)<a class="headerlink" href="#run-010-2026-11-06-plan-0068b055-first-live-evidence-on-ollama_chatbonsai-227b-the-agents-category-was-completed-in-a-later-session" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Model</strong>: <code>ollama_chat/bonsai-2:27b</code> (Q2_0, 26.9B, one GPU, context 32768) with the embedder <code>ollama/embeddinggemma-2:740m</code> | <strong>Commit</strong>: <code>8da28be</code> (the F-AR-05 comparison arms are <code>8a62490</code> and <code>8da28be</code>) | <strong>N</strong>: 1 per category, <strong>3</strong> per arm in the F-AR-05 comparison | <strong>Workers</strong>: 2 (4 for <code>fsm-llm-eval run</code>) | <strong>Timeouts</strong>: default 120 s plus the built-in overrides</li>
+<li><strong>Not comparable with Runs 001 to 009.</strong> Every earlier run was on <code>ollama_chat/qwen3.5:4b</code>. The default model changed in this plan (D-014), the model is larger and slower per call (about 10 to 35 s a call here, with 2 workers sharing one GPU), and the 4b figures (Run 006 and Run 007) are not a baseline for it. Nothing below was compared with them. The 0-4 score is a heuristic that overstates (see the Run 006 note), and the sample is one run per category.</li>
+<li><strong>Run environment</strong>: the repository <code>.env</code> (untracked) still named <code>ollama_chat/qwen3.5:4b</code> and, through litellm, beat the built-in default, so every run used <code>LITELLM_MODE=PRODUCTION</code> with <code>LLM_MODEL</code>, <code>LLM_TEMPERATURE</code> and <code>LLM_MAX_TOKENS</code> unset to make the default apply. See the note under "Prerequisites".</li>
+<li><strong>Smoke</strong>: a greeting FSM with no model argument ran on <code>bonsai-2:27b</code> (6 calls, 0 errors); <code>SemanticMemoryStore</code> with the real embedder returned 768-dimensional vectors and ranked all three probes correctly (relevant scores 0.73 to 0.84 against 0.52 to 0.59); a ReAct agent called a function tool and a keyword-only <code>dict</code> tool in one batch and answered correctly.</li>
+<li><strong><code>fsm-llm-eval run</code></strong> on <code>evaluation/datasets/simple_greeting_cases.json</code>, <code>--trials 3</code>: 12/12 = 100.0% (Wilson 95% CI [75.7%, 100.0%]), 4 cases of 3 trials, <code>name_is_extracted</code> 3/3.</li>
+<li><strong><code>fsm-llm-eval examples</code>, health per category</strong> (score sum over 4 per example):</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Examples</th>
+<th>Health</th>
+<th>Distribution</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>basic</td>
+<td>14</td>
+<td>53/56 = 94.6%</td>
+<td>13 x 4, 1 x 1 (<code>story_time</code>, timeout at 120 s)</td>
+</tr>
+<tr>
+<td>classification</td>
+<td>5</td>
+<td>20/20 = 100.0%</td>
+<td>5 x 4</td>
+</tr>
+<tr>
+<td>intermediate</td>
+<td>3</td>
+<td>12/12 = 100.0%</td>
+<td>3 x 4</td>
+</tr>
+<tr>
+<td>advanced</td>
+<td>17</td>
+<td>68/68 = 100.0%</td>
+<td>17 x 4</td>
+</tr>
+<tr>
+<td>workflows</td>
+<td>8</td>
+<td>32/32 = 100.0%</td>
+<td>8 x 4</td>
+</tr>
+<tr>
+<td>reasoning</td>
+<td>1</td>
+<td>4/4 = 100.0%</td>
+<td>1 x 4</td>
+</tr>
+<tr>
+<td>meta</td>
+<td>5</td>
+<td>20/20 = 100.0%</td>
+<td>5 x 4</td>
+</tr>
+<tr>
+<td>agents</td>
+<td>48</td>
+<td>141/192 = 73.4% as the harness scored them at 2 workers (first session: 109/124 for 31 examples, parsed from stdout; second session: the other 17); 183/192 = 95.3% with the 14 timeouts re-run alone (old scorer, see below)</td>
+<td>31 x 4 and 17 x 1 at 2 workers</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Agents category</strong> (two sessions, scores below are from the scorer that existed at the time, before the 2026-11-06 rubric change in section 3). First session: the run was cut at 2100 s (SIGTERM from <code>timeout</code>, exit 124) before it wrote a scorecard, so 17 of 48 examples were not run and 109/124 = 87.9% was a stdout parse of the 31 that finished (26 x 4, 5 x 1; the five scored 1 were <code>legal_document_review</code>, <code>orchestrator_specialist</code>, <code>pipeline_review</code>, <code>plan_execute</code> and <code>plan_execute_recovery</code>). Second session (HEAD <code>6368411</code> for the first batches; a docs-only commit landed during it, the code under test did not change): all 48 examples have now run. The 16 of the 17 not-run examples that went through the batch (<code>--workers 2</code>, table timeouts) scored 5 x 4 and 11 x 1 (timeouts at 180 to 300 s); the 17th, <code>supply_chain_optimizer</code>, scored 1 in every run of the first session. Counting the 31 earlier ones, the harness scored the category 31 x 4 and 17 x 1 = 141/192 = 73.4%.</li>
+<li><strong>The timeouts were queueing, not the examples.</strong> The server ran with <code>OLLAMA_NUM_PARALLEL:1</code> on one GPU, so two workers interleave: every request of one waits for the other's current generation, and the example timeout counts the wait. At 2 workers 14 examples timed out (the 11 of the batch plus <code>legal_document_review</code>, <code>pipeline_review</code> and <code>supply_chain_optimizer</code>) and every one of them finished when run alone (<code>--workers 1</code>, a 600 or 900 s limit set through <code>--config</code> because <code>--timeout</code> cannot lift a tabled value): 11 s to 307 s, steady progress, no loop. The server log shows the clients killed at the harness timeout while queued (HTTP 499 after 3m50s, 4m20s and 5m0s) and 8 <code>Load failed ... client connection closed</code> lines. The host GPU was also used by another project during the run, so outside contention cannot be excluded. With the 14 re-run alone the category reads 45 x 4 and 3 x 1 (<code>orchestrator_specialist</code>, <code>plan_execute</code>, <code>plan_execute_recovery</code>, not re-run in this session; the first two were shown slow, not looping, in the first one) = 183/192 = 95.3% by the old scorer. <code>supply_chain_optimizer</code> run alone took 306.6 s: the agent's own 300 s budget fired (<code>Error: Agent timed out after 300.0 seconds</code>), the run exited cleanly and the old scorer gave it 4. <code>basic/story_time</code> alone with <code>--timeout 600</code> took 100.6 s (score 4); it needs more than the 120 s default.</li>
+<li><strong>What the old scorer let through, and the rescoring.</strong> Several of those 4s are failed runs: <code>Error: Agent timed out</code> (<code>supply_chain_optimizer</code>), <code>Success: False</code> with no tool run (<code>rewoo_multi_step</code>), <code>Success: False</code> with a quality score of 0.55 (<code>regulatory_compliance</code>), <code>Success: False</code> after three reflections (<code>reflexion</code>). The scorer was changed for this (CHANGELOG, step 12.19). The step that changed it rescored 116 logs of that session offline and found nine that change, each from 4 to 2: <code>classification/multi_intent</code> and <code>advanced/multi_level_stack</code> (an extraction rate of exactly 50%), <code>agents/architecture_review</code> and <code>agents/eval_opt_structured</code> (<code>Success: False</code> and 2 of 4), <code>agents/reflexion</code>, <code>agents/regulatory_compliance</code> and <code>agents/rewoo_multi_step</code> (<code>Success: False</code>), <code>agents/skill_loader</code> (50% extraction) and <code>agents/supply_chain_optimizer</code> (<code>Error: Agent timed out</code>); the other 107 were identical and no legitimately successful run dropped. A later rescoring of the logs still on disk (127, including the F-AR-05 before-arm directories) also flags <code>agents/medical_literature</code> (one before-arm log). No health figure for the agents category under the fixed scorer is claimed, and the table above is not rescored: <strong>the per-category numbers above are not comparable with scores from the fixed scorer.</strong></li>
+<li><strong>Other live findings of that session, all handled in this plan</strong> (see the CHANGELOG Unreleased entries): a reply cut by <code>max_tokens</code> was shipped as the answer (<code>legal_document_review</code>, <code>security_audit</code>; 4 of the <code>regulatory_compliance</code> calls, 7 of 12 in <code>pipeline_review</code>) and <code>rewoo_multi_step</code> lost its plan to a cut <code>plan_blueprint</code> field (detection and a named cause in step 12.23; carried into the agent result as <code>stop_reason="truncated"</code> and a REWOO stop on a cut plan in step 12.28); litellm's provider-error banner printed to stdout in 9 of the 16 batch logs and none of the 15 solo ones (suppressed at import, step 12.20); <code>react_hitl_combined</code> was sent a task that asked for no approval, so its <code>y</code> ran as a second task (step 12.22, and the reworded task of that step was still skipped by the model, see the post-fix bullet below; step 12.31); 23 examples had a harness timeout equal to the agent's own 300 s budget (now 360 s, step 12.21). The other 27 examples that run on the default 300 s agent budget have a harness timeout below it (120 to 240 s) and keep it: there the harness is the hang detector and fires first.</li>
+<li><strong>Post-fix live smoke</strong> (step 12.26; code of <code>9c81ed2f</code>, only docs commits after it; <code>ollama_chat/bonsai-2:27b</code>, <code>--workers 1</code> throughout, same environment as above; N=1 per category): <code>fsm-llm-eval run</code> on <code>simple_greeting_cases.json</code>, <code>--trials 3</code>: 12/12 = 100.0% (Wilson [75.7%, 100.0%]). <code>examples</code>: basic 56/56 = 100.0% (14 x 4; <code>story_time</code> 70.9 s and score 4, where the 2-worker run above timed out at 120 s, so the queueing was the cause), classification 18/20 = 90.0% (4 x 4 and <code>multi_intent</code> 2), intermediate 12/12 = 100.0%. No timeout, no litellm "Give Feedback" banner and no traceback in any log. <strong>SIGTERM</strong> confirmed live twice with <code>timeout</code>: after 40 s (no example finished) the run exited 124 with <code>results.json</code> <code>"interrupted": true</code> and 0 results; after 100 s with 2 of 14 results and their logs; no orphan example process in either (the <code>logs/</code> directory of the first run was missing, which step 12.30 fixed afterwards). <strong>The nine examples the fixed scorer lowers from 4 to 2</strong> were re-run alone: eight scored 2 on a real failure signal read in the log (<code>multi_intent</code>: the dual-intent turn detected <code>question</code>; <code>multi_level_stack</code>: the model keyed <code>product_model</code> instead of the gating <code>product_question</code>; <code>architecture_review</code> and <code>eval_opt_structured</code>: the pass is forced at the 2-refinement cap; <code>reflexion</code>: <code>Success: False</code> after three identical reflections; <code>regulatory_compliance</code>: the report really ends mid-sentence, a cut prose reply; <code>rewoo_multi_step</code>: <code>Tools used: []</code>, the plan field cut at 1000 tokens), except <code>skill_loader</code>, whose task is a weather question with no weather tool, a flawed example task and not a code failure. <code>supply_chain_optimizer</code> scored 4 in that run with <code>Success: True</code> while its "Synthesized Strategy" was the cut-off message (a false 4); a second run, with logging on and no harness, ended with <code>Error: Agent timed out after 300.0 seconds</code> (it needs about 300 to 325 s against a 300 s agent budget). Step 12.28 reports a cut final reply of the agent's own last turn as <code>success=False</code>, <code>stop_reason="truncated"</code> (which the scorer then reads as <code>Success: False</code>); whether the <code>supply_chain_optimizer</code> cut is that case, and not a cut inside a specialist's own run, was not re-run live. <strong><code>react_hitl_combined</code></strong>: with the step 12.22 wording ("Research recent AI papers and publish a summary report") the model never called <code>publish_report</code> in all three solo runs (88.6 to 101.9 s, score 4, exit 0): no approval prompt, the <code>y</code> ran as a second task, and the first answer claimed a publication that no tool call made. With the step 12.31 wording ("Use the publish_report tool to publish a one-paragraph summary of recent AI papers") the model asked for approval and the <code>y</code> answered it in all three live runs (33 to 34 s, one <code>publish_report</code> call, <code>Approve this action? (y/n)</code> then <code>APPROVED</code>). That is three runs of one prompt on one model: a model that skips the tool still turns the <code>y</code> into a second task, and the score 4 does not tell the two cases apart.</li>
+<li><strong>F-AR-05-LIVE</strong> (the silent Orchestrator and ADaPT intermediate states, commit <code>c73dab7</code>): the 7 agents examples that use the pattern (<code>adapt</code>, <code>adapt_with_memory</code>, <code>medical_literature</code>, <code>orchestrator</code>, <code>orchestrator_specialist</code>, <code>hierarchical_orchestrator</code>, <code>supply_chain_optimizer</code>), same model, same day, runs interleaved, N=3 per arm, before arm <code>8a62490</code> (the parent of <code>c73dab7</code>) in a scratch worktree, after arm <code>8da28be</code>. Health over the 7: before 67.9 / 67.9 / 67.9 (median 67.9, spread 0.0), after 78.6 / 67.9 / 78.6 (median 78.6, spread 10.7). The whole difference is <code>hierarchical_orchestrator</code> (timeout at 300 s in all three before runs, finished in 204 s and 218 s in two of three after runs). <code>orchestrator_specialist</code> and <code>supply_chain_optimizer</code> time out in both arms, so their quality is unmeasured. Wall time of the examples that finish fell by about half (<code>orchestrator</code> 93 s to 38 s, <code>adapt</code> 65 s to 32 s, medians). Verdict by the rule of plan decision D-017: do not revert <code>c73dab7</code>. Caveat: the scorer saturates (6 of 7 examples score 4 in both arms), so this shows the change did not lower the score, and it does not show that the answers are as good; the after arm also holds the later 12.x fixes, none of which touches these patterns.</li>
+</ul>
+<hr />
+<p><em>New evaluation runs should be appended above this line.</em></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>

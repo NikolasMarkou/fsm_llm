@@ -1,0 +1,1851 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Finite state machines for large language models">
+      
+      
+      
+        <link rel="canonical" href="https://nikolasmarkou.github.io/fsm_llm/0.13.0/fsm_design/">
+      
+      
+        <link rel="prev" href="../examples/">
+      
+      
+        <link rel="next" href="../handlers/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+    
+    
+      
+        <title>FSM Design - FSM-LLM</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#fsm-design-guide" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="FSM-LLM" class="md-header__button md-logo" aria-label="FSM-LLM" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            FSM-LLM
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              FSM Design
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/NikolasMarkou/fsm_llm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    NikolasMarkou/fsm_llm
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="FSM-LLM" class="md-nav__button md-logo" aria-label="FSM-LLM" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    FSM-LLM
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/NikolasMarkou/fsm_llm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    NikolasMarkou/fsm_llm
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FSM Design
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FSM Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#core-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core Principles
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Core Principles">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-single-responsibility-states" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Single Responsibility States
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-clear-transition-logic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Clear Transition Logic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-graceful-error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Graceful Error Handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-natural-language-cues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Natural Language Cues
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Patterns
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design Patterns">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-gatekeeper-authenticationvalidation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Gatekeeper -- Authentication/Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-collector-gathering-information" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Collector -- Gathering Information
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-router-directing-to-specialized-flows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Router -- Directing to Specialized Flows
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-confirmer-validating-understanding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Confirmer -- Validating Understanding
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#transition-field-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transition Field Reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#context-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context Management
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fsm-stacking-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FSM Stacking Patterns
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FSM Stacking Patterns">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-to-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to Use
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#guidelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guidelines
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#classification-based-routing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Classification-Based Routing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tool-calling-and-structured-turns-completion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool Calling and Structured Turns (completion)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#procedures-written-on-demand-synthesize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Procedures Written on Demand (synthesize)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#designing-for-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Designing for Agents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#anti-patterns-to-avoid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Anti-Patterns to Avoid
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-fsms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing FSMs
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../handlers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handlers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../synthesis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime FSM synthesis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api_reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command line
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evaluate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_5" id="__nav_5_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmaps
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Roadmaps
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026_roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026 roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#core-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core Principles
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Core Principles">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-single-responsibility-states" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Single Responsibility States
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-clear-transition-logic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Clear Transition Logic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-graceful-error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Graceful Error Handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-natural-language-cues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Natural Language Cues
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Patterns
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design Patterns">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-gatekeeper-authenticationvalidation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Gatekeeper -- Authentication/Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-collector-gathering-information" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Collector -- Gathering Information
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-router-directing-to-specialized-flows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Router -- Directing to Specialized Flows
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-confirmer-validating-understanding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Confirmer -- Validating Understanding
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#transition-field-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transition Field Reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#context-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context Management
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fsm-stacking-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FSM Stacking Patterns
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FSM Stacking Patterns">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-to-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to Use
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#guidelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guidelines
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#classification-based-routing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Classification-Based Routing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tool-calling-and-structured-turns-completion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool Calling and Structured Turns (completion)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#procedures-written-on-demand-synthesize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Procedures Written on Demand (synthesize)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#designing-for-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Designing for Agents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#anti-patterns-to-avoid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Anti-Patterns to Avoid
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-fsms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing FSMs
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="fsm-design-guide">FSM Design Guide<a class="headerlink" href="#fsm-design-guide" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Covers FSM-LLM v0.13.0</p>
+</blockquote>
+<p>Best practices for designing effective Finite State Machines for conversational AI.</p>
+<h2 id="core-principles">Core Principles<a class="headerlink" href="#core-principles" title="Permanent link">&para;</a></h2>
+<h3 id="1-single-responsibility-states">1. Single Responsibility States<a class="headerlink" href="#1-single-responsibility-states" title="Permanent link">&para;</a></h3>
+<p>Each state should have one clear purpose:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"collect_email"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"collect_email"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Collect the user's email address"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"purpose"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Collect and validate user's email address"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"extraction_instructions"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Extract the user's email address"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"response_instructions"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Ask for email, or confirm the one provided"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"required_context_keys"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"email"</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">"transitions"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"collect_phone"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Valid email provided"</span><span class="p">}]</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong>Avoid</strong> states that try to collect everything at once.</p>
+<h3 id="2-clear-transition-logic">2. Clear Transition Logic<a class="headerlink" href="#2-clear-transition-logic" title="Permanent link">&para;</a></h3>
+<p>Make conditions explicit with JsonLogic:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"transitions"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"vip_service"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"High-value customer"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"conditions"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span>
+<span class="w">        </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Lifetime value above 1000"</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"requires_context_keys"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"lifetime_value"</span><span class="p">],</span>
+<span class="w">        </span><span class="nt">"logic"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"&gt;"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"var"</span><span class="p">:</span><span class="w"> </span><span class="s2">"lifetime_value"</span><span class="p">},</span><span class="w"> </span><span class="mi">1000</span><span class="p">]}</span>
+<span class="w">      </span><span class="p">}]</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"standard_service"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Default path"</span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="3-graceful-error-handling">3. Graceful Error Handling<a class="headerlink" href="#3-graceful-error-handling" title="Permanent link">&para;</a></h3>
+<p>Always provide paths for error cases -- avoid dead-end states with no transitions.</p>
+<h3 id="4-natural-language-cues">4. Natural Language Cues<a class="headerlink" href="#4-natural-language-cues" title="Permanent link">&para;</a></h3>
+<p>Write purposes that guide natural conversation:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"purpose"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Warmly greet the returning customer by name and ask how we can help"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"response_instructions"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Use the customer's name and offer a personalized welcome"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"required_context_keys"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"customer_name"</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<h2 id="design-patterns">Design Patterns<a class="headerlink" href="#design-patterns" title="Permanent link">&para;</a></h2>
+<h3 id="the-gatekeeper-authenticationvalidation">The Gatekeeper -- Authentication/Validation<a class="headerlink" href="#the-gatekeeper-authenticationvalidation" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"verify_identity"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"purpose"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Verify user identity with security questions"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"required_context_keys"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"account_number"</span><span class="p">,</span><span class="w"> </span><span class="s2">"security_answer"</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">"transitions"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="p">{</span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"authenticated"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Identity verified"</span><span class="p">},</span>
+<span class="w">      </span><span class="p">{</span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"auth_failed"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Failed verification"</span><span class="p">}</span>
+<span class="w">    </span><span class="p">]</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>With no <code>conditions</code> and equal (default) priorities, both transitions pass and tie, so they are ambiguous and the LLM picks between them from the descriptions. (Two tied transitions to the same target are one candidate and need no choice. A tie of 15 or more distinct targets cannot be classified: the conversation stays in the state and <code>fsm-llm-validate</code> warns.) Among passing transitions the unique lowest <code>priority</code> value wins outright, so to make "Identity verified" deterministic, give each transition a condition with <code>requires_context_keys</code> and a <code>logic</code> so only one passes, or give it a lower <code>priority</code> than the fallback edge.</p>
+<h3 id="the-collector-gathering-information">The Collector -- Gathering Information<a class="headerlink" href="#the-collector-gathering-information" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"shipping_address"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"purpose"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Collect complete shipping address"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"extraction_instructions"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Extract street, city, state, and zip code"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"required_context_keys"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"street"</span><span class="p">,</span><span class="w"> </span><span class="s2">"city"</span><span class="p">,</span><span class="w"> </span><span class="s2">"state"</span><span class="p">,</span><span class="w"> </span><span class="s2">"zip"</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">"transitions"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span>
+<span class="w">      </span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"confirm_address"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"All fields collected"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"conditions"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span>
+<span class="w">        </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Every address field is present"</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"requires_context_keys"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"street"</span><span class="p">,</span><span class="w"> </span><span class="s2">"city"</span><span class="p">,</span><span class="w"> </span><span class="s2">"state"</span><span class="p">,</span><span class="w"> </span><span class="s2">"zip"</span><span class="p">],</span>
+<span class="w">        </span><span class="nt">"logic"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"and"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">          </span><span class="p">{</span><span class="nt">"has_context"</span><span class="p">:</span><span class="w"> </span><span class="s2">"street"</span><span class="p">},</span><span class="w"> </span><span class="p">{</span><span class="nt">"has_context"</span><span class="p">:</span><span class="w"> </span><span class="s2">"city"</span><span class="p">},</span>
+<span class="w">          </span><span class="p">{</span><span class="nt">"has_context"</span><span class="p">:</span><span class="w"> </span><span class="s2">"state"</span><span class="p">},</span><span class="w"> </span><span class="p">{</span><span class="nt">"has_context"</span><span class="p">:</span><span class="w"> </span><span class="s2">"zip"</span><span class="p">}</span>
+<span class="w">        </span><span class="p">]}</span>
+<span class="w">      </span><span class="p">}]</span>
+<span class="w">    </span><span class="p">}]</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The condition is what holds the state until the address is complete; <code>required_context_keys</code> alone only asks the pipeline to extract those keys.</p>
+<h3 id="the-router-directing-to-specialized-flows">The Router -- Directing to Specialized Flows<a class="headerlink" href="#the-router-directing-to-specialized-flows" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"issue_classifier"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"purpose"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Understand the issue type and route appropriately"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"transitions"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="p">{</span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"technical_flow"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Technical issue"</span><span class="p">},</span>
+<span class="w">      </span><span class="p">{</span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"billing_flow"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Billing issue"</span><span class="p">},</span>
+<span class="w">      </span><span class="p">{</span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"general_inquiry"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"General question"</span><span class="p">}</span>
+<span class="w">    </span><span class="p">]</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="the-confirmer-validating-understanding">The Confirmer -- Validating Understanding<a class="headerlink" href="#the-confirmer-validating-understanding" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"confirm_order"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"purpose"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Summarize order details and get final confirmation"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"transitions"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="p">{</span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"process_order"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Confirmed"</span><span class="p">},</span>
+<span class="w">      </span><span class="p">{</span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"modify_order"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Wants changes"</span><span class="p">}</span>
+<span class="w">    </span><span class="p">]</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<h2 id="transition-field-reference">Transition Field Reference<a class="headerlink" href="#transition-field-reference" title="Permanent link">&para;</a></h2>
+<p><strong><code>evaluation_priority</code></strong> on <code>TransitionCondition</code>: Controls evaluation order (default 100, range 0-1000). Lower values evaluated first -- useful for short-circuiting:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"conditions"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">  </span><span class="p">{</span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Account suspended"</span><span class="p">,</span><span class="w"> </span><span class="nt">"logic"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"=="</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"var"</span><span class="p">:</span><span class="w"> </span><span class="s2">"account_status"</span><span class="p">},</span><span class="w"> </span><span class="s2">"suspended"</span><span class="p">]},</span><span class="w"> </span><span class="nt">"evaluation_priority"</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">},</span>
+<span class="w">  </span><span class="p">{</span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Account overdue"</span><span class="p">,</span><span class="w"> </span><span class="nt">"logic"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"=="</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"var"</span><span class="p">:</span><span class="w"> </span><span class="s2">"payment_status"</span><span class="p">},</span><span class="w"> </span><span class="s2">"overdue"</span><span class="p">]},</span><span class="w"> </span><span class="nt">"evaluation_priority"</span><span class="p">:</span><span class="w"> </span><span class="mi">50</span><span class="p">}</span>
+<span class="p">]}</span>
+</code></pre></div>
+<p><strong><code>llm_description</code></strong> on <code>Transition</code>: Optional string (max 300 chars) that customizes how a transition is presented to the LLM during ambiguous decisions. When omitted, <code>description</code> is used.</p>
+<h2 id="context-management">Context Management<a class="headerlink" href="#context-management" title="Permanent link">&para;</a></h2>
+<p><strong>Required vs optional</strong>: <code>required_context_keys</code> lists the data a state should extract; it does <strong>not</strong> block a transition (an unconditional transition fires even when a listed key is missing). To hold a state until data exists, give the transition a condition with <code>requires_context_keys</code> and a <code>logic</code> such as <code>{"has_context": "email"}</code>; <code>fsm-llm-validate</code> warns about a required key no condition gates on.</p>
+<p><strong>Progressive building</strong>: Collect information gradually across states rather than all at once.</p>
+<p><strong>Context scope</strong>: <code>context_scope.read_keys</code> restricts which context keys a state's prompts see. <code>write_keys</code> is advisory: it is not enforced. Both must be lists of strings, and any other key in <code>context_scope</code> (for example a misspelt <code>read_key</code>) is a load error.</p>
+<p><strong>Gate keys the user must not set</strong>: a key a transition condition reads (<code>is_admin</code>, <code>is_verified</code>) can be written by a steered extraction unless you list it in the FSM-level <code>handler_only_keys</code>. Listed keys are dropped from every LLM extraction channel and stay writable by handlers, <code>update_context</code> and <code>initial_context</code>. It is opt-in and covers only the listed keys (an unlisted gate key, or one owned by a <code>classification_extractions</code> entry, is not protected). <code>fsm-llm-validate</code> warns about a listed key no state references (usually a typo) and about a listed key that a <code>classification_extractions</code> entry writes.</p>
+<p><strong>Corrections</strong>: a later-turn value the LLM returns for an already-set key replaces it only when the pipeline extracted that key itself (handler-set and <code>update_context</code> values are never overwritten). A refused correction leaves the stored value in place, and the Pass-2 prompt then carries a <code>&lt;rejected_corrections&gt;</code> block so the reply does not claim the change was made. The block appears only when the user's message states the value as a whole word of at least 3 characters (<code>bored</code> does not ground <code>red</code>; a 1 or 2 character value such as <code>US</code> never does), and never for a value that ended up stored. A handler that normalises an extracted value on <code>CONTEXT_UPDATE</code> (<code>blue</code> -&gt; <code>BLUE</code>) counts as a handler edit and turns later corrections of that key off (the stored value stands and the reply is told so).</p>
+<h2 id="fsm-stacking-patterns">FSM Stacking Patterns<a class="headerlink" href="#fsm-stacking-patterns" title="Permanent link">&para;</a></h2>
+<p>FSM stacking (<code>push_fsm</code>/<code>pop_fsm</code>) enables modular, composable design.</p>
+<h3 id="when-to-use">When to Use<a class="headerlink" href="#when-to-use" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Shared sub-flows</strong> -- A "collect address" FSM reused by checkout, returns, account setup</li>
+<li><strong>Progressive detail</strong> -- High-level routing FSM pushes specialized FSMs per topic</li>
+<li><strong>Reasoning integration</strong> -- The reasoning engine uses stacking internally</li>
+</ul>
+<h3 id="guidelines">Guidelines<a class="headerlink" href="#guidelines" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Keep child FSMs self-contained -- they should work independently</li>
+<li>Define clear context contracts via <code>context_to_pass</code> and <code>shared_context_keys</code></li>
+<li>Design terminal states (no outgoing transitions) to trigger <code>pop_fsm</code></li>
+<li>Choose merge strategies: <code>"update"</code> (overwrite parent) or <code>"preserve"</code> (only add new keys). Only keys named in <code>shared_context_keys</code> (or given as <code>return_context</code> / <code>context_to_return</code>) come back, whatever the strategy; a child's other extracted data is dropped on pop.</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="n">api</span><span class="o">.</span><span class="n">push_fsm</span><span class="p">(</span><span class="n">conv_id</span><span class="p">,</span> <span class="s2">"address_form.json"</span><span class="p">,</span>
+    <span class="n">context_to_pass</span><span class="o">=</span><span class="p">{</span><span class="s2">"flow"</span><span class="p">:</span> <span class="s2">"checkout"</span><span class="p">},</span>
+    <span class="n">shared_context_keys</span><span class="o">=</span><span class="p">[</span><span class="s2">"user_id"</span><span class="p">])</span>
+
+<span class="n">api</span><span class="o">.</span><span class="n">pop_fsm</span><span class="p">(</span><span class="n">conv_id</span><span class="p">,</span>
+    <span class="n">context_to_return</span><span class="o">=</span><span class="p">{</span><span class="s2">"address_complete"</span><span class="p">:</span> <span class="kc">True</span><span class="p">},</span>
+    <span class="n">merge_strategy</span><span class="o">=</span><span class="s2">"update"</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="classification-based-routing">Classification-Based Routing<a class="headerlink" href="#classification-based-routing" title="Permanent link">&para;</a></h2>
+<p>Classification is built into the core (<code>fsm_llm.Classifier</code>). Use it with <code>classification_extractions</code> on states for automatic intent-based routing, or use a lightweight classifier layer that pushes the appropriate FSM via stacking.</p>
+<p>Inside a conversation the classifier uses the conversation's own LLM interface, so a custom <code>llm_interface</code> given to <code>API</code> also answers the classification calls. An entry that sets its own <code>model</code> gets a separate interface for that model (no connection settings are copied to it).</p>
+<h2 id="tool-calling-and-structured-turns-completion">Tool Calling and Structured Turns (<code>completion</code>)<a class="headerlink" href="#tool-calling-and-structured-turns-completion" title="Permanent link">&para;</a></h2>
+<p>A state may declare the optional <code>completion</code> field. Its Pass 1 is then one native tool-calling call (<code>tools</code>) or one JSON-schema call (<code>response_format_key</code>, an internal context key holding the response format), never both, over <code>[system(instructions)] + context[messages_key]</code>. The result <code>{kind, text, calls}</code> lands in <code>result_key</code> (default <code>completion_result</code>), and transitions route on <code>&lt;result_key&gt;.kind</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">"transitions"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">  </span><span class="p">{</span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"run_tools"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"The model called tools"</span><span class="p">,</span><span class="w"> </span><span class="nt">"priority"</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span>
+<span class="w">   </span><span class="nt">"conditions"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Calls"</span><span class="p">,</span><span class="w"> </span><span class="nt">"logic"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"=="</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"var"</span><span class="p">:</span><span class="w"> </span><span class="s2">"completion_result.kind"</span><span class="p">},</span><span class="w"> </span><span class="s2">"calls"</span><span class="p">]}}]},</span>
+<span class="w">  </span><span class="p">{</span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"conclude"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Final answer or malformed turn"</span><span class="p">,</span><span class="w"> </span><span class="nt">"priority"</span><span class="p">:</span><span class="w"> </span><span class="mi">900</span><span class="p">}</span>
+<span class="p">]</span>
+</code></pre></div>
+<p>Design rules:</p>
+<ul>
+<li>Give every result kind (<code>calls</code>, <code>final</code>, <code>malformed</code>; no <code>calls</code> without <code>tools</code>) a route, or end on an unconditional fallback edge; <code>fsm-llm-validate</code> warns otherwise.</li>
+<li>The transcript (<code>messages_key</code>, default <code>_completion_messages</code>) belongs to you: seed it with the task as a <code>user</code> message, and after running the calls append <code>fsm_llm.tool_exchange(text, calls, results)</code>. Core refuses an unpaired transcript and a tool-calling turn with no user message.</li>
+<li>The call runs only while <code>result_key</code> is unset: the handler that acts on a result clears it, otherwise the state makes no new call.</li>
+<li>A completion state has no other extraction (<code>field_extractions</code>, <code>classification_extractions</code>, <code>required_context_keys</code>, <code>extraction_instructions</code>) and cannot be terminal. Leave its <code>response_instructions</code> empty unless it should also speak.</li>
+<li>Core runs no tool. Run tools in a handler on the next state (the <code>native_fc</code> agent does exactly this).</li>
+</ul>
+<h2 id="procedures-written-on-demand-synthesize">Procedures Written on Demand (<code>synthesize</code>)<a class="headerlink" href="#procedures-written-on-demand-synthesize" title="Permanent link">&para;</a></h2>
+<p>A state may declare the optional <code>synthesize</code> field when a sub-conversation cannot be written ahead of time. The state carries a goal; <code>fsm_llm.synthesis.ProcedureRunner</code> has a model write a child FSM for it, checks it, runs it on the host's model as a pushed child and merges back only the declared <code>return_keys</code>. The state itself is silent and routes on the result the runner writes to <code>synthesis_result</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">"gather"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"gather"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Run a procedure written on demand"</span><span class="p">,</span><span class="w"> </span><span class="nt">"purpose"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Collect the booking"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"response_instructions"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"synthesize"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"goal"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Book a table: ask the party size and the date."</span><span class="p">,</span>
+<span class="w">                 </span><span class="nt">"inputs"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"venue"</span><span class="p">],</span><span class="w"> </span><span class="nt">"return_keys"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"party_size"</span><span class="p">,</span><span class="w"> </span><span class="s2">"visit_date"</span><span class="p">],</span><span class="w"> </span><span class="nt">"on_failure"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sorry"</span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"transitions"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"done"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"It finished"</span><span class="p">,</span><span class="w"> </span><span class="nt">"priority"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">     </span><span class="nt">"conditions"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ok"</span><span class="p">,</span><span class="w"> </span><span class="nt">"requires_context_keys"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"synthesis_result"</span><span class="p">],</span>
+<span class="w">                     </span><span class="nt">"logic"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"=="</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"var"</span><span class="p">:</span><span class="w"> </span><span class="s2">"synthesis_result.status"</span><span class="p">},</span><span class="w"> </span><span class="s2">"ok"</span><span class="p">]}}]},</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">"target_state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sorry"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"It failed or was stopped"</span><span class="p">,</span><span class="w"> </span><span class="nt">"priority"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<span class="w">     </span><span class="nt">"conditions"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"not ok"</span><span class="p">,</span><span class="w"> </span><span class="nt">"requires_context_keys"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"synthesis_result"</span><span class="p">],</span>
+<span class="w">                     </span><span class="nt">"logic"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"in"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"var"</span><span class="p">:</span><span class="w"> </span><span class="s2">"synthesis_result.status"</span><span class="p">},</span><span class="w"> </span><span class="p">[</span><span class="s2">"failed"</span><span class="p">,</span><span class="w"> </span><span class="s2">"aborted"</span><span class="p">]]}}]}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Design rules:</p>
+<ul>
+<li>Route on <code>synthesis_result.status</code> (<code>ok</code>, <code>failed</code>, <code>aborted</code>; <code>running</code> while it works). Every edge must read the result key, or it would fire before the runner has produced a result.</li>
+<li>Write the failure edge as <code>status in [failed, aborted]</code>. A procedure that spends its turn budget ends <code>aborted</code>, so a bare <code>== "failed"</code> would strand the host: the loader runs the edges on sample results and refuses it.</li>
+<li><code>on_failure</code> names the state the failure edge reaches, one of the state's own transition targets. Give that state a reply that apologises or offers an alternative, because a failure is a normal outcome, not an exception.</li>
+<li>Name what the procedure may use (<code>inputs</code>) and what it must return (<code>return_keys</code>) with plain key names. Do not use a handler-only key as a return key.</li>
+<li>The state declares no extraction and no <code>completion</code>. Core only loads the field: a bare <code>API.converse</code> stays in the state, so drive the host through <code>ProcedureRunner</code>.</li>
+<li>The result is skip-if-set. A state that runs again on re-entry must clear <code>synthesis_result</code> first (<code>clear_keys_on_entry</code>).</li>
+</ul>
+<p>The guide is <a href="../synthesis/">synthesis.md</a>; the reference is the Synthesis section of <a href="../api_reference/">api_reference.md</a>.</p>
+<h2 id="designing-for-agents">Designing for Agents<a class="headerlink" href="#designing-for-agents" title="Permanent link">&para;</a></h2>
+<p>Agent patterns (<code>fsm_llm.agents</code>) auto-generate FSMs from tool registries. The core ReAct loop is a 3-4 state FSM: <strong>Think -&gt; Act -&gt; Observe -&gt; Conclude</strong>. Tool execution happens via handlers, not state instructions.</p>
+<p>For agent-style flows that accumulate intermediate results across turns, <code>WorkingMemory</code> (<code>fsm_llm.WorkingMemory</code>) provides named buffers (<code>core</code>, <code>scratch</code>, <code>environment</code>, <code>reasoning</code>) so tool outputs and intermediate reasoning are organized rather than flattened into one context dict. Note the reach: buffer data is merged into the Pass-1 per-field extraction prompt only (default <code>context_keys</code>), never into the Pass-2 response prompt, which reads <code>context.data</code> alone; put anything the response model must see in <code>context.data</code> (via <code>update_context</code> or a handler). Intermediate states can also set an empty <code>response_instructions</code> to skip the Pass-2 response LLM call entirely (see the 2-pass notes), which is the common pattern for tool-dispatch states inside a ReAct loop.</p>
+<h2 id="anti-patterns-to-avoid">Anti-Patterns to Avoid<a class="headerlink" href="#anti-patterns-to-avoid" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Anti-Pattern</th>
+<th>Problem</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Megazord State</td>
+<td>One state handles everything</td>
+<td>Split into single-responsibility states</td>
+</tr>
+<tr>
+<td>Dead End</td>
+<td>Error state with no transitions out</td>
+<td>Add recovery/retry transitions</td>
+</tr>
+<tr>
+<td>Infinite Loop</td>
+<td>State transitions back to itself</td>
+<td>Add max retry logic or a fallback transition</td>
+</tr>
+<tr>
+<td>Context Blackhole</td>
+<td>Too many <code>required_context_keys</code> at once</td>
+<td>Collect progressively across states</td>
+</tr>
+</tbody>
+</table>
+<h2 id="testing-fsms">Testing FSMs<a class="headerlink" href="#testing-fsms" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Validate structure</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fsm_llm</span><span class="w"> </span><span class="kn">import</span> <span class="n">validate_fsm_from_file</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">validate_fsm_from_file</span><span class="p">(</span><span class="s2">"my_fsm.json"</span><span class="p">)</span>  <span class="c1"># checks reachability, missing transitions</span>
+</code></pre></div>
+<p>Or from the command line:</p>
+<div class="highlight"><pre><span></span><code>fsm-llm-validate<span class="w"> </span>--fsm<span class="w"> </span>my_fsm.json
+</code></pre></div>
+<p>Test all paths, context flow, and edge cases (empty input, very long input, off-topic).</p>
+<hr />
+<p><strong>Next:</strong> <a href="../handlers/">Handler Development</a></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>

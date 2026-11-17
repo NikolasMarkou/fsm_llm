@@ -1,0 +1,1747 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Finite state machines for large language models">
+      
+      
+      
+        <link rel="canonical" href="https://nikolasmarkou.github.io/fsm_llm/0.13.0/concepts/">
+      
+      
+        <link rel="prev" href="../quickstart/">
+      
+      
+        <link rel="next" href="../examples/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+    
+    
+      
+        <title>Concepts - FSM-LLM</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#concepts" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="FSM-LLM" class="md-header__button md-logo" aria-label="FSM-LLM" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            FSM-LLM
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Concepts
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/NikolasMarkou/fsm_llm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    NikolasMarkou/fsm_llm
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="FSM-LLM" class="md-nav__button md-logo" aria-label="FSM-LLM" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    FSM-LLM
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/NikolasMarkou/fsm_llm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    NikolasMarkou/fsm_llm
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-fsm-llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why FSM-LLM?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#key-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key features
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Key features">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-core-finite-state-machines-driven-by-an-llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The core: finite state machines driven by an LLM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reasoning-workflows-and-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reasoning, workflows and agents
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#knowledge-bundles-and-agent-skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Knowledge bundles and Agent Skills
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#monitoring-and-evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Monitoring and evaluation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#one-llm-layer-security-and-reliability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One LLM layer, security and reliability
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Status
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#acknowledgments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acknowledgments
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="References">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agent-patterns-and-reasoning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent patterns and reasoning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#standards-and-specifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Standards and specifications
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evaluation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fsm_design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FSM Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../handlers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handlers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../synthesis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime FSM synthesis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api_reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command line
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evaluate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_5" id="__nav_5_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmaps
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Roadmaps
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026_roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026 roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-fsm-llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why FSM-LLM?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#key-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key features
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Key features">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-core-finite-state-machines-driven-by-an-llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The core: finite state machines driven by an LLM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reasoning-workflows-and-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reasoning, workflows and agents
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#knowledge-bundles-and-agent-skills" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Knowledge bundles and Agent Skills
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#monitoring-and-evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Monitoring and evaluation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#one-llm-layer-security-and-reliability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One LLM layer, security and reliability
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Status
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#acknowledgments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acknowledgments
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="References">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agent-patterns-and-reasoning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent patterns and reasoning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#standards-and-specifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Standards and specifications
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evaluation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="concepts">Concepts<a class="headerlink" href="#concepts" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Covers FSM-LLM v0.13.0</p>
+</blockquote>
+<p>This page explains what the library is made of, where it fits, and how one message travels
+through it. For a first run go to the <a href="../quickstart/">Quick Start</a>; for the parts in detail go
+to the <a href="../fsm_design/">FSM Design Guide</a> and <a href="../architecture/">Architecture</a>.</p>
+<h2 id="why-fsm-llm">Why FSM-LLM?<a class="headerlink" href="#why-fsm-llm" title="Permanent link">&para;</a></h2>
+<p>FSM-LLM splits the work three ways:</p>
+<ul>
+<li><strong>The LLM handles language</strong>: understanding the user, pulling out facts, writing replies.</li>
+<li><strong>The state machine handles flow</strong>: which state you are in and where you go next is a rule,
+  not a mood. The LLM breaks a tie between two equal rules and nothing else.</li>
+<li><strong>The framework handles state</strong>: what has been collected, history, your own hooks, and saving
+  and restoring sessions.</li>
+</ul>
+<p>Use it when the conversation has steps: forms and intake, onboarding, support triage, tutoring
+flows, anything where "what must happen next" is a rule.</p>
+<p>Do not use it for open-ended chat with no structure (a plain LLM call is simpler), or when you
+need a hosted, production-hardened agent platform. The project is young, and one subpackage is
+explicitly experimental (see <a href="#status">Status</a>).</p>
+<h2 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
+<p>Every user message goes through two LLM passes:</p>
+<pre class="mermaid"><code>flowchart LR
+    U[User message] --&gt; P1[Pass 1: extract data]
+    P1 --&gt; C[Update context]
+    C --&gt; T{Transition rules}
+    T -- one fits --&gt; S[New state]
+    T -- several tie --&gt; L[LLM picks one] --&gt; S
+    T -- none fit --&gt; K[Stay]
+    S --&gt; P2[Pass 2: reply from the final state]
+    K --&gt; P2
+    P2 --&gt; R[Reply]</code></pre>
+<ul>
+<li>The context is a dictionary of everything collected so far in one conversation.</li>
+<li>Transition rules use JsonLogic, for example <code>{"&gt;=": [{"var": "age"}, 18]}</code>. If several
+  transitions pass, the lowest <code>priority</code> number wins outright. The LLM is asked only when two
+  or more tie at that lowest priority. If none pass, the conversation stays put.</li>
+<li>Pass 2 runs after the transition, so the reply comes from the state the conversation is
+  actually in. A state with empty <code>response_instructions</code> makes no LLM call, replies with <code>""</code>
+  and adds nothing to the history.</li>
+</ul>
+<p>The subpackages sit on top of the core and never the other way round:</p>
+<pre class="mermaid"><code>flowchart TD
+    core[fsm_llm core: API, FSMManager, MessagePipeline]
+    reasoning[fsm_llm.reasoning] --&gt; core
+    workflows[fsm_llm.workflows] --&gt; core
+    agents[fsm_llm.agents] --&gt; core
+    agents -- ReasoningReactAgent --&gt; reasoning
+    monitor[fsm_llm.monitor] --&gt; core
+    monitor -- launch, builder --&gt; agents
+    monitor -- demo workflows --&gt; workflows
+    eval[fsm_llm.eval] --&gt; core
+    synthesis[fsm_llm.synthesis] --&gt; core
+    synthesis --&gt; agents
+    synthesis --&gt; eval
+    testing[fsm_llm.testing] --&gt; core</code></pre>
+<table>
+<thead>
+<tr>
+<th>Subpackage</th>
+<th>What it adds</th>
+<th>Maturity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/reasoning/README.md"><code>fsm_llm.reasoning</code></a></td>
+<td>9 reasoning strategies as stacked FSMs, validation, up to 3 retries</td>
+<td>Tested offline; live behavior depends on the model</td>
+</tr>
+<tr>
+<td><a href="https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/workflows/README.md"><code>fsm_llm.workflows</code></a></td>
+<td>Async in-memory workflow engine, 11 step types, a Python DSL</td>
+<td>Runs without an LLM unless you add LLM steps</td>
+</tr>
+<tr>
+<td><a href="https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/agents/README.md"><code>fsm_llm.agents</code></a></td>
+<td>18 agent patterns, tools, human approval, memory, MCP, A2A, meta-builder</td>
+<td>Documented known limits in the agents README; open work is in the <a href="../2026_roadmap/">2026 roadmap</a></td>
+</tr>
+<tr>
+<td><a href="https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/monitor/README.md"><code>fsm_llm.monitor</code></a></td>
+<td>FastAPI dashboard, optional OpenTelemetry export</td>
+<td>Needs the <code>monitor</code> extra</td>
+</tr>
+<tr>
+<td><a href="https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/eval/README.md"><code>fsm_llm.eval</code></a></td>
+<td>Examples scorer (0 to 4), conversation cases with Wilson intervals</td>
+<td>Scores are a heuristic that overstates quality; read the logs too</td>
+</tr>
+<tr>
+<td><a href="https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/synthesis/README.md"><code>fsm_llm.synthesis</code></a></td>
+<td>A model compiles a goal into an FSM, gates judge it, a library stores it, a runner executes it; agent tools</td>
+<td>Tested offline with scripted models. Bench status: three blocks run on one model, all INCONCLUSIVE; no result favours synthesis.</td>
+</tr>
+<tr>
+<td><a href="https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/testing/README.md"><code>fsm_llm.testing</code></a></td>
+<td>Public test doubles, a scripted user and assertions for code built on <code>fsm_llm</code> (the fake <code>LLMInterface</code> doubles <code>MockLLM2Interface</code>, <code>PromptGroundedLLM</code> and <code>ScriptedLLM</code>, the reply builders, <code>hash_embed</code>, <code>ScriptedUser</code> with <code>ConversationRun</code>, and the assertions <code>assert_state</code>, <code>assert_context</code>, <code>assert_path</code>, <code>assert_result</code> with the opt-in <code>PathRecorder</code>)</td>
+<td>Offline; imports core only, never pytest</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Evaluation honesty.</strong> The examples scorer reads each run's output with simple rules and gives
+0 to 4. It overstates quality, and runs from before and after the 2026-09-29 restructure are not
+comparable. The method and the run log are on the <a href="../evaluate/">Evaluate</a> page. Offline tests
+(the default) replace the model with a fake, so they say nothing about model quality.</p>
+<h2 id="key-features">Key features<a class="headerlink" href="#key-features" title="Permanent link">&para;</a></h2>
+<p>The library is organized into five pillars.</p>
+<h3 id="the-core-finite-state-machines-driven-by-an-llm">The core: finite state machines driven by an LLM<a class="headerlink" href="#the-core-finite-state-machines-driven-by-an-llm" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Two-pass turns</strong>: every message goes through Pass 1 (extract data) and Pass 2 (write the
+  reply from the state you ended up in). Transition rules are JsonLogic evaluated in plain
+  Python, so they are predictable and unit-testable. The LLM is asked to choose only when two
+  rules tie at the lowest priority.</li>
+<li><strong>Handlers</strong>: your functions run at 8 points (start, before and after processing, before and
+  after a transition, context update, end, error), built with <code>create_handler</code>. See
+  <a href="../handlers/">Handler Development</a>.</li>
+<li><strong>Intent classification</strong>: <code>classification_extractions</code> on a state, plus <code>Classifier</code>,
+  <code>HierarchicalClassifier</code> and <code>IntentRouter</code>.</li>
+<li><strong>FSM stacking</strong>: hand a conversation to a sub-FSM and come back with its results
+  (<code>push_fsm</code> / <code>pop_fsm</code>).</li>
+<li><strong>Streaming</strong>: <code>converse_stream()</code> yields reply tokens as they arrive.</li>
+<li><strong>Steps without a user message</strong>: <code>advance()</code> runs one turn and returns an <code>AdvanceResult</code>;
+  <code>run_until_terminal()</code> repeats it within a step and time budget and raises
+  <code>RunBudgetExceededError</code> when the budget is spent. Agents and the reasoning engine run on
+  these loops.</li>
+<li><strong>Tool calling and structured output</strong>: a state with the optional <code>completion</code> field makes
+  one native tool-calling or JSON-schema call. Core runs no tool; your handlers do.</li>
+<li><strong>Sessions and memory</strong>: <code>save_session</code> / <code>restore_session</code> with <code>FileSessionStore</code>, and
+  <code>WorkingMemory</code> buffers.</li>
+<li><strong>Diagrams</strong>: <code>build_fsm_graph()</code>, <code>to_mermaid()</code>, <code>to_dot()</code> and the <code>fsm-llm-visualize</code>
+  command.</li>
+</ul>
+<h3 id="reasoning-workflows-and-agents">Reasoning, workflows and agents<a class="headerlink" href="#reasoning-workflows-and-agents" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>fsm_llm.reasoning</code></strong>: a solver that picks one of 9 reasoning strategies, runs it as
+  stacked FSMs inside one message-free core run, validates the answer and retries up to 3
+  times. <code>ReasoningEngine.solve_problem(problem)</code> returns the solution and a trace.</li>
+<li><strong><code>fsm_llm.workflows</code></strong>: an async in-memory engine with 11 step types and a Python DSL
+  (<code>create_workflow</code>, <code>auto_step</code>, <code>condition_step</code>). It runs without an LLM unless you add LLM
+  steps.</li>
+<li><strong><code>fsm_llm.agents</code></strong>: 18 agent patterns (<code>react</code>, <code>rewoo</code>, <code>reflexion</code>, <code>plan_execute</code>,
+  <code>prompt_chain</code>, <code>self_consistency</code>, <code>debate</code>, <code>orchestrator</code>, <code>adapt</code>, <code>evaluator_optimizer</code>,
+  <code>maker_checker</code>, <code>reasoning_react</code>, <code>parallel_react</code>, <code>verified_react</code>, <code>auto_memory</code>,
+  <code>native_fc</code>, <code>swarm</code>, <code>meta_builder</code>) plus <code>AgentGraph</code>.</li>
+<li><strong>Tools done properly</strong>: the <code>@tool</code> decorator, annotations, enforced timeouts, MCP and A2A
+  support, tools loaded from folders of Python files, and standard operating procedures.</li>
+<li><strong>Human approval as a security boundary</strong>: a gated tool runs only with a driver-only grant
+  bound to that exact call, which a caller's initial context can never set.</li>
+<li><strong>A meta-builder</strong> that designs FSMs, workflows and agents by chat (<code>fsm-llm-meta</code>).</li>
+<li><strong><code>fsm_llm.synthesis</code></strong>: a host FSM names a goal in a <code>synthesize</code> state, a model writes a
+  child FSM for it, static checks, a bounded simulation and an optional approval decide whether
+  it may run, a file-backed library stores it and a runner pushes it as a child of the host
+  conversation (<code>FSMSynthesizer</code>, <code>ProcedureRunner</code>, <code>FSMLibrary</code>, <code>create_procedure_tools</code>).
+  <code>verified</code> means those checks passed over a model-written spec, not that the procedure is
+  correct. The tests are offline. Bench status: blocks <code>s0</code>, <code>s1</code> and <code>s2</code> are registered, run
+  and recorded (one model, <code>ollama_chat/bonsai-2:27b</code>, for every role and arm, no strong/cheap
+  split); all three verdicts are INCONCLUSIVE and no registered block shows a compiled
+  procedure beating a ReAct agent. See <a href="../synthesis/">Runtime FSM synthesis</a>.</li>
+</ul>
+<h3 id="knowledge-bundles-and-agent-skills">Knowledge bundles and Agent Skills<a class="headerlink" href="#knowledge-bundles-and-agent-skills" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Open Knowledge Format (OKF)</strong>: <code>fsm_llm.okf</code> reads, searches, validates and writes OKF
+  bundles (a directory of markdown files with YAML frontmatter).
+  <code>fsm_llm.engine.okf_bridge.create_okf_handler()</code> puts capped concept summaries into a plain
+  FSM's context. <code>fsm_llm.agents</code> adds read-only OKF tools, a read-only memory backend and
+  bundle exporters. <code>fsm-llm-okf</code> runs it from the shell. This follows OKF v0.2 (SPEC.md at
+  commit ad30107, pre-1.0 and mutable).</li>
+<li><strong>Agent Skills</strong>: <code>fsm_llm.skills</code> reads folders with a <code>SKILL.md</code> from the paths you name
+  (the open standard at agentskills.io as read on 2026-10-23, unversioned and mutable).
+  <code>fsm_llm.agents.create_skill_tools</code> gives an agent three read-only tools (<code>skill_list</code>,
+  <code>skill_load</code>, <code>skill_read</code>), and <code>fsm-llm-skills</code> validates, lists and shows them.</li>
+<li><strong>Untrusted by design</strong>: bundle and skill text reaches a model only as capped,
+  control-stripped tool output (or labelled summaries), never as a tool description,
+  instruction or persona. Nothing in a bundle or skill folder is executed, and <code>allowed-tools</code>
+  is reported, not enforced.</li>
+</ul>
+<h3 id="monitoring-and-evaluation">Monitoring and evaluation<a class="headerlink" href="#monitoring-and-evaluation" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>fsm_llm.monitor</code></strong>: a FastAPI dashboard (REST, WebSocket, vanilla-JS single-page app) to
+  launch, watch and chat with FSMs, agents and workflows, with optional OpenTelemetry export.</li>
+<li><strong><code>fsm_llm.eval</code></strong>: scores the examples 0 to 4, or runs scripted conversations N times and
+  reports pass rates with Wilson confidence intervals (<code>EvalConfig</code>, <code>run_examples</code>,
+  <code>run_cases</code>, <code>run_dataset</code>, <code>wilson_ci</code>).</li>
+<li><strong>Pre-registered benches</strong>: <code>scripts/agents_bench.py</code>, <code>scripts/skills_bench.py</code> and
+  <code>scripts/synthesis_bench.py</code> record blocks that are run once at a fixed n and never edited,
+  so a number in the repository can be recounted from its rows.</li>
+</ul>
+<h3 id="one-llm-layer-security-and-reliability">One LLM layer, security and reliability<a class="headerlink" href="#one-llm-layer-security-and-reliability" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>One LLM layer</strong>: litellm is imported in exactly one module,
+  <code>src/fsm_llm/llm/providers/litellm.py</code>. <code>LLMInterface.complete(CompletionRequest)</code> is the
+  single primitive for tool calling, plain and structured completion, with per-interface call
+  and token counters (<code>usage()</code>) and an embedder (<code>LiteLLMEmbedder</code>). Any litellm model string
+  works.</li>
+<li><strong>Cut-off replies are visible</strong>: a reply that stops at <code>max_tokens</code> is flagged (<code>truncated</code>,
+  a WARNING, a named cause in extraction errors) and never shown as an unreadable half
+  envelope.</li>
+<li><strong>Context security</strong>: internal keys (prefixes <code>_</code>, <code>system_</code>, <code>internal_</code>, <code>__</code>) and
+  secret-looking entries are kept out of prompts. The compromised litellm 1.82.7 and 1.82.8 are
+  below the required version, and <code>make audit</code> scans for malicious <code>.pth</code> files.</li>
+<li><strong>Assured reliability</strong>: an offline-by-default suite (a fake model, no network) covering the
+  core, every subpackage, packaging, regressions, and the examples.</li>
+<li><strong>Decisions are recorded</strong>: <code># DECISION plan-&lt;id&gt;/D-NNN</code> comments in the code say what not to
+  do and why, and a gate (<code>make decision-check</code>) fails when one has no line in the manifest
+  <code>plans/ANCHORS.md</code>. See <a href="../contributing/">Contributing</a>.</li>
+</ul>
+<h2 id="status">Status<a class="headerlink" href="#status" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Version 0.13.0. Most tests are offline and use a fake model, so they check logic and wiring,
+  not model quality.</li>
+<li>Evaluation scores are a heuristic and overstate quality. The recorded runs on the
+  <a href="../evaluate/">Evaluate</a> page used a 4B local model, and scores on other models differ.</li>
+</ul>
+<p>Things to know:</p>
+<ul>
+<li>The <code>fsm-llm</code> command needs <code>LLM_MODEL</code>. The Python <code>API</code> takes <code>model=</code>, then <code>LLM_MODEL</code>,
+  and raises <code>ModelNotConfiguredError</code> when neither is set (there is no built-in default
+  model). Importing <code>fsm_llm</code> loads no <code>.env</code> file; read one on purpose with
+  <code>fsm_llm.load_env()</code> or the <code>--env-file PATH</code> flag of a CLI.</li>
+<li>The library logs nothing until you call <code>setup_logging()</code> or <code>enable_debug_logging()</code>; both
+  also replace loguru's default handler, so a library record prints once.</li>
+<li>One conversation handles one message at a time: a second <code>converse</code> on a conversation that is
+  mid-turn raises <code>FSMError</code>.</li>
+<li><code>constraints.txt</code> pins every direct dependency and the dev tools to exact versions so CI and
+  local runs match.</li>
+</ul>
+<h2 id="acknowledgments">Acknowledgments<a class="headerlink" href="#acknowledgments" title="Permanent link">&para;</a></h2>
+<p>FSM-LLM stands on open-source work: <a href="https://github.com/BerriAI/litellm">litellm</a> for the
+provider layer, <a href="https://docs.pydantic.dev">Pydantic</a> for the models,
+<a href="https://github.com/Delgan/loguru">loguru</a> for logging, <a href="https://jsonlogic.com">JsonLogic</a> for
+transition rules, and <a href="https://ollama.com">Ollama</a> for the local models the evaluation runs
+used. Thanks to everyone who has reported issues and run the examples against other models.</p>
+<h2 id="references">References<a class="headerlink" href="#references" title="Permanent link">&para;</a></h2>
+<p>The agent patterns, reasoning strategies and standards in this library follow published work
+and open specifications. Each pattern's module documents how it differs from the original.</p>
+<h3 id="agent-patterns-and-reasoning">Agent patterns and reasoning<a class="headerlink" href="#agent-patterns-and-reasoning" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>ReAct: Synergizing Reasoning and Acting in Language Models</strong>: Yao, S., et al. (2022).
+  <em>ICLR 2023</em>.</li>
+<li><strong>ReWOO: Decoupling Reasoning from Observations for Efficient Augmented Language Models</strong>:
+  Xu, B., et al. (2023).</li>
+<li><strong>Reflexion: Language Agents with Verbal Reinforcement Learning</strong>: Shinn, N., et al. (2023).
+  <em>NeurIPS</em>.</li>
+<li><strong>Plan-and-Solve Prompting: Improving Zero-Shot Chain-of-Thought Reasoning by Large Language
+  Models</strong>: Wang, L., et al. (2023). <em>ACL</em>.</li>
+<li><strong>Self-Consistency Improves Chain of Thought Reasoning in Language Models</strong>: Wang, X., et al.
+  (2022). <em>ICLR 2023</em>.</li>
+<li><strong>Chain-of-Thought Prompting Elicits Reasoning in Large Language Models</strong>: Wei, J., et al.
+  (2022). <em>NeurIPS</em>.</li>
+<li><strong>Improving Factuality and Reasoning in Language Models through Multiagent Debate</strong>: Du, Y.,
+  et al. (2023).</li>
+<li><strong>Building Effective Agents</strong> (prompt chaining, orchestrator-workers, evaluator-optimizer):
+  Anthropic (2024).</li>
+</ul>
+<h3 id="standards-and-specifications">Standards and specifications<a class="headerlink" href="#standards-and-specifications" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Model Context Protocol (MCP)</strong>: the protocol behind the <code>mcp</code> extra.</li>
+<li><strong>Agent2Agent (A2A) Protocol</strong>: the protocol behind the <code>a2a</code> extra.</li>
+<li><strong>Open Knowledge Format (OKF) v0.2</strong>: SPEC.md at commit ad30107, pre-1.0 and mutable.</li>
+<li><strong>Agent Skills</strong> (agentskills.io): the <code>SKILL.md</code> folder standard, read on 2026-10-23,
+  unversioned and mutable.</li>
+<li><strong>JsonLogic</strong>: the rule format used for transition conditions.</li>
+<li><strong>OpenTelemetry</strong>: the telemetry format behind the <code>otel</code> extra.</li>
+</ul>
+<h3 id="evaluation">Evaluation<a class="headerlink" href="#evaluation" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Probable Inference, the Law of Succession, and Statistical Inference</strong>: Wilson, E. B.
+  (1927). <em>Journal of the American Statistical Association</em>. The source of the Wilson
+  confidence interval used by <code>wilson_ci</code>.</li>
+</ul>
+<h2 id="next-steps">Next steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
+<p>The <a href="../quickstart/">Quick Start</a> runs a first conversation, the <a href="../fsm_design/">FSM Design Guide</a>
+teaches the shape of a good machine, and the <a href="../api_reference/">API Reference</a> lists every public
+name.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>

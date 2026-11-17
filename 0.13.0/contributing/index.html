@@ -1,0 +1,1530 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Finite state machines for large language models">
+      
+      
+      
+        <link rel="canonical" href="https://nikolasmarkou.github.io/fsm_llm/0.13.0/contributing/">
+      
+      
+        <link rel="prev" href="../architecture/">
+      
+      
+        <link rel="next" href="../security/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+    
+    
+      
+        <title>Contributing - FSM-LLM</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#contributing-to-fsm-llm" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="FSM-LLM" class="md-header__button md-logo" aria-label="FSM-LLM" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            FSM-LLM
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Contributing
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/NikolasMarkou/fsm_llm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    NikolasMarkou/fsm_llm
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="FSM-LLM" class="md-nav__button md-logo" aria-label="FSM-LLM" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    FSM-LLM
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/NikolasMarkou/fsm_llm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    NikolasMarkou/fsm_llm
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fsm_design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FSM Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../handlers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handlers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../synthesis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime FSM synthesis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api_reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command line
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#development-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tests-lint-and-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tests, lint and types
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#project-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project structure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#examples-are-frozen" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples are frozen
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#plans-decisions-and-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plans, decisions and findings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decision-anchors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision anchors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#changelog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changelog
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#building-the-docs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building the docs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#releasing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Releasing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#good-places-to-help" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Good places to help
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pull-requests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pull requests
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evaluate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_5" id="__nav_5_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmaps
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Roadmaps
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026_roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026 roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#development-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tests-lint-and-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tests, lint and types
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#project-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project structure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#examples-are-frozen" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples are frozen
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#plans-decisions-and-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plans, decisions and findings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decision-anchors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision anchors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#changelog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changelog
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#building-the-docs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building the docs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#releasing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Releasing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#good-places-to-help" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Good places to help
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pull-requests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pull requests
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="contributing-to-fsm-llm">Contributing to FSM-LLM<a class="headerlink" href="#contributing-to-fsm-llm" title="Permanent link">&para;</a></h1>
+<p>Contributions are welcome, from a typo fix to a new agent pattern. Report vulnerabilities as described in <a href="https://github.com/NikolasMarkou/fsm_llm/blob/main/SECURITY.md">SECURITY.md</a>.</p>
+<h2 id="development-setup">Development setup<a class="headerlink" href="#development-setup" title="Permanent link">&para;</a></h2>
+<p>Work inside the project virtualenv. Every command below assumes <code>.venv/bin</code> is on <code>PATH</code> (or call <code>.venv/bin/python</code> directly).</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span>.venv
+<span class="nb">source</span><span class="w"> </span>.venv/bin/activate
+make<span class="w"> </span>install-dev<span class="w">    </span><span class="c1"># pip install -c constraints.txt -e ".[dev,workflows,reasoning,agents,monitor,eval,synthesis,testing,otel,a2a]" + pre-commit install</span>
+</code></pre></div>
+<p>Upgrading a clone from before the 2026-09-29 restructure (extensions moved under <code>fsm_llm/</code>): delete the old <code>src/fsm_llm_&lt;sub&gt;/</code> directories by hand (<code>make clean</code> no longer removes them), then reinstall with <code>pip install -e .</code>. After the package moved back to <code>src/fsm_llm/</code> (plan d454fd62, step 62), reinstall with <code>pip install -e .</code> again; the old editable install pointed at the flat <code>src/</code>. A leftover directory imports as a namespace package.</p>
+<p><code>constraints.txt</code> pins every direct dependency to one exact version, litellm to a verified-safe release (1.82.7 and 1.82.8 were compromised; <code>pyproject.toml</code> excludes them too). Run <code>make audit</code> after installing new packages; it scans site-packages for suspicious <code>.pth</code> files.</p>
+<h2 id="tests-lint-and-types">Tests, lint and types<a class="headerlink" href="#tests-lint-and-types" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>make<span class="w"> </span>install-dev<span class="w">    </span><span class="c1"># editable install with every extra, plus pre-commit hooks</span>
+make<span class="w"> </span><span class="nb">test</span><span class="w">           </span><span class="c1"># Run full test suite (18,030 tests)</span>
+make<span class="w"> </span>lint<span class="w">           </span><span class="c1"># ruff check src/ tests/</span>
+make<span class="w"> </span>format<span class="w">         </span><span class="c1"># ruff format src/ tests/</span>
+make<span class="w"> </span>type-check<span class="w">     </span><span class="c1"># mypy on the fsm_llm package (src/fsm_llm/)</span>
+make<span class="w"> </span>lint-imports<span class="w">   </span><span class="c1"># import contracts in .importlinter (the Section 5.2 layers, kernel, litellm, testing, pytest, entry modules, ...)</span>
+make<span class="w"> </span>audit<span class="w">          </span><span class="c1"># scan site-packages for malicious .pth files</span>
+make<span class="w"> </span>counts<span class="w">         </span><span class="c1"># fail when a test count written in a .md file differs from a collection</span>
+make<span class="w"> </span>build<span class="w">          </span><span class="c1"># wheel and sdist</span>
+pytest<span class="w"> </span>tests/test_fsm_llm/<span class="w">            </span><span class="c1"># one suite (core)</span>
+pytest<span class="w"> </span>-m<span class="w"> </span><span class="s2">"not slow"</span><span class="w">                  </span><span class="c1"># skip the slow tests</span>
+</code></pre></div>
+<ul>
+<li>The default suite mocks the LLM: it needs no network and no model. Live tests need a reachable Ollama and skip without one.</li>
+<li>CI (<code>.github/workflows/python-package.yml</code>) runs a <code>lint</code> job once (ruff lint and format check, mypy, the <code>.pth</code> audit, the import contracts, the decision-anchor gate and the workflow linters <code>actionlint</code> and <code>zizmor</code>), a <code>supply-chain</code> job (<code>pip-audit --skip-editable</code> over the installed environment, plus a canary that must see <code>pip-audit</code> fail on <code>tests/fixtures/canary-vulnerable-pins.txt</code>: never install or "fix" that file), a <code>dependency-review</code> job on pull requests (<code>actions/dependency-review-action</code>, fails on a high advisory) and a <code>test</code> matrix of seven legs: Linux on Python 3.11 to 3.15, Windows on 3.11 and 3.15 (macOS is not tested in CI). Every leg runs the <code>.pth</code> audit and pytest without the <code>slow</code>, <code>real_llm</code> and <code>integration</code> markers; the Linux 3.12 leg also measures branch coverage and runs the ratchet (<code>scripts/coverage_ratchet.py</code>). The Windows legs run <code>python -m</code> commands in bash, never <code>make</code>. Check an edit to a workflow with <code>uvx --from actionlint-py actionlint .github/workflows/*.yml</code> and <code>uvx --from zizmor zizmor --offline .github/workflows</code> (the lint job runs both at the pins of <code>constraints.txt</code>); every <code>uses:</code> takes a 40-hex SHA with its release tag in a comment, in every workflow file; <code>tests/test_fsm_llm_regression/test_ci_workflow.py</code> pins the matrix.</li>
+<li>Pre-commit runs ruff (lint with <code>--fix</code>, and format) and the file hygiene hooks on commit, and a quick pytest run on push.</li>
+<li>A behaviour change needs a test that fails on the code before the change. Run it against the parent commit to confirm.</li>
+<li>Test counts are written out as literals in <code>AGENTS.md</code> and in <code>CONTRIBUTING.md</code> (the <code>make test</code> line above; the README is the PyPI page and holds no count), and <code>tests/test_packaging.py</code> checks them against a fresh collection. When you add or remove tests, re-measure with <code>pytest --collect-only -q | tail -1</code> (and per suite) and update every literal. Never guess or adjust a count by hand.</li>
+<li><code>tests/test_fsm_llm/test_docs_snippets.py</code> loads every fenced block that names <code>"initial_state"</code> in the first-touch docs. A full FSM snippet in the docs must be a valid FSM.</li>
+<li>Naming for new code (ids, units, constants, enums, builders, exceptions, verbs) follows the <code>Naming conventions</code> section of <a href="https://github.com/NikolasMarkou/fsm_llm/blob/main/AGENTS.md">AGENTS.md</a>.</li>
+<li>litellm is imported in exactly one module, <code>src/fsm_llm/llm/providers/litellm.py</code>. Do not add a second request builder or provider call elsewhere.</li>
+<li>Internal-key and secret-key checks go through <code>fsm_llm.constants.has_internal_prefix</code> and <code>is_forbidden_context_entry</code>. Do not re-inline them.</li>
+<li>Anything new that is configured with many settings gets a step-by-step builder that follows the convention in <a href="https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/AGENTS.md">src/fsm_llm/AGENTS.md</a>: setters only record, <code>build()</code> is the only validator.</li>
+<li>Commit messages follow <code>&lt;type&gt;(&lt;scope&gt;): &lt;summary&gt;</code>.</li>
+</ul>
+<h2 id="project-structure">Project structure<a class="headerlink" href="#project-structure" title="Permanent link">&para;</a></h2>
+<p>The repository is one distribution (<code>llm-fsm</code>, setuptools, src layout). The directory <code>src/fsm_llm/</code> is the import package <code>fsm_llm</code> (found by <code>packages.find</code> in <code>pyproject.toml</code>), so <code>src/fsm_llm/engine/api/conversation.py</code> is <code>fsm_llm.engine.api.conversation</code>, and a subpackage is imported by name, for example <code>from fsm_llm.agents import create_agent</code>.</p>
+<div class="highlight"><pre><span></span><code>fsm_llm/
+├── src/fsm_llm/      # THE LIBRARY (the import package)
+│   ├── engine/api/, engine/fsm/,   # API, FSMManager, MessagePipeline (the 2-pass turn)
+│   │   engine/turn/, engine/kinds/
+│   ├── core/definitions/      # Pydantic FSM models and core exceptions (a package)
+│   ├── core/transition_evaluator.py, core/expressions/   # JsonLogic evaluation, no LLM
+│   ├── core/verify/, core/visualize/   # Validator, data-flow and liveness analysis; diagrams and graph export
+│   ├── handlers/              # Handler system, HandlerBuilder, create_handler
+│   ├── llm/                   # LLMInterface and LiteLLMInterface (llm/providers/litellm.py is the only litellm import), reply parsing
+│   ├── context/               # Context cleaning, compaction, filtering and the prompt builders (context/layout/)
+│   ├── engine/classification.py, session.py, builders.py   # Classifier, session store, API/FSMManager builders
+│   ├── security/, constants.py, logging.py, memory.py, env.py   # Key filtering, path confinement, limits, logging, working memory, .env loader
+│   ├── okf/, text.py                       # Open Knowledge Format, text helpers (okf_bridge is engine/okf_bridge.py)
+│   ├── skills/                # Agent Skills (read-only), the fsm-llm-skills command
+│   ├── tools/                 # Tool registry, tool models and the @tool decorator (re-exported by agents)
+│   ├── policy/                # Approval policy and the human-in-the-loop manager (re-exported by agents)
+│   ├── frontmatter.py, cli_support.py   # The one YAML frontmatter loader, the shared CLI skeleton
+│   ├── runner.py, __main__.py           # The interactive fsm-llm command
+│   ├── reasoning/             # 9 strategies as stacked FSMs
+│   ├── workflows/             # Async workflow engine, 11 step types, DSL
+│   ├── agents/                # 18 agent patterns, tools, HITL, MCP, A2A, meta-builder
+│   ├── monitor/               # FastAPI dashboard, OTEL exporter
+│   ├── eval/                  # Examples scorer, conversation cases
+│   ├── synthesis/             # Runtime FSM synthesis: compile, gates, library, runner
+│   └── testing/               # Public test doubles, scripted user, assertions
+├── tests/                     # One folder per subpackage plus root-level files
+├── examples/                  # 100 runnable examples in 8 categories (evaluation baselines)
+├── docs/                      # The documentation pages of the site (mkdocs.yml builds them)
+├── evaluation/                # Datasets and recorded eval runs
+├── scripts/                   # Supply-chain audit, benches, doc-count check
+├── images/                    # Logo and diagrams
+├── .github/workflows/         # CI: 7-leg matrix (Python 3.11 to 3.15), docs, pin refresh, release
+└── CHANGELOG.md, EVALUATE.md, CONTRIBUTING.md, SECURITY.md
+</code></pre></div>
+<h2 id="examples-are-frozen">Examples are frozen<a class="headerlink" href="#examples-are-frozen" title="Permanent link">&para;</a></h2>
+<p>Do not modify anything under <code>examples/</code> unless a maintainer asks for it. The examples are the evaluation baselines for <code>fsm-llm-eval examples</code>, and every shipped FSM JSON must keep loading (<code>tests/test_examples</code>).</p>
+<h2 id="plans-decisions-and-findings">Plans, decisions and findings<a class="headerlink" href="#plans-decisions-and-findings" title="Permanent link">&para;</a></h2>
+<p>Non-trivial work is done as a plan: explore, write a plan, execute it one step per commit, then review. Each plan lives in its own directory, <code>plans/plan-&lt;YYYY-MM-DD&gt;T&lt;HHMMSS&gt;-&lt;8 hex&gt;/</code>, holding <code>plan.md</code> (goal, steps, success criteria), <code>decisions.md</code> (numbered entries <code>D-001</code>, <code>D-002</code>, ... with context, decision, trade-off and reasoning), <code>findings.md</code> (what exploration found, with evidence), <code>progress.md</code> and <code>state.md</code>.</p>
+<p><code>plans/</code> is gitignored. The one committed file in it is <code>plans/ANCHORS.md</code>, an append-only manifest with one line per anchored decision (<code>&lt;plan-id&gt;/D-NNN | date | one-line rationale</code>), so an anchor in the code still resolves after its plan directory is deleted. Never edit, reorder or trim its lines.</p>
+<p>A commit made for a plan step starts with the plan tag: <code>[plan-YYYY-MM-DD-&lt;8 hex&gt;/iter-N/step-M] &lt;type&gt;(&lt;scope&gt;): &lt;summary&gt;</code>.</p>
+<h2 id="decision-anchors">Decision anchors<a class="headerlink" href="#decision-anchors" title="Permanent link">&para;</a></h2>
+<p>Code whose reason is not obvious from reading it carries a decision anchor, a comment that links it to a <code>decisions.md</code> entry:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># DECISION plan-2026-09-22T080837-8b258a25/D-036</span>
+<span class="c1"># _fsm_cache_lock is a LEAF lock: while holding it do NOT take `_lock`,</span>
+<span class="c1"># a conv_lock, log, or call fsm_loader. See D-036.</span>
+</code></pre></div>
+<ul>
+<li>Format: <code># DECISION &lt;plan-id&gt;/D-NNN</code>, with the full plan directory name as the plan id. Older anchors use the legacy form <code>plan_YYYY-MM-DD_&lt;8 hex&gt;</code>. A bare <code>D-NNN</code> with no plan id is not allowed in new code.</li>
+<li>Add one when the code takes an approach chosen after another one failed, when a simpler-looking alternative was rejected on purpose, when it works around a library or framework constraint, or when a reader would reasonably ask "why not just do X?".</li>
+<li>The body says what NOT to do and why. A new anchor is at most 6 lines; the full reasoning belongs in <code>decisions.md</code>.</li>
+<li>Every anchor needs a line in <code>plans/ANCHORS.md</code>, the append-only manifest (one line per decision: plan id, number, date, one-line rationale). The line is produced when the plan closes; never edit or reorder an existing line. <code>plans/ANCHORS.md</code> is the one tracked file under <code>plans/</code>, so a fresh clone has it. The owner commits the appended lines before the first push.</li>
+<li><code>make decision-check</code> (<code>python scripts/decision_index.py --check</code>) is the gate: it fails when an anchor has no manifest line (and is not <code>[STALE]</code>) and when an anchor has a bad prefix (not a plan id, or a bare <code>D-NNN</code>). It reads the committed <code>plans/ANCHORS.md</code> only and takes no argument. A default-suite test runs the same check, and so does the <code>lint</code> job of CI.</li>
+<li><code>make decision-index</code> writes a report of every anchor to <code>build/decision-index.md</code> (ignored by git, never committed): each decision with its manifest rationale and every place (path and enclosing definition, no line numbers), so it is the lookup path from a decision to its code on a machine that has no plan directory. <code>python scripts/decision_index.py --report</code> prints the counts.</li>
+<li>Read the anchors near code before you change it, and do not undo what they forbid. If a rule no longer fits, record a new decision that supersedes it instead of deleting the anchor quietly.</li>
+</ul>
+<p>Two markers can follow an anchor's id:</p>
+<ul>
+<li><code>[STALE]</code>: the plan directory that recorded the decision has been retired, so the full entry may be gone (its one-line summary is in <code>plans/ANCHORS.md</code>). The gate counts such an anchor as resolved by its tag (it is listed in the index under Retired). The rule itself may still bind. Read the anchor text and the code around it before changing anything.</li>
+<li><code>[SUPERSEDED BY D-nnn]</code> (or an inline <code>[supersedes ...]</code> note on the newer anchor): the rule was replaced. Follow the newer decision; the old text is kept only as history.</li>
+</ul>
+<h2 id="changelog">Changelog<a class="headerlink" href="#changelog" title="Permanent link">&para;</a></h2>
+<p><code>CHANGELOG.md</code> follows Keep a Changelog 1.1.0: a <code>## [Unreleased]</code> section first, then <code>## [X.Y.Z] - YYYY-MM-DD</code> releases, newest first; inside a section the <code>###</code> headings are only Added, Changed, Deprecated, Removed, Fixed and Security, each at most once, in that order; and <code>[Unreleased]: .../compare/v&lt;newest release&gt;...HEAD</code> sits with the reference links at the bottom. Releases already published stay as they were written.</p>
+<p>A change that breaks a caller (a removed or renamed public name or path, a changed default, a new refusal) gets one bullet that starts its breaking part with the exact marker <code>**BREAKING:**</code> (not <code>**Breaking:**</code>, not prose). The bullet names the old form and the new one: the changelog is the migration record of a release, and no separate upgrade guide is published. A <code>**BREAKING:**</code> marker outside a list item (a table row, a paragraph) is refused, because only a bullet is read for the spelling.</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>scripts/changelog_check.py<span class="w"> </span>check<span class="w">                   </span><span class="c1"># the form and the spelling of every BREAKING marker</span>
+python<span class="w"> </span>scripts/changelog_check.py<span class="w"> </span>check<span class="w"> </span>--from<span class="w"> </span><span class="m">0</span>.12.0<span class="w">     </span><span class="c1"># widen the scope to older sections</span>
+python<span class="w"> </span>scripts/changelog_check.py<span class="w"> </span>extract<span class="w"> </span><span class="m">0</span>.13.0<span class="w">          </span><span class="c1"># the notes of one release (also v0.13.0 or Unreleased)</span>
+make<span class="w"> </span>changelog-check<span class="w">                                      </span><span class="c1"># the same check as `check`</span>
+</code></pre></div>
+<p>The checker (stdlib only, read-only) judges <code>[Unreleased]</code>, plus the newest release while <code>[Unreleased]</code> is empty. It is enforced three ways: <code>tests/test_packaging.py::TestTheRealChangelog</code> runs it on the real file in every test run, the <code>lint</code> job of the CI workflow runs the same command, and the release workflow reads the release notes with <code>extract</code>. In the release body a repository-relative link <code>docs/...</code> is made absolute under the tag by <code>extract --link-base</code> (a GitHub release body does not resolve a relative link); the changelog holds no such link today, and if you add one write it relative, never as an absolute URL to <code>main</code>.</p>
+<h2 id="building-the-docs">Building the docs<a class="headerlink" href="#building-the-docs" title="Permanent link">&para;</a></h2>
+<p>The documentation site is built from <code>docs/</code> and <code>mkdocs.yml</code> with mkdocs-material. Its tools are a dependency group, not an extra (they need Python 3.11 or newer and are for maintainers), pinned exactly in <code>constraints.txt</code>:</p>
+<div class="highlight"><pre><span></span><code>.venv/bin/pip<span class="w"> </span>install<span class="w"> </span>--group<span class="w"> </span>docs<span class="w"> </span>-c<span class="w"> </span>constraints.txt<span class="w">   </span><span class="c1"># needs pip 25.1 or newer</span>
+make<span class="w"> </span>docs<span class="w">                                               </span><span class="c1"># a strict build into site/ (ignored by git)</span>
+make<span class="w"> </span>docs-serve<span class="w">                                         </span><span class="c1"># live reload at http://127.0.0.1:8000</span>
+</code></pre></div>
+<p>A strict build fails on any warning: a page missing from the <code>nav</code> in <code>mkdocs.yml</code>, a broken link or anchor, an <code>include-markdown</code> target that does not exist. A new page under <code>docs/</code> goes into the <code>nav</code>; <code>AGENTS.md</code> files are never published (<code>exclude_docs</code>). <code>tests/test_fsm_llm/test_docs_site.py</code> checks the same structure without mkdocs installed.</p>
+<p><code>.github/workflows/refresh-pins.yml</code> refreshes the <code>litellm</code> and <code>mcp</code> pins of <code>constraints.txt</code> once a week (Mondays 05:17 UTC) and on demand (Actions tab, "Refresh pins", Run workflow). <code>scripts/refresh_pins.py</code> picks, per package, the newest release that is stable, not yanked, <strong>at least 7 days old</strong> (the cooldown: litellm 1.82.7 and 1.82.8 were malware for hours, and a bad release is usually yanked within days), whose <code>Requires-Python</code> admits every Python of the CI matrix, and that stays in the major of the current pin; it never downgrades and never crosses a major (a new major is a decision, not a refresh). When a pin moves, the <code>test</code> job installs it and runs the non-slow suite (the <code>mcp</code> stdio tests included), mypy, the <code>.pth</code> audit and <code>pip-audit</code>, and only if all pass does the <code>propose</code> job push a <code>chore/refresh-pins-&lt;date&gt;</code> branch and open a pull request whose body is the script's report (old and new pins, release dates, ages, the newer releases skipped and why). The two jobs are separate on purpose: <code>test</code> executes a brand-new third-party release, so it has the read-only token and no credentials, and hands over only an artifact (<code>constraints.txt</code>, <code>pyproject.toml</code>, the report, uploaded before anything is installed); <code>propose</code> holds the write token, installs nothing and runs no project code, and a guard step refuses anything but those three regular files and any change beyond the litellm and mcp pin and range lines. A pull request opened with the default <code>GITHUB_TOKEN</code> does not trigger the CI workflow, which is why the gate runs in the refresh workflow itself. <strong>Owner action, once:</strong> Settings, Actions, General, Workflow permissions: tick "Allow GitHub Actions to create and approve pull requests" (without it the last step fails with a permission error and no pull request appears; the branch is still pushed). <strong>When a pull request appears:</strong> read the table, skim the upstream release notes of the new version, merge it, and close an older refresh pull request it supersedes. A red <code>test</code> job means the new pin broke the suite or has a known vulnerability: <code>propose</code> does not run, nothing is pushed, the pin stays, and the log names the failing step. Scheduled workflows run only from the default branch and GitHub stops them after 60 days without repository activity (re-enable in the Actions tab). Try the script without touching the repository: <code>python scripts/refresh_pins.py --dry-run</code> (reads PyPI, prints the table and the diff, writes nothing; <code>--json-dir DIR</code> reads canned <code>&lt;package&gt;.json</code> files instead). The tests are <code>tests/test_fsm_llm_regression/test_refresh_pins.py</code> (the script, canned JSON, no network) and <code>test_refresh_workflow.py</code> (the workflow).</p>
+<p><code>.github/workflows/docs.yml</code> builds the site strictly on every pull request and every tag <code>v*</code>, and a tag deploys it with <code>mike</code> to the <code>gh-pages</code> branch after checking that the tag equals <code>src/fsm_llm/__version__.py</code> (<code>docs/README.md</code>, "Publishing the site", lists the owner steps). Its text is pinned by <code>tests/test_fsm_llm_regression/test_docs_workflow.py</code>; check a change to it with <code>uvx --from actionlint-py actionlint .github/workflows/docs.yml</code>. Every <code>uses:</code> in a workflow is a full 40-character commit SHA with the release tag in a trailing comment.</p>
+<h2 id="releasing">Releasing<a class="headerlink" href="#releasing" title="Permanent link">&para;</a></h2>
+<p>A release is one pushed tag. <code>.github/workflows/release.yml</code> starts on a push of a tag <code>v*</code> and on nothing else (no manual dispatch, no pull request, no branch push), so only a pushed tag releases. It builds the sdist and the wheel once, checks them (<code>twine check --strict</code>, the tag against <code>src/fsm_llm/__version__.py</code>, a final release only, the section of the version in <code>CHANGELOG.md</code> through <code>scripts/changelog_check.py extract</code>), writes an SBOM (<code>sbom.cdx.json</code>, CycloneDX, from a fresh environment with the wheel installed with every extra), then publishes to PyPI by trusted publishing with PEP 740 attestations (no API token exists anywhere), and finally creates the GitHub release with the distributions, the SBOM and the notes. <code>tests/test_fsm_llm_regression/test_release_workflow.py</code> pins the workflow; the distribution is <code>llm-fsm</code> (the import package stays <code>fsm_llm</code>).</p>
+<p><strong>The version bump</strong> (what the release commit of 0.13.0 did; the next one repeats it): set <code>version</code> in <code>pyproject.toml</code> and <code>__version__</code> in <code>src/fsm_llm/__version__.py</code> (the subpackage <code>__version__.py</code> files re-export it); the three literal pins of the version in <code>tests/test_fsm_llm_monitor/test_app.py</code> and <code>tests/test_fsm_llm_regression/test_regression_cli_and_exports.py</code>; the README badge; the <code>&gt; Covers FSM-LLM v&lt;version&gt;</code> header of the current guides in <code>docs/</code> (and the lines that say the same in <code>docs/AGENTS.md</code>, <code>docs/README.md</code>, <code>docs/concepts.md</code>, <code>AGENTS.md</code>, <code>src/fsm_llm/AGENTS.md</code>, <code>src/fsm_llm/README.md</code>); in <code>CHANGELOG.md</code>, <code>## [Unreleased]</code> becomes <code>## [X.Y.Z] - YYYY-MM-DD</code> under a fresh empty <code>## [Unreleased]</code>, with the reference links <code>[Unreleased]: .../compare/vX.Y.Z...HEAD</code> and <code>[X.Y.Z]: .../compare/v&lt;previous&gt;...vX.Y.Z</code>. The release section opens with a short <code>**Highlights**</code> block before its first <code>###</code> heading (under 8,000 characters, links in the <code>docs/...</code> form): the release body on GitHub holds at most 125,000 characters, <code>release.yml</code> cuts a longer body at 120,000 and points at the full text, so the Highlights are the part that always survives. <code>tests/test_fsm_llm_regression/test_release_version.py</code> fails on any place that was missed and on a section without Highlights.</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>scripts/changelog_check.py<span class="w"> </span>check<span class="w">                   </span><span class="c1"># the release section is judged while [Unreleased] is empty</span>
+python<span class="w"> </span>scripts/changelog_check.py<span class="w"> </span>extract<span class="w"> </span>X.Y.Z<span class="w"> </span>--link-base<span class="w"> </span>https://github.com/NikolasMarkou/fsm_llm/blob/vX.Y.Z/<span class="w"> </span>&gt;<span class="w"> </span>/tmp/notes.md<span class="w">   </span><span class="c1"># the body GitHub will show, before the cut; `head -40 /tmp/notes.md` is the Highlights</span>
+</code></pre></div>
+<p>Owner steps, in this order (the commands need <code>gh</code> logged in as the owner). Steps 1 to 3 are done once, before the first push of a plan's work:</p>
+<ol>
+<li>Commit the anchor manifest first: <code>git add plans/ANCHORS.md &amp;&amp; git commit -m "docs: anchor manifest lines"</code>. It holds the appended lines that <code>make decision-check</code> (and the <code>lint</code> job) need, so a push before this commit is a red first run on purpose. Never edit an existing line of it.</li>
+<li>In any other clone or virtualenv, after the layout move of 0.13.0: <code>pip uninstall fsm-llm</code>, delete a leftover <code>src/fsm_llm.egg-info</code>, then <code>pip install -e .</code> once (console scripts and the distribution name moved; <code>python scripts/audit_pth.py</code> flags a stale code-bearing finder).</li>
+<li>On PyPI, confirm <code>llm-fsm</code> is in "Your projects" and add a Trusted Publisher with exactly these names: owner <code>NikolasMarkou</code>, repository <code>fsm_llm</code>, workflow <code>release.yml</code>, environment <code>pypi</code>. (A TestPyPI pending publisher with the same names is an optional dry run of the whole path before the real tag.)</li>
+<li>Create the GitHub environment <code>pypi</code> with a required reviewer (you, with two-factor authentication on) and restrict it to tags <code>v*</code>. Without the reviewer <code>publish</code> runs unattended on any pushed <code>v*</code> tag; without the tag restriction a branch can deploy to the environment. One <code>PUT</code> sets the reviewer and the restriction to custom policies, then one <code>POST</code> adds the tag pattern. The environments API takes <code>reviewers</code> as an array of objects, which <code>gh api</code> field flags cannot express (they document scalar arrays only), so the <code>PUT</code> body is JSON on standard input, with real JSON booleans: the booleans as <code>-f</code> fields would be sent as the strings <code>"true"</code> and <code>"false"</code> and the API refuses them (422); with <code>-F</code> they would be booleans, but the reviewer would still be missing. The <code>type</code> of the <code>POST</code> is a string, so <code>-f</code> is right there:</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="nv">owner_id</span><span class="o">=</span><span class="k">$(</span>gh<span class="w"> </span>api<span class="w"> </span>users/NikolasMarkou<span class="w"> </span>--jq<span class="w"> </span>.id<span class="k">)</span>
+<span class="nv">body</span><span class="o">=</span><span class="s1">'{"prevent_self_review":false,"reviewers":[{"type":"User","id":'</span><span class="s2">"</span><span class="nv">$owner_id</span><span class="s2">"</span><span class="s1">'}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'</span>
+gh<span class="w"> </span>api<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>repos/NikolasMarkou/fsm_llm/environments/pypi<span class="w"> </span>--input<span class="w"> </span>-<span class="w"> </span><span class="o">&lt;&lt;&lt;</span><span class="w"> </span><span class="s2">"</span><span class="nv">$body</span><span class="s2">"</span>
+gh<span class="w"> </span>api<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>repos/NikolasMarkou/fsm_llm/environments/pypi/deployment-branch-policies<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-f<span class="w"> </span><span class="nv">name</span><span class="o">=</span><span class="s1">'v*'</span><span class="w"> </span>-f<span class="w"> </span><span class="nv">type</span><span class="o">=</span>tag
+gh<span class="w"> </span>api<span class="w"> </span>repos/NikolasMarkou/fsm_llm/environments/pypi<span class="w"> </span>--jq<span class="w"> </span><span class="s1">'{protection_rules, deployment_branch_policy}'</span>
+</code></pre></div>
+<p>The last command is the check: <code>protection_rules</code> must hold a <code>required_reviewers</code> rule naming you and <code>deployment_branch_policy</code> must read <code>{"custom_branch_policies":true,"protected_branches":false}</code>; the tag pattern is listed by <code>gh api repos/NikolasMarkou/fsm_llm/environments/pypi/deployment-branch-policies --jq '.branch_policies'</code> (one entry, name <code>v*</code>, type <code>tag</code>). The same in the web UI: Settings, Environments, <code>pypi</code>: tick "Required reviewers" and add yourself, leave "Prevent self-review" off (you are the only maintainer: with it on, nobody could approve your own tag), then "Deployment branches and tags", "Selected branches and tags", "Add deployment branch or tag rule", type "Tag", pattern <code>v*</code>. Required reviewers need a public repository or a paid plan. The <code>PUT</code> creates the environment when it does not exist and replaces its whole protection configuration, so run it once, before the first tag.</p>
+<ol>
+<li>Settings, Actions, General: tick "Allow GitHub Actions to create and approve pull requests" (the weekly pin refresh opens its pull request with it). Once the matrix is green, Settings, Branches: protect <code>main</code>, require a pull request before merging, and require the seven <code>test (&lt;os&gt;, Python &lt;version&gt;)</code> checks of the CI workflow (and <code>lint</code> and <code>supply-chain</code>). The pull request rule is not a formality: the coverage ratchet's <code>guard</code> (the baseline in <code>coverage-baseline.json</code> may only rise) runs on pull requests only, so a direct push to <code>main</code> that lowers the baseline file would pass <code>check</code> against the lowered file. As the sole maintainer, set the required approvals to 0 (a pull request, no second reviewer).</li>
+<li><code>git push origin main</code> and watch the first matrix of seven legs. The Windows legs had never run before the first push: a failure there is a finding to fix, not a reason to skip the leg. The coverage tolerance is meant to be tightened after three green runs.</li>
+<li>Release from a clean <code>main</code> whose CI is green and whose <code>CHANGELOG.md</code> date is the day of the tag (edit <code>## [X.Y.Z] - YYYY-MM-DD</code> if the tag is cut on another day, commit, and run <code>python scripts/changelog_check.py check</code> again):</li>
+</ol>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>tag<span class="w"> </span>-a<span class="w"> </span>v0.13.0<span class="w"> </span>-m<span class="w"> </span><span class="s2">"v0.13.0"</span>
+git<span class="w"> </span>push<span class="w"> </span>origin<span class="w"> </span>v0.13.0
+</code></pre></div>
+<ol>
+<li>Open the run in the Actions tab. <code>build</code> and <code>sbom</code> run first; <code>publish</code> then waits for the environment review: approve the deployment. <code>github-release</code> follows. Check the result: the PyPI page of <code>llm-fsm</code> shows the release with its attestations ("Provenance"), the GitHub release carries the wheel, the sdist, <code>sbom.cdx.json</code> and the notes (they open with the Highlights), and <code>pip install llm-fsm==0.13.0</code> works in a fresh environment on Linux and Windows.</li>
+<li>After the first docs deploy (the tag also starts <code>.github/workflows/docs.yml</code>): Settings, Pages, source "Deploy from a branch", branch <code>gh-pages</code>, folder <code>/ (root)</code>; then, from a clone of <code>main</code> with the docs tools installed (<code>pip install --group docs -c constraints.txt</code>), run <code>mike set-default --push latest</code>. <a href="https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/README.md"><code>docs/README.md</code></a>, "Publishing the site", has the detail.</li>
+</ol>
+<p>If a run goes wrong after the tag:</p>
+<ul>
+<li><code>github-release</code> failed after <code>publish</code> succeeded (the files are on PyPI): use "Re-run failed jobs" only. It reuses the artifacts of the run. "Re-run all jobs" rebuilds, and PyPI refuses files it already has ("File already exists"), so the GitHub release would never be cut. A failure before <code>publish</code> is fixed by deleting the tag (below) and tagging again.</li>
+<li><code>.github/workflows/docs.yml</code> also starts on the tag and deploys the site on its own, whether or not the release publishes. If a publish is abandoned (the tag deleted or PyPI refused it), remove that version from the site with <code>mike delete &lt;version&gt; --push</code> from a clone with the docs tools installed (deleting a version deletes its aliases too, so <code>latest</code> goes with it), then give <code>latest</code> back to the previous release with <code>mike alias --push --update-aliases &lt;previous version&gt; latest</code>. The two workflows are not chained on purpose: a <code>workflow_run</code> chain cannot be tested without a real run, so this sentence is the guard.</li>
+</ul>
+<p>A tag that fails a guard publishes nothing: delete it (<code>git push origin :refs/tags/vX.Y.Z</code> and <code>git tag -d vX.Y.Z</code>), fix the cause and tag again. A version that reached PyPI cannot be replaced: cut the next one (the files of a release are immutable there).</p>
+<h2 id="good-places-to-help">Good places to help<a class="headerlink" href="#good-places-to-help" title="Permanent link">&para;</a></h2>
+<p>All taken from recorded open items:</p>
+<ul>
+<li><strong>Agents</strong> (<code>src/fsm_llm/agents/README.md</code> and the <a href="https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/2026_roadmap.md">2026 roadmap</a>, open items): <code>AgentGraph</code> has no failure routing, so a fallback branch cannot be built; Orchestrator subtasks dropped over <code>max_workers</code> do not affect <code>success</code>; a reply cut off by <code>max_tokens</code> is detected (<code>finish_reason</code>, a WARNING, a named cause in extraction errors, no unreadable half envelope shown as a reply) and a cut final reply (or answer field) of an agent run ends it with <code>success=False</code> and <code>stop_reason="truncated"</code> (REWOO stops on a cut plan), but a cut <code>native_fc</code> tool call, a <code>SelfConsistencyAgent</code> sample, a long meta-builder artifact, a streamed reply and a cut in an earlier turn are still not flagged; Swarm never hands off by itself; real human-in-the-loop for REWOO, PlanExecute, ParallelReact and native_fc; MCP v2 and A2A v1.0.</li>
+<li><strong>Core</strong> (<code>CHANGELOG.md</code>, 0.12.0, Known open): validating an <code>FSMDefinition</code> for the first time from several threads at once can race; the message-free <code>classification_extractions</code> path has offline coverage only; nothing was checked live on a non-Ollama provider.</li>
+<li><strong>Reasoning</strong> (<code>CHANGELOG.md</code>, Known open): cheaper typed per-key reasoning fields were tried and reverted after losing answers on a pre-registered probe, so a new attempt needs its own probe; a <code>final_context</code> passed back as <code>initial_context</code> still carries the previous problem's analysis.</li>
+<li><strong>Measurement</strong>: every live number here comes from one small local model. Runs on other models and providers are welcome, as new pre-registered blocks (see <code>scripts/bench_data/README.md</code>).</li>
+</ul>
+<h2 id="pull-requests">Pull requests<a class="headerlink" href="#pull-requests" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Fork the repository and create a feature branch.</li>
+<li>Make the change with tests (see above).</li>
+<li>Make sure <code>make lint</code>, <code>make type-check</code> and <code>make test</code> pass.</li>
+<li>Add an entry under <code>Unreleased</code> in <code>CHANGELOG.md</code>. Name every public removal, rename and deprecation.</li>
+<li>Open the pull request.</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>

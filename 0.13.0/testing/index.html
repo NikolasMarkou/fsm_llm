@@ -1,0 +1,1649 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Finite state machines for large language models">
+      
+      
+      
+        <link rel="canonical" href="https://nikolasmarkou.github.io/fsm_llm/0.13.0/testing/">
+      
+      
+        <link rel="prev" href="../synthesis/">
+      
+      
+        <link rel="next" href="../api_reference/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+    
+    
+      
+        <title>Testing - FSM-LLM</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#testing-guide" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="FSM-LLM" class="md-header__button md-logo" aria-label="FSM-LLM" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            FSM-LLM
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Testing
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/NikolasMarkou/fsm_llm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    NikolasMarkou/fsm_llm
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="FSM-LLM" class="md-nav__button md-logo" aria-label="FSM-LLM" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    FSM-LLM
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/NikolasMarkou/fsm_llm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    NikolasMarkou/fsm_llm
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fsm_design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FSM Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../handlers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handlers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../synthesis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime FSM synthesis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#install-and-import" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install and import
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-first-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A first test
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-doubles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The doubles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-scripted-user" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scripted user
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-assertions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The assertions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pathrecorder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PathRecorder
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#with-pytest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With pytest
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#migrating-from-testsconftest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Migrating from tests.conftest
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api_reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command line
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evaluate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_5" id="__nav_5_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmaps
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Roadmaps
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026_roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026 roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#install-and-import" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Install and import
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-first-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A first test
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-doubles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The doubles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-scripted-user" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The scripted user
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-assertions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The assertions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pathrecorder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PathRecorder
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#with-pytest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With pytest
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#migrating-from-testsconftest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Migrating from tests.conftest
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="testing-guide">Testing Guide<a class="headerlink" href="#testing-guide" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Covers FSM-LLM v0.13.0</p>
+</blockquote>
+<p><code>fsm_llm.testing</code> is the public home of the fakes and assertions the FSM-LLM repository uses for its own tests: fake LLM interfaces that need no network, a scripted user that drives a conversation, and four assertions that name a state, a context value, a visited path or a run result in one line. Use it to test a bot, an agent or a workflow without a model: a model call is slow, costs money and answers differently on each run.</p>
+<p>Every Python block in this guide runs offline, top to bottom in one namespace, as part of the test suite (<code>tests/test_fsm_llm_testing/test_guide.py</code>). A block fenced <code>python {.notest}</code> is shown only.</p>
+<h2 id="install-and-import">Install and import<a class="headerlink" href="#install-and-import" title="Permanent link">&para;</a></h2>
+<p>The subpackage ships in every install of the package; the <code>testing</code> extra adds no third-party dependency (it exists so the extra lists and <code>all</code> name every subpackage). Import it by name. <code>import fsm_llm</code> never loads it, and no library module imports it.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">fsm_llm</span><span class="w"> </span><span class="kn">import</span> <span class="n">API</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">fsm_llm.testing</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">PathRecorder</span><span class="p">,</span>
+    <span class="n">PromptGroundedLLM</span><span class="p">,</span>
+    <span class="n">ScriptedLLM</span><span class="p">,</span>
+    <span class="n">ScriptedUser</span><span class="p">,</span>
+    <span class="n">advance_until_terminal</span><span class="p">,</span>
+    <span class="n">assert_context</span><span class="p">,</span>
+    <span class="n">assert_path</span><span class="p">,</span>
+    <span class="n">assert_result</span><span class="p">,</span>
+    <span class="n">assert_state</span><span class="p">,</span>
+    <span class="n">final_reply</span><span class="p">,</span>
+    <span class="n">tool_call_reply</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+<p>It imports the core and <code>fsm_llm.core.codes</code> only, never <code>pytest</code>, <code>litellm</code> or another subpackage, so it works under pytest, unittest or a plain script. Importing it has no side effect: no clock, no randomness, no socket.</p>
+<h2 id="a-first-test">A first test<a class="headerlink" href="#a-first-test" title="Permanent link">&para;</a></h2>
+<p>A bot that asks a name, then an order, then ends. The model is a <code>ScriptedLLM</code>: the fields it extracts come from a dict and the reply of each state from a second dict, so the whole conversation is decided by the test.</p>
+<div class="highlight"><pre><span></span><code><span class="n">ORDER_BOT</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">"name"</span><span class="p">:</span> <span class="s2">"OrderBot"</span><span class="p">,</span>
+    <span class="s2">"description"</span><span class="p">:</span> <span class="s2">"Take a name, then an order"</span><span class="p">,</span>
+    <span class="s2">"initial_state"</span><span class="p">:</span> <span class="s2">"ask_name"</span><span class="p">,</span>
+    <span class="s2">"persona"</span><span class="p">:</span> <span class="s2">"A polite waiter"</span><span class="p">,</span>
+    <span class="s2">"states"</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">"ask_name"</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">"id"</span><span class="p">:</span> <span class="s2">"ask_name"</span><span class="p">,</span>
+            <span class="s2">"description"</span><span class="p">:</span> <span class="s2">"Learn who is ordering"</span><span class="p">,</span>
+            <span class="s2">"purpose"</span><span class="p">:</span> <span class="s2">"Get the customer's name"</span><span class="p">,</span>
+            <span class="s2">"extraction_instructions"</span><span class="p">:</span> <span class="s2">"Extract the customer's name"</span><span class="p">,</span>
+            <span class="s2">"response_instructions"</span><span class="p">:</span> <span class="s2">"Ask for the name"</span><span class="p">,</span>
+            <span class="s2">"required_context_keys"</span><span class="p">:</span> <span class="p">[</span><span class="s2">"name"</span><span class="p">],</span>
+            <span class="s2">"transitions"</span><span class="p">:</span> <span class="p">[</span>
+                <span class="p">{</span>
+                    <span class="s2">"target_state"</span><span class="p">:</span> <span class="s2">"ask_item"</span><span class="p">,</span>
+                    <span class="s2">"description"</span><span class="p">:</span> <span class="s2">"The name is known"</span><span class="p">,</span>
+                    <span class="s2">"priority"</span><span class="p">:</span> <span class="mi">100</span><span class="p">,</span>
+                    <span class="s2">"conditions"</span><span class="p">:</span> <span class="p">[</span>
+                        <span class="p">{</span>
+                            <span class="s2">"description"</span><span class="p">:</span> <span class="s2">"name is set"</span><span class="p">,</span>
+                            <span class="s2">"requires_context_keys"</span><span class="p">:</span> <span class="p">[</span><span class="s2">"name"</span><span class="p">],</span>
+                            <span class="s2">"logic"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"has_context"</span><span class="p">:</span> <span class="s2">"name"</span><span class="p">},</span>
+                        <span class="p">}</span>
+                    <span class="p">],</span>
+                <span class="p">}</span>
+            <span class="p">],</span>
+        <span class="p">},</span>
+        <span class="s2">"ask_item"</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">"id"</span><span class="p">:</span> <span class="s2">"ask_item"</span><span class="p">,</span>
+            <span class="s2">"description"</span><span class="p">:</span> <span class="s2">"Learn what to order"</span><span class="p">,</span>
+            <span class="s2">"purpose"</span><span class="p">:</span> <span class="s2">"Get the item"</span><span class="p">,</span>
+            <span class="s2">"extraction_instructions"</span><span class="p">:</span> <span class="s2">"Extract the item"</span><span class="p">,</span>
+            <span class="s2">"response_instructions"</span><span class="p">:</span> <span class="s2">"Ask what to order"</span><span class="p">,</span>
+            <span class="s2">"required_context_keys"</span><span class="p">:</span> <span class="p">[</span><span class="s2">"item"</span><span class="p">],</span>
+            <span class="s2">"transitions"</span><span class="p">:</span> <span class="p">[</span>
+                <span class="p">{</span>
+                    <span class="s2">"target_state"</span><span class="p">:</span> <span class="s2">"done"</span><span class="p">,</span>
+                    <span class="s2">"description"</span><span class="p">:</span> <span class="s2">"The item is known"</span><span class="p">,</span>
+                    <span class="s2">"priority"</span><span class="p">:</span> <span class="mi">100</span><span class="p">,</span>
+                    <span class="s2">"conditions"</span><span class="p">:</span> <span class="p">[</span>
+                        <span class="p">{</span>
+                            <span class="s2">"description"</span><span class="p">:</span> <span class="s2">"item is set"</span><span class="p">,</span>
+                            <span class="s2">"requires_context_keys"</span><span class="p">:</span> <span class="p">[</span><span class="s2">"item"</span><span class="p">],</span>
+                            <span class="s2">"logic"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"has_context"</span><span class="p">:</span> <span class="s2">"item"</span><span class="p">},</span>
+                        <span class="p">}</span>
+                    <span class="p">],</span>
+                <span class="p">}</span>
+            <span class="p">],</span>
+        <span class="p">},</span>
+        <span class="s2">"done"</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">"id"</span><span class="p">:</span> <span class="s2">"done"</span><span class="p">,</span>
+            <span class="s2">"description"</span><span class="p">:</span> <span class="s2">"Terminal state"</span><span class="p">,</span>
+            <span class="s2">"purpose"</span><span class="p">:</span> <span class="s2">"Confirm the order"</span><span class="p">,</span>
+            <span class="s2">"response_instructions"</span><span class="p">:</span> <span class="s2">"Confirm the order"</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">},</span>
+<span class="p">}</span>
+
+<span class="n">REPLIES</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">"ask_name"</span><span class="p">:</span> <span class="s2">"Welcome! Who is ordering?"</span><span class="p">,</span>
+    <span class="s2">"ask_item"</span><span class="p">:</span> <span class="s2">"What would you like?"</span><span class="p">,</span>
+    <span class="s2">"done"</span><span class="p">:</span> <span class="s2">"Coming right up."</span><span class="p">,</span>
+<span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">make_bot</span><span class="p">():</span>
+    <span class="n">llm</span> <span class="o">=</span> <span class="n">ScriptedLLM</span><span class="p">(</span>
+        <span class="n">extraction_data</span><span class="o">=</span><span class="p">{</span><span class="s2">"name"</span><span class="p">:</span> <span class="s2">"Ada"</span><span class="p">,</span> <span class="s2">"item"</span><span class="p">:</span> <span class="s2">"tea"</span><span class="p">},</span> <span class="n">responses</span><span class="o">=</span><span class="n">REPLIES</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">llm</span><span class="p">,</span> <span class="n">API</span><span class="o">.</span><span class="n">from_definition</span><span class="p">(</span><span class="n">ORDER_BOT</span><span class="p">,</span> <span class="n">llm_interface</span><span class="o">=</span><span class="n">llm</span><span class="p">)</span>
+
+
+<span class="n">llm</span><span class="p">,</span> <span class="n">api</span> <span class="o">=</span> <span class="n">make_bot</span><span class="p">()</span>
+<span class="n">run</span> <span class="o">=</span> <span class="n">ScriptedUser</span><span class="p">([</span><span class="s2">"I am Ada"</span><span class="p">,</span> <span class="s2">"a tea please"</span><span class="p">])</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">api</span><span class="p">)</span>
+
+<span class="n">assert_path</span><span class="p">(</span><span class="n">run</span><span class="p">,</span> <span class="p">[</span><span class="s2">"ask_name"</span><span class="p">,</span> <span class="s2">"ask_item"</span><span class="p">,</span> <span class="s2">"done"</span><span class="p">])</span>
+<span class="n">assert_state</span><span class="p">(</span><span class="n">run</span><span class="p">,</span> <span class="s2">"done"</span><span class="p">)</span>
+<span class="n">assert_context</span><span class="p">(</span><span class="n">run</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">"Ada"</span><span class="p">,</span> <span class="n">item</span><span class="o">=</span><span class="s2">"tea"</span><span class="p">)</span>
+<span class="n">llm</span><span class="o">.</span><span class="n">assert_exhausted</span><span class="p">()</span>
+</code></pre></div>
+<p><code>ScriptedUser.run</code> starts a conversation, sends the scripted messages and returns a frozen <code>ConversationRun</code>: <code>greeting</code>, <code>messages</code> (what was sent), <code>replies</code>, <code>states</code> (the path), <code>ended</code>, <code>final_state</code>, plus <code>api</code> and <code>conversation_id</code> for further queries.</p>
+<p>Inside pytest the same lines go into a test function; a fixture builds the bot.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+
+
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">bot</span><span class="p">():</span>
+    <span class="k">return</span> <span class="n">make_bot</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_the_order_is_taken</span><span class="p">(</span><span class="n">bot</span><span class="p">):</span>
+    <span class="n">llm</span><span class="p">,</span> <span class="n">api</span> <span class="o">=</span> <span class="n">bot</span>
+    <span class="n">run</span> <span class="o">=</span> <span class="n">ScriptedUser</span><span class="p">([</span><span class="s2">"I am Ada"</span><span class="p">,</span> <span class="s2">"a tea please"</span><span class="p">])</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">api</span><span class="p">)</span>
+    <span class="n">assert_path</span><span class="p">(</span><span class="n">run</span><span class="p">,</span> <span class="p">[</span><span class="s2">"ask_name"</span><span class="p">,</span> <span class="s2">"ask_item"</span><span class="p">,</span> <span class="s2">"done"</span><span class="p">])</span>
+    <span class="n">llm</span><span class="o">.</span><span class="n">assert_exhausted</span><span class="p">()</span>
+
+
+<span class="n">test_the_order_is_taken</span><span class="p">(</span><span class="n">make_bot</span><span class="p">())</span>
+</code></pre></div>
+<h2 id="the-doubles">The doubles<a class="headerlink" href="#the-doubles" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Double</th>
+<th>Use it when</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ScriptedLLM</code></td>
+<td>You want to decide every answer: fields, the reply of each state, tool calls, errors</td>
+<td>Fields from a dict, replies per state, a queue for <code>complete</code>; metered; an unscripted call is recorded and raised</td>
+</tr>
+<tr>
+<td><code>PromptGroundedLLM</code></td>
+<td>You want proof that the data reached the model</td>
+<td>A fact <code>{field: (value, evidence)}</code> comes back only when the evidence text is in the request</td>
+</tr>
+<tr>
+<td><code>MockLLM2Interface</code></td>
+<td>You need a fixed answer and nothing else (the simplest, oldest double)</td>
+<td>Every field from a dict, every reply one text; implements neither bulk extraction nor <code>complete</code></td>
+</tr>
+</tbody>
+</table>
+<p>All three are plain classes, not <code>unittest.mock</code> objects: their attributes are public, may change between turns, and a test may subclass them. Pass one as <code>llm_interface=</code>.</p>
+<p><code>ScriptedLLM</code> keeps <code>requests</code> (the <code>complete</code> calls) and <code>call_history</code> (every call as <code>(method, request)</code>), so a test can read what the pipeline sent. The pipeline swallows an error raised during a field extraction, so a call nothing scripted would otherwise look like a model that found nothing. <code>ScriptedLLM</code> records it in <code>unexpected</code>, raises <code>UnscriptedCallError</code>, and <code>assert_exhausted()</code> fails on it and on a scripted reply that was never used. End a test with <code>llm.assert_exhausted()</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="n">llm</span> <span class="o">=</span> <span class="n">ScriptedLLM</span><span class="p">([</span><span class="n">tool_call_reply</span><span class="p">((</span><span class="s2">"lookup"</span><span class="p">,</span> <span class="p">{</span><span class="s2">"city"</span><span class="p">:</span> <span class="s2">"Rome"</span><span class="p">})),</span> <span class="s2">"It is sunny."</span><span class="p">])</span>
+<span class="n">api</span> <span class="o">=</span> <span class="n">API</span><span class="o">.</span><span class="n">from_definition</span><span class="p">(</span><span class="n">ORDER_BOT</span><span class="p">,</span> <span class="n">llm_interface</span><span class="o">=</span><span class="n">llm</span><span class="p">)</span>
+<span class="c1"># ... run the code under test with `api`, then:</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">llm</span><span class="o">.</span><span class="n">assert_exhausted</span><span class="p">()</span>
+<span class="k">except</span> <span class="ne">AssertionError</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"replies never used:"</span><span class="p">,</span> <span class="n">error</span><span class="p">)</span>
+</code></pre></div>
+<p><code>final_reply(text)</code>, <code>tool_call_reply(*(name, arguments))</code> and <code>malformed_reply()</code> build the three kinds of <code>CompletionResponse</code>; put one in the <code>replies</code> queue, or use a plain string for a final text and an exception instance to make that call fail. <code>state_in_prompt(prompt)</code> returns the state id a response prompt was written for, for a double of your own that answers per state. <code>hash_embed(dim=8)</code> is a pure embedder (<code>Callable[[str], list[float]]</code>): the same text gives the same vector and shared words give a closer one.</p>
+<p><code>PromptGroundedLLM</code> catches the bug a fixed dict hides, an extraction prompt that never shows the model what it must read:</p>
+<div class="highlight"><pre><span></span><code><span class="n">grounded</span> <span class="o">=</span> <span class="n">PromptGroundedLLM</span><span class="p">(</span>
+    <span class="n">facts</span><span class="o">=</span><span class="p">{</span><span class="s2">"name"</span><span class="p">:</span> <span class="p">(</span><span class="s2">"Ada"</span><span class="p">,</span> <span class="s2">"Ada"</span><span class="p">),</span> <span class="s2">"item"</span><span class="p">:</span> <span class="p">(</span><span class="s2">"tea"</span><span class="p">,</span> <span class="s2">"tea"</span><span class="p">)},</span>
+    <span class="n">responses</span><span class="o">=</span><span class="n">REPLIES</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">api</span> <span class="o">=</span> <span class="n">API</span><span class="o">.</span><span class="n">from_definition</span><span class="p">(</span><span class="n">ORDER_BOT</span><span class="p">,</span> <span class="n">llm_interface</span><span class="o">=</span><span class="n">grounded</span><span class="p">)</span>
+
+<span class="n">lost</span> <span class="o">=</span> <span class="n">ScriptedUser</span><span class="p">([</span><span class="s2">"hello there"</span><span class="p">])</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">api</span><span class="p">)</span>
+<span class="n">assert_path</span><span class="p">(</span><span class="n">lost</span><span class="p">,</span> <span class="p">[</span><span class="s2">"ask_name"</span><span class="p">,</span> <span class="s2">"ask_name"</span><span class="p">])</span>  <span class="c1"># no evidence, no fact, no transition</span>
+
+<span class="n">api</span> <span class="o">=</span> <span class="n">API</span><span class="o">.</span><span class="n">from_definition</span><span class="p">(</span><span class="n">ORDER_BOT</span><span class="p">,</span> <span class="n">llm_interface</span><span class="o">=</span><span class="n">grounded</span><span class="p">)</span>
+<span class="n">found</span> <span class="o">=</span> <span class="n">ScriptedUser</span><span class="p">([</span><span class="s2">"I am Ada"</span><span class="p">,</span> <span class="s2">"tea please"</span><span class="p">])</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">api</span><span class="p">)</span>
+<span class="n">assert_path</span><span class="p">(</span><span class="n">found</span><span class="p">,</span> <span class="p">[</span><span class="s2">"ask_name"</span><span class="p">,</span> <span class="s2">"ask_item"</span><span class="p">,</span> <span class="s2">"done"</span><span class="p">])</span>
+</code></pre></div>
+<h2 id="the-scripted-user">The scripted user<a class="headerlink" href="#the-scripted-user" title="Permanent link">&para;</a></h2>
+<p><code>ScriptedUser(messages=(), *, rules=(), fallback=None, max_turns=25)</code>. The next message is the next scripted one; when they are spent, the answer of the first rule whose matcher fits the last reply (a regex or a callable, with one utterance or a sequence of them); then the <code>fallback</code>; then the run stops. It also stops when the conversation has ended or after <code>max_turns</code> messages (a stop, not an error). Exceptions of the API or the model propagate, so a test shows the traceback.</p>
+<div class="highlight"><pre><span></span><code><span class="n">llm</span> <span class="o">=</span> <span class="n">PromptGroundedLLM</span><span class="p">(</span>
+    <span class="n">facts</span><span class="o">=</span><span class="p">{</span><span class="s2">"name"</span><span class="p">:</span> <span class="p">(</span><span class="s2">"Ada"</span><span class="p">,</span> <span class="s2">"Ada"</span><span class="p">),</span> <span class="s2">"item"</span><span class="p">:</span> <span class="p">(</span><span class="s2">"tea"</span><span class="p">,</span> <span class="s2">"tea"</span><span class="p">)},</span> <span class="n">responses</span><span class="o">=</span><span class="n">REPLIES</span>
+<span class="p">)</span>
+<span class="n">api</span> <span class="o">=</span> <span class="n">API</span><span class="o">.</span><span class="n">from_definition</span><span class="p">(</span><span class="n">ORDER_BOT</span><span class="p">,</span> <span class="n">llm_interface</span><span class="o">=</span><span class="n">llm</span><span class="p">)</span>
+<span class="n">user</span> <span class="o">=</span> <span class="n">ScriptedUser</span><span class="p">(</span>
+    <span class="p">[</span><span class="s2">"hi"</span><span class="p">],</span>
+    <span class="n">rules</span><span class="o">=</span><span class="p">[(</span><span class="sa">r</span><span class="s2">"Who is ordering"</span><span class="p">,</span> <span class="s2">"I am Ada"</span><span class="p">),</span> <span class="p">(</span><span class="sa">r</span><span class="s2">"What would you like"</span><span class="p">,</span> <span class="s2">"tea"</span><span class="p">)],</span>
+<span class="p">)</span>
+<span class="n">run</span> <span class="o">=</span> <span class="n">user</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">api</span><span class="p">)</span>
+<span class="n">assert_path</span><span class="p">(</span><span class="n">run</span><span class="p">,</span> <span class="p">[</span><span class="s2">"ask_name"</span><span class="p">,</span> <span class="s2">"ask_name"</span><span class="p">,</span> <span class="s2">"ask_item"</span><span class="p">,</span> <span class="s2">"done"</span><span class="p">])</span>
+<span class="k">assert</span> <span class="n">run</span><span class="o">.</span><span class="n">messages</span> <span class="o">==</span> <span class="p">(</span><span class="s2">"hi"</span><span class="p">,</span> <span class="s2">"I am Ada"</span><span class="p">,</span> <span class="s2">"tea"</span><span class="p">)</span>
+</code></pre></div>
+<p>For an FSM that needs no user message (silent states, completion states, reasoning loops), drive it with <code>advance_until_terminal(api, *, max_steps)</code>; it returns the same record and raises <code>RunBudgetExceededError</code> when the budget is spent.</p>
+<div class="highlight"><pre><span></span><code><span class="n">CHAIN</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">"name"</span><span class="p">:</span> <span class="s2">"Chain"</span><span class="p">,</span>
+    <span class="s2">"description"</span><span class="p">:</span> <span class="s2">"Two steps with no user"</span><span class="p">,</span>
+    <span class="s2">"initial_state"</span><span class="p">:</span> <span class="s2">"first"</span><span class="p">,</span>
+    <span class="s2">"persona"</span><span class="p">:</span> <span class="s2">"A test persona"</span><span class="p">,</span>
+    <span class="s2">"states"</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">"first"</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">"id"</span><span class="p">:</span> <span class="s2">"first"</span><span class="p">,</span>
+            <span class="s2">"description"</span><span class="p">:</span> <span class="s2">"Start"</span><span class="p">,</span>
+            <span class="s2">"purpose"</span><span class="p">:</span> <span class="s2">"Begin"</span><span class="p">,</span>
+            <span class="s2">"response_instructions"</span><span class="p">:</span> <span class="s2">"Say first"</span><span class="p">,</span>
+            <span class="s2">"transitions"</span><span class="p">:</span> <span class="p">[</span>
+                <span class="p">{</span><span class="s2">"target_state"</span><span class="p">:</span> <span class="s2">"last"</span><span class="p">,</span> <span class="s2">"description"</span><span class="p">:</span> <span class="s2">"Always"</span><span class="p">,</span> <span class="s2">"priority"</span><span class="p">:</span> <span class="mi">100</span><span class="p">}</span>
+            <span class="p">],</span>
+        <span class="p">},</span>
+        <span class="s2">"last"</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s2">"id"</span><span class="p">:</span> <span class="s2">"last"</span><span class="p">,</span>
+            <span class="s2">"description"</span><span class="p">:</span> <span class="s2">"End"</span><span class="p">,</span>
+            <span class="s2">"purpose"</span><span class="p">:</span> <span class="s2">"Finish"</span><span class="p">,</span>
+            <span class="s2">"response_instructions"</span><span class="p">:</span> <span class="s2">"Say last"</span><span class="p">,</span>
+        <span class="p">},</span>
+    <span class="p">},</span>
+<span class="p">}</span>
+
+<span class="n">llm</span> <span class="o">=</span> <span class="n">ScriptedLLM</span><span class="p">(</span><span class="n">responses</span><span class="o">=</span><span class="p">{</span><span class="s2">"first"</span><span class="p">:</span> <span class="s2">"One."</span><span class="p">,</span> <span class="s2">"last"</span><span class="p">:</span> <span class="s2">"Two."</span><span class="p">})</span>
+<span class="n">chain</span> <span class="o">=</span> <span class="n">advance_until_terminal</span><span class="p">(</span>
+    <span class="n">API</span><span class="o">.</span><span class="n">from_definition</span><span class="p">(</span><span class="n">CHAIN</span><span class="p">,</span> <span class="n">llm_interface</span><span class="o">=</span><span class="n">llm</span><span class="p">),</span> <span class="n">max_steps</span><span class="o">=</span><span class="mi">5</span>
+<span class="p">)</span>
+<span class="n">assert_path</span><span class="p">(</span><span class="n">chain</span><span class="p">,</span> <span class="p">[</span><span class="s2">"first"</span><span class="p">,</span> <span class="s2">"last"</span><span class="p">])</span>
+<span class="k">assert</span> <span class="n">chain</span><span class="o">.</span><span class="n">ended</span>
+</code></pre></div>
+<h2 id="the-assertions">The assertions<a class="headerlink" href="#the-assertions" title="Permanent link">&para;</a></h2>
+<p>Four plain functions. Each raises <code>AssertionError</code> explicitly (never an <code>assert</code> statement, so <code>python -O</code> changes nothing), hides its own frames so pytest shows the failing line of your test, and names the first difference. <code>source</code> is a <code>ConversationRun</code> or an <code>(api, conversation_id)</code> pair.</p>
+<table>
+<thead>
+<tr>
+<th>Assertion</th>
+<th>Right when</th>
+<th>Not for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>assert_state(source, state_id)</code></td>
+<td>You care where the conversation is now (read live, so it follows later turns)</td>
+<td>How it got there: use <code>assert_path</code></td>
+</tr>
+<tr>
+<td><code>assert_context(source, **expected)</code></td>
+<td>Named keys must hold values; other keys are ignored (a subset check)</td>
+<td>Internal <code>_</code> keys (not visible), or proving a key is absent</td>
+</tr>
+<tr>
+<td><code>assert_path(source, expected, *, exact=True)</code></td>
+<td>The route matters: a <code>ConversationRun</code>, a list of state ids or a sequence of <code>AdvanceResult</code>. <code>exact=False</code> accepts an ordered subsequence</td>
+<td>A path of a conversation nobody recorded: add a <code>PathRecorder</code></td>
+</tr>
+<tr>
+<td><code>assert_result(result, *, kind=None, status=None, reason=...)</code></td>
+<td>A completion state's <code>{kind, text, calls}</code>, a synthesis state's <code>{status, procedure_id, version, reason}</code> or a <code>CompletionResponse</code></td>
+<td>Plain FSM states</td>
+</tr>
+</tbody>
+</table>
+<p>Expected values may be <code>fsm_llm.core.codes</code> members or their strings; a typo raises <code>ValueError</code> listing the vocabulary instead of passing as a wrong guess. <code>reason=None</code> asserts the result carries no reason; leaving <code>reason</code> out checks nothing.</p>
+<div class="highlight"><pre><span></span><code><span class="n">llm</span><span class="p">,</span> <span class="n">api</span> <span class="o">=</span> <span class="n">make_bot</span><span class="p">()</span>
+<span class="n">run</span> <span class="o">=</span> <span class="n">ScriptedUser</span><span class="p">([</span><span class="s2">"I am Ada"</span><span class="p">,</span> <span class="s2">"a tea please"</span><span class="p">])</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">api</span><span class="p">)</span>
+
+<span class="n">assert_path</span><span class="p">(</span><span class="n">run</span><span class="p">,</span> <span class="p">[</span><span class="s2">"ask_name"</span><span class="p">,</span> <span class="s2">"done"</span><span class="p">],</span> <span class="n">exact</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>  <span class="c1"># a subsequence</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">assert_path</span><span class="p">(</span><span class="n">run</span><span class="p">,</span> <span class="p">[</span><span class="s2">"ask_name"</span><span class="p">,</span> <span class="s2">"done"</span><span class="p">])</span>
+<span class="k">except</span> <span class="ne">AssertionError</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">error</span><span class="p">)</span>  <span class="c1"># names the first difference, with its index</span>
+
+<span class="n">assert_result</span><span class="p">(</span><span class="n">final_reply</span><span class="p">(</span><span class="s2">"ok"</span><span class="p">),</span> <span class="n">kind</span><span class="o">=</span><span class="s2">"final"</span><span class="p">)</span>
+<span class="n">assert_result</span><span class="p">({</span><span class="s2">"status"</span><span class="p">:</span> <span class="s2">"ok"</span><span class="p">,</span> <span class="s2">"reason"</span><span class="p">:</span> <span class="kc">None</span><span class="p">},</span> <span class="n">status</span><span class="o">=</span><span class="s2">"ok"</span><span class="p">,</span> <span class="n">reason</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">assert_result</span><span class="p">({</span><span class="s2">"status"</span><span class="p">:</span> <span class="s2">"ok"</span><span class="p">},</span> <span class="n">status</span><span class="o">=</span><span class="s2">"okay"</span><span class="p">)</span>
+<span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">error</span><span class="p">)</span>  <span class="c1"># lists the vocabulary</span>
+</code></pre></div>
+<h2 id="pathrecorder">PathRecorder<a class="headerlink" href="#pathrecorder" title="Permanent link">&para;</a></h2>
+<p>When the code under test drives the conversation (an agent, a runner), no <code>ConversationRun</code> exists. Register a <code>PathRecorder</code> as a handler and read the route back by conversation id.</p>
+<div class="highlight"><pre><span></span><code><span class="n">recorder</span> <span class="o">=</span> <span class="n">PathRecorder</span><span class="p">()</span>
+<span class="n">llm</span> <span class="o">=</span> <span class="n">ScriptedLLM</span><span class="p">(</span><span class="n">extraction_data</span><span class="o">=</span><span class="p">{</span><span class="s2">"name"</span><span class="p">:</span> <span class="s2">"Ada"</span><span class="p">,</span> <span class="s2">"item"</span><span class="p">:</span> <span class="s2">"tea"</span><span class="p">},</span> <span class="n">responses</span><span class="o">=</span><span class="n">REPLIES</span><span class="p">)</span>
+<span class="n">api</span> <span class="o">=</span> <span class="n">API</span><span class="o">.</span><span class="n">from_definition</span><span class="p">(</span><span class="n">ORDER_BOT</span><span class="p">,</span> <span class="n">llm_interface</span><span class="o">=</span><span class="n">llm</span><span class="p">,</span> <span class="n">handlers</span><span class="o">=</span><span class="p">[</span><span class="n">recorder</span><span class="p">])</span>
+
+<span class="n">run</span> <span class="o">=</span> <span class="n">ScriptedUser</span><span class="p">([</span><span class="s2">"I am Ada"</span><span class="p">,</span> <span class="s2">"a tea please"</span><span class="p">])</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">api</span><span class="p">)</span>
+<span class="n">assert_path</span><span class="p">(</span><span class="n">recorder</span><span class="o">.</span><span class="n">path</span><span class="p">(</span><span class="n">run</span><span class="o">.</span><span class="n">conversation_id</span><span class="p">),</span> <span class="p">[</span><span class="s2">"ask_name"</span><span class="p">,</span> <span class="s2">"ask_item"</span><span class="p">,</span> <span class="s2">"done"</span><span class="p">])</span>
+</code></pre></div>
+<p>It records the initial state and each transition target per conversation, and never changes a conversation. A stay is not a transition, so a recorder does not repeat the state; a <code>ConversationRun</code> does.</p>
+<p>Caveat: registering ANY handler makes the pipeline deep-copy the context at every handler timing (with no handler it skips the copy). A context value that cannot be deep-copied, such as a lock, a socket or a client object, can therefore fail a turn that passed without the recorder. Test such code with <code>ConversationRun</code> and no handler.</p>
+<h2 id="with-pytest">With pytest<a class="headerlink" href="#with-pytest" title="Permanent link">&para;</a></h2>
+<p>The assertions need nothing from pytest. They build every message by hand, so <code>pytest.register_assert_rewrite("fsm_llm.testing")</code> is not needed. Add it, before the import, to a <code>conftest.py</code> only if you write your own helpers in a module that use plain <code>assert</code> and want pytest's introspection there:</p>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># conftest.py</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+
+<span class="n">pytest</span><span class="o">.</span><span class="n">register_assert_rewrite</span><span class="p">(</span><span class="s2">"fsm_llm.testing"</span><span class="p">)</span>
+</code></pre></div>
+<p>The doubles never open a socket, so a test that uses them passes in a suite that blocks the network.</p>
+<h2 id="migrating-from-testsconftest">Migrating from <code>tests.conftest</code><a class="headerlink" href="#migrating-from-testsconftest" title="Permanent link">&para;</a></h2>
+<p>Projects that copied <code>MockLLM2Interface</code> or <code>PromptGroundedLLM</code> out of this repository's <code>tests/conftest.py</code> can delete the copy. The classes are the same (the dead <code>transition_target</code> argument of <code>MockLLM2Interface</code>, stored and never read, is gone); the import changes.</p>
+<div class="notest highlight"><pre><span></span><code><span class="gd">-from tests.conftest import MockLLM2Interface, PromptGroundedLLM</span>
+<span class="gi">+from fsm_llm.testing import MockLLM2Interface, PromptGroundedLLM</span>
+</code></pre></div>
+<p>Inside this repository <code>tests/conftest.py</code> no longer exports the doubles at all (a guard test fails when a test imports them from there). Other copies, such as a private <code>_final(...)</code> reply helper or a queue-of-replies class, usually become <code>final_reply(...)</code> and <code>ScriptedLLM(replies)</code>; keep a private double when it encodes behaviour of its own, such as a provider-level fake.</p>
+<h2 id="limits">Limits<a class="headerlink" href="#limits" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The fakes stand in for a model; they say nothing about how a real model behaves. A passing scripted test proves your FSM, handlers and wiring, not the quality of your prompts.</li>
+<li><code>ScriptedLLM</code> answers every field extraction from one dict, whatever the state asks for; use <code>PromptGroundedLLM</code> when the evidence matters.</li>
+<li><code>PathRecorder</code> and the assertions read the conversation through the public <code>API</code>; a conversation closed while still open is read from the snapshot the API kept at the close.</li>
+</ul>
+<h2 id="next-steps">Next steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The <a href="../api_reference/">API Reference</a> lists every name of <code>fsm_llm.testing</code>.</li>
+<li><a href="../handlers/">Handler Development</a> covers the handlers you can test with these doubles.</li>
+<li>The <a href="../fsm_design/">FSM Design Guide</a> covers designing the machine under test.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>

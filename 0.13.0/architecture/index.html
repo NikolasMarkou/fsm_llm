@@ -1,0 +1,2115 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Finite state machines for large language models">
+      
+      
+      
+        <link rel="canonical" href="https://nikolasmarkou.github.io/fsm_llm/0.13.0/architecture/">
+      
+      
+        <link rel="prev" href="../cli/">
+      
+      
+        <link rel="next" href="../contributing/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+    
+    
+      
+        <title>Architecture - FSM-LLM</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#architecture-deep-dive" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="FSM-LLM" class="md-header__button md-logo" aria-label="FSM-LLM" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            FSM-LLM
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Architecture
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/NikolasMarkou/fsm_llm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    NikolasMarkou/fsm_llm
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="FSM-LLM" class="md-nav__button md-logo" aria-label="FSM-LLM" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    FSM-LLM
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/NikolasMarkou/fsm_llm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    NikolasMarkou/fsm_llm
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fsm_design/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FSM Design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../handlers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Handlers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../synthesis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime FSM synthesis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api_reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Command line
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#system-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        System Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#core-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core Components
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Core Components">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api-engineapi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API (engine/api/)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fsmmanager-enginefsm-messagepipeline-engineturn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FSMManager (engine/fsm/) + MessagePipeline (engine/turn/)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prompt-builders-contextlayout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt Builders (context/layout/)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#handler-system-handlers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Handler System (handlers/)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#llm-interface-llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LLM Interface (llm/)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#transitionevaluator-coretransition_evaluatorpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TransitionEvaluator (core/transition_evaluator.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Flow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data Flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#message-processing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Message Processing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#steps-without-a-user-message-apiadvance-apirun_until_terminal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Steps Without a User Message (API.advance, API.run_until_terminal)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#completion-states-tool-calling-and-structured-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Completion States (tool calling and structured output)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#synthesize-states-procedures-written-on-demand" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Synthesize States (procedures written on demand)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#state-kinds-and-executors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State Kinds and Executors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conversation-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conversation Start
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#streaming-apiconverse_stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streaming (API.converse_stream)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#context-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context Handling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Context Handling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#context-in-stacked-fsms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context in Stacked FSMs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#handler-execution-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Handler Execution Pipeline
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#package-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Package Layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extension-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extension Integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extension-points" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extension Points
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Extension Points">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#custom-llm-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom LLM Interface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-handlers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom Handlers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#state-kinds-internal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State Kinds (internal)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evaluate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_5" id="__nav_5_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmaps
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Roadmaps
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../2026_roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026 roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#system-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        System Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#core-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core Components
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Core Components">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api-engineapi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API (engine/api/)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fsmmanager-enginefsm-messagepipeline-engineturn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FSMManager (engine/fsm/) + MessagePipeline (engine/turn/)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prompt-builders-contextlayout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt Builders (context/layout/)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#handler-system-handlers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Handler System (handlers/)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#llm-interface-llm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LLM Interface (llm/)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#transitionevaluator-coretransition_evaluatorpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TransitionEvaluator (core/transition_evaluator.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Flow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data Flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#message-processing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Message Processing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#steps-without-a-user-message-apiadvance-apirun_until_terminal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Steps Without a User Message (API.advance, API.run_until_terminal)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#completion-states-tool-calling-and-structured-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Completion States (tool calling and structured output)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#synthesize-states-procedures-written-on-demand" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Synthesize States (procedures written on demand)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#state-kinds-and-executors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State Kinds and Executors
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conversation-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conversation Start
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#streaming-apiconverse_stream" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Streaming (API.converse_stream)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#context-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context Handling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Context Handling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#context-in-stacked-fsms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context in Stacked FSMs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#handler-execution-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Handler Execution Pipeline
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#package-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Package Layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extension-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extension Integration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extension-points" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extension Points
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Extension Points">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#custom-llm-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom LLM Interface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-handlers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom Handlers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#state-kinds-internal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State Kinds (internal)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="architecture-deep-dive">Architecture Deep Dive<a class="headerlink" href="#architecture-deep-dive" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Covers FSM-LLM v0.13.0</p>
+</blockquote>
+<p>Technical overview of the FSM-LLM architecture and how components work together.</p>
+<h2 id="system-overview">System Overview<a class="headerlink" href="#system-overview" title="Permanent link">&para;</a></h2>
+<p>FSM-LLM uses a <strong>2-pass architecture</strong> that separates data extraction, transition evaluation, and response generation:</p>
+<ol>
+<li><strong>Pass 1 -- Analysis &amp; Transition</strong>: Data extraction from user input, transition evaluation via JsonLogic rules (with LLM classification fallback for ambiguous cases), state transition.</li>
+<li><strong>Pass 2 -- Response Generation</strong>: Response generated from the new state's context, ensuring the response always reflects the correct state.</li>
+</ol>
+<div class="highlight"><pre><span></span><code>┌──────────────────────────────────────────────────────┐
+│                    User Application                   │
+├──────────────────────────────────────────────────────┤
+│                     API Layer                         │
+├──────────────────────────────────────────────────────┤
+│   FSM Manager  │  Handler System  │  LLM Interface   │
+├──────────────────────────────────────────────────────┤
+│              MessagePipeline (2-pass)                 │
+├──────────────────────────────────────────────────────┤
+│  Prompt Builders  │  Context Manager  │  Evaluator   │
+├──────────────────────────────────────────────────────┤
+│   Storage: In-Memory Dicts (+ optional SessionStore)  │
+└──────────────────────────────────────────────────────┘
+</code></pre></div>
+<p>Conversation state lives in in-memory dicts by default. Attaching a <code>SessionStore</code>
+(e.g. <code>FileSessionStore</code>) adds durable, cross-restart persistence -- state is saved after each
+<code>converse()</code> and restored via <code>restore_session()</code>.</p>
+<h2 id="core-components">Core Components<a class="headerlink" href="#core-components" title="Permanent link">&para;</a></h2>
+<h3 id="api-engineapi">API (<code>engine/api/</code>)<a class="headerlink" href="#api-engineapi" title="Permanent link">&para;</a></h3>
+<p>User-facing entry point. Manages FSM definition processing, component wiring, conversation lifecycle, and FSM stacking.</p>
+<h3 id="fsmmanager-enginefsm-messagepipeline-engineturn">FSMManager (<code>engine/fsm/</code>) + MessagePipeline (<code>engine/turn/</code>)<a class="headerlink" href="#fsmmanager-enginefsm-messagepipeline-engineturn" title="Permanent link">&para;</a></h3>
+<p>FSMManager handles FSM instance lifecycle with per-conversation thread locks and LRU FSM cache. MessagePipeline implements the 2-pass processing:</p>
+<div class="highlight"><pre><span></span><code>Pass 1: PRE_PROCESSING handlers → LLM extract data → CONTEXT_UPDATE handlers
+      → Evaluate transitions → PRE_TRANSITION → State change → POST_TRANSITION
+
+Pass 2: POST_PROCESSING handlers → LLM generate response → Return
+</code></pre></div>
+<h3 id="prompt-builders-contextlayout">Prompt Builders (<code>context/layout/</code>)<a class="headerlink" href="#prompt-builders-contextlayout" title="Permanent link">&para;</a></h3>
+<p>Two builders produce structured XML-like prompts, plus the Pass-1 builder slot:
+- <code>DataExtractionPromptBuilder</code> -- the Pass-1 slot of <code>FSMManager</code>/<code>MessagePipeline</code>; the pipeline builds the bulk extraction prompt inline and uses this builder only for the shared sanitizer
+- <code>ResponseGenerationPromptBuilder</code> -- Pass 2: user-facing response generation
+- <code>FieldExtractionPromptBuilder</code> -- Targeted single-field extraction</p>
+<p>Security: XML tag sanitization, CDATA wrapping for JSON, token budget management.</p>
+<h3 id="handler-system-handlers">Handler System (<code>handlers/</code>)<a class="headerlink" href="#handler-system-handlers" title="Permanent link">&para;</a></h3>
+<p>Plugin architecture with 8 timing points. Handlers self-determine execution via state/context conditions, execute in priority order, with configurable error isolation (<code>"continue"</code> or <code>"raise"</code>). Critical handlers always raise on error.</p>
+<h3 id="llm-interface-llm">LLM Interface (<code>llm/</code>)<a class="headerlink" href="#llm-interface-llm" title="Permanent link">&para;</a></h3>
+<p><code>LLMInterface</code> ABC with the methods:
+- <code>generate_response(request)</code> -- Generate user-facing response (Pass 2)
+- <code>extract_field(request)</code> -- Extract a targeted field from input (Pass 1)
+- <code>generate_response_stream(request)</code> -- Stream the Pass-2 response token-by-token
+- <code>extract_bulk_data(request)</code> -- Bulk extraction for states with <code>extraction_instructions</code>
+- <code>complete(request: CompletionRequest) -&gt; CompletionResponse</code> -- The one primitive for tool calling, plain and structured completion (classifier, completion states, the agents' LLM judge). Not abstract: the base method raises <code>NotImplementedError</code></p>
+<p><code>LiteLLMInterface</code> provides the built-in implementation supporting 100+ providers. It is the one place a provider request is built (<code>_build_call_params</code>) and sent (one send path that counts every call on the instance: <code>usage()</code>), for every call kind; <code>LiteLLMEmbedder</code> is the one embedding path. <code>litellm</code> is imported in exactly one module, <code>llm/providers/litellm.py</code>; nothing else in the package (agents, reasoning, meta-builder) calls a provider by itself. The classifier of a conversation sends its <code>complete</code> requests through the conversation's own <code>llm_interface</code>. Request models carry <code>user_message: str | None</code>; the request builder sends <code>None</code> (no user message) as the fixed <code>NEUTRAL_USER_TURN</code> and an empty or whitespace message as <code>EMPTY_USER_MESSAGE_TURN</code>, so the provider never sees an empty user turn and never reads an empty message as an instruction.</p>
+<h3 id="transitionevaluator-coretransition_evaluatorpy">TransitionEvaluator (<code>core/transition_evaluator.py</code>)<a class="headerlink" href="#transitionevaluator-coretransition_evaluatorpy" title="Permanent link">&para;</a></h3>
+<p>Three-outcome evaluation:
+- <strong>DETERMINISTIC</strong> -- One passing transition, or a unique lowest <code>priority</code> value among several passing ones, proceed automatically
+- <strong>AMBIGUOUS</strong> -- Two or more passing transitions tied at the lowest priority; only the tied group is delegated to LLM classification
+- <strong>BLOCKED</strong> -- No matches, stay in current state</p>
+<p>Uses JsonLogic conditions (<code>core/expressions/</code>) and required context key checks.</p>
+<h2 id="data-flow">Data Flow<a class="headerlink" href="#data-flow" title="Permanent link">&para;</a></h2>
+<h3 id="message-processing">Message Processing<a class="headerlink" href="#message-processing" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>User Message → API.converse()
+  → FSMManager.process_message() [acquires per-conversation lock]
+    → MessagePipeline.process()
+      → PRE_PROCESSING handlers
+      → LLM: extract data from user input
+      → Update context (merge extracted data)
+      → CONTEXT_UPDATE handlers (if keys changed)
+      → TransitionEvaluator: evaluate transitions
+      → If transitioning: PRE_TRANSITION → state change → POST_TRANSITION
+      → POST_PROCESSING handlers
+      → LLM: generate response from NEW state
+    → Return response
+</code></pre></div>
+<h3 id="steps-without-a-user-message-apiadvance-apirun_until_terminal">Steps Without a User Message (<code>API.advance</code>, <code>API.run_until_terminal</code>)<a class="headerlink" href="#steps-without-a-user-message-apiadvance-apirun_until_terminal" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>API.advance(conversation_id)
+  → FSMManager.advance() [same per-conversation lock and turn guard]
+    → MessagePipeline.advance() → the same turn body as process(), user_message=None
+      → no user exchange appended to history
+      → Pass 1 prompts in their no-message wording (bulk prompt built from the
+        scoped, security-filtered context; fills unset keys only)
+      → transition evaluation and Pass 2 exactly as for a message
+    → Return AdvanceResult(state_before, state_after, transition_outcome, response, ended)
+
+API.run_until_terminal(conversation_id, *, max_steps, max_seconds=None, before_step=None,
+                       seconds_exempt_states=())
+  → per round: ended? → seconds budget → steps budget → before_step(n) → advance()
+  → an ended PUSHED FSM on top: before_step(n) once (not a step) so the hook can pop it;
+    the run then continues on the parent, or returns if nothing was popped
+  → RunBudgetExceededError when a budget is spent; a conversation closed mid-run ends it normally
+</code></pre></div>
+<p>This is how the agents, the reasoning engine and any program that drives an FSM by itself run a conversation: no synthetic user message is ever sent. The reasoning engine runs one orchestrator run whose <code>before_step</code> hook pushes and pops the strategy FSMs. <code>advance_stream</code> and <code>run_until_terminal_stream</code> are the streaming forms (reply text only).</p>
+<h3 id="completion-states-tool-calling-and-structured-output">Completion States (tool calling and structured output)<a class="headerlink" href="#completion-states-tool-calling-and-structured-output" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>State with "completion": {tools | response_format_key, tool_choice, instructions,
+                          messages_key, result_key}
+  Pass 1 → one LLMInterface.complete() over [system(instructions)] + context[messages_key]
+         → context[result_key] = {kind: calls | final | malformed, text, calls: [{id, name, arguments}]}
+  transitions read &lt;result_key&gt;.kind; a handler runs the calls, appends
+  tool_exchange(content, calls, results) to the transcript and clears result_key
+</code></pre></div>
+<p>The transcript is a context list the consumer owns (an internal key), never the conversation history. Core runs no tool, adds no prompt text and no history, and refuses an unpaired transcript with <code>LLMResponseError</code> before sending (the turn rolls back). <code>NativeFunctionCallingReactAgent</code> (tool loop, forced final tool, repair turn) and the meta-builder's build call are completion states.</p>
+<h3 id="synthesize-states-procedures-written-on-demand">Synthesize States (procedures written on demand)<a class="headerlink" href="#synthesize-states-procedures-written-on-demand" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>State with "synthesize": {goal, inputs, return_keys, on_failure, result_key, min_lifecycle}
+  Pass 1 → no extraction; the pipeline makes result_key handler-only
+  ProcedureRunner (before_step hook of run_until_terminal, or around converse):
+    start   → write {status: running} → obtain(goal) → library hit, or compile + gates G1 to G7
+            → push_fsm(child, inherit_context=False) with only the declared inputs
+    tick    → a child over policy.max_turns steps gets procedure_abort set (priority 0 abort edge)
+    finish  → pop_fsm(context_to_return=return_keys) only on success
+            → context[result_key] = {status: ok | failed | aborted, procedure_id, version, reason}
+  transitions read &lt;result_key&gt;.status
+</code></pre></div>
+<p>Core only loads the field and checks the host FSM with the real evaluator (every edge reads the result, none fires before the runner has written one, the failure edge passes for <code>failed</code> and <code>aborted</code>). The runner is a consumer of the public step driver, as the reasoning engine is: it adds no seam to core. A bare <code>API.converse</code> on a synthesize state stays in it. See <a href="../synthesis/">synthesis.md</a>.</p>
+<h3 id="state-kinds-and-executors">State Kinds and Executors<a class="headerlink" href="#state-kinds-and-executors" title="Permanent link">&para;</a></h3>
+<p>A state has exactly one kind, derived from the config it carries: <code>conversation</code> (the default: field, bulk and classification extraction, then a reply), <code>completion</code> (a <code>completion</code> config) or <code>synthesize</code> (a <code>synthesize</code> config). <code>State.kind</code> returns the name. It is a plain read-only property, not a field: it is absent from <code>model_dump</code>, <code>model_fields</code> and the JSON schema, so a definition cannot declare it and no <code>fsm_id</code> or library digest moves.</p>
+<p>The extension point has two halves, and a new kind needs both:</p>
+<ul>
+<li><strong>Declaration</strong> (core). A frozen <code>KindSpec</code> in <code>fsm_llm.core.state_kinds</code> names the kind, the <code>State</code> field that carries its config (<code>config_field</code>) and the rules the rest of core reads: <code>result_key</code>, <code>inherits_result_on_push</code>, <code>forbidden_declarations</code>, <code>check_state</code>, <code>check_definition</code> and <code>sample_results</code> (the loader), <code>dryrun_judged</code>, <code>mentioned_keys</code> and <code>typed_keys</code> (gate G6a), <code>minted_keys</code> and <code>produced_keys</code> (the pipeline, G3 and G4), <code>lint_raw</code> and <code>raw_result_key</code> (the validator, which reads raw dicts), <code>declared_tools</code>, <code>raw_declared_tools</code> and <code>supported_in_procedure</code> (synthesis). The registry (<code>KINDS</code>, <code>kind_of</code>, <code>get_kind</code>) is static and process-wide; <code>fsm_llm.core.state_kinds</code> is a leaf that imports only the standard library.</li>
+<li><strong>Execution</strong> (engine). A <code>StateExecutor</code> in <code>fsm_llm.engine.kinds</code> says what the kind does in Pass 1: <code>extract(...)</code> produces the turn's extraction result, <code>cleans_extracted</code> says whether the data goes through <code>clean_context_keys</code>, and <code>after_transition(...)</code> runs when a transition lands in a state of the kind. The pipeline picks the executor with <code>executor_for(state, executors)</code> at the one Pass-1 seam that the sync and the stream path share. The executor table is per instance: <code>API(..., executors={kind_name: executor})</code>, passed down to <code>FSMManager</code> and <code>MessagePipeline</code>, is validated, copied read-only and visible to that <code>API</code> only. A kind with no executor (<code>synthesize</code>, which is passive, or a runtime kind nobody registered) runs as conversation, resolved through that <code>API</code>'s own <code>conversation</code> entry first and the module's second, so an <code>executors={"conversation": X}</code> override covers it too (a bare <code>converse</code> on a synthesize state stays in it, as before).</li>
+</ul>
+<p>What the engine guarantees to an executor: <code>process()</code> takes the one snapshot of the turn and restores it on a failure (see Turn atomicity in <code>src/fsm_llm/AGENTS.md</code>), so an executor takes none of its own; handler-only keys (a kind's <code>result_key</code>) are never minted as extraction targets; Pass 2 stays shared and kind-agnostic. What it does not: the conversation Pass-1 methods (<code>_extract_after_transition</code>, <code>_execute_data_extraction</code> and their field, bulk and classification helpers) still live on <code>MessagePipeline</code> and the conversation executor calls them; they move with the module layout split (roadmap 0.4), they were not deleted. A test-only kind registered at runtime runs a full conversation with no edit in core (<code>tests/test_fsm_llm/test_executor_map.py</code>).</p>
+<p>Nothing here is public yet: <code>fsm_llm/__init__.py</code> exports neither module, <code>executors=</code> is not on the builders, and the entry-point group for third-party kinds arrives with the plugin work (roadmap C10, row 5.5). Until then both packages (<code>core.state_kinds</code> and <code>engine.kinds</code>) are internal. The <code>executors</code> keyword of <code>API</code>, <code>FSMManager</code> and <code>MessagePipeline</code> shows in the API snapshot fixture (<code>tests/fixtures/api_snapshot.txt</code>) as <code>Mapping[str, StateExecutor] | None</code>: <code>StateExecutor</code> is imported from <code>fsm_llm.engine.kinds</code> (not from <code>fsm_llm</code>) and is internal until the kind registry is exported, so the annotation names a class the package does not export, on purpose.</p>
+<h3 id="conversation-start">Conversation Start<a class="headerlink" href="#conversation-start" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>API.start_conversation(initial_context)
+  → FSMManager: create FSM instance
+  → START_CONVERSATION handlers
+  → MessagePipeline: generate initial response from initial state
+  → Return (conversation_id, response)
+</code></pre></div>
+<h3 id="streaming-apiconverse_stream">Streaming (<code>API.converse_stream</code>)<a class="headerlink" href="#streaming-apiconverse_stream" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>API.converse_stream() → MessagePipeline.process_stream()
+  → Pass 1 runs fully (extract → transition), identical to the synchronous path
+  → Pass 2 streams the response token-by-token via LLMInterface.generate_response_stream()
+  → yields str chunks to the caller
+</code></pre></div>
+<p>States with an empty <code>response_instructions</code> skip Pass 2 entirely: no LLM call, the empty
+reply (<code>""</code> from <code>start_conversation</code>/<code>converse</code>, no chunk from a stream, <code>response=None</code>
+from <code>advance</code>) and nothing added to the history. This is the common shape for
+intermediate agent/tool-dispatch states.</p>
+<h2 id="context-handling">Context Handling<a class="headerlink" href="#context-handling" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">FSMContext</span><span class="p">:</span>
+    <span class="n">data</span><span class="p">:</span> <span class="nb">dict</span>           <span class="c1"># User-defined context (extracted data, handler outputs)</span>
+    <span class="n">conversation</span><span class="p">:</span> <span class="n">Conversation</span>  <span class="c1"># Message history with max_history_size</span>
+    <span class="n">metadata</span><span class="p">:</span> <span class="nb">dict</span>       <span class="c1"># System metadata</span>
+    <span class="n">working_memory</span><span class="p">:</span> <span class="n">WorkingMemory</span>  <span class="c1"># Named buffers (core, scratch, environment, reasoning)</span>
+</code></pre></div>
+<p><code>get_user_visible_data()</code> (which merges the non-hidden buffers into <code>data</code>, minus internal keys and secret-looking entries; the one key policy lives in <code>security/</code>, so a key named exactly <code>system</code> is an ordinary visible key, unlike <code>system_*</code>) enters the Pass-1 per-field extraction prompt (<code>_execute_field_extractions</code>, when a field's <code>context_keys</code> is left at its default) and both classifier call sites. The three Pass-2 sites (<code>_execute_response_generation_pass</code>, <code>_stream_response_generation_pass</code>, and <code>generate_initial_response</code> when a greeting is generated) build the <code>&lt;current_context&gt;</code> block from <code>get_merged_data()</code>, scoped by <code>read_keys</code>; the prompt is the only context channel, since <code>ResponseGenerationRequest</code> carries no context field. <code>update_context</code>/handlers write <code>data</code> only; a value that must reach the shipped response prompt belongs in <code>data</code>. <code>working_memory</code> is also <code>exclude=True</code>, so <code>FSMContext.model_dump()</code> omits it (sessions persist it through <code>WorkingMemory.to_dict()</code>).</p>
+<p>Special keys (prefixed with <code>_</code>): <code>_conversation_id</code>, <code>_conversation_start</code>, <code>_fsm_id</code>, <code>_timestamp</code>, and, once a transition has happened, <code>_current_state</code>, <code>_previous_state</code>, <code>_transition_timestamp</code>. ERROR handlers additionally see <code>_error</code> and <code>_traceback</code>. Formats: <code>_conversation_start</code> is naive local-time ISO text (<code>datetime.now().isoformat()</code>), <code>_timestamp</code> and <code>_transition_timestamp</code> are epoch seconds (floats), and none of the three is persisted by <code>save_session</code> (UTC-aware values are carried, not built). The raw user message is not in the context, so handlers see extracted keys only.</p>
+<h3 id="context-in-stacked-fsms">Context in Stacked FSMs<a class="headerlink" href="#context-in-stacked-fsms" title="Permanent link">&para;</a></h3>
+<p>On <code>push_fsm</code>: parent context optionally inherited/passed to child.
+On <code>pop_fsm</code>: only what was declared is merged back into the parent, the child's other keys are dropped: the child's values for <code>shared_context_keys</code>, plus the <code>return_context</code> given to <code>push_fsm</code> and the <code>context_to_return</code> given to <code>pop_fsm</code>. The merge strategy only decides collisions on those keys:
+- <strong>UPDATE</strong> -- Returned value overwrites the parent's
+- <strong>PRESERVE</strong> -- Only keys the parent does not have yet are added</p>
+<h2 id="handler-execution-pipeline">Handler Execution Pipeline<a class="headerlink" href="#handler-execution-pipeline" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>START_CONVERSATION → [per message: PRE_PROCESSING → extract → CONTEXT_UPDATE
+→ evaluate → PRE_TRANSITION → transition → POST_TRANSITION → POST_PROCESSING
+→ generate response] → END_CONVERSATION. ERROR on an exception raised while processing a message (`converse` / `converse_stream`; not for a failure inside `start_conversation`).
+</code></pre></div>
+<p>Priority ordering (lower first). Error modes: <code>"continue"</code> (log + skip) or <code>"raise"</code> (propagate). Critical handlers always raise.</p>
+<h2 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Prompt injection prevention</strong>: XML tag sanitization on all user input</li>
+<li><strong>Context isolation</strong>: Per-conversation isolated state, no cross-conversation access</li>
+<li><strong>Input validation</strong>: Length limits, sanitization</li>
+<li><strong>Forbidden patterns</strong>: Regex filtering for passwords, secrets, API keys, tokens</li>
+<li><strong>Internal key prefixes</strong>: <code>_</code>, <code>system_</code>, <code>internal_</code>, <code>__</code> stripped from user-facing context</li>
+</ul>
+<h2 id="performance">Performance<a class="headerlink" href="#performance" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Conversation history limits</strong>: <code>max_history_size</code> (default 5) is the number of exchanges stored per conversation and also the number of messages the extraction and response prompts show (the last N, passed unchanged to the default prompt builders, so the unit of the shown window is messages); the history token budget (default 3000) can cut the window below N, so at most N messages are shown. <code>max_message_length</code> (default 1000)</li>
+<li><strong>FSM definition caching</strong>: LRU cache (max 64) for loaded definitions</li>
+<li><strong>Handler pre-filtering</strong>: Only check handlers matching current timing</li>
+<li><strong>Thread safety</strong>: Per-conversation RLocks in FSMManager</li>
+</ul>
+<h2 id="package-layout">Package Layout<a class="headerlink" href="#package-layout" title="Permanent link">&para;</a></h2>
+<p>The library is one import package, <code>fsm_llm</code>, in <code>src/fsm_llm/</code>. Beneath the seven extension subpackages sit layer packages that ship with every install, and a layer imports only the layers below it. The rule is enforced by <code>.importlinter</code> (<code>make lint-imports</code>, and the test <code>tests/test_fsm_llm_regression/test_import_contract.py</code>), and no module is over 800 lines.</p>
+<table>
+<thead>
+<tr>
+<th>Layer (top to bottom)</th>
+<th>Packages</th>
+<th>What it holds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Subpackages</td>
+<td><code>monitor</code>, <code>eval</code>; <code>agents</code>, <code>synthesis</code>, <code>workflows</code>, <code>reasoning</code>; <code>testing</code></td>
+<td>One extra each, imported by name, never by <code>import fsm_llm</code></td>
+</tr>
+<tr>
+<td><code>engine</code></td>
+<td><code>fsm_llm.engine</code></td>
+<td><code>API</code> (<code>engine.api</code>), <code>FSMManager</code> (<code>engine.fsm</code>), the 2-pass <code>MessagePipeline</code> (<code>engine.turn</code>), the state-kind executors (<code>engine.kinds</code>), <code>Classifier</code>, the builders, the session store, the plain-FSM OKF handler (<code>engine.okf_bridge</code>)</td>
+</tr>
+<tr>
+<td><code>handlers</code></td>
+<td><code>fsm_llm.handlers</code></td>
+<td>The handler system, <code>HandlerBuilder</code>, <code>create_handler</code></td>
+</tr>
+<tr>
+<td><code>policy</code></td>
+<td><code>fsm_llm.policy</code></td>
+<td>Approval types and the human-in-the-loop manager; imports <code>tools</code> and none of <code>context</code>, <code>okf</code>, <code>skills</code> (the contract <code>policy-imports-no-sibling-layer</code>: the row sits above the siblings, so only the contract keeps it off them)</td>
+</tr>
+<tr>
+<td>Independent siblings</td>
+<td><code>context</code>, <code>okf</code>, <code>skills</code>, <code>tools</code></td>
+<td>Context compaction and prompt builders (<code>context.layout</code>); Open Knowledge Format; Agent Skills; the tool registry and tool models</td>
+</tr>
+<tr>
+<td><code>llm</code></td>
+<td><code>fsm_llm.llm</code></td>
+<td><code>LLMInterface</code>, <code>LiteLLMInterface</code> (the one litellm import), the embedder, reply parsing</td>
+</tr>
+<tr>
+<td><code>core</code></td>
+<td><code>fsm_llm.core</code></td>
+<td>Pydantic FSM models (<code>core.definitions</code>), JsonLogic (<code>core.expressions</code>), <code>core.transition_evaluator</code>, <code>core.state_kinds</code>, <code>core.verify</code> (validator, data-flow and liveness analyses), <code>core.visualize</code></td>
+</tr>
+<tr>
+<td>Kernel</td>
+<td><code>constants</code>, <code>logging</code>, <code>security</code>, <code>text</code>, <code>env</code>, <code>frontmatter</code>, <code>memory</code>, <code>cli_support</code></td>
+<td>Small modules any layer may import; they import no layer</td>
+</tr>
+</tbody>
+</table>
+<p><code>import fsm_llm</code> loads the <code>core</code>, <code>engine</code>, <code>handlers</code>, <code>context</code>, <code>llm</code> and <code>security</code> packages and a few kernel modules, and nothing else: no subpackage and none of <code>okf</code>, <code>skills</code>, <code>tools</code> or <code>policy</code> (pinned by <code>tests/test_fsm_llm_regression/test_import_laziness.py</code>). Three edges break the order on purpose and are named in <code>.importlinter</code>: <code>agents</code> imports <code>reasoning</code> (for <code>ReasoningReactAgent</code>), and <code>synthesis</code> imports <code>agents.semantic_tools</code> and <code>eval</code> (the simulator reuses the scripted-trial code).</p>
+<h2 id="extension-integration">Extension Integration<a class="headerlink" href="#extension-integration" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>fsm_llm (core, includes classification)
+├── fsm_llm.reasoning  -- Uses API run_until_terminal; its before_step hook pushes/pops strategy FSMs
+├── fsm_llm.workflows  -- Uses API (via ConversationStep); lifecycle hooks via add_hook
+├── fsm_llm.agents     -- Uses API (auto-generates FSMs, drives them with run_until_terminal)
+│                          + handlers for tool execution; native_fc and the meta-builder use completion states
+├── fsm_llm.monitor    -- Uses API + handlers (observer callbacks at priority 9999)
+├── fsm_llm.eval       -- Runs example scripts as subprocesses; drives scripted conversations
+│                          through API (one instance per trial) and checks the outcome
+├── fsm_llm.synthesis  -- Uses API (push_fsm/pop_fsm, run_until_terminal's before_step hook), agents
+│                          (tools, human approval) and eval (scripted trials for simulation); core
+│                          loads its `synthesize` state field and runs the data-flow and liveness
+│                          analyses (`core/verify/flow.py`)
+└── fsm_llm.testing    -- Public test doubles, scripted user and assertions; imports core only
+</code></pre></div>
+<p>The seven extensions are subpackages of <code>fsm_llm</code>. Core never imports them at package
+import time; each one imports core (<code>from fsm_llm import API</code>). Their place among the
+layers is in Package Layout above.</p>
+<table>
+<thead>
+<tr>
+<th>Package</th>
+<th>Integration</th>
+<th>Key Mechanism</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Classification</td>
+<td>Built into core</td>
+<td>Structured <code>complete</code> call through the conversation's <code>llm_interface</code></td>
+</tr>
+<tr>
+<td>Reasoning</td>
+<td>One message-free run + FSM stacking</td>
+<td><code>run_until_terminal</code> on the orchestrator; the <code>before_step</code> hook pushes a strategy FSM by type and pops it when it ends (or after 30 steps); a spent 170-step budget raises <code>ReasoningExecutionError</code></td>
+</tr>
+<tr>
+<td>Workflows</td>
+<td>Async engine + ConversationStep</td>
+<td>ConversationStep creates API instance for FSM conversations</td>
+</tr>
+<tr>
+<td>Agents</td>
+<td>Auto-generated FSMs + handlers, driven by core <code>run_until_terminal</code></td>
+<td><code>build_react_fsm()</code> generates FSM; handlers execute tools on state entry; core owns the step and time budgets; no synthetic message is sent. <code>native_fc</code> runs on core completion states (native tool calls); the meta-builder is an FSM driven with <code>converse</code>/<code>advance</code>. Also covers multi-agent graph/swarm orchestration, MCP tools, A2A remote agents, and semantic tool retrieval</td>
+</tr>
+<tr>
+<td>Monitor</td>
+<td>Observer handlers + loguru sink + core graph data</td>
+<td>Registers observer handlers (priority 9999; not POST_TRANSITION), never modifies state; FSM graphs come from <code>build_fsm_graph</code></td>
+</tr>
+<tr>
+<td>Eval</td>
+<td>Subprocesses + public API only</td>
+<td><code>fsm-llm-eval examples</code> scores example output with a 0-4 heuristic; <code>fsm-llm-eval run</code> sends each case's turns through a fresh <code>API</code>, reads <code>get_current_state</code>/<code>get_data</code>/<code>has_conversation_ended</code>, and checks declared expectations over N trials. No handlers, no core changes</td>
+</tr>
+<tr>
+<td>Synthesis</td>
+<td>A silent <code>synthesize</code> state + a runner on the core step driver</td>
+<td>A model compiles a goal into an FSM, gates G1 to G7 judge it, a content-addressed library stores it, and <code>ProcedureRunner</code> pushes it as a child (no inherited context), runs it on the host model and merges back only the declared return keys. Core adds the <code>synthesize</code> state field, the loader checks of its edges and <code>core/verify/flow.py</code>; no handler and no second engine</td>
+</tr>
+</tbody>
+</table>
+<h2 id="extension-points">Extension Points<a class="headerlink" href="#extension-points" title="Permanent link">&para;</a></h2>
+<h3 id="custom-llm-interface">Custom LLM Interface<a class="headerlink" href="#custom-llm-interface" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">fsm_llm.constants</span><span class="w"> </span><span class="kn">import</span> <span class="n">NEUTRAL_USER_TURN</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">CustomLLM</span><span class="p">(</span><span class="n">LLMInterface</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">generate_response</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">ResponseGenerationRequest</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ResponseGenerationResponse</span><span class="p">:</span>
+        <span class="c1"># user_message is None when there is no user message (a message-free</span>
+        <span class="c1"># step, a greeting); "" or any string is what the user sent. A silent</span>
+        <span class="c1"># state (empty response_instructions) never reaches this method.</span>
+        <span class="n">user_turn</span> <span class="o">=</span> <span class="n">request</span><span class="o">.</span><span class="n">user_message</span> <span class="k">if</span> <span class="n">request</span><span class="o">.</span><span class="n">user_message</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">NEUTRAL_USER_TURN</span>
+        <span class="n">response</span> <span class="o">=</span> <span class="n">your_api</span><span class="p">(</span><span class="n">request</span><span class="o">.</span><span class="n">system_prompt</span><span class="p">,</span> <span class="n">user_turn</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">ResponseGenerationResponse</span><span class="p">(</span><span class="n">message</span><span class="o">=</span><span class="n">response</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">extract_field</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">FieldExtractionRequest</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">FieldExtractionResponse</span><span class="p">:</span>
+        <span class="o">...</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">extract_bulk_data</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">BulkExtractionRequest</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DataExtractionResponse</span><span class="p">:</span>
+        <span class="o">...</span>  <span class="c1"># needed by states with extraction_instructions; the base class raises NotImplementedError</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">complete</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">CompletionRequest</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">CompletionResponse</span><span class="p">:</span>
+        <span class="o">...</span>  <span class="c1"># needed by classification and completion states; API refuses a definition with</span>
+             <span class="c1"># classification_extractions when this is not implemented</span>
+</code></pre></div>
+<h3 id="custom-handlers">Custom Handlers<a class="headerlink" href="#custom-handlers" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">DatabaseHandler</span><span class="p">(</span><span class="n">BaseHandler</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">should_execute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">timing</span><span class="p">,</span> <span class="n">current_state</span><span class="p">,</span> <span class="n">target_state</span><span class="p">,</span> <span class="n">context</span><span class="p">,</span> <span class="n">updated_keys</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">timing</span> <span class="o">==</span> <span class="n">HandlerTiming</span><span class="o">.</span><span class="n">POST_TRANSITION</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">context</span><span class="p">):</span>
+        <span class="n">database</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">context</span><span class="p">[</span><span class="s2">"_conversation_id"</span><span class="p">],</span> <span class="n">context</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s2">"saved_to_db"</span><span class="p">:</span> <span class="kc">True</span><span class="p">}</span>
+</code></pre></div>
+<h3 id="state-kinds-internal">State Kinds (internal)<a class="headerlink" href="#state-kinds-internal" title="Permanent link">&para;</a></h3>
+<p>A new state kind is a <code>KindSpec</code> in <code>fsm_llm.core.state_kinds</code> plus a <code>StateExecutor</code> supplied with <code>executors={kind_name: executor}</code> on <code>API</code>, <code>FSMManager</code> or <code>MessagePipeline</code>; see State Kinds and Executors above. It is not a public extension point yet: no export from <code>fsm_llm</code>, no builder setter, no entry-point group before roadmap row 5.5.</p>
+<h2 id="next-steps">Next steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../concepts/">Concepts</a> is the shorter tour of the same ideas.</li>
+<li><a href="../handlers/">Handler Development</a> covers the extension points of a turn.</li>
+<li><a href="../synthesis/">Runtime FSM synthesis</a> covers the <code>synthesize</code> state kind.</li>
+<li>The <a href="../api_reference/">API Reference</a> lists the public names of every package.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.top", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>
