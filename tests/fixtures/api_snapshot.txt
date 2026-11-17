@@ -226,7 +226,7 @@ fsm_llm.FSMManager class
   def prune_orphaned_locks(self) -> list[str]
   def register_handler(self, handler)
   def resolve_state_definition(self, instance: FSMInstance, conversation_id: str | None = None) -> State
-  def seed_restored_conversation(self, conversation_id: str, *, summary: str | None, history: list[dict[str, str]], provenance: dict[str, Any] | None, working_memory: Any) -> None
+  def seed_restored_conversation(self, conversation_id: str, *, summary: str | None, history: list[dict[str, str]], provenance: dict[str, Any] | None, working_memory: Any, internal_context: Mapping[str, Any] | None = None) -> None
   def set_conversation_state(self, conversation_id: str, state_name: str) -> None
   def start_conversation(self, fsm_id: str, initial_context: dict[str, Any] | None = None, *, suppress_start: bool = False) -> tuple[str, str]
   def update_conversation_context(self, conversation_id: str, context_update: dict[str, Any], log: Any = None) -> None

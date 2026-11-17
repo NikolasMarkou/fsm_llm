@@ -550,7 +550,8 @@ class API(RunMixin, StackMixin, LifecycleMixin, SessionsMixin):
                 ]
                 self._last_accessed[conversation_id] = time.monotonic()
 
-            record_started(self, conversation_id)
+            if not _suppress_start:  # a restore writes its own record (restore_session)
+                record_started(self, conversation_id)
             return conversation_id, response
 
         except (ValueError, FSMError):

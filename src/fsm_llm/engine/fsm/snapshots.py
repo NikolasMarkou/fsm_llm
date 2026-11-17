@@ -9,7 +9,7 @@ first).
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from fsm_llm.constants import (
@@ -349,8 +349,9 @@ class SnapshotsMixin:
         history: list[dict[str, str]],
         provenance: dict[str, Any] | None,
         working_memory: Any,
+        internal_context: Mapping[str, Any] | None = None,
     ) -> None:
-        """Apply a restored session's four seeds under ONE ``conv_lock`` hold.
+        """Apply a restored session's seeds under ONE ``conv_lock`` hold.
 
         Interface contract:
           - Parameters: ``conversation_id`` (an active conversation, freshly
@@ -359,7 +360,11 @@ class SnapshotsMixin:
             exchanges, appended in order); ``provenance`` (a shallow copy is
             stored under ``PROVENANCE_METADATA_KEY`` when not ``None``);
             ``working_memory`` (a built ``WorkingMemory``, assigned when not
-            ``None``). ``None`` means "keep the fresh conversation's value".
+            ``None``); ``internal_context`` (internal-prefixed context entries
+            written as they are when not ``None``: the CALLER vets the keys, only
+            ``API.restore_session`` calls this and passes just the names the
+            running definition's completion states declare, plan 21e6f00d D-009).
+            ``None`` means "keep the fresh conversation's value".
           - Returns: None; mutates the instance in place.
           - Failure: same as ``_read_under_lock`` (``FSMError`` for an unknown
             conversation or a missing per-conversation lock).
@@ -388,6 +393,8 @@ class SnapshotsMixin:
                 inst.context.metadata[PROVENANCE_METADATA_KEY] = dict(provenance)
             if working_memory is not None:
                 inst.context.working_memory = working_memory
+            if internal_context:
+                inst.context.update(dict(internal_context))
 
         self._read_under_lock(conversation_id, _seed)
 

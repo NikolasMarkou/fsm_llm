@@ -11,10 +11,16 @@ from __future__ import annotations
 from typing import Any
 
 from fsm_llm.core.definitions import FSMError
-from fsm_llm.engine.session import SessionState
+from fsm_llm.engine.events import declared_internal_keys
+from fsm_llm.engine.session import (
+    METADATA_COMPLETION_CONTEXT,
+    METADATA_LAST_SEQ,
+    SessionState,
+)
 from fsm_llm.logging import logger
 from fsm_llm.memory import WorkingMemory
 
+from .events import record_restored
 from .surface import _ApiSurface
 
 
@@ -220,6 +226,7 @@ class SessionsMixin(_ApiSurface):
                     saved_prov if isinstance(saved_prov, dict) and saved_prov else None
                 ),
                 working_memory=self._restored_working_memory(state.working_memory),
+                internal_context=self._restorable_internal(state),
             )
 
             # C3: reinstate the saved current_state AFTER the seeds.
@@ -227,6 +234,13 @@ class SessionsMixin(_ApiSurface):
             # order). It also validates the state against the FSM def,
             # raising FSMError for a corrupted/foreign session.
             self.fsm_manager.set_conversation_state(current_fsm_id, state.current_state)
+
+            # Event log on: the restored state is the first record of the new log (lineage
+            # names the old id and the last event the fold read). A write failure raises
+            # here, so the teardown below ends the conversation.
+            record_restored(
+                self, conv_id, session_id, state.metadata.get(METADATA_LAST_SEQ)
+            )
         except Exception:
             # Best-effort teardown of the just-created conversation. end_conversation
             # removes conv_id from conversation_stacks and
@@ -242,6 +256,26 @@ class SessionsMixin(_ApiSurface):
             raise
 
         return conv_id, state
+
+    def _restorable_internal(self, state: SessionState) -> dict[str, Any] | None:
+        """The internal context entries a restore may seed: only the keys the RUNNING
+        definition's completion states declare (``declared_internal_keys``).
+
+        Everything else a session carries under ``completion_context`` is refused, above all the
+        driver-only grant ``_approval_granted``: a forged log or snapshot must never hand a
+        restored conversation an approval (plan 21e6f00d D-009, a RED test pins it).
+        """
+        saved = state.metadata.get(METADATA_COMPLETION_CONTEXT)
+        if not isinstance(saved, dict) or not saved:
+            return None
+        allowed = declared_internal_keys(self.fsm_definition)
+        kept = {name: value for name, value in saved.items() if name in allowed}
+        if len(kept) != len(saved):
+            logger.warning(
+                f"restore_session: refused {len(saved) - len(kept)} undeclared internal "
+                "context entr(ies) of the saved session"
+            )
+        return kept or None
 
     @staticmethod
     def _restored_working_memory(wm: dict[str, Any] | None) -> Any:

@@ -40,11 +40,25 @@ from pydantic import BaseModel, Field
 
 from fsm_llm.context.filtering import redacting_json_default
 from fsm_llm.logging import logger
+from fsm_llm.runtime import EventLog, EventLogError, EventPayloadError
+from fsm_llm.runtime.stores import (
+    SessionProjection,
+    check_conversation_id,
+    fold_session,
+    projection_from_legacy_file,
+)
 
 # One id rule for _path, list_sessions and ``MemorySessionStore``, matched with
 # ``fullmatch``: ``$`` in a ``re.match`` pattern also matches before a trailing
 # newline ("abc\n").
 SESSION_ID_RE = re.compile(r"[a-zA-Z0-9_\-]+")
+
+# The ``SessionState.metadata`` keys of a session loaded from the event log (the shape is
+# documented on ``EventLogSessionStore``; ``SessionState`` itself has no field for them).
+METADATA_PROVENANCE = "pipeline_extracted"
+METADATA_COMPLETION_CONTEXT = "completion_context"
+METADATA_UNKNOWN_TOOL_CALLS = "unknown_tool_calls"
+METADATA_LAST_SEQ = "last_seq"
 
 
 class SessionState(BaseModel):
@@ -270,3 +284,92 @@ class FileSessionStore(SessionStore):
         except OSError as e:
             logger.warning(f"Failed to check session {session_id}: {e}")
             return False
+
+
+def _session_state(projection: SessionProjection) -> SessionState:
+    """The ``SessionState`` of a projection; the log-only parts ride ``metadata``."""
+    metadata: dict[str, Any] = {}
+    if projection.provenance:
+        metadata[METADATA_PROVENANCE] = projection.provenance
+    if projection.completion_context:
+        metadata[METADATA_COMPLETION_CONTEXT] = projection.completion_context
+    if projection.unknown_tool_calls:
+        metadata[METADATA_UNKNOWN_TOOL_CALLS] = projection.unknown_tool_calls
+    if projection.last_seq:
+        metadata[METADATA_LAST_SEQ] = projection.last_seq
+    return SessionState(
+        conversation_id=projection.conversation_id,
+        fsm_id=projection.fsm_id,
+        current_state=projection.current_state,
+        context_data=projection.context_data,
+        conversation_history=projection.conversation_history,
+        working_memory=projection.working_memory,
+        conversation_summary=projection.conversation_summary,
+        metadata=metadata,
+    )
+
+
+class EventLogSessionStore(SessionStore):
+    """A read-only session store over an ``EventLog``: what a conversation looked like when the
+    process that wrote its log stopped (plan 21e6f00d, D-006).
+
+    Resume with the existing verb: ``API(session_store=EventLogSessionStore(log))
+    .restore_session(old_id)`` starts a NEW conversation seeded from the log of *old_id*.
+
+    Interface contract:
+        - ``EventLogSessionStore(log, *, legacy_dir=None)``: *log* is the ``EventLog`` to read;
+          *legacy_dir*, when given, is a ``FileSessionStore`` directory (created if missing)
+          consulted for an id the log has no state for, through the versioned projection
+          (``projection_from_legacy_file``), so old and new sessions restore through one path.
+        - ``load(id)``: the fold of the log of root conversation *id* (the state of its last
+          committed turn, or the pre-turn state of an open one, frame 0 only), as a
+          ``SessionState`` whose ``metadata`` holds ``pipeline_extracted`` (provenance),
+          ``completion_context`` (the transcript and response format values the log carried),
+          ``unknown_tool_calls`` (tool calls the log cannot resolve, never retried) and
+          ``last_seq`` (the last event the fold read); a key is absent when it is empty.
+          ``None`` when neither the log nor the legacy directory knows *id*. A corrupt log raises
+          ``LogCorruptError``; it is never skipped past. An id outside the log's id rule raises
+          ``EventPayloadError`` unless a legacy directory can hold it.
+        - ``exists``, ``list_sessions`` (the log ids and the legacy ids, sorted): reads.
+        - ``save``: a documented no-op (the engine writes the log itself, ``API`` auto-save
+          still calls it). ``delete`` raises ``EventLogError``: the log is append-only.
+    """
+
+    def __init__(self, log: EventLog, *, legacy_dir: str | Path | None = None) -> None:
+        self._log = log
+        self._legacy = None if legacy_dir is None else FileSessionStore(legacy_dir)
+
+    def _projection(self, session_id: str) -> SessionProjection | None:
+        try:
+            check_conversation_id(session_id)
+        except EventPayloadError:
+            if self._legacy is None:
+                raise
+        else:
+            projection = fold_session(self._log.read(session_id), self._log.get_json)
+            if projection is not None:
+                return projection
+        if self._legacy is None:
+            return None
+        try:
+            return projection_from_legacy_file(self._legacy._path(session_id))
+        except FileNotFoundError:
+            return None
+
+    def load(self, session_id: str) -> SessionState | None:
+        projection = self._projection(session_id)
+        return None if projection is None else _session_state(projection)
+
+    def save(self, session_id: str, state: SessionState) -> None:
+        """No-op: the log is written by the engine, never by a snapshot."""
+
+    def delete(self, session_id: str) -> bool:
+        raise EventLogError(
+            "EventLogSessionStore cannot delete: the event log is append-only"
+        )
+
+    def list_sessions(self) -> list[str]:
+        ids = set(self._log.conversation_ids())
+        if self._legacy is not None:
+            ids.update(self._legacy.list_sessions())
+        return sorted(ids)

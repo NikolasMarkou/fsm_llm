@@ -39,6 +39,11 @@ Interface contract (callers: ``conversation.py`` and ``lifecycle.py``; *api* is 
       (``source: "update_context"``, ``delta_ref`` to ``engine.events.delta_blob``, ``keys`` the
       written key names; ``engine.events.record_delta`` does the write) after ``API.update_context`` wrote the delta. A failed write RAISES
       (``EventLogError``): the memory changed and the log did not, and the caller must know.
+    - ``record_restored(api, conversation_id, restored_from, last_seq)``: appends the
+      ``context/record`` (``source: "restore"``, ``restored_from: {conversation_id, seq?}``) with the
+      state after every seed of ``restore_session``; the first event of the new log
+      (``start_conversation`` writes no start record for a restore). A failed write RAISES, and the
+      restore's own teardown ends the half-restored conversation.
     - ``release_event_writer(api, conversation_id)``: closes the writer of a finished root
       conversation (no file descriptor or lock stays with it). ``close_event_log(api)``: closes an
       owned log only.
@@ -194,6 +199,23 @@ def record_started(api: _ApiSurface, conversation_id: str) -> None:
         with suppress(Exception):
             api.end_conversation(conversation_id)
         raise
+
+
+def record_restored(
+    api: _ApiSurface, conversation_id: str, restored_from: str, last_seq: Any
+) -> None:
+    """Append the ``restore`` record of a restored conversation: its state after every seed and
+    ``restored_from`` (the old id, and the last event the fold read when the session came from a
+    log). The first event of the new log. A no-op with the log off; a failing write raises."""
+    log = getattr(api, "_event_log", None)
+    if log is None:
+        return
+    lineage: dict[str, Any] = {"conversation_id": restored_from}
+    if isinstance(last_seq, int) and not isinstance(last_seq, bool):
+        lineage["seq"] = last_seq
+    record_state(
+        api.fsm_manager, log, conversation_id, source="restore", restored_from=lineage
+    )
 
 
 def release_event_writer(api: _ApiSurface, conversation_id: str) -> None:

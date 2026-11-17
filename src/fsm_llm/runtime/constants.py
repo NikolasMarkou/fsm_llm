@@ -47,3 +47,7 @@ BLOB_REF_RE = re.compile(r"sha256:[0-9a-f]{64}")
 #: a larger one is a blob and the event keeps only its reference (an event is capped at
 #: ``MAX_EVENT_BYTES``, so the inline limit leaves room for the rest of the event).
 MAX_INLINE_BYTES = 8_192
+
+#: Hard cap of a legacy ``FileSessionStore`` file read through the projection layer (32 MiB);
+#: a larger file is refused unread, never truncated.
+MAX_SESSION_FILE_BYTES = 32 * 1024 * 1024
