@@ -7,9 +7,14 @@ the task or the prior turns in front of it (the RC1 loop class).
 
 from __future__ import annotations
 
+import ast
+import inspect
 import itertools
 import json
 import socket
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -490,6 +495,73 @@ def _loopback_listener() -> socket.socket:
     return server
 
 
+_NOT_DEFINED = object()
+
+
+def _fallback_definition() -> ast.FunctionDef:
+    """The stdlib's own loopback ``socketpair`` fallback, parsed from ``socket.py``.
+
+    Whatever the build names it (``_fallback_socketpair``, or ``socketpair`` in the
+    ``else`` branch of 3.11.9) it is the one function of that name that calls
+    ``.connect(``; the native ``socketpair`` wrapper of Linux does not.
+    """
+    source = inspect.getsource(socket)
+    for node in ast.walk(ast.parse(source)):
+        if (
+            isinstance(node, ast.FunctionDef)
+            and node.name in ("_fallback_socketpair", "socketpair")
+            and ".connect(" in (ast.get_source_segment(source, node) or "")
+        ):
+            return node
+    raise AssertionError("socket.py defines no loopback socketpair fallback")
+
+
+@contextmanager
+def _stdlib_fallback_as(
+    name: str,
+    *,
+    filename: str | None = None,
+    namespace: dict[str, object] | None = None,
+) -> Iterator[object]:
+    """The stdlib fallback body, defined as *name* in the ``socket`` module's globals.
+
+    Interface contract (the tests of the offline guard): re-executes the REAL source
+    of the stdlib fallback under the name a CPython version gives it, with the
+    module's globals and source file, so a Linux interpreter can run the frame a
+    Windows 3.11.9 interpreter runs (where it is ``socketpair`` itself). Yields the
+    function; the module's previous binding of *name* is restored on exit. *filename*
+    and *namespace* replace the source file or the globals, to forge a frame that is
+    NOT the stdlib's (the guard must refuse it); a given *namespace* is left alone.
+    """
+    node = _fallback_definition()
+    node.name = name
+    module = ast.fix_missing_locations(ast.Module(body=[node], type_ignores=[]))
+    path = filename or socket.create_connection.__code__.co_filename
+    code = compile(module, path, "exec")
+    target = vars(socket) if namespace is None else namespace
+    saved = target.get(name, _NOT_DEFINED)
+    exec(code, target)
+    try:
+        yield target[name]
+    finally:
+        if namespace is None:
+            if saved is _NOT_DEFINED:
+                del target[name]
+            else:
+                target[name] = saved
+
+
+def _round_trip(pair: tuple[socket.socket, ...]) -> None:
+    left, right = pair[:2]
+    try:
+        assert left.family in (socket.AF_INET, socket.AF_INET6)
+        left.sendall(b"ok")
+        assert right.recv(2) == b"ok"
+    finally:
+        left.close()
+        right.close()
+
+
 class TestOfflineNetworkGuard:
     """E4: the autouse guard in ``conftest.py`` refuses TCP, loopback included.
 
@@ -527,17 +599,67 @@ class TestOfflineNetworkGuard:
             right.close()
 
     def test_the_windows_socketpair_fallback_is_allowed(self):
-        """Windows has no AF_UNIX ``socketpair``: asyncio's self-pipe uses
-        ``socket._fallback_socketpair``, which connects two loopback TCP
-        sockets. That one frame passes; nothing else does."""
-        left, right = socket._fallback_socketpair()[:2]
-        try:
-            assert left.family in (socket.AF_INET, socket.AF_INET6)
-            left.sendall(b"ok")
-            assert right.recv(2) == b"ok"
-        finally:
-            left.close()
-            right.close()
+        """Windows has no AF_UNIX ``socketpair``: asyncio's self-pipe uses the
+        stdlib fallback, which connects two loopback TCP sockets. That one frame
+        passes; nothing else does. The function is ``socket._fallback_socketpair``
+        where the build has that name and ``socket.socketpair`` itself where the
+        platform has no native one (3.11.9 on Windows, the CI leg)."""
+        fallback = getattr(socket, "_fallback_socketpair", None)
+        if fallback is None:
+            if sys.platform != "win32":
+                pytest.skip(
+                    "this build has no fallback by that name; see the next test"
+                )
+            fallback = socket.socketpair
+        _round_trip(fallback())
+
+    @pytest.mark.parametrize("name", ["_fallback_socketpair", "socketpair"])
+    def test_the_fallback_is_allowed_under_each_name_a_python_gives_it(self, name):
+        """The source of the stdlib fallback, defined as each name of the two
+        shapes (3.12 and later, and 3.11.9), run on any platform."""
+        before = vars(socket).get(name, _NOT_DEFINED)
+        with _stdlib_fallback_as(name) as fallback:
+            assert fallback.__code__.co_name == name
+            _round_trip(fallback())
+        assert vars(socket).get(name, _NOT_DEFINED) is before  # the module is as it was
+
+    @pytest.mark.parametrize("name", ["_fallback_socketpair", "socketpair"])
+    def test_an_event_loop_is_built_where_the_fallback_is_the_only_socketpair(
+        self, name, monkeypatch
+    ):
+        """What failed on Windows 3.11.9: every new event loop calls
+        ``socket.socketpair()`` for its self-pipe. Binding the stdlib fallback as
+        that function on this platform makes the same call chain under the guard."""
+        import asyncio
+
+        native = socket.socketpair
+        with _stdlib_fallback_as(name) as fallback:
+            with monkeypatch.context() as patch:
+                patch.setattr(socket, "socketpair", fallback)
+                asyncio.new_event_loop().close()
+        assert socket.socketpair is native  # nothing leaks into the next test
+
+    def test_a_frame_with_the_stdlib_name_and_other_globals_is_refused(self):
+        """Same source, same name, same file name, but not the module's globals:
+        only the globals clause tells it from the stdlib's frame."""
+        stand_in = dict(vars(socket))
+        with _stdlib_fallback_as("socketpair", namespace=stand_in) as fallback:
+            assert (
+                fallback.__code__.co_filename
+                == socket.create_connection.__code__.co_filename
+            )
+            with pytest.raises(ConnectionRefusedError, match="network blocked"):
+                fallback()
+
+    def test_a_frame_in_the_module_globals_from_another_file_is_refused(self):
+        with _stdlib_fallback_as("socketpair", filename="<test code>") as fallback:
+            with pytest.raises(ConnectionRefusedError, match="network blocked"):
+                fallback()
+
+    def test_the_stdlib_frame_under_another_name_is_refused(self):
+        with _stdlib_fallback_as("_loopback_pair_of_a_test") as fallback:
+            with pytest.raises(ConnectionRefusedError, match="network blocked"):
+                fallback()
 
     def test_a_lookalike_of_the_fallback_is_still_refused(self):
         """The exemption is the code object of the stdlib function, not its name."""

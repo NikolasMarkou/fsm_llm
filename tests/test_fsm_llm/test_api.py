@@ -39,7 +39,7 @@ from fsm_llm.handlers import HandlerErrorMode, HandlerTiming, create_handler
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.logging import logger
 from fsm_llm.testing import MockLLM2Interface
-from tests.conftest import current_timing_factor
+from tests.conftest import bind_api_clock, current_timing_factor
 from tests.test_fsm_llm.support import (
     _JOIN_TIMEOUT_S,
     _TWO_STATE,
@@ -1225,6 +1225,36 @@ def _c12_short_lock_timeout():
         yield
 
 
+class _LaterEveryRead:
+    """Stand-in for ``time`` inside ``fsm_llm.engine.api``: each ``monotonic()`` read is 1 s later.
+
+    The idle sweep ends a conversation when ``now - last_access > max_idle_seconds``, so a
+    sweep with ``max_idle_seconds=0`` needs a clock that has moved since each conversation
+    started. On Windows before Python 3.13 ``time.monotonic()`` ticks every 15.6 ms and a
+    run of fast calls reads the same value (CI run 44028115098), so these tests bind a
+    clock that cannot stand still. Every other attribute is the real ``time``'s.
+    """
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def monotonic(self) -> float:
+        self.now += 1.0
+        return self.now
+
+    def __getattr__(self, name: str) -> Any:
+        import time
+
+        return getattr(time, name)
+
+
+@pytest.fixture
+def _later_every_read(monkeypatch: pytest.MonkeyPatch) -> _LaterEveryRead:
+    clock = _LaterEveryRead()
+    bind_api_clock(monkeypatch, clock)
+    return clock
+
+
 @pytest.mark.usefixtures("_c12_short_lock_timeout")
 class TestStep14_1:
     """Review-iter-1 W2: the C12 refusal on the API path."""
@@ -1278,7 +1308,7 @@ class TestStep14_1:
         assert api.get_data(conv_id)["note"] == "n"
         assert api.has_conversation_ended(conv_id) is True
 
-    def test_c12_cleanup_sweep_continues_past_a_refusal(self):
+    def test_c12_cleanup_sweep_continues_past_a_refusal(self, _later_every_read):
         api, ends = _c12_api()
         busy_id, _ = api.start_conversation()
         idle_ids = [api.start_conversation()[0] for _ in range(2)]
@@ -1341,7 +1371,9 @@ class TestStep14_2:
         assert ends == [conv_id]
         assert conv_id not in api._ended_conversations
 
-    def test_c12_pathological_cyclic_context_can_be_ended_and_swept(self):
+    def test_c12_pathological_cyclic_context_can_be_ended_and_swept(
+        self, _later_every_read
+    ):
         from fsm_llm.context.filtering import ContextFilterError
 
         api, ends = _c12_api()

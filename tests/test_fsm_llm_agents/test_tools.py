@@ -124,16 +124,25 @@ class TestToolRegistry:
         assert "add" in registry
         assert "missing" not in registry
 
-    def test_execute_success(self):
+    def test_execute_success(self, monkeypatch):
         registry = ToolRegistry()
         registry.register_function(_add, name="add", description="Add")
+        # The duration is two reads of the registry's clock. A real call of `_add` takes
+        # microseconds and `time.monotonic()` ticks every 15.6 ms on Windows before
+        # Python 3.13, so `> 0` failed there (CI run 44028115098); an injected clock
+        # also pins the value, not only its sign.
+        reads = iter([10.0, 10.25])
+        monkeypatch.setattr(
+            "fsm_llm.tools.registry.time",
+            SimpleNamespace(monotonic=lambda: next(reads)),
+        )
 
         call = ToolCall(tool_name="add", parameters={"a": 2, "b": 3})
         result = registry.execute(call)
 
         assert result.success is True
         assert result.result == 5
-        assert result.execution_time_ms > 0
+        assert result.execution_time_ms == pytest.approx(250.0)
 
     def test_execute_no_params(self):
         registry = ToolRegistry()

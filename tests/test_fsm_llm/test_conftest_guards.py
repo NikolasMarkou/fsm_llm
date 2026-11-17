@@ -347,18 +347,45 @@ class TestHostileNameHelpers:
 
         assert list(tmp_path.iterdir()) == []  # the probe folder is removed
 
+    @staticmethod
+    def _write_as_windows_would(path: Path, content: bytes = b"x") -> bool:
+        """``write_if_creatable`` on a file system where a backslash separates.
+
+        Splits the NAME, not the Path: on Windows pathlib has already done that split
+        (``path.parent`` is the folder ``a`` there and ``a\\b.txt`` is already
+        ``a/b.txt``), on Linux the backslash is still inside the final component.
+        """
+        target = Path(str(path).replace("\\", "/"))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        return True
+
+    @pytest.mark.parametrize("shape", ["backslash-in-name", "split-by-pathlib"])
+    def test_the_windows_stand_in_takes_a_path_in_either_shape(
+        self, tmp_path: Path, shape: str
+    ) -> None:
+        """CI run 44028115098: the first stand-in built `<probe>/a/b.txt` from
+        `path.parent`, which on Windows is already `<probe>/a`, and failed with
+        WinError 3. Both shapes of the path must end in one folder `a` with one file."""
+        probe = tmp_path / "probe"
+        probe.mkdir()
+        path = (
+            probe / "a\\b.txt"
+            if shape == "backslash-in-name"
+            else probe / "a" / "b.txt"
+        )
+
+        assert self._write_as_windows_would(path) is True
+
+        assert sorted(p.relative_to(probe).as_posix() for p in probe.rglob("*")) == [
+            "a",
+            "a/b.txt",
+        ]
+
     def test_the_backslash_probe_skips_where_it_separates(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        def windows_write(path: Path, content: bytes = b"x") -> bool:
-            target = (
-                path.parent / "a" / "b.txt"
-            )  # `a\\b.txt` became a folder and a file
-            target.parent.mkdir()
-            target.write_bytes(content)
-            return True
-
-        monkeypatch.setattr(guards, "write_if_creatable", windows_write)
+        monkeypatch.setattr(guards, "write_if_creatable", self._write_as_windows_would)
 
         with pytest.raises(pytest.skip.Exception, match="path separator"):
             guards.skip_if_backslash_separates(tmp_path)

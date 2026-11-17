@@ -79,10 +79,41 @@ _LINEAR_SPREAD = 2.5
 
 #: Doubling stops here: a CPU clock that never advances must fail, not loop for ever.
 _MAX_CALLS_PER_SAMPLE = 1 << 24
+#: A sample must span this many ticks of the CPU clock to count as a measurement.
+_SAMPLE_TICKS = 10
+#: ``_cpu_tick`` gives up on a clock that does not move for this long (wall seconds).
+_TICK_PROBE_SECONDS = 2.0
 
 
 def _match_any(patterns, text):
     return any(p.match(text) for p in patterns)
+
+
+def _cpu_tick(limit_seconds=_TICK_PROBE_SECONDS):
+    """The step of ``time.process_time()``, observed: the largest of three jumps.
+
+    Interface contract (``_cpu_seconds_per_call`` only): spins on the clock until it
+    has changed three times and returns the biggest difference between two
+    consecutive distinct readings, in seconds; raises ``AssertionError`` when the
+    clock does not move for *limit_seconds* of wall time. On Linux the step is
+    nanoseconds and the spin ends at once; on Windows it is the 15.625 ms timer
+    tick (the spin lasts up to three ticks of CPU time).
+
+    Why not ``time.get_clock_info("process_time").resolution``: on Windows it
+    reports 1e-7 (the unit of ``GetProcessTimes``), not the tick that the readings
+    advance by, so a floor derived from it let a 15.6 ms reading through (CI run
+    44028115098: the sweep still divided by zero on both Windows legs).
+    """
+    deadline = time.monotonic() + limit_seconds
+    steps = []
+    last = time.process_time()
+    while len(steps) < 3:
+        now = time.process_time()
+        if now != last:
+            steps.append(now - last)
+            last = now
+        assert time.monotonic() < deadline, "the CPU clock never advanced"
+    return max(steps)
 
 
 def _cpu_seconds_per_call(call, calls=1, samples=3):
@@ -91,38 +122,47 @@ def _cpu_seconds_per_call(call, calls=1, samples=3):
     Interface contract (the two ratio-based linear-time tests below):
         - *call* is a zero-argument callable, *calls* the number of calls a sample
           starts with. The CPU clock is ``time.process_time`` through ``cpu_timer``.
-        - *calls* doubles until ONE sample spans at least ten ticks of that clock
-          (``time.get_clock_info("process_time").resolution``): on Windows the clock
-          ticks every 15.6 ms, so a short sample read 0 seconds and the spread of a
-          sweep divided by zero. On a fine clock (Linux, nanoseconds) the first
-          sample already spans the floor, so nothing grows and the measurement is
-          the old one. The grown count is kept for the remaining samples.
-        - Returns the smallest per-call time; never zero for a call that takes time.
+        - A sample counts only when it spans at least ``_SAMPLE_TICKS`` ticks of that
+          clock (``_cpu_tick``, observed): a shorter one is redone with twice the
+          calls, whichever sample it is. A coarse clock (Windows: 15.6 ms steps) reads
+          a short sample as 0 or as a whole tick, and the best of three then picked
+          the 0, so the spread of a sweep divided by zero. On a fine clock (Linux,
+          nanoseconds) the first sample already spans the floor, so nothing grows and
+          the measurement is the old one. The grown count is kept for the rest.
+        - Returns the smallest per-call time; every counted sample took at least
+          ``_SAMPLE_TICKS`` ticks, so the result is never zero. Raises
+          ``AssertionError`` when the clock never advances (see ``_cpu_tick``) or
+          the count would pass ``_MAX_CALLS_PER_SAMPLE``.
     """
-    floor = 10 * time.get_clock_info("process_time").resolution
-    while True:
+    floor = _SAMPLE_TICKS * _cpu_tick()
+    best = None
+    counted = 0
+    while counted < samples:
         with cpu_timer() as timer:
             for _ in range(calls):
                 call()
-        if timer.elapsed >= floor:
-            break
-        assert calls < _MAX_CALLS_PER_SAMPLE, "the CPU clock never advanced"
-        calls *= 2
-    best = timer.elapsed / calls
-    for _ in range(samples - 1):
-        with cpu_timer() as timer:
-            for _ in range(calls):
-                call()
-        best = min(best, timer.elapsed / calls)
+        if timer.elapsed < floor:
+            assert calls < _MAX_CALLS_PER_SAMPLE, "the CPU clock never advanced"
+            calls *= 2
+            continue
+        per_call = timer.elapsed / calls
+        best = per_call if best is None else min(best, per_call)
+        counted += 1
     return best
 
 
 class _FakeCpuClock:
     """A CPU clock that advances only when ``call`` runs, quantised to *tick* seconds
-    (Windows: 0.015625), so the tests need neither real time nor a real CPU."""
+    (Windows: 0.015625), so the tests need neither real time nor a real CPU.
 
-    def __init__(self, tick, cost=0.001):
-        self.tick, self.cost, self.now, self.calls = tick, cost, 0.0, 0
+    ``install`` also makes ``time.get_clock_info`` report 1e-7 s for every clock, as
+    CPython does for ``process_time`` on Windows (the unit of ``GetProcessTimes``, not
+    the step of the readings), and answers ``_cpu_tick`` with *tick* because the fake
+    only moves when a call runs.
+    """
+
+    def __init__(self, tick, cost=0.001, start=0.0):
+        self.tick, self.cost, self.now, self.calls = tick, cost, start, 0
 
     def process_time(self):
         return math.floor(self.now / self.tick) * self.tick
@@ -136,8 +176,9 @@ class _FakeCpuClock:
         monkeypatch.setattr(
             time,
             "get_clock_info",
-            lambda name: types.SimpleNamespace(resolution=self.tick),
+            lambda name: types.SimpleNamespace(resolution=1e-7),
         )
+        monkeypatch.setattr(sys.modules[__name__], "_cpu_tick", lambda: self.tick)
         return self
 
 
@@ -166,6 +207,34 @@ class TestCpuSecondsPerCall:
         # 1, 2, .. 256 calls to span 0.15625 s, then two more samples of 256
         assert clock.calls == sum(2**i for i in range(9)) + 2 * 256
 
+    def test_a_sample_that_straddles_one_tick_never_lets_a_later_zero_win(
+        self, monkeypatch
+    ):
+        """CI run 44028115098, both Windows legs: the first sample (about 1 ms of
+        work) happened to cross a tick and read 15.6 ms, so it passed the floor taken
+        from the reported 1e-7 s resolution; the later samples of the same size read
+        0 and the best of three was 0. The floor is ten observed ticks now and every
+        counted sample reaches it."""
+        clock = _FakeCpuClock(tick=0.015625, start=0.0149).install(monkeypatch)
+
+        per_call = _cpu_seconds_per_call(clock.call, 1)
+
+        assert per_call > 0
+        assert per_call == pytest.approx(0.001, rel=0.15)
+
+    def test_a_later_sample_below_the_floor_is_redone_not_counted(self, monkeypatch):
+        clock = _FakeCpuClock(tick=1e-3).install(monkeypatch)  # the floor is 10 ms
+        costs = iter([0.02, 0.0, 0.02, 0.02, 0.02, 0.02])  # one cost per call
+
+        def call():
+            clock.cost = next(costs)
+            clock.call()
+
+        per_call = _cpu_seconds_per_call(call, 1, samples=3)
+
+        assert per_call == pytest.approx(0.02, rel=0.1)  # the zero never counted
+        assert clock.calls == 1 + 1 + 2 + 2  # the zero sample was redone with 2 calls
+
     def test_a_fine_clock_keeps_the_count_and_takes_three_samples(self, monkeypatch):
         clock = _FakeCpuClock(tick=1e-9).install(monkeypatch)
 
@@ -192,6 +261,29 @@ class TestCpuSecondsPerCall:
             _cpu_seconds_per_call(clock.call, 1)
 
         assert clock.calls == sum(2**i for i in range(7))  # 1 .. 64
+
+
+class TestCpuTick:
+    """``_cpu_tick`` measures the step of the CPU clock instead of reading a report."""
+
+    def test_it_finds_the_step_of_a_quantised_clock(self, monkeypatch):
+        quantum = 0.004
+        monkeypatch.setattr(
+            time,
+            "process_time",
+            lambda: math.floor(time.monotonic() / quantum) * quantum,
+        )
+
+        assert _cpu_tick() == pytest.approx(quantum, rel=1e-6)
+
+    def test_the_real_clock_has_a_small_positive_step(self):
+        assert 0 < _cpu_tick() < 0.1
+
+    def test_a_clock_that_never_moves_fails_instead_of_spinning(self, monkeypatch):
+        monkeypatch.setattr(time, "process_time", lambda: 1.0)
+
+        with pytest.raises(AssertionError, match="never advanced"):
+            _cpu_tick(limit_seconds=0.05)
 
 
 def _settled_spread(sweep, attempts=3):

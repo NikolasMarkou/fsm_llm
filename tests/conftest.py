@@ -279,22 +279,38 @@ def network_exempt(node: pytest.Item) -> bool:
     return any(node.get_closest_marker(name) for name in NETWORK_EXEMPT_MARKERS)
 
 
-def _called_by_socketpair_fallback() -> bool:
-    """Whether the caller of the patched connect is ``socket._fallback_socketpair``.
+#: The names under which the stdlib defines its loopback ``socketpair`` fallback:
+#: ``_fallback_socketpair`` (3.12 and later, and 3.11 once gh-122133 was backported)
+#: and ``socketpair`` itself (3.11.9, the last 3.11 build with a Windows installer,
+#: defines the fallback as the module-level ``socketpair`` in the ``else`` of
+#: ``if hasattr(_socket, "socketpair")``). Where the platform has a native
+#: ``socketpair`` the function of that name never calls ``connect``, so naming it
+#: here exempts nothing on Linux or macOS.
+_SOCKETPAIR_FALLBACK_NAMES = frozenset({"_fallback_socketpair", "socketpair"})
 
-    Interface contract (``block_network`` only): compares the code object of the
-    frame two levels up (the caller of ``_connect`` or ``_connect_ex``) with the
-    stdlib function's, so a test-code function that merely shares the name is
-    not exempt. Returns ``False`` when the stdlib has no such function or the
-    frame is absent; never raises.
+
+def _called_by_socketpair_fallback() -> bool:
+    """Whether the caller of the patched connect is the stdlib's socketpair fallback.
+
+    Interface contract (``block_network`` only): looks at the frame two levels up
+    (the caller of ``_connect`` or ``_connect_ex``) and accepts it only when it is
+    the ``socket`` module's own code: its globals ARE ``vars(socket)``, its source
+    file is the one the module's other functions come from, and its name is in
+    ``_SOCKETPAIR_FALLBACK_NAMES`` (the name differs by CPython version). A
+    function of test code that merely shares the name has other globals and is not
+    exempt. Returns ``False`` for any other caller or when the frame is absent;
+    never raises.
     """
-    fallback = getattr(socket, "_fallback_socketpair", None)
-    if fallback is None:
-        return False
     try:
-        return sys._getframe(2).f_code is fallback.__code__
+        code = sys._getframe(2).f_code
+        caller_globals = sys._getframe(2).f_globals
     except ValueError:
         return False
+    return (
+        caller_globals is vars(socket)
+        and code.co_name in _SOCKETPAIR_FALLBACK_NAMES
+        and code.co_filename == socket.create_connection.__code__.co_filename
+    )
 
 
 def block_network(monkeypatch: pytest.MonkeyPatch, node: pytest.Item) -> None:
@@ -311,9 +327,11 @@ def block_network(monkeypatch: pytest.MonkeyPatch, node: pytest.Item) -> None:
           timeout), naming the address. Unix sockets (MCP stdio, asyncio
           self-pipes on POSIX) are untouched. On Windows there is no AF_UNIX
           ``socketpair``: the stdlib builds one from two loopback TCP sockets
-          in ``socket._fallback_socketpair`` (asyncio's self-pipe, every event
-          loop), and that one function, identified by its code object and not
-          by its name, may connect. Every other caller stays refused.
+          in its fallback (asyncio's self-pipe, every event loop; the function
+          is ``socket._fallback_socketpair`` or, on 3.11.9, ``socket.socketpair``
+          itself), and that one frame, identified by the ``socket`` module's
+          globals and source file and not by its name alone, may connect.
+          Every other caller stays refused.
         - No-op when ``network_exempt(node)`` is true (live suites).
     """
     if network_exempt(node):

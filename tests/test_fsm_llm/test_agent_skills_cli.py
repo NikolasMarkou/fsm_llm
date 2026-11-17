@@ -25,13 +25,17 @@ from fsm_llm.constants import (
 )
 from fsm_llm.core.definitions import SkillError
 from fsm_llm.skills import AgentSkill, SkillCatalog, SkillIssue
+from fsm_llm.skills import catalog as skills_catalog
 from fsm_llm.skills.cli import main
 from tests.conftest import symlink_or_skip
+from tests.test_fsm_llm.test_agent_skills import _SpentClock
 
 _REPO = Path(__file__).resolve().parents[2]
 _ESC, _BIDI, _ZWSP, _CJK = chr(0x1B), chr(0x202E), chr(0x200B), chr(0x7F51)
 _HOSTILE = f"a{_ESC}[31mred{_ESC}]0;title{chr(7)}b{_BIDI}c{_ZWSP}d"
-_TINY = "1e-9"  # a load budget that is spent before the first skill
+_TINY = (
+    "1e-9"  # a load budget that is spent before the first skill, with `_spent_clock`
+)
 
 
 def _yaml(text: str) -> str:
@@ -81,6 +85,14 @@ def _path_limit_problem(path: Path) -> str | None:
     except OSError as exc:
         return f"this file system refuses a path of {len(str(path))} characters: {exc}"
     return None
+
+
+@pytest.fixture
+def _spent_clock(monkeypatch: pytest.MonkeyPatch) -> _SpentClock:
+    """``time`` of the skills catalog moves a second per read, so `_TINY` is spent."""
+    clock = _SpentClock()
+    monkeypatch.setattr(skills_catalog, "time", clock)
+    return clock
 
 
 @pytest.fixture
@@ -196,7 +208,10 @@ class TestValidate:
         assert "From the second root." not in listing
 
     def test_a_spent_budget_is_an_error_with_a_hint_and_exits_1(
-        self, clean: Path, capsys: pytest.CaptureFixture[str]
+        self,
+        clean: Path,
+        capsys: pytest.CaptureFixture[str],
+        _spent_clock: _SpentClock,
     ) -> None:
         code, out, err = _run(capsys, "validate", clean, "--max-seconds", _TINY)
 
@@ -368,7 +383,10 @@ class TestListShow:
         )
 
     def test_list_and_show_flag_a_stopped_load_on_stderr_and_exit_0(
-        self, clean: Path, capsys: pytest.CaptureFixture[str]
+        self,
+        clean: Path,
+        capsys: pytest.CaptureFixture[str],
+        _spent_clock: _SpentClock,
     ) -> None:
         note = SKILL_INCOMPLETE_NOTE.format(codes="load-deadline")
 
