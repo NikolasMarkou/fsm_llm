@@ -76,6 +76,7 @@ from fsm_llm.llm.interface import (
     is_malformed_tool_call_error,
 )
 from fsm_llm.llm.json_extraction import extract_json_from_text
+from fsm_llm.llm.observer import begin_send, end_send, fail_send
 from fsm_llm.llm.ollama import build_ollama_response_format, is_ollama_model
 from fsm_llm.llm.parsing import (
     _GENERIC_FALLBACK_MESSAGE,
@@ -127,6 +128,8 @@ class LiteLLMInterface(RequestMixin, ParseMixin, LLMInterface, _Metered):
     _supported_params_memo: tuple[str, list[str] | None] | None = None
     # Times the D-020 apology retry fired on this instance (read-only for callers).
     apology_retry_count: int = 0
+    # Every request goes through ``_send``, so the request observer sees it.
+    observes_requests = True
 
     def __init__(
         self,
@@ -616,14 +619,17 @@ class LiteLLMInterface(RequestMixin, ParseMixin, LLMInterface, _Metered):
             else USAGE_KIND_BY_CALL_TYPE.get(call_type, USAGE_KIND_COMPLETE)
         )
         meter = _meter_of(self)
+        token = begin_send(call_params, call_type=call_type)
         try:
             response = completion(**call_params)
-        except Exception:
+        except Exception as exc:
             # Broad catch is intentional: count the failed request, re-raise
             # it unchanged for the caller's own error boundary.
             meter.record_error(kind)
+            fail_send(token, exc)
             raise
         meter.record(kind, None if stream else response)
+        end_send(token, response)
         # DECISION plan-2026-11-06T093029-0068b055/D-024: finish_reason
         # "length" is read HERE, once per non-streamed reply (a streamed one
         # is not read, as for usage). A cut reply is warned about but never

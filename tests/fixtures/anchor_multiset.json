@@ -514,6 +514,11 @@
       "delta": 1,
       "reason": "step 3 of plan 21e6f00d: second D-011 anchor at the blob writer (runtime/blobs.py BlobStore.put): a local write-if-absent (temp file in the same directory, fsync, os.replace; an existing file of the right size is success, a lost replace race is success only when the final file hashes right), no shared atomic-save helper, no retry loop, no text-mode open; no other token was added or lost",
       "token": "plan-2026-11-17T100529-21e6f00d/D-011"
+    },
+    {
+      "delta": 1,
+      "reason": "step 4 of plan 21e6f00d: new anchor at the request observer (llm/observer.py, above OBSERVED_CALL_KEYS): the observer gets an allow-list of the provider request, never a deny-list or the whole call_params, is a ContextVar callback and not a counter, begin_send fails closed, end_send and fail_send never break the call; the D-004 anchor of plan 944e2692 in llm/providers/litellm.py is untouched; no other token was added or lost",
+      "token": "plan-2026-11-17T100529-21e6f00d/D-002"
     }
   ]
 }
