@@ -180,6 +180,9 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+# Built in (no plugin): dump every thread's stack after 900 s inside one test, kill nothing. A hang on
+# a CI leg then names the test and the line instead of running to the job limit with no output.
+faulthandler_timeout = 900
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [

@@ -2106,6 +2106,67 @@ def _bare_symlink_calls(tree: ast.AST) -> list[int]:
     ]
 
 
+_SUBPROCESS_CALLS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
+
+
+def _scrubbed_env_without_systemroot(tree: ast.AST) -> list[int]:
+    """Lines of a subprocess call whose ``env=`` dict literal names ``PATH`` and
+    does not keep ``SYSTEMROOT`` (a ``**passthrough_env()`` splat, a ``SYSTEMROOT``
+    key, or a splatted expression that names it).
+
+    A hand-built child environment that keeps ``PATH`` and drops ``SYSTEMROOT``
+    cannot ``import asyncio`` on Windows (``WinError 10106``). The dict is read
+    when it is written in the call or assigned to the name in the same scope;
+    an environment copied from ``os.environ`` or built by a helper is not read.
+    """
+
+    def _literal_bad(node: ast.AST) -> bool:
+        if not isinstance(node, ast.Dict):
+            return False
+        keys = [
+            k.value for k in node.keys if isinstance(k, ast.Constant)
+        ]  # a splat has the key None
+        splats = [v for k, v in zip(node.keys, node.values, strict=True) if k is None]
+        keeps = "SYSTEMROOT" in keys or any(
+            (isinstance(v, ast.Call) and _call_name(v) == "passthrough_env")
+            or "SYSTEMROOT" in ast.unparse(v)
+            for v in splats
+        )
+        return "PATH" in keys and not keeps
+
+    bad: list[int] = []
+    for scope in [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef))
+    ]:
+        assigned: dict[str, list[ast.AST]] = {}
+        for node in ast.walk(scope):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        assigned.setdefault(target.id, []).append(node.value)
+        for node in ast.walk(scope):
+            if not (
+                isinstance(node, ast.Call)
+                and _call_name(node) in _SUBPROCESS_CALLS
+                and isinstance(node.func, ast.Attribute)
+                and getattr(node.func.value, "id", "") == "subprocess"
+            ):
+                continue
+            for kw in node.keywords:
+                if kw.arg != "env":
+                    continue
+                values = (
+                    assigned.get(kw.value.id, [])
+                    if isinstance(kw.value, ast.Name)
+                    else [kw.value]
+                )
+                if any(_literal_bad(v) for v in values):
+                    bad.append(node.lineno)
+    return sorted(set(bad))
+
+
 def _test_trees() -> list[tuple[pathlib.Path, ast.AST]]:
     out = []
     for path in sorted((_REPO_ROOT / "tests").rglob("*.py")):
@@ -2187,6 +2248,48 @@ class TestPortabilityRules:
         assert _bare_symlink_calls(
             ast.parse("a.symlink_to(b)\nos.symlink(a, b)\nsymlink_or_skip(a, b)")
         ) == [1, 2]
+
+    def test_a_scrubbed_child_environment_keeps_systemroot(self):
+        """Windows: a child with ``PATH`` and no ``SYSTEMROOT`` dies in ``import asyncio``
+        (`WinError 10106`, the loopback socketpair of the event loop), which
+        ``import fsm_llm`` needs through loguru. Every hand-built env dict of a
+        subprocess call splats ``passthrough_env()``."""
+        offenders = [
+            f"{rel}:{line}"
+            for rel, tree in _test_trees()
+            for line in _scrubbed_env_without_systemroot(tree)
+        ]
+        assert not offenders, (
+            "subprocess env= dict with PATH and no **passthrough_env() "
+            "(tests/test_fsm_llm_regression/workflow_support.py): "
+            + ", ".join(offenders)
+        )
+
+    def test_the_environment_scanner_flags_and_accepts_the_known_shapes(self):
+        flagged = ast.parse(
+            "import subprocess\n"
+            "subprocess.run(['x'], env={'PATH': 'p'})\n"
+            "def f():\n"
+            "    env = {'PATH': 'p', 'A': 'b'}\n"
+            "    subprocess.Popen(['x'], env=env)\n"
+            "def g():\n"
+            "    subprocess.run(['x'], env={'PATH': '', **other()})\n"
+        )
+        assert _scrubbed_env_without_systemroot(flagged) == [2, 5, 7]
+        accepted = ast.parse(
+            "import subprocess\n"
+            "subprocess.run(['x'], env={'PATH': 'p', **passthrough_env()})\n"
+            "def f():\n"
+            "    env = {'PATH': 'p', **passthrough_env()}\n"
+            "    subprocess.run(['x'], env=env)\n"
+            "subprocess.run(['x'], env={'PATH': 'p', 'SYSTEMROOT': 'c'})\n"
+            "subprocess.run(['x'], env={'PATH': 'p', **({'SYSTEMROOT': s} if s else {})})\n"
+            "subprocess.run(['x'], env={'A': 'b'})\n"
+            "subprocess.run(['x'], env=dict(os.environ))\n"
+            "subprocess.run(['x'])\n"
+            "other.run(['x'], env={'PATH': 'p'})\n"
+        )
+        assert _scrubbed_env_without_systemroot(accepted) == []
 
     def test_the_posix_only_mark_skips_on_windows_only(self, monkeypatch):
         from tests.conftest import posix_only

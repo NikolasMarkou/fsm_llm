@@ -33,6 +33,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.llm import LLMInterface, implements_complete
 from fsm_llm.testing import MockLLM2Interface, PromptGroundedLLM
+from tests.test_fsm_llm_regression.workflow_support import passthrough_env
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -480,6 +481,7 @@ class TestNoNetworkNoPytest:
                 "OLLAMA_API_BASE": "http://127.0.0.1:9",
                 "OLLAMA_HOST": "http://127.0.0.1:9",
                 "LITELLM_LOCAL_MODEL_COST_MAP": "True",
+                **passthrough_env(),  # Windows: `import asyncio` needs SYSTEMROOT
             },
         )
 

@@ -526,6 +526,44 @@ class TestOfflineNetworkGuard:
             left.close()
             right.close()
 
+    def test_the_windows_socketpair_fallback_is_allowed(self):
+        """Windows has no AF_UNIX ``socketpair``: asyncio's self-pipe uses
+        ``socket._fallback_socketpair``, which connects two loopback TCP
+        sockets. That one frame passes; nothing else does."""
+        left, right = socket._fallback_socketpair()[:2]
+        try:
+            assert left.family in (socket.AF_INET, socket.AF_INET6)
+            left.sendall(b"ok")
+            assert right.recv(2) == b"ok"
+        finally:
+            left.close()
+            right.close()
+
+    def test_a_lookalike_of_the_fallback_is_still_refused(self):
+        """The exemption is the code object of the stdlib function, not its name."""
+        server = _loopback_listener()
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+        def _fallback_socketpair():
+            client.connect(server.getsockname())
+
+        try:
+            with pytest.raises(ConnectionRefusedError, match="network blocked"):
+                _fallback_socketpair()
+            with pytest.raises(ConnectionRefusedError, match="network blocked"):
+                client.connect_ex(server.getsockname())
+        finally:
+            client.close()
+            server.close()
+
+    def test_a_create_connection_from_test_code_is_still_refused(self):
+        server = _loopback_listener()
+        try:
+            with pytest.raises(ConnectionRefusedError, match="network blocked"):
+                socket.create_connection(server.getsockname(), timeout=1)
+        finally:
+            server.close()
+
     @pytest.mark.parametrize(
         ("markers", "exempt"),
         [

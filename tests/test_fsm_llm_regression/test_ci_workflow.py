@@ -251,6 +251,8 @@ def workflow_problems(text: str) -> set[str]:
     env = test.get("env") or {}
     if env.get("PYTHONUTF8") != "1":
         found.add("pythonutf8")
+    if env.get("PYTHONUNBUFFERED") != "1":
+        found.add("pythonunbuffered")
     if env.get("PYTEST_MARKERS") != _MARKERS:
         found.add("markers")
     for job in jobs.values():
@@ -527,6 +529,23 @@ class TestTheRealWorkflow:
     def test_utf8_mode_is_on_for_every_leg(self):
         # Windows 3.11 to 3.14 default to cp1252 (PEP 686 only from 3.15): D-018.
         assert _load(_real_text())["jobs"]["test"]["env"]["PYTHONUTF8"] == "1"
+
+    def test_python_output_is_unbuffered_so_a_hung_leg_shows_where(self):
+        # Windows 3.11 ran 35 minutes with no output after the last flush: pytest writes
+        # its progress characters to a pipe, which is block-buffered (run 43959038258).
+        assert _load(_real_text())["jobs"]["test"]["env"]["PYTHONUNBUFFERED"] == "1"
+
+    def test_a_test_that_hangs_dumps_its_stacks_well_before_the_job_limit(self):
+        # `faulthandler_timeout` is built in: it prints every thread's stack after N seconds
+        # inside one test and kills nothing (pytest-timeout would `os._exit` the whole run on
+        # Windows and lose every other failure summary).
+        ini = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
+            "tool"
+        ]["pytest"]["ini_options"]
+        job_seconds = _load(_real_text())["jobs"]["test"]["timeout-minutes"] * 60
+
+        assert ini["faulthandler_timeout"] == 900
+        assert ini["faulthandler_timeout"] * 2 < job_seconds
 
     def test_the_default_shell_is_bash_so_windows_legs_run_the_same_scripts(self):
         assert _load(_real_text())["defaults"]["run"]["shell"] == "bash"
@@ -952,6 +971,16 @@ MUTANTS: list[tuple[str, Any, str]] = [
     ),
     ("PYTHONUTF8 removed", _sub(r'^      PYTHONUTF8: "1"\n', ""), "pythonutf8"),
     ("PYTHONUTF8 off", _edit('PYTHONUTF8: "1"', 'PYTHONUTF8: "0"'), "pythonutf8"),
+    (
+        "PYTHONUNBUFFERED removed",
+        _sub(r'^      PYTHONUNBUFFERED: "1"\n', ""),
+        "pythonunbuffered",
+    ),
+    (
+        "PYTHONUNBUFFERED off",
+        _edit('PYTHONUNBUFFERED: "1"', 'PYTHONUNBUFFERED: "0"'),
+        "pythonunbuffered",
+    ),
     (
         "default shell removed",
         _edit("defaults:\n  run:\n    shell: bash\n\n", ""),

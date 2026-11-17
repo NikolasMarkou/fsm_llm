@@ -27,6 +27,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.test_fsm_llm_regression.workflow_support import passthrough_env
+
 REPO = Path(__file__).resolve().parents[2]
 PKG = REPO / "src" / "fsm_llm"
 
@@ -103,6 +105,7 @@ def loaded_by_import(src_root: Path = REPO / "src") -> tuple[set[str], list[str]
             "OLLAMA_API_BASE": "http://127.0.0.1:9",
             "OLLAMA_HOST": "http://127.0.0.1:9",
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
+            **passthrough_env(),  # Windows: `import asyncio` needs SYSTEMROOT
         },
     )
     assert done.returncode == 0, done.stderr

@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 import fsm_llm
+from tests.test_fsm_llm_regression.workflow_support import passthrough_env
 
 #: The directory of the import package (`src/fsm_llm/`); derived, so it survives a layout move.
 _PKG_ROOT = Path(fsm_llm.__file__).resolve().parent
@@ -127,6 +128,7 @@ def _run_probe(code: str) -> subprocess.CompletedProcess[str]:
             "OLLAMA_API_BASE": "http://127.0.0.1:9",
             "OLLAMA_HOST": "http://127.0.0.1:9",
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
+            **passthrough_env(),  # Windows: `import asyncio` needs SYSTEMROOT
         },
     )
 

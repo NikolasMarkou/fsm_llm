@@ -68,6 +68,7 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_stack_lifecycle_seam.py` - races in `push_fsm`/`pop_fsm` and stale-conversation cleanup.
 - `test_cpu_timer.py` - the `cpu_timer` helper: budgets about computation are measured in CPU time, not wall time (a loaded host inflates wall time).
 - `test_timing_factor.py` - the `timing_factor` fixture that scales wall-clock budgets under a tracer or load.
+- `test_conftest_guards.py` - the CI guards of `tests/conftest.py`: short parametrize ids, the node id length limit and the huge-assert explanation that skips `difflib`.
 - `test_turn_guard_deterministic.py` - a second `converse` on a busy conversation raises `FSMError`.
 - `test_fsm_lock_order.py` - the lock order of `FSMManager` (`_lock` before `conv_lock`, `_fsm_cache_lock` a leaf): every manager operation runs over recording locks and the exact `_lock` and `conv_lock` call order of the turn, read, write and end paths is pinned (plan d454fd62 step 78, for the three-module split of `engine/fsm/`).
 - `test_bulk_extraction.py` - bulk extraction through `API.converse`: correction overwrite, provenance, coercion and validation, rejected corrections, back-edge re-extraction, grounding, and a failed bulk surfaced to Pass 2.

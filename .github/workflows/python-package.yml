@@ -141,6 +141,9 @@ jobs:
       # Windows 3.11 to 3.14 default to cp1252 (UTF-8 is the default only from 3.15, PEP 686):
       # the code and tests pass `encoding="utf-8"` and this is the belt (D-018).
       PYTHONUTF8: "1"
+      # pytest writes its progress characters to a pipe, which Python block-buffers: a hung
+      # leg showed nothing after the last flush (Windows 3.11, run 43959038258, 35 minutes).
+      PYTHONUNBUFFERED: "1"
       # Marker exclusions are deliberate, do NOT "restore" a bare `pytest tests/`:
       #   not slow        -> tests that deliberately time.sleep() to exercise timeout code
       #                      paths; excluded for CI speed, not safety.

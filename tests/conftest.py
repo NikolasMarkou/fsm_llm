@@ -208,13 +208,32 @@ def bind_api_clock(monkeypatch: pytest.MonkeyPatch, fake: Any) -> list[str]:
 
 #: Markers whose tests may open real TCP connections under ``block_network``.
 NETWORK_EXEMPT_MARKERS = ("real_llm", "integration")
-#: Address families ``block_network`` refuses (Unix sockets stay open).
+#: Address families ``block_network`` refuses (Unix sockets stay open; on Windows
+#: asyncio self-pipes are loopback TCP, see ``_called_by_socketpair_fallback``).
 _BLOCKED_FAMILIES = (socket.AF_INET, socket.AF_INET6)
 
 
 def network_exempt(node: pytest.Item) -> bool:
     """Whether *node* carries one of ``NETWORK_EXEMPT_MARKERS``."""
     return any(node.get_closest_marker(name) for name in NETWORK_EXEMPT_MARKERS)
+
+
+def _called_by_socketpair_fallback() -> bool:
+    """Whether the caller of the patched connect is ``socket._fallback_socketpair``.
+
+    Interface contract (``block_network`` only): compares the code object of the
+    frame two levels up (the caller of ``_connect`` or ``_connect_ex``) with the
+    stdlib function's, so a test-code function that merely shares the name is
+    not exempt. Returns ``False`` when the stdlib has no such function or the
+    frame is absent; never raises.
+    """
+    fallback = getattr(socket, "_fallback_socketpair", None)
+    if fallback is None:
+        return False
+    try:
+        return sys._getframe(2).f_code is fallback.__code__
+    except ValueError:
+        return False
 
 
 def block_network(monkeypatch: pytest.MonkeyPatch, node: pytest.Item) -> None:
@@ -229,7 +248,11 @@ def block_network(monkeypatch: pytest.MonkeyPatch, node: pytest.Item) -> None:
           blocked too: the default model is a local Ollama.
         - A blocked call raises ``ConnectionRefusedError`` at once (no
           timeout), naming the address. Unix sockets (MCP stdio, asyncio
-          self-pipes) are untouched.
+          self-pipes on POSIX) are untouched. On Windows there is no AF_UNIX
+          ``socketpair``: the stdlib builds one from two loopback TCP sockets
+          in ``socket._fallback_socketpair`` (asyncio's self-pipe, every event
+          loop), and that one function, identified by its code object and not
+          by its name, may connect. Every other caller stays refused.
         - No-op when ``network_exempt(node)`` is true (live suites).
     """
     if network_exempt(node):
@@ -244,12 +267,12 @@ def block_network(monkeypatch: pytest.MonkeyPatch, node: pytest.Item) -> None:
         )
 
     def _connect(sock: socket.socket, address: object) -> None:
-        if sock.family in _BLOCKED_FAMILIES:
+        if sock.family in _BLOCKED_FAMILIES and not _called_by_socketpair_fallback():
             _refuse(address)
         real_connect(sock, address)
 
     def _connect_ex(sock: socket.socket, address: object) -> int:
-        if sock.family in _BLOCKED_FAMILIES:
+        if sock.family in _BLOCKED_FAMILIES and not _called_by_socketpair_fallback():
             _refuse(address)
         return real_connect_ex(sock, address)
 
@@ -449,8 +472,156 @@ def sample_fsm_definition_v2():
     return FSMDefinition.model_validate(fsm_data)
 
 
+#: A parametrize value (``str`` or ``bytes``) longer than this gets a short id.
+MAX_PARAM_VALUE_ID_CHARS = 1_000
+#: A node id longer than this fails collection. pytest copies the node id into the
+#: ``PYTEST_CURRENT_TEST`` environment variable, and Windows refuses a variable of
+#: more than 32,767 characters (``ValueError`` in setup and teardown: the test never
+#: runs), so the limit keeps a wide margin below it.
+MAX_NODEID_CHARS = 4_000
+
+
+def compact_param_id(value: object, argname: str) -> str | None:
+    """A short, stable id for a huge ``str`` or ``bytes`` parameter, else ``None``.
+
+    Interface contract (the ``pytest_make_parametrize_id`` hook below, and a test
+    that builds its own ``ids=`` callable and wants the same form):
+        - Parameters: the parametrize *value* and its *argname*.
+        - Returns ``"<argname>-<str|bytes><length>-<sha1 prefix>"`` for a ``str`` or
+          ``bytes`` longer than ``MAX_PARAM_VALUE_ID_CHARS`` (the same value always
+          gives the same id, two values of one length differ by the digest), and
+          ``None`` for everything else, so pytest builds its usual id.
+        - Never raises for a ``str`` (a lone surrogate is encoded with
+          ``surrogatepass``).
+    """
+    import hashlib
+
+    if not isinstance(value, (str, bytes)) or len(value) <= MAX_PARAM_VALUE_ID_CHARS:
+        return None
+    raw = value if isinstance(value, bytes) else value.encode("utf-8", "surrogatepass")
+    kind = "bytes" if isinstance(value, bytes) else "str"
+    return f"{argname}-{kind}{len(value)}-{hashlib.sha1(raw).hexdigest()[:8]}"
+
+
+def pytest_make_parametrize_id(config, val, argname):
+    """Short ids for the 100,000 and 1,000,000 character parameters of the suite."""
+    return compact_param_id(val, argname)
+
+
+def pytest_collection_modifyitems(config, items):
+    """Fail collection on a node id too long for a Windows environment variable."""
+    too_long = [item.nodeid for item in items if len(item.nodeid) > MAX_NODEID_CHARS]
+    if too_long:
+        raise pytest.UsageError(
+            f"{len(too_long)} test id(s) longer than {MAX_NODEID_CHARS} characters "
+            "(Windows cannot set PYTEST_CURRENT_TEST that long); give the "
+            "parametrize call short ids= or an id= per pytest.param, first: "
+            + too_long[0][:150]
+        )
+
+
+#: ``huge_operand_explanation`` explains a failed ``==`` itself, without ``difflib``,
+#: when an operand is a string or bytes of more than this many characters ...
+MAX_COMPARE_CHARS = 10_000
+#: ... or lines, or a list, tuple, dict or set of more than ``MAX_COMPARE_ITEMS``.
+MAX_COMPARE_LINES = 200
+MAX_COMPARE_ITEMS = 1_000
+
+
+def _too_big_to_diff(value: object) -> bool:
+    if isinstance(value, (str, bytes)):
+        newline = b"\n" if isinstance(value, bytes) else "\n"
+        return (
+            len(value) > MAX_COMPARE_CHARS or value.count(newline) > MAX_COMPARE_LINES
+        )
+    if isinstance(value, (list, tuple, dict, set, frozenset)):
+        return len(value) > MAX_COMPARE_ITEMS
+    return False
+
+
+def _describe(value: object) -> str:
+    size = len(value) if hasattr(value, "__len__") else "?"
+    return f"{type(value).__name__} of length {size}"
+
+
+def huge_operand_explanation(op: str, left: object, right: object) -> list[str] | None:
+    """Explain a failed ``==`` on huge operands without ``difflib``, else ``None``.
+
+    Interface contract (``tests/test_fsm_llm/test_conftest_guards.py`` pins it):
+        - Returns ``None`` (pytest explains the comparison as usual) unless *op* is
+          ``==`` and an operand is a string or bytes of more than
+          ``MAX_COMPARE_CHARS`` characters or ``MAX_COMPARE_LINES`` lines, or a
+          list, tuple, dict, set or frozenset of more than ``MAX_COMPARE_ITEMS``.
+        - Otherwise returns a short explanation (the first line is the summary, as
+          pytest's own): the two types and lengths, the index of the first
+          difference (strings, bytes, lists, tuples) with a short window of each
+          side, and the size of the symmetric difference (dicts and sets). Linear
+          time; never raises for the types above.
+    Why: pytest renders a failed string ``==`` with ``difflib.ndiff`` over the
+    lines; on Python 3.11 to 3.13 that is cubic in the number of near-equal lines
+    (400 by 560 lines took a minute, 5,000 by 7,000 never finished: the Windows
+    3.11 leg of CI ran for 35 minutes inside one failed assert), so a mismatch of a
+    large text must not reach it. The ``pytest_assertrepr_compare`` hook cannot do
+    this: pytest calls every implementation (it is not ``firstresult``), so the
+    builtin one runs whatever a conftest returns; ``pytest_configure`` below puts
+    this function in front of pytest's own ``util.assertrepr_compare`` instead.
+    """
+    if op != "==" or not (_too_big_to_diff(left) or _too_big_to_diff(right)):
+        return None
+    lines = [
+        f"{_describe(left)} == {_describe(right)}",
+        "full diff skipped: the operands are too large for difflib "
+        "(guard in tests/conftest.py, huge_operand_explanation)",
+    ]
+    if isinstance(left, (str, bytes, list, tuple)) and type(left) is type(right):
+        index = next(
+            (i for i, (a, b) in enumerate(zip(left, right, strict=False)) if a != b),
+            min(len(left), len(right)),
+        )
+        lines.append(f"first difference at index {index}")
+        window = slice(max(index - 20, 0), index + 60)
+        lines.append(f"left : {left[window]!r}")
+        lines.append(f"right: {right[window]!r}")
+    elif isinstance(left, (dict, set, frozenset)) and type(left) is type(right):
+        lines.append(f"{len(set(left) ^ set(right))} keys or members on one side only")
+    return lines
+
+
+def guard_assertrepr_compare(original):
+    """Wrap pytest's ``util.assertrepr_compare`` so a huge operand skips ``difflib``.
+
+    Interface contract (``pytest_configure`` only): *original* is the function
+    ``_pytest.assertion.util.assertrepr_compare``, which pytest 9 calls as
+    ``assertrepr_compare(op=..., left=..., right=..., verbose=..., ...)`` and which
+    returns an iterator of lines. The wrapper reads ``op``, ``left`` and ``right``
+    from the keywords; a call that does not pass them by keyword (another pytest
+    version) goes to *original* unchanged, so the guard fails open and never hides
+    an assertion. Returns an iterator, as *original* does.
+    """
+
+    def guarded(*args, **kwargs):
+        if {"op", "left", "right"} <= kwargs.keys():
+            explanation = huge_operand_explanation(
+                kwargs["op"], kwargs["left"], kwargs["right"]
+            )
+            if explanation is not None:
+                return iter(explanation)
+        return original(*args, **kwargs)
+
+    guarded.__wrapped__ = original
+    return guarded
+
+
 def pytest_configure(config):
-    """Configure pytest with custom markers."""
+    """Configure pytest with custom markers and the assertion-diff guard."""
+    from _pytest.assertion import util as assertion_util
+
+    original = assertion_util.assertrepr_compare
+    if not hasattr(original, "__wrapped__"):  # one guard, however often it runs
+        assertion_util.assertrepr_compare = guard_assertrepr_compare(original)
+        config.add_cleanup(
+            lambda: setattr(assertion_util, "assertrepr_compare", original)
+        )
     config.addinivalue_line("markers", "slow: mark test as slow running")
     config.addinivalue_line("markers", "integration: mark test as integration test")
     config.addinivalue_line("markers", "examples: mark test as example test")

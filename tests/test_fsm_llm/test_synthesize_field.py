@@ -26,6 +26,7 @@ from fsm_llm.core.verify import FSMValidator
 from fsm_llm.engine.api.stack import ContextMergeStrategy
 from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
 from fsm_llm.testing import MockLLM2Interface
+from tests.conftest import compact_param_id
 
 # fsm_id of ``_golden()``, captured on the parent commit before the field existed.
 GOLDEN_FSM_ID = "fsm_Golden_043181d0"
@@ -177,7 +178,9 @@ class TestSynthesizeLoads:
 
 class TestSynthesizeRefusals:
     @pytest.mark.parametrize("field", ["goal", "on_failure", "result_key"])
-    @pytest.mark.parametrize("bad", _bad_values(), ids=repr)
+    @pytest.mark.parametrize(
+        "bad", _bad_values(), ids=lambda v: compact_param_id(v, "bad") or repr(v)
+    )
     def test_bad_scalar_values(self, field, bad):
         with pytest.raises(ValidationError):
             SynthesizeConfig(**_synth(**{field: bad}))
