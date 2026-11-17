@@ -92,7 +92,7 @@ ENTRY = {"__main__", "runner"}
 OUTSIDE_THE_LAYERS = {"testing"}
 IGNORED_NAMES = {"__init__", "__version__", "__pycache__"}
 # the roadmap's Section 5.2 packages that do not exist yet: optional in the layers contract
-ROADMAP_ABSENT = {"serve", "simulation", "oo", "retrieval", "runtime"}
+ROADMAP_ABSENT = {"serve", "simulation", "oo", "retrieval"}
 
 _TAG = re.compile(r"^(retired by: [^(]+?|permanent)(?: \([^)]*\))?(?::| \()")
 
@@ -218,6 +218,16 @@ class TestTheContractRuns:
                 "constants.py",
                 "import fsm_llm.core  # planted",
                 "kernel modules import no layer package",
+            ),
+            (
+                "runtime/events.py",
+                "import fsm_llm.engine  # planted",
+                "Section 5.2 layers",
+            ),
+            (
+                "runtime/constants.py",
+                "import fsm_llm.tools  # planted",
+                "Section 5.2 layers",
             ),
             (
                 "okf/models.py",

@@ -115,7 +115,7 @@ _ON_DISK_PACKAGES: frozenset[str] = _packages_under(PACKAGE_DIRS["fsm_llm"])
 #: need no extra and have no per-suite test folder. The set is the layer packages that
 #: exist NOW; each split step adds the name of the package it creates (security at step
 #: 67, core at step 69, llm and context at step 72, handlers at step 77, engine at
-#: step 78, okf at step 83), up to the target `security, core, llm, context, engine, tools, policy,
+#: step 78, okf at step 83, runtime at plan 21e6f00d), up to the target `security, core, llm, context, engine, tools, policy,
 #: okf, skills, handlers`. `test_layer_packages_are_exactly_the_non_extra_packages_on_disk`
 #: pins it to the disk, so a layer package with no entry here, or an entry with no
 #: package, fails.
@@ -128,6 +128,7 @@ LAYER_PACKAGES: frozenset[str] = frozenset(
         "llm",
         "okf",
         "policy",
+        "runtime",
         "security",
         "skills",
         "tools",

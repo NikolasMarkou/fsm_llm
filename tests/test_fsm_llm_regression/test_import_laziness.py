@@ -64,6 +64,7 @@ ON_REQUEST = (
     "skills",
     "tools",
     "policy",
+    "runtime",  # plan 21e6f00d step 1; moves to EAGER in step 7, when the engine imports it
     "text",
     "frontmatter",
     "cli_support",

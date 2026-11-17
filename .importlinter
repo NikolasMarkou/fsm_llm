@@ -41,8 +41,8 @@ exclude_type_checking_imports = True
 # 1. The layered contract. Top to bottom, as the roadmap's Section 5.2 table with the measured
 # deviations of D-014, D-016 and D-042; `|` joins independent siblings (no import either way), a
 # row may import every row below it, never one above. A name in parentheses is a package of the
-# roadmap that does not exist yet (`serve`, `simulation`, `oo`, `retrieval`, `runtime`): optional,
-# so it takes its place the day it is created.
+# roadmap that does not exist yet (`serve`, `simulation`, `oo`, `retrieval`): optional,
+# so it takes its place the day it is created (`runtime` did, plan 21e6f00d).
 #   serve | monitor | eval                      L7  consumers
 #   agents | synthesis | workflows | reasoning  L6  patterns and runtimes
 #   simulation | oo                             L5  (absent)
@@ -51,7 +51,7 @@ exclude_type_checking_imports = True
 #                                                   (D-016 wrote `engine : handlers`; this is stricter and holds)
 #   policy                                      L3  above `tools` (D-037, D-042): it gates a tool call
 #   context | retrieval | okf | skills | tools L3  independent siblings
-#   runtime                                     L2  (absent)
+#   runtime                                     L2  the event log: imports core, llm and the kernel only
 #   llm                                         L1
 #   core                                        L0
 # Not in the contract: the kernel (`constants`, `logging`, `security`, `text`, `env`, `frontmatter`,
@@ -73,7 +73,7 @@ layers =
     handlers
     policy
     context | (retrieval) | okf | skills | tools
-    (runtime)
+    runtime
     llm
     core
 ignore_imports =
@@ -123,6 +123,7 @@ forbidden_modules =
     fsm_llm.policy
     fsm_llm.reasoning
     fsm_llm.runner
+    fsm_llm.runtime
     fsm_llm.skills
     fsm_llm.synthesis
     fsm_llm.testing
