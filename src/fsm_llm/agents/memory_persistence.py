@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
+import time
 from pathlib import Path
 
 from fsm_llm.context.filtering import redacting_json_default
@@ -79,7 +81,23 @@ def save_working_memory(memory: WorkingMemory, path: str) -> None:
             # crash can leave the renamed target empty.
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, target)
+        # Windows only: while another writer's os.replace holds the same target, this one
+        # raises PermissionError (WinError 5); retry with a short backoff (about 0.3 s in all).
+        # POSIX never retries: there PermissionError is a real permission problem. Written out
+        # in each of the three save sites on purpose (plan d7719b03, D-010): the anchors of
+        # these sites refuse a shared atomic-save helper without a maintainer decision.
+        delays = iter(
+            (0.001, 0.002, 0.004, 0.008, 0.016, 0.032, 0.05, 0.05, 0.05, 0.05, 0.05)
+        )
+        while True:
+            try:
+                os.replace(tmp, target)
+                break
+            except PermissionError:
+                delay = next(delays, None) if sys.platform == "win32" else None
+                if delay is None:
+                    raise
+                time.sleep(delay)
     finally:
         if os.path.exists(tmp):
             try:

@@ -11,8 +11,10 @@ package, so a format module may import it without a cycle.
 
 from __future__ import annotations
 
+import errno
 import os
 import re
+import stat
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
@@ -182,9 +184,19 @@ def read_bytes(path: Path, limit: int) -> bytes:
     """Read at most ``limit + 1`` bytes; never follows a final symlink.
 
     Interface contract: raises ``OSError`` for a symlink, a missing or
-    unreadable file; a FIFO opens without blocking and reads as empty."""
+    unreadable file; a FIFO opens without blocking and reads as empty. Where
+    the platform has no ``O_NOFOLLOW`` (Windows), the file is checked after the
+    open instead: the name must not be a symlink and must still be the file the
+    handle holds (``OSError`` ``ELOOP`` otherwise), so a link swapped in after
+    the caller's checks is refused there too. POSIX behaviour is unchanged."""
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     with os.fdopen(os.open(path, flags), "rb") as handle:
+        if not hasattr(os, "O_NOFOLLOW"):
+            named, opened = os.lstat(path), os.fstat(handle.fileno())
+            if stat.S_ISLNK(named.st_mode) or (
+                named.st_ino and opened.st_ino and not os.path.samestat(named, opened)
+            ):
+                raise OSError(errno.ELOOP, "not the file that was opened", str(path))
         return handle.read(limit + 1)
 
 

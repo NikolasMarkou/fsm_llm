@@ -1459,6 +1459,82 @@ class TestResourceConfinement:
             catalog.read_resource("guard", "swap.txt")
         assert str(info.value) == "resource cannot be read"
 
+    @staticmethod
+    def _walk(catalog: SkillCatalog, path: str, size: int) -> list[tuple]:
+        """Every page of *path* with its next offset and length, to the end."""
+        pages, offset = [], 0
+        while True:
+            page, following, length = catalog.read_resource(
+                "guard", path, offset, size=size
+            )
+            pages.append((page, following, length))
+            if following is None:
+                return pages
+            offset = following
+
+    @pytest.mark.parametrize("size", [7, 50, 10_000])
+    def test_a_crlf_or_cr_resource_pages_exactly_like_its_lf_twin(
+        self, tmp_path: Path, size: int
+    ) -> None:
+        """A Windows checkout with ``core.autocrlf`` stores CRLF: ``strip_unsafe_text``
+        turned each ``\\r`` into a space, so every line gained a trailing space and the
+        length and offsets moved (CI run 43959038258, 8 failures and a 35 minute hang)."""
+        catalog, folder, _ = _guarded(tmp_path)
+        text = "".join(f"line {i:03d}\n" for i in range(40)) + "\n\nlast"
+        (folder / "lf.txt").write_bytes(text.encode())
+        (folder / "crlf.txt").write_bytes(text.replace("\n", "\r\n").encode())
+        (folder / "cr.txt").write_bytes(text.replace("\n", "\r").encode())
+
+        lf = self._walk(catalog, "lf.txt", size)
+
+        assert self._walk(catalog, "crlf.txt", size) == lf
+        assert self._walk(catalog, "cr.txt", size) == lf
+        assert "".join(page for page, _, _ in lf) == text
+        assert {length for _, _, length in lf} == {len(text)}
+
+    def test_mixed_line_ends_become_one_newline_each_and_other_controls_still_strip(
+        self, tmp_path: Path
+    ) -> None:
+        catalog, folder, _ = _guarded(tmp_path)
+        (folder / "mixed.txt").write_bytes(b"a\r\nb\rc\nd\r\r\ne\x1b[31mf\x07g\r")
+
+        page, following, length = catalog.read_resource("guard", "mixed.txt")
+
+        # CRLF and CR are one newline each; the ANSI escape and the bell are stripped
+        assert page == "a\nb\nc\nd\n\nefg\n"
+        assert following is None and length == len(page)
+
+    def test_the_file_byte_bound_counts_the_crlf_file_not_the_normalised_text(
+        self, tmp_path: Path
+    ) -> None:
+        catalog, folder, _ = _guarded(tmp_path, max_file_bytes=3_000)
+        (folder / "just.txt").write_bytes(b"x\r\n" * 1_000)  # 3,000 bytes, 2,000 chars
+        (folder / "over.txt").write_bytes(b"x\r\n" * 1_001)  # 3,003 bytes, 2,002 chars
+
+        assert catalog.read_resource("guard", "just.txt")[2] == 2_000
+        with pytest.raises(SkillError) as info:
+            catalog.read_resource("guard", "over.txt")
+        assert str(info.value) == "resource is over the size bound"
+
+    @pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")
+    def test_the_swap_is_refused_where_there_is_no_o_nofollow_too(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Windows has no ``O_NOFOLLOW``: ``frontmatter.read_bytes`` checks the name
+        after the open instead (simulated here by deleting the flag)."""
+        catalog, folder, outside = _guarded(tmp_path)
+        symlink_or_skip(folder / "swap.txt", outside / "secret.txt")
+        monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+        monkeypatch.setattr(
+            skills_module, "_confined", lambda directory, parts: directory / parts[0]
+        )
+        monkeypatch.setattr(skills_module.stat, "S_ISREG", lambda mode: True)
+
+        with pytest.raises(SkillError) as info:
+            catalog.read_resource("guard", "swap.txt")
+
+        assert str(info.value) == "resource cannot be read"
+
     def test_a_directory_target_is_not_a_regular_file(self, tmp_path: Path) -> None:
         catalog, _, _ = _guarded(tmp_path)
         with pytest.raises(SkillError) as info:

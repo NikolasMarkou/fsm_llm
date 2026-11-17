@@ -824,7 +824,7 @@ export_agent_result(result, "./my_bundle", task="payload size")     # writes run
 
 Accepted residuals of the OKF feature, in one place:
 
-- TOCTOU: a path swapped for a symlink after the scan or the write validation can still win; the loader's `O_NOFOLLOW` covers the last component only.
+- TOCTOU: a path swapped for a symlink after the scan or the write validation can still win; the loader's `O_NOFOLLOW` covers the last component only (Windows has no `O_NOFOLLOW`: there `fsm_llm.frontmatter.read_bytes` checks after the open that the name is not a symlink and is still the file it opened, which narrows the window but cannot close it).
 - Hardlinks are not detected and load like any file.
 - Lookalike ids load with an `id-collision` warning only; nothing is dropped.
 - The load and the check keep separate clocks, so `validate --max-seconds N` can take about 2N plus import time.

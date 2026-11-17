@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import enum
+import errno
 import gc
 import json
 import os
@@ -157,6 +158,72 @@ class TestResolveWithin:
 
         with pytest.raises((RuntimeError, OSError)):
             resolve_within(root, "a")
+
+    @pytest.mark.parametrize("relative", ["a\x00b", Path("a\x00b"), "ok/\x00"])
+    def test_a_nul_byte_raises_even_where_resolve_does_not(
+        self, root: Path, relative: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Windows with Python 3.13 or later resolves a path with a NUL without
+        raising (CI run 43959038258); the contract is ``ValueError`` everywhere."""
+        monkeypatch.setattr(Path, "resolve", lambda self, strict=False: self)
+
+        with pytest.raises(ValueError, match="null byte"):
+            resolve_within(root, relative)  # type: ignore[arg-type]
+
+    @staticmethod
+    def _resolve_with_a_strict_failure(
+        root: Path, monkeypatch: pytest.MonkeyPatch, error: OSError
+    ) -> Path | None:
+        """``resolve_within`` on a simulated 3.13 whose strict resolve raises *error*."""
+
+        def fake(self: Path, strict: bool = False) -> Path:
+            if strict:
+                raise error
+            return self
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "resolve", fake)
+            patch.setattr(sys, "version_info", (3, 13, 0, "final", 0))
+            return resolve_within(root, "a")
+
+    @pytest.mark.parametrize("winerror", [1920, 1921])
+    def test_a_windows_symlink_loop_raises_like_eloop(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch, winerror: int
+    ) -> None:
+        """No ``ELOOP`` on Windows: the loop is ``winerror`` 1920 or 1921, which the
+        non-strict ``resolve()`` of 3.13 and later swallows."""
+        error = OSError(errno.EINVAL, "cannot be resolved")
+        error.winerror = winerror  # type: ignore[attr-defined]
+
+        with pytest.raises(OSError) as caught:
+            self._resolve_with_a_strict_failure(root, monkeypatch, error)
+
+        assert caught.value is error
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            OSError(errno.ENOENT, "missing"),  # a missing target stays allowed
+            OSError(errno.EINVAL, "other"),
+            OSError(errno.EACCES, "denied"),
+        ],
+    )
+    def test_any_other_strict_failure_is_still_swallowed(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch, error: OSError
+    ) -> None:
+        assert self._resolve_with_a_strict_failure(root, monkeypatch, error) == (
+            root / "a"
+        )
+
+    def test_a_windows_error_that_is_not_a_loop_is_still_swallowed(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        error = OSError(errno.ENOENT, "not found")
+        error.winerror = 2  # type: ignore[attr-defined]
+
+        assert self._resolve_with_a_strict_failure(root, monkeypatch, error) == (
+            root / "a"
+        )
 
     def test_an_unresolved_root_fails_closed(self, tmp_path: Path) -> None:
         real = tmp_path / "real"

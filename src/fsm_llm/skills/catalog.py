@@ -671,11 +671,19 @@ class SkillCatalog:
     ) -> tuple[str, int | None, int]:
         """``(page, next offset or None, length)`` of a bundled text file; a
         ``SkillError`` for an unsafe path, a symlink, a non-regular, oversize or
-        unreadable file, and binary (NUL) or non-UTF-8 content."""
+        unreadable file, and binary (NUL) or non-UTF-8 content.
+
+        Line ends are normalised to ``\\n`` first (``\\r\\n`` and a lone ``\\r``, as
+        ``split_frontmatter`` does for a body), so a CRLF file (a Windows checkout
+        with ``core.autocrlf``) pages exactly like its LF twin: ``strip_unsafe_text``
+        turns every ``\\r`` into a space, which gave each line a trailing space and
+        shifted ``length`` and the offsets. Offsets and ``length`` count the
+        normalised text; the byte bounds (``max_file_bytes``) count the file."""
         parts = _path_parts(path)
         if parts is None:
             raise _refuse("path-refused")
         text = self._text(name, parts, strict=True)
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
         return text_page(strip_unsafe_text(text, multiline=True), offset, max(size, 1))
 
     def _text(self, name: str, parts: tuple[str, ...], *, strict: bool) -> str:

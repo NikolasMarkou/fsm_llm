@@ -29,7 +29,9 @@ import abc
 import json
 import os
 import re
+import sys
 import tempfile
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -191,7 +193,23 @@ class FileSessionStore(SessionStore):
                 f.write(json.dumps(data, indent=2, default=redacting_json_default))
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp_name, str(path))
+            # Windows only: while another writer's os.replace holds the same target, this one
+            # raises PermissionError (WinError 5); retry with a short backoff (about 0.3 s in all).
+            # POSIX never retries: there PermissionError is a real permission problem. Written out
+            # in each of the three save sites on purpose (plan d7719b03, D-010): the anchors of
+            # these sites refuse a shared atomic-save helper without a maintainer decision.
+            delays = iter(
+                (0.001, 0.002, 0.004, 0.008, 0.016, 0.032, 0.05, 0.05, 0.05, 0.05, 0.05)
+            )
+            while True:
+                try:
+                    os.replace(tmp_name, str(path))
+                    break
+                except PermissionError:
+                    delay = next(delays, None) if sys.platform == "win32" else None
+                    if delay is None:
+                        raise
+                    time.sleep(delay)
             logger.debug(f"Session saved: {session_id}")
         finally:
             # DECISION plan-2026-07-18T162030-a02151fe/D-011 [STALE]

@@ -9,6 +9,7 @@ the wiring ``okf/parser.py`` keeps to it.
 from __future__ import annotations
 
 import ast
+import errno
 import os
 import subprocess
 import sys
@@ -369,6 +370,147 @@ class TestReadBytes:
         data = _on_a_thread(lambda: read_bytes(fifo, 100))
 
         assert data == b""  # nobody writes: it opens without blocking and is empty
+
+
+class TestReadBytesWithoutNoFollow:
+    """Windows has no ``O_NOFOLLOW``: the file is checked after the open (the symlink
+    race of ``skills/catalog.py`` D-023 was wide open there, CI run 43959038258).
+    Simulated on any OS by deleting the flag."""
+
+    @pytest.fixture(autouse=True)
+    def _no_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+
+    @staticmethod
+    def _swap_after_open(monkeypatch: pytest.MonkeyPatch, swap: Any) -> None:
+        """Run *swap* right after ``os.open`` of the file under test returns."""
+        real_open = os.open
+
+        def open_then_swap(path: Any, flags: int, *args: Any) -> int:
+            fd = real_open(path, flags, *args)
+            swap()
+            return fd
+
+        monkeypatch.setattr(os, "open", open_then_swap)
+
+    def test_a_plain_file_is_read_whole(self, tmp_path: Path) -> None:
+        path = tmp_path / "s.md"
+        path.write_bytes(b"hello")
+
+        assert read_bytes(path, 1000) == b"hello"
+        assert read_bytes(path, 2) == b"hel"
+
+    def test_a_final_symlink_is_refused_with_eloop(self, tmp_path: Path) -> None:
+        target = tmp_path / "secret.txt"
+        target.write_bytes(b"top secret")
+        link = tmp_path / "link.md"
+        symlink_or_skip(link, target)
+
+        with pytest.raises(OSError) as caught:
+            read_bytes(link, 100)
+
+        assert caught.value.errno == errno.ELOOP
+
+    def test_a_dangling_symlink_still_raises(self, tmp_path: Path) -> None:
+        link = tmp_path / "dangling.md"
+        symlink_or_skip(link, tmp_path / "gone")
+
+        with pytest.raises(OSError):
+            read_bytes(link, 100)
+
+    def test_a_symlink_swapped_in_after_the_open_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The open saw a regular file; the name is a symlink by the time of the check."""
+        path = tmp_path / "doc.md"
+        path.write_bytes(b"innocent")
+        secret = tmp_path / "secret.txt"
+        secret.write_bytes(b"top secret")
+
+        def swap() -> None:
+            path.unlink()
+            symlink_or_skip(path, secret)
+
+        self._swap_after_open(monkeypatch, swap)
+
+        with pytest.raises(OSError) as caught:
+            read_bytes(path, 100)
+
+        assert caught.value.errno == errno.ELOOP
+
+    def test_a_different_file_swapped_in_after_the_open_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Not a link, but no longer the file the handle holds: also refused."""
+        path = tmp_path / "doc.md"
+        path.write_bytes(b"first")
+        other = tmp_path / "other.md"
+        other.write_bytes(b"second")
+
+        self._swap_after_open(monkeypatch, lambda: os.replace(other, path))
+
+        with pytest.raises(OSError) as caught:
+            read_bytes(path, 100)
+
+        assert caught.value.errno == errno.ELOOP
+
+    def test_a_zero_inode_skips_the_identity_comparison(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A filesystem that reports no file id cannot be compared: the symlink test stays."""
+        path = tmp_path / "doc.md"
+        path.write_bytes(b"x")
+        real_lstat = os.lstat
+
+        class _NoInode:
+            def __init__(self, result: os.stat_result) -> None:
+                self.st_mode, self.st_ino = result.st_mode, 0
+
+        monkeypatch.setattr(os, "lstat", lambda p: _NoInode(real_lstat(p)))
+
+        assert read_bytes(path, 10) == b"x"
+
+    def test_a_zero_inode_still_refuses_a_symlink(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without a file id only the symlink test is left, and it must still fire."""
+        target = tmp_path / "secret.txt"
+        target.write_bytes(b"top secret")
+        link = tmp_path / "link.md"
+        symlink_or_skip(link, target)
+        real_lstat = os.lstat
+
+        class _NoInode:
+            def __init__(self, result: os.stat_result) -> None:
+                self.st_mode, self.st_ino = result.st_mode, 0
+
+        monkeypatch.setattr(os, "lstat", lambda p: _NoInode(real_lstat(p)))
+
+        with pytest.raises(OSError) as caught:
+            read_bytes(link, 100)
+
+        assert caught.value.errno == errno.ELOOP
+
+    def test_with_the_flag_present_nothing_is_checked_after_the_open(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """POSIX is unchanged: ``O_NOFOLLOW`` is the whole defence, no ``lstat`` is made."""
+        monkeypatch.setattr(os, "O_NOFOLLOW", 0, raising=False)
+        path = tmp_path / "doc.md"
+        path.write_bytes(b"data")
+        calls: list[object] = []
+        real_lstat = os.lstat
+
+        def spy(p: Any) -> os.stat_result:
+            calls.append(p)
+            return real_lstat(p)
+
+        monkeypatch.setattr(os, "lstat", spy)
+        self._swap_after_open(
+            monkeypatch, lambda: path.write_bytes(b"later")
+        )  # a rewrite is not a swap
+
+        assert read_bytes(path, 10) == b"later" and calls == []
 
 
 class TestLoneSurrogate:
