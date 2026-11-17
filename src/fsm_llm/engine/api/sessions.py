@@ -15,6 +15,7 @@ from fsm_llm.engine.events import declared_internal_keys
 from fsm_llm.engine.session import (
     METADATA_COMPLETION_CONTEXT,
     METADATA_LAST_SEQ,
+    METADATA_PROVENANCE,
     SessionState,
 )
 from fsm_llm.logging import logger
@@ -96,7 +97,7 @@ class SessionsMixin(_ApiSurface):
         # re-seed provenance for keys the file never carried: a value the
         # store has no digest for stays handler-seeded (never overwritten).
         if snapshot["provenance"]:
-            state.metadata["pipeline_extracted"] = snapshot["provenance"]
+            state.metadata[METADATA_PROVENANCE] = snapshot["provenance"]
         if snapshot["working_memory"] is not None:
             state.working_memory = {
                 "buffers": snapshot["working_memory"],
@@ -216,7 +217,7 @@ class SessionsMixin(_ApiSurface):
             # lookup, then `conv_lock`. Do NOT take `conv_lock` here, and do NOT
             # reach into `fsm_manager._lock`/`.instances` in a seed: that was
             # the C-NEW-007 inversion (`_lock` taken under `conv_lock`).
-            saved_prov = state.metadata.get("pipeline_extracted")
+            saved_prov = state.metadata.get(METADATA_PROVENANCE)
             self.fsm_manager.seed_restored_conversation(
                 current_fsm_id,
                 summary=state.conversation_summary or None,

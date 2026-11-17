@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import copy
 import inspect
+import math
 import threading
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -83,12 +83,6 @@ def _llm() -> ScriptedLLM:
     return ScriptedLLM(
         responses={"chat": "ok", "done": "bye"}, stream_chunks=["o", "k"]
     )
-
-
-@pytest.fixture
-def log(tmp_path: Path) -> Iterator[EventLog]:
-    with EventLog(tmp_path / "events") as opened:
-        yield opened
 
 
 def _api(log: EventLog, llm: Any = None, definition: Any = _FSM, **kwargs: Any) -> API:
@@ -543,3 +537,22 @@ class TestThreads:
             kinds = _types(log, cid)
             assert _boundary(log, cid) == [RECORD, *[START, END] * 3]
             assert [e["seq"] for e in log.read(cid)] == list(range(1, len(kinds) + 1))
+
+
+class TestAHugeInt:
+    def test_an_int_too_big_for_json_text_works_with_the_log_on_as_off(
+        self, log: EventLog
+    ):
+        big = math.factorial(2000)  # over the 4,300 digit limit of int to text
+
+        def run(event_log: EventLog | None) -> tuple[Any, ...]:
+            api = API(_FSM, llm_interface=_llm(), event_log=event_log)
+            cid, _ = api.start_conversation(initial_context={"n": big})
+            api.update_context(cid, {"m": big + 1})
+            reply = api.converse("hi", cid)
+            data = api.get_data(cid)
+            return reply, data["n"] == big, data["m"] == big + 1
+
+        assert run(None) == run(log) == ("ok", True, True)
+        stored = b"".join(p.read_bytes() for p in log.root.rglob("*") if p.is_file())
+        assert f"<int:{big.bit_length()} bits>".encode() in stored

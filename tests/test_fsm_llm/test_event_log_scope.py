@@ -16,14 +16,13 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from litellm.types.utils import Choices, Message, ModelResponse
 
 from fsm_llm.core.definitions import (
     CompletionRequest,
     LLMResponseError,
     ResponseGenerationRequest,
 )
-from fsm_llm.llm import LiteLLMInterface, LLMInterface
+from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.llm import observer as obs
 from fsm_llm.runtime import (
     EventLog,
@@ -40,6 +39,7 @@ from fsm_llm.runtime.events import EventPayloadError
 from fsm_llm.runtime.scope import TurnScope
 from fsm_llm.runtime.stores import jsonl
 from fsm_llm.testing import ScriptedLLM, final_reply
+from tests.test_fsm_llm.event_log_support import _chunk, _reply, _Wrapper
 
 ROOT = "root-1"
 COMPLETION = "fsm_llm.llm.providers.litellm.completion"
@@ -49,18 +49,6 @@ _SECRETS = {
     "extra_headers": {"Authorization": "Bearer SECRET-bearer"},
 }
 _SECRET_TEXT = ("sk-SECRET-key-0001", "secret-host", "SECRET-bearer")
-
-
-@pytest.fixture
-def log(tmp_path: Path) -> Any:
-    with EventLog(tmp_path) as opened:
-        yield opened
-
-
-def _reply(text: str = "Hello") -> ModelResponse:
-    return ModelResponse(
-        choices=[Choices(message=Message(content=text), finish_reason="stop")]
-    )
 
 
 def _llm() -> LiteLLMInterface:
@@ -79,19 +67,9 @@ def _tree_bytes(root: Path) -> bytes:
     return b"".join(p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file())
 
 
-class _Wrapper(LLMInterface):
-    """A custom interface around a real one: it never reaches ``_send`` by itself."""
-
-    def __init__(self, inner: LiteLLMInterface) -> None:
-        self.inner = inner
-
-    def generate_response(self, request: Any) -> Any:
-        return self.inner.generate_response(request)
-
-
 class _Unserializable:
     def model_dump(self, mode: str = "python") -> Any:
-        return {"bad": object()}
+        raise TypeError("cannot dump this request")
 
 
 class TestWithoutAScope:
@@ -272,11 +250,9 @@ class TestObserverPath:
         _, sent = self._run(log)
         assert sent["seen"] == ["llm/request"] and sent["fsyncs"] >= 1
 
-    def test_credentials_never_reach_the_log_or_a_blob(
-        self, log: Any, tmp_path: Path
-    ) -> None:
+    def test_credentials_never_reach_the_log_or_a_blob(self, log: Any) -> None:
         self._run(log)
-        data = _tree_bytes(tmp_path)
+        data = _tree_bytes(log.root)
         assert data and not [s for s in _SECRET_TEXT if s.encode() in data]
 
     def test_a_failing_request_checkpoint_means_no_provider_call_and_no_count(
@@ -293,9 +269,7 @@ class TestObserverPath:
         assert called == [] and llm.usage().calls == 0
         assert [e["type"] for e in _events(log)] == ["llm/request"]
 
-    def test_a_provider_error_is_logged_by_type_and_status_only(
-        self, log: Any, tmp_path: Path
-    ) -> None:
+    def test_a_provider_error_is_logged_by_type_and_status_only(self, log: Any) -> None:
         class Down(Exception):
             status_code = 503
 
@@ -309,8 +283,8 @@ class TestObserverPath:
         assert error["type"] == "provider/error"
         assert (error["error_type"], error["status_code"]) == ("Down", 503)
         assert error["request_seq"] == request["seq"]
-        assert b"provider said" not in _tree_bytes(tmp_path)
-        assert b"sk-SECRET" not in _tree_bytes(tmp_path)
+        assert b"provider said" not in _tree_bytes(log.root)
+        assert b"sk-SECRET" not in _tree_bytes(log.root)
 
     @pytest.mark.parametrize("kind", ["deep dump", "raising dump"])
     def test_an_unrecordable_response_is_flagged_and_the_call_still_succeeds(
@@ -336,12 +310,7 @@ class TestObserverPath:
 
         class Chunks:
             def __init__(self) -> None:
-                self.items = [
-                    SimpleNamespace(
-                        choices=[SimpleNamespace(delta=SimpleNamespace(content=t))]
-                    )
-                    for t in ("a", "b")
-                ]
+                self.items = [_chunk(t) for t in ("a", "b")]
 
             def __iter__(self) -> Any:
                 reads.append("iter")
@@ -440,8 +409,20 @@ class TestEngineFallback:
                 ran.append(1)
         assert ran == [] and _events(log) == []
 
+    def test_a_plain_object_in_a_request_becomes_a_marker_and_the_call_is_made(
+        self, log: Any
+    ) -> None:
+        llm = ScriptedLLM(replies=[final_reply("x")])
+        request = CompletionRequest(messages=[{"role": "user", "content": "hi"}])
+        raw = SimpleNamespace(model_dump=lambda mode="python": {"bad": object()})
+        with bind(log, ROOT):
+            with llm_call(llm, "completion", raw) as call:
+                call.response(llm.complete(request))
+        stored = log.get_json(_events(log)[0]["prompt_ref"])
+        assert stored["request"] == {"bad": "<object>"}
+
     def test_an_error_is_logged_by_type_name_only_and_propagates(
-        self, log: Any, tmp_path: Path
+        self, log: Any
     ) -> None:
         llm = ScriptedLLM(replies=[LLMResponseError("provider text sk-LEAK-0001")])
         with bind(log, ROOT), pytest.raises(LLMResponseError):
@@ -450,7 +431,7 @@ class TestEngineFallback:
         assert error["type"] == "provider/error"
         assert error["error_type"] == "LLMResponseError"
         assert error["request_seq"] == request["seq"] and error["source"] == "engine"
-        assert b"sk-LEAK" not in _tree_bytes(tmp_path)
+        assert b"sk-LEAK" not in _tree_bytes(log.root)
 
     def test_a_response_after_the_reply_is_written_once(self, log: Any) -> None:
         llm = ScriptedLLM(replies=[final_reply("x")])

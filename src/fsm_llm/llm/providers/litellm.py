@@ -619,6 +619,8 @@ class LiteLLMInterface(RequestMixin, ParseMixin, LLMInterface, _Metered):
             else USAGE_KIND_BY_CALL_TYPE.get(call_type, USAGE_KIND_COMPLETE)
         )
         meter = _meter_of(self)
+        # DECISION plan-2026-11-17T100529-21e6f00d/D-002: the observer gets an
+        # allow-listed copy and is not a counter; begin_send fails closed. See observer.py.
         token = begin_send(call_params, call_type=call_type)
         try:
             response = completion(**call_params)

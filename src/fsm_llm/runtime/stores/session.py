@@ -14,7 +14,8 @@ Interface contract:
       definition: the restore does that), ``unknown_tool_calls`` and ``last_seq``.
     - ``migrate_session(payload) -> SessionProjection``: ``v`` absent is the old ``SessionState``
       JSON (v1) and migrates to v2 (``metadata["pipeline_extracted"]`` becomes ``provenance``;
-      ``stack_depth``, ``saved_at`` and every other ``metadata`` key are dropped: advisory); ``v``
+      ``stack_depth``, ``saved_at`` and every other ``metadata`` key are dropped: advisory; the
+      internal-prefixed keys of ``context_data`` are dropped, a legacy file is not trusted); ``v``
       2 is validated as it is; a larger ``v`` raises ``SessionVersionError``, any other malformed
       payload ``LogCorruptError``. A payload nested past ``MAX_PAYLOAD_DEPTH`` is refused.
     - ``projection_from_legacy_file(path) -> SessionProjection``: a bounded binary read
@@ -59,6 +60,11 @@ from fsm_llm.runtime.events import (
 #: The version this module writes and the one a reader accepts.
 SESSION_PROJECTION_VERSION = 2
 
+#: The ``metadata`` key of an old ``SessionState`` that holds the provenance digests: the same
+#: string as ``engine.session.METADATA_PROVENANCE``, which this layer cannot import (the engine
+#: sits above it).
+_LEGACY_PROVENANCE_KEY = "pipeline_extracted"
+
 
 class SessionVersionError(EventLogError, ValueError):
     """A session payload carries a ``v`` newer than this reader understands."""
@@ -94,18 +100,40 @@ def _validated(data: Mapping[str, Any]) -> SessionProjection:
         ) from None
 
 
+def _public(context_data: Any) -> Any:
+    """*context_data* without its internal-prefixed top-level keys (``has_internal_prefix``).
+
+    The one rule of the projection layer, shared by the fold and both versions of the
+    migration; anything that is not a dict is returned as it is for the validation to refuse.
+    """
+    if not isinstance(context_data, dict):
+        return context_data
+    return {
+        key: value
+        for key, value in context_data.items()
+        if not (isinstance(key, str) and has_internal_prefix(key))
+    }
+
+
 def _migrate_1_to_2(payload: Mapping[str, Any]) -> dict[str, Any]:
     """The one adjacent migration: an old ``SessionState`` dict to the v2 field names."""
+    # DECISION plan-2026-11-17T100529-21e6f00d/D-009
+    # An old file is NOT trusted to hold only public keys: `context_data` is filtered by
+    # `_public` here, exactly as `_build` filters the fold, so a forged `_approval_granted` (or
+    # any internal key) in a legacy file never reaches a restore. Do NOT copy `context_data`
+    # through unfiltered, and do NOT carry internal keys by prefix or deny-list: the only
+    # internal keys a restore takes are a definition's own transcript keys (`completion_context`,
+    # checked against the current definition by the restore). See decisions.md D-009.
     metadata = payload.get("metadata")
     provenance = (
-        metadata.get("pipeline_extracted") if isinstance(metadata, dict) else None
+        metadata.get(_LEGACY_PROVENANCE_KEY) if isinstance(metadata, dict) else None
     )
     return {
         "v": 2,
         "conversation_id": payload.get("conversation_id"),
         "fsm_id": payload.get("fsm_id"),
         "current_state": payload.get("current_state"),
-        "context_data": payload.get("context_data", {}),
+        "context_data": _public(payload.get("context_data", {})),
         "conversation_history": payload.get("conversation_history", []),
         "conversation_summary": payload.get("conversation_summary"),
         "working_memory": payload.get("working_memory"),
@@ -130,7 +158,9 @@ def migrate_session(payload: Mapping[str, Any]) -> SessionProjection:
     if version == 1:
         return _validated(_migrate_1_to_2(payload))
     if version == SESSION_PROJECTION_VERSION:
-        return _validated(payload)
+        return _validated(
+            {**payload, "context_data": _public(payload.get("context_data", {}))}
+        )
     raise LogCorruptError(f"session payload has an unknown version {version}")
 
 
@@ -228,14 +258,16 @@ def _build(
     tools: list[Mapping[str, Any]],
 ) -> SessionProjection:
     """Read the winning state blob, apply the deltas after it and validate the result."""
+    # DECISION plan-2026-11-17T100529-21e6f00d/D-009
+    # The fold drops internal-prefixed keys of `context_data` WHATEVER a blob says (`_public`),
+    # and a delta writes internal keys only into `completion_context`, never into the context.
+    # Do NOT "simplify" this to trust the blob: a log is a file, and a forged blob or delta
+    # carrying `_approval_granted` would otherwise be a forgery path into the HITL gate at
+    # restore. The same rule guards the migration (`_migrate_1_to_2`). See decisions.md D-009.
     blob = load_blob(ref)
     if not isinstance(blob, dict):
         raise LogCorruptError("a state blob is not a JSON object")
-    context = {
-        key: value
-        for key, value in _mapping(blob, "context_data").items()
-        if not has_internal_prefix(key)
-    }
+    context = _public(_mapping(blob, "context_data"))
     internal = dict(_mapping(blob, "internal"))
     for delta_ref in deltas:
         _apply_delta(context, internal, load_blob(delta_ref))

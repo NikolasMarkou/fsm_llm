@@ -22,13 +22,13 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from litellm.types.utils import Choices, Message, ModelResponse
 
 from fsm_llm import API, FileSessionStore
 from fsm_llm.core.definitions import FSMError
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.llm.observer import OBSERVED_CALL_KEYS
 from fsm_llm.runtime import PRODUCED_TYPES, EventLog, canonical_json
+from tests.test_fsm_llm.event_log_support import _chunk, _reply
 from tests.test_fsm_llm.test_event_log_producers import (
     _CHILD,
     _FSM,
@@ -66,18 +66,6 @@ _ENGINE_KINDS = {
     "classification": "complete",
     "completion": "complete",
 }
-
-
-def _reply(text: str) -> ModelResponse:
-    return ModelResponse(
-        choices=[Choices(message=Message(content=text), finish_reason="stop")]
-    )
-
-
-def _chunk(text: str) -> SimpleNamespace:
-    return SimpleNamespace(
-        choices=[SimpleNamespace(delta=SimpleNamespace(content=text))]
-    )
 
 
 class _Provider:
@@ -168,12 +156,6 @@ def _scenario(log: EventLog | None, store_dir: Path) -> SimpleNamespace:
         usage=llm.usage().model_dump(),
         snapshot=saved,
     )
-
-
-@pytest.fixture
-def log(tmp_path: Path) -> Iterator[EventLog]:
-    with EventLog(tmp_path / "events") as opened:
-        yield opened
 
 
 class TestTheLogTest:

@@ -25,6 +25,7 @@ from fsm_llm.runtime.constants import (
     ENVELOPE_KEYS,
     LOG_FORMAT_VERSION,
     MAX_EVENT_BYTES,
+    MAX_INT_BITS,
     MAX_PAYLOAD_DEPTH,
 )
 
@@ -176,10 +177,18 @@ def _marker(value: object) -> str:
     return f"<{type(value).__name__}>"
 
 
+def _int_marker(value: int) -> str | None:
+    """The marker of an int over ``MAX_INT_BITS`` (``json.dumps`` refuses its digits), else None."""
+    bits = value.bit_length()
+    return f"<int:{bits} bits>" if bits > MAX_INT_BITS else None
+
+
 def _leaf(value: Any) -> Any:
     """Return the JSON form of a leaf, or the typed marker when it has none."""
-    if value is None or isinstance(value, (str, bool, int)):
+    if value is None or isinstance(value, (str, bool)):
         return value
+    if isinstance(value, int):
+        return _int_marker(value) or value
     if isinstance(value, float):
         return value if math.isfinite(value) else f"<float:{value!r}>"
     if isinstance(value, (datetime.datetime, datetime.date)):
@@ -195,7 +204,9 @@ def _key(key: Any) -> str:
     """A JSON object key: a string as is, a number or bool as its text, else a typed marker."""
     if isinstance(key, str):
         return key
-    if key is None or isinstance(key, (bool, int, float)):
+    if isinstance(key, int) and not isinstance(key, bool):
+        return _int_marker(key) or str(key)
+    if key is None or isinstance(key, (bool, float)):
         return str(key)
     return _marker(key)
 
@@ -206,7 +217,8 @@ def to_jsonable(value: Any, *, max_depth: int = MAX_PAYLOAD_DEPTH - 1) -> Any:
     Containers (dict, list, tuple) are copied, a tuple becoming a list. A leaf JSON cannot
     hold becomes a typed marker string such as ``"<set>"`` (``datetime`` and ``date`` become
     ISO text, ``Decimal`` and ``UUID`` their text, bytes ``"<bytes:N>"``, a non-finite float
-    ``"<float:nan>"``). A container nested deeper than *max_depth* and a reference cycle become
+    ``"<float:nan>"``, an int over ``MAX_INT_BITS`` bits ``"<int:N bits>"``: its digits would make
+    ``json.dumps`` raise). A container nested deeper than *max_depth* and a reference cycle become
     ``"<truncated:depth>"`` and ``"<cycle>"``. The default depth leaves room for the envelope
     (depth 1), so a result stored directly as an event field always encodes; a caller that
     nests it deeper passes a smaller *max_depth*. Iterative, so depth cannot raise

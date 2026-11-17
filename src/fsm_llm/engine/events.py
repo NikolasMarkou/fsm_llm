@@ -31,7 +31,10 @@ Interface contract:
       ``GeneratorExit`` (a stream closed early) is ``abandoned``; any other exception is
       ``rolled_back`` when the end state blob equals the start one (same ``state_ref``, the blobs
       are content addressed) and ``abandoned`` when it does not (a partial Pass-1 commit that
-      the pipeline keeps by contract).
+      the pipeline keeps by contract). The compare covers the whole blob, history and summary
+      included, so a failed turn whose only surviving change is in the history (the trim of old
+      exchanges into the summary is deferred to the reply, so this needs a reply added before
+      a later failure; not reproduced) would read ``abandoned``: the label is state-faithful.
     - ``delta_blob(delta, definition) -> dict``: the log-safe form of an out-of-turn context write
       (``API.update_context``): ``{"context": ..., "internal": ...}``. ``context`` holds the
       public keys through ``filter_context``; ``internal`` only the keys the definition's
@@ -55,7 +58,6 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
 from fsm_llm.core.state_kinds import kind_of
-from fsm_llm.logging import logger
 from fsm_llm.runtime import (
     EventLog,
     EventType,
@@ -64,6 +66,7 @@ from fsm_llm.runtime import (
     current_scope,
     filter_context,
     to_jsonable,
+    warn_on_failure,
 )
 
 from .fsm.snapshots import snapshot_from_instance
@@ -235,7 +238,7 @@ def end_turn(handle: TurnHandle | None, error: type[BaseException] | None) -> No
     if handle is None:
         return
     scope = handle.scope
-    try:
+    with warn_on_failure(EventType.TURN_END):
         end_ref = scope.log.put_json(state_blob(handle.instance, handle.definition))
         outcome = _outcome(error, end_ref == handle.start_ref)
         scope.log.append(
@@ -245,8 +248,6 @@ def end_turn(handle: TurnHandle | None, error: type[BaseException] | None) -> No
             outcome=outcome.value,
             state_ref=end_ref,
         )
-    except Exception as exc:
-        logger.warning(f"event log: turn/end not written ({type(exc).__name__})")
 
 
 def record_state(

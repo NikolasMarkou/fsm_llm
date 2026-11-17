@@ -59,7 +59,14 @@ from typing import Any
 from fsm_llm.core.definitions import FSMDefinition
 from fsm_llm.engine.events import record_delta, record_state
 from fsm_llm.logging import logger
-from fsm_llm.runtime import EventLog, EventType, TurnScope, activate, scoped_iter
+from fsm_llm.runtime import (
+    EventLog,
+    EventType,
+    TurnScope,
+    activate,
+    scoped_iter,
+    warn_on_failure,
+)
 
 from .surface import _ApiSurface
 
@@ -129,10 +136,8 @@ def _record_stack_event(
     if log is None:
         return
     parent = depth - 2 if kind is EventType.STACK_PUSH else depth - 1
-    try:
+    with warn_on_failure(kind):
         log.append(conversation_id, kind, frame=max(parent, 0), depth=depth, **fields)
-    except Exception as exc:
-        logger.warning(f"event log: {kind.value} not written ({type(exc).__name__})")
 
 
 def record_push(

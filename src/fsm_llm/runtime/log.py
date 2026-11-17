@@ -13,10 +13,13 @@ except a caller's allow-list, then ``to_jsonable``); free text (a prompt, a repl
 message) is stored as the model saw it, because the repository already keeps secret-looking
 context entries out of prompts. Keep the log directory as private as a session directory.
 
-The leaf lock ``_guard`` only protects the table of writers; it is never held across an
-append or a call into another component, so the log adds no edge to the lock order of
-``FSMManager``. Imports ``core``, the kernel and ``runtime`` modules only. Windows behavior is
-that of ``stores.jsonl`` and ``blobs`` (unverified until the Windows run).
+The leaf lock ``_guard`` protects the table of writers. It is never held across an append or
+a call into another component, so the log adds no edge to the lock order of ``FSMManager``;
+it IS held while a new writer is built (taking the file lock, opening the file and scanning
+it for a torn tail), so the first append of a large log makes the first append of another
+conversation on the same ``EventLog`` wait for that scan. Imports ``core``, the kernel and
+``runtime`` modules only. Windows behavior is that of ``stores.jsonl`` and ``blobs``
+(unverified until the Windows run).
 """
 
 from __future__ import annotations
@@ -62,6 +65,23 @@ from fsm_llm.runtime.stores.jsonl import (
 _RESERVED_FIELDS = frozenset(ENVELOPE_KEYS)
 
 
+@contextmanager
+def warn_on_failure(kind: EventType | str) -> Iterator[None]:
+    """Run a write that comes AFTER the thing it records; an ``Exception`` is a WARNING.
+
+    Interface contract (callers: the turn scope, the stack events, ``end_turn``): the body is
+    one or more appends; an ``Exception`` out of it is swallowed and logged as ``event log:
+    <kind> not written (<ExceptionType>)`` (the type name only, never the message), because the
+    outcome it describes already happened and must not be hidden by the log. A
+    ``BaseException`` that is not an ``Exception`` (an interrupt, ``SystemExit``) propagates.
+    """
+    try:
+        yield
+    except Exception as exc:
+        name = EventType.from_string(kind).value
+        logger.warning(f"event log: {name} not written ({type(exc).__name__})")
+
+
 def _timestamp() -> str:
     """The informational ``ts``: ISO 8601 UTC with milliseconds and ``Z``, from ``time.time()``.
 
@@ -76,8 +96,30 @@ def _timestamp() -> str:
     return moment.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def _drop_internal_keys(node: Any) -> None:
-    """Remove every internal-prefixed string key from the dicts under *node*, in place.
+def _redact_arguments(text: str) -> str:
+    """Redact the secret-named entries of tool-call arguments that travel as JSON TEXT.
+
+    A transcript stores ``tool_calls[].function.arguments`` as a JSON string, which a walk by
+    key name never reads. A string that parses to a JSON object goes through ``redact_context``
+    and is re-dumped (compact, ASCII) only when something was redacted, so every other
+    arguments string is returned byte for byte; text that is not a JSON object is returned as
+    it is.
+    """
+    try:
+        parsed = json.loads(text)
+    except (ValueError, RecursionError, MemoryError):
+        return text
+    if not isinstance(parsed, dict):
+        return text
+    safe = redact_context(parsed)
+    if safe == parsed:
+        return text
+    return json.dumps(safe, separators=(",", ":"), ensure_ascii=True)
+
+
+def _scrub_in_place(node: Any) -> None:
+    """Drop every internal-prefixed string key and redact the JSON text of ``arguments``
+    entries, in the dicts under *node*, in place.
 
     Iterative with a visited set, so a shared subtree is walked once and a deep value cannot
     raise ``RecursionError``. Only ever called on a fresh copy made by ``redact_context``.
@@ -94,6 +136,9 @@ def _drop_internal_keys(node: Any) -> None:
                 k for k in current if isinstance(k, str) and has_internal_prefix(k)
             ]:
                 del current[key]
+            arguments = current.get("arguments")
+            if isinstance(arguments, str):
+                current["arguments"] = _redact_arguments(arguments)
             stack.extend(current.values())
         elif isinstance(current, (list, tuple)):
             stack.extend(current)
@@ -109,8 +154,10 @@ def filter_context(
           judged by ``is_forbidden_context_entry``, depth cut at ``MAX_CONTEXT_FILTER_DEPTH``,
           cycles cut); then every internal-prefixed key (``has_internal_prefix``) is dropped at
           every depth, except the TOP-LEVEL names listed in *keep_internal* (the completion
-          transcript keys a definition declares; they are redacted like any value); then
-          ``to_jsonable`` turns what JSON cannot hold into typed markers.
+          transcript keys a definition declares; they are redacted like any value); an
+          ``arguments`` string that is a JSON object (a transcript's tool call) is redacted by
+          its entry names too; then ``to_jsonable`` turns what JSON cannot hold into typed
+          markers.
         - The result is a new dict that shares nothing mutable with *mapping*, always passes
           ``encode_event`` as an event field, and is at most ``MAX_PAYLOAD_DEPTH - 1`` deep.
         - Never raises for content (a 100,000 deep value is cut, not recursed into);
@@ -118,6 +165,12 @@ def filter_context(
     """
     if not isinstance(mapping, Mapping):
         raise TypeError(f"filter_context takes a mapping, got {type(mapping).__name__}")
+    # DECISION plan-2026-11-17T100529-21e6f00d/D-009
+    # Internal keys leave a payload at EVERY depth, and only the TOP-LEVEL names a caller
+    # allow-lists (the definition's transcript keys, see engine/events.py) stay. Do NOT keep
+    # internal keys by prefix or deny-list here: the grant `_approval_granted` lives in that
+    # namespace. Secret-looking values are replaced first (`redact_context`) and never
+    # restored. See decisions.md D-009.
     keep = frozenset(keep_internal)
     redacted = redact_context(dict(mapping))
     top = {
@@ -125,7 +178,7 @@ def filter_context(
         for key, value in redacted.items()
         if key in keep or not (isinstance(key, str) and has_internal_prefix(key))
     }
-    _drop_internal_keys(list(top.values()))
+    _scrub_in_place(list(top.values()))
     safe: dict[str, Any] = to_jsonable(top)
     return safe
 
@@ -164,6 +217,19 @@ class EventLog:
           of a tool call, see its docstring. ``unknown_tool_calls(conversation_id)`` reports the
           unresolved ones.
         - ``conversation_ids() -> list[str]``, ``release(conversation_id)``.
+        - Long-running hosts: every conversation id that is appended to keeps one writer open,
+          two file descriptors and the file's advisory lock, until ``release(conversation_id)``
+          (``API`` does it when a root conversation ends) or ``close()``; nothing caps the
+          number of writers. A host that starts many conversations must end them
+          (``API.end_conversation``) or close the API or the log. A writer or log that is
+          dropped without either is closed by the finalizer of ``JsonlWriter``, which frees
+          the descriptors and the lock when the object is collected.
+        - Recovery: a failed write POISONS the writer of that id, and every later append of
+          that tree raises ``LogWriteError`` until ``release(conversation_id)`` (the next
+          append reopens the file, repairs a torn tail and continues the ``seq``) or
+          ``close()`` of the log. A late append to a released id (a straggler thread of a
+          timed-out handler) reopens a writer; it is closed again by the next ``release`` or
+          ``close``.
     """
 
     def __init__(self, root: str | os.PathLike[str]) -> None:
@@ -212,9 +278,8 @@ class EventLog:
         **fields: Any,
     ) -> int:
         """Append one event and return its ``seq`` (see the class contract)."""
-        check_conversation_id(conversation_id)
         event = self._envelope(conversation_id, type, frame, fields)
-        writer = self._writer(conversation_id)
+        writer = self._writer(conversation_id)  # checks the id
         if checkpoint is None:
             checkpoint = is_checkpoint(event["type"], event)
         return writer.append(event, checkpoint=checkpoint)
@@ -228,7 +293,6 @@ class EventLog:
         checkpoint: bool | None = None,
     ) -> list[int]:
         """Append *events* in one write and return their ``seq`` numbers (see the class contract)."""
-        check_conversation_id(conversation_id)
         envelopes = []
         for item in events:
             if "type" not in item:
@@ -420,7 +484,10 @@ class EventLog:
         )
 
     def release(self, conversation_id: str) -> None:
-        """Close and forget the writer of one id (a finished tree); a later append reopens it."""
+        """Close and forget the writer of one id (a finished tree); a later append reopens it.
+
+        This is also the recovery of a poisoned writer (see the class contract).
+        """
         with self._guard:
             writer = self._writers.pop(conversation_id, None)
         if writer is not None:

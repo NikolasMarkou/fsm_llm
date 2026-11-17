@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import ast
 import json
+import math
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +27,7 @@ from fsm_llm.runtime.constants import (
     LOG_FORMAT_VERSION,
     MAX_BLOB_BYTES,
     MAX_EVENT_BYTES,
+    MAX_INT_BITS,
     MAX_PAYLOAD_DEPTH,
     WINDOWS_RESERVED_NAMES,
 )
@@ -38,6 +41,7 @@ from fsm_llm.runtime.events import (
     LogLockedError,
     LogWriteError,
     TurnOutcome,
+    canonical_json,
     check_depth,
     decode_event,
     encode_event,
@@ -507,6 +511,34 @@ class TestToJsonable:
         out = to_jsonable({1: "a", 2.5: "b", None: "c", False: "d", (1,): "e"})
         assert set(out) == {"1", "2.5", "None", "False", "<tuple>"}
 
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param(1 << 5000, id="power-of-two"),
+            pytest.param(-(1 << 5000), id="negative"),
+            pytest.param(10**4400, id="power-of-ten"),
+            pytest.param(math.factorial(2000), id="factorial"),
+        ],
+    )
+    def test_an_int_too_big_for_json_text_is_a_typed_marker_value_or_key(
+        self, value: int
+    ) -> None:
+        marker = f"<int:{value.bit_length()} bits>"
+        out = to_jsonable({"n": value, value: 1, "l": [value]})
+        assert out == {"n": marker, marker: 1, "l": [marker]}
+        canonical_json(out)  # the encoder never raises for an honest Python int
+
+    def test_an_int_within_the_bound_stays_under_the_smallest_digit_limit(self) -> None:
+        small, before = (1 << MAX_INT_BITS) - 1, sys.get_int_max_str_digits()
+        sys.set_int_max_str_digits(640)  # the smallest limit Python accepts
+        try:
+            data = to_jsonable({"n": small, "t": True, "f": False})
+            assert data == {"n": small, "t": True, "f": False}
+            assert json.loads(canonical_json(data)) == data
+        finally:
+            sys.set_int_max_str_digits(before)
+        assert to_jsonable(1 << MAX_INT_BITS) == f"<int:{MAX_INT_BITS + 1} bits>"
+
     def test_a_cycle_is_cut(self) -> None:
         loop: dict[str, Any] = {"name": "x"}
         loop["self"] = loop
@@ -646,6 +678,34 @@ class TestSourceScan:
             "sort_keys": True,
             "allow_nan": False,
         }
+
+    def test_no_runtime_module_imports_a_private_name_of_another_runtime_module(
+        self,
+    ) -> None:
+        offenders = [
+            f"{path.name}: {alias.name}"
+            for path in RUNTIME_DIR.rglob("*.py")
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+            if isinstance(node, ast.ImportFrom)
+            and (node.level or (node.module or "").startswith("fsm_llm.runtime"))
+            for alias in node.names
+            if alias.name.startswith("_")
+        ]
+        assert offenders == []
+
+    def test_the_provenance_key_is_a_constant_in_each_layer_and_a_literal_nowhere_else(
+        self,
+    ) -> None:
+        src = RUNTIME_DIR.parent
+        spelled = sorted(
+            path.relative_to(src).as_posix()
+            for path in src.rglob("*.py")
+            if any(
+                isinstance(n, ast.Constant) and n.value == "pipeline_extracted"
+                for n in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+            )
+        )
+        assert spelled == ["engine/session.py", "runtime/stores/session.py"]
 
     def test_the_package_surface_names_only_things_that_exist(self) -> None:
         import fsm_llm.runtime as runtime

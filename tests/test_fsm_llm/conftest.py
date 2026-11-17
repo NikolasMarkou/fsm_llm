@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from fsm_llm.runtime import EventLog
+
 
 @pytest.fixture
 def minimal_fsm_dict():
@@ -21,3 +23,11 @@ def minimal_fsm_dict():
             }
         },
     }
+
+
+@pytest.fixture
+def log(tmp_path):
+    """An ``EventLog`` under ``tmp_path / "events"`` for the event log tests, closed at
+    teardown (an open handle blocks the removal of its directory on Windows)."""
+    with EventLog(tmp_path / "events") as opened:
+        yield opened

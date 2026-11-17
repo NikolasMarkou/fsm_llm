@@ -32,7 +32,7 @@ from fsm_llm.runtime.events import (
     LogWriteError,
     canonical_json,
 )
-from fsm_llm.runtime.stores.jsonl import _fsync_directory
+from fsm_llm.runtime.stores.jsonl import fsync_directory
 
 _REF_PREFIX = "sha256:"
 
@@ -121,7 +121,7 @@ class BlobStore:
         fresh = not path.parent.exists()
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         if fresh:
-            _fsync_directory(self._dir)
+            fsync_directory(self._dir)
         fd, temp = tempfile.mkstemp(dir=path.parent, prefix="blob-", suffix=".tmp")
         try:
             with os.fdopen(
@@ -137,7 +137,7 @@ class BlobStore:
                 # racing writer may have created it first: success only if it is the blob.
                 if not _is_blob(path, ref):
                     raise
-            _fsync_directory(path.parent)
+            fsync_directory(path.parent)
         finally:
             try:
                 os.unlink(temp)  # gone after a successful replace; ours alone otherwise

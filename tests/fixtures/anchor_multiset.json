@@ -529,6 +529,26 @@
       "delta": 1,
       "reason": "step 7 of plan 21e6f00d: new anchor at the internal-key allow-list of the state blob (engine/events.py, declared_internal_keys): the log carries internal keys only by the running definition's completion-state keys (messages_key, response_format_key), never by prefix or deny-list (the driver-only approval grant lives in that namespace) and the FileSessionStore snapshots stay as D-029 and D-039 of plan 944e2692 pin them; no other token was added or lost",
       "token": "plan-2026-11-17T100529-21e6f00d/D-009"
+    },
+    {
+      "delta": 1,
+      "reason": "step 15.1 of plan 21e6f00d (review of batch 1, concern 8): a reference comment at the fold of the session projection (runtime/stores/session.py, _build): internal-prefixed keys of context_data are dropped whatever a blob says; do not trust the blob (forgery path into the HITL gate); no other token was added or lost",
+      "token": "plan-2026-11-17T100529-21e6f00d/D-009"
+    },
+    {
+      "delta": 1,
+      "reason": "step 15.1 of plan 21e6f00d (review of batch 1, concerns 3 and 8): a reference comment at the legacy migration (runtime/stores/session.py, _migrate_1_to_2): an old FileSessionStore file is filtered by the same rule as the fold, so a forged _approval_granted in a legacy file is not restored; no other token was added or lost",
+      "token": "plan-2026-11-17T100529-21e6f00d/D-009"
+    },
+    {
+      "delta": 1,
+      "reason": "step 15.1 of plan 21e6f00d (review of batch 1, concern 9): a reference comment at the begin_send hook of LiteLLMInterface._send (llm/providers/litellm.py) so an editor of the one send path sees the D-002 rule (allow-listed copy, not a counter, fail closed); the D-004 anchor text is untouched; no other token was added or lost",
+      "token": "plan-2026-11-17T100529-21e6f00d/D-002"
+    },
+    {
+      "delta": 1,
+      "reason": "step 15.1 of plan 21e6f00d (review of batch 1, concern 8): a reference comment at the write-time filter (runtime/log.py, filter_context): internal keys leave a payload at every depth except the caller's top-level allow-list, never by prefix or deny-list; no other token was added or lost",
+      "token": "plan-2026-11-17T100529-21e6f00d/D-009"
     }
   ]
 }

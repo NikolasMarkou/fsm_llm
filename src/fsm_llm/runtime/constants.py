@@ -22,6 +22,12 @@ MAX_BLOB_BYTES = 16 * 1024 * 1024
 #: The envelope itself is depth 1.
 MAX_PAYLOAD_DEPTH = 32
 
+#: Largest Python int (in bits) the log writes as a JSON number; a bigger one becomes the typed
+#: marker ``"<int:N bits>"``. 2,048 bits are 617 digits, under the 640 digits of the smallest
+#: limit ``sys.set_int_max_str_digits`` accepts, so ``json.dumps`` never refuses an honest int
+#: whatever the process setting (the default limit of 4,300 digits made it raise).
+MAX_INT_BITS = 2048
+
 #: Directory names under a log root: ``<root>/logs/<id>.jsonl`` and ``<root>/blobs/<aa>/<62 hex>``.
 LOG_DIR = "logs"
 BLOB_DIR = "blobs"

@@ -51,7 +51,7 @@ Imports ``llm`` (the observer seam), ``core`` and ``runtime`` modules only, neve
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -62,8 +62,9 @@ from fsm_llm.llm.interface import interface_model
 from fsm_llm.llm.observer import install_observer, is_observed, reset_observer
 from fsm_llm.llm.parsing import _finish_reason
 from fsm_llm.logging import logger
+from fsm_llm.runtime.constants import MAX_PAYLOAD_DEPTH
 from fsm_llm.runtime.events import EventType, LogWriteError, to_jsonable
-from fsm_llm.runtime.log import EventLog
+from fsm_llm.runtime.log import EventLog, warn_on_failure
 
 _SCOPE: ContextVar[TurnScope | None] = ContextVar("fsm_llm_turn_scope", default=None)
 
@@ -143,17 +144,31 @@ def scoped_iter(scope: TurnScope, iterator: Iterable[Any]) -> Iterator[Any]:
 
 
 def _write_quietly(scope: TurnScope, kind: EventType, **fields: Any) -> None:
-    """Append an after-the-call event; a failure is a WARNING (type name only), not an error."""
-    try:
+    """Append an after-the-call event; a failure is a WARNING (``warn_on_failure``)."""
+    with warn_on_failure(kind):
         scope.log.append(scope.root_id, kind, frame=scope.frame, **fields)
-    except Exception as exc:
-        logger.warning(f"event log: {kind.value} not written ({type(exc).__name__})")
 
 
 def _dump(value: Any) -> Any:
-    """The JSON-ready form of a reply or request: ``model_dump(mode="json")`` or ``to_jsonable``."""
+    """The JSON-ready form of a reply or request, through ``to_jsonable``.
+
+    ``model_dump(mode="json")`` first (the exact wire form); a value JSON mode refuses (a plain
+    object a handler put in a context) is dumped in Python mode instead. Either way the result
+    goes through ``to_jsonable``, so a leaf JSON cannot hold (an object, NaN, a huge int)
+    becomes a typed marker, the request degrades the way the state blob does and the extraction
+    it guards behaves as it does with the log off. ``to_jsonable`` cuts only below
+    ``MAX_PAYLOAD_DEPTH + 1``, so a value that is really too deep still reaches ``put_json``
+    deeper than its limit and is refused, never recorded cut. A dump that fails either way
+    raises (``_log_request`` turns that into the deliberate refusal).
+    """
     dump = getattr(value, "model_dump", None)
-    return dump(mode="json") if callable(dump) else to_jsonable(value)
+    if not callable(dump):
+        return to_jsonable(value, max_depth=MAX_PAYLOAD_DEPTH + 1)
+    try:
+        dumped = dump(mode="json")
+    except Exception:
+        dumped = dump()
+    return to_jsonable(dumped, max_depth=MAX_PAYLOAD_DEPTH + 1)
 
 
 def _request_body(request: Any) -> Any:
@@ -203,10 +218,15 @@ def _error_fields(error: BaseException) -> dict[str, Any]:
     return fields
 
 
-def _log_request(scope: TurnScope, request_blob: Any, **fields: Any) -> int:
-    """Write the blob and the ``llm/request`` checkpoint; fail closed with ``LogWriteError``."""
+def _log_request(scope: TurnScope, build: Callable[[], Any], **fields: Any) -> int:
+    """Build the request blob, write it and the ``llm/request`` checkpoint; fail closed.
+
+    EVERY failure (a request that cannot be dumped, a blob or an append that cannot be
+    written) is one ``LogWriteError`` and the model call is not made: a refusal chosen on
+    purpose, never a raw serialization error for the call site to swallow.
+    """
     try:
-        ref = scope.log.put_json(request_blob)
+        ref = scope.log.put_json(build())
         return scope.log.append(
             scope.root_id,
             EventType.LLM_REQUEST,
@@ -233,7 +253,7 @@ class _ScopeObserver:
         stream = bool(call.get("stream"))
         seq = _log_request(
             self._scope,
-            call,
+            lambda: call,
             source=SOURCE_PROVIDER,
             call_type=call_type,
             model=call.get("model"),
@@ -257,7 +277,9 @@ class _ScopeObserver:
         )
 
     def fail_send(self, token: object | None, error: BaseException) -> None:
-        if not isinstance(token, _Pending):
+        # A stream fails while it is read, outside `_send`: `llm_call` writes its one
+        # `provider/error` (as `end_send` leaves its one reply to `stream_done`).
+        if not isinstance(token, _Pending) or token.stream:
             return
         _write_quietly(
             self._scope,
@@ -364,13 +386,7 @@ class LlmCall:
         if abandoned is None:
             abandoned = not self._exhausted
         body = {"source": self._source, "response_type": "stream", "text": text}
-        try:
-            fields: dict[str, Any] = {"response_ref": self._scope.log.put_json(body)}
-        except Exception as exc:
-            logger.warning(
-                f"event log: stream reply not recorded ({type(exc).__name__})"
-            )
-            fields = {"unrecorded": True}
+        fields = _response_fields(self._scope.log, body, wrap=None)
         _write_quietly(
             self._scope,
             EventType.LLM_RESPONSE,
@@ -420,7 +436,7 @@ def llm_call(
         return
     seq = _log_request(
         scope,
-        {
+        lambda: {
             "source": SOURCE_ENGINE,
             "request_type": type(request).__name__,
             "request": _request_body(request),

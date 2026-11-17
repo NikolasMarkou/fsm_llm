@@ -19,9 +19,11 @@ Interface contract:
 - ``end_send(handle, response)`` and ``fail_send(handle, error)`` never raise: an observer
   error is logged as a WARNING (type name only) and the call goes on. A streamed call gets
   ``end_send`` with the iterator, never read.
-- ``is_observed(interface)`` is true only for an interface whose class sets
-  ``observes_requests = True`` (``LiteLLMInterface``); a double or a mock is not observed,
-  so the engine logs its calls itself.
+- ``is_observed(interface)`` is true only for an interface that sets ``observes_requests =
+  True`` (``LiteLLMInterface``) AND whose ``_send`` is the one that class family defines: a
+  subclass that overrides ``_send`` without restating the marker is not observed (it may never
+  call the hooks), so the engine logs its calls itself; a double or a mock is not observed
+  either. A subclass that overrides ``_send`` and calls the hooks sets the marker again.
 """
 
 from __future__ import annotations
@@ -121,5 +123,18 @@ def fail_send(handle: SendHandle | None, error: BaseException) -> None:
 
 
 def is_observed(interface: object) -> bool:
-    """True when ``interface`` sends through ``_send`` and so reaches the observer."""
-    return getattr(interface, "observes_requests", False) is True
+    """True when ``interface`` sends through the ``_send`` that calls the observer hooks.
+
+    The marker ``observes_requests`` must be true, and the class that defines ``_send`` must
+    not be MORE derived than the class that defines the marker (a subclass that replaces
+    ``_send`` and does not restate the marker is logged by the engine instead, so the fail
+    closed checkpoint holds for it).
+    """
+    if getattr(interface, "observes_requests", False) is not True:
+        return False
+    mro = type(interface).__mro__
+    marker = next(
+        (i for i, c in enumerate(mro) if "observes_requests" in vars(c)), None
+    )
+    sender = next((i for i, c in enumerate(mro) if "_send" in vars(c)), None)
+    return marker is None or sender is None or sender >= marker

@@ -15,6 +15,7 @@ import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, ClassVar
+from unittest.mock import patch
 
 import pytest
 
@@ -29,26 +30,15 @@ from fsm_llm.runtime.events import (
     LogWriteError,
     check_depth,
 )
-from fsm_llm.runtime.log import EventLog, filter_context
+from fsm_llm.runtime.log import EventLog, filter_context, warn_on_failure
 from fsm_llm.runtime.stores import jsonl
 from tests.conftest import EveryReadLater
+from tests.test_fsm_llm.event_log_support import _Dead
 from tests.test_fsm_llm.test_event_log_format import _deep_list
 
 SECRET_KEY = "sk-live-0123456789abcdefghijklmnopqrstuv"
 SECRET_PASSWORD = "hunter2-correct-horse-battery"
 SECRET_TOKEN = "tok_live_9876543210zyxwvutsrqponmlkj"
-
-
-class _Dead(BaseException):
-    """A stand-in for a process that vanished: not an ``Exception``, not an ``OSError``."""
-
-
-@pytest.fixture
-def log(tmp_path: Path):
-    """An EventLog under ``tmp_path``, closed at teardown (an open handle blocks Windows)."""
-    opened = EventLog(tmp_path)
-    yield opened
-    opened.close()
 
 
 def _types(events: Any) -> list[str]:
@@ -89,7 +79,7 @@ class TestAppend:
         assert not root.exists()
 
     def test_seq_is_one_based_and_contiguous_across_append_and_batch(
-        self, log: EventLog, tmp_path: Path
+        self, log: EventLog
     ) -> None:
         seqs = [log.append("c1", "turn/start")]
         seqs += log.append_batch(
@@ -98,7 +88,7 @@ class TestAppend:
         seqs.append(log.append("c1", EventType.TURN_END))
         seqs.append(log.append("c2", "turn/start"))
         assert seqs == [1, 2, 3, 4, 1]
-        assert (tmp_path / "logs" / "c1.jsonl").is_file()
+        assert (log.root / "logs" / "c1.jsonl").is_file()
         events = list(log.read("c1"))
         assert [e["seq"] for e in events] == [1, 2, 3, 4]
         assert events[1]["kind"] == "a"
@@ -136,7 +126,6 @@ class TestAppend:
     def test_a_bad_event_is_refused_before_any_file_exists(
         self,
         log: EventLog,
-        tmp_path: Path,
         kind: Any,
         frame: Any,
         fields: dict[str, Any],
@@ -146,7 +135,7 @@ class TestAppend:
             log.append("c1", kind, frame=frame, **fields)
         with pytest.raises(error):
             log.append_batch("c1", [{"type": kind, "frame": frame, **fields}])
-        assert not (tmp_path / "logs").exists()
+        assert not (log.root / "logs").exists()
 
     @pytest.mark.parametrize("bad", ["Abc", "CON", "../x", "a" * 65, ""])
     def test_a_bad_conversation_id_is_refused_for_every_verb(
@@ -188,22 +177,32 @@ class TestAppend:
         with pytest.raises(LogWriteError):
             log.append("c1", "turn/start")
 
+    def test_a_poisoned_writer_recovers_through_release(self, log: EventLog) -> None:
+        log.append("c1", "turn/start")
+        with patch.object(jsonl, "_write", side_effect=OSError("disk full")):
+            with pytest.raises(LogWriteError):
+                log.append("c1", "turn/end")
+        with pytest.raises(LogWriteError):  # poisoned, though the disk is back
+            log.append("c1", "turn/end")
+        log.release("c1")
+        assert log.append("c1", "turn/end") == 2
+
     def test_a_second_log_on_one_directory_refuses_the_second_writer(
-        self, log: EventLog, tmp_path: Path
+        self, log: EventLog
     ) -> None:
         log.append("c1", "turn/start")
-        with EventLog(tmp_path) as other:
+        with EventLog(log.root) as other:
             with pytest.raises(LogLockedError):
                 other.append("c1", "turn/start")
             assert other.append("c2", "turn/start") == 1  # another tree is free
 
     def test_close_releases_every_lock_so_another_log_can_take_the_id(
-        self, log: EventLog, tmp_path: Path
+        self, log: EventLog
     ) -> None:
         log.append("c1", "turn/start")
         log.append("c2", "turn/start")
         log.close()
-        with EventLog(tmp_path) as other:
+        with EventLog(log.root) as other:
             assert (other.append("c1", "turn/end"), other.append("c2", "turn/end")) == (
                 2,
                 2,
@@ -312,20 +311,20 @@ class TestReadAndQuery:
         assert list(filled.read("nobody")) == []
 
     def test_conversation_ids_are_the_valid_log_names_sorted(
-        self, log: EventLog, tmp_path: Path
+        self, log: EventLog
     ) -> None:
         for name in ("b2", "a1"):
             log.append(name, "turn/start")
-        (tmp_path / "logs" / "Foreign.jsonl").write_bytes(b"")
-        (tmp_path / "logs" / "notes.txt").write_bytes(b"")
+        (log.root / "logs" / "Foreign.jsonl").write_bytes(b"")
+        (log.root / "logs" / "notes.txt").write_bytes(b"")
         assert log.conversation_ids() == ["a1", "b2"]
 
     def test_a_damaged_middle_line_raises_and_the_reader_repairs_nothing(
-        self, log: EventLog, tmp_path: Path
+        self, log: EventLog
     ) -> None:
         log.append("c1", "turn/start")
         log.append("c1", "turn/end")
-        path = tmp_path / "logs" / "c1.jsonl"
+        path = log.root / "logs" / "c1.jsonl"
         lines = path.read_bytes().split(b"\n")
         damaged = b"\n".join([b"{not json", lines[1], b""])
         path.write_bytes(damaged)
@@ -467,14 +466,14 @@ class TestToolCall:
         assert unknown["call_id"] == "k1" and unknown["side_effecting"] is False
 
     def test_a_failing_body_records_the_type_name_only_and_reraises(
-        self, log: EventLog, tmp_path: Path
+        self, log: EventLog
     ) -> None:
         with pytest.raises(ValueError, match="private-detail"):
             with log.tool_call("c1", name="w", call_id="k1", arguments={}):
                 raise ValueError("private-detail")
         result = list(log.read("c1"))[-1]
         assert (result["status"], result["error_type"]) == ("failed", "ValueError")
-        assert b"private-detail" not in _all_bytes(tmp_path)
+        assert b"private-detail" not in _all_bytes(log.root)
         assert log.unknown_tool_calls("c1") == []
 
     @pytest.mark.parametrize("dying", [KeyboardInterrupt, SystemExit, _Dead])
@@ -502,7 +501,7 @@ class TestToolCall:
         }
 
     def test_secret_arguments_are_redacted_and_large_ones_become_a_blob(
-        self, log: EventLog, tmp_path: Path
+        self, log: EventLog
     ) -> None:
         with log.tool_call(
             "c1", name="w", call_id="a", arguments={"api_key": SECRET_KEY, "q": "x"}
@@ -519,7 +518,7 @@ class TestToolCall:
             stored["password"] == "<redacted>"
             and len(stored["text"]) > MAX_INLINE_BYTES
         )
-        data = _all_bytes(tmp_path)
+        data = _all_bytes(log.root)
         assert SECRET_KEY.encode() not in data and SECRET_PASSWORD.encode() not in data
 
     @pytest.mark.parametrize(
@@ -532,12 +531,12 @@ class TestToolCall:
         ],
     )
     def test_a_malformed_call_is_refused_before_anything_is_written(
-        self, log: EventLog, tmp_path: Path, bad: dict[str, Any]
+        self, log: EventLog, bad: dict[str, Any]
     ) -> None:
         with pytest.raises(EventPayloadError):
             with log.tool_call("c1", **bad):
                 pytest.fail("the body must not run")
-        assert not (tmp_path / "logs").exists()
+        assert not (log.root / "logs").exists()
 
     def test_unresolved_calls_match_one_result_per_call_oldest_first(self) -> None:
         def call(seq: int, call_id: str) -> dict[str, Any]:
@@ -561,6 +560,32 @@ class TestToolCall:
         assert unresolved_tool_calls([]) == []
 
 
+class TestAppendHelpers:
+    def test_warn_on_failure_swallows_an_exception_and_names_its_type_only(
+        self,
+    ) -> None:
+        with patch.object(log_module, "logger") as logger:
+            with warn_on_failure("turn/end"):
+                raise RuntimeError("PRIVATE detail")
+        text = logger.warning.call_args[0][0]
+        assert "turn/end" in text and "RuntimeError" in text and "PRIVATE" not in text
+        with pytest.raises(_Dead), warn_on_failure("turn/end"):
+            raise _Dead  # an interrupt or a vanished process is never swallowed
+
+    def test_the_id_is_checked_once_per_append_and_per_batch(
+        self, log: EventLog
+    ) -> None:
+        with patch.object(
+            log_module, "check_conversation_id", wraps=log_module.check_conversation_id
+        ) as check:
+            log.append("c1", "turn/start")
+            assert check.call_count == 1
+            log.append_batch("c1", [{"type": "turn/end"}])
+        assert check.call_count == 2
+        with pytest.raises(EventPayloadError):
+            log.append("Bad Id", "turn/start")
+
+
 class TestSecretFilter:
     CONTEXT: ClassVar[dict[str, Any]] = {
         "api_key": SECRET_KEY,
@@ -575,12 +600,12 @@ class TestSecretFilter:
     }
 
     def test_no_secret_reaches_a_log_or_a_blob_and_public_values_do(
-        self, log: EventLog, tmp_path: Path
+        self, log: EventLog
     ) -> None:
         safe = filter_context(self.CONTEXT)
         log.append("c1", "context/record", delta=safe)
         log.put_json(safe)
-        data = _all_bytes(tmp_path)
+        data = _all_bytes(log.root)
         for secret in (SECRET_KEY, SECRET_PASSWORD, SECRET_TOKEN):
             assert secret.encode() not in data
         assert b"Paris" in data and b"<redacted>" in data  # not vacuous: it did write
@@ -607,6 +632,32 @@ class TestSecretFilter:
         with pytest.raises(TypeError):
             filter_context([("a", 1)])  # type: ignore[arg-type]
 
+    def test_a_transcripts_tool_call_arguments_text_is_redacted_when_it_holds_a_secret(
+        self,
+    ) -> None:
+        def calls(arguments: str) -> list[dict[str, Any]]:
+            function = {"name": "login", "arguments": arguments}
+            call = {"id": "1", "type": "function", "function": function}
+            return [{"role": "assistant", "tool_calls": [call]}]
+
+        secret = json.dumps(
+            {"user": "a", "password": SECRET_PASSWORD, "opts": {"api_key": SECRET_KEY}}
+        )
+        plain, broken = json.dumps({"user": "a", "n": 1}, indent=1), "not json {"
+        transcripts = {"_s": calls(secret), "_p": calls(plain), "_b": calls(broken)}
+        safe = filter_context(transcripts, keep_internal=list(transcripts))
+        text = safe["_s"][0]["tool_calls"][0]["function"]["arguments"]
+        redacted = {
+            "user": "a",
+            "password": "<redacted>",
+            "opts": {"api_key": "<redacted>"},
+        }
+        assert json.loads(text) == redacted
+        assert SECRET_PASSWORD not in json.dumps(safe) and SECRET_KEY not in json.dumps(
+            safe
+        )
+        assert safe["_p"] == calls(plain) and safe["_b"] == calls(broken)  # untouched
+
     def test_a_100000_deep_value_is_cut_on_the_filter_and_on_append(
         self, log: EventLog
     ) -> None:
@@ -620,14 +671,14 @@ class TestSecretFilter:
 
 class TestBlobs:
     def test_bytes_and_json_round_trip_through_the_log_root(
-        self, log: EventLog, tmp_path: Path
+        self, log: EventLog
     ) -> None:
         ref = log.put_blob(b"a\r\nb\x00")
         assert log.get_blob(ref) == b"a\r\nb\x00"
         jref = log.put_json({"b": 1, "a": [1, 2]})
         assert log.get_json(jref) == {"a": [1, 2], "b": 1}
         assert log.put_json({"a": [1, 2], "b": 1}) == jref
-        assert (tmp_path / "blobs").is_dir()
+        assert (log.root / "blobs").is_dir()
 
     def test_a_blob_that_is_not_json_or_is_too_deep_is_corruption(
         self, log: EventLog

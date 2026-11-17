@@ -22,7 +22,7 @@ from fsm_llm.runtime import blobs
 from fsm_llm.runtime.blobs import BlobStore, blob_ref
 from fsm_llm.runtime.events import EventPayloadError, LogCorruptError, LogWriteError
 from tests.conftest import current_timing_factor
-from tests.test_fsm_llm.test_event_log_jsonl import _child_env
+from tests.test_fsm_llm.event_log_support import child_env
 
 
 def _digest(data: bytes) -> str:
@@ -288,7 +288,7 @@ class TestRaces:
         procs = [
             subprocess.Popen(
                 [sys.executable, "-c", CHILD, str(tmp_path)],
-                env=_child_env(),
+                env=child_env(),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

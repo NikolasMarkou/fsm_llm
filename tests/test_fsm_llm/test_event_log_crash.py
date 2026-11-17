@@ -49,7 +49,8 @@ from fsm_llm.runtime.stores import JsonlWriter, fold_session, jsonl, read_events
 from fsm_llm.testing import ScriptedLLM, final_reply
 from tests.conftest import current_timing_factor
 from tests.test_fsm_llm import event_log_child as child
-from tests.test_fsm_llm.test_event_log_jsonl import _child_env, can_lock_in_child
+from tests.test_fsm_llm.event_log_support import _Dead, child_env, reopen_after_kill
+from tests.test_fsm_llm.test_event_log_jsonl import can_lock_in_child
 from tests.test_fsm_llm.test_event_log_sessions import _CHAT
 
 REPO = Path(__file__).resolve().parents[2]
@@ -58,10 +59,6 @@ READY_SECONDS = (
     300  # a deadline, scaled by the timing factor; the child imports fsm_llm
 )
 POLL_SECONDS = 0.05
-
-
-class _Dead(BaseException):
-    """The process is gone. A ``BaseException``, so no library ``except Exception`` eats it."""
 
 
 class _Crash:
@@ -429,7 +426,7 @@ class TestTheKilledChild:
         assert can_lock_in_child() is True
 
     def test_the_child_environment_has_no_model_and_no_forced_utf8(self) -> None:
-        env = _env()
+        env = child_env()
         assert "PYTHONUTF8" not in env and "LLM_MODEL" not in env
         assert env["OLLAMA_API_BASE"] == env["OLLAMA_HOST"] == "http://127.0.0.1:9"
         assert set(env) >= {"PATH", "LITELLM_LOCAL_MODEL_COST_MAP"}
@@ -476,15 +473,11 @@ class TestTheKilledChild:
 
 def _last_seq(path: Path) -> int:
     """Open a writer on the log (this takes its lock) and close it again."""
-    writer = JsonlWriter(path)
+    writer = reopen_after_kill(lambda: JsonlWriter(path))
     try:
         return writer.last_seq
     finally:
         writer.close()
-
-
-def _env() -> dict[str, str]:
-    return {**_child_env(), "LITELLM_LOCAL_MODEL_COST_MAP": "True"}
 
 
 def _run_until_blocked_then_kill(root: Path, ready: Path, err: Path) -> None:
@@ -497,7 +490,7 @@ def _run_until_blocked_then_kill(root: Path, ready: Path, err: Path) -> None:
         proc = subprocess.Popen(
             [sys.executable, "-m", CHILD_MODULE, str(root), str(ready)],
             cwd=REPO,
-            env=_env(),
+            env=child_env(),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=errfile,
@@ -553,6 +546,26 @@ def _assert_resumes_and_continues(
 
 
 class TestThisFile:
+    def test_every_child_process_of_the_log_tests_gets_the_shared_environment(
+        self,
+    ) -> None:
+        for name in ("jsonl", "blobs", "crash"):
+            path = Path(__file__).with_name(f"test_event_log_{name}.py")
+            calls = (
+                node
+                for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+                if isinstance(node, ast.Call)
+            )
+            envs = {
+                ast.unparse(k.value)
+                for n in calls
+                for k in n.keywords
+                if k.arg == "env"
+            }
+            assert envs == {"child_env()"}, (
+                name
+            )  # cost-map flag, temp and home variables
+
     def test_no_test_of_this_file_carries_a_marker(self) -> None:
         # CI deselects slow, integration and real_llm: a marked kill test would never run there
         module = sys.modules[__name__]

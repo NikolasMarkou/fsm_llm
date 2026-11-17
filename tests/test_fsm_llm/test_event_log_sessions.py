@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import copy
 import json
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -103,12 +102,6 @@ def _script() -> ScriptedLLM:
     )
 
 
-@pytest.fixture
-def log(tmp_path: Path) -> Iterator[EventLog]:
-    with EventLog(tmp_path / "events") as opened:
-        yield opened
-
-
 def _reopen(log: EventLog) -> EventLog:
     """Simulate the process dying between turns: release every writer, open the directory anew."""
     root = log._logs.parent
@@ -191,6 +184,26 @@ def _saved_session(directory: Path, session_id: str = "Old_1") -> SessionState:
 
 
 class TestTheMigration:
+    @pytest.mark.parametrize("version", [None, 2])
+    def test_internal_keys_of_context_data_are_dropped_whatever_the_version(
+        self, version: int | None
+    ) -> None:
+        planted = {
+            "keep": 1,
+            "_approval_granted": _GRANT,
+            "system_x": 1,
+            "INTERNAL_y": 2,
+        }
+        payload: dict[str, Any] = {
+            "conversation_id": "c",
+            "fsm_id": "f",
+            "current_state": "s",
+            "context_data": {**planted, "nested": {"_k": 1}},
+        }
+        if version:
+            payload["v"] = version
+        assert migrate_session(payload).context_data == {"keep": 1, "nested": {"_k": 1}}
+
     def test_a_v1_file_of_the_real_store_equals_what_the_store_loads(
         self, tmp_path: Path, log: EventLog
     ) -> None:
@@ -899,6 +912,27 @@ class TestACompletionState:
         data = revived.fsm_manager.copy_raw_context_data(new_id)
         assert data[_MESSAGES] == [{"role": "user", "content": "task"}]
         assert not {"_approval_granted", "_run_output_keys", "_counter"} & set(data)
+
+    def test_a_forged_grant_in_a_legacy_file_is_not_restored(
+        self, log: EventLog, tmp_path: Path
+    ) -> None:
+        planted = {"keep": "v", "_approval_granted": _GRANT, "_counter": 7}
+        FileSessionStore(tmp_path / "snap").save(
+            "c1",
+            SessionState(
+                conversation_id="c1",
+                fsm_id="f",
+                current_state="call_model",
+                context_data=planted,
+            ),
+        )
+        legacy = tmp_path / "snap" / "c1.json"
+        assert projection_from_legacy_file(legacy).context_data == {"keep": "v"}
+        store = EventLogSessionStore(log, legacy_dir=tmp_path / "snap")
+        revived = _tool_resume(store, _ScriptedLLM(final_reply("x")))
+        new_id, _ = revived.restore_session("c1")  # type: ignore[misc]
+        data = revived.fsm_manager.copy_raw_context_data(new_id)
+        assert data["keep"] == "v" and not {"_approval_granted", "_counter"} & set(data)
 
     def test_the_log_carries_only_declared_keys_to_begin_with(
         self, log: EventLog

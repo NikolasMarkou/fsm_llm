@@ -26,7 +26,6 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from litellm.types.utils import Choices, Message, ModelResponse
 
 import fsm_llm.engine
 from fsm_llm import API
@@ -36,7 +35,7 @@ from fsm_llm.core.definitions import (
     TransitionEvaluationResult,
 )
 from fsm_llm.engine.turn.events import _priority
-from fsm_llm.llm import LiteLLMInterface, LLMInterface
+from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.runtime import (
     DECLARED_TYPES,
     PRODUCED_TYPES,
@@ -50,6 +49,7 @@ from fsm_llm.runtime import (
 )
 from fsm_llm.runtime.stores import jsonl
 from fsm_llm.testing import ScriptedLLM, final_reply
+from tests.test_fsm_llm.event_log_support import _chunk, _reply, _Wrapper
 from tests.test_fsm_llm.support import _state
 
 COMPLETION = "fsm_llm.llm.providers.litellm.completion"
@@ -233,12 +233,6 @@ class _Failing(ScriptedLLM):
         return super().generate_response(request)
 
 
-@pytest.fixture
-def log(tmp_path: Path) -> Iterator[EventLog]:
-    with EventLog(tmp_path / "events") as opened:
-        yield opened
-
-
 def _run(
     log: EventLog | None, llm: ScriptedLLM | None = None, **api_kwargs: Any
 ) -> tuple[API, str, dict[str, tuple[int, int]]]:
@@ -287,18 +281,6 @@ def _run(
 
 def _events(log: EventLog, cid: str, *types: str) -> list[dict[str, Any]]:
     return [e for e in log.read(cid) if not types or e["type"] in types]
-
-
-def _reply(text: str = "Hello") -> ModelResponse:
-    return ModelResponse(
-        choices=[Choices(message=Message(content=text), finish_reason="stop")]
-    )
-
-
-def _chunk(text: str) -> SimpleNamespace:
-    return SimpleNamespace(
-        choices=[SimpleNamespace(delta=SimpleNamespace(content=text))]
-    )
 
 
 class TestTheExpectedTable:
@@ -598,7 +580,7 @@ class TestFailClosedAtTheSites:
         cid, _ = api.start_conversation()
         with (
             patch.object(jsonl, "_write", side_effect=OSError("disk full")),
-            patch("fsm_llm.engine.api.events.logger") as warned,
+            patch("fsm_llm.runtime.log.logger") as warned,
         ):
             api.push_fsm(cid, copy.deepcopy(_SILENT_CHILD))
         assert api.get_stack_depth(cid) == 2
@@ -723,12 +705,19 @@ class TestTheProviderPath:
             "turn/end",
         ]
 
-    def test_a_stream_that_fails_midway_is_a_provider_error_and_no_response(
-        self, log: EventLog
+    @pytest.mark.parametrize("when", ["midway", "at the first chunk"])
+    def test_a_failed_stream_is_one_provider_error_and_no_response(
+        self, log: EventLog, when: str
     ):
         def _broken() -> Iterator[SimpleNamespace]:
             yield _chunk("a")
             raise RuntimeError("PRIVATE stream failure")
+
+        provider: dict[str, Any] = (
+            {"return_value": _broken()}
+            if when == "midway"
+            else {"side_effect": RuntimeError("PRIVATE stream failure")}
+        )
 
         api = API(
             self._chat(),
@@ -737,7 +726,7 @@ class TestTheProviderPath:
         )
         with patch(COMPLETION, return_value=_reply("Welcome")):
             cid, _ = api.start_conversation()
-        with patch(COMPLETION, return_value=_broken()):
+        with patch(COMPLETION, **provider):
             with pytest.raises(Exception):
                 list(api.converse_stream("hi", cid))
         assert _events(log, cid, "llm/response") == []
@@ -752,30 +741,67 @@ class TestTheProviderPath:
         )
 
 
-class _Wrapper(LLMInterface):
-    """A custom interface around a real ``LiteLLMInterface``: never ``observes_requests``."""
-
-    def __init__(self) -> None:
-        self.inner = LiteLLMInterface(model="gpt-4o")
-
-    def generate_response(self, request: Any) -> Any:
-        return self.inner.generate_response(request)
-
-    def generate_response_stream(self, request: Any) -> Iterator[str]:
-        return self.inner.generate_response_stream(request)
-
-    def extract_field(self, request: Any) -> Any:
-        return self.inner.extract_field(request)
-
-    def extract_bulk_data(self, request: Any) -> Any:
-        return self.inner.extract_bulk_data(request)
-
-    def complete(self, request: Any) -> Any:
-        return self.inner.complete(request)
-
-
 def _request() -> ResponseGenerationRequest:
     return ResponseGenerationRequest(system_prompt="Greet.", user_message="hi")
+
+
+def _extracting_fsm(site: str) -> dict[str, Any]:
+    """One silent state that needs `name` (bulk or per-field extraction), then `done`."""
+    gate = [
+        {
+            "description": "named",
+            "requires_context_keys": ["name"],
+            "logic": {"has_context": "name"},
+        }
+    ]
+    where: dict[str, Any] = (
+        {"required_context_keys": ["name"]}
+        if site == "bulk"
+        else {
+            "field_extractions": [
+                {
+                    "field_name": "name",
+                    "field_type": "str",
+                    "extraction_instructions": "the name",
+                }
+            ]
+        }
+    )
+    ask = _state(
+        "ask",
+        transitions=[{"target_state": "done", "description": "go", "conditions": gate}],
+        **where,
+    )
+    return {
+        "name": "Extract",
+        "description": "d",
+        "initial_state": "ask",
+        "states": {"ask": ask, "done": _state("done", response_instructions="bye")},
+    }
+
+
+class TestANonJsonContextValue:
+    @pytest.mark.parametrize("site", ["bulk", "field"])
+    def test_extraction_with_the_log_on_is_the_extraction_with_it_off(
+        self, log: EventLog, site: str
+    ):
+        """A plain object in the context (a handler or `initial_context` can put one there)
+        must not make the request blob raise: it degrades to a typed marker."""
+
+        def run(event_log: EventLog | None) -> tuple[str, Any]:
+            llm = ScriptedLLM(
+                extraction_data={"name": "Ann"}, responses={"done": "bye"}
+            )
+            api = API(_extracting_fsm(site), llm_interface=llm, event_log=event_log)
+            cid, _ = api.start_conversation(initial_context={"thing": object()})
+            api.converse("I am Ann", cid)
+            return api.get_current_state(cid), api.get_data(cid).get("name")
+
+        assert run(None) == run(log) == ("done", "Ann")
+        stored = "".join(
+            p.read_text(encoding="utf-8", errors="replace") for p in log_files(log)
+        )
+        assert "<object>" in stored
 
 
 class TestTheStreamRecorder:

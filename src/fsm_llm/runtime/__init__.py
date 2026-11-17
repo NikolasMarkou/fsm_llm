@@ -33,7 +33,7 @@ from .events import (
     encode_event,
     to_jsonable,
 )
-from .log import EventLog, filter_context
+from .log import EventLog, filter_context, warn_on_failure
 from .scope import (
     LlmCall,
     TurnScope,
@@ -76,4 +76,5 @@ __all__ = [
     "scoped_iter",
     "to_jsonable",
     "unresolved_tool_calls",
+    "warn_on_failure",
 ]

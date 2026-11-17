@@ -10,12 +10,11 @@ import ast
 import contextvars
 import threading
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
-from litellm.types.utils import Choices, Message, ModelResponse
+from litellm.types.utils import ModelResponse
 
 from fsm_llm.core.definitions import (
     CompletionRequest,
@@ -25,6 +24,7 @@ from fsm_llm.core.definitions import (
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.llm import observer as obs
 from fsm_llm.testing import ScriptedLLM
+from tests.test_fsm_llm.event_log_support import _chunk, _reply
 
 _SRC = Path(__file__).resolve().parents[2] / "src" / "fsm_llm"
 _LITELLM = _SRC / "llm" / "providers" / "litellm.py"
@@ -60,12 +60,6 @@ class _Recorder:
 
     def names(self) -> list[str]:
         return [name for name, _ in self.events]
-
-
-def _reply(text: str = "Hello") -> ModelResponse:
-    return ModelResponse(
-        choices=[Choices(message=Message(content=text), finish_reason="stop")]
-    )
 
 
 def _llm(**kwargs: Any) -> LiteLLMInterface:
@@ -260,10 +254,7 @@ class TestStreamingAndRetry:
         assert llm.usage().by_kind["stream"].calls == 1
 
     def test_generate_response_stream_reports_a_streamed_request(self) -> None:
-        recorder, chunks = _Recorder(), []
-        for text in ("a", "b"):
-            delta = SimpleNamespace(content=text)
-            chunks.append(SimpleNamespace(choices=[SimpleNamespace(delta=delta)]))
+        recorder, chunks = _Recorder(), [_chunk("a"), _chunk("b")]
 
         def fn(llm: LiteLLMInterface) -> list[str]:
             return list(
@@ -344,6 +335,20 @@ class TestNoObserverAndScope:
         assert not obs.is_observed(Mock())
         assert not obs.is_observed(ScriptedLLM())
 
+    def test_a_subclass_that_replaces_send_is_observed_only_if_it_says_so(self) -> None:
+        class Own(LiteLLMInterface):
+            def _send(self, call_params: Any, *, call_type: str) -> Any:
+                return None
+
+        class Restates(Own):
+            observes_requests = True
+
+        class Inherits(Restates):
+            pass
+
+        assert not obs.is_observed(Own(model="m"))
+        assert obs.is_observed(Restates(model="m")) and obs.is_observed(Inherits("m"))
+
 
 class TestTheSharedSendPathStaysIntact:
     def test_litellm_is_still_imported_in_one_module_and_its_size_has_room(
@@ -408,4 +413,8 @@ class TestTheSharedSendPathStaysIntact:
             "Readers that want counts own (inject) the interface. See D-004."
         ) in flat
         assert source.count("meter.record(") == 1
+        # D-002 of plan 21e6f00d: a reference at the hook, so an editor of `_send` sees it
+        assert "plan-2026-11-17T100529-21e6f00d/D-002" in (
+            ast.get_source_segment(source, send) or ""
+        )
         assert "observes_requests = True" in source

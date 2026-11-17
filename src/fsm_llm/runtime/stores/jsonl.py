@@ -128,9 +128,13 @@ def _release_lock(fd: int) -> None:
         os.close(fd)
 
 
-def _fsync_directory(directory: Path) -> None:
-    """Make a new file's directory entry durable. POSIX only: ``os.open`` of a directory
-    raises on Windows. Best effort: a file system that cannot fsync a directory is skipped."""
+def fsync_directory(directory: Path) -> None:
+    """Make a new file's directory entry durable (callers: ``JsonlWriter`` and ``BlobStore``).
+
+    Interface contract: *directory* is an existing directory; returns None and never raises (a
+    file system that cannot fsync a directory is skipped). POSIX only: ``os.open`` of a
+    directory raises on Windows, so it does nothing there.
+    """
     if sys.platform == "win32":
         return
     try:
@@ -227,7 +231,10 @@ class JsonlWriter:
           every event is encoded first, so a refused payload writes nothing. Not crash
           atomic: a kill inside the write leaves a whole-line prefix of the batch (never a
           half line once the next writer cut the tail). An empty list writes nothing.
-        - ``close()``: idempotent; releases the fd and the lock. The ``.lock`` file stays.
+        - ``close()``: idempotent; releases the fd and the lock. The ``.lock`` file stays. A
+          writer that is dropped without ``close`` is closed by its finalizer, so a forgotten
+          one frees its two descriptors and the lock when the object is collected (do not rely
+          on it: a long-running host closes, see ``EventLog``).
     """
 
     def __init__(self, path: str | os.PathLike[str]) -> None:
@@ -279,7 +286,7 @@ class JsonlWriter:
             0o600,
         )
         if not existed:
-            _fsync_directory(self.path.parent)
+            fsync_directory(self.path.parent)
         read_fd = os.open(self.path, os.O_RDONLY | _binary_flag())
         try:
             good = 0
@@ -360,6 +367,14 @@ class JsonlWriter:
             os.close(fd)
         if lock_fd >= 0:
             _release_lock(lock_fd)
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except (
+            Exception
+        ):  # a half-built writer or interpreter shutdown: nothing to report
+            pass
 
     def __enter__(self) -> JsonlWriter:
         return self

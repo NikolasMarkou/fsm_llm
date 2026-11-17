@@ -16,6 +16,8 @@ platform and states what only the Windows leg can prove.
 from __future__ import annotations
 
 import ast
+import gc
+import inspect
 import json
 import os
 import subprocess
@@ -26,6 +28,7 @@ from typing import Any
 
 import pytest
 
+from fsm_llm.runtime import EventLog
 from fsm_llm.runtime.constants import (
     LOG_FORMAT_VERSION,
     MAX_EVENT_BYTES,
@@ -45,7 +48,7 @@ from fsm_llm.runtime.stores.jsonl import (
     read_events,
 )
 from tests.conftest import current_timing_factor
-from tests.test_fsm_llm_regression.workflow_support import passthrough_env
+from tests.test_fsm_llm.event_log_support import child_env, reopen_after_kill
 
 JSONL_SOURCE = (
     Path(__file__).resolve().parents[2]
@@ -351,7 +354,7 @@ class TestFsyncPolicy:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         synced: list[Path] = []
-        monkeypatch.setattr(jsonl, "_fsync_directory", synced.append)
+        monkeypatch.setattr(jsonl, "fsync_directory", synced.append)
         path = tmp_path / "logs" / "dirsync.jsonl"
         JsonlWriter(path).close()
         JsonlWriter(path).close()  # the file exists now
@@ -729,24 +732,44 @@ class TestLock:
             JsonlWriter(tmp_path / "logs" / "nolock.jsonl")
 
 
+class TestADroppedHolder:
+    @pytest.mark.parametrize("holder", ["writer", "log"])
+    def test_a_writer_or_log_dropped_without_close_releases_its_lock(
+        self, tmp_path: Path, holder: str
+    ) -> None:
+        if holder == "writer":
+            JsonlWriter(tmp_path / "logs" / "gone.jsonl").append(_event())
+        else:
+            EventLog(tmp_path).append("gone", "turn/start")
+        gc.collect()  # the finalizer, not an explicit close, frees the fds and the lock
+        JsonlWriter(
+            tmp_path / "logs" / "gone.jsonl"
+        ).close()  # LogLockedError if leaked
+
+
+class TestReopenAfterKill:
+    def test_it_retries_only_when_told_to_and_the_default_is_windows_only(self) -> None:
+        calls: list[int] = []
+
+        def opener() -> str:
+            calls.append(1)
+            if len(calls) < 3:
+                raise LogLockedError("held")
+            return "writer"
+
+        assert reopen_after_kill(opener, retry=True) == "writer" and len(calls) == 3
+        calls.clear()
+        with pytest.raises(LogLockedError):
+            reopen_after_kill(opener, retry=False)
+        assert len(calls) == 1
+        default = inspect.signature(reopen_after_kill).parameters["retry"].default
+        assert default is (sys.platform == "win32")
+
+
 def _umask() -> int:
     mask = os.umask(0)
     os.umask(mask)
     return mask
-
-
-def _child_env() -> dict[str, str]:
-    """The environment of a child: what Windows needs (``SYSTEMROOT``), ``PATH``, a dead model
-    port, and ``PYTHONPATH`` when the run uses one. ``PYTHONUTF8`` stays unset on purpose."""
-    env = {
-        **passthrough_env(),
-        "PATH": os.environ.get("PATH", ""),
-        "OLLAMA_API_BASE": "http://127.0.0.1:9",
-        "OLLAMA_HOST": "http://127.0.0.1:9",
-    }
-    if "PYTHONPATH" in os.environ:
-        env["PYTHONPATH"] = os.environ["PYTHONPATH"]
-    return env
 
 
 def can_lock_in_child() -> bool:
@@ -761,7 +784,7 @@ def can_lock_in_child() -> bool:
     try:
         done = subprocess.run(
             [sys.executable, "-c", f"import {module}"],
-            env=_child_env(),
+            env=child_env(),
             capture_output=True,
             timeout=120 * current_timing_factor(),
         )
@@ -803,7 +826,7 @@ class TestLockAndAcknowledgementAcrossProcesses:
         path = tmp_path / "logs" / "child.jsonl"
         proc = subprocess.Popen(
             [sys.executable, "-c", CHILD, str(path)],
-            env=_child_env(),
+            env=child_env(),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -846,7 +869,7 @@ class TestLockAndAcknowledgementAcrossProcesses:
         )  # a torn tail, if the kill made one, is ignored
         assert [e["seq"] for e in events] == list(range(1, len(events) + 1))
         assert len(events) >= max(acked) >= 20  # no acknowledged event is missing
-        writer = JsonlWriter(path)  # the dead holder's lock is free at once
+        writer = reopen_after_kill(lambda: JsonlWriter(path))  # the dead holder's lock
         try:
             assert writer.last_seq == len(events)
             assert writer.append(_event()) == len(events) + 1
