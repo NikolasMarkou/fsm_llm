@@ -1,7 +1,7 @@
 # test_fsm_llm
 
 Path: `tests/test_fsm_llm`
-Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass MessagePipeline, transitions, prompts, LLM wrapper, handlers, memory, validator, visualizer, logging), 94 test files, 7,713 collected tests.
+Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass MessagePipeline, transitions, prompts, LLM wrapper, handlers, memory, validator, visualizer, logging), 94 test files, 7,737 collected tests.
 
 ## Scope
 
@@ -32,7 +32,7 @@ Three test styles:
 ```mermaid
 flowchart TD
     root[tests/conftest.py<br/>MockLLM2Interface, mock_llm_interface,<br/>mock_llm2_interface, sample_fsm_definition_v2, ollama_available]
-    local[conftest.py<br/>minimal_fsm_dict]
+    local[conftest.py<br/>minimal_fsm_dict, log]
     fx[fixtures/*_key_corpus.py]
     phc[test_pipeline_handler_contract.py] --> chs[test_core_hardening_seam.py]
     pu[test_prompts_unit.py] --> chs
@@ -61,7 +61,8 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 
 | File | Role | Notes |
 | --- | --- | --- |
-| `conftest.py` | `minimal_fsm_dict` fixture | one state `only_state`, no transitions |
+| `conftest.py` | `minimal_fsm_dict` fixture; `log` fixture (an `EventLog` under `tmp_path / "events"`, closed at teardown) | one state `only_state`, no transitions; `log` is shared by the event log test files |
+| `event_log_support.py` | helpers the event log test files share: `_reply`, `_chunk`, `_Wrapper`, `_Dead`, `child_env()` (the one environment of every child process of these tests), `reopen_after_kill(open_)` | not a test file and not collected (no `test_` prefix); imported by the `test_event_log_*` files and `test_llm_observer.py` |
 | `support.py` | helpers shared by several test files: FSM builders (`_correction_fsm`, `_classified_fsm`), fake provider responses (`_fake_response`, `_stream_chunk`), the `_Prov` family of scripted providers, `_PassTwoSpy`, `_mock_llm`, `_api`, `_child_env` (the scrubbed environment of a child Python process) and `_plain_state` | not collected (no `test_` prefix); a helper used by one file stays in that file; a clashing name carries its source as a prefix (`_aiter1_ambiguous_fsm`) |
 | `test_api.py`, `test_api_elaborate.py` | `API` loading, conversations, stacking | `test_api_elaborate.py` holds `TestBaseExceptionRollsBackUserMessage` |
 | `test_fsm.py`, `test_fsm_elaborate.py` | `FSMManager` data filtering, stacking | nested filtering of `get_conversation_data` |
@@ -82,17 +83,17 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_pipeline_handler_contract.py` | handler failures through `API.converse` | critical propagation, rollback |
 | `test_memory.py` | `WorkingMemory` | serialization, copy under concurrency |
 | `test_session.py` | `FileSessionStore` ids, soft failures, fsync before replace, file logging after a failed sink add, the default save hook | `_c5_clean_logging` snapshots and restores the global logging state |
-| `test_llm_observer.py` | the request observer of `LiteLLMInterface._send` (D-002): the allow-list of what an observer sees, fail-closed `begin_send` and a `end_send` that never breaks a reply, stream and retry paths, no observer and no scope, and the shared send path and its usage meter unchanged with an observer installed | 19 tests; patches `fsm_llm.llm.providers.litellm.completion`, a recording double as the observer |
-| `test_event_log_format.py` | the event log format of `fsm_llm.runtime`: the closed vocabulary (21 declared types, 13 produced), the safe encoder and decoder (one ASCII line per event, hostile and deep values cannot recurse), depth check, `to_jsonable`, the errors and constants, and a source scan that bans the forbidden file and JSON idioms in `src/fsm_llm/runtime` | 107 tests; no clock, no file |
-| `test_event_log_jsonl.py` | the JSONL store: unbuffered append, the newline as the only commit marker, a torn tail cut by the next lock holder and ignored by readers, a bad middle line raises, the fsync policy, open flags, id rules, the advisory lock and the acknowledged-event proof across processes | 82 tests; crash points injected through `_write`, `_fsync`, `_truncate`; one child killed with `Popen.kill()`; the POSIX-mode test is the one expected Windows skip |
+| `test_llm_observer.py` | the request observer of `LiteLLMInterface._send` (D-002): the allow-list of what an observer sees, fail-closed `begin_send` and a `end_send` that never breaks a reply, stream and retry paths, no observer and no scope, and the shared send path and its usage meter unchanged with an observer installed | 20 tests; patches `fsm_llm.llm.providers.litellm.completion`, a recording double as the observer |
+| `test_event_log_format.py` | the event log format of `fsm_llm.runtime`: the closed vocabulary (21 declared types, 13 produced), the safe encoder and decoder (one ASCII line per event, hostile and deep values cannot recurse), depth check, `to_jsonable`, the errors and constants, and a source scan that bans the forbidden file and JSON idioms in `src/fsm_llm/runtime` | 114 tests; no clock, no file |
+| `test_event_log_jsonl.py` | the JSONL store: unbuffered append, the newline as the only commit marker, a torn tail cut by the next lock holder and ignored by readers, a bad middle line raises, the fsync policy, open flags, id rules, the advisory lock and the acknowledged-event proof across processes | 85 tests; crash points injected through `_write`, `_fsync`, `_truncate`; one child killed with `Popen.kill()`; the POSIX-mode test is the one expected Windows skip |
 | `test_event_log_blobs.py` | the content-addressed blob store: hash and ref rules, a tampered or wrong-hash blob refused, write-if-absent, a stray `.tmp` ignored, races between threads and a child process | 33 tests; the Windows `os.replace` branch is simulated, unverified until the Windows run |
-| `test_event_log_api.py` | `EventLog`: append, read and query, the clock injected and `seq` as the order, checkpoint fsyncs counted, fail-closed writes, the `tool/call` side-effect rule, the secret filter and the blob rules | 74 tests; no timing assertion |
-| `test_event_log_scope.py` | the turn scope of the runtime layer: `emit` with and without a scope, binding, `scoped_iter`, the request observer path from the provider seam and the engine fallback `llm_call`; credentials never reach the log or a blob | 29 tests; patched provider binding and `ScriptedLLM` |
-| `test_event_log_engine.py` | the opt-in `API(event_log=...)`: the `turn/start` and `turn/end` boundary and its four outcomes, the state blob, the log-off guarantee (nothing bound, nothing written), strangler parity of replies and data, the lock order with the log on, and threads | 40 tests; every model is a `ScriptedLLM` |
-| `test_event_log_producers.py` | the engine producers: the seven model call sites, the streamed reply recorder, executor and transition events, stack push and pop, the out-of-turn context record, fail-closed behaviour at each site, the privacy of the request blob, and that the produced set equals `PRODUCED_TYPES` over all scenarios | 38 tests; both the engine path (`ScriptedLLM`) and the provider path (patched `completion`); its `_run`, `_script`, `_FSM`, `_CHILD` helpers are imported by `test_event_log_acceptance.py` |
-| `test_event_log_sessions.py` | session projections: `SessionProjection` v2 and its one v1 migration, the reader of old `FileSessionStore` files, the fold of a log (rolled-back turns, a pushed child, a future event type, a `None` delta value kept as the write keeps it), `EventLogSessionStore`, restore seeding with the declared-key allow-list and the lineage record, and a completion state | 67 tests; hand-built logs and real conversations; the on-versus-off snapshot parity test |
+| `test_event_log_api.py` | `EventLog`: append, read and query, the clock injected and `seq` as the order, checkpoint fsyncs counted, fail-closed writes, the `tool/call` side-effect rule, the secret filter and the blob rules | 78 tests; no timing assertion |
+| `test_event_log_scope.py` | the turn scope of the runtime layer: `emit` with and without a scope, binding, `scoped_iter`, the request observer path from the provider seam and the engine fallback `llm_call`; credentials never reach the log or a blob | 30 tests; patched provider binding and `ScriptedLLM` |
+| `test_event_log_engine.py` | the opt-in `API(event_log=...)`: the `turn/start` and `turn/end` boundary and its four outcomes, the state blob, the log-off guarantee (nothing bound, nothing written), strangler parity of replies and data, the lock order with the log on, and threads | 41 tests; every model is a `ScriptedLLM` |
+| `test_event_log_producers.py` | the engine producers: the seven model call sites, the streamed reply recorder, executor and transition events, stack push and pop, the out-of-turn context record, fail-closed behaviour at each site, the privacy of the request blob, and that the produced set equals `PRODUCED_TYPES` over all scenarios | 41 tests; both the engine path (`ScriptedLLM`) and the provider path (patched `completion`); its `_run`, `_script`, `_FSM`, `_CHILD` helpers are imported by `test_event_log_acceptance.py` |
+| `test_event_log_sessions.py` | session projections: `SessionProjection` v2 and its one v1 migration, the reader of old `FileSessionStore` files, the fold of a log (rolled-back turns, a pushed child, a future event type, a `None` delta value kept as the write keeps it), `EventLogSessionStore`, restore seeding with the declared-key allow-list and the lineage record, and a completion state | 70 tests; hand-built logs and real conversations; the on-versus-off snapshot parity test |
 | `test_event_log_acceptance.py` | in-process acceptance proofs: the roadmap Log test (every `llm/request` rebuilt byte for byte from the log, on the provider path and per call kind on the engine path), strangler parity of a real interface (replies, data, history, snapshot, `usage()` and the exact provider requests, with a failed Pass 2 and its retry), and the privacy corpus end to end | 11 tests; imports private helpers from `test_event_log_producers.py` |
-| `test_event_log_crash.py` | crash proofs: a child killed with `Popen.kill()` mid turn restores to the last committed turn with the in-flight tool as unknown, a death at every event offset (clean and torn) of a tool exchange and a rolled-back turn, the torn tail repaired by the next writer, and the exact fsync count of a scripted run | 10 tests; about 20 to 25 s; no marker (a test pins that); the child module `event_log_child.py` is not collected |
+| `test_event_log_crash.py` | crash proofs: a child killed with `Popen.kill()` mid turn restores to the last committed turn with the in-flight tool as unknown, a death at every event offset (clean and torn) of a tool exchange and a rolled-back turn, the torn tail repaired by the next writer, and the exact fsync count of a scripted run | 11 tests; about 20 to 25 s; no marker (a test pins that); the child module `event_log_child.py` is not collected |
 | `event_log_child.py` | the child process of `test_event_log_crash.py`, run as `python -m tests.test_fsm_llm.event_log_child <dir> <ready_file>` from the repo root | not a test file and not collected; blocks inside a model double so the parent can kill it |
 | `test_strands_features.py` | schema output, invocation state, streaming, `save_session`/`restore_session` | imports `fsm_llm.agents.base` |
 | `test_streaming_history_seam.py` | history after mid-stream error or abandonment | |
@@ -151,7 +152,7 @@ Fixtures and helpers from `tests/conftest.py` (shared by all suites), and the do
 
 Markers registered there: `slow`, `integration`, `examples`, `real_llm`.
 
-Local `conftest.py`: fixture `minimal_fsm_dict`.
+Local `conftest.py`: fixtures `minimal_fsm_dict` and `log` (an `EventLog` in a temporary directory, closed at teardown, for the event log tests).
 
 Helpers imported across files in this directory (module path `tests.test_fsm_llm.<file>`):
 
@@ -209,7 +210,7 @@ Seam files fake the backend with `patch("fsm_llm.llm.providers.litellm.completio
 - New regression for a public-path bug: add a seam test that drives `API.converse` or patched `fsm_llm.llm.providers.litellm.completion`, not only a helper-level test.
 - Reuse a helper by import (see the helper table) rather than copying it. Name a new test file for the behaviour it pins, never for an audit, review round or plan step: `TestNoDatedTestFiles` in `tests/test_packaging.py` refuses such names.
 - Do not relabel, delete or regenerate corpus rows to improve a rate; do not add filter words to catch one corpus entry. Add names from real vocabulary without reading `constants.py` first.
-- After adding or removing tests, re-measure with the first command below. The suite count (7,713) is pinned by `tests/test_packaging.py::test_per_suite_table` (marked slow), which compares a measured `--collect-only` count per suite against a documented literal of the form `pytest tests/test_fsm_llm/  # ... (N tests)`; run that test after changing the count. The counts stated in this file (94 test files, 7,713 tests, 14 slow) are not pinned by any test and must be updated by hand.
+- After adding or removing tests, re-measure with the first command below. The suite count (7,737) is pinned by `tests/test_packaging.py::test_per_suite_table` (marked slow), which compares a measured `--collect-only` count per suite against a documented literal of the form `pytest tests/test_fsm_llm/  # ... (N tests)`; run that test after changing the count. The counts stated in this file (94 test files, 7,737 tests, 14 slow) are not pinned by any test and must be updated by hand.
 
 ```bash
 .venv/bin/python -m pytest tests/test_fsm_llm/ --collect-only -q | tail -1
