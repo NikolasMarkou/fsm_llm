@@ -1575,7 +1575,17 @@ class TestTheRealReleaseNotes:
     ):
         (tmp_path / "scripts").mkdir()
         shutil.copy(_ROOT / "scripts" / "changelog_check.py", tmp_path / "scripts")
-        shutil.copy(_ROOT / "CHANGELOG.md", tmp_path / "CHANGELOG.md")
+        # The real file has entries under [Unreleased] as soon as work follows a release:
+        # empty that section in the copy, so the test states its own premise.
+        lines = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+        start = lines.index("## [Unreleased]")
+        end = next(
+            i for i in range(start + 1, len(lines)) if lines[i].startswith("## [")
+        )
+        emptied = [*lines[: start + 1], "", *lines[end:]]
+        (tmp_path / "CHANGELOG.md").write_text(
+            "\n".join(emptied) + "\n", encoding="utf-8", newline="\n"
+        )
         env = {"VERSION": "Unreleased", **_NOTES_ENV}
         code, _, _ = _run(_script("build", needle="changelog_check.py"), tmp_path, env)
         assert code != 0, "an empty [Unreleased] must not produce release notes"
