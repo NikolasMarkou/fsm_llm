@@ -1,6 +1,6 @@
 # test_fsm_llm
 
-The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 83 test files (7,199 collected tests) plus a `fixtures/` package of labelled secret-filter data.
+The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 94 test files (7,713 collected tests) plus a `fixtures/` package of labelled secret-filter data.
 
 ## What it is for
 
@@ -63,6 +63,17 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_pipeline_handler_contract.py` - handler failures seen through `API.converse`, including rollback.
 - `test_memory.py` - `WorkingMemory` buffers, serialization, copies and concurrency.
 - `test_session.py` - `FileSessionStore` id validation, soft failures, fsync-before-replace, file logging after a failed sink add, and the default save hook.
+- `test_llm_observer.py` - the request observer of `LiteLLMInterface._send` (D-002): the allow-list of what an observer sees, fail-closed `begin_send` and a `end_send` that never breaks a reply, stream and retry paths, no observer and no scope, and the shared send path and its usage meter unchanged with an observer installed.
+- `test_event_log_format.py` - the event log format of `fsm_llm.runtime`: the closed vocabulary (21 declared types, 13 produced), the safe encoder and decoder (one ASCII line per event, hostile and deep values cannot recurse), depth check, `to_jsonable`, the errors and constants, and a source scan that bans the forbidden file and JSON idioms in `src/fsm_llm/runtime`.
+- `test_event_log_jsonl.py` - the JSONL store: unbuffered append, the newline as the only commit marker, a torn tail cut by the next lock holder and ignored by readers, a bad middle line raises, the fsync policy, open flags, id rules, the advisory lock and the acknowledged-event proof across processes.
+- `test_event_log_blobs.py` - the content-addressed blob store: hash and ref rules, a tampered or wrong-hash blob refused, write-if-absent, a stray `.tmp` ignored, races between threads and a child process.
+- `test_event_log_api.py` - `EventLog`: append, read and query, the clock injected and `seq` as the order, checkpoint fsyncs counted, fail-closed writes, the `tool/call` side-effect rule, the secret filter and the blob rules.
+- `test_event_log_scope.py` - the turn scope of the runtime layer: `emit` with and without a scope, binding, `scoped_iter`, the request observer path from the provider seam and the engine fallback `llm_call`; credentials never reach the log or a blob.
+- `test_event_log_engine.py` - the opt-in `API(event_log=...)`: the `turn/start` and `turn/end` boundary and its four outcomes, the state blob, the log-off guarantee (nothing bound, nothing written), strangler parity of replies and data, the lock order with the log on, and threads.
+- `test_event_log_producers.py` - the engine producers: the seven model call sites, the streamed reply recorder, executor and transition events, stack push and pop, the out-of-turn context record, fail-closed behaviour at each site, the privacy of the request blob, and that the produced set equals `PRODUCED_TYPES` over all scenarios.
+- `test_event_log_sessions.py` - session projections: `SessionProjection` v2 and its one v1 migration, the reader of old `FileSessionStore` files, the fold of a log (rolled-back turns, a pushed child, a future event type, a `None` delta value kept as the write keeps it), `EventLogSessionStore`, restore seeding with the declared-key allow-list and the lineage record, and a completion state.
+- `test_event_log_acceptance.py` - in-process acceptance proofs: the roadmap Log test (every `llm/request` rebuilt byte for byte from the log, on the provider path and per call kind on the engine path), strangler parity of a real interface (replies, data, history, snapshot, `usage()` and the exact provider requests, with a failed Pass 2 and its retry), and the privacy corpus end to end.
+- `test_event_log_crash.py` - crash proofs: a child killed with `Popen.kill()` mid turn restores to the last committed turn with the in-flight tool as unknown, a death at every event offset (clean and torn) of a tool exchange and a rolled-back turn, the torn tail repaired by the next writer, and the exact fsync count of a scripted run.
 - `test_strands_features.py` - schema-enforced output, invocation state, streaming, session save and restore.
 - `test_streaming_history_seam.py` - history stays consistent when a stream fails or is abandoned.
 - `test_stack_lifecycle_seam.py` - races in `push_fsm`/`pop_fsm` and stale-conversation cleanup.
