@@ -5,7 +5,11 @@ chunk; ``_Wrapper(inner=None)`` is a custom interface around a real ``LiteLLMInt
 never reaches ``_send`` by itself); ``_Dead`` is a ``BaseException`` that stands for a vanished
 process; ``child_env()`` is the one environment of every child Python process of these tests
 (the scrubbed ``support._child_env`` plus ``PYTHONPATH`` when the run uses one);
-``reopen_after_kill(open_)`` calls *open_*, retrying on ``LogLockedError`` only on Windows.
+``reopen_after_kill(open_)`` calls *open_*, retrying on ``LogLockedError`` only on Windows;
+``tree_files(root)`` lists the regular files under *root* in sorted order without the writer's
+``*.lock`` files and ``tree_bytes(root)`` joins their bytes (the one way a test reads "every
+byte the log wrote": Windows refuses a read of a byte-range-locked file, even in the same
+process, so a test never reads a lock file).
 The ``log`` fixture lives in this folder's ``conftest.py``.
 """
 
@@ -15,6 +19,7 @@ import os
 import sys
 import time
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, TypeVar
 
@@ -22,6 +27,7 @@ from litellm.types.utils import Choices, Message, ModelResponse
 
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.runtime.events import LogLockedError
+from fsm_llm.runtime.stores.jsonl import LOCK_SUFFIX
 from tests.conftest import current_timing_factor
 from tests.test_fsm_llm.support import _child_env
 
@@ -94,3 +100,21 @@ def reopen_after_kill(
             if not retry or time.monotonic() >= deadline:
                 raise
             time.sleep(0.05)
+
+
+def tree_files(root: str | os.PathLike[str]) -> list[Path]:
+    """Return the regular files under *root*, sorted, except the writer's lock files.
+
+    A ``LOCK_SUFFIX`` file carries a byte-range lock for as long as its writer is open, and on
+    Windows a read of it fails with ``PermissionError`` even in the holding process.
+    """
+    return sorted(
+        p
+        for p in Path(root).rglob("*")
+        if p.is_file() and not p.name.endswith(LOCK_SUFFIX)
+    )
+
+
+def tree_bytes(root: str | os.PathLike[str]) -> bytes:
+    """Return the concatenated bytes of ``tree_files(root)`` (empty when there are none)."""
+    return b"".join(p.read_bytes() for p in tree_files(root))

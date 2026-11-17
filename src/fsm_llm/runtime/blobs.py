@@ -21,7 +21,9 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +37,11 @@ from fsm_llm.runtime.events import (
 from fsm_llm.runtime.stores.jsonl import fsync_directory
 
 _REF_PREFIX = "sha256:"
+# After a refused replace on Windows the winner's file may stay unreadable for a moment (a
+# sharing violation while its own replace is in flight): at most this many checks, this far
+# apart (about 100 ms in all). Never used elsewhere.
+_VERIFY_TRIES = 20
+_VERIFY_PAUSE_SECONDS = 0.005
 
 # Indirection a test patches to simulate a lost race or a failing disk, read at call time.
 _replace = os.replace
@@ -91,11 +98,19 @@ class BlobStore:
     # atomic-save helper (four anchors forbid a shared helper without a maintainer decision,
     # and this is not a replace: the target may legitimately exist). Do NOT rewrite a target
     # that already has the right size, retry in a loop (the loser of a content-addressed
-    # race has nothing to retry), treat a PermissionError or FileExistsError as success
-    # without checking that the final file now hashes right, open a path in text mode or
-    # with a bare os.open (no O_BINARY: "\n" would become "\r\n" on Windows and fail the
-    # re-hash), or write the final path directly (a reader would see a half file). The write
-    # is a temp file in the SAME directory, fsync, then os.replace. See D-011 and D-012.
+    # race has nothing to retry: the replace is never repeated), treat a PermissionError or
+    # FileExistsError as success without checking that the final file is the blob, open a
+    # path in text mode or with a bare os.open (no O_BINARY: "\n" would become "\r\n" on
+    # Windows and fail the re-hash), or write the final path directly (a reader would see a
+    # half file). The write is a temp file in the SAME directory, fsync, then os.replace.
+    # D-025 allows ONE thing: after a refused replace, on win32 only, the check "is the
+    # target the blob" is retried a bounded number of times (_VERIFY_TRIES, 5 ms apart),
+    # because a racing replace makes the winner's file transiently unreadable there
+    # (PermissionError), which failed honest concurrent puts in CI run 44121497599; the
+    # file that stayed unreadable to the last try is accepted at the right size (the fast
+    # path in put trusts size alone); a readable file that hashes wrong never is.
+    # Never lengthen that wait, never retry on another platform, never repeat the replace.
+    # See D-011, D-012 and D-025.
     def put(self, data: bytes) -> str:
         """Store *data* if absent and return its reference (see the class contract)."""
         if not isinstance(data, bytes):
@@ -135,7 +150,7 @@ class BlobStore:
             except (PermissionError, FileExistsError):
                 # Windows refuses to replace a target another process holds open, and a
                 # racing writer may have created it first: success only if it is the blob.
-                if not _is_blob(path, ref):
+                if not _winner_is_there(path, data, ref):
                     raise
             fsync_directory(path.parent)
         finally:
@@ -174,9 +189,33 @@ def _read(path: Path) -> bytes:
     return data
 
 
-def _is_blob(path: Path, ref: str) -> bool:
-    """True when *path* holds bytes that hash to *ref* (a missing or foreign file: False)."""
+def _winner_is_there(path: Path, data: bytes, ref: str) -> bool:
+    """True when *path* is the blob *ref* after a replace that was refused (see ``put``).
+
+    One hash check everywhere. On win32 only, the check is repeated up to ``_VERIFY_TRIES``
+    times, ``_VERIFY_PAUSE_SECONDS`` apart, and when the file stayed unreadable to the last
+    try a regular file of ``len(data)`` bytes is accepted. False means the caller re-raises
+    its original error: a readable file that hashes wrong, a file of another size, a missing
+    file and a persistent failure never count as success.
+    """
+    windows = sys.platform == "win32"
+    tries = _VERIFY_TRIES if windows else 1
+    found: bool | None = False
+    for attempt in range(tries):
+        found = _check_blob(path, ref)
+        if found:
+            return True
+        if attempt + 1 < tries:
+            time.sleep(_VERIFY_PAUSE_SECONDS)
+    return windows and found is None and _has_size(path, len(data))
+
+
+def _check_blob(path: Path, ref: str) -> bool | None:
+    """True when *path* hashes to *ref*, False when it does not (a missing file or one that
+    hashes wrong), None when it could not be read (a sharing violation, an OSError)."""
     try:
         return blob_ref(_read(path)) == ref
-    except (OSError, LogCorruptError):
+    except (FileNotFoundError, LogCorruptError):
         return False
+    except OSError:
+        return None

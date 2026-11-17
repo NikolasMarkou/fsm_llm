@@ -34,6 +34,7 @@ from fsm_llm.runtime import (
 )
 from fsm_llm.runtime.stores import jsonl
 from fsm_llm.testing import ScriptedLLM
+from tests.test_fsm_llm.event_log_support import tree_bytes
 from tests.test_fsm_llm.test_fsm_lock_order import (
     _PINNED,
     _short,
@@ -336,9 +337,7 @@ class TestStateBlob:
         blob = _state(log, record)
         assert blob["internal"] == {"_completion_messages": transcript}
         assert blob["context_data"] == {"api_key": REDACTED, "user_name": "Bo"}
-        raw = b"".join(
-            path.read_bytes() for path in Path(log.root).rglob("*") if path.is_file()
-        )
+        raw = tree_bytes(log.root)
         for forbidden in (b"forged-grant", b"_run_output_keys", b"internal-note"):
             assert forbidden not in raw
         assert b"sk-SECRET-0001" not in raw
@@ -554,5 +553,5 @@ class TestAHugeInt:
             return reply, data["n"] == big, data["m"] == big + 1
 
         assert run(None) == run(log) == ("ok", True, True)
-        stored = b"".join(p.read_bytes() for p in log.root.rglob("*") if p.is_file())
+        stored = tree_bytes(log.root)
         assert f"<int:{big.bit_length()} bits>".encode() in stored

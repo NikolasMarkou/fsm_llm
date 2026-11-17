@@ -9,6 +9,7 @@ behaviour of the files under a real Windows file system (the lock and ``O_BINARY
 
 from __future__ import annotations
 
+import ast
 import copy
 import json
 import threading
@@ -33,7 +34,11 @@ from fsm_llm.runtime.events import (
 from fsm_llm.runtime.log import EventLog, filter_context, warn_on_failure
 from fsm_llm.runtime.stores import jsonl
 from tests.conftest import EveryReadLater
-from tests.test_fsm_llm.event_log_support import _Dead
+from tests.test_fsm_llm.event_log_support import (
+    _Dead,
+    tree_bytes,
+    tree_files,
+)
 from tests.test_fsm_llm.test_event_log_format import _deep_list
 
 SECRET_KEY = "sk-live-0123456789abcdefghijklmnopqrstuv"
@@ -43,10 +48,6 @@ SECRET_TOKEN = "tok_live_9876543210zyxwvutsrqponmlkj"
 
 def _types(events: Any) -> list[str]:
     return [event["type"] for event in events]
-
-
-def _all_bytes(root: Path) -> bytes:
-    return b"".join(p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file())
 
 
 @pytest.fixture
@@ -473,7 +474,7 @@ class TestToolCall:
                 raise ValueError("private-detail")
         result = list(log.read("c1"))[-1]
         assert (result["status"], result["error_type"]) == ("failed", "ValueError")
-        assert b"private-detail" not in _all_bytes(log.root)
+        assert b"private-detail" not in tree_bytes(log.root)
         assert log.unknown_tool_calls("c1") == []
 
     @pytest.mark.parametrize("dying", [KeyboardInterrupt, SystemExit, _Dead])
@@ -518,7 +519,7 @@ class TestToolCall:
             stored["password"] == "<redacted>"
             and len(stored["text"]) > MAX_INLINE_BYTES
         )
-        data = _all_bytes(log.root)
+        data = tree_bytes(log.root)
         assert SECRET_KEY.encode() not in data and SECRET_PASSWORD.encode() not in data
 
     @pytest.mark.parametrize(
@@ -605,7 +606,7 @@ class TestSecretFilter:
         safe = filter_context(self.CONTEXT)
         log.append("c1", "context/record", delta=safe)
         log.put_json(safe)
-        data = _all_bytes(log.root)
+        data = tree_bytes(log.root)
         for secret in (SECRET_KEY, SECRET_PASSWORD, SECRET_TOKEN):
             assert secret.encode() not in data
         assert b"Paris" in data and b"<redacted>" in data  # not vacuous: it did write
@@ -692,3 +693,81 @@ class TestBlobs:
             deep = b"[" * depth + b"]" * depth
             with pytest.raises(LogCorruptError):
                 log.get_json(log.put_blob(deep))
+
+
+def _reads_every_file(source: str) -> list[int]:
+    """Line numbers of comprehensions that read file content over ``rglob("*")``."""
+
+    def calls(node: ast.AST, attrs: set[str]) -> list[ast.Call]:
+        return [
+            n
+            for n in ast.walk(node)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr in attrs
+        ]
+
+    found: list[int] = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+            continue
+        every = [
+            c
+            for gen in node.generators
+            for c in calls(gen.iter, {"rglob"})
+            if c.args and isinstance(c.args[0], ast.Constant) and c.args[0].value == "*"
+        ]
+        if every and calls(node.elt, {"read_bytes", "read_text"}):
+            found.append(node.lineno)
+    return found
+
+
+class TestTheTestsNeverReadALockFile:
+    """Windows refuses a read of a byte-range-locked file, even in the process that holds the
+    lock (CI run 44121497599: nine tests failed on it), so a test reads a log tree through
+    ``tree_bytes`` / ``tree_files`` only, which skip the ``*.lock`` files."""
+
+    def test_tree_bytes_skips_a_lock_file_that_cannot_be_read(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        (tmp_path / "logs").mkdir()
+        (tmp_path / "logs" / "c1.jsonl").write_bytes(b"line\n")
+        (tmp_path / "logs" / "c1.lock").write_bytes(b"\x00")
+        (tmp_path / "blobs").mkdir()
+        (tmp_path / "blobs" / "ab").write_bytes(b"blob")
+        real = Path.read_bytes
+
+        def read_bytes(self: Path) -> bytes:
+            if self.name.endswith(".lock"):
+                raise PermissionError(13, "simulated: a byte range is locked")
+            return real(self)
+
+        monkeypatch.setattr(Path, "read_bytes", read_bytes)
+        assert tree_bytes(tmp_path) == b"blob" + b"line\n"  # sorted by path
+        assert [p.name for p in tree_files(tmp_path)] == ["ab", "c1.jsonl"]
+        with pytest.raises(PermissionError):  # the stand-in is a real trap
+            (tmp_path / "logs" / "c1.lock").read_bytes()
+
+    def test_an_empty_or_missing_tree_is_empty_bytes(self, tmp_path: Path) -> None:
+        assert tree_bytes(tmp_path) == b"" == tree_bytes(tmp_path / "missing")
+
+    def test_no_event_log_test_reads_every_file_of_a_tree_itself(self) -> None:
+        folder = Path(__file__).parent
+        files = sorted(folder.glob("test_event_log_*.py"))
+        assert len(files) >= 10
+        bad = {
+            f.name: lines
+            for f in files
+            if (lines := _reads_every_file(f.read_text(encoding="utf-8")))
+        }
+        assert bad == {}, "use tree_bytes or tree_files from event_log_support"
+
+    def test_the_scan_catches_the_pattern_and_passes_the_helper(self) -> None:
+        trap = 'b"".join(p.read_bytes() for p in root.rglob("*") if p.is_file())'
+        assert _reads_every_file(trap) == [1]
+        assert _reads_every_file("[p.read_text() for p in root.rglob('*')]") == [1]
+        assert (
+            _reads_every_file('[p.read_bytes() for p in root.rglob("*.jsonl")]') == []
+        )
+        assert _reads_every_file('[p for p in root.rglob("*") if p.is_file()]') == []
+        assert _reads_every_file("tree_bytes(root)") == []

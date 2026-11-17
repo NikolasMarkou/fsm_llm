@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -240,6 +241,111 @@ class TestWriteIfAbsent:
             for n in ast.walk(tree)
             if isinstance(n, ast.Attribute) and n.attr in {"symlink", "link"}
         ]
+
+
+class TestAWinnerHiddenForAMoment:
+    """D-025: after a refused replace the winner's file may be unreadable for a moment on win32.
+
+    The tests drive the branch with a patched replace (the winner's file lands, the replace
+    raises), a patched ``_read`` that refuses the first reads, a patched platform and a
+    counting sleep. Unverified until the Windows run: the real sharing violation window.
+    """
+
+    def _hide(
+        self,
+        monkeypatch,
+        store: BlobStore,
+        *,
+        platform: str,
+        winner: bytes | None = b"payload",
+        hidden: int | None = 3,
+    ) -> tuple[list[float], list[Path]]:
+        """Patch time, platform, replace and read; return (sleeps, reads) as they fill."""
+        sleeps: list[float] = []
+        reads: list[Path] = []
+        real_read = blobs._read
+
+        def lose(src: str, dst: str) -> None:
+            if winner is not None:
+                Path(dst).write_bytes(winner)
+            raise PermissionError(13, "simulated: a replace is in flight")
+
+        def read(path: Path) -> bytes:
+            reads.append(path)
+            if hidden is None or len(reads) <= hidden:
+                raise PermissionError(13, "simulated: sharing violation")
+            return real_read(path)
+
+        monkeypatch.setattr(blobs, "_replace", lose)
+        monkeypatch.setattr(blobs, "_read", read)
+        monkeypatch.setattr(
+            blobs, "time", SimpleNamespace(sleep=sleeps.append), raising=False
+        )
+        monkeypatch.setattr(
+            blobs, "sys", SimpleNamespace(platform=platform), raising=False
+        )
+        return sleeps, reads
+
+    def test_a_target_unreadable_for_three_checks_is_success_on_windows(
+        self, store: BlobStore, tmp_path: Path, monkeypatch
+    ) -> None:
+        sleeps, reads = self._hide(monkeypatch, store, platform="win32", hidden=3)
+        assert store.put(b"payload") == blob_ref(b"payload")
+        assert len(reads) == 4 and sleeps == [0.005] * 3
+        assert store.path_for(blob_ref(b"payload")).read_bytes() == b"payload"
+        assert _files(tmp_path, ".tmp") == []
+
+    def test_a_persistent_refusal_with_no_target_raises_after_at_most_20_tries(
+        self, store: BlobStore, tmp_path: Path, monkeypatch
+    ) -> None:
+        sleeps, reads = self._hide(
+            monkeypatch, store, platform="win32", winner=None, hidden=None
+        )
+        with pytest.raises(LogWriteError, match="PermissionError"):
+            store.put(b"payload")
+        assert len(reads) == 20 and len(sleeps) == 19 and sum(sleeps) < 0.1
+        assert _files(tmp_path, ".tmp") == [] and _files(tmp_path) == []
+
+    def test_a_target_unreadable_to_the_last_try_counts_at_the_right_size(
+        self, store: BlobStore, monkeypatch
+    ) -> None:
+        sleeps, reads = self._hide(monkeypatch, store, platform="win32", hidden=None)
+        assert store.put(b"payload") == blob_ref(b"payload")
+        assert len(reads) == 20 and len(sleeps) == 19
+
+    def test_an_unreadable_target_of_another_size_never_counts(
+        self, store: BlobStore, monkeypatch
+    ) -> None:
+        self._hide(monkeypatch, store, platform="win32", winner=b"pay", hidden=None)
+        with pytest.raises(LogWriteError):
+            store.put(b"payload")
+
+    @pytest.mark.parametrize("winner", [b"payloaX", b"pay", b"payload and more"])
+    def test_a_readable_target_with_wrong_content_never_counts(
+        self, store: BlobStore, monkeypatch, winner: bytes
+    ) -> None:
+        sleeps, reads = self._hide(
+            monkeypatch, store, platform="win32", winner=winner, hidden=0
+        )
+        with pytest.raises(LogWriteError):
+            store.put(b"payload")
+        assert len(reads) <= 20 and len(sleeps) <= 19
+
+    @pytest.mark.parametrize("platform", ["linux", "darwin"])
+    def test_elsewhere_there_is_one_check_and_no_wait(
+        self, store: BlobStore, monkeypatch, platform: str
+    ) -> None:
+        sleeps, reads = self._hide(monkeypatch, store, platform=platform, hidden=3)
+        with pytest.raises(LogWriteError, match="PermissionError"):
+            store.put(b"payload")
+        assert len(reads) == 1 and sleeps == []
+
+    def test_a_target_that_is_readable_at_once_costs_no_wait(
+        self, store: BlobStore, monkeypatch
+    ) -> None:
+        sleeps, reads = self._hide(monkeypatch, store, platform="win32", hidden=0)
+        assert store.put(b"payload") == blob_ref(b"payload")
+        assert len(reads) == 1 and sleeps == []
 
 
 PAYLOADS = 100

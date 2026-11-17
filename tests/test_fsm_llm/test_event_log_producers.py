@@ -49,7 +49,12 @@ from fsm_llm.runtime import (
 )
 from fsm_llm.runtime.stores import jsonl
 from fsm_llm.testing import ScriptedLLM, final_reply
-from tests.test_fsm_llm.event_log_support import _chunk, _reply, _Wrapper
+from tests.test_fsm_llm.event_log_support import (
+    _chunk,
+    _reply,
+    _Wrapper,
+    tree_files,
+)
 from tests.test_fsm_llm.support import _state
 
 COMPLETION = "fsm_llm.llm.providers.litellm.completion"
@@ -539,8 +544,7 @@ class TestTheProducers:
 
 
 def log_files(log: EventLog) -> list[Path]:
-    root = Path(log.root)
-    return [p for p in root.rglob("*") if p.is_file() and p.suffix != ".lock"]
+    return tree_files(log.root)
 
 
 class TestFailClosedAtTheSites:

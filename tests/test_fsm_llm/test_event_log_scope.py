@@ -39,7 +39,12 @@ from fsm_llm.runtime.events import EventPayloadError
 from fsm_llm.runtime.scope import TurnScope
 from fsm_llm.runtime.stores import jsonl
 from fsm_llm.testing import ScriptedLLM, final_reply
-from tests.test_fsm_llm.event_log_support import _chunk, _reply, _Wrapper
+from tests.test_fsm_llm.event_log_support import (
+    _chunk,
+    _reply,
+    _Wrapper,
+    tree_bytes,
+)
 
 ROOT = "root-1"
 COMPLETION = "fsm_llm.llm.providers.litellm.completion"
@@ -61,10 +66,6 @@ def _request(text: str = "hi") -> ResponseGenerationRequest:
 
 def _events(log: EventLog, *types: str) -> list[dict[str, Any]]:
     return list(log.query(ROOT, types=types or None))
-
-
-def _tree_bytes(root: Path) -> bytes:
-    return b"".join(p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file())
 
 
 class _Unserializable:
@@ -252,7 +253,7 @@ class TestObserverPath:
 
     def test_credentials_never_reach_the_log_or_a_blob(self, log: Any) -> None:
         self._run(log)
-        data = _tree_bytes(log.root)
+        data = tree_bytes(log.root)
         assert data and not [s for s in _SECRET_TEXT if s.encode() in data]
 
     def test_a_failing_request_checkpoint_means_no_provider_call_and_no_count(
@@ -283,8 +284,8 @@ class TestObserverPath:
         assert error["type"] == "provider/error"
         assert (error["error_type"], error["status_code"]) == ("Down", 503)
         assert error["request_seq"] == request["seq"]
-        assert b"provider said" not in _tree_bytes(log.root)
-        assert b"sk-SECRET" not in _tree_bytes(log.root)
+        assert b"provider said" not in tree_bytes(log.root)
+        assert b"sk-SECRET" not in tree_bytes(log.root)
 
     @pytest.mark.parametrize("kind", ["deep dump", "raising dump"])
     def test_an_unrecordable_response_is_flagged_and_the_call_still_succeeds(
@@ -431,7 +432,7 @@ class TestEngineFallback:
         assert error["type"] == "provider/error"
         assert error["error_type"] == "LLMResponseError"
         assert error["request_seq"] == request["seq"] and error["source"] == "engine"
-        assert b"sk-LEAK" not in _tree_bytes(log.root)
+        assert b"sk-LEAK" not in tree_bytes(log.root)
 
     def test_a_response_after_the_reply_is_written_once(self, log: Any) -> None:
         llm = ScriptedLLM(replies=[final_reply("x")])

@@ -28,7 +28,7 @@ from fsm_llm.core.definitions import FSMError
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.llm.observer import OBSERVED_CALL_KEYS
 from fsm_llm.runtime import PRODUCED_TYPES, EventLog, canonical_json
-from tests.test_fsm_llm.event_log_support import _chunk, _reply
+from tests.test_fsm_llm.event_log_support import _chunk, _reply, tree_bytes
 from tests.test_fsm_llm.test_event_log_producers import (
     _CHILD,
     _FSM,
@@ -294,9 +294,7 @@ class TestThePrivacyCorpusEndToEnd:
         assert not [
             s for s in _CONTEXT_SECRETS if s in json.dumps(run.provider.received)
         ]
-        data = b"".join(
-            p.read_bytes() for p in (tmp_path / "events").rglob("*") if p.is_file()
-        )
+        data = tree_bytes(tmp_path / "events")
         assert b'"llm/request"' in data
         needles = (_KEY, _BASE, "secret-host", "hdr-SECRET", *_CONTEXT_SECRETS)
         assert [n for n in needles if n.encode() in data] == []
