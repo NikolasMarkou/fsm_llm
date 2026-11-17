@@ -26,6 +26,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.llm import LLMInterface, check_tool_transcript
 from fsm_llm.logging import logger
+from fsm_llm.runtime import llm_call
 
 from .base import StateExecutor
 from .services import _PipelineServices
@@ -167,7 +168,9 @@ class CompletionExecutor(StateExecutor):
                 f"first: {e.errors()[0]['msg']}"
             ) from e
         try:
-            reply = llm_interface.complete(request)
+            with llm_call(llm_interface, "completion", request) as call:
+                reply = llm_interface.complete(request)
+                call.response(reply)
         except NotImplementedError as e:
             raise LLMResponseError(
                 f"{type(llm_interface).__name__} does not implement "

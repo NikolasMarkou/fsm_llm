@@ -20,6 +20,7 @@ from fsm_llm.core.definitions import (
     State,
 )
 from fsm_llm.logging import logger
+from fsm_llm.runtime import llm_call
 
 from .records import _is_silent, _response_temperature
 from .surface import _PipelineSurface
@@ -103,34 +104,40 @@ class Pass2Mixin(_PipelineSurface):
         # signal, so a thrown Exception is deliberately treated as an ERROR (partial
         # dropped, user turn rolled back) even though the consumer may already have
         # seen chunks.  That asymmetry is intended, not an oversight.
-        try:
-            for chunk in self.llm_interface.generate_response_stream(request):
-                chunks.append(chunk)
-                yield chunk
-        except GeneratorExit:
-            raise
-        except BaseException:
-            persist = False
-            raise
-        finally:
-            # Store the accumulated response when the stream completed OR the
-            # consumer abandoned it — but never when it errored (see D-015).
-            #
-            # DECISION plan-2026-07-19T191147-4b664252/D-003 [STALE]
-            # TWO DISTINCT suppression conditions, deliberately not merged:
-            #   * `persist` is False only for a mid-stream ERROR (D-015 above).
-            #   * `full_message` is empty when the provider produced no real text
-            #     (e.g. every delta.content was ""), which `if chunks` could not
-            #     see — ['', ''] is a truthy list, so a blank assistant turn was
-            #     persisted permanently. Test on the JOINED content, never on the
-            #     chunk list.
-            # Do NOT collapse these into one flag: a GeneratorExit carrying a
-            # GENUINE partial must still persist (that is the engine/fsm/turns.py contract),
-            # and only the empty-content case is suppressed here.
-            full_message = "".join(chunks)
-            if full_message and persist:
-                instance.context.conversation.add_system_message(full_message)
-                log.debug("Streaming response generation completed")
+        with llm_call(
+            self.llm_interface, "response_stream", request, stream=True
+        ) as call:
+            try:
+                for chunk in call.stream(
+                    self.llm_interface.generate_response_stream(request)
+                ):
+                    chunks.append(chunk)
+                    yield chunk
+            except GeneratorExit:
+                raise
+            except BaseException:
+                persist = False
+                raise
+            finally:
+                # Store the accumulated response when the stream completed OR the
+                # consumer abandoned it — but never when it errored (see D-015).
+                #
+                # DECISION plan-2026-07-19T191147-4b664252/D-003 [STALE]
+                # TWO DISTINCT suppression conditions, deliberately not merged:
+                #   * `persist` is False only for a mid-stream ERROR (D-015 above).
+                #   * `full_message` is empty when the provider produced no real text
+                #     (e.g. every delta.content was ""), which `if chunks` could not
+                #     see — ['', ''] is a truthy list, so a blank assistant turn was
+                #     persisted permanently. Test on the JOINED content, never on the
+                #     chunk list.
+                # Do NOT collapse these into one flag: a GeneratorExit carrying a
+                # GENUINE partial must still persist (that is the engine/fsm/turns.py contract),
+                # and only the empty-content case is suppressed here.
+                full_message = "".join(chunks)
+                call.stream_done(full_message)
+                if full_message and persist:
+                    instance.context.conversation.add_system_message(full_message)
+                    log.debug("Streaming response generation completed")
 
     # ----------------------------------------------------------
     # Initial response generation
@@ -164,7 +171,9 @@ class Pass2Mixin(_PipelineSurface):
             instance, current_state, conversation_id, None, None, False, None
         )
 
-        response = self.llm_interface.generate_response(request)
+        with llm_call(self.llm_interface, "greeting", request) as call:
+            response = self.llm_interface.generate_response(request)
+            call.response(response)
         instance.last_response_generation = response
         instance.context.conversation.add_system_message(response.message)
         if was_cut_off(response):
@@ -219,7 +228,9 @@ class Pass2Mixin(_PipelineSurface):
             previous_state,
         )
 
-        response = self.llm_interface.generate_response(request)
+        with llm_call(self.llm_interface, "response_generation", request) as call:
+            response = self.llm_interface.generate_response(request)
+            call.response(response)
         instance.last_response_generation = response
         instance.context.conversation.add_system_message(response.message)
         if was_cut_off(response):

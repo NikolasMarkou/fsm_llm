@@ -44,6 +44,7 @@ from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import implements_complete
 from fsm_llm.logging import logger
 
+from .events import record_transition
 from .records import (
     _record_transition_classification,
     _TurnRecord,
@@ -123,12 +124,15 @@ class TransitionsMixin(_PipelineSurface):
 
         elif evaluation.result_type == TransitionEvaluationResult.BLOCKED:
             log.warning(f"Transitions blocked: {evaluation.blocked_reason}")
+            record_transition(current_state, evaluation, None, executed=False)
             return False, None
 
         if target_state:
             self._execute_state_transition(instance, target_state, conversation_id)
+            record_transition(current_state, evaluation, target_state, executed=True)
             return True, previous_state_id
 
+        record_transition(current_state, evaluation, None, executed=False)
         return False, None
 
     # ----------------------------------------------------------

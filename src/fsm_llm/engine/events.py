@@ -32,6 +32,16 @@ Interface contract:
       ``rolled_back`` when the end state blob equals the start one (same ``state_ref``, the blobs
       are content addressed) and ``abandoned`` when it does not (a partial Pass-1 commit that
       the pipeline keeps by contract).
+    - ``delta_blob(delta, definition) -> dict``: the log-safe form of an out-of-turn context write
+      (``API.update_context``): ``{"context": ..., "internal": ...}``. ``context`` holds the
+      public keys through ``filter_context``; ``internal`` only the keys the definition's
+      completion states declare (the D-009 allow-list), nothing else; a ``None`` value stays
+      ``None`` (it deletes the key, as in the write).
+    - ``record_delta(manager, scope, child_id, delta, *, source) -> int``: append the
+      ``context/record`` of an out-of-turn write to conversation *child_id* under *scope*: ``source``,
+      ``keys`` (the written key names, sorted) and ``delta_ref`` (the ``delta_blob`` of the
+      definition that conversation runs). Reads ``manager.instances`` here, not in the ``API``
+      modules (a source scan keeps the ``API`` off the manager's tables).
     - ``record_state(manager, log, conversation_id, *, source, frame=0, **fields) -> int``: append
       one ``context/record`` with the state of the conversation read under ONE ``conv_lock`` hold
       (out of any turn: ``start_conversation``).
@@ -149,6 +159,43 @@ def state_blob(instance: FSMInstance, definition: FSMDefinition) -> dict[str, An
     }
     safe: dict[str, Any] = to_jsonable(blob)
     return safe
+
+
+def delta_blob(delta: Mapping[str, Any], definition: FSMDefinition) -> dict[str, Any]:
+    """Return the log-safe form of a context write (see the module docstring)."""
+    keys = declared_internal_keys(definition)
+    blob: dict[str, Any] = to_jsonable(
+        {
+            "context": filter_context(
+                {name: value for name, value in delta.items() if name not in keys}
+            ),
+            "internal": filter_context(
+                {name: delta[name] for name in keys if name in delta},
+                keep_internal=keys,
+            ),
+        }
+    )
+    return blob
+
+
+def record_delta(
+    manager: _TurnManager,
+    scope: TurnScope,
+    child_id: str,
+    delta: Mapping[str, Any],
+    *,
+    source: str,
+) -> int:
+    """Append the ``context/record`` of a context write (see the module docstring)."""
+    definition = manager.get_fsm_definition(manager.instances[child_id].fsm_id)
+    return scope.log.append(
+        scope.root_id,
+        EventType.CONTEXT_RECORD,
+        frame=scope.frame,
+        source=source,
+        keys=sorted(str(name) for name in delta),
+        delta_ref=scope.log.put_json(delta_blob(delta, definition)),
+    )
 
 
 def begin_turn(

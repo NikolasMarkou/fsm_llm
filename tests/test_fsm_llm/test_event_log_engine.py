@@ -99,6 +99,12 @@ def _types(log: EventLog, cid: str) -> list[str]:
     return [e["type"] for e in log.read(cid)]
 
 
+def _boundary(log: EventLog, cid: str) -> list[str]:
+    """The turn boundary of a conversation: the state-carrying types only (the producers of
+    plan step 8 write executor, transition and model-call events between them)."""
+    return [t for t in _types(log, cid) if t in (RECORD, START, END)]
+
+
 def _of(log: EventLog, cid: str, *kinds: str) -> list[dict[str, Any]]:
     return [e for e in log.read(cid) if e["type"] in kinds]
 
@@ -118,7 +124,7 @@ class TestTurnBoundary:
         api = _api(log)
         cid, greeting = api.start_conversation()
         assert api.converse("hello", cid) == "ok"
-        assert _types(log, cid) == [RECORD, START, END]
+        assert _boundary(log, cid) == [RECORD, START, END]
         start, end = _of(log, cid, START, END)
         assert start["has_user_message"] is True and start["frame"] == 0
         assert log.get_json(start["user_message_ref"]) == "hello"
@@ -165,10 +171,10 @@ class TestTurnBoundary:
         api = _api(log)
         cid, _ = api.start_conversation()
         assert "".join(api.converse_stream("hi", cid)) == "ok"
-        assert _types(log, cid) == [RECORD, START, END]
+        assert _boundary(log, cid) == [RECORD, START, END]
         assert _of(log, cid, END)[0]["outcome"] == "committed"
         assert "".join(api.advance_stream(cid)) == "ok"
-        assert _types(log, cid)[-2:] == [START, END]
+        assert _boundary(log, cid)[-2:] == [START, END]
 
     def test_a_turn_run_inside_an_except_block_is_still_committed(self, log: EventLog):
         """``sys.exc_info()`` in a ``finally`` would answer with the CALLER's exception here."""
@@ -202,7 +208,7 @@ class TestTurnBoundary:
         stream = api.converse_stream("hi", cid)
         assert next(stream) == "o"
         stream.close()
-        assert _types(log, cid) == [RECORD, START, END]
+        assert _boundary(log, cid) == [RECORD, START, END]
         start, end = _of(log, cid, START, END)
         assert end["outcome"] == "abandoned"
         assert end["state_ref"] != start["state_ref"]  # the partial reply is kept
@@ -249,7 +255,7 @@ class TestTurnBoundary:
             "committed",
             "rolled_back",
         ]
-        assert _types(log, cid)[-2:] == [START, END]
+        assert _boundary(log, cid)[-2:] == [START, END]
 
     def test_a_failing_turn_start_fails_the_turn_and_leaks_no_lock(self, log: EventLog):
         api = _api(log)
@@ -279,7 +285,9 @@ class TestTurnBoundary:
     ):
         api = _api(log)
         cid, _ = api.start_conversation()
-        with patch.object(jsonl, "_fsync", side_effect=OSError("no flush")):
+        # The turn has two checkpoints: the Pass-2 `llm/request`, then `turn/end`. The first
+        # flush succeeds, the second fails: only `turn/end` is lost, the reply is not.
+        with patch.object(jsonl, "_fsync", side_effect=[None, OSError("no flush")]):
             assert api.converse("hi", cid) == "ok"  # turn/end is a checkpoint
         assert api.fsm_manager._active_turns == set()
         with pytest.raises(FSMError):  # the poisoned writer refuses the next turn
@@ -440,7 +448,7 @@ class TestStrangler:
             manager.process_message(cid, "hi")
         assert {name for name, _, _ in events} <= {"lock", "cache", "conv"}
         assert _short(events) == _PINNED["process_message"]
-        assert _types(log, "own-lock-only") == [START, END]
+        assert _boundary(log, "own-lock-only") == [START, END]
 
 
 class TestOptIn:
@@ -533,5 +541,5 @@ class TestThreads:
         assert errors == []
         for cid in ids:
             kinds = _types(log, cid)
-            assert kinds == [RECORD, *[START, END] * 3]
+            assert _boundary(log, cid) == [RECORD, *[START, END] * 3]
             assert [e["seq"] for e in log.read(cid)] == list(range(1, len(kinds) + 1))

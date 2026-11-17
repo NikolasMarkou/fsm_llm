@@ -1092,6 +1092,7 @@
     "fsm_llm.engine.kinds.services",
     "fsm_llm.engine.turn",
     "fsm_llm.engine.turn.driver",
+    "fsm_llm.engine.turn.events",
     "fsm_llm.engine.turn.pass1",
     "fsm_llm.engine.turn.pass2",
     "fsm_llm.engine.turn.surface",

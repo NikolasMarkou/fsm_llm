@@ -26,6 +26,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.logging import logger
+from fsm_llm.runtime import llm_call
 
 from .surface import _ConversationSurface
 
@@ -262,7 +263,10 @@ class ConversationFieldsMixin(_ConversationSurface):
                 if memo is not None and memo_key in memo:
                     response = memo[memo_key]
                 else:
-                    response = self._services.llm_interface.extract_field(request)
+                    llm = self._services.llm_interface
+                    with llm_call(llm, "field_extraction", request) as call:
+                        response = llm.extract_field(request)
+                        call.response(response)
                     if memo is not None and response.value is None:
                         memo[memo_key] = response
             except Exception as e:

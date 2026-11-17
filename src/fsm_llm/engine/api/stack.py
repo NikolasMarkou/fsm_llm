@@ -19,6 +19,12 @@ from fsm_llm.core.definitions import FSMDefinition, FSMError
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.logging import logger
 
+from .events import (
+    child_event_scope,
+    record_context_update,
+    record_pop,
+    record_push,
+)
 from .helpers import _require_classifier_interface, _unexpected_error
 from .surface import _ApiSurface
 
@@ -116,9 +122,10 @@ class StackMixin(_ApiSurface):
                 child_definition=processed_fsm_def,
             )
 
-            new_conversation_id, response = self.fsm_manager.start_conversation(
-                processed_fsm_id, initial_context=initial_context
-            )
+            with child_event_scope(self, conversation_id):
+                new_conversation_id, response = self.fsm_manager.start_conversation(
+                    processed_fsm_id, initial_context=initial_context
+                )
             with self._stack_lock:
                 # DECISION plan-2026-07-21T045419-9925aa3a/D-011
                 # Do NOT re-add `_temp_fsm_definitions.pop(processed_fsm_id, None)`
@@ -150,6 +157,14 @@ class StackMixin(_ApiSurface):
 
             with self._stack_lock:
                 stack_depth = len(self.conversation_stacks.get(conversation_id, []))
+            record_push(
+                self,
+                conversation_id,
+                new_conversation_id,
+                processed_fsm_id,
+                processed_fsm_def,
+                stack_depth,
+            )
             logger.info(
                 f"Pushed new FSM onto conversation {conversation_id}, "
                 f"stack depth: {stack_depth}"
@@ -367,6 +382,15 @@ class StackMixin(_ApiSurface):
             response = self._generate_resume_message(context_to_merge)
             with self._stack_lock:
                 stack_depth = len(self.conversation_stacks.get(conversation_id, []))
+            record_pop(
+                self,
+                conversation_id,
+                current_frame.conversation_id,
+                current_frame.fsm_id,
+                merge_strategy_enum.value,
+                len(context_to_merge or {}),
+                stack_depth,
+            )
             logger.info(
                 f"Popped FSM from conversation {conversation_id}, "
                 f"stack depth: {stack_depth}"
@@ -540,6 +564,7 @@ class StackMixin(_ApiSurface):
             return
         current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
         self.fsm_manager.update_conversation_context(current_fsm_id, context_update)
+        record_context_update(self, conversation_id, current_fsm_id, context_update)
 
     def get_stack_depth(self, conversation_id: str) -> int:
         """

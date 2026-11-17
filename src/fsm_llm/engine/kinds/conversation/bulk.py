@@ -15,6 +15,7 @@ from fsm_llm.constants import CONTEXT_KEY_AGENT_TRACE, is_forbidden_context_entr
 from fsm_llm.context.layout import sanitize_text_for_prompt
 from fsm_llm.core.definitions import BulkExtractionRequest, FSMInstance, State
 from fsm_llm.logging import logger
+from fsm_llm.runtime import llm_call
 
 from .surface import _ConversationSurface
 
@@ -130,7 +131,10 @@ class ConversationBulkMixin(_ConversationSurface):
                 user_message=user_message,
                 prompt_context=prompt_context,
             )
-            response = self._services.llm_interface.extract_bulk_data(request)
+            llm = self._services.llm_interface
+            with llm_call(llm, "data_extraction", request) as call:
+                response = llm.extract_bulk_data(request)
+                call.response(response)
             # Filter out None/empty values — extract_bulk_data returns the
             # extraction verbatim; this merge-time filtering is this
             # caller's own concern, not the LLM interface's.

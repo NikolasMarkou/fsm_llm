@@ -47,6 +47,7 @@ from fsm_llm.llm import (
 )
 from fsm_llm.llm.json_extraction import extract_json_from_text
 from fsm_llm.logging import logger
+from fsm_llm.runtime import llm_call
 
 # Type alias for intent handler functions
 HandlerFn = Callable[[str, dict[str, str | None]], Any]
@@ -365,7 +366,9 @@ class Classifier:
         # in it (AttributeError, ...) must fail the turn as it does in
         # generate_response, not become a silent "stay" (0d9c218e/D-001).
         try:
-            response = self._llm.complete(request)
+            with llm_call(self._llm, "classification", request) as call:
+                response = self._llm.complete(request)
+                call.response(response)
         except LLMResponseError as e:
             raise ClassificationError(f"Classification LLM call failed: {e!s}") from e
         logger.debug(f"Classification call completed in {time.time() - start:.2f}s")

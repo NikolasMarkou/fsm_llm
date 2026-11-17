@@ -14,6 +14,7 @@ from fsm_llm.engine.kinds.records import _is_agent_managed, _record_provenance
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
+from .events import record_executor_result, record_executor_start
 from .records import _TurnRecord
 from .surface import _PipelineSurface
 
@@ -47,9 +48,11 @@ class Pass1Mixin(_PipelineSurface):
         # completion state its one completion call (engine/kinds/completion.py).
         source_state = self.get_state(instance, conversation_id)
         executor = executor_for(source_state, self._executors)
+        record_executor_start(source_state)
         extraction_response = executor.extract(
             self, instance, user_message, conversation_id, source_state
         )
+        record_executor_result(source_state, extraction_response)
 
         # Step 2: Update context with extracted data
         if extraction_response.extracted_data:
