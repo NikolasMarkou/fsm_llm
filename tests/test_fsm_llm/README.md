@@ -1,6 +1,6 @@
 # test_fsm_llm
 
-The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 94 test files (7,737 collected tests) plus a `fixtures/` package of labelled secret-filter data.
+The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 94 test files (7,751 collected tests) plus a `fixtures/` package of labelled secret-filter data.
 
 ## What it is for
 
@@ -30,7 +30,7 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 ## Files
 
 - `conftest.py` - the `minimal_fsm_dict` fixture (a one-state FSM with only required fields) and the `log` fixture (an `EventLog` in a temporary directory, closed at teardown, shared by the event log tests).
-- `event_log_support.py` - helpers the event log test files share (scripted provider replies and chunks, a wrapper interface, the child process environment, the reopen after a kill). Not collected: the name has no `test_` prefix.
+- `event_log_support.py` - helpers the event log test files share (scripted provider replies and chunks, a wrapper interface, the child process environment, the reopen after a kill, `tree_files` and `tree_bytes` that skip byte-range-locked `.lock` files). Not collected: the name has no `test_` prefix.
 - `support.py` - helpers that more than one test file uses (FSM builders, fake provider responses, scripted providers). Not collected: the name has no `test_` prefix.
 - `kind_corpus.py` - the corpus and recording code behind `test_kind_equality.py` (the 14 example FSMs, the agent, `native_fc`, meta and reasoning builders, the 32 synthesis-bench FSMs and hand-written completion and synthesize fixtures, plus three scripted turns). Not collected; `python -m tests.test_fsm_llm.kind_corpus --write` regenerates the baseline, `--show CASE` prints one record.
 - `fixtures/` - labelled corpora for the secret filter (`context_key_corpus.py`, `holdout_key_corpus.py`, `census_key_corpus.py`).
