@@ -6,6 +6,7 @@ error mapping, request bounds, dashboard config parsing and builder guards.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import subprocess
@@ -340,3 +341,47 @@ class TestPresetValidation:
                 validate_preset_id(bad, tmp_path)
         with pytest.raises(FileNotFoundError):
             validate_preset_id("missing.json", tmp_path)
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            OSError(errno.ELOOP, "Too many levels of symbolic links"),
+            OSError(errno.EACCES, "Permission denied"),
+            RuntimeError("Symlink loop from 'a'"),  # Python 3.11 and 3.12
+        ],
+        ids=["eloop", "eacces", "runtime-loop"],
+    )
+    def test_a_resolve_failure_is_an_invalid_preset(self, tmp_path, failure):
+        """``resolve_within`` raises ``OSError`` or ``RuntimeError`` for a symlink loop
+        (and on Windows for a reparse point it cannot follow); that must read as an
+        invalid id (a 400), never reach the route as a 500."""
+        (tmp_path / "ok.json").write_text("{}", encoding="utf-8")
+
+        with mock.patch(
+            "fsm_llm.monitor.instance_manager.examples.resolve_within",
+            side_effect=failure,
+        ):
+            with pytest.raises(ValueError, match="Invalid preset ID"):
+                validate_preset_id("ok.json", tmp_path)
+
+    @pytest.mark.parametrize(
+        "route", ["/api/preset/fsm/ok.json", "/api/fsm/visualize/preset/ok.json"]
+    )
+    def test_a_resolve_failure_answers_400_on_the_preset_routes(self, tmp_path, route):
+        (tmp_path / "ok.json").write_text("{}", encoding="utf-8")
+        client = _client()
+
+        with (
+            mock.patch(
+                "fsm_llm.monitor.instance_manager.examples.find_examples_dir",
+                return_value=tmp_path,
+            ),
+            mock.patch(
+                "fsm_llm.monitor.instance_manager.examples.resolve_within",
+                side_effect=OSError(errno.ELOOP, "Too many levels of symbolic links"),
+            ),
+        ):
+            response = client.get(route)
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "invalid preset ID"

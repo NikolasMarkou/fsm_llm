@@ -11,8 +11,12 @@ from pathlib import Path
 # Path Confinement
 # --------------------------------------------------------------
 
-#: ``OSError.winerror`` values of a Windows symlink loop (no ``ELOOP`` there).
-_WIN_LOOP_ERRORS = (1920, 1921)
+#: ``OSError.winerror`` of a Windows symlink loop (no ``ELOOP`` there):
+#: ERROR_CANT_RESOLVE_FILENAME. 1920 (ERROR_CANT_ACCESS_FILE) is NOT a loop code:
+#: Windows also returns it for reparse points it cannot follow (WSL links, app
+#: execution aliases, cloud placeholders), which CPython's own ``ntpath.realpath``
+#: tolerates; add it only after a Windows run shows the loop raising it.
+_WIN_LOOP_ERRORS = (1921,)
 
 
 def resolve_within(root: Path, relative: str | os.PathLike[str]) -> Path | None:
@@ -36,8 +40,8 @@ def resolve_within(root: Path, relative: str | os.PathLike[str]) -> Path | None:
         - Failure mode: ``ValueError`` for an embedded NUL byte in *relative*
           (raised here on every platform: Windows with Python 3.13 or later no
           longer raises it from ``resolve()``), ``RuntimeError`` or ``OSError``
-          for a symlink loop (on Windows, ``OSError`` with ``winerror`` 1920 or
-          1921 counts as one). Other ``Path.resolve()`` errors propagate
+          for a symlink loop (on Windows, ``OSError`` with ``winerror`` 1921
+          counts as one). Other ``Path.resolve()`` errors propagate
           unchanged. The caller decides how to refuse.
 
     The order is load-bearing: RESOLVE FIRST, COMPARE SECOND, and compare path
@@ -53,7 +57,7 @@ def resolve_within(root: Path, relative: str | os.PathLike[str]) -> Path | None:
     this guard stops path arguments chosen by a model or found in a bundle, not
     a hostile local process.
     """
-    if "\0" in str(relative):
+    if "\0" in os.fspath(relative):
         raise ValueError("embedded null byte")
     resolved = (root / relative).resolve()
     if sys.version_info >= (3, 13):
@@ -62,8 +66,8 @@ def resolve_within(root: Path, relative: str | os.PathLike[str]) -> Path | None:
         # RuntimeError. A strict resolve of the result raises ELOOP again, so the
         # failure mode in the contract holds on every version. A missing target
         # is fine and stays allowed. Windows has no ELOOP: its loop is
-        # ERROR_CANT_ACCESS_FILE (1920) or ERROR_CANT_RESOLVE_FILENAME (1921),
-        # and the non-strict resolve() swallows both.
+        # ERROR_CANT_RESOLVE_FILENAME (1921), which the non-strict resolve()
+        # swallows.
         try:
             resolved.resolve(strict=True)
         except OSError as exc:

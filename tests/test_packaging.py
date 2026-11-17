@@ -2112,7 +2112,32 @@ def _bare_symlink_calls(tree: ast.AST) -> list[int]:
     ]
 
 
-_SUBPROCESS_CALLS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
+_SUBPROCESS_CALLS = {
+    "subprocess": frozenset({"run", "Popen", "check_output", "check_call", "call"}),
+    "asyncio": frozenset({"create_subprocess_exec", "create_subprocess_shell"}),
+}
+
+
+def _child_process_names(tree: ast.AST) -> set[str]:
+    """Bare names that start a child process in *tree*: ``from subprocess import run``
+    and ``from asyncio import create_subprocess_exec`` (an ``as`` alias counts)."""
+    return {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module in _SUBPROCESS_CALLS
+        for alias in node.names
+        if alias.name in _SUBPROCESS_CALLS[node.module or ""]
+    }
+
+
+def _starts_a_child(node: ast.Call, bare: set[str]) -> bool:
+    if isinstance(node.func, ast.Name):
+        return node.func.id in bare
+    return (
+        isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.attr in _SUBPROCESS_CALLS.get(node.func.value.id, ())
+    )
 
 
 def _scrubbed_env_without_systemroot(tree: ast.AST) -> list[int]:
@@ -2124,15 +2149,30 @@ def _scrubbed_env_without_systemroot(tree: ast.AST) -> list[int]:
     cannot ``import asyncio`` on Windows (``WinError 10106``). The dict is read
     when it is written in the call or assigned to the name in the same scope;
     an environment copied from ``os.environ`` or built by a helper is not read.
+
+    The calls read are ``subprocess.run/Popen/check_output/check_call/call``,
+    ``asyncio.create_subprocess_exec/shell`` and the same names imported bare
+    (``from subprocess import run``, aliases included); the env is a dict literal
+    or ``dict(PATH=...)``. Limits, on purpose: a call through another module
+    alias (``import subprocess as sp``), an environment built by mutation
+    (``env["PATH"] = ...``) or returned by a helper, and a function imported from a
+    project module that wraps ``subprocess`` are not seen.
     """
+    bare = _child_process_names(tree)
 
     def _literal_bad(node: ast.AST) -> bool:
-        if not isinstance(node, ast.Dict):
+        if isinstance(node, ast.Dict):
+            keys = [
+                k.value for k in node.keys if isinstance(k, ast.Constant)
+            ]  # a splat has the key None
+            splats = [
+                v for k, v in zip(node.keys, node.values, strict=True) if k is None
+            ]
+        elif isinstance(node, ast.Call) and _call_name(node) == "dict":
+            keys = [kw.arg for kw in node.keywords if kw.arg]
+            splats = [kw.value for kw in node.keywords if kw.arg is None]
+        else:
             return False
-        keys = [
-            k.value for k in node.keys if isinstance(k, ast.Constant)
-        ]  # a splat has the key None
-        splats = [v for k, v in zip(node.keys, node.values, strict=True) if k is None]
         keeps = "SYSTEMROOT" in keys or any(
             (isinstance(v, ast.Call) and _call_name(v) == "passthrough_env")
             or "SYSTEMROOT" in ast.unparse(v)
@@ -2153,12 +2193,7 @@ def _scrubbed_env_without_systemroot(tree: ast.AST) -> list[int]:
                     if isinstance(target, ast.Name):
                         assigned.setdefault(target.id, []).append(node.value)
         for node in ast.walk(scope):
-            if not (
-                isinstance(node, ast.Call)
-                and _call_name(node) in _SUBPROCESS_CALLS
-                and isinstance(node.func, ast.Attribute)
-                and getattr(node.func.value, "id", "") == "subprocess"
-            ):
+            if not (isinstance(node, ast.Call) and _starts_a_child(node, bare)):
                 continue
             for kw in node.keywords:
                 if kw.arg != "env":
@@ -2280,8 +2315,16 @@ class TestPortabilityRules:
             "    subprocess.Popen(['x'], env=env)\n"
             "def g():\n"
             "    subprocess.run(['x'], env={'PATH': '', **other()})\n"
+            "from subprocess import run, Popen as P\n"
+            "run(['x'], env={'PATH': 'p'})\n"
+            "P(['x'], env={'PATH': 'p'})\n"
+            "import asyncio\n"
+            "asyncio.create_subprocess_exec('x', env={'PATH': 'p'})\n"
+            "from asyncio import create_subprocess_shell\n"
+            "create_subprocess_shell('x', env={'PATH': 'p'})\n"
+            "subprocess.run(['x'], env=dict(PATH='p'))\n"
         )
-        assert _scrubbed_env_without_systemroot(flagged) == [2, 5, 7]
+        assert _scrubbed_env_without_systemroot(flagged) == [2, 5, 7, 9, 10, 12, 14, 15]
         accepted = ast.parse(
             "import subprocess\n"
             "subprocess.run(['x'], env={'PATH': 'p', **passthrough_env()})\n"
@@ -2294,6 +2337,10 @@ class TestPortabilityRules:
             "subprocess.run(['x'], env=dict(os.environ))\n"
             "subprocess.run(['x'])\n"
             "other.run(['x'], env={'PATH': 'p'})\n"
+            "subprocess.run(['x'], env=dict(PATH='p', **passthrough_env()))\n"
+            "def run(): pass\n"
+            "run(env={'PATH': 'p'})\n"
+            "asyncio.create_subprocess_exec('x', env={'PATH': 'p', **passthrough_env()})\n"
         )
         assert _scrubbed_env_without_systemroot(accepted) == []
 

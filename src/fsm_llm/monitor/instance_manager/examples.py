@@ -39,7 +39,9 @@ def validate_preset_id(preset_id: str, base: Path) -> Path:
     # land inside.
     try:
         confined = resolve_within(base.resolve(), preset_id)
-    except ValueError as e:  # an embedded NUL byte
+    except (OSError, RuntimeError, ValueError) as e:
+        # an embedded NUL byte, or a symlink loop or unreadable link on the way
+        # (`OSError`, `RuntimeError` on Python 3.11 and 3.12): an invalid id, not a 500
         raise ValueError("Invalid preset ID") from e
     if confined is None:
         raise ValueError("Invalid preset ID")

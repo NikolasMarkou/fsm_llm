@@ -584,20 +584,31 @@ def pytest_collection_modifyitems(config, items):
 #: ``huge_operand_explanation`` explains a failed ``==`` itself, without ``difflib``,
 #: when an operand is a string or bytes of more than this many characters ...
 MAX_COMPARE_CHARS = 10_000
-#: ... or lines, or a list, tuple, dict or set of more than ``MAX_COMPARE_ITEMS``.
-MAX_COMPARE_LINES = 200
+#: ... or when two texts have more lines than this once multiplied (``ndiff`` of
+#: near-equal texts is cubic: it compares every line of one side with every line of
+#: the other, measured on Python 3.11: 200 x 200 lines 0.5 s, 400 x 560 lines 5.5 s,
+#: about 1,000 lines a RecursionError) ...
+MAX_COMPARE_LINE_PAIRS = 100_000
+#: ... or a list, tuple, dict or set of more than this many items.
 MAX_COMPARE_ITEMS = 1_000
+
+
+def _line_count(value: object) -> int:
+    if isinstance(value, (str, bytes)):
+        return value.count(b"\n" if isinstance(value, bytes) else "\n") + 1
+    return 0
 
 
 def _too_big_to_diff(value: object) -> bool:
     if isinstance(value, (str, bytes)):
-        newline = b"\n" if isinstance(value, bytes) else "\n"
-        return (
-            len(value) > MAX_COMPARE_CHARS or value.count(newline) > MAX_COMPARE_LINES
-        )
+        return len(value) > MAX_COMPARE_CHARS
     if isinstance(value, (list, tuple, dict, set, frozenset)):
         return len(value) > MAX_COMPARE_ITEMS
     return False
+
+
+def _too_many_line_pairs(left: object, right: object) -> bool:
+    return _line_count(left) * _line_count(right) > MAX_COMPARE_LINE_PAIRS
 
 
 def _describe(value: object) -> str:
@@ -611,8 +622,11 @@ def huge_operand_explanation(op: str, left: object, right: object) -> list[str] 
     Interface contract (``tests/test_fsm_llm/test_conftest_guards.py`` pins it):
         - Returns ``None`` (pytest explains the comparison as usual) unless *op* is
           ``==`` and an operand is a string or bytes of more than
-          ``MAX_COMPARE_CHARS`` characters or ``MAX_COMPARE_LINES`` lines, or a
-          list, tuple, dict, set or frozenset of more than ``MAX_COMPARE_ITEMS``.
+          ``MAX_COMPARE_CHARS`` characters, or both are texts whose line counts
+          multiply to more than ``MAX_COMPARE_LINE_PAIRS`` (the quantity that makes
+          ``ndiff`` slow; a 201 line text of 895 characters keeps the normal diff),
+          or an operand is a list, tuple, dict, set or frozenset of more than
+          ``MAX_COMPARE_ITEMS``.
         - Otherwise returns a short explanation (the first line is the summary, as
           pytest's own): the two types and lengths, the index of the first
           difference (strings, bytes, lists, tuples) with a short window of each
@@ -627,7 +641,11 @@ def huge_operand_explanation(op: str, left: object, right: object) -> list[str] 
     builtin one runs whatever a conftest returns; ``pytest_configure`` below puts
     this function in front of pytest's own ``util.assertrepr_compare`` instead.
     """
-    if op != "==" or not (_too_big_to_diff(left) or _too_big_to_diff(right)):
+    if op != "==" or not (
+        _too_big_to_diff(left)
+        or _too_big_to_diff(right)
+        or _too_many_line_pairs(left, right)
+    ):
         return None
     lines = [
         f"{_describe(left)} == {_describe(right)}",
@@ -652,12 +670,16 @@ def guard_assertrepr_compare(original):
     """Wrap pytest's ``util.assertrepr_compare`` so a huge operand skips ``difflib``.
 
     Interface contract (``pytest_configure`` only): *original* is the function
-    ``_pytest.assertion.util.assertrepr_compare``, which pytest 9 calls as
-    ``assertrepr_compare(op=..., left=..., right=..., verbose=..., ...)`` and which
-    returns an iterator of lines. The wrapper reads ``op``, ``left`` and ``right``
-    from the keywords; a call that does not pass them by keyword (another pytest
-    version) goes to *original* unchanged, so the guard fails open and never hides
-    an assertion. Returns an iterator, as *original* does.
+    ``_pytest.assertion.util.assertrepr_compare``. pytest calls it as
+    ``assertrepr_compare(op=..., left=..., right=..., ...)`` by keyword (9.0.x
+    consumes a list and passes ``config=``; 9.1.x wraps the result in ``list()``
+    and passes ``verbose=`` and the highlighter). The wrapper reads ``op``,
+    ``left`` and ``right`` from the keywords and, for a huge operand, returns the
+    explanation as a LIST (both versions accept a list; 9.0.x calls ``len()`` on
+    the result, an iterator breaks it). Any other call (``op``, ``left`` or
+    ``right`` not all given by keyword, or no huge operand) returns exactly what
+    *original* returns, so an unknown call shape reaches pytest's own code and
+    only the guard is lost; it never hides an assertion.
     """
 
     def guarded(*args, **kwargs):
@@ -666,7 +688,7 @@ def guard_assertrepr_compare(original):
                 kwargs["op"], kwargs["left"], kwargs["right"]
             )
             if explanation is not None:
-                return iter(explanation)
+                return explanation
         return original(*args, **kwargs)
 
     guarded.__wrapped__ = original

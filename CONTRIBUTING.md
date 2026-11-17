@@ -20,7 +20,7 @@ Upgrading a clone from before the 2026-09-29 restructure (extensions moved under
 
 ```bash
 make install-dev    # editable install with every extra, plus pre-commit hooks
-make test           # Run full test suite (17,998 tests)
+make test           # Run full test suite (18,012 tests)
 make lint           # ruff check src/ tests/
 make format         # ruff format src/ tests/
 make type-check     # mypy on the fsm_llm package (src/fsm_llm/)

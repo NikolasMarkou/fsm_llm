@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 import errno
 import os
+import stat
 import subprocess
 import sys
 import threading
@@ -418,20 +419,25 @@ class TestReadBytesWithoutNoFollow:
         with pytest.raises(OSError):
             read_bytes(link, 100)
 
-    def test_a_symlink_swapped_in_after_the_open_is_refused(
+    def test_a_symlink_retargeted_after_the_open_is_refused(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The open saw a regular file; the name is a symlink by the time of the check."""
-        path = tmp_path / "doc.md"
-        path.write_bytes(b"innocent")
+        """The open followed a link to an innocent file; by the check the name is a
+        link to the secret. Staged so that Windows allows it too: the open handle
+        pins the target, never the link, so the link can be deleted and made again
+        while the handle is open (a regular file at the name could not be)."""
+        innocent = tmp_path / "innocent.md"
+        innocent.write_bytes(b"innocent")
         secret = tmp_path / "secret.txt"
         secret.write_bytes(b"top secret")
+        path = tmp_path / "doc.md"
+        symlink_or_skip(path, innocent)
 
-        def swap() -> None:
+        def retarget() -> None:
             path.unlink()
             symlink_or_skip(path, secret)
 
-        self._swap_after_open(monkeypatch, swap)
+        self._swap_after_open(monkeypatch, retarget)
 
         with pytest.raises(OSError) as caught:
             read_bytes(path, 100)
@@ -441,18 +447,75 @@ class TestReadBytesWithoutNoFollow:
     def test_a_different_file_swapped_in_after_the_open_is_refused(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Not a link, but no longer the file the handle holds: also refused."""
+        """Not a link at the check, but no longer the file the handle holds. The
+        name is a link when the open happens (so the handle is on ``first``, not on
+        the name, and Windows lets the name be replaced) and a regular file at the
+        check: only the identity comparison can refuse it."""
+        first = tmp_path / "first.md"
+        first.write_bytes(b"first")
         path = tmp_path / "doc.md"
-        path.write_bytes(b"first")
-        other = tmp_path / "other.md"
-        other.write_bytes(b"second")
+        symlink_or_skip(path, first)
 
-        self._swap_after_open(monkeypatch, lambda: os.replace(other, path))
+        def replace_by_regular_file() -> None:
+            path.unlink()
+            path.write_bytes(b"second")
+
+        self._swap_after_open(monkeypatch, replace_by_regular_file)
 
         with pytest.raises(OSError) as caught:
             read_bytes(path, 100)
 
         assert caught.value.errno == errno.ELOOP
+
+    @staticmethod
+    def _fake_stats(
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        named: tuple[int, int],
+        opened: tuple[int, int],
+    ) -> None:
+        """Make ``os.lstat`` (the name) and ``os.fstat`` (the handle) report a regular
+        file with the given ``(st_ino, st_dev)``; no race and no symlink needed."""
+
+        class _Stat:
+            def __init__(self, ino_dev: tuple[int, int]) -> None:
+                self.st_mode, (self.st_ino, self.st_dev) = stat.S_IFREG | 0o644, ino_dev
+
+        monkeypatch.setattr(os, "lstat", lambda p: _Stat(named))
+        monkeypatch.setattr(os, "fstat", lambda fd: _Stat(opened))
+
+    def test_a_pair_of_stats_for_different_files_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The identity half on every OS and without a link: the same decision on
+        stand-in stat results (runs on Windows where a staged swap may be skipped)."""
+        path = tmp_path / "doc.md"
+        path.write_bytes(b"x")
+        self._fake_stats(monkeypatch, named=(5, 1), opened=(6, 1))
+
+        with pytest.raises(OSError) as caught:
+            read_bytes(path, 10)
+
+        assert caught.value.errno == errno.ELOOP
+
+    def test_a_pair_of_stats_for_one_file_is_accepted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "doc.md"
+        path.write_bytes(b"x")
+        self._fake_stats(monkeypatch, named=(5, 1), opened=(5, 1))
+
+        assert read_bytes(path, 10) == b"x"
+
+    def test_the_same_inode_on_two_devices_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "doc.md"
+        path.write_bytes(b"x")
+        self._fake_stats(monkeypatch, named=(5, 1), opened=(5, 2))
+
+        with pytest.raises(OSError):
+            read_bytes(path, 10)
 
     def test_a_zero_inode_skips_the_identity_comparison(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -190,19 +190,50 @@ class TestResolveWithin:
             patch.setattr(sys, "version_info", (3, 13, 0, "final", 0))
             return resolve_within(root, "a")
 
-    @pytest.mark.parametrize("winerror", [1920, 1921])
     def test_a_windows_symlink_loop_raises_like_eloop(
-        self, root: Path, monkeypatch: pytest.MonkeyPatch, winerror: int
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """No ``ELOOP`` on Windows: the loop is ``winerror`` 1920 or 1921, which the
-        non-strict ``resolve()`` of 3.13 and later swallows."""
+        """No ``ELOOP`` on Windows: the loop is ``winerror`` 1921 (cannot resolve the
+        file name), which the non-strict ``resolve()`` of 3.13 and later swallows."""
         error = OSError(errno.EINVAL, "cannot be resolved")
-        error.winerror = winerror  # type: ignore[attr-defined]
+        error.winerror = 1921  # type: ignore[attr-defined]
 
         with pytest.raises(OSError) as caught:
             self._resolve_with_a_strict_failure(root, monkeypatch, error)
 
         assert caught.value is error
+
+    def test_winerror_1920_is_not_taken_for_a_loop(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """1920 (cannot access the file) is also what Windows answers for a reparse
+        point it cannot follow (WSL link, app execution alias, cloud placeholder), and
+        ``ntpath.realpath`` tolerates it: no evidence that a loop raises it, so a path
+        through such a point resolves as before (review of step 11.1)."""
+        error = OSError(errno.EINVAL, "cannot access the file")
+        error.winerror = 1920  # type: ignore[attr-defined]
+
+        assert self._resolve_with_a_strict_failure(root, monkeypatch, error) == (
+            root / "a"
+        )
+
+    def test_a_path_like_is_checked_by_its_fspath_not_its_str(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``os.fspath`` is what the file system gets: a path-like whose ``__str__``
+        hides the NUL must not bypass the check."""
+
+        class _Sneaky:
+            def __fspath__(self) -> str:
+                return "a\x00b"
+
+            def __str__(self) -> str:
+                return "a b"
+
+        monkeypatch.setattr(Path, "resolve", lambda self, strict=False: self)
+
+        with pytest.raises(ValueError, match="null byte"):
+            resolve_within(root, _Sneaky())  # type: ignore[arg-type]
 
     @pytest.mark.parametrize(
         "error",

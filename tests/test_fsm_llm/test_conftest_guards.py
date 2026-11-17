@@ -129,7 +129,7 @@ class TestAssertReprGuard:
         ("left", "right"),
         [
             ("a" * 10_001, "a" * 10_001 + "b"),  # characters
-            ("l\n" * 201, "l\n" * 200),  # lines
+            ("l\n" * 400, "l\n" * 300),  # line pairs (401 x 301 over 100,000)
             (b"x" * 10_001, b"y"),  # bytes
             (list(range(1_001)), list(range(1_000))),
             (tuple(range(1_001)), (1,)),
@@ -146,7 +146,10 @@ class TestAssertReprGuard:
         ("op", "left", "right"),
         [
             ("==", "small", "smaller"),
-            ("==", "a\n" * 200, "b\n" * 200),  # at the line limit: pytest's own diff
+            ("==", "a\n" * 200, "b\n" * 200),  # 40,401 line pairs: pytest's own diff
+            ("==", "a\n" * 300, "b\n" * 300),  # 90,601 line pairs, still under
+            ("==", _lines(201, 0, ""), _lines(201, 1, "")),  # 201 lines, 895 chars
+            ("==", "a\n" * 5_000, "b"),  # one-sided: ndiff has no pairs to compare
             ("==", [1] * 1_000, [2] * 1_000),
             ("==", 1, 2),
             ("!=", "x" * 20_000, "x" * 20_000),
@@ -197,6 +200,36 @@ class TestAssertReprGuard:
         assert "full diff skipped" in "\n".join(huge)
         assert small == other_op == positional == ["original"]
         assert len(seen) == 3 and guarded.__wrapped__ is original
+
+    def test_the_wrapper_answers_a_huge_operand_with_a_list(self) -> None:
+        """pytest 9.0.x calls ``len()`` on the result (``truncate_if_required``) and 9.1.x
+        wraps it in ``list()``: a list serves both, an iterator breaks 9.0.x (review of
+        step 11.1: ``TypeError: object of type 'list_iterator' has no len()``)."""
+        guarded = guards.guard_assertrepr_compare(lambda *a, **k: iter(["original"]))
+        big = "a" * 20_000
+
+        by_90_keywords = guarded(config=object(), op="==", left=big, right="b")
+        by_91_keywords = guarded(
+            op="==", left=big, right="b", verbose=1, highlighter=None
+        )
+
+        for result in (by_90_keywords, by_91_keywords):
+            assert isinstance(result, list)
+            assert len(result) >= 2  # what 9.0.x does first
+            assert list(result) == result  # what 9.1.x does
+            assert "full diff skipped" in "\n".join(result)
+
+    def test_a_call_with_the_operands_by_position_reaches_the_original(self) -> None:
+        calls: list[tuple] = []
+
+        def original(*args, **kwargs):
+            calls.append((args, kwargs))
+            return ["original"]
+
+        guarded = guards.guard_assertrepr_compare(original)
+
+        assert guarded("==", "a" * 20_000, "b") == ["original"]
+        assert calls == [(("==", "a" * 20_000, "b"), {})]
 
     def test_a_failing_assert_of_huge_texts_finishes_in_the_real_pytest(
         self, tmp_path: Path
