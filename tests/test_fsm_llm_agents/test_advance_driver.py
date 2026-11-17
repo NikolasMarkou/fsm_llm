@@ -2416,18 +2416,27 @@ _ROOT_ATTEMPT = "Direct answer to the root task."
 
 
 def _adapt_run(
-    *, decompose: bool, attempt_seconds: float = 0.0, timeout_seconds: float = 300.0
+    *,
+    decompose: bool,
+    attempt_seconds: float = 0.0,
+    timeout_seconds: float = 300.0,
+    elapsed: list[float] | None = None,
 ) -> tuple:
     """The root attempt (which takes ``attempt_seconds``) is judged a failure
     when ``decompose`` and split into two subtasks; every subtask attempt
-    succeeds."""
+    succeeds. ``elapsed`` receives the time the root attempt took on the clock the
+    run reads (``time.monotonic``), which is not ``attempt_seconds`` where that
+    clock ticks every 15.6 ms."""
 
     def is_root(ctx: dict[str, Any]) -> bool:
         return ctx.get(ContextKeys.TASK) == _TRIP_TASK
 
     def attempt(_text: str, ctx: dict[str, Any]) -> str:
         if is_root(ctx):
+            began = time.monotonic()
             time.sleep(attempt_seconds)
+            if elapsed is not None:
+                elapsed.append(time.monotonic() - began)
             return _ROOT_ATTEMPT
         return f"Answer for {ctx.get(ContextKeys.TASK)}."
 
@@ -2531,14 +2540,21 @@ class TestAdaptOnTheCoreLoop:
 
         monkeypatch.setattr(API, "run_until_terminal", _recording)
 
-        result, _ = _adapt_run(decompose=True, attempt_seconds=0.05, timeout_seconds=60)
+        took: list[float] = []
+        result, _ = _adapt_run(
+            decompose=True, attempt_seconds=0.05, timeout_seconds=60, elapsed=took
+        )
 
         assert result.success is True
         root, first, second = budgets
         # at most 1 s (times the factor) passed between the run start and the root run
         assert 60.0 - timing_factor < root <= 60.0
-        # The root attempt took 0.05 s of the one clock before any sub-run.
-        assert first <= 60.0 - 0.05
+        # The root attempt took ``spent`` of the one clock before any sub-run. The
+        # measure is read on that clock: on Windows before Python 3.13 it ticks every
+        # 15.6 ms and a 0.05 s sleep reads 0.047 s (CI run 44051249381).
+        (spent,) = took
+        assert spent >= 0.025
+        assert first <= 60.0 - spent
         assert second <= first
 
 
