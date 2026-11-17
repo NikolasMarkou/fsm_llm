@@ -18,7 +18,7 @@ import json
 import math
 import uuid
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 from fsm_llm.core.definitions import FSMError
 from fsm_llm.runtime.constants import (
@@ -317,4 +317,4 @@ def decode_event(line: bytes) -> dict[str, Any]:
         or not 1 <= version <= LOG_FORMAT_VERSION
     ):
         raise LogCorruptError(f"log line has unsupported format version {version!r}")
-    return event
+    return cast("dict[str, Any]", event)  # _check_envelope proved it is a dict

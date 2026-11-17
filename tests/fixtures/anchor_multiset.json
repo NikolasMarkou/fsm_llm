@@ -504,6 +504,11 @@
       "delta": 1,
       "reason": "step 97.1 of plan d454fd62 (review gate 2 concern 1): new anchor at the MirroredConstants mechanism (tools/constants.py): a shared constant is mirrored on the tool, policy and agents classes and a change is written through to all of them; no other token was added or lost",
       "token": "plan-2026-11-12T073150-d454fd62/D-045"
+    },
+    {
+      "delta": 1,
+      "reason": "step 2 of plan 21e6f00d: new anchor at the JSONL writer (runtime/stores/jsonl.py JsonlWriter.append): a local one-write-per-event append, no shared atomic-save helper, no buffered or text-mode open, no splitlines, no default=str or indent; the second D-011 anchor (runtime/blobs.py) arrives in step 3 with its own entry; no other token was added or lost",
+      "token": "plan-2026-11-17T100529-21e6f00d/D-011"
     }
   ]
 }

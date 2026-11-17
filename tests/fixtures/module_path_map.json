@@ -1136,6 +1136,8 @@
     "fsm_llm.runtime",
     "fsm_llm.runtime.constants",
     "fsm_llm.runtime.events",
+    "fsm_llm.runtime.stores",
+    "fsm_llm.runtime.stores.jsonl",
     "fsm_llm.skills",
     "fsm_llm.synthesis",
     "fsm_llm.synthesis.__version__",
