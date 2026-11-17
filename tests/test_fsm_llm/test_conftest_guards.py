@@ -424,6 +424,6 @@ class TestEveryReadLater:
         clock = EveryReadLater()
 
         assert clock.sleep is time.sleep
-        assert clock.perf_counter is time.perf_counter
+        assert clock.monotonic_ns is time.monotonic_ns
         with pytest.raises(AttributeError):
             clock.no_such_clock  # noqa: B018  (the attribute read is the test)
