@@ -751,6 +751,39 @@ class TestTheStore:
             store.delete("c1")
         assert store.load("nope") is None and not store.exists("nope")
 
+    def test_exists_is_membership_and_never_decodes_the_log(
+        self, log: EventLog, tmp_path: Path
+    ) -> None:
+        """C5: ``exists`` was the inherited ``load(...) is not None``, so it folded
+        the whole log and RAISED for a corrupt log or a shape-level log, though
+        ``list_sessions`` names both ids."""
+        store = EventLogSessionStore(log)
+        _Script(log).state(_START)
+        assert store.exists("c1") and not store.exists("nope")
+        path = log._logs / "c1.jsonl"
+        path.write_bytes(b"{broken\n" + path.read_bytes())
+        with pytest.raises(LogCorruptError):
+            store.load("c1")
+        assert store.exists("c1") is True
+        with EventLog(tmp_path / "shape", privacy="shape") as shape:
+            shape.append("s1", _START)
+            sstore = EventLogSessionStore(shape)
+            with pytest.raises(FSMError):
+                sstore.load("s1")
+            assert sstore.exists("s1") is True
+            assert sstore.exists("s1") == ("s1" in sstore.list_sessions())
+        (log._logs / "empty1.jsonl").write_bytes(b"")
+        assert store.exists("empty1") == ("empty1" in store.list_sessions())
+
+    def test_exists_follows_the_id_rule_and_the_legacy_dir(
+        self, log: EventLog, tmp_path: Path
+    ) -> None:
+        with pytest.raises(EventPayloadError):
+            EventLogSessionStore(log).exists("Upper")
+        _saved_session(tmp_path)
+        legacy = EventLogSessionStore(log, legacy_dir=tmp_path)
+        assert legacy.exists("Old_1") is True and legacy.exists("Missing") is False
+
     def test_list_sessions_is_the_log_ids_and_the_legacy_ids_sorted(
         self, log: EventLog, tmp_path: Path
     ) -> None:

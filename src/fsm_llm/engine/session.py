@@ -339,7 +339,8 @@ class EventLogSessionStore(SessionStore):
           ``shape`` (or a ``values`` log continued as ``shape``) raises ``LogPrivacyError`` (an
           ``FSMError``): it holds no state, and "unknown id" would lie. An id outside the log's id rule raises
           ``EventPayloadError`` unless a legacy directory can hold it.
-        - ``exists``, ``list_sessions`` (the log ids and the legacy ids, sorted): reads.
+        - ``exists`` (a file of that id, no fold), ``list_sessions`` (the log ids and the
+          legacy ids, sorted): reads.
         - ``save``: a documented no-op (the engine writes the log itself, ``API`` auto-save
           still calls it). ``delete`` raises ``EventLogError``: the log is append-only.
     """
@@ -368,6 +369,24 @@ class EventLogSessionStore(SessionStore):
     def load(self, session_id: str) -> SessionState | None:
         projection = self._projection(session_id)
         return None if projection is None else session_state_from_projection(projection)
+
+    def exists(self, session_id: str) -> bool:
+        """Whether the log (or the legacy directory) has a file for *session_id*.
+
+        Membership, as ``list_sessions`` reports it, never a fold: a corrupt log
+        or a shape-level log (which ``load`` refuses) exists. An id outside the
+        log's id rule raises ``EventPayloadError`` unless a legacy directory can
+        hold it, as in ``load``.
+        """
+        try:
+            check_conversation_id(session_id)
+        except EventPayloadError:
+            if self._legacy is None:
+                raise
+        else:
+            if session_id in self._log.conversation_ids():
+                return True
+        return self._legacy is not None and self._legacy.exists(session_id)
 
     def save(self, session_id: str, state: SessionState) -> None:
         """No-op: the log is written by the engine, never by a snapshot."""
