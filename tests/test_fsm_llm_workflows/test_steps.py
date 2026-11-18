@@ -1113,7 +1113,7 @@ _STEP_MODULE_OF = {
 
 
 def _minimal_step_kwargs() -> dict[str, dict[str, Any]]:
-    """Valid keyword arguments for each of the 11 step kinds."""
+    """Valid keyword arguments for each step kind."""
     inner = AutoStep(step_id="inner", name="Inner", next_step_id="")
     return {
         "AutoStep": {"next_step_id": "n"},

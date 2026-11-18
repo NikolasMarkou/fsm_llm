@@ -112,7 +112,7 @@ Behaviors pinned, grouped by area (the assertion, not the history):
 
 ## Working here
 
-- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_regression/` (about 1 s). Single bug: `-k VB14b` or a class name.
+- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_regression/`. Single bug: `-k VB14b` or a class name.
 - Add a regression as a new `Test<Id><Feature>` class with a docstring naming the id and fixed behavior, in the file for its review round, or a new `test_regression_<topic>.py`.
 - Import code under test inside the test function when other tests in the file do; top-level imports are fine for stable modules.
 - No document states this suite's test count; measure it with `.venv/bin/python -m pytest tests/test_fsm_llm_regression --collect-only -q | tail -1`.

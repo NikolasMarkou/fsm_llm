@@ -2,7 +2,7 @@
 
 Plan d454fd62, review gate 2 blind spot. The import contracts of ``.importlinter`` read
 ``import`` statements; ``importlib.import_module("fsm_llm.engine")`` (or ``__import__``) is
-invisible to them (a plant of such a call in ``llm/text.py`` left all 32 contracts kept). Today
+invisible to them (a plant of such a call in ``llm/text.py`` left every contract kept). Today
 ``src/fsm_llm`` has exactly two places that load by a name computed at run time, both on purpose:
 
 * ``fsm_llm/__init__.py``: the ``has_*`` / ``get_*`` probes of the subpackages
