@@ -1,7 +1,7 @@
 # test_fsm_llm
 
 Path: `tests/test_fsm_llm`
-Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass MessagePipeline, transitions, prompts, LLM wrapper, handlers, memory, validator, visualizer, logging), 102 test files, 8,230 collected tests.
+Purpose: pytest suite for the core `fsm_llm` framework (API, FSMManager, 2-pass MessagePipeline, transitions, prompts, LLM wrapper, handlers, memory, validator, visualizer, logging), 103 test files, 8,259 collected tests.
 
 ## Scope
 
@@ -101,6 +101,7 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_event_log_forks.py` | `API.fork`: a new conversation tree from the state of an old one at the end of its Nth turn with the whole stack rebuilt from the log, the forged routes (hand-written trees whose blobs lie), the refusals and the teardown at every stage of the rebuild | 42 tests; one RED test per route of the D-009 trust rule |
 | `test_event_log_privacy.py` | privacy of the event log: the `shape` level read as bytes (no user text, no model text, no ref, no `blobs/`), `LogPrivacyError` on every fold, fork, resume and restore, and the redaction hook (fail closed, after the built-in filters) | 44 tests; counts, bytes and sequences, never timing |
 | `test_event_log_retention.py` | `EventLog.prune`: logs by file mtime or count, blobs by mark and sweep with a grace, held writers and `.lock` files left alone, and a model differential over random trees of logs, forks and blobs | 132 tests; mtimes set with `os.utime`, no sleeps for ordering; a real refused unlink is unverified until the Windows run |
+| `test_event_log_restore_trust.py` | the fix round of the whole-diff review of plan 5a6a1f80: a restored frame drops internal-prefixed return-context keys and shared key names (fork and resume, then `pop_fsm`), prune re-stats a blob before the unlink, a pushed frame's `max_steps` and `max_seconds` ride its push and come back with a fresh count, a classifier the API cannot run and a symlinked log are refused | 29 tests; each is RED on the parent commit and names its mutant; a symlink skips where the platform refuses one |
 | `test_turn_budgets.py` | core turn budgets: lifetime `max_steps` and `max_seconds` per conversation and per pushed frame on `API`, `start_conversation`, `push_fsm` and `FSMManager`, charged after the claim and before any model call, a spent budget raising `RunBudgetExceededError` on the next turn, and `None` changing nothing | 56 tests; each test names the mutant it kills where that is not obvious |
 | `test_usage_projection.py` | usage as a projection: the ledger with a marker that `reset_usage()` moves without losing history, and the one record shape and one fold shared by the ledger and the events of the log | 46 tests; the provider is the patched `fsm_llm.llm.providers.litellm.completion` binding |
 | `test_strands_features.py` | schema output, invocation state, streaming, `save_session`/`restore_session` | imports `fsm_llm.agents.base` |
@@ -218,7 +219,7 @@ Seam files fake the backend with `patch("fsm_llm.llm.providers.litellm.completio
 - New regression for a public-path bug: add a seam test that drives `API.converse` or patched `fsm_llm.llm.providers.litellm.completion`, not only a helper-level test.
 - Reuse a helper by import (see the helper table) rather than copying it. Name a new test file for the behaviour it pins, never for an audit, review round or plan step: `TestNoDatedTestFiles` in `tests/test_packaging.py` refuses such names.
 - Do not relabel, delete or regenerate corpus rows to improve a rate; do not add filter words to catch one corpus entry. Add names from real vocabulary without reading `constants.py` first.
-- After adding or removing tests, re-measure with the first command below. The suite count (8,230) is pinned by `tests/test_packaging.py::test_per_suite_table` (marked slow), which compares a measured `--collect-only` count per suite against a documented literal of the form `pytest tests/test_fsm_llm/  # ... (N tests)`; run that test after changing the count. The counts stated in this file (102 test files, 8,230 tests, 14 slow) are not pinned by any test and must be updated by hand.
+- After adding or removing tests, re-measure with the first command below. The suite count (8,259) is pinned by `tests/test_packaging.py::test_per_suite_table` (marked slow), which compares a measured `--collect-only` count per suite against a documented literal of the form `pytest tests/test_fsm_llm/  # ... (N tests)`; run that test after changing the count. The counts stated in this file (103 test files, 8,259 tests, 14 slow) are not pinned by any test and must be updated by hand.
 
 ```bash
 .venv/bin/python -m pytest tests/test_fsm_llm/ --collect-only -q | tail -1

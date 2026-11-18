@@ -1,6 +1,6 @@
 # test_fsm_llm
 
-The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 102 test files (8,230 collected tests) plus a `fixtures/` package of labelled secret-filter data.
+The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 103 test files (8,259 collected tests) plus a `fixtures/` package of labelled secret-filter data.
 
 ## What it is for
 
@@ -81,6 +81,7 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_event_log_forks.py` - `API.fork`: a new conversation tree from the state of an old one at the end of its Nth turn with the whole stack rebuilt from the log, the forged routes (hand-written trees whose blobs lie), the refusals and the teardown at every stage of the rebuild.
 - `test_event_log_privacy.py` - privacy of the event log: the `shape` level read as bytes (no user text, no model text, no ref, no `blobs/`), `LogPrivacyError` on every fold, fork, resume and restore, and the redaction hook (fail closed, after the built-in filters).
 - `test_event_log_retention.py` - `EventLog.prune`: logs by file mtime or count, blobs by mark and sweep with a grace, held writers and `.lock` files left alone, and a model differential over random trees of logs, forks and blobs.
+- `test_event_log_restore_trust.py` - the fix round of the whole-diff review of plan 5a6a1f80: a restored frame drops internal-prefixed return-context keys and shared key names (fork and resume, then `pop_fsm`), prune re-stats a blob before the unlink, a pushed frame's `max_steps` and `max_seconds` ride its push and come back with a fresh count, a classifier the API cannot run and a symlinked log are refused.
 - `test_turn_budgets.py` - core turn budgets: lifetime `max_steps` and `max_seconds` per conversation and per pushed frame on `API`, `start_conversation`, `push_fsm` and `FSMManager`, charged after the claim and before any model call, a spent budget raising `RunBudgetExceededError` on the next turn, and `None` changing nothing.
 - `test_usage_projection.py` - usage as a projection: the ledger with a marker that `reset_usage()` moves without losing history, and the one record shape and one fold shared by the ledger and the events of the log.
 - `test_strands_features.py` - schema-enforced output, invocation state, streaming, session save and restore.
