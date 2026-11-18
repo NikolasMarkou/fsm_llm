@@ -15,7 +15,7 @@
 
 A language model call starts from nothing. A multi-turn conversation that must collect data, follow a set flow and decide the same way every time needs structure around the model. **FSM-LLM** is a Python framework for chatbots and agents that follow a fixed structure: you describe the conversation as a finite state machine in JSON, and the language model does the language work inside each state.
 
-It is one package, `fsm_llm`, with a small core and seven subpackages on top: reasoning strategies, a workflow engine, 18 agent patterns, a monitoring dashboard, an evaluation harness, runtime FSM synthesis and public test doubles. Every subpackage is built from the same parts as the core (stacked FSMs, message-free steps, one LLM layer), so there is one way to run a model, not five.
+It is one package, `fsm_llm`, with a small core and subpackages on top: reasoning strategies, a workflow engine, agent patterns, a monitoring dashboard, an evaluation harness, runtime FSM synthesis and public test doubles. Every subpackage is built from the same parts as the core (stacked FSMs, message-free steps, one LLM layer), so there is one way to run a model, not one per subpackage.
 
 ---
 
@@ -26,7 +26,7 @@ It is one package, `fsm_llm`, with a small core and seven subpackages on top: re
 4.  [**Quick Start**](#quick-start): A conversation, a fake model, a builder, an agent, a workflow.
 5.  [**How It Works**](#how-it-works): The two-pass turn, the state kinds, the layers.
 6.  [**In-Depth Documentation**](#in-depth-documentation): The docs site, the guides and per-package READMEs.
-7.  [**Examples and Command-Line Tools**](#examples-and-command-line-tools): 100 runnable examples and the CLIs.
+7.  [**Examples and Command-Line Tools**](#examples-and-command-line-tools): The runnable examples and the CLIs.
 8.  [**Quality, CI and Release**](#quality-ci-and-release): Offline tests, import contracts, supply-chain checks.
 9.  [**Project Structure**](#project-structure): A short tour of the repository.
 10. [**Contributing**](#contributing): Where the rules live.
@@ -39,15 +39,15 @@ It is one package, `fsm_llm`, with a small core and seven subpackages on top: re
 
 ## Key Features
 
-The library is organized into five pillars. Each one is a collapsible section.
+The library is organized into pillars. Each one is a collapsible section.
 
 <details>
 <summary><b>1. The Core: Finite State Machines Driven by an LLM</b></summary>
 <p>
 
 - **Two-pass turns**: every message goes through Pass 1 (extract data) and Pass 2 (write the reply from the state you ended up in). Transition rules are JsonLogic evaluated in plain Python, so they are predictable and unit-testable. The LLM is asked to choose only when two rules tie at the lowest priority.
-- **Three state kinds**: `conversation` (the default), `completion` (one native tool-calling or JSON-schema call per turn, over a transcript you own) and `synthesize` (a goal that a model turns into a child FSM, behind gates). Each kind is a spec plus an executor, so a new kind is an addition, not a rewrite.
-- **Handlers**: your functions run at 8 points (start, before and after processing, before and after a transition, context update, end, error), built with `create_handler`, with a `continue` or `raise` error mode.
+- **State kinds**: `conversation` (the default), `completion` (one native tool-calling or JSON-schema call per turn, over a transcript you own) and `synthesize` (a goal that a model turns into a child FSM, behind gates). Each kind is a spec plus an executor, so a new kind is an addition, not a rewrite.
+- **Handlers**: your functions run at lifecycle points (start, before and after processing, before and after a transition, context update, end, error), built with `create_handler`, with a `continue` or `raise` error mode.
 - **Intent classification**: `classification_extractions` on a state, plus `Classifier`, `HierarchicalClassifier` and `IntentRouter`.
 - **FSM stacking**: hand a conversation to a sub-FSM and come back with its results (`push_fsm` / `pop_fsm`).
 - **Streaming**: `converse_stream()` yields reply tokens as they arrive.
@@ -61,9 +61,9 @@ The library is organized into five pillars. Each one is a collapsible section.
 <summary><b>2. Reasoning, Workflows, Agents and Synthesis</b></summary>
 <p>
 
-- **`fsm_llm.reasoning`**: a solver that picks one of 9 reasoning strategies, runs it as stacked FSMs inside one message-free core run, validates the answer and retries up to 3 times. `ReasoningEngine.solve_problem(problem)` returns the solution and a trace.
-- **`fsm_llm.workflows`**: an async in-memory engine with 11 step types and a Python DSL (`create_workflow_builder`, `auto_step`, `condition_step`). It runs without an LLM unless you add LLM steps.
-- **`fsm_llm.agents`**: 18 agent patterns (`react`, `rewoo`, `reflexion`, `plan_execute`, `prompt_chain`, `self_consistency`, `debate`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reasoning_react`, `parallel_react`, `verified_react`, `auto_memory`, `native_fc`, `swarm`, `meta_builder`) plus `AgentGraph`.
+- **`fsm_llm.reasoning`**: a solver that picks one of the reasoning strategies, runs it as stacked FSMs inside one message-free core run, validates the answer and retries up to 3 times. `ReasoningEngine.solve_problem(problem)` returns the solution and a trace.
+- **`fsm_llm.workflows`**: an async in-memory engine with typed steps and a Python DSL (`create_workflow_builder`, `auto_step`, `condition_step`). It runs without an LLM unless you add LLM steps.
+- **`fsm_llm.agents`**: the agent patterns (`react`, `rewoo`, `reflexion`, `plan_execute`, `prompt_chain`, `self_consistency`, `debate`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reasoning_react`, `parallel_react`, `verified_react`, `auto_memory`, `native_fc`, `swarm`, `meta_builder`) plus `AgentGraph`.
 - **Tools done properly**: the `@tool` decorator, annotations, enforced timeouts, MCP and A2A support, tools loaded from folders of Python files, and standard operating procedures.
 - **Human approval as a security boundary**: a gated tool runs only with a driver-only grant bound to that exact call, which a caller's initial context can never set.
 - **A meta-builder** that designs FSMs, workflows and agents by chat (`fsm-llm-meta`).
@@ -76,7 +76,7 @@ The library is organized into five pillars. Each one is a collapsible section.
 <p>
 
 - **Open Knowledge Format (OKF)**: `fsm_llm.okf` reads, searches, validates and writes OKF bundles (a directory of markdown files with YAML frontmatter). `fsm_llm.engine.okf_bridge.create_okf_handler()` puts capped concept summaries into a plain FSM's context. `fsm_llm.agents` adds read-only OKF tools, a read-only memory backend and bundle exporters. `fsm-llm-okf` runs it from the shell. This follows OKF v0.2 (pre-1.0 and mutable).
-- **Agent Skills**: `fsm_llm.skills` reads folders with a `SKILL.md` from the paths you name (the open standard at agentskills.io, unversioned and mutable). `fsm_llm.agents.create_skill_tools` gives an agent three read-only tools (`skill_list`, `skill_load`, `skill_read`), and `fsm-llm-skills` validates, lists and shows them.
+- **Agent Skills**: `fsm_llm.skills` reads folders with a `SKILL.md` from the paths you name (the open standard at agentskills.io, unversioned and mutable). `fsm_llm.agents.create_skill_tools` gives an agent the read-only tools (`skill_list`, `skill_load`, `skill_read`), and `fsm-llm-skills` validates, lists and shows them.
 - **Untrusted by design**: bundle and skill text reaches a model only as capped, control-stripped tool output (or labelled summaries), never as a tool description, instruction or persona. Nothing in a bundle or skill folder is executed, and `allowed-tools` is reported, not enforced.
 </p>
 </details>
@@ -101,7 +101,7 @@ The library is organized into five pillars. Each one is a collapsible section.
 - **Cut-off replies are visible**: a reply that stops at `max_tokens` is flagged (`truncated`, a WARNING, a named cause in extraction errors) and never shown as an unreadable half envelope.
 - **Context security**: internal keys (prefixes `_`, `system_`, `internal_`, `__`) and secret-looking entries are kept out of prompts. The compromised litellm 1.82.7 and 1.82.8 are below the required version, and `make audit` scans for malicious `.pth` files.
 - **Enforced layering**: a layer package imports only the layers below it, written as import contracts (`.importlinter`) that a test and CI run, so the architecture cannot drift unnoticed.
-- **Assured reliability**: an offline-by-default suite (a fake model, no network) covering the core, every subpackage, packaging, regressions, and the 100 examples.
+- **Assured reliability**: an offline-by-default suite (a fake model, no network) covering the core, every subpackage, packaging, regressions, and the examples.
 </p>
 </details>
 
@@ -396,7 +396,7 @@ Every user message goes through two LLM passes:
 
 ### The layers
 
-The core is built in layers, and a layer imports only the rows below it (the contracts are in `.importlinter`). The seven subpackages sit on top and are imported by name, so `import fsm_llm` loads only the core:
+The core is built in layers, and a layer imports only the rows below it (the contracts are in `.importlinter`). The subpackages sit on top and are imported by name, so `import fsm_llm` loads only the core:
 
 ```text
   monitor  eval  agents  synthesis  workflows  reasoning  testing    <- subpackages: from fsm_llm.agents import ...
@@ -420,7 +420,7 @@ Maturity differs by subpackage: reasoning, agents and synthesis are tested offli
 ## In-Depth Documentation
 
 -   **Documentation site:** [https://nikolasmarkou.github.io/fsm_llm/](https://nikolasmarkou.github.io/fsm_llm/) (the guides below, built with MkDocs on every pull request and versioned per release).
--   **Start here, in this order:** [Quick Start](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/quickstart.md) (zero to a running conversation, then builders, an agent, a workflow and the reasoning engine), [Concepts](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/concepts.md) (what is in the box, where it fits), [FSM Design](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/fsm_design.md) (states, transitions, priorities, classification, `completion` and `synthesize`) and [Handlers](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/handlers.md) (the 8 hook points).
+-   **Start here, in this order:** [Quick Start](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/quickstart.md) (zero to a running conversation, then builders, an agent, a workflow and the reasoning engine), [Concepts](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/concepts.md) (what is in the box, where it fits), [FSM Design](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/fsm_design.md) (states, transitions, priorities, classification, `completion` and `synthesize`) and [Handlers](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/handlers.md) (the hook points).
 -   **Going deeper:** [Architecture](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/architecture.md) (the pipeline, the layers, the step driver), [Testing](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/testing.md) (test your own bot offline), [Runtime FSM synthesis](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/synthesis.md), [API Reference](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/api_reference.md) and the [command-line tools](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/cli.md).
 -   **Per-package READMEs:** [core](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/README.md), [reasoning](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/reasoning/README.md), [workflows](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/workflows/README.md), [agents](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/agents/README.md), [monitor](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/monitor/README.md), [eval](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/eval/README.md), [synthesis](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/synthesis/README.md) and [testing](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/testing/README.md).
 -   **Project records:** [CHANGELOG](https://github.com/NikolasMarkou/fsm_llm/blob/main/CHANGELOG.md), [EVALUATE](https://github.com/NikolasMarkou/fsm_llm/blob/main/EVALUATE.md) (method and run log), [CONTRIBUTING](https://github.com/NikolasMarkou/fsm_llm/blob/main/CONTRIBUTING.md), [SECURITY](https://github.com/NikolasMarkou/fsm_llm/blob/main/SECURITY.md) and the [2026 roadmap](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/2026_roadmap.md).
@@ -431,22 +431,22 @@ Maturity differs by subpackage: reasoning, agents and synthesis are tested offli
 
 ### Examples
 
-100 runnable examples in 8 categories. Each is a folder with `run.py` and its FSM JSON. They are in the repository, not in the installed package, so get them from a checkout of the source and run one:
+The examples are runnable and grouped by category. Each is a folder with `run.py` and its FSM JSON. They are in the repository, not in the installed package, so get them from a checkout of the source and run one:
 
 ```bash
 python examples/basic/simple_greeting/run.py     # needs a model: an OpenAI key, or a local Ollama
 ```
 
-| Category | Count | Highlights |
-|----------|-------|------------|
-| Basic | 14 | simple_greeting, form_filling, multi_turn_extraction |
-| Intermediate | 3 | book_recommendation, product_recommendation, adaptive_quiz |
-| Advanced | 17 | e_commerce (FSM stacking), support_pipeline, concurrent_conversations |
-| Classification | 4 | intent_routing, smart_helpdesk, multi_intent |
-| Reasoning | 1 | math_tutor |
-| Workflows | 8 | order_processing, parallel_steps, conditional_branching |
-| Agents | 48 | react_search, plan_execute, reflexion, debate, orchestrator |
-| Meta | 5 | build_fsm, build_workflow, build_agent |
+| Category | Highlights |
+|----------|------------|
+| Basic | simple_greeting, form_filling, multi_turn_extraction |
+| Intermediate | book_recommendation, product_recommendation, adaptive_quiz |
+| Advanced | e_commerce (FSM stacking), support_pipeline, concurrent_conversations |
+| Classification | intent_routing, smart_helpdesk, multi_intent |
+| Reasoning | math_tutor |
+| Workflows | order_processing, parallel_steps, conditional_branching |
+| Agents | react_search, plan_execute, reflexion, debate, orchestrator |
+| Meta | build_fsm, build_workflow, build_agent |
 
 The examples are evaluation baselines: `fsm-llm-eval examples` runs them in parallel and scores each. The list with links is the [examples page](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/examples.md).
 
@@ -471,8 +471,8 @@ The CLIs that call a model need one: `--model/-m NAME`, else `LLM_MODEL` in the 
 
 ## Quality, CI and Release
 
-- **Offline by default, enforced by contracts.** The default test run needs no network and no model (live tests skip without a local Ollama). Import contracts, a module-size guard, a public-API snapshot, a documented-count check and a decision-anchor gate run as tests or CI steps.
-- **A seven-leg CI matrix.** `python-package.yml` runs `lint` (ruff, mypy, the `.pth` audit, the import contracts, the workflow linters), `supply-chain` (`pip-audit` over the installed environment, with a canary that must fail), `dependency-review` on pull requests, and `test` on Linux with Python 3.11 to 3.15 and on Windows with 3.11 and 3.15. Runners and actions are pinned, and a coverage ratchet guards the Linux 3.12 leg.
+- **Offline by default, enforced by contracts.** The default test run needs no network and no model (live tests skip without a local Ollama). Import contracts, a module-size guard, a public-API snapshot and a decision-anchor gate run as tests or CI steps.
+- **A CI matrix.** `python-package.yml` runs `lint` (ruff, mypy, the `.pth` audit, the import contracts, the workflow linters), `supply-chain` (`pip-audit` over the installed environment, with a canary that must fail), `dependency-review` on pull requests, and `test` on Linux with Python 3.11 to 3.15 and on Windows with 3.11 and 3.15. Runners and actions are pinned, and a coverage ratchet guards the Linux 3.12 leg.
 - **Pinned dependencies.** `constraints.txt` pins every direct dependency exactly; a weekly job proposes a newer litellm or mcp only when it is stable, at least 7 days old and green on the suite, and never merges by itself.
 - **Releases come from a tag.** One pushed tag `vX.Y.Z` builds the package once, writes an SBOM, publishes to PyPI by trusted publishing with attestations and creates the GitHub release; nothing publishes from a developer machine. The same tag deploys the docs site.
 
@@ -480,7 +480,7 @@ The CLIs that call a model need one: `--model/-m NAME`, else `LLM_MODEL` in the 
 
 ## Project Structure
 
-One distribution (`llm-fsm`, setuptools, src layout): the directory `src/fsm_llm/` is the import package `fsm_llm`. Beside it: `tests/` (one folder per subpackage), `examples/` (100 runnable examples, the evaluation baselines), `docs/` (the pages of the site), `evaluation/` (datasets and recorded runs), `scripts/` (supply-chain audit, benches, doc-count check) and `.github/workflows/` (CI, docs, pin refresh, release). The full tree, one line per package, is in [CONTRIBUTING](https://github.com/NikolasMarkou/fsm_llm/blob/main/CONTRIBUTING.md).
+One distribution (`llm-fsm`, setuptools, src layout): the directory `src/fsm_llm/` is the import package `fsm_llm`. Beside it: `tests/` (one folder per subpackage), `examples/` (the runnable examples, the evaluation baselines), `docs/` (the pages of the site), `evaluation/` (datasets and recorded runs), `scripts/` (supply-chain audit, benches) and `.github/workflows/` (CI, docs, pin refresh, release). The full tree, one line per package, is in [CONTRIBUTING](https://github.com/NikolasMarkou/fsm_llm/blob/main/CONTRIBUTING.md).
 
 ---
 
