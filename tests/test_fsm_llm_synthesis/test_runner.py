@@ -559,6 +559,25 @@ class TestAnOutageIsNoFault:
         assert cheap.errors == 1
         assert rig.result["status"] == "ok" and rig.result["reason"] is None
 
+    def test_an_outage_run_counts_no_run_in_the_library(self, valid_fsm, tmp_path):
+        cheap = _Metered(10_000, extraction_data={"answer": "42"}, responses=REPLIES)
+        rig = self._run(valid_fsm, tmp_path, cheap)
+
+        assert rig.result["reason"] == "provider_error"
+        assert rig.library is not None
+        stats = rig.library.get_record(self.traces[0].digest).stats
+        assert stats == {"runs": 0, "successes": 0}  # no fault of the procedure
+
+    def test_a_retried_call_that_then_succeeds_still_counts_an_ok_run(
+        self, valid_fsm, tmp_path
+    ):
+        cheap = _Metered(1, extraction_data={"answer": "42"}, responses=REPLIES)
+        rig = self._run(valid_fsm, tmp_path, cheap)
+
+        assert rig.library is not None
+        stats = rig.library.get_record(self.traces[0].digest).stats
+        assert stats == {"runs": 1, "successes": 1}
+
     def test_diagnose_never_patches_from_the_outage_runs(self, valid_fsm, tmp_path):
         cheap = _Metered(10_000, extraction_data={"answer": "42"}, responses=REPLIES)
         rig = self._run(valid_fsm, tmp_path, cheap)

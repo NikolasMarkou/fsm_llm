@@ -19,6 +19,7 @@ from fsm_llm.core.definitions import (
     CompletionStateConfig,
     FSMDefinition,
     LLMResponseError,
+    LLMUsage,
 )
 from fsm_llm.engine.api.conversation import API
 from fsm_llm.synthesis import (
@@ -268,6 +269,63 @@ def _run(rig: _Rig, **inputs: Any) -> str:
     return rig.call("run_procedure", procedure_id=rig.digest(), inputs=inputs)
 
 
+class _Outage(ScriptedRunnerLLM):
+    """A cheap model whose first ``outages`` extractions fail; its meter counts
+    each failure as a real interface's does."""
+
+    def __init__(self, outages: int, **kw: Any) -> None:
+        super().__init__(**kw)
+        self.outages, self.errors = outages, 0
+
+    def usage(self) -> LLMUsage:
+        return LLMUsage(calls=len(self.call_history), errors=self.errors)
+
+    def extract_field(self, request: Any) -> Any:
+        if self.errors < self.outages:
+            self.errors += 1
+            raise LLMResponseError(LEAK)
+        return super().extract_field(request)
+
+
+def _classifying() -> dict[str, Any]:
+    """One state that classifies ``answer`` (needs ``complete`` at run time)."""
+    intents = [
+        {"name": "billing", "description": "a billing issue"},
+        {"name": "other", "description": "anything else"},
+    ]
+    ask = {
+        "id": "ask",
+        "description": "ask",
+        "purpose": "ask",
+        "response_instructions": "What do you need?",
+        "classification_extractions": [
+            {"field_name": "answer", "intents": intents, "fallback_intent": "other"}
+        ],
+        "transitions": [
+            {
+                "target_state": "done",
+                "description": "answered",
+                "priority": 1,
+                "conditions": [
+                    {"description": "has", "requires_context_keys": ["answer"]}
+                ],
+            }
+        ],
+    }
+    done = {
+        "id": "done",
+        "description": "d",
+        "purpose": "d",
+        "response_instructions": "",
+    }
+    return {
+        "name": "Route",
+        "description": "route",
+        "initial_state": "ask",
+        "states": {"ask": ask, "done": done},
+    }
+
+
 class TestRequireSimulation:
     """``require_simulation`` binds the run tool as it binds ``obtain`` (D-062)."""
 
@@ -363,6 +421,63 @@ class TestRun:
         assert _run(rig) == f"{LABEL}\nfailed: provider_error"
         assert rig.library is not None
         assert rig.library.get_record(rig.digest()).stats["runs"] == 0
+
+    def test_an_extraction_outage_is_a_provider_error_and_counts_no_run(
+        self, valid_fsm, tmp_path
+    ):
+        """Core swallows a Pass-1 extraction error, so the child just stalls: the
+        budget is spent, which is no fault of the procedure (D-061)."""
+        rig = _rig(valid_fsm, tmp_path, policy=SynthesisPolicy(max_turns=3))
+        rig.obtain()
+        cheap = _Outage(10_000, extraction_data={"answer": "42"})
+        rig.registry = create_procedure_tools(rig.synth, runner_llm=cheap)
+
+        assert _run(rig) == f"{LABEL}\nfailed: provider_error"
+        assert cheap.errors > 0 and LEAK not in repr(rig.registry.list_tools())
+        assert rig.library is not None
+        assert rig.library.get_record(rig.digest()).stats == {"runs": 0, "successes": 0}
+
+    def test_a_retried_call_that_then_succeeds_is_still_an_ok_run(
+        self, valid_fsm, tmp_path
+    ):
+        rig = _rig(valid_fsm, tmp_path)
+        rig.obtain()
+        cheap = _Outage(1, extraction_data={"answer": "42"})
+        rig.registry = create_procedure_tools(rig.synth, runner_llm=cheap)
+
+        assert _fields(_run(rig))["status"] == "ok" and cheap.errors == 1
+        assert rig.library is not None
+        assert rig.library.get_record(rig.digest()).stats == {"runs": 1, "successes": 1}
+
+    def test_a_runner_llm_the_procedure_cannot_run_on_is_push_failed(
+        self, valid_fsm, tmp_path
+    ):
+        """A state that classifies needs ``complete`` on the interface, which a
+        plain ``ScriptedRunnerLLM`` lacks: core raises ``ValueError`` while the
+        sub-API is built, naming the state and field the compile chose."""
+        rig = _rig(valid_fsm, tmp_path)
+        report = run_gates(_classifying(), SynthesisPolicy(), return_keys=("answer",))
+        assert report.definition is not None, report.repair_text()
+        assert rig.library is not None
+        rig.library.put(
+            report.definition,
+            goal=GOAL,
+            inputs_required=[],
+            return_keys=["answer"],
+            lifecycle="verified",
+            gates_passed=list(GATES),
+        )
+
+        result = rig.registry.execute(
+            ToolCall(
+                tool_name="run_procedure",
+                parameters={"procedure_id": digest_of(report.definition)},
+            )
+        )
+
+        assert result.success and result.result == f"{LABEL}\nfailed: push_failed"
+        assert rig.cheap.call_history == []
+        assert rig.library.get_record(digest_of(report.definition)).stats["runs"] == 0
 
     def test_a_deprecated_procedure_is_refused(self, valid_fsm, tmp_path):
         rig = _rig(valid_fsm, tmp_path)

@@ -22,6 +22,7 @@ from typing import Any
 
 from fsm_llm.core.definitions import (
     SYNTHESIZE_GOAL_MAX_LENGTH,
+    FSMError,
     LLMResponseError,
     RunBudgetExceededError,
 )
@@ -29,6 +30,7 @@ from fsm_llm.core.expressions import is_missing
 from fsm_llm.engine.api.conversation import API
 from fsm_llm.llm import LLMInterface
 from fsm_llm.logging import logger
+from fsm_llm.runtime.usage import watch_provider_errors
 from fsm_llm.tools import ToolAnnotations, ToolRegistry, require_int_limit
 from fsm_llm.tools.constants import OBSERVATION_ENTRY, Defaults
 
@@ -40,11 +42,12 @@ from .constants import (
     REASON_INPUTS_MISSING,
     REASON_LIBRARY_ERROR,
     REASON_PROVIDER_ERROR,
+    REASON_PUSH_FAILED,
     REASON_RETURN_KEYS_MISSING,
 )
 from .exceptions import LibraryError, SynthesisError
 from .gates import safe_text, verify_stored
-from .runner import reason_of, runnable_reason
+from .runner import _no_errors, reason_of, runnable_reason
 from .synthesizer import FSMSynthesizer
 
 __all__ = ["TOOL_DESCRIPTIONS", "TOOL_PARAMETERS", "create_procedure_tools"]
@@ -152,7 +155,11 @@ def create_procedure_tools(
           conversation always ended) and replies ``procedure_id``,
           ``status: ok`` and one defanged ``key: value`` line per return key.
           ``needs_user_input`` (budget spent) and ``return_keys_missing`` count
-          one failed run; ``provider_error`` counts none.
+          one failed run; ``provider_error`` counts none (an outage the core
+          swallowed, which only shows as a stalled child, is told from the
+          interface's meter as the runner tells it, D-061); ``push_failed`` is
+          a procedure the sub-``API`` cannot be built for on *runner_llm* (a
+          classifying state and an interface without ``complete``).
         - Every reply starts with ``PROCEDURE_UNTRUSTED_LABEL`` and fits the
           agent loop's cap with its echo margin; a failure is ``failed: <code>``
           (``bad_arguments`` or ``constants.REASONS``), never an echoed argument
@@ -257,11 +264,21 @@ def create_procedure_tools(
             return failed(
                 f"{REASON_INPUTS_MISSING} ({_safe(', '.join(missing), 100)})", room
             )
-        ok, values, reason = False, {}, _NEEDS_USER_INPUT
         try:
-            with API.from_definition(definition, llm_interface=runner_llm) as api:
+            api = API.from_definition(definition, llm_interface=runner_llm)
+        except (FSMError, ValueError):
+            # core's message names the compile's states and fields: a code only (D-030)
+            return failed(REASON_PUSH_FAILED, room)
+        ok, values, reason = False, {}, _NEEDS_USER_INPUT
+        outage = _no_errors
+        try:
+            with api:
                 # close() ends the sub-conversation on every path
                 conv, _ = api.start_conversation({n: given[n] for n in needs})
+                # the outage is a position taken now, as the runner takes it at the push
+                outage = watch_provider_errors(
+                    runner_llm, getattr(api, "event_log", None), conv, 0
+                )
                 api.run_until_terminal(conv, max_steps=policy.max_turns)
                 data = api.get_data(conv)
                 if any(is_missing(data, k) for k in keys):
@@ -272,6 +289,8 @@ def create_procedure_tools(
             pass  # the budget is spent: close() ended the sub-conversation
         except LLMResponseError:
             return failed(REASON_PROVIDER_ERROR, room)  # not the procedure's fault
+        if not ok and outage() > 0:  # core swallows an extraction error: a stalled
+            return failed(REASON_PROVIDER_ERROR, room)  # child, no fault of the run
         try:
             library.record_run(
                 procedure_id, ok, trust_after_successes=policy.trust_after_successes

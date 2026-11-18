@@ -614,7 +614,9 @@ class ProcedureRunner:
             conversation_id, {config.result_key: _result(status, reason, procedure)}
         )
         library = self.synthesizer.library
-        if library is not None and procedure.record is not None:
+        # an outage is no fault of the procedure and counts no run (D-061; the
+        # tool path counts none either); an ok run that retried a call still counts
+        if library is not None and procedure.record is not None and (ok or not outage):
             try:
                 library.record_run(
                     procedure.digest,
