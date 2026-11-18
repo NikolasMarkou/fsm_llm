@@ -1517,6 +1517,50 @@ class TestUnknownKeyWarnings:
             f"no unknown-key warning naming the typo: {result.warnings}"
         )
 
+    @pytest.mark.parametrize(
+        "path, where, typo",
+        [
+            (("field_extractions", 0), "field_extractions #0", "require"),
+            (
+                ("classification_extractions", 0),
+                "classification_extractions #0",
+                "confidence_treshold",
+            ),
+            (
+                ("classification_extractions", 0, "intents", 1),
+                "classification_extractions #0 intent #1",
+                "desc",
+            ),
+        ],
+    )
+    def test_extraction_entry_typo_warns_and_stays_valid(self, path, where, typo):
+        """B4: a misspelled key of an extraction entry or an intent is dropped by
+        the loader (a lost gate threshold or `required` flag); it is a WARNING
+        naming the key, and the same data without it is clean."""
+        data = _valid_fsm_data()
+        state = data["states"]["start"]
+        state["field_extractions"] = [
+            {"field_name": "f", "field_type": "str", "extraction_instructions": "x"}
+        ]
+        state["classification_extractions"] = [
+            {
+                "field_name": "c",
+                "intents": [{"name": n, "description": n} for n in ("buy", "browse")],
+                "fallback_intent": "browse",
+            }
+        ]
+        clean = FSMValidator(copy.deepcopy(data)).validate()
+        assert clean.is_valid and not any("Unknown key" in w for w in clean.warnings)
+
+        node: Any = state
+        for step in path:
+            node = node[step]
+        node[typo] = "x"
+        result = FSMValidator(data).validate()
+        assert result.is_valid is True
+        expected = f"Unknown key '{typo}' in state 'start' {where}"
+        assert any(expected in w for w in result.warnings), result.warnings
+
     def test_free_form_logic_keys_do_not_warn(self):
         """Vacuity / false-positive guard (Pre-Mortem 3): operator keys inside a
         condition's `logic` are DATA, not model field names -- they must NOT

@@ -16,8 +16,11 @@ from fsm_llm.constants import (
 )
 from fsm_llm.core.definitions import (
     DEFAULT_SYNTHESIS_RESULT_KEY,
+    ClassificationExtractionConfig,
     CompletionResponse,
+    FieldExtractionConfig,
     FSMDefinition,
+    IntentDefinition,
     State,
     Transition,
     TransitionCondition,
@@ -46,6 +49,12 @@ _RESULT_WRITERS = {
     "completion": _COMPLETION_WRITER,
     "synthesize": "the synthesis runner",
 }
+
+
+def _entries(value: Any) -> list[Any]:
+    """``value`` when it is a list, else an empty list (a raw shape the loader
+    refuses is stage 0's to report, never this pass's)."""
+    return value if isinstance(value, list) else []
 
 
 def _string_literals(node: Any) -> set[str]:
@@ -363,12 +372,15 @@ class StructureMixin:
     def _validate_unknown_keys(self):
         """Warn (never error) on FSM-JSON keys that no model field declares.
 
-        Walks the FOUR fixed-schema levels only -- FSM -> states -> transitions
-        -> conditions -- comparing each raw dict's keys against the corresponding
+        Walks the fixed-schema levels only -- FSM -> states -> transitions ->
+        conditions, and states -> field_extractions, classification_extractions
+        -> intents -- comparing each raw dict's keys against the corresponding
         Pydantic model's `model_fields`. A misspelled OPTIONAL key (e.g.
-        `requred_context_keys`) is silently dropped by the loader
-        (`extra="ignore"`), so surfacing it here as a WARNING is the only signal
-        an author gets that the key had no effect.
+        `requred_context_keys`, `confidence_treshold`) is silently dropped by the
+        loader (`extra="ignore"`), so surfacing it here as a WARNING is the only
+        signal an author gets that the key had no effect. The extraction levels
+        are typed models too (B4 of plan 52ce5464, a plain extension of this
+        rule, WARNING only, never `extra="forbid"`).
 
         # DECISION plan-2026-07-21T045419-9925aa3a/D-008
         # WARNING tier ONLY -- never `add_error`. The loader accepts extra keys,
@@ -401,6 +413,18 @@ class StructureMixin:
             _warn_unknown(state, State, f"state '{state_id}'")
             if not isinstance(state, dict):
                 continue
+            for f_idx, field in enumerate(_entries(state.get("field_extractions"))):
+                where = f"state '{state_id}' field_extractions #{f_idx}"
+                _warn_unknown(field, FieldExtractionConfig, where)
+            classified = _entries(state.get("classification_extractions"))
+            for c_idx, entry in enumerate(classified):
+                where = f"state '{state_id}' classification_extractions #{c_idx}"
+                _warn_unknown(entry, ClassificationExtractionConfig, where)
+                intents = _entries(
+                    entry.get("intents") if isinstance(entry, dict) else None
+                )
+                for i_idx, intent in enumerate(intents):
+                    _warn_unknown(intent, IntentDefinition, f"{where} intent #{i_idx}")
             transitions = state.get("transitions", [])
             if not isinstance(transitions, list):
                 continue
