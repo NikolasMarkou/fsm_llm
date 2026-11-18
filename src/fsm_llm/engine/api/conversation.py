@@ -85,10 +85,11 @@ Custom handler integration:
 
 Layer ``engine`` (plan d454fd62, step 81): this module is the shell of the old ``fsm_llm.api``:
 ``API`` (the constructor, the factories, ``start_conversation``, the turn entries ``converse`` and
-``advance`` with their streams, ``close``), composed of five mixins: ``RunMixin`` (``run.py``),
+``advance`` with their streams, ``close``), composed of six mixins: ``RunMixin`` (``run.py``),
 ``StackMixin`` (``stack.py``), ``LifecycleMixin`` (``lifecycle.py``), ``SessionsMixin``
-(``sessions.py``) and ``HandlerRegistrationMixin`` (``registration.py``, moved out at plan
-5a6a1f80 step 3). The method bodies are unchanged.
+(``sessions.py``), ``HandlerRegistrationMixin`` (``registration.py``, moved out at plan
+5a6a1f80 step 3) and ``ForkMixin`` (``forks.py``, ``fork``, plan 5a6a1f80 step 4). The method
+bodies are unchanged.
 """
 
 from __future__ import annotations
@@ -141,6 +142,7 @@ from .events import (
     open_event_log,
     record_started,
 )
+from .forks import ForkMixin
 from .helpers import _require_classifier_interface, _unexpected_error
 from .lifecycle import MAX_ENDED_CONVERSATIONS_CACHE, LifecycleMixin
 from .registration import HandlerRegistrationMixin
@@ -199,7 +201,12 @@ def _auto_save_session(api: API, conversation_id: str) -> None:
 
 
 class API(
-    RunMixin, StackMixin, LifecycleMixin, SessionsMixin, HandlerRegistrationMixin
+    RunMixin,
+    StackMixin,
+    LifecycleMixin,
+    SessionsMixin,
+    HandlerRegistrationMixin,
+    ForkMixin,
 ):
     """
     Enhanced API for Improved 2-Pass FSM-LLM Architecture.

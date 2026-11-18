@@ -51,6 +51,16 @@ Interface contract (callers: ``conversation.py`` and ``lifecycle.py``; *api* is 
       state after every seed of ``restore_session``; the first event of the new log
       (``start_conversation`` writes no start record for a restore). A failed write RAISES, and the
       restore's own teardown ends the half-restored conversation.
+    - ``record_forked(api, conversation_id, forked_from)``: appends the ``context/record``
+      (``source: "fork"``, ``forked_from: {conversation_id, seq, turn}``) with the state of the new
+      root after every seed of ``fork``: the first event of the fork's log. A failed write RAISES
+      and the restore's teardown ends the half-built fork.
+    - ``record_restored_frame(api, conversation_id, child_id, fsm_id, definition, depth, *,
+      return_context, shared_context_keys, preserve_history)``: appends a ``stack/push`` marked
+      ``restored: true`` for a frame ``fork`` rebuilt, with the SAME fields a live push carries and
+      the frame's current state, so the fork's own log folds to its stack with no help from the
+      source (a fork of a fork). Unlike ``record_push`` it is strict: any field that cannot be
+      written RAISES, because a fork log that lost a frame would restore a shorter stack.
     - ``release_event_writer(api, conversation_id)``: closes the writer of a finished root
       conversation (no file descriptor or lock stays with it). ``close_event_log(api)``: closes an
       owned log only.
@@ -262,6 +272,54 @@ def record_restored(
         lineage["seq"] = last_seq
     record_state(
         api.fsm_manager, log, conversation_id, source="restore", restored_from=lineage
+    )
+
+
+def record_forked(
+    api: _ApiSurface, conversation_id: str, forked_from: Mapping[str, Any]
+) -> None:
+    """Append the ``fork`` record of a new fork root (a no-op with the log off; a failing write raises)."""
+    log = getattr(api, "_event_log", None)
+    if log is None:
+        return
+    record_state(
+        api.fsm_manager,
+        log,
+        conversation_id,
+        source="fork",
+        forked_from=dict(forked_from),
+    )
+
+
+def record_restored_frame(
+    api: _ApiSurface,
+    conversation_id: str,
+    child_id: str,
+    fsm_id: str,
+    definition: FSMDefinition,
+    depth: int,
+    *,
+    return_context: Mapping[str, Any],
+    shared_context_keys: Sequence[str],
+    preserve_history: bool,
+) -> None:
+    """Append the strict, ``restored`` ``stack/push`` of a frame ``fork`` rebuilt."""
+    log = getattr(api, "_event_log", None)
+    if log is None:
+        return
+    log.append(
+        conversation_id,
+        EventType.STACK_PUSH,
+        frame=depth - 2,
+        depth=depth,
+        restored=True,
+        child_conversation_id=child_id,
+        fsm_id=fsm_id,
+        shared_context_keys=list(shared_context_keys),
+        preserve_history=bool(preserve_history),
+        definition_ref=log.put_json(definition.model_dump(mode="json")),
+        return_context_ref=log.put_json(filter_context(return_context)),
+        state_ref=state_ref_of(api.fsm_manager, log, child_id),
     )
 
 

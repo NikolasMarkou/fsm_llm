@@ -9,6 +9,7 @@ fsm_llm.API class
   def converse_stream(self, user_message: str, conversation_id: str) -> Iterator[str]
   def create_handler(self, name: str = 'CustomHandler', timing: HandlerTiming | None = None, action: Any | None = None) -> HandlerBuilder
   def end_conversation(self, conversation_id: str) -> None
+  def fork(self, conversation_id: str, *, at_turn: int) -> tuple[str, SessionState]
   classmethod def from_definition(cls, fsm_definition: FSMDefinition | dict[str, Any] | None = None, *, definition: FSMDefinition | dict[str, Any] | None = None, **kwargs: Any) -> API
   classmethod def from_file(cls, path: Path | str, **kwargs: Any) -> API
   def get_conversation_history(self, conversation_id: str) -> list[dict[str, str]]

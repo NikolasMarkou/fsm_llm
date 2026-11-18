@@ -14,11 +14,11 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import os
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from fsm_llm.core.definitions import AdvanceResult, FSMDefinition
     from fsm_llm.engine.fsm.manager import FSMManager
-    from fsm_llm.engine.session import SessionStore
+    from fsm_llm.engine.session import SessionState, SessionStore
     from fsm_llm.handlers import HandlerSystem
     from fsm_llm.llm import LLMInterface
     from fsm_llm.runtime import EventLog
@@ -51,6 +51,21 @@ class _ApiSurface:
         def _get_current_fsm_conversation_id(self, conversation_id: str) -> str: ...
 
         def _release_unreferenced_temp_definitions(self) -> None: ...
+
+        def _rollback_push(
+            self, processed_fsm_id: str | None, new_conversation_id: str | None
+        ) -> None: ...
+
+        def _restore_conversation(
+            self,
+            state: SessionState,
+            record: Callable[[str], None],
+            *,
+            conversation_id: str | None = None,
+        ) -> str: ...
+
+        @staticmethod
+        def _restored_working_memory(wm: dict[str, Any] | None) -> Any: ...
 
         def _ended_cache_entry(self, conversation_id: str) -> dict[str, Any] | None: ...
 

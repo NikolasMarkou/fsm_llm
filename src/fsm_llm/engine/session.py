@@ -286,8 +286,14 @@ class FileSessionStore(SessionStore):
             return False
 
 
-def _session_state(projection: SessionProjection) -> SessionState:
-    """The ``SessionState`` of a projection; the log-only parts ride ``metadata``."""
+def session_state_from_projection(
+    projection: SessionProjection, *, stack_depth: int = 1
+) -> SessionState:
+    """The ``SessionState`` of a projection; the log-only parts ride ``metadata``.
+
+    *stack_depth* fills the advisory ``SessionState.stack_depth`` (``fork`` passes the depth of
+    the stack it folded; the root-only store leaves 1).
+    """
     metadata: dict[str, Any] = {}
     if projection.provenance:
         metadata[METADATA_PROVENANCE] = projection.provenance
@@ -305,6 +311,7 @@ def _session_state(projection: SessionProjection) -> SessionState:
         conversation_history=projection.conversation_history,
         working_memory=projection.working_memory,
         conversation_summary=projection.conversation_summary,
+        stack_depth=stack_depth,
         metadata=metadata,
     )
 
@@ -358,7 +365,7 @@ class EventLogSessionStore(SessionStore):
 
     def load(self, session_id: str) -> SessionState | None:
         projection = self._projection(session_id)
-        return None if projection is None else _session_state(projection)
+        return None if projection is None else session_state_from_projection(projection)
 
     def save(self, session_id: str, state: SessionState) -> None:
         """No-op: the log is written by the engine, never by a snapshot."""

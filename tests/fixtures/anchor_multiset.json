@@ -554,6 +554,11 @@
       "delta": 1,
       "reason": "step 2 of plan 5a6a1f80: new anchor at fold_stack (runtime/stores/stack.py): the stack fold is depth-indexed, a push is the only commit of a frame, a missing pop is inferred, a duplicate record is a no-op; no other token was added or lost",
       "token": "plan-2026-11-18T071726-5a6a1f80/D-004"
+    },
+    {
+      "delta": 1,
+      "reason": "step 4 of plan 5a6a1f80: new anchor at the frame trust rule of fork (engine/api/forks.py, _frame_internal): a frame above the root is rebuilt from a log-sourced definition that is not trusted, only the default transcript name is restored, never declared_internal_keys(definition); no other token was added or lost",
+      "token": "plan-2026-11-18T071726-5a6a1f80/D-009"
     }
   ]
 }
