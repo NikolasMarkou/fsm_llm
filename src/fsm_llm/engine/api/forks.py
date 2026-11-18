@@ -39,6 +39,7 @@ Interface contract:
       an event log. Failure: ``FSMError`` (no log, no state, live id), ``LogLockedError``,
       ``LogCorruptError`` as ``fork``; any failure after the lock releases the writer and ends
       what was built. A budget is not persisted: the resumed tree starts with a fresh one (D-011).
+    - ``event_log`` (property): the ``EventLog`` of this ``API`` or ``None``, read-only (row 1.13).
 """
 
 from __future__ import annotations
@@ -130,6 +131,15 @@ def _prepare(api: _ApiSurface, log: EventLog, frame: FrameProjection) -> _Prepar
 
 class ForkMixin(_ApiSurface):
     """Fork a conversation of this ``API``'s event log into a new tree."""
+
+    @property
+    def event_log(self) -> EventLog | None:
+        """The event log this ``API`` writes (``None`` when it was built without one).
+
+        Read-only. It is how a consumer above the engine (the synthesis runner) reads the log of
+        a conversation through ``fsm_llm.runtime.usage`` without building a second one.
+        """
+        return self._event_log
 
     def fork(self, conversation_id: str, *, at_turn: int) -> tuple[str, SessionState]:
         """Start a NEW conversation from *conversation_id* as it stood at the end of turn *at_turn*.

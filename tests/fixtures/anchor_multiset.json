@@ -574,6 +574,16 @@
       "delta": 1,
       "reason": "step 8 of plan 5a6a1f80: new anchor at the abort path of ProcedureRunner._tick (synthesis/runner.py): the engine bounds a child through the max_steps of its frame and the manager says when that frame is spent, never a runner-side count, never the abort edge, never the text of RunBudgetExceededError; the second half of the D-029 anchor of plan 2cefeb61 (the runner's own child_steps) is superseded by it, the D-029, D-044 and D-061 tokens are all kept; no other token was added or lost",
       "token": "plan-2026-11-18T071726-5a6a1f80/D-012"
+    },
+    {
+      "delta": 2,
+      "reason": "step 9 of plan 5a6a1f80: new anchor at _UsageMeter (llm/usage.py) and an in-place pointer at the D-004 comment of _send (llm/providers/litellm.py): the ledger only grows and reset_usage moves a marker, which SUPERSEDES the 'a reset clears the counters' part of D-004 of plan 944e2692; the D-004 token is kept (the comment is marked [SUPERSEDED BY ...] in place with the same line count); no other token was added or lost",
+      "token": "plan-2026-11-18T071726-5a6a1f80/D-014"
+    },
+    {
+      "delta": 1,
+      "reason": "step 9 of plan 5a6a1f80: new anchor at ProcedureRunner._watch_errors (synthesis/runner.py): the provider outage is a position taken at the push (log, then ledger, then the interface's own count, then 0), never a before and after of usage().errors, never the ledger added to the log; the D-061 anchor of plan 2cefeb61 is kept; no other token was added or lost",
+      "token": "plan-2026-11-18T071726-5a6a1f80/D-015"
     }
   ]
 }

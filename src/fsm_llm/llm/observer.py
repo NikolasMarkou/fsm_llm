@@ -39,7 +39,8 @@ from fsm_llm.logging import logger
 # kwarg, and a key added to the builder tomorrow must not reach a log by default. Do NOT
 # replace the allow-list with "copy everything but the secrets". The observer is a
 # ContextVar and a callback, not a counter: the usage meter stays fed in ``_send`` alone
-# (plan 944e2692 D-004) and nothing here counts. ``begin_send`` runs BEFORE the provider
+# (plan 944e2692 D-004; plan 5a6a1f80 D-014 only changed what a reset does to it) and
+# nothing here counts. ``begin_send`` runs BEFORE the provider
 # call and fails closed; ``end_send`` and ``fail_send`` must never break the call. Do NOT
 # attach an observer to an interface instance (the classifier and agents build their own).
 # See decisions.md D-002.

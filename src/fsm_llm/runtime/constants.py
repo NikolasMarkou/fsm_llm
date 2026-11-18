@@ -57,3 +57,8 @@ MAX_INLINE_BYTES = 8_192
 #: Hard cap of a legacy ``FileSessionStore`` file read through the projection layer (32 MiB);
 #: a larger file is refused unread, never truncated.
 MAX_SESSION_FILE_BYTES = 32 * 1024 * 1024
+
+#: The inline token counts an observed ``llm/response`` carries (all three, or none when the
+#: reply held no usage), in the order of ``fsm_llm.llm.usage.usage_counts``. Integers only: a
+#: count is never text, so it is safe at any privacy level.
+USAGE_TOKEN_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens")

@@ -25,7 +25,10 @@ from fsm_llm.core.definitions import (
     RunBudgetExceededError,
 )
 from fsm_llm.engine.api.conversation import API
+from fsm_llm.llm.usage import _meter_of
+from fsm_llm.llm.usage import _Metered as _RealMetered
 from fsm_llm.logging import logger
+from fsm_llm.runtime import EventLog
 from fsm_llm.synthesis import (
     FSMLibrary,
     FSMSynthesizer,
@@ -144,6 +147,7 @@ def _rig(
     context: dict[str, Any] | None = None,
     sink: Any = None,
     cheap: ScriptedRunnerLLM | None = None,
+    event_log: EventLog | None = None,
 ) -> _Rig:
     cheap = cheap or ScriptedRunnerLLM(
         {"answer": "42"} if extraction is None else extraction, dict(REPLIES)
@@ -152,7 +156,7 @@ def _rig(
     library = FSMLibrary(tmp_path / "lib") if tmp_path is not None else None
     synth = FSMSynthesizer(strong, policy=policy, library=library)
     host = _host(**(config or {}))
-    api = API.from_definition(definition=host, llm_interface=cheap)
+    api = API.from_definition(definition=host, llm_interface=cheap, event_log=event_log)
     stream: list[tuple[str, dict[str, Any]]] = []
     runner = ProcedureRunner(
         api, host, synth, trace_sink=sink or (lambda e, f: stream.append((e, dict(f))))
@@ -568,6 +572,106 @@ class TestAnOutageIsNoFault:
         got = diagnose(self.traces * 3, FSMDefinition(**stripped), SynthesisPolicy())
 
         assert [d.code for d in got] == ["not-procedure-fault"]
+
+
+class _Ledgered(_RealMetered, ScriptedRunnerLLM):
+    """A cheap model with a REAL ledger (``_Metered.usage``): the first ``outages`` extractions
+    fail and are counted as errors, as ``LiteLLMInterface`` counts a failed request."""
+
+    def __init__(self, outages: int, **kw: Any) -> None:
+        super().__init__(**kw)
+        self.outages, self.failed = outages, 0
+
+    def extract_field(self, request: Any) -> Any:
+        if self.failed < self.outages:
+            self.failed += 1
+            _meter_of(self).record_error("extract")
+            raise LLMResponseError("provider timed out")
+        return super().extract_field(request)
+
+
+class _Meterless(ScriptedRunnerLLM):
+    """A cheap model with no ``usage()`` at all, whose extractions always fail."""
+
+    usage = None  # type: ignore[assignment]
+
+    def extract_field(self, request: Any) -> Any:
+        raise LLMResponseError("provider timed out")
+
+
+class TestTheOutageIsAPositionTakenAtThePush:
+    """The outage is decided from a position taken when the child is pushed, never from a
+    before and after of ``usage().errors`` (D-015 of plan 5a6a1f80)."""
+
+    def _run(
+        self, valid_fsm: Any, cheap: Any, tmp_path: Any, *, log: bool, sink: Any = None
+    ) -> _Rig:
+        opened = EventLog(tmp_path / "events") if log else None
+        rig = _rig(
+            valid_fsm,
+            cheap=cheap,
+            policy=SynthesisPolicy(max_turns=3),
+            sink=sink,
+            event_log=opened,
+        )
+        try:
+            rig.runner.run(rig.conv, max_steps=30)
+        finally:
+            if opened is not None:
+                opened.close()
+        return rig
+
+    @pytest.mark.parametrize("log", [False, True])
+    def test_a_reset_of_the_usage_in_the_middle_of_the_run_keeps_the_outage(
+        self, valid_fsm, tmp_path, log
+    ):
+        cheap = _Ledgered(2, extraction_data={}, responses=REPLIES)
+        seen: list[str] = []
+        harvested: list[int] = []
+
+        def sink(event: str, fields: dict[str, Any]) -> None:
+            seen.append(event)
+            if event == "stepped" and seen.count("stepped") == 2:
+                harvested.append(
+                    cheap.reset_usage().errors
+                )  # another reader starts again
+
+        rig = self._run(valid_fsm, cheap, tmp_path, log=log, sink=sink)
+
+        assert (harvested, cheap.usage().errors) == (
+            [2],
+            0,
+        )  # the reset really cleared the view
+        assert rig.result["status"] == "aborted"
+        assert rig.result["reason"] == "provider_error"
+
+    def test_an_interface_with_no_meter_reports_the_outage_when_the_log_is_on(
+        self, valid_fsm, tmp_path
+    ):
+        cheap = _Meterless(extraction_data={}, responses=REPLIES)
+
+        rig = self._run(valid_fsm, cheap, tmp_path, log=True)
+
+        assert rig.result["reason"] == "provider_error"
+
+    def test_an_interface_with_no_meter_and_no_log_reads_zero_as_before(
+        self, valid_fsm, tmp_path
+    ):
+        cheap = _Meterless(extraction_data={}, responses=REPLIES)
+
+        rig = self._run(valid_fsm, cheap, tmp_path, log=False)
+
+        assert rig.result["reason"] == "budget_spent"  # the documented limit
+
+    def test_errors_of_the_host_before_the_push_are_not_the_childs(
+        self, valid_fsm, tmp_path
+    ):
+        cheap = _Ledgered(0, extraction_data={}, responses=REPLIES)
+        _meter_of(cheap).record_error("generate")  # earlier work of the same interface
+
+        rig = self._run(valid_fsm, cheap, tmp_path, log=True)
+
+        assert rig.result["reason"] == "budget_spent"
 
 
 def _two_key(valid_fsm: dict[str, Any]) -> dict[str, Any]:

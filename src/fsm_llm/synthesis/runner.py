@@ -39,6 +39,7 @@ from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.engine.api.conversation import API
 from fsm_llm.engine.api.stack import ContextMergeStrategy
 from fsm_llm.logging import logger
+from fsm_llm.runtime.usage import watch_provider_errors
 
 from .constants import (
     ABORT_STATE_ID,
@@ -76,6 +77,10 @@ _ALLOWED_LIFECYCLES = {
 }
 
 
+def _no_errors() -> int:
+    return 0
+
+
 @dataclass
 class _Run:
     """One procedure pushed by the runner. The count of its turns is the engine's
@@ -86,7 +91,8 @@ class _Run:
     procedure: Procedure
     config: SynthesizeConfig
     traced: int = 0
-    errors0: int = 0  # the interface's error meter when the child was pushed
+    # the provider errors made since the child was pushed (a position taken at the push)
+    errors: Callable[[], int] = _no_errors
 
 
 def _result(
@@ -539,16 +545,33 @@ class ProcedureRunner:
             )
         except (FSMError, ValueError):
             return REASON_PUSH_FAILED, ""
-        runs.append(_Run(procedure, config, errors0=self._errors()))
+        runs.append(_Run(procedure, config, errors=self._watch_errors(conversation_id)))
         self._emit("pushed", conversation_id, digest=procedure.digest, step=step)
         return "", reply
 
-    def _errors(self) -> int:
-        """The conversation interface's count of failed calls (0 without a meter)."""
+    def _watch_errors(self, conversation_id: str) -> Callable[[], int]:
+        """A reader of the provider errors made since NOW, taken when the child is pushed.
+
+        The sources, each falling back to the next: the event log (the errors of the child's
+        frame after the last ``seq``), the interface's ledger (a position that survives
+        ``reset_usage()``), its own ``usage().errors``, 0 (see ``runtime.usage``).
+        """
+        # DECISION plan-2026-11-18T071726-5a6a1f80/D-015
+        # The outage is a POSITION taken at the push, not a before and after of
+        # ``usage().errors``. Do NOT go back to comparing that count alone (a
+        # ``reset_usage()`` mid-run and an interface with no meter lost the outage), do NOT
+        # add the ledger to the log (one source answers) and do NOT take the position at the
+        # pop (the child has already run). See decisions.md D-015.
+        api = self.api
         try:
-            return int(self.api.get_llm_interface().usage().errors)  # type: ignore[attr-defined]
+            return watch_provider_errors(
+                api.get_llm_interface(),
+                getattr(api, "event_log", None),
+                conversation_id,
+                api.get_stack_depth(conversation_id) - 1,
+            )
         except Exception:
-            return 0
+            return _no_errors
 
     def _finish(
         self,
@@ -576,7 +599,7 @@ class ProcedureRunner:
         # child; a run whose interface errored is `provider_error`, which
         # `diagnose` never patches. Do NOT call it `budget_spent`, and do NOT
         # let an ok run (a retried call) become a fault.
-        outage = self._errors() > run.errors0
+        outage = run.errors() > 0
         status = STATUS_OK if ok else STATUS_ABORTED if aborted else STATUS_FAILED
         reason = (
             None

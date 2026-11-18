@@ -1237,6 +1237,7 @@ UNPINNED_CORE = {
     "src/fsm_llm/agents/semantic_tools.py": "embedding lookup, the bench library has no embedder",
     "src/fsm_llm/synthesis/diagnose.py": "repair, never called by the bench",
     "src/fsm_llm/synthesis/patch.py": "repair, never called by the bench",
+    "src/fsm_llm/runtime/usage.py": "the outage reader of the pinned synthesis/runner.py (step 9 of plan 5a6a1f80); the bench runs with no event log, so it reads the interface's own count",
     "src/fsm_llm/eval/_pool.py": "run-directory plumbing, run_case_trial calls none",
     "src/fsm_llm/eval/constants.py": "run-directory plumbing, run_case_trial calls none",
     "src/fsm_llm/eval/exceptions.py": "run-directory plumbing, run_case_trial calls none",

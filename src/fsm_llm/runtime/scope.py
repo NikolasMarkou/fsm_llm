@@ -43,8 +43,13 @@ Interface contract (callers: ``engine`` in steps 7 and 8, tests):
       ``{source, request_type, request}``); ``llm/response`` ``request_seq``, ``source``,
       ``call_type``, ``response_ref``, ``finish_reason``, or ``unrecorded: true`` when the reply
       cannot be written (the call still succeeds), plus ``stream`` and ``abandoned`` for a
-      stream; ``provider/error`` ``request_seq``, ``source``, ``call_type``, ``error_type`` (a
-      class name) and an integer ``status_code`` when the error has one, never message text.
+      stream; a provider reply that carried token usage also holds the integers
+      ``prompt_tokens``, ``completion_tokens`` and ``total_tokens`` (a provider reply also holds its ``model``; row 1.13:
+      ``runtime.usage`` folds them, no blob is read; an engine-logged reply and a stream carry
+      none, which the fold counts as ``usage_missing`` as the meter does);
+      ``provider/error`` ``request_seq``, ``source``, ``call_type``, ``error_type`` (a
+      class name) and an integer ``status_code`` when the error has one, never message text,
+      plus ``stream: true`` when the call was a stream.
 
 Imports ``llm`` (the observer seam), ``core`` and ``runtime`` modules only, never ``engine``.
 """
@@ -61,8 +66,9 @@ from fsm_llm.core.redaction import redact_context
 from fsm_llm.llm.interface import interface_model
 from fsm_llm.llm.observer import install_observer, is_observed, reset_observer
 from fsm_llm.llm.parsing import _finish_reason
+from fsm_llm.llm.usage import usage_counts
 from fsm_llm.logging import logger
-from fsm_llm.runtime.constants import MAX_PAYLOAD_DEPTH
+from fsm_llm.runtime.constants import MAX_PAYLOAD_DEPTH, USAGE_TOKEN_FIELDS
 from fsm_llm.runtime.events import EventType, LogWriteError, to_jsonable
 from fsm_llm.runtime.log import EventLog, warn_on_failure
 
@@ -78,6 +84,7 @@ class _Pending(NamedTuple):
     request_seq: int
     call_type: str
     stream: bool
+    model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -209,6 +216,21 @@ def _response_fields(
     return fields
 
 
+def _usage_fields(response: Any, model: str | None) -> dict[str, Any]:
+    """The inline token integers of a provider reply (none without usage) and its model.
+
+    Integers only (from ``usage_counts``, the meter's own reader): the fold of
+    ``runtime.usage`` never reads a blob and a ``shape`` log can hold them.
+    """
+    counts = usage_counts(response)
+    fields: dict[str, Any] = (
+        {} if counts is None else dict(zip(USAGE_TOKEN_FIELDS, counts, strict=True))
+    )
+    if isinstance(model, str):
+        fields["model"] = model
+    return fields
+
+
 def _error_fields(error: BaseException) -> dict[str, Any]:
     """``error_type`` (a class name) and an integer ``status_code``; never message text."""
     fields: dict[str, Any] = {"error_type": type(error).__name__}
@@ -260,7 +282,10 @@ class _ScopeObserver:
             stream=stream,
         )
         self.last_request_seq = seq
-        return _Pending(seq, call_type, stream)
+        model = call.get("model")
+        return _Pending(
+            seq, call_type, stream, model if isinstance(model, str) else None
+        )
 
     def end_send(self, token: object | None, response: Any) -> None:
         # A stream is never read here: its one ``llm/response`` is ``LlmCall.stream_done``.
@@ -274,6 +299,7 @@ class _ScopeObserver:
             source=SOURCE_PROVIDER,
             call_type=token.call_type,
             **_response_fields(scope.log, response, wrap=None),
+            **_usage_fields(response, token.model),
         )
 
     def fail_send(self, token: object | None, error: BaseException) -> None:
@@ -303,6 +329,7 @@ class LlmCall:
         "_request_seq",
         "_scope",
         "_source",
+        "_stream",
     )
 
     def __init__(
@@ -313,12 +340,14 @@ class LlmCall:
         source: str,
         *,
         logs_reply: bool,
+        stream: bool = False,
     ) -> None:
         self._scope = scope
         self._request_seq = request_seq
         self._call_type = call_type
         self._source = source
         self._logs_reply = logs_reply
+        self._stream = stream
         self._done = False
         self._exhausted = False
         self._errored = False
@@ -409,6 +438,7 @@ class LlmCall:
             source=self._source,
             call_type=self._call_type,
             **_error_fields(error),
+            **({"stream": True} if self._stream else {}),
         )
 
 
@@ -425,7 +455,9 @@ def llm_call(
         yield _NO_CALL
         return
     if is_observed(interface):
-        observed = LlmCall(scope, None, call_type, SOURCE_PROVIDER, logs_reply=False)
+        observed = LlmCall(
+            scope, None, call_type, SOURCE_PROVIDER, logs_reply=False, stream=stream
+        )
         try:
             yield observed
         except Exception as exc:
@@ -446,7 +478,9 @@ def llm_call(
         model=interface_model(interface),
         stream=bool(stream),
     )
-    call = LlmCall(scope, seq, call_type, SOURCE_ENGINE, logs_reply=True)
+    call = LlmCall(
+        scope, seq, call_type, SOURCE_ENGINE, logs_reply=True, stream=bool(stream)
+    )
     # An inner LiteLLMInterface (a wrapper) must not log the call a second time. A stream
     # is read after this block yields, so `LlmCall.stream` switches the observer off per chunk.
     token = None if stream else install_observer(None)

@@ -51,9 +51,6 @@ del _LITELLM_MODE_PREVIOUS
 from fsm_llm.constants import (
     DEFAULT_TEMPERATURE,
     RESERVED_LLM_CALL_KWARGS,
-    USAGE_KIND_BY_CALL_TYPE,
-    USAGE_KIND_COMPLETE,
-    USAGE_KIND_STREAM,
 )
 from fsm_llm.core.coerce import coerce_confidence
 from fsm_llm.core.definitions import (
@@ -86,7 +83,7 @@ from fsm_llm.llm.parsing import (
     cut_off_note,
 )
 from fsm_llm.llm.text import resolve_reasoning_trace, strip_think_and_fences
-from fsm_llm.llm.usage import _meter_of, _Metered
+from fsm_llm.llm.usage import _meter_of, _Metered, usage_kind
 from fsm_llm.logging import logger
 
 from .request import RequestMixin, _checked_model, _warn_reserved_kwargs
@@ -606,18 +603,14 @@ class LiteLLMInterface(RequestMixin, ParseMixin, LLMInterface, _Metered):
         one as a call with usage missing (its chunks carry no usage on
         Ollama, and the reply is not read here).
         """
-        # DECISION plan-2026-10-01T093600-944e2692/D-004: the meter is per
-        # instance and fed here only. Do NOT add a process-global counter
-        # (shared state across conversations and tests), do NOT count in the
-        # public methods (a second count site drifts from the one send path),
-        # and do NOT read usage off a stream (its chunks carry none on Ollama).
-        # Readers that want counts own (inject) the interface. See D-004.
+        # DECISION plan-2026-10-01T093600-944e2692/D-004 [SUPERSEDED BY
+        # plan-2026-11-18T071726-5a6a1f80/D-014 on resets]: the meter is per
+        # instance and fed here only; a reset moves a marker, see llm/usage.py.
+        # Do NOT add a process-global counter, do NOT count in the public
+        # methods, do NOT read usage off a stream (its chunks carry none).
+        # Readers that want counts own (inject) the interface. See D-004, D-014.
         stream = bool(call_params.get("stream"))
-        kind = (
-            USAGE_KIND_STREAM
-            if stream
-            else USAGE_KIND_BY_CALL_TYPE.get(call_type, USAGE_KIND_COMPLETE)
-        )
+        kind = usage_kind(call_type, stream)
         meter = _meter_of(self)
         # DECISION plan-2026-11-17T100529-21e6f00d/D-002: the observer gets an
         # allow-listed copy and is not a counter; begin_send fails closed. See observer.py.

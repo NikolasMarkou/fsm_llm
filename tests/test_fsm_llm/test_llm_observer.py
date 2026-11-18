@@ -402,15 +402,16 @@ class TestTheSharedSendPathStaysIntact:
             "record",
             "end_send",
         ]
-        # D-004 of plan 944e2692: the anchor text is untouched; counted only here
+        # D-004 of plan 944e2692, superseded IN PLACE on resets by D-014 of plan 5a6a1f80
+        # (step 9): the same six lines, the rule that a reset clears is the one that changed
         flat = " ".join(source.replace("# ", " ").split())
         assert (
-            "DECISION plan-2026-10-01T093600-944e2692/D-004: the meter is per "
-            "instance and fed here only. Do NOT add a process-global counter "
-            "(shared state across conversations and tests), do NOT count in the "
-            "public methods (a second count site drifts from the one send path), "
-            "and do NOT read usage off a stream (its chunks carry none on Ollama). "
-            "Readers that want counts own (inject) the interface. See D-004."
+            "DECISION plan-2026-10-01T093600-944e2692/D-004 [SUPERSEDED BY "
+            "plan-2026-11-18T071726-5a6a1f80/D-014 on resets]: the meter is per "
+            "instance and fed here only; a reset moves a marker, see llm/usage.py. "
+            "Do NOT add a process-global counter, do NOT count in the public "
+            "methods, do NOT read usage off a stream (its chunks carry none). "
+            "Readers that want counts own (inject) the interface. See D-004, D-014."
         ) in flat
         assert source.count("meter.record(") == 1
         # D-002 of plan 21e6f00d: a reference at the hook, so an editor of `_send` sees it
